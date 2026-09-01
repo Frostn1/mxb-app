@@ -49,6 +49,7 @@ export default tseslint.config(
     // flags wholesale. @react-three/fiber ships types for them, so tsc is the real check.
     files: [
       "src/Components/Viewer/ModelViewer.tsx",
+      "src/Components/Viewer/PoseHandles.tsx",
       "src/Components/Viewer/TrackViewer.tsx",
     ],
     rules: { "react/no-unknown-property": "off" },

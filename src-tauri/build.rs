@@ -12,11 +12,53 @@ fn main() {
         println!("cargo::rustc-cfg=sidecar");
     }
     println!("cargo::rerun-if-changed=src/sidecar.rs");
+    println!("cargo::rerun-if-changed=src/sidecar_lock.rs");
+
+    // The secure-content packer, gated independently of the sidecar modules above.
+    println!("cargo::rustc-check-cfg=cfg(mxbsecure)");
+    if Path::new("src/mxbsecure.rs").exists() {
+        println!("cargo::rustc-cfg=mxbsecure");
+    }
+    println!("cargo::rerun-if-changed=src/mxbsecure.rs");
+
+    // Place the injected client DLL next to the built executable, so a dev build can find it
+    // beside itself with nothing to copy by hand. The file is gitignored and put here by
+    // `mxbapp-private/sync.sh`; absent in a public build, where this is a no-op.
+    stage_secure_dll();
 
     shop_credentials();
     release_tag();
 
     tauri_build::build()
+}
+
+/// Stage `src/mxbsecure.dll` (if present) so both a dev build and the installer can find it.
+///
+/// Two destinations: beside the built exe (a dev build reads it there), and into `resources/`,
+/// which `tauri.conf.json` globs into the packaged app — the beside-the-exe copy isn't in the
+/// installer, so a released build needs this to ship the DLL at all. Both are no-ops in a
+/// public build, where the gitignored file is absent.
+fn stage_secure_dll() {
+    println!("cargo::rerun-if-changed=src/mxbsecure.dll");
+    let src = Path::new("src/mxbsecure.dll");
+    if !src.exists() {
+        return;
+    }
+    // (1) Beside the exe. OUT_DIR is `<target>/<profile>/build/<crate>-<hash>/out`; up three.
+    let out_dir = std::env::var("OUT_DIR").unwrap_or_default();
+    if let Some(target_dir) = Path::new(&out_dir).ancestors().nth(3) {
+        if let Err(e) = std::fs::copy(src, target_dir.join("mxbsecure.dll")) {
+            println!("cargo::warning=could not stage mxbsecure.dll beside the exe: {e}");
+        }
+    }
+    // (2) Into resources/, bundled into the installer by the `resources` glob.
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+    let res_dir = Path::new(&manifest_dir).join("resources");
+    if std::fs::create_dir_all(&res_dir).is_ok() {
+        if let Err(e) = std::fs::copy(src, res_dir.join("mxbsecure.dll")) {
+            println!("cargo::warning=could not stage mxbsecure.dll into resources: {e}");
+        }
+    }
 }
 
 /// Bake in the git tag this build came from, when there is one.

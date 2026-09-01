@@ -123,9 +123,16 @@ export default function ModCard({
                 </Badge>
               )}
             </div>
-            <span className="text-[11.5px] text-muted-foreground">
-              {formatDateShort(mod.date)}
-            </span>
+            {/* Date and byline share the line, the way a shop card carries its author. A
+                mod the catalog named nobody for just keeps the date. */}
+            <div className="flex items-baseline justify-between gap-2 text-[11.5px] text-muted-foreground">
+              <span className="flex-none">{formatDateShort(mod.date)}</span>
+              {mod.author && (
+                <span className="truncate" title={mod.author}>
+                  {t("browse.byAuthor", { author: mod.author })}
+                </span>
+              )}
+            </div>
           </div>
         </button>
       </ContextMenuTrigger>

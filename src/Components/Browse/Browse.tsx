@@ -79,13 +79,12 @@ export default function Browse({
     selectAll,
     scrollTop,
   } = listing;
-  const [bulkBusy, setBulkBusy] = useState(false);
   // A pending reinstall the user must confirm (they already have these mods).
   const [reinstall, setReinstall] = useState<
     { kind: "single"; mod: ModSummary } | { kind: "bulk"; mods: ModSummary[] } | null
   >(null);
 
-  const { startInstall } = useInstall();
+  const { startPendingInstall } = useInstall();
   const selectionActive = selected.size > 0;
 
   // The grid scroller. Its offset is kept in `listing` rather than here, so opening a mod
@@ -102,91 +101,95 @@ export default function Browse({
     [installed],
   );
 
-  // Silent quick-install: resolve the mirror + folder, then enqueue.
+  /**
+   * Silent quick-install: the mod joins the download queue on the spot, and its mirror and
+   * destination folder are worked out when the queue reaches it.
+   *
+   * The lookup used to come first, which meant a mod existed nowhere on screen until its page
+   * came back — and a bulk selection of twenty appeared in the panel a page-fetch at a time.
+   * Resolving late also asks the library where the mod should go *after* the installs ahead of
+   * it have landed, which is the state the answer depends on.
+   */
+  const queueQuickInstall = useCallback(
+    (mod: ModSummary) =>
+      startPendingInstall({
+        slug: mod.slug,
+        title: mod.title,
+        subpath: modType.installSubpath,
+        resolve: async () => {
+          try {
+            const res = await resolveQuickInstall(mod.slug, modType, game, categoryId);
+            if (res.ok) return { ...res.params, categoryId };
+            if (res.reason === "blocked") {
+              toast.error(t("browse.needsBrowser", { title: res.title }), {
+                description: t("browse.needsBrowserDesc", { host: res.host ?? "" }),
+              });
+            } else if (res.reason === "serverOnly") {
+              // Not installed on the user's behalf: one click can't ask which build was meant,
+              // and a server file installs cleanly while the game shows nothing.
+              toast.error(t("browse.serverOnly", { title: res.title }), {
+                description: t("browse.serverOnlyDesc"),
+              });
+            } else {
+              toast.error(t("browse.noDownload", { title: res.title }));
+            }
+          } catch (e) {
+            toast.error(t("browse.quickInstallFailed", { title: mod.title }), {
+              description: String(e),
+            });
+          }
+          return null;
+        },
+      }),
+    [modType, categoryId, game, startPendingInstall, t],
+  );
+
   const doQuickInstall = useCallback(
-    async (mod: ModSummary) => {
-      try {
-        const res = await resolveQuickInstall(mod.slug, modType, game, categoryId);
-        if (res.ok) {
-          startInstall({ ...res.params, categoryId });
-          toast.success(t("browse.queued", { title: res.params.title }), {
-            description: t("browse.queuedDesc", {
-              folder: res.params.destFolder || t("browse.rootFolder"),
-            }),
-          });
-        } else if (res.reason === "blocked") {
-          toast.error(t("browse.needsBrowser", { title: res.title }), {
-            description: t("browse.needsBrowserDesc", { host: res.host ?? "" }),
-          });
-        } else {
-          toast.error(t("browse.noDownload", { title: res.title }));
-        }
-      } catch (e) {
-        toast.error(t("browse.quickInstallFailed", { title: mod.title }), {
-          description: String(e),
-        });
-      }
+    (mod: ModSummary) => {
+      queueQuickInstall(mod);
+      toast.success(t("browse.queued", { title: mod.title }), {
+        description: t("browse.queuedDesc"),
+      });
     },
-    [modType, categoryId, game, startInstall, t],
+    [queueQuickInstall, t],
   );
 
   // Guard: if the mod is already installed, confirm before overwriting.
   const quickInstall = useCallback(
     (mod: ModSummary) => {
       if (isInstalled(mod)) setReinstall({ kind: "single", mod });
-      else void doQuickInstall(mod);
+      else doQuickInstall(mod);
     },
     [isInstalled, doQuickInstall],
   );
 
+  // The whole selection is queued at once. Nothing is fetched here, so there's no busy state
+  // to sit through and no count of what got skipped — a mod with no usable download says so
+  // itself, by name, when the queue gets to it.
   const doBulkInstall = useCallback(
-    async (list: ModSummary[]) => {
-      setBulkBusy(true);
-      let queued = 0;
-      const skipped: string[] = [];
-      for (const mod of list) {
-        try {
-          const res = await resolveQuickInstall(mod.slug, modType, game, categoryId);
-          if (res.ok) {
-            startInstall({ ...res.params, categoryId });
-            queued++;
-          } else {
-            skipped.push(res.title);
-          }
-        } catch {
-          skipped.push(mod.title);
-        }
-      }
-      setBulkBusy(false);
+    (list: ModSummary[]) => {
+      list.forEach(queueQuickInstall);
       clearSelection();
-      if (queued > 0) {
-        toast.success(t("browse.queuedBulk", { count: queued }), {
-          description: skipped.length
-            ? t("browse.queuedBulkSkipped", { count: skipped.length })
-            : t("browse.queuedBulkDesc"),
-        });
-      } else if (skipped.length) {
-        toast.error(t("browse.bulkFailed"), {
-          description: t("browse.bulkFailedDesc", { count: skipped.length }),
-        });
-      }
+      toast.success(t("browse.queuedBulk", { count: list.length }), {
+        description: t("browse.queuedBulkDesc"),
+      });
     },
-    [modType, categoryId, game, startInstall, clearSelection, t],
+    [queueQuickInstall, clearSelection, t],
   );
 
   const bulkInstall = useCallback(() => {
     const list = [...selected.values()];
     const already = list.filter(isInstalled);
     if (already.length) setReinstall({ kind: "bulk", mods: list });
-    else void doBulkInstall(list);
+    else doBulkInstall(list);
   }, [selected, isInstalled, doBulkInstall]);
 
   const confirmReinstall = useCallback(() => {
     const pending = reinstall;
     setReinstall(null);
     if (!pending) return;
-    if (pending.kind === "single") void doQuickInstall(pending.mod);
-    else void doBulkInstall(pending.mods);
+    if (pending.kind === "single") doQuickInstall(pending.mod);
+    else doBulkInstall(pending.mods);
   }, [reinstall, doQuickInstall, doBulkInstall]);
 
   const isBike = modType.id === "bikes";
@@ -326,20 +329,17 @@ export default function Browse({
           <span className="text-[12.5px] font-semibold">
             {t("browse.selectedCount", { count: selected.size })}
           </span>
-          <Button size="sm" onClick={bulkInstall} disabled={bulkBusy}>
+          <Button size="sm" onClick={bulkInstall}>
             <Download className="size-3.5" />
-            {bulkBusy
-              ? t("browse.queuing")
-              : t("browse.quickInstallCount", { count: selected.size })}
+            {t("browse.quickInstallCount", { count: selected.size })}
           </Button>
-          <Button size="sm" variant="outline" onClick={selectAll} disabled={bulkBusy}>
+          <Button size="sm" variant="outline" onClick={selectAll}>
             {t("common.selectAll")}
           </Button>
           <Button
             size="sm"
             variant="outline"
             onClick={clearSelection}
-            disabled={bulkBusy}
             className="ml-auto"
           >
             <X className="size-3.5" /> {t("common.clear")}

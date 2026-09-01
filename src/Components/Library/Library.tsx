@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import {
   Search,
   RefreshCw,
@@ -20,6 +20,20 @@ import {
   Loader2,
   Share2,
   ClipboardPaste,
+  ArrowUpDown,
+  Check,
+  AlertTriangle,
+  Ban,
+  Layers,
+  ChevronDown,
+  Clock,
+  History,
+  PackageOpen,
+  Download,
+  Copy,
+  EyeOff,
+  Undo2,
+  Search as SearchIcon,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -30,10 +44,29 @@ import {
   moveMod,
   revealInExplorer,
   uninstallMod,
+  libraryLedger,
+  ledgerCapture,
+  forgetLedgerEntry,
+  restoreLedgerEntry,
+  downloadHistory,
+  scanModelSwaps,
   type ModType,
 } from "../../api/mods";
-import type { LibraryEntry, PkzMeta } from "../../types";
-import { displayName, folderLabel, formatBytes, formatLength } from "../../lib/mods";
+import type {
+  BikeModels,
+  DownloadRecord,
+  LedgerRow,
+  LibraryEntry,
+  ModelVariant,
+  PkzMeta,
+} from "../../types";
+import {
+  displayName,
+  folderLabel,
+  formatBytes,
+  formatDay,
+  formatLength,
+} from "../../lib/mods";
 import { useT, type TFunc } from "../../i18n/context";
 import { metaKey, peekMeta, primeMetaCache, requestMeta } from "../../lib/pkzMeta";
 import {
@@ -44,11 +77,14 @@ import {
 } from "./categories";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import LibraryDetail from "./LibraryDetail";
+import { ModelSwapActions } from "../Locker/ModelSwapActions";
+import FindAgainDialog from "./FindAgainDialog";
 import { ViewerDialog } from "../Viewer/ViewerDialog";
 import { entryViewerProps } from "../Viewer/entryViewer";
 import { useConfig } from "../../Context/Config";
 import { useImport } from "../Dropzone/useImport";
 import { useShare } from "../../Context/Share";
+import { useInstall } from "../../Context/Install";
 import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
 import HelpHint from "@/Components/ui/help-hint";
@@ -98,9 +134,14 @@ interface RowAction {
 function LibraryCardBody({
   item,
   typeIcon: TypeIcon,
+  footer,
 }: {
   item: LibraryEntry;
   typeIcon: LucideIcon;
+  /** Rendered under the subtitle, inside the name column. Anything put in the row *beside*
+   *  the name competes with it for width, and the name is what loses — it collapsed to
+   *  nothing the moment a second control landed next to "View in 3D". */
+  footer?: ReactNode;
 }) {
   const t = useT();
   const cacheKey = metaKey(item);
@@ -187,9 +228,195 @@ function LibraryCardBody({
         <span className="truncate text-[11px] text-muted-foreground" title={subtitle}>
           {subtitle}
         </span>
+        {footer}
       </div>
     </>
   );
+}
+
+/**
+ * The model swaps a bike carries, listed under its Library card.
+ *
+ * Read-only on purpose: the Locker is the only place that moves files, so there is no way
+ * for two views to disagree about which model is live. Mirrors the Locker's own vocabulary —
+ * same icons, same states — so a variant reads the same wherever you meet it.
+ */
+function ModelSwapList({
+  bike,
+  variants,
+  t,
+  onPreview,
+  onChanged,
+}: {
+  bike: string;
+  variants: ModelVariant[];
+  t: TFunc;
+  /** Undefined when this build can't draw bike geometry — then no row offers a preview. */
+  onPreview?: (variant: string) => void;
+  /** A model moved or went to the Trash — rescan. */
+  onChanged: () => void;
+}) {
+  return (
+    <ul
+      onClick={(e) => e.stopPropagation()}
+      className="mt-2 flex w-full cursor-default flex-col gap-1 border-t border-white/[0.07] pt-2"
+    >
+      {variants.map((v) => (
+        <li
+          key={v.name}
+          className={cn(
+            "flex items-center gap-2 rounded-md px-2 py-1",
+            v.active ? "bg-primary/[0.08]" : "opacity-80",
+          )}
+        >
+          <span className="flex size-3.5 flex-none items-center justify-center">
+            {v.active ? (
+              <Check className="size-3.5 text-primary" />
+            ) : v.empty ? (
+              <Ban className="size-3 text-muted-foreground" />
+            ) : !v.valid ? (
+              <AlertTriangle className="size-3 text-amber-500/80" />
+            ) : null}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium">{v.name}</span>
+          <span className="flex-none text-[10.5px] text-faint">
+            {v.active
+              ? t("common.active")
+              : v.empty
+                ? t("locker.noModel")
+                : !v.valid
+                  ? t("library.modelIncomplete")
+                  : t("swaps.fileCount", { count: v.fileCount })}
+          </span>
+          {/* A set with a mesh can be drawn; so can Stock, which shows the packed model the
+              loose files are covering. A "no model" set has nothing to show. */}
+          {onPreview && (v.valid || v.name.toLowerCase() === "stock") && (
+            <button
+              title={t("locker.preview3d", { name: v.name })}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPreview(v.name);
+              }}
+              className="flex flex-none cursor-default items-center gap-1 rounded px-1 py-0.5 text-[10.5px] text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-primary"
+            >
+              <Box className="size-3" />
+              {t("locker.view3d")}
+            </button>
+          )}
+          <ModelSwapActions bike={bike} variant={v} onChanged={onChanged} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * A mod the tree no longer holds.
+ *
+ * Deliberately not folded into {@link LibraryCardBody}'s sections: a missing mod has no path
+ * to act on, and letting one into `visibleItems` would put it in reach of select-all, move,
+ * share and uninstall — every one of which would then be aimed at a file that isn't there.
+ * Rendering it separately makes that impossible rather than merely unlikely.
+ *
+ * The snapshot is all there is to go on, which is the point — it was captured while the mod
+ * was still installed precisely so this card could exist.
+ */
+function GhostCard({
+  row,
+  typeIcon: TypeIcon,
+  actions,
+}: {
+  row: LedgerRow;
+  typeIcon: LucideIcon;
+  actions: RowAction[];
+}) {
+  const t = useT();
+  const title = row.title?.trim() || displayName(row.name);
+  const parts: string[] = [];
+  if (row.author) parts.push(t("library.byAuthor", { author: row.author }));
+  if (row.length) parts.push(formatLength(row.length));
+  if (row.size) parts.push(formatBytes(row.size));
+  const subtitle = parts.join(" · ") || folderLabel(row.folder);
+  const when =
+    row.state === "parked"
+      ? t("library.parkedHint")
+      : t("library.goneOn", { date: formatDay(row.goneAt ?? row.lastSeen) });
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-dashed border-white/[0.09] bg-card/40 p-3">
+      <div className="relative grid h-12 w-[76px] flex-none place-items-center overflow-hidden rounded-md bg-gradient-to-br from-[#33373c] to-[#1c1f24] text-foreground/20">
+        {row.thumbData ? (
+          // Saturation dropped rather than opacity: the picture stays readable — which is the
+          // whole reason it was kept — while still reading as not-installed.
+          <img src={row.thumbData} alt="" className="h-full w-full object-cover saturate-[0.35]" />
+        ) : (
+          <TypeIcon className="size-5" strokeWidth={1.5} />
+        )}
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="w-fit max-w-full truncate text-[13px] font-semibold text-muted-foreground">
+              {title}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" align="start" className="max-w-sm">
+            <p className="font-semibold">{title}</p>
+            <p className="text-muted-foreground">{row.rel}</p>
+            {row.location && <p className="text-muted-foreground">{row.location}</p>}
+            <p className="text-muted-foreground">{when}</p>
+          </TooltipContent>
+        </Tooltip>
+        <span className="truncate text-[11px] text-faint" title={subtitle}>
+          {subtitle}
+        </span>
+        <span className="truncate text-[11px] text-faint">{when}</span>
+      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            onClick={(e) => e.stopPropagation()}
+            className="flex-none cursor-default rounded-md px-1 text-faint transition-colors hover:text-foreground"
+          >
+            <MoreHorizontal className="size-4" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {actions.map((a) => (
+            <Fragment key={a.key}>
+              {a.separatorBefore && <DropdownMenuSeparator />}
+              <DropdownMenuItem
+                variant={a.destructive ? "destructive" : "default"}
+                onSelect={a.onSelect}
+              >
+                <a.icon className="size-4" /> {a.label}
+              </DropdownMenuItem>
+            </Fragment>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+/** Ledger rows for this tab, filtered by the same search box as the installed ones. */
+function ghostsFor(rows: LedgerRow[], modType: ModType, search: string): LedgerRow[] {
+  const q = search.trim().toLowerCase();
+  const matches = q
+    ? rows.filter(
+        (r) =>
+          r.name.toLowerCase().includes(q) ||
+          (r.title ?? "").toLowerCase().includes(q) ||
+          (r.author ?? "").toLowerCase().includes(q) ||
+          (r.location ?? "").toLowerCase().includes(q) ||
+          r.folder.toLowerCase().includes(q),
+      )
+    : rows;
+  // Bikes hides liveries and model-swaps from its own grid; its ghosts follow suit rather
+  // than becoming the one place hundreds of paint rows show up unasked.
+  return modType.id === "bikes"
+    ? matches.filter((r) => r.category !== "bikePaint" && r.category !== "bikeModelSwap")
+    : matches;
 }
 
 interface Section {
@@ -198,10 +425,15 @@ interface Section {
   items: LibraryEntry[];
 }
 
+/** Folder grouping is the default; "Recently added" answers "which of these did I just get",
+ *  for mods that predate the download history as well as ones that don't. */
+export type LibrarySort = "folder" | "recent";
+
 function buildSections(
   modType: ModType,
   entries: LibraryEntry[],
   search: string,
+  sort: LibrarySort,
   t: TFunc,
 ): Section[] {
   const q = search.trim().toLowerCase();
@@ -213,6 +445,15 @@ function buildSections(
           (e.parent ?? "").toLowerCase().includes(q),
       )
     : entries;
+
+  // One flat list, newest first — grouping by folder would scatter the very thing being
+  // looked for across half a dozen sections.
+  if (sort === "recent") {
+    const recent = [...filtered].sort((a, b) => b.modified - a.modified);
+    return recent.length
+      ? [{ key: "__recent__", label: t("library.sortRecent"), items: recent }]
+      : [];
+  }
 
   if (modType.id === "rider") {
     const byCat = new Map<string, LibraryEntry[]>();
@@ -255,6 +496,14 @@ interface LibraryProps {
   onChangeType: (type: ModType) => void;
   refreshKey: number;
   onChanged: () => void;
+  /** Something sent the user here to look at one mod — seeds the search box with its name.
+   *  A new object per jump, so repeating the same jump re-applies it. */
+  focus?: { name: string } | null;
+  /** Consumed: the jump has been applied, and must not be re-applied on the next visit. */
+  onFocusApplied?: () => void;
+  /** Open a catalog mod's page. Lets a hit from "Find it again" go straight to the mod,
+   *  rather than leaving the player to search Browse for the name a second time. */
+  onOpenMod?: (slug: string) => void;
 }
 
 export default function Library({
@@ -262,6 +511,9 @@ export default function Library({
   onChangeType,
   refreshKey,
   onChanged,
+  focus,
+  onFocusApplied,
+  onOpenMod,
 }: LibraryProps) {
   const t = useT();
   const { pickAndImport, staging } = useImport();
@@ -270,16 +522,31 @@ export default function Library({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<LibrarySort>("folder");
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<LibraryEntry | null>(null);
   const [view3d, setView3d] = useState<LibraryEntry | null>(null);
+  // A model swap being previewed in 3D, by bike + variant. Separate from `view3d`, which is
+  // keyed by library entry: a swap has no entry of its own to point at.
+  const [swapView, setSwapView] = useState<{ bike: string; variant: string } | null>(null);
   const [moveTarget, setMoveTarget] = useState<LibraryEntry | null>(null);
+  // Model swaps per bike folder, for the expandable row on a bike card. Bikes only — no
+  // other mod type has them — and read-only: switching stays in the Locker.
+  const [swaps, setSwaps] = useState<Map<string, BikeModels>>(new Map());
+  // Which bike cards are showing their variants, by path.
+  const [openSwaps, setOpenSwaps] = useState<Set<string>>(new Set());
   const [uninstallTarget, setUninstallTarget] = useState<LibraryEntry | null>(null);
   // Multi-select: a "Select" mode turns cards into checkboxes for bulk actions.
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   const [bulkUninstallOpen, setBulkUninstallOpen] = useState(false);
+  // What the tree used to hold. Off by default: the common visit is about what is installed.
+  const [showRemoved, setShowRemoved] = useState(false);
+  const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [findAgain, setFindAgain] = useState<LedgerRow | null>(null);
+  // Joined to ledger rows so a mod the app installed can be fetched again from the row.
+  const [history, setHistory] = useState<DownloadRecord[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -290,6 +557,9 @@ export default function Library({
       // opened before renders complete without touching a single archive.
       await primeMetaCache(scanned);
       setEntries(scanned);
+      // With the cache warm, snapshotting the installed mods costs a file read each — and it
+      // has to happen now, while they still exist. Never blocks the scan being shown.
+      void ledgerCapture().catch(() => {});
     } catch (e) {
       setError(String(e));
     } finally {
@@ -297,11 +567,58 @@ export default function Library({
     }
   }, [modType]);
 
+  // The ledger is only fetched once the player asks to see it: it inflates a thumbnail per
+  // missing mod, which is real work for a panel most visits never open.
+  useEffect(() => {
+    if (!showRemoved) return;
+    let alive = true;
+    void Promise.all([libraryLedger(modType.installSubpath), downloadHistory()])
+      .then(([rows, records]) => {
+        if (!alive) return;
+        setLedger(rows);
+        setHistory(records);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [showRemoved, modType, refreshKey]);
+
   useEffect(() => {
     load();
   }, [load, refreshKey]);
 
+  // Model swaps, for the bikes tab only — one scan of the whole tree, indexed by bike
+  // folder. Installing a mod or editing the folder changes what's swappable, so it rides
+  // the same `refreshKey` the library scan does. A failure leaves the map empty and the
+  // cards simply carry no badge; it must never take the library down with it.
+  useEffect(() => {
+    if (modType.id !== "bikes") {
+      setSwaps(new Map());
+      return;
+    }
+    let alive = true;
+    void scanModelSwaps()
+      .then((rows) => {
+        if (alive) setSwaps(new Map(rows.map((r) => [r.bike.toLowerCase(), r])));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [modType, refreshKey]);
+
+  // A card that has scrolled away, or a tab change, must not leave a row expanded.
+  useEffect(() => setOpenSwaps(new Set()), [modType]);
+
   useEffect(() => setDetail(null), [modType]);
+  // Arriving from a download row: search for that mod so the jump lands on it, not just on
+  // the right tab. Consumed on arrival — a later visit is not still about that one mod.
+  useEffect(() => {
+    if (!focus) return;
+    setSearch(focus.name);
+    onFocusApplied?.();
+  }, [focus, onFocusApplied]);
   // Leaving a type (or a rescan removing items) should never carry a stale selection.
   const exitSelect = useCallback(() => {
     setSelectMode(false);
@@ -315,12 +632,23 @@ export default function Library({
   );
 
   const sections = useMemo(
-    () => buildSections(modType, entries, search, t),
-    [modType, entries, search, t],
+    () => buildSections(modType, entries, search, sort, t),
+    [modType, entries, search, sort, t],
   );
 
+  // Installed items only — this feeds select-all and every bulk action, and a missing mod
+  // has no file to act on.
   const visibleItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
   const visibleCount = visibleItems.length;
+
+  const ghosts = useMemo(
+    () => (showRemoved ? ghostsFor(ledger, modType, search) : []),
+    [showRemoved, ledger, modType, search],
+  );
+  // Parked and gone are different facts and get their own headings: one is a mod Manage can
+  // hand straight back, the other is a mod that would have to be found again.
+  const parked = useMemo(() => ghosts.filter((r) => r.state === "parked"), [ghosts]);
+  const gone = useMemo(() => ghosts.filter((r) => r.state === "gone"), [ghosts]);
 
   const toggleSelect = useCallback((path: string) => {
     setSelected((prev) => {
@@ -347,6 +675,7 @@ export default function Library({
   );
 
   const { bikePreview, game } = useConfig();
+  const { startInstall } = useInstall();
   // The Library is a view of the mods tree, so the one type that installs outside it —
   // ReShade presets, which live in the game's install folder — has no tab here. They're
   // managed in Settings, where their install status can be shown alongside them.
@@ -477,6 +806,131 @@ export default function Library({
     },
   ];
 
+  /** The download that installed this mod, when the app was the one that fetched it. */
+  const sourceOf = (row: LedgerRow) =>
+    history.find(
+      (r) =>
+        !!r.url &&
+        r.status === "installed" &&
+        (r.title.toLowerCase() === (row.title ?? "").toLowerCase() ||
+          r.title.toLowerCase() === displayName(row.name).toLowerCase()),
+    );
+
+  const forgetGhost = async (row: LedgerRow) => {
+    try {
+      await forgetLedgerEntry(row.key);
+      setLedger((prev) => prev.filter((r) => r.key !== row.key));
+    } catch (e) {
+      toast.error(t("library.forgetFailed"), { description: String(e) });
+    }
+  };
+
+  const restoreGhost = async (row: LedgerRow) => {
+    try {
+      await restoreLedgerEntry(row.key);
+      toast.success(t("library.restored"));
+      setLedger((prev) => prev.filter((r) => r.key !== row.key));
+      await load();
+      onChanged();
+    } catch (e) {
+      toast.error(t("library.restoreFailed"), { description: String(e) });
+    }
+  };
+
+  const ghostActions = (row: LedgerRow): RowAction[] => {
+    const source = sourceOf(row);
+    return [
+      // Offered only when the files are still recoverable — the app deleted them and noted
+      // where they went. A Restore that can only fail is worse than no Restore.
+      ...(row.state === "gone" && row.trashedAt
+        ? [
+            {
+              key: "restore",
+              icon: Undo2,
+              label: t("library.restore"),
+              onSelect: () => void restoreGhost(row),
+            },
+          ]
+        : []),
+      // The name is often all that survives, so make it searchable everywhere at once.
+      {
+        key: "find",
+        icon: SearchIcon,
+        label: t("library.findAgain"),
+        onSelect: () => setFindAgain(row),
+      },
+      // The best possible answer to "I want to ride that again": the app already knows where
+      // it came from, so getting it back is one click rather than a search.
+      ...(source
+        ? [
+            {
+              key: "reinstall",
+              icon: Download,
+              label: t("library.reinstall"),
+              onSelect: () =>
+                startInstall({
+                  slug: source.slug,
+                  title: source.title,
+                  subpath: source.subpath,
+                  destFolder: source.destFolder,
+                  categoryId: source.categoryId ?? undefined,
+                  url: source.url!,
+                  host: source.host ?? "",
+                }),
+            },
+          ]
+        : []),
+      // Otherwise the name is the thing worth having — it's what was forgotten.
+      {
+        key: "copy",
+        icon: Copy,
+        label: t("library.copyName"),
+        onSelect: () => {
+          void navigator.clipboard
+            .writeText(row.title?.trim() || displayName(row.name))
+            .then(() => toast.success(t("library.copiedName")))
+            .catch(() => {});
+        },
+      },
+      {
+        key: "forget",
+        icon: EyeOff,
+        label: t("library.forget"),
+        destructive: true,
+        separatorBefore: true,
+        onSelect: () => void forgetGhost(row),
+      },
+    ];
+  };
+
+  const ghostSection = (
+    key: string,
+    label: string,
+    rows: LedgerRow[],
+    hint: string,
+  ) =>
+    rows.length > 0 && (
+      <section key={key} className="flex flex-col gap-2.5">
+        <div className="flex items-baseline gap-2">
+          <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
+            ▸ {label}
+          </span>
+          <span className="text-[11px] text-faint">{rows.length}</span>
+          <span className="text-[11px] text-faint/70">{hint}</span>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {rows.map((row) => (
+            <GhostCard
+              key={row.key}
+              row={row}
+              typeIcon={categoryIcon(row.category)}
+              actions={ghostActions(row)}
+            />
+          ))}
+        </div>
+      </section>
+    );
+
   return (
     <div className="flex h-full flex-col">
       {detail ? (
@@ -527,6 +981,34 @@ export default function Library({
             className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
           />
         </div>
+        {/* Sorting by arrival is the only way to find a mod whose name you never read —
+            and it works for everything on disk, not just what the history remembers. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <ArrowUpDown className="size-3.5" />{" "}
+              {t(sort === "recent" ? "library.sortRecent" : "library.sortFolder")}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => setSort("folder")}>
+              <Folder className="size-3.5" /> {t("library.sortFolder")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setSort("recent")}>
+              <Clock className="size-3.5" /> {t("library.sortRecent")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {/* The library only ever showed what is on disk. This is the rest of the story —
+            what used to be there, which is the only way to name a mod you already deleted. */}
+        <Button
+          variant={showRemoved ? "default" : "outline"}
+          size="sm"
+          onClick={() => setShowRemoved((v) => !v)}
+          title={t("library.showRemovedHint")}
+        >
+          <History className="size-3.5" /> {t("library.showRemoved")}
+        </Button>
         <Button
           variant={selectMode ? "default" : "outline"}
           size="sm"
@@ -581,7 +1063,7 @@ export default function Library({
           <p className="py-16 text-center text-[13px] text-muted-foreground">
             {t("library.scanning")}
           </p>
-        ) : sections.length === 0 ? (
+        ) : sections.length === 0 && ghosts.length === 0 ? (
           <p className="py-16 text-center text-[13px] text-muted-foreground">
             {entries.length === 0
               ? t("library.empty", { type: t(modType.labelInline) })
@@ -603,6 +1085,12 @@ export default function Library({
                     const Icon = categoryIcon(item.category);
                     const canView3d = entryViewerProps(item, entries, bikePreview) !== null;
                     const isSel = selected.has(item.path);
+                    // A bike's model swaps. The Locker always lists the active set as a row
+                    // of its own, so a bike with nothing to switch between still reports one
+                    // variant — only two or more is a choice worth a badge.
+                    const models = swaps.get(displayName(item.name).toLowerCase());
+                    const showModels = !selectMode && (models?.variants.length ?? 0) > 1;
+                    const swapsOpen = openSwaps.has(item.path);
                     return (
                       <ContextMenu key={item.path}>
                         <ContextMenuTrigger asChild>
@@ -617,12 +1105,13 @@ export default function Library({
                               (selectMode ? toggleSelect(item.path) : setDetail(item))
                             }
                             className={cn(
-                              "flex cursor-pointer items-center gap-3 rounded-xl border bg-card p-3 transition-colors",
+                              "flex cursor-pointer flex-col self-start rounded-xl border bg-card p-3 transition-colors",
                               isSel
                                 ? "border-primary/60 bg-primary/[0.06]"
                                 : "border-white/[0.07] hover:border-white/15",
                             )}
                           >
+                            <div className="flex w-full items-center gap-3">
                             {selectMode && (
                               <span className="flex-none">
                                 {isSel ? (
@@ -632,7 +1121,39 @@ export default function Library({
                                 )}
                               </span>
                             )}
-                            <LibraryCardBody item={item} typeIcon={Icon} />
+                            <LibraryCardBody
+                              item={item}
+                              typeIcon={Icon}
+                              footer={
+                                showModels ? (
+                                  <button
+                                    title={t("library.modelsHint")}
+                                    aria-expanded={swapsOpen}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenSwaps((prev) => {
+                                        const next = new Set(prev);
+                                        if (!next.delete(item.path)) next.add(item.path);
+                                        return next;
+                                      });
+                                    }}
+                                    className={cn(
+                                      "-ml-1 mt-0.5 flex w-fit max-w-full cursor-default items-center gap-1 truncate rounded px-1 py-0.5 text-[10.5px] font-semibold transition-colors hover:bg-foreground/[0.06]",
+                                      swapsOpen ? "text-primary" : "text-faint hover:text-primary",
+                                    )}
+                                  >
+                                    <Layers className="size-3 flex-none" />
+                                    {t("library.models", { count: models!.variants.length })}
+                                    <ChevronDown
+                                      className={cn(
+                                        "size-3 flex-none transition-transform",
+                                        swapsOpen && "rotate-180",
+                                      )}
+                                    />
+                                  </button>
+                                ) : undefined
+                              }
+                            />
                             {!selectMode && canView3d && (
                               <button
                                 title={t("library.quick3d")}
@@ -672,6 +1193,21 @@ export default function Library({
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             )}
+                            </div>
+                            {showModels && swapsOpen && (
+                              <ModelSwapList
+                                bike={models!.bike}
+                                variants={models!.variants}
+                                t={t}
+                                onChanged={onChanged}
+                                onPreview={
+                                  bikePreview
+                                    ? (variant) =>
+                                        setSwapView({ bike: models!.bike, variant })
+                                    : undefined
+                                }
+                              />
+                            )}
                           </div>
                         </ContextMenuTrigger>
                         <ContextMenuContent>
@@ -693,6 +1229,21 @@ export default function Library({
                 </div>
               </section>
             ))}
+            {/* After the installed grid, never mixed into it: these are a different kind of
+                fact and support a different set of actions. */}
+            {ghostSection(
+              "__parked__",
+              t("section.parked"),
+              parked,
+              t("library.parkedNote"),
+            )}
+            {ghostSection("__gone__", t("section.removed"), gone, t("library.goneNote"))}
+            {showRemoved && ghosts.length === 0 && (
+              <p className="py-6 text-center text-[12.5px] text-faint">
+                <PackageOpen className="mr-1.5 inline size-3.5" />
+                {t("library.nothingRemoved")}
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -742,6 +1293,12 @@ export default function Library({
       )}
 
       <ViewerDialog
+        open={swapView !== null}
+        onOpenChange={(o) => !o && setSwapView(null)}
+        title={swapView ? `${swapView.bike} · ${swapView.variant}` : undefined}
+        modelSwap={swapView ?? undefined}
+      />
+      <ViewerDialog
         open={Boolean(view3d)}
         onOpenChange={(o) => !o && setView3d(null)}
         title={view3d ? displayName(view3d.name) : undefined}
@@ -754,6 +1311,14 @@ export default function Library({
         initialPaint={view3dProps?.initialPaint}
         initialGoggles={view3dProps?.initialGoggles}
       />
+
+      {findAgain && (
+        <FindAgainDialog
+          row={findAgain}
+          onOpenMod={onOpenMod}
+          onClose={() => setFindAgain(null)}
+        />
+      )}
 
       <MoveDialog
         open={Boolean(moveTarget)}

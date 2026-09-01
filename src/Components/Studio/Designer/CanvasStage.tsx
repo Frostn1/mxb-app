@@ -1,11 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useT } from "../../../i18n/context";
-import { layerCorners } from "./composite";
+import { layerCorners, selectionBounds } from "./composite";
 import type { Ghost } from "./ghost";
-import { partAt, partPath, type UvPart } from "./uv";
+import {
+  faceAt,
+  partAt,
+  partBox,
+  partPath,
+  partsAt,
+  sideAt,
+  spotAt,
+  type Face,
+  type Side,
+  type UvPart,
+} from "./uv";
 import { hitTest, type Layer, type Sheet } from "./layers";
 import { constrained, hasTip, isDragTool, type PaintTool, type Point } from "./paint";
+
+/** How far the pointer must travel across the sheet, in uv, before the 3D spot is redrawn. */
+const SPOT_STEP = 0.004;
 
 /** Half-edge of a drawn corner handle, and how far off one a press still counts, in view px. */
 const HANDLE = 3.5;
@@ -44,6 +58,85 @@ function checkerTile(): HTMLCanvasElement {
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 4;
 
+/**
+ * How close a drag has to come to a line before it takes hold of it, in *view* pixels.
+ *
+ * In view pixels rather than sheet ones, so the pull feels the same however far in you are
+ * zoomed — a fixed number of texels would be an unmissable magnet at 8× and nothing at all
+ * when the whole sheet is on screen.
+ */
+const SNAP = 6;
+
+/** Held apart so a "nothing is snapped" render isn't a new object every frame. */
+const NO_SNAP: { x: number | null; y: number | null } = { x: null, y: null };
+
+/** How long after a press a second one still counts as a double-click, and how far it may move.
+ *  The platform's own thresholds aren't readable from a webview; these are the usual ones, and
+ *  the slop matters more than the interval on a touchpad, where a "stationary" finger drifts. */
+const DOUBLE_MS = 400;
+const DOUBLE_SLOP = 6;
+
+/**
+ * The lines a drag can catch on, in sheet pixels.
+ *
+ * Three answers to "line this up with what?", and between them they cover what anyone actually
+ * does on a livery: the sheet's own middle and edges, the box of whatever the moving layers are
+ * clipped to, and every other layer's middle and edges.
+ *
+ * Built once when a drag starts rather than per sample. Nothing here moves while the drag is
+ * running — that is exactly what makes these the things worth lining up against — and the
+ * layer array is replaced on every pointer sample, so a memo on it would rebuild the lot a
+ * hundred times a second to produce the same numbers.
+ */
+function snapLines(sheet: Sheet, parts: UvPart[], moving: Layer[]): { xs: number[]; ys: number[] } {
+  const xs = [0, sheet.width / 2, sheet.width];
+  const ys = [0, sheet.height / 2, sheet.height];
+  const held = new Set(moving.map((l) => l.id));
+
+  for (const layer of moving) {
+    const part = layer.clip ? parts.find((p) => p.label === layer.clip?.label) : null;
+    if (!part) continue;
+    const b = partBox(part, sheet.width, sheet.height);
+    xs.push(b.x, b.x + b.w / 2, b.x + b.w);
+    ys.push(b.y, b.y + b.h / 2, b.y + b.h);
+  }
+
+  for (const layer of sheet.layers) {
+    // A paint layer's box is the sheet's own, which is already in the list, and an invisible
+    // layer is not something anyone is lining anything up with.
+    if (layer.kind === "paint" || !layer.visible || held.has(layer.id)) continue;
+    const b = selectionBounds([layer]);
+    if (!b) continue;
+    xs.push(b.x, b.x + b.w / 2, b.x + b.w);
+    ys.push(b.y, b.y + b.h / 2, b.y + b.h);
+  }
+  return { xs, ys };
+}
+
+/**
+ * The nudge that puts one of `edges` onto the nearest of `lines`, and which line that was.
+ *
+ * Every edge against every line rather than the centre against the centres: butting a decal up
+ * against the edge of a shroud is as common as centring it on one, and only a box's own edges
+ * can say when that has happened.
+ */
+function snapTo(edges: number[], lines: number[], tol: number): { shift: number; line: number | null } {
+  let shift = 0;
+  let line: number | null = null;
+  let best = tol;
+  for (const edge of edges) {
+    for (const candidate of lines) {
+      const d = Math.abs(candidate - edge);
+      if (d <= best) {
+        best = d;
+        shift = candidate - edge;
+        line = candidate;
+      }
+    }
+  }
+  return { shift, line };
+}
+
 interface CanvasStageProps {
   sheet: Sheet;
   /** The sheet's composite, already drawn. Blitted here rather than redrawn. */
@@ -54,19 +147,50 @@ interface CanvasStageProps {
   ghost: Ghost | null;
   /** The model's bodywork for this sheet, for naming what the pointer is over. */
   parts: UvPart[];
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-  /** Drag, in sheet pixels. */
-  onMove: (id: string, dx: number, dy: number) => void;
-  /** Corner drag, as the layer's new absolute scale. */
-  onScale: (id: string, scale: number) => void;
+  /**
+   * What the pointer is on, as triangle references into the model — null off the sheet.
+   *
+   * Reported so the 3D view can light the piece up. Which flank a region paints is the one
+   * thing a word has never settled on its own: "left" means the bike's left, the preview
+   * opens looking at that flank from the front, and the two readings of the sentence differ
+   * by exactly the mistake this is here to end.
+   */
+  onHoverSpot?: (tris: Int32Array | null) => void;
+  /** The selected layers, bottom-first. Empty for none. */
+  selection: string[];
+  /**
+   * What a press means for the selection.
+   *
+   * `replace` is a plain click, `toggle` a shift-click, `isolate` an alt-click — which is the
+   * one that reaches inside a group. The stage says which gesture happened and the editor
+   * decides what that means for grouped layers; a stage that expanded groups itself would need
+   * to know what a group is, and it doesn't.
+   */
+  onSelect: (ids: string[], mode: "replace" | "toggle" | "isolate") => void;
+  /** Drag of the whole selection, in sheet pixels. */
+  onMove: (dx: number, dy: number) => void;
+  /**
+   * Corner drag, as where every dragged layer ends up.
+   *
+   * Absolute rather than a factor per move: a drag is a run of samples, and a ratio applied
+   * once per sample compounds its own rounding until a logo dragged out and back is not the
+   * size it started. Scaling several layers also moves them, since they grow about the
+   * selection's centre rather than each about their own.
+   */
+  onScale: (next: { id: string; x: number; y: number; scale: number }[]) => void;
+  /** A right-click that wasn't a pan, in client coordinates. */
+  onMenu: (x: number, y: number) => void;
   /** What the pointer does here. `move` is the select-and-drag behaviour. */
   tool: PaintTool;
   /** Brush and eraser diameter in sheet pixels, for the cursor. */
   brushSize: number;
   /** True when there is a paint layer for a stroke to land on. */
   canPaint: boolean;
-  onPaintStart: (at: Point) => void;
+  /**
+   * `whole` is a right-click with the bucket: fill the island rather than the one triangle
+   * under the pointer. Meaningless to every other tool, which ignore it.
+   */
+  onPaintStart: (at: Point, whole: boolean) => void;
   onPaintMove: (points: Point[], constrain: boolean) => void;
   onPaintEnd: () => void;
   className?: string;
@@ -84,6 +208,13 @@ interface CanvasStageProps {
  *
  * The ghost is drawn here for the same reason, read backwards: a guide that never enters the
  * composite cannot reach the file, whatever anyone later does to the save path.
+ *
+ * The sheet is shown flipped top-to-bottom. A `.pnt` stores its rows in the order the mesh
+ * samples them, which is upside down from the template painters work in — open one flat and
+ * the forks land top-left where the template has them bottom-left. The flip lives here and
+ * only here: the composite, the saved file and the 3D preview all stay in the sheet's own row
+ * order, so no amount of work on the view can change what a paint contains. Everything
+ * crossing between the two spaces goes through `toSheet`, `toView` or `sheetSpace`.
  */
 export function CanvasStage({
   sheet,
@@ -91,10 +222,12 @@ export function CanvasStage({
   version,
   ghost,
   parts,
-  selectedId,
+  onHoverSpot,
+  selection,
   onSelect,
   onMove,
   onScale,
+  onMenu,
   tool,
   brushSize,
   canPaint,
@@ -115,21 +248,70 @@ export function CanvasStage({
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  // Where the pointer went down, and what it was doing — a drag of a layer, or of the view.
-  const drag = useRef<{ id: string | null; x: number; y: number } | null>(null);
-  // A corner drag: the layer's centre and the distance the press was from it, both in sheet
-  // pixels, plus the scale it started at. Scale comes out as a ratio of distances, so the
-  // grabbed corner stays under the pointer however the view is zoomed or panned mid-drag.
-  const sizing = useRef<{ id: string; cx: number; cy: number; dist: number; scale: number } | null>(
-    null,
-  );
+  // Where the pointer went down, and what it was doing — a drag of the selection, or of the view.
+  const drag = useRef<{
+    moving: boolean;
+    x: number;
+    y: number;
+    /** Built on the first move rather than at the press — see the note in `onPointerDown`. */
+    lines: { xs: number[]; ys: number[] } | null;
+    /**
+     * Where the selection's box was when the drag started, and how far the pointer has
+     * travelled since, in sheet pixels.
+     *
+     * Kept apart from where the layers actually are because a snap moves those and not the
+     * pointer. Adding a snapped delta per sample would throw away the pointer travel spent
+     * held against a line, and the layer would drift out from under the hand a little further
+     * every time it caught on something.
+     */
+    origin: { x: number; y: number } | null;
+    raw: { x: number; y: number };
+  } | null>(null);
+  // A corner drag: the fixed point it grows from and the distance the press was from it, both
+  // in sheet pixels, plus what each dragged layer was at the press. Scale comes out as a ratio
+  // of distances, so the grabbed corner stays under the pointer however the view is zoomed or
+  // panned mid-drag; keeping the starting sizes means it never compounds its own rounding.
+  const sizing = useRef<{
+    cx: number;
+    cy: number;
+    dist: number;
+    from: { id: string; x: number; y: number; scale: number }[];
+  } | null>(null);
   const painting = useRef(false);
+  // A rubber band over empty canvas, in sheet pixels, while one is being pulled out.
+  const [marquee, setMarquee] = useState<{ from: Point; to: Point; add: boolean } | null>(null);
+  // Where a right press went down, so a release that never moved can be told from a pan — the
+  // native `contextmenu` event fires on the press and can't tell them apart.
+  const rightPress = useRef<{ x: number; y: number } | null>(null);
+  // The lines a drag is currently held to, in sheet coordinates, purely so they can be drawn.
+  const [snapped, setSnapped] = useState<{ x: number | null; y: number | null }>(NO_SNAP);
+  // The last left press, for recognising a double-click ourselves. Null once one has been
+  // recognised, so a run of fast clicks pairs up rather than firing on every press after the
+  // second. See `onPointerDown` for why the DOM's own `dblclick` can't be used here.
+  const lastPress = useRef<{ t: number; x: number; y: number } | null>(null);
+  // Where the 3D highlight was last asked for, so it is only asked again once the pointer
+  // has moved far enough for the answer to look different.
+  const spotFrom = useRef<{ u: number; v: number } | null>(null);
   // Which corner the pointer is over, purely so the cursor can say the layer is resizable.
   const [overHandle, setOverHandle] = useState(-1);
   // The piece of bodywork under the pointer. The whole reason the UV map is worth having is
   // being able to answer "what am I painting on" — an outline you have to interpret answers it
   // less well than a name does.
   const [overPart, setOverPart] = useState<UvPart | null>(null);
+  // The largest part sharing that point, when something else does. Two parts over one texel is
+  // ordinary — and it is also the whole reason a small bracket used to answer for the panel it
+  // sits on, so the overlap is named rather than resolved out of sight.
+  const [overAlso, setOverAlso] = useState<string | null>(null);
+  // And which flank of the bike that piece is, at the point being pointed at rather than over
+  // the part as a whole — the two are different answers wherever the flanks share an island.
+  const [overSide, setOverSide] = useState<Side | null>(null);
+  // Which way the surface there faces. The answer that says a rear fender's island has its
+  // underside in it, which is otherwise only discoverable by painting and looking.
+  const [overFace, setOverFace] = useState<Face | null>(null);
+  // Whether the sheet is currently washed left/right — the islands are up, they are visible,
+  // and this model was assembled well enough to have sides at all.
+  const washed =
+    !!ghost?.showWire && !!ghost.wire && ghost.opacity > 0 && parts.some((part) => part.flanks);
   // The press and current point of a gradient or shape drag, so it can be shown while it's
   // being aimed. Only ever set between press and release.
   const [guide, setGuide] = useState<{ from: Point; to: Point } | null>(null);
@@ -173,7 +355,7 @@ export function CanvasStage({
       if (!rect || !scale) return null;
       const vx = clientX - rect.left - originX;
       const vy = clientY - rect.top - originY;
-      return { x: vx / scale + sheet.width / 2, y: vy / scale + sheet.height / 2 };
+      return { x: vx / scale + sheet.width / 2, y: sheet.height / 2 - vy / scale };
     },
     [originX, originY, scale, sheet.width, sheet.height],
   );
@@ -182,25 +364,51 @@ export function CanvasStage({
   const toView = useCallback(
     (p: Point): [number, number] => [
       originX + (p.x - sheet.width / 2) * scale,
-      originY + (p.y - sheet.height / 2) * scale,
+      originY - (p.y - sheet.height / 2) * scale,
     ],
     [originX, originY, scale, sheet.width, sheet.height],
   );
 
   /**
-   * The selected layer's corners in view space — what's drawn as handles, and what's grabbed.
+   * The selected layers, and of those the ones a drag can actually move.
+   *
+   * Paint layers are the sheet — see `layers.ts` — so they are selectable from the list and
+   * inert here. Kept apart rather than filtered at each use, because "what is selected" and
+   * "what a corner drag would resize" are different questions asked a dozen times below.
+   */
+  const chosen = useMemo(
+    () => sheet.layers.filter((l) => selection.includes(l.id)),
+    [sheet.layers, selection],
+  );
+  const movable = useMemo(() => chosen.filter((l) => l.kind !== "paint"), [chosen]);
+
+  /**
+   * The selection's corners in view space — what's drawn as handles, and what's grabbed.
+   *
+   * One layer gives its own rotated box, so a logo turned 30° is outlined at 30°. Several give
+   * the upright box around the lot: there is no angle several layers agree on, and a box drawn
+   * at one of their angles would say they share it.
    *
    * Computed rather than remembered from the last paint, so a handle is always tested against
    * where the corner is now. A resize moves all four while the pointer is still down, and a
    * cached set would have the grab point drift away from the square under the cursor.
    */
   const handles = useCallback((): [number, number][] => {
-    const selected = sheet.layers.find((l) => l.id === selectedId);
-    // Paint layers are the sheet — see `layers.ts`. There is nothing to resize, and the
-    // corners would sit on the sheet edge where they'd catch every click near the border.
-    if (!selected || selected.kind === "paint") return [];
-    return layerCorners(selected).map((c) => toView({ x: c[0], y: c[1] }));
-  }, [sheet.layers, selectedId, toView]);
+    if (!movable.length) return [];
+    if (movable.length === 1) {
+      return layerCorners(movable[0]).map((c) => toView({ x: c[0], y: c[1] }));
+    }
+    const b = selectionBounds(movable);
+    if (!b) return [];
+    return (
+      [
+        [b.x, b.y],
+        [b.x + b.w, b.y],
+        [b.x + b.w, b.y + b.h],
+        [b.x, b.y + b.h],
+      ] as [number, number][]
+    ).map(([x, y]) => toView({ x, y }));
+  }, [movable, toView]);
 
   /**
    * The corner under a client point, or -1.
@@ -272,6 +480,21 @@ export function CanvasStage({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
 
+    /**
+     * Draw in sheet pixels, flipped: anchored at the bottom edge with y running back up.
+     *
+     * Every picture of the sheet goes through this — the composite and all three ghosts — so
+     * they cannot come out a row apart from each other, which is the one way an underlay is
+     * worse than no underlay. The overlays below are in view pixels already and don't.
+     */
+    const sheetSpace = (draw: () => void) => {
+      ctx.save();
+      ctx.translate(left, top + h);
+      ctx.scale(1, -1);
+      draw();
+      ctx.restore();
+    };
+
     // The whole reference goes *under* the drawing — that is what makes it a ghost rather than
     // an overlay. Both halves show through wherever the sheet is still transparent, which is
     // exactly where there is nothing drawn yet and exactly where you need to know which piece
@@ -284,18 +507,25 @@ export function CanvasStage({
     if (ghost && ghost.opacity > 0) {
       ctx.save();
       ctx.globalAlpha = ghost.opacity;
-      // Template first, islands over it: the outlines have to stay readable against the paint
-      // being traced, and they are the thinner of the two marks.
-      if (ghost.showTemplate && ghost.template) {
-        ctx.drawImage(ghost.template, left, top, w, h);
-      }
-      if (ghost.showWire && ghost.wire) {
-        ctx.drawImage(ghost.wire, left, top, w, h);
-      }
+      // Artwork first, islands over it: the outlines have to stay readable against whatever
+      // is being traced, and they are the thinnest of the marks. The model's own texture goes
+      // under the template rather than over it — someone who lifted a paint out to trace it
+      // asked for *that* paint, and the stock plastics are the fallback beneath it.
+      sheetSpace(() => {
+        if (ghost.showStock && ghost.stock) {
+          ctx.drawImage(ghost.stock, 0, 0, w, h);
+        }
+        if (ghost.showTemplate && ghost.template) {
+          ctx.drawImage(ghost.template, 0, 0, w, h);
+        }
+        if (ghost.showWire && ghost.wire) {
+          ctx.drawImage(ghost.wire, 0, 0, w, h);
+        }
+      });
       ctx.restore();
     }
 
-    ctx.drawImage(source, left, top, w, h);
+    sheetSpace(() => ctx.drawImage(source, 0, 0, w, h));
 
     // Sheet edge, so you can see where the texture stops.
     ctx.strokeStyle = "rgba(255,255,255,0.18)";
@@ -328,12 +558,11 @@ export function CanvasStage({
     // The piece under the pointer, picked out of the map. Only while the map is on: a highlight
     // that appeared over a livery with no islands showing would be an outline from nowhere.
     if (overPart && overPath && ghost?.showWire && ghost.wire) {
-      ctx.save();
-      ctx.translate(left, top);
-      ctx.scale(w / sheet.width, h / sheet.height);
-      ctx.fillStyle = `hsla(${overPart.hue}, 85%, 65%, 0.18)`;
-      ctx.fill(overPath, "nonzero");
-      ctx.restore();
+      sheetSpace(() => {
+        ctx.scale(w / sheet.width, h / sheet.height);
+        ctx.fillStyle = `hsla(${overPart.hue}, 85%, 65%, 0.18)`;
+        ctx.fill(overPath, "nonzero");
+      });
     }
 
     // Where a gradient runs, or what a shape will cover. The stroke itself is already visible
@@ -363,6 +592,45 @@ export function CanvasStage({
       }
       ctx.restore();
     }
+
+    // The rubber band, in the same dashed idiom as the guide above — it is the same kind of
+    // thing, a gesture in progress that hasn't touched the sheet.
+    if (marquee) {
+      const [ax, ay] = toView(marquee.from);
+      const [bx, by] = toView(marquee.to);
+      ctx.save();
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = "rgba(59,130,246,0.9)";
+      ctx.fillStyle = "rgba(59,130,246,0.12)";
+      ctx.lineWidth = 1;
+      const rx = Math.min(ax, bx);
+      const ry = Math.min(ay, by);
+      ctx.fillRect(rx, ry, Math.abs(bx - ax), Math.abs(by - ay));
+      ctx.strokeRect(rx, ry, Math.abs(bx - ax), Math.abs(by - ay));
+      ctx.restore();
+    }
+
+    // What a drag is being held to, drawn right across the sheet. A mark beside the layer
+    // would say only that *something* was caught; the line says what, which is the half that
+    // tells you whether it's the seam you meant or the logo behind it.
+    if (snapped.x !== null || snapped.y !== null) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(244,114,182,0.85)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      if (snapped.x !== null) {
+        const [sx] = toView({ x: snapped.x, y: 0 });
+        ctx.moveTo(sx, top);
+        ctx.lineTo(sx, top + h);
+      }
+      if (snapped.y !== null) {
+        const [, sy] = toView({ x: 0, y: snapped.y });
+        ctx.moveTo(left, sy);
+        ctx.lineTo(left + w, sy);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
   }, [
     box,
     scale,
@@ -375,6 +643,8 @@ export function CanvasStage({
     overPath,
     version,
     guide,
+    marquee,
+    snapped,
     tool,
     toView,
     handles,
@@ -396,50 +666,139 @@ export function CanvasStage({
     [brushSize, scale],
   );
 
+  /**
+   * Fill the view with one piece of bodywork.
+   *
+   * A shroud is a tenth of a 2048² sheet, and reaching it by wheel-and-drag means aiming at a
+   * shape whose edges are the thing you were trying to see. Double-click is the gesture because
+   * it costs no mode and no modifier: a paint tool lays its first dab where you clicked, and
+   * the view arrives at the part you were already pointing at.
+   */
+  const focusPart = useCallback(
+    (part: UvPart) => {
+      if (!fit || !box.w || !box.h) return;
+      // A degenerate island — one point, or a sliver — would divide the view to infinity.
+      const pw = Math.max(1, (part.maxU - part.minU) * sheet.width);
+      const ph = Math.max(1, (part.maxV - part.minV) * sheet.height);
+      // 0.8 leaves the part's surroundings in frame. A panel cut exactly to the edges gives
+      // nothing to judge where a decal sits relative to the seam beside it.
+      const z = Math.min(8, Math.max(0.25, (Math.min(box.w / pw, box.h / ph) * 0.8) / fit));
+      const s = fit * z;
+      const cx = ((part.minU + part.maxU) / 2) * sheet.width;
+      const cy = ((part.minV + part.maxV) / 2) * sheet.height;
+      setZoom(z);
+      // Pan is measured from the sheet's centre, which is where the blit is anchored. The y
+      // term doesn't take the minus the x one does: the view runs the other way up.
+      setPan({ x: -(cx - sheet.width / 2) * s, y: (cy - sheet.height / 2) * s });
+    },
+    [box.w, box.h, fit, sheet.width, sheet.height],
+  );
+
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       const at = toSheet(e.clientX, e.clientY);
       if (!at) return;
+      // The second press of a double-click, timed here rather than taken from the DOM's own
+      // `dblclick`. The canvas captures the pointer on every press so a stroke survives leaving
+      // the element, and a captured pointer is exactly the case where WebKit stops delivering
+      // `dblclick` — so the gesture has to be recognised from the presses we already get.
+      if (e.button === 0) {
+        const prev = lastPress.current;
+        const near = prev && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_SLOP;
+        const quick = prev && e.timeStamp - prev.t < DOUBLE_MS;
+        lastPress.current = { t: e.timeStamp, x: e.clientX, y: e.clientY };
+        if (near && quick && parts.length) {
+          const part = partAt(parts, at.x / sheet.width, at.y / sheet.height);
+          if (part) {
+            // Forget the pair, so a third press starts a new one rather than focusing again
+            // on every press of a rapid series.
+            lastPress.current = null;
+            focusPart(part);
+            return;
+          }
+        }
+      }
       e.currentTarget.setPointerCapture(e.pointerId);
+      // Right-click with the bucket fills the whole island. The left button takes the single
+      // triangle under the pointer, which is right for trimming an edge and hopeless for
+      // covering a shroud — so the coarse answer gets the other button rather than a mode.
+      // It costs the bucket its right-drag pan; the middle button still pans for every tool.
+      if (e.button === 2 && paints && tool === "fill") {
+        painting.current = true;
+        onPaintStart(at, true);
+        return;
+      }
       // Middle and right drag pan, whatever the tool — panning while painting matters more
       // than it does while dragging a logo, because a stroke needs the part you can't see.
       // Not mid-stroke, though: the view moving under a brush that is still down would drag
       // the stroke sideways across the sheet.
       if (e.button === 1 || e.button === 2) {
-        if (!painting.current) drag.current = { id: null, x: e.clientX, y: e.clientY };
+        // A right press in the move tool might be a pan or might be a menu, and which it was
+        // is only known on release. Both are set up here and the release picks one.
+        if (e.button === 2 && !paints) rightPress.current = { x: e.clientX, y: e.clientY };
+        if (!painting.current)
+          drag.current = { moving: false, x: e.clientX, y: e.clientY, lines: null, origin: null, raw: { x: 0, y: 0 } };
         return;
       }
       if (paints) {
         painting.current = true;
         if (isDragTool(tool)) setGuide({ from: at, to: at });
-        onPaintStart(at);
+        onPaintStart(at, false);
         return;
       }
       // Corners before contents. A handle sits on the layer's own edge, so hit-testing first
       // would answer "you clicked the layer" every time and there would be no way to resize
       // anything — and the corner of a small layer often overlaps a bigger one behind it.
       const corner = handleAt(e.clientX, e.clientY);
-      const selected = sheet.layers.find((l) => l.id === selectedId);
-      if (corner >= 0 && selected) {
-        const dist = Math.hypot(at.x - selected.x, at.y - selected.y);
+      if (corner >= 0 && movable.length) {
+        // One layer grows about its own centre, which is the fixed point the inspector's
+        // slider uses. Several grow about the box they share, so their spacing scales with
+        // them rather than each drifting out from wherever it happened to be.
+        const around = movable.length === 1 ? null : selectionBounds(movable);
+        const cx = around ? around.x + around.w / 2 : movable[0].x;
+        const cy = around ? around.y + around.h / 2 : movable[0].y;
+        const dist = Math.hypot(at.x - cx, at.y - cy);
         // A press exactly on the centre has no distance to take a ratio of. Can only happen
         // on a layer scaled down to nothing, and dropping the drag beats dividing by zero.
         if (dist > 0.5) {
           sizing.current = {
-            id: selected.id,
-            cx: selected.x,
-            cy: selected.y,
+            cx,
+            cy,
             dist,
-            scale: selected.scale,
+            from: movable.map((l) => ({ id: l.id, x: l.x, y: l.y, scale: l.scale })),
           };
           return;
         }
       }
+
       const hit = hitTest(sheet.layers, at.x, at.y);
-      onSelect(hit?.id ?? null);
-      drag.current = { id: hit?.id ?? null, x: e.clientX, y: e.clientY };
+      if (!hit) {
+        // Empty canvas pulls a rubber band rather than panning the view. Panning survives the
+        // change on the middle and right buttons, where it is also the only thing they do.
+        if (!e.shiftKey) onSelect([], "replace");
+        setMarquee({ from: at, to: at, add: e.shiftKey });
+        return;
+      }
+      onSelect([hit.id], e.shiftKey ? "toggle" : e.altKey ? "isolate" : "replace");
+      // `lines` is left null on purpose. What this press selected is decided above us — a
+      // click on one member of a group takes the whole group — so the layers that are about
+      // to move aren't known until the state that says so has come back down as a prop.
+      drag.current = { moving: true, x: e.clientX, y: e.clientY, lines: null, origin: null, raw: { x: 0, y: 0 } };
     },
-    [handleAt, onPaintStart, onSelect, paints, selectedId, sheet.layers, toSheet, tool],
+    [
+      focusPart,
+      handleAt,
+      movable,
+      onPaintStart,
+      onSelect,
+      paints,
+      parts,
+      sheet.layers,
+      sheet.width,
+      sheet.height,
+      toSheet,
+      tool,
+    ],
   );
 
   const onPointerMove = useCallback(
@@ -450,11 +809,25 @@ export function CanvasStage({
       if (size) {
         const p = toSheet(e.clientX, e.clientY);
         if (!p) return;
-        // Scale as the ratio of distances from the layer's centre, which is where it grows
-        // from — the same fixed point the inspector's slider uses, so dragging a corner and
-        // typing a number move the layer's pixels the same way.
-        const next = (size.scale * Math.hypot(p.x - size.cx, p.y - size.cy)) / size.dist;
-        onScale(size.id, Math.min(MAX_SCALE, Math.max(MIN_SCALE, next)));
+        // Scale as the ratio of distances from the point it grows about — the same fixed point
+        // the inspector's slider uses, so dragging a corner and typing a number move the
+        // layer's pixels the same way.
+        const ratio = Math.hypot(p.x - size.cx, p.y - size.cy) / size.dist;
+        onScale(
+          size.from.map((l) => {
+            // Clamped per layer, so one that has already hit the limit stops there instead of
+            // pinning the rest of the selection at the size it happens to be.
+            const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, l.scale * ratio));
+            const k = l.scale ? scale / l.scale : 1;
+            return { id: l.id, x: size.cx + (l.x - size.cx) * k, y: size.cy + (l.y - size.cy) * k, scale };
+          }),
+        );
+        return;
+      }
+
+      if (marquee) {
+        const p = toSheet(e.clientX, e.clientY);
+        if (p) setMarquee((m) => (m ? { ...m, to: p } : m));
         return;
       }
 
@@ -489,9 +862,27 @@ export function CanvasStage({
         setOverHandle(paints ? -1 : handleAt(e.clientX, e.clientY));
         if (parts.length) {
           const at = toSheet(e.clientX, e.clientY);
-          setOverPart(
-            at ? partAt(parts, at.x / sheet.width, at.y / sheet.height) : null,
-          );
+          const u = at ? at.x / sheet.width : 0;
+          const v = at ? at.y / sheet.height : 0;
+          // Everything under the pointer, not just the winner: the side and the facing are
+          // asked of all of it, so a bracket sharing the panel's island can't answer for the
+          // panel. `hits[0]` stays the most specific part, which is what gets outlined.
+          const hits = at ? partsAt(parts, u, v) : [];
+          setOverPart(hits[0] ?? null);
+          setOverAlso(hits.length > 1 ? hits[hits.length - 1].label : null);
+          setOverSide(hits.length ? sideAt(parts, u, v) : null);
+          setOverFace(hits.length ? faceAt(parts, u, v) : null);
+          // Every move the pointer has actually travelled on, rather than every event: the
+          // spot is meant to track the pointer, but each one re-renders the 3D view, and a
+          // trackpad emits them far faster than the picture can say anything new.
+          if (onHoverSpot) {
+            const last = spotFrom.current;
+            const far = !last || Math.hypot(u - last.u, v - last.v) > SPOT_STEP;
+            if (far) {
+              spotFrom.current = at ? { u, v } : null;
+              onHoverSpot(at ? spotAt(parts, u, v) : null);
+            }
+          }
         }
         return;
       }
@@ -501,20 +892,52 @@ export function CanvasStage({
       if (!dx && !dy) return;
       d.x = e.clientX;
       d.y = e.clientY;
-      if (d.id) onMove(d.id, dx / scale, dy / scale);
-      else setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
+      if (!d.moving) {
+        setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
+        return;
+      }
+      if (!movable.length) return;
+
+      // First move of the drag: the selection this press made has come back down as a prop by
+      // now, so this is the first moment the layers about to move are actually known.
+      const now = selectionBounds(movable);
+      if (!now) return;
+      if (!d.lines) d.lines = snapLines(sheet, parts, movable);
+      if (!d.origin) d.origin = { x: now.x, y: now.y };
+
+      d.raw.x += dx / scale;
+      d.raw.y -= dy / scale;
+      let wantX = d.origin.x + d.raw.x;
+      let wantY = d.origin.y + d.raw.y;
+      let lineX: number | null = null;
+      let lineY: number | null = null;
+      // Alt is the escape hatch. A decal a few pixels off a seam on purpose is a real thing to
+      // want, and a magnet with no way to switch it off is worse than no magnet.
+      if (!e.altKey) {
+        const tol = SNAP / scale;
+        const sx = snapTo([wantX, wantX + now.w / 2, wantX + now.w], d.lines.xs, tol);
+        const sy = snapTo([wantY, wantY + now.h / 2, wantY + now.h], d.lines.ys, tol);
+        wantX += sx.shift;
+        wantY += sy.shift;
+        lineX = sx.line;
+        lineY = sy.line;
+      }
+      setSnapped((s) => (s.x === lineX && s.y === lineY ? s : { x: lineX, y: lineY }));
+      onMove(wantX - now.x, wantY - now.y);
     },
     [
       handleAt,
+      marquee,
+      movable,
       moveCursor,
+      onHoverSpot,
       onMove,
       onPaintMove,
       onScale,
       paints,
       parts,
       scale,
-      sheet.height,
-      sheet.width,
+      sheet,
       toSheet,
       tool,
     ],
@@ -527,13 +950,47 @@ export function CanvasStage({
         setGuide(null);
         onPaintEnd();
       }
+
+      const band = marquee;
+      if (band) {
+        setMarquee(null);
+        const x0 = Math.min(band.from.x, band.to.x);
+        const x1 = Math.max(band.from.x, band.to.x);
+        const y0 = Math.min(band.from.y, band.to.y);
+        const y1 = Math.max(band.from.y, band.to.y);
+        // A band with no area is a click on empty canvas, which has already cleared the
+        // selection on the way in.
+        if (x1 - x0 > 1 || y1 - y0 > 1) {
+          // Touched rather than swallowed. A band you have to draw right round a logo is a band
+          // you end up drawing twice, and the layer you wanted was under the first attempt.
+          const caught = sheet.layers.filter((l) => {
+            if (l.kind === "paint" || !l.visible) return false;
+            const b = selectionBounds([l]);
+            return !!b && b.x <= x1 && b.x + b.w >= x0 && b.y <= y1 && b.y + b.h >= y0;
+          });
+          if (caught.length) {
+            onSelect(caught.map((l) => l.id), band.add ? "toggle" : "replace");
+          }
+        }
+      }
+
+      // A right press that never moved was a menu; one that did was a pan, and it has already
+      // happened. This is the release, which is the first moment the two can be told apart —
+      // the slop is the same one a double-click gets, and for the same reason.
+      const right = rightPress.current;
+      rightPress.current = null;
+      if (right && Math.hypot(e.clientX - right.x, e.clientY - right.y) < DOUBLE_SLOP) {
+        onMenu(e.clientX, e.clientY);
+      }
+
       drag.current = null;
       sizing.current = null;
+      setSnapped((s) => (s === NO_SNAP ? s : NO_SNAP));
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
       }
     },
-    [onPaintEnd],
+    [marquee, onMenu, onPaintEnd, onSelect, sheet.layers],
   );
 
   const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -544,6 +1001,7 @@ export function CanvasStage({
     setZoom(1);
     setPan({ x: 0, y: 0 });
   }, []);
+
 
   const ringed = paints && hasTip(tool);
   // Corners come out of `layerCorners` clockwise from the top left, so 0/2 are one diagonal
@@ -575,6 +1033,8 @@ export function CanvasStage({
           if (cursorRef.current) cursorRef.current.style.opacity = "0";
           setOverHandle(-1);
           setOverPart(null);
+          spotFrom.current = null;
+          onHoverSpot?.(null);
         }}
         onPointerEnter={() => {
           if (cursorRef.current) cursorRef.current.style.opacity = "1";
@@ -590,6 +1050,25 @@ export function CanvasStage({
           ringed ? "block" : "hidden",
         )}
       />
+      {/* What the wash over the islands means. Only while the islands are showing, and only on
+          a model that can say — a legend for a colour nobody can see is furniture. It sits
+          here rather than in the readout below because the wash is on screen whether or not
+          the pointer is over anything, and that is exactly when it needs explaining. */}
+      {washed && (
+        <div
+          className="pointer-events-auto absolute left-2 top-2 flex items-center gap-2 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45"
+          title={t("designer.flankWashHint")}
+        >
+          <span className="flex items-center gap-1">
+            <span className="size-2 rounded-[2px] bg-[hsl(28_95%_55%)]" />
+            {t("designer.flank.left")}
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="size-2 rounded-[2px] bg-[hsl(205_95%_60%)]" />
+            {t("designer.flank.right")}
+          </span>
+        </div>
+      )}
       <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-2 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45">
         <span>
           {sheet.width}×{sheet.height}
@@ -601,7 +1080,39 @@ export function CanvasStage({
         {overPart && (
           <>
             <span>·</span>
-            <span className="max-w-[160px] truncate text-white/70">{overPart.label}</span>
+            {/* The node first, because a group's name is whatever its author typed and the node
+                is the bike's own part — `chassis` still means the shrouds on a pack that calls
+                them `Metal.027`. */}
+            {overPart.owner && <span className="text-white/70">{overPart.owner}</span>}
+            <span className="max-w-[190px] truncate" title={t("designer.focusHint")}>
+              {overAlso ? t("designer.partOver", { part: overPart.label, over: overAlso }) : overPart.label}
+            </span>
+            {/* Which flank, when the model can say. `both` is the one that saves an
+                afternoon: it means this island is worn by each side of the bike. */}
+            {overSide && overSide !== "centre" && (
+              <span
+                // The same colours the sheet is washed with, so the word and the region under
+                // the pointer are recognisably the same answer.
+                className={cn(
+                  overSide === "left" && "text-[hsl(28_95%_62%)]",
+                  overSide === "right" && "text-[hsl(205_95%_66%)]",
+                  overSide === "both" && "text-white/45",
+                )}
+                title={overSide === "both" ? t("designer.flankSharedHint") : undefined}
+              >
+                {t(`designer.flank.${overSide}` as "designer.flank.left")}
+              </span>
+            )}
+            {/* Only the answers worth acting on. "Top" is where a livery goes anyway, so
+                saying it every time would bury the one that means "nobody will see this". */}
+            {(overFace === "under" || overFace === "both") && (
+              <span
+                className="text-amber-300/70"
+                title={t(`designer.faceHint.${overFace}` as "designer.faceHint.under")}
+              >
+                {t(`designer.face.${overFace}` as "designer.face.under")}
+              </span>
+            )}
           </>
         )}
       </div>

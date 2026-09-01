@@ -147,6 +147,7 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     center_over_game(&window);
     window.show().map_err(|e| format!("{e:#}"))?;
     SHOWINGS.fetch_add(1, Ordering::SeqCst);
+    crate::usage::track("overlay.open");
     let _ = window.set_focus();
     Ok(())
 }
@@ -211,15 +212,56 @@ pub fn on_focus_lost<R: Runtime>(app: &AppHandle<R>) {
 /// the multi-monitor rigs this crowd runs. Best-effort: with no game up (or off Windows)
 /// the centred position stands.
 fn center_over_game<R: Runtime>(window: &WebviewWindow<R>) {
-    let Some((left, top, right, bottom)) = gameproc::game_window_rect() else {
+    let Some(rect) = gameproc::game_window_rect() else {
         return;
     };
     let Ok(size) = window.outer_size() else {
         return;
     };
-    let x = left + (right - left - size.width as i32) / 2;
-    let y = top + (bottom - top - size.height as i32) / 2;
+    let bounds = monitor_holding(window, rect);
+    let (x, y) = centered_on(rect, (size.width, size.height), bounds);
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+}
+
+/// A screen rectangle in physical pixels: `left, top, right, bottom`.
+type Rect = (i32, i32, i32, i32);
+
+/// Centre a `(width, height)` window on `rect`, kept inside `bounds` when there are any.
+///
+/// The clamp is the belt to [`gameproc::game_window_rect`]'s braces. That function is what
+/// stops a minimized game handing us its (-32000, -32000) iconic rect, and this is what
+/// makes sure no rect from anywhere can put the overlay somewhere the player can't see it
+/// — an overlay off the edge of the desktop is indistinguishable from a hotkey that did
+/// nothing, except that it also holds focus and takes it off the game.
+fn centered_on(rect: Rect, size: (u32, u32), bounds: Option<Rect>) -> (i32, i32) {
+    let (left, top, right, bottom) = rect;
+    let (w, h) = (size.0 as i32, size.1 as i32);
+    let x = left + (right - left - w) / 2;
+    let y = top + (bottom - top - h) / 2;
+
+    let Some((bl, bt, br, bb)) = bounds else {
+        return (x, y);
+    };
+    // `.max(bl)` for a window larger than the screen it's on: there is no position that
+    // fits, so pin it to the top-left and let it overhang the far edge rather than have
+    // the clamp push its title bar off the near one.
+    (x.clamp(bl, (br - w).max(bl)), y.clamp(bt, (bb - h).max(bt)))
+}
+
+/// The monitor `rect` sits on, as `left, top, right, bottom`.
+///
+/// Found by the rect's centre rather than by the window's own monitor: the whole point of
+/// this path is to move the overlay to the screen the *game* is on, which on a sim rig is
+/// routinely not the one Tauri built it over.
+fn monitor_holding<R: Runtime>(window: &WebviewWindow<R>, rect: Rect) -> Option<Rect> {
+    let (left, top, right, bottom) = rect;
+    let (cx, cy) = ((left + right) / 2, (top + bottom) / 2);
+    window.available_monitors().ok()?.into_iter().find_map(|m| {
+        let (p, s) = (m.position(), m.size());
+        let (l, t) = (p.x, p.y);
+        let (r, b) = (l + s.width as i32, t + s.height as i32);
+        (cx >= l && cx < r && cy >= t && cy < b).then_some((l, t, r, b))
+    })
 }
 
 /// Take the overlay off the screen, leaving the foreground where it lands.
@@ -363,6 +405,63 @@ mod tests {
     fn an_unparseable_hotkey_says_what_was_wrong() {
         let err = parse_hotkey("Ctrl+++").expect_err("nonsense doesn't parse");
         assert!(err.contains("Ctrl+++"), "names the bad combo: {err}");
+    }
+
+    /// A 1920x1080 primary monitor at the origin.
+    const PRIMARY: Rect = (0, 0, 1920, 1080);
+    /// What the overlay is sized to.
+    const OVERLAY: (u32, u32) = (WIDTH as u32, HEIGHT as u32);
+
+    #[test]
+    fn the_overlay_lands_in_the_middle_of_the_game_window() {
+        // A 1600x900 game window centred on the primary monitor.
+        let game = (160, 90, 1760, 990);
+        assert_eq!(
+            centered_on(game, OVERLAY, Some(PRIMARY)),
+            (410, 180),
+            "centred on the game, not on the monitor",
+        );
+    }
+
+    /// The bug this whole path had: a minimized game reports the iconic rect, and an
+    /// overlay centred on it is placed ~32,000px off the left of the desktop — shown,
+    /// focused, and invisible, which is indistinguishable from a hotkey that did nothing.
+    ///
+    /// `game_window_rect` now refuses to return that rect at all. This is the second line
+    /// of defence, and it is the one that holds for *any* rect we haven't thought of.
+    #[test]
+    fn an_iconic_rect_cannot_put_the_overlay_off_the_desktop() {
+        let iconic = (-32000, -32000, -31840, -31970);
+        let (x, y) = centered_on(iconic, OVERLAY, Some(PRIMARY));
+        assert_eq!((x, y), (0, 0), "pulled back onto the monitor");
+
+        let unclamped = centered_on(iconic, OVERLAY, None);
+        assert!(
+            unclamped.0 < -32000,
+            "and without bounds it really would go off-screen: {unclamped:?}",
+        );
+    }
+
+    /// The reason this positions by the game's monitor rather than the primary one. A
+    /// screen to the left of primary has negative coordinates, and a clamp that assumed
+    /// otherwise would drag the overlay back onto the wrong display — breaking exactly
+    /// the multi-monitor case the feature exists for.
+    #[test]
+    fn a_monitor_left_of_primary_keeps_its_negative_coordinates() {
+        let left_screen = (-1920, 0, 0, 1080);
+        let game = (-1920, 0, 0, 1080); // fullscreen on that monitor
+        let (x, y) = centered_on(game, OVERLAY, Some(left_screen));
+        assert_eq!((x, y), (-1510, 180));
+        assert!(x < 0, "stayed on the left-hand screen");
+    }
+
+    /// A window taller than the screen has no position that fits. Pin it to the top-left
+    /// so its controls are reachable, rather than letting the clamp push them off.
+    #[test]
+    fn an_overlay_bigger_than_the_screen_is_pinned_not_pushed() {
+        let small_screen = (0, 0, 800, 600);
+        let game = (0, 0, 800, 600);
+        assert_eq!(centered_on(game, OVERLAY, Some(small_screen)), (0, 0));
     }
 
     /// Tauri's mock runtime — real window bookkeeping, no display, no webview.

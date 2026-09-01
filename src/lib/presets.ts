@@ -128,6 +128,9 @@ export const ANY_MODEL = "*";
 export interface Scans {
   bikePaints: Record<string, string[]>; // bikeid → livery names
   modelSwaps: Record<string, string[]>; // bikeid → model-swap variant names
+  activeModel: Record<string, string>; // bikeid → the model swap currently on the bike
+  /** bikeid → variant name → the liveries that variant claims. See {@link forPickedModel}. */
+  modelPaints: Record<string, Record<string, string[]>>;
   helmets: string[];
   helmetPaints: Record<string, string[]>; // helmet model (or ANY_MODEL) → paints
   goggles: Record<string, string[]>; // helmet model / rider profile → goggles
@@ -164,6 +167,8 @@ export async function loadScans(): Promise<Scans> {
   const s: Scans = {
     bikePaints: {},
     modelSwaps: {},
+    activeModel: {},
+    modelPaints: {},
     helmets: [...targets.helmets],
     helmetPaints: {},
     goggles: {},
@@ -186,6 +191,10 @@ export async function loadScans(): Promise<Scans> {
     // mesh) is rejected by the backend, so offering it only produces a failed apply.
     const usable = b.variants.filter((v) => v.valid || v.empty).map((v) => v.name);
     if (usable.length) s.modelSwaps[b.bike] = usable;
+    s.activeModel[b.bike] = b.active;
+    // Every variant's claim, not just the active one's — a livery claimed by *any* model
+    // is one the others shouldn't offer.
+    s.modelPaints[b.bike] = Object.fromEntries(b.variants.map((v) => [v.name, v.paints]));
   }
   for (const e of rider) {
     const v = stripExt(e.name);
@@ -231,10 +240,56 @@ export async function loadScans(): Promise<Scans> {
  * asks by the `bikeid` written in `profile.ini`; those agree in case only by convention,
  * and an exact match silently yielded an empty dropdown whenever they didn't.
  */
-function forBike(map: Record<string, string[]>, bikeid: string): string[] {
-  if (map[bikeid]) return map[bikeid];
+function byBike<T>(map: Record<string, T>, bikeid: string): T | undefined {
+  if (map[bikeid] !== undefined) return map[bikeid];
   const hit = Object.keys(map).find((k) => k.toLowerCase() === bikeid.toLowerCase());
-  return hit ? map[hit] : [];
+  return hit === undefined ? undefined : map[hit];
+}
+
+function forBike(map: Record<string, string[]>, bikeid: string): string[] {
+  return byBike(map, bikeid) ?? [];
+}
+
+/**
+ * The model swap a loadout puts on `bikeid`: its own pick, else whatever is on the bike.
+ *
+ * An empty `modelSwap` slot means *leave the model alone*, so the answer is the variant
+ * currently loose at the bike's root — never `"Stock"`, which is the packed model those
+ * loose files are hiding, and a different bike whenever a swap is applied.
+ */
+export function pickedModel(bikeid: string, loadout: Loadout, scans: Scans | null): string {
+  if (!scans) return loadout.modelSwap;
+  return loadout.modelSwap || byBike(scans.activeModel, bikeid) || "";
+}
+
+/**
+ * Narrow a bike's liveries to the ones that suit the model the preset puts on it: the
+ * liveries that model claims, plus the ones no model claims at all.
+ *
+ * A bike wears one model at a time but its liveries all share the single `paints/` folder
+ * the game insists on, so a Yami mesh on a KTM otherwise offers every KTM livery too. The
+ * model that matters is the one *this preset* selects — a preset pairs a model with the
+ * livery drawn for it — falling back to whatever is on the bike when the preset leaves the
+ * model alone. Unclaimed liveries staying universal is the same rule {@link forModel}
+ * applies to gear paints installed without an owning model, and it means a bike nobody has
+ * assigned anything on behaves exactly as before.
+ */
+function forPickedModel(
+  liveries: string[],
+  bikeid: string,
+  loadout: Loadout,
+  scans: Scans,
+): string[] {
+  const claims = byBike(scans.modelPaints, bikeid);
+  if (!claims) return liveries;
+  const model = pickedModel(bikeid, loadout, scans);
+  const keyed = (name: string) =>
+    Object.entries(claims).find(([v]) => v.toLowerCase() === name.toLowerCase())?.[1] ?? [];
+
+  const lower = (names: string[]) => new Set(names.map((n) => n.toLowerCase()));
+  const mine = lower(keyed(model));
+  const spokenFor = lower(Object.values(claims).flat());
+  return liveries.filter((l) => mine.has(l.toLowerCase()) || !spokenFor.has(l.toLowerCase()));
 }
 
 /** Paints for `model`, plus any installed with no owning model folder. */
@@ -271,7 +326,7 @@ export function slotOptions(
   let opts: string[] = [];
   switch (slot.key) {
     case "paint":
-      opts = forBike(scans.bikePaints, bikeid);
+      opts = forPickedModel(forBike(scans.bikePaints, bikeid), bikeid, loadout, scans);
       break;
     case "modelSwap":
       opts = forBike(scans.modelSwaps, bikeid);

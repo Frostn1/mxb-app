@@ -1,19 +1,29 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
+  Bike,
+  ClipboardPaste,
+  Copy,
+  CopyPlus,
   Eye,
   EyeOff,
+  FileImage,
   FilePlus2,
+  FlipHorizontal2,
+  FlipVertical2,
   Grid3x3,
-  ImagePlus,
+  Group,
   Layers as LayersIcon,
+  Link2,
+  Link2Off,
   Loader2,
   PackageOpen,
-  PaintRoller,
+  PaintBucket,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
   Save,
   Trash2,
-  Type as TypeIcon,
+  Ungroup,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
@@ -27,41 +37,68 @@ import {
   paintStudioSave,
   paintStudioStage,
   paintStudioTarget,
+  psdRead,
+  psdSave,
   textureBytes,
 } from "../../../api/mods";
 import { useT } from "../../../i18n/context";
-import { IMAGE_EXTS, PaintDestBar, usePaintDest } from "../paintDest";
+import { IMAGE_EXTS, PaintDestBar, isBikeKind, usePaintDest } from "../paintDest";
 import { CanvasStage } from "./CanvasStage";
 import { Row, Slider } from "./controls";
 import { PreviewPanel } from "./PreviewPanel";
 import { LayerInspector } from "./LayerInspector";
 import { PaintTools } from "./PaintTools";
-import { bitmapFromRgba, composite, sheetTexture, toPng } from "./composite";
+import { bitmapFromRgba, composite, hasInk, sheetTexture, toPng } from "./composite";
 import { EMPTY_GHOST, ghostShows, type Ghost } from "./ghost";
-import { partPath, uvParts, uvWireframe, type UvPart } from "./uv";
+import {
+  islandAt,
+  partAt,
+  partBox,
+  partPath,
+  triangleAt,
+  uvParts,
+  uvWireframe,
+  type UvPart,
+} from "./uv";
 import {
   blankSheet,
+  cloneLayer,
+  groupOf,
   imageLayer,
+  isCompanionMap,
   layerExtent,
   newId,
   paintLayer,
+  regroup,
+  shapeLayer,
   textLayer,
   unionRegion,
   type Layer,
   type PaintLayer,
+  type ShapeLayer,
   type Region,
   type Sheet,
 } from "./layers";
+import { buildMirror, derive, mirrorLayer, type MirrorIndex } from "./mirror";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../../ui/dropdown-menu";
 import {
   DEFAULT_PAINT,
   PaintHistory,
+  SHAPE_TOOLS,
   Stroke,
   TOOL_KEYS,
+  constrained,
   type PaintSettings,
   type PaintTool,
   type Point,
 } from "./paint";
-import type { EdfNode } from "../../../types";
+import type { EdfNode, PaintTexture } from "../../../types";
 
 /**
  * The paint designer: layers on a sheet, the sheet on the model, and a `.pnt` at the end.
@@ -83,6 +120,48 @@ import type { EdfNode } from "../../../types";
 /** A blank sheet's edge. Powers of two only — the backend would resize anything else. */
 const BLANK_SIZE = 2048;
 
+/**
+ * A stock texture's pixels, decoded, or null if they can't be had.
+ *
+ * Null covers both ends of it: the store evicts, and a rejected read is the same nothing to
+ * draw as a name that matched no texture at all.
+ */
+function stockBitmap(tex: PaintTexture): Promise<ImageBitmap | null> {
+  return textureBytes(tex.token)
+    .then((buf) => bitmapFromRgba(buf, tex.width, tex.height))
+    .catch(() => null);
+}
+
+/**
+ * What was last copied, and the sheet it was cut from.
+ *
+ * Outside the component because the Studio unmounts this pane when another tab is opened, and
+ * a clipboard that emptied when you went to look at something is a clipboard nobody uses. The
+ * sheet's size travels with it: a layer's position is in sheet pixels, so pasting across sheets
+ * of different sizes has to bring the artwork with it rather than leave it off the edge.
+ */
+let clipboard: { width: number; height: number; layers: Layer[] } | null = null;
+
+/** One row of the canvas menu, so a dozen of them don't each spell out the same classes. */
+function MenuRow({
+  icon: Icon,
+  label,
+  disabled,
+  onPick,
+}: {
+  icon: typeof Copy;
+  label: string;
+  disabled?: boolean;
+  onPick: () => void;
+}) {
+  return (
+    <DropdownMenuItem disabled={disabled} onSelect={onPick}>
+      <Icon className="size-3.5" />
+      {label}
+    </DropdownMenuItem>
+  );
+}
+
 interface DesignerProps {
   /**
    * Sheets handed over from Paint Studio, by path — drawn on rather than replaced.
@@ -98,7 +177,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const t = useT();
   const [sheets, setSheets] = useState<Sheet[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<string[]>([]);
+  // Where the canvas's right-click menu is, in client coordinates, or null for closed.
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   // The sheets/layers rail folds away, because once a paint is set up the thing worth the
@@ -110,7 +191,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const [paint, setPaint] = useState<PaintSettings>(DEFAULT_PAINT);
   // Painting history, and a counter to bring its undo/redo buttons back into a render — the
   // stack itself is a mutable object, so nothing about it would reach React on its own.
-  const history = useRef(new PaintHistory());
+  const history = useRef(new PaintHistory<Sheet[]>());
   const [historyRev, setHistoryRev] = useState(0);
   // The stroke in progress. A ref because it changes on every pointer sample and no render
   // depends on it — the pixels it writes are what reach the screen.
@@ -131,9 +212,18 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // The mesh the preview is showing, reported back by it. Null until one loads, and null again
   // if it fails — a UV map drawn from a model that isn't on screen would be a confident lie.
   const [geometry, setGeometry] = useState<EdfNode[] | null>(null);
+  // The same mesh, reachable without waiting for a render — see `onGeometry` for why it exists
+  // at all, and `ensureMirror` for why it has to be readable from this far up the file.
+  const geometryRef = useRef<EdfNode[] | null>(null);
+  // Whether that mesh was assembled about the bike's mirror plane. Without it a position is a
+  // number in some part's own frame, and the sides and facings read off it would be invented.
+  const [assembled, setAssembled] = useState(false);
+  // That same model's own textures — the look it ships with. Empty for anything that can't
+  // say which of its textures are its own, which is every model but a bike.
+  const [stockTextures, setStockTextures] = useState<PaintTexture[]>([]);
 
   const destState = usePaintDest();
-  const { dest, hints } = destState;
+  const { dest, hints, hintsFor } = destState;
 
   // Composites, one per sheet, owned here and reused: they're the size of the sheet, and
   // reallocating a 4096² canvas on every pointer move is not a thing to do.
@@ -162,8 +252,27 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // can tell whether it has anything to say *before* saying it — see the note there.
   const publishedNames = useRef("");
 
+  // The sheets as they stand, for the undo stack to snapshot on its way past an edit. A mirror
+  // rather than a read of `sheets`: the callbacks that mutate are memoised on their own
+  // dependencies, and one holding a stale array would remember a state that had already moved on.
+  const sheetsRef = useRef(sheets);
+  sheetsRef.current = sheets;
+
   const active = sheets.find((s) => s.id === activeId) ?? null;
   const bump = useCallback(() => setVersion((v) => v + 1), []);
+
+  /**
+   * The one selected layer, where "one" is what the question means.
+   *
+   * The paint target, the part picker and the fit all act on a single layer, and null is the
+   * honest answer for a selection of three — better than picking the first and acting on a
+   * layer nobody pointed at.
+   */
+  const selectedId = selection.length === 1 ? selection[0] : null;
+  const chosen = useMemo(
+    () => active?.layers.filter((l) => selection.includes(l.id)) ?? [],
+    [active, selection],
+  );
 
   /**
    * The sheets that exist, as a string.
@@ -266,21 +375,112 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     };
   }, []);
 
-  const patchSheet = useCallback((id: string, fn: (s: Sheet) => Sheet) => {
-    // Every route into a sheet but a stroke comes through here, and none of them says where it
-    // drew. Marking the sheet wholly dirty on the way past is what lets the recomposite treat a
-    // region as a promise rather than a hint: if one is there, a stroke put it there.
-    dirty.current.set(id, null);
-    setSheets((prev) => prev.map((s) => (s.id === id ? fn(s) : s)));
+  /**
+   * Record the document as it stands, so the edit about to happen can be taken back.
+   *
+   * Before the mutation, never after: what undo needs is the state that existed a moment ago,
+   * and once `setSheets` has run there is nothing left holding it. `key` collapses a run of
+   * edits that are one gesture — see `PaintHistory.pushDoc`.
+   */
+  const remember = useCallback((key: string | null = null) => {
+    history.current.pushDoc(sheetsRef.current, key);
+    setHistoryRev((v) => v + 1);
   }, []);
 
+  /* ── Mirroring ─────────────────────────────────────────────────────────────────────────
+     A mirrored layer is a *follower*: it holds no placement of its own worth keeping, and is
+     re-derived from the layer it reflects on every edit. That derivation hangs off `patchSheet`
+     below, which is the one road every edit but a stroke takes. ──────────────────────────── */
+
+  /**
+   * What the mirror needs, in a ref rather than a memo, and built only when something asks.
+   *
+   * `patchSheet` is defined here — long before the model's parts are — and every edit has to
+   * go through it, so the geometry arrives sideways rather than in a dependency list. Lazily,
+   * too: most paints mirror nothing, and a memo would build an index for every sheet anyone
+   * opened to answer a question that was never asked.
+   *
+   * `ready` is the model's own statement that its axes can be trusted. Without it there is no
+   * left and right to reflect between — see `uvParts`.
+   */
+  const mirrorRef = useRef<{
+    sheetId: string | null;
+    parts: UvPart[];
+    ready: boolean;
+    index: MirrorIndex | null;
+  }>({ sheetId: null, parts: [], ready: false, index: null });
+
+  const ensureMirror = useCallback((): MirrorIndex | null => {
+    const held = mirrorRef.current;
+    if (!held.ready) return null;
+    if (!held.index) held.index = buildMirror(held.parts, geometryRef.current ?? []);
+    return held.index;
+  }, []);
+
+  /**
+   * Bring every follower on a sheet back into step with the layer it reflects.
+   *
+   * Strokes don't come through here and don't need to: a paint layer is the sheet, so it can
+   * never be a source or a follower, and that is what keeps this off the one path in the
+   * editor that runs a hundred times a second.
+   */
+  const syncMirrors = useCallback(
+    (sheet: Sheet): Sheet => {
+      if (!sheet.layers.some((l) => l.mirror)) return sheet;
+      const held = mirrorRef.current;
+      const index = held.sheetId === sheet.id ? ensureMirror() : null;
+      const by = new Map(sheet.layers.map((l) => [l.id, l]));
+      return {
+        ...sheet,
+        layers: sheet.layers.map((layer) => {
+          if (!layer.mirror) return layer;
+          const from = by.get(layer.mirror.of);
+          // The source has gone — deleted, or undone away — or is something that can't be a
+          // source. The follower stops following rather than going with it: what it holds is
+          // still somebody's artwork, and it is already on the bike.
+          if (!from || from.id === layer.id || from.kind === "paint") {
+            return { ...layer, mirror: null };
+          }
+          // A null placement leaves it where it is. That is the case where the model isn't
+          // loaded, and a follower that jumped to a guess would look placed rather than stale.
+          const placed = index ? mirrorLayer(index, held.parts, from, sheet) : null;
+          return derive(layer, from, placed?.ok ? placed : null, held.parts, sheet);
+        }),
+      };
+    },
+    [ensureMirror],
+  );
+
+  const patchSheet = useCallback(
+    /**
+     * `undoKey` names the gesture for coalescing, or `false` for an edit the history must not
+     * record — one whose other half lives outside the document, where an undo would restore the
+     * sheet and leave that half where it was.
+     */
+    (id: string, fn: (s: Sheet) => Sheet, undoKey: string | null | false = null) => {
+      // Every route into a sheet but a stroke comes through here, and none of them says where it
+      // drew. Marking the sheet wholly dirty on the way past is what lets the recomposite treat a
+      // region as a promise rather than a hint: if one is there, a stroke put it there.
+      if (undoKey !== false) remember(undoKey);
+      dirty.current.set(id, null);
+      // Followers re-derived on the way out, so no caller has to remember they exist. Dragging
+      // a logo and hiding one are the same kind of edit as far as the far side is concerned.
+      setSheets((prev) => prev.map((s) => (s.id === id ? syncMirrors(fn(s)) : s)));
+    },
+    [remember, syncMirrors],
+  );
+
   const patchLayer = useCallback(
-    (layerId: string, fn: (l: Layer) => Layer) => {
+    (layerId: string, fn: (l: Layer) => Layer, undoKey: string | null | false = null) => {
       if (!activeId) return;
-      patchSheet(activeId, (s) => ({
-        ...s,
-        layers: s.layers.map((l) => (l.id === layerId ? fn(l) : l)),
-      }));
+      patchSheet(
+        activeId,
+        (s) => ({
+          ...s,
+          layers: s.layers.map((l) => (l.id === layerId ? fn(l) : l)),
+        }),
+        undoKey,
+      );
     },
     [activeId, patchSheet],
   );
@@ -344,6 +544,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * the moment it arrives, because that is what the mark is made of; only the telling-everyone
    * waits, and it waits at most until the next frame, which is the soonest anyone could see it.
    */
+  // The shape layer a drag is currently rewriting, and where the press landed. Null except
+  // between the press and the release of a shape tool — the stroke ref's opposite number.
+  const shaping = useRef<{ id: string; from: Point } | null>(null);
+
   const queued = useRef<{ sheetId: string; layerId: string } | null>(null);
   const frame = useRef(0);
 
@@ -384,7 +588,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     if (!active) return;
     const layer = paintLayer(t("designer.paintLayerName"), active);
     patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, layer] }));
-    setSelectedId(layer.id);
+    setSelection([layer.id]);
     bump();
   }, [active, bump, patchSheet, t]);
 
@@ -398,30 +602,45 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const pickTool = useCallback(
     (tool: PaintTool) => {
       setPaint((p) => ({ ...p, tool }));
-      if (tool === "move" || !active) return;
+      // A shape makes its own layer on the press, so it needs nothing selected to land on.
+      if (tool === "move" || SHAPE_TOOLS.has(tool) || !active) return;
       const selected = active.layers.find((l) => l.id === selectedId);
       if (selected?.kind === "paint") return;
       const existing = [...active.layers].reverse().find((l) => l.kind === "paint");
-      if (existing) setSelectedId(existing.id);
+      if (existing) setSelection([existing.id]);
       else addPaintLayer();
     },
     [active, addPaintLayer, selectedId],
   );
 
-  const startPaint = useCallback(
-    (at: Point) => {
-      if (!target || !activeId) return;
-      const next = new Stroke(target.canvas, paint, at);
-      stroke.current = next;
-      // Straight through rather than queued: the press is the one sample nobody would forgive a
-      // frame's wait on, and a tool that puts nothing down on the press has nothing to show.
-      if (next.dirty) touchPaint(activeId, target.id, next.dirty);
-    },
-    [activeId, paint, target, touchPaint],
-  );
 
   const movePaint = useCallback(
     (points: Point[], constrain: boolean) => {
+      // A shape in progress is a layer, not a stroke: the drag rewrites its box and the
+      // composite redraws it, so what is on screen mid-drag is the shape itself rather than a
+      // preview of one. See `startPaint`.
+      const drawing = shaping.current;
+      if (drawing) {
+        const raw = points[points.length - 1];
+        if (!raw) return;
+        const to = constrain ? constrained(drawing.from, raw, paint.tool) : raw;
+        patchLayer(
+          drawing.id,
+          (l) =>
+            l.kind === "shape"
+              ? {
+                  ...l,
+                  x: (drawing.from.x + to.x) / 2,
+                  y: (drawing.from.y + to.y) / 2,
+                  w: to.x - drawing.from.x,
+                  h: -(to.y - drawing.from.y),
+                }
+              : l,
+          `shape:${drawing.id}`,
+        );
+        bump();
+        return;
+      }
       const live = stroke.current;
       if (!live || !target || !activeId) return;
       live.move(points, constrain);
@@ -429,10 +648,28 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       markPaint(activeId, live.dirty);
       schedulePaint(activeId, target.id);
     },
-    [activeId, markPaint, schedulePaint, target],
+    [activeId, bump, markPaint, paint.tool, patchLayer, schedulePaint, target],
   );
 
   const endPaint = useCallback(() => {
+    const drawing = shaping.current;
+    if (drawing) {
+      shaping.current = null;
+      // A click with a shape tool selected is not a shape. Left in, it would be an invisible
+      // layer in the list with handles too small to grab and nothing to see.
+      if (active) {
+        const made = active.layers.find((l) => l.id === drawing.id);
+        if (made?.kind === "shape" && Math.abs(made.w) < 2 && Math.abs(made.h) < 2) {
+          patchSheet(active.id, (sh) => ({
+            ...sh,
+            layers: sh.layers.filter((l) => l.id !== drawing.id),
+          }));
+          setSelection([]);
+          bump();
+        }
+      }
+      return;
+    }
     const done = stroke.current;
     stroke.current = null;
     // Whatever the last frame didn't get to, now — a stroke that ended between two frames would
@@ -443,7 +680,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     if (!done?.end() || !target || !activeId) return;
     history.current.push(activeId, target.id, done.before);
     setHistoryRev((v) => v + 1);
-  }, [activeId, flushPaint, target]);
+  }, [active, activeId, bump, flushPaint, patchSheet, target]);
 
   /** The live canvas behind a layer id, wherever it lives — history spans every sheet. */
   const paintCanvas = useCallback(
@@ -465,21 +702,50 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     [historyRev],
   );
 
+  /**
+   * Reading and replacing the document for the history — plus putting the cursor somewhere real
+   * afterwards.
+   *
+   * Undoing the sheet you were looking at leaves `activeId` naming something that no longer
+   * exists, and the editor would come back empty rather than showing what it just restored. The
+   * same for a selected layer. Neither is part of the document, so neither is restored by it.
+   */
+  const docAccess = useMemo(
+    () => ({
+      read: () => sheetsRef.current,
+      write: (next: Sheet[]) => {
+        setSheets(next);
+        setActiveId((cur) => (cur && next.some((s) => s.id === cur) ? cur : next[0]?.id ?? null));
+        setSelection((cur) => {
+          const alive = cur.filter((id) => next.some((s) => s.layers.some((l) => l.id === id)));
+          return alive.length === cur.length ? cur : alive;
+        });
+      },
+    }),
+    [],
+  );
+
   // Not while the pointer is still down: the stroke redraws its layer from its own snapshot on
   // the next sample, so an undo mid-drag would be silently taken back a moment later.
   const undo = useCallback(() => {
     if (stroke.current) return;
-    const entry = history.current.undo(paintCanvas);
+    const entry = history.current.undo(paintCanvas, docAccess);
     setHistoryRev((v) => v + 1);
-    if (entry) touchPaint(entry.sheetId, entry.layerId);
-  }, [paintCanvas, touchPaint]);
+    if (!entry) return;
+    // A document step replaces sheet objects wholesale, and the recomposite already follows
+    // sheet identity — so it needs no region, only to be told the drawing moved.
+    if (entry.kind === "pixels") touchPaint(entry.sheetId, entry.layerId);
+    else bump();
+  }, [bump, docAccess, paintCanvas, touchPaint]);
 
   const redo = useCallback(() => {
     if (stroke.current) return;
-    const entry = history.current.redo(paintCanvas);
+    const entry = history.current.redo(paintCanvas, docAccess);
     setHistoryRev((v) => v + 1);
-    if (entry) touchPaint(entry.sheetId, entry.layerId);
-  }, [paintCanvas, touchPaint]);
+    if (!entry) return;
+    if (entry.kind === "pixels") touchPaint(entry.sheetId, entry.layerId);
+    else bump();
+  }, [bump, docAccess, paintCanvas, touchPaint]);
 
   // Which paint layers exist, as a string. `sheets` changes on every pointer sample of a
   // stroke; this changes only when one is added or deleted, which is the only time the
@@ -505,49 +771,59 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paintLayerKey]);
 
-  /**
-   * Tool keys, and undo.
-   *
-   * On the window rather than on the canvas, because a brush should be one key away wherever
-   * the focus happens to be — but the Studio keeps this pane mounted behind whichever tab is
-   * open, so an invisible Designer would otherwise steal every `b` typed into Paint Studio.
-   */
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!rootRef.current?.offsetParent) return;
-      const el = e.target as HTMLElement | null;
-      if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return;
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
-        return;
-      }
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const key = e.key.toLowerCase();
-      const tool = (Object.keys(TOOL_KEYS) as PaintTool[]).find((k) => TOOL_KEYS[k] === key);
-      if (tool) {
-        e.preventDefault();
-        pickTool(tool);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [pickTool, redo, undo]);
 
   /**
    * Pixels for a file the user picked, at the sheet's own resolution.
    *
-   * No orientation is imposed. A `.pnt` doesn't record which way up its rows are and paints in
-   * the wild are stored both ways, so the editor shows exactly what the file holds — the same
-   * rows the viewer renders and the game reads. A sheet that looks upside down here is upside
-   * down in the file, and guessing otherwise would flip every correctly-made paint.
+   * The rows arrive in the order the file holds them, which is the order the mesh samples
+   * them — and that is upside down from the template a painter works in. Nothing is flipped
+   * here: the sheet, the composite and the save all stay in the file's own row order, and the
+   * 2D stage turns it the right way up for display alone (see `CanvasStage`). Flipping the
+   * pixels instead would put the editor's opinion about orientation inside the saved paint.
    */
   const readImage = useCallback(async (path: string) => {
     const tex = await paintStudioPixels(path);
     const buf = await textureBytes(tex.token);
     return { name: tex.name, bitmap: await bitmapFromRgba(buf, tex.width, tex.height) };
   }, []);
+
+  /**
+   * Which destination the sheets on screen belong to, and which one has already been asked
+   * about — see the effect below `destKey` for what each of them stops from happening twice.
+   *
+   * `destKeyRef` is the same string as `destKey`, readable from up here: `installSheets` is
+   * defined long before the destination is, and every caller of it means "these are the sheets
+   * for wherever this is aimed right now".
+   */
+  const filled = useRef<string | null>(null);
+  const warned = useRef<string | null>(null);
+  const destKeyRef = useRef("");
+
+  /**
+   * Make `next` the sheets, whatever they were made out of.
+   *
+   * Every way into the editor ends here — an unpacked `.pnt`, a Photoshop file, the sheets a
+   * model asks for — because they all mean the same thing: what was open is gone and this is
+   * open instead. One undo step covers it, which is what makes a wrong choice of starting
+   * point cost a keystroke rather than the work.
+   *
+   * Whatever arrives is recorded against the destination that is chosen. A paint opened for
+   * this bike is *for* this bike, and without that the warning below would fire on the way in
+   * — sheets handed over by Paint Studio land here before the model's own list has been
+   * fetched, which is indistinguishable from having switched models unless somebody says so.
+   */
+  const installSheets = useCallback(
+    (next: Sheet[], nameHint?: string) => {
+      remember();
+      setSheets(next);
+      setActiveId(next[0]?.id ?? null);
+      setSelection([]);
+      if (nameHint) setName((n) => n || nameHint);
+      filled.current = destKeyRef.current;
+      bump();
+    },
+    [bump, remember],
+  );
 
   /**
    * Start from an installed paint.
@@ -567,22 +843,20 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         return;
       }
       const loaded = await Promise.all(paths.map((f) => readImage(f)));
-      const next: Sheet[] = loaded.map(({ name: sheetName, bitmap }) => ({
-        id: newId("sheet"),
-        name: sheetName,
-        width: bitmap.width,
-        height: bitmap.height,
-        base: bitmap,
-        layers: [],
-      }));
-      setSheets(next);
-      setActiveId(next[0]?.id ?? null);
-      setSelectedId(null);
-      if (nameHint) setName((n) => n || nameHint);
-      bump();
-      toast.success(t("designer.loadedSheets", { count: String(next.length) }));
+      installSheets(
+        loaded.map(({ name: sheetName, bitmap }) => ({
+          id: newId("sheet"),
+          name: sheetName,
+          width: bitmap.width,
+          height: bitmap.height,
+          base: bitmap,
+          layers: [],
+        })),
+        nameHint,
+      );
+      toast.success(t("designer.loadedSheets", { count: String(paths.length) }));
     },
-    [bump, readImage, t],
+    [installSheets, readImage, t],
   );
 
   const startFromPaint = useCallback(async () => {
@@ -609,6 +883,85 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     }
   }, [loadSheets]);
 
+  /**
+   * Start from a Photoshop file — one sheet per document.
+   *
+   * The layers survive the crossing, which is the whole point: a livery that arrives flattened
+   * is a picture of somebody's work rather than the work, and every adjustment after that is
+   * repainting. Sizes and names come from the file, so a `plastics.psd` lands as a sheet called
+   * `plastics` at whatever the artist drew it at — the save resizes to an edge the game takes.
+   *
+   * One at a time rather than in parallel: a 4096² document with two dozen layers is decoded
+   * into as many bitmaps, and several of those in flight at once is how a webview runs out of
+   * memory partway through.
+   */
+  const startFromPsd = useCallback(async () => {
+    const picked = await openDialog({
+      multiple: true,
+      filters: [{ name: "Photoshop", extensions: ["psd", "psb"] }],
+    });
+    const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
+    if (!paths.length) return;
+    setBusy(true);
+    try {
+      // Loaded on demand, here and in the export below. The PSD codec is a quarter of a
+      // megabyte and most sessions never open one — see `psd.ts`.
+      const { psdToSheet } = await import("./psd");
+      const next: Sheet[] = [];
+      for (const path of paths) {
+        const stem = (path.replace(/\\/g, "/").split("/").pop() ?? "").replace(/\.ps[db]$/i, "");
+        next.push(await psdToSheet(await psdRead(path), stem));
+      }
+      installSheets(next, next[0]?.name);
+      toast.success(t("designer.loadedSheets", { count: String(next.length) }));
+    } catch (e) {
+      toast.error(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(false);
+    }
+  }, [installSheets, t]);
+
+  /**
+   * Write every sheet out as a `.psd`, into a folder the picker chose.
+   *
+   * A folder and not a file, because a sheet is a document: they have their own sizes, and a
+   * PSD has one canvas — so a paint with a 4096² `plastics` and a 1024² `number` cannot be one
+   * file without resampling one of them. One `.psd` each says what is true.
+   *
+   * Composited on the way out for the same reason the save does it: the layers only exist as
+   * canvases until something asks, and asking here is what stops an export shipping a frame
+   * older than the screen.
+   */
+  const exportPsd = useCallback(async () => {
+    if (!sheets.length) return;
+    const picked = await openDialog({ directory: true });
+    const dir = Array.isArray(picked) ? picked[0] : picked;
+    if (!dir) return;
+    setBusy(true);
+    try {
+      const { sheetToPsd } = await import("./psd");
+      // The picker answers in the platform's own separator, and a path with both in it is a
+      // path some Windows API will refuse. Follow whatever it handed back.
+      const sep = dir.includes("\\") ? "\\" : "/";
+      const prefix = name.trim() ? `${name.trim()} - ` : "";
+      let written = 0;
+      for (const sheet of sheets) {
+        const canvas = canvasFor(sheet);
+        composite(canvas, sheet);
+        // A sheet is named after a texture, and a texture name is not obliged to be a legal
+        // file name. Nothing is renamed on the sheet — only on the file it is written to.
+        const label = (sheet.name.trim() || `sheet-${written + 1}`).replace(/[\\/:*?"<>|]/g, "_");
+        await psdSave(`${dir}${sep}${prefix}${label}.psd`, sheetToPsd(sheet, canvas));
+        written += 1;
+      }
+      toast.success(t("designer.exportedPsd", { count: written, dir }));
+    } catch (e) {
+      toast.error(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(false);
+    }
+  }, [canvasFor, name, sheets, t]);
+
   // Sheets sent over from Paint Studio. Same path as unpacking a paint here, because it is the
   // same thing — that tab has already done the unpacking.
   useEffect(() => {
@@ -622,17 +975,113 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       });
   }, [incoming, loadSheets, onIncomingLoaded]);
 
+  /**
+   * Texture names this model wants that have no sheet yet — what the create button offers,
+   * and the name a new blank sheet is given.
+   *
+   * Colour sheets only. The hint line lists the companion maps too, because knowing the bike
+   * has a `plastics_n` is worth knowing, but an *empty* one is worse than none: a paint
+   * replaces textures by name, so saving a blank normal map strips the bike's real one.
+   */
+  const missingHints = useMemo(() => {
+    const taken = new Set(sheets.map((s) => s.name.trim().toLowerCase()));
+    return hints.filter((h) => !taken.has(h.trim().toLowerCase()) && !isCompanionMap(h));
+  }, [hints, sheets]);
+
   const addBlankSheet = useCallback(() => {
     // Name it after a texture the chosen model actually asks for, when we know one — that's
     // the difference between a paint that shows and a paint that doesn't.
-    const taken = new Set(sheets.map((s) => s.name.toLowerCase()));
-    const suggested = hints.find((h) => !taken.has(h.toLowerCase())) ?? "";
+    const suggested = missingHints[0] ?? "";
     const sheet = blankSheet(suggested, BLANK_SIZE);
+    remember();
     setSheets((prev) => [...prev, sheet]);
     setActiveId(sheet.id);
-    setSelectedId(null);
+    setSelection([]);
     bump();
-  }, [bump, hints, sheets]);
+  }, [bump, missingHints, remember]);
+
+  /**
+   * One sheet per colour texture the model asks for that isn't on the list yet.
+   *
+   * The names are the whole binding — a sheet called anything else paints nothing — and until
+   * now the only way to get them right without an installed paint to start from was to read
+   * them off the hint line and type each one back in.
+   *
+   * Only the missing ones, so pressing it twice doesn't leave two sheets fighting over a name.
+   */
+  const addHintSheets = useCallback(() => {
+    const made = missingHints.map((h) => blankSheet(h, BLANK_SIZE));
+    if (!made.length) return;
+    remember();
+    setSheets((prev) => [...prev, ...made]);
+    setActiveId(made[0].id);
+    setSelection([]);
+    bump();
+  }, [bump, missingHints, remember]);
+
+  /**
+   * The destination as one string, for comparing one against another.
+   *
+   * A model, not a folder path, is what decides which sheets a paint is made of — but a paint
+   * aimed at a folder of the player's own has no model behind it and no hints either, so the
+   * two share a key and the empty answer takes care of the difference.
+   */
+  const destKey = useMemo(
+    () => (dest ? (dest.kind === "mods" ? dest.rel : dest.path) : ""),
+    [dest],
+  );
+  destKeyRef.current = destKey;
+
+  /**
+   * Whether there is anything here worth not throwing away.
+   *
+   * "Blank sheets with the right names" is the state this editor now opens in, and replacing
+   * those costs nothing — they are a fact about the model, not somebody's work. A base or a
+   * layer is the first thing that isn't.
+   */
+  const pristine = useMemo(() => sheets.every((s) => !s.base && !s.layers.length), [sheets]);
+
+  /**
+   * Keep the sheet list on the model that's chosen.
+   *
+   * The names are the entire binding — a sheet called anything else paints nothing — and until
+   * now they were on screen as a hint line with a button beside it, which made the first move
+   * in every session the same move. So the sheets a model wants are simply *there* when it is
+   * picked, and they follow when it is changed.
+   *
+   * Two refs, not one. `filled` is which destination the sheets on screen belong to, and stops
+   * this from refilling a list the user has since emptied on purpose. `warned` is which one has
+   * already been asked about, and stops the warning below from being raised again by the next
+   * unrelated render — this effect follows the sheets, so there are many.
+   */
+  useEffect(() => {
+    // Not until the hints are about the destination that's actually chosen: they're fetched,
+    // and acting on the last model's list would fill a KTM with a Yamaha's sheet names.
+    if (!destKey || hintsFor !== destKey || filled.current === destKey) return;
+    const wanted = hints.filter((h) => !isCompanionMap(h));
+    if (!wanted.length) return;
+    const make = () => wanted.map((h) => blankSheet(h, BLANK_SIZE));
+    if (pristine) {
+      const switching = sheets.length > 0;
+      warned.current = destKey;
+      installSheets(make());
+      // Said out loud when it replaces something, silent when it fills an empty editor. A
+      // list that changed under you is worth a line; one that arrived is what was asked for.
+      if (switching) toast.info(t("designer.sheetsSwitched", { dest: destKey }));
+      return;
+    }
+    if (warned.current === destKey) return;
+    warned.current = destKey;
+    // Asked rather than done. Everything on screen would go, and a model picker is not a
+    // control anybody expects to lose an afternoon's drawing to.
+    toast.warning(t("designer.switchSheetsTitle"), {
+      description: t("designer.switchSheetsBody", { dest: destKey, names: wanted.join(", ") }),
+      action: {
+        label: t("designer.switchSheets"),
+        onClick: () => installSheets(make()),
+      },
+    });
+  }, [destKey, hints, hintsFor, installSheets, pristine, sheets.length, t]);
 
   const addImage = useCallback(async () => {
     if (!active) return;
@@ -649,7 +1098,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         imageLayer(layerName, bitmap, active),
       );
       patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, ...added] }));
-      setSelectedId(added[added.length - 1]?.id ?? null);
+      setSelection(added.length ? [added[added.length - 1].id] : []);
       bump();
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
@@ -662,35 +1111,76 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     if (!active) return;
     const layer = textLayer(t("designer.newTextValue"), active);
     patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, layer] }));
-    setSelectedId(layer.id);
+    setSelection([layer.id]);
     bump();
   }, [active, bump, patchSheet, t]);
 
-  const removeLayer = useCallback(
-    (id: string) => {
-      if (!activeId) return;
-      patchSheet(activeId, (s) => ({ ...s, layers: s.layers.filter((l) => l.id !== id) }));
-      setSelectedId((cur) => (cur === id ? null : cur));
+  const removeLayers = useCallback(
+    (ids: string[]) => {
+      if (!activeId || !ids.length) return;
+      const gone = new Set(ids);
+      patchSheet(activeId, (s) => ({ ...s, layers: s.layers.filter((l) => !gone.has(l.id)) }));
+      setSelection((cur) => cur.filter((id) => !gone.has(id)));
       bump();
     },
     [activeId, bump, patchSheet],
   );
 
-  const moveLayer = useCallback(
-    (id: string, dx: number, dy: number) => {
-      patchLayer(id, (l) => ({ ...l, x: l.x + dx, y: l.y + dy }));
+  /**
+   * Apply a change to every selected layer.
+   *
+   * Followers need no special case here, which is worth saying because it looks like they
+   * should. `patchSheet` re-derives them on the way out, so a change to something a follower
+   * takes from its source is simply put back — that *is* the lock, and it costs nothing.
+   * What a follower owns for itself, its name and its group, sticks.
+   */
+  const patchSelection = useCallback(
+    (fn: (l: Layer) => Layer, undoKey: string | null | false = null) => {
+      if (!activeId || !selection.length) return;
+      const ids = new Set(selection);
+      patchSheet(
+        activeId,
+        (s) => ({ ...s, layers: s.layers.map((l) => (ids.has(l.id) ? fn(l) : l)) }),
+        undoKey,
+      );
       bump();
     },
-    [bump, patchLayer],
+    [activeId, bump, patchSheet, selection],
   );
 
-  /** A corner drag, as an absolute scale. Clamped by the stage to the inspector's range. */
-  const scaleLayer = useCallback(
-    (id: string, scale: number) => {
-      patchLayer(id, (l) => ({ ...l, scale }));
+  const moveSelection = useCallback(
+    (dx: number, dy: number) => {
+      if (!dx && !dy) return;
+      // One undo step per run of the same gesture, however many samples it took — see
+      // `PaintHistory.pushDoc`. Keyed on what is moving, so picking up a different layer
+      // starts a new step rather than folding into the last one.
+      patchSelection(
+        (l) => (l.kind === "paint" ? l : { ...l, x: l.x + dx, y: l.y + dy }),
+        `move:${selection.join(",")}`,
+      );
+    },
+    [patchSelection, selection],
+  );
+
+  /** A corner drag, as where each dragged layer ends up. Clamped by the stage to the range. */
+  const scaleSelection = useCallback(
+    (next: { id: string; x: number; y: number; scale: number }[]) => {
+      if (!activeId || !next.length) return;
+      const by = new Map(next.map((n) => [n.id, n]));
+      patchSheet(
+        activeId,
+        (s) => ({
+          ...s,
+          layers: s.layers.map((l) => {
+            const to = by.get(l.id);
+            return to ? { ...l, x: to.x, y: to.y, scale: to.scale } : l;
+          }),
+        }),
+        `scale:${next.map((n) => n.id).join(",")}`,
+      );
       bump();
     },
-    [bump, patchLayer],
+    [activeId, bump, patchSheet],
   );
 
   /* ── The reference underlay ────────────────────────────────────────────────────────────
@@ -711,17 +1201,82 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // replaces the sheet object without changing any of these.
   const activeWidth = active?.width ?? 0;
   const activeHeight = active?.height ?? 0;
+  // Left and right are asked for on bikes only: a bike arrives assembled about its mirror
+  // plane, where gear is a single piece whose up-axis the viewer has to work out per mod.
+  // And only when it *did* arrive that way — a bike that loaded without its `.geom` is a heap
+  // of parts in their own frames, and a side named from that is worse than no side at all.
+  const bike = isBikeKind(destState.kind);
+  // The island the pointer is over, for the 3D view to light up. Held here rather than in the
+  // stage because it crosses from the 2D half of the editor to the 3D one, and this is the
+  // only thing that owns both.
+  const [hoverIsland, setHoverIsland] = useState<Int32Array | null>(null);
   const parts = useMemo<UvPart[]>(
-    () => (geometry ? uvParts(geometry, activeName) : []),
-    [geometry, activeName],
+    () => (geometry ? uvParts(geometry, activeName, { assembled: bike && assembled }) : []),
+    [geometry, activeName, bike, assembled],
   );
 
-  /** Pin the selected layer to a piece of bodywork, or let it cover the sheet again. */
+  const startPaint = useCallback(
+    (at: Point, whole: boolean) => {
+      // A rectangle, ellipse or line becomes a layer, not pixels. Made on the press and
+      // rewritten as the drag goes, so the thing being dragged out *is* the finished object —
+      // there is no separate preview to disagree with the result, and on release it is
+      // already selected with handles on it.
+      if (SHAPE_TOOLS.has(paint.tool) && active) {
+        const shape = paint.tool as ShapeLayer["shape"];
+        const layer = shapeLayer(
+          t(`designer.tool.${shape}`),
+          shape,
+          at,
+          at,
+          paint.shape,
+          paint.colorA,
+          paint.strokeWidth,
+        );
+        remember();
+        patchSheet(active.id, (sh) => ({ ...sh, layers: [...sh.layers, layer] }));
+        setSelection([layer.id]);
+        shaping.current = { id: layer.id, from: at };
+        bump();
+        return;
+      }
+      if (!target || !activeId) return;
+      // The bucket fills the uv triangle under the press, not the sheet and not the whole mesh
+      // group. Worked out here rather than inside `Stroke`, because the parts are the editor's
+      // knowledge of the model and paint.ts is deliberately ignorant of it — it puts pixels
+      // down, wherever it is told to.
+      //
+      // The group is only the first cut: `shroud` is both flanks and often several islands, so
+      // stopping there floods panels the press never pointed at. Left button takes the one
+      // triangle under the pointer; right button takes the island it belongs to.
+      let fillTo: { path: Path2D; box: Region } | null = null;
+      if (paint.tool === "fill" && active && parts.length) {
+        const u = at.x / active.width;
+        const v = at.y / active.height;
+        const under = partAt(parts, u, v);
+        const pick = whole ? islandAt : triangleAt;
+        const region = under ? (pick(under, u, v) ?? under) : null;
+        if (region) {
+          fillTo = {
+            path: partPath(region, active.width, active.height),
+            box: partBox(region, active.width, active.height),
+          };
+        }
+      }
+      const next = new Stroke(target.canvas, paint, at, fillTo);
+      stroke.current = next;
+      // Straight through rather than queued: the press is the one sample nobody would forgive a
+      // frame's wait on, and a tool that puts nothing down on the press has nothing to show.
+      if (next.dirty) touchPaint(activeId, target.id, next.dirty);
+    },
+    [active, activeId, bump, paint, parts, patchSheet, remember, t, target, touchPaint],
+  );
+
+  /** Pin the selection to a piece of bodywork, or let it cover the sheet again. */
   const clipLayer = useCallback(
     (label: string | null) => {
-      if (!active || !selectedId) return;
+      if (!active) return;
       const part = label ? parts.find((p) => p.label === label) : null;
-      patchLayer(selectedId, (l) => ({
+      patchSelection((l) => ({
         ...l,
         // Built here, at this sheet's size, so the composite never has to. Re-picking the
         // part is what rebuilds it, which is also the answer to a resized sheet.
@@ -729,9 +1284,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           ? { label: part.label, path: partPath(part, active.width, active.height) }
           : null,
       }));
-      bump();
     },
-    [active, bump, parts, patchLayer, selectedId],
+    [active, parts, patchSelection],
   );
 
   /**
@@ -762,6 +1316,255 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     [active, bump, parts, patchLayer, selectedId],
   );
 
+  /**
+   * Hand the mirror the model it should answer from, and drop the index built from the last one.
+   *
+   * Dropped rather than rebuilt. Most sheets are never mirrored on, and the rebuild is a walk
+   * over the whole of the bodywork — `ensureMirror` does it the moment something actually asks.
+   *
+   * During the render rather than in an effect, the same way `sheetsRef` is kept: the button
+   * that offers a mirror is rendered from `ready`, and an effect would leave it a render behind
+   * the model — disabled, with nothing on screen to explain why.
+   */
+  if (mirrorRef.current.sheetId !== activeId || mirrorRef.current.parts !== parts) {
+    mirrorRef.current = {
+      sheetId: activeId,
+      parts,
+      // The flank codes are the model's own statement that its axes mean something; `uvParts`
+      // only produces them for a bike that arrived assembled.
+      ready: parts.some((p) => p.flanks),
+      index: null,
+    };
+  }
+
+  /* ── The selection, and what can be done to it ─────────────────────────────────────────
+     A group is a tag on its members rather than a container (see `layers.ts`), so "select the
+     group" is a question asked of the layer list right here — everything downstream, the stage
+     and the inspector both, only ever sees a list of ids. ─────────────────────────────── */
+
+  const select = useCallback(
+    (ids: string[], mode: "replace" | "toggle" | "isolate") => {
+      const layers = active?.layers ?? [];
+      // Alt reaches inside a group. Anything else takes the whole block a layer belongs to,
+      // which is the entire point of having grouped it.
+      const want =
+        mode === "isolate" ? ids : [...new Set(ids.flatMap((id) => groupOf(layers, id)))];
+      setSelection((cur) => {
+        if (mode !== "toggle") return want;
+        const next = new Set(cur);
+        // A group toggles as a block: if any of it is out, all of it comes in.
+        const add = want.some((id) => !next.has(id));
+        for (const id of want) {
+          if (add) next.add(id);
+          else next.delete(id);
+        }
+        // Kept in stacking order, so anything reading the selection reads it bottom-first.
+        return layers.filter((l) => next.has(l.id)).map((l) => l.id);
+      });
+    },
+    [active],
+  );
+
+  /** How far a duplicate lands from what it was copied from, as a fraction of the sheet. */
+  const offset = active ? Math.max(4, Math.round(Math.min(active.width, active.height) * 0.02)) : 0;
+
+  const duplicateSelection = useCallback(() => {
+    if (!active || !chosen.length) return;
+    // A duplicate of several layers is a group of its own, or the first drag takes it apart.
+    const tag = chosen.length > 1 ? newId("group") : null;
+    const copies = chosen.map((l) => ({
+      ...cloneLayer(l, t("designer.copyName", { name: l.name })),
+      group: tag,
+      // Down and to the right on screen — the sheet's y runs the other way. A copy landing
+      // exactly on its original looks like nothing happened.
+      x: l.x + offset,
+      y: l.y - offset,
+    }));
+    patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, ...copies] }));
+    setSelection(copies.map((c) => c.id));
+    bump();
+  }, [active, bump, chosen, offset, patchSheet, t]);
+
+  const copySelection = useCallback(() => {
+    if (!active || !chosen.length) return;
+    // Cloned on the way in rather than on the way out: the layers left behind go on being
+    // edited, and a clipboard holding the live ones would paste whatever they had become.
+    clipboard = {
+      width: active.width,
+      height: active.height,
+      layers: chosen.map((l) => cloneLayer(l, l.name)),
+    };
+    toast.success(t("designer.copied", { count: String(chosen.length) }));
+  }, [active, chosen, t]);
+
+  const pasteClipboard = useCallback(() => {
+    if (!active || !clipboard?.layers.length) return;
+    const kx = active.width / clipboard.width;
+    const ky = active.height / clipboard.height;
+    const sized = kx === 1 && ky === 1;
+    // A paint layer is the sheet, and its raster is the size of the sheet it was cut from.
+    // Onto a sheet of another size there is nothing sensible to do with it.
+    const keep = sized ? clipboard.layers : clipboard.layers.filter((l) => l.kind !== "paint");
+    const dropped = clipboard.layers.length - keep.length;
+    if (!keep.length) {
+      toast.error(t("designer.pasteWrongSize"));
+      return;
+    }
+    const tag = keep.length > 1 ? newId("group") : null;
+    const copies = keep.map((l) => ({
+      ...cloneLayer(l, l.name),
+      group: tag,
+      // Positions are in sheet pixels, so a decal copied off a 2048² sheet has to be brought
+      // with it or half of what was copied lands off the edge of a 1024² one.
+      x: l.x * kx,
+      y: l.y * ky,
+      scale: l.scale * Math.min(kx, ky),
+    }));
+    patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, ...copies] }));
+    setSelection(copies.map((c) => c.id));
+    if (dropped) toast.warning(t("designer.pasteDropped", { count: String(dropped) }));
+    bump();
+  }, [active, bump, patchSheet, t]);
+
+  const groupSelection = useCallback(() => {
+    if (!active || chosen.length < 2) return;
+    const tag = newId("group");
+    const ids = new Set(chosen.map((l) => l.id));
+    patchSheet(active.id, (s) => {
+      const tagged = s.layers.map((l) => (ids.has(l.id) ? { ...l, group: tag } : l));
+      // Gathered as well as tagged, so raising the group later takes it past what it sits on
+      // rather than past its own members — see `regroup`.
+      return { ...s, layers: regroup(tagged, tag) };
+    });
+    bump();
+  }, [active, bump, chosen, patchSheet]);
+
+  const ungroupSelection = useCallback(() => {
+    const tags = new Set(chosen.map((l) => l.group).filter((g): g is string => !!g));
+    if (!tags.size) return;
+    patchSelection((l) => (l.group && tags.has(l.group) ? { ...l, group: null } : l));
+  }, [chosen, patchSelection]);
+
+  const unlinkSelection = useCallback(() => {
+    patchSelection((l) => (l.mirror ? { ...l, mirror: null } : l));
+  }, [patchSelection]);
+
+  /**
+   * Put a copy of the selected layer where it lands on the far flank, and keep it there.
+   *
+   * The copy is appended with no placement worked out here on purpose: `patchSheet` derives
+   * every follower on the way through, so the same code that puts it down is the code that
+   * will keep it in step afterwards. Asking first is only to have something to say when the
+   * answer is no.
+   */
+  const mirrorSelected = useCallback(() => {
+    const layer = chosen.length === 1 ? chosen[0] : null;
+    if (!active || !layer) return;
+    if (layer.kind === "paint") {
+      toast.error(t("designer.fitNotForPaint"));
+      return;
+    }
+    const result = mirrorLayer(ensureMirror(), mirrorRef.current.parts, layer, active);
+    if (!result.ok) {
+      toast.error(t(`designer.mirrorWhy.${result.why}` as "designer.mirrorWhy.no-model"));
+      return;
+    }
+    const follower: Layer = {
+      ...cloneLayer(layer, t("designer.mirrorName", { name: layer.name })),
+      mirror: { of: layer.id },
+    };
+    patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, follower] }));
+    setSelection([follower.id]);
+    if (result.approximate) toast.warning(t("designer.mirrorRough"));
+    bump();
+  }, [active, bump, chosen, ensureMirror, patchSheet, t]);
+
+  /**
+   * Tool keys, and undo.
+   *
+   * On the window rather than on the canvas, because a brush should be one key away wherever
+   * the focus happens to be — but the Studio keeps this pane mounted behind whichever tab is
+   * open, so an invisible Designer would otherwise steal every `b` typed into Paint Studio.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!rootRef.current?.offsetParent) return;
+      // A modal over the editor — the fullscreen preview — owns the keyboard: a tool letter
+      // pressed while looking at the model would swap a brush nobody can see.
+      if (document.querySelector('[role="dialog"][data-state="open"]')) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      const key = e.key.toLowerCase();
+      // Everything on a modifier, because every unmodified letter is already a tool.
+      if (e.metaKey || e.ctrlKey) {
+        const run: Record<string, (() => void) | undefined> = {
+          c: copySelection,
+          v: pasteClipboard,
+          d: duplicateSelection,
+          g: e.shiftKey ? ungroupSelection : groupSelection,
+          a: () => setSelection((sheetsRef.current.find((s) => s.id === activeId)?.layers ?? []).map((l) => l.id)),
+        };
+        const act = run[key];
+        if (act) {
+          e.preventDefault();
+          act();
+        }
+        return;
+      }
+      if (e.altKey) return;
+
+      if ((e.key === "Delete" || e.key === "Backspace") && selection.length) {
+        e.preventDefault();
+        removeLayers(selection);
+        return;
+      }
+
+      const step = e.shiftKey ? 10 : 1;
+      // Up on the keyboard is up on the *picture*. The sheet's rows run the other way (see
+      // `CanvasStage`), so the arrow that agrees with what's on screen is the one that
+      // disagrees with the array, and this is where that gets turned round.
+      const arrows: Record<string, [number, number] | undefined> = {
+        ArrowLeft: [-step, 0],
+        ArrowRight: [step, 0],
+        ArrowUp: [0, step],
+        ArrowDown: [0, -step],
+      };
+      const nudge = arrows[e.key];
+      if (nudge && selection.length) {
+        e.preventDefault();
+        moveSelection(nudge[0], nudge[1]);
+        return;
+      }
+
+      const tool = (Object.keys(TOOL_KEYS) as PaintTool[]).find((k) => TOOL_KEYS[k] === key);
+      if (tool) {
+        e.preventDefault();
+        pickTool(tool);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    activeId,
+    copySelection,
+    duplicateSelection,
+    groupSelection,
+    moveSelection,
+    pasteClipboard,
+    pickTool,
+    redo,
+    removeLayers,
+    selection,
+    undo,
+    ungroupSelection,
+  ]);
+
   const ghostOf = useCallback(
     (id: string | null | undefined) => (id && ghosts.get(id)) || EMPTY_GHOST,
     [ghosts],
@@ -782,15 +1585,26 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * previous model would look perfectly valid over the new one while describing bodywork that
    * isn't there — the worst kind of wrong for a guide.
    */
-  const geometryRef = useRef<EdfNode[] | null>(null);
-  const onGeometry = useCallback((nodes: EdfNode[] | null) => {
+  const onGeometry = useCallback((nodes: EdfNode[] | null, assembled: boolean) => {
     // Compared against a ref rather than inside a `setState` updater: an updater has to be
     // pure, and this has to invalidate the wires as well as record the mesh.
     if (geometryRef.current === nodes) return;
     geometryRef.current = nodes;
     setGeometry(nodes);
+    setAssembled(assembled);
     setGhosts((gs) =>
       gs.size ? new Map([...gs].map(([id, g]) => [id, { ...g, wire: null, wireFor: null }])) : gs,
+    );
+  }, []);
+
+  /** The same, for the model's own textures: a new bike, a new set of stock sheets. */
+  const stockRef = useRef<PaintTexture[]>([]);
+  const onStock = useCallback((textures: PaintTexture[]) => {
+    if (stockRef.current === textures) return;
+    stockRef.current = textures;
+    setStockTextures(textures);
+    setGhosts((gs) =>
+      gs.size ? new Map([...gs].map(([id, g]) => [id, { ...g, stock: null, stockFor: null }])) : gs,
     );
   }, []);
 
@@ -806,13 +1620,17 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       const sheet = sheets.find((s) => s.id === sheetId);
       if (!sheet) return;
       const ghost = ghostOf(sheetId);
+      // Not recorded by the history, either way: the bitmap moves between the sheet and the
+      // ghost, and the ghost isn't part of the document — an undo would put the template back
+      // on the sheet while the ghost still held it, which is the copy this is careful not to
+      // make. Pressing the button again is the way back, as it always was.
       if (sheet.base) {
         const template = sheet.base;
-        patchSheet(sheetId, (s) => ({ ...s, base: null }));
+        patchSheet(sheetId, (s) => ({ ...s, base: null }), false);
         patchGhost(sheetId, (g) => ({ ...g, template, showTemplate: true }));
       } else if (ghost.template) {
         const base = ghost.template;
-        patchSheet(sheetId, (s) => ({ ...s, base }));
+        patchSheet(sheetId, (s) => ({ ...s, base }), false);
         patchGhost(sheetId, (g) => ({ ...g, template: null }));
       }
       bump();
@@ -845,6 +1663,100 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     const wire = uvWireframe(parts, activeWidth, activeHeight);
     patchGhost(activeId, (g) => ({ ...g, wire, wireFor: activeName }));
   }, [activeId, activeName, activeWidth, activeHeight, geometry, ghosts, parts, patchGhost]);
+
+  /**
+   * The model's own texture for a sheet name, or null for a name it carries none of.
+   *
+   * The name is the whole binding here exactly as it is for the triangles — call a sheet
+   * `plastics` and it is the plastics, call it anything else and the model has nothing of its
+   * own to answer with.
+   */
+  const stockFor = useCallback(
+    (name: string): PaintTexture | null => {
+      const want = name.trim().toLowerCase();
+      return stockTextures.find((t) => t.name.trim().toLowerCase() === want) ?? null;
+    },
+    [stockTextures],
+  );
+
+  /**
+   * Fetch the model's own texture for the active sheet, the same way and for the same reasons.
+   *
+   * Lazy and keyed on the name again — the name is what picks the texture out of the model,
+   * exactly as it picks the triangles — but this one crosses to the backend for pixels, so a
+   * 2048² sheet is a few megabytes over IPC. Only the sheet on screen pays for it, and only
+   * once: a paint with twenty sheets fetches the one being looked at.
+   */
+  const stockFetch = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeId || !activeName.trim() || !stockTextures.length) return;
+    const ghost = ghosts.get(activeId) ?? EMPTY_GHOST;
+    if (!ghost.showStock || ghost.stockFor === activeName) return;
+    // One request in the air per sheet-and-name. This effect re-runs on every change to any
+    // ghost — the opacity slider alone is dozens — and without this each of those would put
+    // another copy of the same megabyte read on the wire while the first was still coming.
+    const key = `${activeId}:${activeName}`;
+    if (stockFetch.current === key) return;
+    stockFetch.current = key;
+    const tex = stockFor(activeName);
+    void (async () => {
+      const stock = tex ? await stockBitmap(tex) : null;
+      // Written against the sheet it was asked *for*, not whichever is active now, and both
+      // halves land together. So the worst a slow answer can do is describe a name the sheet
+      // no longer has — which the guard above then notices, and asks again.
+      patchGhost(activeId, (g) => ({ ...g, stock, stockFor: activeName }));
+      if (stockFetch.current === key) stockFetch.current = null;
+    })();
+  }, [activeId, activeName, ghosts, patchGhost, stockFor, stockTextures]);
+
+  /**
+   * Paint the model's own texture into the sheet, at full strength.
+   *
+   * The second thing here that touches a sheet, and the opposite of tracing: the stock plastics
+   * stop being something to draw *against* and become what is drawn. That is the whole of what
+   * most people are after — the bike as it ships, with their number on it — and until now the
+   * only route to it was to find the artwork outside the app, because a reference at 35% is
+   * deliberately not it. So this one is saved, and it goes through the history like any other
+   * edit to the sheet.
+   *
+   * The reference's copy is used when there is one, because it is the same texture read from
+   * the same store; the fetch is for the sheet whose ghost is switched off, since the button
+   * has to work without asking anyone to turn a guide on first.
+   */
+  const stockAsBase = useCallback(
+    async (sheetId: string) => {
+      const sheet = sheetsRef.current.find((s) => s.id === sheetId);
+      if (!sheet) return;
+      const tex = stockFor(sheet.name);
+      if (!tex) {
+        toast.error(t("designer.stockNoMatch", { name: sheet.name.trim() }));
+        return;
+      }
+      const held = ghostOf(sheetId);
+      const ready = held.stockFor === sheet.name ? held.stock : null;
+      setBusy(true);
+      const base = ready ?? (await stockBitmap(tex));
+      setBusy(false);
+      if (!base) {
+        toast.error(t("designer.stockReadFailed", { name: sheet.name.trim() }));
+        return;
+      }
+      patchSheet(sheetId, (s) => ({
+        ...s,
+        // The texture's own size, but only for a sheet nothing has been done to yet: a stock
+        // texture stretched onto a 2048 blank is the bike's artwork resampled for no reason,
+        // and resizing a sheet already drawn on would take every layer's placement with it.
+        ...(s.base || s.layers.length ? {} : { width: tex.width, height: tex.height }),
+        base,
+      }));
+      // The reference is drawn underneath the sheet, and the sheet is now the same picture —
+      // leaving it on would be showing the stock texture through the stock texture.
+      patchGhost(sheetId, (g) => ({ ...g, showStock: false }));
+      bump();
+      toast.success(t("designer.stockAsBaseDone", { name: sheet.name.trim() }));
+    },
+    [bump, ghostOf, patchGhost, patchSheet, stockFor, t],
+  );
 
   // Ghosts of sheets that are gone. Each holds a decoded bitmap and a raster the size of the
   // sheet, so leaving them behind would keep a closed paint's pixels alive for the session.
@@ -883,20 +1795,26 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * the `.pnt`. The mesh binds by name either way, but a paint whose sheets are ordered the
    * way its author expects is easier to diff and to hand to somebody else.
    */
-  const reorderSheet = useCallback((id: string, delta: number) => {
-    setSheets((prev) => {
-      const at = prev.findIndex((s) => s.id === id);
-      const to = at + delta;
-      if (at < 0 || to < 0 || to >= prev.length) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(at, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-  }, []);
+  const reorderSheet = useCallback(
+    (id: string, delta: number) => {
+      // Keyed, so walking a sheet three places up is one step back rather than three.
+      remember(`sheet-order:${id}`);
+      setSheets((prev) => {
+        const at = prev.findIndex((s) => s.id === id);
+        const to = at + delta;
+        if (at < 0 || to < 0 || to >= prev.length) return prev;
+        const next = [...prev];
+        const [moved] = next.splice(at, 1);
+        next.splice(to, 0, moved);
+        return next;
+      });
+    },
+    [remember],
+  );
 
   const removeSheet = useCallback(
     (id: string) => {
+      remember();
       setSheets((prev) => {
         const next = prev.filter((s) => s.id !== id);
         setActiveId((cur) => (cur === id ? next[0]?.id ?? null : cur));
@@ -904,12 +1822,13 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       });
       bump();
     },
-    [bump],
+    [bump, remember],
   );
 
-  /** Why saving isn't possible yet, as a translated message — or null when it is. */
+  /** Why saving isn't possible yet, as a translated message — or null when it is, and on an
+   *  empty canvas, where there is nothing to fix yet and Save is simply off. */
   const blocked = useMemo<string | null>(() => {
-    if (!sheets.length) return t("designer.needSheets");
+    if (!sheets.length) return null;
     if (!name.trim()) return t("paints.needName");
     if (sheets.some((s) => !s.name.trim())) return t("paints.needTextureNames");
     const seen = new Set<string>();
@@ -922,19 +1841,34 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     return null;
   }, [sheets, name, dest, t]);
 
+  const canSave = sheets.length > 0 && !blocked;
+
   const write = useCallback(
     async (overwrite: boolean) => {
       if (!dest) return;
       setBusy(true);
       try {
-        // Stage every sheet first: `paint_studio_save` packs files, and these only exist as
-        // canvases until now. Composited once more on the way out so a save can't ship a
-        // frame older than the screen.
+        // Composite every sheet first: they only exist as canvases until now, and doing it on
+        // the way out is what stops a save shipping a frame older than the screen.
+        //
+        // Then drop the ones with nothing on them. A `.pnt` replaces the model's textures by
+        // name, so an empty sheet doesn't add a blank — it *removes* whatever the bike had
+        // there. Offering to create every missing sheet at once made that easy to do by
+        // accident: create twenty, paint two, and the other eighteen would have wiped the
+        // bike's normal and roughness maps.
+        const inked = sheets.filter((sheet) => {
+          const canvas = canvasFor(sheet);
+          composite(canvas, sheet);
+          return hasInk(canvas);
+        });
+        const blank = sheets.length - inked.length;
+        if (!inked.length) {
+          toast.error(t("designer.nothingToSave"));
+          return;
+        }
         const staged = await Promise.all(
-          sheets.map(async (sheet) => {
-            const canvas = canvasFor(sheet);
-            composite(canvas, sheet);
-            const path = await paintStudioStage(sheet.name.trim(), await toPng(canvas));
+          inked.map(async (sheet) => {
+            const path = await paintStudioStage(sheet.name.trim(), await toPng(canvasFor(sheet)));
             return { path, name: sheet.name.trim() };
           }),
         );
@@ -945,7 +1879,11 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           dest,
           overwrite,
         });
-        toast.success(t("paints.saved", { path: outcome.path }));
+        // Said out loud, not silently: a sheet that doesn't get written is a sheet that
+        // won't be in the file, and finding that out later is worse than reading it now.
+        toast.success(t("paints.saved", { path: outcome.path }), {
+          description: blank ? t("designer.blankSheetsSkipped", { count: blank }) : undefined,
+        });
       } catch (e) {
         toast.error(String(e).replace(/^Error:\s*/, ""));
       } finally {
@@ -956,7 +1894,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   );
 
   const save = useCallback(async () => {
-    if (blocked || !dest) {
+    if (!canSave || !dest) {
       if (blocked) toast.error(blocked);
       return;
     }
@@ -976,9 +1914,13 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       return;
     }
     await write(false);
-  }, [blocked, dest, name, t, write]);
+  }, [blocked, canSave, dest, name, t, write]);
 
-  const selected = active?.layers.find((l) => l.id === selectedId) ?? null;
+  // Whether the model can say where the far flank is at all, for the controls that need it.
+  const mirrorReady = mirrorRef.current.ready && mirrorRef.current.sheetId === activeId;
+  const canGroup = chosen.length > 1;
+  const canUngroup = chosen.some((l) => l.group);
+  const canUnlink = chosen.some((l) => l.mirror);
 
   return (
     <div
@@ -1012,22 +1954,24 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         />
         <Button
           size="sm"
-          disabled={busy || !!blocked}
+          disabled={busy || !canSave}
           title={blocked ?? undefined}
           onClick={() => void save()}
         >
           {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
           {t("paints.save")}
         </Button>
-        <span className="h-5 w-px flex-none bg-border" />
-        <Button variant="outline" size="sm" disabled={!active || busy} onClick={() => void addImage()}>
-          <ImagePlus className="size-3.5" /> {t("designer.addImage")}
-        </Button>
-        <Button variant="outline" size="sm" disabled={!active} onClick={addText}>
-          <TypeIcon className="size-3.5" /> {t("designer.addText")}
-        </Button>
-        <Button variant="outline" size="sm" disabled={!active} onClick={addPaintLayer}>
-          <PaintRoller className="size-3.5" /> {t("designer.addPaint")}
+        {/* Beside Save rather than buried in a menu: it is the other way out of here, and the
+            one somebody finishing a job in Photoshop is looking for. */}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || !sheets.length}
+          title={t("designer.exportPsdHint")}
+          onClick={() => void exportPsd()}
+        >
+          <FileImage className="size-3.5" />
+          {t("designer.exportPsd")}
         </Button>
         {blocked && (
           <span className="ml-auto max-w-[40%] truncate text-[11px] text-faint" title={blocked}>
@@ -1052,7 +1996,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             hints={hints}
             onPick={(id) => {
               setActiveId(id);
-              setSelectedId(null);
+              setSelection([]);
             }}
             onRename={(id, value) => {
               patchSheet(id, (s) => ({ ...s, name: value }));
@@ -1060,8 +2004,12 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             }}
             onRemove={removeSheet}
             onReorder={reorderSheet}
+            missingHints={missingHints}
             onAddBlank={addBlankSheet}
+            onAddHintSheets={addHintSheets}
             onStartFromPaint={() => void startFromPaint()}
+            onStartFromPsd={() => void startFromPsd()}
+            pristine={pristine}
             busy={busy}
           />
 
@@ -1071,7 +2019,11 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               sheetName={active.name}
               hasBase={!!active.base}
               hasGeometry={!!geometry}
+              hasStock={!!stockTextures.length}
+              stockSheet={!!stockFor(active.name)}
+              busy={busy}
               onTrace={() => toggleTrace(active.id)}
+              onStockBase={() => void stockAsBase(active.id)}
               onChange={(fn) => patchGhost(active.id, fn)}
             />
           )}
@@ -1085,32 +2037,42 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               canRedo={canRedo}
               onUndo={undo}
               onRedo={redo}
+              onAddImage={() => void addImage()}
+              onAddText={addText}
+              busy={busy}
             />
           )}
 
           {active && (
             <LayerList
               layers={active.layers}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
+              selection={selection}
+              onSelect={select}
               onToggle={(id, visible) => {
                 patchLayer(id, (l) => ({ ...l, visible }));
                 bump();
               }}
-              onRemove={removeLayer}
+              onRemove={(id) => removeLayers([id])}
               onReorder={reorder}
+              onAdd={addPaintLayer}
             />
           )}
-          {selected && (
+          {!!chosen.length && active && (
             <LayerInspector
-              layer={selected}
+              layers={chosen}
+              all={active.layers}
+              width={active.width}
+              height={active.height}
               parts={parts}
+              mirrorReady={mirrorReady}
               onClip={clipLayer}
               onFit={fitLayer}
-              onChange={(fn) => {
-                patchLayer(selected.id, fn);
-                bump();
-              }}
+              onMirror={mirrorSelected}
+              onUnlink={unlinkSelection}
+              onSelect={(id) => select([id], "replace")}
+              onGroup={groupSelection}
+              onUngroup={ungroupSelection}
+              onChange={(fn) => patchSelection(fn, `layer:${selection.join(",")}`)}
             />
           )}
         </section>
@@ -1125,13 +2087,15 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               version={version}
               ghost={ghostOf(active.id)}
               parts={parts}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              onMove={moveLayer}
-              onScale={scaleLayer}
+              onHoverSpot={setHoverIsland}
+              selection={selection}
+              onSelect={select}
+              onMove={moveSelection}
+              onScale={scaleSelection}
+              onMenu={(x, y) => setMenuAt({ x, y })}
               tool={paint.tool}
               brushSize={paint.size}
-              canPaint={!!target}
+              canPaint={!!target || SHAPE_TOOLS.has(paint.tool)}
               onPaintStart={startPaint}
               onPaintMove={movePaint}
               onPaintEnd={endPaint}
@@ -1145,12 +2109,97 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
                 <Button size="sm" disabled={busy} onClick={() => void startFromPaint()}>
                   <PackageOpen className="size-3.5" /> {t("designer.startFromPaint")}
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void startFromPsd()}
+                >
+                  <FileImage className="size-3.5" /> {t("designer.startFromPsd")}
+                </Button>
                 <Button variant="outline" size="sm" onClick={addBlankSheet}>
                   <FilePlus2 className="size-3.5" /> {t("designer.blankSheet")}
                 </Button>
             </div>
           </div>
         )}
+
+        {/* The canvas's own menu. Anchored to a point rather than to the canvas, because what
+            it is about is whatever was under the pointer — and opened from the *release* of a
+            right press, since the native `contextmenu` event fires on the press and can't tell
+            a menu from the start of a pan. See `CanvasStage.onMenu`. */}
+        <DropdownMenu open={!!menuAt} onOpenChange={(open) => !open && setMenuAt(null)}>
+          <DropdownMenuTrigger asChild>
+            <span
+              aria-hidden
+              className="pointer-events-none fixed size-0"
+              style={{ left: menuAt?.x ?? 0, top: menuAt?.y ?? 0 }}
+            />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-52">
+            <MenuRow
+              icon={FlipHorizontal2}
+              label={t("designer.mirror")}
+              disabled={chosen.length !== 1 || !mirrorReady || !!chosen[0]?.mirror}
+              onPick={mirrorSelected}
+            />
+            {canUnlink && (
+              <MenuRow icon={Link2Off} label={t("designer.unlink")} onPick={unlinkSelection} />
+            )}
+            <DropdownMenuSeparator />
+            <MenuRow
+              icon={CopyPlus}
+              label={t("designer.duplicate")}
+              disabled={!chosen.length}
+              onPick={duplicateSelection}
+            />
+            <MenuRow
+              icon={Copy}
+              label={t("designer.copy")}
+              disabled={!chosen.length}
+              onPick={copySelection}
+            />
+            <MenuRow
+              icon={ClipboardPaste}
+              label={t("designer.paste")}
+              disabled={!clipboard?.layers.length}
+              onPick={pasteClipboard}
+            />
+            <DropdownMenuSeparator />
+            <MenuRow
+              icon={FlipHorizontal2}
+              label={t("designer.flipX")}
+              disabled={!chosen.length}
+              onPick={() => patchSelection((l) => ({ ...l, flipX: !l.flipX }))}
+            />
+            <MenuRow
+              icon={FlipVertical2}
+              label={t("designer.flipY")}
+              disabled={!chosen.length}
+              onPick={() => patchSelection((l) => ({ ...l, flipY: !l.flipY }))}
+            />
+            <DropdownMenuSeparator />
+            <MenuRow
+              icon={Group}
+              label={t("designer.group")}
+              disabled={!canGroup}
+              onPick={groupSelection}
+            />
+            <MenuRow
+              icon={Ungroup}
+              label={t("designer.ungroup")}
+              disabled={!canUngroup}
+              onPick={ungroupSelection}
+            />
+            <DropdownMenuSeparator />
+            <MenuRow
+              icon={Trash2}
+              label={t("common.remove")}
+              disabled={!chosen.length}
+              onPick={() => removeLayers(selection)}
+            />
+          </DropdownMenuContent>
+        </DropdownMenu>
       </section>
 
       {/* ── The model ────────────────────────────────────────────────────────── */}
@@ -1160,6 +2209,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           overrides={overrides}
           frameToken={version}
           onGeometry={onGeometry}
+          onStock={onStock}
+          highlight={hoverIsland}
           className="flex-1"
         />
       </section>
@@ -1172,30 +2223,53 @@ function SheetList({
   sheets,
   activeId,
   hints,
+  missingHints,
   onPick,
   onRename,
   onRemove,
   onReorder,
   onAddBlank,
+  onAddHintSheets,
   onStartFromPaint,
+  onStartFromPsd,
+  pristine,
   busy,
 }: {
   sheets: Sheet[];
   activeId: string | null;
+  /** Every texture name the model's paints use — shown in full, companion maps included. */
   hints: string[];
+  /** The colour sheets among them that don't exist yet: what the create button would make. */
+  missingHints: string[];
   onPick: (id: string) => void;
   onRename: (id: string, value: string) => void;
   onRemove: (id: string) => void;
   onReorder: (id: string, delta: number) => void;
   onAddBlank: () => void;
+  onAddHintSheets: () => void;
   onStartFromPaint: () => void;
+  onStartFromPsd: () => void;
+  /** Nothing has been drawn yet — see the Designer's own `pristine`. */
+  pristine: boolean;
   busy: boolean;
 }) {
   const t = useT();
   return (
     <div className="rounded-lg border border-border bg-card/40 p-3.5">
-      <h2 className="mb-2.5 text-[13px] font-semibold">{t("designer.sheets")}</h2>
-      <div className="flex flex-col gap-1.5">
+      <div className="mb-2.5 flex items-center gap-2">
+        <h2 className="text-[13px] font-semibold">{t("designer.sheets")}</h2>
+        <button
+          type="button"
+          className="ml-auto text-muted-foreground transition-colors hover:text-foreground"
+          onClick={onAddBlank}
+          title={t("designer.addSheet")}
+        >
+          <Plus className="size-4" />
+        </button>
+      </div>
+      {/* Scrolls rather than growing: a bike's paint runs to two dozen sheets, and a list that
+          long pushed the hint line and every button below the fold of the rail. */}
+      <div className="flex max-h-[40vh] flex-col gap-1.5 overflow-y-auto pr-0.5">
         {sheets.map((sheet, i) => (
           <div
             key={sheet.id}
@@ -1249,23 +2323,58 @@ function SheetList({
         ))}
       </div>
 
-      {/* The names the installed paints use. A sheet named anything else binds to nothing,
-          and this is the only place the right answer is visible. */}
+      {/* The names this model binds — what its mesh draws, plus whatever the paints already
+          installed replace. A sheet named anything else binds to nothing, and this is the only
+          place the right answer is visible — so it also offers to make them, rather than
+          leaving the list to be copied out by hand. */}
       {!!hints.length && (
-        <p className="mt-2 text-[11px] leading-snug text-faint">
-          {t("paints.expected")} {hints.join(", ")}
-        </p>
+        <div className="mt-2 flex flex-col items-start gap-1.5">
+          <p className="text-[11px] leading-snug text-faint">
+            {t("paints.expected")} {hints.join(", ")}
+          </p>
+          {/* Full width and clipping, not sized to its label: the rail is 224px, a bike can
+              want two dozen sheets, and `Button` is `whitespace-nowrap` — so a count in the
+              label, or a longer word for it in another language, ran straight out of the rail. */}
+          {!!missingHints.length && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full min-w-0 justify-start"
+              onClick={onAddHintSheets}
+              title={missingHints.join(", ")}
+            >
+              <FilePlus2 className="size-3.5" />
+              <span className="truncate">
+                {t("designer.createExpected", { count: missingHints.length })}
+              </span>
+            </Button>
+          )}
+        </div>
       )}
 
-      <div className="mt-2.5 flex flex-wrap gap-1.5">
-        <Button variant="outline" size="sm" disabled={busy} onClick={onStartFromPaint}>
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <PackageOpen className="size-3.5" />}
-          {t("designer.startFromPaint")}
-        </Button>
-        <Button variant="outline" size="sm" onClick={onAddBlank}>
-          <FilePlus2 className="size-3.5" /> {t("designer.blankSheet")}
-        </Button>
-      </div>
+      {/* Only while there is nothing to lose. Starting from a paint or a `.psd` *replaces*
+          every sheet — that's what makes it a template step — so offering it beside work in
+          progress is offering to throw that work away. The blank sheets a model arrives with
+          are not work, which is why this reaches past "the list is empty" to "nothing has been
+          drawn on it". Adding another sheet is the ＋ above. */}
+      {pristine && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          <Button variant="outline" size="sm" disabled={busy} onClick={onStartFromPaint}>
+            {busy ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <PackageOpen className="size-3.5" />
+            )}
+            {t("designer.startFromPaint")}
+          </Button>
+          <Button variant="outline" size="sm" disabled={busy} onClick={onStartFromPsd}>
+            <FileImage className="size-3.5" /> {t("designer.startFromPsd")}
+          </Button>
+          <Button variant="outline" size="sm" onClick={onAddBlank}>
+            <FilePlus2 className="size-3.5" /> {t("designer.blankSheet")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1282,7 +2391,11 @@ function GhostPanel({
   sheetName,
   hasBase,
   hasGeometry,
+  hasStock,
+  stockSheet,
+  busy,
   onTrace,
+  onStockBase,
   onChange,
 }: {
   ghost: Ghost;
@@ -1290,7 +2403,14 @@ function GhostPanel({
   /** Whether the sheet still holds a template that tracing could lift out of it. */
   hasBase: boolean;
   hasGeometry: boolean;
+  /** Whether the model on screen can say which of its textures are its own — bikes can. */
+  hasStock: boolean;
+  /** Whether it carries one under *this* sheet's name — what makes it something to paint on. */
+  stockSheet: boolean;
+  busy: boolean;
   onTrace: () => void;
+  /** Put that texture into the sheet for real, rather than faintly underneath it. */
+  onStockBase: () => void;
   onChange: (fn: (g: Ghost) => Ghost) => void;
 }) {
   const t = useT();
@@ -1298,6 +2418,8 @@ function GhostPanel({
   // A map was built for this name and came back with nothing on it. Distinct from "not built
   // yet" (`wireFor` still null), which is why both halves are checked.
   const noMatch = ghost.showWire && ghost.wireFor === sheetName && !ghost.wire;
+  // The same pair, asked of the model's textures rather than of its triangles.
+  const noStock = hasStock && ghost.showStock && ghost.stockFor === sheetName && !ghost.stock;
   // Nothing to trace: a blank sheet never had a template, and one that did has already had it
   // lifted. The UV map is the guide that still applies, so the button says so rather than
   // sitting there dead with no explanation.
@@ -1314,7 +2436,7 @@ function GhostPanel({
         <button
           type="button"
           className="ml-auto text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
-          disabled={!ghost.template && !ghost.wire}
+          disabled={!ghost.template && !ghost.stock && !ghost.wire}
           onClick={() =>
             onChange((g) => {
               // One eye over both, and it turns them off together rather than remembering
@@ -1324,6 +2446,10 @@ function GhostPanel({
               return {
                 ...g,
                 showTemplate: !off,
+                // Not gated on already having one, unlike the wire below: the stock texture is
+                // fetched *because* this is on, so requiring it first would be a switch that
+                // could never be turned back on.
+                showStock: !off,
                 showWire: !off && !!g.wire,
                 // Faded all the way out counts as hidden, so switching back on has to undo
                 // that too. Otherwise the eye says "showing" over a reference at zero.
@@ -1352,6 +2478,14 @@ function GhostPanel({
           }}
         />
         <GhostToggle
+          icon={<Bike className="size-3.5" />}
+          label={t("designer.stockTexture")}
+          title={t(hasStock ? "designer.stockHint" : "designer.noStock")}
+          on={ghost.showStock}
+          disabled={!hasStock}
+          onClick={() => onChange((g) => ({ ...g, showStock: !g.showStock }))}
+        />
+        <GhostToggle
           icon={<Grid3x3 className="size-3.5" />}
           label={t("designer.uvMap")}
           title={t(hasGeometry ? "designer.uvHint" : "designer.noGeometry")}
@@ -1360,6 +2494,30 @@ function GhostPanel({
           onClick={() => onChange((g) => ({ ...g, showWire: !g.showWire }))}
         />
       </div>
+
+      {/* Not a toggle and not part of the reference — what it puts in is the sheet itself, and
+          stays there through the save. It sits here because the picture it puts in is the one
+          the button above shows faintly, and wanting that at full strength with a number over
+          it is what a good half of the people who turn the reference on came for. */}
+      {hasStock && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="mb-2 w-full min-w-0 justify-start"
+          disabled={!stockSheet || busy}
+          title={t(stockSheet ? "designer.stockAsBaseHint" : "designer.stockNoMatch", {
+            name: sheetName.trim(),
+          })}
+          onClick={onStockBase}
+        >
+          {busy ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <PaintBucket className="size-3.5" />
+          )}
+          <span className="truncate">{t("designer.stockAsBase")}</span>
+        </Button>
+      )}
 
       <Row label={t("designer.opacity")}>
         <Slider
@@ -1389,7 +2547,15 @@ function GhostPanel({
         </p>
       )}
 
-      <p className="mt-1.5 text-[11px] leading-snug text-faint">{t("designer.ghostNote")}</p>
+      {/* Not the same miss as the one above, and worth saying separately: a model can draw a
+          texture without shipping one of its own, so a sheet every paint replaces has islands
+          to show and no stock artwork behind them. Said without claiming which of the two it
+          is — with the UV map off there is nothing here that knows. */}
+      {noStock && !noMatch && (
+        <p className="mt-1.5 text-[11px] leading-snug text-faint">
+          {t("designer.stockNoMatch", { name: sheetName.trim() })}
+        </p>
+      )}
     </div>
   );
 }
@@ -1425,81 +2591,161 @@ function GhostToggle({
     </button>
   );
 }
-
+/**
+ * The layer stack, with grouped layers gathered under a heading.
+ *
+ * A group is a tag rather than a container (see `layers.ts`), so this doesn't recurse — it walks
+ * the stack once and starts a block wherever the tag changes. That works because grouping also
+ * *gathers*: `regroup` puts a group's members next to each other, and everything downstream,
+ * this list included, gets to stay flat.
+ */
 function LayerList({
   layers,
-  selectedId,
+  selection,
   onSelect,
   onToggle,
   onRemove,
   onReorder,
+  onAdd,
 }: {
   layers: Layer[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
+  selection: string[];
+  onSelect: (ids: string[], mode: "replace" | "toggle" | "isolate") => void;
   onToggle: (id: string, visible: boolean) => void;
   onRemove: (id: string) => void;
   onReorder: (id: string, delta: number) => void;
+  onAdd: () => void;
 }) {
   const t = useT();
+  // Top of the list is the top of the stack, which is how a layer panel reads — the array
+  // itself is bottom-first because that's the order it's drawn in.
+  const shown = [...layers].reverse();
+  const rows: ({ tag: string; members: Layer[] } | { tag: null; members: [Layer] })[] = [];
+  for (let i = 0; i < shown.length; i += 1) {
+    const layer = shown[i];
+    if (!layer.group) {
+      rows.push({ tag: null, members: [layer] });
+      continue;
+    }
+    // The block is emitted at its first member and skipped at the rest of them.
+    if (i > 0 && shown[i - 1].group === layer.group) continue;
+    rows.push({ tag: layer.group, members: shown.filter((l) => l.group === layer.group) });
+  }
+
+  const row = (layer: Layer) => (
+    <div
+      key={layer.id}
+      className={cn(
+        "flex items-center gap-1.5 rounded-md border px-1.5 py-1 text-[11.5px] transition-colors",
+        selection.includes(layer.id) ? "border-primary bg-primary/10" : "border-border",
+      )}
+    >
+      <button
+        type="button"
+        className="flex-none text-muted-foreground hover:text-foreground"
+        onClick={() => onToggle(layer.id, !layer.visible)}
+        title={t(layer.visible ? "designer.hide" : "designer.show")}
+      >
+        {layer.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+      </button>
+      {/* A follower says so here as well as in the inspector: this is the list you scan when
+          you can't work out why a layer won't move. */}
+      {layer.mirror && (
+        <Link2 className="size-3 flex-none text-primary" aria-label={t("designer.mirroredShort")} />
+      )}
+      <button
+        type="button"
+        className="min-w-0 flex-1 truncate text-left"
+        // Alt reaches inside a group, shift adds to the selection — the same two modifiers the
+        // canvas uses, because it is the same question being asked twice.
+        onClick={(e) =>
+          onSelect([layer.id], e.shiftKey ? "toggle" : e.altKey ? "isolate" : "replace")
+        }
+      >
+        {layer.kind === "text" ? layer.text || layer.name : layer.name}
+      </button>
+      <button
+        type="button"
+        className="flex-none px-0.5 text-muted-foreground hover:text-foreground"
+        onClick={() => onReorder(layer.id, 1)}
+        title={t("designer.raise")}
+      >
+        ↑
+      </button>
+      <button
+        type="button"
+        className="flex-none px-0.5 text-muted-foreground hover:text-foreground"
+        onClick={() => onReorder(layer.id, -1)}
+        title={t("designer.lower")}
+      >
+        ↓
+      </button>
+      <button
+        type="button"
+        className="flex-none text-muted-foreground hover:text-destructive"
+        onClick={() => onRemove(layer.id)}
+        title={t("common.remove")}
+      >
+        <Trash2 className="size-3.5" />
+      </button>
+    </div>
+  );
+
   return (
     <div className="rounded-lg border border-border bg-card/40 p-3.5">
-      <h2 className="mb-2.5 text-[13px] font-semibold">{t("designer.layers")}</h2>
+      <div className="mb-2.5 flex items-center gap-2">
+        <h2 className="text-[13px] font-semibold">{t("designer.layers")}</h2>
+        <button
+          type="button"
+          className="ml-auto text-muted-foreground transition-colors hover:text-foreground"
+          onClick={onAdd}
+          title={t("designer.addPaint")}
+        >
+          <Plus className="size-4" />
+        </button>
+      </div>
       {!layers.length ? (
         <p className="text-[11px] leading-snug text-faint">{t("designer.noLayers")}</p>
       ) : (
         <div className="flex flex-col gap-1">
-          {/* Top of the list is the top of the stack, which is how a layer panel reads —
-              the array itself is bottom-first because that's the order it's drawn in. */}
-          {[...layers].reverse().map((layer) => (
-            <div
-              key={layer.id}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md border px-1.5 py-1 text-[11.5px] transition-colors",
-                layer.id === selectedId ? "border-primary bg-primary/10" : "border-border",
-              )}
-            >
-              <button
-                type="button"
-                className="flex-none text-muted-foreground hover:text-foreground"
-                onClick={() => onToggle(layer.id, !layer.visible)}
-                title={t(layer.visible ? "designer.hide" : "designer.show")}
+          {rows.map((block) =>
+            block.tag === null ? (
+              row(block.members[0])
+            ) : (
+              <div
+                key={block.tag}
+                className="flex flex-col gap-1 rounded-md border border-dashed border-border/70 p-1"
               >
-                {layer.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
-              </button>
-              <button
-                type="button"
-                className="min-w-0 flex-1 truncate text-left"
-                onClick={() => onSelect(layer.id)}
-              >
-                {layer.kind === "text" ? layer.text || layer.name : layer.name}
-              </button>
-              <button
-                type="button"
-                className="flex-none px-0.5 text-muted-foreground hover:text-foreground"
-                onClick={() => onReorder(layer.id, 1)}
-                title={t("designer.raise")}
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                className="flex-none px-0.5 text-muted-foreground hover:text-foreground"
-                onClick={() => onReorder(layer.id, -1)}
-                title={t("designer.lower")}
-              >
-                ↓
-              </button>
-              <button
-                type="button"
-                className="flex-none text-muted-foreground hover:text-destructive"
-                onClick={() => onRemove(layer.id)}
-                title={t("common.remove")}
-              >
-                <Trash2 className="size-3.5" />
-              </button>
-            </div>
-          ))}
+                <div className="flex items-center gap-1.5 px-0.5 text-[10.5px] text-muted-foreground">
+                  <button
+                    type="button"
+                    className="flex-none hover:text-foreground"
+                    // One toggle for the block: if any of it is showing, the whole thing hides.
+                    onClick={() => {
+                      const anyVisible = block.members.some((l) => l.visible);
+                      for (const l of block.members) onToggle(l.id, !anyVisible);
+                    }}
+                    title={t("designer.hide")}
+                  >
+                    {block.members.some((l) => l.visible) ? (
+                      <Eye className="size-3" />
+                    ) : (
+                      <EyeOff className="size-3" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center gap-1 truncate text-left hover:text-foreground"
+                    onClick={() => onSelect(block.members.map((l) => l.id), "replace")}
+                  >
+                    <Group className="size-3 flex-none" />
+                    {t("designer.groupOf", { count: String(block.members.length) })}
+                  </button>
+                </div>
+                {block.members.map(row)}
+              </div>
+            ),
+          )}
         </div>
       )}
     </div>

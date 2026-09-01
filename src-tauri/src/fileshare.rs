@@ -319,6 +319,17 @@ pub fn decode(text: &str) -> anyhow::Result<FileShare> {
     if share.items.is_empty() {
         anyhow::bail!("this share code carries no files");
     }
+    // Every `rel` is joined onto the receiver's mods root on import, and the first segment
+    // of the first one picks the type folder outright — so a code written by hand with
+    // `../` in it would install into the game folder itself. Nothing this app produces
+    // looks like that: `plan` derives every rel from a real path under the mods root.
+    if let Some(bad) = share.items.iter().find(|i| !library::is_safe_rel(&i.rel)) {
+        anyhow::bail!(
+            "this share code points outside the mods folder ('{}') — don't import it",
+            bad.rel
+        );
+    }
+    crate::presets::check_bundle_ref(&share.bundle)?;
     Ok(share)
 }
 
@@ -342,7 +353,16 @@ pub async fn import(
     let mods_dir = library::mods_subdir(&cfg.mods_path, "mods");
     // The archive is a `mods/` tree, which routes as a merge — the type folder is only a
     // fallback for shapes this never produces, but naming the real one keeps the log honest.
-    install::place_mod(&extracted, &mods_dir, &type_folder(&share.items), "", SLUG)?;
+    // Staged under our own `work`, deleted on the next line — nothing else reads it.
+    install::place_mod_with(
+        &extracted,
+        &mods_dir,
+        &type_folder(&share.items),
+        "",
+        SLUG,
+        install::OnConflict::Overwrite,
+        install::Staging::Consume,
+    )?;
 
     let _ = std::fs::remove_dir_all(&work);
     install::notify_frostmod(app, SLUG);
@@ -503,6 +523,40 @@ mod tests {
         assert!(p.items.is_empty(), "{:?}", p.items);
         assert!(p.skipped[0].reason.contains("steps outside"), "{:?}", p.skipped);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The import target is picked from the first segment of the first item's `rel`, so a
+    /// hand-written code with `../` in it would install into the game folder itself.
+    #[test]
+    fn a_code_that_points_outside_the_mods_folder_is_refused() {
+        let item = |rel: &str| ShareItem {
+            name: "x.pkz".into(),
+            rel: rel.into(),
+            size: 1,
+            is_dir: false,
+        };
+        let share = |items: Vec<ShareItem>, url: &str| FileShare {
+            items,
+            total_size: 1,
+            bundle: BundleRef {
+                url: url.into(),
+                host: "catbox".into(),
+                size: 1,
+                parts: Vec::new(),
+            },
+        };
+        let good = "https://files.catbox.moe/a.zip";
+        for hostile in [
+            share(vec![item("../evil.dll")], good),
+            share(vec![item("tracks/../../evil.dll")], good),
+            share(vec![item("/etc/passwd")], good),
+            // The first item routes the install; a climb hiding behind a good one still lands.
+            share(vec![item("tracks/EU/RedBud.pkz"), item("../evil.dll")], good),
+            share(vec![item("tracks/EU/RedBud.pkz")], "file:///etc/passwd"),
+        ] {
+            let code = encode(&hostile);
+            assert!(decode(&code).is_err(), "should be refused: {:?}", hostile.items);
+        }
     }
 
     #[test]

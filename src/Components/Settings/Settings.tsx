@@ -12,11 +12,16 @@ import {
   Sparkles,
   FolderOpen,
   Download,
+  Share2,
+  Copy,
+  Loader2,
 } from "lucide-react";
 import { open as pickFolder, save as pickSavePath } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
+import PaintSync from "./PaintSync";
+import Plugins from "./Plugins";
 import {
   countProfilesIn,
   detectGamePath,
@@ -24,13 +29,17 @@ import {
   getModsRoot,
   getOverlayState,
   logsInfo,
+  onLogsShareProgress,
   openLogsFolder,
+  shareLogs,
   type LogGroup,
   type LogsInfo,
   type LogsKind,
+  type LogsShare,
   overlayToggle,
   presetsListProfiles,
   setAutoRunFrostmod,
+  setFrostmodArgs,
   setGamePath,
   setInstantRefresh,
   setLaunchAtStartup,
@@ -38,6 +47,7 @@ import {
   setOverlayEnabled,
   setOverlayHotkey,
   setProfilesPath,
+  setAnalyticsEnabled,
   setRunInBackground,
   setWatchModsReload,
   setWineRunner,
@@ -45,10 +55,14 @@ import {
   type WineHostInfo,
   type OverlayState,
   experimentalState as experimentalStateApi,
-  setExperimental,
   type ExperimentalState,
   voiceDevices,
+  voiceMute,
+  voiceStatus,
   setVoiceEnabled,
+  setPaintSyncEnabled,
+  setMxbsecureEnabled,
+  contentSecureAvailable,
   setVoiceInputDevice,
   setVoiceOutputDevice,
   setVoicePttHotkey,
@@ -56,8 +70,12 @@ import {
   voiceMeterStart,
   voiceMeterStop,
   voiceTestOutput,
+  onVoiceStatus,
   onVoiceInputLevel,
+  onVoicePtt,
+  setVoiceToggleToTalk,
   type VoiceDevices,
+  type VoiceStatus,
 } from "../../api/mods";
 import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "../../lib/usePlatform";
@@ -72,6 +90,7 @@ import { getLocale, LOCALE_OPTIONS } from "../../i18n/core";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { prettyHotkey } from "../../lib/hotkey";
 import { formatBytes, formatDateShort } from "../../lib/mods";
+import { copyText } from "../../lib/clipboard";
 import { useTour } from "../Tour/Tour";
 import { Button } from "@/Components/ui/button";
 import HelpHint from "@/Components/ui/help-hint";
@@ -101,7 +120,8 @@ export type SectionId =
   | "frostmod"
   | "reshade"
   | "logs"
-  | "experimental"
+  | "paintsync"
+  | "plugins"
   | "supporters"
   | "about";
 
@@ -133,6 +153,8 @@ const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
       { id: "appearance", label: "settings.appearance" },
       { id: "overlay", label: "overlay.section" },
       { id: "voice", label: "voice.section" },
+      { id: "paintsync", label: "settings.paintSync" },
+      { id: "plugins", label: "plugins.section" },
     ],
   },
   {
@@ -141,7 +163,6 @@ const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
       { id: "logs", label: "settings.logs" },
       // Had no nav entry at all before this, and rendered in the middle of the scroll
       // with nothing pointing at it.
-      { id: "experimental", label: "settings.experimental" },
     ],
   },
   {
@@ -265,8 +286,12 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const platform = usePlatform();
   const isWindows = platform === "windows";
   const isMac = platform === "macos";
+  // FrostMod is a Win32 DLL injected into the game — which is exactly what the game is
+  // everywhere it runs: natively on Windows, under Proton on Linux, in a CrossOver/Whisky
+  // bottle on macOS. The app starts FrostMod in whichever prefix holds the game.
+  const hasFrostmod = isWindows || platform === "linux" || isMac;
   const { theme, setTheme } = useTheme();
-  const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime } =
+  const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes, strayMsvcr90, clearingStray, clearStrayMsvcr90 } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
   const { startTour } = useTour();
@@ -284,7 +309,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     ...g,
     sections: g.sections.filter(
       (s) =>
-        (s.id !== "frostmod" || (isWindows && caps.frostmod)) &&
+        (s.id !== "frostmod" || (hasFrostmod && caps.frostmod)) &&
         (s.id !== "game" || multiGame),
     ),
   })).filter((g) => g.sections.length > 0);
@@ -332,6 +357,12 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // something just went wrong, and a count from ten minutes ago answers the wrong question.
   const [logs, setLogs] = useState<LogsInfo | null>(null);
   const [exportingLogs, setExportingLogs] = useState(false);
+  // The link the last share came back with, kept on screen for the rest of the session:
+  // it lands on the clipboard by itself, and a clipboard that has since been used for
+  // something else is the one way an uploaded bundle is lost for good.
+  const [sharedLogs, setSharedLogs] = useState<LogsShare | null>(null);
+  const [sharingLogs, setSharingLogs] = useState<string | null>(null);
+  const [copiedLogsLink, setCopiedLogsLink] = useState(false);
   const refreshLogs = useCallback(() => {
     logsInfo()
       .then(setLogs)
@@ -372,6 +403,54 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     }
   };
 
+  /** Zip the same logs and put them on the file host, handing back one link.
+   *
+   * Saving to disk is only half of "send me your logs" — the file still has to get to
+   * whoever asked, and that is where a bug report usually stalls. This ends with a link
+   * on the clipboard. It goes to a public host, hence the warning that sits under it. */
+  const shareLogsNow = async () => {
+    setSharingLogs(t("logs.sharePacking"));
+    setSharedLogs(null);
+    setCopiedLogsLink(false);
+    const unlisten = await onLogsShareProgress((p) => {
+      // "done" arrives just before the call returns; letting it through would flash the
+      // button back to "Packing…" for a frame on the way out.
+      if (p.phase === "done") return;
+      setSharingLogs(
+        p.phase === "uploading" ? p.message || t("logs.sharing") : t("logs.sharePacking"),
+      );
+    });
+    try {
+      const share = await shareLogs();
+      setSharedLogs(share);
+      // Straight to the clipboard: the link exists to be pasted somewhere, and someone
+      // who has just waited out an upload shouldn't have to click again to collect it.
+      const copied = await copyText(shareLinkText(share));
+      setCopiedLogsLink(copied);
+      toast.success(t("logs.shared"), {
+        description: copied
+          ? t("logs.sharedCopied", { size: formatBytes(share.size) })
+          : t("logs.sharedDesc", { size: formatBytes(share.size) }),
+      });
+      refreshLogs();
+    } catch (e) {
+      toast.error(t("logs.shareFailed"), {
+        description: String(e).replace(/^Error:\s*/, ""),
+      });
+    } finally {
+      unlisten();
+      setSharingLogs(null);
+    }
+  };
+
+  const copyLogsLink = async () => {
+    if (!sharedLogs) return;
+    if (await copyText(shareLinkText(sharedLogs))) {
+      setCopiedLogsLink(true);
+      toast.success(t("logs.linkCopied"));
+    }
+  };
+
   const profilesSep = config.modsPath.includes("\\") ? "\\" : "/";
   const defaultProfilesPath =
     resolvedProfilesPath ||
@@ -380,8 +459,13 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       : t("settings.insideModsFolder"));
 
   const runInBackground = config.runInBackground ?? true;
+  const analyticsEnabled = config.analyticsEnabled ?? true;
   const launchAtStartup = config.launchAtStartup ?? true;
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
+  // Typed flags are edited freely and saved on blur, so the field holds a draft until then —
+  // saving per keystroke would write the config on every letter and fight the cursor.
+  const [frostmodArgsDraft, setFrostmodArgsDraft] = useState<string | null>(null);
+  const frostmodArgs = frostmodArgsDraft ?? config.frostmodArgs ?? "";
   const instantRefresh = config.instantRefresh ?? true;
   const watchModsReload = config.watchModsReload ?? true;
 
@@ -390,10 +474,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // Same shape as the overlay pair above: the config's fields are optional (an install
   // predating voice has none), so every read is defaulted here rather than at each use.
   const voiceEnabled = config.voiceEnabled ?? false;
+  // Off unless it was turned on, matching the backend's default.
+  const paintSyncEnabled = config.paintSyncEnabled ?? false;
+  const mxbsecureEnabled = config.mxbsecureEnabled ?? false;
+  const [secureAvailable, setSecureAvailable] = useState(false);
   const voiceInput = config.voiceInputDevice ?? "";
   const voiceOutput = config.voiceOutputDevice ?? "";
   const voicePtt = config.voicePttHotkey || FALLBACK_PTT_HOTKEY;
   const voiceGain = config.voiceInputGain ?? 1;
+  const voiceToggle = config.voiceToggleToTalk ?? false;
   const voiceVolume = config.voiceOutputVolume ?? 1;
 
   // What the overlay is doing right now: is the game up, does something else own the
@@ -453,6 +542,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const [devices, setDevices] = useState<VoiceDevices | null>(null);
   const [micTesting, setMicTesting] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
+  // Whether the mic key currently has the mic open. Shown because in toggle mode there is
+  // nothing physical to tell you — you can walk away from a latched-open microphone.
+  const [micOpen, setMicOpen] = useState(false);
+  // Who else is in voice. Pushed from the engine, so this is live without polling.
+  const [voice, setVoice] = useState<VoiceStatus>({
+    joined: false,
+    server: "",
+    peers: [],
+    error: null,
+  });
 
   const refreshDevices = useCallback(async () => {
     try {
@@ -485,6 +584,31 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     };
   }, []);
 
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void onVoicePtt(setMicOpen).then((f) => (un = f));
+    return () => un?.();
+  }, []);
+
+  // The room, as it changes. Asked once for the first paint, then pushed — a rider joining
+  // mid-session should appear without the page having to ask.
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void voiceStatus().then(setVoice).catch(() => {});
+    void onVoiceStatus(setVoice).then((f) => (un = f));
+    return () => un?.();
+  }, []);
+
+  const toggleMute = useCallback((peerId: string, muted: boolean) => {
+    // Optimistic: the engine is authoritative, but its next status push is up to 20 ms away
+    // and a mute button that lags is a mute button people press twice.
+    setVoice((v) => ({
+      ...v,
+      peers: v.peers.map((p) => (p.peerId === peerId ? { ...p, muted } : p)),
+    }));
+    void voiceMute(peerId, muted);
+  }, []);
+
   // Navigating to another section closes the meter with it. The state that drives it lives
   // up here rather than in the section, so without this a mic left testing would keep
   // recording behind a pane that isn't even on screen.
@@ -500,6 +624,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     } catch (e) {
       toast.error(t("voice.registerFailed"), { description: String(e) });
       await reloadConfig();
+    }
+  };
+
+  const changeMicMode = async (mode: string) => {
+    try {
+      await setVoiceToggleToTalk(mode === "toggle");
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
     }
   };
 
@@ -572,6 +705,26 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     }
   };
 
+  const togglePaintSync = async (v: boolean) => {
+    try {
+      await setPaintSyncEnabled(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+      await reloadConfig();
+    }
+  };
+
+  const toggleMxbsecure = async (v: boolean) => {
+    try {
+      await setMxbsecureEnabled(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+      await reloadConfig();
+    }
+  };
+
   const toggleInstantRefresh = async (v: boolean) => {
     try {
       await setInstantRefresh(v);
@@ -599,9 +752,31 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     }
   };
 
+  const saveFrostmodArgs = async () => {
+    if (frostmodArgsDraft === null) return;
+    try {
+      await setFrostmodArgs(frostmodArgsDraft);
+      await reloadConfig();
+      // Back to reading the config: it is the one that survives a restart, and it has the
+      // trimmed form of what was typed.
+      setFrostmodArgsDraft(null);
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
   const toggleBackground = async (v: boolean) => {
     try {
       await setRunInBackground(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const toggleAnalytics = async (v: boolean) => {
+    try {
+      await setAnalyticsEnabled(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
@@ -620,6 +795,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion(""));
     experimentalStateApi().then(setExperimentalState).catch(() => {});
+    contentSecureAvailable().then(setSecureAvailable).catch(() => {});
     // Re-check FrostMod against GitHub whenever Settings opens — the provider
     // only fetches once at launch, so this catches releases cut since then.
     void refreshStatus();
@@ -1065,6 +1241,46 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               disabled={!caps.instantRefresh}
               onChange={toggleInstantRefresh}
             />
+            <div className="h-px bg-border" />
+            {/* Paint sync. In General rather than behind the experimental toggle because it
+                is on by default and runs by itself — the one thing a player needs is the
+                switch that stops it. */}
+            <ToggleRow
+              label={t("settings.paintSync")}
+              desc={t("settings.paintSyncDesc")}
+              checked={paintSyncEnabled}
+              onChange={togglePaintSync}
+            />
+            <div className="h-px bg-border" />
+            <ToggleRow
+              label={t("settings.analytics")}
+              desc={t("settings.analyticsDesc")}
+              checked={analyticsEnabled}
+              onChange={toggleAnalytics}
+            />
+            {secureAvailable && (
+              <>
+                <div className="h-px bg-border" />
+                {/* Experimental content locking. Only shown when the local packer module is
+                    present, since without it the tab it reveals could do nothing. */}
+                <ToggleRow
+                  label={t("settings.mxbsecure")}
+                  desc={t("settings.mxbsecureDesc")}
+                  checked={mxbsecureEnabled}
+                  onChange={toggleMxbsecure}
+                />
+              </>
+            )}
+          </Section>
+          )}
+
+          {/* Paint sync's own state. The General toggle turns it on and off; this says what
+              it has actually managed — both halves run in the background off things the
+              player didn't ask for, so without this the only record was a log file. */}
+          {active === "plugins" && <Plugins />}
+          {active === "paintsync" && (
+          <Section title={t("settings.paintSync")} desc={t("settings.paintSyncDesc")}>
+            <PaintSync />
           </Section>
           )}
 
@@ -1169,6 +1385,79 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               <Callout tone="warning" title={t("voice.noDevices")}>
                 {devices.error}
               </Callout>
+            )}
+
+            {/* The room. Nothing here is a control except mute: joining happens because
+                the rider is on a server, which is the whole point of the feature. */}
+            {voiceEnabled && (
+              <div className="space-y-2 rounded-md border border-border/60 p-3">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      voice.joined ? "bg-success" : "bg-foreground/25",
+                    )}
+                  />
+                  <span className="text-[12.5px] text-foreground/85">
+                    {voice.joined ? t("voice.inRoom", { server: voice.server }) : t("voice.notConnected")}
+                  </span>
+                </div>
+
+                {voice.error && (
+                  <Callout tone="warning" title={t("voice.stopped")}>
+                    {voice.error}
+                  </Callout>
+                )}
+
+                {voice.peers.length === 0 ? (
+                  <p className="text-[12px] leading-relaxed text-muted-foreground">
+                    {t("voice.notConnectedDesc")}
+                  </p>
+                ) : (
+                  <ul className="space-y-1">
+                    {voice.peers.map((peer) => (
+                      <li key={peer.peerId} className="flex items-center gap-2">
+                        {/* Talking is the one thing worth seeing at a glance, so it is a
+                            colour change on the row rather than an icon to look for. */}
+                        <span
+                          className={cn(
+                            "size-1.5 shrink-0 rounded-full",
+                            !peer.connected
+                              ? "bg-foreground/25"
+                              : peer.talking
+                                ? "bg-success"
+                                : "bg-foreground/40",
+                          )}
+                        />
+                        <span
+                          className={cn(
+                            "flex-1 truncate text-[12.5px]",
+                            peer.muted ? "text-muted-foreground line-through" : "text-foreground/85",
+                          )}
+                        >
+                          {peer.riderName || t("voice.unnamedRider")}
+                          {peer.raceNum > 0 && (
+                            <span className="ml-1.5 text-muted-foreground">#{peer.raceNum}</span>
+                          )}
+                        </span>
+                        {!peer.connected && (
+                          <span className="text-[11px] text-muted-foreground">
+                            {t("voice.connecting")}
+                          </span>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-[11px]"
+                          onClick={() => toggleMute(peer.peerId, !peer.muted)}
+                        >
+                          {peer.muted ? t("voice.unmute") : t("voice.mute")}
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             )}
 
             <div className="h-px bg-border" />
@@ -1292,20 +1581,45 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
 
             <div className="h-px bg-border" />
 
+            {/* Hold or latch. Push-to-talk is the default because it cannot leave a
+                microphone open by accident; toggle can, which is why the live indicator
+                below exists. */}
+            <div className="flex items-start justify-between gap-6">
+              <div className="flex flex-col gap-1">
+                <span className="text-[12.5px] text-foreground/85">{t("voice.micMode")}</span>
+                <span className="text-[11.5px] leading-relaxed text-muted-foreground">
+                  {voiceToggle ? t("voice.toggleDesc") : t("voice.pttDesc")}
+                </span>
+              </div>
+              <Segmented
+                size="sm"
+                value={voiceToggle ? "toggle" : "ptt"}
+                onChange={changeMicMode}
+                options={[
+                  { value: "ptt", label: t("voice.modePush") },
+                  { value: "toggle", label: t("voice.modeToggle") },
+                ]}
+              />
+            </div>
+
             <div className="flex items-center justify-between gap-6">
-              <span className="text-[12.5px] text-foreground/85">{t("voice.ptt")}</span>
+              <span className="flex items-center gap-2 text-[12.5px] text-foreground/85">
+                {t("voice.micKey")}
+                {/* Live, and deliberately loud in toggle mode: a latched mic has nothing
+                    physical to remind you it is open. */}
+                {voiceEnabled && micOpen && (
+                  <span className="flex items-center gap-1.5 rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-semibold text-success">
+                    <span className="size-[6px] rounded-full bg-success" />
+                    {t("voice.micOpen")}
+                  </span>
+                )}
+              </span>
               <HotkeyField
                 value={voicePtt}
                 onCapture={rebindPtt}
                 disabled={!voiceEnabled}
               />
             </div>
-
-            {/* Says what does and doesn't work today. A settings page that looks complete
-                while the feature can't reach anyone is the worse failure. */}
-            <Callout tone="info" title={t("voice.notConnected")}>
-              {t("voice.notConnectedDesc")}
-            </Callout>
           </Section>
           )}
 
@@ -1356,11 +1670,12 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           </Section>
           )}
 
-          {/* frostmod — a Win32 DLL injected into the game, so it has nothing to do
-              anywhere else. Hidden rather than shown-and-disabled: every control in it
-              would fail, including one that downloads two Windows binaries. The nav drops
-              its entry on the same condition. */}
-          {isWindows && caps.frostmod && active === "frostmod" && (
+          {/* frostmod — a Win32 DLL injected into the game, so it has nothing to do where
+              the game isn't a Windows process. It is one on all three platforms (Proton on
+              Linux, a Wine bottle on macOS), and hidden anywhere else rather than
+              shown-and-disabled: every control would fail, including one that downloads two
+              Windows binaries. The nav drops its entry on the same condition. */}
+          {hasFrostmod && caps.frostmod && active === "frostmod" && (
           <Section
             title={t("settings.frostmod")}
             titleRight={
@@ -1403,9 +1718,14 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                     ? t("settings.checkingGitHub")
                     : statusError
                       ? t("settings.updateCheckFailed")
-                      : // Above everything else: a missing Visual C++ runtime stops
-                        // FrostMod attaching at all, and no amount of repairing or
-                        // updating FrostMod puts one on the machine.
+                      : // Above everything else: a file in the game folder that aborts
+                        // MX Bikes with R6034 the moment anything loads the VC9 CRT. The
+                        // game not starting at all outranks FrostMod not attaching.
+                        strayMsvcr90
+                        ? t("settings.frostmodStrayMsvcr90")
+                        : // Then a missing Visual C++ runtime, which stops FrostMod
+                          // attaching at all — and no amount of repairing or updating
+                          // FrostMod puts one on the machine.
                         missingRuntime
                         ? t("settings.frostmodRuntimeMissing")
                         : status?.needsRepair
@@ -1423,6 +1743,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
+                {/* The banner carries this too, but a dismissed bar shouldn't take the
+                    only explanation with it — and this is the one press that moves a file
+                    out of somebody's game folder, so it stays somewhere they can find it
+                    again. */}
+                {strayMsvcr90 && (
+                  <Button
+                    size="sm"
+                    onClick={() => void clearStrayMsvcr90()}
+                    disabled={clearingStray || repairingRuntimes}
+                    title={t("runtime.strayFixHint")}
+                  >
+                    {clearingStray
+                      ? t("runtime.strayClearing")
+                      : t("runtime.strayFix")}
+                  </Button>
+                )}
                 {/* Its own button rather than a mode of the one below: the FrostMod
                     install and the Windows component are separate things to fix, and
                     someone can genuinely need both. */}
@@ -1430,13 +1766,30 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   <Button
                     size="sm"
                     onClick={() => void installRuntime(missingRuntime)}
-                    disabled={installingRuntime}
+                    disabled={installingRuntime || repairingRuntimes}
                   >
                     {installingRuntime
                       ? t("runtime.installing")
                       : t("runtime.fixIt")}
                   </Button>
                 )}
+                {/* Always offered, never gated on `missingRuntime`. Detection can say a PC
+                    has everything and be right about that while the game still won't
+                    start: the redistributable registers a side-by-side assembly and leaves
+                    the plain DLL search path alone. A repair reachable only when we'd
+                    already spotted a problem would never run on the machines that need it
+                    most — the ones where we spotted nothing. */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void repairRuntimes()}
+                  disabled={repairingRuntimes || installingRuntime}
+                  title={t("settings.repairRuntimesHint")}
+                >
+                  {repairingRuntimes
+                    ? t("runtime.repairing")
+                    : t("settings.repairRuntimes")}
+                </Button>
                 {status?.installed && (
                   <Button
                     variant="ghost"
@@ -1513,6 +1866,33 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               onChange={toggleWatchModsReload}
             />
 
+            {/* FrostMod's own flags, typed. A plain field rather than a toggle each: these
+                are diagnostics that come and go with FrostMod's releases, and the app would
+                otherwise have to ship a new build to offer one. `--game` and `--mods` are
+                still sent by the app; anything typed here follows them. */}
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[12.5px] text-foreground/85">
+                {t("settings.frostmodArgs")}
+              </span>
+              <input
+                value={frostmodArgs}
+                spellCheck={false}
+                placeholder="--probe-overjump"
+                onChange={(e) => setFrostmodArgsDraft(e.currentTarget.value)}
+                onBlur={saveFrostmodArgs}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
+                className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px] text-muted-foreground"
+              />
+              <span className="text-[11.5px] text-muted-foreground">
+                {t("settings.frostmodArgsDesc")}
+              </span>
+            </div>
+
+            {/* Only once FrostMod is on disk: without an install there is no config to
+                edit, and the keys would be an offer that quietly does nothing. */}
+
             <div className="flex gap-2">
               {/* Stop is offered whenever FrostMod is running, installed by us or not —
                   `frostmod_stop` kills a hand-launched `frostmod.exe` too, and gating it
@@ -1545,33 +1925,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           </Section>
           )}
 
-          {/* experimental */}
-          {active === "experimental" && (
-          <Section title={t("settings.experimental")}>
-            <ToggleRow
-              label={t("settings.experimentalServers")}
-              desc={
-                experimental?.forcedByEnv
-                  ? t("settings.experimentalForced")
-                  : t("settings.experimentalServersDesc")
-              }
-              checked={experimental?.enabled ?? false}
-              onChange={(v) => {
-                // The env override wins in the backend, so flipping the switch would look
-                // like it did nothing. Say so instead of pretending.
-                if (experimental?.forcedByEnv) {
-                  toast.info(t("settings.experimentalForced"));
-                  return;
-                }
-                setExperimental(v)
-                  .then(() => experimentalStateApi())
-                  .then(setExperimentalState)
-                  .catch((e) => toast.error(String(e)));
-              }}
-            />
-          </Section>
-          )}
-
           {/* logs — the first thing any bug report asks for, and the one thing a player
               has no way to find on their own: MXB App's log dir is buried in AppData, and
               the game writes its own beside the executable. Both are named here, either
@@ -1589,7 +1942,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 FrostMod section above: a Win32 DLL injected into the game has no folder
                 to open anywhere else, and a permanently empty row would be the only
                 mention of it on the page. */}
-            {isWindows && caps.frostmod && (
+            {hasFrostmod && caps.frostmod && (
               <LogRow
                 label="FrostMod"
                 hint={t("logs.frostmodLogsDesc")}
@@ -1603,15 +1956,80 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               group={logs?.game}
               onOpen={() => openLogs("game")}
             />
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={saveLogs} disabled={exportingLogs}>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={saveLogs}
+                disabled={exportingLogs || !!sharingLogs}
+              >
                 <Download className="size-3.5" />
                 {exportingLogs ? t("logs.saving") : t("logs.save")}
               </Button>
-              <Button variant="outline" size="sm" onClick={refreshLogs} disabled={exportingLogs}>
+              {/* The same zip, uploaded — for the far more common case where the logs are
+                  wanted by someone who isn't sitting at this machine. */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={shareLogsNow}
+                disabled={exportingLogs || !!sharingLogs}
+              >
+                {sharingLogs ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Share2 className="size-3.5" />
+                )}
+                {sharingLogs || t("logs.share")}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={refreshLogs}
+                disabled={exportingLogs || !!sharingLogs}
+              >
                 <RefreshCw className="size-3.5" /> {t("logs.refresh")}
               </Button>
             </div>
+            {sharedLogs && (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex gap-2">
+                  {/* One link is a field; a sliced bundle is a numbered list, and an
+                      `input` would eat the newlines that keep the parts apart. */}
+                  {sharedLogs.parts.length > 1 ? (
+                    <textarea
+                      readOnly
+                      value={shareLinkText(sharedLogs)}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="h-20 min-w-0 flex-1 resize-none rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px] leading-snug text-muted-foreground"
+                    />
+                  ) : (
+                    <input
+                      readOnly
+                      value={sharedLogs.url}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px] text-muted-foreground"
+                    />
+                  )}
+                  <Button variant="outline" size="sm" onClick={copyLogsLink}>
+                    {copiedLogsLink ? (
+                      <Check className="size-3.5" />
+                    ) : (
+                      <Copy className="size-3.5" />
+                    )}
+                    {copiedLogsLink ? t("logs.linkCopiedShort") : t("logs.copyLink")}
+                  </Button>
+                </div>
+                <span className="text-[11.5px] text-muted-foreground">
+                  {t("logs.sharedSummary", {
+                    count: sharedLogs.files,
+                    size: formatBytes(sharedLogs.size),
+                  })}
+                </span>
+                {/* Anonymous public host, no expiry — the one thing worth saying out loud
+                    before a link goes into a Discord thread. */}
+                <span className="text-[11.5px] text-warning">{t("logs.shareWarning")}</span>
+              </div>
+            )}
             <p className="text-[11.5px] leading-relaxed text-faint">
               {t("logs.privacy")}
             </p>
@@ -1820,6 +2238,16 @@ function LogRow({
       </span>
     </div>
   );
+}
+
+/** The link text a share is copied and shown as.
+ *
+ * One line for the single upload a log bundle almost always is. A bundle big enough to
+ * have been sliced needs every part, in order, or it can't be put back together — so
+ * they go out as a numbered list rather than a first link that quietly loses the rest. */
+function shareLinkText(share: LogsShare): string {
+  if (share.parts.length < 2) return share.url;
+  return share.parts.map((url, i) => `${i + 1}/${share.parts.length} ${url}`).join("\n");
 }
 
 /** "today at 14:32" / "Aug 11 at 14:32" for a log's mtime — the age is what matters,

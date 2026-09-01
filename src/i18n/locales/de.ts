@@ -50,26 +50,34 @@ export const de: Translation = {
   // ── Navigation ─────────────────────────────────────────────────────────────
   "nav.browse": "Entdecken",
   "nav.shop": "Shop",
+  "nav.hub": "MXB Hub",
   "nav.library": "Bibliothek",
+  "nav.downloads": "Downloads",
   "nav.locker": "Spind",
   "nav.presets": "Presets",
   "nav.rider": "Fahrer",
+  "nav.pose": "Pose",
   "nav.designer": "Designer",
   "nav.paints": "Designs",
   "nav.studio": "Studio",
   "nav.servers": "Server",
-  "nav.manage": "Verwalten",
+  "nav.manage": "Rennmodus",
+  "nav.secure": "Schützen",
   "nav.settings": "Einstellungen",
 
   "sidebar.installing": "„{{name}}“ wird installiert",
+  "sidebar.installingCount": "{{count}} Mods werden installiert",
   "sidebar.queued": "+{{count}} in der Warteschlange",
   "sidebar.expand": "Seitenleiste ausklappen",
   "sidebar.collapse": "Seitenleiste einklappen",
+  "sidebar.showGroup": "Zeigen, was unter {{name}} liegt",
+  "sidebar.hideGroup": "Ausblenden, was unter {{name}} liegt",
 
   // ── FrostMod ───────────────────────────────────────────────────────────────
   "frostmod.checking": "FrostMod wird geprüft…",
   "frostmod.running": "FrostMod läuft",
   "frostmod.notRunning": "FrostMod läuft nicht",
+  "frostmod.notInGame": "FrostMod nicht im Spiel",
   "frostmod.reloadGame": "Spiel neu laden",
   "frostmod.start": "FrostMod starten",
   "frostmod.reloadedGame": "FrostMod hat das Spiel neu geladen.",
@@ -123,6 +131,8 @@ export const de: Translation = {
   "welcome.intro.body":
     "Dein Mod-Manager für MX Bikes. Halte Strecken, Motorräder und Lackierungen an einem Ort organisiert — keine ZIP-Dateien mehr über den ganzen Desktop verstreut. Wir zeigen dir das Wichtigste in ein paar Sekunden.",
   "welcome.getStarted": "Los geht's",
+  "welcome.analyticsNote":
+    "MXB App zählt anonym, welche Seiten genutzt werden. Keine Namen, keine Dateien — in den Einstellungen abschaltbar.",
 
   // ── Presets ────────────────────────────────────────────────────────────────
   "presets.missing": "fehlt",
@@ -133,6 +143,13 @@ export const de: Translation = {
   "presets.help":
     "Speichere einen kompletten Fahrer-Look und lade ihn auf Kommando auf ein Motorrad.",
   "presets.profile": "Profil",
+  "presets.forgetBike": "Bike entfernen",
+  "presets.forgetBikeOne": "{{name}} aus diesem Profil entfernen",
+  "presets.forgetBikeQ": "Dieses Bike entfernen?",
+  "presets.forgetBikeBody":
+    "„{{name}}“ verschwindet aus der Bike-Liste dieses Profils, samt dem dafür gespeicherten Look. Installiertes wird nicht gelöscht — fährst du das Bike wieder, trägt das Spiel es sofort erneut ein.",
+  "presets.bikeForgotten": "„{{name}}“ aus diesem Profil entfernt.",
+  "presets.forgetFailed": "Bike konnte nicht entfernt werden",
   "presets.namePlaceholder": "Preset-Name…",
   "presets.savePreset": "Preset speichern",
   "presets.saveChanges": "Änderungen speichern",
@@ -214,6 +231,42 @@ export const de: Translation = {
   "slotGroup.head": "Kopf",
   "slotGroup.body": "Körper",
 
+
+  // ── Pose studio ────────────────────────────────────────────────────────────
+  "pose.help": "Bring den Fahrer in Position — wo die Hände sitzen, wie weit die Beine stehen, ein Bein nach vorn. Nur für die Vorschau; MX Bikes nimmt die Haltung aus dem Fahrstil.",
+  "pose.showing": "Angezeigt",
+  "pose.none": "—",
+  "pose.bike": "Motorrad",
+  "pose.quick": "Schnelle Posen",
+  "pose.quickHint": "Jede kommt zur Pose hinzu, sie lassen sich also stapeln. Feinschliff unten.",
+  "pose.dragHint": "Zieh an den Punkten am Fahrer, um ein Glied zu bewegen — gedreht wird das Gelenk über dem, das du greifst. Das Glied folgt mit halbem Tempo; für feiner die Umschalttaste halten. Die Regler sind für Drehung und genaue Werte.",
+  "pose.reset": "Zurücksetzen",
+  "pose.group.torso": "Rumpf und Kopf",
+  "pose.group.arms": "Arme",
+  "pose.group.hands": "Hände",
+  "pose.group.legs": "Beine",
+  "pose.move.legsWide": "Beine weiter",
+  "pose.move.legsNarrow": "Beine enger",
+  "pose.move.leftLegForward": "Linkes Bein vor",
+  "pose.move.elbowsUp": "Ellbogen hoch",
+  "pose.move.leanIn": "Nach vorn lehnen",
+  "pose.move.ride": "Sitzposition",
+  "pose.axis.bend": "Beugen",
+  "pose.axis.twist": "Drehen",
+  "pose.axis.splay": "Spreizen",
+  "pose.quickWaiting": "Warte auf das Fahrermodell — jede Bewegung ist ein Ort, an den ein Gelenk soll, dafür braucht es das Rig.",
+  "pose.photo": "Foto",
+  "pose.photoHint": "Der saubere Ausschnitt blendet Punkte und Panels aus. Das Foto wird in doppelter Panelgröße gespeichert — für ein größeres die Vorschau im Vollbild öffnen.",
+  "pose.cleanFrame": "Sauberer Ausschnitt",
+  "pose.savePhoto": "Foto speichern",
+  "pose.photoSaved": "Foto gespeichert",
+  "pose.photoFailed": "Foto konnte nicht gespeichert werden",
+  "pose.scene.studio": "Studio",
+  "pose.scene.white": "Weiß",
+  "pose.scene.sky": "Tageslicht",
+  "pose.scene.sunset": "Sonnenuntergang",
+  "pose.scene.dusk": "Dämmerung",
+
   // ── Fahrer-Studio ──────────────────────────────────────────────────────────
   "rider.help":
     "Kleide das Fahrermodell ein — Helm, Brille, Outfit und Stiefel zusammen.",
@@ -227,6 +280,11 @@ export const de: Translation = {
   "rider.repairDone_one": "{{count}} Datei in „{{model}}“ zusammengefasst.",
   "rider.repairDone_other": "{{count}} Dateien in „{{model}}“ zusammengefasst.",
   "rider.repairNothing": "Es gibt nichts mehr zusammenzufassen.",
+  "rider.unwrapTitle": "Ein {{area}}-Mod wurde einen Ordner zu tief installiert",
+  "rider.unwrapBody":
+    "„{{folder}}“ enthält nichts außer {{model}}, und ein gepacktes Mod lädt nur aus {{area}} selbst — weder das Spiel noch diese App sehen es dort. Nach oben verschieben?",
+  "rider.unwrapDone_one": "{{count}} Mod nach oben verschoben. Es steht jetzt als „{{model}}“ in der Liste.",
+  "rider.unwrapDone_other": "{{count}} Mods nach oben verschoben, beginnend mit „{{model}}“.",
 
   // ── Rundgang ───────────────────────────────────────────────────────────────
   "tour.welcomeTour.title": "Mach einen kurzen Rundgang",
@@ -294,20 +352,71 @@ export const de: Translation = {
     "Windows braucht dafür deine Erlaubnis. Der Download von Microsoft wird stattdessen geöffnet.",
   "runtime.installFailed": "Komponente konnte nicht installiert werden",
   "runtime.downloadManually": "Selbst herunterladen",
+  "runtime.componentVc140X86": "Microsoft Visual C++ 2015–2022 (x86)",
+  "runtime.repairing": "Wird repariert…",
+  "runtime.repairDone": "Laufzeitkomponenten repariert",
+  "runtime.repairDoneDesc":
+    "Starte MX Bikes neu, falls es schon läuft, und versuche es dann noch einmal.",
+  "runtime.repairNothingToDo": "Es war bereits alles vorhanden",
+  "runtime.repairNothingToDoDesc":
+    "Alle Visual-C++-Laufzeitkomponenten sind installiert und im Spielordner liegt, was er braucht. Startet das Spiel trotzdem nicht, schick uns dein Protokoll.",
+  "runtime.repairPartial": "Ein Teil braucht noch dich",
+  "runtime.repairPartialDesc":
+    "Nicht abgeschlossen: {{what}}. Windows braucht deine Erlaubnis, oder der Download kam nicht an — du kannst es auch von Hand installieren.",
+  "runtime.repairNoGameFolder": "Kein Spielordner festgelegt",
+  "runtime.repairNoGameFolderDesc":
+    "Die Laufzeitkomponenten sind installiert, aber ohne Installationsordner können wir den Spielordner selbst nicht prüfen. Lege ihn oben fest und repariere erneut.",
+  "runtime.repairFailed": "Laufzeitkomponenten konnten nicht repariert werden",
+  "runtime.strayForeign": "Eine Datei in deinem Spielordner ({{what}}) lässt MX Bikes abstürzen.",
+  "runtime.strayLocked": "{{what}} in deinem Spielordner lässt MX Bikes abstürzen.",
+  "runtime.strayPitch":
+    "Sie verursacht den Fehler \"R6034\" beim Start. Beiseitelegen genügt — gelöscht wird nichts.",
+  "runtime.strayLockedPitch":
+    "Sie verursacht den Fehler \"R6034\" beim Start. Schließe zuerst MX Bikes, dann leg sie beiseite.",
+  "runtime.strayFix": "Beiseitelegen",
+  "runtime.strayFixHint":
+    "Benennt sie in msvcr90.dll.disabled um, damit Windows sie nicht mehr lädt. Gelöscht wird nichts.",
+  "runtime.strayClearing": "Wird verschoben…",
+  "runtime.strayCleared": "Aus dem Weg geräumt",
+  "runtime.strayClearedDesc":
+    "Sie heißt jetzt msvcr90.dll.disabled und liegt im selben Ordner. Starte MX Bikes neu.",
+  "runtime.strayClearFailed": "Datei konnte nicht verschoben werden",
   "update.checkFailed": "Updates konnten nicht geprüft werden",
   "update.failed": "Update fehlgeschlagen",
 
   // ── 3D-Ansicht ─────────────────────────────────────────────────────────────
   "viewer.preview3d": "3D-Vorschau",
   "viewer.expand": "Vergrößern",
+  "viewer.fullscreen": "Vollbild",
+  "viewer.exitFullscreen": "Vollbild beenden",
   "viewer.paint": "Design",
+  "viewer.tyres": "Reifen",
+  "viewer.tyresOwn": "Die des Bikes",
   "viewer.loadingModel": "Modell wird geladen…",
   "viewer.loadingPaint": "Design wird geladen…",
   "viewer.loadingRider": "Fahrer wird geladen…",
   "viewer.riderLoadFailed": "Vorschau ist veraltet — sie konnte nicht aktualisiert werden",
+  "viewer.both": "Beide",
+  "viewer.onBike": "Auf dem Motorrad",
+  "viewer.noSeat": "Die Setup-Datei dieses Motorrads sagt nicht, wo die Sitzbank ist — der Fahrer kann sich nicht daraufsetzen.",
+  "viewer.loadingBike": "Motorrad wird geladen…",
+  "viewer.bikeLoadFailed": "Motorrad-Vorschau ist veraltet — sie konnte nicht aktualisiert werden",
   "viewer.dragToRotate": "Ziehen zum Drehen",
   "viewer.scrollToZoom": "Scrollen zum Zoomen",
   "viewer.rightDragToPan": "Rechts ziehen zum Verschieben",
+  "viewer.paintReloaded": "Lackierung neu geladen",
+  "viewer.pose": "Haltung",
+  "viewer.poseRear": "Hinten",
+  "viewer.poseFront": "Vorne",
+  "viewer.poseSteer": "Lenkung",
+  "viewer.poseLevel": "Räder ausrichten",
+  "viewer.poseReset": "Zurücksetzen",
+  "viewer.place": "Platzierung",
+  "viewer.placeSide": "Seite",
+  "viewer.placeUp": "Höhe",
+  "viewer.placeFwd": "Vorwärts",
+  "viewer.placeTurn": "Drehen",
+  "viewer.resizePanel": "Ziehen zum Anpassen · Doppelklick setzt zurück",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Suchen…",
@@ -353,7 +462,6 @@ export const de: Translation = {
   "browse.empty": "Keine {{type}} gefunden.",
   "browse.loadMore": "Mehr laden",
   "browse.selectedCount": "{{count}} ausgewählt",
-  "browse.queuing": "Wird eingereiht…",
   "browse.quickInstallCount": "{{count}} schnell installieren",
   "browse.quickInstall": "Schnellinstallation",
   "browse.quickReinstall": "Schnelle Neuinstallation",
@@ -367,27 +475,21 @@ export const de: Translation = {
   "browse.reinstall": "Neu installieren",
   "browse.reinstallAll": "Alle neu installieren",
   "browse.queued": "„{{title}}“ eingereiht",
-  "browse.queuedDesc": "Wird in {{folder}} installiert.",
-  "browse.rootFolder": "Hauptordner",
+  "browse.queuedDesc": "Wird installiert, sobald sie an der Reihe ist.",
+  "browse.byAuthor": "von {{author}}",
   "browse.needsBrowser":
     "„{{title}}“ muss über den Browser heruntergeladen werden",
   "browse.needsBrowserDesc":
     "{{host}} blockiert Downloads in der App — öffne die Seite, um fertigzustellen.",
   "browse.noDownload": "Kein Download für „{{title}}“ gefunden",
+  "browse.serverOnly": "„{{title}}“ bietet nur Server-Dateien",
+  "browse.serverOnlyDesc":
+    "Öffne die Mod, um ihre Downloads zu sehen — ein Build für dedizierte Server wird nicht für dich installiert.",
   "browse.quickInstallFailed":
     "„{{title}}“ konnte nicht schnell installiert werden",
   "browse.queuedBulk_one": "{{count}} Mod eingereiht",
   "browse.queuedBulk_other": "{{count}} Mods eingereiht",
   "browse.queuedBulkDesc": "Sie werden nacheinander installiert.",
-  "browse.queuedBulkSkipped_one":
-    "{{count}} übersprungen — nur über den Browser verfügbar.",
-  "browse.queuedBulkSkipped_other":
-    "{{count}} übersprungen — nur über den Browser verfügbar.",
-  "browse.bulkFailed": "Die Auswahl konnte nicht schnell installiert werden",
-  "browse.bulkFailedDesc_one":
-    "Er muss über den Browser heruntergeladen werden.",
-  "browse.bulkFailedDesc_other":
-    "Alle {{count}} müssen über den Browser heruntergeladen werden.",
 
   // ── Shop (MX Bikes Shop — gekaufte Downloads) ──────────────────────────────
   "shop.help":
@@ -404,6 +506,26 @@ export const de: Translation = {
   "shop.sessionFailed": "Sitzung des MX Bikes Shop konnte nicht übernommen werden",
   "shop.loadFailed": "Deine Käufe konnten nicht geladen werden: {{error}}",
   "shop.empty": "Für dein Konto wurden noch keine gekauften Downloads gefunden.",
+
+  // ── MXB Hub (shop.mxb-hub.com) ──
+  "hub.help":
+    "Durchsuche den MXB-Hub-Marktplatz auf shop.mxb-hub.com und installiere, was dir schon gehört. Gekauft wird weiterhin auf der Seite des Shops; melde dich unter „Meine Käufe“ an, um deine Bestellungen von hier aus zu installieren.",
+  "hub.count_one": "{{count}} Artikel",
+  "hub.count_other": "{{count}} Artikel",
+  "hub.searchPlaceholder": "MXB Hub durchsuchen…",
+  "hub.myDownloads": "Meine Käufe",
+  "hub.signInTitle": "Bei MXB Hub anmelden",
+  "hub.signInBody":
+    "Melde dich bei shop.mxb-hub.com an, um alles zu sehen und zu installieren, was dir gehört – auch kostenlose Mods. Wir öffnen die echte Seite; dein Passwort erreicht diese App nie.",
+  "hub.signIn": "Anmelden",
+  "hub.signedIn": "Bei MXB Hub angemeldet",
+  "hub.sessionFailed": "Deine MXB-Hub-Sitzung konnte nicht übernommen werden",
+  "hub.empty": "Für dein MXB-Hub-Konto wurden noch keine Downloads gefunden.",
+  "hubSort.newest": "Neueste",
+  "hubSort.popular": "Beliebteste",
+  "hubSort.priceAsc": "Preis: aufsteigend",
+  "hubSort.priceDesc": "Preis: absteigend",
+  "hubSort.nameAsc": "Name (A–Z)",
   "purchases.count_one": "{{count}} Kauf",
   "purchases.count_other": "{{count}} Käufe",
   "purchases.fileCount_one": "{{count}} Datei",
@@ -484,10 +606,19 @@ export const de: Translation = {
   "installDialog.differentBike": "Anderes Motorrad / Paket",
   "installDialog.directFastest": "Direkt · am schnellsten",
   "installDialog.direct": "Direkt",
+  "installDialog.recommendedBadge": "Empfohlen",
+  "installDialog.matchedBadge": "Dein Motorrad",
+  "installDialog.browserBadge": "Browser",
+  "installDialog.serverBadge": "Server",
+  "installDialog.serverBuildNote": "Build für dedizierte Server — nicht zum Spielen",
+  "installDialog.serverFiles_one": "1 Datei für dedizierte Server",
+  "installDialog.serverFiles_other": "{{count}} Dateien für dedizierte Server",
+  "installDialog.serverOnlyNotice":
+    "Jeder Download hier ist ein Build für dedizierte Server. Installiere ihn nur, wenn du einen Server betreibst — zum Fahren kommt nichts dazu.",
+  "installDialog.moreMirrors_one": "1 weiterer Spiegelserver",
+  "installDialog.moreMirrors_other": "{{count}} weitere Spiegelserver",
   "installDialog.perBikeHint":
     "Jeder Download ist ein anderes Motorrad — automatisch passend zu deiner Auswahl. Wähle das Paket „all bikes“, um alle auf einmal zu bekommen.",
-  "installDialog.mirrorsHint":
-    "Alle Spiegelserver enthalten dieselbe Datei. Wenn einer fehlschlägt, probiere den nächsten.",
 
   // ── Bibliotheksdetails ─────────────────────────────────────────────────────
   "libraryDetail.author": "Autor",
@@ -516,12 +647,15 @@ export const de: Translation = {
   "modDetail.stagePlace": "Ablegen",
   "modDetail.stageReload": "Neu laden",
   "modDetail.modFiles": "Mod-Dateien",
+  "modDetail.loadFailed": "Diese Mod konnte nicht geladen werden",
   "modDetail.copied": "Kopiert",
   "modDetail.copy": "Kopieren",
   "modDetail.addToLibrary": "Zur Bibliothek hinzufügen",
   "modDetail.host": "Host",
   "modDetail.installsTo": "Installiert nach",
   "modDetail.noDownloadLink": "Auf dieser Seite wurde kein Download-Link gefunden — öffne sie auf {{site}}.",
+  "modDetail.serverOnlyNotice":
+    "Diese Seite bietet nur Dateien für dedizierte Server. Sie lassen sich installieren, aber im Spiel gibt es nichts zu fahren.",
   "modDetail.frostmodHint":
     "FrostMod lädt die Liste ({{kind}}) neu, sobald das fertig ist.",
   "modDetail.kindRider": "Fahrer",
@@ -534,6 +668,7 @@ export const de: Translation = {
   "modDetail.addedToLibrary": "Zu deiner Bibliothek hinzugefügt",
   "modDetail.extracting": "Wird entpackt…",
   "modDetail.addingToLibrary": "Wird zur Bibliothek hinzugefügt…",
+  "modDetail.chooseWhatToInstall": "Wähle aus, was installiert wird",
   "modDetail.resolving": "Download wird aufgelöst…",
   "modDetail.finishInBrowser": "Im Browser abschließen",
   "modDetail.viewOnSite": "Auf {{site}} ansehen",
@@ -566,6 +701,9 @@ export const de: Translation = {
   "settings.themeSystem": "System",
   "settings.language": "Sprache",
   "settings.languageSystem": "System",
+  "settings.analytics": "Anonyme Nutzungsstatistik teilen",
+  "settings.analyticsDesc":
+    "Sendet eine zufällige ID, die App-Version und Zähler dazu, welche Seiten und Funktionen du nutzt — damit klar wird, was sich zu bauen lohnt. Niemals dein Name, deine Dateien oder deine Adresse.",
   "settings.runInBackground": "Im Hintergrund weiterlaufen",
   "settings.runInBackgroundDesc":
     "Beim Schließen des Fensters läuft MXB App im Infobereich weiter, damit FrostMod verbunden bleibt. Beenden über das Symbol im Infobereich.",
@@ -575,11 +713,84 @@ export const de: Translation = {
   "settings.instantRefresh": "Sofortige Preset-Aktualisierung",
   "settings.instantRefreshDesc":
     "Wenn du ein Preset anwendest, während {{game}} läuft, wird der Look sofort im Spiel aktualisiert — ohne Neustart und ohne das Profil neu auszuwählen. Falls das nicht klappt, wirst du gebeten, dein Profil neu auszuwählen.",
+  "settings.mxbsecure": "Inhaltssperre (mxbsecure)",
+  "settings.mxbsecureDesc":
+    "Experimentell. Fügt einen Schützen-Tab hinzu, der eine Datei so sperrt, dass ihr Besitz allein nicht zur Nutzung reicht. Nur für Creator, die bezahlte Inhalte packen.",
+  "secure.help":
+    "Sperrt eine Datei in ein .mxbsecure-Blob. Der Klartext wird nie ausgeliefert — nur das verschlüsselte Blob, und das ist ohne einen Schlüssel wertlos, den der Server berechtigten Spielern gibt.",
+  "secure.genTitle": "Strecken für einen Käufer schützen",
+  "secure.genDesc": "Wähle eine oder mehrere Strecken und die Steam-ID des Käufers. Die App legt neben jeder Strecke eine verschlüsselte Kopie und einen an dieses Konto gebundenen Schlüssel ab — dein Original bleibt unberührt.",
+  "secure.steamIdLabel": "Steam-ID des Käufers",
+  "secure.steamIdPlaceholder": "76561198…",
+  "secure.steamIdHint": "Die 17-stellige SteamID64 — die deines Freundes findest du in seinem Steam-Profil.",
+  "secure.pickTracks": "Strecken wählen",
+  "secure.selected": "{{count}} ausgewählt",
+  "secure.generate": "Erzeugen",
+  "secure.genOk": "{{ok}} von {{total}} geschützt — an {{id}} gebunden.",
+  "secure.genFail": "{{name}} konnte nicht geschützt werden",
+  "secure.badSteamId": "Gib zuerst die 17-stellige Steam-ID des Käufers ein.",
+  "secure.buyerNote": "Schicke dem Käufer beide Dateien. Er legt sie in seinen Strecken-Ordner — die Strecke erscheint und ist fahrbar, an sein Steam-Konto gebunden, offline.",
+  "secure.genResult": "Erzeugt",
+  "secure.experimental": "Experimentell",
+  "secure.intro":
+    "Datei wählen, sperren, dann das Entsperren prüfen. Beim Prüfen wird das Blob hier entschlüsselt und Byte für Byte mit dem Original verglichen — der Beleg, dass es auf diesem Rechner zurückkommt.",
+  "secure.protectTitle": "Eine Strecke schützen",
+  "secure.protectDesc":
+    "Verschlüsselt eine Streckendatei an Ort und Stelle — sie behält ihren Namen, das Spiel listet sie weiter, aber nur du kannst sie fahren, offline. Überschreibt die Datei, also behalte eine eigene Masterkopie. Dann einfach das Spiel starten.",
+  "secure.protectAction": "Strecke wählen & schützen",
+  "secure.protectedOk": "Geschützt, an {{id}} gebunden.",
+  "secure.protectedInPlace": "Geschützt — an Ort und Stelle verschlüsselt",
+  "secure.protectFailed": "Datei konnte nicht geschützt werden",
+  "secure.testHeading": "Format testen (optional)",
+  "secure.step3": "An dein Steam-Konto binden & offline spielen",
+  "secure.step3Desc":
+    "Versiegelt den Schlüssel an dein Steam-Konto und speichert ihn lokal. Danach öffnet er ohne Server — offline, im LAN, überall — aber nur auf deinem Konto. Eine Kopie auf einem anderen Konto bekommt nichts.",
+  "secure.steamAccount": "Dein Steam-Konto:",
+  "secure.noSteam": "Steam-Konto konnte nicht gelesen werden. Ist Steam installiert und angemeldet?",
+  "secure.provision": "An mein Konto binden",
+  "secure.provisioned": "An {{id}} gebunden.",
+  "secure.provisionedOk": "Gebunden — Schlüssel lokal gespeichert",
+  "secure.provisionFailed": "Schlüssel konnte nicht gebunden werden",
+  "secure.openOffline": "Offline öffnen",
+  "secure.offlineOk": "Offline geöffnet und stimmt überein.",
+  "secure.offlineBad": "Offline geöffnet, aber stimmt nicht überein.",
+  "secure.offlineFailed": "Offline-Öffnen fehlgeschlagen",
+  "secure.offlineMatches": "Offline geöffnet — stimmt überein, kein Server",
+  "secure.offlineMismatch": "Stimmt nicht überein",
+  "secure.step1": "Datei sperren",
+  "secure.pick": "Datei wählen",
+  "secure.lock": "Sperren",
+  "secure.locked": "Gesperrt.",
+  "secure.lockFailed": "Datei konnte nicht gesperrt werden",
+  "secure.result": "Gesperrt",
+  "secure.blob": "Blob",
+  "secure.size": "Größe",
+  "secure.sizeValue": "{{plain}} Klartext → {{blob}} gesperrt",
+  "secure.assetId": "Asset-ID",
+  "secure.key": "Schlüssel",
+  "secure.copyKey": "Schlüssel kopieren",
+  "secure.keyNote":
+    "Bewahre diesen Schlüssel auf — er wird einmal gezeigt und steht nicht im Blob. In Produktion hält ihn der Server und gibt ihn nur berechtigten Spielern.",
+  "secure.step2": "Entsperren prüfen",
+  "secure.step2Desc":
+    "Das Blob mit dem Schlüssel entschlüsseln und mit der gesperrten Datei vergleichen.",
+  "secure.verify": "Entsperren prüfen",
+  "secure.verifiedOk": "Entsperrt und stimmt mit dem Original überein.",
+  "secure.verifiedBad": "Entsperrt, aber es stimmt nicht überein.",
+  "secure.verifyFailed": "Prüfung fehlgeschlagen",
+  "secure.unlockedMatches": "Entsperrt — stimmt mit dem Original überein",
+  "secure.unlockedMismatch": "Stimmt nicht überein",
+  "settings.paintSync": "Lackierungs-Sync",
+  "settings.paintSyncDesc":
+    "Teilt die Lackierungen, die du trägst, mit den anderen Fahrern auf deinem Server und installiert deren Lackierungen, damit das Starterfeld so aussieht, wie alle es gemeint haben. Läuft von selbst auf jedem Server — weder du noch der Host müssen etwas einrichten.",
   "settings.instantRefreshWindowsOnly":
-    "Den Look ohne Neustart im Spiel zu aktualisieren erfordert FrostMod, und das gibt es nur für Windows — du wirst stattdessen gebeten, dein Profil neu auszuwählen.",
+    "Den Look ohne Neustart im Spiel zu aktualisieren heißt, in das laufende Spiel hineinzugreifen, und das kann nur die Windows-Version — du wirst stattdessen gebeten, dein Profil neu auszuwählen.",
   "settings.autoRunFrostmod": "FrostMod automatisch starten",
   "settings.autoRunFrostmodDesc":
     "FrostMod im Hintergrund starten, sobald MXB App geöffnet wird.",
+  "settings.frostmodArgs": "FrostMod-Flags",
+  "settings.frostmodArgsDesc":
+    "Zusätzliche Kommandozeile für FrostMod, so getippt wie im Terminal. Gilt ab dem nächsten Start von FrostMod. Lass das Feld leer, außer du hast ein Flag zum Ausprobieren bekommen.",
   "settings.watchModsReload": "Automatisch neu laden bei Ordneränderungen",
   "settings.watchModsReloadDesc":
     "Das Spiel automatisch neu laden, wenn Strecken oder Motorräder in deinen Mod-Ordner kommen — auch wenn sie außerhalb von MXB App manuell heruntergeladen wurden.",
@@ -593,8 +804,13 @@ export const de: Translation = {
   "settings.updateCheckFailed":
     "Updates konnten nicht geprüft werden — offline oder GitHub nicht erreichbar.",
   "settings.latestVersion": "Neueste: {{version}}",
+  "settings.frostmodStrayMsvcr90":
+    "Eine Datei in deinem Spielordner lässt MX Bikes mit \"R6034\" abstürzen — leg sie beiseite, dann ist es behoben.",
   "settings.frostmodRuntimeMissing":
     "Windows fehlt eine Visual-C++-Komponente, die FrostMod braucht — installiere sie, um den Fehler „dll was not found“ loszuwerden.",
+  "settings.repairRuntimes": "Laufzeit reparieren",
+  "settings.repairRuntimesHint":
+    "Installiert alle fehlenden Visual-C++-Laufzeiten dieses PCs, 32- und 64-Bit, und räumt weg, was eine ältere Version dieser App im Spielordner hinterlassen hat. Lohnt sich auch, wenn oben nichts falsch aussieht.",
   "settings.frostmodNeedsRepair":
     "Die installierten Dateien passen nicht zu dieser Version — eine Neuinstallation behebt das.",
   "settings.frostmodRepair": "Installation reparieren",
@@ -795,6 +1011,9 @@ export const de: Translation = {
   "sync.lastPulled": "Zuletzt geprüft {{ago}}. Läuft von selbst wieder, wenn du auf Spielen drückst.",
   "sync.neverPulled": "Du hast noch keine Lackierungen der anderen geholt",
   "sync.neverPulledWhy": "Bis dahin erscheinen andere Fahrer mit Standard-Bikes, auch wenn sie ihre veröffentlicht haben.",
+  "sync.notStartedTitle": "Noch nicht gestartet",
+  "sync.notStartedWhy":
+    "Die Lackierungs-Synchronisation richtet sich beim ersten Online-Rennen selbst ein — es gibt nichts auszufüllen. Starte MX Bikes, tritt einem Server bei, und hier steht der Rest von allein.",
   "sync.oversized_one": "{{count}} Lackierung ist zu groß zum Teilen, andere Fahrer sehen sie nicht.",
   "sync.oversized_other": "{{count}} Lackierungen sind zu groß zum Teilen, andere Fahrer sehen sie nicht.",
   "sync.skippedBikes_one": "{{count}} Bike wurde nicht veröffentlicht — du hast mehr, als wir speichern können.",
@@ -845,7 +1064,7 @@ export const de: Translation = {
   "viewer.stockGearNote":
     "Auf dem Standard-{{part}} des Spiels gezeigt. Ein Design für ein anderes Modell passt möglicherweise nicht exakt.",
   "viewer.paintNoChange":
-    "Keine der Texturen dieses Designs wird von den hier gezeigten Teilen verwendet, deshalb ändert sich die Vorschau nicht. Es kann trotzdem Räder oder Kette einfärben, die diese Ansicht nicht darstellt.",
+    "Keine der Texturen dieses Designs wird von den hier gezeigten Teilen verwendet, deshalb ändert sich die Vorschau nicht. Es kann trotzdem die Kette einfärben, die diese Ansicht nicht darstellt.",
   "viewer.noPaintPreview": "Keine Design-Vorschau ({{err}})",
 
   // ── Bibliothek ─────────────────────────────────────────────────────────────
@@ -855,11 +1074,55 @@ export const de: Translation = {
   "library.byAuthor": "von {{author}}",
   "library.locked": "Gesperrt — Inhalt kann nicht gelesen werden",
   "library.searchPlaceholder": "Installierte durchsuchen…",
+  "library.sortFolder": "Nach Ordner",
+  "library.sortRecent": "Zuletzt hinzugefügt",
+  "library.showRemoved": "Entfernt",
+  "library.showRemovedHint":
+    "Mods anzeigen, die dieser Ordner mal hatte — auch außerhalb der App gelöschte",
+  "library.goneOn": "Entfernt am {{date}}",
+  "library.goneNote": "aufbewahrt, damit du sie wiederfindest",
+  "library.parkedHint": "In Verwalten deaktiviert — noch auf der Platte",
+  "library.parkedNote": "in Verwalten wieder einschalten",
+  "library.nothingRemoved":
+    "Noch nichts verschwunden. Ab jetzt wird alles gemerkt, was du löschst.",
+  "library.reinstall": "Erneut herunterladen",
+  "library.copyName": "Namen kopieren",
+  "library.copiedName": "Name kopiert",
+  "library.forget": "Vergessen",
+  "library.forgetFailed": "Konnte das nicht vergessen",
+  "library.restore": "Wiederherstellen",
+  "library.restored": "Zurückgelegt",
+  "library.restoreFailed": "Konnte das nicht wiederherstellen",
+  "library.findAgain": "Wiederfinden",
+  "library.findAgainFor": "Suche „{{name}}“ in allen Quellen.",
+  "library.findAgainNone": "Nichts unter dem Namen.",
+  "library.findAgainFailed": "Suche hier fehlgeschlagen.",
   "library.scanning": "Deine Bibliothek wird gescannt…",
   "library.empty":
     "Noch keine {{type}} installiert — geh zu Entdecken und füge etwas hinzu.",
   "library.noMatches": "Keine Treffer.",
   "library.quick3d": "In 3D ansehen",
+  "swapActions.menu": "Dieses Modell verschieben oder löschen",
+  "swapActions.move": "Auf ein anderes Bike verschieben…",
+  "swapActions.delete": "Modell löschen…",
+  "swapActions.activeFirst": "Das ist das aktive Modell — wechsle das Bike zuerst auf ein anderes",
+  "swapActions.stockHasNoFiles": "Stock ist kein Model-Set — es gibt nichts zu verschieben oder zu löschen",
+  "swapActions.moveTitle": "{{name}} auf ein anderes Bike verschieben",
+  "swapActions.moveBlurb": "Die Modelldateien wandern mit. Alles andere bleibt beim Bike.",
+  "swapActions.pickBike": "Bike wählen…",
+  "swapActions.liveriesTitle": "Lackierungen mitnehmen?",
+  "swapActions.liveriesBlurb": "Eine Lackierung ist für das Layout eines Bikes gezeichnet und passt selten auf ein anderes. Was du zurücklässt, bleibt auf diesem Bike.",
+  "swapActions.moveConfirm": "Verschieben",
+  "swapActions.moved": "{{name}} nach {{bike}} verschoben",
+  "swapActions.deleteTitle": "{{name}} löschen?",
+  "swapActions.deleteBlurb_one": "{{count}} Datei wandert in den Papierkorb. Lackierungen bleiben auf dem Bike.",
+  "swapActions.deleteBlurb_other": "{{count}} Dateien wandern in den Papierkorb. Lackierungen bleiben auf dem Bike.",
+  "swapActions.deleteConfirm": "Löschen",
+  "swapActions.deleted": "{{name}} in den Papierkorb verschoben",
+  "library.models_one": "{{count}} Modell",
+  "library.models_other": "{{count}} Modelle",
+  "library.modelsHint": "Für dieses Bike installierte Model-Swaps — wechseln kannst du sie im Locker",
+  "library.modelIncomplete": "Unvollständig",
   "library.selectNone": "Auswahl aufheben",
   "library.move": "Verschieben",
   "library.uninstall": "Deinstallieren",
@@ -934,6 +1197,7 @@ export const de: Translation = {
     "Wechsle Modell und Motorsound jedes Motorrads zwischen den Sets, die du installiert hast.",
   "locker.rescan": "Neu scannen",
   "locker.restore": "Wiederherstellen",
+  "locker.hideOrphan": "Diesen Hinweis ausblenden",
   "locker.register": "Registrieren",
   "locker.scanning": "Motorräder werden gescannt…",
   "locker.scanForSwaps": "Nach Sets suchen",
@@ -962,16 +1226,43 @@ export const de: Translation = {
     "Nur Stock — installiere einen Sound-Mod zum Tauschen",
   "locker.noModel": "Kein Modell",
   "locker.stock": "Stock",
+  "locker.stockModel": "Spielstandard",
   "locker.activeModel": "Aktives Modell",
   "locker.activeSound": "Aktiver Sound",
   "locker.switchToNoModel":
     "Auf kein Modell wechseln — entfernt die aktuellen Modelldateien",
+  "locker.switchToStockModel":
+    "Entfernt das aktuelle Modell, damit das spieleigene übernimmt — es wird abgelegt, nicht gelöscht",
   "locker.switchToStock":
     "Auf Stock wechseln — entfernt den Sound-Mod (der Originalsound spielt)",
   "locker.missingModelEdf": "Diesem Set fehlt model.edf",
   "locker.missingSoundFiles":
     "Diesem Set fehlt engine.scl oder sfx.cfg",
   "locker.switchTo": "Auf {{name}} wechseln",
+  "locker.preview3d": "{{name}} in 3D ansehen — es wird nichts gewechselt",
+  "locker.view3d": "3D ansehen",
+  "locker.paints": "Lackierungen",
+  "locker.assignPaints": "W\u00e4hle, welche Lackierungen zu {{name}} geh\u00f6ren",
+  "locker.paintsClaimed_one": "{{count}} Lackierung diesem Modell zugewiesen",
+  "locker.paintsClaimed_other": "{{count}} Lackierungen diesem Modell zugewiesen",
+  "locker.paintsTitle": "Lackierungen f\u00fcr \u201e{{model}}\u201c",
+  "locker.paintsBlurb":
+    "H\u00e4kchen bei den Lackierungen setzen, die f\u00fcr dieses Modell gezeichnet wurden. Nur sie werden angeboten, solange es aktiv ist, und Lackierungen eines anderen Modells wandern aus dem paints-Ordner des Bikes, sodass auch {{game}} sie nicht mehr auflistet. Eine Lackierung ohne H\u00e4kchen bei irgendeinem Modell bleibt bei allen verf\u00fcgbar.",
+  "locker.paintsFilter": "Lackierungen suchen\u2026",
+  "locker.paintsSelectAll": "Alle ausw\u00e4hlen",
+  "locker.paintsClearAll": "Alle abw\u00e4hlen",
+  "locker.paintsLoading": "Lackierungen werden gelesen\u2026",
+  "locker.paintsNone": "Dieses Bike hat noch keine Lackierungen \u2014 installiere eine, dann erscheint sie hier.",
+  "locker.paintsNoMatch": "Keine Lackierung passt dazu.",
+  "locker.paintsAlsoOn": "Auch {{models}} zugewiesen",
+  "locker.paintsSaved_one": "{{count}} Lackierung \u201e{{model}}\u201c zugewiesen.",
+  "locker.paintsSaved_other": "{{count}} Lackierungen \u201e{{model}}\u201c zugewiesen.",
+  "locker.paintsStuck_one":
+    "{{count}} Lackierungsdatei konnte nicht verschoben werden \u2014 schlie\u00dfe {{game}} und scanne erneut, sonst bleibt sie im Spiel sichtbar.",
+  "locker.paintsStuck_other":
+    "{{count}} Lackierungsdateien konnten nicht verschoben werden \u2014 schlie\u00dfe {{game}} und scanne erneut, sonst bleiben sie im Spiel sichtbar.",
+  "locker.paintsReselect": "W\u00e4hle dein Profil in {{game}} erneut aus, um die neue Liste zu sehen.",
+  "locker.paintsNextLaunch": "Das Spiel zeigt die neue Liste beim n\u00e4chsten Start.",
   "locker.tiedToModel": "Verknüpft mit Modell {{models}}",
   "locker.boundHint":
     "„{{sound}}“ ist mit Modell „{{model}}“ verknüpft — er wandert mit diesem Modell mit. Zum Lösen klicken.",
@@ -997,18 +1288,16 @@ export const de: Translation = {
     "Wähle dein Profil in MX Bikes neu aus, um den Tausch zu laden.",
   "locker.loadsNextTime":
     "Wird beim nächsten Start des Spiels geladen.",
-  "locker.modelRefreshing":
-    "Wird im Spiel aktualisiert — wenn es dein ausgewähltes Motorrad ist, ändert es sich jetzt.",
   "locker.modelFrostmodNotRunning":
-    "Starte FrostMod, um Modellwechsel live zu sehen — wähle das Motorrad vorerst im Spiel neu aus.",
-  "locker.modelReselectBike":
-    "Modell gewechselt — wähle das Motorrad in MX Bikes neu aus, um es zu sehen.",
+    "FrostMod läuft nicht — wechsle in MX Bikes die Motorradkategorie weg und zurück, um das Modell zu sehen.",
+  "locker.modelSwitchCategory":
+    "Modell gewechselt — wechsle in MX Bikes die Motorradkategorie weg und zurück, um es zu sehen.",
   "locker.modelFrostmodUnreachable":
-    "FrostMod war nicht erreichbar — wähle das Motorrad im Spiel neu aus, um es zu laden.",
+    "FrostMod nicht erreichbar — wechsle im Spiel die Motorradkategorie weg und zurück, um das Modell zu laden.",
   "locker.modelRefreshWindowsOnly":
-    "Die Live-Modellaktualisierung gibt es nur unter Windows — wähle das Motorrad im Spiel neu aus.",
+    "Modell gewechselt — wechsle im Spiel die Motorradkategorie weg und zurück, um es zu sehen.",
   "locker.modelInstantRefreshOff":
-    "Wähle das Motorrad in MX Bikes neu aus, um es zu laden (die sofortige Aktualisierung ist aus).",
+    "Wechsle in MX Bikes die Motorradkategorie weg und zurück, um das Modell zu laden.",
 
   // ── Registrierung loser Sets ───────────────────────────────────────────────
   "swaps.model": "Modell",
@@ -1046,6 +1335,46 @@ export const de: Translation = {
   "install.failed": "Installation fehlgeschlagen — {{title}}",
   "install.openModPage": "Die Mod-Seite öffnen",
   "install.clickToOpen": "Klicken, um die Mod-Seite zu öffnen",
+  "install.cancelled": "{{title}} abgebrochen",
+
+  "downloads.title": "Downloads",
+  "downloads.open": "Download-Warteschlange anzeigen",
+  "downloads.preparing": "Wird vorbereitet…",
+  "downloads.waiting": "Wartet",
+  "downloads.cancel": "Diesen Download abbrechen",
+  "downloads.remove": "Aus der Warteschlange entfernen",
+  "downloads.cancelling": "Wird abgebrochen…",
+  "downloads.stageResolving": "Datei wird gesucht…",
+  "downloads.stageDownloading": "Wird heruntergeladen",
+  "downloads.stageExtracting": "Wird entpackt",
+  "downloads.stagePlacing": "Wird installiert",
+  "downloads.stageReview": "Wartet auf dich",
+
+  // ── Downloads (Verlauf) ────────────────────────────────────────────────────
+  "downloads.help":
+    "Alles, was du heruntergeladen hast, das Neueste zuerst — auch die fehlgeschlagenen. Filtere nach Status oder such nach einer Mod, deren Namen du nicht mehr genau weißt.",
+  "downloads.filterAll": "Alle",
+  "downloads.filterFailed": "Fehlgeschlagen",
+  "downloads.searchPlaceholder": "Downloads durchsuchen…",
+  "downloads.clearAction": "Leeren",
+  "downloads.clearTitle": "Download-Verlauf leeren?",
+  "downloads.clearBody":
+    "Das vergisst nur die Liste. Nichts Installiertes wird entfernt.",
+  "downloads.empty":
+    "Noch nichts heruntergeladen — geh zu Entdecken und füge etwas hinzu.",
+  "downloads.noMatches": "Keine Treffer.",
+  "downloads.today": "Heute",
+  "downloads.yesterday": "Gestern",
+  "downloads.sourceSite": "Download",
+  "downloads.sourceShop": "Shop",
+  "downloads.sourceHub": "MXB Hub",
+  "downloads.sourceFile": "Importierte Datei",
+  "downloads.showInLibrary": "In der Bibliothek zeigen",
+  "downloads.openModPage": "Mod-Seite öffnen",
+  "downloads.forget": "Aus der Liste entfernen",
+  "downloads.rowActions": "Mehr",
+  "downloads.failedBadge_one": "{{count}} Download fehlgeschlagen",
+  "downloads.failedBadge_other": "{{count}} Downloads fehlgeschlagen",
 
   // ── Kategorien (Singular) ──────────────────────────────────────────────────
   "category.track": "Strecke",
@@ -1065,6 +1394,8 @@ export const de: Translation = {
   "category.misc": "Sonstiges",
 
   // ── Abschnittsüberschriften (Plural) ───────────────────────────────────────
+  "section.removed": "Nicht mehr installiert",
+  "section.parked": "Von Verwalten geparkt",
   "section.bikePaint": "Lackierungen",
   "section.bikeModelSwap": "Modellwechsel",
   "section.sound": "Sounds",
@@ -1126,7 +1457,14 @@ export const de: Translation = {
   "voice.testOutputDesc": "Prüfe, ob du die anderen im richtigen Headset hörst.",
   "voice.micGain": "Mikrofonverstärkung",
   "voice.volume": "Lautstärke",
+  "voice.micMode": "Mikrofontaste",
+  "voice.modePush": "Halten",
+  "voice.modeToggle": "Umschalten",
+  "voice.micKey": "Mikrofontaste",
+  "voice.micOpen": "Mikro offen",
+  "voice.toggleDesc": "Einmal drücken öffnet das Mikrofon, nochmal drücken schließt es. Nichts hält es zu — achte auf die Anzeige.",
   "voice.ptt": "Push-to-Talk",
+  "voice.pttDesc": "Taste halten zum Sprechen, loslassen zum Beenden. Funktioniert, während das Spiel im Vordergrund ist.",
   "voice.pttUpdated": "Push-to-Talk-Taste aktualisiert",
   "voice.micFailed": "Mikrofon konnte nicht geöffnet werden",
   "voice.outputFailed": "Testton konnte nicht abgespielt werden",
@@ -1134,7 +1472,13 @@ export const de: Translation = {
   "voice.deviceGone": "Dieses Gerät ist nicht angeschlossen",
   "voice.noDevices": "Keine Audiogeräte gefunden",
   "voice.notConnected": "Noch mit niemandem verbunden",
-  "voice.notConnectedDesc": "Diese Einstellungen steuern dein eigenes Mikrofon und Headset, und die Test-Buttons funktionieren schon. Um wirklich mit anderen Fahrern zu sprechen, fehlt noch der Voice-Server — hier wird nichts übertragen.",
+  "voice.notConnectedDesc": "Voice startet von selbst, sobald du auf einen Server gehst — nichts einzurichten, nichts herunterzuladen und nichts, was der Server laufen lassen muss. Alle anderen dort mit der App tauchen hier auf.",
+  "voice.inRoom": "Im Voice auf {{server}}",
+  "voice.stopped": "Voice gestoppt",
+  "voice.unnamedRider": "Fahrer",
+  "voice.connecting": "verbinde…",
+  "voice.mute": "Stumm",
+  "voice.unmute": "Laut",
 
   "overlay.pressKeys": "Tasten drücken…",
   "overlay.needModifier": "Modifikator hinzufügen",
@@ -1160,6 +1504,129 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0124.hero.title":
+    "Jeder im Starterfeld in der Lackierung, die er wirklich gewählt hat",
+  "showcase.v0124.hero.body":
+    "MX Bikes überträgt keine eigenen Inhalte, also war ein Lobby voller Fremder immer ein Lobby voller Standard-Lackierungen. MXB App teilt jetzt, was du trägst, mit den Fahrern um dich herum und installiert deren Lackierungen — auf jedem Server, ohne Zutun des Hosts und ohne Code.",
+  "showcase.v0124.anyserver":
+    "Jeder Server, nicht nur unsere. Die App liest den Server aus dem laufenden Spiel, also funktioniert eine öffentliche Lobby genau wie eine private.",
+  "showcase.v0124.nosetup":
+    "Nichts einzurichten. Kein Einladungscode, keine Anmeldung, keine Server-Installation — in den Einstellungen einschalten, den Rest macht sie selbst.",
+  "showcase.v0124.everyone":
+    "Du siehst jeden Fahrer, der ebenfalls MXB App hat. Je mehr in deiner Lobby, desto mehr vom Feld sieht richtig aus.",
+  "showcase.v0124.settings":
+    "Einstellungen → Lackierungs-Sync zeigt, was rausging, was ankam und welche Lackierung nicht überschrieben wurde. Der Schalter zum Abschalten sitzt unter Allgemein.",
+  "showcase.v0124.shape":
+    "Sprünge werden über ihre Kontur geformt. Zieh die Oberkante eines Tabletops für die Höhe, das hintere Ende für die Länge, die Gegenseite eines Doubles für die Lücke — oder zeichne einen Punkt für Punkt.",
+  "showcase.v0124.stats":
+    "MXB App zählt jetzt anonym, welche Seiten und Funktionen genutzt werden — eine zufällige ID und nichts über dich. Einstellungen → Allgemein schaltet es ab.",
+  "showcase.v0122.hero.title":
+    "Die Replay-Kamera kann dem Fahrer folgen",
+  "showcase.v0122.hero.body":
+    "Ziele mit einem Key auf einen Fahrer, und FrostMods Replay-Kamera hält Bild für Bild auf ihn statt auf die Winkel, die du geflogen hast. Schneide zwischen Einstellungen, halte auf einer, und sieh den ganzen Pfad in der Welt, während du ihn baust.",
+  "showcase.v0122.aim":
+    "Drücke T auf einem Key, um auf einen Fahrer zu zielen. Die Kamera folgt ihm, und bei zwei Fahrern auf einem Abschnitt gleitet sie weich von einem zum anderen.",
+  "showcase.v0122.shots":
+    "E entscheidet, was ein Key tut: durchlaufen, darauf halten oder hart auf die nächste Einstellung schneiden. Ein Pfad kann ein ganzer Schnitt sein.",
+  "showcase.v0122.preview":
+    "V zeichnet den Pfad in der Welt, während du ihn baust, und U macht die letzte Änderung rückgängig — vierundzwanzig Schritte weit.",
+  "showcase.v0122.paths":
+    "Einstellungen → FrostMod listet jeden gespeicherten Pfad: wo seine Keys liegen, wie er fliegt, und wie du ihn weitergibst.",
+  "showcase.v0121.hero.title":
+    "Deine Replay-Kamera-Tasten, deine Tastatur",
+  "showcase.v0121.hero.body":
+    "FrostMods Replay-Kamera liest die Tastatur direkt — und das Spiel im selben Moment ebenso. Wenn S deine Kamera rückwärts bewegt, hat S zum Speichern eines Pfads auch die Kamera bewegt. Jede Taste des Editors lässt sich jetzt dorthin legen, wo das Spiel nicht hinfasst.",
+  "showcase.v0121.rebind":
+    "Belege jede Editor-Taste neu unter Einstellungen → FrostMod: Aktion anklicken, Taste drücken.",
+  "showcase.v0121.clash":
+    "Wähle eine Taste, die deine Kamerasteuerung nicht nutzt. Funktionstasten und der Ziffernblock sind meist frei; ein Modifier hilft nicht, das Spiel sieht die Taste darunter trotzdem.",
+  "showcase.v0121.clean":
+    "F7 blendet alles aus, was FrostMod zeichnet — Panel, Radar, Umrisse — für saubere Aufnahmen.",
+  "showcase.v0113.hero.title":
+    "Jede Strecke \u00f6ffnet sich als der Ort, der sie ist",
+  "showcase.v0113.hero.body":
+    "Fr\u00fcher \u00f6ffnete sich eine Strecke als nackter Boden \u2014 die richtigen Rillen, Anlieger und Sprungkanten, aber nichts, was darauf steht, sodass eine Supercross-Halle und ein Nationalkurs kaum zu unterscheiden waren. Der Betrachter zeichnet jetzt, was eine Strecke auf sich stellt: Zelte und Vord\u00e4cher, Strohballen und Reifenw\u00e4nde, Bannerreihen und Z\u00e4une, die Anh\u00e4nger im Fahrerlager und die Landschaft jenseits des eigenen Quadrats.",
+  "showcase.v0113.sky":
+    "Eine Strecke liegt unter ihrem eigenen Himmel, beleuchtet und im Dunst so, wie es ihre eigene Ambience-Datei vorgibt.",
+  "showcase.v0113.ground":
+    "Der Boden beh\u00e4lt seine Details aus der N\u00e4he \u2014 der Dreck der Strecke selbst, mit echtem Relief, wo sie eine Normal Map daf\u00fcr mitliefert.",
+  "showcase.v0113.pick":
+    "Klicke auf irgendetwas, das auf der Strecke steht, und es leuchtet einzeln auf, benannt und vermessen.",
+  "showcase.v0113.speed":
+    "Es kommt in Stufen \u2014 erst das Gel\u00e4nde, dann die Form der Objekte, dann ihre Farben \u2014 und dieselbe Strecke erneut zu \u00f6ffnen \u00fcberspringt das Archiv ganz.",
+  "showcase.v0112.hero.title":
+    "Ein Bike-Pack wird als die Bikes darin installiert",
+  "showcase.v0112.hero.body":
+    "Das OEM-Pack sind 54 Maschinen in einem 3,8-GB-Archiv, und bislang kam es als eine einzige Zeile mit der Aufschrift \u201eMods-Ordner\u201c \u2014 alles oder nichts. Jetzt steht es so da, wie es gebaut ist: jedes Bike mit echtem Namen und Klasse, mit Kontrollk\u00e4stchen. Nimm die vier, die du f\u00e4hrst, und lass die anderen f\u00fcnfzig liegen.",
+  "showcase.v0112.fullscreen":
+    "Die 3D-Vorschau im Designer \u00f6ffnet sich im Vollbild \u2014 ein Knopf f\u00fcllt das Fenster mit dem Modell, das du gerade lackierst.",
+  "showcase.v0112.review":
+    "Ein Download, der sich als mehrere Mods entpuppt, h\u00e4lt an und zeigt dir seinen Inhalt, bevor irgendetwas in deinem Mods-Ordner landet.",
+  "showcase.v0112.paint":
+    "Ein Paint mit einer Datei je Maschine installiert jetzt die f\u00fcr das gew\u00e4hlte Bike \u2014 nicht einfach die erste auf der Seite.",
+  "showcase.v0112.speed":
+    "Das Pr\u00fcffenster \u00f6ffnet sich mit installierten OEM-Bikes in etwa einer Sekunde statt in knapp zwanzig.",
+  "showcase.v0112.window":
+    "Ein schwarzes Fenster beim Start kann dich nicht mehr festsetzen: Es bleibt verborgen, bis es etwas gezeichnet hat, und l\u00e4sst sich immer schlie\u00dfen.",
+  "showcase.v0111.hero.title":
+    "Geschützte Modell-Swaps öffnen sich in 3D",
+  "showcase.v0111.hero.body":
+    "Ein bei einem Creator gekauftes Modell liefert sein Mesh versiegelt aus, und der Viewer konnte es nicht lesen — „In 3D ansehen“ meldete, der Swap enthalte kein lesbares Mesh, obwohl er im Spiel einwandfrei läuft. Jetzt öffnet er sich wie jedes andere Bike.",
+  "showcase.v0111.messages":
+    "Lässt sich ein Bike trotzdem nicht öffnen, nennt die App den tatsächlichen Fehler, statt alles der Cloud-Synchronisierung anzulasten.",
+  "showcase.v0110.hero.title":
+    "Nimm den Fahrer und bring ihn in Position",
+  "showcase.v0110.hero.body":
+    "Greife in der 3D-Vorschau die Gelenke des Fahrers und bewege ihn — Hände, Ellbogen, Hüften, Füße. Schnelle Posen stapeln sich, Regler justieren fein, und Sitzposition setzt ihn aufs Motorrad. Nur Vorschau: Im Spiel wird nichts verändert.",
+  "showcase.v0110.designer":
+    "Spiegle eine Ebene durch das Motorrad, wähle mehrere zugleich, raste beim Ziehen ein, klappe um und tippe exakte Positionen ein.",
+  "showcase.v0110.wheels":
+    "Motorräder werden mit ihren Rädern dargestellt, und du wählst, auf welchen Reifen sie stehen.",
+  "showcase.v0110.speed":
+    "Strecken zeichnen siebenmal schneller, Motorräder öffnen in 127 ms statt 201, und Mods installieren zu zweit.",
+  "showcase.v0110.swaps":
+    "Verschiebe ein Modellset auf ein anderes Motorrad oder lösche es, und sieh dir jeden Swap in 3D aus der Bibliothek an.",
+  "showcase.v0102.hero.title":
+    "Lackierungen gehören dem Modell, das sie trägt",
+  "showcase.v0102.hero.body":
+    "MX Bikes gibt einem Bike einen einzigen paints-Ordner und kennt keine Modell-Swaps, also bot ein Yami-Mesh auf einer KTM auch jede KTM-Lackierung an. Jedes Modell im Locker hat jetzt eine Paletten-Schaltfläche — hake die für es gezeichneten Lackierungen an, und nur die werden noch angeboten, auch in der Lackauswahl von MX Bikes selbst.",
+  "showcase.v0102.packs":
+    "Lackierungen, die in einem Modellpaket steckten, waren installiert, aber unsichtbar. Öffnest du die Auswahl dieses Modells, übernimmt es sie — und genau das macht sie nutzbar.",
+  "showcase.v0102.presets":
+    "Die Presets-Lackauswahl zeigt nur noch Lackierungen, die zum gewählten Modell passen.",
+  "showcase.v0102.vcredist":
+    "Auf einem frisch zurückgesetzten Windows schloss sich die App sofort nach dem Start — kein Fenster, kein Log. Der Installer legt jetzt erst Microsofts Visual-C++-Runtime nach und dann die App.",
+  "showcase.v0102.msvcr90":
+    "Eine übrig gebliebene msvcr90.dll, die die App nicht selbst löscht, ist kein stiller Absturz mehr: Sie benennt die Datei und deaktiviert sie auf einen Klick.",
+  "showcase.v0102.paintsync":
+    "Paint-Sync verschickte die Lackierung des falschen Bikes, wenn zwei Bikes denselben Lacknamen hatten — und Helm-, Brillen-, Stiefel- und Protektoren-Lacks wurden nie geteilt.",
+  "showcase.v0101.hero.title":
+    "Deine Bibliothek merkt sich, was du gelöscht hast",
+  "showcase.v0101.hero.body":
+    "Eine gelöschte Strecke war früher spurlos weg. Jetzt bleiben Name, Autor, Ort und ein Bild erhalten — damit du die, deren Namen du Monate später nicht mehr weißt, trotzdem wiederfindest.",
+  "showcase.v0101.restore":
+    "Wiederherstellen legt einen von der App gelöschten Mod zurück, und „Wiederfinden“ durchsucht mxb-mods und den Shop mit dem gemerkten Namen.",
+  "showcase.v0101.paints":
+    "Ein gespeichertes Paint erscheint jetzt im laufenden Spiel — kein Alt-Tab, kein erneutes Profilwählen.",
+  "showcase.v0101.r6034":
+    "Ein Absturz, den diese App verursacht hat, ist behoben: die von ihr abgelegte msvcr90.dll ließ MX Bikes mit R6034 sterben. Sie räumt die Kopie jetzt wieder weg.",
+  "showcase.v0101.logs":
+    "„Logs teilen“ packt dasselbe Archiv wie „Logs speichern“ und gibt dir einen Link statt einer Datei zum Hochladen.",
+  "showcase.v0101.bikes":
+    "Bikes, die du nicht mehr fährst, lassen sich aus der Presets-Auswahl entfernen.",
+  "showcase.v0100.hero.title": "Der Designer richtet seine Blätter selbst ein",
+  "showcase.v0100.hero.body":
+    "Er legt jetzt die Blätter an, die ein Modell braucht, legt die eigenen Plastikteile des Bikes darunter zum Abpausen und öffnet ein Modell in etwa einer Sekunde statt in fast zwanzig.",
+  "showcase.v0100.location":
+    "Fahr mit der Maus über das Blatt, und es sagt dir, was unter dem Cursor liegt: das Teil, die Seite des Bikes, auf der es sitzt, und ob es eine Fläche ist, die du siehst, oder eine Unterseite, die du nicht siehst.",
+  "showcase.v0100.downloads":
+    "Die Downloads-Seite listet auf, was du geholt hast: nach Tag, das Neueste oben, mit dem Ort, an dem jede Datei gelandet ist, und dem Mirror, von dem sie kam.",
+  "showcase.v0100.terrain":
+    "Eine Strecke öffnet sich jetzt direkt aus der Bibliothek in 3D, mit ihren Sprüngen und Rillen, gezeichnet aus dem eigenen Höhenfeld des Spiels.",
+  "showcase.v0100.sharing":
+    "Jetzt kann alles in deiner Bibliothek zu einem Code werden, den du jemandem gibst, und es landet wieder in denselben Ordnern, in denen du es hast.",
+  "showcase.v0100.linux":
+    "Unter Linux läuft FrostMod jetzt in genau dem Proton-Prefix, unter dem auch das Spiel läuft.",
   "showcase.v092.hero.title": "Sieh dir das Gelände einer Strecke in 3D an",
   "showcase.v092.hero.body":
     "Strecken waren das Einzige, was die Bibliothek nicht zeigen konnte — ein Name, ein Bild und eine Größe. Der Viewer liest jetzt das Höhenfeld aus einer Strecke und zeichnet den Boden selbst, sodass Sprünge, Rillen und die Form einer Kurve zu sehen sind, bevor du sie überhaupt lädst. Er öffnet sich bei einer Strecke in der Bibliothek, neben In 3D ansehen.",
@@ -1319,6 +1786,8 @@ export const de: Translation = {
   "drop.scanning": "Wird geprüft …",
   "drop.found_one": "{{count}} Element gefunden",
   "drop.found_other": "{{count}} Elemente gefunden",
+  "drop.selectAll": "Alle auswählen",
+  "drop.selectNone": "Keine auswählen",
   "drop.reviewHint": "Prüf die Ziele und installiere dann.",
   "drop.install_one": "{{count}} installieren",
   "drop.install_other": "{{count}} installieren",
@@ -1353,6 +1822,7 @@ export const de: Translation = {
   "drop.kind.bikePaint": "Lackierung",
   "drop.kind.soundSet": "Sound",
   "drop.kind.riderGear": "Fahrer-Ausrüstung",
+  "drop.kind.tyres": "Reifen",
   "drop.kind.reshadePreset": "ReShade-Preset",
   "drop.kind.unknown": "Unbekannt",
   "drop.reason.modsTree": "Enthält einen kompletten Mods-Ordner",
@@ -1367,6 +1837,7 @@ export const de: Translation = {
   "drop.reason.riderTexture": "Bemalt den Fahrerkörper — ein Outfit",
   "drop.reason.gearTexture": "Bemalt ein Teil der Fahrer-Ausrüstung",
   "drop.reason.reshadePreset": "Listet ReShade-Techniken auf",
+  "drop.reason.packLayout": "Vom Paket hier einsortiert",
   "drop.reason.unrecognised": "Nicht erkannt — du musst es zuordnen",
 
   // ── Import (derselbe Ablauf wie Ablegen, nur per Auswahl) ──────────────────
@@ -1386,7 +1857,7 @@ export const de: Translation = {
   // ── Logs ───────────────────────────────────────────────────────────────────
   "settings.logs": "Logs",
   "logs.desc":
-    "Die Dateien, die du schickst, wenn etwas schiefgeht. MXB App, FrostMod und {{game}} führen jeweils eigene — öffne den Ordner, den du brauchst, oder speichere alle als ein Zip für einen Fehlerbericht.",
+    "Die Dateien, die du schickst, wenn etwas schiefgeht. MXB App, FrostMod und {{game}} führen jeweils eigene — öffne den Ordner, den du brauchst, speichere alle als ein Zip, oder teile sie als Link für einen Fehlerbericht.",
   "logs.appLogs": "MXB App",
   "logs.appLogsDesc": "Was die App selbst aufgezeichnet hat",
   "logs.frostmodLogsDesc": "Was der Loader in seinen eigenen Ordner geschrieben hat",
@@ -1405,6 +1876,20 @@ export const de: Translation = {
   "logs.savedDesc_one": "{{count}} Log-Datei, {{size}}",
   "logs.savedDesc_other": "{{count}} Log-Dateien, {{size}}",
   "logs.saveFailed": "Logs konnten nicht gespeichert werden",
+  "logs.share": "Logs teilen",
+  "logs.sharePacking": "Wird gepackt…",
+  "logs.sharing": "Wird hochgeladen…",
+  "logs.shared": "Logs hochgeladen",
+  "logs.sharedCopied": "{{size}} — der Link liegt in deiner Zwischenablage.",
+  "logs.sharedDesc": "{{size}} — der Link steht unten.",
+  "logs.sharedSummary_one": "{{count}} Log-Datei, {{size}} hochgeladen.",
+  "logs.sharedSummary_other": "{{count}} Log-Dateien, {{size}} hochgeladen.",
+  "logs.shareFailed": "Logs konnten nicht geteilt werden",
+  "logs.copyLink": "Link kopieren",
+  "logs.linkCopiedShort": "Kopiert",
+  "logs.linkCopied": "Link kopiert",
+  "logs.shareWarning":
+    "Das Zip liegt auf einem öffentlichen Filehoster — wer den Link hat, kann es herunterladen. Gib ihn also nur dem, der danach gefragt hat.",
   "logs.privacy":
     "Logs enthalten Ordnerpfade und was die App gerade getan hat — nie deine Passwörter oder Session-Cookies, und keine Einstellungsdatei ist dabei.",
 
@@ -1478,7 +1963,6 @@ export const de: Translation = {
   "paints.kind.bike": "Bike-Design",
   "paints.kind.helmet": "Helm",
   "paints.kind.goggles": "Brille",
-  "paints.kind.profileGoggles": "Brille (Fahrer)",
   "paints.kind.boots": "Stiefel",
   "paints.kind.protection": "Protektoren",
   "paints.kind.kit": "Fahrer-Outfit",
@@ -1497,7 +1981,7 @@ export const de: Translation = {
   "paints.sheetsTitle": "Texturen",
   "paints.reload": "Neu von der Platte laden",
   "paints.addImages": "Bilder hinzufügen…",
-  "paints.expected": "Designs hier verwenden:",
+  "paints.expected": "Hier verwendete Bahnen:",
   "paints.empty":
     "Füge pro Textur eine .tga oder .png hinzu. Entscheidend sind die Namen, nicht die Dateien: eine Textur namens „livery“ landet auf dem Teil, das „livery“ verlangt. Ein entpacktes Design liefert die richtigen Namen.",
   "paints.resized": "Größe {{from}} → {{to}} geändert — das Spiel braucht Zweierpotenzen.",
@@ -1513,11 +1997,26 @@ export const de: Translation = {
 
   // ── Designer (der Ebenen-Editor) ──────────────────────────────────────────────
   "designer.help":
-    "Zeichne ein Design auf die Bahnen, die das Spiel wirklich liest, und sieh es dabei am Modell. Fang bei einem installierten Design an, damit die Bahnennamen stimmen, male mit Pinsel, Verlauf oder Formen darauf, leg Bilder und Text darüber und speichere: heraus kommt eine .pnt, die das Spiel lädt — kein Export, den noch jemand umwandeln muss.",
+    "Zeichne ein Design auf die Bahnen, die das Spiel wirklich liest, und sieh es dabei am Modell. Wähl ein Modell und seine Bahnen sind schon da, unter den Namen, die es nutzt — oder fang bei einem installierten Design oder einer Photoshop-Datei an und bring deine Arbeit mit. Male mit Pinsel, Verlauf oder Formen, leg Bilder und Text darüber und speichere: heraus kommt eine .pnt, die das Spiel lädt — kein Export, den noch jemand umwandeln muss.",
   "designer.empty":
-    "Noch nichts zum Zeichnen da. Fang bei einem für dieses Modell installierten Design an — dann hast du seine Bahnen samt Namen — oder füge eine leere hinzu.",
+    "Noch nichts zum Zeichnen da. Fang bei einem für dieses Modell installierten Design an, öffne eine Photoshop-Datei, um ihre Ebenen zu behalten, oder füge eine leere Bahn hinzu.",
   "designer.startFromPaint": "Von einem Design ausgehen…",
+  "designer.startFromPsd": "Von einer PSD ausgehen…",
+  "designer.exportPsd": "Als PSD exportieren",
+  "designer.exportPsdHint": "Schreibt jede Bahn als PSD mit Ebenen in einen Ordner deiner Wahl.",
+  "designer.exportedPsd_one": "1 Bahn nach {{dir}} geschrieben",
+  "designer.exportedPsd_other": "{{count}} Bahnen nach {{dir}} geschrieben",
+  "designer.sheetsSwitched": "Auf die Bahnen von {{dest}} gewechselt.",
+  "designer.switchSheetsTitle": "Diese Bahnen gehören zu einem anderen Modell",
+  "designer.switchSheetsBody": "{{dest}} nutzt {{names}}. Beim Wechseln werden alle offenen Bahnen ersetzt.",
+  "designer.switchSheets": "Bahnen wechseln",
   "designer.blankSheet": "Leere Bahn",
+  "designer.addSheet": "Bahn hinzufügen",
+  "designer.nothingToSave": "Alle Bahnen sind leer — zeichne etwas, bevor du speicherst.",
+  "designer.blankSheetsSkipped_one": "1 leere Bahn wurde ausgelassen — eine leere würde die Textur des Modells löschen.",
+  "designer.blankSheetsSkipped_other": "{{count}} leere Bahnen wurden ausgelassen — eine leere würde die Textur des Modells löschen.",
+  "designer.createExpected_one": "1 Bahn anlegen",
+  "designer.createExpected_other": "{{count}} Bahnen anlegen",
   "designer.sheets": "Bahnen",
   "designer.moveDown": "Nach unten",
   "designer.moveUp": "Nach oben",
@@ -1550,6 +2049,71 @@ export const de: Translation = {
   "designer.fitNotForPaint": "Eine Malebene ist das Blatt selbst — da gibt es nichts zu verschieben oder zu skalieren.",
   "designer.clipped": "Zugeschnitten",
   "designer.clippedHint": "Diese Ebene ist auf das Teil beschnitten — nichts ragt über die Naht hinaus.",
+  "designer.flank.left": "linke Seite",
+  "designer.flank.right": "rechte Seite",
+  "designer.flank.both": "beide Seiten",
+  "designer.flankWashHint":
+    "Warm ist die linke Seite des Motorrads, kühl die rechte. Die beiden Seiten werden oft als zwei fast identische Kopien desselben Teils abgewickelt — nur hieran lassen sie sich auf der Textur unterscheiden.",
+  "designer.flankSharedHint":
+    "Beide Flanken liegen auf derselben Fläche, deshalb erscheint alles hier Gezeichnete auf jeder Seite des Motorrads — gespiegelt, und nicht dort, wo man es auf der anderen Seite erwarten würde.",
+  "designer.focusHint": "Doppelklick auf ein Teil füllt die Ansicht damit.",
+  "designer.partOver": "{{part}} auf {{over}}",
+  "designer.face.under": "Unterseite",
+  "designer.face.both": "Ober- + Unterseite",
+  "designer.faceHint.under":
+    "Diese Fläche ist die Unterseite des Teils — hier Gemaltes zeigt zum Boden und ist von außen nie zu sehen.",
+  "designer.faceHint.both":
+    "Ober- und Unterseite des Teils liegen auf derselben Fläche, deshalb landet alles hier Gezeichnete auf beiden.",
+  // ── Designer › die Auswahl, und was man mit ihr machen kann ───────────────────
+  "designer.layersSelected": "{{count}} Ebenen ausgewählt",
+  "designer.position": "Position",
+  "designer.duplicate": "Duplizieren",
+  "designer.copy": "Kopieren",
+  "designer.paste": "Einfügen",
+  "designer.copyName": "{{name}} Kopie",
+  "designer.copied_one": "1 Ebene kopiert.",
+  "designer.copied_other": "{{count}} Ebenen kopiert.",
+  "designer.pasteWrongSize":
+    "Das stammt von einer Bahn anderer Größe, und eine Malebene *ist* die Bahn — hier passt nichts davon hinein.",
+  "designer.pasteDropped_one":
+    "1 Malebene wurde ausgelassen — eine Malebene ist die Bahn, und diese hat eine andere Größe.",
+  "designer.pasteDropped_other":
+    "{{count}} Malebenen wurden ausgelassen — eine Malebene ist die Bahn, und diese hat eine andere Größe.",
+  "designer.group": "Gruppieren",
+  "designer.ungroup": "Gruppierung lösen",
+  "designer.groupRow": "Zusammen",
+  "designer.groupOf": "Gruppe aus {{count}}",
+  "designer.groupHint":
+    "Bewegt sie als eins. Ein Klick auf eine davon nimmt die ganze Gruppe — halte Alt, um eine einzelne Ebene herauszugreifen.",
+  "designer.flip": "Spiegeln",
+  "designer.flipX": "Links–rechts spiegeln",
+  "designer.flipY": "Oben–unten spiegeln",
+
+  // ── Designer › auf die andere Flanke spiegeln ─────────────────────────────────
+  "designer.mirror": "Auf die andere Seite spiegeln",
+  "designer.mirrorName": "{{name}} gespiegelt",
+  "designer.mirrorHint":
+    "Legt eine Kopie dieser Ebene dorthin, wo sie auf der anderen Seite des Motorrads landet. Aus dem Modell berechnet statt durch Umklappen der Bahn, also kommt sie auf dem richtigen Teil an — und sie folgt dieser Ebene, bis du sie löst.",
+  "designer.mirroredFrom": "Gespiegelt von „{{name}}“.",
+  "designer.mirroredShort": "Gespiegelt",
+  "designer.mirroredOrphan": "Dies wurde von einer Ebene gespiegelt, die es nicht mehr gibt.",
+  "designer.unlink": "Lösen",
+  "designer.unlinkHint":
+    "Hört auf zu folgen und behält, was da ist. Es wird eine gewöhnliche Ebene, die du für sich bearbeiten kannst.",
+  "designer.selectSource": "Original auswählen",
+  "designer.mirrorPaused":
+    "Kein Modell geladen — dies bleibt, wo es zuletzt platziert wurde, statt zu folgen.",
+  "designer.mirrorRough":
+    "Die andere Seite ist nicht als Spiegelung dieser abgewickelt, daher ist die Platzierung nah statt exakt.",
+  "designer.mirrorWhy.no-model":
+    "Lade zuerst das Motorrad in die Vorschau — ohne Modell gibt es keine andere Seite zu finden.",
+  "designer.mirrorWhy.shared":
+    "Beide Flanken sind auf dieselbe Stelle abgewickelt, das hier ist also schon auf beiden Seiten. Eine zweite Kopie läge genau auf der ersten.",
+  "designer.mirrorWhy.centre":
+    "Das sitzt auf der Mittellinie des Motorrads, die ihre eigene Spiegelung ist — es gibt keine andere Seite dafür.",
+  "designer.mirrorWhy.asymmetric":
+    "Das Modell hat an der Spiegelung dieser Stelle nichts, es gibt also keine andere Seite dafür.",
+
   "designer.opacity": "Deckkraft",
   "designer.blend": "Modus",
   "designer.blend.normal": "Normal",
@@ -1561,7 +2125,6 @@ export const de: Translation = {
   "designer.size": "Textgröße",
   "designer.colour": "Farbe",
   "designer.outline": "Kontur",
-  "designer.needSheets": "Füge eine Bahn zum Zeichnen hinzu.",
   "designer.noModelFound":
     "„{{model}}“ ist nicht in deiner Bibliothek, also gibt es nichts, worauf es gezeigt werden könnte.",
   "designer.noBikePreview":
@@ -1570,11 +2133,26 @@ export const de: Translation = {
     "Die 3D-Vorschau gibt es vorerst nur für MX Bikes — die Modelle von {{game}} brauchen eigene Teil-Zuordnungen. Alles andere funktioniert gleich, und das Design wird ganz normal gespeichert.",
   "designer.gearNote":
     "Auf dem Standardfahrer gezeigt — deine eigene Ausrüstung ist hier nicht geladen.",
+  "designer.gearOnly": "Nur Teil",
+  "designer.gearOnlyHint": "Nur das Teil zeigen, das du bemalst — ohne Fahrer",
   "designer.reference": "Referenz",
   "designer.traceTemplate": "Vorlage",
   "designer.traceHint":
     "Hebt die Lackierung, mit der du angefangen hast, aus dem Blatt heraus und zeigt sie schwach darunter zum Abpausen. Sie ist dann nicht mehr Teil dessen, was du speicherst.",
   "designer.noTemplate": "Dieses Blatt hat keine Vorlage zum Abpausen — es war von Anfang an leer.",
+  "designer.stockTexture": "Originaltextur",
+  "designer.stockHint":
+    "Zeigt unter deinem Blatt die Textur, mit der das Modell ausgeliefert wird — das eigene Plastik des Bikes, bevor eine Lackierung es ersetzt hat. Nichts davon wird gespeichert.",
+  "designer.noStock":
+    "Nur Bikes können sagen, welche Texturen ihre eigenen sind. Ein Helm trägt die Lackierung, mit der er kam, und die ist kein Originallook zum Abpausen.",
+  "designer.stockNoMatch":
+    "Dieses Modell bringt keine eigene Textur namens „{{name}}“ mit, also gibt es vom Bike nichts unter diesem Blatt zu zeigen.",
+  "designer.stockAsBase": "Original als Basis",
+  "designer.stockAsBaseHint":
+    "Malt die eigene Textur des Bikes in voller Deckkraft in dieses Blatt — der Originallook als Ausgangspunkt, eine Startnummer von einer fertigen Lackierung entfernt. Anders als die Referenz darüber gehört diese zu dem, was du speicherst.",
+  "designer.stockAsBaseDone":
+    "„{{name}}“ trägt jetzt die eigene Textur des Bikes — setz deine Nummer drauf und speichere.",
+  "designer.stockReadFailed": "Die eigene Textur „{{name}}“ des Modells ließ sich nicht lesen.",
   "designer.uvMap": "UV-Karte",
   "designer.uvHint":
     "Zeigt, wo die Verkleidungsteile des Modells auf diesem Blatt landen, jedes in eigener Farbe.",
@@ -1583,7 +2161,6 @@ export const de: Translation = {
     "Nichts am Modell verwendet eine Textur namens „{{name}}“, also gibt es kein UV-Layout zu zeigen.",
   "designer.ghostBuried":
     "Die Referenz liegt unter dem Blatt, und die Vorlage dieses Blattes ist undurchsichtig — schalte Vorlage ein, um sie herauszuheben und hindurchzusehen.",
-  "designer.ghostNote": "Nur eine Hilfe — die Referenz wird nie in die Lackierung gespeichert.",
   "designer.resetView": "Ansicht zurücksetzen",
 
   // ── Designer › die Malwerkzeuge ───────────────────────────────────────────────
@@ -1601,7 +2178,7 @@ export const de: Translation = {
   "designer.tool.ellipse": "Ellipse",
   "designer.tool.line": "Linie",
   "designer.moveHint":
-    "Ziehe Ebenen auf der Bahn, um sie zu platzieren. Wähle oben ein Werkzeug, um stattdessen darauf zu malen.",
+    "Ziehe Ebenen auf der Bahn, um sie zu platzieren — sie rasten an Nähten und aneinander ein, halte Alt zum freien Platzieren. Umschalt+Klick erweitert die Auswahl, ein Zug über leere Fläche zieht ein Lasso, und der Rechtsklick hat den Rest. Wähle oben ein Werkzeug, um stattdessen darauf zu malen.",
   "designer.colourFrom": "Damit malen",
   "designer.colourTo": "Dahin verlaufen",
   "designer.swapColours": "Die beiden Farben tauschen",
@@ -1631,6 +2208,18 @@ export const de: Translation = {
   "trackViewer.surface": "Surface",
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Höhenunterschied",
+  "trackViewer.objects": "Objekte",
+  "trackViewer.painting": "Texturen…",
+  "trackViewer.scenery": "Kulisse",
+  "trackViewer.sceneryTris": "{{count}} Dreiecke",
+  "trackViewer.fixtures": "Markierte Punkte",
+  "trackViewer.pieces": "Einzelteile",
+  "trackViewer.selected": "Gewähltes Teil",
+  "trackViewer.place": "Modell setzen",
+  "trackViewer.placePick": "Modell wählen, dann auf den Boden klicken.",
+  "trackViewer.placeHint": "Auf den Boden klicken zum Setzen.",
+  "trackViewer.placedCount": "{{count}} gesetzt",
+  "trackViewer.saveProps": ".scr speichern",
   "trackViewer.noTerrain": "Kein Gelände zum Anzeigen",
   "trackViewer.noTerrainHint":
     "Die Höhendaten dieser Strecke liegen in keinem Format vor, das der Betrachter bereits lesen kann.",
@@ -1641,4 +2230,157 @@ export const de: Translation = {
   "trackViewer.whyDetails": "Warum?",
   "trackViewer.copyDetails": "Details kopieren",
   "trackViewer.copied": "Kopiert",
+  /* ── Protect ─────────────────────────────────────────────────────────── */
+  "nav.protect": "Schützen",
+  "protect.help": "Sperre die Dateien, die du gebaut hast, auf die GUIDs derjenigen, die sie laden dürfen. Eine gesperrte Datei öffnet sich nur auf der Installation, deren GUID sie trägt — ein Käufer, eine Kopie. Dateien einmal auswählen, GUIDs einfügen, und du bekommst einen Ordner pro Käufer. Deine Originale werden nur gelesen.",
+  "protect.ownTitle": "Deine GUID",
+  "protect.ownDesc": "Die Identität, unter der MX Bikes dich kennt. Sie steht in keiner Datei — Steam liefert sie beim Anmelden — also liest die App sie aus dem laufenden Spiel.",
+  "protect.ownUnknown": "Noch nicht bekannt",
+  "protect.readOwn": "Aus dem Spiel lesen",
+  "protect.copy": "Kopieren",
+  "protect.copied": "Kopiert",
+  "protect.useMine": "Zur Liste hinzufügen",
+  "protect.ownFound": "Deine GUID ist {{guid}}",
+  "protect.ownNotFound": "GUID konnte nicht gelesen werden",
+  "protect.ownNotFoundWhy": "Starte MX Bikes, melde dich bei Steam an und versuch es noch einmal.",
+  "protect.ownFailed": "Lesen deiner GUID fehlgeschlagen",
+  "protect.filesTitle": "Zu sperrende Dateien",
+  "protect.filesDesc": "Einzelne Dateien hinzufügen — oder einen Ordner, um alles darin zu nehmen. Eine .pkz wird als Archiv gesperrt, alles andere für sich.",
+  "protect.addFiles": "Dateien hinzufügen",
+  "protect.addFolder": "Ordner hinzufügen",
+  "protect.clear": "Leeren",
+  "protect.summary": "{{files}} Dateien · {{size}}",
+  "protect.summarySkipped": "{{count}} übersprungen",
+  "protect.planFailed": "Diese Auswahl konnte nicht gelesen werden",
+  "protect.skipJunk": "Übersprungen",
+  "protect.skipEmpty": "Leer",
+  "protect.skipProtected": "Bereits geschützt",
+  "protect.guidsTitle": "Sperren auf",
+  "protect.guidsDesc": "Eine GUID pro Zeile — pro GUID kommt ein Ordner heraus. Jede Kopie bekommt ihren eigenen Schlüssel, damit zwei Käufer nicht erkennen können, dass sie dieselbe Datei haben.",
+  "protect.guidsPlaceholder": "FF0110000108D7CFE3",
+  "protect.guidBad": "Keine GUID — 18 Hex-Zeichen",
+  "protect.outTitle": "Wohin damit",
+  "protect.outDesc": "Hier entsteht ein Ordner pro GUID, mit den Dateien unter denselben Pfaden wie zuvor. Deine Originale bleiben unangetastet.",
+  "protect.outPlaceholder": "Ordner wählen",
+  "protect.browse": "Durchsuchen",
+  "protect.lock": "{{files}} Dateien für {{guids}} GUIDs sperren",
+  "protect.done": "{{files}} Dateien für {{guids}} GUIDs gesperrt",
+  "protect.failed": "Sperren fehlgeschlagen",
+  "protect.showFolder": "Ordner anzeigen",
+
+  // ── Track Studio ───────────────────────────────────────────────────────────
+  "nav.track": "Strecke",
+  "track.help": "Beschreibe eine Strecke und Claude schreibt die Runde — die Kurven, die Geraden und jeden Sprung darauf. Die App baut sie, misst sie an echten veröffentlichten Strecken und fragt erneut nach, was nicht passt. Sieh sie in 3D an, bearbeite jeden Sprung und exportiere dann den Ordner, den TerrainEd von MX Bikes kompiliert.",
+  "track.briefPlaceholder": "Eine sandige National-Strecke mit langer Rhythmus-Sektion und zwei großen Step-ups",
+  "track.generate": "Erzeugen",
+  "track.generating": "Schreibt…",
+  "track.generatingHint": "Legt eine geschlossene Runde an, baut sie und misst sie. Ein bis zwei Minuten, länger wenn der erste Versuch korrigiert werden muss.",
+  "track.generated": "„{{name}}“ geschrieben",
+  "track.generateFailed": "Strecke konnte nicht geschrieben werden",
+  "track.empty": "Beschreibe die gewünschte Strecke. Claude schreibt die Runde und jeden Sprung; die App baut sie und prüft, dass sie sich wie eine echte misst.",
+  "track.lap": "Runde",
+  "track.width": "Breite",
+  "track.ground": "Gelände",
+  "track.features": "Elemente",
+  "track.corners": "Kurven",
+  "track.measured": "Gemessen",
+  "track.lips": "Sprünge",
+  "track.steepest": "Steilste",
+  "track.relief": "Relief",
+  "track.budget": "Höhe genutzt",
+  "track.problems": "Zu beheben",
+  "track.preview": "In 3D ansehen",
+  "track.fullscreen": "Vollbild",
+  "track.exitFullscreen": "Vollbild verlassen",
+  "track.building": "Baut…",
+  "track.install": "Installieren",
+  "track.export": "Quelle exportieren",
+  "track.installed": "Vorschau installiert",
+  "track.installFailed": "Konnte nicht installiert werden",
+  "track.buildFailed": "Konnte nicht gebaut werden",
+  "track.exported": "{{count}} Dateien geschrieben",
+  "track.exportFailed": "Konnte nicht exportiert werden",
+  "track.previewOnly": "Eine installierte Strecke bringt Gelände, Oberflächen, Renndaten und den Untergrund mit — keine Kulissen. Dafür TerrainEd über den exportierten Ordner laufen lassen.",
+  "track.at": "Bei",
+  "track.kind": "Art",
+  "track.height": "Höhe",
+  "track.length": "Länge",
+  "track.kind.tabletop": "Tabletop",
+  "track.kind.double": "Double",
+  "track.kind.roller": "Roller",
+  "track.kind.whoops": "Whoops",
+  "track.kind.stepUp": "Step-up",
+  "track.kind.berm": "Anlieger",
+  "track.straight": "Gerade",
+  "track.turnLeft": "Linkskurve",
+  "track.turnRight": "Rechtskurve",
+  "track.radius": "Radius",
+  "track.gap": "Lücke",
+  "track.deep": "tief",
+  "track.over": "über",
+  "track.kind.rut": "Rille",
+  "track.sequenceHint": "Du kannst die Runde der Reihe nach beschreiben — „eine lange Gerade, eine linke Haarnadel, dann ein Double und eine Rhythmus-Sektion“ — und genau so wird sie gebaut.",
+  "track.compile": "Mit TerrainEd bauen",
+  "track.compiling": "Kompiliert…",
+  "track.compiled": "Kompiliert",
+  "track.compileFailed": "Konnte nicht kompiliert werden",
+  "track.buildStepFailed": "Schritt „{{step}}“ fehlgeschlagen",
+  "track.pointAtTools": "Track-Tools auswählen…",
+  "track.toolsNotFound": "Kein terrained.exe in diesem Ordner",
+  "track.stillNeeded": "Die .rdf wird für dich geschrieben — Startgatter, Boxen und Checkpoints. Öffne sie in TrackEd, wenn du die Kameras verschieben willst.",
+  "track.base": "Basis-Strecke",
+  "track.baseLoaded": "„{{name}}“ geladen",
+  "track.name": "Streckenname",
+  "track.author": "Autor",
+  "track.previewHint": "Auf Vorschau drücken, um sie zu bauen und hier anzusehen.",
+  "track.location": "Ort",
+  "track.blank": "Leer",
+  "track.closeLap": "Runde schließen",
+  "track.lapClosed": "Die Runde schließt sich jetzt",
+  "track.closeFailed": "Konnte nicht geschlossen werden",
+  "track.notes": "Anders als veröffentlichte Strecken",
+  "track.replaceTitle": "Diese Strecke ersetzen?",
+  "track.replaceBody": "Es gibt Änderungen, die weder exportiert noch installiert wurden. Eine andere Strecke zu laden verwirft sie.",
+  "track.replaceConfirm": "Verwerfen und laden",
+  "track.across": "breit",
+  "track.hills": "Hügel",
+  "track.surface": "Boden",
+  "track.soil": "Erde",
+  "track.sand": "Sand",
+  "track.grass": "Gras",
+  "track.smoothing": "Übergang",
+  "track.live": "Live",
+  "track.rebuild": "Vorschau neu bauen",
+  "track.wholeLap": "ganze Runde",
+  "track.kind.custom": "Form",
+  "track.mode.height": "Höhe",
+  "track.mode.shape": "Form",
+
+  // --- paid plugins ---
+  "plugins.section": "Plugins",
+  "plugins.sectionDesc": "Kostenpflichtige Erweiterungen für MXB App. Eine Lizenz ist ein Monatsabo, das an dein Konto gebunden ist und zwischen den Prüfungen eine Woche offline weiterläuft.",
+  "plugins.keyLabel": "Schlüssel einlösen",
+  "plugins.keyHelp": "Füge den erhaltenen Schlüssel ein. Zum Verlängern dient ein weiterer Schlüssel — er wird auf die verbleibende Zeit addiert.",
+  "plugins.redeem": "Einlösen",
+  "plugins.redeemed": "{{name}} ist für dieses Konto lizenziert.",
+  "plugins.available": "Verfügbar",
+  "plugins.refresh": "Aktualisieren",
+  "plugins.loading": "Lizenzen werden geprüft…",
+  "plugins.none": "Noch nichts im Angebot.",
+  "plugins.install": "Installieren",
+  "plugins.update": "Aktualisieren",
+  "plugins.installed": "{{name}} ist installiert und läuft.",
+  "plugins.active": "Aktiv",
+  "plugins.activeDetail": "lizenziert bis {{date}}.",
+  "plugins.licensed": "Lizenziert",
+  "plugins.readyToInstall": "Version {{version}} kann installiert werden.",
+  "plugins.noBuildYet": "es gibt noch keinen Build zum Installieren.",
+  "plugins.updateAvailable": "Update verfügbar",
+  "plugins.updateDetail": "du hast {{installed}}, {{latest}} ist erschienen.",
+  "plugins.needsCheck": "Prüfung nötig",
+  "plugins.needsCheckDetail": "seit einer Woche war die Control Plane nicht erreichbar. Geh online und aktualisiere.",
+  "plugins.lapsed": "Abgelaufen",
+  "plugins.lapsedDetail": "deine Lizenz ist am {{date}} abgelaufen. Löse einen Schlüssel ein, um weiterzumachen.",
+  "plugins.notLicensed": "Nicht lizenziert",
+  "plugins.notLicensedDetail": "löse oben einen Schlüssel ein, um es freizuschalten.",
 };

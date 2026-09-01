@@ -339,6 +339,7 @@ struct RawMod {
     /// the ignored live test can print the union of unknown keys and tell us exactly what
     /// [`map_mod`] should be corrected to.
     #[serde(flatten)]
+    #[allow(dead_code)]
     extra: HashMap<String, Value>,
 }
 
@@ -439,7 +440,7 @@ fn parse_timestamp(value: &Value) -> Option<i64> {
     }
 }
 
-fn parse_date_str(raw: &str) -> Option<i64> {
+pub(crate) fn parse_date_str(raw: &str) -> Option<i64> {
     let s = raw.trim();
     if s.is_empty() {
         return None;
@@ -542,7 +543,7 @@ fn safe_shop_url(raw: &str) -> Option<String> {
 }
 
 /// Same rule, relaxed to any https host, for images — thumbnails legitimately live on a CDN.
-fn safe_image_url(raw: &str) -> Option<String> {
+pub(crate) fn safe_image_url(raw: &str) -> Option<String> {
     let url = reqwest::Url::parse(raw.trim()).ok()?;
     (url.scheme() == "https").then(|| url.to_string())
 }
@@ -559,7 +560,7 @@ fn safe_image_url(raw: &str) -> Option<String> {
 /// ~2 KB median), so sanitising at parse time meant an html5ever parse per item on the load
 /// path that blocks the first paint, to produce markup that all but a handful of items would
 /// never show. One parse on open costs nothing and is invisible next to the click.
-fn sanitize_html(raw: &str) -> Option<String> {
+pub(crate) fn sanitize_html(raw: &str) -> Option<String> {
     use scraper::{Html, Selector};
 
     let trimmed = raw.trim();

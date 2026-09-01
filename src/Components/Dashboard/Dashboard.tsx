@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import Sidebar, { type DashboardView } from "../Shell/Sidebar";
+import { parsePluginView, usePlugins } from "@/lib/usePlugins";
 import Library from "../Library/Library";
+import Downloads from "../Downloads/Downloads";
 import Locker from "../Locker/Locker";
 import Presets from "../Presets/Presets";
 import Manage from "../Manage/Manage";
-import Servers from "../Servers/Servers";
+import Secure from "../Secure/Secure";
 import Studio, { type StudioTab } from "../Studio/Studio";
 import Browse from "../Browse/Browse";
 import Shop from "../Shop/Shop";
+import Hub from "../Hub/Hub";
 import ModDetail from "../ModDetail/ModDetail";
 import DropZone from "../Dropzone/DropZone";
 import Settings, { type SectionId } from "../Settings/Settings";
@@ -15,12 +19,15 @@ import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import ReleaseShowcase from "../Showcase/ReleaseShowcase";
 import { useReleaseShowcase } from "../Showcase/useReleaseShowcase";
 import { InstallProvider } from "../../Context/Install";
+import { DownloadsProvider } from "../../Context/Downloads";
 import { DropReviewProvider } from "../../Context/DropReview";
 import { ShareProvider } from "../../Context/Share";
 import { useConfig } from "../../Context/Config";
-import { setIntroSeen } from "../../api/mods";
+import { modTypesFor, setIntroSeen } from "../../api/mods";
 import { useModBrowsing } from "../../lib/useModBrowsing";
-import type { Loadout } from "../../types";
+import { displayName } from "../../lib/mods";
+import { track } from "../../lib/analytics";
+import type { DownloadRecord, Loadout } from "../../types";
 
 interface DashboardProps {
   /** True while the Welcome slideshow is still up. The tour waits for it to close
@@ -34,6 +41,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // A preset handed off from the Presets tab to load in the Rider tab (its
   // "View in Rider" button). Consumed once by the Rider view, then cleared.
   const [riderPreset, setRiderPreset] = useState<Loadout | null>(null);
+  const [riderBike, setRiderBike] = useState<string | null>(null);
   // Which Studio sub-view is open. Here rather than inside `Studio` because two things
   // outside it open the Studio *at* a sub-view — Presets' "View in Rider", and the tour.
   const [studioTab, setStudioTab] = useState<StudioTab>("designer");
@@ -60,6 +68,41 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // Which Settings section to land on, when something sent us there on purpose.
   // Cleared on the way out so a later visit opens where Settings normally opens.
   const [settingsSection, setSettingsSection] = useState<SectionId | undefined>();
+
+  // Paid plugins running this session. A plugin that fails to mount says so once and is
+  // then dropped: the app is a mod manager first, and a broken add-on must not take it down.
+  const plugins = usePlugins((id, message) =>
+    toast.error(`${id}: ${message}`),
+  );
+  // The panel on screen, when the current view addresses one. A view naming a plugin that
+  // is no longer mounted — a licence that lapsed mid-session — falls through to the
+  // built-in pages rather than rendering a blank frame.
+  const pluginPanel = (() => {
+    const ref = parsePluginView(view);
+    if (!ref) return null;
+    const p = plugins.find((x) => x.manifest.id === ref.plugin);
+    return p?.panels.find((panel) => panel.id === ref.panel) ?? null;
+  })();
+  // Which page is open, as the usage counters name it.
+  //
+  // Derived and counted by an effect rather than inside `navigate`, because plenty of
+  // things move the view without going through it — the tour, the release showcase, a
+  // download row jumping to the Library — and a page nobody counted is worse than one
+  // counted twice. Studio's sub-views are pages in their own right; everything else is
+  // one name, so a tab added to the sidebar is counted without touching this.
+  const page = view.startsWith("plugin:")
+    ? "view.plugin"   // one bucket: naming each panel would be unbounded cardinality
+    : view === "studio"
+      ? `view.studio.${studioTab}`
+      : `view.${view}`;
+  useEffect(() => {
+    track(page);
+  }, [page]);
+
+  // Opening a mod's page is a use of the browser, not a page of its own.
+  useEffect(() => {
+    if (selectedSlug) track("mod.detail");
+  }, [selectedSlug]);
 
   const navigate = useCallback(
     (v: DashboardView, studio?: StudioTab) => {
@@ -109,19 +152,53 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     startTour();
   }, [welcomeActive, startTour, config.tourDone]);
 
+  // Jump from a download row to the mod it installed: the right library tab, searched for
+  // by name. A fresh object each time so repeating the same jump still re-applies it.
+  const [libraryFocus, setLibraryFocus] = useState<{ name: string } | null>(null);
+  const showInLibrary = useCallback(
+    (record: DownloadRecord) => {
+      const target = modTypesFor(game.id).find(
+        (mt) => mt.installSubpath === record.subpath,
+      );
+      if (target) changeType(target);
+      setLibraryFocus({ name: displayName(record.title) });
+      navigate("library");
+    },
+    [game.id, changeType, navigate],
+  );
+  const clearLibraryFocus = useCallback(() => setLibraryFocus(null), []);
+
+  // The other direction: from a mod the Library only *remembers* to the catalog page it
+  // could be downloaded from again. The category comes from the tab being browsed, the same
+  // fallback the detail view uses when nothing more specific is known.
+  const openFoundMod = useCallback(
+    (slug: string) => {
+      openMod(slug, modType.categoryId);
+      navigate("browse");
+    },
+    [openMod, modType.categoryId, navigate],
+  );
+
   // Jump from Presets into the Rider tab with a preset loaded, to view it on the model.
-  const openInRider = useCallback((lo: Loadout) => {
+  const openInRider = useCallback((lo: Loadout, bike: string) => {
     setRiderPreset(lo);
+    // The bike rides along: a loadout names a livery and a model swap but never the bike
+    // they belong to, so without this the Rider tab would dress whichever bike it landed on.
+    setRiderBike(bike);
     navigate("studio", "rider");
   }, [navigate]);
   const clearRiderPreset = useCallback(() => setRiderPreset(null), []);
 
   return (
     <TourContext.Provider value={{ startTour }}>
+    {/* Outside the installers: both of them write to the history, and the sidebar reads it. */}
+    <DownloadsProvider>
+    {/* Above the installer, not below it: a *download* stages a plan too now — a pack like
+        the OEM bikes arrives as fifty-five mods in one archive — so `InstallProvider` has to
+        be able to hand one over. It wraps the views for the same reason it always did: a drop
+        anywhere in the window and the Shop's purchases grid both finish in this one sheet. */}
+    <DropReviewProvider onInstalled={onInstalled}>
     <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
-      {/* Wraps the views because two of them stage plans: a drop anywhere in the window, and
-          the Shop's purchases grid. Both finish in the one review sheet this renders. */}
-      <DropReviewProvider onInstalled={onInstalled}>
       {/* Owns the share/import dialogs for every screen that lists installed content, and
           watches for a share code pasted into the window. */}
       <ShareProvider onImported={onInstalled}>
@@ -130,9 +207,11 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           window renders its own tree and deliberately gets no drop target. */}
       <DropZone />
       <div className="flex min-h-0 flex-1">
-        <Sidebar view={view} onNavigate={navigate} />
+        <Sidebar view={view} studioTab={studioTab} plugins={plugins} onNavigate={navigate} />
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-          {view === "browse" && selectedSlug ? (
+          {pluginPanel ? (
+            <pluginPanel.component />
+          ) : view === "browse" && selectedSlug ? (
             <ModDetail
               slug={selectedSlug}
               modType={modType}
@@ -151,12 +230,24 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
             />
           ) : view === "shop" ? (
             <Shop refreshKey={libraryVersion} />
+          ) : view === "hub" ? (
+            <Hub refreshKey={libraryVersion} />
           ) : view === "library" ? (
             <Library
               modType={modType}
               onChangeType={changeType}
               refreshKey={libraryVersion}
               onChanged={onInstalled}
+              focus={libraryFocus}
+              onFocusApplied={clearLibraryFocus}
+              onOpenMod={openFoundMod}
+            />
+          ) : view === "downloads" ? (
+            <Downloads
+              onOpenMod={openModTarget}
+              onShowInLibrary={showInLibrary}
+              onOpenShop={() => navigate("shop")}
+              onOpenHub={() => navigate("hub")}
             />
           ) : view === "locker" ? (
             <Locker />
@@ -171,12 +262,13 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               tab={studioTab}
               onTab={setStudioTab}
               riderPreset={riderPreset}
+              riderBike={riderBike}
               onRiderPresetLoaded={clearRiderPreset}
             />
-          ) : view === "servers" ? (
-            <Servers />
           ) : view === "manage" ? (
             <Manage />
+          ) : view === "secure" ? (
+            <Secure />
           ) : (
             <Settings
               initialSection={settingsSection}
@@ -196,8 +288,9 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
         />
       )}
       </ShareProvider>
-      </DropReviewProvider>
-    </InstallProvider>
+      </InstallProvider>
+    </DropReviewProvider>
+    </DownloadsProvider>
     </TourContext.Provider>
   );
 };

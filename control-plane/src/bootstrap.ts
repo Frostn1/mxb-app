@@ -47,15 +47,124 @@ const ROOT = "C:\\mxb";
  * rather than as cmd, and `<persist>false</persist>` keeps it to first boot only — this
  * script is not idempotent and re-running it on every start would rewrite live config.
  */
-export function bootstrapScript(input: BootstrapInputs): string {
-  // Values are interpolated into a PowerShell string, so anything that could close a quote
-  // or start a new statement has to be refused rather than escaped. The callers validate
-  // too; this is the last line before it becomes code on someone's machine.
+/**
+ * What a server launched from a prebuilt image runs.
+ *
+ * Everything expensive — the game, the bikes, the agent binary — is already on the disk, so
+ * this only does the parts that differ per server: the name and track it advertises, and its
+ * own agent token, which cannot be baked into a shared image because every server has a
+ * different one.
+ *
+ * Seconds rather than the quarter of an hour a from-scratch install takes, and it stays that
+ * way as the bike pack grows.
+ */
+export function imageBootstrapScript(input: BootstrapInputs): string {
+  guardInputs(input);
+  return `<powershell>
+$ErrorActionPreference = "Stop"
+Start-Transcript -Path "C:\\mxb-bootstrap.log" -Append
+
+function Send-Stage {
+  param([string] $Stage, [bool] $Ok = $true, [string] $Log = "")
+  try {
+    $payload = @{ stage = $Stage; ok = $Ok; log = $Log } | ConvertTo-Json -Compress
+    Invoke-RestMethod -Method POST -Uri "${input.controlPlaneUrl}/v1/servers/${input.serverId}/bootstrap" -Headers @{ "Authorization" = "Bearer ${input.agentToken}"; "Content-Type" = "application/json" } -Body $payload -TimeoutSec 15 | Out-Null
+  } catch {
+    Write-Output "couldn't report stage '$Stage': $_"
+  }
+}
+
+trap {
+  $reason = "$_"
+  Write-Output "bootstrap failed: $reason"
+  try { Stop-Transcript } catch {}
+  $tail = ""
+  try { $tail = (Get-Content -Path "C:\\mxb-bootstrap.log" -Tail 200 | Out-String) } catch {}
+  Send-Stage -Stage "failed" -Ok $false -Log "$reason\`n$tail"
+  Stop-Computer -Force
+  exit 1
+}
+
+Send-Stage -Stage "starting up"
+
+# The image carries the game and the bikes. If it does not, this is not the image we think it
+# is, and a server that comes up without them refuses every rider on a mod bike.
+if (-not (Test-Path "${ROOT}\\game\\mxbikes.exe")) { throw "this image has no game installed" }
+
+@"
+[connection]
+name = ${input.serverName}
+maxclient = 20
+
+[event]
+track = Victoria
+track_layout =
+"@ | Set-Content -Path "${ROOT}\\game\\dedicated.ini" -Encoding ASCII
+
+$imdsToken = Invoke-RestMethod -Method PUT -Uri "http://169.254.169.254/latest/api/token" -Headers @{ "X-aws-ec2-metadata-token-ttl-seconds" = "300" } -TimeoutSec 10
+$publicIp = Invoke-RestMethod -Uri "http://169.254.169.254/latest/meta-data/public-ipv4" -Headers @{ "X-aws-ec2-metadata-token" = $imdsToken } -TimeoutSec 10
+if (-not $publicIp) { throw "this instance has no public address" }
+
+# The one thing that cannot be baked in: every server has its own token.
+@{
+  token = "${input.agentToken}"
+  listen = "0.0.0.0:${input.agentPort}"
+  public_url = "http://$publicIp:${input.agentPort}"
+  game_dir = "${ROOT}\\game"
+  ini = "dedicated.ini"
+  game_port = ${input.gamePort}
+} | ConvertTo-Json | Set-Content -Path "${ROOT}\\agent.json" -Encoding ASCII
+try { Get-Content -Path "${ROOT}\\agent.json" -Raw | ConvertFrom-Json | Out-Null }
+catch { throw "the agent config we just wrote is not valid JSON: $_" }
+
+Start-ScheduledTask -TaskName "mxb-agent"
+Send-Stage -Stage "waiting for the agent"
+
+$ready = $false
+foreach ($attempt in 1..45) {
+  try {
+    Invoke-RestMethod -Uri "http://127.0.0.1:${input.agentPort}/health" -TimeoutSec 5 | Out-Null
+    $ready = $true
+    break
+  } catch { Start-Sleep -Seconds 2 }
+}
+if (-not $ready) { throw "the agent never answered on ${input.agentPort}" }
+
+$announced = $false
+foreach ($attempt in 1..5) {
+  try {
+    Invoke-RestMethod -Method POST -Uri "${input.controlPlaneUrl}/v1/servers/${input.serverId}/hello" -Headers @{ "Authorization" = "Bearer ${input.agentToken}"; "Content-Type" = "application/json" } -Body '{"agentPort":${input.agentPort},"gamePort":${input.gamePort}}' -TimeoutSec 15 | Out-Null
+    $announced = $true
+    break
+  } catch {
+    Write-Output "announce attempt $attempt failed: $_"
+    Start-Sleep -Seconds 5
+  }
+}
+if (-not $announced) { throw "couldn't tell the control plane this server is up" }
+
+Send-Stage -Stage "ready"
+Write-Output "bootstrap complete"
+Stop-Transcript
+</powershell>
+<persist>false</persist>`;
+}
+
+/**
+ * Values are interpolated into a PowerShell string, so anything that could close a quote or
+ * start a new statement is refused rather than escaped. The callers validate too; this is the
+ * last line before it becomes code on someone's machine.
+ */
+function guardInputs(input: BootstrapInputs): void {
   for (const [field, value] of Object.entries(input)) {
     if (typeof value === "string" && /["'`$\r\n]/.test(value)) {
       throw new Error(`${field} contains a character that can't go in the bootstrap script`);
     }
   }
+}
+
+export function bootstrapScript(input: BootstrapInputs): string {
+  guardInputs(input);
 
   return `<powershell>
 $ErrorActionPreference = "Stop"
@@ -154,20 +263,79 @@ if (-not (Test-Path "${ROOT}\\game\\mxbikes.exe")) {
 #
 # Best-effort: a server with no mod bikes is still a working server for stock ones, and is a
 # far better outcome than destroying the instance over content that can be added later.
-Send-Stage -Stage "installing bikes"
 try {
-  $bikesDir = "${ROOT}\\game\\mods\\bikes"
+  # Where MX Bikes actually reads mods from.
+  #
+  # The client reads them from PiBoSo's user folder -- Documents\\PiBoSo\\MX Bikes\\mods -- not
+  # from beside the executable. The dedicated server is the same program, and running as
+  # SYSTEM its Documents folder is under systemprofile. Installing only into the game folder
+  # is why a server rejected riders on bikes it had supposedly been given: the files were on
+  # disk and the game was never looking there.
+  #
+  # Installed once into the user folder, with the game folder junctioned to it, so the
+  # agent's own track scan sees the same content without a second copy of two gigabytes.
+  $userMods = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "PiBoSo\\MX Bikes\\mods"
+  $bikesDir = Join-Path $userMods "bikes"
   New-Item -ItemType Directory -Force -Path $bikesDir | Out-Null
-  $listing = Invoke-RestMethod -Uri "${input.controlPlaneUrl}/v1/content/bikes" -TimeoutSec 60
-  $count = 0
-  foreach ($bike in $listing.bikes) {
-    $dest = Join-Path $bikesDir $bike.name
-    & $curl -L --fail --silent --show-error --retry 3 --retry-delay 5 \`
-      -o $dest "${input.controlPlaneUrl}/v1/content/bikes/$($bike.name)"
-    if ($LASTEXITCODE -eq 0) { $count = $count + 1 }
-    else { Write-Output "couldn't fetch $($bike.name) (curl $LASTEXITCODE)" }
+  Send-Stage -Stage "installing bikes"
+  Write-Output "mods folder: $userMods"
+  $gameMods = "${ROOT}\\game\\mods"
+  if (-not (Test-Path $gameMods)) {
+    # A junction rather than a copy: same bytes, both paths, no second 2 GB.
+    cmd /c mklink /J "$gameMods" "$userMods" | Out-Null
+    Write-Output "linked $gameMods -> $userMods"
   }
-  Write-Output "installed $count of $($listing.bikes.Count) bikes"
+  $listing = Invoke-RestMethod -Uri "${input.controlPlaneUrl}/v1/content/bikes" -TimeoutSec 60
+  $total = $listing.bikes.Count
+  $count = 0
+  # Two passes over whatever is still missing. The common causes of a lost file here are
+  # transient, and the cost of not trying again is a server that rejects riders on a bike it
+  # was meant to have -- which is how this failure is met: "bike unknown to server".
+  $pending = @($listing.bikes)
+  for ($pass = 1; $pass -le 2 -and $pending.Count -gt 0; $pass++) {
+    $next = @()
+    $i = 0
+    foreach ($bike in $pending) {
+      $i = $i + 1
+      $dest = Join-Path $bikesDir $bike.name
+      # A flat five-minute cap was the wrong budget. The pack's two biggest bikes are 184 MB,
+      # which only fits inside five minutes above 0.6 MB/s -- so the slower the instance, the
+      # more certain it was to drop exactly the OEM bikes somebody provisioned a server for.
+      # Each file gets the time 100 KB/s would need instead, never less than five minutes.
+      #
+      # --speed-limit is what actually catches a dead transfer: a connection that stays open
+      # and stops sending, which --retry cannot see and which hung the first build for three
+      # quarters of an hour.
+      $budget = [int][Math]::Max(300, $bike.size / 102400)
+      & $curl -L --fail --silent --show-error --retry 3 --retry-delay 5 \`
+        --max-time $budget --speed-limit 10240 --speed-time 60 \`
+        -o $dest "${input.controlPlaneUrl}/v1/content/bikes/$($bike.name)"
+      if ($LASTEXITCODE -eq 0) { $count = $count + 1 }
+      else {
+        $next += $bike
+        Write-Output "couldn't fetch $($bike.name) (curl $LASTEXITCODE)"
+      }
+      # Say where we are. Reporting the step once and then going quiet for the length of a four
+      # gigabyte download is indistinguishable from having hung -- which is exactly how the
+      # first image build looked.
+      if (($i % 5) -eq 0 -or $i -eq $pending.Count) {
+        Send-Stage -Stage "installing bikes $count of $total"
+      }
+    }
+    $pending = @($next)
+    if ($pending.Count -gt 0 -and $pass -eq 1) {
+      Send-Stage -Stage "retrying $($pending.Count) bikes"
+    }
+  }
+  Write-Output "installed $count of $total bikes"
+  # A short pack is not worth destroying the instance over, but it must not pass for a clean
+  # build either. The names go in the log, which is kept only for a report that says something
+  # went wrong -- and which has no charset, unlike a stage string, where a bike's dots and
+  # underscores would be rejected outright.
+  if ($pending.Count -gt 0) {
+    $names = ($pending | ForEach-Object { $_.name }) -join ", "
+    Send-Stage -Stage "installed $count of $total bikes" -Ok $false -Log "missing: $names"
+  }
 } catch {
   Write-Output "couldn't install the bike pack: $_"
 }

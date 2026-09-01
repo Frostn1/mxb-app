@@ -130,7 +130,7 @@ fn is_dir(path: &Path) -> bool {
 }
 
 /// Every entry name in a track, without inflating any of them.
-fn entry_names(path: &Path) -> Result<Vec<String>> {
+pub(crate) fn entry_names(path: &Path) -> Result<Vec<String>> {
     if is_dir(path) {
         let mut out = Vec::new();
         for entry in crate::linkwalk::walk_depth(path, 6)
@@ -150,14 +150,13 @@ fn entry_names(path: &Path) -> Result<Vec<String>> {
 }
 
 /// Pull one named entry's bytes out of a track.
-fn read_entry(path: &Path, name: &str) -> Result<Vec<u8>> {
+pub(crate) fn read_entry(path: &Path, name: &str) -> Result<Vec<u8>> {
     if is_dir(path) {
         return std::fs::read(path.join(name)).with_context(|| format!("read {name}"));
     }
     let want = name.to_ascii_lowercase();
-    let found = crate::pkz::read_selected(path, |n| {
-        n.replace('\\', "/").to_ascii_lowercase() == want
-    })?;
+    let found =
+        crate::pkz::read_selected(path, |n| n.replace('\\', "/").to_ascii_lowercase() == want)?;
     match found.into_iter().next() {
         Some((_, bytes)) => Ok(bytes),
         None => bail!("{name} is not in {path:?}"),
@@ -165,7 +164,7 @@ fn read_entry(path: &Path, name: &str) -> Result<Vec<u8>> {
 }
 
 /// The entries that could hold a terrain grid, best-looking first.
-fn heightfield_entries(names: &[String]) -> Vec<String> {
+pub(crate) fn heightfield_entries(names: &[String]) -> Vec<String> {
     let mut out: Vec<String> = names
         .iter()
         .filter(|n| {
@@ -261,7 +260,11 @@ pub fn read_info(app: &tauri::AppHandle, path: &str) -> Result<TrackInfo> {
             TrackFile { name, role }
         })
         .collect();
-    files.sort_by(|a, b| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()));
+    files.sort_by(|a, b| {
+        a.name
+            .to_ascii_lowercase()
+            .cmp(&b.name.to_ascii_lowercase())
+    });
 
     Ok(TrackInfo {
         meta,
@@ -276,7 +279,11 @@ pub fn load_master(app: &tauri::AppHandle, path: &str) -> Result<Master> {
     let stamp = stamp(path)?;
     let key = cache_key(path, stamp);
 
-    if let Some(hit) = memory_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+    if let Some(hit) = memory_cache()
+        .lock()
+        .ok()
+        .and_then(|mut c| c.get(&key).cloned())
+    {
         return Ok(hit);
     }
     if let Some(hit) = cache_file(app, &key).and_then(|f| read_cache(&f)) {
@@ -363,11 +370,12 @@ pub fn terrain_blob(master: &Master, max_dim: u32) -> Vec<u8> {
     let mut out = Vec::with_capacity(BLOB_HEADER + heights.len() * 4);
     out.extend_from_slice(b"FTRN");
     out.extend_from_slice(&1u16.to_le_bytes()); // version
-    // Bit 0: the sample spacing was stated by the track rather than assumed. The app needs
-    // this to caption the view honestly — with the spacing assumed, the relief is drawn
-    // against a footprint we guessed, so its steepness is not something to trust.
-    // Bit 1: the heights are metres rather than the file's own raw units.
-    let flags = u16::from(master.info.scale_known) | (u16::from(master.info.heights_in_metres) << 1);
+                                                // Bit 0: the sample spacing was stated by the track rather than assumed. The app needs
+                                                // this to caption the view honestly — with the spacing assumed, the relief is drawn
+                                                // against a footprint we guessed, so its steepness is not something to trust.
+                                                // Bit 1: the heights are metres rather than the file's own raw units.
+    let flags =
+        u16::from(master.info.scale_known) | (u16::from(master.info.heights_in_metres) << 1);
     out.extend_from_slice(&flags.to_le_bytes());
     out.extend_from_slice(&w.to_le_bytes());
     out.extend_from_slice(&h.to_le_bytes());
@@ -400,7 +408,7 @@ pub const TEXTURE_HEADER: usize = 16;
 
 /// Bump when [`surface_colour`] changes, so cached textures drawn with the old palette are
 /// retired rather than kept.
-const SURFACE_SCHEME: u32 = 1;
+const SURFACE_SCHEME: u32 = 2;
 
 /// The colour of a surface, by the id the track states for it.
 ///
@@ -417,17 +425,33 @@ const SURFACE_SCHEME: u32 = 1;
 ///
 /// Hues are kept apart on purpose. Half of these are browns, and a track whose surfaces are
 /// all a similar brown reads as one flat surface no matter how correct each colour is.
+///
+/// Kept dry, though. An id names a surface the way the physics means it, not the way a track
+/// looks: a sand circuit in Australia paints its infield as surface 1, and a lawn green there
+/// is the loudest wrong thing on the screen. These are the same hues pulled towards earth, so
+/// a mistaken one reads as ground rather than as a golf course.
 fn surface_colour(id: u32) -> [u8; 3] {
     match id {
-        0 => [84, 86, 92],     // asphalt — cold, dark
-        1 => [98, 132, 66],    // grass — the only green
-        2 => [216, 198, 152],  // sand — pale, warm
-        3 => [186, 146, 92],   // kerb — tan, between sand and soil
-        4 => [138, 100, 62],   // soil — mid brown
+        0 => [88, 89, 94],     // asphalt — cold, dark
+        1 => [124, 138, 96],   // grass — dry, not a lawn
+        2 => [214, 197, 156],  // sand — pale, warm
+        3 => [188, 152, 104],  // kerb — tan, between sand and soil
+        4 => [150, 118, 84],   // soil — mid brown
         5 => [158, 156, 150],  // concrete — light, neutral
-        10 => [122, 78, 52],   // the riding line — darkest, reddest
-        12 => [112, 120, 92],  // olive, so it parts from both grass and soil
-        _ => [126, 114, 96],
+        10 => [128, 84, 58],   // the riding line — darkest, reddest
+        // Generated tracks paint their features with ids of their own, so the studio's 3D
+        // preview can show you which lump is which. Nothing published uses these — real
+        // tracks' surface ids are all under about 16 — so they cost real tracks nothing.
+        200 => [214, 120, 60],  // tabletop
+        201 => [206, 74, 96],   // double
+        202 => [120, 150, 200], // roller
+        203 => [190, 170, 70],  // whoops
+        204 => [110, 180, 130], // step-up
+        205 => [150, 110, 200], // berm
+        206 => [90, 90, 110],   // rut
+        207 => [200, 200, 210], // a shape drawn by hand
+        12 => [124, 126, 102], // olive, so it parts from both grass and soil
+        _ => [138, 126, 106],
     }
 }
 
@@ -436,7 +460,7 @@ fn surface_colour(id: u32) -> [u8; 3] {
 /// Found by the table's own first entry rather than by walking: mask bytes are arbitrary and
 /// contain plenty of values that read as a plausible record header, so a walk with no end in
 /// sight runs off into the data. With the end known, the walk is bounded and exact.
-fn material_table_offset(block: &[u8]) -> Option<usize> {
+pub(crate) fn material_table_offset(block: &[u8]) -> Option<usize> {
     block
         .windows(8)
         .position(|w| w == b"asphalt\0")
@@ -444,11 +468,11 @@ fn material_table_offset(block: &[u8]) -> Option<usize> {
 }
 
 /// One painted surface: which id it is, and a byte of coverage per cell.
-struct Coverage {
-    id: u32,
-    width: u32,
-    height: u32,
-    at: usize,
+pub(crate) struct Coverage {
+    pub(crate) id: u32,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) at: usize,
 }
 
 /// The coverage masks in a height file's trailing block.
@@ -456,12 +480,14 @@ struct Coverage {
 /// Records start at 44 and are `id, value, width, height` then `width * height` bytes —
 /// except that some carry no `value`, so a header is twelve bytes as often as sixteen and
 /// each has to be tried. A record with zero dimensions is a surface named but never painted.
-fn coverage_masks(block: &[u8]) -> Vec<Coverage> {
+pub(crate) fn coverage_masks(block: &[u8]) -> Vec<Coverage> {
     let Some(end) = material_table_offset(block) else {
         return Vec::new();
     };
     let u32_at = |o: usize| -> Option<u32> {
-        block.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+        block
+            .get(o..o + 4)
+            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
     };
     let plausible = |v: u32| (16..=8192).contains(&v);
 
@@ -473,7 +499,12 @@ fn coverage_masks(block: &[u8]) -> Vec<Coverage> {
 
         if let (Some(id), Some(w), Some(h)) = (id, w16, h16) {
             if plausible(w) && plausible(h) && o + 16 + (w as usize * h as usize) <= end {
-                out.push(Coverage { id, width: w, height: h, at: o + 16 });
+                out.push(Coverage {
+                    id,
+                    width: w,
+                    height: h,
+                    at: o + 16,
+                });
                 o += 16 + w as usize * h as usize;
                 continue;
             }
@@ -484,7 +515,12 @@ fn coverage_masks(block: &[u8]) -> Vec<Coverage> {
         }
         if let (Some(id), Some(w), Some(h)) = (u32_at(o), w12, h12) {
             if plausible(w) && plausible(h) && o + 12 + (w as usize * h as usize) <= end {
-                out.push(Coverage { id, width: w, height: h, at: o + 12 });
+                out.push(Coverage {
+                    id,
+                    width: w,
+                    height: h,
+                    at: o + 12,
+                });
                 o += 12 + w as usize * h as usize;
                 continue;
             }
@@ -514,9 +550,12 @@ pub fn overview_blob(app: &tauri::AppHandle, path: &Path, max_dim: u32) -> Optio
     // The scheme number is part of the key, so changing how surfaces are coloured retires
     // every cached texture on its own. Without it a track keeps whatever colours it was first
     // drawn with, and the change only shows on machines that had never opened it.
-    let key = stamp(&path.to_string_lossy())
-        .ok()
-        .map(|st| format!("{}:tex{max_dim}v{SURFACE_SCHEME}", cache_key(&path.to_string_lossy(), st)));
+    let key = stamp(&path.to_string_lossy()).ok().map(|st| {
+        format!(
+            "{}:tex{max_dim}v{SURFACE_SCHEME}",
+            cache_key(&path.to_string_lossy(), st)
+        )
+    });
     if let Some(f) = key.as_deref().and_then(|k| cache_file(app, k)) {
         if let Ok(bytes) = std::fs::read(&f) {
             if bytes.len() > TEXTURE_HEADER && bytes.starts_with(b"FTEX") {
@@ -551,7 +590,9 @@ fn build_surface_blob(path: &Path, max_dim: u32) -> Option<Vec<u8>> {
 
     let src_w = masks[0].width as usize;
     let src_h = masks[0].height as usize;
-    let scale = (src_w.max(src_h) as f32 / max_dim.max(1) as f32).ceil().max(1.0) as usize;
+    let scale = (src_w.max(src_h) as f32 / max_dim.max(1) as f32)
+        .ceil()
+        .max(1.0) as usize;
     let out_w = src_w.div_ceil(scale);
     let out_h = src_h.div_ceil(scale);
     // At least two cells across even when drawing a mask at its own resolution, so the dither
@@ -571,7 +612,7 @@ fn build_surface_blob(path: &Path, max_dim: u32) -> Option<Vec<u8>> {
             // leaves the whole track a flat brown with nothing to pick features out by.
             let mut best = 0u32;
             let mut colour = BARE;
-            for (i, m) in masks.iter().enumerate() {
+            for m in masks.iter() {
                 let mx = x * scale * m.width as usize / src_w.max(1);
                 let my = y * scale * m.height as usize / src_h.max(1);
 
@@ -638,7 +679,11 @@ fn resample(master: &Master, max_dim: u32) -> (u32, u32, Vec<f32>) {
     let max_dim = max_dim.max(1) as usize;
     let longest = w.max(h);
     if longest <= max_dim {
-        return (master.info.width, master.info.height, master.heights.clone());
+        return (
+            master.info.width,
+            master.info.height,
+            master.heights.clone(),
+        );
     }
 
     // Land on exactly the size asked for. Reducing by a whole number of samples instead
@@ -740,7 +785,13 @@ fn hex_preview(bytes: &[u8], count: usize) -> String {
     let hex: Vec<String> = bytes[..take].iter().map(|b| format!("{b:02x}")).collect();
     let ascii: String = bytes[..take]
         .iter()
-        .map(|b| if b.is_ascii_graphic() { *b as char } else { '.' })
+        .map(|b| {
+            if b.is_ascii_graphic() {
+                *b as char
+            } else {
+                '.'
+            }
+        })
         .collect();
     format!("{}  |{ascii}|", hex.join(" "))
 }
@@ -891,11 +942,23 @@ mod tests {
     fn read_a_real_track() {
         let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK to a track .pkz/folder");
         println!("{}", diagnose(Path::new(&path)));
+        // What the viewer actually receives at its own detail level — a terrain whose info
+        // reads fine but whose heights come back empty draws nothing at all.
+        let want: u32 = std::env::var("FROST_DETAIL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(512);
+        match decode_master(Path::new(&path)) {
+            Ok(m) => {
+                let (w, h, heights) = resample(&m, want);
+                let finite = heights.iter().filter(|v| v.is_finite()).count();
+                let lo = heights.iter().cloned().fold(f32::INFINITY, f32::min);
+                let hi = heights.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                println!("view {w}x{h}: {} heights, {finite} finite, [{lo}, {hi}]", heights.len());
+            }
+            Err(e) => println!("no master: {e:#}"),
+        }
     }
-
-
-
-
 
     /// Point this at a real track to see the surfaces its height file paints:
     ///
@@ -914,7 +977,10 @@ mod tests {
             let bytes = read_entry(path, &entry).unwrap();
             let gw = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
             let gh = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-            for (i, m) in coverage_masks(&bytes[12 + gw * gh * 2..]).iter().enumerate() {
+            for (i, m) in coverage_masks(&bytes[12 + gw * gh * 2..])
+                .iter()
+                .enumerate()
+            {
                 println!("  surface {i}: id={} {}x{}", m.id, m.width, m.height);
             }
         }
@@ -927,6 +993,29 @@ mod tests {
                 assert_eq!(b.len(), TEXTURE_HEADER + (w * h * 4) as usize);
             }
             None => println!("no surfaces in this track"),
+        }
+        // `FROST_PNG=/tmp/surface.png` writes the picture out, which is the only way to see
+        // whether a track really is one flat colour or is being read as one.
+        if let (Ok(out), Some(b)) = (std::env::var("FROST_PNG"), build_surface_blob(path, 1024)) {
+            let w = u32::from_le_bytes(b[8..12].try_into().unwrap()) as usize;
+            let h = u32::from_le_bytes(b[12..16].try_into().unwrap()) as usize;
+            let px = &b[TEXTURE_HEADER..];
+            let mut seen = std::collections::HashMap::new();
+            for q in px.chunks_exact(4) {
+                *seen.entry([q[0], q[1], q[2]]).or_insert(0usize) += 1;
+            }
+            let mut counts: Vec<_> = seen.into_iter().collect();
+            counts.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+            println!("  {} distinct colours, commonest:", counts.len());
+            for (c, n) in counts.iter().take(6) {
+                println!("    {c:?} {:.1}%", *n as f64 * 100.0 / (w * h) as f64);
+            }
+            let mut ppm = format!("P6\n{w} {h}\n255\n").into_bytes();
+            for q in px.chunks_exact(4) {
+                ppm.extend_from_slice(&q[..3]);
+            }
+            std::fs::write(&out, ppm).unwrap();
+            println!("  wrote {out}");
         }
     }
 
@@ -976,7 +1065,11 @@ mod tests {
             heights: vec![0.25; 64 * 32],
         };
         let (w, h, _) = resample(&master, 512);
-        assert_eq!((w, h), (64, 32), "never invented detail the master hasn't got");
+        assert_eq!(
+            (w, h),
+            (64, 32),
+            "never invented detail the master hasn't got"
+        );
     }
 
     #[test]
@@ -1056,7 +1149,11 @@ mod tests {
     fn a_surface_that_was_never_painted_takes_no_space() {
         let b = block_with(&[(7, 0, 0, true), (1, 48, 48, true)]);
         let m = coverage_masks(&b);
-        assert_eq!(m.len(), 1, "an empty record is skipped, not treated as a mask");
+        assert_eq!(
+            m.len(),
+            1,
+            "an empty record is skipped, not treated as a mask"
+        );
         assert_eq!(m[0].id, 1);
     }
 
@@ -1078,7 +1175,10 @@ mod tests {
             for &b in &ids[n + 1..] {
                 let (x, y) = (surface_colour(a), surface_colour(b));
                 let apart: i32 = (0..3).map(|k| (x[k] as i32 - y[k] as i32).abs()).sum();
-                assert!(apart > 40, "surfaces {a} and {b} look alike: {x:?} vs {y:?}");
+                assert!(
+                    apart > 40,
+                    "surfaces {a} and {b} look alike: {x:?} vs {y:?}"
+                );
             }
         }
     }
@@ -1086,9 +1186,25 @@ mod tests {
     #[test]
     fn a_surface_the_file_does_not_name_still_gets_a_colour() {
         // Ids past the table turn up on real tracks, and one that panicked or came back
-        // black would be worse than one that is merely approximate.
-        assert_ne!(surface_colour(200), [0, 0, 0]);
-        assert_eq!(surface_colour(200), surface_colour(201));
+        // black would be worse than one that is merely approximate. 200-206 are spoken for
+        // now — the studio paints generated features with them — so this asks about ids
+        // nothing has claimed.
+        assert_ne!(surface_colour(300), [0, 0, 0]);
+        assert_eq!(surface_colour(300), surface_colour(301));
+    }
+
+    #[test]
+    fn every_generated_feature_kind_gets_its_own_colour() {
+        // The whole point of them is telling one lump from another in the preview, so two
+        // sharing a colour is the one thing that must not happen.
+        let mut seen = std::collections::HashSet::new();
+        for id in 200..=207 {
+            assert!(seen.insert(surface_colour(id)), "id {id} repeats a colour");
+        }
+        // And none of them collides with a surface a real track paints.
+        for real in [0, 1, 2, 3, 4, 5, 10, 12] {
+            assert!(!seen.contains(&surface_colour(real)), "id {real} collides");
+        }
     }
 
     #[test]
@@ -1225,7 +1341,9 @@ mod tests {
         let mut m = master(64);
         let known = terrain_blob(&m, 64);
         assert_eq!(u16::from_le_bytes([known[6], known[7]]) & 1, 1);
-        assert!((f32::from_le_bytes([known[28], known[29], known[30], known[31]]) - 0.9).abs() < 1e-6);
+        assert!(
+            (f32::from_le_bytes([known[28], known[29], known[30], known[31]]) - 0.9).abs() < 1e-6
+        );
 
         // A track that never stated its sample spacing has to come through as such — the
         // relief is real, the footprint it's drawn against is a guess.
@@ -1290,14 +1408,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-
-
-
-
-
-
-
-
-
-
-

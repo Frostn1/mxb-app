@@ -153,10 +153,64 @@ fn on_webview() -> bool {
 /// `GET` with backoff over the transient blocks above. Transport errors retry too, which
 /// is what `install::get_with_retry` already does for download hosts.
 async fn get_with_retry(url: &str, params: &[(&str, String)]) -> anyhow::Result<Fetched> {
+    get(url, params, Want::Api).await
+}
+
+/// `GET` a rendered page, asked for the way a browser asks for one.
+///
+/// Its own entry point because Cloudflare guards the rendered pages far more tightly than the
+/// JSON API — a user whose catalog browses fine can still be refused the moment they open a
+/// single mod, which is the whole shape of this failure.
+async fn get_page(url: &str) -> anyhow::Result<Fetched> {
+    get(url, &[], Want::Page).await
+}
+
+/// Which shape of request this is, and therefore what it has to look like on the wire.
+#[derive(Clone, Copy)]
+enum Want {
+    /// The WP REST API. Script asks for these in a browser, and [`client`]'s default headers
+    /// already say exactly that.
+    Api,
+    /// A rendered page. A browser *navigates* to these — see [`page_headers`] for the HTTP
+    /// client and [`crate::mxb_fetch::read_page`] for the WebView.
+    Page,
+}
+
+/// The headers a browser sends when it navigates to a page, replacing the JSON-fetch defaults
+/// [`build_client`] sets.
+///
+/// Those defaults describe a same-origin `fetch` for JSON, which is what every REST call is.
+/// Sending them for a rendered page asks Cloudflare to believe a script wanted an HTML
+/// document — a shape no browser produces, on the one path its bot rules actually guard.
+fn page_headers() -> reqwest::header::HeaderMap {
+    use reqwest::header::{HeaderMap, HeaderValue};
+    let mut headers = HeaderMap::new();
+    for (k, v) in [
+        (
+            "accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,\
+             image/apng,*/*;q=0.8",
+        ),
+        ("sec-fetch-mode", "navigate"),
+        ("sec-fetch-dest", "document"),
+        // A page reached by clicking a link on the site, which is what this stands in for.
+        ("sec-fetch-site", "same-origin"),
+        ("sec-fetch-user", "?1"),
+        ("upgrade-insecure-requests", "1"),
+    ] {
+        headers.insert(k, HeaderValue::from_static(v));
+    }
+    headers
+}
+
+async fn get(url: &str, params: &[(&str, String)], want: Want) -> anyhow::Result<Fetched> {
     if on_webview() {
         // No backoff loop here: the bridge is a real browser, so a 429/503 it gets is one
         // the site means, and it has its own timeout.
-        return crate::mxb_fetch::get(url, params).await;
+        return match want {
+            Want::Api => crate::mxb_fetch::get(url, params).await,
+            Want::Page => crate::mxb_fetch::read_page(url).await,
+        };
     }
 
     const ATTEMPTS: u32 = 3;
@@ -164,7 +218,12 @@ async fn get_with_retry(url: &str, params: &[(&str, String)]) -> anyhow::Result<
     let mut last_err: Option<anyhow::Error> = None;
     for attempt in 1..=ATTEMPTS {
         let started = Instant::now();
-        match client.get(url).query(params).send().await {
+        let req = client.get(url).query(params);
+        let req = match want {
+            Want::Api => req,
+            Want::Page => req.headers(page_headers()),
+        };
+        match req.send().await {
             Ok(resp) if !worth_retrying(resp.status()) => {
                 // Debug, not info: search runs on every keystroke, and a line per keystroke
                 // would bury the one failure worth reading. `MXB_LOG=debug` turns it on.
@@ -395,12 +454,25 @@ pub async fn search(
         ModSort::Newest
     };
 
-    match sort {
+    let items = match sort {
         ModSort::Newest => listing(q, category_id, Page::Number(page)).await,
         ModSort::Oldest => oldest(q, category_id, page).await,
         // `popular_range` is Some for every remaining variant.
         _ => popular(category_id, page, sort.popular_range().unwrap_or("all")).await,
-    }
+    };
+
+    // The site publishes no author through its API — see `fill_authors`. Every listing gets
+    // whatever the feed has already taught us; only a date-ordered one asks it for more.
+    let mut items = items?;
+    fill_authors(
+        &mut items,
+        category_id,
+        q,
+        page,
+        matches!(sort, ModSort::Newest),
+    )
+    .await;
+    Ok(items)
 }
 
 /// Which slice of a listing to ask for. WP accepts either, and `Offset` is what makes
@@ -442,7 +514,8 @@ async fn listing_response(
     let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-json/wp/v2/posts"));
     let mut params: Vec<(&str, String)> = vec![
         ("categories", category_id.to_string()),
-        ("_embed", "wp:featuredmedia".to_string()),
+        // `author` rides along so a card can carry a byline; it costs no extra request.
+        ("_embed", "author,wp:featuredmedia".to_string()),
     ];
     match page {
         Page::Number(n) => {
@@ -533,7 +606,7 @@ async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec
         ("order_by", "views".to_string()),
         ("limit", per_page.to_string()),
         ("offset", ((page - 1) * per_page).to_string()),
-        ("_embed", "wp:featuredmedia".to_string()),
+        ("_embed", "author,wp:featuredmedia".to_string()),
     ];
 
     let resp = get_with_retry(&url, &params).await?;
@@ -593,12 +666,13 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
     // swallowed: a 403 is `Ok(resp)`, so its error body went to the parsers and produced
     // zero downloads — the page then said "No download link was found on this page"
     // rather than "we couldn't read the page". Surface it instead.
-    let resp = get_with_retry(&link, &[]).await?;
+    let resp = get_page(&link).await?;
     if !resp.is_success() {
         return Err(refusal("the mod page", &resp));
     }
     let html = resp.body;
     let (downloads, version) = (parse_downloads(&html), parse_version(&html));
+    let author = parse_author(&html);
     // Only call it a challenge when the page also yielded nothing, so a marker that turns
     // up in a page that actually parsed can never turn a working mod into an error.
     if downloads.is_empty() {
@@ -620,6 +694,8 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
         description_html,
         images,
         version,
+        author: author.as_ref().map(|(name, _)| name.clone()),
+        author_url: author.and_then(|(_, url)| url),
         downloads,
         categories: term_names(&post),
     })
@@ -736,7 +812,172 @@ fn summary_from_post(p: &Value, category_id: u32) -> Option<ModSummary> {
         date: p.get("date").and_then(Value::as_str).unwrap_or("").to_string(),
         image: featured_image(p),
         category_id,
+        author: embedded_author(p),
     })
+}
+
+/// Post link to the name the site credits it to, learned from the feed and kept for the
+/// session. Authors do not change, and a mod seen once should keep its byline while the
+/// catalog is browsed around it.
+static FEED_AUTHORS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, String>>> =
+    std::sync::OnceLock::new();
+
+/// Posts the feed hands back per page. WordPress's own default, and not the same as
+/// [`PER_PAGE`] — which is why a listing needs two feed pages to cover itself.
+const FEED_PER_PAGE: u32 = 20;
+
+/// Fill in the bylines the API refuses to give.
+///
+/// mxb-mods.com has closed everything that would name an author: `_embed=author` answers
+/// `rest_user_invalid_id`, the users endpoint is shut, `class_list` carries no author class,
+/// and `/?author=<id>` is a 500. What it does still publish is its RSS feed, and every item
+/// in that carries a `dc:creator`.
+///
+/// So the feed is the source. One or two requests per page of results rather than one per
+/// card, matched on the post's own permalink, and remembered — scrolling the catalog warms
+/// the cache rather than paying for it again.
+///
+/// Best effort throughout: a feed that fails, or a sort the feed cannot reproduce, leaves the
+/// cards exactly as they were before this existed.
+async fn fill_authors(items: &mut [ModSummary], category_id: u32, q: &str, page: u32, fetch: bool) {
+    let cache = FEED_AUTHORS.get_or_init(Default::default);
+    let known = |items: &mut [ModSummary]| {
+        if let Ok(map) = cache.lock() {
+            for m in items.iter_mut() {
+                if m.author.is_none() {
+                    m.author = map.get(&m.link).cloned();
+                }
+            }
+        }
+    };
+    known(items);
+    // The feed is date-descending and nothing else, so it can only be *asked* about a listing
+    // in that order. Every other sort still gets whatever browsing has already learned.
+    if !fetch || items.iter().all(|m| m.author.is_some()) {
+        return;
+    }
+
+    // Which feed pages hold the posts this listing is showing.
+    let per: u32 = PER_PAGE.parse().unwrap_or(24);
+    let first = page.saturating_sub(1) * per;
+    let from = first / FEED_PER_PAGE + 1;
+    let to = (first + per).div_ceil(FEED_PER_PAGE);
+
+    for m in from..=to.max(from) {
+        let mut params: Vec<(&str, String)> = vec![("paged", m.to_string())];
+        if category_id != 0 {
+            params.push(("cat", category_id.to_string()));
+        }
+        if !q.is_empty() {
+            params.push(("s", q.to_string()));
+        }
+        // Built into the URL rather than passed alongside it: the webview path reads a page
+        // by URL alone and would drop them.
+        let base = format!("{}{}", mxb_session::base(), obfstr!("/feed/"));
+        let Ok(url) = reqwest::Url::parse_with_params(&base, &params) else {
+            return;
+        };
+
+        let Ok(resp) = get_page(url.as_str()).await else {
+            return;
+        };
+        if !resp.is_success() {
+            return;
+        }
+        if let Ok(mut map) = cache.lock() {
+            for (link, name) in feed_creators(&resp.body) {
+                map.insert(link, name);
+            }
+        }
+    }
+    known(items);
+}
+
+/// `(permalink, creator)` for each item of an RSS feed.
+///
+/// Read with a scanner rather than an XML parser: the shape is two known tags inside
+/// `<item>`, and the crate that reads the site's HTML is a *HTML* parser, which would mangle
+/// this. Anything it does not recognise is skipped rather than guessed at.
+fn feed_creators(xml: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for item in xml.split("<item>").skip(1) {
+        let item = item.split("</item>").next().unwrap_or_default();
+        let tag = |name: &str| -> Option<String> {
+            let open = format!("<{name}>");
+            let body = item.split(&open).nth(1)?.split(&format!("</{name}>")).next()?;
+            let body = body
+                .trim()
+                .trim_start_matches("<![CDATA[")
+                .trim_end_matches("]]>")
+                .trim();
+            (!body.is_empty()).then(|| decode_entities(body))
+        };
+        if let (Some(link), Some(name)) = (tag("link"), tag("dc:creator")) {
+            out.push((link, name));
+        }
+    }
+    out
+}
+
+/// The post author's display name, from `_embed=author`.
+///
+/// Optional on purpose. WordPress answers the embed with an error object rather than a user
+/// when the site keeps its author list private, and a catalog that stops naming anyone is no
+/// reason for a listing to fail — the card simply doesn't show a byline.
+fn embedded_author(p: &Value) -> Option<String> {
+    let name = p
+        .get("_embedded")?
+        .get("author")?
+        .as_array()?
+        .first()?
+        .get("name")?
+        .as_str()?;
+    let name = decode_entities(name).trim().to_string();
+    (!name.is_empty()).then_some(name)
+}
+
+#[cfg(test)]
+mod feed_tests {
+    use super::feed_creators;
+
+    /// The shape the site's own feed comes in, down to the CDATA and the entity.
+    const FEED: &str = r#"<rss><channel>
+<item>
+  <title><![CDATA[LATROBE SPEEDWAY RD.1]]></title>
+  <link>https://mxb-mods.com/latrobe-speedway-rd-1/</link>
+  <dc:creator><![CDATA[S33VERSMX]]></dc:creator>
+</item>
+<item>
+  <title><![CDATA[ID Worx &#8211; Factoryburn]]></title>
+  <link>https://mxb-mods.com/id-worx-factoryburn/</link>
+  <dc:creator><![CDATA[dryftzz]]></dc:creator>
+</item>
+<item>
+  <title><![CDATA[No byline on this one]]></title>
+  <link>https://mxb-mods.com/anon/</link>
+</item>
+</channel></rss>"#;
+
+    #[test]
+    fn creators_come_out_paired_with_their_post() {
+        let got = feed_creators(FEED);
+        assert_eq!(
+            got,
+            vec![
+                ("https://mxb-mods.com/latrobe-speedway-rd-1/".to_string(), "S33VERSMX".to_string()),
+                ("https://mxb-mods.com/id-worx-factoryburn/".to_string(), "dryftzz".to_string()),
+            ],
+            "an item with no creator is skipped rather than guessed at"
+        );
+    }
+
+    #[test]
+    fn nothing_that_isnt_a_feed_yields_anything() {
+        assert!(feed_creators("").is_empty());
+        assert!(feed_creators("<html><body>refused</body></html>").is_empty());
+        // A truncated item — a cut-off response — must not panic or half-read.
+        assert!(feed_creators("<item><link>https://x/</link>").is_empty());
+    }
 }
 
 /// `post[field]["rendered"]` as a &str.
@@ -823,6 +1064,34 @@ fn strip_images(html: &str) -> String {
     img.replace_all(&s, "").into_owned()
 }
 
+/// The file name a download URL ends in — where an author who didn't label the block
+/// often still says what the file is (`…/Track_Server.zip`).
+///
+/// MediaFire and Google Drive hang a routing segment off the end of the path
+/// (`…/track.zip/file`, `…/view`), so those are stepped over to reach the real name.
+fn url_file_name(url: &str) -> &str {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let mut segs = path.trim_end_matches('/').rsplit('/').filter(|s| !s.is_empty());
+    let last = segs.next().unwrap_or("");
+    if ["file", "view", "download"].iter().any(|s| last.eq_ignore_ascii_case(s)) {
+        segs.next().unwrap_or(last)
+    } else {
+        last
+    }
+}
+
+/// Does this text call something a server build?
+///
+/// The word has to stand on its own: a track named "Observer Hill" contains the letters
+/// but isn't a server file, and mistaking one for the other hides the only download a mod
+/// has. Letters are what separate them rather than `\b`, because `_` is a word character
+/// to a regex and `Ironman_2024_Server.pkz` is how these files are actually named.
+fn mentions_server(text: &str) -> bool {
+    Regex::new(r"(?i)(?:^|[^a-z])servers?(?:[^a-z]|$)")
+        .unwrap()
+        .is_match(text)
+}
+
 /// Parse the theme's `div.download-container` blocks into download options.
 fn parse_downloads(html: &str) -> Vec<DownloadOption> {
     let doc = Html::parse_document(html);
@@ -836,10 +1105,14 @@ fn parse_downloads(html: &str) -> Vec<DownloadOption> {
             .value()
             .classes()
             .any(|c| c.eq_ignore_ascii_case("container-default"));
-        // Dedicated-server builds are labelled "server" somewhere in the block.
-        let is_server = el.text().collect::<String>().to_lowercase().contains("server");
         let href = el.select(&a_sel).next().and_then(|a| a.value().attr("href"));
         let Some(url) = href else { continue };
+
+        // Dedicated-server builds are labelled "server" in the block — or, when the author
+        // only said it in the file's name, nowhere but the link. Both are read, because a
+        // server build that reaches the app unflagged is one the picker can preselect.
+        let is_server =
+            mentions_server(&el.text().collect::<String>()) || mentions_server(url_file_name(url));
 
         // The shown origin must reflect the ACTUAL link — authors often type a
         // mirror nickname (e.g. "GoWithTheFlow") in `div.filename`, which is not
@@ -862,8 +1135,10 @@ fn parse_downloads(html: &str) -> Vec<DownloadOption> {
         });
     }
 
-    // Show the author's default file first.
-    out.sort_by_key(|d| !d.is_default);
+    // The author's default file first, and dedicated-server builds after everything else —
+    // whatever the page's own order was, a server build is never the file someone browsing
+    // for something to ride is after.
+    out.sort_by_key(|d| (d.is_server, !d.is_default));
     out
 }
 
@@ -882,6 +1157,33 @@ fn parse_version(html: &str) -> Option<String> {
     }
     let trimmed = text.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+/// The byline the theme prints above the post title, and the profile page it links to.
+///
+/// mxb-mods and gpb-mods run the same theme: `<p class="post-date">posted by
+/// <a href="…/author/<slug>/"><b id="authorName">Name</b></a>`. Scoped to the post header
+/// because every comment below the page names an author too, and the first `/author/` link
+/// in the document is only the byline by luck of layout.
+fn parse_author(html: &str) -> Option<(String, Option<String>)> {
+    let doc = Html::parse_document(html);
+
+    if let Ok(sel) = Selector::parse(r#".post-header a[href*="/author/"]"#) {
+        if let Some(el) = doc.select(&sel).next() {
+            let name = el.text().collect::<String>();
+            let name = name.trim();
+            if !name.is_empty() {
+                return Some((name.to_string(), el.value().attr("href").map(str::to_string)));
+            }
+        }
+    }
+
+    // The name without its link — the theme's own id for it, which still stands when the
+    // profile isn't linkable.
+    let sel = Selector::parse("#authorName").ok()?;
+    let name = doc.select(&sel).next()?.text().collect::<String>();
+    let name = name.trim();
+    (!name.is_empty()).then(|| (name.to_string(), None))
 }
 
 fn host_from_url(url: &str) -> String {
@@ -930,6 +1232,23 @@ fn dedup(v: &mut Vec<String>) {
 mod tests {
     use super::*;
 
+    /// The rendered pages are guarded far more tightly than the JSON API, and asking for one
+    /// with the client's JSON-fetch defaults describes a request no browser makes: a script
+    /// wanting an HTML document. Every default this overrides is one that said so.
+    #[test]
+    fn a_page_is_asked_for_the_way_a_browser_navigates() {
+        let h = page_headers();
+        assert_eq!(h.get("sec-fetch-dest").unwrap(), "document");
+        assert_eq!(h.get("sec-fetch-mode").unwrap(), "navigate");
+        assert!(h.get("accept").unwrap().to_str().unwrap().starts_with("text/html"));
+        // A continued string literal is easy to leave a newline in, and a header value with
+        // one in it is rejected outright — which would fail only on the blocked user's machine.
+        for (_, v) in h.iter() {
+            let v = v.to_str().unwrap();
+            assert!(!v.contains('\n') && !v.contains("  "), "{v:?}");
+        }
+    }
+
     #[test]
     fn reads_every_embedded_term_name() {
         // Shape of `_embed=wp:term` on a real livery post: one group per taxonomy, the
@@ -956,6 +1275,56 @@ mod tests {
 
         // A post fetched without `_embed`, or one with no terms, must not blow up.
         assert!(term_names(&serde_json::json!({})).is_empty());
+    }
+
+    #[test]
+    fn reads_the_byline_from_the_post_header() {
+        // mxb-mods: byline and date in one paragraph.
+        let mxb = r#"
+            <div class="post-header">
+              <p class="post-date">posted by
+                <a href="https://mxb-mods.com/author/kenziesaunders/"><b id="authorName">Macks Tracks</b></a>
+                on Aug. 29, 2026</p>
+              <h1 class="post-title">Highland-Mx</h1>
+            </div>"#;
+        assert_eq!(
+            parse_author(mxb),
+            Some((
+                "Macks Tracks".to_string(),
+                Some("https://mxb-mods.com/author/kenziesaunders/".to_string())
+            ))
+        );
+
+        // gpb-mods: same theme, date split into its own paragraph.
+        let gpb = r#"
+            <div class="post-header"><p class="post-date">Aug. 21, 2026</p>
+              <p class="post-date">posted by
+                <a href="https://gpb-mods.com/author/kalat/"><b id="authorName">Kalat le Nul</b></a></p>
+            </div>"#;
+        assert_eq!(
+            parse_author(gpb).unwrap().0,
+            "Kalat le Nul",
+            "the same parse has to serve both catalogs"
+        );
+    }
+
+    #[test]
+    fn a_commenter_is_never_mistaken_for_the_byline() {
+        // Discussion sits outside `.post-header` and names an author on every comment. A
+        // document-wide search for the first `/author/` link would credit the mod to
+        // whoever happened to be rendered first.
+        let html = r#"
+            <div class="wpd-comment">
+              <a href="https://mxb-mods.com/author/somecommenter/">SomeCommenter</a>
+            </div>
+            <div class="post-header">
+              <p class="post-date">posted by
+                <a href="https://mxb-mods.com/author/dr-phdeez/"><b id="authorName">Dr.PhDeez</b></a></p>
+            </div>"#;
+        assert_eq!(parse_author(html).unwrap().0, "Dr.PhDeez");
+
+        // No byline at all — a page must still parse rather than inventing one.
+        assert_eq!(parse_author("<div class=\"post-header\"></div>"), None);
     }
 
     #[test]
@@ -993,6 +1362,96 @@ mod tests {
         assert_eq!(downloads.len(), 1);
         assert_eq!(downloads[0].host, "MediaFire");
         assert_eq!(downloads[0].label, "GoWithTheFlow");
+    }
+
+    #[test]
+    fn reads_the_posts_author() {
+        let post: Value = serde_json::from_str(
+            r#"{"id":1,"slug":"a-track","title":{"rendered":"A Track"},
+                "_embedded":{"author":[{"name":"Ren&#038;s Bikes"}]}}"#,
+        )
+        .unwrap();
+        let summary = summary_from_post(&post, 22).unwrap();
+        // Entities decoded, same as the title.
+        assert_eq!(summary.author.as_deref(), Some("Ren&s Bikes"));
+
+        // A site that keeps its author list private answers the embed with an error object
+        // instead of a user. That's a card without a byline, not a failed listing.
+        let hidden: Value = serde_json::from_str(
+            r#"{"id":2,"slug":"b-track","title":{"rendered":"B Track"},
+                "_embedded":{"author":[{"code":"rest_user_cannot_view"}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(summary_from_post(&hidden, 22).unwrap().author, None);
+
+        // No `_embed` at all, and a blank name, are the same non-answer.
+        let bare: Value =
+            serde_json::from_str(r#"{"id":3,"slug":"c","title":{"rendered":"C"}}"#).unwrap();
+        assert_eq!(summary_from_post(&bare, 22).unwrap().author, None);
+        let blank: Value = serde_json::from_str(
+            r#"{"id":4,"slug":"d","title":{"rendered":"D"},"_embedded":{"author":[{"name":"  "}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(summary_from_post(&blank, 22).unwrap().author, None);
+    }
+
+    #[test]
+    fn flags_server_builds_and_sorts_them_last() {
+        // The author marked the server build in the block's text, and made it the page's
+        // default — which is exactly how a server file used to end up preselected.
+        let html = r#"
+            <div class="download-container container-default">
+              <div class="filename">Dedicated Server files</div>
+              <a href="https://www.mediafire.com/file/abc/track_srv.zip/file">Download</a>
+            </div>
+            <div class="download-container container-mirror">
+              <div class="filename">mediafire.com</div>
+              <a href="https://www.mediafire.com/file/xyz/track.zip/file">Download</a>
+            </div>
+        "#;
+        let downloads = parse_downloads(html);
+        assert_eq!(downloads.len(), 2);
+        // Playable first, despite the server build carrying the page's "default" flag.
+        assert!(!downloads[0].is_server);
+        assert!(downloads[1].is_server);
+        assert!(downloads[1].is_default);
+    }
+
+    #[test]
+    fn reads_the_server_label_out_of_the_link() {
+        // Nothing in the block says "server"; only the file it points at does.
+        let html = r#"
+            <div class="download-container container-default">
+              <div class="filename">MediaFire</div>
+              <a href="https://www.mediafire.com/file/abc/Ironman_2024_Server.pkz/file">Download</a>
+            </div>
+        "#;
+        assert!(parse_downloads(html)[0].is_server);
+    }
+
+    #[test]
+    fn a_track_named_observer_is_not_a_server_build() {
+        // Substring matching flagged this one, which left the mod looking undownloadable.
+        let html = r#"
+            <div class="download-container container-default">
+              <div class="filename">Observer Hill</div>
+              <a href="https://www.mediafire.com/file/abc/ObserverHill.zip/file">Download</a>
+            </div>
+        "#;
+        assert!(!parse_downloads(html)[0].is_server);
+    }
+
+    #[test]
+    fn file_name_skips_the_hosts_routing_segment() {
+        assert_eq!(
+            url_file_name("https://www.mediafire.com/file/abc/track_server.zip/file"),
+            "track_server.zip",
+        );
+        assert_eq!(
+            url_file_name("https://drive.google.com/file/d/ABC123/view?usp=sharing"),
+            "ABC123",
+        );
+        assert_eq!(url_file_name("https://x.com/downloads/pack.7z"), "pack.7z");
     }
 
     #[test]
@@ -1274,8 +1733,14 @@ mod client_tests {
         assert!(!mods.is_empty(), "the tracks category should not be empty");
 
         let d = detail(&mods[0].slug).await.expect("detail works");
-        eprintln!("detail '{}': {} downloads, version {:?}", d.title, d.downloads.len(), d.version);
+        eprintln!(
+            "detail '{}': {} downloads, version {:?}, by {:?} ({:?})",
+            d.title, d.downloads.len(), d.version, d.author, d.author_url
+        );
         assert!(!d.title.is_empty());
+        // The byline is scraped off the rendered page, not the REST API — the site answers
+        // `_embed=author` with an empty user, so nothing else would notice a theme change.
+        assert!(d.author.is_some(), "every post on the catalog carries a byline");
     }
 
     /// The ReShade Presets category the Settings card sends people to is real, populated,

@@ -329,6 +329,10 @@ fn settle_then_reload(app: AppHandle, pending: Arc<Mutex<Pending>>, live: Arc<At
     if mods.is_empty() {
         return;
     }
+    // The folder just changed and has gone quiet, so this is the cheapest honest moment to
+    // update the record of what the library holds — including anything deleted by hand,
+    // which no in-app action would have told us about.
+    crate::ledger_reconcile_detached(&app);
     reload(&app, mods);
 }
 

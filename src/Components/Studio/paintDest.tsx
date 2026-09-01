@@ -68,19 +68,6 @@ const AREA_LABEL: Record<string, TKey> = {
   goggles: "paints.kind.goggles",
 };
 
-/**
- * Labels for the folders that hang off a rider profile, where the folder name alone would
- * collide with a gear area's.
- *
- * MX Bikes has goggles in two places and they are genuinely different destinations: a pair
- * bought with a helmet lives in `helmets/<helmet>/goggles`, and a pair that came with the rider
- * lives in `riders/<profile>/goggles`. Both are offered — two buttons reading "Goggles" would
- * be a coin toss over which folder a paint lands in.
- */
-const EXTRA_LABEL: Record<string, TKey> = {
-  goggles: "paints.kind.profileGoggles",
-};
-
 /** Which `RiderTargets` list holds the models of a gear folder. */
 const AREA_TARGETS: Record<string, keyof RiderTargets> = {
   helmets: "helmets",
@@ -152,13 +139,15 @@ export function kindsFor(game: GameInfo): PaintKindDef[] {
     }
   }
   kinds.push({ id: "kit", label: label(RIDERS), area: RIDERS, sub: "paints" });
-  for (const extra of game.riderProfileExtras) {
-    kinds.push({
-      id: `extra:${extra}`,
-      label: EXTRA_LABEL[extra] ?? label(extra),
-      area: RIDERS,
-      sub: extra,
-    });
+  // A profile's extras, minus the ones a gear area already offers under the same name.
+  //
+  // MX Bikes keeps goggles in two places — bought with a helmet, and shipped with the rider —
+  // and both are real folders, but two buttons reading "Goggles" is a coin toss over which one
+  // a paint lands in. The helmet's is the one anybody means: it's where a goggle mod installs,
+  // and where every goggle paint in the shop is filed. Gloves have no such twin, so they stay.
+  const offered = new Set(kinds.map((k) => k.sub));
+  for (const extra of game.riderProfileExtras.filter((e) => !offered.has(e))) {
+    kinds.push({ id: `extra:${extra}`, label: label(extra), area: RIDERS, sub: extra });
   }
   return kinds;
 }
@@ -178,8 +167,17 @@ export interface PaintDestState {
   clearFolder: () => void;
   /** Resolved destination, or null while nothing can be aimed at yet. */
   dest: PaintDest | null;
-  /** What the paints already installed for this model call their sheets. */
+  /** The sheet names this model binds — from its own mesh and from the paints installed for it. */
   hints: string[];
+  /**
+   * The destination `hints` describe, or `""` while none has been answered for.
+   *
+   * Hints are fetched, so between picking a model and hearing back, `hints` still holds the
+   * *previous* model's answer. Anything that acts on them — the Designer fills a sheet list
+   * from these — has to be able to tell the two apart, or it acts on the old bike's list and
+   * records it against the new bike's name.
+   */
+  hintsFor: string;
   /** This build can decode bike geometry — false on public builds, which have no bike mesh. */
   bikePreview: boolean;
   modelLabel: TKey;
@@ -204,6 +202,7 @@ export function usePaintDest(onChange?: () => void): PaintDestState {
   const [targets, setTargets] = useState<RiderTargets>(EMPTY_RIDER_TARGETS);
   const [bikePreview, setBikePreview] = useState(true);
   const [hints, setHints] = useState<string[]>([]);
+  const [hintsFor, setHintsFor] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -255,12 +254,17 @@ export function usePaintDest(onChange?: () => void): PaintDestState {
   useEffect(() => {
     if (folder || !model) {
       setHints([]);
+      setHintsFor(folder ?? "");
       return;
     }
     let alive = true;
-    paintStudioHints(relFor(kind, model))
-      .then((h) => alive && setHints(h))
-      .catch(() => alive && setHints([]));
+    const rel = relFor(kind, model);
+    // Both halves land together, and `hintsFor` is what says which model the list is about —
+    // see the field's note. Set on the way out whether or not the read found anything, because
+    // "this model expects nothing" is an answer and has to be distinguishable from "not yet".
+    paintStudioHints(rel)
+      .then((h) => alive && (setHints(h), setHintsFor(rel)))
+      .catch(() => alive && (setHints([]), setHintsFor(rel)));
     return () => {
       alive = false;
     };
@@ -309,6 +313,7 @@ export function usePaintDest(onChange?: () => void): PaintDestState {
     clearFolder,
     dest,
     hints,
+    hintsFor,
     bikePreview,
     // A rider folder holds profiles (MX Bikes) or rider models (GP Bikes); everything else
     // holds models. Naming it right is the difference between "For" reading as a question

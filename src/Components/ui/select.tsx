@@ -57,12 +57,18 @@ SelectContent.displayName = "SelectContent";
 
 const SelectItem = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
->(({ className, children, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & {
+    /** A control pinned to the right of the row — a row action, not part of the value.
+     *  Kept outside `ItemText` on purpose: Radix clones that into the closed trigger, so
+     *  anything in there would show up next to the selected value too. */
+    trailing?: React.ReactNode;
+  }
+>(({ className, children, trailing, ...props }, ref) => (
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
       "relative flex w-full cursor-default select-none items-center rounded-md py-1.5 pl-8 pr-2 text-[12.5px] outline-none focus:bg-foreground/[0.06] data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      trailing && "pr-8",
       className,
     )}
     {...props}
@@ -73,6 +79,9 @@ const SelectItem = React.forwardRef<
       </SelectPrimitive.ItemIndicator>
     </span>
     <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+    {trailing && (
+      <span className="absolute right-1.5 flex items-center">{trailing}</span>
+    )}
   </SelectPrimitive.Item>
 ));
 SelectItem.displayName = "SelectItem";

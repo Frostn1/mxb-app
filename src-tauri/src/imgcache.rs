@@ -29,11 +29,16 @@ pub const SCHEME: &str = "imgcache";
 /// Bumped when the on-disk layout changes, so old entries are dropped rather than misread.
 const CACHE_DIR: &str = "img-v1";
 
-/// The store's hosts. `mxbikes-shop.b-cdn.net` is its own Bunny pull zone, named in full
-/// rather than as `b-cdn.net` — that suffix is shared by every Bunny customer, and matching
-/// it would open the proxy to all of them. A few dozen product descriptions embed images
-/// from it.
-const SHOP_HOSTS: [&str; 2] = ["mxbikes-shop.com", "mxbikes-shop.b-cdn.net"];
+/// The stores' hosts. `mxbikes-shop.b-cdn.net` is that store's own Bunny pull zone, named in
+/// full rather than as `b-cdn.net` — that suffix is shared by every Bunny customer, and
+/// matching it would open the proxy to all of them. A few dozen product descriptions embed
+/// images from it.
+///
+/// MXB Hub serves everything from its own origin: a sweep of 40 listings, thumbnails, srcsets
+/// and description markup included, found no host but `shop.mxb-hub.com`. It is listed as the
+/// registrable domain anyway, which covers the subdomain it actually uses and any sibling the
+/// store adds later.
+const SHOP_HOSTS: [&str; 3] = ["mxbikes-shop.com", "mxbikes-shop.b-cdn.net", "mxb-hub.com"];
 
 /// Is `host` one we're willing to fetch from?
 ///
@@ -61,6 +66,20 @@ const PRUNE_TO: f64 = 0.8;
 /// sockets — the same reasoning as `mods::mxb`'s rating concurrency.
 const MAX_CONCURRENT_FETCHES: usize = 8;
 
+/// …and how many of those may be MXB Hub's at once. See the gate in [`handle`] for why this
+/// store gets its own, far smaller, number.
+const MAX_CONCURRENT_HUB_FETCHES: usize = 2;
+
+/// Ceiling on a single download.
+///
+/// The whole body is held in memory to be sniffed and downscaled, and being on the allowlist
+/// says only where a URL points, never how big what it points at is: an `<img>` on a mod page
+/// can name whatever its author uploaded. Uncapped, one such link costs however large that
+/// file happens to be — and [`MAX_CONCURRENT_FETCHES`] of them can be in flight at once, so
+/// the grid decides how many times over. Generous for a card rendered around 300px wide: the
+/// store's own product images, the largest thing normally seen here, are ~0.5 MB.
+const MAX_FETCH_BYTES: usize = 32 * 1024 * 1024;
+
 /// How long a failed URL is remembered, so a dead thumbnail isn't refetched on every pass.
 const NEGATIVE_TTL: Duration = Duration::from_secs(5 * 60);
 
@@ -80,6 +99,17 @@ pub fn handle(
     tauri::async_runtime::spawn(async move {
         responder.respond(serve(&app, request.uri().to_string()).await);
     });
+}
+
+/// Images handed to the webview this session, and how many bytes that came to. Read by
+/// [`crate::memwatch`], which is trying to answer "what was the app doing when it grew?" —
+/// a grid being scrolled looks very different here from an app nobody is touching.
+static SERVED: AtomicU64 = AtomicU64::new(0);
+static SERVED_BYTES: AtomicU64 = AtomicU64::new(0);
+
+/// `(images, bytes)` served since launch.
+pub fn traffic() -> (u64, u64) {
+    (SERVED.load(Ordering::Relaxed), SERVED_BYTES.load(Ordering::Relaxed))
 }
 
 /// Drop superseded cache generations, and bring the current one under its size cap. Spawned
@@ -107,7 +137,11 @@ async fn serve(app: &AppHandle, uri: String) -> http::Response<Vec<u8>> {
     let width = requested_width(&uri);
 
     match load(app, &url, width).await {
-        Some((bytes, mime)) => reply(200, mime, bytes),
+        Some((bytes, mime)) => {
+            SERVED.fetch_add(1, Ordering::Relaxed);
+            SERVED_BYTES.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+            reply(200, mime, bytes)
+        }
         // `ModCard`'s existing `onError` fallback fires on this, exactly as it does for a
         // dead remote URL — so a miss degrades to the placeholder icon, not a broken image.
         None => reply(404, "text/plain", b"not cached".to_vec()),
@@ -210,6 +244,17 @@ async fn load(app: &AppHandle, url: &str, width: Option<u32>) -> Option<(Vec<u8>
 
     let bytes = {
         let _permit = fetch_semaphore().acquire().await.ok()?;
+        // A second, much tighter gate for the store that counts requests. Everything else here
+        // is fetched eight at a time, which is what a grid of twenty-four thumbnails wants;
+        // MXB Hub answers that burst by deciding we are a robot and refusing the whole site,
+        // images and API alike, for everyone on this address. Two at a time costs a moment on
+        // the first paint of a page and nothing at all afterwards, because the entry is then
+        // on disk — and it is the difference between a grid that loads and one that cannot.
+        let _polite = if is_hub(url) {
+            Some(hub_semaphore().acquire().await.ok()?)
+        } else {
+            None
+        };
         fetch(url).await
     };
 
@@ -360,6 +405,18 @@ fn touch(path: &Path) {
 /// keep separate jars precisely because a clearance is scoped to the host that minted it, so
 /// serving a gpb-mods.com thumbnail through mxb-mods.com's session — or, as it did before,
 /// through the store's — sends a cookie that can only fail.
+fn is_hub(url: &str) -> bool {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()))
+        .is_some_and(|h| h == "mxb-hub.com" || h.ends_with(".mxb-hub.com"))
+}
+
+fn hub_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_HUB_FETCHES))
+}
+
 fn client_for(url: &str) -> Option<&'static reqwest::Client> {
     static MXB: OnceLock<Option<reqwest::Client>> = OnceLock::new();
     static GPB: OnceLock<Option<reqwest::Client>> = OnceLock::new();
@@ -376,6 +433,12 @@ fn client_for(url: &str) -> Option<&'static reqwest::Client> {
         catalog(&MXB, &crate::mxb_session::MXB_SITE)
     } else if under(crate::mxb_session::GPB_SITE.domain) {
         catalog(&GPB, &crate::mxb_session::GPB_SITE)
+    } else if under("mxb-hub.com") {
+        // MXB Hub's images are behind the same rate-based robot challenge as its API, so they
+        // have to be fetched with the client that holds the clearance. Sending them through
+        // the store client below is what left the grid full of placeholder icons: every
+        // thumbnail came back as a 202 of challenge HTML.
+        crate::mods::hub::client().ok()
     } else {
         SHOP.get_or_init(|| crate::shop_catalog_session::client_builder().build().ok())
             .as_ref()
@@ -383,16 +446,59 @@ fn client_for(url: &str) -> Option<&'static reqwest::Client> {
 }
 
 async fn fetch(url: &str) -> Option<Vec<u8>> {
+    use futures_util::StreamExt;
+
     let resp = client_for(url)?
         .get(url)
         .header("accept", "image/avif,image/webp,image/*,*/*;q=0.8")
         .send()
         .await
         .ok()?;
+    // A robot challenge is a `202` full of HTML, which `is_success` waves through — so
+    // without this the cache would happily store a web page under an image's name and keep
+    // serving it long after the challenge was cleared. Refused rather than retried: the
+    // catalog request alongside it is what triggers the handshake, and a page of thumbnails
+    // all trying to solve the same challenge is the request storm that caused it.
+    if crate::mods::hub::challenged(&resp) {
+        log::debug!("imgcache: {url} came back as a robot challenge — not caching it");
+        return None;
+    }
     if !resp.status().is_success() {
         return None;
     }
-    Some(resp.bytes().await.ok()?.to_vec())
+
+    // Refuse an oversized body before a byte of it is read, when the origin says how big it
+    // is...
+    if let Some(len) = resp.content_length() {
+        if len > MAX_FETCH_BYTES as u64 {
+            log::warn!("imgcache: {url} declares {len} bytes, past the cap — not fetching it");
+            return None;
+        }
+    }
+    // ...and again as it arrives, because that header is optional and can be wrong. Streaming
+    // rather than `bytes()` also stops the body being held twice over: once whole, once copied
+    // into a `Vec`.
+    let mut body: Vec<u8> = Vec::new();
+    let mut chunks = resp.bytes_stream();
+    while let Some(chunk) = chunks.next().await {
+        if !push_capped(&mut body, &chunk.ok()?) {
+            log::warn!("imgcache: {url} went past the cap mid-download — dropped");
+            return None;
+        }
+    }
+    Some(body)
+}
+
+/// Append `chunk`, unless doing so would take `body` past [`MAX_FETCH_BYTES`].
+///
+/// Returns whether it was appended. The check is against the total rather than the chunk, so
+/// a body arriving in small pieces can't walk past the ceiling one piece at a time.
+fn push_capped(body: &mut Vec<u8>, chunk: &[u8]) -> bool {
+    if body.len().saturating_add(chunk.len()) > MAX_FETCH_BYTES {
+        return false;
+    }
+    body.extend_from_slice(chunk);
+    true
 }
 
 fn fetch_semaphore() -> &'static tokio::sync::Semaphore {
@@ -540,6 +646,33 @@ mod tests {
     }
 
     #[test]
+    fn a_body_within_the_cap_is_kept() {
+        let mut body = Vec::new();
+        assert!(push_capped(&mut body, &[1, 2, 3]));
+        assert!(push_capped(&mut body, &[4, 5]));
+        assert_eq!(body, [1, 2, 3, 4, 5]);
+    }
+
+    /// The bug: the cap has to be on the running total. Checking each chunk on its own lets a
+    /// body of any size through as long as it arrives in small enough pieces — which is how
+    /// bodies arrive.
+    #[test]
+    fn small_chunks_cannot_walk_past_the_cap() {
+        let mut body = vec![0u8; MAX_FETCH_BYTES - 1];
+        assert!(push_capped(&mut body, &[1]), "the last byte that fits");
+        assert_eq!(body.len(), MAX_FETCH_BYTES);
+        assert!(!push_capped(&mut body, &[1]), "one past the cap");
+        assert_eq!(body.len(), MAX_FETCH_BYTES, "a refused chunk leaves nothing behind");
+    }
+
+    #[test]
+    fn a_single_oversized_chunk_is_refused_whole() {
+        let mut body = Vec::new();
+        assert!(!push_capped(&mut body, &vec![0u8; MAX_FETCH_BYTES + 1]));
+        assert!(body.is_empty());
+    }
+
+    #[test]
     fn accepts_the_catalog_origins_and_their_cdns() {
         for url in [
             "https://mxb-mods.com/wp-content/uploads/a.jpg",
@@ -548,8 +681,24 @@ mod tests {
             "https://cdn.mxbikes-shop.com/img/1.png",
             // The store's Bunny pull zone — where some product descriptions embed from.
             "https://mxbikes-shop.b-cdn.net/wp-content/uploads/2024/05/a.jpg",
+            // MXB Hub serves its product images from its own origin.
+            "https://shop.mxb-hub.com/wp-content/uploads/2026/08/a.png",
+            "https://mxb-hub.com/wp-content/uploads/2026/08/a.png",
         ] {
             assert_eq!(source_url(&encoded(url)).as_deref(), Some(url), "{url}");
+        }
+    }
+
+    /// A lookalike host must not ride in on a store's name — the handler fetches whatever it
+    /// is handed, and product descriptions are markup written by other people.
+    #[test]
+    fn a_lookalike_store_host_is_refused() {
+        for url in [
+            "https://mxb-hub.com.evil.com/x.png",
+            "https://evil-mxb-hub.com/x.png",
+            "https://mxb-hub.co/x.png",
+        ] {
+            assert!(source_url(&encoded(url)).is_none(), "{url} must be refused");
         }
     }
 

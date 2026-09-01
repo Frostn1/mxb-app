@@ -1,10 +1,9 @@
 //! Microphone and speaker plumbing for in-game voice.
 //!
 //! This is the device half of voice chat: which microphone we listen to, which output the
-//! other riders come out of, how loud, and the key that opens the mic. There is no codec
-//! and no network here yet — those land with the voice room on `mxb-agent`. What this
-//! module gives the player is the part they have to get right *before* any of that can
-//! help them: proof that the app can hear them, and proof they'll hear everyone else.
+//! other riders come out of, how loud, and the key that opens the mic. What it gives the
+//! player is the part they have to get right *before* any of the rest can help them: proof
+//! that the app can hear them, and proof they'll hear everyone else.
 //!
 //! Two deliberate choices:
 //!
@@ -67,7 +66,12 @@ pub struct Level {
 /// Push-to-talk state, shared with whatever eventually does the transmitting.
 static PTT_DOWN: AtomicBool = AtomicBool::new(false);
 
-/// Whether the mic is currently open. True while PTT is held.
+/// Whether the key itself is physically down. Only toggle mode needs this, to tell a fresh
+/// press from the auto-repeat the OS sends while a key is held — in push-to-talk the mic
+/// state *is* the key state, so the distinction doesn't arise.
+static KEY_HELD: AtomicBool = AtomicBool::new(false);
+
+/// Whether the mic is currently open — held in push-to-talk, latched in toggle.
 pub fn transmitting() -> bool {
     PTT_DOWN.load(Ordering::Relaxed)
 }
@@ -122,7 +126,7 @@ fn collect<I: Iterator<Item = cpal::Device>>(list: Option<I>, default: Option<&s
 /// `wanted` blank → the system default, which is the setting's whole meaning. A name we
 /// can't find → the default too, but the caller is told, because a player who picked a
 /// specific headset needs to know they're not on it.
-fn resolve(wanted: &str, input: bool) -> Result<(cpal::Device, Option<String>), String> {
+pub(super) fn resolve(wanted: &str, input: bool) -> Result<(cpal::Device, Option<String>), String> {
     let host = cpal::default_host();
     let default = || {
         if input { host.default_input_device() } else { host.default_output_device() }
@@ -346,17 +350,24 @@ pub fn test_output(device: &str, volume: f32) -> Result<Option<String>, String> 
 }
 
 // ---------------------------------------------------------------------------------------
-// Push to talk
+// The mic key: push to talk, or toggle
 // ---------------------------------------------------------------------------------------
 
-/// Bind the push-to-talk key.
+/// Bind the mic key.
 ///
 /// Called from [`crate::overlay::register`], which owns global-shortcut registration for the
-/// whole app: it clears every binding before rebinding, so a PTT key registered anywhere
+/// whole app: it clears every binding before rebinding, so a mic key registered anywhere
 /// else would be wiped the next time the overlay hotkey changed.
 ///
-/// Unlike the overlay's hotkey this acts on **both** edges — the mic opens on press and
-/// closes on release, which is what "push to talk" means.
+/// Two modes, and the difference is entirely in which edges matter:
+///
+/// - **Push to talk** acts on *both* edges — the mic opens on press and closes on release.
+/// - **Toggle** acts on the press only, flipping the mic each time. The release is ignored,
+///   because acting on it is what would make the key a push-to-talk key.
+///
+/// The mic always starts closed on a rebind. That matters more for toggle: the state lives
+/// in this process, so a rebind (or turning voice off and on) must not leave someone
+/// transmitting with no key press behind it.
 pub fn bind_ptt<R: Runtime>(
     app: &AppHandle<R>,
     cfg: &crate::config::AppConfig,
@@ -364,6 +375,7 @@ pub fn bind_ptt<R: Runtime>(
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
     PTT_DOWN.store(false, Ordering::Relaxed);
+    let _ = app.emit("voice-ptt", false);
     if !cfg.voice_enabled {
         return Ok(());
     }
@@ -372,20 +384,40 @@ pub fn bind_ptt<R: Runtime>(
         .parse()
         .map_err(|_| format!("\"{combo}\" isn't a key combination we understand."))?;
 
+    let toggle = cfg.voice_toggle_to_talk;
     let handle = app.clone();
     app.global_shortcut()
         .on_shortcut(shortcut, move |_app, _shortcut, event| {
-            let down = event.state() == ShortcutState::Pressed;
-            // The OS repeats a held key; only edges are worth reacting to.
-            if PTT_DOWN.swap(down, Ordering::Relaxed) == down {
+            let pressed = event.state() == ShortcutState::Pressed;
+            let open = if toggle {
+                // Only the press flips it; the release is what we are deliberately not
+                // acting on. A held key also repeats presses, so ignore a repeat that
+                // arrives while we already believe the key is down.
+                if !pressed {
+                    KEY_HELD.store(false, Ordering::Relaxed);
+                    return;
+                }
+                if KEY_HELD.swap(true, Ordering::Relaxed) {
+                    return; // auto-repeat, not a new press
+                }
+                !PTT_DOWN.load(Ordering::Relaxed)
+            } else {
+                KEY_HELD.store(pressed, Ordering::Relaxed);
+                pressed
+            };
+            // Nothing to say if it didn't actually change.
+            if PTT_DOWN.swap(open, Ordering::Relaxed) == open {
                 return;
             }
-            let _ = handle.emit("voice-ptt", down);
+            let _ = handle.emit("voice-ptt", open);
         })
         .map_err(|e| {
-            format!("Couldn't register {combo} for push-to-talk — another app is probably using it. ({e})")
+            format!("Couldn't register {combo} for the mic key — another app is probably using it. ({e})")
         })?;
-    log::info!("voice: push-to-talk bound to {combo}");
+    log::info!(
+        "voice: mic key bound to {combo} ({})",
+        if toggle { "toggle" } else { "push to talk" }
+    );
     Ok(())
 }
 
@@ -471,5 +503,60 @@ mod tests {
     #[test]
     fn ptt_starts_closed() {
         assert!(!transmitting(), "the mic must never be open before a key is pressed");
+    }
+
+    #[test]
+    fn push_to_talk_is_the_default() {
+        // The mode that cannot leave a microphone open by accident is the one you get
+        // without choosing.
+        assert!(!AppConfig::default().voice_toggle_to_talk);
+    }
+
+    /// The mic-state decision, lifted out of the shortcut handler so the two modes can be
+    /// exercised without a global shortcut — which macOS can't deliver to us anyway.
+    fn next_open(toggle: bool, pressed: bool, key_held: &mut bool, open: bool) -> Option<bool> {
+        if toggle {
+            if !pressed {
+                *key_held = false;
+                return None;
+            }
+            if std::mem::replace(key_held, true) {
+                return None; // auto-repeat
+            }
+            Some(!open)
+        } else {
+            *key_held = pressed;
+            Some(pressed)
+        }
+    }
+
+    #[test]
+    fn push_to_talk_opens_on_press_and_closes_on_release() {
+        let mut held = false;
+        assert_eq!(next_open(false, true, &mut held, false), Some(true));
+        assert_eq!(next_open(false, false, &mut held, true), Some(false));
+    }
+
+    #[test]
+    fn toggle_latches_and_ignores_the_release() {
+        let mut held = false;
+        // Press opens...
+        assert_eq!(next_open(true, true, &mut held, false), Some(true));
+        // ...and the release must NOT close it, or it's push-to-talk again.
+        assert_eq!(next_open(true, false, &mut held, true), None);
+        // The next press closes.
+        assert_eq!(next_open(true, true, &mut held, true), Some(false));
+        assert_eq!(next_open(true, false, &mut held, false), None);
+    }
+
+    #[test]
+    fn a_held_key_does_not_flap_the_toggle() {
+        // The OS repeats a held key. Acting on each repeat would open and close the mic
+        // dozens of times a second for as long as someone leans on it.
+        let mut held = false;
+        assert_eq!(next_open(true, true, &mut held, false), Some(true));
+        for _ in 0..10 {
+            assert_eq!(next_open(true, true, &mut held, true), None, "repeat must be ignored");
+        }
     }
 }

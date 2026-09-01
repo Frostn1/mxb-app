@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { LoadedPlugin } from "@/lib/pluginHost";
 import {
   Home,
   Library as LibraryIcon,
@@ -12,20 +13,29 @@ import {
   Gamepad2,
   SlidersHorizontal,
   Store,
+  ShoppingBag,
+  Brush,
+  Move3d,
+  Mountain,
   Palette,
+  PersonStanding,
+  Puzzle,
+  Shield,
+  Lock,
   PanelLeftClose,
   PanelLeftOpen,
-  Server as ServerIcon,
   Plug,
+  Download as DownloadIcon,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useFrostmod } from "../../Context/FrostmodContext";
-import { useInstall } from "../../Context/Install";
-import { displayName } from "../../lib/mods";
-import { useT, type TKey } from "../../i18n/context";
+import { useDownloads } from "../../Context/Downloads";
+import { useT, type TFunc, type TKey } from "../../i18n/context";
 import {
   experimentalState,
+  cpServers,
   launchGame,
   onSyncEvent,
   type ExperimentalState,
@@ -34,22 +44,38 @@ import {
 import { useGameRunning } from "../../lib/useGameRunning";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
+import { ATTACH_PROBLEM } from "../../types";
+import { contentLockAvailable, contentSecureAvailable } from "../../api/mods";
+import type { StudioTab } from "../Studio/Studio";
 import JoinServerDialog from "./JoinServerDialog";
+import DownloadQueue from "./DownloadQueue";
 
+/**
+ * A page in the shell. The template literal is how a plugin gets a nav row: its panels are
+ * addressed `plugin:<plugin id>/<panel id>`, so the shell can route to one without the
+ * union having to name plugins it will never know about at build time.
+ */
 export type DashboardView =
+  | `plugin:${string}`
   | "browse"
   | "shop"
+  | "hub"
   | "library"
+  | "downloads"
   | "locker"
   | "presets"
   | "studio"
-  | "servers"
   | "manage"
+  | "secure"
   | "settings";
 
 interface SidebarProps {
   view: DashboardView;
-  onNavigate: (view: DashboardView) => void;
+  /** Which Studio sub-view is showing, so the right child row reads as active. */
+  studioTab: StudioTab;
+  /** Plugins running this session. Each contributes its panels as rows under one group. */
+  plugins: LoadedPlugin[];
+  onNavigate: (view: DashboardView, studio?: StudioTab) => void;
 }
 
 /**
@@ -59,14 +85,43 @@ interface SidebarProps {
  */
 type NavEntry = {
   id: DashboardView;
+  /** A translation key for the app's own rows. A plugin supplies `rawLabel` instead. */
   label: TKey;
+  /** A label the app cannot translate, because a plugin wrote it. Wins over `label`. */
+  rawLabel?: string;
   icon: typeof Home;
   cap?: keyof GameCaps;
+  /** Indented under this entry, behind a chevron. */
+  children?: NavEntry[];
+  /**
+   * Which Studio sub-view this row opens. Studio's tools are entries in the sidebar rather
+   * than a control inside the page: there are six of them and a row across the top has
+   * nowhere to grow, while a list under Studio reads the way Downloads reads under Library.
+   *
+   * They all share `id: "studio"`, so the active row is the one whose sub-view is showing
+   * rather than the one whose id matches.
+   */
+  studio?: StudioTab;
+  /** Hidden unless the optional local content-lock module is present. */
+  needsLock?: boolean;
+  /** Hidden unless the mxbsecure module is present AND the experimental flag is on. */
+  needsSecure?: boolean;
 };
+
+/** A row's text. A plugin wrote its own, so there is nothing to translate. */
+const entryLabel = (t: TFunc, e: NavEntry) => e.rawLabel ?? t(e.label);
 
 const NAV: NavEntry[] = [
   { id: "browse", label: "nav.browse", icon: Home },
-  { id: "library", label: "nav.library", icon: LibraryIcon },
+  {
+    id: "library",
+    label: "nav.library",
+    icon: LibraryIcon,
+    // Under the library rather than beside it: Downloads answers the question the library
+    // can't — which of these arrived today, and what didn't arrive at all — so it reads as
+    // part of the same place, not a seventh destination competing with it.
+    children: [{ id: "downloads", label: "nav.downloads", icon: DownloadIcon }],
+  },
   // The Locker and Rider views are the 3D preview; GP Bikes' meshes need their own
   // part bindings before they can be shown.
   { id: "locker", label: "nav.locker", icon: Bike, cap: "viewer" },
@@ -74,13 +129,25 @@ const NAV: NavEntry[] = [
   // Designer, Paints and Rider in one tab. Deliberately *not* viewer-gated: building a `.pnt`
   // is the same job for either title — same container, same encoder, same folders — and only
   // the 3D preview needs part bindings. Studio hides the sub-views that do.
-  { id: "studio", label: "nav.studio", icon: Palette },
+  {
+    id: "studio",
+    label: "nav.studio",
+    icon: Palette,
+    children: [
+      { id: "studio", label: "nav.designer", icon: Palette, studio: "designer" },
+      { id: "studio", label: "nav.paints", icon: Brush, studio: "paints" },
+      { id: "studio", label: "nav.rider", icon: PersonStanding, studio: "rider", cap: "viewer" },
+      { id: "studio", label: "nav.pose", icon: Move3d, studio: "pose", cap: "viewer" },
+      { id: "studio", label: "nav.track", icon: Mountain, studio: "track" },
+      { id: "studio", label: "nav.protect", icon: Shield, studio: "protect", needsLock: true },
+    ],
+  },
   { id: "manage", label: "nav.manage", icon: SlidersHorizontal, cap: "manage" },
+  { id: "secure", label: "nav.secure", icon: Lock, needsSecure: true },
 ];
 
 /**
- * Sits second, next to Browse, because it is the other catalog — unlike the experimental
- * entry below, which is appended.
+ * Sits second, next to Browse, because it is the other catalog.
  *
  * Gated only on `cap: "shop"`: the store is mxbikes-shop.com, so it has nothing to sell a
  * player on another title. Deliberately *not* gated on the build-time catalog credential any
@@ -90,30 +157,142 @@ const NAV: NavEntry[] = [
  */
 const SHOP_ENTRY: NavEntry = { id: "shop", label: "nav.shop", icon: Store, cap: "shop" };
 
-/** Shown only when the experimental features are on — see `settings.experimental`.
- *  Also capability-gated: it administers MX Bikes dedicated servers and keys riders by
- *  MX Bikes GUID, neither of which means anything for another title. */
-const EXPERIMENTAL_NAV: NavEntry = {
-  id: "servers",
-  label: "nav.servers",
-  icon: ServerIcon,
-  cap: "servers",
-};
+/**
+ * MXB Hub — the other store, and the same reasoning as the entry above: it sells MX Bikes
+ * mods, so it has nothing to offer a player on another title.
+ *
+ * Its own entry rather than a third tab inside Shop. The two are separate storefronts with
+ * separate accounts and separate carts, and folding them into one view would mean a sign-in
+ * that silently means a different thing depending on which pill is lit.
+ */
+const HUB_ENTRY: NavEntry = { id: "hub", label: "nav.hub", icon: ShoppingBag, cap: "shop" };
 
 /** Remembered across launches: a collapsed sidebar is a preference, not a mode. */
 const COLLAPSED_KEY = "mxb:sidebarCollapsed:v1";
 
-const IN_PROGRESS = new Set(["resolving", "downloading", "extracting", "placing"]);
+/** Same idea, for the nav groups the user left open. */
+const OPEN_GROUPS_KEY = "mxb:sidebarOpenGroups:v1";
 
 /** MX Bikes takes a while to show up in the process list; stop saying "Starting…" after this. */
 const STARTING_TIMEOUT_MS = 15000;
 
-export default function Sidebar({ view, onNavigate }: SidebarProps) {
+/**
+ * One row of the nav.
+ *
+ * A row with children carries a chevron beside its label, and its children are indented under
+ * it — except when the sidebar is collapsed, where there is nothing to indent into and a group
+ * is simply its icons one after another.
+ */
+function NavRow({
+  entry,
+  active,
+  collapsed,
+  child,
+  badge,
+  group,
+  onSelect,
+}: {
+  entry: NavEntry;
+  active: boolean;
+  collapsed: boolean;
+  child: boolean;
+  /** Unseen download failures to flag on this row; 0 for none. */
+  badge: number;
+  /** Only on a row that has children. */
+  group?: { open: boolean; onToggle: () => void };
+  onSelect: () => void;
+}) {
   const t = useT();
-  const { running, reload, status, start, stop } = useFrostmod();
-  const { active, queueLength } = useInstall();
+  const Icon = entry.icon;
+  const indented = child && !collapsed;
+  return (
+    // The pill is the row, not the button inside it, so the active background and the hover
+    // reach under the chevron too.
+    <div
+      data-tour={entry.id}
+      className={cn(
+        "relative flex items-center rounded-lg transition-colors",
+        active
+          ? "bg-accent text-accent-foreground"
+          : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+      )}
+    >
+      <button
+        onClick={onSelect}
+        title={collapsed ? entryLabel(t, entry) : undefined}
+        aria-label={collapsed ? entryLabel(t, entry) : undefined}
+        className={cn(
+          "flex min-w-0 flex-1 cursor-default items-center gap-2.5",
+          collapsed ? "justify-center px-0 py-2.5" : indented ? "py-2 pl-9 pr-3" : "px-3 py-2.5",
+          indented ? "text-[13px]" : "text-[13.5px]",
+          active ? "font-semibold" : "font-medium",
+        )}
+      >
+        <Icon className={cn("flex-none", indented ? "size-3.5" : "size-4")} />
+        {!collapsed && <span className="truncate">{entryLabel(t, entry)}</span>}
+      </button>
+
+      {/* A failed download used to exist only as a toast, so one dismissed in passing left no
+          sign anything had gone wrong. This is that sign — and it sits on the parent while the
+          group is shut, because closing a group must not hide the failure with it. */}
+      {badge > 0 && (
+        <span
+          title={t("downloads.failedBadge", { count: badge })}
+          className={cn(
+            "flex-none rounded-full bg-destructive text-center text-[10px] font-bold leading-[16px] text-destructive-foreground",
+            collapsed ? "absolute right-1.5 top-1.5 size-2 p-0" : "mr-2.5 min-w-[18px] px-1",
+          )}
+        >
+          {!collapsed && badge}
+        </span>
+      )}
+
+      {group && !collapsed && (
+        <button
+          onClick={group.onToggle}
+          title={t(group.open ? "sidebar.hideGroup" : "sidebar.showGroup", {
+            name: entryLabel(t, entry),
+          })}
+          aria-label={t(group.open ? "sidebar.hideGroup" : "sidebar.showGroup", {
+            name: entryLabel(t, entry),
+          })}
+          aria-expanded={group.open}
+          className="flex flex-none cursor-default items-center py-2.5 pl-1 pr-2.5"
+        >
+          <ChevronDown
+            className={cn("size-3.5 transition-transform", !group.open && "-rotate-90")}
+          />
+        </button>
+      )}
+    </div>
+  );
+}
+
+export default function Sidebar({ view, studioTab, plugins, onNavigate }: SidebarProps) {
+  const t = useT();
+  // Locking needs an optional local module. Without it the Protect row would be a place you
+  // can go and nothing can happen, so it isn't listed.
+  const [hasLock, setHasLock] = useState(false);
+  useEffect(() => {
+    contentLockAvailable()
+      .then(setHasLock)
+      .catch(() => {});
+  }, []);
+  // The mxbsecure Lock tab needs the local module present *and* the experimental flag on.
+  const [hasSecure, setHasSecure] = useState(false);
+  useEffect(() => {
+    contentSecureAvailable()
+      .then(setHasSecure)
+      .catch(() => {});
+  }, []);
+  const { running, attachment, reload, status, start, stop } = useFrostmod();
+  // FrostMod is up but isn't reaching the game — see `frostmod::attachment`. The good
+  // states (and the grace period after a launch) deliberately look like plain "Running".
+  const attachProblem =
+    attachment !== null && ATTACH_PROBLEM.includes(attachment.state);
+  const { unseenFailures } = useDownloads();
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
-  const { game } = useConfig();
+  const { game, config } = useConfig();
   const caps = game.caps;
   const [starting, setStarting] = useState(false);
   const [collapsed, setCollapsed] = useState(
@@ -127,25 +306,40 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
       }),
     [],
   );
+  const [openGroups, setOpenGroups] = useState<string[]>(() =>
+    (localStorage.getItem(OPEN_GROUPS_KEY) ?? "").split(",").filter(Boolean),
+  );
+  const setGroupOpen = useCallback((id: DashboardView, open: boolean) => {
+    setOpenGroups((cur) => {
+      if (cur.includes(id) === open) return cur;
+      const next = open ? [...cur, id] : cur.filter((g) => g !== id);
+      localStorage.setItem(OPEN_GROUPS_KEY, next.join(","));
+      return next;
+    });
+  }, []);
   const [joinOpen, setJoinOpen] = useState(false);
-  // Re-read on navigation rather than subscribing: the toggle lives in Settings, and
-  // leaving that page is exactly when the nav needs to reflect a change.
-  const [experimental, setExperimental] = useState(false);
-
-  // Kept whole rather than just `.enabled`: the sync line below reads the same payload, and
-  // asking twice for one answer is two IPC round trips per navigation.
+  // Re-read on navigation rather than subscribing: paint sync can be switched off in
+  // Settings, and leaving that page is exactly when this line needs to reflect it.
   const [sync, setSync] = useState<ExperimentalState | null>(null);
   const [syncBusy, setSyncBusy] = useState<SyncEvent["phase"] | null>(null);
 
   const readExperimental = useCallback(() => {
-    experimentalState()
-      .then((s) => {
-        setExperimental(s.enabled);
-        setSync(s);
-      })
-      .catch(() => {});
+    experimentalState().then(setSync).catch(() => {});
   }, []);
   useEffect(readExperimental, [readExperimental, view]);
+
+  // Whether there is anywhere to join. The dialog can only offer servers the control plane
+  // knows about, and the real list — the one the game's own browser shows — comes from
+  // PiBoSo's master server, which we cannot read yet (see `tasks/mxb-server-browser.md`).
+  // A button that opens onto an empty list and an IP box is worse than no button, so it
+  // waits until there is something behind it. When the public browser lands, this gate is
+  // what brings the button back on its own.
+  const [joinable, setJoinable] = useState(false);
+  useEffect(() => {
+    cpServers()
+      .then((list) => setJoinable(list.length > 0))
+      .catch(() => setJoinable(false));
+  }, [view]);
 
   // Follow the background work as it happens, and re-read the record it leaves behind.
   useEffect(() => {
@@ -158,14 +352,62 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
     };
   }, [readExperimental]);
 
-  // Two independent gates: servers needs the experimental toggle, and every entry needs the
+  // Every entry needs the
   // active game to support it. Built here rather than inline so the JSX stays one `.map`.
-  const nav = [
-    NAV[0],
-    SHOP_ENTRY,
-    ...NAV.slice(1),
-    ...(experimental ? [EXPERIMENTAL_NAV] : []),
-  ].filter(({ cap }) => !cap || caps[cap]);
+  const secureEnabled = hasSecure && (config.mxbsecureEnabled ?? false);
+  const supported = ({ cap, needsLock, needsSecure }: NavEntry) =>
+    (!cap || caps[cap]) && (!needsLock || hasLock) && (!needsSecure || secureEnabled);
+
+  // Plugin rows, under one group so a paid add-on reads as a thing the user installed
+  // rather than as another built-in page. Absent entirely when nothing is licensed.
+  const pluginGroup: NavEntry[] =
+    plugins.length === 0
+      ? []
+      : [
+          {
+            id: `plugin:${plugins[0].manifest.id}/${plugins[0].panels[0].id}` as DashboardView,
+            label: "plugins.section",
+            icon: Puzzle,
+            children: plugins.flatMap((p) =>
+              p.panels.map((panel) => ({
+                id: `plugin:${p.manifest.id}/${panel.id}` as DashboardView,
+                label: "plugins.section" as TKey,
+                rawLabel: panel.label,
+                icon: Puzzle,
+              })),
+            ),
+          },
+        ];
+  const nav = [NAV[0], SHOP_ENTRY, HUB_ENTRY, ...NAV.slice(1), ...pluginGroup]
+    .filter(supported)
+    .map((e) => (e.children ? { ...e, children: e.children.filter(supported) } : e));
+
+  // Flattened to the rows actually on screen, so the JSX below stays one `.map`: a group
+  // contributes its own row, then its children when it's open — or always when the sidebar is
+  // collapsed, where there is no indent to hide them behind.
+  const rows = nav.flatMap((entry) => {
+    const kids = entry.children ?? [];
+    // Open because the user opened it, or because one of its pages is the one on screen —
+    // arriving at Downloads from a toast shouldn't leave it hidden inside a shut group.
+    const open = kids.some((k) => k.id === view) || openGroups.includes(entry.id);
+    const shown = collapsed || open ? kids : [];
+    const failures = (e: NavEntry) => (e.id === "downloads" ? unseenFailures : 0);
+    return [
+      {
+        entry,
+        child: false,
+        // Whatever the children would have flagged, while they aren't on screen to flag it.
+        badge: shown.length ? failures(entry) : Math.max(...kids.map(failures), failures(entry)),
+        group: kids.length ? { open, onToggle: () => setGroupOpen(entry.id, !open) } : undefined,
+      },
+      ...shown.map((kid) => ({
+        entry: kid,
+        child: true,
+        badge: failures(kid),
+        group: undefined,
+      })),
+    ];
+  });
 
   // Drop out of "Starting…" once the game shows up — or once it's clear it isn't going
   // to, so a launch that failed silently doesn't leave the button stuck.
@@ -195,12 +437,6 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
     }
     refreshGame();
   };
-
-  const installing = active && IN_PROGRESS.has(active.stage);
-  const pct =
-    active?.total && active.received
-      ? Math.round((active.received / active.total) * 100)
-      : undefined;
 
   const onReload = async () => {
     const outcome = await reload();
@@ -245,61 +481,34 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
         </button>
       </div>
 
-      <nav className="flex flex-col gap-0.5">
-        {nav.map(({ id, label, icon: Icon }) => {
-          const activeNav = view === id;
-          return (
-            <button
-              key={id}
-              data-tour={id}
-              onClick={() => onNavigate(id)}
-              title={collapsed ? t(label) : undefined}
-              aria-label={collapsed ? t(label) : undefined}
-              className={cn(
-                "flex cursor-default items-center gap-2.5 rounded-lg py-2.5 text-[13.5px] transition-colors",
-                collapsed ? "justify-center px-0" : "px-3",
-                activeNav
-                  ? "bg-accent font-semibold text-accent-foreground"
-                  : "font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
-              )}
-            >
-              <Icon className="size-4 flex-none" />
-              {!collapsed && <span>{t(label)}</span>}
-            </button>
-          );
-        })}
+      {/* The list scrolls; the Play button below it does not. Studio's tools are rows now,
+          so a short window or an expanded group can push the list past the bottom, and the
+          thing that must never scroll away is the one people came to press. */}
+      <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden">
+        {rows.map(({ entry, child, badge, group }) => (
+          <NavRow
+            key={entry.studio ?? entry.id}
+            entry={entry}
+            active={
+              entry.studio ? view === "studio" && studioTab === entry.studio : view === entry.id
+            }
+            collapsed={collapsed}
+            child={child}
+            badge={badge}
+            group={group}
+            onSelect={() => {
+              onNavigate(entry.id, entry.studio);
+              // Opening the parent's page shows what's under it. Only ever opens: clicking
+              // Library twice shouldn't make Downloads disappear — that's the chevron's job.
+              if (group) setGroupOpen(entry.id, true);
+            }}
+          />
+        ))}
       </nav>
 
-      <div className="mt-auto flex flex-col gap-2">
-        {!collapsed && installing && (
-          <div className="flex flex-col gap-[7px] rounded-[10px] border border-white/[0.07] bg-[color-mix(in_srgb,var(--card)_60%,var(--window))] px-3 py-2.5">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="truncate text-[11.5px] font-semibold text-foreground/85">
-                {t("sidebar.installing", { name: displayName(active.title) })}
-              </span>
-              {pct !== undefined && (
-                <span className="flex-none text-[10.5px] text-muted-foreground">
-                  {pct}%
-                </span>
-              )}
-            </div>
-            {queueLength > 0 && (
-              <span className="text-[10.5px] text-muted-foreground">
-                {t("sidebar.queued", { count: queueLength })}
-              </span>
-            )}
-            <div className="h-[3px] overflow-hidden rounded-full bg-foreground/[0.08]">
-              <div
-                className={cn(
-                  "h-full rounded-full bg-primary transition-[width]",
-                  pct === undefined &&
-                    "w-1/3 animate-[frost-indeterminate_1.2s_ease-in-out_infinite]",
-                )}
-                style={pct !== undefined ? { width: `${pct}%` } : undefined}
-              />
-            </div>
-          </div>
-        )}
+      <div className="mt-3 flex flex-none flex-col gap-2">
+        {/* The install card is the queue's trigger now — same look, opens the panel. */}
+        <DownloadQueue collapsed={collapsed} />
 
         <button
           data-tour="play"
@@ -332,13 +541,12 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           )}
         </button>
 
-        {/* Join-by-address launches the game with `-directconnect`. Behind the experimental
-            toggle with the rest of the unfinished multiplayer surface: the flag is
-            undocumented by PiBoSo, so it's opt-in rather than something a player finds by
-            accident. Capability-gated on top — both the argv parser offset it was found at
-            and the default port it assumes are MX Bikes', so it waits until GP's are
-            confirmed. */}
-        {!collapsed && experimental && caps.joinByAddress && (
+        {/* Join-by-address launches the game with `-directconnect`. Joining a server is not
+            hosting one, so it is not hidden with the server-creation surface — but it only
+            appears when there is a real list to show. Capability-gated too: both the argv
+            parser offset it was found at and the default port it assumes are MX Bikes', so
+            it waits until GP's are confirmed. */}
+        {!collapsed && joinable && caps.joinByAddress && (
         <>
         <button
           onClick={() => setJoinOpen(true)}
@@ -366,9 +574,10 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
         {/* Paint sync, in one line. Both halves of it run in the background off actions the
             player didn't ask for — an apply, a launch, the game rewriting profile.ini — so
             without something like this the only place its state existed was the log file.
-            Shown only once there's an account, since before that the Servers page is where
-            the answer is. */}
-        {!collapsed && experimental && sync?.enrolled && (
+            No longer behind the experimental toggle: sync is on for everyone and works on
+            any server, so everyone needs somewhere to see it working. Waits for an account,
+            which the app claims for itself the first time sync runs. */}
+        {!collapsed && sync?.paintSyncEnabled && sync?.enrolled && (
           <div className="flex items-center gap-2 rounded-[10px] border border-white/[0.07] px-3 py-2">
             <span
               className={cn(
@@ -389,8 +598,10 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
                     ? t("sync.sidebarOk", { count: sync.sync.pulledRiders })
                     : t("sync.sidebarUnpublished")}
             </span>
+            {/* Where the detail is: Settings → Paint sync, which holds the publish and
+                pull state, the GUID, and any paint the sync declined to overwrite. */}
             <button
-              onClick={() => onNavigate("servers")}
+              onClick={() => onNavigate("settings")}
               title={t("sync.title")}
               className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
             >
@@ -404,14 +615,20 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
         {caps.frostmod && (
         <div
           data-tour="frostmod"
+          // A running FrostMod that never got into the game is the state this pill used
+          // to report as plain "Running", which is exactly as far as the player could get
+          // in working out why nothing was happening in game. The reason goes in the
+          // tooltip whether or not the sidebar is collapsed.
           title={
-            collapsed
-              ? running === null
-                ? t("frostmod.checking")
-                : running
-                  ? t("frostmod.running")
-                  : t("frostmod.notRunning")
-              : undefined
+            attachProblem
+              ? attachment?.reason
+              : collapsed
+                ? running === null
+                  ? t("frostmod.checking")
+                  : running
+                    ? t("frostmod.running")
+                    : t("frostmod.notRunning")
+                : undefined
           }
           className={cn(
             "flex items-center rounded-[10px] border border-white/[0.07] py-2",
@@ -421,16 +638,27 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           <span
             className={cn(
               "size-[7px] flex-none rounded-full",
-              running ? "bg-success" : "bg-muted-foreground/50",
+              attachProblem
+                ? "bg-warning"
+                : running
+                  ? "bg-success"
+                  : "bg-muted-foreground/50",
             )}
           />
           {!collapsed && (
-            <span className="flex-1 text-[11.5px] text-muted-foreground">
-              {running === null
-                ? t("frostmod.checking")
-                : running
-                  ? t("frostmod.running")
-                  : t("frostmod.notRunning")}
+            <span
+              className={cn(
+                "flex-1 text-[11.5px]",
+                attachProblem ? "text-warning" : "text-muted-foreground",
+              )}
+            >
+              {attachProblem
+                ? t("frostmod.notInGame")
+                : running === null
+                  ? t("frostmod.checking")
+                  : running
+                    ? t("frostmod.running")
+                    : t("frostmod.notRunning")}
             </span>
           )}
           {running ? (

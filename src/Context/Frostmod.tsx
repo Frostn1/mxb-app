@@ -9,8 +9,11 @@ import {
 import { toast } from "sonner";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import {
+  frostmodClearStrayMsvcr90,
   frostmodInstall,
   frostmodInstallRuntime,
+  frostmodRepairRuntimes,
+  frostmodAttachment,
   frostmodStart,
   frostmodStatus,
   frostmodStop,
@@ -19,8 +22,11 @@ import {
   onFrostmodReload,
   reloadFrostmod,
   RUNTIME_DOWNLOAD_URL,
+  RUNTIME_DOWNLOADS_PAGE,
+  RUNTIME_NAME_KEY,
 } from "../api/mods";
-import type { FrostmodStatus, VcRuntime } from "../types";
+import type { Attachment, FrostmodStatus, VcRuntime } from "../types";
+import { ATTACH_PROBLEM } from "../types";
 import { displayName } from "../lib/mods";
 import { useT, type TFunc } from "../i18n/context";
 import { FrostmodContext } from "./FrostmodContext";
@@ -48,11 +54,18 @@ function watchDescription(mods: string[], t: TFunc): string {
 export function FrostmodProvider({ children }: { children: ReactNode }) {
   const t = useT();
   const [running, setRunning] = useState<boolean | null>(null);
+  const [attachment, setAttachment] = useState<Attachment | null>(null);
+  // What we last warned about, so a problem that persists across the 5s poll is reported
+  // once rather than every tick. Cleared when the state stops being a problem, which is
+  // what lets the *next* game session warn again.
+  const warnedFor = useRef<string | null>(null);
   const [status, setStatus] = useState<FrostmodStatus | null>(null);
   const [installing, setInstalling] = useState(false);
   const [checking, setChecking] = useState(false);
   const [statusError, setStatusError] = useState(false);
   const [installingRuntime, setInstallingRuntime] = useState(false);
+  const [repairingRuntimes, setRepairingRuntimes] = useState(false);
+  const [clearingStray, setClearingStray] = useState(false);
   const [runtimeDismissed, setRuntimeDismissed] = useState(false);
   const mounted = useRef(true);
 
@@ -63,7 +76,30 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     } catch {
       if (mounted.current) setRunning(false);
     }
-  }, []);
+    // Folded into the same tick rather than given a poll of its own: it answers the
+    // follow-up to the question above, and asking them apart would let the pill show a
+    // running FrostMod and a stale attach state at the same time.
+    try {
+      const a = await frostmodAttachment();
+      if (!mounted.current) return;
+      setAttachment(a);
+      if (!ATTACH_PROBLEM.includes(a.state)) {
+        warnedFor.current = null;
+        return;
+      }
+      // The reason carries the game name, so a state that stays the same while the
+      // player switches title still gets said once for each.
+      const key = `${a.state}:${a.reason}`;
+      if (warnedFor.current === key) return;
+      warnedFor.current = key;
+      toast.warning(t("frostmod.notInGame"), {
+        description: a.reason,
+        duration: 12000,
+      });
+    } catch {
+      /* older backend or non-Tauri — leave the pill on `running` alone */
+    }
+  }, [t]);
 
   const refreshStatus = useCallback(async () => {
     if (mounted.current) setChecking(true);
@@ -215,6 +251,97 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     [refreshStatus, t],
   );
 
+  /**
+   * Install everything the PC is short of, and sweep up the stray `msvcr90.dll` older
+   * builds of this app left beside the game exe.
+   *
+   * The one path that doesn't ask detection for permission first. A PC can report every
+   * runtime present and still stop the game dead, so this always does the work and reports
+   * what it found rather than deciding there was nothing to do.
+   *
+   * Never throws: the backend returns a report instead, so a UAC prompt declined on one
+   * installer doesn't cost the player the other two.
+   */
+  const repairRuntimes = useCallback(async () => {
+    setRepairingRuntimes(true);
+    try {
+      const report = await frostmodRepairRuntimes();
+      await refreshStatus();
+
+      const fixed =
+        report.installed.length > 0 || report.strayMsvcr90 === "removed";
+      if (report.stillMissing.length > 0) {
+        // Partly done at best, and every remaining item has a link. Offer the first —
+        // opening three tabs at once would be its own kind of unhelpful.
+        const first = report.stillMissing[0];
+        toast.warning(t("runtime.repairPartial"), {
+          description: t("runtime.repairPartialDesc", {
+            what: report.stillMissing.map((r) => t(RUNTIME_NAME_KEY[r])).join(", "),
+          }),
+          action: {
+            label: t("runtime.downloadManually"),
+            onClick: () => void openUrl(RUNTIME_DOWNLOAD_URL[first]),
+          },
+          duration: 12000,
+        });
+      } else if (fixed) {
+        toast.success(t("runtime.repairDone"), {
+          description: t("runtime.repairDoneDesc"),
+        });
+      } else if (!report.gameDirKnown) {
+        // Everything was already installed, but with no game folder we never looked at the
+        // half of the job that lives in it. Saying "all good" here would be a lie.
+        toast.info(t("runtime.repairNoGameFolder"), {
+          description: t("runtime.repairNoGameFolderDesc"),
+        });
+      } else {
+        toast.info(t("runtime.repairNothingToDo"), {
+          description: t("runtime.repairNothingToDoDesc"),
+        });
+      }
+    } catch (e) {
+      toast.error(t("runtime.repairFailed"), {
+        description: String(e),
+        action: {
+          label: t("runtime.downloadManually"),
+          onClick: () => void openUrl(RUNTIME_DOWNLOADS_PAGE),
+        },
+      });
+    } finally {
+      setRepairingRuntimes(false);
+    }
+  }, [refreshStatus, t]);
+
+  /**
+   * Move the stray `msvcr90.dll` aside, now that the player has asked for it.
+   *
+   * The one file-destroying thing in here, which is why it is only ever reachable from a
+   * bar that has already named the file: the backend refuses to delete a `msvcr90.dll` it
+   * can't prove this app planted, and a press is the only other thing that settles it.
+   */
+  const clearStrayMsvcr90 = useCallback(async () => {
+    setClearingStray(true);
+    try {
+      await frostmodClearStrayMsvcr90();
+      await refreshStatus();
+      toast.success(t("runtime.strayCleared"), {
+        description: t("runtime.strayClearedDesc"),
+      });
+    } catch (e) {
+      // Almost always the game holding the file open, and the backend's message says so.
+      toast.error(t("runtime.strayClearFailed"), { description: String(e) });
+    } finally {
+      setClearingStray(false);
+    }
+  }, [refreshStatus, t]);
+
+  // A file that crashes the game outranks a runtime that isn't installed, so this is
+  // checked before `missingRuntime` wherever one bar has to win. `clear`/`removed` mean
+  // there is nothing there — only the two arms that leave a file behind reach the UI.
+  const stray = status?.strayMsvcr90;
+  const strayMsvcr90 = stray === "foreign" || stray === "locked" ? stray : null;
+  const strayWarning = runtimeDismissed ? null : strayMsvcr90;
+
   // Only ever surface one at a time: two banners stacked over the app is noise, and the
   // game's own runtime (vc90) is the one that produces the error people actually report,
   // so `missingRuntimes` order (vc90 first) decides.
@@ -262,6 +389,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       running,
+      attachment,
       status,
       installing,
       checking,
@@ -274,11 +402,17 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       stop,
       installingRuntime,
       installRuntime,
+      repairingRuntimes,
+      repairRuntimes,
+      strayMsvcr90,
+      strayWarning,
+      clearingStray,
+      clearStrayMsvcr90,
       dismissRuntimeWarning,
       runtimeWarning,
       missingRuntime,
     }),
-    [running, status, installing, checking, statusError, reload, probe, refreshStatus, install, start, stop, installingRuntime, installRuntime, dismissRuntimeWarning, runtimeWarning, missingRuntime],
+    [running, attachment, status, installing, checking, statusError, reload, probe, refreshStatus, install, start, stop, installingRuntime, installRuntime, repairingRuntimes, repairRuntimes, strayMsvcr90, strayWarning, clearingStray, clearStrayMsvcr90, dismissRuntimeWarning, runtimeWarning, missingRuntime],
   );
 
   return (

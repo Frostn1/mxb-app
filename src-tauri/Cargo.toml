@@ -1,7 +1,10 @@
 [package]
-name = "frost"
-version = "0.9.2"
-description = "Frost — MX Bikes mod manager"
+# `mainBinaryName` renames the bundled binary, but only for `tauri build` — a dev run is
+# whatever cargo called it. Cargo target names can't hold a space, so this is as close as
+# it gets. The description is what Windows Task Manager shows in its Processes tab.
+name = "mxb-app"
+version = "0.13.1"
+description = "MXB App — MX Bikes mod manager"
 authors = ["Frost"]
 edition = "2021"
 
@@ -11,6 +14,10 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# Secure-content packing (mxbsecure). Public crates, always compiled; the format and its use
+# live in the gitignored `src/mxbsecure.rs` sidecar, gated by cfg(mxbsecure).
+chacha20poly1305 = "0.10"
+getrandom = "0.2"
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
@@ -30,6 +37,8 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-log = "2"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
+# Only for the install id the anonymous usage counters are keyed on.
+uuid = { version = "1", features = ["v4"] }
 serde_json = "1"
 dirs-next = "2.0.0"
 walkdir = "2"
@@ -38,6 +47,9 @@ walkdir = "2"
 percent-encoding = "2"
 # The custom URI scheme handler builds its own responses. Same crate Tauri re-exports.
 http = "1"
+# How much memory this process is holding, for `memwatch`. A few lines of platform FFI
+# behind one call; not worth hand-rolling three times over.
+memory-stats = "1"
 # rustls: consistent modern TLS across platforms (native SChannel failed on
 # Windows). MediaFire downloads work directly with this client — its CDN no
 # longer blocks the rustls fingerprint (verified against a live 427 MB .pkz).
@@ -96,6 +108,10 @@ notify-debouncer-mini = "0.4"
 # Check an installed FrostMod binary against the digest its GitHub release advertises,
 # so an install that only half-applied can be spotted and repaired.
 sha2 = "0.10"
+# Verifies the signature on a paid plugin's entitlement. Verification only — the app holds
+# the public half of the pair and never signs anything, which is the whole reason this is a
+# signature rather than a MAC whose key would ship inside the binary.
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 # The 16-byte digest a `.pnt`/`.edf` texture header carries beside its dimensions, written
 # when the app builds a paint of its own (`paint::encode`). Shares the `digest` traits
 # `sha2` already pulls in, so it costs one small crate.
@@ -114,6 +130,31 @@ tauri-plugin-deep-link = "2.4.9"
 # `cargo check --target x86_64-pc-windows-gnu` before raising this; a macOS build won't
 # catch it, and a Windows-first app can't ship without it.
 cpal = "0.15"
+
+# The rest of voice: the codec, the peer-to-peer transport, and the socket that introduces
+# two apps to each other.
+#
+# `str0m` is sans-IO WebRTC — we own the UDP socket and the loop, it owns ICE, DTLS and the
+# data channel. `rust-crypto` rather than the default backend so there is no OpenSSL or
+# aws-lc to build: the whole stack cross-compiles to Windows with nothing installed.
+str0m = { version = "0.23", default-features = false, features = ["rust-crypto"] }
+# libopus, vendored and built from source by `opusic-sys` — no system library to find.
+opus = "0.4"
+# Signalling is one long-lived WebSocket carrying a few KB per join, so it is the blocking
+# client on its own thread rather than an async one: the voice subsystem is threads and
+# channels throughout (see `Monitor`), and a second runtime would buy nothing.
+tungstenite = { version = "0.24", default-features = false, features = [
+    "handshake",
+    "rustls-tls-webpki-roots",
+] }
+
+# Only for putting a mod back after an uninstall. `trash` calls `trashItemAtURL` but throws
+# away the destination it reports, and the Trash folder can't simply be read back — macOS
+# refuses `~/.Trash` to an app without Full Disk Access. Asking the API where it put the file
+# is the one way to know. Both are already in the tree as `trash`'s own dependencies.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSFileManager", "NSURL", "NSError", "NSString"] }
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

@@ -5,6 +5,7 @@ import {
   Boxes,
   Check,
   ChevronsUpDown,
+  CircleDot,
   FileQuestion,
   Layers,
   Loader2,
@@ -56,6 +57,7 @@ const KIND_LABEL: Record<DropKind, TKey> = {
   bikePaint: "drop.kind.bikePaint",
   soundSet: "drop.kind.soundSet",
   riderGear: "drop.kind.riderGear",
+  tyres: "drop.kind.tyres",
   reshadePreset: "drop.kind.reshadePreset",
   unknown: "drop.kind.unknown",
 };
@@ -73,6 +75,7 @@ const REASON_LABEL: Record<DropReason, TKey> = {
   riderTexture: "drop.reason.riderTexture",
   gearTexture: "drop.reason.gearTexture",
   reshadePreset: "drop.reason.reshadePreset",
+  packLayout: "drop.reason.packLayout",
   unrecognised: "drop.reason.unrecognised",
 };
 
@@ -83,6 +86,7 @@ const KIND_ICON: Record<DropKind, typeof BikeIcon> = {
   bikePaint: Palette,
   soundSet: Volume2,
   riderGear: Shirt,
+  tyres: CircleDot,
   reshadePreset: Sparkles,
   unknown: FileQuestion,
 };
@@ -328,6 +332,7 @@ export default function DropReview({
   rows,
   installing,
   onToggle,
+  onToggleAll,
   onPick,
   onCancel,
   onInstall,
@@ -336,6 +341,7 @@ export default function DropReview({
   rows: RowState[];
   installing: boolean;
   onToggle: (id: string) => void;
+  onToggleAll: (keep: boolean) => void;
   onPick: (id: string, value: string) => void;
   onCancel: () => void;
   onInstall: () => void;
@@ -354,6 +360,7 @@ export default function DropReview({
     () => ready.reduce((n, r) => n + r.collisions.length, 0),
     [ready],
   );
+  const allKept = useMemo(() => rows.every((r) => r.keep), [rows]);
 
   return (
     <Dialog open>
@@ -375,6 +382,20 @@ export default function DropReview({
               {t("drop.reviewHint")}
             </p>
           </div>
+          {/* A split pack runs to dozens of rows, and picking four of fifty-five is a lot of
+              clicking from a sheet that starts with everything checked. Hidden on the short
+              lists, where it would only be one more thing to read. */}
+          {rows.length > 3 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="flex-none text-[11.5px]"
+              disabled={installing}
+              onClick={() => onToggleAll(!allKept)}
+            >
+              {allKept ? t("drop.selectNone") : t("drop.selectAll")}
+            </Button>
+          )}
         </div>
 
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-5 py-4">

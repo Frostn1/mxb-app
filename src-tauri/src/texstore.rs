@@ -11,7 +11,8 @@
 //!
 //! Ownership: `to_texture` is called once per texture per source load, so a token belongs
 //! to exactly one `bike_cache` entry — no refcounting. That entry calls [`release`] when it
-//! is evicted. Paths with no cache of their own (a gear `.pnt` re-decoded on every pick)
+//! leaves the cache, which means evicted *or* replaced in place: a bike built twice under
+//! one key displaces the first build, and its pixels are freed by nothing else. Paths with no cache of their own (a gear `.pnt` re-decoded on every pick)
 //! rely on [`CAP_BYTES`] reaping the oldest blobs.
 
 use std::collections::{HashMap, VecDeque};

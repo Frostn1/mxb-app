@@ -33,11 +33,17 @@ impl<V> Lru<V> {
         self.map.get(key)
     }
 
-    /// Insert `value`, returning whatever was evicted to make room for it.
+    /// Insert `value`, returning whatever it displaced — the coldest entry, evicted to make
+    /// room, or the value that was already under `key`.
+    ///
+    /// Both cases hand back something the caller is now the only owner of. A replaced entry
+    /// used to be dropped here instead, which silently stranded whatever hung off it: a bike
+    /// built twice under one key leaked the first build's pixels, because the texture store
+    /// frees only what this returns.
     pub fn insert(&mut self, key: String, value: V) -> Option<V> {
-        if self.map.insert(key.clone(), value).is_some() {
+        if let Some(replaced) = self.map.insert(key.clone(), value) {
             self.touch(&key);
-            return None; // replaced in place, nothing left the cache
+            return Some(replaced); // nothing left the cache, but the old value left the map
         }
         self.order.push_back(key);
         if self.map.len() > self.cap {
@@ -82,11 +88,11 @@ mod tests {
     }
 
     #[test]
-    fn replacing_a_key_evicts_nothing() {
+    fn replacing_a_key_hands_back_the_old_value() {
         let mut lru = Lru::new(2);
         lru.insert("a".into(), 1);
         lru.insert("b".into(), 2);
-        assert_eq!(lru.insert("a".into(), 9), None);
+        assert_eq!(lru.insert("a".into(), 9), Some(1), "the caller still owns what it displaced");
         assert_eq!(lru.get("a"), Some(&9));
         assert_eq!(lru.get("b"), Some(&2), "both still resident");
     }
