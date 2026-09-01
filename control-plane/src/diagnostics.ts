@@ -2,8 +2,17 @@
  * What is loaded inside a player's running game.
  *
  * The app walks the module list of the running game and posts it here — file name, where it
- * came from, and a hash for anything that is not a Windows system library. That is the whole
- * of the client's job: it observes and reports, and it holds no opinion about any file.
+ * came from, a hash for anything that is not a Windows system library, and what the file says
+ * about itself: size, last written, whether Windows trusts its signature and who signed it,
+ * and the company and product it claims. That is the whole of the client's job: it observes
+ * and reports, and it holds no opinion about any file.
+ *
+ * The self-description is worth having because a name and a hash only identify what is
+ * already known, and every first sighting is a name nobody recognises. `signed by NVIDIA
+ * Corporation` and `unsigned, claims nothing` are the same length on the page and mean
+ * opposite things. None of it is trusted: a version resource is text the file supplies about
+ * itself and is treated exactly like any other string off a client. Only `trust` is checked,
+ * because only Windows checked it.
  *
  * Every judgement lives here instead, against `module_rules`, and that split is the design
  * rather than an accident of layering:
@@ -56,11 +65,39 @@ export function isState(value: unknown): value is State {
   return typeof value === "string" && value in STATE_RANK;
 }
 
+/**
+ * What Windows made of a file's signature, as the client read it.
+ *
+ * `unchecked` is not `unsigned`: system libraries are never looked at, and neither is
+ * anything under Wine, where there is no trust store to ask. Folding the two together would
+ * report every Linux player's whole game as unsigned.
+ */
+export type Trust = "unchecked" | "unsigned" | "signed" | "untrusted";
+
+const TRUSTS: readonly string[] = ["unchecked", "unsigned", "signed", "untrusted"];
+
+export function isTrust(value: unknown): value is Trust {
+  return typeof value === "string" && TRUSTS.includes(value);
+}
+
 export interface ReportedModule {
   name: string;
   origin: Origin;
   /** Empty for system libraries, which the client does not hash, and for unreadable files. */
   sha256: string;
+  /** Bytes on disk; 0 when the client could not read the file. */
+  size: number;
+  /** Last written, seconds since the epoch; 0 when unknown. */
+  mtime: number;
+  trust: Trust;
+  /** The signing certificate's display name. Only ever set when `trust` is `signed`. */
+  publisher: string;
+  /** `CompanyName` off the version resource — a claim, not a checked fact. */
+  company: string;
+  /** `ProductName`. */
+  product: string;
+  /** `FileDescription`, the field Explorer shows. */
+  description: string;
 }
 
 export interface ModuleRule {
@@ -91,6 +128,16 @@ export const MAX_MODULES = 400;
 
 /** A file name. Long enough for anything real, short enough to be a column. */
 const MAX_NAME = 96;
+
+/** The same bound the client already applies to everything it reads off a file. */
+const MAX_FIELD = 96;
+
+/** Bigger than any library, and the point past which a number is a client bug or a lie. */
+const MAX_SIZE = 8 * 1024 * 1024 * 1024;
+
+/** Seconds. Anything outside this is not a timestamp — 2000-01-01 to roughly 2100. */
+const MIN_MTIME = 946_684_800;
+const MAX_MTIME = 4_102_444_800;
 
 const ORIGINS: readonly string[] = ["game", "system", "app", "other"];
 
@@ -150,9 +197,44 @@ export function parseModules(value: unknown): ReportedModule[] | null {
     const key = `${clean} ${hash}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ name: clean, origin: origin as Origin, sha256: hash });
+    const e = entry as Record<string, unknown>;
+    out.push({
+      name: clean,
+      origin: origin as Origin,
+      sha256: hash,
+      size: bounded(e.size, MAX_SIZE),
+      mtime: stamp(e.mtime),
+      // An absent or unrecognised trust reads as `unchecked` rather than rejecting the
+      // report: an older client sends no such field at all, and a report that is thrown away
+      // is worse than one that says less than it could.
+      trust: isTrust(e.trust) ? e.trust : "unchecked",
+      publisher: field(e.publisher),
+      company: field(e.company),
+      product: field(e.product),
+      description: field(e.description),
+    });
   }
   return out;
+}
+
+/** One string a file said about itself: trimmed, bounded, and stripped of control characters. */
+function field(value: unknown): string {
+  if (typeof value !== "string") return "";
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, MAX_FIELD);
+}
+
+/** A non-negative integer inside a bound, or 0. */
+function bounded(value: unknown, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  const n = Math.trunc(value);
+  return n > 0 && n <= max ? n : 0;
+}
+
+/** A plausible epoch-seconds timestamp, or 0. */
+function stamp(value: unknown): number {
+  const n = bounded(value, MAX_MTIME);
+  return n >= MIN_MTIME ? n : 0;
 }
 
 /**
@@ -163,7 +245,11 @@ export function parseModules(value: unknown): ReportedModule[] | null {
  *   1. **Deny first.** A named file is named wherever it loaded from — something that copies
  *      itself into the game's folder must not be trusted for being there.
  *   2. **Allow next**, so a false positive is silenced by adding one row, not by a release.
- *   3. **Loader names in the game's folder**, the one case where the location is the point.
+ *   3. **Anything in the game's own folder.** Sitting beside the executable is the cheapest
+ *      way into a process, not a credential — and this is the hole the first version left:
+ *      a file dropped next to `mxbikes.exe` under an ordinary name read as accounted for
+ *      because of where it was. The game's own libraries land here too and are cleared once,
+ *      by hash, from the admin page.
  *   4. **Anything from outside** the game, the system, and what the app installed.
  *   5. Everything else is accounted for.
  */
@@ -180,11 +266,7 @@ export function classify(modules: ReportedModule[], rules: ModuleRule[]): Classi
       continue;
     }
     if (matchRule(allow, mod)) continue;
-    if (mod.origin === "game" && LOADER_NAMES.includes(mod.name)) {
-      unknown.push(mod);
-      continue;
-    }
-    if (mod.origin === "other") unknown.push(mod);
+    if (isUnaccounted(mod)) unknown.push(mod);
   }
 
   const state: State = matched.length > 0 ? "alert" : unknown.length > 0 ? "warn" : "ok";
@@ -347,11 +429,15 @@ async function store(
     statements.push(
       env.DB.prepare(
         "INSERT INTO client_module_seen (account_id, name, sha256, origin, state, label," +
-          " rider_name, server_id, first_at, last_at, hits)" +
-          " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)" +
+          " rider_name, server_id, first_at, last_at, hits," +
+          " size, mtime, trust, publisher, company, product, description)" +
+          " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)" +
           " ON CONFLICT(account_id, name, sha256) DO UPDATE SET origin = excluded.origin," +
           " state = excluded.state, label = excluded.label, rider_name = excluded.rider_name," +
-          " server_id = excluded.server_id, last_at = excluded.last_at, hits = hits + 1",
+          " server_id = excluded.server_id, last_at = excluded.last_at, hits = hits + 1," +
+          " size = excluded.size, mtime = excluded.mtime, trust = excluded.trust," +
+          " publisher = excluded.publisher, company = excluded.company," +
+          " product = excluded.product, description = excluded.description",
       ).bind(
         account.id,
         mod.name,
@@ -363,6 +449,13 @@ async function store(
         serverId,
         now,
         now,
+        mod.size,
+        mod.mtime,
+        mod.trust,
+        mod.publisher,
+        mod.company,
+        mod.product,
+        mod.description,
       ),
     );
   }
@@ -370,10 +463,27 @@ async function store(
   await env.DB.batch(statements);
 }
 
+/**
+ * Does this module need a rule to account for it?
+ *
+ * `system` is the only origin that accounts for itself, and it does so by where it is: a
+ * Windows system folder is not writable without administrator rights, so a file there was
+ * put there by something that already had the machine. `app` is our own install folder,
+ * which we put every file in ourselves.
+ *
+ * Everything else — the game's folder included — needs a rule. `LOADER_NAMES` no longer
+ * changes the answer for the game's folder, because the whole folder is asked about now; it
+ * stays because those names matter wherever else they turn up.
+ */
+export function isUnaccounted(mod: ReportedModule): boolean {
+  if (mod.origin === "system") return false;
+  if (mod.origin === "app") return LOADER_NAMES.includes(mod.name);
+  return true;
+}
+
 /** Was this module one of the ones nothing accounted for in the report it arrived in? */
 function unknownState(mod: ReportedModule, reportState: State): State {
-  if (mod.origin === "other") return "warn";
-  if (mod.origin === "game" && LOADER_NAMES.includes(mod.name)) return "warn";
+  if (isUnaccounted(mod)) return "warn";
   return reportState === "unknown" ? "unknown" : "ok";
 }
 
@@ -394,39 +504,88 @@ export interface LiveRow {
   updatedAt: number;
 }
 
-/** One file, as it has been seen across everyone. */
-export interface SeenRow {
-  accountId: string;
-  riderName: string;
-  serverId: string;
+/**
+ * One distinct file — one name and one hash — as it has been seen across everyone.
+ *
+ * A variant, not a sighting: the per-account rows behind it are collapsed, because the
+ * question the page asks is "what is this file" and the answer does not change with who
+ * loaded it. `riderName` is only meaningful when `accounts` is 1, and the page only shows it
+ * then; naming one of several people would read as an accusation of that one.
+ */
+export interface SeenVariant {
   name: string;
   sha256: string;
   origin: string;
   state: State;
   label: string;
-  firstAt: number;
-  lastAt: number;
-  hits: number;
+  trust: Trust;
+  publisher: string;
+  company: string;
+  product: string;
+  description: string;
+  size: number;
+  mtime: number;
+  riderName: string;
   /** How many distinct accounts have ever loaded this exact file. */
   accounts: number;
+  hits: number;
+  lastAt: number;
+}
+
+/**
+ * Every variant sharing one file name, which is how the unaccounted list is read.
+ *
+ * The name is the unit because that is what a rule is written against and what a person
+ * recognises. `variants` is where the interesting shape lives: one name with one hash on
+ * two hundred machines is a driver, and one name with two hundred hashes is something being
+ * rebuilt between sessions.
+ */
+export interface SeenGroup {
+  name: string;
+  /** The worst state any variant is in. */
+  state: State;
+  /** The first label any rule gave a variant, so a named group says what it is. */
+  label: string;
+  /** Distinct accounts across every variant of this name. */
+  accounts: number;
+  hits: number;
+  firstAt: number;
+  lastAt: number;
+  /** Distinct hashes recorded under this name in the window. */
+  variantCount: number;
+  /** The variants themselves, worst first then most recent. May be short of
+   *  `variantCount` when the detail query's cap was reached. */
+  variants: SeenVariant[];
 }
 
 export interface AdminView {
   live: LiveRow[];
-  seen: SeenRow[];
+  seen: SeenGroup[];
+  /** Distinct unaccounted file names in the window, before `MAX_SEEN_NAMES` trimmed them. */
+  seenNamesTotal: number;
   rules: ModuleRule[];
   rulesVersion: number;
   reporting: number;
 }
 
+/** The most file names the unaccounted list draws. Anything past it is counted, not drawn. */
+const MAX_SEEN_NAMES = 200;
+
+/** The most variants fetched across all of those names together. */
+const MAX_SEEN_VARIANTS = 1000;
+
 /**
  * Everything the admin page draws.
  *
  * `live` is who is reporting right now, worst first. `seen` is the evidence log — every
- * non-system file anyone's game has loaded that the rules do not account for, most recent
- * first, with the number of accounts that have ever loaded it. That last number is the one
- * that reads best: a file on one machine out of hundreds is interesting whatever any rule
- * says, and a file on all of them is a driver.
+ * non-system file anyone's game has loaded that the rules do not account for — grouped by
+ * file name, most recent first, with the number of accounts that have ever loaded it. That
+ * last number is the one that reads best: a file on one machine out of hundreds is
+ * interesting whatever any rule says, and a file on all of them is a driver.
+ *
+ * Grouped rather than listed because the list is per account and per hash, and one popular
+ * overlay was arriving as several hundred rows that said the same thing. The name is the
+ * unit a rule is written against, so it is also the unit the page is read in.
  */
 export async function collectAdminView(env: Env, days: number): Promise<AdminView> {
   const fresh = Date.now() - PRESENCE_TTL_MS;
@@ -457,30 +616,87 @@ export async function collectAdminView(env: Env, days: number): Promise<AdminVie
       server_id: string | null;
     }>();
 
-  const seen = await env.DB.prepare(
-    "SELECT s.account_id, s.rider_name, s.server_id, s.name, s.sha256, s.origin, s.state," +
-      " s.label, s.first_at, s.last_at, s.hits," +
-      " (SELECT COUNT(DISTINCT t.account_id) FROM client_module_seen t" +
-      "  WHERE t.name = s.name AND t.sha256 = s.sha256) AS accounts" +
-      " FROM client_module_seen s" +
-      " WHERE s.state IN ('warn', 'alert') AND s.last_at > ?" +
-      " ORDER BY s.last_at DESC LIMIT 500",
+  // Two queries rather than one, because the totals have to be right even where the detail
+  // is trimmed: the first counts every name in the window, the second fetches the variants
+  // to draw under them. Grouping the first in SQL is what keeps a name loaded by six hundred
+  // people from arriving as six hundred rows.
+  const names = await env.DB.prepare(
+    "SELECT name, COUNT(DISTINCT account_id) AS accounts, COUNT(DISTINCT sha256) AS variants," +
+      " SUM(hits) AS hits, MIN(first_at) AS first_at, MAX(last_at) AS last_at" +
+      " FROM client_module_seen" +
+      " WHERE state IN ('warn', 'alert') AND last_at > ?" +
+      " GROUP BY name ORDER BY MAX(last_at) DESC LIMIT ?",
+  )
+    .bind(since, MAX_SEEN_NAMES)
+    .all<{
+      name: string;
+      accounts: number;
+      variants: number;
+      hits: number;
+      first_at: number;
+      last_at: number;
+    }>();
+
+  const nameTotal = await env.DB.prepare(
+    "SELECT COUNT(DISTINCT name) AS n FROM client_module_seen" +
+      " WHERE state IN ('warn', 'alert') AND last_at > ?",
   )
     .bind(since)
+    .first<{ n: number }>();
+
+  const seen = await env.DB.prepare(
+    "SELECT name, sha256, origin, state, label, trust, publisher, company, product," +
+      " description, size, mtime, MAX(rider_name) AS rider_name," +
+      " COUNT(DISTINCT account_id) AS accounts, SUM(hits) AS hits, MAX(last_at) AS last_at" +
+      " FROM client_module_seen" +
+      " WHERE state IN ('warn', 'alert') AND last_at > ?" +
+      " GROUP BY name, sha256 ORDER BY MAX(last_at) DESC LIMIT ?",
+  )
+    .bind(since, MAX_SEEN_VARIANTS)
     .all<{
-      account_id: string;
-      rider_name: string;
-      server_id: string;
       name: string;
       sha256: string;
       origin: string;
       state: string;
       label: string;
-      first_at: number;
-      last_at: number;
-      hits: number;
+      trust: string;
+      publisher: string;
+      company: string;
+      product: string;
+      description: string;
+      size: number;
+      mtime: number;
+      rider_name: string;
       accounts: number;
+      hits: number;
+      last_at: number;
     }>();
+
+  // Variants, indexed by the name they belong to.
+  const byName = new Map<string, SeenVariant[]>();
+  for (const r of seen.results ?? []) {
+    const variant: SeenVariant = {
+      name: r.name,
+      sha256: r.sha256,
+      origin: r.origin,
+      state: isState(r.state) ? r.state : "unknown",
+      label: r.label ?? "",
+      trust: isTrust(r.trust) ? r.trust : "unchecked",
+      publisher: r.publisher ?? "",
+      company: r.company ?? "",
+      product: r.product ?? "",
+      description: r.description ?? "",
+      size: r.size ?? 0,
+      mtime: r.mtime ?? 0,
+      riderName: r.rider_name ?? "",
+      accounts: r.accounts,
+      hits: r.hits,
+      lastAt: r.last_at,
+    };
+    const list = byName.get(variant.name);
+    if (list) list.push(variant);
+    else byName.set(variant.name, [variant]);
+  }
 
   const { rules, version } = await loadRules(env);
 
@@ -508,20 +724,28 @@ export async function collectAdminView(env: Env, days: number): Promise<AdminVie
             Math.max(stateRank(a.worstState), stateRank(a.state)) ||
           b.updatedAt - a.updatedAt,
       ),
-    seen: (seen.results ?? []).map((r) => ({
-      accountId: r.account_id,
-      riderName: r.rider_name ?? "",
-      serverId: r.server_id ?? "",
-      name: r.name,
-      sha256: r.sha256,
-      origin: r.origin,
-      state: isState(r.state) ? r.state : "unknown",
-      label: r.label ?? "",
-      firstAt: r.first_at,
-      lastAt: r.last_at,
-      hits: r.hits,
-      accounts: r.accounts,
-    })),
+    seen: (names.results ?? []).map((g) => {
+      const variants = (byName.get(g.name) ?? []).sort(
+        (a, b) => stateRank(b.state) - stateRank(a.state) || b.lastAt - a.lastAt,
+      );
+      return {
+        name: g.name,
+        // Off the variants we actually have. A group whose detail was trimmed can only be
+        // as bad as what is in front of us, which is the honest answer rather than a guess.
+        state: variants.reduce<State>(
+          (worst, v) => (stateRank(v.state) > stateRank(worst) ? v.state : worst),
+          "unknown",
+        ),
+        label: variants.find((v) => v.label)?.label ?? "",
+        accounts: g.accounts,
+        hits: g.hits,
+        firstAt: g.first_at,
+        lastAt: g.last_at,
+        variantCount: g.variants,
+        variants,
+      };
+    }),
+    seenNamesTotal: nameTotal?.n ?? (names.results ?? []).length,
     rules,
     rulesVersion: version,
     reporting: (live.results ?? []).length,

@@ -6,6 +6,8 @@ use crate::config::AppConfig;
 ///
 /// An `mxbikes.exe` offset, so it is only ever used when MX Bikes is the active game —
 /// see [`crate::game::Caps::instant_refresh`], which gates every path that reaches here.
+/// It is an address in *one build* of that exe; [`KNOWN_GOOD_BUILDS`] and
+/// [`loader_looks_runnable`] are what keep it from being run in a different one.
 #[cfg(windows)]
 const LOADER_OFFSET: usize = 0x000e_cd00;
 
@@ -22,6 +24,25 @@ const LOADER_OFFSET: usize = 0x000e_cd00;
 /// found", never as a GUID.
 #[cfg(windows)]
 const GUID_OFFSET: usize = 0x000e_5522c;
+
+/// Builds of `mxbikes.exe` the offsets above are known to be right for, as the PE
+/// `TimeDateStamp` the linker wrote into the image.
+///
+/// The offsets are addresses in one particular build. PiBoSo ships new ones, code moves,
+/// and nothing about `base + 0xecd00` announces that it is no longer the customization
+/// loader — it is simply whatever now lives at that address. [`local_guid`] survives that
+/// by checking what it reads back; [`refresh_look`] cannot, because it does not read
+/// anything. It starts a thread there. On the wrong build that is a jump into the middle of
+/// an unrelated function, on the game's own process, with the player's session behind it.
+///
+/// So the offsets are qualified by the build they came from. **Empty means unqualified**,
+/// and unqualified is what shipped before this list existed: the structural checks in
+/// [`loader_looks_runnable`] still apply, but a build match is not required, because
+/// requiring a match against an empty list would take the feature away from everyone.
+/// Filling this in is what turns the guard on, and `refresh_look` logs the running build's
+/// stamp every time so any player's log yields the value to put here.
+#[cfg(windows)]
+const KNOWN_GOOD_BUILDS: &[u32] = &[];
 
 /// The flag that makes a fresh game process connect straight to a server.
 ///
@@ -52,6 +73,11 @@ pub enum LiveRefresh {
     GameNotRunning,
     /// The instant-refresh setting was off — we didn't try.
     Disabled,
+    /// The running game isn't a build the loader offset is known good for, so nothing was
+    /// run in it. The look stays as it is until the game is restarted, which is the
+    /// outcome the offset was buying us anyway — and a great deal better than a thread
+    /// started at whatever that address holds now.
+    UnknownBuild,
     /// This platform can't do it (non-Windows dev builds).
     Unsupported,
 }
@@ -111,6 +137,38 @@ mod ffi {
     /// We aren't pumping messages on this thread; without it the shell can return before
     /// it has finished with the string buffers we lent it.
     pub const SEE_MASK_NOASYNC: u32 = 0x0000_0100;
+
+    /// `MEM_COMMIT` — the page is backed, not merely reserved.
+    pub const MEM_COMMIT: u32 = 0x0000_1000;
+
+    /// The four page protections that permit execution. A start address whose page is not
+    /// one of these is not code, whatever the offset says it should be.
+    pub const PAGE_EXECUTE: u32 = 0x10;
+    pub const PAGE_EXECUTE_READ: u32 = 0x20;
+    pub const PAGE_EXECUTE_READWRITE: u32 = 0x40;
+    pub const PAGE_EXECUTE_WRITECOPY: u32 = 0x80;
+
+    /// `MEMORY_BASIC_INFORMATION`. The two padding slots are the x64 layout's own
+    /// `__alignment` members; without them `region_size` lands four bytes early and every
+    /// field after it is read from the wrong place.
+    // No `Default`: raw pointers have none. Every caller zeroes it, as the rest of this
+    // module does for the toolhelp structs. Most of it is never read — the fields are here
+    // to put `state` and `protect` at the offsets the kernel writes them to.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    #[allow(dead_code)]
+    pub struct MemoryBasicInformation {
+        pub base_address: *mut c_void,
+        pub allocation_base: *mut c_void,
+        pub allocation_protect: u32,
+        pub partition_id: u16,
+        pub _alignment1: u16,
+        pub region_size: usize,
+        pub state: u32,
+        pub protect: u32,
+        pub kind: u32,
+        pub _alignment2: u32,
+    }
 
     /// `TOKEN_ELEVATION` — one `BOOL`, non-zero when the token is an elevated one.
     #[repr(C)]
@@ -196,6 +254,14 @@ mod ffi {
             size: usize,
             read: *mut usize,
         ) -> i32;
+        /// What the process has mapped at an address: enough to say whether a start
+        /// address is committed, executable, and part of the exe's own image.
+        pub fn VirtualQueryEx(
+            process: Handle,
+            address: *const c_void,
+            buffer: *mut MemoryBasicInformation,
+            length: usize,
+        ) -> usize;
         pub fn CreateRemoteThread(
             process: Handle,
             attrs: *mut c_void,
@@ -769,6 +835,104 @@ pub fn is_exclusive_fullscreen() -> bool {
     hr == 0 && state == ffi::QUNS_RUNNING_D3D_FULL_SCREEN
 }
 
+/// The PE `TimeDateStamp` of the image mapped at `base`, read out of the live process.
+///
+/// The linker writes it once per build, so it is the cheapest exact answer to "is this the
+/// game the offsets were read from?" — cheaper and far more specific than a file version,
+/// which PiBoSo leaves at `0.0.0.0`. Read from the process rather than off disk on purpose:
+/// the question is about the image that is actually running.
+///
+/// `None` when the headers can't be read or don't look like a PE, which is treated the same
+/// as a build that doesn't match.
+#[cfg(windows)]
+unsafe fn image_build_stamp(proc: ffi::Handle, base: *mut u8) -> Option<u32> {
+    /// `e_magic` — "MZ".
+    const DOS_MAGIC: u16 = 0x5A4D;
+    /// `Signature` — "PE\0\0".
+    const PE_MAGIC: u32 = 0x0000_4550;
+    /// `e_lfanew`, the offset of the NT headers, at a fixed place in the DOS header.
+    const E_LFANEW: usize = 0x3C;
+    /// `TimeDateStamp` sits two `WORD`s into `IMAGE_FILE_HEADER`, itself just past the
+    /// four-byte signature.
+    const STAMP_FROM_NT: usize = 4 + 4;
+
+    // SAFETY: every read is a fixed-size read into a local, at an address inside the image
+    // the caller resolved; a short or failed read yields `None` rather than a value.
+    unsafe fn read<T: Copy>(proc: ffi::Handle, at: *const u8) -> Option<T> {
+        let mut out = std::mem::zeroed::<T>();
+        let mut got = 0usize;
+        let ok = ffi::ReadProcessMemory(
+            proc,
+            at as *const std::os::raw::c_void,
+            &mut out as *mut T as *mut std::os::raw::c_void,
+            std::mem::size_of::<T>(),
+            &mut got,
+        ) != 0
+            && got == std::mem::size_of::<T>();
+        ok.then_some(out)
+    }
+
+    if read::<u16>(proc, base)? != DOS_MAGIC {
+        return None;
+    }
+    let nt = base.add(read::<u32>(proc, base.add(E_LFANEW))? as usize);
+    if read::<u32>(proc, nt)? != PE_MAGIC {
+        return None;
+    }
+    read::<u32>(proc, nt.add(STAMP_FROM_NT))
+}
+
+/// Why [`LOADER_OFFSET`] must not be run in this process, or `Ok(())` if it may be.
+///
+/// Two layers, because they fail differently. The structural one asks the kernel what is
+/// mapped at the address — a start address that isn't committed, executable code belonging
+/// to the exe's own image is disqualifying whatever build this is, and it needs no
+/// knowledge of any build to say so. The build match is the sharper check and the one that
+/// catches the case that actually happens: the address is still perfectly good code, just
+/// not the function we meant. It only applies once [`KNOWN_GOOD_BUILDS`] has entries.
+#[cfg(windows)]
+unsafe fn loader_looks_runnable(proc: ffi::Handle, base: *mut u8) -> Result<(), String> {
+    let start = base.add(LOADER_OFFSET);
+
+    let mut info = std::mem::zeroed::<ffi::MemoryBasicInformation>();
+    let wrote = ffi::VirtualQueryEx(
+        proc,
+        start as *const std::os::raw::c_void,
+        &mut info,
+        std::mem::size_of::<ffi::MemoryBasicInformation>(),
+    );
+    if wrote == 0 {
+        return Err(format!("VirtualQueryEx failed (error {})", ffi::GetLastError()));
+    }
+    if info.state != ffi::MEM_COMMIT {
+        return Err("the loader address isn't committed memory".into());
+    }
+    let executable = ffi::PAGE_EXECUTE
+        | ffi::PAGE_EXECUTE_READ
+        | ffi::PAGE_EXECUTE_READWRITE
+        | ffi::PAGE_EXECUTE_WRITECOPY;
+    if info.protect & executable == 0 {
+        return Err(format!("the loader address isn't executable (protect {:#x})", info.protect));
+    }
+    if info.allocation_base != base as *mut std::os::raw::c_void {
+        return Err("the loader address isn't inside the game's own image".into());
+    }
+
+    let stamp = image_build_stamp(proc, base);
+    match stamp {
+        Some(s) => log::info!("[look] running game build: TimeDateStamp {s:#010x}"),
+        None => log::warn!("[look] could not read the running game's build stamp"),
+    }
+    if KNOWN_GOOD_BUILDS.is_empty() {
+        return Ok(());
+    }
+    match stamp {
+        Some(s) if KNOWN_GOOD_BUILDS.contains(&s) => Ok(()),
+        Some(s) => Err(format!("build {s:#010x} is not one the loader offset is known good for")),
+        None => Err("the running game's build stamp is unreadable".into()),
+    }
+}
+
 /// Experimental: re-run the game's profile-load routine in the live process. Best-effort.
 #[cfg(windows)]
 pub fn refresh_look() -> LiveRefresh {
@@ -785,13 +949,21 @@ pub fn refresh_look() -> LiveRefresh {
         | ffi::PROCESS_VM_WRITE
         | ffi::PROCESS_VM_READ;
 
-    // SAFETY: we open the process for thread creation, spawn a thread at the
-    // resolved loader address, wait briefly, and close every handle we open. The
-    // start address is the module base plus a fixed code offset within the exe.
+    // SAFETY: we open the process for thread creation, check what is actually mapped at
+    // the resolved loader address, and only then spawn a thread there, wait briefly, and
+    // close every handle we open — on the refusing path too. The start address is the
+    // module base plus a fixed code offset within the exe.
     unsafe {
         let proc = ffi::OpenProcess(access, 0, pid);
         if proc.is_null() {
             return LiveRefresh::Failed;
+        }
+        // Nothing below this point can be undone, so everything that could say "not this
+        // process" has to have said it by here.
+        if let Err(why) = loader_looks_runnable(proc, base) {
+            log::warn!("[look] not running the loader in the live game: {why}");
+            ffi::CloseHandle(proc);
+            return LiveRefresh::UnknownBuild;
         }
         let start = base.add(LOADER_OFFSET) as *mut std::os::raw::c_void;
         let thread = ffi::CreateRemoteThread(

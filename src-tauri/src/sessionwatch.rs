@@ -68,7 +68,13 @@ pub fn start(app: &AppHandle) {
             if running {
                 if reported.is_none_or(|at| at.elapsed() >= REPORT_EVERY) {
                     reported = Some(Instant::now());
-                    crate::procmods::tick(&app);
+                    // Off the runtime, not on it. The first pass of a session reads every
+                    // non-system module the game has loaded — hash, signature and version
+                    // resource — and that is disk I/O and a trust check per file, seconds of
+                    // it on a cold cache. Held here it would stall every other async task in
+                    // the app, the updater and paint sync among them, for the length of it.
+                    let handle = app.clone();
+                    tauri::async_runtime::spawn_blocking(move || crate::procmods::tick(&handle));
                 }
             } else if reported.take().is_some() {
                 // The session is over, so nothing that was true of it is true now.

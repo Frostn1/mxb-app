@@ -2279,7 +2279,7 @@ export const it: Translation = {
   "track.buildFailed": "Impossibile costruire",
   "track.exported": "Scritti {{count}} file",
   "track.exportFailed": "Impossibile esportare",
-  "track.previewOnly": "Una pista installata porta terreno, superfici, dati di gara e il fondo dipinto — niente scenografie. Per quelle esegui TerrainEd sulla cartella esportata.",
+  "track.previewOnly": "Una pista installata contiene terreno, superfici e dati di gara — non ha grafica, quindi il gioco non può girarci. Compila con TerrainEd sulla cartella esportata per una pista guidabile.",
   "track.at": "A",
   "track.kind": "Tipo",
   "track.height": "Altezza",
