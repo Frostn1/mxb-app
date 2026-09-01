@@ -1427,7 +1427,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     put(&format!("{slug}/{slug}.amb"), crlf(AMB), &mut wrote)?;
     put(&format!("{slug}/gfx.cfg"), crlf(&gfx_cfg(prog)), &mut wrote)?;
     put(&format!("{slug}/{slug}.rdf"), crlf(&rdf(prog)), &mut wrote)?;
-    put(&format!("{slug}/{slug}.ssc"), Vec::new(), &mut wrote)?;
+    put(&format!("{slug}/{slug}.ssc"), SSC.into(), &mut wrote)?;
     let (map_img, shot) = ui_images(syn, UI_IMAGE_DIM);
     put(&format!("{slug}/{slug}_map.tga"), map_img, &mut wrote)?;
     put(&format!("{slug}/{slug}.tga"), shot, &mut wrote)?;
@@ -1925,7 +1925,7 @@ pub fn write_pkz(
         (format!("{slug}/{slug}.amb"), crlf(AMB)),
         (format!("{slug}/gfx.cfg"), crlf(&gfx_cfg(prog))),
         // Empty on the reference track, and on every track that ships one.
-        (format!("{slug}/{slug}.ssc"), Vec::new()),
+        (format!("{slug}/{slug}.ssc"), SSC.into()),
         (format!("{slug}/{slug}_map.tga"), map_img),
         (format!("{slug}/{slug}.tga"), shot),
     ] {
@@ -2464,6 +2464,15 @@ fn grass_billboard(dim: usize) -> Vec<u8> {
     tga_bgra(dim, dim, &px)
 }
 
+/// The track's sound sources: none of them.
+///
+/// It used to be a zero-byte file, which is not the same statement. Every published track's
+/// `.ssc` opens with a count — Indiana declares five and hangs a crowd on each — and a reader
+/// looking for `numsources` in an empty file does not find a zero, it finds nothing at all.
+/// Saying "none" is a sentence; saying nothing is not. A generated track ships no crowd, so
+/// none is the honest answer.
+const SSC: &str = "numsources = 0\n";
+
 /// Lighting and weather. Three conditions, because the game asks for all three and a track
 /// missing one falls back to nothing rather than to a default.
 ///
@@ -2657,18 +2666,22 @@ fn tcl(prog: &TrackProgram) -> String {
 /// The track's own description, in the shape published tracks write it.
 ///
 /// Two details are load-bearing and were wrong: `length` is a plain number of metres — a
-/// trailing `m` is not a unit the game strips — and `pic`/`pic_info` have to name files the
-/// archive actually carries, which are the two the writer puts beside this one.
+/// `pic`/`pic_info` have to name files the archive actually carries, which are the two the
+/// writer puts beside this one.
+///
+/// `length` and `altitude` are **not** measurements, whatever they sound like. Millville,
+/// Flanders and Indiana all state `1`, Lambretta Lynds states `999`, and not one published
+/// track puts a plausible number of metres there — so a lap length in the field is a value
+/// the game has never been shown.
 fn track_ini(prog: &TrackProgram) -> String {
     let slug = slug(&prog.name);
     format!(
-        "[info]\nname = {}\nshort_name = {}\nlength = {:.0}\naltitude = 40\n\n\
+        "[info]\nname = {}\nshort_name = {}\nlength = 1\naltitude = 1\n\n\
          [race]\ndefaulteventlaps = 15\nreflaptime = {:.0}\n\n\
          [ui]\npic = {slug}.tga\npic_info = {slug}_map.tga\nauthor = {}\nlocation = {}\n\n\
          [weather]\ncloud_prob = 0.4\nrainy_prob = 0.1\n",
         prog.name,
         prog.name.chars().take(12).collect::<String>(),
-        prog.lap_length(),
         // A minute and a half for a mile is roughly national pace, and it only seeds the UI.
         prog.lap_length() / 11.0,
         if prog.author.is_empty() {
@@ -3159,6 +3172,36 @@ mod tests {
                     "length = {value:?} is not a plain number of metres"
                 );
             }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Nothing we ship may be an empty file.
+    ///
+    /// The `.ssc` was written as zero bytes for months. It is a config the game parses, and a
+    /// parser looking for `numsources` in an empty file does not read a zero — so the fault
+    /// is not "a file with nothing in it", it is "a file that answers no question it is
+    /// asked". Generalised past the one that was wrong, because the next one will be a
+    /// different file.
+    #[test]
+    fn every_file_in_a_built_track_says_something() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let dir = std::env::temp_dir().join(format!("mxb-empty-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let wrote = write_source(&p, &s, &dir).unwrap();
+        for rel in &wrote {
+            let n = std::fs::metadata(dir.join(rel)).unwrap().len();
+            assert!(n > 0, "{rel} is empty, which is not the same as saying nothing is there");
+        }
+        // And the same for the archive, which is assembled separately and so can drift.
+        let pkz = dir.join("t.pkz");
+        write_pkz(&p, &s, &pkz, false).unwrap();
+        let f = std::fs::File::open(&pkz).unwrap();
+        let mut zip = zip::ZipArchive::new(f).unwrap();
+        for i in 0..zip.len() {
+            let e = zip.by_index(i).unwrap();
+            assert!(e.size() > 0, "{} is empty in the .pkz", e.name());
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
