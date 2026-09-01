@@ -719,13 +719,55 @@ fn nearest_station(
         }
     }
 
+    // The chamfer is a guess, and a scanline-shaped one. Its metric is an integer
+    // approximation to a circle propagated in raster order, so its labels are wrong in a
+    // pattern that runs along the scan — and everything downstream reads the label to find out
+    // how far round the lap a cell is. The result was fine axis-aligned striping fanning off
+    // the outside of every corner and single-cell scratches across the field, both of them
+    // visible in a hillshade and in neither of the numbers we measure.
+    //
+    // So the labels are relaxed against the real distance afterwards: a cell takes a
+    // neighbour's station whenever that station is genuinely nearer than its own. Three passes
+    // in alternating directions is enough — the chamfer is never far wrong, it is only wrong
+    // in stripes, and one sweep of true distances flattens them.
     let mut out = vec![0.0f32; gw * gh];
-    for y in 0..gh {
-        for x in 0..gw {
-            let at = y * gw + x;
-            let s = &st[label[at] as usize];
-            out[at] = ((x as f32 * mps_x - s.x).powi(2) + (y as f32 * mps_z - s.z).powi(2)).sqrt();
+    let true_d = |at: usize, l: u32| -> f32 {
+        let (x, y) = ((at % gw) as f32 * mps_x, (at / gw) as f32 * mps_z);
+        let s = &st[l as usize];
+        (x - s.x).powi(2) + (y - s.z).powi(2)
+    };
+    for at in 0..gw * gh {
+        out[at] = true_d(at, label[at]);
+    }
+    for pass in 0..3 {
+        let order: Vec<usize> = if pass % 2 == 0 {
+            (0..gw * gh).collect()
+        } else {
+            (0..gw * gh).rev().collect()
+        };
+        for at in order {
+            let (x, y) = (at % gw, at / gw);
+            let mut best = (out[at], label[at]);
+            for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                if nx < 0 || ny < 0 || nx >= gw as i32 || ny >= gh as i32 {
+                    continue;
+                }
+                let l = label[ny as usize * gw + nx as usize];
+                if l == best.1 {
+                    continue;
+                }
+                let d = true_d(at, l);
+                if d < best.0 {
+                    best = (d, l);
+                }
+            }
+            out[at] = best.0;
+            label[at] = best.1;
         }
+    }
+    for v in &mut out {
+        *v = v.sqrt();
     }
     (out, label)
 }

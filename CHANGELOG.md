@@ -19,6 +19,9 @@
 
 ### Fixed
 - A corner banks the outside of the turn.
+- Ruts read as ridden ground rather than as a set of parallel lines running the whole lap.
+- The ground either side of the track no longer carries fine streaks fanning off every corner.
+- The starting track is a lap that folds through its own middle instead of a regular star.
 
 ## 2026-09-01 — v0.13.2 — Tracks that load
 
