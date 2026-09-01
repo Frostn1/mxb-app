@@ -713,6 +713,14 @@ export const es: Translation = {
   "secure.experimental": "Experimental",
   "secure.intro":
     "Elige un archivo, bloquéalo y luego verifica que se desbloquea. Verificar descifra el blob aquí mismo y lo compara con el original, byte a byte — la prueba de que va y vuelve en esta máquina.",
+  "secure.protectTitle": "Proteger un circuito",
+  "secure.protectDesc":
+    "Cifra un archivo de circuito en el sitio — conserva su nombre, el juego lo sigue listando, pero solo tú puedes rodarlo, sin conexión. Sobrescribe el archivo, así que guarda tu propia copia maestra. Luego solo inicia el juego.",
+  "secure.protectAction": "Elegir un circuito y proteger",
+  "secure.protectedOk": "Protegido, vinculado a {{id}}.",
+  "secure.protectedInPlace": "Protegido — cifrado en el sitio",
+  "secure.protectFailed": "No se pudo proteger el archivo",
+  "secure.testHeading": "Probar el formato (opcional)",
   "secure.step3": "Vincular a tu cuenta de Steam y jugar sin conexión",
   "secure.step3Desc":
     "Sella la clave a tu cuenta de Steam y la guarda localmente. A partir de ahí se abre sin servidor — sin conexión, en LAN, donde sea — pero solo en tu cuenta. Una copia en otra cuenta no obtiene nada.",
