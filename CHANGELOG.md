@@ -9,6 +9,11 @@
   published one.
 
 ### Changed
+- Instant refresh looks before it leaps. Applying a look to a running game re-runs one of the
+  game's own routines, at an address that is only right for the build it was read from. The
+  app now asks the game what is actually mapped there and does nothing if it isn't the game's
+  own executable code — and writes the running game's build to the log either way, so a game
+  update that moves the address can be noticed rather than crashed into.
 - Diagnostics say more about each file loaded in your game: its size, when it was built,
   whether Windows trusts its signature and who signed it, and the company and product it
   claims to be. A file can be read the first time it is seen instead of only recognised.
@@ -23,6 +28,11 @@
   the toggle is in Settings for anyone who wants the app waiting for them.
 
 ### Fixed
+- Cloud sync tidying up behind you no longer asks the game to reload its mods. OneDrive,
+  Dropbox and iCloud all take back the contents of files they think you have stopped using,
+  and to the folder watcher that looked exactly like a mod being installed — so the game was
+  sent to re-read a track that had left the machine, at a moment nobody chose. Those changes
+  are now ignored, and the log says which files and how to keep them on the device.
 - Two of the four values every vertex of a track's graphics file carries were left at zero.
 - The terrain in a track's graphics file is cut into tiles, so no single piece of it is too
   large for the game to build a buffer for.
