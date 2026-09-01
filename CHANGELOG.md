@@ -3,6 +3,9 @@
 ## 2026-09-01
 
 ### Fixed
+- Designer: the sheet list no longer offers a name that another paint misspelt — the KTM
+  250 SX-F's normal map is `plastics_n`, and a paint beside it calls its own `plastics-n`,
+  which the bike asks for on no part of itself.
 - Generated laps stopped running over their own ground. Five of six briefs now come back clean
   where none did before.
 
