@@ -528,7 +528,7 @@ pub const EXAMPLE: &str = r#"{
       "width": 12.0,
       "terrain": {
         "sizeX": 500.0, "sizeZ": 480.0, "samples": 2049, "scale": 86.0,
-        "relief": { "amplitude": 7.0, "wavelength": 420.0, "seed": 3, "tilt": 26.0, "tiltAngle": 35.0, "landforms": 13, "landformHeight": 17.0 }
+        "relief": { "amplitude": 7.0, "wavelength": 420.0, "seed": 3, "tilt": 26.0, "tiltAngle": 35.0, "landforms": 6, "landformHeight": 18.0 }
       },
       "start": { "x": 231.10, "z": 262.90, "angle": 0.0 },
       "segments": [
