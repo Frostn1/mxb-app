@@ -343,6 +343,232 @@ pub struct Synth {
 // Synthesis
 // ---------------------------------------------------------------------------
 
+/// The ground a track is built on, without the track.
+///
+/// Pulled out of `synthesise` so it can be sampled before a lap exists. That is what lets the
+/// lap be *routed* to the terrain rather than dropped on it: the placement is chosen by asking
+/// this what the ground does along a candidate line, which is the thing Indiana's builder did
+/// with a map and we were not doing at all.
+pub struct Landscape {
+    tilt: f32,
+    tilt_dir: (f32, f32),
+    span: f32,
+    amplitude: f32,
+    wavelength: f32,
+    seed: u32,
+    /// `(x, z, long, across, height, bearing)` per mound.
+    mounds: Vec<(f32, f32, f32, f32, f32, f32)>,
+}
+
+impl Landscape {
+    pub fn of(prog: &TrackProgram) -> Self {
+        let r = &prog.terrain.relief;
+        let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
+        let mut mounds = Vec::new();
+        for n in 0..r.landforms.min(24) {
+            // Long enough to be a hill a track is built over, small enough to leave ground
+            // between them. With 110–260 m ones the map comes out 27.9% flat against
+            // Indiana's 37.3 and curved everywhere at 0.29 m over fifteen metres against its
+            // 0.19 — the landforms *are* the landscape. With none at all it is 68% flat,
+            // which is flatter than Indiana. The truth is in between.
+            //
+            // And a mound has to be longer than the distance the lap's own elevation is
+            // smoothed over, or it is a bump under the riding line rather than a hill the
+            // track climbs.
+            let long = 110.0 + 150.0 * (hash2(n as i32, 5, r.seed ^ 0x1A2D) * 0.5 + 0.5);
+            if long < BENCH_SMOOTH_M * 1.6 {
+                continue;
+            }
+            let across = long * (0.45 + 0.4 * (hash2(n as i32, 9, r.seed ^ 0x1A2D) * 0.5 + 0.5));
+            let h1 = hash2(n as i32 * 71, 13, r.seed ^ 0x1A2D);
+            let h2 = hash2(n as i32 * 71, 29, r.seed ^ 0x1A2D);
+            let tall = r.landform_height * (0.45 + 0.55 * (hash2(n as i32, 17, r.seed ^ 0x1A2D) * 0.5 + 0.5));
+            let bearing = hash2(n as i32, 23, r.seed ^ 0x1A2D) * std::f32::consts::PI;
+            mounds.push((
+                (h1 * 0.5 + 0.5) * sx,
+                (h2 * 0.5 + 0.5) * sz,
+                long,
+                across,
+                tall,
+                bearing,
+            ));
+        }
+        Landscape {
+            tilt: r.tilt,
+            tilt_dir: crate::trackprog::heading_vector(r.tilt_angle.to_radians()),
+            span: sx.max(sz).max(1.0),
+            amplitude: r.amplitude,
+            wavelength: r.wavelength.max(1.0),
+            seed: r.seed,
+            mounds,
+        }
+    }
+
+    /// The hillside, its bumps, and the metre-scale grain that makes it read as land.
+    pub fn at(&self, x: f32, z: f32) -> f32 {
+        let along = (x * self.tilt_dir.0 + z * self.tilt_dir.1) / self.span;
+        -self.tilt * along
+            + fbm_of(
+                x / self.wavelength,
+                z / self.wavelength,
+                self.seed,
+                LANDSCAPE_OCTAVES,
+                LANDSCAPE_GAIN,
+            ) * self.amplitude
+            + fbm(x / FIELD_DETAIL_M, z / FIELD_DETAIL_M, self.seed ^ 0xF1E1D) * FIELD_DETAIL_HEIGHT_M
+            + self.mounds_at(x, z)
+    }
+
+    /// Just the banks, for a caller that has the rest already.
+    pub fn mounds_at(&self, x: f32, z: f32) -> f32 {
+        let mut add = 0.0;
+        for &(cx, cz, long, across, tall, bearing) in &self.mounds {
+            let (dx, dz) = (x - cx, z - cz);
+            let (c, s) = (bearing.cos(), bearing.sin());
+            let (u, v) = (dx * c + dz * s, -dx * s + dz * c);
+            // The outline is warped, not elliptical: an ellipse reads as a flying saucer
+            // parked on the ground however you shade it.
+            let warp = 0.42
+                * fbm(
+                    x / (long * 0.55),
+                    z / (long * 0.55),
+                    self.seed ^ 0x1A2D ^ (long as u32),
+                );
+            let t = ((u / long).powi(2) + (v / across).powi(2)).sqrt() + warp;
+            if t < 1.0 {
+                add += tall * (1.0 - smoothstep(t.max(0.0))).powf(0.7);
+            }
+        }
+        add
+    }
+}
+
+/// Where on its ground a lap should sit.
+///
+/// A lap is a shape; the plot is a piece of ground; nothing until now decided how the one lay
+/// on the other beyond centring it. So the track met whatever the hills happened to be doing
+/// there, and the trade came out wrong whichever size the hills were: mounds small enough to
+/// give the lap a real climb left it off-camber everywhere, and mounds gentle enough to ride
+/// left it flat. Measured against Indiana, 8.3° of grade at the ninetieth with 3.0 m of fall
+/// across thirty metres of track — ours managed either 9.0° with 7.6 m, or 8.1° with 5.2 m.
+///
+/// Indiana's builder did not have that problem because he did not place the track and the
+/// hills independently. He ran it along the contours where it wanted to be level and up the
+/// fall line where it wanted to climb.
+///
+/// This is the cheap version of the same idea: the shape is fixed, so the only freedoms are
+/// where it sits and which way round it faces, and both are searched. It costs a few hundred
+/// samples of the landscape per candidate and buys the difference between a track laid on the
+/// ground and one laid across it.
+pub struct Placement {
+    pub dx: f32,
+    pub dz: f32,
+    pub turn_deg: f32,
+    /// What it scored, and what the untouched placement scored, so a caller can say whether
+    /// the search was worth anything.
+    pub cross_m: f32,
+    pub was_cross_m: f32,
+    pub grade_p90_deg: f32,
+}
+
+/// How much fall across the track the search will trade a degree of grade for.
+///
+/// Both matter and they pull against each other. Cross-slope is weighted the harder of the
+/// two because a track that is off-camber everywhere is unrideable in a way that a gentle one
+/// is merely dull.
+const ROUTE_GRADE_TARGET_DEG: f32 = 8.3;
+const ROUTE_GRADE_WEIGHT: f32 = 0.35;
+
+/// Route a lap over its ground: pick the rotation and offset whose line has the least fall
+/// across it, at about the grade a published track climbs at.
+pub fn place_on_ground(prog: &TrackProgram) -> Option<Placement> {
+    let land = Landscape::of(prog);
+    let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
+    let base = prog.stations(2.0);
+    if base.len() < 16 {
+        return None;
+    }
+    // The lap's own centre, so a rotation turns it about itself rather than about the corner
+    // of the plot.
+    let (mut lo_x, mut hi_x, mut lo_z, mut hi_z) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+    for st in &base {
+        lo_x = lo_x.min(st.x);
+        hi_x = hi_x.max(st.x);
+        lo_z = lo_z.min(st.z);
+        hi_z = hi_z.max(st.z);
+    }
+    let (cx, cz) = ((lo_x + hi_x) * 0.5, (lo_z + hi_z) * 0.5);
+    let half = ((hi_x - lo_x).max(hi_z - lo_z)) * 0.5;
+    // Room enough that the corridor and its shoulder are inside the plot, not just the
+    // centreline — and a little over, because the placement is scored on stations two metres
+    // apart and the lap between two of them can bulge past both.
+    let margin = prog.width * 2.0 + SHOULDER_M;
+
+    let score = |turn: f32, dx: f32, dz: f32| -> Option<(f32, f32, f32)> {
+        let (c, s) = (turn.cos(), turn.sin());
+        let mut cross: Vec<f32> = Vec::with_capacity(base.len());
+        let mut grade: Vec<f32> = Vec::with_capacity(base.len());
+        let mut placed: Vec<(f32, f32, f32)> = Vec::with_capacity(base.len());
+        for st in &base {
+            let (rx, rz) = (st.x - cx, st.z - cz);
+            let x = cx + rx * c - rz * s + dx;
+            let z = cz + rx * s + rz * c + dz;
+            // Anything off the plot disqualifies the whole placement — a lap that leaves its
+            // ground is not a candidate however well the rest of it lies.
+            if x < margin || z < margin || x > sx - margin || z > sz - margin {
+                return None;
+            }
+            placed.push((x, z, st.heading + turn));
+        }
+        for (i, &(x, z, h)) in placed.iter().enumerate() {
+            let (rx, rz) = crate::trackprog::right_vector(h);
+            cross.push((land.at(x + 15.0 * rx, z + 15.0 * rz) - land.at(x - 15.0 * rx, z - 15.0 * rz)).abs());
+            let (nx, nz, _) = placed[(i + 5) % placed.len()];
+            grade.push(((land.at(nx, nz) - land.at(x, z)) / 20.0).abs());
+        }
+        cross.sort_by(f32::total_cmp);
+        grade.sort_by(f32::total_cmp);
+        let cross_p90 = cross[cross.len() * 9 / 10];
+        let grade_p90 = grade[grade.len() * 9 / 10].atan().to_degrees();
+        Some((
+            cross_p90 + ROUTE_GRADE_WEIGHT * (grade_p90 - ROUTE_GRADE_TARGET_DEG).abs(),
+            cross_p90,
+            grade_p90,
+        ))
+    };
+
+    let was = score(0.0, 0.0, 0.0);
+    let mut best: Option<(f32, Placement)> = None;
+    for t in 0..24 {
+        let turn = t as f32 * std::f32::consts::TAU / 24.0;
+        // A rotated lap needs room for its diagonal, so it is nudged back towards the middle
+        // rather than left where the rotation put it.
+        for gx in -2..=2 {
+            for gz in -2..=2 {
+                let room = (sx.min(sz) * 0.5 - half - margin).max(0.0);
+                let (dx, dz) = (gx as f32 * room * 0.4, gz as f32 * room * 0.4);
+                let Some((total, cross_m, grade_p90_deg)) = score(turn, dx, dz) else {
+                    continue;
+                };
+                if best.as_ref().map(|b| total < b.0).unwrap_or(true) {
+                    best = Some((
+                        total,
+                        Placement {
+                            dx,
+                            dz,
+                            turn_deg: turn.to_degrees(),
+                            cross_m,
+                            was_cross_m: was.map(|w| w.1).unwrap_or(cross_m),
+                            grade_p90_deg,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
 pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     prog.check()?;
 
@@ -366,137 +592,11 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
 
     // 1. The landscape, which knows nothing about the track.
     let r = &prog.terrain.relief;
+    let land = Landscape::of(prog);
     let mut heights = vec![0.0f32; gw * gh];
     for y in 0..gh {
         for x in 0..gw {
-            let (wx, wz) = (x as f32 * mps_x, y as f32 * mps_z);
-            // Plus a metre-scale octave everywhere. Four octaves over a hundred metres put
-            // the smallest hummock twelve metres across, and a field of those is a blur, not
-            // ground — this is what the eye reads as land when it is nowhere near the track.
-            // The hillside the whole thing sits on, before anything else.
-            let (tx, tz) = crate::trackprog::heading_vector(r.tilt_angle.to_radians());
-            let along = (wx * tx + wz * tz) / (prog.terrain.size_x.max(prog.terrain.size_z)).max(1.0);
-            heights[y * gw + x] = -r.tilt * along
-                + fbm_of(
-                wx / r.wavelength,
-                wz / r.wavelength,
-                r.seed,
-                LANDSCAPE_OCTAVES,
-                LANDSCAPE_GAIN,
-            ) * r.amplitude
-                + fbm(wx / FIELD_DETAIL_M, wz / FIELD_DETAIL_M, r.seed ^ 0xF1E1D)
-                    * FIELD_DETAIL_HEIGHT_M;
-        }
-    }
-
-    // 1b. The landforms — the banks and spoil hills a venue has around it.
-    //
-    // This is what separates a generated plot from a real one, and it is not roughness.
-    // Height change over twenty-five metres, Indiana against a plain of noise tuned to match
-    // its median exactly:
-    //
-    //            p50     p90     p99     max
-    //   Indiana  0.71    3.70   12.18   19.83
-    //   noise    0.71    1.84    3.64    6.05
-    //
-    // The medians agree and the tail does not. Indiana has ground that climbs twelve to
-    // twenty metres in twenty-five and noise never does, because noise is the same everywhere
-    // and a venue is not. Measured by distance from the riding line, its steepest ground is
-    // 40–120 m out — not the cut and fill either side of the track, but the banks people
-    // stand on and the hills the place was built in.
-    //
-    // So they are placed rather than shaken out: a handful of long mounds, kept clear of the
-    // track, each with its own size and bearing.
-    if r.landforms > 0 {
-        let mut placed: Vec<(f32, f32, f32, f32, f32, f32)> = Vec::new();
-        let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
-        for n in 0..r.landforms.min(24) {
-            // Rejection sampling on a hash, so it is deterministic in the seed.
-            for k in 0..40u32 {
-                let h1 = hash2(n as i32 * 71 + k as i32, 13, r.seed ^ 0x1A2D);
-                let h2 = hash2(n as i32 * 71 + k as i32, 29, r.seed ^ 0x1A2D);
-                let (cx, cz) = ((h1 * 0.5 + 0.5) * sx, (h2 * 0.5 + 0.5) * sz);
-                let near = stations
-                    .iter()
-                    .map(|st| (st.x - cx).powi(2) + (st.z - cz).powi(2))
-                    .fold(f32::MAX, f32::min)
-                    .sqrt();
-                // Big enough that their flanks are gentle. A tall mound on a small footprint
-                // is a wall beside the track: with 55–145 m ones the ground fifteen metres
-                // either side of the riding line differed by 6.5 m at the ninetieth against
-                // Indiana's 3.0. A hill a track is built over is a hundred metres and more
-                // across, and then the same height buys a grade instead of a cliff.
-                // Long enough to be a hill a track is built over, small enough to leave ground
-                // between them. With 110–260 m ones covering most of the plot the map came out
-                // 27.9% flat against Indiana's 37.3, and curved everywhere at 0.29 m over
-                // fifteen metres against its 0.19 — the landforms *were* the landscape. With
-                // none at all it is 68% flat, which is flatter than Indiana. The truth is in
-                // between: they cover part of it and break harder where they do.
-                // The size is a trade, and it is worth writing down which way it runs. Small
-                // and tall gives the lap the right grade along it — 9.0° at the ninetieth
-                // against Indiana's 8.3 — and wrecks the ground across it, 7.6 m over thirty
-                // metres against its 3.0. Large and lower keeps the ground across the track
-                // sane at 5.2 and costs grade, 8.1 and 12.4 against 8.3 and 16.6.
-                //
-                // Neither is right, and no size is: ours are oriented at random, so the lap
-                // meets them however it happens to. Indiana's track was *routed* to its
-                // terrain — along the contours where it wants to be level, up the fall line
-                // where it wants to climb — which is a thing the layout would have to know
-                // about the ground, not a number here. Large is chosen because a track that
-                // is off-camber everywhere is worse than one that climbs gently.
-                let long = 110.0
-                    + 150.0 * (hash2(n as i32, 5, r.seed ^ 0x1A2D) * 0.5 + 0.5);
-                let across = long * (0.45 + 0.4 * (hash2(n as i32, 9, r.seed ^ 0x1A2D) * 0.5 + 0.5));
-                // Not clear of the track. A bank the rider never touches is scenery, and
-                // scenery is not what makes a hills track: Indiana's lap climbs and drops at
-                // 12.6° at the ninetieth and 29.4° at the ninety-ninth over twenty metres,
-                // and it does that by running over the ground, not past it. Keeping every
-                // mound 30 m clear left ours at 5.2° and 12.5° — a flat track with hills in
-                // the distance.
-                //
-                // What is required instead is that the mound be big enough for a track to be
-                // built over: the lap's own elevation is smoothed over 45 m, so anything
-                // shorter than that becomes a bump under the riding line rather than a hill
-                // the track climbs.
-                if long < BENCH_SMOOTH_M * 1.6 {
-                    continue;
-                }
-                let _ = near;
-                let tall = r.landform_height
-                    * (0.45 + 0.55 * (hash2(n as i32, 17, r.seed ^ 0x1A2D) * 0.5 + 0.5));
-                let bearing = hash2(n as i32, 23, r.seed ^ 0x1A2D) * std::f32::consts::PI;
-                placed.push((cx, cz, long, across, tall, bearing));
-                break;
-            }
-        }
-        for y in 0..gh {
-            for x in 0..gw {
-                let (wx, wz) = (x as f32 * mps_x, y as f32 * mps_z);
-                let mut add = 0.0f32;
-                for &(cx, cz, long, across, tall, bearing) in &placed {
-                    let (dx, dz) = (wx - cx, wz - cz);
-                    let (c, s) = (bearing.cos(), bearing.sin());
-                    let (u, v) = (dx * c + dz * s, -dx * s + dz * c);
-                    // The outline is warped, not elliptical. An ellipse with a smooth falloff
-                    // reads as a flying saucer parked on the ground however you shade it —
-                    // the eye finds the regularity instantly. Pushing the boundary about with
-                    // noise, at a wavelength near the mound's own size, makes it ragged the
-                    // way a bank of pushed-up spoil is.
-                    let warp = 0.42
-                        * fbm(
-                            wx / (long * 0.55),
-                            wz / (long * 0.55),
-                            r.seed ^ 0x1A2D ^ (long as u32),
-                        );
-                    let t = ((u / long).powi(2) + (v / across).powi(2)).sqrt() + warp;
-                    if t < 1.0 {
-                        // A mound, not a dome: flat-ish on top and steep on the flanks, which
-                        // is what a bank pushed up out of spoil looks like.
-                        add += tall * (1.0 - smoothstep(t.max(0.0))).powf(0.7);
-                    }
-                }
-                heights[y * gw + x] += add;
-            }
+            heights[y * gw + x] = land.at(x as f32 * mps_x, y as f32 * mps_z);
         }
     }
 
@@ -4358,6 +4458,26 @@ mod tests {
              quarter of its racing line",
             track * 100.0,
             field * 100.0
+        );
+    }
+
+    /// A lap is routed to its ground, not dropped on it.
+    ///
+    /// The shape is fixed, so the only freedoms are where it sits and which way round it
+    /// faces — and on a plot with hills on it those two decide whether the track climbs the
+    /// ground or lies across it. Indiana measures 3.0 m of fall across thirty metres of track;
+    /// ours managed 5.2 to 7.6 depending only on how big the hills happened to be.
+    #[test]
+    fn a_lap_is_turned_to_lie_along_the_ground() {
+        let mut p: TrackProgram = serde_json::from_str(DEMO).unwrap();
+        p.terrain.relief.landforms = 8;
+        p.terrain.relief.landform_height = 18.0;
+        let placed = place_on_ground(&p).expect("a lap that fits has a placement");
+        assert!(
+            placed.cross_m <= placed.was_cross_m,
+            "routing made it worse: {:.2} m against {:.2}",
+            placed.cross_m,
+            placed.was_cross_m
         );
     }
 
