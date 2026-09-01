@@ -1243,11 +1243,25 @@ fn apply_elevation(along: &mut [f32], st: &[Station], knots: &[Knot], lap: f32) 
 
 /// A step-up doesn't sit on the ground, it *is* the ground — so it moves the elevation the
 /// whole rest of the lap runs at rather than adding a bump to it.
+/// Ground that is higher after a feature than before it.
+///
+/// And then the lap is levelled again. A step-up raises everything after it and nothing puts
+/// it back, so a lap with one 2.2 m step-up on it finishes 2.2 m above where it started — and
+/// the start line, where the two ends of the lap meet in the ground, is a 2.2 m cliff across
+/// the track. `rise` is checked for exactly this ("a lap that climbs has to come back down")
+/// and step-ups went round the check.
+///
+/// The drift comes out as a constant grade rather than as a complaint, because it is one: a
+/// track that steps up somewhere has to fall the same amount over the rest of the lap, and
+/// spreading it evenly is what a builder would do. Over a 1900 m lap, 2.2 m is a grade of one
+/// part in 900 — under a centimetre between one station and the next.
 fn apply_step_ups(along: &mut [f32], st: &[Station], features: &[Feature]) {
+    let mut net = 0.0f32;
     for f in features {
         let Feature::StepUp { at, length, height } = *f else {
             continue;
         };
+        net += height;
         for (i, s) in st.iter().enumerate() {
             let u = s.s - at;
             along[i] += if u <= 0.0 {
@@ -1258,6 +1272,16 @@ fn apply_step_ups(along: &mut [f32], st: &[Station], features: &[Feature]) {
                 height * smoothstep(u / length)
             };
         }
+    }
+    if net == 0.0 {
+        return;
+    }
+    let lap = st.last().map(|s| s.s).unwrap_or(0.0);
+    if lap <= 0.0 {
+        return;
+    }
+    for (i, s) in st.iter().enumerate() {
+        along[i] -= net * (s.s / lap);
     }
 }
 
@@ -3986,6 +4010,26 @@ mod tests {
     /// Which side a corner's bank stands on. The berm the corner grows on its own used to
     /// stand on the *inside*, and nothing caught it because the demo declares a berm at every
     /// corner and a declared one replaced it.
+    /// A lap has to come back to where it started, in height as well as in position. One
+    /// step-up used to raise everything after it and nothing put it back, so the start line —
+    /// where the two ends of the lap meet in the ground — was a cliff the height of the
+    /// step-up. It measured 1.30 m in a single sample on the demo, and no test saw it.
+    #[test]
+    fn a_step_up_does_not_leave_a_cliff_at_the_start() {
+        let mut p = hairpins();
+        p.terrain.relief.amplitude = 0.0;
+        p.features = vec![Feature::StepUp { at: 60.0, length: 20.0, height: 2.2 }];
+        let s = synthesise(&p).unwrap();
+        let lap = p.lap_length();
+        let (before, after) = (height_at_arc(&s, lap - 6.0), height_at_arc(&s, 6.0));
+        assert!(
+            (before - after).abs() < 0.35,
+            "the ground is {:.2} m at the finish and {:.2} m at the start",
+            before,
+            after
+        );
+    }
+
     #[test]
     fn a_corner_banks_on_its_outside() {
         let p = hairpins(); // right-hand, and no berm declared anywhere
