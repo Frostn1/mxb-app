@@ -21,6 +21,7 @@ import { useReleaseShowcase } from "../Showcase/useReleaseShowcase";
 import { InstallProvider } from "../../Context/Install";
 import { DownloadsProvider } from "../../Context/Downloads";
 import { DropReviewProvider } from "../../Context/DropReview";
+import { ShareProvider } from "../../Context/Share";
 import { useConfig } from "../../Context/Config";
 import { modTypesFor, setIntroSeen } from "../../api/mods";
 import { useModBrowsing } from "../../lib/useModBrowsing";
@@ -198,6 +199,9 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
         anywhere in the window and the Shop's purchases grid both finish in this one sheet. */}
     <DropReviewProvider onInstalled={onInstalled}>
     <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
+      {/* Owns the share/import dialogs for every screen that lists installed content, and
+          watches for a share code pasted into the window. */}
+      <ShareProvider onImported={onInstalled}>
       {/* Mounted here rather than in `App` so a drop only works once the app is set up —
           there is nowhere to install to before the MX Bikes folder is known. The overlay
           window renders its own tree and deliberately gets no drop target. */}
@@ -283,6 +287,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           onOpenSettings={openSettingsSection}
         />
       )}
+      </ShareProvider>
       </InstallProvider>
     </DropReviewProvider>
     </DownloadsProvider>

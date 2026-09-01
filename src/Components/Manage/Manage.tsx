@@ -6,6 +6,7 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Share2,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -54,6 +55,7 @@ import type {
 import { useT } from "../../i18n/context";
 import { displayName, formatBytes } from "../../lib/mods";
 import { CATEGORY_LABEL, categoryIcon } from "../Library/categories";
+import { useShare } from "../../Context/Share";
 import { ContentDialog } from "./ContentDialog";
 
 type Tab = "race" | "mods";
@@ -573,6 +575,9 @@ function ModsPanel({
   onBulk: (rels: string[], enabled: boolean) => void;
 }) {
   const t = useT();
+  // A mod is named here by its rel, which is what a share code carries anyway — and it
+  // reaches a mod switched *off* too, parked outside the content folder.
+  const { shareFiles } = useShare();
   const [search, setSearch] = useState("");
   const [type, setType] = useState<TypeFilter>("all");
 
@@ -671,10 +676,19 @@ function ModsPanel({
                   </span>
                   <button
                     disabled={busy}
+                    onClick={() => shareFiles([m.rel])}
+                    title={t("share.action")}
+                    aria-label={t("share.action")}
+                    className="ml-auto flex-none cursor-default rounded-md p-1 text-faint transition-colors hover:bg-foreground/[0.06] hover:text-primary disabled:opacity-40"
+                  >
+                    <Share2 className="size-3.5" />
+                  </button>
+                  <button
+                    disabled={busy}
                     onClick={() => onDelete(m)}
                     title={t("library.uninstallAction")}
                     aria-label={t("library.uninstallAction")}
-                    className="ml-auto flex-none cursor-default rounded-md p-1 text-faint transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-40"
+                    className="flex-none cursor-default rounded-md p-1 text-faint transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-40"
                   >
                     <Trash2 className="size-3.5" />
                   </button>

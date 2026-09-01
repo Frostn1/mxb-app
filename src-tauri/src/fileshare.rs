@@ -19,7 +19,7 @@ use crate::upload;
 use anyhow::Context;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
 /// Phase updates ride their own event, so the Library's dialog and the Presets one never
@@ -73,70 +73,128 @@ pub struct FileShare {
     pub bundle: BundleRef,
 }
 
-/// Resolve picked absolute paths into `mods/`-relative items, saying what was left out.
+/// Turn one pick into the file it names and the rel a code would carry, or the reason it
+/// can't be shared.
 ///
-/// Everything shared has to live under the mods root: the rel path is what the code carries,
-/// and a file from anywhere else has no rel path to give. That check doubles as the guard on
-/// paths arriving from the frontend — nothing outside the mods tree can be packed up and
-/// uploaded, whatever the caller asks for.
-pub fn plan(cfg: &AppConfig, paths: &[String]) -> SharePlan {
+/// Two callers, two ways of naming a thing. The Library holds absolute paths from its scan;
+/// Manage and the Locker name content the way the rest of the app does, by its
+/// `mods/`-relative rel (`mods/tracks/EU/RedBud.pkz`, or bare `tracks/…`). Both land here.
+///
+/// This is also the guard on input from the frontend, and it has exactly two ways to say
+/// yes: the mods tree, and the shadow tree a disabled mod is parked in. A `..` is refused
+/// outright — `starts_with` compares components, so `mods/../../secrets` would otherwise
+/// pass a prefix check while naming a file well outside.
+fn resolve_pick(
+    cfg: &AppConfig,
+    root: &Path,
+    raw: &str,
+) -> Result<(PathBuf, String), &'static str> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("empty path");
+    }
+    let given = Path::new(raw);
+    if given.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err("path steps outside the mods folder");
+    }
+
+    let abs = if given.is_absolute() {
+        given.to_path_buf()
+    } else {
+        // A rel names a place in the mods tree whether or not it says `mods/` first.
+        let first_is_mods = raw
+            .split(['/', '\\'])
+            .find(|s| !s.is_empty())
+            .is_some_and(|s| s.eq_ignore_ascii_case("mods"));
+        let rel = if first_is_mods { raw.to_string() } else { format!("mods/{raw}") };
+        let enabled = library::mods_subdir(&cfg.mods_path, &rel);
+        // Manage lists mods it has switched *off* too, and those are parked outside the
+        // content folder. Sharing one is still sharing the file — and the rel a code
+        // carries is where it goes when enabled, which is the same either way.
+        if enabled.exists() { enabled } else { crate::modstate::disabled_path(&cfg.mods_path, &rel) }
+    };
+
+    if !abs.exists() {
+        return Err("no longer on disk");
+    }
+
+    let shadow = crate::modstate::shadow_root(&cfg.mods_path);
+    let rel = abs
+        .strip_prefix(root)
+        .or_else(|_| abs.strip_prefix(&shadow))
+        .map_err(|_| "outside the mods folder")?
+        .to_string_lossy()
+        .replace('\\', "/");
+    let rel = rel.trim_matches('/').to_string();
+    if rel.is_empty() {
+        return Err("that's the mods folder itself");
+    }
+    Ok((abs, rel))
+}
+
+/// A resolved pick: what a code will say about it, and where it's actually read from.
+///
+/// The two are not the same file for a mod Manage has switched off — it says
+/// `mods/tracks/RedBud.pkz`, because that is where it goes on the far end, while `src`
+/// points into the shadow tree it's parked in today.
+struct Pick {
+    item: ShareItem,
+    src: PathBuf,
+}
+
+/// Resolve picks, saying what was left out and why. Deduped and ordered by rel.
+///
+/// The rel path is the whole portability story — see [`ShareItem::rel`] — so anything that
+/// can't be given one can't be shared. See [`resolve_pick`] for what counts.
+fn picks(cfg: &AppConfig, paths: &[String]) -> (Vec<Pick>, Vec<Skipped>) {
     let root = library::mods_root(&cfg.mods_path);
-    let mut items: Vec<ShareItem> = Vec::new();
+    let mut picks: Vec<Pick> = Vec::new();
     let mut skipped: Vec<Skipped> = Vec::new();
 
     for raw in paths {
-        let p = PathBuf::from(raw.trim());
-        let reason = if !p.exists() {
-            Some("no longer on disk")
-        } else if !p.starts_with(&root) {
-            Some("outside the mods folder")
-        } else {
-            None
+        let (src, rel) = match resolve_pick(cfg, &root, raw) {
+            Ok(resolved) => resolved,
+            Err(reason) => {
+                skipped.push(Skipped { path: raw.clone(), reason: reason.to_string() });
+                continue;
+            }
         };
-        if let Some(reason) = reason {
-            skipped.push(Skipped { path: raw.clone(), reason: reason.to_string() });
-            continue;
-        }
 
-        let rel = p
-            .strip_prefix(&root)
-            .map(|r| r.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
-        let rel = rel.trim_matches('/').to_string();
-        if rel.is_empty() {
-            skipped.push(Skipped {
-                path: raw.clone(),
-                reason: "that's the mods folder itself".to_string(),
-            });
-            continue;
-        }
-
-        let is_dir = p.is_dir();
-        items.push(ShareItem {
-            name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-            rel,
-            size: if is_dir { bundle::dir_size_deep(&p) } else { bundle::file_size(&p) },
-            is_dir,
+        let is_dir = src.is_dir();
+        picks.push(Pick {
+            item: ShareItem {
+                name: src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                rel,
+                size: if is_dir { bundle::dir_size_deep(&src) } else { bundle::file_size(&src) },
+                is_dir,
+            },
+            src,
         });
     }
 
-    dedup(&mut items);
-    items.sort_by(|a, b| a.rel.to_lowercase().cmp(&b.rel.to_lowercase()));
+    dedup(&mut picks);
+    picks.sort_by(|a, b| a.item.rel.to_lowercase().cmp(&b.item.rel.to_lowercase()));
+    (picks, skipped)
+}
+
+pub fn plan(cfg: &AppConfig, paths: &[String]) -> SharePlan {
+    let (picks, skipped) = picks(cfg, paths);
+    let items: Vec<ShareItem> = picks.into_iter().map(|p| p.item).collect();
     let total_size = items.iter().map(|i| i.size).sum();
     SharePlan { items, skipped, total_size }
 }
 
 /// Drop repeats, and anything already carried by a folder that's also in the list — picking
 /// a track folder *and* a file inside it must not pack that file twice.
-fn dedup(items: &mut Vec<ShareItem>) {
-    let dirs: Vec<String> = items
+fn dedup(picks: &mut Vec<Pick>) {
+    let dirs: Vec<String> = picks
         .iter()
-        .filter(|i| i.is_dir)
-        .map(|i| i.rel.trim_end_matches('/').to_lowercase())
+        .filter(|p| p.item.is_dir)
+        .map(|p| p.item.rel.trim_end_matches('/').to_lowercase())
         .collect();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    items.retain(|i| {
-        let key = i.rel.to_lowercase();
+    picks.retain(|p| {
+        let key = p.item.rel.to_lowercase();
         if !seen.insert(key.clone()) {
             return false;
         }
@@ -167,22 +225,20 @@ pub async fn create(
     cfg: &AppConfig,
     paths: &[String],
 ) -> anyhow::Result<String> {
-    let plan = plan(cfg, paths);
-    if plan.items.is_empty() {
+    let (picks, _) = picks(cfg, paths);
+    if picks.is_empty() {
         anyhow::bail!(
             "Nothing here can be shared — pick installed files from your mods folder."
         );
     }
 
     bundle::emit(app, EVENT, "bundling", None);
-    let root_dir = library::mods_root(&cfg.mods_path);
     let work = std::env::temp_dir().join(format!("mxb-share-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&work);
     let root = work.join("share");
     std::fs::create_dir_all(&root)?;
 
-    for item in &plan.items {
-        let src = root_dir.join(bundle::rel_to_native(&item.rel));
+    for Pick { item, src } in &picks {
         let dest = root.join("mods").join(bundle::rel_to_native(&item.rel));
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)?;
@@ -190,18 +246,20 @@ pub async fn create(
         if item.is_dir {
             // Resolved, not linked: a junction into the sender's tree means nothing on the
             // machine this is headed for. Same reason the preset bundle resolves its folders.
-            bundle::copy_tree(&src, &dest)?;
+            bundle::copy_tree(src, &dest)?;
         } else {
-            std::fs::copy(&src, &dest)
+            std::fs::copy(src, &dest)
                 .with_context(|| format!("copying {}", src.display()))?;
         }
     }
 
+    let items: Vec<ShareItem> = picks.into_iter().map(|p| p.item).collect();
+
     // A manifest for anyone who unzips the archive by hand rather than pasting the code.
     // `place_mod` routes on the `mods/` child alone, so this sits beside it harmlessly.
-    std::fs::write(root.join("share.json"), serde_json::to_vec_pretty(&plan.items)?)?;
+    std::fs::write(root.join("share.json"), serde_json::to_vec_pretty(&items)?)?;
 
-    let zip_path = work.join(format!("{}.zip", archive_stem(&plan.items)));
+    let zip_path = work.join(format!("{}.zip", archive_stem(&items)));
     bundle::zip_dir(&root, &zip_path)?;
 
     let size = bundle::file_size(&zip_path);
@@ -229,7 +287,7 @@ pub async fn create(
     // there's more than one to stitch back together.
     let parts = if up.parts.len() > 1 { up.parts } else { Vec::new() };
     let share = FileShare {
-        items: plan.items,
+        items,
         total_size: up.size,
         bundle: BundleRef { url: first, host: up.host, size: up.size, parts },
     };
@@ -326,7 +384,6 @@ fn type_folder(items: &[ShareItem]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     fn touch(p: &Path) {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -408,6 +465,63 @@ mod tests {
         assert_eq!(p.items.len(), 1);
         assert_eq!(p.items[0].rel, "tracks/Loose Track");
         assert!(p.items[0].is_dir);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Manage and the Locker name content by rel, not by absolute path — that's how the rest
+    /// of the app talks about a mod. Both spellings have to resolve to the same item.
+    #[test]
+    fn planning_takes_a_rel_as_readily_as_a_path() {
+        let root = tmp("rels");
+        touch(&root.join("mods/tracks/EU/RedBud.pkz"));
+        touch(&root.join("mods/bikes/KTM450/FrostMod Models/Factory OEM/model.edf"));
+        let cfg = cfg_at(&root);
+
+        let p = plan(
+            &cfg,
+            &[
+                "mods/tracks/EU/RedBud.pkz".to_string(),
+                "bikes/KTM450/FrostMod Models/Factory OEM".to_string(),
+            ],
+        );
+
+        let rels: Vec<&str> = p.items.iter().map(|i| i.rel.as_str()).collect();
+        assert_eq!(rels, ["bikes/KTM450/FrostMod Models/Factory OEM", "tracks/EU/RedBud.pkz"]);
+        assert!(p.items[0].is_dir, "a swap variant is a folder");
+        assert!(p.skipped.is_empty(), "{:?}", p.skipped);
+
+        // And the absolute spelling of the same track answers identically.
+        let abs = plan(&cfg, &[root.join("mods/tracks/EU/RedBud.pkz").to_string_lossy().into_owned()]);
+        assert_eq!(abs.items[0], p.items[1]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Manage lists mods it has switched off, and those are parked outside the content
+    /// folder. Sharing one has to reach it — and still say where it goes, not where it sits.
+    #[test]
+    fn planning_reaches_a_mod_manage_switched_off() {
+        let root = tmp("parked");
+        touch(&root.join("mxbapp_disabled/tracks/Old.pkz"));
+
+        let p = plan(&cfg_at(&root), &["mods/tracks/Old.pkz".to_string()]);
+
+        assert_eq!(p.items.len(), 1, "skipped: {:?}", p.skipped);
+        assert_eq!(p.items[0].rel, "tracks/Old.pkz", "the rel is where it lands when enabled");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `starts_with` compares components, so a rel with `..` in it would sail through a
+    /// prefix check while naming a file well outside the tree. It never gets that far.
+    #[test]
+    fn planning_refuses_a_rel_that_climbs_out() {
+        let root = tmp("climb");
+        touch(&root.join("mods/tracks/RedBud.pkz"));
+        touch(&root.join("secrets.txt"));
+
+        let p = plan(&cfg_at(&root), &["mods/../secrets.txt".to_string()]);
+
+        assert!(p.items.is_empty(), "{:?}", p.items);
+        assert!(p.skipped[0].reason.contains("steps outside"), "{:?}", p.skipped);
         let _ = std::fs::remove_dir_all(&root);
     }
 

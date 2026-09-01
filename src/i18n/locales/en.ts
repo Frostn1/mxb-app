@@ -1137,6 +1137,7 @@ export const en = {
   // ── Sharing installed files (any track or paint, not just presets) ─────────
   "share.share": "Share",
   "share.action": "Share…",
+  "share.rightClickHint": "Right-click to share",
   "share.title": "Share these files",
   "share.hint":
     "Packs them up, uploads them, and gives you one code to paste anywhere. Whoever pastes it back gets the files in the same folders.",

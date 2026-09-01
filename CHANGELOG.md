@@ -2,6 +2,14 @@
 
 ## 2026-08-31
 
+### Added
+- Share from wherever you're already looking. Manage shares any mod in its list, switched on
+  or off — a mod it has parked is still a file, and the code says where it goes rather than
+  where it currently sits. The Locker shares a model or sound set: right-click the one you
+  want, including the one you're riding.
+- Paste a share code anywhere in the window. Ctrl+V over any screen opens the import with the
+  code filled in. A paste into a box you're typing in is left alone.
+
 ### Changed
 - Bikes wear their normal maps in the 3D preview, so a shroud has its curve and a seat its
   grip instead of drawing as a flat colour. A paint can supply its own.
