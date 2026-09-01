@@ -28,9 +28,15 @@
   repeated down the lap.
 - Ruts, berms and banking are built to numbers measured off ten published tracks.
 - Straights carry worn ground rather than being smooth between the corners.
+- MXB App stays off at login unless you ask for it. Launch at startup is off by default, and
+  the toggle is in Settings for anyone who wants the app waiting for them.
 
 ### Fixed
 - A corner banks the outside of the turn.
+- Switching MXB App off in Windows' list of startup apps sticks, and Launch at startup in
+  Settings follows it.
+- More of the crash at track graphics: the ground sheets in a track's graphics file were
+  written in a shape the game cannot read past.
 
 ## 2026-09-01 — v0.13.2 — Tracks that load
 

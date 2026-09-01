@@ -78,6 +78,11 @@ struct Payload<'a> {
     /// has nothing to read. Sent rather than skipped: "we could not look" is a real answer,
     /// and the alternative is silence that reads exactly like a clean machine.
     available: bool,
+    /// The player's MX Bikes GUID, so a report is tied to a player and not only to an install.
+    /// Empty until the game has signed in to Steam; skipped on the wire when unknown, and the
+    /// next report carries it once it is.
+    #[serde(skip_serializing_if = "str::is_empty")]
+    guid: &'a str,
     modules: &'a [Module],
 }
 
@@ -150,9 +155,22 @@ pub fn tick(app: &tauri::AppHandle) {
         *slot = Some(Sent { digest, at: Instant::now() });
     }
 
+    // The identity the game knows the player by, read only when a report is actually going
+    // out — never on a tick that finds nothing new. Prefer the value already claimed and
+    // persisted; otherwise read it out of the running game, which is up whenever this runs.
+    // Empty before Steam sign-in, and a later heartbeat carries it once it is known.
+    let guid = {
+        let claimed = cfg.cp_guid.trim();
+        if !claimed.is_empty() {
+            claimed.to_string()
+        } else {
+            crate::gameproc::local_guid().unwrap_or_default()
+        }
+    };
+
     let version = app.package_info().version.to_string();
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = send(&token, &version, available, &modules).await {
+        if let Err(e) = send(&token, &version, available, &guid, &modules).await {
             log::debug!("[diag] report not sent: {e:#}");
         }
     });
@@ -339,12 +357,13 @@ async fn send(
     token: &str,
     app_version: &str,
     available: bool,
+    guid: &str,
     modules: &[Module],
 ) -> anyhow::Result<()> {
     let res = reqwest::Client::new()
         .put(format!("{}/v1/diagnostics", crate::paintsync::control_plane()))
         .bearer_auth(token)
-        .json(&Payload { app_version, available, modules })
+        .json(&Payload { app_version, available, guid, modules })
         .timeout(Duration::from_secs(10))
         .send()
         .await?;
@@ -461,15 +480,30 @@ mod tests {
     #[test]
     fn the_payload_is_the_shape_the_other_end_reads() {
         let mods = collected(&["C:\\Games\\MX Bikes\\mxbikes.exe", "C:\\Windows\\System32\\a.dll"]);
-        let json =
-            serde_json::to_string(&Payload { app_version: "0.13.1", available: true, modules: &mods })
-                .unwrap();
+        let json = serde_json::to_string(&Payload {
+            app_version: "0.13.1",
+            available: true,
+            guid: "FF0110000108D7CFE3",
+            modules: &mods,
+        })
+        .unwrap();
         assert!(json.contains(r#""appVersion":"0.13.1""#), "{json}");
         assert!(json.contains(r#""available":true"#), "{json}");
+        assert!(json.contains(r#""guid":"FF0110000108D7CFE3""#), "{json}");
         assert!(json.contains(r#""origin":"game""#), "{json}");
         assert!(json.contains(r#""origin":"system""#), "{json}");
         // Absent rather than empty, which is what the parser expects of an unhashed file.
         assert!(json.contains(r#"{"name":"a.dll","origin":"system"}"#), "{json}");
+
+        // Unknown until sign-in, and then simply absent rather than an empty string.
+        let anon = serde_json::to_string(&Payload {
+            app_version: "0.13.1",
+            available: true,
+            guid: "",
+            modules: &mods,
+        })
+        .unwrap();
+        assert!(!anon.contains("guid"), "{anon}");
     }
 
     #[test]

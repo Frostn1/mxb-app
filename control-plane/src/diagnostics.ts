@@ -31,11 +31,13 @@
  * raises the cost of the ordinary case; it is not a wall.
  */
 
-import { isAppVersion, isSha256, PRESENCE_TTL_MS } from "./validate";
+import { isAppVersion, isGuid, isSha256, PRESENCE_TTL_MS } from "./validate";
 
 export interface Account {
   id: string;
   rider_name: string;
+  /** The player's MX Bikes GUID, once known. Filled from a report when we don't have it. */
+  guid?: string | null;
 }
 
 /** Where the client loaded a module from. Its judgement of location, not of character. */
@@ -230,7 +232,18 @@ export async function putReport(request: Request, account: Account, env: Env): P
     return json(400, { error: "expected a JSON body" });
   }
   if (!body || typeof body !== "object") return json(400, { error: "expected a JSON body" });
-  const { modules, appVersion, available } = body as Record<string, unknown>;
+  const { modules, appVersion, available, guid } = body as Record<string, unknown>;
+
+  // Tie the report to the player, not just the install. The game already publishes this GUID
+  // to every server the player joins, so it is the identity the rest of the system keys on.
+  // Fill-only: a GUID claimed elsewhere (a server log, the app) is left as it stands.
+  if (isGuid(guid) && !(account.guid ?? "").trim()) {
+    await env.DB.prepare(
+      "UPDATE accounts SET guid = ? WHERE id = ? AND (guid IS NULL OR guid = '')",
+    )
+      .bind((guid as string).trim(), account.id)
+      .run();
+  }
 
   const now = Date.now();
   const version = isAppVersion(appVersion) ? appVersion : "";
