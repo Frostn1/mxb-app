@@ -2,6 +2,11 @@
 
 ## 2026-09-01
 
+### Added
+- Designer: naming a sheet as a normal or roughness map starts it from the model's own — the
+  vents and the seat weave already in it — instead of from a blank canvas. A normal map with
+  none to copy starts flat rather than black.
+
 ### Changed
 - Track diagnostics keep protected tracks protected: for a sealed track the report gives
   the layout probe's findings without listing the files inside it or their contents.
