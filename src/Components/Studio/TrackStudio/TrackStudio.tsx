@@ -14,6 +14,8 @@ import {
   ChevronDown,
   ChevronRight,
   GripVertical,
+  Maximize2,
+  Minimize2,
   PenLine,
   Plus,
   RefreshCw,
@@ -105,6 +107,10 @@ export default function TrackStudio() {
   const [terrain, setTerrain] = useState<TrackTerrain | null>(null);
   const [overview, setOverview] = useState<TrackOverview | null>(null);
   const [focus, setFocus] = useState<{ x: number; z: number } | null>(null);
+  // The viewer, filling the window. It is the same element either way — only the wrapper's
+  // classes change — because remounting it would throw away the scene and rebuild the
+  // terrain from scratch every time you toggled.
+  const [full, setFull] = useState(false);
   const [hover, setHover] = useState<{
     path: { x: number; z: number }[];
     width: number;
@@ -218,6 +224,23 @@ export default function TrackStudio() {
       setBusy(null);
     }
   }
+
+  // Escape leaves full screen. Anything that covers the whole window has to have a way out
+  // that does not involve finding a button on top of a 3D scene.
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFull(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [full]);
+
+  // A track that goes away while you are looking at it full screen would leave you staring
+  // at an empty black window with no obvious way back.
+  useEffect(() => {
+    if (!terrain) setFull(false);
+  }, [terrain]);
 
   async function onClose() {
     if (!program || busy) return;
@@ -1017,7 +1040,14 @@ export default function TrackStudio() {
 
           {/* Right: the track itself. Features are painted with a colour each, so a row in
               the list and a lump on the ground can be matched up by eye. */}
-          <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-input bg-black/20">
+          <div
+            className={cn(
+              "relative overflow-hidden",
+              full
+                ? "fixed inset-0 z-50 bg-black"
+                : "min-h-0 min-w-0 flex-1 rounded-xl border border-input bg-black/20",
+            )}
+          >
             {terrain ? (
               <TrackViewer
                 terrain={terrain}
@@ -1036,6 +1066,18 @@ export default function TrackStudio() {
               <div className="absolute inset-0 grid place-items-center px-6 text-center text-[12.5px] text-muted-foreground">
                 {busy === "preview" ? t("track.building") : t("track.previewHint")}
               </div>
+            )}
+            {terrain && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setFull((v) => !v)}
+                title={t(full ? "track.exitFullscreen" : "track.fullscreen")}
+                aria-label={t(full ? "track.exitFullscreen" : "track.fullscreen")}
+                className="absolute right-2 top-2 size-8 bg-black/45 text-white/90 backdrop-blur hover:bg-black/65"
+              >
+                {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              </Button>
             )}
           </div>
         </div>

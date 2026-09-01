@@ -38,6 +38,11 @@
 - Ground sheets tile at a fixed size on the ground, so a long track and a short one get soil of
   the same grain.
 - Generated laps have more corners, and more variety in them.
+- Track generation works. It had never actually run against the model — the schema compiled
+  to a grammar the API rejects, on every model — and the lap, the plot and the height budget
+  are now worked out rather than asked for.
+- Generating a track costs about a fifth of what it was going to.
+- The 3D preview has a full-screen button.
 
 ## 2026-08-31 — v0.13.0 — Secure tracks
 

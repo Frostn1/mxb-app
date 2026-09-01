@@ -575,6 +575,12 @@ pub fn with_fitted_budget(prog: &TrackProgram) -> Result<TrackProgram> {
 }
 
 /// Samples across and down, both a power of two plus one, with cells as square as that allows.
+/// The grid the synthesiser would build for this program, so the repair pass can work out
+/// what plot would make its cells square.
+pub fn grid_for(prog: &TrackProgram) -> Result<(usize, usize)> {
+    grid_dims(prog)
+}
+
 fn grid_dims(prog: &TrackProgram) -> Result<(usize, usize)> {
     let n = prog.terrain.samples as usize;
     let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);

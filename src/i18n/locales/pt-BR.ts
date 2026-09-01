@@ -2265,6 +2265,8 @@ export const ptBR: Translation = {
   "track.budget": "Altura usada",
   "track.problems": "A corrigir",
   "track.preview": "Ver em 3D",
+  "track.fullscreen": "Tela cheia",
+  "track.exitFullscreen": "Sair da tela cheia",
   "track.building": "Construindo…",
   "track.install": "Instalar",
   "track.export": "Exportar fonte",

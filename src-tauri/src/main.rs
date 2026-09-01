@@ -1243,9 +1243,11 @@ async fn generate_track(app: tauri::AppHandle, brief: String) -> Result<serde_js
         base,
         token: cfg.cp_token.clone(),
     };
-    // Three attempts: one to write it, one to fix the numbers, one for the thing the fix
-    // broke. Past that it isn't converging and the cost is real.
-    let prog = trackllm::generate(brief.trim(), &ask, 3)
+    // Four attempts: one to write it, one to fix the numbers, one for the thing the fix
+    // broke, and one more because they are cheap now. Three was set when this called Opus at
+    // $5/$25 per MTok; it calls Haiku at $1/$5, most of what used to come back wrong is
+    // repaired without asking, and an attempt costs a fraction of a cent and twenty seconds.
+    let prog = trackllm::generate(brief.trim(), &ask, 4)
         .await
         .map_err(|e| format!("{e:#}"))?;
     usage::track("track.generate");

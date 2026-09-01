@@ -2275,6 +2275,8 @@ export const es: Translation = {
   "track.budget": "Altura usada",
   "track.problems": "Por corregir",
   "track.preview": "Ver en 3D",
+  "track.fullscreen": "Pantalla completa",
+  "track.exitFullscreen": "Salir de pantalla completa",
   "track.building": "Construyendo…",
   "track.install": "Instalar",
   "track.export": "Exportar fuente",
