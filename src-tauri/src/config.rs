@@ -287,17 +287,21 @@ impl Default for AppConfig {
     }
 }
 
-/// Bring a config written by an older build up to date.
-///
-/// Applied on every read rather than in a one-shot upgrade step: the config is also
-/// written by hand and by older builds still on disk, so "has this already been
-/// migrated?" is only ever answerable from the values themselves.
 /// Bumped to turn paint sync off for everyone once.
 ///
 /// v1: v0.12.4 shipped it on and it froze the game.
 pub const PAINT_SYNC_REV: u32 = 1;
 
-pub fn migrate(mut cfg: AppConfig) -> AppConfig {
+/// Bring a config written by an older build up to date.
+///
+/// Applied on every read rather than in a one-shot upgrade step: the config is also
+/// written by hand and by older builds still on disk, so "has this already been
+/// migrated?" is only ever answerable from the values themselves.
+///
+/// Returns whether it changed anything, so the caller can write it down: a migration left
+/// in memory is decided — and logged — again on every read.
+pub fn migrate(cfg: &mut AppConfig) -> bool {
+    let mut changed = false;
     // The one-shot described on `paint_sync_rev`. A config that never had the field is at
     // rev 0 too, and forcing an already-off setting off is a no-op, so this needs no way to
     // tell those two apart.
@@ -307,6 +311,7 @@ pub fn migrate(mut cfg: AppConfig) -> AppConfig {
         }
         cfg.paint_sync_enabled = false;
         cfg.paint_sync_rev = PAINT_SYNC_REV;
+        changed = true;
     }
     if LEGACY_OVERLAY_HOTKEYS.contains(&cfg.overlay_hotkey.trim()) {
         log::info!(
@@ -314,12 +319,15 @@ pub fn migrate(mut cfg: AppConfig) -> AppConfig {
             cfg.overlay_hotkey.trim(),
         );
         cfg.overlay_hotkey = DEFAULT_OVERLAY_HOTKEY.to_string();
+        changed = true;
     }
     // Pre-multi-game configs have folders but no `games` map. Seed the active game's
     // entry from them so switching away and back doesn't lose the folders someone has
     // been using — see `stash_active`, which is the same operation on the write side.
+    // Not counted as a change: every `save` does it anyway, so reporting it would turn
+    // each read of an old config into a write.
     cfg.stash_active();
-    cfg
+    changed
 }
 
 impl AppConfig {
@@ -535,7 +543,13 @@ pub fn load(app: &AppHandle) -> anyhow::Result<AppConfig> {
         }
     }
 
-    let cfg = migrate(cfg);
+    // A migration only sticks once it is written down. `load` is on the FrostMod status
+    // poll and the game watcher, so an unsaved one runs, and logs, four times a minute.
+    if migrate(&mut cfg) {
+        if let Err(e) = save(app, &cfg) {
+            log::warn!("couldn't write the migrated config back: {e:#}");
+        }
+    }
     crate::game::set_active(cfg.active_game);
     Ok(cfg)
 }
@@ -971,7 +985,8 @@ mod tests {
             "runInBackground": true,
             "overlayHotkey": "CommandOrControl+Shift+X"
         }"#;
-        let cfg = migrate(serde_json::from_str::<AppConfig>(json).unwrap());
+        let mut cfg = serde_json::from_str::<AppConfig>(json).unwrap();
+        migrate(&mut cfg);
 
         assert_eq!(cfg.active_game, Game::Mxb, "an old config is an MX Bikes one");
         assert_eq!(cfg.mods_path, "/games/MX Bikes", "folders are untouched");
@@ -1003,21 +1018,38 @@ mod tests {
     #[test]
     fn a_v0124_config_gets_paint_sync_turned_off_once() {
         let json = r#"{ "modsPath": "/games/MX Bikes", "paintSyncEnabled": true }"#;
-        let cfg = migrate(serde_json::from_str::<AppConfig>(json).unwrap());
+        let mut cfg = serde_json::from_str::<AppConfig>(json).unwrap();
 
+        assert!(migrate(&mut cfg), "and the caller is told to write it down");
         assert!(!cfg.paint_sync_enabled, "the explicit true is overridden once");
         assert_eq!(cfg.paint_sync_rev, PAINT_SYNC_REV, "and the config is caught up");
+    }
+
+    /// And it lands once, not on every read: before `load` wrote the result back, the flip
+    /// was re-decided — and "turning paint sync off" re-logged — on every poll, forever.
+    #[test]
+    fn a_written_back_migration_does_not_run_again() {
+        let json = r#"{ "modsPath": "/games/MX Bikes", "paintSyncEnabled": true }"#;
+        let mut cfg = serde_json::from_str::<AppConfig>(json).unwrap();
+        assert!(migrate(&mut cfg), "the first read has work to do");
+
+        // What `load` writes back, read again the way the next poll reads it.
+        let saved = serde_json::to_string(&cfg).unwrap();
+        let mut next = serde_json::from_str::<AppConfig>(&saved).unwrap();
+        assert!(!migrate(&mut next), "and the read after it has none");
     }
 
     /// Once. Someone who turns it back on afterwards keeps it — otherwise the setting is
     /// not a setting, it is a switch that resets every launch.
     #[test]
     fn turning_paint_sync_back_on_survives_the_next_launch() {
-        let mut cfg = migrate(AppConfig::default());
+        let mut cfg = AppConfig::default();
+        migrate(&mut cfg);
         cfg.paint_sync_enabled = true;
 
         let saved = serde_json::to_string(&cfg).unwrap();
-        let reloaded = migrate(serde_json::from_str::<AppConfig>(&saved).unwrap());
+        let mut reloaded = serde_json::from_str::<AppConfig>(&saved).unwrap();
+        assert!(!migrate(&mut reloaded), "a caught-up config needs no second write");
         assert!(reloaded.paint_sync_enabled, "their choice stands");
     }
 
@@ -1500,14 +1532,16 @@ mod tests {
     fn the_retired_default_hotkey_moves_to_the_current_one() {
         let mut cfg = AppConfig::default();
         cfg.overlay_hotkey = "CommandOrControl+Shift+M".into();
-        assert_eq!(migrate(cfg).overlay_hotkey, DEFAULT_OVERLAY_HOTKEY);
+        assert!(migrate(&mut cfg), "and the move is written down rather than redone");
+        assert_eq!(cfg.overlay_hotkey, DEFAULT_OVERLAY_HOTKEY);
     }
 
     #[test]
     fn a_hotkey_the_player_picked_survives_migration() {
         let mut cfg = AppConfig::default();
         cfg.overlay_hotkey = "Alt+F1".into();
-        assert_eq!(migrate(cfg).overlay_hotkey, "Alt+F1");
+        migrate(&mut cfg);
+        assert_eq!(cfg.overlay_hotkey, "Alt+F1");
     }
 
     /// Blank means "use the default" (see `overlay::hotkey_of`) — filling it in here
@@ -1516,7 +1550,8 @@ mod tests {
     fn a_blank_hotkey_is_left_blank() {
         let mut cfg = AppConfig::default();
         cfg.overlay_hotkey = String::new();
-        assert!(migrate(cfg).overlay_hotkey.is_empty());
+        migrate(&mut cfg);
+        assert!(cfg.overlay_hotkey.is_empty());
     }
 
     #[test]
