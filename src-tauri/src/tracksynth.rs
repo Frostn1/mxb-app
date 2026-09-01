@@ -1366,15 +1366,17 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
     match *f {
         // Up, along the top, and down. The ramps are a third each, which is about what a
         // built tabletop measures.
-        Feature::Tabletop { height, .. } => {
-            if t < 0.27 {
-                // Steeper than a smoothstep at the lip, which is what a packed takeoff is.
-                let u = t / 0.27;
-                height * (u * u * (3.0 - 2.0 * u)).powf(0.82)
-            } else if t < 0.56 {
+        // Up, along the top, and down — with the two ramps sized from the height and an
+        // angle rather than as fractions of the length, so a short tabletop is not a steep
+        // one. Shared with `Feature::length`, which has to agree about where it ends.
+        Feature::Tabletop { height, length, .. } => {
+            let (up, top, down) = crate::trackprog::tabletop_faces(height, length);
+            if u <= up {
+                height * smoothstep(u / up)
+            } else if u <= up + top {
                 height
             } else {
-                height * smoothstep((1.0 - t) / 0.44)
+                height * smoothstep(1.0 - (u - up - top) / down)
             }
         }
         Feature::Roller { height, .. } => height * (0.5 - 0.5 * (t * std::f32::consts::TAU).cos()),
