@@ -456,6 +456,22 @@ mod tests {
         assert_ne!(digest(true, &[]), digest(false, &[]));
     }
 
+    /// The wire shape the control plane parses. Its validator refuses anything else outright,
+    /// so a rename on either side is a silent stop rather than an error anybody sees.
+    #[test]
+    fn the_payload_is_the_shape_the_other_end_reads() {
+        let mods = collected(&["C:\\Games\\MX Bikes\\mxbikes.exe", "C:\\Windows\\System32\\a.dll"]);
+        let json =
+            serde_json::to_string(&Payload { app_version: "0.13.1", available: true, modules: &mods })
+                .unwrap();
+        assert!(json.contains(r#""appVersion":"0.13.1""#), "{json}");
+        assert!(json.contains(r#""available":true"#), "{json}");
+        assert!(json.contains(r#""origin":"game""#), "{json}");
+        assert!(json.contains(r#""origin":"system""#), "{json}");
+        // Absent rather than empty, which is what the parser expects of an unhashed file.
+        assert!(json.contains(r#"{"name":"a.dll","origin":"system"}"#), "{json}");
+    }
+
     #[test]
     fn a_mapping_that_is_not_a_file_name_is_dropped() {
         // Linux hands back mappings that are not always plain files; the control plane takes
