@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-01
+
+### Changed
+- The map-loader tracer stops where it can no longer be sure, instead of guessing past it.
+
+## 2026-09-01
+
+### Fixed
+- The map-loader tracer stops at the end of the file instead of reading zeros past it.
+
+## 2026-09-01
 ## 2026-09-01 — v0.13.3 — Nothing you didn't ask for
 
 ### Added

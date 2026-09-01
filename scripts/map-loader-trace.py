@@ -21,13 +21,20 @@ Needs `~/Downloads/mxbikes.exe.unpacked.exe` (see the notes on the unpacked bina
 `.map` to read. The OEM drag strip is the reference worth using: its mesh, materials and
 textures are all declared empty, so everything it contains is in the part still being decoded.
 
-Known limit: the texture payload's decompressor is stubbed, so a length after the first
-payload comes out negative and the trace drifts from there. Letting that function run for
-real is what would produce the whole file's layout in one pass.
+Where it currently stops, and why that is the honest answer: after record 0's texture payload
+the loader tail-calls through a pointer this harness never filled in, and there is no sound way
+to recover. A shadow return stack was tried and removed — it needs every `ret`, and a linear
+disassembly of this binary finds 2,692 call sites against 198 returns, so it drifted and landed
+execution mid-function, inventing a read of -7 bytes. Stopping is correct; the next step is to
+make that call resolve rather than to guess past it.
+
+The payload primitive itself is fully understood and worth knowing: `0x1402573f0` reads a
+4-byte size, then 8 bytes, then `size - 8` bytes of raw DEFLATE.
 """
 
 import struct, os, sys
 import pefile
+import capstone
 from unicorn import *
 from unicorn.x86_const import *
 
@@ -80,26 +87,19 @@ def _unwind(uc):
             return True
     return False
 
-_shadow = []
+# No shadow return stack.
+#
+# There was one, to recover from tail calls through pointers we never filled in. It relied on
+# spotting every `ret`, and a linear disassembly of this binary finds 2,692 call sites but only
+# 198 returns — data interleaved with code desyncs it. So the stack drifted, and an unwind
+# landed execution in the middle of a function it had left long before, which invented a read
+# of -7 bytes. An unwinder that is wrong is worse than none: it turns a stopped trace into a
+# fictional one.
 def hook_code(uc, addr, size, _):
     _trail.append(addr)
     if len(_trail) > 24: _trail.pop(0)
-    # A shadow return stack. Tail calls through pointers we never filled in leave nothing on
-    # the real stack to unwind to, so remember where each call came from ourselves.
-    if BASE <= addr < BASE + IMGSZ:
-        try:
-            b0 = img[addr-BASE]
-            if b0 == 0xE8 or (b0 == 0xFF and (img[addr-BASE+1] >> 3) & 7 == 2):
-                _shadow.append(addr + size)
-                if len(_shadow) > 256: _shadow.pop(0)
-        except Exception:
-            pass
     if not (BASE <= addr < BASE + IMGSZ):
         if not _unwind(uc):
-            if _shadow:
-                uc.reg_write(UC_X86_REG_RAX, 0)
-                uc.reg_write(UC_X86_REG_RIP, _shadow.pop())
-                return
             rsp = uc.reg_read(UC_X86_REG_RSP)
             try:
                 sl = struct.unpack('<8Q', uc.mem_read(rsp, 64))
