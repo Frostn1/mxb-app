@@ -39,7 +39,14 @@ const STATION_STEP: f32 = 0.5;
 
 /// How far past the riding line the terrain is still pulled towards it, metres. This is the
 /// shoulder — the graded ground either side that a track sits in rather than on.
-const SHOULDER_M: f32 = 9.0;
+///
+/// Six, not nine. At nine the track sat in a shelf whose ground rejoined the field 19.5 m from
+/// the centreline against Indiana's 12.5, and it reads as a soft halo round every corner where
+/// a real track's edge is nearly flush with the field. The measurement is a crude one — it
+/// fits a straight line through the ground either side and asks where the profile leaves it,
+/// and it returns nonsense on the flattest sections — so the picture decided this rather than
+/// the number: side by side at 6 m the edge is crisp and at 9 m it is not.
+const SHOULDER_M: f32 = 6.0;
 
 /// Metres of lap the track's own elevation is smoothed over. Short enough to follow a hill,
 /// long enough not to follow a bush.
