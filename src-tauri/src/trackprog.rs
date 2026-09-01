@@ -236,6 +236,40 @@ pub fn double_faces(height: f32, lip: f32) -> (f32, f32) {
     (lip.max(back), back)
 }
 
+/// The gentlest face — the one a landing gets. Published landings measure 19.0° at the
+/// ninetieth against a takeoff's 27.0: a built takeoff is short because that is what throws
+/// you, and the landing is long because that is what catches you.
+pub const JUMP_LANDING_DEG: f32 = 22.0;
+
+/// A tabletop's ramp up, its flat top and its ramp down, in metres.
+///
+/// The ramps used to be fixed fractions of the feature's length — 27% up and 44% down — so a
+/// short tabletop got a short ramp however tall it was asked to be, and how steep it came out
+/// depended on nothing but the ratio of the two numbers. A 3 m tabletop 16 m long ramped at
+/// 39°. Sized from the height and an angle instead, the way a double's faces now are.
+///
+/// The stated length is what the *top* is measured against: the ramps are added to it, so a
+/// tabletop's footprint is longer than the number asked for and [`Feature::length`] reports
+/// the whole thing.
+pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
+    let h = height.abs();
+    // Whichever is longer: the angle's, or the fraction of the stated length the ramps used
+    // to be. The angle alone makes a *short* jump steeper than it was — at 30° a one-metre
+    // tabletop gets a 2.6 m ramp where 27% of a 22 m length gave it 5.9 m — which is the same
+    // way round as it bit on the double. The angle is a ceiling for the tall ones, not a
+    // target for all of them.
+    let up = (1.5 * h / JUMP_FACE_DEG.to_radians().tan())
+        .max(length * 0.27)
+        .max(JUMP_FACE_MIN_M);
+    let down = (1.5 * h / JUMP_LANDING_DEG.to_radians().tan())
+        .max(length * 0.44)
+        .max(JUMP_FACE_MIN_M);
+    // Whatever the asked-for length has left once the faces are in it, and never negative:
+    // a tabletop too short for its own height is a peaked jump, which is a real thing.
+    let top = (length - up - down).max(0.0);
+    (up, top, down)
+}
+
 /// Under this many degrees an arc is a drift, not a corner — a builder nudging a straight
 /// back onto line.
 pub const CORNER_DEG: f32 = 1.0;
@@ -372,8 +406,14 @@ impl Feature {
     /// How much of the lap it occupies.
     pub fn length(&self) -> f32 {
         match self {
-            Feature::Tabletop { length, .. }
-            | Feature::Roller { length, .. }
+            // The ramps are sized from the height, so the footprint is longer than the
+            // stated length and this has to say so — the profile is only written as far as
+            // `at + length`, and anything past it is cut off into a step.
+            Feature::Tabletop { height, length, .. } => {
+                let (up, top, down) = tabletop_faces(*height, *length);
+                up + top + down
+            }
+            Feature::Roller { length, .. }
             | Feature::StepUp { length, .. }
             | Feature::Berm { length, .. }
             | Feature::Rut { length, .. }
