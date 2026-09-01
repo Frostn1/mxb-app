@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-08-31
+
+### Changed
+- A track installed from Track Studio is packed the way the game reads tracks, so it turns up
+  in the in-game list.
+- The track file names the artwork it ships and states its lap length in metres.
+
+### Added
+- Installed tracks carry the ground they are painted with, and a gfx.cfg so roost is the
+  colour of the dirt.
+
 ## 2026-08-31 — v0.13.0 — Secure tracks
 
 ### Added

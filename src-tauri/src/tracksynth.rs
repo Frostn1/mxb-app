@@ -1039,11 +1039,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     put("area_start.tga", tga_alpha(MASK_DIM, MASK_DIM, &start), &mut wrote)?;
 
     // Ground colours follow what the track is made of, so a sand national exports sand.
-    let (ground, line) = match prog.terrain.surface {
-        Surface::Soil => ([124, 96, 68], [96, 70, 50]),
-        Surface::Sand => ([196, 174, 132], [172, 148, 108]),
-        Surface::Grass => ([104, 118, 74], [92, 74, 54]),
-    };
+    let (ground, line) = ground_palette(prog.terrain.surface);
     std::fs::create_dir_all(dir.join("maps")).context("make the maps folder")?;
     let seed = prog.terrain.relief.seed;
     put(
@@ -1074,6 +1070,11 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         &mut wrote,
     )?;
     put(&format!("{slug}/{slug}.amb"), AMB.into(), &mut wrote)?;
+    put(
+        &format!("{slug}/gfx.cfg"),
+        gfx_cfg(prog).into_bytes(),
+        &mut wrote,
+    )?;
     put(
         &format!("{slug}/{slug}.rdf"),
         rdf(prog).into_bytes(),
@@ -1357,25 +1358,104 @@ fn rdf(prog: &TrackProgram) -> String {
     s
 }
 
-/// The smallest `.map` the format allows: no materials, no geometry, no nodes.
+/// The `.map`: the sheets the ground is painted with.
 ///
-/// TerrainEd is what really makes these, and it is Windows-only. This is not a substitute —
-/// it is the degenerate case the format already has, which the OEM L21-DragStrip ships (its
-/// material count is zero and it carries no geometry at all). Whether the game will draw the
-/// terrain from the `.trh` when the `.map` is empty is the one thing about this pipeline that
-/// cannot be answered without running it, and shipping the empty file is how the question
-/// gets asked.
+/// TerrainEd builds these and it is Windows-only, but a `.map` is not the riding surface —
+/// measured against published tracks, every triangle in one is scenery, and the terrain is
+/// drawn from the `.trh`. What a `.map` also carries is *every texture the track uses*,
+/// the ground sheets among them: SandPoint's are `track-dark`, `track-light`, `track-norm`.
 ///
-/// The layout is `map.rs`'s, which is the parser that reads real ones.
-fn empty_map() -> Vec<u8> {
-    let mut out = Vec::with_capacity(24);
+/// So a track with no scenery still needs a `.map`, and it needs exactly this much of one:
+/// no materials, no geometry, the sheets after them. That is the shape the OEM drag strip
+/// ships — zero materials, not one triangle, and its textures behind them — so it is a file
+/// the game already loads rather than one invented here.
+///
+/// The record layout is `edf.rs`'s, which is the scanner that reads real ones: a
+/// null-terminated name, its dimensions a hundred bytes in, the payload's length at +128,
+/// eight zero bytes, then the pixels as raw DEFLATE over RGBA8.
+fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
+    let _ = syn;
+    let (ground, line) = ground_palette(prog.terrain.surface);
+    let seed = prog.terrain.relief.seed;
+    let dim = GROUND_TEXTURE_DIM;
+
+    let mut out = Vec::new();
     out.extend_from_slice(b"MP2\0");
     out.extend_from_slice(&304u32.to_le_bytes()); // header size, constant on every map measured
     out.extend_from_slice(&0u32.to_le_bytes()); // materials
     out.extend_from_slice(&0u32.to_le_bytes()); // vertices
     out.extend_from_slice(&0u32.to_le_bytes()); // triangles
     out.extend_from_slice(&0u32.to_le_bytes()); // nodes
+
+    // The surfaces are counted before they are listed — `map::texture_table` reads that word
+    // where the node tree ends, and a reader walking the file straight through lands on it
+    // here. Without it the first record is read as the count and the table is empty.
+    let sheets = [
+        // `_c` is PiBoSo's own mark for a colour sheet, and the ground words are what a
+        // reader looking for a track's dirt matches on — ours say both.
+        ("ground_c", ground_pixels(dim, ground, 0.22, seed ^ 0x9A0D)),
+        ("dirt_line_c", ground_pixels(dim, line, 0.28, seed ^ 0x11E5)),
+        ("grass_c", ground_pixels(dim, [96, 116, 66], 0.30, seed ^ 0x6A55)),
+    ];
+    out.extend_from_slice(&(sheets.len() as u32).to_le_bytes());
+    for (name, px) in &sheets {
+        out.extend_from_slice(&texture_record(name, dim as u32, dim as u32, px));
+    }
     out
+}
+
+/// The roost: what colour the dirt is when a wheel throws it.
+///
+/// Every published track ships one of these beside its `.map`, and the shape is the same on
+/// all of them — a ground colour, then a colour per surface the game can spray. Ours follows
+/// what the track is made of, so a sand national roosts sand rather than the default loam.
+fn gfx_cfg(prog: &TrackProgram) -> String {
+    let (ground, line) = ground_palette(prog.terrain.surface);
+    let rgb = |c: [u8; 3]| {
+        format!(
+            "\t\tred = {:.2}\n\t\tgreen = {:.2}\n\t\tblue = {:.2}\n",
+            c[0] as f32 / 255.0,
+            c[1] as f32 / 255.0,
+            c[2] as f32 / 255.0
+        )
+    };
+    let mut s = format!(
+        "dirt_color\n{{\n\tred = {:.2}\n\tgreen = {:.2}\n\tblue = {:.2}\n}}\n\nparticles\n{{\n",
+        ground[0] as f32 / 255.0,
+        ground[1] as f32 / 255.0,
+        ground[2] as f32 / 255.0
+    );
+    // The worked line is what a bike is actually on, so it is what the soils roost.
+    for name in ["soilsoft", "soil", "soilcompact"] {
+        s.push_str(&format!("\t{name}\n\t{{\n{}\t}}\n\n", rgb(line)));
+    }
+    for name in ["sand", "gravel"] {
+        s.push_str(&format!("\t{name}\n\t{{\n{}\t}}\n\n", rgb(ground)));
+    }
+    s.push_str("}\n");
+    s
+}
+
+/// One embedded texture, in the record shape [`crate::edf::embedded_textures`] reads.
+fn texture_record(name: &str, w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
+    let payload = deflate_raw(rgba);
+    // 100 bytes of name field, dimensions, then the header the scanner keys on.
+    let mut rec = vec![0u8; 140];
+    let n = name.len().min(39);
+    rec[..n].copy_from_slice(&name.as_bytes()[..n]);
+    rec[100..104].copy_from_slice(&w.to_le_bytes());
+    rec[104..108].copy_from_slice(&h.to_le_bytes());
+    // The length at +128 counts the eight zero bytes that follow it, which stay zero.
+    rec[128..132].copy_from_slice(&((payload.len() + 8) as u32).to_le_bytes());
+    rec.extend_from_slice(&payload);
+    rec
+}
+
+fn deflate_raw(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut e = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+    let _ = e.write_all(bytes);
+    e.finish().unwrap_or_default()
 }
 
 /// The preview as a `.pkz` the app can open: a plain zip, which is what the reader falls back
@@ -1394,17 +1474,17 @@ pub fn write_pkz(
 
     use std::io::Write;
     let (map_img, shot) = ui_images(syn, UI_IMAGE_DIM);
-    // Everything a track needs that we can actually produce. What is still missing is the
-    // `.rdf` — start gate, pit lane, cameras, which only TrackEd writes — and a `gate.edf`
-    // copied from another track. Neither is ours to make at any effort.
+    // Every published track puts its files in a folder named after itself, and the game
+    // looks for them there — flat at the archive root they are not found at all.
     for (name, bytes) in [
-        (format!("{slug}.trh"), trh(prog, syn, paint_features)),
-        (format!("{slug}.map"), empty_map()),
-        (format!("{slug}.ini"), track_ini(prog).into_bytes()),
-        (format!("{slug}.rdf"), rdf(prog).into_bytes()),
-        (format!("{slug}.amb"), AMB.as_bytes().to_vec()),
-        (format!("{slug}_map.tga"), map_img),
-        (format!("{slug}.tga"), shot),
+        (format!("{slug}/{slug}.trh"), trh(prog, syn, paint_features)),
+        (format!("{slug}/{slug}.map"), map(prog, syn)),
+        (format!("{slug}/{slug}.ini"), track_ini(prog).into_bytes()),
+        (format!("{slug}/{slug}.rdf"), rdf(prog).into_bytes()),
+        (format!("{slug}/{slug}.amb"), AMB.as_bytes().to_vec()),
+        (format!("{slug}/gfx.cfg"), gfx_cfg(prog).into_bytes()),
+        (format!("{slug}/{slug}_map.tga"), map_img),
+        (format!("{slug}/{slug}.tga"), shot),
     ] {
         zip.start_file(name, opts)?;
         zip.write_all(&bytes)?;
@@ -1470,6 +1550,17 @@ fn tile_noise(x: f32, y: f32, period: i32, seed: u32) -> f32 {
 /// noise over a base colour is not a photograph, but it tiles, it is the right format, and
 /// it is in the folder.
 fn ground_texture(dim: usize, base: [u8; 3], grain: f32, seed: u32) -> Vec<u8> {
+    let rgba = ground_pixels(dim, base, grain, seed);
+    let mut px = Vec::with_capacity(rgba.len());
+    for p in rgba.chunks_exact(4) {
+        px.extend_from_slice(&[p[2], p[1], p[0], p[3]]);
+    }
+    tga_bgra(dim, dim, &px)
+}
+
+/// The same grain as RGBA, which is what the `.map` embeds — the `.tga` is the same pixels
+/// with the channels swapped, so they can't drift apart.
+fn ground_pixels(dim: usize, base: [u8; 3], grain: f32, seed: u32) -> Vec<u8> {
     let mut px = Vec::with_capacity(dim * dim * 4);
     for y in 0..dim {
         for x in 0..dim {
@@ -1484,10 +1575,19 @@ fn ground_texture(dim: usize, base: [u8; 3], grain: f32, seed: u32) -> Vec<u8> {
             }
             let k = 1.0 + n * grain;
             let c = |i: usize| (base[i] as f32 * k).clamp(0.0, 255.0) as u8;
-            px.extend_from_slice(&[c(2), c(1), c(0), 255]);
+            px.extend_from_slice(&[c(0), c(1), c(2), 255]);
         }
     }
-    tga_bgra(dim, dim, &px)
+    px
+}
+
+/// What the ground and the riding line are coloured, by what the track is made of.
+fn ground_palette(s: Surface) -> ([u8; 3], [u8; 3]) {
+    match s {
+        Surface::Soil => ([124, 96, 68], [96, 70, 50]),
+        Surface::Sand => ([196, 174, 132], [172, 148, 108]),
+        Surface::Grass => ([104, 118, 74], [92, 74, 54]),
+    }
 }
 
 /// The blade sprite the grass layer scatters. Alpha-cut, like every foliage sheet in the
@@ -1685,11 +1785,17 @@ fn tcl(prog: &TrackProgram) -> String {
     s
 }
 
+/// The track's own description, in the shape published tracks write it.
+///
+/// Two details are load-bearing and were wrong: `length` is a plain number of metres — a
+/// trailing `m` is not a unit the game strips — and `pic`/`pic_info` have to name files the
+/// archive actually carries, which are the two the writer puts beside this one.
 fn track_ini(prog: &TrackProgram) -> String {
+    let slug = slug(&prog.name);
     format!(
-        "[info]\nname={}\nshort_name={}\nlength={:.0}m\naltitude=40\n\n\
-         [race]\ndefaulteventlaps=15\nreflaptime={:.0}\n\n\
-         [ui]\npic=track_image.tga\npic_info=track_map.tga\nauthor={}\nlocation={}\n\n\
+        "[info]\nname = {}\nshort_name = {}\nlength = {:.0}\naltitude = 40\n\n\
+         [race]\ndefaulteventlaps = 15\nreflaptime = {:.0}\n\n\
+         [ui]\npic = {slug}.tga\npic_info = {slug}_map.tga\nauthor = {}\nlocation = {}\n\n\
          [weather]\ncloud_prob = 0.4\nrainy_prob = 0.1\n",
         prog.name,
         prog.name.chars().take(12).collect::<String>(),
@@ -1724,12 +1830,10 @@ fn readme(prog: &TrackProgram, syn: &Synth, slug: &str) -> String {
          1. _map.bat        graphics, writes {slug}/{slug}.map\n\
          2. _trh.bat        collision, writes {slug}/{slug}.trh\n\
          3. _centerline.bat merges track.tcl into the .trh\n\n\
-         Two files are still missing after that, and neither is ours to write:\n\
-         \n\
-           {slug}.rdf   start gate, pit lane, finish line, cameras — TrackEd writes it\n\
-           gate.edf     the starting gate model — copy one from another track\n\
-         \n\
-         With those in the folder, zip it and rename the zip {slug}.pkz.\n",
+         Then zip the {slug} folder and rename the zip {slug}.pkz.\n\n\
+         The .rdf beside it — start gate, pit lane, finish line, checkpoints — is written\n\
+         here rather than in TrackEd, laid out from the lap itself. Open it there if you\n\
+         want to move the cameras.\n",
         name = prog.name,
         gw = syn.gw,
         gh = syn.gh,
@@ -2071,16 +2175,103 @@ mod tests {
     }
 
     #[test]
-    fn the_empty_map_is_a_map() {
-        let m = empty_map();
+    fn the_map_is_a_map_with_the_ground_sheets_in_it() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let m = map(&p, &s);
         assert_eq!(&m[..4], b"MP2\0");
         assert_eq!(u32::from_le_bytes(m[4..8].try_into().unwrap()), 304);
         assert_eq!(u32::from_le_bytes(m[8..12].try_into().unwrap()), 0, "materials");
         // `map::parse` builds a *mesh*, so it rightly declines one with no geometry — that
-        // is the whole point of the degenerate case. What has to hold is that the file is
-        // recognised as a map at all, and that reading it doesn't panic.
+        // is the drag strip's shape and it is deliberate. What has to hold is that the file
+        // is recognised as a map, and that its sheets read back.
         assert!(crate::map::is_map(&m), "not recognised as a map");
         assert!(crate::map::parse(&m).is_none(), "there is no mesh in it to find");
+
+        // The scanner that reads published tracks' textures has to find ours, and they have
+        // to inflate to the pixel count they claim — a record the game would skip is a
+        // ground sheet the track doesn't have.
+        let texs = crate::edf::embedded_textures(&m);
+        let names: Vec<&str> = texs.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["ground_c", "dirt_line_c", "grass_c"], "found {names:?}");
+
+        // A reader walking the file rather than scanning it lands on the count where the
+        // node tree ends — six words in, since nothing before it has any entries.
+        let after_tree = 24;
+        assert_eq!(
+            u32::from_le_bytes(m[after_tree..after_tree + 4].try_into().unwrap()),
+            texs.len() as u32,
+            "the surfaces have to be counted before they are listed"
+        );
+        assert_eq!(
+            &m[after_tree + 4..after_tree + 4 + 8],
+            b"ground_c",
+            "the first record starts straight after the count"
+        );
+        for t in &texs {
+            assert_eq!(t.width, GROUND_TEXTURE_DIM as u32);
+            let px = crate::edf::inflate_texture(&m, t).expect("the sheet inflates");
+            assert_eq!(px.len(), (t.width * t.height * 4) as usize);
+        }
+        // The colour is the surface's, not a default: a sand track's ground reads as sand.
+        let sand = {
+            let mut p = oval();
+            p.terrain.surface = Surface::Sand;
+            let s = synthesise(&p).unwrap();
+            let m = map(&p, &s);
+            let t = crate::edf::embedded_textures(&m).remove(0);
+            crate::edf::inflate_texture(&m, &t).unwrap()[0]
+        };
+        let soil = crate::edf::inflate_texture(&m, &texs[0]).unwrap()[0];
+        assert!(sand > soil, "sand ({sand}) should be lighter than soil ({soil})");
+    }
+
+    /// The game looks for a track's files in a folder named after it — flat at the archive
+    /// root they are not found at all, which is what a preview used to install as.
+    #[test]
+    fn the_pkz_nests_its_files_and_names_the_pictures_it_carries() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let dir = std::env::temp_dir().join(format!("mxb-pkz-selftest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("preview.pkz");
+        write_pkz(&p, &s, &path, false).unwrap();
+
+        let slug = slug(&p.name);
+        let names = crate::pkz::entry_names(&path).unwrap();
+        for want in [
+            format!("{slug}/{slug}.trh"),
+            format!("{slug}/{slug}.map"),
+            format!("{slug}/{slug}.ini"),
+            format!("{slug}/{slug}.rdf"),
+            format!("{slug}/{slug}.amb"),
+            format!("{slug}/gfx.cfg"),
+        ] {
+            assert!(names.contains(&want), "{want} is missing from {names:?}");
+        }
+
+        // And the `.ini` names pictures the archive actually has — it used to name two
+        // files that were never written, which is a track with no artwork at all.
+        let ini =
+            String::from_utf8(crate::pkz::read_entry(&path, &format!("{slug}.ini")).unwrap().unwrap())
+                .unwrap();
+        for line in ini.lines() {
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            if matches!(key.trim(), "pic" | "pic_info") {
+                let want = format!("{slug}/{}", value.trim());
+                assert!(names.contains(&want), "the ini names {want}, which isn't in it");
+            }
+            // A length with a unit on it is not a number the game can read.
+            if key.trim() == "length" {
+                assert!(
+                    value.trim().parse::<f32>().is_ok(),
+                    "length = {value:?} is not a plain number of metres"
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -2151,6 +2342,7 @@ mod tests {
             format!("{slug}/{slug}.amb"),
             format!("{slug}/{slug}.tga"),
             format!("{slug}/{slug}_map.tga"),
+            format!("{slug}/gfx.cfg"),
         ] {
             assert!(dir.join(&f).is_file(), "{f} is missing");
         }
