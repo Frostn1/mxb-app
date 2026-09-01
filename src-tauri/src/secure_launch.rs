@@ -165,7 +165,7 @@ mod win {
     const MEM_COMMIT_RESERVE: u32 = 0x1000 | 0x2000;
     const PAGE_READWRITE: u32 = 0x04;
 
-    extern "system" {
+    unsafe extern "system" {
         fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
         fn GetModuleHandleW(name: *const u16) -> *mut c_void;
         fn GetProcAddress(module: *mut c_void, name: *const i8) -> *mut c_void;

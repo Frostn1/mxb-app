@@ -73,7 +73,7 @@ fn windows_steam_path() -> Option<PathBuf> {
     const RRF_RT_REG_SZ: u32 = 0x0000_0002;
 
     #[link(name = "advapi32")]
-    extern "system" {
+    unsafe extern "system" {
         fn RegGetValueW(
             hkey: isize,
             subkey: *const u16,
