@@ -2,8 +2,14 @@
 //!
 //! The app already reports presence and anonymous usage. This is the same idea pointed at
 //! the game process: while MX Bikes is up, walk its module list and report what is in it —
-//! each file's name, where it was loaded from, and a hash for anything that is not a Windows
-//! system library.
+//! each file's name, where it was loaded from, a hash for anything that is not a Windows
+//! system library, and what the file says about itself: its size, when it was last written,
+//! whether Windows trusts its signature and who signed it, and the company and product it
+//! claims in its version resource (see [`crate::fileinfo`]).
+//!
+//! The extra detail is there because a name and a hash only identify what is already known.
+//! Every first sighting is a name nobody recognises, and "unsigned, no company, written last
+//! Tuesday" is what makes one of those readable without recognising it.
 //!
 //! **This module makes no judgements and holds no lists of anything.** It records where a
 //! file came from and hands that over; what any of it means is decided by the control plane
@@ -20,6 +26,7 @@
 //!   * A report is only sent when the module set has actually changed, with a heartbeat so a
 //!     settled session still says it is there.
 
+use crate::fileinfo::FileFacts;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -56,6 +63,19 @@ impl Origin {
     }
 }
 
+/// Everything one pass reads off a file on disk.
+///
+/// Taken in one go and cached together, because the expensive half is the same for all of
+/// it: the file has to be opened and read either way.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileRead {
+    pub sha256: String,
+    pub size: u64,
+    /// Last written, as seconds since the epoch. Zero when it could not be read.
+    pub mtime: i64,
+    pub facts: FileFacts,
+}
+
 /// One module, as reported.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,6 +87,25 @@ pub struct Module {
     /// Empty for system libraries, which are not hashed, and for a file we could not read.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub sha256: String,
+    /// Bytes on disk. Zero for anything not read, which is how it is left out on the wire.
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub size: u64,
+    /// Last written, seconds since the epoch. Two builds of a file that both refuse to hash
+    /// still tell themselves apart by this.
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub mtime: i64,
+    /// Signature and version resource. Flattened, so a module is one flat object on the wire
+    /// rather than an object with a nested one nobody reading the payload would expect.
+    #[serde(flatten)]
+    pub facts: FileFacts,
+}
+
+fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
+}
+
+fn is_zero_i64(value: &i64) -> bool {
+    *value == 0
 }
 
 /// What one report says.
@@ -97,10 +136,11 @@ fn last_sent() -> &'static Mutex<Option<Sent>> {
     &LAST
 }
 
-/// Hashes already taken, keyed by path and invalidated by size or mtime. What keeps a pass
-/// from re-reading the same forty files every forty-five seconds.
-fn hash_cache() -> &'static Mutex<HashMap<String, (u64, u64, String)>> {
-    static CACHE: std::sync::OnceLock<Mutex<HashMap<String, (u64, u64, String)>>> =
+/// What has already been read off each file, keyed by path and invalidated by size or
+/// mtime. What keeps a pass from re-reading the same forty files every forty-five seconds —
+/// and it matters more now than it did: a signature check reads the whole file too.
+fn hash_cache() -> &'static Mutex<HashMap<String, FileRead>> {
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<String, FileRead>>> =
         std::sync::OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -196,15 +236,15 @@ pub struct Roots {
 /// Turn a list of module paths into what gets reported.
 ///
 /// Pure, so the whole of it is testable with made-up paths on a machine with no game on it.
-/// `hash` is passed in for the same reason.
+/// `read` is passed in for the same reason.
 pub fn collect(paths: &[String], roots: &Roots) -> Vec<Module> {
-    collect_with(paths, roots, &hash_file)
+    collect_with(paths, roots, &read_file)
 }
 
 pub fn collect_with(
     paths: &[String],
     roots: &Roots,
-    hash: &dyn Fn(&Path) -> String,
+    read: &dyn Fn(&Path) -> FileRead,
 ) -> Vec<Module> {
     let mut out: Vec<Module> = Vec::new();
     for path in paths.iter().take(MAX_MODULES) {
@@ -214,11 +254,20 @@ pub fn collect_with(
             continue;
         }
         let origin = origin_of(&normalized, roots);
-        // System libraries are not hashed: there are hundreds of them, they are the same on
-        // every machine, and reading them all every session would be the expensive half of
-        // this for no answer anyone wants.
-        let sha256 = if origin.is_system() { String::new() } else { hash(Path::new(path)) };
-        out.push(Module { name, origin, sha256 });
+        // System libraries are not read at all: there are hundreds of them, they are the
+        // same on every machine, and hashing and signature-checking them every session would
+        // be the expensive half of this for no answer anyone wants. They keep the default
+        // `unchecked` trust, which is not the same claim as `unsigned`.
+        let file =
+            if origin.is_system() { FileRead::default() } else { read(Path::new(path)) };
+        out.push(Module {
+            name,
+            origin,
+            sha256: file.sha256,
+            size: file.size,
+            mtime: file.mtime,
+            facts: file.facts,
+        });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.sha256.cmp(&b.sha256)));
     out.dedup_by(|a, b| a.name == b.name && a.sha256 == b.sha256);
@@ -290,41 +339,55 @@ fn file_name_of(path: &str) -> String {
     name
 }
 
-/// SHA-256 of a file, lowercase hex, cached by size and mtime.
+/// Everything read off one file: size, mtime, SHA-256, signature and version resource.
+/// Cached by path, and the cache entry is thrown away when either size or mtime moves.
 ///
-/// Empty when it cannot be read or is implausibly large. A missing hash costs a weaker
-/// report, never a wrong one — a file with no hash can still be recognised by name.
-fn hash_file(path: &Path) -> String {
-    let Ok(meta) = std::fs::metadata(path) else { return String::new() };
+/// A file that cannot be read, or is implausibly large, comes back as the default — no hash,
+/// no size, and `unchecked` rather than `unsigned`. A missing answer costs a weaker report,
+/// never a wrong one: a file with no hash can still be recognised by name.
+fn read_file(path: &Path) -> FileRead {
+    let Ok(meta) = std::fs::metadata(path) else { return FileRead::default() };
     if !meta.is_file() || meta.len() > MAX_HASH_BYTES {
-        return String::new();
+        return FileRead::default();
     }
     let mtime = meta
         .modified()
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
+        .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let key = norm(path);
     if let Ok(cache) = hash_cache().lock() {
-        if let Some((size, seen, hash)) = cache.get(&key) {
-            if *size == meta.len() && *seen == mtime {
-                return hash.clone();
+        if let Some(hit) = cache.get(&key) {
+            if hit.size == meta.len() && hit.mtime == mtime {
+                return hit.clone();
             }
         }
     }
 
+    let read = FileRead {
+        sha256: sha256_of(path),
+        size: meta.len(),
+        mtime,
+        // Asked after the hash, so a file that vanished between the two costs a signature
+        // and not the whole entry.
+        facts: crate::fileinfo::read(path),
+    };
+    if let Ok(mut cache) = hash_cache().lock() {
+        cache.insert(key, read.clone());
+    }
+    read
+}
+
+/// SHA-256 of a file, lowercase hex. Empty when it cannot be opened or read through.
+fn sha256_of(path: &Path) -> String {
     use sha2::{Digest, Sha256};
     let Ok(mut file) = std::fs::File::open(path) else { return String::new() };
     let mut hasher = Sha256::new();
     if std::io::copy(&mut file, &mut hasher).is_err() {
         return String::new();
     }
-    let hash = format!("{:x}", hasher.finalize());
-    if let Ok(mut cache) = hash_cache().lock() {
-        cache.insert(key, (meta.len(), mtime, hash.clone()));
-    }
-    hash
+    format!("{:x}", hasher.finalize())
 }
 
 /// A stable fingerprint of one answer, so an unchanged session sends nothing.
@@ -388,7 +451,15 @@ mod tests {
         let owned: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
         collect_with(&owned, &roots(), &|p| {
             // A stand-in for reading the file, so the classification is testable without one.
-            format!("{:0>64}", p.to_string_lossy().len())
+            FileRead {
+                sha256: format!("{:0>64}", p.to_string_lossy().len()),
+                size: p.to_string_lossy().len() as u64,
+                mtime: 1_700_000_000,
+                facts: FileFacts {
+                    trust: crate::fileinfo::Trust::Unsigned,
+                    ..Default::default()
+                },
+            }
         })
     }
 
@@ -421,12 +492,60 @@ mod tests {
     }
 
     #[test]
-    fn system_libraries_are_not_hashed() {
+    fn system_libraries_are_not_read_at_all() {
         let mods = collected(&["C:\\Windows\\System32\\kernel32.dll", "C:\\x\\other.dll"]);
         let sys = mods.iter().find(|m| m.name == "kernel32.dll").unwrap();
         let other = mods.iter().find(|m| m.name == "other.dll").unwrap();
         assert_eq!(sys.sha256, "");
+        assert_eq!(sys.size, 0);
+        assert_eq!(sys.mtime, 0);
+        // Not `unsigned`: nothing looked. There are hundreds of these and they are the same
+        // on every machine, and calling them unsigned would be a claim we never checked.
+        assert_eq!(sys.facts.trust, crate::fileinfo::Trust::Unchecked);
         assert_ne!(other.sha256, "");
+        assert_ne!(other.size, 0);
+        assert_eq!(other.facts.trust, crate::fileinfo::Trust::Unsigned);
+    }
+
+    /// The detail is flattened onto the module, so a report is a list of flat objects rather
+    /// than one with a nested `facts` nobody reading the payload would expect.
+    #[test]
+    fn what_a_file_says_about_itself_rides_alongside_it() {
+        let owned = vec!["C:\\x\\overlay.dll".to_string()];
+        let mods = collect_with(&owned, &roots(), &|_| FileRead {
+            sha256: "a".repeat(64),
+            size: 2_400_000,
+            mtime: 1_750_000_000,
+            facts: FileFacts {
+                trust: crate::fileinfo::Trust::Signed,
+                details: crate::fileinfo::Details {
+                    publisher: "NVIDIA Corporation".into(),
+                    company: "NVIDIA Corporation".into(),
+                    product: "NVIDIA Share".into(),
+                    description: "NVIDIA Share overlay".into(),
+                },
+            },
+        });
+        let json = serde_json::to_value(&mods).unwrap();
+        let one = &json[0];
+        assert_eq!(one["trust"], "signed");
+        assert_eq!(one["publisher"], "NVIDIA Corporation");
+        assert_eq!(one["product"], "NVIDIA Share");
+        assert_eq!(one["size"], 2_400_000);
+        assert_eq!(one["mtime"], 1_750_000_000);
+        assert!(one.get("facts").is_none(), "flattened, not nested: {json}");
+    }
+
+    /// Empty strings and zeros are left off the wire entirely, so a file nothing could be
+    /// read off costs three keys rather than nine on every report from every install.
+    #[test]
+    fn nothing_known_about_a_file_is_nothing_sent() {
+        let owned = vec!["C:\\x\\locked.dll".to_string()];
+        let mods = collect_with(&owned, &roots(), &|_| FileRead::default());
+        let json = serde_json::to_value(&mods).unwrap();
+        let one = json[0].as_object().unwrap();
+        assert_eq!(one.keys().len(), 3, "{json}");
+        assert_eq!(one["trust"], "unchecked");
     }
 
     #[test]
@@ -493,7 +612,12 @@ mod tests {
         assert!(json.contains(r#""origin":"game""#), "{json}");
         assert!(json.contains(r#""origin":"system""#), "{json}");
         // Absent rather than empty, which is what the parser expects of an unhashed file.
-        assert!(json.contains(r#"{"name":"a.dll","origin":"system"}"#), "{json}");
+        // `trust` is the exception and is always sent: "we did not look" is an answer, and
+        // leaving it off would have the other end infer it rather than be told.
+        assert!(
+            json.contains(r#"{"name":"a.dll","origin":"system","trust":"unchecked"}"#),
+            "{json}"
+        );
 
         // Unknown until sign-in, and then simply absent rather than an empty string.
         let anon = serde_json::to_string(&Payload {

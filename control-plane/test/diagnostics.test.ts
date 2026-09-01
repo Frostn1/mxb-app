@@ -1,15 +1,33 @@
 import { describe, expect, it } from "vitest";
 import {
   classify,
+  isUnaccounted,
   MAX_MODULES,
   parseModules,
   stateRank,
   type ModuleRule,
   type Origin,
+  type ReportedModule,
 } from "../src/diagnostics";
 
-function mod(name: string, origin: Origin, sha256 = "") {
-  return { name, origin, sha256 };
+/** What a module with nothing read off it looks like — the shape an older client sends. */
+const BLANK = {
+  size: 0,
+  mtime: 0,
+  trust: "unchecked" as const,
+  publisher: "",
+  company: "",
+  product: "",
+  description: "",
+};
+
+function mod(
+  name: string,
+  origin: Origin,
+  sha256 = "",
+  extra: Partial<ReportedModule> = {},
+): ReportedModule {
+  return { name, origin, sha256, ...BLANK, ...extra };
 }
 
 function rule(kind: "deny" | "allow", by: { pattern?: string; sha256?: string }): ModuleRule {
@@ -26,9 +44,60 @@ describe("reading a reported module list", () => {
       { name: "kernel32.dll", origin: "system" },
     ]);
     expect(list).toEqual([
-      { name: "mxbikes.exe", origin: "game", sha256: HASH },
-      { name: "kernel32.dll", origin: "system", sha256: "" },
+      mod("mxbikes.exe", "game", HASH),
+      mod("kernel32.dll", "system"),
     ]);
+  });
+
+  it("takes what a file says about itself, and bounds every word of it", () => {
+    const list = parseModules([
+      {
+        name: "overlay.dll",
+        origin: "other",
+        sha256: HASH,
+        size: 2_400_000,
+        mtime: 1_750_000_000,
+        trust: "signed",
+        publisher: "NVIDIA Corporation",
+        company: "NVIDIA Corporation",
+        product: "NVIDIA Share",
+        description: "NVIDIA Share overlay\u0000\n",
+      },
+    ]);
+    expect(list?.[0]).toEqual(
+      mod("overlay.dll", "other", HASH, {
+        size: 2_400_000,
+        mtime: 1_750_000_000,
+        trust: "signed",
+        publisher: "NVIDIA Corporation",
+        company: "NVIDIA Corporation",
+        product: "NVIDIA Share",
+        // The control characters are gone: this is text off a file, rendered on a page.
+        description: "NVIDIA Share overlay",
+      }),
+    );
+  });
+
+  it("keeps a report a client sent nonsense detail in, and drops the nonsense", () => {
+    // A report thrown away says nothing at all, which is worse than one that says less. Only
+    // the fields that failed are dropped, and each falls back to "we do not know".
+    const list = parseModules([
+      {
+        name: "x.dll",
+        origin: "other",
+        size: -5,
+        mtime: 10,
+        trust: "definitely-fine",
+        company: 42,
+      },
+    ]);
+    expect(list?.[0]).toEqual(mod("x.dll", "other"));
+  });
+
+  it("reads an older client's report, which carries none of this", () => {
+    const list = parseModules([{ name: "x.dll", origin: "other", sha256: HASH }]);
+    expect(list?.[0]).toEqual(mod("x.dll", "other", HASH));
+    expect(list?.[0].trust).toBe("unchecked");
   });
 
   it("refuses a path where a file name belongs", () => {
@@ -71,11 +140,15 @@ describe("reading a reported module list", () => {
 });
 
 describe("what the rules make of a list", () => {
-  it("accounts for a plain machine", () => {
-    const v = classify(
-      [mod("mxbikes.exe", "game"), mod("kernel32.dll", "system"), mod("frostmod.dll", "app")],
-      [],
-    );
+  it("accounts for a plain machine once the game's own files are cleared", () => {
+    // The system's libraries and our own install folder account for themselves. The game's
+    // do not any more — they are cleared once, by hash, and then a plain machine is quiet.
+    const machine = [
+      mod("mxbikes.exe", "game", HASH),
+      mod("kernel32.dll", "system"),
+      mod("frostmod.dll", "app"),
+    ];
+    const v = classify(machine, [rule("allow", { sha256: HASH })]);
     expect(v.state).toBe("ok");
     expect(v.unknown).toHaveLength(0);
   });
@@ -122,6 +195,37 @@ describe("what the rules make of a list", () => {
     const v = classify([mod("d3d9.dll", "game", HASH)], []);
     expect(v.state).toBe("warn");
     expect(v.unknown.map((m) => m.name)).toEqual(["d3d9.dll"]);
+  });
+
+  it("asks about the game's folder whatever the file is called", () => {
+    // The hole the first version left: the loader-name list was the only thing that looked
+    // inside the game's folder, so anything injected under an ordinary name read as
+    // accounted for purely because of where it sat.
+    const v = classify([mod("physx_helper.dll", "game", HASH)], []);
+    expect(v.state).toBe("warn");
+    expect(v.unknown.map((m) => m.name)).toEqual(["physx_helper.dll"]);
+  });
+
+  it("still accounts for the system's own libraries by where they are", () => {
+    // A Windows system folder is not writable without already owning the machine, and there
+    // are hundreds of them. Asking about those would bury everything worth reading.
+    expect(classify([mod("kernel32.dll", "system")], []).state).toBe("ok");
+    expect(isUnaccounted(mod("kernel32.dll", "system"))).toBe(false);
+  });
+
+  it("accounts for what the app installed, unless it took a loader's name", () => {
+    // We put every file in that folder there ourselves — except that a loader name sitting
+    // in it is worth the same question it is worth anywhere else.
+    expect(isUnaccounted(mod("frostmod.dll", "app"))).toBe(false);
+    expect(isUnaccounted(mod("dxgi.dll", "app"))).toBe(true);
+  });
+
+  it("clears a stock game library once its hash is allowed", () => {
+    // What the change costs: the game's own libraries arrive unaccounted for on day one and
+    // are cleared once, by hash, from the page. After that they never come back.
+    const stock = [mod("mxbikes.exe", "game", HASH)];
+    expect(classify(stock, []).state).toBe("warn");
+    expect(classify(stock, [rule("allow", { sha256: HASH })]).state).toBe("ok");
   });
 
   it("clears a loader name once its exact file is allowed", () => {

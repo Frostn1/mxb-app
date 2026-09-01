@@ -18,6 +18,7 @@ mod firstpaint;
 mod frostmod;
 mod frostmod_manage;
 mod game;
+mod fileinfo;
 mod gameproc;
 mod gate;
 mod gearrepair;
