@@ -2,6 +2,12 @@
 
 ## 2026-09-01
 
+### Fixed
+- Another cause of the crash at track graphics: every vertex in the track's graphics file
+  carried a zero-length tangent, which is a divide by zero in anything that shades it.
+
+## 2026-09-01
+
 ### Changed
 - Track diagnostics keep protected tracks protected: for a sealed track the report gives
   the layout probe's findings without listing the files inside it or their contents.

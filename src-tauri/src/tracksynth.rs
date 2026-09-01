@@ -1794,14 +1794,31 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
                 let at = v * 12 + i * 4;
                 block[at..at + 4].copy_from_slice(&p.to_le_bytes());
             }
-            // Texture coordinates at 12 x count, normals at 52 x count — structure of
-            // arrays, eighty bytes a vertex.
+            // Structure of arrays, eighty bytes a vertex. Every offset here was read off a
+            // published map rather than assumed, and two of them are why this is a fix:
+            //
+            //   @0        position
+            //   @12 x vc  texture coordinates
+            //   @44 x vc  a pair that is (1, 1) on every vertex sampled
+            //   @52 x vc  normal
+            //   @64 x vc  tangent, unit length, plus a handedness of +1 or -1
+            //
+            // We left the last two as zeros. A zero-length tangent is not a neutral value:
+            // anything that normalises it — which is what a shader does with a tangent —
+            // divides by zero and gets NaN, at exactly the moment the graphics load.
             let uv = 12 * vc + v * 8;
             let (u, w) = ((c == 1 || c == 2) as u32 as f32, (c >= 2) as u32 as f32);
             block[uv..uv + 4].copy_from_slice(&u.to_le_bytes());
             block[uv + 4..uv + 8].copy_from_slice(&w.to_le_bytes());
+            let pair = 44 * vc + v * 8;
+            block[pair..pair + 4].copy_from_slice(&1.0f32.to_le_bytes());
+            block[pair + 4..pair + 8].copy_from_slice(&1.0f32.to_le_bytes());
             let nm = 52 * vc + v * 12;
             block[nm + 4..nm + 8].copy_from_slice(&1.0f32.to_le_bytes()); // straight up
+            // Perpendicular to that normal, which is what a tangent has to be.
+            let tg = 64 * vc + v * 16;
+            block[tg..tg + 4].copy_from_slice(&1.0f32.to_le_bytes()); // (1, 0, 0)
+            block[tg + 12..tg + 16].copy_from_slice(&1.0f32.to_le_bytes()); // handedness
         }
     }
     out.extend_from_slice(&block);
@@ -3216,6 +3233,35 @@ mod tests {
             assert_eq!(w(11), (k + 1) as u32, "material {k}: the id is one-based, at word 11");
             assert_eq!(w(12), 0, "material {k} word 12");
             assert_eq!(w(13), 0, "material {k} word 13");
+        }
+    }
+
+    /// No vertex may carry a zero-length normal or tangent.
+    ///
+    /// Both are unit vectors on every published map sampled, and both were zero on ours.
+    /// Zero is not a neutral value for a thing that gets normalised — it is a divide by zero,
+    /// and the place it lands is the graphics load.
+    #[test]
+    fn vertices_carry_unit_normals_and_tangents() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let m = map(&p, &s);
+        let n = u32::from_le_bytes(m[8..12].try_into().unwrap()) as usize;
+        let at = 12 + n * 56;
+        let vc = u32::from_le_bytes(m[at..at + 4].try_into().unwrap()) as usize;
+        let block = &m[at + 4..at + 4 + vc * 80];
+        let f = |o: usize| f32::from_le_bytes(block[o..o + 4].try_into().unwrap());
+        for v in 0..vc {
+            let nm = 52 * vc + v * 12;
+            let len = (f(nm).powi(2) + f(nm + 4).powi(2) + f(nm + 8).powi(2)).sqrt();
+            assert!((len - 1.0).abs() < 1e-3, "vertex {v} normal is {len}, not a unit vector");
+            let tg = 64 * vc + v * 16;
+            let tl = (f(tg).powi(2) + f(tg + 4).powi(2) + f(tg + 8).powi(2)).sqrt();
+            assert!((tl - 1.0).abs() < 1e-3, "vertex {v} tangent is {tl}, not a unit vector");
+            assert!(f(tg + 12).abs() == 1.0, "vertex {v} handedness is {}", f(tg + 12));
+            // And the pair that is (1, 1) on every published vertex.
+            let pr = 44 * vc + v * 8;
+            assert_eq!((f(pr), f(pr + 4)), (1.0, 1.0), "vertex {v}");
         }
     }
 
