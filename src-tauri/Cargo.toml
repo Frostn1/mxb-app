@@ -3,7 +3,7 @@
 # whatever cargo called it. Cargo target names can't hold a space, so this is as close as
 # it gets. The description is what Windows Task Manager shows in its Processes tab.
 name = "mxb-app"
-version = "0.13.1"
+version = "0.13.2"
 description = "MXB App — MX Bikes mod manager"
 authors = ["Frost"]
 edition = "2021"

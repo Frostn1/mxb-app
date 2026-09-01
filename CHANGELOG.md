@@ -1,64 +1,6 @@
 # Changelog
 
-## 2026-09-01
-
-### Fixed
-- Installed tracks crashed the game at the track graphics stage because the track's graphics
-  file carried no ground. It carries the terrain now.
-- The track's picture in the game menu was mirrored against the route drawn over it.
-
-## 2026-09-01
-
-### Added
-- Designer: naming a sheet as a normal or roughness map starts it from the model's own — the
-  vents and the seat weave already in it — instead of from a blank canvas. A normal map with
-  none to copy starts flat rather than black.
-
-### Changed
-- Protecting content is faster. A mod is locked for several buyers at once instead of one
-  after another, and each file is sealed in a single pass, so four buyers now cost barely
-  more than one and a folder of paints finishes in a fraction of the time.
-- Track diagnostics keep protected tracks protected: for a sealed track the report gives
-  the layout probe's findings without listing the files inside it or their contents.
-- Paint Studio and the Designer open on the KTM 250 SX-F when it is installed, rather than on
-  whichever bike sorts first alphabetically.
-
-### Fixed
-- Installed tracks hard-crashed the game at the track graphics stage. The material records in
-  the track's graphics file were the wrong shape.
-
-## 2026-09-01
-
-### Fixed
-- Designer: the sheet list no longer offers a name that another paint misspelt — the KTM
-  250 SX-F's normal map is `plastics_n`, and a paint beside it calls its own `plastics-n`,
-  which the bike asks for on no part of itself.
-- Generated laps stopped running over their own ground. Five of six briefs now come back clean
-  where none did before.
-
-## 2026-09-01
-
-### Fixed
-- Designer: a normal or roughness sheet (`plastics_n` and the like) shows the same parts as
-  the sheet it belongs to, instead of opening as a blank canvas with no layout on it.
-- More of what stopped an installed track loading: the sound config was an empty file, and the
-  track file claimed a lap length in a field no published track uses that way.
-
-## 2026-09-01
-
-### Fixed
-- Installed tracks no longer crash the game as it loads track graphics. The `.map` declared no
-  geometry at all, so anything reading it in order stopped a few bytes in.
-- A generated lap can no longer run over its own ground. Nothing checked for it, so a track
-  that crossed itself passed every test and came out with the crossing graded into the
-  terrain as a scar.
-- Settings carried over from an older build are written down the first time they are read,
-  so the app settles them once at startup instead of re-deciding them on every check.
-
-### Changed
-- Which model writes the track is a setting (`TRACK_MODEL`) rather than a code change.
-
-## 2026-08-31
+## 2026-09-01 — v0.13.2 — Tracks that load
 
 ### Added
 - Share from wherever you're already looking. Manage shares any mod in its list, switched on
@@ -67,16 +9,38 @@
   want, including the one you're riding.
 - Paste a share code anywhere in the window. Ctrl+V over any screen opens the import with the
   code filled in. A paste into a box you're typing in is left alone.
+- Designer: a normal or roughness sheet opens on the parts its base sheet covers, and starts
+  from the model's own map — the vents and the seat weave already in it — rather than a blank
+  canvas. A normal map with none to copy starts flat rather than black.
 
 ### Changed
 - Bikes wear their normal maps in the 3D preview, so a shroud has its curve and a seat its
   grip instead of drawing as a flat colour. A paint can supply its own.
+- Protecting content is faster. A mod is locked for several buyers at once instead of one
+  after another, and each file is sealed in a single pass, so four buyers now cost barely
+  more than one and a folder of paints finishes in a fraction of the time.
+- Track diagnostics keep protected tracks protected: for a sealed track the report gives
+  the layout probe's findings without listing the files inside it or their contents.
+- Paint Studio and the Designer open on the KTM 250 SX-F when it is installed, rather than on
+  whichever bike sorts first alphabetically.
+- Which model writes the track is a setting (`TRACK_MODEL`) rather than a code change.
 
 ### Fixed
+- Installed tracks load and ride. The track's graphics file carries its ground and its
+  material records in the shape the game reads, the sound config says something, and the lap
+  length sits in the field published tracks use it for.
+- The track's picture in the game menu faces the same way as the route drawn over it.
+- A generated lap comes back as a clean loop that never runs over its own ground. Five of six
+  briefs now come back clean where none did before.
 - Designer: a sheet whose parts are tiled — the number plates, a tiled exhaust — shows those
   parts where the game reads them, instead of off the edge of the sheet.
+- Designer: the sheet list no longer offers a name that another paint misspelt — the KTM
+  250 SX-F's normal map is `plastics_n`, and a paint beside it calls its own `plastics-n`,
+  which the bike asks for on no part of itself.
 - The 3D preview shows the livery on a bike's side and front number plates, instead of the
   blank plate the model carries there.
+- Settings carried over from an older build are written down the first time they are read,
+  so the app settles them once at startup instead of re-deciding them on every check.
 
 ## 2026-08-31 — v0.13.1 — Tracks that look ridden
 
