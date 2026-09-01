@@ -421,14 +421,29 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     .map(|st| (st.x - cx).powi(2) + (st.z - cz).powi(2))
                     .fold(f32::MAX, f32::min)
                     .sqrt();
-                let long = 55.0
-                    + 90.0 * (hash2(n as i32, 5, r.seed ^ 0x1A2D) * 0.5 + 0.5);
-                let across = long * (0.35 + 0.4 * (hash2(n as i32, 9, r.seed ^ 0x1A2D) * 0.5 + 0.5));
-                // Clear of the riding line by its own width plus the shoulder, so a bank is
-                // beside the track rather than on it.
-                if near < across + 30.0 {
+                // Big enough that their flanks are gentle. A tall mound on a small footprint
+                // is a wall beside the track: with 55–145 m ones the ground fifteen metres
+                // either side of the riding line differed by 6.5 m at the ninetieth against
+                // Indiana's 3.0. A hill a track is built over is a hundred metres and more
+                // across, and then the same height buys a grade instead of a cliff.
+                let long = 110.0
+                    + 150.0 * (hash2(n as i32, 5, r.seed ^ 0x1A2D) * 0.5 + 0.5);
+                let across = long * (0.45 + 0.4 * (hash2(n as i32, 9, r.seed ^ 0x1A2D) * 0.5 + 0.5));
+                // Not clear of the track. A bank the rider never touches is scenery, and
+                // scenery is not what makes a hills track: Indiana's lap climbs and drops at
+                // 12.6° at the ninetieth and 29.4° at the ninety-ninth over twenty metres,
+                // and it does that by running over the ground, not past it. Keeping every
+                // mound 30 m clear left ours at 5.2° and 12.5° — a flat track with hills in
+                // the distance.
+                //
+                // What is required instead is that the mound be big enough for a track to be
+                // built over: the lap's own elevation is smoothed over 45 m, so anything
+                // shorter than that becomes a bump under the riding line rather than a hill
+                // the track climbs.
+                if long < BENCH_SMOOTH_M * 1.6 {
                     continue;
                 }
+                let _ = near;
                 let tall = r.landform_height
                     * (0.45 + 0.55 * (hash2(n as i32, 17, r.seed ^ 0x1A2D) * 0.5 + 0.5));
                 let bearing = hash2(n as i32, 23, r.seed ^ 0x1A2D) * std::f32::consts::PI;
