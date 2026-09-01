@@ -1164,6 +1164,7 @@ export const de: Translation = {
   // ── Installierte Dateien teilen (jede Strecke, jede Lackierung) ────────────
   "share.share": "Teilen",
   "share.action": "Teilen…",
+  "share.rightClickHint": "Rechtsklick zum Teilen",
   "share.title": "Diese Dateien teilen",
   "share.hint":
     "Wir packen sie ein, laden sie hoch und geben dir einen einzigen Code zum Einfügen. Wer ihn einfügt, bekommt die Dateien in denselben Ordnern.",

@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Share2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import HelpHint from "@/Components/ui/help-hint";
 import {
@@ -46,6 +47,13 @@ import { ViewerDialog } from "../Viewer/ViewerDialog";
 import { useConfig } from "../../Context/Config";
 import { Trans } from "../../i18n";
 import { useT, type TFunc } from "../../i18n/context";
+import { useShare } from "../../Context/Share";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+} from "@/Components/ui/context-menu";
 
 /**
  * Locker — the app-side bike **model & sound swap** manager, twinned with FrostMod's
@@ -131,6 +139,15 @@ function swapNote(
     default:
       return t("locker.reselectProfile");
   }
+}
+
+/** Where each kind of swap set is filed inside its bike — `modelswap::LIB_DIR` and
+ *  `soundmods::SOUND_LIB_DIR` on the Rust side. */
+const SWAP_DIR = { model: "FrostMod Models", sound: "FrostMod Sounds" } as const;
+
+/** A variant's path as the rest of the app names content: relative to the MX Bikes root. */
+function variantRel(bike: string, kind: "model" | "sound", name: string): string {
+  return `mods/bikes/${bike}/${SWAP_DIR[kind]}/${name}`;
 }
 
 /** The row standing for the game's own model/sound, which is never a folder in the library. */
@@ -534,6 +551,7 @@ function BikeCard({
           {models.variants.map((v) => (
             <VariantButton
               key={v.name}
+              bike={bike}
               variant={v}
               kind="model"
               busy={busy}
@@ -567,6 +585,7 @@ function BikeCard({
           return (
             <VariantButton
               key={v.name}
+              bike={bike}
               variant={v}
               kind="sound"
               busy={busy}
@@ -620,6 +639,7 @@ function SwapSection({
 }
 
 function VariantButton({
+  bike,
   variant: v,
   kind,
   busy,
@@ -631,6 +651,7 @@ function VariantButton({
   onAssignPaints,
   manage,
 }: {
+  bike: string;
   variant: ModelVariant | SoundVariant;
   kind: "model" | "sound";
   busy: boolean;
@@ -647,6 +668,10 @@ function VariantButton({
   manage?: { bike: string; onChanged: () => void };
 }) {
   const t = useT();
+  const { shareFiles } = useShare();
+  // An empty set is a state, not a folder — "no model", the game's own model, or the built-in
+  // engine sound. There is nothing on disk to hand anyone.
+  const shareable = !v.empty;
   // A model row named "Stock" is the game's own model, packed in the bike's `.pkz` —
   // reached by clearing the loose set, so it's empty like a "no model" row but means the
   // opposite. Only the wording differs.
@@ -665,7 +690,19 @@ function VariantButton({
   // missing its required file is incomplete and stays disabled.
   const applicable = v.valid || v.empty;
   const selectable = !v.active && applicable && !disabled;
-  return (
+  const what = v.active
+    ? kind === "model"
+      ? t("locker.activeModel")
+      : t("locker.activeSound")
+    : v.empty
+      ? emptyTitle
+      : !v.valid
+        ? kind === "model"
+          ? t("locker.missingModelEdf")
+          : t("locker.missingSoundFiles")
+        : t("locker.switchTo", { name: v.name });
+
+  const button = (
     <div
       className={cn(
         "flex items-center gap-1 rounded-lg border pr-1.5 transition-colors",
@@ -680,19 +717,8 @@ function VariantButton({
       <button
         disabled={!selectable}
         onClick={onClick}
-        title={
-          v.active
-            ? kind === "model"
-              ? t("locker.activeModel")
-              : t("locker.activeSound")
-            : v.empty
-              ? emptyTitle
-              : !v.valid
-                ? kind === "model"
-                  ? t("locker.missingModelEdf")
-                  : t("locker.missingSoundFiles")
-                : t("locker.switchTo", { name: v.name })
-        }
+        // The share lives on a right-click, so the hover is where it gets announced.
+        title={shareable ? `${what} · ${t("share.rightClickHint")}` : what}
         className={cn(
           "flex min-w-0 flex-1 items-center gap-2 rounded-l-lg px-3 py-2.5 text-left",
           selectable && "cursor-pointer",
@@ -784,6 +810,27 @@ function VariantButton({
         />
       )}
     </div>
+  );
+
+  // A right-click shares the set, the way the Library shares anything else it lists. It
+  // rides a context menu rather than a second control because the tile is itself a button,
+  // and the grid has no room for another one.
+  //
+  // The trigger is the wrapper, not the button: the *active* variant's button is disabled —
+  // and a disabled button fires no mouse events at all — which would have left the one set
+  // most people want to hand over as the one that couldn't be right-clicked.
+  if (!shareable) return button;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="min-w-0">{button}</div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => shareFiles([variantRel(bike, kind, v.name)])}>
+          <Share2 className="size-4" /> {t("share.action")}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
