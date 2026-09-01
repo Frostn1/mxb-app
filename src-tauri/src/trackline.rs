@@ -63,11 +63,9 @@ impl Lap {
                 if s.radius == 0.0 || s.angle == 0.0 {
                     Segment::Straight { length: s.length, rise: 0.0 }
                 } else {
-                    Segment::Arc {
-                        radius: s.radius,
-                        angle: s.angle * s.radius.signum(),
-                        rise: 0.0,
-                    }
+                    // The angle is a magnitude: which way a corner goes is the radius's
+                    // sign, here and everywhere else in the pipeline.
+                    Segment::Arc { radius: s.radius, angle: s.angle, rise: 0.0 }
                 }
             })
             .collect()
@@ -215,9 +213,9 @@ mod tests {
         let b = block(&[(60.0, 0.0, 0.0), (15.7, -10.0, 90.0)]);
         let segs = read(&b).unwrap().program_segments();
         assert!(matches!(segs[0], Segment::Straight { length, .. } if (length - 60.0).abs() < 0.01));
-        // A left corner keeps its sign through the conversion.
+        // A left corner keeps its direction through the conversion, in the radius.
         assert!(matches!(segs[1], Segment::Arc { radius, angle, .. }
-            if radius < 0.0 && angle < 0.0));
+            if radius < 0.0 && (angle - 90.0).abs() < 0.01));
     }
 
     #[test]
