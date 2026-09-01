@@ -114,6 +114,32 @@ fn write_manifest(assets: &[SecureAsset], dir: &std::path::Path) -> Result<(), S
     std::fs::write(dir.join("manifest.tsv"), out).map_err(|e| e.to_string())
 }
 
+/// Watch for the game and inject the moment it appears — as early as possible, because MX
+/// Bikes reads a track's content to list it, so the hook has to be live *before* the track
+/// browser opens or a protected track won't show. A tight poll (every couple of seconds)
+/// rather than the 15-second session watcher, and it injects once per run of the game.
+///
+/// A no-op run to run when nothing is protected: it only wakes to check a process list.
+pub fn watch(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut injected_this_session = false;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let running = crate::gameproc::is_game_running();
+            if running {
+                if !injected_this_session && !load_assets(&app).is_empty() {
+                    arm(&app);
+                    injected_this_session = true;
+                }
+            } else {
+                // Game gone: re-arm for the next launch.
+                injected_this_session = false;
+            }
+        }
+    });
+}
+
 /// Arm secure content for the session that just started: stage the DLL, write the manifest
 /// beside it, and inject. Best-effort and quiet on the common "nothing to secure" — a player
 /// with no locked content should see no trace of this.
