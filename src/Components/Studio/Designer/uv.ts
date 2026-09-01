@@ -199,6 +199,33 @@ export function faceAt(parts: UvPart[], u: number, v: number): Face | null {
 }
 
 /**
+ * Which sheet's uv layout to read for `sheetName`.
+ *
+ * Normally itself. But a companion map — `plastics_n` beside `plastics`, and the `_r`/`_s`
+ * maps with it — is never bound to any geometry: the material names the colour sheet, and the
+ * companion rides along on the *same* uv, which is the whole reason it can be a separate
+ * image at all. Asked for one by name, nothing matched and the editor put up a blank sheet
+ * with no parts on it — every island, every clip and every hover gone, for a sheet whose
+ * layout is the one already on screen next to it.
+ *
+ * The literal name is tried first, so a model that really does bind a texture called
+ * `something_n` still wins. Only when nothing is bound does it fall back to the base.
+ */
+function sheetFor(nodes: EdfNode[], sheetName: string): string {
+  const want = sheetName.trim().toLowerCase();
+  if (!want) return "";
+  const binds = (name: string) =>
+    nodes.some(
+      (n) =>
+        n.texture?.toLowerCase() === name ||
+        n.submeshes.some((sm) => sm.texture?.toLowerCase() === name),
+    );
+  if (binds(want)) return want;
+  const base = want.replace(/_(n|r|s)$/, "");
+  return base !== want && binds(base) ? base : want;
+}
+
+/**
  * Move one triangle into the tile the sheet is actually sampled in, in place.
  *
  * Most bodywork is unwrapped inside the unit square and this does nothing to it. The number
@@ -264,7 +291,7 @@ export function uvParts(
   sheetName: string,
   opts?: { assembled?: boolean },
 ): UvPart[] {
-  const want = sheetName.trim().toLowerCase();
+  const want = sheetFor(nodes, sheetName);
   if (!want) return [];
 
   // A fraction of the model's width, so the dead band around the mirror plane scales with the

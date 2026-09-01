@@ -3,6 +3,8 @@
 ## 2026-09-01
 
 ### Fixed
+- Designer: a normal or roughness sheet (`plastics_n` and the like) shows the same parts as
+  the sheet it belongs to, instead of opening as a blank canvas with no layout on it.
 - More of what stopped an installed track loading: the sound config was an empty file, and the
   track file claimed a lap length in a field no published track uses that way.
 
