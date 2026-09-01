@@ -99,15 +99,25 @@ fn berm_on_a_corner(turn: &[crate::trackprog::Station], at: f32) -> bool {
 fn repair(prog: &mut TrackProgram) -> Vec<String> {
     let mut done = Vec::new();
 
-    // 1. Put the lap on the ground. Where the lap's corners fall is the model's business;
-    //    how big a rectangle it needs and where to sit it is not — it is the lap's own
-    //    bounding box plus a track's width of margin, which is exactly what the check
-    //    measures. The plot only ever grows, and the start pose slides so the lap is
-    //    centred on it, which leaves the shape of the track untouched.
+    // 1. Put the lap on the ground, and make the cells square, which is one problem and
+    //    not two.
+    //
+    //    They were two steps and they fought: fitting the plot to the lap and then squaring
+    //    the cells let the squaring shrink a side back below what the lap needed, and the
+    //    check reported a lap leaving a 525 x 1050 m plot — a ratio that is exactly what the
+    //    snapping produces. The synthesiser sizes the short side of the grid to a power of
+    //    two plus one, so the plot's two jobs — hold the lap, and divide into square cells —
+    //    only have a common answer if you look for it.
+    //
+    //    Solved by iterating: grow to fit, square by growing, and if squaring would leave a
+    //    side short, grow the *other* side instead and go round again. The snapping means
+    //    this steps rather than slides, so it needs a few passes, and it converges in two or
+    //    three. Whatever it lands on, the lap's shape is untouched — only the ground under it
+    //    changes size, and the start pose slides to centre the lap on it.
     {
         let st = prog.stations(2.0);
         if !st.is_empty() {
-            let margin = prog.width.max(1.0);
+            let margin = prog.width.max(1.0) * 1.5;
             let (mut lo_x, mut hi_x) = (f32::MAX, f32::MIN);
             let (mut lo_z, mut hi_z) = (f32::MAX, f32::MIN);
             for s in &st {
@@ -118,49 +128,59 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
             }
             let need_x = (hi_x - lo_x) + margin * 2.0;
             let need_z = (hi_z - lo_z) + margin * 2.0;
-            let grow_x = prog.terrain.size_x.max(need_x * 1.05);
-            let grow_z = prog.terrain.size_z.max(need_z * 1.05);
-            // Centre it: the offset that puts the lap's own middle at the plot's middle.
-            let dx = grow_x * 0.5 - (lo_x + hi_x) * 0.5;
-            let dz = grow_z * 0.5 - (lo_z + hi_z) * 0.5;
-            let grew = grow_x > prog.terrain.size_x + 0.5 || grow_z > prog.terrain.size_z + 0.5;
-            let moved = dx.abs() > 0.5 || dz.abs() > 0.5;
-            if grew || moved {
-                let mut what = Vec::new();
+            let (was_x, was_z) = (prog.terrain.size_x, prog.terrain.size_z);
+            let (mut sx, mut sz) = (was_x.max(need_x), was_z.max(need_z));
+
+            for _ in 0..8 {
+                let mut probe = prog.clone();
+                probe.terrain.size_x = sx;
+                probe.terrain.size_z = sz;
+                let Ok((gw, gh)) = crate::tracksynth::grid_for(&probe) else {
+                    break;
+                };
+                let (gw, gh) = ((gw.max(2) - 1) as f32, (gh.max(2) - 1) as f32);
+                let (want_x, want_z) = if sx >= sz {
+                    (sx, sx / gw * gh)
+                } else {
+                    (sz / gh * gw, sz)
+                };
+                // Square, and still big enough: done.
+                if want_x >= need_x && want_z >= need_z {
+                    sx = want_x;
+                    sz = want_z;
+                    break;
+                }
+                // Squaring would cut into the lap. Grow the long side until it doesn't.
+                let short = (need_x / want_x.max(1.0)).max(need_z / want_z.max(1.0));
+                if sx >= sz {
+                    sx *= short.max(1.02);
+                } else {
+                    sz *= short.max(1.02);
+                }
+            }
+
+            // Centre the lap on whatever ground we settled on.
+            let dx = sx * 0.5 - (lo_x + hi_x) * 0.5;
+            let dz = sz * 0.5 - (lo_z + hi_z) * 0.5;
+            let grew = (sx - was_x).abs() > 0.5 || (sz - was_z).abs() > 0.5;
+            if grew || dx.abs() > 0.5 || dz.abs() > 0.5 {
                 if grew {
-                    what.push(format!(
-                        "plot {:.0}x{:.0} m grows to {grow_x:.0}x{grow_z:.0}",
-                        prog.terrain.size_x, prog.terrain.size_z
+                    done.push(format!(
+                        "ground {was_x:.0}x{was_z:.0} m becomes {sx:.0}x{sz:.0}, cells square"
                     ));
                 }
-                if moved {
-                    what.push(format!("start moves by ({dx:.0}, {dz:.0}) m to centre the lap"));
+                if dx.abs() > 0.5 || dz.abs() > 0.5 {
+                    done.push(format!("start moves by ({dx:.0}, {dz:.0}) m to centre the lap"));
                 }
-                done.push(what.join("; "));
-                prog.terrain.size_x = grow_x;
-                prog.terrain.size_z = grow_z;
+                prog.terrain.size_x = sx;
+                prog.terrain.size_z = sz;
                 prog.start.x += dx;
                 prog.start.z += dz;
             }
         }
     }
 
-    // 2. Square the cells. The synthesiser snaps the short side of the grid to a power of two
-    //    plus one, so a plot whose sides aren't near that ratio gets cells wider one way than
-    //    the other — and it refuses to build one, because a berm would come out wider across
-    //    than along. The plot is ours to nudge; the lap is not.
-    if let Some((sx, sz)) = squared_plot(prog) {
-        if (sx - prog.terrain.size_x).abs() > 0.5 || (sz - prog.terrain.size_z).abs() > 0.5 {
-            done.push(format!(
-                "squared the cells: plot {:.0}x{:.0} m becomes {sx:.0}x{sz:.0}",
-                prog.terrain.size_x, prog.terrain.size_z
-            ));
-            prog.terrain.size_x = sx;
-            prog.terrain.size_z = sz;
-        }
-    }
-
-    // 3. Close the lap, with a turn no tighter than the tightest already on it — the same
+    // 2. Close the lap, with a turn no tighter than the tightest already on it — the same
     //    rule the studio's own "Close the lap" button uses.
     let closure = prog.closure_error();
     if closure > corpus::CLOSURE_M {
@@ -183,7 +203,7 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
         }
     }
 
-    // 4. Put berms on corners. A berm on a straight silently does nothing, and it is never
+    // 3. Put berms on corners. A berm on a straight silently does nothing, and it is never
     //    what was meant — a model that asks for one has decided the corner wants banking and
     //    then got the distance round the lap wrong. Where the corners are is not a matter of
     //    opinion, so slide it to the nearest one rather than sending the whole program back.
@@ -212,7 +232,7 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
         }
     }
 
-    // 5. Fit the height budget. It exists only because samples are quantised against it, and
+    // 4. Fit the height budget. It exists only because samples are quantised against it, and
     //    it is a number the synthesiser already knows — there was never a reason to make the
     //    model guess it and then be told off for guessing wrong.
     if let Ok(fitted) = crate::tracksynth::with_fitted_budget(prog) {
@@ -226,20 +246,6 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
     }
 
     done
-}
-
-/// The plot the synthesiser would actually build, in metres, once it has snapped the short
-/// side of the grid to a power of two. `None` if it would not build one at all.
-fn squared_plot(prog: &TrackProgram) -> Option<(f32, f32)> {
-    let (gw, gh) = crate::tracksynth::grid_for(prog).ok()?;
-    let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
-    if sx >= sz {
-        let mps = sx / (gw.max(2) - 1) as f32;
-        Some((sx, mps * (gh.max(2) - 1) as f32))
-    } else {
-        let mps = sz / (gh.max(2) - 1) as f32;
-        Some((mps * (gw.max(2) - 1) as f32, sz))
-    }
 }
 
 /// Ask for a track, and keep asking until it measures like one.
@@ -775,6 +781,34 @@ mod tests {
                     started.elapsed().as_secs_f32()
                 );
                 assert!(validate(&prog).is_empty(), "a returned track has no problems");
+
+                // `FROST_BUILD=/tmp/out` turns the answer into a folder and a `.pkz` — the
+                // whole way from a sentence to something the app can install, in one command.
+                if let Ok(dir) = std::env::var("FROST_BUILD") {
+                    let dir = std::path::Path::new(&dir);
+                    std::fs::create_dir_all(dir).unwrap();
+                    let syn = crate::tracksynth::synthesise(&prog).unwrap();
+                    let wrote = crate::tracksynth::write_source(&prog, &syn, dir).unwrap();
+                    std::fs::write(
+                        dir.join("program.json"),
+                        serde_json::to_string_pretty(&prog).unwrap(),
+                    )
+                    .unwrap();
+                    let slug: String = prog
+                        .name
+                        .chars()
+                        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+                        .collect();
+                    let pkz = dir.join(format!("{slug}.pkz"));
+                    let size = crate::tracksynth::write_pkz(&prog, &syn, &pkz, false).unwrap();
+                    println!(
+                        "wrote {} source files to {}, and {} ({} bytes)",
+                        wrote.len() + 1,
+                        dir.display(),
+                        pkz.display(),
+                        size
+                    );
+                }
             }
             Err(e) => {
                 // Not an assertion failure dressed up: a small model that cannot close a lap
