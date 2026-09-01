@@ -377,11 +377,18 @@ pub async fn generate(brief: &str, ask: &impl Ask, tries: usize) -> Result<Track
                 if problems.is_empty() {
                     return Ok(prog);
                 }
+                // Each one, not just how many. A run that ends "gave up after 4 attempts"
+                // with four lines saying `came back with 1 problems` records nothing about
+                // why — and the one line that does carry the reason goes to the caller, so
+                // it is gone as soon as the dialog is dismissed.
                 log::info!(
-                    "[trackllm] attempt {} came back with {} problems",
+                    "[trackllm] attempt {} came back with {} problem(s):",
                     round + 1,
                     problems.len()
                 );
+                for p in &problems {
+                    log::info!("[trackllm]   - {p}");
+                }
                 attempt = Attempt {
                     previous: Some(raw.clone()),
                     problems,
@@ -390,6 +397,7 @@ pub async fn generate(brief: &str, ask: &impl Ask, tries: usize) -> Result<Track
             Err(e) => {
                 // A schema violation is the model's to fix too, and saying which field
                 // beats saying "invalid JSON".
+                log::info!("[trackllm] attempt {} didn't parse: {e}", round + 1);
                 attempt = Attempt {
                     previous: Some(raw.clone()),
                     problems: vec![format!("that didn't parse as a track program: {e}")],
@@ -399,6 +407,11 @@ pub async fn generate(brief: &str, ask: &impl Ask, tries: usize) -> Result<Track
         last = Some(attempt.problems.join("; "));
     }
 
+    log::warn!(
+        "[trackllm] gave up after {} attempts; last: {}",
+        tries.max(1),
+        last.clone().unwrap_or_else(|| "no answer".into())
+    );
     bail!(
         "gave up after {} attempts — last time: {}",
         tries.max(1),

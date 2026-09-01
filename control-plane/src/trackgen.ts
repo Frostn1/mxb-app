@@ -151,7 +151,7 @@ const TrackProgram = z.object({
  * ones. Quoted rather than described: a model given "13 m wide" writes a track, a model given
  * "realistic" writes a guess.
  */
-const SYSTEM = `You design motocross tracks for MX Bikes as a "track program" — a document the
+export const SYSTEM = `You design motocross tracks for MX Bikes as a "track program" — a document the
 game's own terrain compiler is built from. You never write a heightmap.
 
 A lap is a start pose plus a list of segments, each either a straight of some length or an arc
@@ -193,7 +193,8 @@ a part of the lap you drew earlier. Long straights are good, but a straight that
 you past the middle of the infield is too long.
 
 WRITE A LAP, NOT A SHAPE. This is the thing generated tracks get most wrong, and it is not a
-matter of taste — a `.trh` carries the centreline its builder typed, so we can read exactly
+matter of taste — a track's height file carries the centreline its builder typed, so we can
+read exactly
 what ten published circuits are made of:
 
   segments in a lap   52-150. Not twenty.
