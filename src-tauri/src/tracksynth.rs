@@ -3851,9 +3851,9 @@ mod tests {
         .expect("and it measures");
         println!(
             "centreline: lap {:.0}m  {} segs = {} arcs + {} straights  {} turns  turn p50 {:.0}°  \
-             tightest R p50 {:.1}m  turning {:.0}°",
+             tightest R p50 {:.1}m  turning {:.0}°  climbs {:.1}m  grade p90 {:.1}°",
             r.lap_m, r.segments, r.arcs, r.straights, r.turns, r.turn_deg.p50,
-            r.turn_radius_m.p50, r.total_turn_deg,
+            r.turn_radius_m.p50, r.total_turn_deg, r.lap_climb_m, r.grade_deg.p90,
         );
         println!(
             "  ruts {:.1} at {:.2}m  depth corner p50 {:.2} p90 {:.2}  straight p50 {:.2}  |  \
@@ -4038,6 +4038,66 @@ mod tests {
     /// step-up used to raise everything after it and nothing put it back, so the start line —
     /// where the two ends of the lap meet in the ground — was a cliff the height of the
     /// step-up. It measured 1.30 m in a single sample on the demo, and no test saw it.
+    /// No straight line across the terrain, whichever direction it runs.
+    ///
+    /// A straight line in ground is always a defect — real terrain has no reason to step along
+    /// a row of samples — and it is the one class of fault none of the measurements we take
+    /// would report. The 2.2 m wall a step-up used to leave across the start line passed the
+    /// corridor width, the slope percentiles and the lip count without a murmur.
+    ///
+    /// A raw count of stepping samples does not separate the two: Indiana's worst row steps on
+    /// 17% of its samples, more than any generated track, because a row that runs the length
+    /// of a straight crosses a lot of jump faces. What separates them is *coherence* — a cliff
+    /// steps the same way all along its length and a row of jump faces does not. Measured on
+    /// Indiana the worst coherent line averages 0.28 m a step; the demo's is 0.25 m; the wall
+    /// was 1.35 m.
+    #[test]
+    fn the_terrain_has_no_straight_lines_in_it() {
+        let p: TrackProgram = serde_json::from_str(DEMO).unwrap();
+        let s = synthesise(&p).unwrap();
+        let step = 0.12f32; // below this it is texture, not a face
+
+        let mut worst = (0.0f32, 0usize, String::new());
+        let mut consider = |total: f32, n: usize, what: String| {
+            if n >= 20 {
+                let mean = total.abs() / n as f32;
+                if mean > worst.0 {
+                    worst = (mean, n, what);
+                }
+            }
+        };
+        for y in 1..s.gh {
+            let (mut total, mut n) = (0.0f32, 0usize);
+            for x in (0..s.gw).step_by(2) {
+                let d = s.heights[y * s.gw + x] - s.heights[(y - 1) * s.gw + x];
+                if d.abs() > step {
+                    total += d;
+                    n += 1;
+                }
+            }
+            consider(total, n, format!("row {y}"));
+        }
+        for x in 1..s.gw {
+            let (mut total, mut n) = (0.0f32, 0usize);
+            for y in (0..s.gh).step_by(2) {
+                let d = s.heights[y * s.gw + x] - s.heights[y * s.gw + x - 1];
+                if d.abs() > step {
+                    total += d;
+                    n += 1;
+                }
+            }
+            consider(total, n, format!("column {x}"));
+        }
+        assert!(
+            worst.0 < 0.60,
+            "{} steps the same way {} times, {:.2} m each — a published track's worst \
+             coherent line averages 0.28 m",
+            worst.2,
+            worst.1,
+            worst.0
+        );
+    }
+
     #[test]
     fn a_step_up_does_not_leave_a_cliff_at_the_start() {
         let mut p = hairpins();

@@ -391,7 +391,8 @@ impl Feature {
 ///
 /// 1900 m, 114 segments of which 88 are arcs, nineteen corners at 167° apiece, 2634° of
 /// turning, and it closes to 0.01 m. Thirty-six features, seven of them over 2.2 m and the
-/// rest small ground, which is the ratio Indiana has.
+/// rest small ground, which is the ratio Indiana has. It climbs 22 m round the lap, which is
+/// Indiana's 21.3 — half the published corpus is a hillside and a flat plot rides like one.
 ///
 /// This is the schema's own test. It is parsed by the test suite, synthesised, and measured
 /// against published tracks, so it cannot drift away from what the code accepts.
@@ -401,8 +402,8 @@ pub const EXAMPLE: &str = r#"{
       "location": "Generated",
       "width": 12.0,
       "terrain": {
-        "sizeX": 500.0, "sizeZ": 480.0, "samples": 2049, "scale": 40.0,
-        "relief": { "amplitude": 9.0, "wavelength": 165.0, "seed": 7 }
+        "sizeX": 500.0, "sizeZ": 480.0, "samples": 2049, "scale": 60.0,
+        "relief": { "amplitude": 22.0, "wavelength": 150.0, "seed": 7 }
       },
       "start": { "x": 261.50, "z": 259.20, "angle": 0.0 },
       "segments": [

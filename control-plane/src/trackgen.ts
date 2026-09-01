@@ -242,8 +242,14 @@ What real tracks measure, from a survey of published ones. Land inside these unl
 explicitly asks otherwise:
 
   jumps on a lap      COUNT THEM. A 2000 m lap carries 30–45 features — not four.
-  landscape relief    amplitude 8–20 m over a 120–200 m wavelength. A flat plot measures
+  landscape relief    amplitude 8–25 m over a 120–200 m wavelength. A flat plot measures
                       under 18° at its steepest and is rejected for it; ground has to roll.
+  how much it climbs  2–66 m from the lowest ground on the lap to the highest, and the spread
+                      is the point rather than the middle of it. Lambretta Lynds climbs 2 m
+                      and Millville 66; Indiana 21. A track on a hillside rides nothing like a
+                      track on a field. Pick one deliberately from the brief — "sand national"
+                      and "hillside" are different tracks — instead of landing on flat by
+                      default. Amplitude is what sets it: 22 m of relief gives a 22 m climb.
   riding line width   10–17 m
   jumps per km        12–25, measured along the centrelines of published tracks
   the SIZE MIX        this is what makes a lap read as a national rather than a rhythm

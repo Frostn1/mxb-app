@@ -82,6 +82,12 @@ pub mod corpus {
     pub const TURNS: (f32, f32) = (10.0, 30.0);
     /// The tightest radius inside a turn, at the median. Measured 10.6–18.5 m.
     pub const TURN_RADIUS_M: (f32, f32) = (7.0, 30.0);
+    /// Highest ground on the lap over lowest. Measured 2.2–66.3 m, and the spread is the
+    /// point: Lambretta Lynds climbs 2 m and Millville 66. A track on a hillside rides
+    /// nothing like a track on a field, and both are normal.
+    pub const LAP_CLIMB_M: (f32, f32) = (2.0, 70.0);
+    /// Steepest grade along the riding line at the ninetieth. Measured 9.1–22.5°.
+    pub const GRADE_P90_DEG: (f32, f32) = (7.0, 26.0);
 }
 
 /// One round trip: what the model was last told, and what was wrong with what it sent.
@@ -532,6 +538,16 @@ pub fn review(prog: &TrackProgram) -> Review {
         }
     }
     between("the lap's total turning", turning, corpus::TOTAL_TURN_DEG, "°", &mut notes);
+    // How much of a hill it is. A generated lap lands on flat by default — the landscape
+    // amplitude is the only thing that decides it, and a track on a field rides nothing like
+    // a track on a hillside. Half the published corpus climbs more than 20 m.
+    between(
+        "the landscape's amplitude",
+        prog.terrain.relief.amplitude,
+        (4.0, 30.0),
+        " m",
+        &mut notes,
+    );
     between("the lap", real.len() as f32, corpus::TURNS, " corners", &mut notes);
     if !real.is_empty() {
         let mut r: Vec<f32> = real.iter().map(|t| t.1).collect();
