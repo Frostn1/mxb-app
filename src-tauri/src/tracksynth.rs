@@ -426,6 +426,24 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 // either side of the riding line differed by 6.5 m at the ninetieth against
                 // Indiana's 3.0. A hill a track is built over is a hundred metres and more
                 // across, and then the same height buys a grade instead of a cliff.
+                // Long enough to be a hill a track is built over, small enough to leave ground
+                // between them. With 110–260 m ones covering most of the plot the map came out
+                // 27.9% flat against Indiana's 37.3, and curved everywhere at 0.29 m over
+                // fifteen metres against its 0.19 — the landforms *were* the landscape. With
+                // none at all it is 68% flat, which is flatter than Indiana. The truth is in
+                // between: they cover part of it and break harder where they do.
+                // The size is a trade, and it is worth writing down which way it runs. Small
+                // and tall gives the lap the right grade along it — 9.0° at the ninetieth
+                // against Indiana's 8.3 — and wrecks the ground across it, 7.6 m over thirty
+                // metres against its 3.0. Large and lower keeps the ground across the track
+                // sane at 5.2 and costs grade, 8.1 and 12.4 against 8.3 and 16.6.
+                //
+                // Neither is right, and no size is: ours are oriented at random, so the lap
+                // meets them however it happens to. Indiana's track was *routed* to its
+                // terrain — along the contours where it wants to be level, up the fall line
+                // where it wants to climb — which is a thing the layout would have to know
+                // about the ground, not a number here. Large is chosen because a track that
+                // is off-camber everywhere is worse than one that climbs gently.
                 let long = 110.0
                     + 150.0 * (hash2(n as i32, 5, r.seed ^ 0x1A2D) * 0.5 + 0.5);
                 let across = long * (0.45 + 0.4 * (hash2(n as i32, 9, r.seed ^ 0x1A2D) * 0.5 + 0.5));
@@ -3325,7 +3343,7 @@ mod tests {
                     tilt_angle: 0.0,
                                     landforms: 0,
                     landform_height: 12.0,
-                },
+                                },
                 surface: crate::trackprog::Surface::Soil,
             },
             start: Start {
