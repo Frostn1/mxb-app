@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-08-31
+## 2026-08-31 — v0.13.1 — Tracks that look ridden
 
 ### Added
 - A FrostMod flags box in Settings. What you type there is handed to FrostMod the next time
