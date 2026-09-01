@@ -3,6 +3,15 @@
 ## 2026-09-01
 
 ### Fixed
+- Designer: the sheet list no longer offers a name that another paint misspelt — the KTM
+  250 SX-F's normal map is `plastics_n`, and a paint beside it calls its own `plastics-n`,
+  which the bike asks for on no part of itself.
+- Generated laps stopped running over their own ground. Five of six briefs now come back clean
+  where none did before.
+
+## 2026-09-01
+
+### Fixed
 - Designer: a normal or roughness sheet (`plastics_n` and the like) shows the same parts as
   the sheet it belongs to, instead of opening as a blank canvas with no layout on it.
 - More of what stopped an installed track loading: the sound config was an empty file, and the

@@ -2142,8 +2142,29 @@ fn paint_hints(dir: &std::path::Path) -> Vec<String> {
     // the only thing that says that (see `on_goggle_side`) — and offering a helmet's shell
     // sheet to somebody painting its goggles would put the shell in the wrong file.
     let main_paints = dir.file_name().is_some_and(|s| s.eq_ignore_ascii_case("paints"));
-    if let (true, Some(model_dir)) = (main_paints, dir.parent()) {
-        add(&mut names, mesh_texture_names(model_dir));
+    let mesh = match (main_paints, dir.parent()) {
+        (true, Some(model_dir)) => mesh_texture_names(model_dir),
+        _ => Vec::new(),
+    };
+    add(&mut names, mesh.clone());
+
+    // Drop a name that is another paint's misspelling of one the model actually binds.
+    //
+    // A `.pnt` supplies textures by name, so a sheet the model never asks for changes
+    // nothing — and these names come from paints as much as from the mesh, misspellings and
+    // all. The KTM 250 SX-F binds `plastics_n`; a paint installed beside it calls its own
+    // sheet `plastics-n`, and the two sat next to each other in the list, one character
+    // apart, with the dead one first. Painting it is work that cannot reach the bike.
+    //
+    // Only a name that collides with a bound one is dropped, and only by separator or case.
+    // A paint is free to ship sheets the mesh never mentions — `tyres` and `wheel` come off
+    // the wheels rather than the bike — and those are left alone.
+    if !mesh.is_empty() {
+        let key = |s: &str| s.to_ascii_lowercase().replace('-', "_");
+        let bound: std::collections::HashSet<String> = mesh.iter().map(|n| key(n)).collect();
+        names.retain(|n| {
+            mesh.iter().any(|m| m.eq_ignore_ascii_case(n)) || !bound.contains(&key(n))
+        });
     }
     names.sort_by_key(|n| n.to_lowercase());
     names
@@ -10128,6 +10149,50 @@ mod mesh_texture_tests {
 
         std::fs::create_dir_all(root.join("Bare")).unwrap();
         assert!(mesh_texture_names(&root.join("Bare")).is_empty(), "no mesh, nothing to say");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A sheet name that only exists because another paint misspelt one the model binds is
+    /// not offered. The KTM 250 SX-F binds `plastics_n`; a paint beside it ships
+    /// `plastics-n`, which the game asks for on no part of the bike, so painting it is work
+    /// that cannot show up. Names the mesh never mentions at all are somebody else's sheet
+    /// and are left alone.
+    #[test]
+    fn a_paints_misspelling_of_a_bound_sheet_is_not_offered() {
+        let root = std::env::temp_dir().join(format!("frost-dead-sheet-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let bike = root.join("Bike");
+        std::fs::create_dir_all(bike.join("paints")).unwrap();
+        let mut mesh = mesh_naming("plastics");
+        mesh.extend_from_slice(&mesh_naming("plastics_n"));
+        std::fs::write(bike.join("model.edf"), mesh).unwrap();
+        std::fs::write(
+            bike.join("paints").join("Someone.pnt"),
+            super::paint::encode(
+                "Someone",
+                &[
+                    super::paint::PntTexture {
+                        name: "plastics-n".into(),
+                        width: 2,
+                        height: 2,
+                        rgba: vec![0; 16],
+                    },
+                    super::paint::PntTexture {
+                        name: "tyres".into(),
+                        width: 2,
+                        height: 2,
+                        rgba: vec![0; 16],
+                    },
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let names = paint_hints(&bike.join("paints"));
+        assert!(names.iter().any(|n| n == "plastics_n"), "the bound spelling stays: {names:?}");
+        assert!(!names.iter().any(|n| n == "plastics-n"), "the dead one goes: {names:?}");
+        assert!(names.iter().any(|n| n == "tyres"), "a sheet of its own is not ours to drop: {names:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
