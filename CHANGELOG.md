@@ -3,6 +3,11 @@
 ## 2026-09-01
 
 ### Fixed
+- Two of the four values every vertex of a track's graphics file carries were left at zero.
+
+## 2026-09-01
+
+### Fixed
 - The terrain in a track's graphics file is cut into tiles, so no single piece of it is too
   large for the game to build a buffer for.
 
