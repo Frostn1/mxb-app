@@ -2,6 +2,10 @@
 
 ## 2026-08-31
 
+### Fixed
+- The 3D preview shows the livery on a bike's side and front number plates, instead of the
+  blank plate the model carries there.
+
 ### Added
 - Installed tracks carry the ground they are painted with, and a gfx.cfg so roost is the
   colour of the dirt.
