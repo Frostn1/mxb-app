@@ -26,6 +26,8 @@ import {
   terminateInstance,
 } from "./aws";
 import { bmacWebhook } from "./bmac";
+import { pruneReports, putReport } from "./diagnostics";
+import { diagnosticsDashboard, diagnosticsRules } from "./diagnosticspage";
 import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
 import { generateTrack } from "./trackgen";
 import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
@@ -96,6 +98,7 @@ export default {
         advanceImageBuild(env),
         pruneDeviceClaims(env),
         pruneUsage(env),
+        pruneReports(env),
       ]).then(
         () => undefined,
       ),
@@ -186,6 +189,17 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/v1/usage/stats") return usageStats(request, url, env);
   if (method === "GET" && path === "/admin/usage") return usageDashboard(request, url, env);
 
+  // What the app sees loaded inside people's running games, and the rules that say how to
+  // read it. Behind `ADMIN_KEY` on the same terms as the usage page, and above the account
+  // gate for the same reason: the key belongs to whoever runs the deployment, and no
+  // player's token should ever be enough to read this about anybody else.
+  if (method === "GET" && path === "/admin/diagnostics") {
+    return diagnosticsDashboard(request, url, env);
+  }
+  if (method === "POST" && path === "/admin/diagnostics/rules") {
+    return diagnosticsRules(request, url, env);
+  }
+
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
 
@@ -194,6 +208,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/v1/me") return me(account, env);
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
   if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
+  if (method === "PUT" && path === "/v1/diagnostics") return putReport(request, account, env);
   if (method === "GET" && path === "/v1/voice/ice") return iceServers();
 
   // Paid plugins. Open to every account on the same terms as voice and paint sync: holding
