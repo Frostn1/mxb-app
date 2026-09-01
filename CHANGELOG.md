@@ -1,32 +1,19 @@
 # Changelog
 
-## 2026-09-01
-
-### Fixed
-- The map-loader tracer stops at the end of the file instead of reading zeros past it.
-
-## 2026-09-01
+## 2026-09-01 — v0.13.3 — Nothing you didn't ask for
 
 ### Added
 - A tool that traces exactly which bytes MX Bikes reads out of a track's graphics file, by
   emulating the game's own loader. Groundwork for generating tracks the game can ride without
   running TerrainEd.
-
-## 2026-09-01
-
-### Fixed
-- Installing a generated track no longer crashes the game. It ships without graphics rather
-  than with graphics the game cannot read, and the Studio says so.
-
-## 2026-09-01
-
-### Added
 - Track generation reads a published track's own centreline out of its height file, so a real
   lap's corners, their radii and its straights can be measured directly rather than guessed at.
 - A generated track carries its centreline too, and is measured by the same code as a
   published one.
 
 ### Changed
+- MXB App stays off at login unless you ask for it. Launch at startup is off by default, and
+  the toggle is in Settings for anyone who wants the app waiting for them.
 - Paint sync only asks about the server you are actually on. Starting the game no longer
   fetches every rider's paints from every server on the registry — the paints for your grid
   arrive when you join it. The Sync button still checks everywhere if you ask it to.
@@ -45,26 +32,6 @@
   repeated down the lap.
 - Ruts, berms and banking are built to numbers measured off ten published tracks.
 - Straights carry worn ground rather than being smooth between the corners.
-- MXB App stays off at login unless you ask for it. Launch at startup is off by default, and
-  the toggle is in Settings for anyone who wants the app waiting for them.
-
-### Fixed
-- Cloud sync tidying up behind you no longer asks the game to reload its mods. OneDrive,
-  Dropbox and iCloud all take back the contents of files they think you have stopped using,
-  and to the folder watcher that looked exactly like a mod being installed — so the game was
-  sent to re-read a track that had left the machine, at a moment nobody chose. Those changes
-  are now ignored, and the log says which files and how to keep them on the device.
-- Two of the four values every vertex of a track's graphics file carries were left at zero.
-- The terrain in a track's graphics file is cut into tiles, so no single piece of it is too
-  large for the game to build a buffer for.
-- A corner banks the outside of the turn.
-- Ruts read as ridden ground rather than as a set of parallel lines running the whole lap.
-- The ground either side of the track no longer carries fine streaks fanning off every corner.
-- The starting track is a lap that folds through its own middle instead of a regular star.
-- A step-up no longer leaves a cliff across the track at the start line. A lap that steps up
-  somewhere now falls the same amount over the rest of it.
-
-### Changed
 - The starting track is built on a hillside. It climbs 22 m round the lap, which is what
   Indiana does — half of the published tracks climb more than 20 m, and a flat plot rides
   like a car park.
@@ -74,10 +41,29 @@
 - Jumps are built rather than dropped on. A takeoff ramps up over ten metres instead of five,
   the ground either side dips where the dirt for it came from, and no face is steeper than
   dirt will stand — a big double's lip was a 65° wall and is now a 30° face.
+
+### Fixed
+- Cloud sync tidying up behind you no longer asks the game to reload its mods. OneDrive,
+  Dropbox and iCloud all take back the contents of files they think you have stopped using,
+  and to the folder watcher that looked exactly like a mod being installed — so the game was
+  sent to re-read a track that had left the machine, at a moment nobody chose. Those changes
+  are now ignored, and the log says which files and how to keep them on the device.
 - Switching MXB App off in Windows' list of startup apps sticks, and Launch at startup in
   Settings follows it.
+- Installing a generated track no longer crashes the game. It ships without graphics rather
+  than with graphics the game cannot read, and the Studio says so.
 - More of the crash at track graphics: the ground sheets in a track's graphics file were
   written in a shape the game cannot read past.
+- The map-loader tracer stops at the end of the file instead of reading zeros past it.
+- Two of the four values every vertex of a track's graphics file carries were left at zero.
+- The terrain in a track's graphics file is cut into tiles, so no single piece of it is too
+  large for the game to build a buffer for.
+- A corner banks the outside of the turn.
+- Ruts read as ridden ground rather than as a set of parallel lines running the whole lap.
+- The ground either side of the track no longer carries fine streaks fanning off every corner.
+- The starting track is a lap that folds through its own middle instead of a regular star.
+- A step-up no longer leaves a cliff across the track at the start line. A lap that steps up
+  somewhere now falls the same amount over the rest of it.
 
 ## 2026-09-01 — v0.13.2 — Tracks that load
 
