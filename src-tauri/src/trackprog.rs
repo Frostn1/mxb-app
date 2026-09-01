@@ -316,8 +316,12 @@ pub struct ShapePoint {
     pub h: f32,
 }
 
+/// Measured against Indiana rather than chosen: its jumps reach half their height five
+/// metres before the crest and full height at it, so the ramp is about ten metres long. At
+/// six the takeoff is still at a tenth of its height five metres out — a spike rather than a
+/// ramp, and it rides like one.
 fn default_lip() -> f32 {
-    6.0
+    10.0
 }
 
 impl Feature {
@@ -527,42 +531,42 @@ pub const EXAMPLE: &str = r#"{
         { "kind": "straight", "length": 8.0000 }
       ],
       "features": [
-        { "kind": "tabletop", "at": 18.7, "length": 19.0, "height": 1.10 },
+        { "kind": "tabletop", "at": 18.7, "length": 25.7, "height": 1.10 },
         { "kind": "berm", "at": 47.4, "length": 10.1, "height": 1.70 },
-        { "kind": "double", "at": 120.5, "height": 3.60, "gap": 16.4, "lip": 6.0 },
+        { "kind": "double", "at": 120.5, "height": 3.60, "gap": 16.4, "lip": 11.0 },
         { "kind": "roller", "at": 153.1, "length": 14.6, "height": 0.64 },
-        { "kind": "tabletop", "at": 185.7, "length": 17.3, "height": 1.20 },
-        { "kind": "tabletop", "at": 218.2, "length": 18.2, "height": 1.40 },
+        { "kind": "tabletop", "at": 185.7, "length": 23.4, "height": 1.20 },
+        { "kind": "tabletop", "at": 218.2, "length": 24.6, "height": 1.40 },
         { "kind": "roller", "at": 250.8, "length": 11.5, "height": 0.77 },
         { "kind": "roller", "at": 316.1, "length": 11.6, "height": 0.80 },
-        { "kind": "double", "at": 335.8, "height": 1.90, "gap": 9.2, "lip": 5.5 },
-        { "kind": "tabletop", "at": 390.5, "length": 22.5, "height": 1.60 },
-        { "kind": "tabletop", "at": 449.0, "length": 25.2, "height": 1.50 },
+        { "kind": "double", "at": 335.8, "height": 1.90, "gap": 9.2, "lip": 9.5 },
+        { "kind": "tabletop", "at": 390.5, "length": 30.4, "height": 1.60 },
+        { "kind": "tabletop", "at": 449.0, "length": 34.0, "height": 1.50 },
         { "kind": "stepUp", "at": 466.7, "length": 19.3, "height": 2.20 },
-        { "kind": "tabletop", "at": 566.9, "length": 26.9, "height": 2.90 },
+        { "kind": "tabletop", "at": 566.9, "length": 29.6, "height": 2.90 },
         { "kind": "roller", "at": 589.5, "length": 15.7, "height": 0.70 },
         { "kind": "roller", "at": 687.9, "length": 13.5, "height": 0.46 },
         { "kind": "whoops", "at": 702.6, "count": 7, "spacing": 4.2, "height": 0.57 },
         { "kind": "berm", "at": 754.5, "length": 17.8, "height": 1.70 },
-        { "kind": "double", "at": 789.5, "height": 3.20, "gap": 13.7, "lip": 6.0 },
-        { "kind": "double", "at": 811.0, "height": 1.30, "gap": 8.9, "lip": 5.5 },
+        { "kind": "double", "at": 789.5, "height": 3.20, "gap": 13.7, "lip": 11.0 },
+        { "kind": "double", "at": 811.0, "height": 1.30, "gap": 8.9, "lip": 9.5 },
         { "kind": "roller", "at": 832.4, "length": 15.9, "height": 0.54 },
-        { "kind": "tabletop", "at": 888.9, "length": 24.4, "height": 2.50 },
+        { "kind": "tabletop", "at": 888.9, "length": 32.9, "height": 2.50 },
         { "kind": "roller", "at": 913.4, "length": 14.4, "height": 0.82 },
-        { "kind": "double", "at": 1002.4, "height": 1.50, "gap": 8.8, "lip": 5.5 },
-        { "kind": "tabletop", "at": 1112.5, "length": 18.4, "height": 1.10 },
+        { "kind": "double", "at": 1002.4, "height": 1.50, "gap": 8.8, "lip": 9.5 },
+        { "kind": "tabletop", "at": 1112.5, "length": 24.8, "height": 1.10 },
         { "kind": "roller", "at": 1197.0, "length": 11.1, "height": 0.79 },
-        { "kind": "tabletop", "at": 1260.0, "length": 24.1, "height": 1.10 },
-        { "kind": "tabletop", "at": 1353.4, "length": 31.3, "height": 3.10 },
+        { "kind": "tabletop", "at": 1260.0, "length": 32.5, "height": 1.10 },
+        { "kind": "tabletop", "at": 1353.4, "length": 34.4, "height": 3.10 },
         { "kind": "roller", "at": 1377.8, "length": 11.3, "height": 0.80 },
-        { "kind": "tabletop", "at": 1402.2, "length": 22.6, "height": 1.50 },
-        { "kind": "double", "at": 1495.8, "height": 2.90, "gap": 15.6, "lip": 6.0 },
+        { "kind": "tabletop", "at": 1402.2, "length": 30.5, "height": 1.50 },
+        { "kind": "double", "at": 1495.8, "height": 2.90, "gap": 15.6, "lip": 11.0 },
         { "kind": "roller", "at": 1518.3, "length": 14.4, "height": 0.75 },
         { "kind": "roller", "at": 1540.8, "length": 11.5, "height": 0.66 },
-        { "kind": "double", "at": 1607.3, "height": 1.60, "gap": 8.2, "lip": 5.5 },
+        { "kind": "double", "at": 1607.3, "height": 1.60, "gap": 8.2, "lip": 9.5 },
         { "kind": "roller", "at": 1620.8, "length": 14.3, "height": 0.79 },
-        { "kind": "double", "at": 1667.4, "height": 1.20, "gap": 12.7, "lip": 5.5 },
-        { "kind": "tabletop", "at": 1681.0, "length": 16.9, "height": 1.00 }
+        { "kind": "double", "at": 1667.4, "height": 1.20, "gap": 12.7, "lip": 9.5 },
+        { "kind": "tabletop", "at": 1681.0, "length": 22.8, "height": 1.00 }
       ]
     }"#;
 
