@@ -61,10 +61,15 @@ pub struct AppConfig {
     pub wine_runner: String,
     /// Hide to the tray on window close and keep running.
     pub run_in_background: bool,
-    /// Start MXB App automatically on login.
+    /// Start MXB App automatically on login. Off until the player asks for it: it is a mod
+    /// manager, not something that needs to be running before the game is.
     pub launch_at_startup: bool,
     /// Which [`AUTOSTART_BINDING_REV`] the login item was last written for.
     pub autostart_binding_rev: u32,
+    /// Which [`LAUNCH_AT_STARTUP_REV`] this config has been through — the one-shot that
+    /// turns the setting off once, described on [`LAUNCH_AT_STARTUP_REV`].
+    #[serde(default)]
+    pub launch_at_startup_rev: u32,
     /// Launch FrostMod automatically when the app opens.
     pub auto_run_frostmod: bool,
     /// Extra command-line flags for `frostmod.exe`, exactly as they would be typed. Empty
@@ -251,10 +256,12 @@ impl Default for AppConfig {
             reshade_path: String::new(),
             wine_runner: String::new(),
             run_in_background: true,
-            launch_at_startup: true,
+            launch_at_startup: false,
             // Zero, not the current rev: a config without the field predates the rename and
             // its login item still names the old binary.
             autostart_binding_rev: 0,
+            // The current rev, so a config created now is not immediately "migrated".
+            launch_at_startup_rev: LAUNCH_AT_STARTUP_REV,
             auto_run_frostmod: true,
             frostmod_args: String::new(),
             instant_refresh: true,
@@ -292,6 +299,18 @@ impl Default for AppConfig {
 /// v1: v0.12.4 shipped it on and it froze the game.
 pub const PAINT_SYNC_REV: u32 = 1;
 
+/// Bumped to turn launch-at-startup off for everyone once.
+///
+/// Changing the default alone would reach nobody: it shipped on, so every config already
+/// written carries `launchAtStartup: true` spelled out. Nobody picked that — it is what the
+/// app chose for them — and turning it back off by hand didn't stick, which is what the
+/// reports were about. So it is switched off once here, the same one-shot as
+/// [`PAINT_SYNC_REV`]. Anyone who then turns it on keeps it, because the counter no longer
+/// moves.
+///
+/// v1: it shipped on by default and shouldn't have.
+pub const LAUNCH_AT_STARTUP_REV: u32 = 1;
+
 /// Bring a config written by an older build up to date.
 ///
 /// Applied on every read rather than in a one-shot upgrade step: the config is also
@@ -311,6 +330,16 @@ pub fn migrate(cfg: &mut AppConfig) -> bool {
         }
         cfg.paint_sync_enabled = false;
         cfg.paint_sync_rev = PAINT_SYNC_REV;
+        changed = true;
+    }
+    // The one-shot described on `LAUNCH_AT_STARTUP_REV`. The login item itself is left to
+    // the reconcile at startup, which takes the setting off a config this has already fixed.
+    if cfg.launch_at_startup_rev < LAUNCH_AT_STARTUP_REV {
+        if cfg.launch_at_startup {
+            log::info!("turning launch-at-startup off: it is off by default until it is asked for");
+        }
+        cfg.launch_at_startup = false;
+        cfg.launch_at_startup_rev = LAUNCH_AT_STARTUP_REV;
         changed = true;
     }
     if LEGACY_OVERLAY_HOTKEYS.contains(&cfg.overlay_hotkey.trim()) {
@@ -1039,6 +1068,33 @@ mod tests {
         assert!(!migrate(&mut next), "and the read after it has none");
     }
 
+    /// The same one-shot for launch-at-startup, and the same reason it is needed: every
+    /// config already out there says `launchAtStartup: true` in so many words, because that
+    /// is what the app chose, so moving the default alone would reach nobody.
+    #[test]
+    fn an_existing_config_gets_launch_at_startup_turned_off_once() {
+        let json = r#"{ "modsPath": "/games/MX Bikes", "launchAtStartup": true }"#;
+        let mut cfg = serde_json::from_str::<AppConfig>(json).unwrap();
+
+        assert!(migrate(&mut cfg), "and the caller is told to write it down");
+        assert!(!cfg.launch_at_startup, "the explicit true is overridden once");
+        assert_eq!(cfg.launch_at_startup_rev, LAUNCH_AT_STARTUP_REV, "and it is caught up");
+
+        // Read back the way the next poll reads it: the flip lands once, not forever.
+        let saved = serde_json::to_string(&cfg).unwrap();
+        let mut next = serde_json::from_str::<AppConfig>(&saved).unwrap();
+        assert!(!migrate(&mut next), "the read after it has none");
+    }
+
+    /// Once. Whoever wants the app waiting for them at login says so and keeps it.
+    #[test]
+    fn turning_launch_at_startup_back_on_survives_the_next_launch() {
+        let mut cfg = AppConfig::default();
+        cfg.launch_at_startup = true;
+        assert!(!migrate(&mut cfg), "a caught-up config has nothing to migrate");
+        assert!(cfg.launch_at_startup, "and the setting is left where it was put");
+    }
+
     /// Once. Someone who turns it back on afterwards keeps it — otherwise the setting is
     /// not a setting, it is a switch that resets every launch.
     #[test]
@@ -1517,7 +1573,7 @@ mod tests {
         assert_eq!(cfg.mods_path, "C:\\MXB");
         assert_eq!(cfg.game_path, "C:\\Steam\\MX Bikes");
         assert!(!cfg.run_in_background);
-        assert!(cfg.launch_at_startup, "unset fields fall back to the defaults");
+        assert!(!cfg.launch_at_startup, "unset fields fall back to the defaults");
         assert!(!cfg.welcome_seen);
         assert!(!cfg.tour_done);
         assert!(
