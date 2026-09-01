@@ -89,13 +89,23 @@ const WIDTH_WAVELENGTH_M: f32 = 70.0;
 
 /// Corner radius at which ruts start to form, and the one where they are at full depth.
 /// Everyone takes the same line through a tight corner, and that is what digs a rut.
-const RUT_RADIUS_M: (f32, f32) = (45.0, 14.0);
+/// Forty metres because that is where the measurement changes: below it a corner's grooves
+/// deepen and its two edges stop being the same height, above it published corners read like
+/// straights.
+const RUT_RADIUS_M: (f32, f32) = (40.0, 14.0);
 
-/// How deep a corner's own rut gets, metres.
-const RUT_DEPTH_M: f32 = 0.19;
+/// How deep a corner's own rut gets, metres, and how deep the shallowest ground on the lap is
+/// worn.
+///
+/// Both measured off ten published tracks' own centrelines. A corner's grooves run 0.15–0.30 m
+/// at the median and 0.35–0.67 m at the ninetieth; and a *straight* is not smooth either —
+/// every one of those tracks wears 0.09–0.16 m of groove down its straights. Ruts everywhere,
+/// deeper through the corners, is the shape of the measurement. Ruts only in corners was ours.
+const RUT_DEPTH_M: f32 = 0.68;
+const RUT_DEPTH_STRAIGHT_M: f32 = 0.17;
 
 /// A rut's width across the track, metres — about a tyre and the ridge of dirt each side.
-const RUT_WIDTH_M: f32 = 0.42;
+const RUT_WIDTH_M: f32 = 0.55;
 
 /// Ruts do not come one at a time.
 ///
@@ -105,10 +115,14 @@ const RUT_WIDTH_M: f32 = 0.42;
 /// neighbour. It is the single most recognisable thing in a real track's collision terrain:
 /// Indiana's corners are combs, and one groove down the middle of a corner is the clearest
 /// sign the turn was drawn rather than ridden.
-const RUT_LINES: usize = 9;
+/// Five, not nine, and two metres apart rather than one. Counted off ten published tracks:
+/// they carry one to three grooves deep enough to find at a time, 1.75–4.0 m apart, spanning
+/// six or seven metres of an eleven-metre line. Nine at 1.15 m is corduroy, and it measures
+/// as corduroy.
+const RUT_LINES: usize = 5;
 
 /// Metres between one rut and the next — a tyre, plus the ridge that gets pushed up beside it.
-const RUT_SPACING_M: f32 = 1.15;
+const RUT_SPACING_M: f32 = 2.05;
 
 /// How much of the half-width the bundle covers, at the loosest corner that ruts at all and
 /// at the tightest.
@@ -125,12 +139,20 @@ const RUT_CARRY_EXIT_M: f32 = 55.0;
 const RUT_CARRY_ENTRY_M: f32 = 22.0;
 
 /// How far the bundle sits towards the inside of the corner, as a fraction of the half-width.
-const RUT_INSIDE: f32 = 0.22;
+///
+/// All but nothing, and measured rather than reasoned. Everyone pictures a corner's ruts
+/// hugging the inside line; across 796 of Indiana's corner cross-sections the bundle's centre
+/// sits 0.12 m to the *outside* of the centreline, and only 42% of corners have it inside at
+/// all. Riders take every line through a corner, and what they leave is spread across it.
+const RUT_INSIDE: f32 = -0.022;
 
 /// How far a single rut wanders across the track down its own length, metres, and over what
 /// distance. Perfectly concentric grooves are a machine's idea of a corner.
-const RUT_WANDER_M: f32 = 0.45;
-const RUT_WANDER_WAVELENGTH_M: f32 = 16.0;
+/// Ten metres, from Indiana: a cross-section still matches the one two metres behind it four
+/// fifths of the way, half of it at five metres, and by twenty it is different ground. A
+/// groove that holds its line for a whole corner was never ridden down.
+const RUT_WANDER_M: f32 = 0.8;
+const RUT_WANDER_WAVELENGTH_M: f32 = 10.0;
 
 /// Metres before a corner that riders brake in, and so where the ground gets chopped up.
 const BRAKING_M: f32 = 22.0;
@@ -183,7 +205,25 @@ const SPOIL_WAVELENGTH_M: f32 = 19.0;
 /// How tall a corner's own berm grows without anyone asking for one, metres at the tightest
 /// corner that has one. Riders push material to the outside of every turn they ride; a berm
 /// only has to be *declared* when it is bigger than what the corner would build itself.
-const CORNER_BERM_M: f32 = 0.34;
+/// Measured as the rise of a corner's outside edge over the lowest ground on it, across ten
+/// published tracks: 0.30–1.10 m outside against 0.00–0.52 m inside, and the asymmetry is gone
+/// above a forty-metre radius. Indiana reads 0.55 against 0.28.
+const CORNER_BERM_M: f32 = 0.55;
+
+/// The radii a corner's own berm grows between: nothing at the first, full height at the
+/// second.
+///
+/// Its own pair rather than the ruts', because the two measure differently. Grooves keep
+/// deepening down to the tightest hairpin; the edge asymmetry is at full strength by twenty
+/// metres and grows no further.
+const BERM_RADIUS_M: (f32, f32) = (40.0, 20.0);
+
+/// How far past the edge of the riding line a corner's berm reaches, metres.
+///
+/// A berm is not a wall at the white line. Indiana's outside edge still stands a third of a
+/// metre proud two metres off the track and only meets the field at four, so the bank has a
+/// back to it — which is the difference between something a rider can lean on and a step.
+const BERM_REACH_M: f32 = 4.5;
 
 /// The finest thing the landscape itself carries, and how tall it stands.
 ///
@@ -392,23 +432,28 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             let radius = 1.0 / k.abs();
             CORNER_BERM_M
                 * smoothstep(
-                    ((RUT_RADIUS_M.0 - radius) / (RUT_RADIUS_M.0 - RUT_RADIUS_M.1))
+                    ((BERM_RADIUS_M.0 - radius) / (BERM_RADIUS_M.0 - BERM_RADIUS_M.1))
                         .clamp(0.0, 1.0),
                 )
-                * -k.signum()
+                * k.signum()
         } else {
             0.0
         };
-        let b = berms.at(s);
-        let b = if b == 0.0 {
-            auto
-        } else if auto == 0.0 || b.signum() == auto.signum() {
-            b + auto
-        } else {
-            b
-        };
-        if b != 0.0 && t * -b.signum() > 0.0 && t.abs() <= half {
-            heights[i] += b.abs() * (t.abs() / half).powi(2);
+        // Both are signed by which way the corner turns, so the taller one is the berm: a
+        // declared 1.6 m wall replaces the 0.55 m the corner would have grown, rather than
+        // standing on top of it.
+        let declared = berms.at(s);
+        let b = if declared.abs() >= auto.abs() { declared } else { auto };
+        // Up to the crest at the edge of the line, then away over the ground behind it. A
+        // berm that stops at the white line is a step; the back is what makes it a bank.
+        if b != 0.0 && t * -b.signum() > 0.0 {
+            let a = t.abs();
+            if a <= half {
+                heights[i] += b.abs() * (a / half).powi(2);
+            } else if a < half + BERM_REACH_M {
+                let u = (a - half) / BERM_REACH_M;
+                heights[i] += b.abs() * (1.0 - u * u);
+            }
         }
 
         // The windrow: the spoil the blade pushed off the line, sitting just outside it.
@@ -466,7 +511,9 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 // And no two of them the same depth — a comb of identical grooves is a
                 // machine's idea of a corner just as much as a single groove is.
                 let fade = 1.0 - (off.abs() / reach.max(1e-3)).min(1.0).powi(2);
-                let own = 0.55 + 0.45 * (hash2(n as i32, 7, r.seed ^ 0x2117) * 0.5 + 0.5);
+                // No two the same depth, and the spread is wide: a real comb has one groove
+                // half a metre deep beside one you would not notice.
+                let own = 0.42 + 0.58 * (hash2(n as i32, 7, r.seed ^ 0x2117) * 0.5 + 0.5);
                 let g = (t - centre) / RUT_WIDTH_M;
                 heights[i] -= depth * fade * own * (-g * g).exp();
             }
@@ -812,9 +859,20 @@ fn rut_profile(features: &[Feature], turn: &Profile, lap: f32, seed: u32) -> Rut
                 let vary = 0.75 + 0.25 * fbm(s / 9.0, 3.5, seed ^ 0x2117);
                 depth.v[i] = RUT_DEPTH_M * t * vary;
                 tight.v[i] = t;
-                // Towards the inside, which is the side the corner turns towards.
-                centre.v[i] = -k.signum() * RUT_INSIDE * t;
+                // Positive curvature turns right, and the corner's inside is the rider's
+                // right — the same side `right_vector` points at, which is the sign every
+                // lateral quantity here is measured in.
+                centre.v[i] = k.signum() * RUT_INSIDE * t;
             }
+        }
+        // A straight is not smooth ground. Every published track wears grooves down its
+        // straights too — a tenth of a metre against a corner's third — and a lap that is
+        // glass between the turns reads as one from the first corner exit.
+        let vary = 0.7 + 0.3 * fbm(s / 11.0, 8.5, seed ^ 0x2118);
+        let floor = RUT_DEPTH_STRAIGHT_M * vary;
+        if depth.v[i] < floor {
+            depth.v[i] = floor;
+            tight.v[i] = tight.v[i].max(0.12);
         }
     }
     // Out of the corner and back up the approach, before any hand-placed rut is added — a
@@ -1577,6 +1635,24 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
         out.extend_from_slice(m);
     }
 
+    // The pose block, which sits forty bytes ahead of the material table in every published
+    // file: where the lap starts, how long it is, and the box it lives in.
+    out.extend_from_slice(&prog.start.x.to_le_bytes());
+    out.extend_from_slice(&prog.start.z.to_le_bytes());
+    out.extend_from_slice(&prog.start.angle.to_le_bytes());
+    let lap = prog.lap_length();
+    out.extend_from_slice(&lap.to_le_bytes());
+    for v in [
+        0.0,
+        0.0,
+        0.0,
+        prog.terrain.size_x,
+        prog.terrain.scale,
+        prog.terrain.size_z,
+    ] {
+        out.extend_from_slice(&(v as f32).to_le_bytes());
+    }
+
     // The material table, which is also how a reader finds the end of the masks: it looks for
     // "asphalt" and counts back four bytes. Same six, in the same order, as every published
     // track carries.
@@ -1587,6 +1663,57 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
         out.extend_from_slice(&field);
         out.extend_from_slice(&[0u8; 36]); // nine floats of physics we have nothing to say about
     }
+
+    // And the centreline, in the same sixty-byte records a compiled track carries. Written
+    // for one reason: it is what lets a generated track be measured by the code that measures
+    // published ones. `trackstats::ridden` reads a lap's own line and then measures the
+    // ground against it — rut depth across the track, the rise of a corner's outside edge,
+    // jumps found along the line rather than by roughness — and without this the only track
+    // it cannot read is ours.
+    out.extend_from_slice(&(prog.segments.len() as u32).to_le_bytes());
+    let mut at = 0.0f32;
+    let mut x = prog.start.x;
+    let mut z = prog.start.z;
+    let mut theta = prog.start.angle.to_radians();
+    for seg in &prog.segments {
+        let (radius, angle) = match *seg {
+            Segment::Straight { .. } => (0.0, 0.0),
+            Segment::Arc { radius, angle, .. } => (radius, angle),
+        };
+        let mut rec = [0f32; 15];
+        rec[0] = if at == 0.0 { 0.0 } else { 1.0 };
+        rec[1] = seg.length();
+        rec[2] = radius;
+        rec[3] = angle.abs();
+        rec[4] = {
+            let c = (x / syn.mps).round().clamp(0.0, (syn.gw - 1) as f32) as usize;
+            let r = (z / syn.mps).round().clamp(0.0, (syn.gh - 1) as f32) as usize;
+            syn.heights[r * syn.gw + c]
+        };
+        rec[5] = at;
+        rec[6] = theta.cos();
+        rec[7] = theta.sin();
+        rec[8] = x;
+        rec[9] = -theta.sin();
+        rec[10] = theta.cos();
+        rec[11] = z;
+        rec[14] = 1.0;
+        for v in rec {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        at += seg.length();
+        if radius == 0.0 {
+            let (hx, hz) = crate::trackprog::heading_vector(theta);
+            x += seg.length() * hx;
+            z += seg.length() * hz;
+        } else {
+            let next = theta + seg.length() / radius;
+            x += radius * (theta.cos() - next.cos());
+            z += radius * (next.sin() - theta.sin());
+            theta = next;
+        }
+    }
+
     out.extend_from_slice(b"EXT\0");
     out
 }
@@ -3377,6 +3504,44 @@ mod tests {
             c.lip_spacing_m.p10, c.lip_spacing_m.p50, c.lip_spacing_m.p90, c.lip_spacing_m.count
         );
 
+        // And again against the track's own centreline, which is how the published tracks are
+        // measured. The corridor rule and this one disagree by construction — one finds the
+        // line, the other is told where it is — and it is the second that has real tracks to
+        // compare against.
+        let bytes = trh(&p, &s, false);
+        let block = &bytes[12 + s.gw * s.gh * 2..];
+        let lap = crate::trackline::read(block).expect("the .trh carries its own centreline");
+        let r = crate::trackstats::ridden(
+            &lap,
+            &crate::trackstats::Grid {
+                w: s.gw,
+                h: s.gh,
+                size_x: p.terrain.size_x,
+                size_z: p.terrain.size_z,
+                v: s.heights.clone(),
+            },
+        )
+        .expect("and it measures");
+        println!(
+            "centreline: lap {:.0}m  {} segs = {} arcs + {} straights  {} turns  turn p50 {:.0}°  \
+             tightest R p50 {:.1}m  turning {:.0}°",
+            r.lap_m, r.segments, r.arcs, r.straights, r.turns, r.turn_deg.p50,
+            r.turn_radius_m.p50, r.total_turn_deg,
+        );
+        println!(
+            "  ruts {:.1} at {:.2}m  depth corner p50 {:.2} p90 {:.2}  straight p50 {:.2}  |  \
+             berm out {:.2}m in {:.2}m  bank p50 {:.1}° p90 {:.1}°",
+            r.rut_lines, r.rut_spacing_m.p50, r.rut_depth_corner_m.p50, r.rut_depth_corner_m.p90,
+            r.rut_depth_straight_m.p50, r.berm_outside_m, r.berm_inside_m,
+            r.bank_deg.p50, r.bank_deg.p90,
+        );
+        println!(
+            "  {:.1} lips/km ({:.1} over 1m)  h p50 {:.2} p90 {:.2} max {:.2}  \
+             face p50 {:.1}° p90 {:.1}°  gap p50 {:.1}m",
+            r.lips_per_km, r.big_lips_per_km, r.lip_height_m.p50, r.lip_height_m.p90,
+            r.lip_height_m.max, r.lip_face_deg.p50, r.lip_face_deg.p90, r.lip_spacing_m.p50,
+        );
+
         // The corpus, from the published tracks in trackstats. A generated track that lands
         // outside these isn't wrong by taste — it's outside anything anyone has shipped.
         let between = |what: &str, v: f32, lo: f32, hi: f32| {
@@ -3538,6 +3703,35 @@ mod tests {
     /// A corner does not wear one groove down the middle. Everybody takes roughly the same
     /// line and nobody takes exactly it, so what a tight turn ends up with is a comb — which
     /// is what a published track's collision terrain shows and what a single rut does not.
+    #[test]
+    /// Which side a corner's bank stands on. The berm the corner grows on its own used to
+    /// stand on the *inside*, and nothing caught it because the demo declares a berm at every
+    /// corner and a declared one replaced it.
+    #[test]
+    fn a_corner_banks_on_its_outside() {
+        let p = hairpins(); // right-hand, and no berm declared anywhere
+        let s = synthesise(&p).unwrap();
+        let v = across(&s, 120.0 + 0.5 * std::f32::consts::PI * 16.0);
+        let low = v.iter().fold(f32::MAX, |a, b| a.min(*b));
+        // `across` runs left to right and the hairpins turn right, so the outside is the
+        // first sample and the inside the last.
+        let (outside, inside) = (v[0] - low, v[v.len() - 1] - low);
+        assert!(
+            outside > inside + 0.15,
+            "outside stands {outside:.2} m, inside {inside:.2} m"
+        );
+    }
+
+    /// A straight is worn ground too. Published tracks measure 0.09–0.16 m of groove down
+    /// theirs, and a lap that is glass between the corners reads as one.
+    #[test]
+    fn a_straight_is_not_smooth_either() {
+        let p = hairpins();
+        let s = synthesise(&p).unwrap();
+        let n = grooves(&across(&s, 60.0), 0.04);
+        assert!(n >= 1, "the straight wore {n} grooves");
+    }
+
     #[test]
     fn a_corner_wears_a_bundle_of_ruts() {
         let p = hairpins();

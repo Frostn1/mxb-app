@@ -871,7 +871,7 @@ struct Cross {
     p: Vec<f32>,
 }
 
-fn ridden(lap: &crate::trackline::Lap, g: &Grid) -> Option<RiddenStats> {
+pub fn ridden(lap: &crate::trackline::Lap, g: &Grid) -> Option<RiddenStats> {
     let n = (2.0 * RIDDEN_REACH_M / RIDDEN_LATERAL_M) as usize + 1;
     let u_at = |i: usize| i as f32 * RIDDEN_LATERAL_M - RIDDEN_REACH_M;
     let inside: Vec<usize> = (0..n).filter(|i| u_at(*i).abs() <= RIDDEN_HALF_M).collect();
