@@ -527,10 +527,10 @@ pub const EXAMPLE: &str = r#"{
       "location": "Generated",
       "width": 12.0,
       "terrain": {
-        "sizeX": 500.0, "sizeZ": 480.0, "samples": 2049, "scale": 86.0,
+        "sizeX": 500.0, "sizeZ": 500.0, "samples": 2049, "scale": 63.0,
         "relief": { "amplitude": 7.0, "wavelength": 420.0, "seed": 3, "tilt": 26.0, "tiltAngle": 35.0, "landforms": 6, "landformHeight": 18.0 }
       },
-      "start": { "x": 231.10, "z": 262.90, "angle": 0.0 },
+      "start": { "x": 282.02, "z": 225.07, "angle": 195.0 },
       "segments": [
         { "kind": "arc", "radius": -32.8954, "angle": 13.9340 },
         { "kind": "straight", "length": 11.1325 },
