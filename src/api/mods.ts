@@ -364,18 +364,19 @@ export function mxbsecureOpenOffline(blobPath: string, original: string): Promis
   return invoke<boolean>("mxbsecure_open_offline", { blobPath, original });
 }
 
-/** What protecting a track in place produced. */
-export interface SecureProtectOutcome {
-  protectedPath: string;
+/** The two files generating a protected copy produced. */
+export interface SecureGenerateOutcome {
+  gameName: string;
+  blobPath: string;
   mxbkeyPath: string;
   steamId: string;
   plainBytes: number;
 }
 
-/** Protect a track file in place: encrypt it under its own name, bound to your Steam account,
- *  and record it for auto-injection. Overwrites the original — keep your master copy. */
-export function mxbsecureProtect(trackPath: string): Promise<SecureProtectOutcome> {
-  return invoke<SecureProtectOutcome>("mxbsecure_protect", { trackPath });
+/** Generate a protected copy of a track for a specific Steam ID, leaving the original untouched.
+ *  Writes `<track>.mxbsecure` and `<track>.mxbsecure.mxbkey` beside it — the buyer needs both. */
+export function mxbsecureGenerate(trackPath: string, steamId: string): Promise<SecureGenerateOutcome> {
+  return invoke<SecureGenerateOutcome>("mxbsecure_generate", { trackPath, steamId });
 }
 
 /** What a run would touch — folders walked, files taken as themselves, skips flagged. */

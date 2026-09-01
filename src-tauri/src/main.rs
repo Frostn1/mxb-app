@@ -5710,37 +5710,50 @@ fn secure_steam_id() -> Option<String> {
     steamid::current_steam_id64()
 }
 
-/// What protecting a track in place produced.
+/// What generating a protected copy produced. The two files a buyer needs, side by side.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SecureProtectOutcome {
-    /// The now-encrypted file, keeping its original name.
-    protected_path: String,
+struct SecureGenerateOutcome {
+    /// The name the game will list and open (the original file's name, e.g. `FarmSX.pkz`).
+    game_name: String,
+    /// The encrypted blob: `<original>.mxbsecure`.
+    blob_path: String,
+    /// The key sealed to the buyer's Steam ID: `<original>.mxbsecure.mxbkey`.
     mxbkey_path: String,
+    /// The Steam ID it was sealed to.
     steam_id: String,
     plain_bytes: u64,
 }
 
-/// Protect a track file **in place**: replace it with its encrypted blob under the same name,
-/// seal the key to the buyer's Steam ID beside it, and record it for auto-injection.
+/// Generate a protected copy of a track for a **specific Steam ID**, leaving the original
+/// untouched.
 ///
-/// This is the shipping shape. The file keeps its `.pkz` name, so MX Bikes' folder scan still
-/// finds it and lists the track; the injected client decrypts it on read. There is no separate
-/// `.mxbsecure` file and no plaintext left on disk — **the creator must keep their own master
-/// copy**, because this overwrites the original.
+/// This is the creator's action. Given a track and the buyer's 17-digit Steam ID, it writes two
+/// files beside the original:
+///
+/// - `<track>.mxbsecure` — the encrypted blob.
+/// - `<track>.mxbsecure.mxbkey` — the content key sealed to that Steam ID.
+///
+/// Both are needed, next to each other, to load; the key opens only on the machine signed into
+/// that Steam account. The original `.pkz` is never modified — the creator keeps their master,
+/// and hands the buyer only the two generated files.
 #[tauri::command]
-async fn mxbsecure_protect(
-    app: tauri::AppHandle,
+async fn mxbsecure_generate(
     track_path: String,
-) -> Result<SecureProtectOutcome, String> {
+    steam_id: String,
+) -> Result<SecureGenerateOutcome, String> {
     #[cfg(mxbsecure)]
     {
         use std::path::Path;
-        let steam_id = steamid::current_steam_id64()
-            .ok_or("couldn't read your Steam ID — is Steam installed and signed in?")?;
+        let steam_id = steam_id.trim().to_string();
+        if steam_id.len() != 17 || !steam_id.bytes().all(|b| b.is_ascii_digit()) {
+            return Err("that isn't a Steam ID — it should be 17 digits (a SteamID64)".into());
+        }
 
-        let plaintext = tokio::fs::read(&track_path).await.map_err(|e| format!("read {track_path}: {e}"))?;
-        // Refuse a file that is already one of ours, so a double-protect can't seal ciphertext.
+        let plaintext = tokio::fs::read(&track_path)
+            .await
+            .map_err(|e| format!("read {track_path}: {e}"))?;
+        // Refuse a file that is already one of ours, so a double-encrypt can't seal ciphertext.
         if plaintext.starts_with(b"MXBSEC") {
             return Err("that file is already protected".into());
         }
@@ -5748,6 +5761,7 @@ async fn mxbsecure_protect(
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .ok_or("not a file")?;
+
         let mut rnd = [0u8; 6];
         getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
         let suffix: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
@@ -5755,37 +5769,28 @@ async fn mxbsecure_protect(
 
         let locked = mxbsecure::lock(&plaintext, &asset_id, "k1");
         let sealed = mxbsecure::seal_key_to_identity(&locked.content_key, &steam_id, "");
-        let mxbkey = format!("{track_path}.mxbkey");
-        tokio::fs::write(&mxbkey, &sealed).await.map_err(|e| format!("write .mxbkey: {e}"))?;
 
-        // Overwrite the original with the encrypted blob, same name. Written to a temp beside
-        // it and renamed, so a crash mid-write can't leave a half-encrypted track.
-        let tmp = format!("{track_path}.mxbsecuring");
+        // `<track>.mxbsecure` and `<track>.mxbsecure.mxbkey`, beside the original.
+        let blob_path = format!("{track_path}.mxbsecure");
+        let mxbkey_path = format!("{blob_path}.mxbkey");
+        // Blob is written to a temp and renamed, so a crash mid-write leaves no half file.
+        let tmp = format!("{blob_path}.writing");
         tokio::fs::write(&tmp, &locked.blob).await.map_err(|e| format!("write blob: {e}"))?;
-        tokio::fs::rename(&tmp, &track_path).await.map_err(|e| format!("replace track: {e}"))?;
+        tokio::fs::rename(&tmp, &blob_path).await.map_err(|e| format!("finish blob: {e}"))?;
+        tokio::fs::write(&mxbkey_path, &sealed).await.map_err(|e| format!("write .mxbkey: {e}"))?;
 
-        if let Err(e) = secure_launch::record_asset(
-            &app,
-            secure_launch::SecureAsset {
-                game_name: name,
-                blob_path: track_path.clone(),
-                mxbkey_path: mxbkey.clone(),
-            },
-        ) {
-            log::warn!("[secure] couldn't record the protected asset: {e}");
-        }
-
-        Ok(SecureProtectOutcome {
-            protected_path: track_path,
-            mxbkey_path: mxbkey,
+        Ok(SecureGenerateOutcome {
+            game_name: name,
+            blob_path,
+            mxbkey_path,
             steam_id,
             plain_bytes: plaintext.len() as u64,
         })
     }
     #[cfg(not(mxbsecure))]
     {
-        let _ = (app, track_path);
-        Err("this build can't protect content".into())
+        let _ = (track_path, steam_id);
+        Err("this build can't generate protected content".into())
     }
 }
 
@@ -9416,7 +9421,7 @@ fn main() {
             secure_steam_id,
             mxbsecure_provision,
             mxbsecure_open_offline,
-            mxbsecure_protect,
+            mxbsecure_generate,
             local_guid,
             load_bike_model,
             preview_model_swap,

@@ -94,6 +94,15 @@ jobs:
           ssh-key: ${{ secrets.SIDECAR_DEPLOY_KEY }}
           path: .sidecar-src
 
+      # Build the injected secure-content DLL from the private crate on the Windows leg only —
+      # injection is Windows-only, so the other platforms bundle nothing. sync.sh (next step)
+      # copies this into src/mxbsecure.dll, from where build.rs stages it into resources/ for
+      # the bundler. MSVC target to match the game's runtime.
+      - name: Build secure-content DLL
+        if: ${{ github.repository == 'Frostn1/mxb-app' && startsWith(matrix.platform, 'windows') }}
+        shell: bash
+        run: cargo build --release --manifest-path .sidecar-src/secure/Cargo.toml --target x86_64-pc-windows-msvc
+
       - name: Apply sidecar module
         if: ${{ github.repository == 'Frostn1/mxb-app' }}
         shell: bash

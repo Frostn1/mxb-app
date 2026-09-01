@@ -40,6 +40,50 @@ pub fn load_assets(app: &AppHandle) -> Vec<SecureAsset> {
         .unwrap_or_default()
 }
 
+/// The secured assets actually present on disk: every `*.mxbsecure` under the tracks tree
+/// that has a sibling `.mxbkey`. This is how a **buyer** works with no provisioning — they drop
+/// the two files into their tracks folder and the manifest is built from what's there, the same
+/// way MX Bikes discovers tracks by scanning. Anything provisioned on this machine is folded in.
+pub fn scan_secured(app: &AppHandle) -> Vec<SecureAsset> {
+    let mut found: Vec<SecureAsset> = Vec::new();
+    if let Ok(cfg) = crate::config::load(app) {
+        let tracks = crate::library::mods_subdir(&cfg.mods_path, "mods/tracks");
+        collect_mxbsecure(&tracks, &mut found);
+    }
+    for a in load_assets(app) {
+        if !found.iter().any(|f| f.blob_path.eq_ignore_ascii_case(&a.blob_path)) {
+            found.push(a);
+        }
+    }
+    found
+}
+
+/// Walk `dir` for `<name>.mxbsecure` blobs that have a `<name>.mxbsecure.mxbkey` beside them,
+/// pushing a [`SecureAsset`] for each. Recursive, because tracks live in sub-folders.
+fn collect_mxbsecure(dir: &std::path::Path, out: &mut Vec<SecureAsset>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_mxbsecure(&path, out);
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        if !name.ends_with(".mxbsecure") {
+            continue; // its `.mxbkey` sibling ends in .mxbkey, so it's skipped here
+        }
+        let mxbkey = format!("{}.mxbkey", path.to_string_lossy());
+        if !std::path::Path::new(&mxbkey).exists() {
+            continue; // a blob with no key can't be opened — don't list it
+        }
+        out.push(SecureAsset {
+            game_name: name.trim_end_matches(".mxbsecure").to_string(),
+            blob_path: path.to_string_lossy().to_string(),
+            mxbkey_path: mxbkey,
+        });
+    }
+}
+
 /// Record a newly provisioned asset, replacing any earlier entry for the same game name so a
 /// re-lock doesn't leave two. Only the full (mxbsecure) build provisions, so it is otherwise
 /// unused.
@@ -68,9 +112,12 @@ fn source_dll(app: &AppHandle) -> Option<PathBuf> {
         }
     }
     if let Ok(res) = app.path().resource_dir() {
-        let p = res.join("mxbsecure.dll");
-        if p.exists() {
-            return Some(p);
+        // The bundler places `resources/*.dll` under `<resource_dir>/resources/`; also accept
+        // it at the root, in case a build stages it there.
+        for p in [res.join("resources").join("mxbsecure.dll"), res.join("mxbsecure.dll")] {
+            if p.exists() {
+                return Some(p);
+            }
         }
     }
     let exe = std::env::current_exe().ok()?;
@@ -128,7 +175,7 @@ pub fn watch(app: &AppHandle) {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             let running = crate::gameproc::is_game_running();
             if running {
-                if !injected_this_session && !load_assets(&app).is_empty() {
+                if !injected_this_session && !scan_secured(&app).is_empty() {
                     arm(&app);
                     injected_this_session = true;
                 }
@@ -144,7 +191,7 @@ pub fn watch(app: &AppHandle) {
 /// beside it, and inject. Best-effort and quiet on the common "nothing to secure" — a player
 /// with no locked content should see no trace of this.
 pub fn arm(app: &AppHandle) {
-    let assets = load_assets(app);
+    let assets = scan_secured(app);
     if assets.is_empty() {
         return;
     }
