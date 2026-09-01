@@ -117,6 +117,18 @@ fn self_crossing(prog: &TrackProgram) -> Option<(f32, f32, f32)> {
     worst
 }
 
+/// Which segment a distance round the lap falls in.
+fn segment_at(prog: &TrackProgram, at: f32) -> usize {
+    let mut run = 0.0f32;
+    for (i, seg) in prog.segments.iter().enumerate() {
+        run += seg.length();
+        if at <= run {
+            return i;
+        }
+    }
+    prog.segments.len().saturating_sub(1)
+}
+
 /// Whether a berm at this distance round the lap is on a corner.
 ///
 /// One definition, used by both the check and the repair. They had one each, they disagreed,
@@ -414,10 +426,30 @@ pub fn review(prog: &TrackProgram) -> Review {
         ));
     }
     if let Some((a, b, gap)) = self_crossing(prog) {
+        // Named in the model's own terms. It wrote a list of segments, not a distance round
+        // a lap, so "1632 m comes within 0 m of 2066 m" makes it do the dead reckoning it is
+        // already bad at just to find out which two lines to change. Saying "segment 7 runs
+        // over segment 11" points at the edit.
+        let (i, j) = (segment_at(prog, a), segment_at(prog, b));
+        let name = |k: usize| match prog.segments.get(k) {
+            Some(crate::trackprog::Segment::Straight { length, .. }) => {
+                format!("segment {k} (the {length:.0} m straight)")
+            }
+            Some(crate::trackprog::Segment::Arc { radius, angle, .. }) => format!(
+                "segment {k} (the {:.0}° {} of radius {:.0} m)",
+                angle.abs(),
+                if *radius >= 0.0 { "right" } else { "left" },
+                radius.abs()
+            ),
+            None => format!("segment {k}"),
+        };
         out.push(format!(
-            "the lap crosses itself: {a:.0} m round comes within {gap:.0} m of {b:.0} m \
-             round, and the track is {:.0} m wide. Two parts of a lap cannot share the same \
-             ground — route one of them around the other, or turn earlier so they miss.",
+            "the lap crosses itself: {} runs within {gap:.0} m of {}, and the track is \
+             {:.0} m wide. Two parts of a lap cannot share the same ground. Shorten whichever \
+             of the two overshoots, or turn earlier so they miss — and remember the lap still \
+             has to close afterwards.",
+            name(i),
+            name(j),
             prog.width
         ));
     }
