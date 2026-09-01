@@ -1384,6 +1384,22 @@ async fn preview_track(
     .map_err(|e| format!("preview_track task failed: {e}"))?
 }
 
+/// Where an installed track goes: the mods tree's `tracks` folder.
+///
+/// Not `game_path` — that is the folder with the executable in it, which the game never
+/// reads content from, and which is empty on a machine that only has the mods folder
+/// configured. And `mods` is resolved rather than joined on: a player who relocated the
+/// tree with `mxbikes.ini` has `mods_path` already pointing at it.
+fn track_install_dir(cfg: &AppConfig) -> Result<std::path::PathBuf, String> {
+    if cfg.mods_path.trim().is_empty() {
+        return Err(format!(
+            "No {} folder is configured yet — set it in Settings.",
+            cfg.game().display
+        ));
+    }
+    Ok(library::mods_subdir(&cfg.mods_path, "mods/tracks"))
+}
+
 /// Install the preview into the game's tracks folder.
 ///
 /// Terrain only, so the game will list it and fail to load it — the studio says so. It is
@@ -1396,18 +1412,12 @@ async fn install_track_preview(
 ) -> Result<String, String> {
     let prog = track_program(program)?;
     let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let dir = track_install_dir(&cfg)?;
     tauri::async_runtime::spawn_blocking(move || {
         let syn = tracksynth::synthesise(&prog).map_err(|e| format!("{e:#}"))?;
-        let dir = std::path::Path::new(&cfg.game_path)
-            .join("mods")
-            .join("tracks");
-        std::fs::create_dir_all(&dir).map_err(|e| format!("{e}"))?;
-        let name: String = prog
-            .name
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .collect();
-        let path = dir.join(format!("{}.pkz", name.trim_matches('_')));
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        // The archive's own name, so the `.pkz` and the folder inside it agree.
+        let path = dir.join(format!("{}.pkz", tracksynth::slug(&prog.name)));
         tracksynth::write_pkz(&prog, &syn, &path, false).map_err(|e| format!("{e:#}"))?;
         usage::track("track.install");
         Ok(path.to_string_lossy().into_owned())
@@ -12502,5 +12512,58 @@ mod live_look_tests {
         for _ in 0..5 {
             assert!(!live_look_cooldown_passed(), "the rest fold into it");
         }
+    }
+}
+
+#[cfg(test)]
+mod track_install_tests {
+    use super::*;
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("frost-trackdest-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    #[test]
+    fn a_track_installs_into_the_mods_tree_not_the_install_dir() {
+        let user = tmp("user");
+        std::fs::create_dir_all(user.join("mods").join("tracks")).unwrap();
+        let cfg = AppConfig {
+            mods_path: user.to_string_lossy().into_owned(),
+            // Deliberately set, and deliberately not where the track goes.
+            game_path: "/somewhere/else/MX Bikes".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            track_install_dir(&cfg).unwrap(),
+            user.join("mods").join("tracks")
+        );
+        let _ = std::fs::remove_dir_all(&user);
+    }
+
+    /// `mxbikes.ini` lets a player point the game at `C:\mods`, and then `mods_path` *is*
+    /// the tree — joining `mods` on by hand would write to `C:\mods\mods\tracks`.
+    #[test]
+    fn a_relocated_tree_is_the_mods_folder_itself() {
+        let tree = tmp("tree");
+        for d in ["bikes", "tracks", "rider"] {
+            std::fs::create_dir_all(tree.join(d)).unwrap();
+        }
+        let cfg = AppConfig {
+            mods_path: tree.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        assert_eq!(track_install_dir(&cfg).unwrap(), tree.join("tracks"));
+        let _ = std::fs::remove_dir_all(&tree);
+    }
+
+    /// With no folder configured the old code joined onto an empty `game_path` and wrote
+    /// `mods/tracks` relative to the working directory — a track installed into thin air.
+    #[test]
+    fn no_configured_folder_is_an_error_not_a_relative_path() {
+        let cfg = AppConfig { mods_path: String::new(), ..Default::default() };
+        let err = track_install_dir(&cfg).unwrap_err();
+        assert!(err.contains("configured"), "{err}");
     }
 }

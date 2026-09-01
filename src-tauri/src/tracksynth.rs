@@ -1416,22 +1416,12 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     put("params.ini", PARAMS_INI.into(), &mut wrote)?;
     put("trh_params.ini", TRH_PARAMS_INI.into(), &mut wrote)?;
     put("track.tcl", tcl(prog).into_bytes(), &mut wrote)?;
-    put(
-        &format!("{slug}/{slug}.ini"),
-        track_ini(prog).into_bytes(),
-        &mut wrote,
-    )?;
-    put(&format!("{slug}/{slug}.amb"), AMB.into(), &mut wrote)?;
-    put(
-        &format!("{slug}/gfx.cfg"),
-        gfx_cfg(prog).into_bytes(),
-        &mut wrote,
-    )?;
-    put(
-        &format!("{slug}/{slug}.rdf"),
-        rdf(prog).into_bytes(),
-        &mut wrote,
-    )?;
+    // The game-facing files, byte for byte what the `.pkz` carries.
+    put(&format!("{slug}/{slug}.ini"), crlf(&track_ini(prog)), &mut wrote)?;
+    put(&format!("{slug}/{slug}.amb"), crlf(AMB), &mut wrote)?;
+    put(&format!("{slug}/gfx.cfg"), crlf(&gfx_cfg(prog)), &mut wrote)?;
+    put(&format!("{slug}/{slug}.rdf"), crlf(&rdf(prog)), &mut wrote)?;
+    put(&format!("{slug}/{slug}.ssc"), Vec::new(), &mut wrote)?;
     let (map_img, shot) = ui_images(syn, UI_IMAGE_DIM);
     put(&format!("{slug}/{slug}_map.tga"), map_img, &mut wrote)?;
     put(&format!("{slug}/{slug}.tga"), shot, &mut wrote)?;
@@ -1842,10 +1832,12 @@ pub fn write_pkz(
     for (name, bytes) in [
         (format!("{slug}/{slug}.trh"), trh(prog, syn, paint_features)),
         (format!("{slug}/{slug}.map"), map(prog, syn)),
-        (format!("{slug}/{slug}.ini"), track_ini(prog).into_bytes()),
-        (format!("{slug}/{slug}.rdf"), rdf(prog).into_bytes()),
-        (format!("{slug}/{slug}.amb"), AMB.as_bytes().to_vec()),
-        (format!("{slug}/gfx.cfg"), gfx_cfg(prog).into_bytes()),
+        (format!("{slug}/{slug}.ini"), crlf(&track_ini(prog))),
+        (format!("{slug}/{slug}.rdf"), crlf(&rdf(prog))),
+        (format!("{slug}/{slug}.amb"), crlf(AMB)),
+        (format!("{slug}/gfx.cfg"), crlf(&gfx_cfg(prog))),
+        // Empty on the reference track, and on every track that ships one.
+        (format!("{slug}/{slug}.ssc"), Vec::new()),
         (format!("{slug}/{slug}_map.tga"), map_img),
         (format!("{slug}/{slug}.tga"), shot),
     ] {
@@ -1854,6 +1846,11 @@ pub fn write_pkz(
     }
     zip.finish()?;
     Ok(std::fs::metadata(path).map(|m| m.len()).unwrap_or(0))
+}
+
+/// PiBoSo's own config files are CRLF throughout, so ours are too.
+fn crlf(text: &str) -> Vec<u8> {
+    text.replace("\r\n", "\n").replace('\n', "\r\n").into_bytes()
 }
 
 /// The heightmap: little-endian u16, quantised against the height budget.
@@ -2633,7 +2630,7 @@ fn readme(prog: &TrackProgram, syn: &Synth, slug: &str) -> String {
     )
 }
 
-fn slug(name: &str) -> String {
+pub fn slug(name: &str) -> String {
     let s: String = name
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
@@ -3033,6 +3030,7 @@ mod tests {
             format!("{slug}/{slug}.ini"),
             format!("{slug}/{slug}.rdf"),
             format!("{slug}/{slug}.amb"),
+            format!("{slug}/{slug}.ssc"),
             format!("{slug}/gfx.cfg"),
         ] {
             assert!(names.contains(&want), "{want} is missing from {names:?}");
@@ -3043,6 +3041,11 @@ mod tests {
         let ini =
             String::from_utf8(crate::pkz::read_entry(&path, &format!("{slug}.ini")).unwrap().unwrap())
                 .unwrap();
+        // PiBoSo writes these CRLF, so a line of ours is never bare LF.
+        assert!(
+            ini.contains("\r\n") && !ini.replace("\r\n", "").contains('\n'),
+            "the ini is not CRLF throughout"
+        );
         for line in ini.lines() {
             let Some((key, value)) = line.split_once('=') else {
                 continue;

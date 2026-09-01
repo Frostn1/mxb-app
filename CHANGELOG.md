@@ -7,6 +7,8 @@
   colour of the dirt.
 
 ### Changed
+- Track Studio installs a track into your MX Bikes mods folder, where the game reads its
+  tracks from. If no folder is set yet, it says so instead of installing.
 - A track installed from Track Studio is packed the way the game reads tracks, so it turns up
   in the in-game list.
 - The track file names the artwork it ships and states its lap length in metres.
