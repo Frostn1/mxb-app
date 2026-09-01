@@ -60,7 +60,7 @@ mu.mem_map(0, 0x100000)          # scratch for writes through null pointers
 
 data = open(MAP,'rb').read()
 state = {"cursor": int(sys.argv[1]) if len(sys.argv)>1 else 312,
-         "heap": HEAP + 0x1000, "log": [], "depth": 0}
+         "heap": HEAP + 0x1000, "log": [], "depth": 0, "overran": None}
 
 _stub_targets = set()
 _trail = []
@@ -118,8 +118,16 @@ def hook_code(uc, addr, size, _):
         n  = uc.reg_read(UC_X86_REG_EDX) & 0xFFFFFFFF
         dst= uc.reg_read(UC_X86_REG_R8)
         off= state["cursor"]
+        # Stop dead at the end of the file. This used to zero-fill, and zero-filling is how
+        # you get a confident, detailed, entirely fictional trace: once the cursor runs off,
+        # every count reads back as 0, every loop "terminates cleanly", and the log looks like
+        # a decode. It cost me a wrong finding — "records 1 to 11 have no textures" — that was
+        # nothing but zeros past the end.
+        if off >= len(data) or off + n > len(data):
+            state["overran"] = (off, n)
+            uc.emu_stop()
+            return
         chunk = data[off:off+n]
-        if len(chunk) < n: chunk = chunk + b'\0'*(n-len(chunk))
         try: uc.mem_write(dst, chunk)
         except Exception: pass
         state["log"].append((off, n, dst))
@@ -256,6 +264,10 @@ except Exception as e:
 print("last addresses before stopping:", " -> ".join(hex(a) for a in _trail[-12:]))
 log = state["log"]
 print(f"{len(log)} reads, cursor ended at {state['cursor']:,} of {len(data):,}")
+if state["overran"]:
+    off, n = state["overran"]
+    print(f"stopped at the end of the file: a read of {n:,} bytes at {off:,} "
+          f"(file is {len(data):,}). Everything up to here is real; nothing past it would be.")
 SZ = len(data)
 for i,(o,n,d) in enumerate(log):
     if o > SZ:

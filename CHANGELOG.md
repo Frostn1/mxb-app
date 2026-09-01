@@ -2,6 +2,11 @@
 
 ## 2026-09-01
 
+### Fixed
+- The map-loader tracer stops at the end of the file instead of reading zeros past it.
+
+## 2026-09-01
+
 ### Added
 - A tool that traces exactly which bytes MX Bikes reads out of a track's graphics file, by
   emulating the game's own loader. Groundwork for generating tracks the game can ride without
