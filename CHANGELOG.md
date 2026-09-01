@@ -49,6 +49,8 @@
 - The racing line is chopped up at the scale of a wheel rather than a jump, and the field
   around it is smooth. It used to be nearly as rough out in the grass as it was on the line.
 - A track's edge is crisp against the field rather than fading out over a wide shelf.
+- A venue has banks and spoil hills around it, the way a real one does — the thing that makes
+  a plot look built rather than generated.
 - A track can be built on a hillside. The ground falls across the plot the way a real one
   does, instead of being a bumpy plain — which is most of why the land around a generated
   track never looked like the land around a real one.

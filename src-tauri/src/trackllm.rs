@@ -795,7 +795,7 @@ mod tests {
         for key in ["sizeX", "sizeZ", "samples", "scale", "relief"] {
             assert!(v["terrain"].get(key).is_some(), "the schema names `terrain.{key}`");
         }
-        for key in ["amplitude", "wavelength", "seed", "texture", "tilt", "tiltAngle"] {
+        for key in ["amplitude", "wavelength", "seed", "texture", "tilt", "tiltAngle", "landforms", "landformHeight"] {
             assert!(v["terrain"]["relief"].get(key).is_some(), "`relief.{key}`");
         }
         for key in ["x", "z", "angle"] {

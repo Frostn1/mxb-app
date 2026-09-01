@@ -164,6 +164,22 @@ pub struct Relief {
     /// Which way it falls, degrees, in the same convention as a heading.
     #[serde(default)]
     pub tilt_angle: f32,
+    /// How many banks and spoil hills the venue has around the track, and how tall the
+    /// tallest of them stands.
+    ///
+    /// What separates a real plot from a plain of noise is not roughness, it is these.
+    /// Indiana's ground climbs twelve metres in twenty-five at the ninety-ninth percentile
+    /// and twenty at the worst; noise tuned to its median exactly reaches 3.6 and 6.0. The
+    /// steepest of it sits 40–120 m from the riding line — the banks people stand on, not the
+    /// cut and fill either side of the track.
+    #[serde(default)]
+    pub landforms: u32,
+    #[serde(default = "default_landform_height")]
+    pub landform_height: f32,
+}
+
+fn default_landform_height() -> f32 {
+    12.0
 }
 
 /// Measured, not chosen. The surface roughness of a published track — the mean absolute
@@ -183,6 +199,8 @@ impl Default for Relief {
             texture: default_texture(),
             tilt: 0.0,
             tilt_angle: 0.0,
+            landforms: 0,
+            landform_height: default_landform_height(),
         }
     }
 }
@@ -509,8 +527,8 @@ pub const EXAMPLE: &str = r#"{
       "location": "Generated",
       "width": 12.0,
       "terrain": {
-        "sizeX": 500.0, "sizeZ": 480.0, "samples": 2049, "scale": 62.0,
-        "relief": { "amplitude": 12.0, "wavelength": 420.0, "seed": 3, "tilt": 26.0, "tiltAngle": 35.0 }
+        "sizeX": 500.0, "sizeZ": 480.0, "samples": 2049, "scale": 86.0,
+        "relief": { "amplitude": 7.0, "wavelength": 420.0, "seed": 3, "tilt": 26.0, "tiltAngle": 35.0, "landforms": 13, "landformHeight": 17.0 }
       },
       "start": { "x": 231.10, "z": 262.90, "angle": 0.0 },
       "segments": [

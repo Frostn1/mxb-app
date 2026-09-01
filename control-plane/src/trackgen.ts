@@ -125,6 +125,13 @@ const TrackProgram = z.object({
           "metres the whole plot falls from one side to the other — a hillside rather than a plain. 0 for flat ground, 20-30 for a hillside national.",
         ),
       tiltAngle: z.number().describe("which way it falls, degrees, same convention as a heading"),
+      landforms: z
+        .number()
+        .int()
+        .describe(
+          "how many banks and spoil hills the venue has around the track. 0 for a bare field, 10-15 for a proper venue. These are what make a plot look built rather than generated.",
+        ),
+      landformHeight: z.number().describe("how tall the tallest of them stands, metres; 12-18 is normal"),
     }),
     surface: z
       .enum(["soil", "sand", "grass"])
@@ -259,6 +266,14 @@ explicitly asks otherwise:
                       for a hillside national (Millville, Washougal, Flanders and Sardegna
                       climb 48-66 m over a lap), 0-8 for a flat one (Lambretta Lynds climbs
                       2.2 m). Pick from the brief. tiltAngle is which way it falls.
+
+                      Then set landforms — the banks and spoil hills round the outside. 10-15
+                      of them at 12-18 m for a venue, 0 for a bare field. THIS is what makes a
+                      plot look built. Measured as height change over 25 m, Indiana reaches
+                      12.2 m at the ninety-ninth percentile and 19.8 at the worst; ground made
+                      only of noise, tuned to match its median exactly, reaches 3.6 and 6.0.
+                      Its steepest ground sits 40-120 m from the riding line — the banks people
+                      stand on, not the cut and fill beside the track.
 
                       amplitude is then the *bumps on top of it* and wants to be small — 5-8 m
                       over a 200-300 m wavelength. It used to carry the whole landform and the
