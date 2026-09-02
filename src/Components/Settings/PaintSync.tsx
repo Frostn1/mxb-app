@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Download, Upload, TriangleAlert } from "lucide-react";
+import { Loader2, Download, Upload, TriangleAlert, Trash2 } from "lucide-react";
 import { Button } from "@/Components/ui/button";
 import { Input } from "@/Components/ui/input";
 import { cn } from "@/lib/utils";
@@ -8,6 +8,7 @@ import {
   experimentalState,
   onSyncEvent,
   publishPaints,
+  removeSyncedPaints,
   setGuid as setGuidApi,
   syncPaints,
   type ExperimentalState,
@@ -175,6 +176,20 @@ export const PaintSync = () => {
     setBusy(false);
   };
 
+  const remove = async () => {
+    setBusy(true);
+    try {
+      const r = await removeSyncedPaints();
+      toast.success(t("sync.removed", { count: r.removed }));
+      if (r.keptYours > 0)
+        toast.warning(t("sync.removeKeptYours", { count: r.keptYours }));
+      refresh();
+    } catch (e) {
+      toast.error(t("sync.removeFailed"), { description: String(e) });
+    }
+    setBusy(false);
+  };
+
   const sync = state?.sync;
   const publishedAgo = ago(t, sync?.publishedAt ?? 0);
   const pulledAgo = ago(t, sync?.pulledAt ?? 0);
@@ -263,6 +278,27 @@ export const PaintSync = () => {
                 </Button>
               }
             />
+
+            {/* Other people's paints, in their mods folder, that nothing used to be able to
+                take out again. Turning the sync off deliberately leaves them — so this is
+                the only way back, and it has to be somewhere a player can find it. */}
+            {(state.syncedPaints ?? 0) > 0 && (
+              <StatusRow
+                tone="info"
+                title={t("sync.installedState", { count: state.syncedPaints })}
+                detail={t("sync.installedWhy")}
+                action={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => void remove()}
+                  >
+                    <Trash2 className="size-3.5" /> {t("sync.remove")}
+                  </Button>
+                }
+              />
+            )}
 
             {/* The GUID is the identity that survives a name change. A player can't read it
                 off their own machine, so this is no longer something to type: the app takes

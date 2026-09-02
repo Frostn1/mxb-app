@@ -3,6 +3,12 @@
 ## 2026-09-01
 
 ### Added
+- Settings shows how many paints other riders' syncs have put in your mods folder, with a
+  button that takes them back out. Paints you have edited since are kept.
+
+## 2026-09-01
+
+### Added
 - The diagnostics dashboard searches. Riders by name, GUID, Steam id or account id; files by
   name, hash, signer, or anything the file claims about itself.
 - Every rider has a page: their identity, last report, the servers they have been seen on,

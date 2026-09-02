@@ -2732,6 +2732,8 @@ export interface ExperimentalState {
    * a publish that quietly does nothing.
    */
   profile: string | null;
+  /** Paints the sync has installed and can still take back out. */
+  syncedPaints: number;
 }
 
 export interface PublishOutcome {
@@ -2829,6 +2831,24 @@ export function publishPaints(force = false, profile?: string): Promise<PublishO
  */
 export function syncPaints(): Promise<PullOutcome> {
   return invoke<PullOutcome>("sync_paints");
+}
+
+export interface RemoveOutcome {
+  removed: number;
+  /** Paints left alone because their bytes have changed since the sync wrote them. */
+  keptYours: number;
+  /** Recorded paints whose file had already gone. */
+  missing: number;
+}
+
+/**
+ * Take every synced paint back out of the mods folder.
+ *
+ * Turning the sync off leaves what it already installed, so this is the way to actually get
+ * the folder back. Only files the sync wrote and nobody has edited since are touched.
+ */
+export function removeSyncedPaints(): Promise<RemoveOutcome> {
+  return invoke<RemoveOutcome>("remove_synced_paints");
 }
 
 // ── Dedicated servers ────────────────────────────────────────────────────────
