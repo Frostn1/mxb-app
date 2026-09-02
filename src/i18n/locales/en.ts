@@ -331,6 +331,16 @@ export const en = {
   "runtime.fixIt": "Install it",
   "runtime.installing": "Installing…",
   "runtime.dismiss": "Dismiss this warning",
+  "cloud.genericProvider":
+    "a cloud sync tool",
+  "cloud.evictedBody":
+    "Some of your mods aren’t really on this PC — {{what}} has moved them to the cloud.",
+  "cloud.evictedPitch":
+    "The game reads them while loading and can crash there. Move your mods folder out, or set “Always keep on this device”.",
+  "cloud.slowBody":
+    "Your mods folder is inside {{what}}.",
+  "cloud.slowPitch":
+    "The game reads every mod while loading, and reads through {{what}} are slow — on a big collection it can look like the game has frozen. Moving the folder out fixes it.",
   "runtime.installed": "Component installed",
   "runtime.installedDesc":
     "FrostMod should reach the game now. Restart MX Bikes if it's already open.",
@@ -780,6 +790,9 @@ export const en = {
   "settings.watchModsReload": "Auto-reload on folder changes",
   "settings.watchModsReloadDesc":
     "Reload the game automatically when tracks or bikes are added to your mods folder — even downloaded manually outside MXB App.",
+  "settings.secureContentInject": "Use locked content in game",
+  "settings.secureContentInjectDesc":
+    "Lets purchased locked tracks open by adding a small helper to the running game. Off by default. With it on, start the game with Play — a session MXB App didn't launch is left alone.",
   "settings.checking": "Checking…",
   "settings.runningConnected": "Running · game connected",
   "settings.notRunning": "Not running",

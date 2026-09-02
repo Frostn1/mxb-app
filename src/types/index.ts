@@ -104,6 +104,16 @@ export interface Config {
    * MXB App (e.g. a manual download dropped into the folder). Default true.
    */
   watchModsReload?: boolean;
+  /**
+   * Inject `mxbsecure.dll` into the running game so locked content can be opened.
+   *
+   * **Off by default.** It reaches into a process the app usually didn't create, and the
+   * DLL hasn't been proven on a real Windows run — a build that armed it for everyone with
+   * locked content had the game dying on access violations seconds in, with quitting the
+   * app from the tray as the only way out. With it on, launch the game from Play: the app
+   * won't inject into a session it didn't start.
+   */
+  secureContentInject?: boolean;
   /** Intro slideshow already dismissed. Saved with the config (not in localStorage)
    *  so clearing the webview's storage doesn't replay the first-run flow. */
   welcomeSeen?: boolean;
@@ -1116,7 +1126,39 @@ export interface FrostmodStatus {
    * aborts MX Bikes with R6034 is still sitting there — see {@link StrayMsvcr90}.
    */
   strayMsvcr90: StrayMsvcr90;
+  /**
+   * What became of a `frostmod.dlo` hand-installed into the game's own `plugins` folder.
+   *
+   * `absent` is the normal case. Anything else means plugin mode is in play: the game loads
+   * FrostMod itself at startup, with no `frostmod.exe` involved. Nothing used to update that
+   * copy, so it outlived every release — one player was running a v0.12 plugin against a
+   * v0.16.2 install, which hung the game before the loading screen.
+   */
+  gamePlugin: PluginCopy;
 }
+
+/**
+ * The mods tree's standing with a cloud sync tool, as reported by the `mods-dehydrated`
+ * event at the start of every game session. Matches `cloudfiles::Dehydrated`.
+ *
+ * Two different problems arrive on this one event. `count > 0` means bytes have actually
+ * been evicted — the game can crash reading them off the load screen. `count === 0` with a
+ * `provider` set means nothing is missing but the tree still sits behind a sync driver, and
+ * the game's whole-tree read during loading is slow enough to look like a hang.
+ */
+export interface ModsDehydrated {
+  /** Content files that are placeholders rather than real bytes. */
+  count: number;
+  /** How many were looked at, so `count` has a denominator. */
+  scanned: number;
+  /** A few names, to make the warning concrete. */
+  examples: string[];
+  /** The sync tool the tree sits under, e.g. `"OneDrive"`. Null if it doesn't sit under one. */
+  provider: string | null;
+}
+
+/** State of a FrostMod plugin copy in the game's `plugins` folder. Matches `PluginCopy`. */
+export type PluginCopy = "absent" | "current" | "refreshed" | "locked";
 
 /**
  * A Visual C++ runtime the FrostMod chain needs. Matches `vcruntime::Runtime`.

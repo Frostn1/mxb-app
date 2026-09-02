@@ -1523,6 +1523,51 @@ fn connect_args(address: &str) -> [String; 2] {
 }
 
 /// Shared body of [`launch`] and [`join`] — `address` is already normalized.
+/// When the app last asked for the game to start. Steam usually spawns the process, so there
+/// is no child handle and no pid to match on — the launch *instant* is the only provenance we
+/// get, and anything that reaches into the game process checks it before acting.
+static LAST_APP_LAUNCH: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// How long after a Play click a game that appears still counts as one the app started. Steam
+/// can take a while to get from the URL to a running process, so this is generous; it only has
+/// to separate "the app asked for this" from "the player started it themselves hours ago".
+const APP_LAUNCH_WINDOW: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// Record that the app asked for the game to start.
+fn note_app_launch() {
+    if let Ok(mut slot) = LAST_APP_LAUNCH.lock() {
+        *slot = Some(std::time::Instant::now());
+    }
+}
+
+/// When the current game session was first noticed, or `None` if the game isn't up.
+static SESSION_SINCE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Called by [`crate::sessionwatch`] as a session begins and ends, so anything that needs to
+/// know "how long has the game been up" can ask without a second process poll.
+pub fn note_session(started: bool) {
+    if let Ok(mut slot) = SESSION_SINCE.lock() {
+        *slot = started.then(std::time::Instant::now);
+    }
+}
+
+/// How long the game has been running, as far as the session poll has noticed. `None` when
+/// no session is up.
+pub fn session_age() -> Option<std::time::Duration> {
+    SESSION_SINCE.lock().ok().and_then(|slot| *slot).map(|at| at.elapsed())
+}
+
+/// Whether the game now running is one the app launched, as far as we can tell.
+///
+/// Used to keep the app from reaching into a process it had no hand in starting.
+pub fn launched_by_app() -> bool {
+    LAST_APP_LAUNCH
+        .lock()
+        .ok()
+        .and_then(|slot| *slot)
+        .is_some_and(|at| at.elapsed() < APP_LAUNCH_WINDOW)
+}
+
 fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchOutcome> {
     if is_game_running() {
         return Ok(LaunchOutcome::AlreadyRunning);
@@ -1533,6 +1578,7 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
         Some(addr) => log::info!("launching {game} into {addr}: {}", exe.display()),
         None => log::info!("launching {game}: {}", exe.display()),
     }
+    note_app_launch();
 
     #[cfg(windows)]
     {

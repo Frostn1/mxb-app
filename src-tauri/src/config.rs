@@ -82,6 +82,15 @@ pub struct AppConfig {
     /// Watch `<mods_path>/mods` and signal FrostMod to reload when tracks/bikes are
     /// added outside the app (e.g. a manual download dropped into the folder).
     pub watch_mods_reload: bool,
+    /// Inject `mxbsecure.dll` into the running game so locked content can be opened.
+    ///
+    /// **Off by default, deliberately.** This reaches into a process the app usually did not
+    /// create, and the DLL has never been proven on a real Windows run — a build that armed it
+    /// for everyone with locked content had the game dying on access violations 17–31s in, and
+    /// the only way out was quitting the app from the tray, because nothing else the app does
+    /// touches a Steam-started game. It stays opt-in until that run happens.
+    #[serde(default)]
+    pub secure_content_inject: bool,
     /// The intro slideshow has been dismissed. Kept here rather than in the webview's
     /// `localStorage` so it survives that storage being cleared (WebView2 resets it on
     /// an app-data wipe, and an OS shutdown can kill the tray-resident process before
@@ -266,6 +275,7 @@ impl Default for AppConfig {
             frostmod_args: String::new(),
             instant_refresh: true,
             watch_mods_reload: true,
+            secure_content_inject: false,
             welcome_seen: false,
             tour_done: false,
             overlay_enabled: true,

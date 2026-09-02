@@ -344,6 +344,16 @@ export const de: Translation = {
   "runtime.fixIt": "Installieren",
   "runtime.installing": "Wird installiert…",
   "runtime.dismiss": "Hinweis ausblenden",
+  "cloud.genericProvider":
+    "ein Cloud-Sync-Dienst",
+  "cloud.evictedBody":
+    "Einige Mods liegen nicht wirklich auf diesem PC — {{what}} hat sie in die Cloud verschoben.",
+  "cloud.evictedPitch":
+    "Das Spiel liest sie beim Laden und kann dabei abstürzen. Verschiebe den Mods-Ordner heraus oder wähle „Immer auf diesem Gerät behalten“.",
+  "cloud.slowBody":
+    "Dein Mods-Ordner liegt in {{what}}.",
+  "cloud.slowPitch":
+    "Das Spiel liest beim Laden jede Mod, und Zugriffe über {{what}} sind langsam — bei einer großen Sammlung wirkt das wie ein eingefrorenes Spiel. Den Ordner herauszuschieben behebt es.",
   "runtime.installed": "Komponente installiert",
   "runtime.installedDesc":
     "FrostMod sollte das Spiel jetzt erreichen. Starte MX Bikes neu, falls es schon läuft.",
@@ -794,6 +804,9 @@ export const de: Translation = {
   "settings.watchModsReload": "Automatisch neu laden bei Ordneränderungen",
   "settings.watchModsReloadDesc":
     "Das Spiel automatisch neu laden, wenn Strecken oder Motorräder in deinen Mod-Ordner kommen — auch wenn sie außerhalb von MXB App manuell heruntergeladen wurden.",
+  "settings.secureContentInject": "Gesperrte Inhalte im Spiel nutzen",
+  "settings.secureContentInjectDesc":
+    "Erlaubt gekaufte gesperrte Strecken, indem dem laufenden Spiel ein kleiner Helfer hinzugefügt wird. Standardmäßig aus. Wenn aktiv, starte das Spiel über Play — eine Sitzung, die MXB App nicht gestartet hat, bleibt unberührt.",
   "settings.checking": "Wird geprüft…",
   "settings.runningConnected": "Läuft · Spiel verbunden",
   "settings.notRunning": "Läuft nicht",

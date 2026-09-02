@@ -1,14 +1,16 @@
 import {
   AlertTriangle,
+  CloudOff,
   Download,
   FolderInput,
   Loader2,
   OctagonAlert,
   X,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/Components/ui/button";
-import { RUNTIME_NAME_KEY } from "@/api/mods";
+import { RUNTIME_NAME_KEY, onModsDehydrated } from "@/api/mods";
+import type { ModsDehydrated } from "@/types";
 import { useFrostmod } from "@/Context/FrostmodContext";
 import { Trans } from "@/i18n";
 import { useT } from "@/i18n/context";
@@ -27,7 +29,12 @@ import { useT } from "@/i18n/context";
  * FrostMod silently failing to attach, or a bare "…dll was not found" box over the game —
  * gives no hint that Settings is where to look.
  *
- * Renders nothing when neither applies, which is the overwhelmingly common case.
+ * **A mods folder inside a cloud sync tool**, which has no button at all — the fix is to
+ * move the folder, which only the player can do. It earns a place here because its symptom
+ * is the least legible of the three: the game sits on a black screen reading a tree it can't
+ * read quickly, and nothing anywhere says that's what is happening.
+ *
+ * Renders nothing when none applies, which is the overwhelmingly common case.
  */
 export default function RuntimeBanner() {
   const t = useT();
@@ -40,6 +47,18 @@ export default function RuntimeBanner() {
     clearingStray,
     clearStrayMsvcr90,
   } = useFrostmod();
+  const [cloud, setCloud] = useState<ModsDehydrated | null>(null);
+  const [cloudDismissed, setCloudDismissed] = useState(false);
+
+  // Announced once per game session by the backend, so a player who moves the folder stops
+  // hearing about it from the next session on without anything having to invalidate here.
+  useEffect(() => {
+    const stop = onModsDehydrated((info) => {
+      setCloud(info);
+      setCloudDismissed(false);
+    });
+    return () => void stop.then((off) => off());
+  }, []);
 
   if (strayWarning) {
     // `locked` is ours and the game is holding it open, so the fix is theirs to make in
@@ -63,6 +82,28 @@ export default function RuntimeBanner() {
         busy={clearingStray}
         onAction={() => void clearStrayMsvcr90()}
         onDismiss={dismissRuntimeWarning}
+        dismissLabel={t("runtime.dismiss")}
+      />
+    );
+  }
+
+  // Below the two runtime bars: those are things that stop FrostMod dead, this is a folder
+  // that makes the game slow and fragile. Shown only when nothing louder is up.
+  if (!runtimeWarning && cloud && !cloudDismissed) {
+    const evicted = cloud.count > 0;
+    const provider = cloud.provider ?? t("cloud.genericProvider");
+    return (
+      <Bar
+        tone={evicted ? "danger" : "warning"}
+        icon={CloudOff}
+        body={
+          <Trans
+            k={evicted ? "cloud.evictedBody" : "cloud.slowBody"}
+            values={{ what: <span className="font-semibold">{provider}</span> }}
+          />
+        }
+        pitch={t(evicted ? "cloud.evictedPitch" : "cloud.slowPitch")}
+        onDismiss={() => setCloudDismissed(true)}
         dismissLabel={t("runtime.dismiss")}
       />
     );
@@ -110,6 +151,7 @@ function Bar({
   tone,
   body,
   pitch,
+  icon,
   action,
   actionIcon: ActionIcon,
   busyLabel,
@@ -121,16 +163,19 @@ function Bar({
   tone: "danger" | "warning";
   body: ReactNode;
   pitch: string;
-  action: string;
-  actionIcon: typeof Download;
-  busyLabel: string;
-  busy: boolean;
-  onAction: () => void;
+  /** Overrides the tone's default glyph. */
+  icon?: typeof Download;
+  /** Omitted for a bar with nothing to press — a fix only the player can carry out. */
+  action?: string;
+  actionIcon?: typeof Download;
+  busyLabel?: string;
+  busy?: boolean;
+  onAction?: () => void;
   onDismiss: () => void;
   dismissLabel: string;
 }) {
   const danger = tone === "danger";
-  const Icon = danger ? OctagonAlert : AlertTriangle;
+  const Icon = icon ?? (danger ? OctagonAlert : AlertTriangle);
   return (
     <div
       className={`flex items-center gap-3 border-b px-4 py-2 text-sm text-foreground ${
@@ -146,14 +191,16 @@ function Bar({
       </span>
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
-        <Button size="sm" onClick={onAction} disabled={busy}>
-          {busy ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <ActionIcon className="size-3.5" />
-          )}
-          {busy ? busyLabel : action}
-        </Button>
+        {action && ActionIcon && onAction && (
+          <Button size="sm" onClick={onAction} disabled={busy}>
+            {busy ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <ActionIcon className="size-3.5" />
+            )}
+            {busy ? busyLabel : action}
+          </Button>
+        )}
         <Button
           size="icon"
           variant="ghost"

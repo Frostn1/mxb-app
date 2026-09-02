@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   Attachment,
+  ModsDehydrated,
   BikeModels,
   BikeSounds,
   DropCommitItem,
@@ -2485,9 +2486,29 @@ export function onVoiceStatus(cb: (status: VoiceStatus) => void): Promise<Unlist
   return listen<VoiceStatus>("voice-status", (e) => cb(e.payload));
 }
 
+/**
+ * Fires at the start of each game session when the mods tree is on a cloud sync tool —
+ * either with bytes actually evicted, or merely sitting behind the sync driver.
+ */
+export function onModsDehydrated(
+  cb: (info: ModsDehydrated) => void,
+): Promise<UnlistenFn> {
+  return listen<ModsDehydrated>("mods-dehydrated", (e) => cb(e.payload));
+}
+
 /** Toggle watching the mods folder to reload the game on external changes. */
 export function setWatchModsReload(enabled: boolean): Promise<void> {
   return invoke<void>("set_watch_mods_reload", { enabled });
+}
+
+/**
+ * Toggle injecting `mxbsecure.dll` into the running game for locked content.
+ *
+ * Takes effect on the next game session — the app decides once per run, so flipping this
+ * mid-session won't reach into a game that's already up.
+ */
+export function setSecureContentInject(enabled: boolean): Promise<void> {
+  return invoke<void>("set_secure_content_inject", { enabled });
 }
 
 export const MODS_WATCH_SLUG = "__mods_watch__";

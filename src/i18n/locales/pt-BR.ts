@@ -340,6 +340,16 @@ export const ptBR: Translation = {
   "runtime.fixIt": "Instalar",
   "runtime.installing": "Instalando…",
   "runtime.dismiss": "Dispensar este aviso",
+  "cloud.genericProvider":
+    "uma ferramenta de sincronização na nuvem",
+  "cloud.evictedBody":
+    "Alguns mods não estão realmente neste PC — o {{what}} os moveu para a nuvem.",
+  "cloud.evictedPitch":
+    "O jogo os lê ao carregar e pode travar aí. Tire a pasta de mods de lá, ou marque “Manter sempre neste dispositivo”.",
+  "cloud.slowBody":
+    "Sua pasta de mods está dentro do {{what}}.",
+  "cloud.slowPitch":
+    "O jogo lê todos os mods ao carregar, e leituras pelo {{what}} são lentas — numa coleção grande parece que o jogo travou. Mover a pasta para fora resolve.",
   "runtime.installed": "Componente instalado",
   "runtime.installedDesc":
     "O FrostMod já deve alcançar o jogo. Reinicie o MX Bikes se ele estiver aberto.",
@@ -788,6 +798,9 @@ export const ptBR: Translation = {
   "settings.watchModsReload": "Recarregar automaticamente ao mudar a pasta",
   "settings.watchModsReloadDesc":
     "Recarregar o jogo automaticamente quando pistas ou motos forem adicionadas à sua pasta de mods — mesmo baixadas manualmente fora do MXB App.",
+  "settings.secureContentInject": "Usar conteúdo bloqueado no jogo",
+  "settings.secureContentInjectDesc":
+    "Permite abrir pistas bloqueadas compradas adicionando um pequeno auxiliar ao jogo em execução. Desativado por padrão. Com isso ativo, inicie o jogo pelo Play — uma sessão que o MXB App não iniciou é deixada em paz.",
   "settings.checking": "Verificando…",
   "settings.runningConnected": "Em execução · jogo conectado",
   "settings.notRunning": "Não está em execução",
