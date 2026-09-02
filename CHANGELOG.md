@@ -3,6 +3,12 @@
 ## 2026-09-01
 
 ### Fixed
+- Generated tracks draw their ground. The track graphics file now carries the terrain as a
+  mesh, the way a published track does, instead of a heightfield with no surface on it.
+
+## 2026-09-01
+
+### Fixed
 - Generated tracks load and ride with their ground visible: each layer now ships the normal
   map the renderer expects, writes its blend mask the way the game reads it, and identifies
   each texture the way the game caches it — so the surface lights instead of dropping the game.
