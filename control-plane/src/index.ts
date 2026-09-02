@@ -27,7 +27,15 @@ import {
 } from "./aws";
 import { bmacWebhook } from "./bmac";
 import { pruneReports, putReport } from "./diagnostics";
-import { diagnosticsDashboard, diagnosticsRules } from "./diagnosticspage";
+import {
+  diagnosticsDashboard,
+  diagnosticsFile,
+  diagnosticsFiles,
+  diagnosticsRider,
+  diagnosticsRiders,
+  diagnosticsRules,
+  diagnosticsRulesPage,
+} from "./diagnosticspage";
 import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
 import { generateTrack } from "./trackgen";
 import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
@@ -195,6 +203,21 @@ async function route(request: Request, env: Env): Promise<Response> {
   // player's token should ever be enough to read this about anybody else.
   if (method === "GET" && path === "/admin/diagnostics") {
     return diagnosticsDashboard(request, url, env);
+  }
+  if (method === "GET" && path === "/admin/diagnostics/riders") {
+    return diagnosticsRiders(request, url, env);
+  }
+  if (method === "GET" && path === "/admin/diagnostics/rider") {
+    return diagnosticsRider(request, url, env);
+  }
+  if (method === "GET" && path === "/admin/diagnostics/files") {
+    return diagnosticsFiles(request, url, env);
+  }
+  if (method === "GET" && path === "/admin/diagnostics/file") {
+    return diagnosticsFile(request, url, env);
+  }
+  if (method === "GET" && path === "/admin/diagnostics/rules") {
+    return diagnosticsRulesPage(request, url, env);
   }
   if (method === "POST" && path === "/admin/diagnostics/rules") {
     return diagnosticsRules(request, url, env);

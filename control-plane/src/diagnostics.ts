@@ -107,6 +107,8 @@ export interface ModuleRule {
   pattern: string;
   sha256: string;
   label: string;
+  /** Why the rule exists. Written on the add form, and only ever read on the rules page. */
+  note?: string;
 }
 
 /** One rule-matched module, as it is stored and shown. */
@@ -285,8 +287,15 @@ function matchRule(rules: ModuleRule[], mod: ReportedModule): ModuleRule | null 
 /** The rules in force, oldest first. Version is `max(id)` — see the migration. */
 export async function loadRules(env: Env): Promise<{ rules: ModuleRule[]; version: number }> {
   const rows = await env.DB.prepare(
-    "SELECT id, kind, pattern, sha256, label FROM module_rules ORDER BY id",
-  ).all<{ id: number; kind: string; pattern: string; sha256: string; label: string }>();
+    "SELECT id, kind, pattern, sha256, label, note FROM module_rules ORDER BY id",
+  ).all<{
+    id: number;
+    kind: string;
+    pattern: string;
+    sha256: string;
+    label: string;
+    note: string | null;
+  }>();
   const rules = (rows.results ?? [])
     .filter((r) => r.kind === "deny" || r.kind === "allow")
     .map((r) => ({
@@ -295,6 +304,7 @@ export async function loadRules(env: Env): Promise<{ rules: ModuleRule[]; versio
       pattern: (r.pattern ?? "").toLowerCase(),
       sha256: (r.sha256 ?? "").toLowerCase(),
       label: r.label ?? "",
+      note: r.note ?? "",
     }));
   const version = rules.reduce((max, r) => Math.max(max, r.id), 0);
   return { rules, version };
@@ -504,92 +514,21 @@ export interface LiveRow {
   updatedAt: number;
 }
 
-/**
- * One distinct file — one name and one hash — as it has been seen across everyone.
- *
- * A variant, not a sighting: the per-account rows behind it are collapsed, because the
- * question the page asks is "what is this file" and the answer does not change with who
- * loaded it. `riderName` is only meaningful when `accounts` is 1, and the page only shows it
- * then; naming one of several people would read as an accusation of that one.
- */
-export interface SeenVariant {
-  name: string;
-  sha256: string;
-  origin: string;
-  state: State;
-  label: string;
-  trust: Trust;
-  publisher: string;
-  company: string;
-  product: string;
-  description: string;
-  size: number;
-  mtime: number;
-  riderName: string;
-  /** How many distinct accounts have ever loaded this exact file. */
-  accounts: number;
-  hits: number;
-  lastAt: number;
-}
-
-/**
- * Every variant sharing one file name, which is how the unaccounted list is read.
- *
- * The name is the unit because that is what a rule is written against and what a person
- * recognises. `variants` is where the interesting shape lives: one name with one hash on
- * two hundred machines is a driver, and one name with two hundred hashes is something being
- * rebuilt between sessions.
- */
-export interface SeenGroup {
-  name: string;
-  /** The worst state any variant is in. */
-  state: State;
-  /** The first label any rule gave a variant, so a named group says what it is. */
-  label: string;
-  /** Distinct accounts across every variant of this name. */
-  accounts: number;
-  hits: number;
-  firstAt: number;
-  lastAt: number;
-  /** Distinct hashes recorded under this name in the window. */
-  variantCount: number;
-  /** The variants themselves, worst first then most recent. May be short of
-   *  `variantCount` when the detail query's cap was reached. */
-  variants: SeenVariant[];
-}
-
 export interface AdminView {
   live: LiveRow[];
-  seen: SeenGroup[];
-  /** Distinct unaccounted file names in the window, before `MAX_SEEN_NAMES` trimmed them. */
-  seenNamesTotal: number;
   rules: ModuleRule[];
   rulesVersion: number;
   reporting: number;
 }
 
-/** The most file names the unaccounted list draws. Anything past it is counted, not drawn. */
-const MAX_SEEN_NAMES = 200;
-
-/** The most variants fetched across all of those names together. */
-const MAX_SEEN_VARIANTS = 1000;
-
 /**
- * Everything the admin page draws.
+ * Who is reporting right now, worst first, and the rules that read them.
  *
- * `live` is who is reporting right now, worst first. `seen` is the evidence log — every
- * non-system file anyone's game has loaded that the rules do not account for — grouped by
- * file name, most recent first, with the number of accounts that have ever loaded it. That
- * last number is the one that reads best: a file on one machine out of hundreds is
- * interesting whatever any rule says, and a file on all of them is a driver.
- *
- * Grouped rather than listed because the list is per account and per hash, and one popular
- * overlay was arriving as several hundred rows that said the same thing. The name is the
- * unit a rule is written against, so it is also the unit the page is read in.
+ * The file side of the page lives in `diagnosticssearch.ts`: it is a search now rather than
+ * a fixed list, and the two have nothing in common but the tables.
  */
-export async function collectAdminView(env: Env, days: number): Promise<AdminView> {
+export async function collectAdminView(env: Env): Promise<AdminView> {
   const fresh = Date.now() - PRESENCE_TTL_MS;
-  const since = Date.now() - days * 24 * 60 * 60 * 1000;
 
   const live = await env.DB.prepare(
     "SELECT c.account_id, a.rider_name, a.guid, c.state, c.rules_version, c.module_count," +
@@ -615,88 +554,6 @@ export async function collectAdminView(env: Env, days: number): Promise<AdminVie
       updated_at: number;
       server_id: string | null;
     }>();
-
-  // Two queries rather than one, because the totals have to be right even where the detail
-  // is trimmed: the first counts every name in the window, the second fetches the variants
-  // to draw under them. Grouping the first in SQL is what keeps a name loaded by six hundred
-  // people from arriving as six hundred rows.
-  const names = await env.DB.prepare(
-    "SELECT name, COUNT(DISTINCT account_id) AS accounts, COUNT(DISTINCT sha256) AS variants," +
-      " SUM(hits) AS hits, MIN(first_at) AS first_at, MAX(last_at) AS last_at" +
-      " FROM client_module_seen" +
-      " WHERE state IN ('warn', 'alert') AND last_at > ?" +
-      " GROUP BY name ORDER BY MAX(last_at) DESC LIMIT ?",
-  )
-    .bind(since, MAX_SEEN_NAMES)
-    .all<{
-      name: string;
-      accounts: number;
-      variants: number;
-      hits: number;
-      first_at: number;
-      last_at: number;
-    }>();
-
-  const nameTotal = await env.DB.prepare(
-    "SELECT COUNT(DISTINCT name) AS n FROM client_module_seen" +
-      " WHERE state IN ('warn', 'alert') AND last_at > ?",
-  )
-    .bind(since)
-    .first<{ n: number }>();
-
-  const seen = await env.DB.prepare(
-    "SELECT name, sha256, origin, state, label, trust, publisher, company, product," +
-      " description, size, mtime, MAX(rider_name) AS rider_name," +
-      " COUNT(DISTINCT account_id) AS accounts, SUM(hits) AS hits, MAX(last_at) AS last_at" +
-      " FROM client_module_seen" +
-      " WHERE state IN ('warn', 'alert') AND last_at > ?" +
-      " GROUP BY name, sha256 ORDER BY MAX(last_at) DESC LIMIT ?",
-  )
-    .bind(since, MAX_SEEN_VARIANTS)
-    .all<{
-      name: string;
-      sha256: string;
-      origin: string;
-      state: string;
-      label: string;
-      trust: string;
-      publisher: string;
-      company: string;
-      product: string;
-      description: string;
-      size: number;
-      mtime: number;
-      rider_name: string;
-      accounts: number;
-      hits: number;
-      last_at: number;
-    }>();
-
-  // Variants, indexed by the name they belong to.
-  const byName = new Map<string, SeenVariant[]>();
-  for (const r of seen.results ?? []) {
-    const variant: SeenVariant = {
-      name: r.name,
-      sha256: r.sha256,
-      origin: r.origin,
-      state: isState(r.state) ? r.state : "unknown",
-      label: r.label ?? "",
-      trust: isTrust(r.trust) ? r.trust : "unchecked",
-      publisher: r.publisher ?? "",
-      company: r.company ?? "",
-      product: r.product ?? "",
-      description: r.description ?? "",
-      size: r.size ?? 0,
-      mtime: r.mtime ?? 0,
-      riderName: r.rider_name ?? "",
-      accounts: r.accounts,
-      hits: r.hits,
-      lastAt: r.last_at,
-    };
-    const list = byName.get(variant.name);
-    if (list) list.push(variant);
-    else byName.set(variant.name, [variant]);
-  }
 
   const { rules, version } = await loadRules(env);
 
@@ -724,28 +581,6 @@ export async function collectAdminView(env: Env, days: number): Promise<AdminVie
             Math.max(stateRank(a.worstState), stateRank(a.state)) ||
           b.updatedAt - a.updatedAt,
       ),
-    seen: (names.results ?? []).map((g) => {
-      const variants = (byName.get(g.name) ?? []).sort(
-        (a, b) => stateRank(b.state) - stateRank(a.state) || b.lastAt - a.lastAt,
-      );
-      return {
-        name: g.name,
-        // Off the variants we actually have. A group whose detail was trimmed can only be
-        // as bad as what is in front of us, which is the honest answer rather than a guess.
-        state: variants.reduce<State>(
-          (worst, v) => (stateRank(v.state) > stateRank(worst) ? v.state : worst),
-          "unknown",
-        ),
-        label: variants.find((v) => v.label)?.label ?? "",
-        accounts: g.accounts,
-        hits: g.hits,
-        firstAt: g.first_at,
-        lastAt: g.last_at,
-        variantCount: g.variants,
-        variants,
-      };
-    }),
-    seenNamesTotal: nameTotal?.n ?? (names.results ?? []).length,
     rules,
     rulesVersion: version,
     reporting: (live.results ?? []).length,
@@ -753,7 +588,7 @@ export async function collectAdminView(env: Env, days: number): Promise<AdminVie
 }
 
 /** A stored JSON column read back. A row that will not parse is empty, never a 500. */
-function parseMatched(text: string): Matched[] {
+export function parseMatched(text: string): Matched[] {
   try {
     const value = JSON.parse(text);
     if (!Array.isArray(value)) return [];
