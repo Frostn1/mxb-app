@@ -103,6 +103,17 @@ pub struct PullOutcome {
     pub conflicted: usize,
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveOutcome {
+    /// Paints deleted.
+    pub removed: usize,
+    /// Paints left where they are because the bytes are no longer the ones we wrote.
+    pub kept_yours: usize,
+    /// Recorded paints whose file had already gone.
+    pub missing: usize,
+}
+
 /// Resolve a control-plane-supplied destination against the local mods folder.
 ///
 /// **This is the security boundary of the whole feature.** `rel_dest` is written by another
@@ -679,6 +690,100 @@ pub async fn pull(
     Ok(out)
 }
 
+/// How many paints the sync currently claims — what a removal would look at.
+pub fn installed_count(cfg: &AppConfig) -> usize {
+    Manifest::read(&crate::library::mods_root(&cfg.mods_path)).installed.len()
+}
+
+/// Delete the paints the sync installed, leaving everything else alone.
+///
+/// The counterpart to the switch that stops it: turning the sync off keeps a grid's worth of
+/// other people's liveries in the mods folder, and until now nothing could tell those from
+/// the player's own to take them out again. The manifest can, so this is the only safe way to
+/// do it — a file whose bytes have changed since we wrote it is the player's now and stays.
+pub fn remove_installed(cfg: &AppConfig) -> RemoveOutcome {
+    let mods_dir = crate::library::mods_root(&cfg.mods_path);
+    let mut manifest = Manifest::read(&mods_dir);
+    let mut out = RemoveOutcome::default();
+
+    for (rel_dest, sha) in std::mem::take(&mut manifest.installed) {
+        let Some(dest) = safe_dest(&mods_dir, &rel_dest) else {
+            // Nothing we can act on, so nothing worth remembering either.
+            out.missing += 1;
+            manifest.dirty = true;
+            continue;
+        };
+        // The manifest lowercases its keys, and on a case-sensitive filesystem that is not
+        // the name the file was written under. Windows doesn't care; Linux would leave every
+        // paint with a capital letter in its path behind.
+        let Some(dest) = dest.is_file().then_some(dest).or_else(|| resolve_ignoring_case(&mods_dir, &rel_dest))
+        else {
+            out.missing += 1;
+            manifest.dirty = true;
+            continue;
+        };
+        if sha256_file(&dest).ok().as_deref() != Some(sha.as_str()) {
+            out.kept_yours += 1;
+            // Keep the record: it is what a later pull reads to know this file is not ours.
+            manifest.installed.insert(rel_dest, sha);
+            continue;
+        }
+        match std::fs::remove_file(&dest) {
+            Ok(()) => {
+                out.removed += 1;
+                manifest.dirty = true;
+                prune_empty(&mods_dir, dest.parent());
+            }
+            Err(e) => {
+                log::warn!("[sync] couldn't remove {}: {e}", dest.display());
+                manifest.installed.insert(rel_dest, sha);
+            }
+        }
+    }
+
+    manifest.write(&mods_dir);
+    out
+}
+
+/// Find `rel_dest` under `mods_dir` when the recorded spelling only matches case-insensitively.
+///
+/// Every segment is checked against what is actually on disk, so this can only ever return a
+/// path inside `mods_dir` that already passed [`safe_dest`].
+fn resolve_ignoring_case(mods_dir: &Path, rel_dest: &str) -> Option<PathBuf> {
+    let mut cur = mods_dir.to_path_buf();
+    for segment in rel_dest.split('/') {
+        let direct = cur.join(segment);
+        if direct.exists() {
+            cur = direct;
+            continue;
+        }
+        let found = std::fs::read_dir(&cur).ok()?.flatten().find(|e| {
+            e.file_name().to_string_lossy().eq_ignore_ascii_case(segment)
+        })?;
+        cur = found.path();
+    }
+    cur.is_file().then_some(cur)
+}
+
+/// Drop the folders a removal emptied. Stops two levels below the mods root, so `mods/bikes`
+/// and its siblings stay even when the last thing in them was a synced paint.
+fn prune_empty(mods_dir: &Path, from: Option<&Path>) {
+    let mut cur = from.map(Path::to_path_buf);
+    while let Some(dir) = cur {
+        let Ok(rel) = dir.strip_prefix(mods_dir) else { return };
+        if rel.components().count() < 2 {
+            return;
+        }
+        if std::fs::read_dir(&dir).map(|mut rd| rd.next().is_some()).unwrap_or(true) {
+            return;
+        }
+        if std::fs::remove_dir(&dir).is_err() {
+            return;
+        }
+        cur = dir.parent().map(Path::to_path_buf);
+    }
+}
+
 /// Destinations more than one digest wants, lowercased for comparison.
 ///
 /// MX Bikes picks a remote rider's paint by the file name they chose, so two riders using
@@ -751,6 +856,11 @@ impl Manifest {
             return;
         }
         let path = mods_dir.join(MANIFEST_NAME);
+        // Nothing left to describe: the file itself is one of ours to clean up.
+        if self.installed.is_empty() {
+            let _ = std::fs::remove_file(&path);
+            return;
+        }
         let Ok(text) = serde_json::to_string_pretty(&self.installed) else { return };
         if let Err(e) = std::fs::write(&path, text) {
             // Not fatal: the paints are on disk and correct. The cost of losing this is
@@ -1034,6 +1144,83 @@ mod tests {
         let mut oversized = 0;
         paints_of(&plan, &mut sources, &mut oversized);
         assert_eq!(oversized, 1, "the outsized paint must be counted, not silently dropped");
+    }
+
+    /// A mods tree in a temp folder, with `paints` already written into it.
+    fn machine(name: &str, paints: &[(&str, &[u8])]) -> AppConfig {
+        let root = std::env::temp_dir().join(format!("mxb-rm-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mods_dir = root.join("mods");
+        let mut manifest = Manifest::default();
+        for (rel, bytes) in paints {
+            let dest = safe_dest(&mods_dir, rel).unwrap();
+            std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+            std::fs::write(&dest, bytes).unwrap();
+            manifest.claim(rel, &sha256_bytes(bytes));
+        }
+        manifest.write(&mods_dir);
+        AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() }
+    }
+
+    // What a player who turns the sync off is left with today: a grid's worth of other
+    // people's liveries and nothing that can tell them from their own.
+    #[test]
+    fn removing_takes_back_what_the_sync_installed() {
+        let cfg = machine(
+            "installed",
+            &[
+                ("bikes/KTM450/paints/Rider1.pnt", b"one"),
+                ("bikes/YZ250/paints/Rider2.pnt", b"two"),
+            ],
+        );
+        let mods_dir = crate::library::mods_root(&cfg.mods_path);
+        assert_eq!(installed_count(&cfg), 2);
+
+        let out = remove_installed(&cfg);
+        assert_eq!((out.removed, out.kept_yours, out.missing), (2, 0, 0));
+        assert!(!mods_dir.join("bikes/KTM450/paints/Rider1.pnt").exists());
+        assert!(!mods_dir.join("bikes/YZ250").exists(), "the emptied folders go too");
+        assert!(mods_dir.join("bikes").is_dir(), "but not the tree's own folders");
+        assert!(!mods_dir.join(MANIFEST_NAME).exists(), "nothing left to describe");
+        assert_eq!(installed_count(&cfg), 0);
+    }
+
+    #[test]
+    fn a_paint_the_player_has_edited_since_is_theirs_and_stays() {
+        let cfg = machine("edited", &[("bikes/KTM450/paints/Mine.pnt", b"as installed")]);
+        let mods_dir = crate::library::mods_root(&cfg.mods_path);
+        let dest = mods_dir.join("bikes/KTM450/paints/Mine.pnt");
+        std::fs::write(&dest, b"repainted by hand").unwrap();
+
+        let out = remove_installed(&cfg);
+        assert_eq!((out.removed, out.kept_yours), (0, 1));
+        assert!(dest.is_file(), "their work is not ours to delete");
+        // And the record survives, because it is what a later pull reads to leave it alone.
+        assert_eq!(installed_count(&cfg), 1);
+    }
+
+    #[test]
+    fn a_paint_that_is_already_gone_is_simply_forgotten() {
+        let cfg = machine("gone", &[("bikes/KTM450/paints/Deleted.pnt", b"one")]);
+        let mods_dir = crate::library::mods_root(&cfg.mods_path);
+        std::fs::remove_file(mods_dir.join("bikes/KTM450/paints/Deleted.pnt")).unwrap();
+
+        let out = remove_installed(&cfg);
+        assert_eq!((out.removed, out.missing), (0, 1));
+        assert_eq!(installed_count(&cfg), 0);
+    }
+
+    // The manifest lowercases its keys, so on Linux the recorded path is not the one on
+    // disk. Matching only exactly would leave every capitalised paint behind.
+    #[test]
+    fn a_destination_recorded_in_another_case_is_still_found() {
+        let cfg = machine("case", &[("Bikes/KTM450/Paints/Red.pnt", b"one")]);
+        let mods_dir = crate::library::mods_root(&cfg.mods_path);
+        assert!(resolve_ignoring_case(&mods_dir, "bikes/ktm450/paints/red.pnt").is_some());
+
+        let out = remove_installed(&cfg);
+        assert_eq!((out.removed, out.missing), (1, 0));
+        assert!(!mods_dir.join("Bikes/KTM450/Paints/Red.pnt").exists());
     }
 
     #[test]

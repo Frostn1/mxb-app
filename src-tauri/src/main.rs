@@ -6451,6 +6451,9 @@ fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
         // Whether there is a profile to publish at all. A rider name that matches no profile
         // on disk publishes nothing, silently, and that is worth saying out loud.
         "profile": sync_profile(&cfg),
+        // Other people's paints currently sitting in the mods folder. The sync writes them
+        // and, until it was given something to press, nothing ever took them out again.
+        "syncedPaints": paintsync::installed_count(&cfg),
     })
 }
 
@@ -7848,6 +7851,24 @@ fn set_paint_sync_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), St
         publish_paints_soon(&app, &cfg, None);
     }
     Ok(())
+}
+
+/// Take back the paints the sync installed.
+///
+/// Turning the sync off deliberately leaves them: they are files the player now has, and a
+/// switch that wipes a grid's worth of liveries is a worse surprise than one that doesn't.
+/// This is the other half of that — the way to actually get the folder back — and it only
+/// touches what the manifest says we wrote and nobody has edited since.
+#[tauri::command]
+fn remove_synced_paints(app: tauri::AppHandle) -> Result<paintsync::RemoveOutcome, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let out = paintsync::remove_installed(&cfg);
+    // A running game is holding paints that are no longer there; a rescan is what makes it
+    // fall back to the default liveries rather than keep drawing them.
+    if out.removed > 0 {
+        let _ = frostmod::signal_reload();
+    }
+    Ok(out)
 }
 
 /// Pick the tyre pack the 3D previews fit. A blank name means "whatever the bike names".
@@ -9891,6 +9912,7 @@ fn main() {
             voice_mute,
             set_voice_enabled,
             set_paint_sync_enabled,
+            remove_synced_paints,
             set_preview_tyres,
             set_voice_input_device,
             set_voice_output_device,

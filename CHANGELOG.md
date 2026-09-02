@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-01
+
+### Added
+- Settings shows how many paints other riders' syncs have put in your mods folder, with a
+  button that takes them back out. Paints you have edited since are kept.
+
 ## 2026-09-01 — v0.13.4 — Ground under the track
 
 ### Added
