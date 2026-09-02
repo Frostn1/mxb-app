@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   Attachment,
+  ModsDehydrated,
   BikeModels,
   BikeSounds,
   DropCommitItem,
@@ -2483,6 +2484,16 @@ export function voiceMute(peerId: string, muted: boolean): Promise<void> {
 /** Fires whenever the room changes — someone joined, left, started or stopped talking. */
 export function onVoiceStatus(cb: (status: VoiceStatus) => void): Promise<UnlistenFn> {
   return listen<VoiceStatus>("voice-status", (e) => cb(e.payload));
+}
+
+/**
+ * Fires at the start of each game session when the mods tree is on a cloud sync tool —
+ * either with bytes actually evicted, or merely sitting behind the sync driver.
+ */
+export function onModsDehydrated(
+  cb: (info: ModsDehydrated) => void,
+): Promise<UnlistenFn> {
+  return listen<ModsDehydrated>("mods-dehydrated", (e) => cb(e.payload));
 }
 
 /** Toggle watching the mods folder to reload the game on external changes. */

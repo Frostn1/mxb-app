@@ -344,6 +344,16 @@ export const de: Translation = {
   "runtime.fixIt": "Installieren",
   "runtime.installing": "Wird installiert…",
   "runtime.dismiss": "Hinweis ausblenden",
+  "cloud.genericProvider":
+    "ein Cloud-Sync-Dienst",
+  "cloud.evictedBody":
+    "Einige Mods liegen nicht wirklich auf diesem PC — {{what}} hat sie in die Cloud verschoben.",
+  "cloud.evictedPitch":
+    "Das Spiel liest sie beim Laden und kann dabei abstürzen. Verschiebe den Mods-Ordner heraus oder wähle „Immer auf diesem Gerät behalten“.",
+  "cloud.slowBody":
+    "Dein Mods-Ordner liegt in {{what}}.",
+  "cloud.slowPitch":
+    "Das Spiel liest beim Laden jede Mod, und Zugriffe über {{what}} sind langsam — bei einer großen Sammlung wirkt das wie ein eingefrorenes Spiel. Den Ordner herauszuschieben behebt es.",
   "runtime.installed": "Komponente installiert",
   "runtime.installedDesc":
     "FrostMod sollte das Spiel jetzt erreichen. Starte MX Bikes neu, falls es schon läuft.",

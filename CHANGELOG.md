@@ -8,7 +8,10 @@
 - Locked content is now something you switch on in Settings, and only applies to games started
   with Play.
 - A FrostMod plugin installed into the game's own folder is kept up to date with the FrostMod
-  the app manages, instead of staying on whatever version it was installed at.
+  the app manages, instead of staying on whatever version it was installed at. One that can't
+  be updated is renamed so the game stops loading it, and can be renamed back.
+- A warning when your mods folder is inside OneDrive or another sync tool, which is what makes
+  the game sit on a black screen while it loads.
 - Auto-reload waits for the game to finish loading when the mods folder is on OneDrive or
   another sync tool, so a folder change during startup no longer leaves the game on a black
   screen.

@@ -77,9 +77,16 @@ pub enum PluginCopy {
     Current,
     /// Was stale and has been brought up to date.
     Refreshed,
-    /// Stale, and the game (or something else) is holding it open. It will be refreshed
-    /// on the next poll after the game closes.
+    /// Was stale, couldn't be updated, and has been renamed so the game stops loading it.
+    /// Nothing is destroyed — see [`disable_game_plugin`].
+    Disabled,
+    /// Stale, couldn't be updated, and couldn't be moved aside either. The game is still
+    /// loading it; another poll will try again.
     Locked,
+    /// A plugin is installed but the app doesn't manage a FrostMod to judge it against, so
+    /// there is nothing to compare and nothing to copy from. Left strictly alone: it may be
+    /// perfectly current, and it isn't ours to touch on a machine we aren't managing.
+    Unmanaged,
 }
 
 /// The folder we install FrostMod into and run it from — so also where anything it
@@ -320,10 +327,14 @@ fn game_plugin_path(game_dir: &Path) -> PathBuf {
 /// every status poll: a copy we made is the same size and newer, and that pair converges.
 fn refresh_game_plugin(dir: &Path, game_dir: &Path) -> PluginCopy {
     let dlo = game_plugin_path(game_dir);
-    let (Ok(dlo_meta), Ok(dll_meta)) = (std::fs::metadata(&dlo), std::fs::metadata(dir.join("frostmod.dll")))
-    else {
-        // No plugin installed (the normal case), or no managed DLL to refresh it from.
-        return PluginCopy::Absent;
+    let Ok(dlo_meta) = std::fs::metadata(&dlo) else {
+        return PluginCopy::Absent; // no plugin installed — the normal case
+    };
+    let Ok(dll_meta) = std::fs::metadata(dir.join("frostmod.dll")) else {
+        // A plugin we have no way to judge: nothing to compare against and nothing to copy
+        // from. Leaving it is the only honest move — it may well be current, and a machine
+        // whose FrostMod we don't manage isn't one to start renaming files on.
+        return PluginCopy::Unmanaged;
     };
     let fresh = dlo_meta.len() == dll_meta.len()
         && match (dlo_meta.modified(), dll_meta.modified()) {
@@ -340,7 +351,7 @@ fn refresh_game_plugin(dir: &Path, game_dir: &Path) -> PluginCopy {
     // Windows won't open a mapped image for writing, but it will let it be renamed away.
     let staged = dlo.with_extension("dlo.staging");
     if std::fs::copy(dir.join("frostmod.dll"), &staged).is_err() {
-        return PluginCopy::Locked;
+        return disable_game_plugin(&dlo);
     }
     match swap_in(&dlo, &staged) {
         Ok(retired) => {
@@ -357,6 +368,50 @@ fn refresh_game_plugin(dir: &Path, game_dir: &Path) -> PluginCopy {
         Err(e) => {
             let _ = std::fs::remove_file(&staged);
             log::warn!("[frostmod] couldn't refresh {}: {e}", dlo.display());
+            disable_game_plugin(&dlo)
+        }
+    }
+}
+
+/// Move a stale plugin out of the way, when it can't be brought up to date.
+///
+/// A stale plugin is not a neutral thing to leave lying there: the game loads it at startup
+/// on its own, and a stale enough one hangs the game before the loading screen — which is a
+/// rider who cannot play at all, with nothing on screen to say why. So if we can't fix it,
+/// we stop it loading.
+///
+/// Renamed, never deleted. Two reasons: the app didn't install this file, so destroying it
+/// isn't ours to do; and a rename works even while MX Bikes has the plugin mapped (the
+/// loader opens images with `FILE_SHARE_DELETE`), so the fix lands on the *next* launch
+/// without waiting for the player to close the game. The new name deliberately does not end
+/// in `.dlo` — anything that does, in this folder, gets loaded as a plugin.
+fn disable_game_plugin(dlo: &Path) -> PluginCopy {
+    // A rider who has been through this twice shouldn't have the first parked copy silently
+    // replaced by the second — on Windows the rename would simply fail, and on Unix it would
+    // overwrite. Number them instead.
+    let first = dlo.with_extension("dlo.disabled");
+    let parked = if first.exists() {
+        (1..)
+            .map(|n| dlo.with_extension(format!("dlo.disabled-{n}")))
+            .find(|p| !p.exists())
+            .expect("the range is unbounded")
+    } else {
+        first
+    };
+    match rename_with_retry(dlo, &parked) {
+        Ok(()) => {
+            log::warn!(
+                "[frostmod] the plugin at {} is older than the FrostMod we manage and couldn't \
+                 be updated, so it has been renamed to {} — the game loads a plugin at startup \
+                 whether or not frostmod.exe is running, and a stale one can stop it opening. \
+                 Rename it back to re-enable plugin mode.",
+                dlo.display(),
+                parked.display()
+            );
+            PluginCopy::Disabled
+        }
+        Err(e) => {
+            log::warn!("[frostmod] couldn't move {} aside: {e}", dlo.display());
             PluginCopy::Locked
         }
     }
@@ -1455,13 +1510,52 @@ mod plugin_copy_tests {
         assert_eq!(refresh_game_plugin(&managed, &game), PluginCopy::Current);
     }
 
-    /// Nothing to copy from is not a reason to touch the game folder.
+    /// Nothing to compare against and nothing to copy from is not a licence to start
+    /// renaming files in somebody's game folder.
     #[test]
     fn no_managed_dll_leaves_the_plugin_untouched() {
         let (managed, game) = dirs("nodll");
         std::fs::write(game_plugin_path(&game), b"v0.12").unwrap();
 
-        assert_eq!(refresh_game_plugin(&managed, &game), PluginCopy::Absent);
+        assert_eq!(refresh_game_plugin(&managed, &game), PluginCopy::Unmanaged);
         assert_eq!(std::fs::read(game_plugin_path(&game)).unwrap(), b"v0.12");
+    }
+
+    /// The force: a stale plugin that can't be updated stops loading rather than being left
+    /// to hang the game. Renamed, not deleted — and to a name that isn't `.dlo`, or the game
+    /// would just load it again.
+    #[test]
+    fn a_stale_plugin_that_cannot_be_updated_is_moved_aside() {
+        let (managed, game) = dirs("disable");
+        let dlo = game_plugin_path(&game);
+        std::fs::write(&dlo, b"v0.12").unwrap();
+
+        let parked = disable_game_plugin(&dlo);
+
+        assert_eq!(parked, PluginCopy::Disabled);
+        assert!(!dlo.exists(), "the game must stop loading it");
+        let kept = dlo.with_extension("dlo.disabled");
+        assert_eq!(std::fs::read(&kept).unwrap(), b"v0.12", "nothing is destroyed");
+        assert_ne!(
+            kept.extension().and_then(|e| e.to_str()),
+            Some("dlo"),
+            "a parked copy still ending in .dlo would be loaded as a plugin"
+        );
+    }
+
+    /// Twice through the same fix must not overwrite the first parked copy.
+    #[test]
+    fn a_second_disable_does_not_clobber_the_first() {
+        let (managed, game) = dirs("disable-twice");
+        let dlo = game_plugin_path(&game);
+
+        std::fs::write(&dlo, b"first").unwrap();
+        assert_eq!(disable_game_plugin(&dlo), PluginCopy::Disabled);
+        std::fs::write(&dlo, b"second").unwrap();
+        assert_eq!(disable_game_plugin(&dlo), PluginCopy::Disabled);
+
+        assert_eq!(std::fs::read(dlo.with_extension("dlo.disabled")).unwrap(), b"first");
+        assert_eq!(std::fs::read(dlo.with_extension("dlo.disabled-1")).unwrap(), b"second");
+        let _ = managed;
     }
 }

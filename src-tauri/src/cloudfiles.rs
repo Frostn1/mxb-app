@@ -59,20 +59,39 @@ pub fn warn_if_dehydrated(app: &AppHandle, cfg: &crate::config::AppConfig) {
     let app = app.clone();
     std::thread::spawn(move || {
         let found = scan(&root);
-        if found.count == 0 {
+        // Two separate problems, and the second used to go unmentioned.
+        //
+        // Evicted bytes are the crash. But a tree that merely *sits* on a sync provider is
+        // slow to read even fully hydrated — every read goes through the filter driver — and
+        // the game reads the whole tree during the load screen. One player's took 5–6 seconds
+        // per track folder, which is a game that never reaches the loading screen at all. That
+        // is worth saying before it happens, not only when bytes have actually gone.
+        if found.count == 0 && found.provider.is_none() {
             return;
         }
         let provider = found.provider.clone().unwrap_or_else(|| "a cloud sync tool".into());
-        log::warn!(
-            "[cloud] {} of {} mod file(s) under {} are placeholders, not real files — {provider} \
-             has evicted them. The game reads these during the load screen and can crash there \
-             (in-page error). Fix: right-click the folder in Explorer and choose \
-             \"Always keep on this device\", or move the folder out of {provider}. Examples: {}",
-            found.count,
-            found.scanned,
-            root.display(),
-            found.examples.join(", ")
-        );
+        if found.count > 0 {
+            log::warn!(
+                "[cloud] {} of {} mod file(s) under {} are placeholders, not real files — \
+                 {provider} has evicted them. The game reads these during the load screen and \
+                 can crash there (in-page error). Fix: right-click the folder in Explorer and \
+                 choose \"Always keep on this device\", or move the folder out of {provider}. \
+                 Examples: {}",
+                found.count,
+                found.scanned,
+                root.display(),
+                found.examples.join(", ")
+            );
+        } else {
+            log::warn!(
+                "[cloud] the mods folder is inside {provider} ({}). Every read there goes \
+                 through {provider}'s filter driver, and the game reads the whole tree during \
+                 the load screen — slow enough, on a big collection, to look like the game has \
+                 hung. Nothing is evicted right now, so this is a warning, not a fault. Fix: \
+                 move the folder out of {provider}.",
+                root.display()
+            );
+        }
         let _ = app.emit(EVENT, &found);
     });
 }

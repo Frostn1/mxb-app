@@ -1137,6 +1137,26 @@ export interface FrostmodStatus {
   gamePlugin: PluginCopy;
 }
 
+/**
+ * The mods tree's standing with a cloud sync tool, as reported by the `mods-dehydrated`
+ * event at the start of every game session. Matches `cloudfiles::Dehydrated`.
+ *
+ * Two different problems arrive on this one event. `count > 0` means bytes have actually
+ * been evicted — the game can crash reading them off the load screen. `count === 0` with a
+ * `provider` set means nothing is missing but the tree still sits behind a sync driver, and
+ * the game's whole-tree read during loading is slow enough to look like a hang.
+ */
+export interface ModsDehydrated {
+  /** Content files that are placeholders rather than real bytes. */
+  count: number;
+  /** How many were looked at, so `count` has a denominator. */
+  scanned: number;
+  /** A few names, to make the warning concrete. */
+  examples: string[];
+  /** The sync tool the tree sits under, e.g. `"OneDrive"`. Null if it doesn't sit under one. */
+  provider: string | null;
+}
+
 /** State of a FrostMod plugin copy in the game's `plugins` folder. Matches `PluginCopy`. */
 export type PluginCopy = "absent" | "current" | "refreshed" | "locked";
 
