@@ -1,16 +1,12 @@
 # Changelog
 
-## 2026-09-01
-
-### Added
-- Settings shows how many paints other riders' syncs have put in your mods folder, with a
-  button that takes them back out. Paints you have edited since are kept.
-
 ## 2026-09-01 — v0.13.4 — Ground under the track
 
 ### Added
 - Generated tracks carry their ground. An installed track has graphics instead of a black
   surface, and no longer needs TerrainEd to be rideable.
+- Settings shows how many paints other riders' syncs have put in your mods folder, with a
+  button that takes them back out. Paints you have edited since are kept.
 - The diagnostics dashboard searches: riders by name, GUID, Steam id or account id; files by
   name, hash, signer, or anything the file claims about itself.
 - Every rider has a page — their identity, last report, the servers they have been seen on,
