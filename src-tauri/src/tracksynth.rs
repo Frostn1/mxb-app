@@ -105,6 +105,7 @@ const WIDTH_WANDER: f32 = 0.14;
 /// Metres of lap between one pinch and the next.
 const WIDTH_WAVELENGTH_M: f32 = 70.0;
 
+
 /// Corner radius at which ruts start to form, and the one where they are at full depth.
 /// Everyone takes the same line through a tight corner, and that is what digs a rut.
 /// Forty metres because that is where the measurement changes: below it a corner's grooves
@@ -2175,18 +2176,37 @@ fn rdf(prog: &TrackProgram) -> String {
     }
     s.push_str("}\n");
 
-    // One row of gates across the track, which is what a motocross start is.
-    let grid = 24;
+    // One row of gates across the start, which is what a motocross start is.
+    //
+    // Forty of them, at 1.2 m apart, because that is what every modern track ships: Indiana,
+    // Millville, Washougal, Maryland and the GP tracks all say 40, and their lane widths run
+    // 1.1 to 1.3. Twenty-four at 1.5 was a guess.
+    //
+    // The row is far wider than the riding line — 48 m against 14 — and that is correct. A
+    // start straight is a wide fan that funnels into the track; the published tracks measure
+    // 13 to 15 m at the finish line and still put a 45 to 53 m gate row on the start.
+    //
+    // What was wrong is where the row was anchored. `posx`/`posz` is one *end* of it, not the
+    // middle, so anchoring at the centreline laid all forty gates out to one side and left
+    // every one of them off the track. The anchor now sits half a row-width to the side so
+    // the gates come out centred on the line.
+    let grid = 40;
+    let lane = 1.2f32;
+    let span = grid as f32 * lane;
+    let (rx, rz) = crate::trackprog::right_vector(prog.start.angle.to_radians());
+    let anchor_x = prog.start.x + rx * span * 0.5;
+    let anchor_z = prog.start.z + rz * span * 0.5;
     s.push_str(&format!(
-        "starting_grid\n{{\n\tnumstalls = {grid}\n\ttype = 1\n\tposx = {:.6}\n\
-         \tposz = {:.6}\n\tangle = {:.6}\n\tnumstallsperrow = {grid}\n\
+        "starting_grid\n{{\n\tnumstalls = {grid}\n\ttype = 1\n\tposx = {anchor_x:.6}\n\
+         \tposz = {anchor_z:.6}\n\tangle = {:.6}\n\tnumstallsperrow = {grid}\n\
          \tdistfromstartline = 0.000000\n\tlanespacing = 0.000000\n\trowspacing = 0.000000\n\
-         \tdifflat = 0.000000\n\tlanewidth = 1.500000\n\tlatshift = 0.000000\n\tside = 1\n",
-        prog.start.x, prog.start.z, prog.start.angle
+         \tdifflat = 0.000000\n\tlanewidth = {:.6}\n\tlatshift = 0.000000\n\tside = 1\n",
+        prog.start.angle, -lane
     ));
     for i in 0..grid {
-        // Spread across the track and a little beyond it: a gate is wider than the line.
-        let lat = -half * 1.4 + (i as f32 + 0.5) * (half * 2.8 / grid as f32);
+        // Spread across the whole row, so a stall's own position agrees with the row the
+        // gate is drawn on.
+        let lat = -span * 0.5 + (i as f32 + 0.5) * lane;
         s.push_str(&format!(
             "\tstall{i}\n\t{{\n\t\tlong = {gate_at:.6}\n\t\tlat = {lat:.6}\n\
              \t\tangle = 0.000000\n\t}}\n"

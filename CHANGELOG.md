@@ -2,6 +2,12 @@
 
 ## 2026-09-01
 
+### Fixed
+- The starting gates sit across the track instead of off to one side of it, and there are
+  forty of them at the spacing every published track uses.
+
+## 2026-09-01
+
 ### Changed
 - The map-loader tracer stops where it can no longer be sure, instead of guessing past it.
 
