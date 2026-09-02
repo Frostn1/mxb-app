@@ -2,6 +2,12 @@
 
 ## 2026-09-01
 
+### Added
+- Generated tracks carry their ground again, so an installed track has graphics instead of a
+  black surface — and no longer needs TerrainEd to be rideable.
+
+## 2026-09-01
+
 ### Fixed
 - The map-loader tracer reads a whole track graphics file instead of stopping a fraction in.
 
