@@ -2300,6 +2300,15 @@ const MAP_QUADS: usize = 256;
 ///   f32 1.0
 /// 32 bytes    zero: the vegetation and detail lists, all empty
 /// ```
+/// What the game keys its texture cache on: the MD5 of a sheet's pixels, before deflating.
+///
+/// Measured on every sheet of PiBoSo's drag strip -- and it is content-addressed, so two
+/// layers sharing a texture share a hash.
+fn sheet_hash(rgba: &[u8]) -> [u8; 16] {
+    use md5::Digest;
+    md5::Md5::digest(rgba).into()
+}
+
 /// A tangent-space normal map derived from a ground sheet's own luma.
 ///
 /// Every terrain layer on a published map carries one of these beside its colour sheet. The
@@ -2402,9 +2411,11 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
         out.extend_from_slice(&u(0));
         out.extend_from_slice(&u(dim as u32));
         out.extend_from_slice(&u(dim as u32));
-        out.extend_from_slice(&[0u8; 16]);
-        out.extend_from_slice(&u(0));
         let rgba = ground_pixels(dim, look, seed ^ salt);
+        // The game keys its texture cache on this, and it is the MD5 of the pixels before
+        // they are deflated. Leave it zero and every sheet in the file is the same texture.
+        out.extend_from_slice(&sheet_hash(&rgba));
+        out.extend_from_slice(&u(0));
         let px = deflate_raw(&rgba);
         out.extend_from_slice(&u(px.len() as u32 + 8));
         out.extend_from_slice(&[0u8; 8]);
@@ -2424,9 +2435,10 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
         out.extend_from_slice(&nrec);
         out.extend_from_slice(&u(dim as u32));
         out.extend_from_slice(&u(dim as u32));
-        out.extend_from_slice(&[0u8; 16]);
+        let nrgba = normal_pixels(&rgba, dim, NORMAL_STRENGTH);
+        out.extend_from_slice(&sheet_hash(&nrgba));
         out.extend_from_slice(&u(0));
-        let np = deflate_raw(&normal_pixels(&rgba, dim, NORMAL_STRENGTH));
+        let np = deflate_raw(&nrgba);
         out.extend_from_slice(&u(np.len() as u32 + 8));
         out.extend_from_slice(&[0u8; 8]);
         out.extend_from_slice(&np);
@@ -4688,6 +4700,7 @@ mod map_layer_records {
         let layers = u32_at(&m, o) as usize;
         o += 4;
         assert!(layers > 0, "a map with no layers has no ground");
+        let mut hashes = std::collections::HashSet::new();
 
         for i in 0..layers {
             let mat: Vec<f32> = (0..14).map(|w| f32_at(&m, o + w * 4)).collect();
@@ -4699,8 +4712,18 @@ mod map_layer_records {
             assert_eq!(u32_at(&m, o), 1, "layer {i} sheet count");
             o += 4 + 100 + 4;
             let (w, h) = (u32_at(&m, o) as usize, u32_at(&m, o + 4) as usize);
-            o += 8 + 16 + 4;
+            o += 8;
+            let dhash: [u8; 16] = m[o..o + 16].try_into().unwrap();
+            o += 16 + 4;
             let plen = u32_at(&m, o) as usize;
+            // The cache key must be the MD5 of the pixels this record carries; zeros, or a
+            // hash shared with another sheet, make the game treat them as one texture.
+            assert_eq!(
+                dhash,
+                sheet_hash(&inflate(&m[o + 12..o + 4 + plen])),
+                "layer {i} colour sheet hash"
+            );
+            assert!(hashes.insert(dhash), "layer {i} colour sheet hash is not unique");
             o += 4 + plen;
             // One normal map per layer, in the record shape a published map uses.
             assert_eq!(u32_at(&m, o), 1, "layer {i} secondary count");
@@ -4713,8 +4736,16 @@ mod map_layer_records {
             o += 16 + 100;
             let (nw, nh) = (u32_at(&m, o) as usize, u32_at(&m, o + 4) as usize);
             assert_eq!((nw, nh), (w, h), "layer {i} normal map matches its colour sheet");
-            o += 8 + 16 + 4;
+            o += 8;
+            let nhash: [u8; 16] = m[o..o + 16].try_into().unwrap();
+            o += 16 + 4;
             let nlen = u32_at(&m, o) as usize;
+            assert_eq!(
+                nhash,
+                sheet_hash(&inflate(&m[o + 12..o + 4 + nlen])),
+                "layer {i} normal map hash"
+            );
+            assert!(hashes.insert(nhash), "layer {i} normal map hash is not unique");
             o += 4 + nlen;
             o += 8;
             let masked = u32_at(&m, o);
@@ -4752,5 +4783,6 @@ mod map_layer_records {
         assert_eq!(m.len() - o, 32, "the vegetation and detail lists close the file");
     }
 }
+
 
 
