@@ -6995,10 +6995,29 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
 /// `None` when FrostMod isn't running, the game isn't up, or the rider is in the menus, in a
 /// replay, or testing alone — none of which is a grid to sync with.
 fn live_server_key() -> Option<String> {
+    Some(live_presence()?.key)
+}
+
+/// The same, with what the running game can say about the place.
+///
+/// The key alone scopes a roster; the name, the track and the head count are what the server
+/// browser is built out of. They ride along with the roster read that already reports the
+/// key, so a rider in a session puts their server on everyone else's list for free.
+fn live_presence() -> Option<paintsync::Presence> {
     let session = live_session()?;
-    session
-        .on_a_server()
-        .then(|| voice::session::room_key(&session.server_name))
+    if !session.on_a_server() {
+        return None;
+    }
+    let some = |s: &str| {
+        let s = s.trim();
+        (!s.is_empty()).then(|| s.to_string())
+    };
+    Some(paintsync::Presence {
+        key: voice::session::room_key(&session.server_name),
+        server_name: some(&session.server_name),
+        track: some(&session.track_id),
+        riders: Some(session.riders.len()),
+    })
 }
 
 /// The session FrostMod is publishing, if any.
@@ -7128,8 +7147,8 @@ async fn pull_rosters(
     // Only the server the rider is actually on. Reporting presence for every key used to
     // happen here, which on a registry sweep meant claiming to be on every server at once:
     // untrue, and one write per server for the privilege.
-    let here = live_server_key();
-    let outcome = paintsync::pull(&cfg, &token, &keys, here.as_deref())
+    let here = live_presence();
+    let outcome = paintsync::pull(&cfg, &token, &keys, here.as_ref())
         .await
         .map_err(|e| format!("{e:#}"))?;
     // Re-read immediately before writing: the pull took a round trip, and `config::save`
@@ -7186,6 +7205,24 @@ async fn cp_servers(app: tauri::AppHandle) -> Result<Vec<paintsync::RegisteredSe
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     let token = Some(cfg.cp_token.as_str()).filter(|t| !t.trim().is_empty());
     paintsync::registry(token).await.map_err(|e| format!("{e:#}"))
+}
+
+/// Everywhere there is to ride, for the server browser.
+///
+/// The registry, plus every server riders running the app are on right now — their names,
+/// what they are riding and how many of them there are. The second half is the one the app
+/// could never show before: MX Bikes' own list comes from PiBoSo's master server over a
+/// protocol we cannot speak, so the only servers the app could name were the handful
+/// somebody had registered. Every app in a session already reports where it is, so counting
+/// those reports is a live list built out of what the people on it can see.
+///
+/// Works without an account, like the registry it extends: "where can I go" is the question
+/// of somebody who has never enrolled.
+#[tauri::command]
+async fn cp_browse(app: tauri::AppHandle) -> Result<Vec<paintsync::BrowseServer>, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let token = Some(cfg.cp_token.as_str()).filter(|t| !t.trim().is_empty());
+    paintsync::browse(token).await.map_err(|e| format!("{e:#}"))
 }
 
 /// The dedicated servers this player administers.
@@ -9958,6 +9995,7 @@ fn main() {
             list_servers,
             save_servers,
             cp_servers,
+            cp_browse,
             server_status,
             server_tracks,
             server_probe,

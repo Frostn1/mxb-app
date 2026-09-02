@@ -80,6 +80,14 @@ Each of these is a tab in the app.
     TerrainEd.
   - **Protect** locks files you made to the GUIDs allowed to load them, a folder
     per buyer. Official builds only — see [Optional modules](#optional-modules).
+- **Servers** — where people are riding right now. MX Bikes' own list comes from
+  PiBoSo's master server over a protocol the app can't speak, so this is built the
+  other way round: every copy of the app in a session already reports the server it
+  is on — by the name FrostMod reads out of the running game — and counting those
+  reports is a live list. A registered server carries an address, so Join starts the
+  game straight into it; the rest name where the riders are, and you pick them from
+  the game's own list. Joining by an address somebody gave you still works, as it
+  always has.
 - **Race mode** — MX Bikes loads every mod in the folder at startup, so a preset
   names the track it races on and everything else steps aside into a holding
   folder until you bring it back.
@@ -286,9 +294,10 @@ Features coming next:
   the Studio says so plainly rather than showing an empty stage.
 - **Your in-game track list, through FrostMod** (which already handles the live
   reload) — to one-click-install the tracks you're missing.
-- **A server browser.** Joining by address works today; reading the game's own
-  list is what's missing, and an empty list behind a button is worse than no
-  button.
+- **An address for every server on the browser.** The Servers tab names the servers
+  riders are on and counts who is there, but one nobody registered has no address to
+  launch at, so it still has to be picked from the game's own list. Reading MX Bikes'
+  own list — PiBoSo's master server — is what would close that.
 - **Hosting a server from the app.** Built once and taken back out — creating and
   running a dedicated server needs an account on the control plane, and opening
   that up is the remaining work.

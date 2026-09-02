@@ -299,6 +299,42 @@ export function isServerKey(value: unknown): value is string {
   return !/[\u0000-\u001f\u007f]/.test(key);
 }
 
+/**
+ * Something the app read out of the running game and wants shown: the server's own name for
+ * itself, or the track it is on.
+ *
+ * Never a key and never a path — the browser prints it and nothing else — so the only jobs
+ * here are a bound and no control characters. 96 is comfortably past the 64 and 104 byte
+ * fields FrostMod publishes them in.
+ */
+export function isReportedLabel(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const label = value.trim();
+  if (label.length === 0 || label.length > 96) return false;
+  return !/[\u0000-\u001f\u007f]/.test(label);
+}
+
+/** How many riders the reporter can see on the grid. MX Bikes seats 64. */
+export function isRiderCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 64;
+}
+
+/**
+ * Does this server key name an address rather than a server?
+ *
+ * A key is `room_key(server_name)` for a rider in a session and a normalized `host:port` for
+ * one whose app reported before the game was on a grid. The second kind is somebody's
+ * address — a private league's, as often as not — and the browser is a public list, so it
+ * is dropped there rather than published. Nothing is lost by it: once the rider is actually
+ * on the server their own app re-keys them under its name.
+ */
+export function isAddressKey(value: string): boolean {
+  // The exact shape `parse_server_address` normalizes to: an IPv4 literal or a hostname,
+  // then a port. A server *named* something like `mxb-central:2025` would be read as one
+  // and left out of the browser, which costs a row nobody can join anyway.
+  return /^[a-z0-9.-]+:\d{1,5}$/i.test(value.trim());
+}
+
 
 /**
  * How long a presence heartbeat counts for before the rider is treated as gone.

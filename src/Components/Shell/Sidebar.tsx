@@ -20,11 +20,11 @@ import {
   Palette,
   PersonStanding,
   Puzzle,
+  Server,
   Shield,
   Lock,
   PanelLeftClose,
   PanelLeftOpen,
-  Plug,
   Download as DownloadIcon,
   ChevronDown,
 } from "lucide-react";
@@ -35,7 +35,6 @@ import { useDownloads } from "../../Context/Downloads";
 import { useT, type TFunc, type TKey } from "../../i18n/context";
 import {
   experimentalState,
-  cpServers,
   launchGame,
   onSyncEvent,
   type ExperimentalState,
@@ -47,7 +46,6 @@ import type { GameCaps } from "../../types";
 import { ATTACH_PROBLEM } from "../../types";
 import { contentLockAvailable, contentSecureAvailable } from "../../api/mods";
 import type { StudioTab } from "../Studio/Studio";
-import JoinServerDialog from "./JoinServerDialog";
 import DownloadQueue from "./DownloadQueue";
 
 /**
@@ -66,6 +64,7 @@ export type DashboardView =
   | "presets"
   | "studio"
   | "manage"
+  | "servers"
   | "secure"
   | "settings";
 
@@ -142,6 +141,10 @@ const NAV: NavEntry[] = [
       { id: "studio", label: "nav.protect", icon: Shield, studio: "protect", needsLock: true },
     ],
   },
+  // Where everyone is riding, and the way onto a server. Gated on the same capability the
+  // Join button always was: both the argv offset the connect flag is written at and the
+  // default port it assumes are MX Bikes', so it waits until GP's are confirmed.
+  { id: "servers", label: "nav.servers", icon: Server, cap: "joinByAddress" },
   { id: "manage", label: "nav.manage", icon: SlidersHorizontal, cap: "manage" },
   { id: "secure", label: "nav.secure", icon: Lock, needsSecure: true },
 ];
@@ -317,7 +320,6 @@ export default function Sidebar({ view, studioTab, plugins, onNavigate }: Sideba
       return next;
     });
   }, []);
-  const [joinOpen, setJoinOpen] = useState(false);
   // Re-read on navigation rather than subscribing: paint sync can be switched off in
   // Settings, and leaving that page is exactly when this line needs to reflect it.
   const [sync, setSync] = useState<ExperimentalState | null>(null);
@@ -327,19 +329,6 @@ export default function Sidebar({ view, studioTab, plugins, onNavigate }: Sideba
     experimentalState().then(setSync).catch(() => {});
   }, []);
   useEffect(readExperimental, [readExperimental, view]);
-
-  // Whether there is anywhere to join. The dialog can only offer servers the control plane
-  // knows about, and the real list — the one the game's own browser shows — comes from
-  // PiBoSo's master server, which we cannot read yet (see `tasks/mxb-server-browser.md`).
-  // A button that opens onto an empty list and an IP box is worse than no button, so it
-  // waits until there is something behind it. When the public browser lands, this gate is
-  // what brings the button back on its own.
-  const [joinable, setJoinable] = useState(false);
-  useEffect(() => {
-    cpServers()
-      .then((list) => setJoinable(list.length > 0))
-      .catch(() => setJoinable(false));
-  }, [view]);
 
   // Follow the background work as it happens, and re-read the record it leaves behind.
   useEffect(() => {
@@ -540,36 +529,6 @@ export default function Sidebar({ view, studioTab, plugins, onNavigate }: Sideba
             </span>
           )}
         </button>
-
-        {/* Join-by-address launches the game with `-directconnect`. Joining a server is not
-            hosting one, so it is not hidden with the server-creation surface — but it only
-            appears when there is a real list to show. Capability-gated too: both the argv
-            parser offset it was found at and the default port it assumes are MX Bikes', so
-            it waits until GP's are confirmed. */}
-        {!collapsed && joinable && caps.joinByAddress && (
-        <>
-        <button
-          onClick={() => setJoinOpen(true)}
-          disabled={gameRunning}
-          title={gameRunning ? t("game.running") : t("join.title")}
-          className={cn(
-            "flex cursor-default items-center justify-center gap-2 rounded-lg border border-white/[0.07] px-3 py-1.5 text-[12px] font-medium transition-colors",
-            gameRunning
-              ? "text-muted-foreground"
-              : "text-foreground/80 hover:bg-white/[0.04]",
-          )}
-        >
-          <Plug className="size-3.5" />
-          <span>{t("join.title")}</span>
-        </button>
-
-        <JoinServerDialog
-          open={joinOpen}
-          onOpenChange={setJoinOpen}
-          onJoined={refreshGame}
-        />
-        </>
-        )}
 
         {/* Paint sync, in one line. Both halves of it run in the background off actions the
             player didn't ask for — an apply, a launch, the game rewriting profile.ini — so

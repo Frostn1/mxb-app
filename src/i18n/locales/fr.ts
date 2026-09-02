@@ -908,6 +908,28 @@ export const fr: Translation = {
   "join.manual": "Rejoindre un serveur non listé",
   "join.noServers": "Aucun serveur listé pour l'instant — saisissez une adresse qu'on vous a donnée.",
 
+  // Le navigateur de serveurs. `nav.servers` plus haut nomme l'onglet.
+  "browser.help":
+    "Où l'on roule en ce moment. Un serveur listé a été enregistré par quelqu'un, donc Rejoindre lance {{game}} directement dessus. Les autres sont des serveurs où se trouvent des pilotes qui utilisent MXB App : ils montrent où est tout le monde, et on les choisit dans la liste du jeu.",
+  "browser.search": "Rechercher un serveur",
+  "browser.refresh": "Actualiser",
+  "browser.ridingNow_one": "{{count}} pilote en piste",
+  "browser.ridingNow_other": "{{count}} pilotes en piste",
+  "browser.riders_one": "{{count}} pilote",
+  "browser.riders_other": "{{count}} pilotes",
+  "browser.nobody": "Personne ici",
+  "browser.live": "En direct",
+  "browser.liveWhy":
+    "Personne n'a enregistré ce serveur. Il est là parce que des pilotes qui utilisent MXB App y roulent.",
+  "browser.pickInGame": "Choisissez-le dans la liste du jeu",
+  "browser.empty": "Personne en piste pour l'instant",
+  "browser.noMatch": "Aucun serveur ne correspond",
+  "browser.emptyWhy":
+    "Cette liste réunit les serveurs enregistrés et les endroits où roulent les pilotes qui utilisent MXB App : elle se remplit quand ils sortent. Les comptes ne voient que les pilotes qui utilisent l'app — un serveur calme peut très bien être plein.",
+  "browser.byAddress": "Rejoindre par adresse",
+  "browser.byAddressWhy":
+    "Lance {{game}} directement connecté — le moyen d'entrer sur un serveur où personne d'ici n'a encore roulé.",
+
   "servers.title": "Serveurs",
   "servers.subtitle":
     "Gérez les serveurs dédiés que vous hébergez. Chacun doit avoir l'agent MXB installé.",

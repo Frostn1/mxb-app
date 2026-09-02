@@ -27,6 +27,7 @@ consequences fall out of that, and they're baked into the schema:
 | GET | `/v1/agent.exe` | — | The agent binary. Unauthenticated by necessity: a booting instance fetches it before it holds any credential. |
 | POST | `/v1/enroll` | invite code | Trade an invite for an account and a bearer token |
 | GET | `/v1/servers` | — | Server registry. Public: it is the app's join picker, and the people who most need it are the ones with no account yet. `agent_url` is not returned. |
+| GET | `/v1/browse` | — | The server browser: the registry above, plus every server riders running the app are on right now, with the track and a head count. Public on the same terms — see [below](#where-the-browser-comes-from). |
 | POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
 | GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it |
 | PUT | `/v1/me/guid` | bearer | Claim a GUID. First-come. |
@@ -55,6 +56,26 @@ out is decided in the game — nothing tells us in advance. Storing one loadout 
 meant publishing a second bike deleted the first, so a rider appeared correctly on whichever
 bike the app last touched and in default livery on every other. `loadout_paints` is therefore
 keyed `(account_id, bike_id, slot)`, and the app publishes all of them together.
+
+### Where the browser comes from
+
+MX Bikes' own server list is served by PiBoSo's master server over a protocol we do not
+speak, so `/v1/servers` — the handful of servers somebody registered — was the whole of what
+the app could name. `/v1/browse` is the other half, and it is built out of bookkeeping that
+was already happening: every app in a session reports its presence, keyed by
+`room_key(server_name)`, because that is the one identifier every rider on a grid computes
+identically. Group those rows by key and the count is a live list of where people are.
+
+The presence report now carries what the reporter's game can see with it — the server's own
+name, its track and the size of its grid — in the query string of the roster read that
+already writes the row, so the browser costs no extra request. A report without them still
+records the presence; it just doesn't describe the place.
+
+Two things it leaves out on purpose. Presence keyed by `host:port` — a rider whose app
+reported before the game reached a grid — is somebody's server address, and this endpoint is
+public, so those rows are dropped (`isAddressKey`). And nothing here says *who* is on a
+server: the count is a count. The roster, which does name riders, stays behind a bearer
+token and is scoped to one server at a time.
 
 ### How a provisioned server becomes joinable
 

@@ -2899,6 +2899,33 @@ export function cpServers(): Promise<RegisteredServer[]> {
   return invoke<RegisteredServer[]>("cp_servers");
 }
 
+/**
+ * A row of the server browser.
+ *
+ * `address` is what makes a row joinable, and only a registered server has one: for a server
+ * we know about because riders are on it, the app never learns an address — the rider picked
+ * it out of the game's own browser and the game does not say where it is.
+ */
+export interface BrowseServer {
+  id: string;
+  name: string;
+  region: string | null;
+  address: string | null;
+  /** What the riders there are on, when one of them told us. */
+  track: string | null;
+  /** Riders whose app is reporting. A floor, never a total. */
+  riders: number;
+  registered: boolean;
+}
+
+/**
+ * Everywhere there is to ride: the registry, plus every server riders running the app are on
+ * right now. Works without an account.
+ */
+export function cpBrowse(): Promise<BrowseServer[]> {
+  return invoke<BrowseServer[]>("cp_browse");
+}
+
 export type ServerAction = "start" | "stop" | "restart";
 
 export function listServers(): Promise<ServerRef[]> {

@@ -161,7 +161,7 @@ async fn reconcile(app: &AppHandle) -> Result<(), String> {
         // a reconnect after a blip must not be turned away — and pass on a race number that
         // has arrived since we joined, which is what places this rider on the grid.
         if let Ok(token) = signal::account(app, &cfg).await {
-            let _ = crate::paintsync::report_presence(&token, &key).await;
+            let _ = crate::paintsync::report_presence(&presence(&game, &key), &token).await;
         }
         session.send(engine::Command::Rider {
             rider_name: game.rider_name.clone(),
@@ -177,7 +177,7 @@ async fn reconcile(app: &AppHandle) -> Result<(), String> {
 
     // Presence before joining: the room admits a rider because the control plane already
     // believes they are on this server, so saying so has to come first.
-    crate::paintsync::report_presence(&token, &key)
+    crate::paintsync::report_presence(&presence(&game, &key), &token)
         .await
         .map_err(|e| format!("couldn't report presence for voice: {e:#}"))?;
 
@@ -201,6 +201,25 @@ async fn reconcile(app: &AppHandle) -> Result<(), String> {
     crate::usage::track("voice.join");
     session.set(key, handle);
     Ok(())
+}
+
+/// What to report about the server this rider is on.
+///
+/// The key is what the roster and the room are scoped by; the rest is what the server
+/// browser is made of. Voice is where it comes from because voice is already reading the
+/// running game every few seconds — the same block that names the server names its track and
+/// counts its grid, so the report describes the place at no extra cost.
+fn presence(game: &GameSession, key: &str) -> crate::paintsync::Presence {
+    let some = |s: &str| {
+        let s = s.trim();
+        (!s.is_empty()).then(|| s.to_string())
+    };
+    crate::paintsync::Presence {
+        key: key.to_string(),
+        server_name: some(&game.server_name),
+        track: some(&game.track_id),
+        riders: Some(game.riders.len()),
+    }
 }
 
 /// The room key for a server name.

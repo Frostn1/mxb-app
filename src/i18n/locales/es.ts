@@ -903,6 +903,28 @@ export const es: Translation = {
   "join.manual": "Unirse a un servidor que no está en la lista",
   "join.noServers": "Todavía no hay servidores en la lista — escribe una dirección que te hayan dado.",
 
+  // El explorador de servidores. `nav.servers` arriba da nombre a la pestaña.
+  "browser.help":
+    "Dónde se está rodando ahora mismo. Un servidor listado lo registró alguien, así que Unirse inicia {{game}} conectado directamente a él. Los demás son servidores donde hay pilotos con MXB App: muestran dónde está la gente, y se eligen desde la lista del propio juego.",
+  "browser.search": "Buscar servidores",
+  "browser.refresh": "Actualizar",
+  "browser.ridingNow_one": "{{count}} piloto rodando",
+  "browser.ridingNow_other": "{{count}} pilotos rodando",
+  "browser.riders_one": "{{count}} piloto",
+  "browser.riders_other": "{{count}} pilotos",
+  "browser.nobody": "Aquí no hay nadie",
+  "browser.live": "En vivo",
+  "browser.liveWhy":
+    "Nadie registró este servidor. Está aquí porque hay pilotos con MXB App en él.",
+  "browser.pickInGame": "Elígelo en la lista del juego",
+  "browser.empty": "Ahora mismo no hay nadie rodando",
+  "browser.noMatch": "Ningún servidor coincide",
+  "browser.emptyWhy":
+    "Esta lista tiene los servidores que la gente registró y los sitios donde ruedan los pilotos con MXB App, así que se llena cuando salen a rodar. Los recuentos solo ven a quien usa la app: un servidor tranquilo puede estar lleno.",
+  "browser.byAddress": "Unirse por dirección",
+  "browser.byAddressWhy":
+    "Inicia {{game}} conectado directamente — la forma de entrar en un servidor donde aún no ha rodado nadie de aquí.",
+
   "servers.title": "Servidores",
   "servers.subtitle":
     "Gestiona los servidores dedicados que tengas. Cada uno necesita el agente de MXB instalado.",

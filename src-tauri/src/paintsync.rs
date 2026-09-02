@@ -466,15 +466,47 @@ pub async fn publish_all(
 ///
 /// Best-effort: failing to report presence costs a narrower roster for a minute, and must
 /// never be the thing that stops a sync.
-pub async fn report_presence(token: &str, server_id: &str) -> anyhow::Result<()> {
+pub async fn report_presence(presence: &Presence, token: &str) -> anyhow::Result<()> {
     client()?
         .put(format!("{}/v1/presence", control_plane()))
         .bearer_auth(token)
-        .json(&serde_json::json!({ "serverId": server_id }))
+        .json(&serde_json::json!({
+            "serverId": presence.key,
+            "serverName": presence.server_name,
+            "track": presence.track,
+            "riders": presence.riders,
+        }))
         .send()
         .await?
         .error_for_status()?;
     Ok(())
+}
+
+/// Where a rider is, and what they can see of it.
+///
+/// The key is the whole of what the roster needs — everyone on one grid computes the same
+/// one, and that is what scopes a roster to a session. The rest is for everybody else: the
+/// server browser is built out of these reports, and a key is a fold rather than a name.
+/// `frost racing eu` names no track, seats nobody and is not what the operator called it.
+///
+/// All three are optional because presence is also reported by paths that cannot see a game
+/// — a sync fired at launch, before the rider has reached a grid. A report without them
+/// still says where the rider is; it just doesn't describe the place.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Presence {
+    pub key: String,
+    /// The server's own name for itself, as FrostMod reads it out of the running game.
+    pub server_name: Option<String>,
+    pub track: Option<String>,
+    /// How many riders are on the grid, as this rider's game sees it.
+    pub riders: Option<usize>,
+}
+
+impl Presence {
+    /// A report that says where and nothing else.
+    pub fn keyed(key: impl Into<String>) -> Self {
+        Self { key: key.into(), ..Default::default() }
+    }
 }
 
 /// A server in the control plane's registry, as `GET /v1/servers` returns it.
@@ -500,6 +532,43 @@ pub async fn registry(token: Option<&str>) -> anyhow::Result<Vec<RegisteredServe
         servers: Vec<RegisteredServer>,
     }
     let mut req = client()?.get(format!("{}/v1/servers", control_plane()));
+    if let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) {
+        req = req.bearer_auth(token);
+    }
+    let resp: Resp = req.send().await?.error_for_status()?.json().await?;
+    Ok(resp.servers)
+}
+
+/// A row of the server browser, as `GET /v1/browse` returns it.
+///
+/// The registry plus everywhere riders running the app are right now — see the control
+/// plane's `browse.ts`. A row without an address is a server we know about only because
+/// people are on it: worth showing, since that is the question a browser answers, and not
+/// something the app can launch the game into.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseServer {
+    pub id: String,
+    pub name: String,
+    pub region: Option<String>,
+    pub address: Option<String>,
+    pub track: Option<String>,
+    pub riders: u32,
+    /// Somebody registered it, so it has an address and is joinable from here.
+    pub registered: bool,
+}
+
+/// Everywhere there is to ride.
+///
+/// Public like the registry, and for the same reason: "where can I go" is the question of
+/// somebody who has never enrolled. The token is sent when there is one, so the control
+/// plane can key anything it later wants to personalise off the caller.
+pub async fn browse(token: Option<&str>) -> anyhow::Result<Vec<BrowseServer>> {
+    #[derive(Deserialize)]
+    struct Resp {
+        servers: Vec<BrowseServer>,
+    }
+    let mut req = client()?.get(format!("{}/v1/browse", control_plane()));
     if let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) {
         req = req.bearer_auth(token);
     }
@@ -572,7 +641,7 @@ pub async fn pull(
     cfg: &AppConfig,
     token: &str,
     server_ids: &[String],
-    here: Option<&str>,
+    here: Option<&Presence>,
 ) -> anyhow::Result<PullOutcome> {
     let http = client()?;
 
@@ -585,9 +654,22 @@ pub async fn pull(
     let mut reached = 0usize;
 
     for server_id in server_ids {
-        let mut query: Vec<(&str, &str)> = vec![("server", server_id.as_str())];
-        if here == Some(server_id.as_str()) {
-            query.push(("here", "1"));
+        let mut query: Vec<(&str, String)> = vec![("server", server_id.clone())];
+        // Where we are rides along with the read that is scoped by it, and so does what we
+        // can see of it: this request is already the one every app in a session makes, so
+        // describing the server for the browser costs nothing. A separate presence write is
+        // exactly the second request that took the worker past its ceiling on 2026-08-31.
+        if let Some(here) = here.filter(|h| h.key == *server_id) {
+            query.push(("here", "1".into()));
+            if let Some(name) = here.server_name.as_deref() {
+                query.push(("serverName", name.to_string()));
+            }
+            if let Some(track) = here.track.as_deref() {
+                query.push(("track", track.to_string()));
+            }
+            if let Some(riders) = here.riders {
+                query.push(("riders", riders.to_string()));
+            }
         }
         let roster: Roster = match http
             .get(format!("{}/v1/roster", control_plane()))
@@ -1388,12 +1470,19 @@ mod live_sync {
         publish_one(&alice, "YZ450F", "bikes/YZ450F/paints/Alice.pnt", &alice_paint).await;
         publish_one(&bob, "YZ450F", "bikes/YZ450F/paints/Bob.pnt", &bob_paint).await;
 
-        report_presence(&alice.token, &server).await.unwrap();
-        report_presence(&bob.token, &server).await.unwrap();
+        report_presence(&Presence::keyed(server.clone()), &alice.token).await.unwrap();
+        report_presence(&Presence::keyed(server.clone()), &bob.token).await.unwrap();
 
         // Bob rides onto the server and pulls.
         let (bob_root, bob_cfg) = rider_machine("bob");
-        let out = pull(&bob_cfg, &bob.token, &[server.clone()], Some(server.as_str())).await.unwrap();
+        let out = pull(
+            &bob_cfg,
+            &bob.token,
+            &[server.clone()],
+            Some(&Presence::keyed(server.clone())),
+        )
+        .await
+        .unwrap();
         println!("bob: {out:?}");
 
         let landed = bob_root.join("mods/bikes/YZ450F/paints/Alice.pnt");
@@ -1409,7 +1498,14 @@ mod live_sync {
 
         // And the other direction, which is the half a one-sided test would miss.
         let (alice_root, alice_cfg) = rider_machine("alice");
-        let out = pull(&alice_cfg, &alice.token, &[server.clone()], Some(server.as_str())).await.unwrap();
+        let out = pull(
+            &alice_cfg,
+            &alice.token,
+            &[server.clone()],
+            Some(&Presence::keyed(server.clone())),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             std::fs::read(alice_root.join("mods/bikes/YZ450F/paints/Bob.pnt")).ok(),
             Some(bob_paint),
@@ -1417,7 +1513,14 @@ mod live_sync {
         );
 
         // A second pass installs nothing: the manifest recognises what it wrote.
-        let again = pull(&bob_cfg, &bob.token, &[server.clone()], Some(server.as_str())).await.unwrap();
+        let again = pull(
+            &bob_cfg,
+            &bob.token,
+            &[server.clone()],
+            Some(&Presence::keyed(server.clone())),
+        )
+        .await
+        .unwrap();
         assert_eq!(again.installed, 0, "a repeat sync installs nothing: {again:?}");
         assert!(again.already_had >= 1, "and recognises what it already has: {again:?}");
 
@@ -1428,7 +1531,14 @@ mod live_sync {
         // No separate presence call: the pull below reports it, which is the whole point of
         // `here` — one request where there used to be two.
         let (carol_root, carol_cfg) = rider_machine("carol");
-        let out = pull(&carol_cfg, &carol.token, &[elsewhere.clone()], Some(elsewhere.as_str())).await.unwrap();
+        let out = pull(
+            &carol_cfg,
+            &carol.token,
+            &[elsewhere.clone()],
+            Some(&Presence::keyed(elsewhere.clone())),
+        )
+        .await
+        .unwrap();
         assert_eq!(out.installed, 0, "another server is another grid: {out:?}");
         assert!(
             !carol_root.join("mods/bikes/YZ450F/paints/Alice.pnt").exists(),
@@ -1465,11 +1575,18 @@ mod live_sync {
 
         publish_one(&first, "YZ450F", "bikes/YZ450F/paints/First.pnt", b"the first Frost").await;
         publish_one(&second, "YZ450F", "bikes/YZ450F/paints/Second.pnt", b"the other Frost").await;
-        report_presence(&first.token, &server).await.unwrap();
-        report_presence(&second.token, &server).await.unwrap();
+        report_presence(&Presence::keyed(server.clone()), &first.token).await.unwrap();
+        report_presence(&Presence::keyed(server.clone()), &second.token).await.unwrap();
 
         let (root, cfg) = rider_machine("clash");
-        let out = pull(&cfg, &first.token, &[server.clone()], Some(server.as_str())).await.unwrap();
+        let out = pull(
+            &cfg,
+            &first.token,
+            &[server.clone()],
+            Some(&Presence::keyed(server.clone())),
+        )
+        .await
+        .unwrap();
         println!("name clash: {out:?}");
 
         assert_eq!(

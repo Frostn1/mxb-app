@@ -887,6 +887,28 @@ export const en = {
   "join.manual": "Join a server that isn't listed",
   "join.noServers": "No servers listed yet — type an address you were given instead.",
 
+  // The server browser. `nav.servers` above names the tab.
+  "browser.help":
+    "Where people are riding right now. A listed server is one somebody registered, so Join starts {{game}} straight into it. The rest are servers riders running MXB App are on — they show where everyone is, and you pick them from the game's own list.",
+  "browser.search": "Search servers",
+  "browser.refresh": "Refresh",
+  "browser.ridingNow_one": "{{count}} rider out there",
+  "browser.ridingNow_other": "{{count}} riders out there",
+  "browser.riders_one": "{{count}} rider",
+  "browser.riders_other": "{{count}} riders",
+  "browser.nobody": "Nobody here",
+  "browser.live": "Live",
+  "browser.liveWhy":
+    "Nobody registered this one. It's here because riders running MXB App are on it.",
+  "browser.pickInGame": "Pick it in the game's list",
+  "browser.empty": "Nobody's out there right now",
+  "browser.emptyWhy":
+    "This list holds the servers people registered, plus wherever riders running MXB App are riding — so it fills as they go out. Counts only see riders running the app, and a quiet server may well be busy.",
+  "browser.noMatch": "No server matches that",
+  "browser.byAddress": "Join by address",
+  "browser.byAddressWhy":
+    "Starts {{game}} connected straight to it — the way onto a server nobody here has ridden yet.",
+
   "servers.title": "Servers",
   "servers.subtitle":
     "Manage dedicated servers you run. Each one needs the MXB agent installed on its host.",

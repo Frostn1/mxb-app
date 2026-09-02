@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-09-02
+
+### Added
+- **A server browser, in the app.** The new Servers tab lists where people are riding right
+  now: the servers somebody registered, and every server riders running MXB App are on.
+  MX Bikes' own list comes from PiBoSo's master server over a protocol the app can't speak,
+  so this is built the other way round — every copy of the app in a session already reports
+  the server it is on, by the name FrostMod reads out of the running game, and counting those
+  reports is a live list that nobody has to maintain.
+- Each row says how many riders are on it and what track they're riding, refreshes itself
+  while the tab is open, and searches by name, track or address.
+- A registered server carries an address, so Join starts the game straight into it. One
+  nobody registered has none — the rider who put it on the list picked it out of the game's
+  own browser, and the game never says where it is — so the row says to pick it there.
+- Joining by an address somebody gave you is on the same page, which is the way onto a server
+  nobody here has ridden yet.
+
+### Changed
+- Join a server is a tab rather than a button and a dialog, and it no longer hides itself
+  when the registry is empty: the list is now everywhere people actually are, so there is
+  something behind it.
+- A rider's presence report carries what their game can see — the server's own name, the
+  track and the head count — alongside the key it always carried. It rides along with the
+  roster read that already reports presence, so the browser costs no extra request.
+
 ## 2026-09-01
 
 ### Fixed

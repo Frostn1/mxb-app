@@ -51,6 +51,8 @@ import {
   isPublicGameAddress,
   isRegion,
   isRelDest,
+  isReportedLabel,
+  isRiderCount,
   isServerKey,
   isRiderName,
   isServerName,
@@ -60,6 +62,7 @@ import {
   MAX_PAINT_BYTES,
   PRESENCE_TTL_MS,
 } from "./validate";
+import { browseServers } from "./browse";
 import { claimDeviceAccount, iceServers, voiceRoom } from "./voice";
 import { pruneUsage, reportUsage, usageStats } from "./usage";
 import { usageDashboard } from "./usagepage";
@@ -167,6 +170,11 @@ async function route(request: Request, env: Env): Promise<Response> {
   // secret; it is the same name/region/address a server browser shows, and `agent_url` is
   // deliberately not selected, so the admin API's location stays private.
   if (method === "GET" && path === "/v1/servers") return listServers(env);
+
+  // The browser: the registry above, plus every server riders running the app are on right
+  // now, with what they are riding and how many of them there are. Public for the same
+  // reason and on the same terms — see `browse.ts` for what it deliberately leaves out.
+  if (method === "GET" && path === "/v1/browse") return browseServers(env);
 
   // A provisioned box announcing itself. Authenticated by the agent token in its own row,
   // not by an account bearer — the machine holds no account and has no way to be given one.
@@ -1713,19 +1721,77 @@ async function putPresence(request: Request, account: Account, env: Env): Promis
   const { serverId } = body as { serverId?: unknown };
   if (!isServerKey(serverId)) return json(400, { error: "that isn't a server" });
 
-  await markPresent(account.id, (serverId as string).trim(), env);
+  await markPresent(
+    account.id,
+    (serverId as string).trim(),
+    env,
+    presenceDetail(body as Record<string, unknown>),
+  );
   return json(200, { ok: true });
 }
 
+/**
+ * What the reporter can see of the server they are on, where they can see it.
+ *
+ * All three come from the block FrostMod publishes out of the running game, and all three
+ * are optional: presence is also written by paths that have only a key — the roster's
+ * `?here=1`, and a sync fired before the game reached a grid. Anything malformed is dropped
+ * rather than refused, because the presence itself is the part that matters and a rider
+ * whose server name arrived with a control character in it is still on that server.
+ */
+function presenceDetail(source: Record<string, unknown> | URLSearchParams): Detail {
+  const read = (key: string): unknown =>
+    source instanceof URLSearchParams ? (source.get(key) ?? undefined) : source[key];
+  const name = read("serverName");
+  const track = read("track");
+  const riders = read("riders");
+  const count = typeof riders === "string" ? Number(riders) : riders;
+  return {
+    serverName: isReportedLabel(name) ? name.trim() : null,
+    track: isReportedLabel(track) ? track.trim() : null,
+    riders: isRiderCount(count) ? count : null,
+  };
+}
+
+/** The describable half of a presence report. Every field is optional — see above. */
+interface Detail {
+  serverName: string | null;
+  track: string | null;
+  riders: number | null;
+}
+
 /** Record that an account is on a server. One writer, so the two callers cannot drift. */
-async function markPresent(accountId: string, serverId: string, env: Env): Promise<void> {
+async function markPresent(
+  accountId: string,
+  serverId: string,
+  env: Env,
+  detail: Detail = { serverName: null, track: null, riders: null },
+): Promise<void> {
   await env.DB.prepare(
-    "INSERT INTO presence (account_id, server_id, updated_at) VALUES (?, ?, ?)" +
+    "INSERT INTO presence (account_id, server_id, updated_at, server_name, track, riders)" +
+      " VALUES (?, ?, ?, ?, ?, ?)" +
       " ON CONFLICT(account_id) DO UPDATE SET server_id = excluded.server_id," +
-      " updated_at = excluded.updated_at",
+      " updated_at = excluded.updated_at," +
+      // A report that carries a description wins. One that carries none keeps what this
+      // rider last told us about *this* server, so a heartbeat with nothing to say doesn't
+      // blank the browser — but never carries a description across a move, which would
+      // label the new server with the old one's name.
+      detailColumn("server_name") +
+      "," +
+      detailColumn("track") +
+      "," +
+      detailColumn("riders"),
   )
-    .bind(accountId, serverId, Date.now())
+    .bind(accountId, serverId, Date.now(), detail.serverName, detail.track, detail.riders)
     .run();
+}
+
+/** The `DO UPDATE SET` clause described above, for one nullable description column. */
+function detailColumn(column: string): string {
+  return (
+    ` ${column} = CASE WHEN excluded.${column} IS NOT NULL THEN excluded.${column}` +
+    ` WHEN presence.server_id = excluded.server_id THEN presence.${column} END`
+  );
 }
 
 /**
@@ -1764,7 +1830,13 @@ async function roster(url: URL, account: Account, env: Env): Promise<Response> {
     if (!isServerKey(serverId)) return json(400, { error: "that isn't a server" });
     // Before the read, not after: the roster is scoped by presence, and a rider should
     // appear in the same answer they are asking for.
-    await markPresent(account.id, serverId.trim(), env);
+    //
+    // The server's name, its track and the head count ride along in the query string when
+    // the caller can see them. This request is already the one every app in a session makes
+    // and the presence write is already part of it, so describing the server costs nothing
+    // — and a description that arrived on a separate `PUT /v1/presence` is exactly the extra
+    // request that took the worker past its ceiling on 2026-08-31.
+    await markPresent(account.id, serverId.trim(), env, presenceDetail(url.searchParams));
   }
 
   // DISTINCT on the destination: loadouts are per bike, and gear repeats across every bike a

@@ -910,6 +910,28 @@ export const de: Translation = {
   "join.manual": "Einem nicht gelisteten Server beitreten",
   "join.noServers": "Noch keine Server gelistet — tippe eine Adresse ein, die du bekommen hast.",
 
+  // Der Server-Browser. `nav.servers` oben benennt den Tab.
+  "browser.help":
+    "Wo gerade gefahren wird. Ein gelisteter Server wurde von jemandem registriert, deshalb startet Beitreten {{game}} direkt darauf. Die übrigen sind Server, auf denen Fahrer mit MXB App unterwegs sind — sie zeigen, wo alle sind, und ausgewählt werden sie in der Liste des Spiels.",
+  "browser.search": "Server suchen",
+  "browser.refresh": "Aktualisieren",
+  "browser.ridingNow_one": "{{count}} Fahrer unterwegs",
+  "browser.ridingNow_other": "{{count}} Fahrer unterwegs",
+  "browser.riders_one": "{{count}} Fahrer",
+  "browser.riders_other": "{{count}} Fahrer",
+  "browser.nobody": "Niemand hier",
+  "browser.live": "Live",
+  "browser.liveWhy":
+    "Diesen Server hat niemand registriert. Er steht hier, weil Fahrer mit MXB App darauf sind.",
+  "browser.pickInGame": "Im Spiel aus der Liste wählen",
+  "browser.empty": "Gerade ist niemand unterwegs",
+  "browser.noMatch": "Kein Server passt dazu",
+  "browser.emptyWhy":
+    "Diese Liste zeigt die registrierten Server und überall dort, wo Fahrer mit MXB App fahren — sie füllt sich also, sobald sie rausfahren. Gezählt wird nur, wer die App nutzt: ein stiller Server kann trotzdem voll sein.",
+  "browser.byAddress": "Über Adresse beitreten",
+  "browser.byAddressWhy":
+    "Startet {{game}} direkt verbunden — der Weg auf einen Server, auf dem von hier noch niemand gefahren ist.",
+
   "servers.title": "Server",
   "servers.subtitle":
     "Verwalte deine eigenen Dedicated Server. Auf jedem muss der MXB-Agent installiert sein.",
