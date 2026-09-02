@@ -3,6 +3,12 @@
 ## 2026-09-01
 
 ### Fixed
+- Generated tracks load and ride with their ground visible: each layer now ships the normal
+  map the renderer expects, so the surface lights instead of dropping the game.
+
+## 2026-09-01
+
+### Fixed
 - Generated tracks no longer crash the game at the track graphics stage: each ground layer
   now carries the material record a published map uses.
 

@@ -282,6 +282,9 @@ const PROFILE_STEP: f32 = 0.1;
 
 /// Masks are stretched over the terrain, so they cost nothing to keep coarser than it.
 const MASK_DIM: usize = 1024;
+/// How hard the ground's own luma pushes its normals. Enough to catch light on ruts and
+/// chop without turning the soil grain into relief.
+const NORMAL_STRENGTH: f32 = 6.0;
 
 /// The ground textures' edge, in pixels. A power of two, as MX Bikes requires.
 ///
@@ -2297,6 +2300,33 @@ const MAP_QUADS: usize = 256;
 ///   f32 1.0
 /// 32 bytes    zero: the vegetation and detail lists, all empty
 /// ```
+/// A tangent-space normal map derived from a ground sheet's own luma.
+///
+/// Every terrain layer on a published map carries one of these beside its colour sheet. The
+/// encoding is two-channel — the normal lives in red and green, blue is a constant 255 and
+/// alpha a constant 3 — measured off PiBoSo's drag strip.
+fn normal_pixels(rgba: &[u8], dim: usize, strength: f32) -> Vec<u8> {
+    let luma = |x: usize, y: usize| -> f32 {
+        let i = (y % dim) * dim * 4 + (x % dim) * 4;
+        (0.299 * rgba[i] as f32 + 0.587 * rgba[i + 1] as f32 + 0.114 * rgba[i + 2] as f32) / 255.0
+    };
+    let mut out = vec![0u8; dim * dim * 4];
+    for y in 0..dim {
+        for x in 0..dim {
+            let dx = luma((x + 1) % dim, y) - luma((x + dim - 1) % dim, y);
+            let dy = luma(x, (y + 1) % dim) - luma(x, (y + dim - 1) % dim);
+            let (nx, ny, nz) = (-dx * strength, -dy * strength, 1.0);
+            let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-6);
+            let i = (y * dim + x) * 4;
+            out[i] = (((nx / len) * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0) as u8;
+            out[i + 1] = (((ny / len) * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0) as u8;
+            out[i + 2] = 255;
+            out[i + 3] = 3;
+        }
+    }
+    out
+}
+
 fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
     const FMAX: u32 = 0x7F7F_FFFF;
     const NFMAX: u32 = 0xFF7F_FFFF;
@@ -2374,11 +2404,32 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
         out.extend_from_slice(&u(dim as u32));
         out.extend_from_slice(&[0u8; 16]);
         out.extend_from_slice(&u(0));
-        let px = deflate_raw(&ground_pixels(dim, look, seed ^ salt));
+        let rgba = ground_pixels(dim, look, seed ^ salt);
+        let px = deflate_raw(&rgba);
         out.extend_from_slice(&u(px.len() as u32 + 8));
         out.extend_from_slice(&[0u8; 8]);
         out.extend_from_slice(&px);
-        out.extend_from_slice(&u(0)); // no secondary map
+
+        // The normal map. Every layer on a published track has one, and the renderer binds it
+        // whether or not the file supplies it -- shipping none is what crashed the game.
+        out.extend_from_slice(&u(1));
+        out.extend_from_slice(&u(0));
+        out.extend_from_slice(&u(0));
+        out.extend_from_slice(&u(1));
+        out.extend_from_slice(&u(0));
+        let mut nrec = vec![0u8; 100];
+        let nname = format!("{}_n", sheet.trim_end_matches("_c"));
+        let n = nname.len().min(99);
+        nrec[..n].copy_from_slice(&nname.as_bytes()[..n]);
+        out.extend_from_slice(&nrec);
+        out.extend_from_slice(&u(dim as u32));
+        out.extend_from_slice(&u(dim as u32));
+        out.extend_from_slice(&[0u8; 16]);
+        out.extend_from_slice(&u(0));
+        let np = deflate_raw(&normal_pixels(&rgba, dim, NORMAL_STRENGTH));
+        out.extend_from_slice(&u(np.len() as u32 + 8));
+        out.extend_from_slice(&[0u8; 8]);
+        out.extend_from_slice(&np);
 
         let reps = repetitions(prog, tile) as f32;
         out.extend_from_slice(&f(reps));
@@ -4620,8 +4671,21 @@ mod map_layer_records {
             o += 8 + 16 + 4;
             let plen = u32_at(&m, o) as usize;
             o += 4 + plen;
-            assert_eq!(u32_at(&m, o), 0, "layer {i} secondary count");
-            o += 4 + 8;
+            // One normal map per layer, in the record shape a published map uses.
+            assert_eq!(u32_at(&m, o), 1, "layer {i} secondary count");
+            o += 4;
+            assert_eq!(
+                [u32_at(&m, o), u32_at(&m, o + 4), u32_at(&m, o + 8), u32_at(&m, o + 12)],
+                [0, 0, 1, 0],
+                "layer {i} secondary prefix"
+            );
+            o += 16 + 100;
+            let (nw, nh) = (u32_at(&m, o) as usize, u32_at(&m, o + 4) as usize);
+            assert_eq!((nw, nh), (w, h), "layer {i} normal map matches its colour sheet");
+            o += 8 + 16 + 4;
+            let nlen = u32_at(&m, o) as usize;
+            o += 4 + nlen;
+            o += 8;
             let masked = u32_at(&m, o);
             o += 4;
             if masked == 1 {
@@ -4641,3 +4705,4 @@ mod map_layer_records {
         assert_eq!(m.len() - o, 32, "the vegetation and detail lists close the file");
     }
 }
+
