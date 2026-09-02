@@ -45,7 +45,8 @@ from unicorn import *
 from unicorn.x86_const import *
 
 EXE = os.path.expanduser("~/Downloads/mxbikes.exe.unpacked.exe")
-MAP = os.path.expanduser("~/Projects/pkz/L21-DragStrip_OEM/L21-DragStrip_OEM.map")
+MAP = os.environ.get("MAP") or os.path.expanduser(
+    "~/Projects/pkz/L21-DragStrip_OEM/L21-DragStrip_OEM.map")
 
 pe = pefile.PE(EXE, fast_load=True)
 pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_EXCEPTION']])

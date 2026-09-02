@@ -2,6 +2,12 @@
 
 ## 2026-09-01
 
+### Fixed
+- Generated tracks no longer crash the game at the track graphics stage: each ground layer
+  now carries the material record a published map uses.
+
+## 2026-09-01
+
 ### Added
 - Generated tracks carry their ground again, so an installed track has graphics instead of a
   black surface — and no longer needs TerrainEd to be rideable.

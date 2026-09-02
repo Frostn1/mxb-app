@@ -2347,19 +2347,22 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
     let dim = GROUND_TEXTURE_DIM;
     let half = prog.width * 0.5;
     let (_, shoulder_scale) = ground(prog.terrain.surface);
-    let bands: [(&str, &str, &GroundLook, u32, f32, Option<f32>); 4] = [
-        ("ground", "ground_c", &field, 0x9A0D, TILE_FIELD_M, None),
-        ("shoulder", "shoulder_c", &shoulder, 0x30D2, TILE_SHOULDER_M,
+    let bands: [(&str, &GroundLook, u32, f32, Option<f32>); 4] = [
+        ("ground_c", &field, 0x9A0D, TILE_FIELD_M, None),
+        ("shoulder_c", &shoulder, 0x30D2, TILE_SHOULDER_M,
          Some(half + SHOULDER_M * shoulder_scale)),
-        ("line", "dirt_line_c", &ridden, 0x11E5, TILE_LINE_M, Some(half)),
-        ("grass", "grass_c", &turf, 0x6A55, TILE_GRASS_M, Some(-1.0)),
+        ("dirt_line_c", &ridden, 0x11E5, TILE_LINE_M, Some(half)),
+        ("grass_c", &turf, 0x6A55, TILE_GRASS_M, Some(-1.0)),
     ];
     out.extend_from_slice(&u(bands.len() as u32));
-    for (name, sheet, look, salt, tile, mask_to) in bands {
-        let mut blob = [0u8; 56];
-        let n = name.len().min(51);
-        blob[4..4 + n].copy_from_slice(&name.as_bytes()[..n]);
-        out.extend_from_slice(&blob);
+    for (sheet, look, salt, tile, mask_to) in bands {
+        // A material record: fourteen floats, the shape every published map uses. This is not
+        // a name field -- writing text here hands the renderer garbage coefficients.
+        out.extend_from_slice(&f(0.0));
+        for _ in 0..6 {
+            out.extend_from_slice(&f(1.0));
+        }
+        out.extend_from_slice(&[0u8; 28]);
 
         out.extend_from_slice(&u(1)); // one sheet
         let mut rec = vec![0u8; 100];
@@ -2399,7 +2402,7 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
                 out.extend_from_slice(&packed);
             }
         }
-        out.extend_from_slice(&f(1.0));
+        out.extend_from_slice(&f(if mask_to.is_none() { 0.0 } else { 1.0 }));
     }
 
     // The vegetation and detail lists, every one of them empty.
@@ -3339,7 +3342,7 @@ mod tests {
     use crate::trackprog::{Relief, Start, Terrain};
 
     /// A lap that closes: two straights joined by two half-circle turns.
-    fn oval() -> TrackProgram {
+    pub(super) fn oval() -> TrackProgram {
         TrackProgram {
             name: "Test Oval".into(),
             author: "MXB App".into(),
@@ -4574,5 +4577,67 @@ mod tests {
             (st.z / s.mps).round() as usize,
         );
         s.heights[gy.min(s.gh - 1) * s.gw + gx.min(s.gw - 1)]
+    }
+}
+
+#[cfg(test)]
+mod map_layer_records {
+    use super::*;
+
+    fn u32_at(m: &[u8], o: usize) -> u32 {
+        u32::from_le_bytes(m[o..o + 4].try_into().unwrap())
+    }
+    fn f32_at(m: &[u8], o: usize) -> f32 {
+        f32::from_le_bytes(m[o..o + 4].try_into().unwrap())
+    }
+
+    /// Every published map opens each terrain layer with a material record of fourteen
+    /// floats -- `0`, six `1`s, then zeros. It is not a name field: text written here reads
+    /// back as garbage coefficients, which the loader accepts and the renderer dies on.
+    #[test]
+    fn every_layer_opens_with_a_material_record() {
+        let prog = tests::oval();
+        let syn = synthesise(&prog).unwrap();
+        let m = map(&prog, &syn);
+
+        let mut o = 312;
+        let (a, b) = (u32_at(&m, o) as usize, u32_at(&m, o + 4) as usize);
+        o += 8 + a * b * 2 + 12 + 12;
+        let layers = u32_at(&m, o) as usize;
+        o += 4;
+        assert!(layers > 0, "a map with no layers has no ground");
+
+        for i in 0..layers {
+            let mat: Vec<f32> = (0..14).map(|w| f32_at(&m, o + w * 4)).collect();
+            let want = [0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+            assert_eq!(mat, want, "layer {i} material record");
+            o += 56;
+
+            // Step the sheet so the next layer's record is found: one sheet, no secondaries.
+            assert_eq!(u32_at(&m, o), 1, "layer {i} sheet count");
+            o += 4 + 100 + 4;
+            let (w, h) = (u32_at(&m, o) as usize, u32_at(&m, o + 4) as usize);
+            o += 8 + 16 + 4;
+            let plen = u32_at(&m, o) as usize;
+            o += 4 + plen;
+            assert_eq!(u32_at(&m, o), 0, "layer {i} secondary count");
+            o += 4 + 8;
+            let masked = u32_at(&m, o);
+            o += 4;
+            if masked == 1 {
+                let len = u32_at(&m, o + 8) as usize;
+                o += 12 + len;
+            }
+            // The base layer carries no mask and ends in 0; masked layers end in 1.
+            let trail = f32_at(&m, o);
+            o += 4;
+            assert_eq!(
+                trail,
+                if masked == 0 { 0.0 } else { 1.0 },
+                "layer {i} trailing float (masked={masked})"
+            );
+            assert!(w > 0 && h > 0, "layer {i} sheet is {w}x{h}");
+        }
+        assert_eq!(m.len() - o, 32, "the vegetation and detail lists close the file");
     }
 }
