@@ -563,7 +563,7 @@ export default function TrackStudio() {
       {program && (
         <div className="flex min-h-0 flex-1 gap-4">
           {/* Left: what the lap is, and what it measures. */}
-          <div className="flex w-[300px] flex-none flex-col gap-3">
+          <div className="flex min-h-0 w-[300px] flex-none flex-col gap-3 overflow-y-auto">
             <div className="rounded-xl border border-input p-3.5">
               {/* The name is the folder, the .pkz and what the game lists it as, so it is
                   worth being able to change before any of those are written. */}
