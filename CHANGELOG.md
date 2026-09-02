@@ -3,6 +3,11 @@
 ## 2026-09-01
 
 ### Fixed
+- The map-loader tracer reads a whole track graphics file instead of stopping a fraction in.
+
+## 2026-09-01
+
+### Fixed
 - The starting gates sit across the track instead of off to one side of it, and there are
   forty of them at the spacing every published track uses.
 

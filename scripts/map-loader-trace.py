@@ -21,15 +21,21 @@ Needs `~/Downloads/mxbikes.exe.unpacked.exe` (see the notes on the unpacked bina
 `.map` to read. The OEM drag strip is the reference worth using: its mesh, materials and
 textures are all declared empty, so everything it contains is in the part still being decoded.
 
-Where it currently stops, and why that is the honest answer: after record 0's texture payload
-the loader tail-calls through a pointer this harness never filled in, and there is no sound way
-to recover. A shadow return stack was tried and removed — it needs every `ret`, and a linear
-disassembly of this binary finds 2,692 call sites against 198 returns, so it drifted and landed
-execution mid-function, inventing a read of -7 bytes. Stopping is correct; the next step is to
-make that call resolve rather than to guess past it.
+On the OEM drag strip it now walks the whole file: 14,545 reads ending at byte 120,609,745 of
+120,609,745, exactly. That output is the format.
 
-The payload primitive itself is fully understood and worth knowing: `0x1402573f0` reads a
-4-byte size, then 8 bytes, then `size - 8` bytes of raw DEFLATE.
+What made it work, after a long time not working: **only stub *primary* functions.** Half of
+this binary's 8,741 `.pdata` entries are chained fragments — continuations of a function that
+lives elsewhere — and treating one as a function entry means stubbing the middle of something
+already running. It popped a return address that had never been pushed and execution left for
+nowhere, which looked exactly like an unresolvable tail call and was blamed on one for a long
+time.
+
+Note the version word: the OEM strip and Indiana are 304, PiBoSo's `mxb_track_example` is 288,
+and the record layout differs between them. Trace the version you intend to write.
+
+The payload primitive is `0x1402573f0`: a 4-byte size, then 8 bytes, then `size - 8` bytes of
+raw DEFLATE.
 """
 
 import struct, os, sys
@@ -43,7 +49,8 @@ MAP = os.path.expanduser("~/Projects/pkz/L21-DragStrip_OEM/L21-DragStrip_OEM.map
 
 pe = pefile.PE(EXE, fast_load=True)
 pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_EXCEPTION']])
-_pdata = [(e.struct.BeginAddress, e.struct.EndAddress) for e in pe.DIRECTORY_ENTRY_EXCEPTION]
+_pdata = [(e.struct.BeginAddress, e.struct.EndAddress, e.struct.UnwindData)
+          for e in pe.DIRECTORY_ENTRY_EXCEPTION]
 BASE = pe.OPTIONAL_HEADER.ImageBase
 img  = pe.get_memory_mapped_image(ImageBase=BASE)
 IMGSZ = (len(img) + 0xFFF) & ~0xFFF
@@ -111,7 +118,7 @@ def hook_code(uc, addr, size, _):
     # First instruction of a function that never touches the file: skip the whole thing.
     if addr not in (READ, ALLOC, FREE, MEMSET, ENTRY):
         fn = _fn_of(addr)
-        if fn and fn[0] == addr and not reads_file(addr):
+        if fn and fn[0] == addr and addr not in _fragments and not reads_file(addr):
             _stub_targets.add(addr)
     if addr == READ:
         h  = uc.reg_read(UC_X86_REG_ECX)
@@ -165,7 +172,20 @@ def hook_code(uc, addr, size, _):
 # Everything else can be stubbed to "returned 0" without changing the byte layout, which is
 # the only thing being measured here.
 import capstone
-_ranges = [(BASE+a, BASE+b) for a,b in _pdata]
+# Only *primary* functions. Half of this binary's 8,741 .pdata entries are chained
+# fragments — continuations of a function that lives elsewhere — and treating one as a
+# function entry means stubbing the middle of something already running. That is what the
+# "unresolved tail call to 0x0" was: `0x140257cad` is a fragment of the payload primitive,
+# the stub popped a return address that was never pushed, and execution left for nowhere.
+def _is_chained(unwind_rva):
+    for sec in pe.sections:
+        if sec.VirtualAddress <= unwind_rva < sec.VirtualAddress + sec.Misc_VirtualSize:
+            off = sec.PointerToRawData + (unwind_rva - sec.VirtualAddress)
+            return bool((_raw[off] >> 3) & 0x4)
+    return False
+_raw = open(EXE, 'rb').read()
+_ranges = [(BASE+a, BASE+b) for a, b, u in _pdata if not _is_chained(u)]
+_fragments = {BASE+a for a, b, u in _pdata if _is_chained(u)}
 _md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
 _calls = {}
 def _fn_of(va):
