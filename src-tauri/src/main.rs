@@ -7992,6 +7992,17 @@ fn set_watch_mods_reload(
     Ok(())
 }
 
+/// Turn injecting `mxbsecure.dll` into the running game on or off.
+///
+/// Takes effect on the next game session: the watcher decides once per run, so a change made
+/// mid-session doesn't reach into a game that is already up.
+#[tauri::command]
+fn set_secure_content_inject(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.secure_content_inject = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window(SHOP_LOGIN_WINDOW) {
@@ -9890,6 +9901,7 @@ fn main() {
             voice_meter_stop,
             voice_test_output,
             set_watch_mods_reload,
+            set_secure_content_inject,
             frostmod_reload,
             frostmod_running,
             frostmod_attachment,

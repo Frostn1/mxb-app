@@ -161,28 +161,58 @@ fn write_manifest(assets: &[SecureAsset], dir: &std::path::Path) -> Result<(), S
     std::fs::write(dir.join("manifest.tsv"), out).map_err(|e| e.to_string())
 }
 
-/// Watch for the game and inject the moment it appears — as early as possible, because MX
-/// Bikes reads a track's content to list it, so the hook has to be live *before* the track
-/// browser opens or a protected track won't show. A tight poll (every couple of seconds)
-/// rather than the 15-second session watcher, and it injects once per run of the game.
+/// Is injecting into the running game allowed on this install? Off unless the player turned
+/// it on — see [`crate::config::AppConfig::secure_content_inject`].
+fn injection_enabled(app: &AppHandle) -> bool {
+    crate::config::load(app).map(|c| c.secure_content_inject).unwrap_or(false)
+}
+
+/// Watch for the game and, if this install has opted in, inject shortly after it appears —
+/// early matters, because MX Bikes reads a track's content to list it, so the hook has to be
+/// live before the track browser opens or a protected track won't show.
 ///
-/// A no-op run to run when nothing is protected: it only wakes to check a process list.
+/// Exactly one decision per run of the game, latched. That matters more than it sounds: this
+/// used to re-test `!scan_secured(..).is_empty()` on every tick, and since an install with
+/// nothing protected never made that true, it never latched — so a player with no locked
+/// content at all got a **recursive walk of the whole `mods/tracks` tree every two seconds**
+/// for as long as they played. On a cloud-synced mods folder (OneDrive et al, where a single
+/// directory read can take seconds) that alone is enough to ruin the session. The old comment
+/// here claimed the opposite: "a no-op run to run when nothing is protected". It wasn't.
+///
+/// So: decide once, latch, and only re-decide when the game has gone away.
 pub fn watch(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let mut injected_this_session = false;
+        let mut decided_this_run = false;
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            let running = crate::gameproc::is_game_running();
-            if running {
-                if !injected_this_session && !scan_secured(&app).is_empty() {
-                    arm(&app);
-                    injected_this_session = true;
-                }
-            } else {
-                // Game gone: re-arm for the next launch.
-                injected_this_session = false;
+            if !crate::gameproc::is_game_running() {
+                decided_this_run = false; // game gone: decide again for the next run
+                continue;
             }
+            if decided_this_run {
+                continue;
+            }
+            // Latch first, whatever we decide below: every path here is a once-per-run
+            // decision, and none of them should be retried on a two-second timer.
+            decided_this_run = true;
+
+            // The setting is checked before anything touches the disk, so the default path
+            // costs a config read and nothing else.
+            if !injection_enabled(&app) {
+                continue;
+            }
+            // Don't reach into a process the app had no hand in starting. Locked content is
+            // worth a DLL in *our* game; it is not worth one in a game the player started
+            // themselves while the app happened to be open in the tray.
+            if !crate::gameproc::launched_by_app() {
+                log::info!(
+                    "[secure] the game wasn't launched from the app — not injecting. \
+                     Start it with Play to use locked content."
+                );
+                continue;
+            }
+            arm(&app);
         }
     });
 }

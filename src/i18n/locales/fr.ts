@@ -791,6 +791,9 @@ export const fr: Translation = {
     "Rechargement auto lors des changements de dossier",
   "settings.watchModsReloadDesc":
     "Recharger le jeu automatiquement quand des circuits ou des motos sont ajoutés à votre dossier de mods — même téléchargés manuellement hors de MXB App.",
+  "settings.secureContentInject": "Utiliser le contenu verrouillé en jeu",
+  "settings.secureContentInjectDesc":
+    "Permet d'ouvrir les circuits verrouillés achetés en ajoutant un petit assistant au jeu en cours. Désactivé par défaut. Si activé, lance le jeu avec Play — une session que MXB App n'a pas lancée est laissée tranquille.",
   "settings.checking": "Vérification…",
   "settings.runningConnected": "En cours · jeu connecté",
   "settings.notRunning": "Inactif",

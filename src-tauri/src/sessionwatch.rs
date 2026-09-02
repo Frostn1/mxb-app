@@ -39,6 +39,11 @@ pub fn start(app: &AppHandle) {
 
             let running = gameproc::is_game_running();
             let started = running && !was_running;
+            if running != was_running {
+                // Publish the transition: the mods watcher holds its reloads while a session
+                // is young, because that is when the game is walking the whole content tree.
+                gameproc::note_session(running);
+            }
             was_running = running;
 
             // Checked every pass, not only when the poll says the game is gone: the handle

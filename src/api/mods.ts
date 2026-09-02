@@ -2490,6 +2490,16 @@ export function setWatchModsReload(enabled: boolean): Promise<void> {
   return invoke<void>("set_watch_mods_reload", { enabled });
 }
 
+/**
+ * Toggle injecting `mxbsecure.dll` into the running game for locked content.
+ *
+ * Takes effect on the next game session — the app decides once per run, so flipping this
+ * mid-session won't reach into a game that's already up.
+ */
+export function setSecureContentInject(enabled: boolean): Promise<void> {
+  return invoke<void>("set_secure_content_inject", { enabled });
+}
+
 export const MODS_WATCH_SLUG = "__mods_watch__";
 
 /** Fires after each install with whether FrostMod picked the new mod up live. */

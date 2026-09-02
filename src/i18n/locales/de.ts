@@ -794,6 +794,9 @@ export const de: Translation = {
   "settings.watchModsReload": "Automatisch neu laden bei Ordneränderungen",
   "settings.watchModsReloadDesc":
     "Das Spiel automatisch neu laden, wenn Strecken oder Motorräder in deinen Mod-Ordner kommen — auch wenn sie außerhalb von MXB App manuell heruntergeladen wurden.",
+  "settings.secureContentInject": "Gesperrte Inhalte im Spiel nutzen",
+  "settings.secureContentInjectDesc":
+    "Erlaubt gekaufte gesperrte Strecken, indem dem laufenden Spiel ein kleiner Helfer hinzugefügt wird. Standardmäßig aus. Wenn aktiv, starte das Spiel über Play — eine Sitzung, die MXB App nicht gestartet hat, bleibt unberührt.",
   "settings.checking": "Wird geprüft…",
   "settings.runningConnected": "Läuft · Spiel verbunden",
   "settings.notRunning": "Läuft nicht",

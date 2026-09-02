@@ -48,6 +48,11 @@ const SETTLE: Duration = Duration::from_secs(3);
 /// the reload forever — past this we act on what has landed so far.
 const MAX_SETTLE: Duration = Duration::from_secs(45);
 
+/// How far into a game session auto-reload stays quiet when the mods tree sits on a sync
+/// provider. Long enough to cover the game's own startup content walk, which is the window
+/// where a second walk turns into a black screen — see [`settle_then_reload`].
+const CLOUD_SESSION_GRACE: Duration = Duration::from_secs(120);
+
 /// Slug the folder watcher tags its `frostmod-reload` events with. In-app install
 /// handlers filter on their own slug, so this sentinel never collides with them.
 pub const WATCH_SLUG: &str = "__mods_watch__";
@@ -358,10 +363,37 @@ fn on_batch(
 
 /// Wait for the mods folder to stop changing, then fire one reload for the whole batch.
 fn settle_then_reload(app: AppHandle, pending: Arc<Mutex<Pending>>, live: Arc<AtomicBool>) {
+    // Read once, not once a second: the provider is a property of the configured path.
+    let cloud = crate::config::load(&app).ok().and_then(|c| crate::cloudfiles::mods_provider(&c));
+    let mut held = false;
+
     let mods = loop {
         std::thread::sleep(SETTLE / 3);
         if !live.load(Ordering::SeqCst) {
             return;
+        }
+        // A reload makes the game walk the whole content tree again. On a sync-backed tree
+        // that walk is slow enough to matter — one player's took 5–6 *seconds per track
+        // folder* under OneDrive — and firing it while the game is still doing its own
+        // startup walk stacks a second one on top: the game stops at a black screen and
+        // never reaches the loading screen. So while a session is young, hold the batch.
+        //
+        // A mitigation, not a cure. The cure is the folder not being on a sync provider,
+        // which `cloudfiles` already tells the player at the top of every session.
+        if let (Some(provider), Some(age)) = (&cloud, crate::gameproc::session_age()) {
+            if age < CLOUD_SESSION_GRACE {
+                if !held {
+                    held = true;
+                    log::info!(
+                        "mods watcher: holding the reload — the game has only been up {:?} and \
+                         the mods tree is on {provider}, where a content reload during the load \
+                         screen can leave the game on a black screen. It will fire once the \
+                         session has settled.",
+                        age
+                    );
+                }
+                continue;
+            }
         }
         let settled = pending
             .lock()

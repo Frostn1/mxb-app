@@ -780,6 +780,9 @@ export const en = {
   "settings.watchModsReload": "Auto-reload on folder changes",
   "settings.watchModsReloadDesc":
     "Reload the game automatically when tracks or bikes are added to your mods folder — even downloaded manually outside MXB App.",
+  "settings.secureContentInject": "Use locked content in game",
+  "settings.secureContentInjectDesc":
+    "Lets purchased locked tracks open by adding a small helper to the running game. Off by default. With it on, start the game with Play — a session MXB App didn't launch is left alone.",
   "settings.checking": "Checking…",
   "settings.runningConnected": "Running · game connected",
   "settings.notRunning": "Not running",

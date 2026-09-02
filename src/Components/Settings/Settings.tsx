@@ -50,6 +50,7 @@ import {
   setAnalyticsEnabled,
   setRunInBackground,
   setWatchModsReload,
+  setSecureContentInject,
   setWineRunner,
   wineHostInfo,
   type WineHostInfo,
@@ -468,6 +469,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const frostmodArgs = frostmodArgsDraft ?? config.frostmodArgs ?? "";
   const instantRefresh = config.instantRefresh ?? true;
   const watchModsReload = config.watchModsReload ?? true;
+  const secureContentInject = config.secureContentInject ?? false;
 
   const overlayEnabled = config.overlayEnabled ?? true;
   const overlayHotkey = config.overlayHotkey || FALLBACK_HOTKEY;
@@ -737,6 +739,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const toggleWatchModsReload = async (v: boolean) => {
     try {
       await setWatchModsReload(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const toggleSecureContentInject = async (v: boolean) => {
+    try {
+      await setSecureContentInject(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
@@ -1864,6 +1875,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               desc={t("settings.watchModsReloadDesc")}
               checked={watchModsReload}
               onChange={toggleWatchModsReload}
+            />
+
+            {/* Off unless asked for: this puts a DLL into the running game, and the game is
+                usually Steam's process, not ours. With it on, launch from Play — a session
+                the app didn't start is left alone. */}
+            <ToggleRow
+              label={t("settings.secureContentInject")}
+              desc={t("settings.secureContentInjectDesc")}
+              checked={secureContentInject}
+              onChange={toggleSecureContentInject}
             />
 
             {/* FrostMod's own flags, typed. A plain field rather than a toggle each: these

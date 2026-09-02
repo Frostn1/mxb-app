@@ -785,6 +785,9 @@ export const it: Translation = {
   "settings.watchModsReload": "Ricarica automatica alle modifiche",
   "settings.watchModsReloadDesc":
     "Ricarica il gioco automaticamente quando piste o moto vengono aggiunte alla cartella mod — anche se scaricate manualmente fuori da MXB App.",
+  "settings.secureContentInject": "Usa i contenuti bloccati nel gioco",
+  "settings.secureContentInjectDesc":
+    "Consente di aprire i tracciati bloccati acquistati aggiungendo un piccolo supporto al gioco in esecuzione. Disattivato per impostazione predefinita. Se attivo, avvia il gioco con Play: una sessione non avviata da MXB App viene lasciata stare.",
   "settings.checking": "Controllo…",
   "settings.runningConnected": "In esecuzione · gioco collegato",
   "settings.notRunning": "Non in esecuzione",

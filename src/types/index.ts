@@ -104,6 +104,16 @@ export interface Config {
    * MXB App (e.g. a manual download dropped into the folder). Default true.
    */
   watchModsReload?: boolean;
+  /**
+   * Inject `mxbsecure.dll` into the running game so locked content can be opened.
+   *
+   * **Off by default.** It reaches into a process the app usually didn't create, and the
+   * DLL hasn't been proven on a real Windows run — a build that armed it for everyone with
+   * locked content had the game dying on access violations seconds in, with quitting the
+   * app from the tray as the only way out. With it on, launch the game from Play: the app
+   * won't inject into a session it didn't start.
+   */
+  secureContentInject?: boolean;
   /** Intro slideshow already dismissed. Saved with the config (not in localStorage)
    *  so clearing the webview's storage doesn't replay the first-run flow. */
   welcomeSeen?: boolean;
@@ -1116,7 +1126,19 @@ export interface FrostmodStatus {
    * aborts MX Bikes with R6034 is still sitting there — see {@link StrayMsvcr90}.
    */
   strayMsvcr90: StrayMsvcr90;
+  /**
+   * What became of a `frostmod.dlo` hand-installed into the game's own `plugins` folder.
+   *
+   * `absent` is the normal case. Anything else means plugin mode is in play: the game loads
+   * FrostMod itself at startup, with no `frostmod.exe` involved. Nothing used to update that
+   * copy, so it outlived every release — one player was running a v0.12 plugin against a
+   * v0.16.2 install, which hung the game before the loading screen.
+   */
+  gamePlugin: PluginCopy;
 }
+
+/** State of a FrostMod plugin copy in the game's `plugins` folder. Matches `PluginCopy`. */
+export type PluginCopy = "absent" | "current" | "refreshed" | "locked";
 
 /**
  * A Visual C++ runtime the FrostMod chain needs. Matches `vcruntime::Runtime`.

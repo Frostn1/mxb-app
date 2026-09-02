@@ -125,6 +125,15 @@ fn is_content(path: &std::path::Path) -> bool {
 
 /// Name the sync tool from the path, so the advice can name it too. `None` when the folder
 /// is somewhere unrecognised — a placeholder there is still a placeholder.
+/// The sync provider the configured mods tree sits under, if any.
+///
+/// A path question, not a disk one: it answers whether reads there go through a sync
+/// tool's filter driver at all, which is true even when every file is currently hydrated.
+/// That is the thing worth knowing before asking the game to re-walk the tree.
+pub fn mods_provider(cfg: &crate::config::AppConfig) -> Option<String> {
+    provider_of(&crate::library::mods_root(&cfg.mods_path))
+}
+
 fn provider_of(root: &std::path::Path) -> Option<String> {
     let lower = root.to_string_lossy().to_ascii_lowercase();
     for (needle, name) in [
