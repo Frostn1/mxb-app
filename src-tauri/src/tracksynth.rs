@@ -2442,14 +2442,20 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
                 // is everything the shoulder does not reach.
                 let grass = edge < 0.0;
                 let to = if grass { half + SHOULDER_M } else { edge };
-                let m = mask_from(syn, MASK_DIM, |d, _, _, _| {
+                let (mw, mh) = (syn.gw - 1, syn.gh - 1);
+                let m = mask_rect(syn, mw, mh, |d, _, _, _| {
                     u8::from(if grass { d > to } else { d <= to }) * 255
                 });
                 let packed = deflate_raw(&m);
                 out.extend_from_slice(&u(1));
-                out.extend_from_slice(&u(MASK_DIM as u32));
-                out.extend_from_slice(&u(MASK_DIM as u32));
-                out.extend_from_slice(&u(packed.len() as u32));
+                out.extend_from_slice(&u(mw as u32));
+                out.extend_from_slice(&u(mh as u32));
+                // The length counts the eight bytes that follow it, exactly as a sheet's
+                // does. Leaving them out feeds the first eight bytes of the mask to whatever
+                // reads this pair, and the rest to the inflater.
+                out.extend_from_slice(&u(packed.len() as u32 + 8));
+                out.extend_from_slice(&u(2));
+                out.extend_from_slice(&u(0));
                 out.extend_from_slice(&packed);
             }
         }
@@ -2597,6 +2603,24 @@ fn raw16(syn: &Synth, scale: f32) -> Vec<u8> {
 /// distance from the centreline is a band of exactly constant width running the whole lap,
 /// and from above that is the most machine-made thing on the whole track — more so than the
 /// terrain, because paint has no relief to distract from its outline.
+fn mask_rect(syn: &Synth, mw: usize, mh: usize, f: impl Fn(f32, f32, f32, f32) -> u8) -> Vec<u8> {
+    let mut out = vec![0u8; mw * mh];
+    for y in 0..mh {
+        let gy = (y * syn.gh / mh).min(syn.gh - 1);
+        for x in 0..mw {
+            let gx = (x * syn.gw / mw).min(syn.gw - 1);
+            let i = gy * syn.gw + gx;
+            out[y * mw + x] = f(
+                syn.dist[i],
+                syn.arc[i],
+                gx as f32 * syn.mps,
+                gy as f32 * syn.mps,
+            );
+        }
+    }
+    out
+}
+
 fn mask_from(syn: &Synth, dim: usize, f: impl Fn(f32, f32, f32, f32) -> u8) -> Vec<u8> {
     let mut out = vec![0u8; dim * dim];
     for y in 0..dim {
@@ -4635,6 +4659,13 @@ mod tests {
 mod map_layer_records {
     use super::*;
 
+    fn inflate(d: &[u8]) -> Vec<u8> {
+        use std::io::Read;
+        let mut out = Vec::new();
+        flate2::read::DeflateDecoder::new(d).read_to_end(&mut out).unwrap();
+        out
+    }
+
     fn u32_at(m: &[u8], o: usize) -> u32 {
         u32::from_le_bytes(m[o..o + 4].try_into().unwrap())
     }
@@ -4689,7 +4720,23 @@ mod map_layer_records {
             let masked = u32_at(&m, o);
             o += 4;
             if masked == 1 {
+                // Mask dimensions follow the terrain, and the length counts the 8-byte
+                // prefix in front of the payload -- both measured off a published map.
+                let (mw, mh) = (u32_at(&m, o) as usize, u32_at(&m, o + 4) as usize);
+                assert_eq!(
+                    (mw, mh),
+                    (syn.gw - 1, syn.gh - 1),
+                    "layer {i} mask is sized to the terrain"
+                );
                 let len = u32_at(&m, o + 8) as usize;
+                assert_eq!(
+                    [u32_at(&m, o + 12), u32_at(&m, o + 16)],
+                    [2, 0],
+                    "layer {i} mask prefix"
+                );
+                let packed = &m[o + 20..o + 12 + len];
+                let raw = inflate(packed);
+                assert_eq!(raw.len(), mw * mh, "layer {i} mask is one byte a texel");
                 o += 12 + len;
             }
             // The base layer carries no mask and ends in 0; masked layers end in 1.
@@ -4705,4 +4752,5 @@ mod map_layer_records {
         assert_eq!(m.len() - o, 32, "the vegetation and detail lists close the file");
     }
 }
+
 
