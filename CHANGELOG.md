@@ -6,88 +6,47 @@
 - Settings shows how many paints other riders' syncs have put in your mods folder, with a
   button that takes them back out. Paints you have edited since are kept.
 
-## 2026-09-01
+## 2026-09-01 — v0.13.4 — Ground under the track
 
 ### Added
-- The diagnostics dashboard searches. Riders by name, GUID, Steam id or account id; files by
+- Generated tracks carry their ground. An installed track has graphics instead of a black
+  surface, and no longer needs TerrainEd to be rideable.
+- The diagnostics dashboard searches: riders by name, GUID, Steam id or account id; files by
   name, hash, signer, or anything the file claims about itself.
-- Every rider has a page: their identity, last report, the servers they have been seen on,
+- Every rider has a page — their identity, last report, the servers they have been seen on,
   and every file their game has loaded.
-- Every file has a page listing everyone who has loaded it, per build — the lookup run
-  backwards.
-- Lists are paged, with a page count and numbered links.
+- Every file has a page listing everyone who has loaded it, per build.
+- Diagnostics lists are paged, with a page count and numbered links.
 
 ### Changed
-- The dashboard is four views behind a nav instead of one long page, and the tables carry the
-  information the prose used to explain.
+- Locked content is something you switch on in Settings, and applies only to games started
+  with Play.
+- Mods folders on a sync tool are read once per game session rather than every two seconds.
+- The diagnostics dashboard is four views behind a nav instead of one long page, and the
+  tables carry the information the prose used to explain.
 - Rule notes show on the rules page, and a Flag or Clear button returns to the page it was
   pressed on with its filters intact.
-
-## 2026-09-01
+- The map-loader tracer reads a whole track graphics file, and stops where it can no longer
+  be sure instead of guessing past it.
 
 ### Fixed
 - The game opens again after being closed once, without having to quit MXB App from the tray
   first.
-- Locked content is now something you switch on in Settings, and only applies to games started
-  with Play.
+- A generated track's ground lights and renders: every layer ships a normal map, writes its
+  blend mask the way the game reads it, carries a material record, and names each texture the
+  way the game caches it.
+- The starting gates sit across the track rather than off to one side, and there are forty of
+  them at the spacing every published track uses.
 - A FrostMod plugin installed into the game's own folder is kept up to date with the FrostMod
   the app manages, instead of staying on whatever version it was installed at. One that can't
   be updated is renamed so the game stops loading it, and can be renamed back.
 - A warning when your mods folder is inside OneDrive or another sync tool, which is what makes
   the game sit on a black screen while it loads.
-- Auto-reload waits for the game to finish loading when the mods folder is on OneDrive or
-  another sync tool, so a folder change during startup no longer leaves the game on a black
-  screen.
-- Mods folders on a sync tool are read once per game session rather than every two seconds.
-
-## 2026-09-01
-
-### Fixed
-- Generated tracks draw their ground. The track graphics file now carries the terrain as a
-  mesh, the way a published track does, instead of a heightfield with no surface on it.
-
-## 2026-09-01
-
-### Fixed
-- Generated tracks load and ride with their ground visible: each layer now ships the normal
-  map the renderer expects, writes its blend mask the way the game reads it, and identifies
-  each texture the way the game caches it — so the surface lights instead of dropping the game.
-
-## 2026-09-01
-
-### Fixed
-- Generated tracks no longer crash the game at the track graphics stage: each ground layer
-  now carries the material record a published map uses.
-
-## 2026-09-01
-
-### Added
-- Generated tracks carry their ground again, so an installed track has graphics instead of a
-  black surface — and no longer needs TerrainEd to be rideable.
-
-## 2026-09-01
-
-### Fixed
-- The map-loader tracer reads a whole track graphics file instead of stopping a fraction in.
-
-## 2026-09-01
-
-### Fixed
-- The starting gates sit across the track instead of off to one side of it, and there are
-  forty of them at the spacing every published track uses.
-
-## 2026-09-01
-
-### Changed
-- The map-loader tracer stops where it can no longer be sure, instead of guessing past it.
-
-### Fixed
+- Auto-reload waits for the game to finish loading when the mods folder is on a sync tool, so
+  a folder change during startup no longer leaves the game on a black screen.
 - A custom rider model no longer turns up upside down and facing backwards in the 3D preview.
-  The viewer stood a body up with one fixed turn that suits how the stock riders are built,
-  and a model built the other way round took it and landed on its head. It now checks the
-  result — skin at the top, name and number on the back — and turns the body again if the
-  first guess was wrong.
-- The map-loader tracer stops at the end of the file instead of reading zeros past it.
+  The viewer now checks the result — skin at the top, name and number on the back — and turns
+  the body again if the first guess was wrong.
 
 ## 2026-09-01 — v0.13.3 — Nothing you didn't ask for
 
