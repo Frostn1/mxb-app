@@ -273,6 +273,35 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
                 prog.start.x += dx;
                 prog.start.z += dz;
             }
+
+            // And then routed to the ground rather than merely centred on it: turned and
+            // shifted to the placement whose line has the least fall across it, at about the
+            // grade a published track climbs at. The lap's shape is untouched — only where it
+            // lies and which way round it faces.
+            if let Some(p) = tracksynth::place_on_ground(prog) {
+                if p.was_cross_m - p.cross_m > 0.25 {
+                    let (c, s) = (p.turn_deg.to_radians().cos(), p.turn_deg.to_radians().sin());
+                    let st = prog.stations(4.0);
+                    let (mut lo_x, mut hi_x, mut lo_z, mut hi_z) =
+                        (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+                    for q in &st {
+                        lo_x = lo_x.min(q.x);
+                        hi_x = hi_x.max(q.x);
+                        lo_z = lo_z.min(q.z);
+                        hi_z = hi_z.max(q.z);
+                    }
+                    let (cx, cz) = ((lo_x + hi_x) * 0.5, (lo_z + hi_z) * 0.5);
+                    let (rx, rz) = (prog.start.x - cx, prog.start.z - cz);
+                    prog.start.x = cx + rx * c - rz * s + p.dx;
+                    prog.start.z = cz + rx * s + rz * c + p.dz;
+                    prog.start.angle += p.turn_deg;
+                    done.push(format!(
+                        "lap turned {:.0}° to lie along the ground — the fall across it drops \
+                         from {:.1} m to {:.1} m over thirty metres, climbing at {:.1}°",
+                        p.turn_deg, p.was_cross_m, p.cross_m, p.grade_p90_deg
+                    ));
+                }
+            }
         }
     }
 

@@ -58,6 +58,8 @@
 - The racing line is chopped up at the scale of a wheel rather than a jump, and the field
   around it is smooth. It used to be nearly as rough out in the grass as it was on the line.
 - A track's edge is crisp against the field rather than fading out over a wide shelf.
+- The lap is routed to its ground rather than dropped on it — turned and shifted to the
+  placement that lies along the hills instead of across them.
 - The track runs over the hills instead of past them — it climbs and drops the way a hillside
   track does, rather than sitting flat with scenery in the distance.
 - A venue has banks and spoil hills around it, the way a real one does — the thing that makes
