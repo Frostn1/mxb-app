@@ -282,6 +282,9 @@ const PROFILE_STEP: f32 = 0.1;
 
 /// Masks are stretched over the terrain, so they cost nothing to keep coarser than it.
 const MASK_DIM: usize = 1024;
+/// How hard the ground's own luma pushes its normals. Enough to catch light on ruts and
+/// chop without turning the soil grain into relief.
+const NORMAL_STRENGTH: f32 = 6.0;
 
 /// The ground textures' edge, in pixels. A power of two, as MX Bikes requires.
 ///
@@ -2297,116 +2300,236 @@ const MAP_QUADS: usize = 256;
 ///   f32 1.0
 /// 32 bytes    zero: the vegetation and detail lists, all empty
 /// ```
-fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
-    const FMAX: u32 = 0x7F7F_FFFF;
-    const NFMAX: u32 = 0xFF7F_FFFF;
-    let mut out: Vec<u8> = Vec::new();
-    let u = |v: u32| v.to_le_bytes();
-    let f = |v: f32| v.to_le_bytes();
+/// What the game keys its texture cache on: the MD5 of a sheet's pixels, before deflating.
+///
+/// Measured on every sheet of PiBoSo's drag strip -- and it is content-addressed, so two
+/// layers sharing a texture share a hash.
+fn sheet_hash(rgba: &[u8]) -> [u8; 16] {
+    use md5::Digest;
+    md5::Md5::digest(rgba).into()
+}
 
-    // An empty mesh block: no materials, no geometry, one node with inverted bounds.
-    let mut node = Vec::new();
-    for w in [FMAX, FMAX, FMAX, NFMAX, NFMAX, NFMAX] {
-        node.extend_from_slice(&u(w));
+/// A tangent-space normal map derived from a ground sheet's own luma.
+///
+/// Every terrain layer on a published map carries one of these beside its colour sheet. The
+/// encoding is two-channel — the normal lives in red and green, blue is a constant 255 and
+/// alpha a constant 3 — measured off PiBoSo's drag strip.
+fn normal_pixels(rgba: &[u8], dim: usize, strength: f32) -> Vec<u8> {
+    let luma = |x: usize, y: usize| -> f32 {
+        let i = (y % dim) * dim * 4 + (x % dim) * 4;
+        (0.299 * rgba[i] as f32 + 0.587 * rgba[i + 1] as f32 + 0.114 * rgba[i + 2] as f32) / 255.0
+    };
+    let mut out = vec![0u8; dim * dim * 4];
+    for y in 0..dim {
+        for x in 0..dim {
+            let dx = luma((x + 1) % dim, y) - luma((x + dim - 1) % dim, y);
+            let dy = luma(x, (y + 1) % dim) - luma(x, (y + dim - 1) % dim);
+            let (nx, ny, nz) = (-dx * strength, -dy * strength, 1.0);
+            let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-6);
+            let i = (y * dim + x) * 4;
+            out[i] = (((nx / len) * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0) as u8;
+            out[i + 1] = (((ny / len) * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0) as u8;
+            out[i + 2] = 255;
+            out[i + 3] = 3;
+        }
     }
-    node.extend_from_slice(&[0u8; 20]);
+    out
+}
 
-    out.extend_from_slice(b"MP2\0");
-    out.extend_from_slice(&u(304));
-    out.extend_from_slice(&u(0)); // materials
-    out.extend_from_slice(&u(0)); // vertices
-    out.extend_from_slice(&u(0)); // triangles
-    out.extend_from_slice(&u(1));
-    out.extend_from_slice(&node);
-    out.extend_from_slice(&u(0)); // no mesh textures
-    out.extend_from_slice(&[0u8; 16]);
-    out.extend_from_slice(&u(1));
-    out.extend_from_slice(&node);
-    out.extend_from_slice(&[0u8; 8]);
-    out.extend_from_slice(&u(1));
-    out.extend_from_slice(&node);
-    out.extend_from_slice(&[0u8; 4]);
-    out.extend_from_slice(&u(1));
-    out.extend_from_slice(&node);
-    out.extend_from_slice(&[0u8; 68]);
-    debug_assert_eq!(out.len(), 312, "the prefix is a fixed 312 bytes");
-
-    // The terrain itself, as the same 16-bit samples the `.raw` carries.
-    out.extend_from_slice(&u(syn.gw as u32));
-    out.extend_from_slice(&u(syn.gh as u32));
-    out.extend_from_slice(&raw16(syn, prog.terrain.scale));
-    out.extend_from_slice(&f(prog.terrain.size_x));
-    out.extend_from_slice(&f(prog.terrain.scale));
-    out.extend_from_slice(&f(5.0));
-    out.extend_from_slice(&[0u8; 12]);
-
-    // One layer per painted band, in the order they are painted over each other. The first
-    // covers everything and so carries no mask; the rest are masked.
+fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
     let (field, ridden, shoulder, turf) = ground_looks(prog.terrain.surface);
     let seed = prog.terrain.relief.seed;
     let dim = GROUND_TEXTURE_DIM;
-    let half = prog.width * 0.5;
-    let (_, shoulder_scale) = ground(prog.terrain.surface);
-    let bands: [(&str, &GroundLook, u32, f32, Option<f32>); 4] = [
-        ("ground_c", &field, 0x9A0D, TILE_FIELD_M, None),
-        ("shoulder_c", &shoulder, 0x30D2, TILE_SHOULDER_M,
-         Some(half + SHOULDER_M * shoulder_scale)),
-        ("dirt_line_c", &ridden, 0x11E5, TILE_LINE_M, Some(half)),
-        ("grass_c", &turf, 0x6A55, TILE_GRASS_M, Some(-1.0)),
+
+    // Materials are bound to sheets positionally, so the two lists stay in step.
+    let sheets = [
+        ("ground_c", ground_pixels(dim, &field, seed ^ 0x9A0D), TILE_FIELD_M),
+        ("shoulder_c", ground_pixels(dim, &shoulder, seed ^ 0x30D2), TILE_SHOULDER_M),
+        ("dirt_line_c", ground_pixels(dim, &ridden, seed ^ 0x11E5), TILE_LINE_M),
+        ("grass_c", ground_pixels(dim, &turf, seed ^ 0x6A55), TILE_GRASS_M),
     ];
-    out.extend_from_slice(&u(bands.len() as u32));
-    for (sheet, look, salt, tile, mask_to) in bands {
-        // A material record: fourteen floats, the shape every published map uses. This is not
-        // a name field -- writing text here hands the renderer garbage coefficients.
-        out.extend_from_slice(&f(0.0));
-        for _ in 0..6 {
-            out.extend_from_slice(&f(1.0));
-        }
-        out.extend_from_slice(&[0u8; 28]);
+    let n = sheets.len();
 
-        out.extend_from_slice(&u(1)); // one sheet
-        let mut rec = vec![0u8; 100];
-        let n = sheet.len().min(99);
-        rec[..n].copy_from_slice(&sheet.as_bytes()[..n]);
+    let mut out = Vec::new();
+    out.extend_from_slice(b"MP2\0");
+    out.extend_from_slice(&304u32.to_le_bytes());
+
+    // One material record each: `0`, six `1`s, then zeros but for a one-based id at word
+    // eleven, which is an integer and not a float. Measured across Indiana's 49.
+    out.extend_from_slice(&(n as u32).to_le_bytes());
+    for k in 0..n {
+        let mut rec = [0u8; 56];
+        for w in 1..=6 {
+            rec[w * 4..w * 4 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        rec[44..48].copy_from_slice(&((k + 1) as u32).to_le_bytes());
         out.extend_from_slice(&rec);
-        out.extend_from_slice(&u(0));
-        out.extend_from_slice(&u(dim as u32));
-        out.extend_from_slice(&u(dim as u32));
-        out.extend_from_slice(&[0u8; 16]);
-        out.extend_from_slice(&u(0));
-        let px = deflate_raw(&ground_pixels(dim, look, seed ^ salt));
-        out.extend_from_slice(&u(px.len() as u32 + 8));
-        out.extend_from_slice(&[0u8; 8]);
-        out.extend_from_slice(&px);
-        out.extend_from_slice(&u(0)); // no secondary map
-
-        let reps = repetitions(prog, tile) as f32;
-        out.extend_from_slice(&f(reps));
-        out.extend_from_slice(&f(reps));
-
-        match mask_to {
-            None => out.extend_from_slice(&u(0)),
-            Some(edge) => {
-                // Where this band covers the ground. A negative edge means the grass, which
-                // is everything the shoulder does not reach.
-                let grass = edge < 0.0;
-                let to = if grass { half + SHOULDER_M } else { edge };
-                let m = mask_from(syn, MASK_DIM, |d, _, _, _| {
-                    u8::from(if grass { d > to } else { d <= to }) * 255
-                });
-                let packed = deflate_raw(&m);
-                out.extend_from_slice(&u(1));
-                out.extend_from_slice(&u(MASK_DIM as u32));
-                out.extend_from_slice(&u(MASK_DIM as u32));
-                out.extend_from_slice(&u(packed.len() as u32));
-                out.extend_from_slice(&packed);
-            }
-        }
-        out.extend_from_slice(&f(if mask_to.is_none() { 0.0 } else { 1.0 }));
     }
 
-    // The vegetation and detail lists, every one of them empty.
-    out.extend_from_slice(&[0u8; 32]);
+    // The ground, as geometry.
+    //
+    // A published motocross map carries its terrain as a mesh — Indiana has 997,571 vertices
+    // and no heightfield block at all. The heightfield-only shape this file used to write is
+    // what PiBoSo's drag strip does, and that track declares no vertices and no triangles, so
+    // it draws nothing. That is why our tracks rode with the jumps present and the ground
+    // black: the `.trh` was giving collision and the `.map` was giving no surface.
+    let q = MAP_QUADS;
+    let half = prog.width * 0.5;
+    let (_, shoulder_scale) = ground(prog.terrain.surface);
+    let shoulder_to = half + SHOULDER_M * shoulder_scale;
+    let at = |gx: usize, gy: usize| -> f32 {
+        syn.heights[gy.min(syn.gh - 1) * syn.gw + gx.min(syn.gw - 1)]
+    };
+    let sample = |i: usize, j: usize| -> (f32, f32, f32) {
+        let gx = i * (syn.gw - 1) / q;
+        let gy = j * (syn.gh - 1) / q;
+        (gx as f32 * syn.mps, at(gx, gy), gy as f32 * syn.mps)
+    };
+    let band = |i: usize, j: usize| -> usize {
+        let gx = (i * (syn.gw - 1) / q + (i + 1) * (syn.gw - 1) / q) / 2;
+        let gy = (j * (syn.gh - 1) / q + (j + 1) * (syn.gh - 1) / q) / 2;
+        let d = syn.dist[gy.min(syn.gh - 1) * syn.gw + gx.min(syn.gw - 1)];
+        if d <= half {
+            2
+        } else if d <= shoulder_to {
+            1
+        } else if prog.terrain.surface == Surface::Grass {
+            3
+        } else if d > shoulder_to * 1.6 {
+            3
+        } else {
+            0
+        }
+    };
+
+    // Tiles, because a draw group is uploaded through a 16-bit index buffer. Indiana carries
+    // 1313 groups over a million vertices, the largest 8363 and not one over 65535.
+    const TILE: usize = 16;
+    let tiles = q / TILE;
+    struct Group {
+        material: usize,
+        quads: Vec<(usize, usize)>,
+    }
+    let mut leaves: Vec<Vec<Group>> = Vec::new();
+    for tj in 0..tiles {
+        for ti in 0..tiles {
+            let mut by_band: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];
+            for j in tj * TILE..(tj + 1) * TILE {
+                for i in ti * TILE..(ti + 1) * TILE {
+                    by_band[band(i, j)].push((i, j));
+                }
+            }
+            let groups: Vec<Group> = by_band
+                .into_iter()
+                .enumerate()
+                .filter(|(_, v)| !v.is_empty())
+                .map(|(material, quads)| Group { material, quads })
+                .collect();
+            if !groups.is_empty() {
+                leaves.push(groups);
+            }
+        }
+    }
+
+    let total_quads: usize = leaves.iter().flatten().map(|g| g.quads.len()).sum();
+    let vc = total_quads * 4;
+    let tc = total_quads * 2;
+
+    // The vertex block is a structure of arrays, every section measured off Indiana:
+    //   0      position (12)      12*vc  uv0 (8)        20*vc  uv1 (8)     28*vc  uv2 (8)
+    //   36*vc  pair 1,1 (8)       44*vc  pair 1,1 (8)   52*vc  normal (12) 64*vc  tangent (16)
+    out.extend_from_slice(&(vc as u32).to_le_bytes());
+    let mut block = vec![0u8; vc * 80];
+    let put = |b: &mut [u8], o: usize, v: f32| b[o..o + 4].copy_from_slice(&v.to_le_bytes());
+    let mut v = 0usize;
+    for groups in &leaves {
+        for g in groups {
+            let tile = sheets[g.material].2.max(0.5);
+            for &(i, j) in &g.quads {
+                for (dx, dz) in [(0usize, 0usize), (1, 0), (1, 1), (0, 1)] {
+                    let (x, y, z) = sample(i + dx, j + dz);
+                    put(&mut block, v * 12, x);
+                    put(&mut block, v * 12 + 4, y);
+                    put(&mut block, v * 12 + 8, z);
+                    put(&mut block, 12 * vc + v * 8, x / tile);
+                    put(&mut block, 12 * vc + v * 8 + 4, z / tile);
+                    put(&mut block, 36 * vc + v * 8, 1.0);
+                    put(&mut block, 36 * vc + v * 8 + 4, 1.0);
+                    put(&mut block, 44 * vc + v * 8, 1.0);
+                    put(&mut block, 44 * vc + v * 8 + 4, 1.0);
+
+                    let gx = ((i + dx) * (syn.gw - 1) / q).min(syn.gw - 1);
+                    let gy = ((j + dz) * (syn.gh - 1) / q).min(syn.gh - 1);
+                    let dhx = (at(gx + 1, gy) - at(gx.saturating_sub(1), gy)) / (2.0 * syn.mps);
+                    let dhz = (at(gx, gy + 1) - at(gx, gy.saturating_sub(1))) / (2.0 * syn.mps);
+                    let inv = 1.0 / (dhx * dhx + 1.0 + dhz * dhz).sqrt();
+                    put(&mut block, 52 * vc + v * 12, -dhx * inv);
+                    put(&mut block, 52 * vc + v * 12 + 4, inv);
+                    put(&mut block, 52 * vc + v * 12 + 8, -dhz * inv);
+                    let tinv = 1.0 / (1.0 + dhx * dhx).sqrt();
+                    put(&mut block, 64 * vc + v * 16, tinv);
+                    put(&mut block, 64 * vc + v * 16 + 4, dhx * tinv);
+                    put(&mut block, 64 * vc + v * 16 + 12, 1.0);
+                    v += 1;
+                }
+            }
+        }
+    }
+    out.extend_from_slice(&block);
+
+    // Triangle indices are absolute into the whole vertex buffer.
+    out.extend_from_slice(&(tc as u32).to_le_bytes());
+    for c in 0..total_quads {
+        let b = (c * 4) as u32;
+        for t in [[b, b + 1, b + 2], [b, b + 2, b + 3]] {
+            for i in t {
+                out.extend_from_slice(&i.to_le_bytes());
+            }
+        }
+    }
+
+    // A leaf per tile: bounds, then `[triangles here, first triangle, group count]`.
+    out.extend_from_slice(&(leaves.len() as u32).to_le_bytes());
+    let mut tri = 0u32;
+    let mut vert = 0u32;
+    for groups in &leaves {
+        let first = tri;
+        let tris: u32 = groups.iter().map(|g| g.quads.len() as u32 * 2).sum();
+        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for g in groups {
+            for &(i, j) in &g.quads {
+                for (dx, dz) in [(0usize, 0usize), (1, 0), (1, 1), (0, 1)] {
+                    let (x, y, z) = sample(i + dx, j + dz);
+                    for (k, c) in [x, y, z].into_iter().enumerate() {
+                        lo[k] = lo[k].min(c);
+                        hi[k] = hi[k].max(c);
+                    }
+                }
+            }
+        }
+        let mut node = vec![0u8; 44];
+        for (k, val) in lo.iter().chain(hi.iter()).enumerate() {
+            node[k * 4..k * 4 + 4].copy_from_slice(&val.to_le_bytes());
+        }
+        node[32..36].copy_from_slice(&tris.to_le_bytes());
+        node[36..40].copy_from_slice(&first.to_le_bytes());
+        node[40..44].copy_from_slice(&(groups.len() as u32).to_le_bytes());
+        out.extend_from_slice(&node);
+        for g in groups {
+            let qn = g.quads.len() as u32;
+            for w in [0u32, g.material as u32, tri, qn * 2, vert, qn * 4] {
+                out.extend_from_slice(&w.to_le_bytes());
+            }
+            tri += qn * 2;
+            vert += qn * 4;
+        }
+    }
+
+    // The material count again, then a colour sheet and its normal map for each.
+    out.extend_from_slice(&(n as u32).to_le_bytes());
+    for (name, px, _) in &sheets {
+        out.extend_from_slice(&texture_record(name, dim as u32, dim as u32, px));
+    }
     out
 }
 
@@ -2458,6 +2581,8 @@ fn texture_record(name: &str, w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
     rec[..n].copy_from_slice(&name.as_bytes()[..n]);
     rec[104..108].copy_from_slice(&w.to_le_bytes());
     rec[108..112].copy_from_slice(&h.to_le_bytes());
+    // The game keys its texture cache on the MD5 of the pixels before they are deflated.
+    rec[112..128].copy_from_slice(&sheet_hash(rgba));
     // The length at +132 counts the eight zero bytes that follow it, which stay zero.
     rec[132..136].copy_from_slice(&((payload.len() + 8) as u32).to_le_bytes());
     rec.extend_from_slice(&payload);
@@ -2546,6 +2671,24 @@ fn raw16(syn: &Synth, scale: f32) -> Vec<u8> {
 /// distance from the centreline is a band of exactly constant width running the whole lap,
 /// and from above that is the most machine-made thing on the whole track — more so than the
 /// terrain, because paint has no relief to distract from its outline.
+fn mask_rect(syn: &Synth, mw: usize, mh: usize, f: impl Fn(f32, f32, f32, f32) -> u8) -> Vec<u8> {
+    let mut out = vec![0u8; mw * mh];
+    for y in 0..mh {
+        let gy = (y * syn.gh / mh).min(syn.gh - 1);
+        for x in 0..mw {
+            let gx = (x * syn.gw / mw).min(syn.gw - 1);
+            let i = gy * syn.gw + gx;
+            out[y * mw + x] = f(
+                syn.dist[i],
+                syn.arc[i],
+                gx as f32 * syn.mps,
+                gy as f32 * syn.mps,
+            );
+        }
+    }
+    out
+}
+
 fn mask_from(syn: &Synth, dim: usize, f: impl Fn(f32, f32, f32, f32) -> u8) -> Vec<u8> {
     let mut out = vec![0u8; dim * dim];
     for y in 0..dim {
@@ -3763,59 +3906,77 @@ mod tests {
         let s = synthesise(&p).unwrap();
         let m = map(&p, &s);
         let u = |o: usize| u32::from_le_bytes(m[o..o + 4].try_into().unwrap());
-        let f = |o: usize| f32::from_le_bytes(m[o..o + 4].try_into().unwrap());
+        let fl = |o: usize| f32::from_le_bytes(m[o..o + 4].try_into().unwrap());
 
         assert_eq!(&m[..4], b"MP2\0");
         assert_eq!(u(4), 304, "version");
-        // Four empty mesh blocks, and nothing in them but 0, 1 and the inverted bounds.
-        for at in [8, 12, 16] {
-            assert_eq!(u(at), 0, "the mesh is empty at {at}");
-        }
-        let mut o = 312;
 
-        assert_eq!((u(o), u(o + 4)), (s.gw as u32, s.gh as u32), "grid");
-        o += 8 + s.gw * s.gh * 2;
-        assert_eq!(f(o), p.terrain.size_x, "ground size");
-        assert_eq!(f(o + 4), p.terrain.scale, "height budget");
-        o += 24;
-
-        let layers = u(o) as usize;
-        assert_eq!(layers, 4, "one layer per painted band");
-        o += 4;
-        for k in 0..layers {
-            let name = String::from_utf8_lossy(&m[o + 4..o + 56])
-                .trim_end_matches('\0')
-                .to_string();
-            assert!(!name.is_empty(), "layer {k} has no name");
-            o += 56;
-            assert_eq!(u(o), 1, "layer {k} carries one sheet");
-            o += 4;
-            let sheet = String::from_utf8_lossy(&m[o..o + 100])
-                .trim_end_matches('\0')
-                .to_string();
-            assert!(sheet.ends_with("_c"), "layer {k} sheet is {sheet}");
-            assert_eq!(u(o + 104), GROUND_TEXTURE_DIM as u32, "layer {k} width");
-            assert_eq!(u(o + 108), GROUND_TEXTURE_DIM as u32, "layer {k} height");
-            assert_eq!(u(o + 128), 0, "layer {k} sub-records");
-            let size = u(o + 132) as usize;
-            assert_eq!(&m[o + 136..o + 144], &[0u8; 8], "layer {k} pad");
-            o += 144 + size - 8;
-            assert_eq!(u(o), 0, "layer {k} declares no secondary map");
-            o += 4 + 8; // the two tiling floats
-            let masked = u(o);
-            o += 4;
-            if masked == 1 {
-                assert_eq!((u(o), u(o + 4)), (MASK_DIM as u32, MASK_DIM as u32));
-                o += 12 + u(o + 8) as usize;
-            } else {
-                assert_eq!(k, 0, "only the base layer goes unmasked");
+        // Materials: `0`, six `1`s, zeros, and a one-based id at word eleven.
+        let nmat = u(8) as usize;
+        assert!(nmat > 0, "a map with no materials draws nothing");
+        let mut o = 12;
+        for k in 0..nmat {
+            assert_eq!(fl(o), 0.0, "material {k} word 0");
+            for w in 1..=6 {
+                assert_eq!(fl(o + w * 4), 1.0, "material {k} word {w}");
             }
-            assert_eq!(f(o), 1.0, "layer {k} tail");
-            o += 4;
+            assert_eq!(u(o + 44), (k + 1) as u32, "material {k} one-based id");
+            o += 56;
         }
-        // The vegetation and detail lists, empty, and then the file is over.
-        o += 32;
-        assert_eq!(o, m.len(), "the walk has to land exactly on the end of the file");
+
+        // The ground itself. A map that declares no geometry renders black, which is what
+        // PiBoSo's drag strip does and what ours used to copy.
+        let vc = u(o) as usize;
+        assert!(vc > 0, "the map carries no ground");
+        o += 4;
+        let verts = o;
+        o += vc * 80;
+        let tc = u(o) as usize;
+        assert_eq!(tc, vc / 2, "two triangles a quad");
+        o += 4 + tc * 12;
+
+        // Every index must land inside the vertex buffer.
+        for t in (0..tc * 3).step_by(997) {
+            assert!((u(o - tc * 12 + t * 4) as usize) < vc, "index {t} is out of range");
+        }
+        // Normals are unit length, and the pair at 36*vc is 1,1 like a published map's.
+        for i in (0..vc).step_by(499) {
+            let n = [fl(verts + 52 * vc + i * 12), fl(verts + 52 * vc + i * 12 + 4),
+                     fl(verts + 52 * vc + i * 12 + 8)];
+            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            assert!((len - 1.0).abs() < 1e-3, "vertex {i} normal is not unit: {len}");
+            assert_eq!(fl(verts + 36 * vc + i * 8), 1.0, "vertex {i} pair at 36*vc");
+            assert_eq!(fl(verts + 44 * vc + i * 8), 1.0, "vertex {i} pair at 44*vc");
+        }
+
+        // A leaf per tile, then its draw groups. No group may exceed a 16-bit index.
+        let leaves = u(o) as usize;
+        assert!(leaves > 0, "no leaf nodes");
+        o += 4;
+        for l in 0..leaves {
+            let groups = u(o + 40) as usize;
+            o += 44;
+            for g in 0..groups {
+                let gverts = u(o + 20) as usize;
+                assert!(gverts <= 65535, "leaf {l} group {g} has {gverts} vertices");
+                o += 24;
+            }
+        }
+
+        assert_eq!(u(o) as usize, nmat, "the texture table declares the material count");
+        o += 4;
+        for k in 0..nmat {
+            let name = String::from_utf8_lossy(&m[o..o + 40])
+                .trim_end_matches('\0')
+                .to_string();
+            assert!(!name.is_empty(), "sheet {k} has no name");
+            let (w, h) = (u(o + 104) as usize, u(o + 108) as usize);
+            assert!(w > 0 && h > 0, "sheet {k} is {w}x{h}");
+            let len = u(o + 132) as usize;
+            o += 144 + len - 8;
+            o += 24; // the descriptor that follows every colour record
+        }
+        assert_eq!(o, m.len(), "the map walks to its last byte");
     }
 
     #[test]
@@ -4580,64 +4741,6 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod map_layer_records {
-    use super::*;
 
-    fn u32_at(m: &[u8], o: usize) -> u32 {
-        u32::from_le_bytes(m[o..o + 4].try_into().unwrap())
-    }
-    fn f32_at(m: &[u8], o: usize) -> f32 {
-        f32::from_le_bytes(m[o..o + 4].try_into().unwrap())
-    }
 
-    /// Every published map opens each terrain layer with a material record of fourteen
-    /// floats -- `0`, six `1`s, then zeros. It is not a name field: text written here reads
-    /// back as garbage coefficients, which the loader accepts and the renderer dies on.
-    #[test]
-    fn every_layer_opens_with_a_material_record() {
-        let prog = tests::oval();
-        let syn = synthesise(&prog).unwrap();
-        let m = map(&prog, &syn);
 
-        let mut o = 312;
-        let (a, b) = (u32_at(&m, o) as usize, u32_at(&m, o + 4) as usize);
-        o += 8 + a * b * 2 + 12 + 12;
-        let layers = u32_at(&m, o) as usize;
-        o += 4;
-        assert!(layers > 0, "a map with no layers has no ground");
-
-        for i in 0..layers {
-            let mat: Vec<f32> = (0..14).map(|w| f32_at(&m, o + w * 4)).collect();
-            let want = [0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-            assert_eq!(mat, want, "layer {i} material record");
-            o += 56;
-
-            // Step the sheet so the next layer's record is found: one sheet, no secondaries.
-            assert_eq!(u32_at(&m, o), 1, "layer {i} sheet count");
-            o += 4 + 100 + 4;
-            let (w, h) = (u32_at(&m, o) as usize, u32_at(&m, o + 4) as usize);
-            o += 8 + 16 + 4;
-            let plen = u32_at(&m, o) as usize;
-            o += 4 + plen;
-            assert_eq!(u32_at(&m, o), 0, "layer {i} secondary count");
-            o += 4 + 8;
-            let masked = u32_at(&m, o);
-            o += 4;
-            if masked == 1 {
-                let len = u32_at(&m, o + 8) as usize;
-                o += 12 + len;
-            }
-            // The base layer carries no mask and ends in 0; masked layers end in 1.
-            let trail = f32_at(&m, o);
-            o += 4;
-            assert_eq!(
-                trail,
-                if masked == 0 { 0.0 } else { 1.0 },
-                "layer {i} trailing float (masked={masked})"
-            );
-            assert!(w > 0 && h > 0, "layer {i} sheet is {w}x{h}");
-        }
-        assert_eq!(m.len() - o, 32, "the vegetation and detail lists close the file");
-    }
-}
