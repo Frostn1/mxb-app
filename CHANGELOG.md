@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-01
+
+### Fixed
+- The track creator's left column scrolls, so the install and export buttons stay reachable
+  on a short window.
+
 ## 2026-09-01 — v0.13.4 — Ground under the track
 
 ### Added
