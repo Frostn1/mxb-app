@@ -3598,32 +3598,189 @@ fn body_is_z_up(ext: [f32; 3]) -> bool {
     ext[2] > ext[1] && ext[2] > ext[0]
 }
 
-fn stand_body_upright(nodes: &mut [edf::EdfNode]) {
+/// A half turn about X. Up and front both invert; left and right are kept, so it turns the
+/// body rather than mirroring it.
+const BODY_FLIP_UPRIGHT: [[f32; 3]; 3] =
+    [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
+
+/// A half turn about Y. Front and left invert, up is kept — the turn that faces a body the
+/// other way without disturbing which end is the head.
+const BODY_TURN_AROUND: [[f32; 3]; 3] =
+    [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
+
+/// The extent of a body, or of one slot of it.
+fn body_bounds(nodes: &[edf::EdfNode], slot: Option<&str>) -> ([f32; 3], [f32; 3]) {
     let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
-    for n in nodes.iter() {
-        for v in n.positions.chunks_exact(3) {
-            for a in 0..3 {
-                lo[a] = lo[a].min(v[a]);
-                hi[a] = hi[a].max(v[a]);
+    for n in nodes {
+        for sm in &n.submeshes {
+            if slot.is_some() && sm.texture.as_deref() != slot {
+                continue;
+            }
+            let range =
+                sm.tri_start as usize * 3..(sm.tri_start + sm.tri_count) as usize * 3;
+            for i in n.indices.get(range).unwrap_or(&[]) {
+                let Some(v) = n.positions.get(*i as usize * 3..*i as usize * 3 + 3) else {
+                    continue;
+                };
+                for a in 0..3 {
+                    lo[a] = lo[a].min(v[a]);
+                    hi[a] = hi[a].max(v[a]);
+                }
             }
         }
     }
-    let ext = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
-    if !body_is_z_up(ext) {
-        return;
+    (lo, hi)
+}
+
+/// Where one slot sits front-to-back, relative to the body's own centre. `None` when the
+/// model has no such slot.
+fn slot_depth(nodes: &[edf::EdfNode], slot: &str, centre_z: f32) -> Option<f64> {
+    let (mut sum, mut count) = (0f64, 0usize);
+    for n in nodes {
+        for sm in &n.submeshes {
+            if sm.texture.as_deref() != Some(slot) {
+                continue;
+            }
+            let range =
+                sm.tri_start as usize * 3..(sm.tri_start + sm.tri_count) as usize * 3;
+            for i in n.indices.get(range).unwrap_or(&[]) {
+                if let Some(v) = n.positions.get(*i as usize * 3..*i as usize * 3 + 3) {
+                    sum += (v[2] - centre_z) as f64;
+                    count += 1;
+                }
+            }
+        }
     }
+    (count > 0).then(|| sum / count as f64)
+}
+
+fn turn_body(nodes: &mut [edf::EdfNode], r: [[f32; 3]; 3]) {
     for n in nodes.iter_mut() {
         for v in n.positions.chunks_exact_mut(3).chain(n.normals.chunks_exact_mut(3)) {
             let (x, y, z) = (v[0], v[1], v[2]);
-            let r = BODY_STAND_UP;
-            // Negated, not taken as-is: these meshes lie head-away, with the head at the
-            // most negative Z, so this is what puts it at the top.
             v[0] = r[0][0] * x + r[0][1] * y + r[0][2] * z;
             v[1] = r[1][0] * x + r[1][1] * y + r[1][2] * z;
             v[2] = r[2][0] * x + r[2][1] * y + r[2][2] * z;
         }
     }
-    log::info!("[rider] body was authored Z-up ({ext:?}); stood it upright");
+}
+
+/// `b` applied after `a`, as one matrix. The rig has to take exactly what the mesh took,
+/// and it takes it in one go rather than replaying the steps.
+fn compose(b: [[f32; 3]; 3], a: [[f32; 3]; 3]) -> [[f32; 3]; 3] {
+    let mut m = [[0.0f32; 3]; 3];
+    for r in 0..3 {
+        for c in 0..3 {
+            m[r][c] = (0..3).map(|k| b[r][k] * a[k][c]).sum();
+        }
+    }
+    m
+}
+
+const BODY_KEEP: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+/// Stand the body up, then check the result and fix it if the guess was wrong.
+///
+/// Returns the whole turn, so [`body_rig`] can put the skeleton through the same one instead
+/// of deciding for itself. It used to decide from the rig's own extents, which agreed with
+/// the mesh only for as long as the mesh's answer was a fixed rotation — the moment the mesh
+/// can be corrected and the rig can't, a corrected body gets a skeleton lying across it.
+fn stand_body_upright(nodes: &mut [edf::EdfNode]) -> [[f32; 3]; 3] {
+    let (lo, hi) = body_bounds(nodes, None);
+    let ext = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
+    let mut applied = BODY_KEEP;
+    if body_is_z_up(ext) {
+        // The quarter turn assumes the head lies at the most negative Z, which is where the
+        // stock Z-up bodies put it. `check_body_orientation` is what catches a model that
+        // doesn't — the assumption is now a starting guess rather than the answer.
+        turn_body(nodes, BODY_STAND_UP);
+        applied = BODY_STAND_UP;
+        log::info!("[rider] body was authored Z-up ({ext:?}); stood it upright");
+    }
+    compose(check_body_orientation(nodes), applied)
+}
+
+/// Confirm the body ended up the right way up and the right way round, and turn it if not.
+///
+/// The turn above is one fixed rotation for one authoring convention, and a custom model is
+/// under no obligation to share it: a Z-up body with its head at *positive* Z takes that
+/// rotation and lands upside down and facing backwards, which is exactly what a hoodie-and-
+/// baggies rider model was reported doing while the stock ones were fine.
+///
+/// So measure the result instead of trusting the guess. Both signals are the ones the
+/// viewer's own real-model test has always asserted — they just used to be checked in a test
+/// nobody runs on a player's machine, against models that happened to pass:
+///
+///   * **Which end is the head.** Bare skin. The head is the highest thing on a rider, so
+///     skin sitting in the bottom half means the body is upside down.
+///   * **Which way it faces.** The name and number planes go on a rider's back. Where a model
+///     has none, the head leans forward over the bars — a weaker signal, so it only decides
+///     when the strong one is absent.
+///
+/// A model showing no skin at all — every inch covered by kit, helmet and gloves — leaves the
+/// first question unanswerable, and it keeps whatever the guess gave it. Better an unturned
+/// body than one turned on no evidence.
+fn check_body_orientation(nodes: &mut [edf::EdfNode]) -> [[f32; 3]; 3] {
+    let mut applied = BODY_KEEP;
+    let (lo, hi) = body_bounds(nodes, None);
+    let height = hi[1] - lo[1];
+    if height <= 0.0 {
+        return applied;
+    }
+    let (skin_lo, skin_hi) = body_bounds(nodes, Some("face"));
+    // `>=`, not `>`: the question is whether the model shows any skin at all, and an
+    // unfound slot leaves the sentinels crossed (`hi` below `lo`). Asking for vertical
+    // extent instead would call a model with skin no taller than a point "no skin".
+    let has_skin = skin_hi[1] >= skin_lo[1];
+    if has_skin && skin_hi[1] < lo[1] + 0.5 * height {
+        log::info!(
+            "[rider] body is upside down (skin tops out at {:.3} of {:.3}..{:.3}); turning it              the right way up",
+            skin_hi[1],
+            lo[1],
+            hi[1],
+        );
+        turn_body(nodes, BODY_FLIP_UPRIGHT);
+        applied = BODY_FLIP_UPRIGHT;
+    }
+
+    // Re-measured: the flip above moves everything it is about to judge.
+    let (lo, hi) = body_bounds(nodes, None);
+    let centre_z = (lo[2] + hi[2]) / 2.0;
+    let backwards = match slot_depth(nodes, "hide", centre_z) {
+        // The planes are on the back, so they belong behind the centre.
+        Some(back) => back > 0.0,
+        None => {
+            // No planes. The head leans forward over the bars — but only the head, since on
+            // the rolled-sleeve models the skin texture also covers bare wrists that reach
+            // well down the body and would drag the answer with them.
+            let head_floor = hi[1] - 0.125 * (hi[1] - lo[1]);
+            let (mut sum, mut count) = (0f64, 0usize);
+            for n in nodes.iter() {
+                for sm in &n.submeshes {
+                    if sm.texture.as_deref() != Some("face") {
+                        continue;
+                    }
+                    let range =
+                        sm.tri_start as usize * 3..(sm.tri_start + sm.tri_count) as usize * 3;
+                    for i in n.indices.get(range).unwrap_or(&[]) {
+                        if let Some(v) = n.positions.get(*i as usize * 3..*i as usize * 3 + 3) {
+                            if v[1] > head_floor {
+                                sum += (v[2] - centre_z) as f64;
+                                count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            count > 0 && (sum / count as f64) < 0.0
+        }
+    };
+    if backwards {
+        log::info!("[rider] body was facing backwards; turned it around");
+        turn_body(nodes, BODY_TURN_AROUND);
+        applied = compose(BODY_TURN_AROUND, applied);
+    }
+    applied
 }
 
 /// Bind each body submesh to the texture the mesh itself says it wears.
@@ -3719,6 +3876,14 @@ fn rig_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<edf::Bone>>> {
     C.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(MESH_CACHE_CAP * 2)))
 }
 
+/// The turn each body mesh took, so its rig can take the same one. Keyed exactly as the
+/// mesh cache is, and written on the parse that fills it.
+fn body_turn_cache() -> &'static std::sync::Mutex<lru::Lru<[[f32; 3]; 3]>> {
+    static C: std::sync::OnceLock<std::sync::Mutex<lru::Lru<[[f32; 3]; 3]>>> =
+        std::sync::OnceLock::new();
+    C.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(MESH_CACHE_CAP * 2)))
+}
+
 /// A rider body's rig, in the same frame the viewer gets its mesh in, memoised.
 ///
 /// The mesh takes two turns on the way out of the file — [`edf::to_right_handed`] mirrors X,
@@ -3735,16 +3900,30 @@ fn body_rig(src: &BodySource, profile: &str) -> Vec<edf::Bone> {
     let mut rig = src.read(profile).map(|b| edf::parse_skeleton(&b)).unwrap_or_default();
     if !rig.is_empty() {
         edf::transform_skeleton(&mut rig, [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
-        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
-        for b in rig.iter() {
-            let o = b.origin();
-            for a in 0..3 {
-                lo[a] = lo[a].min(o[a]);
-                hi[a] = hi[a].max(o[a]);
+        // What the mesh actually took, where the mesh has been read — which is every path
+        // that reaches here, since a rig is only wanted alongside the body it bends.
+        let mesh_turn = body_turn_cache()
+            .lock()
+            .ok()
+            .and_then(|mut c| c.get(&src.cache_key(profile)).copied());
+        match mesh_turn {
+            Some(turn) => edf::transform_skeleton(&mut rig, turn),
+            None => {
+                // No mesh read this session. Fall back to the rig's own extents, which is
+                // the old answer and right for every body whose head is where the stock ones
+                // put it — the models this ever differed for are the ones the mesh corrects.
+                let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                for b in rig.iter() {
+                    let o = b.origin();
+                    for a in 0..3 {
+                        lo[a] = lo[a].min(o[a]);
+                        hi[a] = hi[a].max(o[a]);
+                    }
+                }
+                if body_is_z_up([hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]) {
+                    edf::transform_skeleton(&mut rig, BODY_STAND_UP);
+                }
             }
-        }
-        if body_is_z_up([hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]) {
-            edf::transform_skeleton(&mut rig, BODY_STAND_UP);
         }
         log::info!("[rider] body '{profile}' rig: {} bones", rig.len());
     }
@@ -3892,9 +4071,13 @@ fn rider_body_nodes(src: &BodySource, profile: &str) -> Option<Vec<edf::EdfNode>
     if let Some(n) = cached_mesh(&key) {
         return Some(n);
     }
-    mesh_from_bytes(key, &src.read(profile)?, false, |nodes, data| {
+    let turn_key = key.clone();
+    mesh_from_bytes(key, &src.read(profile)?, false, move |nodes, data| {
         bind_body_submeshes(nodes, data);
-        stand_body_upright(nodes);
+        let turn = stand_body_upright(nodes);
+        if let Ok(mut c) = body_turn_cache().lock() {
+            c.insert(turn_key, turn);
+        }
     })
 }
 
@@ -10807,6 +10990,129 @@ mod grid_watch_tests {
 }
 
 #[cfg(test)]
+mod body_orientation_tests {
+    use super::*;
+
+    /// A body as three marked points: the head's skin, the name planes on its back, and the
+    /// boots. Enough to answer both questions the orientation asks and nothing more.
+    fn body(skin: [f32; 3], back: [f32; 3], feet: [f32; 3]) -> Vec<edf::EdfNode> {
+        let mut positions = Vec::new();
+        let mut indices = Vec::new();
+        let mut submeshes = Vec::new();
+        for (i, (p, slot)) in
+            [(skin, "face"), (back, "hide"), (feet, "rider")].into_iter().enumerate()
+        {
+            // A triangle per part, all three corners on the same point: the orientation only
+            // ever reads positions, so a degenerate triangle carries everything it needs.
+            for _ in 0..3 {
+                positions.extend_from_slice(&p);
+                indices.push((i * 3 + indices.len() % 3) as u32);
+            }
+            let base = i * 3;
+            indices.truncate(base);
+            indices.extend_from_slice(&[base as u32, base as u32 + 1, base as u32 + 2]);
+            submeshes.push(edf::Submesh {
+                name: slot.into(),
+                tri_start: i as u32,
+                tri_count: 1,
+                texture: Some(slot.into()),
+                uv_tile: None,
+                mat: None,
+            });
+        }
+        vec![edf::EdfNode {
+            name: "body".into(),
+            positions,
+            uvs: Vec::new(),
+            normals: Vec::new(),
+            indices,
+            submeshes,
+            texture: None,
+            placed: true,
+            materials: Vec::new(),
+        }]
+    }
+
+    fn skin_top(nodes: &[edf::EdfNode]) -> f32 {
+        body_bounds(nodes, Some("face")).1[1]
+    }
+
+    fn back_depth(nodes: &[edf::EdfNode]) -> f64 {
+        let (lo, hi) = body_bounds(nodes, None);
+        slot_depth(nodes, "hide", (lo[2] + hi[2]) / 2.0).expect("the planes are there")
+    }
+
+    /// The report: a custom body came out upside down and facing backwards while the stock
+    /// ones were fine. A Z-up mesh with its head at *positive* Z takes the one fixed quarter
+    /// turn and lands exactly like that, because that turn is written for the other end.
+    #[test]
+    fn a_body_that_lands_upside_down_is_turned_back() {
+        // Already stood up, and wrong: skin at the bottom, name planes in front.
+        let mut nodes = body([0.0, 0.05, 0.10], [0.0, 0.9, 0.10], [0.0, 1.7, 0.0]);
+        check_body_orientation(&mut nodes);
+
+        let (lo, hi) = body_bounds(&nodes, None);
+        assert!(
+            skin_top(&nodes) > lo[1] + 0.5 * (hi[1] - lo[1]),
+            "the head ends up at the top ({:.3} of {:.3}..{:.3})",
+            skin_top(&nodes),
+            lo[1],
+            hi[1],
+        );
+        assert!(back_depth(&nodes) < 0.0, "and the name planes end up on the back");
+    }
+
+    /// The half turn that rights a body also swings it front-to-back, so a body that is only
+    /// upside down must not be left facing the wrong way by the fix for the first fault.
+    #[test]
+    fn righting_a_body_leaves_it_facing_forward() {
+        // Upside down, but its planes are already behind it.
+        let mut nodes = body([0.0, 0.05, -0.10], [0.0, 0.9, -0.10], [0.0, 1.7, 0.0]);
+        check_body_orientation(&mut nodes);
+        assert!(back_depth(&nodes) < 0.0, "the planes are still on the back");
+    }
+
+    /// A body that only faces the wrong way is turned about its height, which must not put
+    /// its head back at the bottom.
+    #[test]
+    fn a_backwards_body_is_turned_without_upending_it() {
+        let mut nodes = body([0.0, 1.7, 0.10], [0.0, 0.9, 0.10], [0.0, 0.05, 0.0]);
+        check_body_orientation(&mut nodes);
+
+        let (lo, hi) = body_bounds(&nodes, None);
+        assert!(skin_top(&nodes) > lo[1] + 0.5 * (hi[1] - lo[1]), "the head stays at the top");
+        assert!(back_depth(&nodes) < 0.0, "and it now faces forward");
+    }
+
+    /// The one that matters most: the stock bodies already arrive correct, and a check that
+    /// "corrects" them is worse than no check at all.
+    #[test]
+    fn a_body_that_is_already_right_is_left_alone() {
+        let before = body([0.0, 1.7, -0.10], [0.0, 0.9, -0.10], [0.0, 0.05, 0.0]);
+        let mut after = before.clone();
+        check_body_orientation(&mut after);
+        assert_eq!(after[0].positions, before[0].positions, "not a vertex moves");
+    }
+
+    /// Every inch covered — kit, helmet, gloves, no skin anywhere — leaves the question
+    /// unanswerable. An unturned body beats one turned on no evidence.
+    #[test]
+    fn a_body_showing_no_skin_is_not_guessed_at() {
+        let mut nodes = body([0.0, 1.7, -0.10], [0.0, 0.9, -0.10], [0.0, 0.05, 0.0]);
+        for n in nodes.iter_mut() {
+            for sm in n.submeshes.iter_mut() {
+                if sm.texture.as_deref() == Some("face") {
+                    sm.texture = Some("rider".into());
+                }
+            }
+        }
+        let before = nodes.clone();
+        check_body_orientation(&mut nodes);
+        assert_eq!(nodes[0].positions, before[0].positions, "nothing is assumed");
+    }
+}
+
+#[cfg(test)]
 mod viewer_tests {
     use std::path::{Path, PathBuf};
 
@@ -12861,3 +13167,4 @@ mod track_install_tests {
         assert!(err.contains("configured"), "{err}");
     }
 }
+

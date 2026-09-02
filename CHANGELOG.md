@@ -5,12 +5,14 @@
 ### Changed
 - The map-loader tracer stops where it can no longer be sure, instead of guessing past it.
 
-## 2026-09-01
-
 ### Fixed
+- A custom rider model no longer turns up upside down and facing backwards in the 3D preview.
+  The viewer stood a body up with one fixed turn that suits how the stock riders are built,
+  and a model built the other way round took it and landed on its head. It now checks the
+  result — skin at the top, name and number on the back — and turns the body again if the
+  first guess was wrong.
 - The map-loader tracer stops at the end of the file instead of reading zeros past it.
 
-## 2026-09-01
 ## 2026-09-01 — v0.13.3 — Nothing you didn't ask for
 
 ### Added
