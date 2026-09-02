@@ -2,6 +2,23 @@
 
 ## 2026-09-01
 
+### Added
+- The diagnostics dashboard searches. Riders by name, GUID, Steam id or account id; files by
+  name, hash, signer, or anything the file claims about itself.
+- Every rider has a page: their identity, last report, the servers they have been seen on,
+  and every file their game has loaded.
+- Every file has a page listing everyone who has loaded it, per build — the lookup run
+  backwards.
+- Lists are paged, with a page count and numbered links.
+
+### Changed
+- The dashboard is four views behind a nav instead of one long page, and the tables carry the
+  information the prose used to explain.
+- Rule notes show on the rules page, and a Flag or Clear button returns to the page it was
+  pressed on with its filters intact.
+
+## 2026-09-01
+
 ### Fixed
 - Generated tracks no longer crash the game at the track graphics stage: each ground layer
   now carries the material record a published map uses.
