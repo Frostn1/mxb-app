@@ -93,6 +93,9 @@ export interface RiderRow {
   /** Distinct files ever recorded for this account, and how many are unaccounted for. */
   files: number;
   flagged: number;
+  /** The paint sync half of the same account: equipped slots, and when they last published. */
+  paints: number;
+  paintedAt: number;
 }
 
 interface RiderRecord {
@@ -181,7 +184,7 @@ export async function searchRiders(env: Env, query: RiderQuery): Promise<Paged<R
     .all<RiderRecord>();
 
   const rows = (found.results ?? []).map(riderRow);
-  await attachFileCounts(env, rows);
+  await Promise.all([attachFileCounts(env, rows), attachPaintCounts(env, rows)]);
   return { rows, total: total?.n ?? rows.length, page: query.page, size: PAGE_SIZE };
 }
 
@@ -207,6 +210,8 @@ function riderRow(r: RiderRecord): RiderRow {
     lastServerId: "",
     files: 0,
     flagged: 0,
+    paints: 0,
+    paintedAt: 0,
   };
 }
 
@@ -232,6 +237,32 @@ async function attachFileCounts(env: Env, rows: RiderRow[]): Promise<void> {
   for (const row of rows) {
     row.files = byId.get(row.accountId)?.files ?? 0;
     row.flagged = byId.get(row.accountId)?.flagged ?? 0;
+  }
+}
+
+/**
+ * What paint sync holds for the same page of riders.
+ *
+ * The other half of the account, read the same way and for the same reason as the file
+ * counts above: one grouped read over the rows on screen rather than a subquery per row.
+ * Nothing joined the two dashboards before this, and they have always keyed on the same id.
+ */
+async function attachPaintCounts(env: Env, rows: RiderRow[]): Promise<void> {
+  if (!rows.length) return;
+  const ids = rows.map((r) => r.accountId);
+  const counts = await env.DB.prepare(
+    "SELECT p.account_id, COUNT(*) AS paints," +
+      " (SELECT MAX(l.updated_at) FROM loadouts l WHERE l.account_id = p.account_id) AS painted_at" +
+      ` FROM loadout_paints p WHERE p.account_id IN (${ids.map(() => "?").join(",")})` +
+      " GROUP BY p.account_id",
+  )
+    .bind(...ids)
+    .all<{ account_id: string; paints: number; painted_at: number | null }>();
+
+  const byId = new Map((counts.results ?? []).map((c) => [c.account_id, c]));
+  for (const row of rows) {
+    row.paints = byId.get(row.accountId)?.paints ?? 0;
+    row.paintedAt = byId.get(row.accountId)?.painted_at ?? 0;
   }
 }
 
@@ -352,7 +383,7 @@ export async function riderDetail(
   if (!record) return null;
 
   const rider = riderRow(record);
-  await attachFileCounts(env, [rider]);
+  await Promise.all([attachFileCounts(env, [rider]), attachPaintCounts(env, [rider])]);
 
   const where = ["account_id = ?"];
   const args: unknown[] = [rider.accountId];

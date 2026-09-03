@@ -414,7 +414,8 @@ function riderTable(rows: RiderRow[], c: Ctx): string {
   if (!rows.length) return `<p class="muted">No rider matches.</p>`;
   return wrap(`<table>
   <thead><tr><th>Rider</th><th>GUID</th><th>State</th><th class="num">Files</th>
-    <th class="num">Flagged</th><th>Server</th><th>App</th><th>Last report</th></tr></thead>
+    <th class="num">Flagged</th><th class="num">Paints</th><th>Server</th><th>App</th>
+    <th>Last report</th></tr></thead>
   <tbody>${rows
     .map((r) => {
       const peak = r.worstState && stateRank(r.worstState) > stateRank(r.state) ? r.worstState : r.state;
@@ -429,12 +430,27 @@ function riderTable(rows: RiderRow[], c: Ctx): string {
       <td>${state}</td>
       <td class="num">${r.files.toLocaleString("en-GB")}</td>
       <td class="num ${r.flagged ? "hot" : "muted"}">${r.flagged.toLocaleString("en-GB")}</td>
+      <td class="num">${paintsCell(r, c)}</td>
       <td class="muted">${esc(r.serverId || "—")}</td>
       <td class="muted">${esc(r.appVersion || "—")}</td>
       <td class="muted">${esc(r.updatedAt ? ago(r.updatedAt) : "—")}</td>
     </tr>`;
     })
     .join("")}</tbody></table>`);
+}
+
+/**
+ * The paint sync half of the same account, as a link into it.
+ *
+ * Publishing paints and reporting diagnostics are independent — most people do one of them —
+ * so nothing published is an em dash rather than a zero.
+ */
+function paintsCell(r: RiderRow, c: Ctx): string {
+  if (!r.paints) return `<span class="muted">—</span>`;
+  const to = href("/admin/paints/rider", { id: r.accountId }, c.key);
+  return `<a href="${esc(to)}" title="last published ${esc(ago(r.paintedAt))}">${r.paints.toLocaleString(
+    "en-GB",
+  )}</a>`;
 }
 
 function riderLink(accountId: string, name: string, c: Ctx): string {

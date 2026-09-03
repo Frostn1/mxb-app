@@ -59,6 +59,9 @@ interface RiderRow {
   bytes: number;
   published_at: number | null;
   at_server: string | null;
+  /** The diagnostics half of the same account. Empty when they have never reported. */
+  state: string | null;
+  reported_at: number | null;
 }
 
 interface PaintRow {
@@ -147,6 +150,9 @@ export const RIDER_COLUMNS: Record<string, Column> = {
   size: { label: "Size", num: true, first: "desc", order: byNumber("SUM(p.size)") },
   published: { label: "Published", first: "desc", order: byNumber("published_at") },
   where: { label: "Where", first: "asc", order: byText("at_server") },
+  // The other dashboard, sorted by how bad it is rather than alphabetically: the reason to
+  // sort by this column is to bring the alerts to the top.
+  reported: { label: "Reported", first: "desc", order: byNumber("state_rank") },
 };
 
 export const PAINT_COLUMNS: Record<string, Column> = {
@@ -379,8 +385,14 @@ async function searchRiders(
       " COUNT(*) AS slots, SUM(p.size) AS bytes," +
       " (SELECT MAX(l.updated_at) FROM loadouts l WHERE l.account_id = a.id) AS published_at," +
       " (SELECT pr.server_id FROM presence pr WHERE pr.account_id = a.id AND pr.updated_at > ?)" +
-      "   AS at_server" +
+      "   AS at_server," +
+      // The join the two dashboards never had. Both key on the account, so what a rider is
+      // wearing and what their game has loaded are one row rather than two searches.
+      " m.state, m.updated_at AS reported_at," +
+      " CASE m.state WHEN 'alert' THEN 3 WHEN 'warn' THEN 2 WHEN 'ok' THEN 1" +
+      "   WHEN 'unknown' THEN 0 ELSE NULL END AS state_rank" +
       " FROM accounts a JOIN loadout_paints p ON p.account_id = a.id" +
+      " LEFT JOIN client_modules m ON m.account_id = a.id" +
       " WHERE" +
       RIDER_MATCH +
       ` GROUP BY a.id ORDER BY ${orderBy(RIDER_COLUMNS, order, "a.rider_name COLLATE NOCASE")}` +
@@ -623,10 +635,27 @@ ${rows
   <td class="num">${esc(bytes(r.bytes))}</td>
   <td title="${esc(stamp(r.published_at ?? 0))}">${esc(ago(r.published_at ?? 0))}</td>
   <td>${r.at_server ? `<span class="dot ok"></span> ${esc(r.at_server)}` : `<span class="muted">—</span>`}</td>
+  <td>${reported(r.state, r.reported_at, r.id, c)}</td>
 </tr>`,
   )
   .join("")}
 </tbody></table>`;
+}
+
+/**
+ * What diagnostics says about the same account, as a link into it.
+ *
+ * A rider who publishes paints and never reports is the ordinary case — the two features are
+ * independent and most people run one of them — so the absence is drawn as an em dash rather
+ * than as a state of its own.
+ */
+function reported(state: string | null, at: number | null, id: string, c: Ctx): string {
+  if (!state) return `<span class="muted">—</span>`;
+  const tone = state === "alert" ? "alert" : state === "warn" ? "warn" : state === "ok" ? "ok" : "";
+  const to = href("/admin/diagnostics/rider", { id }, c.key);
+  return `<a href="${esc(to)}" title="${esc(stamp(at ?? 0))}"><span class="pill ${tone}">${esc(
+    state,
+  )}</span></a> <span class="muted">${esc(ago(at ?? 0))}</span>`;
 }
 
 // ---------------------------------------------------------------------------
