@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-02
+
+### Changed
+- Generated tracks carry their ground as a mesh, the way a published track does, and load
+  through the same path the game uses for its own terrain.
+
 ## 2026-09-01
 
 ### Fixed
