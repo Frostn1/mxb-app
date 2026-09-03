@@ -252,6 +252,9 @@ button.allow{border-color:var(--ok);color:var(--ok)}
 .count{color:var(--muted);font-size:12px;margin:0 0 8px}
 .who{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px}
 .who .name{font-size:16px;font-weight:600;overflow-wrap:anywhere}
+/* The same rider on the other dashboard. Pushed right, so it reads as a way out of this
+   page rather than as another fact about them. */
+.who .aside{margin-left:auto;font-size:12px}
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px 16px;margin:0}
 .facts dt{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
 .facts dd{margin:1px 0 0;overflow-wrap:anywhere}
