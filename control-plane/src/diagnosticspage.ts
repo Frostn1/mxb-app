@@ -457,6 +457,8 @@ function riderView(d: RiderDetail, query: SightingQuery, c: Ctx): string {
     <span class="name">${esc(r.riderName || "(no name)")}</span>
     ${r.state ? `<span class="pill ${esc(peak)}">${esc(r.state)}</span>` : `<span class="muted">never reported</span>`}
     ${peak !== r.state ? `<span class="muted">peaked at ${esc(peak)} ${esc(ago(r.worstAt))}</span>` : ""}
+    <a class="aside" href="${esc(href("/admin/paints/rider", { id: r.accountId }, c.key))}"
+      >Paints for this rider →</a>
   </div>
   <dl class="facts">
     ${fact("GUID", r.guid || "—", true)}

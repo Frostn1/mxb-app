@@ -505,9 +505,6 @@ function shell(title: string, tab: Tab, body: string, c: Ctx): string {
 <header><h1>${esc(title)}</h1><nav>${nav}
   <a class="out" href="${esc(href("/admin/diagnostics", {}, c.key))}">Diagnostics</a></nav></header>
 ${body}
-<footer class="muted">A rider appears here once their app has published a loadout. Pictures are
-  rendered from the paint's largest sheet, which is stored upside-down and flipped for the
-  view; locked content has no readable sheets and shows as sealed.</footer>
 </body></html>`;
 }
 
@@ -651,10 +648,14 @@ function riderView(
   c: Ctx,
 ): string {
   const live = presence && presence.updated_at > Date.now() - PRESENCE_TTL_MS;
+  // Both dashboards key on the same account id, so one rider is one link away from what
+  // their game has loaded — the two halves of the same person, previously unconnected.
+  const diagnostics = href("/admin/diagnostics/rider", { id: account.id }, c.key);
   const facts = `<section class="panel">
   <div class="who"><span class="name">${esc(account.rider_name)}</span>
     <span class="tag">${esc(account.kind)}</span>
-    ${live ? `<span class="pill ok">on ${esc(presence!.server_id)}</span>` : ""}</div>
+    ${live ? `<span class="pill ok">on ${esc(presence!.server_id)}</span>` : ""}
+    <a class="aside" href="${esc(diagnostics)}">Diagnostics for this rider →</a></div>
   <dl class="facts">
     ${fact("GUID", account.guid ?? "—", true)}
     ${fact("Steam id", account.steam_id ?? "—", true)}
