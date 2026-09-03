@@ -215,6 +215,11 @@ th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;
 td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 tr:last-child td{border-bottom:0}
 .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* A sortable header is a link that still reads as a header until it is the one in use. */
+th a{color:inherit;display:inline-block}
+th a:hover{color:var(--accent);text-decoration:none}
+th.on a{color:var(--accent)}
+th .dir{margin-left:3px;font-size:10px;vertical-align:1px}
 .num.hot{color:var(--warn);font-weight:600}
 .act{text-align:right;white-space:nowrap}
 .act.left{text-align:left;margin-top:10px;display:flex;align-items:center;gap:8px}

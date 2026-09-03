@@ -3,6 +3,7 @@
 ## 2026-09-02
 
 ### Added
+- Every column of the paint sync tables sorts, either way, by clicking its header.
 - The control plane has a paint sync view: who has published a look, searchable by rider
   name, GUID or Steam id, and every paint we hold with a picture of it.
 - A rider's page lists their bikes slot by slot, with the paint each one installs and where

@@ -92,6 +92,107 @@ interface Totals {
 }
 
 // ---------------------------------------------------------------------------
+// Sorting
+// ---------------------------------------------------------------------------
+
+/** Which way a column reads. Two words, and the query string may name no others. */
+export type Dir = "asc" | "desc";
+
+export function parseDir(value: string | null, fallback: Dir): Dir {
+  return value === "asc" || value === "desc" ? value : fallback;
+}
+
+interface Column {
+  label: string;
+  /** Right-aligned, as every number in these tables is. */
+  num?: boolean;
+  /** Which way this column is worth reading first — names up, quantities and dates down. */
+  first: Dir;
+  /** The ORDER BY fragment. A fixed expression and one of the two words above; nothing a
+   *  caller typed ever reaches it. */
+  order(dir: Dir): string;
+}
+
+/** Text, with the empties at the bottom whichever way the column is read. */
+function byText(expr: string): Column["order"] {
+  return (dir) => `(${expr} IS NULL OR ${expr} = ''), ${expr} COLLATE NOCASE ${dir.toUpperCase()}`;
+}
+
+/** A count, a size or a timestamp, with the absent ones at the bottom either way. */
+function byNumber(expr: string): Column["order"] {
+  return (dir) => `${expr} IS NULL, ${expr} ${dir.toUpperCase()}`;
+}
+
+/**
+ * The columns of the rider table.
+ *
+ * Aggregates are named by their expression rather than by the alias they are selected under:
+ * `size` is also a column of `loadout_paints`, and a bare alias in ORDER BY is one rename
+ * away from quietly sorting by the wrong thing. The two correlated subqueries are the
+ * exception — nothing else is called `published_at` or `at_server`, and repeating a subquery
+ * would mean re-binding its parameter.
+ */
+export const RIDER_COLUMNS: Record<string, Column> = {
+  name: { label: "Rider", first: "asc", order: byText("a.rider_name") },
+  guid: { label: "GUID", first: "asc", order: byText("a.guid") },
+  steam: { label: "Steam", first: "asc", order: byText("a.steam_id") },
+  bikes: { label: "Bikes", num: true, first: "desc", order: byNumber("COUNT(DISTINCT p.bike_id)") },
+  slots: { label: "Slots", num: true, first: "desc", order: byNumber("COUNT(*)") },
+  paints: {
+    label: "Paints",
+    num: true,
+    first: "desc",
+    order: byNumber("COUNT(DISTINCT p.sha256)"),
+  },
+  size: { label: "Size", num: true, first: "desc", order: byNumber("SUM(p.size)") },
+  published: { label: "Published", first: "desc", order: byNumber("published_at") },
+  where: { label: "Where", first: "asc", order: byText("at_server") },
+};
+
+export const PAINT_COLUMNS: Record<string, Column> = {
+  file: { label: "File", first: "asc", order: byText("MIN(p.file_name)") },
+  slots: { label: "Slots", first: "asc", order: byText("GROUP_CONCAT(DISTINCT p.slot)") },
+  riders: {
+    label: "Riders",
+    num: true,
+    first: "desc",
+    order: byNumber("COUNT(DISTINCT p.account_id)"),
+  },
+  uses: { label: "Uses", num: true, first: "desc", order: byNumber("COUNT(*)") },
+  size: { label: "Size", num: true, first: "desc", order: byNumber("MAX(p.size)") },
+  digest: { label: "Digest", first: "asc", order: byText("p.sha256") },
+};
+
+/** How a table is being read: a column that exists, and a direction. */
+export interface Order {
+  sort: string;
+  dir: Dir;
+}
+
+/**
+ * The column asked for, or the one the table opens on.
+ *
+ * The name is looked up in the map rather than trusted — an unknown one is a hand-edited URL
+ * or a stale link, and either way the answer is the default rather than an error.
+ */
+export function parseOrder(url: URL, columns: Record<string, Column>, fallback: string): Order {
+  const asked = url.searchParams.get("sort") ?? "";
+  const sort = asked in columns ? asked : fallback;
+  return { sort, dir: parseDir(url.searchParams.get("dir"), columns[sort].first) };
+}
+
+/**
+ * The ORDER BY for a table, with a tie-break that never changes.
+ *
+ * Without the tie-break, rows that match on the sorted column come back in whatever order
+ * the query planner felt like — which is invisible on one page and duplicates or drops rows
+ * across two.
+ */
+export function orderBy(columns: Record<string, Column>, order: Order, tiebreak: string): string {
+  return `${columns[order.sort].order(order.dir)}, ${tiebreak}`;
+}
+
+// ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 
@@ -123,9 +224,10 @@ export async function paintRiders(request: Request, url: URL, env: Env): Promise
 
   const c = ctx(url);
   const q = (url.searchParams.get("q") ?? "").slice(0, 96);
+  const order = parseOrder(url, RIDER_COLUMNS, "published");
   const page = parsePage(url.searchParams.get("page"));
-  const [sums, found] = await Promise.all([totals(env), searchRiders(env, q, page)]);
-  return html(shell("Paint sync", "riders", ridersView(sums, found, q, c), c));
+  const [sums, found] = await Promise.all([totals(env), searchRiders(env, q, order, page)]);
+  return html(shell("Paint sync", "riders", ridersView(sums, found, q, order, c), c));
 }
 
 /** `GET /admin/paints/rider?id=…` — one rider's bikes, slot by slot. */
@@ -182,10 +284,10 @@ export async function paintFiles(request: Request, url: URL, env: Env): Promise<
 
   const c = ctx(url);
   const q = (url.searchParams.get("q") ?? "").slice(0, 96);
-  const sort = sortOf(url.searchParams.get("sort"));
+  const order = parseOrder(url, PAINT_COLUMNS, "riders");
   const page = parsePage(url.searchParams.get("page"));
-  const [sums, found] = await Promise.all([totals(env), searchPaints(env, q, sort, page)]);
-  return html(shell("Paints", "paints", paintsView(sums, found, q, sort, c), c));
+  const [sums, found] = await Promise.all([totals(env), searchPaints(env, q, order, page)]);
+  return html(shell("Paints", "paints", paintsView(sums, found, q, order, c), c));
 }
 
 /** `GET /admin/paints/paint?sha=…` — one paint: its sheets, and who is wearing it. */
@@ -262,7 +364,12 @@ const RIDER_MATCH =
   " (? = '' OR a.rider_name LIKE ? ESCAPE '\\' OR COALESCE(a.guid, '') LIKE ? ESCAPE '\\'" +
   " OR COALESCE(a.steam_id, '') LIKE ? ESCAPE '\\')";
 
-async function searchRiders(env: Env, q: string, page: number): Promise<Paged<RiderRow>> {
+async function searchRiders(
+  env: Env,
+  q: string,
+  order: Order,
+  page: number,
+): Promise<Paged<RiderRow>> {
   const like = likeTerm(q);
   const fresh = Date.now() - PRESENCE_TTL_MS;
 
@@ -276,7 +383,8 @@ async function searchRiders(env: Env, q: string, page: number): Promise<Paged<Ri
       " FROM accounts a JOIN loadout_paints p ON p.account_id = a.id" +
       " WHERE" +
       RIDER_MATCH +
-      " GROUP BY a.id ORDER BY published_at DESC, a.rider_name LIMIT ? OFFSET ?",
+      ` GROUP BY a.id ORDER BY ${orderBy(RIDER_COLUMNS, order, "a.rider_name COLLATE NOCASE")}` +
+      " LIMIT ? OFFSET ?",
   )
     .bind(fresh, like, like, like, like, PAGE_SIZE, (page - 1) * PAGE_SIZE)
     .all<RiderRow>();
@@ -293,28 +401,15 @@ async function searchRiders(env: Env, q: string, page: number): Promise<Paged<Ri
   return { rows: rows.results ?? [], total: total?.n ?? 0, page, size: PAGE_SIZE };
 }
 
-const SORTS = ["riders", "size", "name"] as const;
-type Sort = (typeof SORTS)[number];
-
-function sortOf(value: string | null): Sort {
-  return (SORTS as readonly string[]).includes(value ?? "") ? (value as Sort) : "riders";
-}
-
 const PAINT_MATCH = " (? = '' OR p.file_name LIKE ? ESCAPE '\\' OR p.sha256 LIKE ? ESCAPE '\\')";
 
 async function searchPaints(
   env: Env,
   q: string,
-  sort: Sort,
+  order: Order,
   page: number,
 ): Promise<Paged<PaintRow>> {
   const like = likeTerm(q);
-  const order =
-    sort === "size"
-      ? "size DESC, riders DESC"
-      : sort === "name"
-        ? "file_name COLLATE NOCASE, riders DESC"
-        : "riders DESC, uses DESC, file_name COLLATE NOCASE";
 
   const rows = await env.DB.prepare(
     "SELECT p.sha256, MIN(p.file_name) AS file_name, COUNT(DISTINCT p.file_name) AS names," +
@@ -322,7 +417,8 @@ async function searchPaints(
       " GROUP_CONCAT(DISTINCT p.slot) AS slots" +
       " FROM loadout_paints p WHERE" +
       PAINT_MATCH +
-      ` GROUP BY p.sha256 ORDER BY ${order} LIMIT ? OFFSET ?`,
+      ` GROUP BY p.sha256 ORDER BY ${orderBy(PAINT_COLUMNS, order, "MIN(p.file_name) COLLATE NOCASE")}` +
+      " LIMIT ? OFFSET ?",
   )
     .bind(like, like, like, PAGE_SIZE, (page - 1) * PAGE_SIZE)
     .all<Omit<PaintRow, "stored">>();
@@ -442,6 +538,41 @@ function thumb(sha: string, name: string, c: Ctx, big = false): string {
     src="${esc(href(`${ROOT}/thumb`, { sha }, c.key))}" alt="${esc(name)}"></a>`;
 }
 
+/**
+ * A header row whose columns are links.
+ *
+ * Clicking the column already being read turns it around; clicking a new one starts it the
+ * way that column is worth reading. `page` is dropped rather than carried: page 7 of a
+ * different ordering is a different set of rows, and landing there reads as a bug.
+ */
+function sortable(
+  path: string,
+  params: Params,
+  columns: Record<string, Column>,
+  order: Order,
+  c: Ctx,
+  lead = "",
+  trail = "",
+): string {
+  const heads = Object.entries(columns)
+    .map(([key, col]) => {
+      const on = key === order.sort;
+      const dir: Dir = on ? (order.dir === "asc" ? "desc" : "asc") : col.first;
+      const arrow = on ? `<span class="dir">${order.dir === "asc" ? "\u2191" : "\u2193"}</span>` : "";
+      const to = href(path, { ...params, sort: key, dir, page: undefined }, c.key);
+      return `<th class="${col.num ? "num" : ""}${on ? " on" : ""}"><a href="${esc(to)}"
+    title="Sort by ${esc(col.label)}">${esc(col.label)}${arrow}</a></th>`;
+    })
+    .join("");
+  return `<thead><tr>${lead}${heads}${trail}</tr></thead>`;
+}
+
+/** The current ordering, as hidden fields, so searching does not reset the table. */
+function keep(order: Order): string {
+  return `<input type="hidden" name="sort" value="${esc(order.sort)}">
+  <input type="hidden" name="dir" value="${esc(order.dir)}">`;
+}
+
 function searchBox(path: string, q: string, extra: string, c: Ctx, hint: string): string {
   return `<form class="search" method="get" action="${esc(path)}">
   ${c.key ? `<input type="hidden" name="key" value="${esc(c.key)}">` : ""}
@@ -456,23 +587,32 @@ function searchBox(path: string, q: string, extra: string, c: Ctx, hint: string)
 // Riders
 // ---------------------------------------------------------------------------
 
-function ridersView(s: Totals, found: Paged<RiderRow>, q: string, c: Ctx): string {
-  const params: Params = { q };
+function ridersView(
+  s: Totals,
+  found: Paged<RiderRow>,
+  q: string,
+  order: Order,
+  c: Ctx,
+): string {
+  const params: Params = { q, sort: order.sort, dir: order.dir };
   return `${tiles(s)}
 <section class="panel">
   <h2>Riders</h2>
-  ${searchBox(ROOT, q, "", c, "rider name, GUID or Steam id")}
+  ${searchBox(ROOT, q, keep(order), c, "rider name, GUID or Steam id")}
   ${count(found, "rider")}
-  ${found.rows.length ? wrap(riderTable(found.rows, c)) : `<p class="muted">Nobody matches.</p>`}
+  ${
+    found.rows.length
+      ? wrap(riderTable(found.rows, params, order, c))
+      : `<p class="muted">Nobody matches.</p>`
+  }
   ${pager(ROOT, params, found, c)}
 </section>`;
 }
 
-function riderTable(rows: RiderRow[], c: Ctx): string {
-  return `<table><thead><tr>
-  <th>Rider</th><th>GUID</th><th>Steam</th><th class="num">Bikes</th><th class="num">Slots</th>
-  <th class="num">Paints</th><th class="num">Size</th><th>Published</th><th>Where</th>
-</tr></thead><tbody>
+function riderTable(rows: RiderRow[], params: Params, order: Order, c: Ctx): string {
+  return `<table>
+${sortable(ROOT, params, RIDER_COLUMNS, order, c)}
+<tbody>
 ${rows
   .map(
     (r) => `<tr>
@@ -585,36 +725,33 @@ function paintsView(
   s: Totals,
   found: Paged<PaintRow>,
   q: string,
-  sort: Sort,
+  order: Order,
   c: Ctx,
 ): string {
   const path = `${ROOT}/files`;
-  const params: Params = { q, sort };
-  const options = (
-    [
-      ["riders", "Most worn"],
-      ["size", "Largest"],
-      ["name", "By name"],
-    ] as const
-  )
-    .map(([v, text]) => `<option value="${v}"${v === sort ? " selected" : ""}>${text}</option>`)
-    .join("");
+  const params: Params = { q, sort: order.sort, dir: order.dir };
 
   return `${tiles(s)}
 <section class="panel">
   <h2>Paints</h2>
-  ${searchBox(path, q, `<select name="sort">${options}</select>`, c, "file name or digest")}
+  ${searchBox(path, q, keep(order), c, "file name or digest")}
   ${count(found, "paint")}
-  ${found.rows.length ? wrap(paintTable(found.rows, c)) : `<p class="muted">Nothing matches.</p>`}
+  ${
+    found.rows.length
+      ? wrap(paintTable(found.rows, params, order, c))
+      : `<p class="muted">Nothing matches.</p>`
+  }
   ${pager(path, params, found, c)}
 </section>`;
 }
 
-function paintTable(rows: PaintRow[], c: Ctx): string {
-  return `<table><thead><tr>
-  <th></th><th>File</th><th>Slots</th><th class="num">Riders</th><th class="num">Uses</th>
-  <th class="num">Size</th><th>Blob</th><th>Digest</th>
-</tr></thead><tbody>
+function paintTable(rows: PaintRow[], params: Params, order: Order, c: Ctx): string {
+  // The picture leads and `Blob` trails, neither of them a column the database can order by:
+  // one is the paint itself, and the other is what the bucket answered about this page's
+  // rows after the query had already run.
+  return `<table>
+${sortable(`${ROOT}/files`, params, PAINT_COLUMNS, order, c, "<th></th>", "<th>Blob</th>")}
+<tbody>
 ${rows
   .map(
     (r) => `<tr>
@@ -625,6 +762,7 @@ ${rows
   <td class="num">${r.riders}</td>
   <td class="num">${r.uses}</td>
   <td class="num">${esc(bytes(r.size))}</td>
+  <td class="mono">${esc(r.sha256.slice(0, 12))}</td>
   <td>${
     r.stored === null
       ? `<span class="pill alert">missing</span>`
@@ -632,7 +770,6 @@ ${rows
         ? `<span class="dot ok"></span>`
         : `<span class="pill warn">${esc(bytes(r.stored))}</span>`
   }</td>
-  <td class="mono">${esc(r.sha256.slice(0, 12))}</td>
 </tr>`,
   )
   .join("")}
