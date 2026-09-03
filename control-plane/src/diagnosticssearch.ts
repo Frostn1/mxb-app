@@ -12,42 +12,13 @@
 import { isState, isTrust, parseMatched, type Matched, type State, type Trust } from "./diagnostics";
 import { PRESENCE_TTL_MS } from "./validate";
 
-/** Rows per page. One screen of a dense table, and one D1 read. */
-export const PAGE_SIZE = 50;
-
-/** The most rows a count query will count exactly. Past it the page says "10,000+". */
-export const MAX_COUNT = 10_000;
+// Paging and the search-box escaping live in `adminui.ts` — the paint views page and filter
+// the same way, and two copies of "what is page 2" is how they stop agreeing. Re-exported
+// rather than moved out of sight: every caller here has always read them from this module.
+export { likeTerm, MAX_COUNT, PAGE_SIZE, parsePage, type Paged } from "./adminui";
+import { MAX_COUNT, PAGE_SIZE, likeTerm, parsePage, type Paged } from "./adminui";
 
 const DAY_MS = 86_400_000;
-
-export interface Paged<T> {
-  rows: T[];
-  /** Matching rows, counted up to `MAX_COUNT`. */
-  total: number;
-  /** 1-based. */
-  page: number;
-  size: number;
-}
-
-/** `?page=` as a 1-based page number. Anything unusable is page 1. */
-export function parsePage(value: string | null): number {
-  const asked = Number(value ?? "1");
-  if (!Number.isFinite(asked)) return 1;
-  return Math.min(10_000, Math.max(1, Math.trunc(asked)));
-}
-
-/**
- * A search box turned into a LIKE pattern.
- *
- * `%` and `_` are wildcards and `\` is the escape, so someone searching `nvidia_share` gets
- * the underscore they typed rather than any character. Empty stays empty, which every caller
- * reads as "no filter".
- */
-export function likeTerm(query: string): string {
-  const trimmed = query.trim().slice(0, 96);
-  if (!trimmed) return "";
-  return `%${trimmed.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-}
 
 /** A window in days, clamped to something a page can draw. */
 export function clampDays(value: string | null, fallback = 30): number {

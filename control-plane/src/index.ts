@@ -36,6 +36,13 @@ import {
   diagnosticsRules,
   diagnosticsRulesPage,
 } from "./diagnosticspage";
+import {
+  paintFiles,
+  paintOne,
+  paintRider,
+  paintRiders,
+  paintThumbnail,
+} from "./paintspage";
 import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
 import { generateTrack } from "./trackgen";
 import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
@@ -222,6 +229,16 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "POST" && path === "/admin/diagnostics/rules") {
     return diagnosticsRules(request, url, env);
   }
+
+  // Who has published a look, and what we are shipping to a grid. Behind `ADMIN_KEY` and
+  // above the account gate on exactly the same terms as the two pages before it: it names
+  // riders, their GUIDs and their Steam ids, and no player's token should be enough to read
+  // any of that about anybody else.
+  if (method === "GET" && path === "/admin/paints") return paintRiders(request, url, env);
+  if (method === "GET" && path === "/admin/paints/rider") return paintRider(request, url, env);
+  if (method === "GET" && path === "/admin/paints/files") return paintFiles(request, url, env);
+  if (method === "GET" && path === "/admin/paints/paint") return paintOne(request, url, env);
+  if (method === "GET" && path === "/admin/paints/thumb") return paintThumbnail(request, url, env);
 
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
