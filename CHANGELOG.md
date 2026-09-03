@@ -3,16 +3,8 @@
 ## 2026-09-02 — v0.13.5
 
 ### Added
-- Your rider name and GUID now come from the running game, so the name other riders see is
-  the name paint sync matches you on. Nothing to type, and no server of your own needed.
-- The control plane has a paint sync view: who has published a look, searchable by rider
-  name, GUID or Steam id, and every paint we hold with a picture of it.
-- A rider's page lists their bikes slot by slot, with the paint each one installs and where
-  it lands on disk.
-- A paint's page lists the sheets it carries and every rider wearing it, and says when the
-  file a loadout names was never uploaded.
-- Every column of those tables sorts, either way, by clicking its header.
-- The paint sync and diagnostics rider lists each show the other's summary, and link across.
+- Your rider name now comes from the game itself, so the name other riders see is the name
+  your paints are matched on. Nothing to type, and nothing to set up.
 
 ### Fixed
 - The track creator's left column scrolls, so the install and export buttons stay reachable
