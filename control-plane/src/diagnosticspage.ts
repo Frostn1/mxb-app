@@ -63,37 +63,29 @@ import {
   type SightingQuery,
 } from "./diagnosticssearch";
 import { adminAllowed } from "./usage";
+import {
+  ago,
+  bytes,
+  count,
+  ctx,
+  CSS,
+  errorPage,
+  esc,
+  href,
+  pager,
+  stamp,
+  wrap,
+  type Ctx,
+  type Params,
+} from "./adminui";
 
 /** Windows the header offers. Anything else still works via `?days=`. */
 const RANGES = [1, 7, 30, 90];
 
 const ROOT = "/admin/diagnostics";
 
-/** Query values a link carries. `undefined` and `""` are dropped rather than sent empty. */
-type Params = Record<string, string | number | undefined | null>;
-
-/** What every view needs to draw a link back to itself: the key, and where it is. */
-interface Ctx {
-  key: string;
-  /** The path and query of the page being drawn, for a rule form to come back to. */
-  back: string;
-}
-
-function ctx(url: URL): Ctx {
-  return { key: url.searchParams.get("key") ?? "", back: `${url.pathname}${url.search}` };
-}
-
-/** Every link carries the admin key: a browser typing a URL cannot send a header. */
-function href(path: string, params: Params, key: string): string {
-  const q = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === null || v === "") continue;
-    q.set(k, String(v));
-  }
-  if (key) q.set("key", key);
-  const query = q.toString();
-  return query ? `${path}?${query}` : path;
-}
+/** Named on every error page this module returns, so the title is written once. */
+const TITLE = "MXB App diagnostics";
 
 // ---------------------------------------------------------------------------
 // Routes
@@ -102,8 +94,10 @@ function href(path: string, params: Params, key: string): string {
 /** The gate every view goes through, so no handler can forget it. */
 function gate(request: Request, url: URL, env: Env): Response | null {
   const allowed = adminAllowed(request, url, env);
-  if (allowed === "unset") return page(503, "No admin key is configured on this deployment.");
-  if (allowed === "denied") return page(401, "Unauthorized.");
+  if (allowed === "unset") {
+    return errorPage(TITLE, 503, "No admin key is configured on this deployment.");
+  }
+  if (allowed === "denied") return errorPage(TITLE, 401, "Unauthorized.");
   return null;
 }
 
@@ -209,7 +203,7 @@ export async function diagnosticsRules(request: Request, url: URL, env: Env): Pr
   try {
     form = await request.formData();
   } catch {
-    return page(400, "That was not a form.");
+    return errorPage(TITLE, 400, "That was not a form.");
   }
   const field = (name: string) => String(form.get(name) ?? "");
   // Back where the button was pressed, filters and page intact. Anything not one of our own
@@ -231,7 +225,7 @@ export async function diagnosticsRules(request: Request, url: URL, env: Env): Pr
     field("label"),
     field("note"),
   );
-  if (!result.ok) return page(400, result.error ?? "That rule was not usable.");
+  if (!result.ok) return errorPage(TITLE, 400, result.error ?? "That rule was not usable.");
   return redirect(back);
 }
 
@@ -268,7 +262,8 @@ function shell(title: string, tab: Tab, body: string, c: Ctx): string {
 <title>${esc(title)} — MXB App diagnostics</title>
 <style>${CSS}</style>
 </head><body>
-<header><h1>${esc(title)}</h1><nav>${nav}</nav></header>
+<header><h1>${esc(title)}</h1><nav>${nav}
+  <a class="out" href="${esc(href("/admin/paints", {}, c.key))}">Paints</a></nav></header>
 ${body}
 <footer class="muted">Only clients running the app report. A missing row means nobody told us,
   not that nothing happened.</footer>
@@ -796,64 +791,12 @@ function select<T extends string | number>(
 }
 
 /** "51–100 of 312 riders" — or "10,000+" where the count stopped counting. */
-function count(found: Paged<unknown>, noun: string): string {
-  const label = `${found.total.toLocaleString("en-GB")}${found.total >= MAX_COUNT ? "+" : ""} ${noun}${
-    found.total === 1 ? "" : "s"
-  }`;
-  const shown = found.rows.length;
-  // A hand-edited `?page=` past the end. Say so, rather than showing an empty table that
-  // reads as "nothing matched".
-  if (!shown) {
-    return found.total
-      ? `<p class="count">Page ${found.page} is past the end — ${label}.</p>`
-      : "";
-  }
-  const from = (found.page - 1) * found.size + 1;
-  return `<p class="count">${from.toLocaleString("en-GB")}–${(from + shown - 1).toLocaleString(
-    "en-GB",
-  )} of ${label}</p>`;
-}
-
 /**
  * Numbered pages, not a scroll that loads as it goes.
  *
  * A link to page four has to still be page four tomorrow, and a page of evidence you cannot
  * link to is not much use to anybody.
  */
-function pager(path: string, params: Params, found: Paged<unknown>, c: Ctx): string {
-  const pages = Math.max(1, Math.ceil(Math.min(found.total, MAX_COUNT) / found.size));
-  if (pages <= 1) return "";
-
-  // Clamped for the arrows, so a `?page=` past the end still has a way back. The highlight
-  // is not clamped: nothing is marked current when the page asked for does not exist.
-  const at = Math.min(found.page, pages);
-  const here = found.page === at;
-  const first = Math.max(1, Math.min(at - 3, pages - 6));
-  const last = Math.min(pages, first + 6);
-
-  const step = (to: number, text: string, disabled: boolean) =>
-    disabled
-      ? `<span class="off">${text}</span>`
-      : `<a href="${esc(href(path, { ...params, page: to }, c.key))}">${text}</a>`;
-
-  const numbers: string[] = [];
-  for (let p = first; p <= last; p++) {
-    numbers.push(
-      p === at && here
-        ? `<span class="on">${p}</span>`
-        : `<a href="${esc(href(path, { ...params, page: p }, c.key))}">${p}</a>`,
-    );
-  }
-
-  return `<nav class="pages">
-    ${step(1, "First", at === 1 && here)}
-    ${step(at - 1, "‹ Prev", at === 1 && here)}
-    ${numbers.join("")}
-    ${step(at + 1, "Next ›", at === pages)}
-    ${step(pages, "Last", at === pages && here)}
-  </nav>`;
-}
-
 /** A signature, which is Windows' answer, and who it names. */
 function sig(trust: Trust, publisher: string): string {
   const tone = trust === "signed" ? "" : trust === "unchecked" ? "muted" : "warn";
@@ -861,135 +804,3 @@ function sig(trust: Trust, publisher: string): string {
   return `<span class="sig ${tone}">${esc(trust)}</span>${who}`;
 }
 
-/** Wide tables scroll inside their panel rather than pushing the page sideways. */
-function wrap(table: string): string {
-  return `<div class="scroll">${table}</div>`;
-}
-
-/** A size a person reads, not a byte count. */
-function bytes(size: number): string {
-  if (!size) return "—";
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/** How long ago, in the coarsest unit that still says something. */
-function ago(at: number): string {
-  if (!at) return "—";
-  const secs = Math.max(0, Math.round((Date.now() - at) / 1000));
-  if (secs < 90) return `${secs}s ago`;
-  const mins = Math.round(secs / 60);
-  if (mins < 90) return `${mins}m ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 48) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
-}
-
-/** The absolute time, where "3d ago" is not precise enough to act on. */
-function stamp(at: number): string {
-  if (!at) return "—";
-  return new Date(at).toISOString().replace("T", " ").slice(0, 16) + "Z";
-}
-
-function page(status: number, message: string): Response {
-  return new Response(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<title>MXB App diagnostics</title>
-<style>${CSS}</style></head><body><header><h1>Diagnostics</h1></header>
-<section class="panel"><p>${esc(message)}</p></section></body></html>`,
-    { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
-  );
-}
-
-function esc(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-const CSS = `
-:root{--bg:#f6f7f9;--panel:#fff;--ink:#16181d;--muted:#6b7280;--line:#e3e6ea;--accent:#e2492b;
-  --ok:#3f9e5a;--warn:#c98a1b;--alert:#d33b2c}
-@media (prefers-color-scheme:dark){
-  :root{--bg:#0f1114;--panel:#171a1f;--ink:#e8eaed;--muted:#9aa3ae;--line:#262b32;--accent:#ff6a42;
-    --ok:#4fb872;--warn:#e0a53a;--alert:#ff5c4d}
-}
-*{box-sizing:border-box}
-body{margin:0;padding:20px;background:var(--bg);color:var(--ink);
-  font:13px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-a{color:var(--accent);text-decoration:none}
-a:hover{text-decoration:underline}
-header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:14px}
-h1{font-size:17px;margin:0;letter-spacing:-.01em;overflow-wrap:anywhere}
-h2{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
-  margin:0 0 10px;display:flex;align-items:baseline;gap:8px}
-h2 .more{margin-left:auto;text-transform:none;letter-spacing:0;font-size:12px}
-header nav a{color:var(--muted);padding:4px 9px;border-radius:6px;margin-left:2px}
-header nav a.on{background:var(--accent);color:#fff}
-header nav a.on:hover{text-decoration:none}
-.ranges{margin:0 0 12px}
-.ranges a{color:var(--muted);padding:3px 8px;border-radius:6px;margin-right:2px;font-size:12px}
-.ranges a.on{background:var(--accent);color:#fff}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px}
-.tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;
-  display:flex;flex-direction:column;gap:1px}
-.tile.alert{border-color:var(--alert)}
-.tile.warn{border-color:var(--warn)}
-.tile .n{font-size:24px;font-weight:600;letter-spacing:-.02em}
-.tile .l{font-size:12px}
-.tile .h,.muted{color:var(--muted);font-size:12px}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;
-  margin-bottom:14px}
-.scroll{overflow-x:auto}
-table{width:100%;border-collapse:collapse}
-th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
-  font-weight:500;padding:0 8px 7px;border-bottom:1px solid var(--line);white-space:nowrap}
-td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-tr:last-child td{border-bottom:0}
-.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.num.hot{color:var(--warn);font-weight:600}
-.act{text-align:right;white-space:nowrap}
-.act.left{text-align:left;margin-top:10px;display:flex;align-items:center;gap:8px}
-.act form{display:inline}
-code,.mono{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
-.pill{display:inline-block;min-width:9px;padding:1px 7px;border-radius:99px;font-size:11px;
-  color:#fff;background:var(--muted)}
-.pill.ok{background:var(--ok)}
-.pill.warn{background:var(--warn)}
-.pill.alert{background:var(--alert)}
-.dot{display:inline-block;width:8px;height:8px;border-radius:99px;background:var(--muted);
-  vertical-align:baseline}
-.dot.ok{background:var(--ok)}
-.dot.warn{background:var(--warn)}
-.dot.alert{background:var(--alert)}
-.tag{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;
-  border:1px solid var(--line)}
-.sig{font-size:12px}
-.sig.warn{color:var(--warn);font-weight:600}
-button{font:inherit;font-size:12px;padding:3px 10px;border-radius:6px;border:1px solid var(--line);
-  background:var(--panel);color:var(--ink);cursor:pointer;margin-left:4px}
-button.deny{border-color:var(--alert);color:var(--alert)}
-button.allow{border-color:var(--ok);color:var(--ok)}
-.search{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px}
-.search input,.search select{font:inherit;font-size:13px;padding:5px 8px;border-radius:6px;
-  border:1px solid var(--line);background:var(--bg);color:var(--ink)}
-.search input[name="q"],.search input[name="f"]{flex:1 1 280px;min-width:200px}
-.search .clear{font-size:12px;color:var(--muted)}
-.add input[name="sha256"]{min-width:240px}
-.count{color:var(--muted);font-size:12px;margin:0 0 8px}
-.who{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px}
-.who .name{font-size:16px;font-weight:600;overflow-wrap:anywhere}
-.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px 16px;margin:0}
-.facts dt{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
-.facts dd{margin:1px 0 0;overflow-wrap:anywhere}
-.named{margin:12px 0 0}
-.pages{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:12px;font-size:12px}
-.pages a,.pages span{padding:3px 9px;border-radius:6px;border:1px solid var(--line);color:var(--muted)}
-.pages a{color:var(--ink)}
-.pages .on{background:var(--accent);color:#fff;border-color:var(--accent)}
-.pages .off{opacity:.4}
-footer{color:var(--muted);font-size:12px;margin-top:4px;max-width:70ch}
-`;
