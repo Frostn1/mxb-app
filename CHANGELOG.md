@@ -3,6 +3,9 @@
 ## 2026-09-02
 
 ### Added
+- The app takes your rider name and GUID from the running game, so the name other riders see
+  is the name paint sync matches on. Neither needs you to run a server or type anything.
+- The paint sync and diagnostics rider lists each show the other's summary, and link across.
 - Every column of the paint sync tables sorts, either way, by clicking its header.
 - A rider's paint page and their diagnostics page link to each other.
 - The control plane has a paint sync view: who has published a look, searchable by rider

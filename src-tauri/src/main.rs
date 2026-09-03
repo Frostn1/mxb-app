@@ -25,6 +25,7 @@ mod gearrepair;
 mod heightfield;
 mod hub_clearance;
 mod hub_session;
+mod identity;
 mod imgcache;
 mod install;
 mod ledger;
@@ -6512,35 +6513,9 @@ async fn set_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
     claim_guid(&app, &guid).await
 }
 
-/// Register `guid` against this account and remember it locally.
-///
-/// Shared by the manual field and the automatic claim off a server roster, so both go
-/// through the same validation and land in the same place.
+/// Register `guid` against this account and remember it locally. See [`identity`].
 async fn claim_guid(app: &tauri::AppHandle, guid: &str) -> Result<(), String> {
-    let cfg = config::load_or_detect(app).unwrap_or_default();
-    if cfg.cp_token.trim().is_empty() {
-        return Err("Enroll with an invite code first.".into());
-    }
-    let resp = reqwest::Client::new()
-        .put(format!("{}/v1/me/guid", paintsync::control_plane()))
-        .bearer_auth(&cfg.cp_token)
-        .json(&serde_json::json!({ "guid": guid.trim() }))
-        .send()
-        .await
-        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
-    if !resp.status().is_success() {
-        let detail = resp.text().await.unwrap_or_default();
-        return Err(serde_json::from_str::<serde_json::Value>(&detail)
-            .ok()
-            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
-            .unwrap_or(detail));
-    }
-
-    // Re-read rather than reusing the config above: the round trip is long enough for
-    // something else to have written it.
-    let mut cfg = config::load_or_detect(app).unwrap_or_default();
-    cfg.cp_guid = guid.trim().to_string();
-    config::save(app, &cfg).map_err(|e| format!("{e:#}"))
+    identity::claim_guid(app, guid).await
 }
 
 /// Publish this rider's paints so everyone else on the server can see them.
@@ -7008,6 +6983,17 @@ fn live_server_key() -> Option<String> {
 fn live_session() -> Option<voice::gamesession::GameSession> {
     static GAME: std::sync::OnceLock<voice::gamesession::Reader> = std::sync::OnceLock::new();
     GAME.get_or_init(voice::gamesession::Reader::default).read()
+}
+
+/// What the running game says this player is called, for [`identity::claim_from_game`].
+///
+/// `None` when there is no session to read — no FrostMod, or one that has not reached
+/// `EventInit` yet — which is not the same as a session that reports empty fields.
+pub fn seen_identity() -> Option<identity::SeenIdentity> {
+    live_session().map(|s| identity::SeenIdentity {
+        guid: s.guid,
+        rider_name: s.rider_name,
+    })
 }
 
 /// Who is on the grid, and who has turned up since we last looked.

@@ -71,6 +71,15 @@ pub fn start(app: &AppHandle) {
             }
 
             if running {
+                // Who this player is, from the game rather than from the disk. Every pass
+                // rather than once a session: `EventInit` is what carries the GUID and the
+                // rider name, and it fires when they enter a session, which can be long
+                // after the process started. A pass with nothing new costs a shared-memory
+                // read and two string compares.
+                if let Some(seen) = crate::seen_identity() {
+                    crate::identity::claim_from_game(&app, &seen).await;
+                }
+
                 if reported.is_none_or(|at| at.elapsed() >= REPORT_EVERY) {
                     reported = Some(Instant::now());
                     // Off the runtime, not on it. The first pass of a session reads every
