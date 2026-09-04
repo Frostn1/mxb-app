@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-04
+
+### Fixed
+- Paint sync and voice chat now know which server you are on. The app installs a small
+  FrostMod plugin that reads the server name from the game, so you sync with the riders
+  you are actually riding with instead of nobody.
+
 ## 2026-09-02 — v0.13.5
 
 ### Added
