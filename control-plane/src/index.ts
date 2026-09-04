@@ -25,6 +25,7 @@ import {
   runInstance,
   terminateInstance,
 } from "./aws";
+import { adminSearch } from "./adminsearch";
 import { bmacWebhook } from "./bmac";
 import { pruneReports, putReport } from "./diagnostics";
 import {
@@ -202,7 +203,18 @@ async function route(request: Request, env: Env): Promise<Response> {
   // player's endpoint at all: the key belongs to whoever runs the deployment, and an account
   // token must never be enough to read what everybody else is doing.
   if (method === "GET" && path === "/v1/usage/stats") return usageStats(request, url, env);
-  if (method === "GET" && path === "/admin/usage") return usageDashboard(request, url, env);
+
+  // The three dashboards are one tool, so they have one front door: `/admin` is the URL to
+  // bookmark, and every page it leads to carries the same tabs and the same search box. It
+  // opens on usage — the widest of the three — rather than redirecting, so what stays in the
+  // address bar is the URL that was typed.
+  if (method === "GET" && (path === "/admin" || path === "/admin/usage")) {
+    return usageDashboard(request, url, env);
+  }
+
+  // One question asked of all three at once. Same key, same gate, no new facts — it runs the
+  // searches the section pages already run and links into them.
+  if (method === "GET" && path === "/admin/search") return adminSearch(request, url, env);
 
   // What the app sees loaded inside people's running games, and the rules that say how to
   // read it. Behind `ADMIN_KEY` on the same terms as the usage page, and above the account

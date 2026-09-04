@@ -77,11 +77,132 @@ export function wrap(table: string): string {
 export function errorPage(title: string, status: number, message: string): Response {
   return new Response(
     `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<title>${esc(title)}</title>
-<style>${CSS}</style></head><body><header><h1>${esc(title)}</h1></header>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>${esc(title)} — MXB control plane</title>
+<style>${CSS}</style></head><body>
+<header class="top"><span class="mark">MXB <span>Control</span></span></header>
+<h1>${esc(title)}</h1>
 <section class="panel"><p>${esc(message)}</p></section></body></html>`,
     { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
   );
+}
+
+// ---------------------------------------------------------------------------
+// The shell
+// ---------------------------------------------------------------------------
+
+/** The three dashboards. One tab each, on every page. */
+export type Section = "usage" | "diagnostics" | "paints";
+
+// Usage is `/admin` rather than `/admin/usage`: the front door and the first tab are the same
+// page, so the URL to bookmark is the one every link uses. `/admin/usage` still answers, for
+// the bookmarks that predate this.
+const SECTIONS: readonly (readonly [Section, string, string])[] = [
+  ["usage", "Usage", "/admin"],
+  ["diagnostics", "Diagnostics", "/admin/diagnostics"],
+  ["paints", "Paints", "/admin/paints"],
+];
+
+/** A view inside a section — the second row of the header. */
+export interface SubTab {
+  id: string;
+  text: string;
+  path: string;
+  params?: Params;
+}
+
+export interface Page {
+  title: string;
+  /** Which top tab is lit. `null` on search, which belongs to none of them. */
+  section: Section | null;
+  tabs?: SubTab[];
+  /** Which of `tabs` is lit. */
+  current?: string;
+  /** The right-hand end of the second row — the day-window switcher, where there is one. */
+  aside?: string;
+  body: string;
+  footer?: string;
+  /** What the search box holds, so a search page keeps its own query in it. */
+  q?: string;
+  c: Ctx;
+}
+
+/**
+ * The one document every admin page is drawn into.
+ *
+ * These were three pages with three headers and, in the usage page's case, a second copy of
+ * the stylesheet — so they drifted, and answering one question meant three browser tabs and
+ * three search boxes. They are one tool: the same key, the same accounts, the same
+ * questions. The tabs and the search box are therefore on every page, which is what makes
+ * one browser tab enough.
+ */
+export function shell(p: Page): string {
+  const sections = SECTIONS.map(
+    ([id, text, path]) =>
+      `<a class="${id === p.section ? "on" : ""}" href="${esc(href(path, {}, p.c.key))}">${text}</a>`,
+  ).join("");
+
+  const sub = (p.tabs ?? [])
+    .map(
+      (t) =>
+        `<a class="${t.id === p.current ? "on" : ""}" href="${esc(
+          href(t.path, t.params ?? {}, p.c.key),
+        )}">${esc(t.text)}</a>`,
+    )
+    .join("");
+
+  const bar =
+    sub || p.aside
+      ? `<div class="subbar"><nav class="sub">${sub}</nav>` +
+        `<div class="aside">${p.aside ?? ""}</div></div>`
+      : "";
+
+  return `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>${esc(p.title)} — MXB control plane</title>
+<style>${CSS}</style>
+</head><body>
+<header class="top">
+  <a class="mark" href="${esc(href("/admin", {}, p.c.key))}">MXB <span>Control</span></a>
+  <nav class="sections">${sections}</nav>
+  ${findBox(p.q ?? "", p.c)}
+</header>
+${bar}
+<h1>${esc(p.title)}</h1>
+${p.body}
+${p.footer ? `<footer class="muted">${p.footer}</footer>` : ""}
+</body></html>`;
+}
+
+/** The search box that sits in every header. */
+function findBox(q: string, c: Ctx): string {
+  return `<form class="find" method="get" action="/admin/search" role="search">
+  ${c.key ? `<input type="hidden" name="key" value="${esc(c.key)}">` : ""}
+  <input name="q" type="search" value="${esc(q)}" maxlength="96" autocomplete="off"
+    aria-label="Search" placeholder="Search riders, mod files, paints…">
+</form>`;
+}
+
+/** The day-window switcher, for the pages that have one. */
+export function ranges(
+  days: number,
+  options: readonly number[],
+  path: string,
+  params: Params,
+  c: Ctx,
+): string {
+  return options
+    .map(
+      (d) =>
+        `<a class="${d === days ? "on" : ""}" href="${esc(
+          href(path, { ...params, days: d, page: undefined }, c.key),
+        )}">${d}d</a>`,
+    )
+    .join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -186,18 +307,39 @@ body{margin:0;padding:20px;background:var(--bg);color:var(--ink);
   font:13px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 a{color:var(--accent);text-decoration:none}
 a:hover{text-decoration:underline}
-header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:14px}
-h1{font-size:17px;margin:0;letter-spacing:-.01em;overflow-wrap:anywhere}
+h1{font-size:19px;margin:16px 0 12px;letter-spacing:-.015em;overflow-wrap:anywhere}
 h2{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
   margin:0 0 10px;display:flex;align-items:baseline;gap:8px}
 h2 .more{margin-left:auto;text-transform:none;letter-spacing:0;font-size:12px}
-header nav a{color:var(--muted);padding:4px 9px;border-radius:6px;margin-left:2px}
-header nav a.on{background:var(--accent);color:#fff}
-header nav a.on:hover{text-decoration:none}
-header nav a.out{color:var(--muted);opacity:.75}
-.ranges{margin:0 0 12px}
-.ranges a{color:var(--muted);padding:3px 8px;border-radius:6px;margin-right:2px;font-size:12px}
-.ranges a.on{background:var(--accent);color:#fff}
+/* A line under a heading saying what the panel counts, pulled up against it. */
+.hint{margin:-8px 0 12px}
+
+/* Chrome. Two rows: the three dashboards and the search box, then the section's own views.
+   The first row is sticky, so the way out of a page is still there four hundred rows down. */
+.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:6px 14px;
+  flex-wrap:wrap;padding:9px 20px;margin:-20px -20px 0;
+  background:var(--panel);border-bottom:1px solid var(--line)}
+.mark{color:var(--ink);font-weight:600;letter-spacing:-.01em;white-space:nowrap}
+.mark span{color:var(--accent)}
+.mark:hover{text-decoration:none}
+.sections{display:flex;gap:2px}
+.sections a{color:var(--muted);padding:5px 11px;border-radius:7px;font-weight:500}
+.sections a:hover{background:var(--bg);text-decoration:none}
+.sections a.on{background:var(--accent);color:#fff}
+.sections a.on:hover{background:var(--accent)}
+.find{margin-left:auto;flex:0 1 300px;min-width:170px;display:flex}
+.find input{width:100%;font:inherit;font-size:13px;padding:6px 10px;border-radius:7px;
+  border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.find input:focus{outline:none;border-color:var(--accent)}
+.subbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 20px;margin:0 -20px;
+  border-bottom:1px solid var(--line)}
+.sub{display:flex;flex-wrap:wrap;gap:2px}
+.sub a,.subbar .aside a{color:var(--muted);padding:3px 9px;border-radius:6px;font-size:12px}
+.sub a:hover,.subbar .aside a:hover{color:var(--ink);text-decoration:none}
+.sub a.on{color:var(--ink);background:var(--panel);box-shadow:inset 0 0 0 1px var(--line)}
+.subbar .aside{margin-left:auto;display:flex;gap:2px}
+.subbar .aside a.on{background:var(--accent);color:#fff}
+.subbar .aside a.on:hover{color:#fff}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px}
 .tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;
   display:flex;flex-direction:column;gap:1px}
@@ -212,7 +354,7 @@ header nav a.out{color:var(--muted);opacity:.75}
 table{width:100%;border-collapse:collapse}
 th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
   font-weight:500;padding:0 8px 7px;border-bottom:1px solid var(--line);white-space:nowrap}
-td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top;position:relative}
 tr:last-child td{border-bottom:0}
 .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 /* A sortable header is a link that still reads as a header until it is the one in use. */
@@ -274,4 +416,37 @@ footer{color:var(--muted);font-size:12px;margin-top:4px;max-width:70ch}
   background-size:12px 12px;background-position:0 0,6px 6px}
 .thumb.big{width:132px;height:132px}
 a.thumblink{display:inline-block}
+
+/* The usage view's chart furniture, in the shared sheet rather than in a second stylesheet
+   of its own — that second copy is how the three pages stopped looking like one tool. */
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+svg.chart{width:100%;height:180px;display:block}
+.area{fill:var(--accent);opacity:.12}
+.line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round}
+.tick{fill:var(--muted);font-size:11px}
+.tick.end{text-anchor:end}
+.bars{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.bars li{display:grid;grid-template-columns:1fr 2fr auto;gap:10px;align-items:center}
+.bars .k{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bars .bar{background:var(--line);border-radius:4px;height:8px;overflow:hidden}
+.bars .bar i{display:block;height:100%;background:var(--accent)}
+.bars .v{color:var(--muted);font-variant-numeric:tabular-nums}
+/* Reach drawn behind the row it belongs to, so the ranking reads without a second column. */
+.rowbar{position:absolute;left:0;top:2px;bottom:2px;background:var(--accent);opacity:.10;
+  border-radius:4px}
+.rowbar+code{position:relative}
+.unused{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
+.unused li{border:1px solid var(--line);border-radius:6px;padding:3px 8px}
+
+/* Search hits: a row that is a link with a line of detail under it. */
+.hits{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.hits li{padding:7px 0;border-bottom:1px solid var(--line);display:flex;gap:10px;
+  align-items:center}
+.hits li:last-child{border-bottom:0}
+.hits .name{font-weight:500;overflow-wrap:anywhere}
+.hits .meta{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.hits .to{margin-left:auto;font-size:12px;white-space:nowrap;padding-left:8px}
+.hits .thumb{width:40px;height:40px;flex:0 0 auto}
+.tips{color:var(--muted);margin:0}
+.tips code{color:var(--ink)}
 `;
