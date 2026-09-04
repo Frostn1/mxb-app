@@ -11,11 +11,13 @@
  * looking for the setting they just changed finds the name they saw there.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, Save } from "lucide-react";
+import { Loader2, Save, ChevronRight, Search } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { Slider } from "../ui/controls";
+import { Segmented } from "../ui/segmented";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +30,9 @@ import type { Feel } from "../../api/mods";
 
 /** `profile.ini` sections, in the order a rider thinks about them. */
 const SECTION_ORDER = ["input", "aids", "view", "ext_view", "gfx"] as const;
+
+/** The two a rider opens this for. The rest are set once and forgotten. */
+const OPEN_BY_DEFAULT = new Set(["aids"]);
 
 const SECTION_LABEL: Record<string, TKey> = {
   input: "feel.groupInput",
@@ -180,6 +185,9 @@ export default function FeelEditor({ feel, taken, onClose, onSave }: Props) {
   const t = useT();
   const [draft, setDraft] = useState<Feel | null>(feel);
   const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [control, setControl] = useState("");
+  const [open, setOpen] = useState<Record<string, boolean>>({});
 
   useEffect(() => setDraft(feel), [feel]);
 
@@ -218,6 +226,21 @@ export default function FeelEditor({ feel, taken, onClose, onSave }: Props) {
   );
   const controls = Object.keys(draft.controls ?? {});
 
+  const needle = filter.trim().toLowerCase();
+  const filtering = needle.length > 0;
+  /** Match on what the row says *and* on the raw key, so both "direct lean" and
+   *  "leanhelp" find the same setting. */
+  const match = (entries: [string, string][]) =>
+    !filtering
+      ? entries
+      : entries.filter(
+          ([k]) =>
+            k.toLowerCase().includes(needle) || prettify(k).toLowerCase().includes(needle),
+        );
+  const nothingMatches =
+    controls.every((c) => match(Object.entries(draft.controls[c] ?? {})).length === 0) &&
+    sections.every((sec) => match(Object.entries(draft.ini[sec] ?? {})).length === 0);
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-[1040px]">
@@ -225,47 +248,102 @@ export default function FeelEditor({ feel, taken, onClose, onSave }: Props) {
           <DialogTitle>{t("feel.editTitle", { name: feel.name })}</DialogTitle>
         </DialogHeader>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-[11px] font-medium text-muted-foreground">
-            {t("feel.editName")}
-          </span>
-          <Input
-            className="h-8"
-            value={draft.name}
-            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          />
-          {clash && (
-            <span className="text-[11px] text-destructive">
-              {t("feel.editNameClash", { name: draft.name.trim() })}
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex min-w-[220px] flex-1 flex-col gap-1">
+            <span className="text-[11px] font-medium text-muted-foreground">
+              {t("feel.editName")}
             </span>
-          )}
-        </label>
+            <Input
+              className="h-8"
+              value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            />
+            {clash && (
+              <span className="text-[11px] text-destructive">
+                {t("feel.editNameClash", { name: draft.name.trim() })}
+              </span>
+            )}
+          </label>
+          <label className="relative flex w-[240px] flex-none flex-col gap-1">
+            <span className="text-[11px] font-medium text-muted-foreground">
+              {t("feel.filter")}
+            </span>
+            <Search className="pointer-events-none absolute bottom-[9px] left-2.5 size-3.5 text-muted-foreground" />
+            <Input
+              className="h-8 pl-8"
+              value={filter}
+              placeholder={t("feel.filterPlaceholder")}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+          </label>
+        </div>
 
         <div className="-mx-1 max-h-[66vh] overflow-y-auto px-1">
           {controls.length > 0 && (
-            <Group title={t("feel.groupControls")}>
-              {controls.map((control) => (
-                <div key={control} className="mb-2.5 last:mb-0">
-                  <div className="mb-1.5 text-[11.5px] font-semibold text-foreground/85">
-                    {control}
-                  </div>
-                  <Rows
-                    entries={Object.entries(draft.controls[control] ?? {})}
-                    onChange={(k, v) => setTuning(control, k, v)}
-                  />
-                </div>
-              ))}
-            </Group>
+            <CollapsibleGroup
+              title={t("feel.groupControls")}
+              count={controls.length}
+              open={open.controls ?? true}
+              forceOpen={filtering}
+              onToggle={() => setOpen((o) => ({ ...o, controls: !(o.controls ?? true) }))}
+            >
+              {/* One control at a time. Five controls times six values is thirty rows, and
+                  stacked they were most of why this screen read as a wall. */}
+              {!filtering && controls.length > 1 && (
+                <Segmented
+                  size="sm"
+                  className="mb-3 flex-wrap"
+                  value={controls.includes(control) ? control : controls[0]}
+                  onChange={setControl}
+                  options={controls.map((c) => ({ value: c, label: c }))}
+                />
+              )}
+              {(filtering ? controls : [controls.includes(control) ? control : controls[0]]).map(
+                (c) => {
+                  const rows = match(Object.entries(draft.controls[c] ?? {}));
+                  if (!rows.length) return null;
+                  return (
+                    <div key={c} className="mb-3 last:mb-0">
+                      {filtering && (
+                        <div className="mb-1.5 text-[11.5px] font-semibold text-foreground/85">
+                          {c}
+                        </div>
+                      )}
+                      <Rows entries={rows} onChange={(k, v) => setTuning(c, k, v)} />
+                    </div>
+                  );
+                },
+              )}
+            </CollapsibleGroup>
           )}
 
-          {sections.map((section) => (
-            <Group key={section} title={t(SECTION_LABEL[section])}>
-              <Rows
-                entries={Object.entries(draft.ini[section] ?? {})}
-                onChange={(k, v) => setIni(section, k, v)}
-              />
-            </Group>
-          ))}
+          {sections.map((section) => {
+            const rows = match(Object.entries(draft.ini[section] ?? {}));
+            if (filtering && !rows.length) return null;
+            return (
+              <CollapsibleGroup
+                key={section}
+                title={t(SECTION_LABEL[section])}
+                count={Object.keys(draft.ini[section] ?? {}).length}
+                open={open[section] ?? OPEN_BY_DEFAULT.has(section)}
+                forceOpen={filtering}
+                onToggle={() =>
+                  setOpen((o) => ({
+                    ...o,
+                    [section]: !(o[section] ?? OPEN_BY_DEFAULT.has(section)),
+                  }))
+                }
+              >
+                <Rows entries={rows} onChange={(k, v) => setIni(section, k, v)} />
+              </CollapsibleGroup>
+            );
+          })}
+
+          {filtering && nothingMatches && (
+            <p className="px-1 py-6 text-center text-[12.5px] text-muted-foreground">
+              {t("feel.noMatches", { text: filter.trim() })}
+            </p>
+          )}
         </div>
 
         <DialogFooter>
@@ -293,13 +371,51 @@ export default function FeelEditor({ feel, taken, onClose, onSave }: Props) {
   );
 }
 
-function Group({ title, children }: { title: string; children: React.ReactNode }) {
+/**
+ * One named block of settings, collapsed until it's wanted.
+ *
+ * A profile carries about forty-six values plus every bound control. Open all at once they
+ * read as one undifferentiated wall, and the two groups a rider actually came for — how the
+ * controls feel and which aids are on — are buried in the middle of it. So those two open
+ * and the rest wait to be asked for.
+ */
+function CollapsibleGroup({
+  title,
+  count,
+  open,
+  forceOpen,
+  onToggle,
+  children,
+}: {
+  title: string;
+  count: number;
+  open: boolean;
+  /** A filter overrides the fold — a hidden match is a match the rider can't find. */
+  forceOpen: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  const shown = open || forceOpen;
   return (
-    <section className="mb-3.5 last:mb-0">
-      <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
-        {title}
-      </h3>
-      <div className="rounded-xl border border-white/[0.07] bg-card/40 p-3">{children}</div>
+    <section className="mb-2 last:mb-0">
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={forceOpen}
+        className="flex w-full cursor-default items-center gap-2 rounded-lg px-1 py-2 text-left transition-colors hover:bg-foreground/[0.04] disabled:hover:bg-transparent"
+      >
+        <ChevronRight
+          className={cn(
+            "size-3.5 flex-none text-muted-foreground transition-transform",
+            shown && "rotate-90",
+          )}
+        />
+        <span className="text-[12.5px] font-semibold">{title}</span>
+        <span className="text-[11px] tabular-nums text-faint">{count}</span>
+      </button>
+      {shown && (
+        <div className="rounded-xl border border-white/[0.07] bg-card/40 p-3.5">{children}</div>
+      )}
     </section>
   );
 }

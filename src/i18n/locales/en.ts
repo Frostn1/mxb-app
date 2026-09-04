@@ -1102,6 +1102,9 @@ export const en = {
   "feel.groupView": "Camera",
   "feel.groupExtView": "Chase camera",
   "feel.groupGfx": "Graphics quality",
+  "feel.filter": "Find a setting",
+  "feel.filterPlaceholder": "throttle, lean, camera…",
+  "feel.noMatches": "Nothing matches “{{text}}”.",
   "settings.profilesDesc":
     "Presets read your profiles from here — the path below is where the app is looking right now. It's the {{profiles}} folder inside your {{game}} folder, or your {{documents}} one if you moved your mods folder. Set it only if yours is somewhere else.",
   "settings.resetToDefault": "Reset to default",

@@ -1118,6 +1118,9 @@ export const es: Translation = {
   "feel.groupView": "Cámara",
   "feel.groupExtView": "Cámara exterior",
   "feel.groupGfx": "Calidad gráfica",
+  "feel.filter": "Buscar un ajuste",
+  "feel.filterPlaceholder": "gas, inclinación, cámara…",
+  "feel.noMatches": "Nada coincide con “{{text}}”.",
   "settings.profilesDesc":
     "Los presets leen tus perfiles de aquí — la ruta de abajo es donde está mirando la app ahora mismo. Es la carpeta {{profiles}} dentro de tu carpeta de {{game}}, o {{documents}} si moviste tu carpeta de mods. Defínela solo si la tuya está en otro sitio.",
   "settings.resetToDefault": "Restablecer",

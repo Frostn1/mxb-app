@@ -1125,6 +1125,9 @@ export const de: Translation = {
   "feel.groupView": "Kamera",
   "feel.groupExtView": "Verfolgerkamera",
   "feel.groupGfx": "Grafikqualität",
+  "feel.filter": "Einstellung finden",
+  "feel.filterPlaceholder": "Gas, Lean, Kamera…",
+  "feel.noMatches": "Nichts passt zu „{{text}}“.",
   "settings.profilesDesc":
     "Presets lesen deine Profile von hier — der Pfad unten ist der, in dem die App gerade nachsieht. Das ist der Ordner {{profiles}} in deinem {{game}}-Ordner, oder {{documents}}, wenn du deinen Mod-Ordner verschoben hast. Setze ihn nur, wenn deiner woanders liegt.",
   "settings.resetToDefault": "Auf Standard zurücksetzen",
