@@ -1,17 +1,18 @@
 /**
- * One question, asked of all three dashboards at once.
+ * One question, asked of every dashboard at once.
  *
- * Usage, diagnostics and paint sync are three views of the same deployment, and until this
- * page existed "who or what is `frost`?" had to be typed into three separate boxes on three
- * separate pages. It is the same string every time — a rider name, a GUID, a Steam id, a file
- * name, a digest — so it is asked once and answered in three groups.
+ * Usage, diagnostics, paint sync and plugins are views of the same deployment, and until this
+ * page existed "who or what is `frost`?" had to be typed into a separate box on each of them.
+ * It is the same string every time — a rider name, a GUID, a Steam id, a file name, a digest,
+ * a key someone was sent — so it is asked once and answered in groups.
  *
- * Nothing here is a new fact. The mod-file group runs `searchFiles` and the paint group runs
- * `searchPaints`, exactly as their own pages do, so a hit and the page it links to can never
- * disagree. Only the rider group needed its own query, and for a reason worth writing down:
- * the two existing rider searches each start from their own table — diagnostics from
- * `client_modules`, paints from `loadout_paints` — so neither can find an account that only
- * exists on the other side. This one starts from `accounts` and joins both.
+ * Nothing here is a new fact. The mod-file group runs `searchFiles`, the paint group runs
+ * `searchPaints` and the plugin groups run `searchKeys` and `searchLicenses`, exactly as
+ * their own pages do, so a hit and the page it links to can never disagree. Only the rider
+ * group needed its own query, and for a reason worth writing down: the two existing rider
+ * searches each start from their own table — diagnostics from `client_modules`, paints from
+ * `loadout_paints` — so neither can find an account that only exists on the other side. This
+ * one starts from `accounts` and joins both.
  */
 
 import {
@@ -23,10 +24,19 @@ import {
   href,
   likeTerm,
   shell,
+  stamp,
   type Ctx,
 } from "./adminui";
 import { searchFiles, type FileGroup } from "./diagnosticssearch";
 import { searchPaints, thumb, type PaintRow } from "./paintspage";
+import {
+  keyState,
+  licenseState,
+  searchKeys,
+  searchLicenses,
+  type KeyRow,
+  type LicenseAdminRow,
+} from "./plugins";
 import { adminAllowed } from "./usage";
 
 const TITLE = "Search";
@@ -113,7 +123,7 @@ export async function adminSearch(request: Request, url: URL, env: Env): Promise
  * reason. One row over the shown count is enough to know a group has more.
  */
 async function results(env: Env, q: string, c: Ctx): Promise<string> {
-  const [accounts, files, paints] = await Promise.all([
+  const [accounts, files, paints, keys, licenses] = await Promise.all([
     searchAccounts(env, q, SHOWN + 1),
     searchFiles(env, {
       q,
@@ -125,12 +135,14 @@ async function results(env: Env, q: string, c: Ctx): Promise<string> {
       page: 1,
     }),
     searchPaints(env, q, { sort: "riders", dir: "desc" }, 1),
+    searchKeys(env, { q, plugin: "", state: "any", page: 1 }),
+    searchLicenses(env, { q, plugin: "", state: "any", page: 1 }),
   ]);
 
-  const found = accounts.length + files.total + paints.total;
+  const found = accounts.length + files.total + paints.total + keys.total + licenses.total;
   if (!found) {
     return `<section class="panel"><p class="muted">Nothing matches
-      <code>${esc(q)}</code> — not a rider, not a mod file, not a paint.</p></section>
+      <code>${esc(q)}</code> — not a rider, not a mod file, not a paint, not a key.</p></section>
       ${tips()}`;
   }
 
@@ -158,6 +170,20 @@ async function results(env: Env, q: string, c: Ctx): Promise<string> {
       "See all →",
       href("/admin/paints/files", { q }, c.key),
       paints.rows.slice(0, SHOWN).map((p) => paintHit(p, c)),
+    ) +
+    group(
+      "Plugin keys",
+      countOf(keys.total),
+      "See all →",
+      href("/admin/plugins", { q }, c.key),
+      keys.rows.slice(0, SHOWN).map((k) => keyHit(k, c)),
+    ) +
+    group(
+      "Plugin licenses",
+      countOf(licenses.total),
+      "See all →",
+      href("/admin/plugins/licenses", { q }, c.key),
+      licenses.rows.slice(0, SHOWN).map((l) => licenseHit(l, c)),
     )
   );
 }
@@ -232,13 +258,54 @@ function paintHit(p: PaintRow, c: Ctx): string {
 </li>`;
 }
 
+/**
+ * A key, and what became of it.
+ *
+ * The reason this group is worth having: a code arrives pasted into a message — "this isn't
+ * working" — and the answer is one of spent, withdrawn, or never one of ours. That is a
+ * lookup by the code itself, which no other box on these pages accepts.
+ */
+function keyHit(k: KeyRow, c: Ctx): string {
+  const state = keyState(k);
+  const spent = k.redeemed_by
+    ? ` · <a href="${esc(href("/admin/diagnostics/rider", { id: k.redeemed_by }, c.key))}">${esc(
+        k.rider_name ?? k.redeemed_by,
+      )}</a> ${esc(ago((k.redeemed_at ?? 0) * 1000))}`
+    : "";
+  return `<li>
+  <div>
+    <div class="name"><code>${esc(k.code)}</code></div>
+    <div class="meta">${esc(k.plugin_id)} · ${k.months} month${k.months === 1 ? "" : "s"} ·
+      <span class="pill ${state === "revoked" ? "alert" : state === "redeemed" ? "" : "ok"}">${state}</span>${spent}${
+        k.note ? ` · ${esc(k.note)}` : ""
+      }</div>
+  </div>
+</li>`;
+}
+
+function licenseHit(l: LicenseAdminRow, c: Ctx): string {
+  const state = licenseState(l);
+  return `<li>
+  <div>
+    <div class="name">${esc(l.rider_name)}</div>
+    <div class="meta">${esc(l.plugin_id)} ·
+      <span class="pill ${state === "revoked" ? "alert" : state === "live" ? "ok" : ""}">${state}</span> ·
+      expires ${esc(stamp(l.expires_at * 1000))}</div>
+  </div>
+  <span class="to">
+    <a href="${esc(href("/admin/plugins/licenses", { q: l.account_id }, c.key))}">Plugins</a>
+  </span>
+</li>`;
+}
+
 /** What an empty box can be given, rather than an empty table. */
 function tips(): string {
   return `<section class="panel">
-  <h2>One box, three dashboards</h2>
+  <h2>One box, every dashboard</h2>
   <p class="tips">A rider name, a <code>GUID</code>, a Steam id or an account id finds the
-    person on both the diagnostics and the paint side. A file name, a signer, a company or
-    anything a build claims about itself finds a mod file. A <code>.pnt</code> name or a
-    digest finds a paint.</p>
+    person on the diagnostics and paint sides, and any plugin license they hold. A file name,
+    a signer, a company or anything a build claims about itself finds a mod file. A
+    <code>.pnt</code> name or a digest finds a paint. A <code>FRST-</code> code, or the note a
+    batch was minted under, finds a key.</p>
 </section>`;
 }

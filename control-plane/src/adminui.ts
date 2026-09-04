@@ -92,8 +92,8 @@ export function errorPage(title: string, status: number, message: string): Respo
 // The shell
 // ---------------------------------------------------------------------------
 
-/** The three dashboards. One tab each, on every page. */
-export type Section = "usage" | "diagnostics" | "paints";
+/** The dashboards. One tab each, on every page. */
+export type Section = "usage" | "diagnostics" | "paints" | "plugins";
 
 // Usage is `/admin` rather than `/admin/usage`: the front door and the first tab are the same
 // page, so the URL to bookmark is the one every link uses. `/admin/usage` still answers, for
@@ -102,6 +102,7 @@ const SECTIONS: readonly (readonly [Section, string, string])[] = [
   ["usage", "Usage", "/admin"],
   ["diagnostics", "Diagnostics", "/admin/diagnostics"],
   ["paints", "Paints", "/admin/paints"],
+  ["plugins", "Plugins", "/admin/plugins"],
 ];
 
 /** A view inside a section — the second row of the header. */
@@ -401,6 +402,12 @@ button.allow{border-color:var(--ok);color:var(--ok)}
 .facts dt{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
 .facts dd{margin:1px 0 0;overflow-wrap:anywhere}
 .named{margin:12px 0 0}
+/* A panel saying what the last button did, and the codes a mint just produced. The textarea
+   is the one control a browser lets someone select all of and copy without a line of script. */
+.said{border-color:var(--ok)}
+.minted textarea{width:100%;max-width:34ch;padding:8px;border-radius:6px;border:1px solid var(--line);
+  background:var(--bg);color:var(--ink);resize:vertical}
+
 .pages{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:12px;font-size:12px}
 .pages a,.pages span{padding:3px 9px;border-radius:6px;border:1px solid var(--line);color:var(--muted)}
 .pages a{color:var(--ink)}
