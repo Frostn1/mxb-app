@@ -7,6 +7,19 @@
   FrostMod plugin that reads the server name from the game, so you sync with the riders
   you are actually riding with instead of nobody.
 
+## 2026-09-03
+
+### Added
+- Presets has a Feel tab. Save your throttle, lean, rider aids, camera and graphics quality
+  under a name, and switch between them with one click — a soft Supercross setup and a
+  snappy outdoor one, without walking the Options screens again.
+- Feel presets share like look presets do. The code carries the settings only, so it never
+  touches the receiver's bindings, controller or screen mode.
+- Open a saved feel to see every setting inside it, grouped and named, and change any of
+  them without going back into the game.
+- Duplicate any preset, look or feel, so you can fork one you already race and change a
+  single thing.
+
 ## 2026-09-02 — v0.13.5
 
 ### Added
