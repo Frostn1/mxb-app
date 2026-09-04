@@ -270,15 +270,15 @@ impl IniDoc {
     /// GP Bikes' slot set is not MX Bikes' — no `goggles_paint`, no `boots`, no
     /// `protection`, since it bakes those into the rider model — so rather than ship a
     /// guessed list per title, the file is asked what it has.
-    fn sections(&self) -> Vec<String> {
+    pub(crate) fn sections(&self) -> Vec<String> {
         self.lines.iter().filter_map(|l| Self::header_name(l).map(str::to_string)).collect()
     }
 
-    fn has_section(&self, section: &str) -> bool {
+    pub(crate) fn has_section(&self, section: &str) -> bool {
         self.section_span(section).is_some()
     }
 
-    fn section_keys(&self, section: &str) -> Vec<String> {
+    pub(crate) fn section_keys(&self, section: &str) -> Vec<String> {
         let mut out = Vec::new();
         if let Some((h, end)) = self.section_span(section) {
             for line in &self.lines[h + 1..end] {
@@ -302,7 +302,7 @@ fn profile_ini_path(profiles_dir: &Path, profile: &str) -> PathBuf {
 /// the bytes are not always valid UTF-8 (`read_to_string` fails on them). Returns
 /// the text plus whether it was valid UTF-8, so a write can round-trip the
 /// original single-byte encoding instead of silently converting it.
-fn decode_ini(bytes: &[u8]) -> (String, bool) {
+pub(crate) fn decode_ini(bytes: &[u8]) -> (String, bool) {
     match std::str::from_utf8(bytes) {
         Ok(s) => (s.to_string(), true),
         // Latin-1 is a lossless byte<->char map we reverse in `encode_ini`.
@@ -313,7 +313,7 @@ fn decode_ini(bytes: &[u8]) -> (String, bool) {
 /// Re-encode INI text for writing, reversing [`decode_ini`] so a Latin-1 file is
 /// written back byte-for-byte rather than upgraded to UTF-8. Edited values are
 /// ASCII, so every char is <= U+00FF when the source was Latin-1.
-fn encode_ini(text: &str, was_utf8: bool) -> Vec<u8> {
+pub(crate) fn encode_ini(text: &str, was_utf8: bool) -> Vec<u8> {
     if was_utf8 {
         text.as_bytes().to_vec()
     } else {

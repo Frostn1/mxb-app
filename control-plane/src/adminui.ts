@@ -311,6 +311,8 @@ h1{font-size:19px;margin:16px 0 12px;letter-spacing:-.015em;overflow-wrap:anywhe
 h2{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
   margin:0 0 10px;display:flex;align-items:baseline;gap:8px}
 h2 .more{margin-left:auto;text-transform:none;letter-spacing:0;font-size:12px}
+/* A line under a heading saying what the panel counts, pulled up against it. */
+.hint{margin:-8px 0 12px}
 
 /* Chrome. Two rows: the three dashboards and the search box, then the section's own views.
    The first row is sticky, so the way out of a page is still there four hundred rows down. */

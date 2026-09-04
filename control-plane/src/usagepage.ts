@@ -59,7 +59,8 @@ function render(s: Stats, url: URL): string {
 </section>
 
 <div class="cols">
-  ${buckets("Version", s.versions)}
+  ${buckets("Version now", s.currentVersions, "what each install last reported — one vote each")}
+  ${buckets("Versions seen", s.versions, "ran it at any point; an install that updated is in both")}
   ${buckets("Platform", s.platforms)}
   ${buckets("Title", s.games)}
 </div>
@@ -140,10 +141,11 @@ function chart(s: Stats): string {
 </svg>`;
 }
 
-function buckets(title: string, rows: Bucket[]): string {
-  if (!rows.length) return `<section class="panel"><h2>${esc(title)}</h2><p class="muted">Nothing yet.</p></section>`;
+function buckets(title: string, rows: Bucket[], hint?: string): string {
+  const head = `<h2>${esc(title)}</h2>${hint ? `<p class="muted hint">${esc(hint)}</p>` : ""}`;
+  if (!rows.length) return `<section class="panel">${head}<p class="muted">Nothing yet.</p></section>`;
   const max = Math.max(...rows.map((r) => r.installs));
-  return `<section class="panel"><h2>${esc(title)}</h2><ul class="bars">${rows
+  return `<section class="panel">${head}<ul class="bars">${rows
     .map(
       (r) => `<li><span class="k">${esc(r.label)}</span>
         <span class="bar"><i style="width:${((r.installs / max) * 100).toFixed(1)}%"></i></span>

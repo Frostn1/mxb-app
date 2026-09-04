@@ -260,7 +260,56 @@ describe("reading it back", () => {
 
     expect(stats.active).toEqual({ day: 0, week: 0, month: 0 });
     expect(stats.events).toEqual([]);
+    expect(stats.currentVersions).toEqual([]);
     // Everything the app can report is listed as untouched, rather than the page being blank.
     expect(stats.unused).toContain("view.browse");
   });
+
+  it("counts an install once per version it ran, and once overall", async () => {
+    // Two installs on 0.13.5, one of which was on 0.12.6 earlier in the window. "Seen"
+    // counts it twice on purpose; "now" is what says how many are actually on each build.
+    const db = answering({
+      "GROUP BY version": [
+        { label: "0.13.5", installs: 2 },
+        { label: "0.12.6", installs: 1 },
+      ],
+      "PARTITION BY install_id": [
+        { label: "0.13.5", installs: 2 },
+      ],
+    });
+    const stats = await collectStats({ DB: db } as unknown as Env, 30);
+
+    expect(stats.versions).toHaveLength(2);
+    expect(stats.currentVersions).toEqual([{ label: "0.13.5", installs: 2 }]);
+  });
+
+  it("asks for the latest day per install, not every day it reported", async () => {
+    const db = answering({});
+    await collectStats({ DB: db } as unknown as Env, 30);
+    const sql = db.asked.find((q) => q.includes("PARTITION BY install_id"));
+
+    expect(sql).toContain("ORDER BY day DESC");
+    expect(sql).toContain("WHERE rn = 1");
+  });
 });
+
+/** A D1 stand-in for reads: every query gets the rows whose key its SQL contains. */
+function answering(rows: Record<string, unknown[]>) {
+  const asked: string[] = [];
+  return {
+    asked,
+    prepare(sql: string) {
+      asked.push(sql);
+      return {
+        bind() {
+          return {
+            async all() {
+              const key = Object.keys(rows).find((k) => sql.includes(k));
+              return { results: key ? rows[key] : [] };
+            },
+          };
+        },
+      };
+    },
+  };
+}
