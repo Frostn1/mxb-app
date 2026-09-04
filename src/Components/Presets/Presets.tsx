@@ -14,6 +14,7 @@ import {
   UploadCloud,
   User,
   Pencil,
+  CopyPlus,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -75,6 +76,7 @@ import {
   loadScans,
   missingSlots,
   loadoutSummary,
+  copyName,
   type Scans,
 } from "../../lib/presets";
 import { useGearPaints } from "../../lib/useGearPaints";
@@ -355,6 +357,25 @@ export default function Presets({
   const onShare = useCallback((preset: Preset) => {
     setSharePreset(preset);
   }, []);
+
+  /** Save a copy under a free name, so a rider can fork a preset and change one slot
+   *  without losing the one they already race. */
+  const onDuplicate = useCallback(
+    async (preset: Preset) => {
+      const name = copyName(
+        preset.name,
+        saved.map((p) => p.name),
+      );
+      try {
+        await presetsSave({ ...preset, name, bundle: null });
+        await refreshSaved();
+        toast.success(t("presets.duplicated", { name }));
+      } catch (e) {
+        toast.error(String(e).replace(/^Error:\s*/, ""));
+      }
+    },
+    [saved, refreshSaved, t],
+  );
 
   const onDelete = useCallback(
     async (preset: Preset) => {
@@ -720,6 +741,7 @@ export default function Presets({
                   onApply={() => void applyLoadout(p.loadout, p.name, p.name)}
                   onLoad={() => setLoadout(p.loadout)}
                   onEdit={() => onEdit(p)}
+                  onDuplicate={() => void onDuplicate(p)}
                   onShare={() => onShare(p)}
                   onDelete={() => void onDelete(p)}
                   onViewInRider={
@@ -789,6 +811,7 @@ function PresetCard({
   onApply,
   onLoad,
   onEdit,
+  onDuplicate,
   onShare,
   onDelete,
   onViewInRider,
@@ -800,6 +823,7 @@ function PresetCard({
   onApply: () => void;
   onLoad: () => void;
   onEdit: () => void;
+  onDuplicate: () => void;
   onShare: () => void;
   onDelete: () => void;
   onViewInRider?: () => void;
@@ -838,6 +862,9 @@ function PresetCard({
           )}
           <IconBtn title={t("presets.editNameOrOptions")} onClick={onEdit}>
             <Pencil className="size-3.5" />
+          </IconBtn>
+          <IconBtn title={t("presets.duplicate")} onClick={onDuplicate}>
+            <CopyPlus className="size-3.5" />
           </IconBtn>
           <IconBtn chip title={t("presets.share")} onClick={onShare}>
             <Share2 className="size-3.5" />

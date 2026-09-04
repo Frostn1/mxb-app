@@ -1062,8 +1062,6 @@ export const en = {
   "feel.saveCurrent": "Save current settings as",
   "feel.namePlaceholder": "Supercross",
   "feel.save": "Save",
-  "feel.saveHint":
-    "Reads your throttle, lean, aids, camera and graphics quality straight from the profile — everything you set on the game's Options screens. Bindings stay put: a feel never rebinds your controller.",
   "feel.savedTitle": "Saved feels",
   "feel.noneHint":
     "No feels saved yet. Set the game up how you like it for one discipline, then save it here — and again for the other.",
@@ -1090,6 +1088,22 @@ export const en = {
   "feel.importPlaceholder": "MXBF1-…",
   "feel.imported": "Imported {{name}}.",
   "feel.importFailed": "Couldn't import that code",
+  "presets.duplicate": "Duplicate",
+  "presets.duplicated": "Duplicated as {{name}}.",
+  "feel.edit": "See and change what's in it",
+  "feel.editTitle": "{{name}}",
+  "feel.editBody":
+    "Every setting this preset carries. Change any of them here — nothing reaches the game until you apply it.",
+  "feel.editName": "Name",
+  "feel.editNameClash": "Another feel is already called “{{name}}”.",
+  "feel.editSave": "Save changes",
+  "feel.updated": "Updated {{name}}.",
+  "feel.groupControls": "Control feel",
+  "feel.groupInput": "Input",
+  "feel.groupAids": "Rider aids",
+  "feel.groupView": "Camera",
+  "feel.groupExtView": "Chase camera",
+  "feel.groupGfx": "Graphics quality",
   "settings.profilesDesc":
     "Presets read your profiles from here — the path below is where the app is looking right now. It's the {{profiles}} folder inside your {{game}} folder, or your {{documents}} one if you moved your mods folder. Set it only if yours is somewhere else.",
   "settings.resetToDefault": "Reset to default",

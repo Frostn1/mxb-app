@@ -15,6 +15,8 @@ import {
   Copy,
   Check,
   Gauge,
+  Pencil,
+  CopyPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -45,6 +47,8 @@ import {
   feelImport,
   type Feel,
 } from "../../api/mods";
+import FeelEditor from "./FeelEditor";
+import { copyName } from "../../lib/presets";
 import { useT } from "../../i18n/context";
 import { copyText } from "../../lib/clipboard";
 
@@ -71,6 +75,7 @@ export default function FeelPresets({ profiles, profile, onProfile }: Props) {
   const [applying, setApplying] = useState<string | null>(null);
   const [share, setShare] = useState<{ name: string; code: string } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [editing, setEditing] = useState<Feel | null>(null);
 
   const load = useCallback(async () => {
     setSaved(await feelList());
@@ -144,6 +149,38 @@ export default function FeelPresets({ profiles, profile, onProfile }: Props) {
     [load, t],
   );
 
+  const duplicate = useCallback(
+    async (feel: Feel) => {
+      const name = copyName(
+        feel.name,
+        saved.map((f) => f.name),
+      );
+      await feelSave({ ...feel, name });
+      await load();
+      toast.success(t("presets.duplicated", { name }));
+    },
+    [saved, load, t],
+  );
+
+  /** Save an edited feel. A rename saves under the new name and drops the old one, so the
+   *  list never ends up holding both halves of one preset. */
+  const saveEdit = useCallback(
+    async (next: Feel, previousName: string) => {
+      try {
+        await feelSave(next);
+        if (next.name.toLowerCase() !== previousName.toLowerCase()) {
+          await feelDelete(previousName);
+        }
+        setEditing(null);
+        await load();
+        toast.success(t("feel.updated", { name: next.name }));
+      } catch (e) {
+        toast.error(t("feel.saveFailed"), { description: String(e) });
+      }
+    },
+    [load, t],
+  );
+
   const openShare = useCallback(
     async (feel: Feel) => {
       try {
@@ -200,10 +237,6 @@ export default function FeelPresets({ profiles, profile, onProfile }: Props) {
         </Button>
       </div>
 
-      <p className="-mt-1 px-1 text-[12px] leading-relaxed text-muted-foreground">
-        {t("feel.saveHint")}
-      </p>
-
       {/* Saved list */}
       <h2 className="text-[11px] font-semibold uppercase tracking-wide text-faint">
         {t("feel.savedTitle")}
@@ -232,6 +265,12 @@ export default function FeelPresets({ profiles, profile, onProfile }: Props) {
                   </div>
                 </div>
                 <div className="flex flex-none items-center gap-0.5">
+                  <IconBtn title={t("feel.edit")} onClick={() => setEditing(feel)}>
+                    <Pencil className="size-3.5" />
+                  </IconBtn>
+                  <IconBtn title={t("presets.duplicate")} onClick={() => void duplicate(feel)}>
+                    <CopyPlus className="size-3.5" />
+                  </IconBtn>
                   <IconBtn chip title={t("feel.share")} onClick={() => void openShare(feel)}>
                     <Share2 className="size-3.5" />
                   </IconBtn>
@@ -259,6 +298,12 @@ export default function FeelPresets({ profiles, profile, onProfile }: Props) {
         </div>
       )}
 
+      <FeelEditor
+        feel={editing}
+        taken={saved.map((f) => f.name)}
+        onClose={() => setEditing(null)}
+        onSave={saveEdit}
+      />
       <ShareDialog share={share} onClose={() => setShare(null)} />
       <ImportDialog
         open={importOpen}

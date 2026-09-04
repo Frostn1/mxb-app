@@ -1076,8 +1076,6 @@ export const it: Translation = {
   "feel.saveCurrent": "Salva le impostazioni attuali come",
   "feel.namePlaceholder": "Supercross",
   "feel.save": "Salva",
-  "feel.saveHint":
-    "Legge gas, inclinazione, aiuti, telecamera e qualità grafica direttamente dal profilo — tutto quello che imposti nelle Opzioni del gioco. I comandi restano dove sono: un feeling non rimappa mai il tuo controller.",
   "feel.savedTitle": "Feeling salvati",
   "feel.noneHint":
     "Nessun feeling salvato. Imposta il gioco come ti piace per una disciplina e salvalo qui — poi rifallo per l'altra.",
@@ -1104,6 +1102,22 @@ export const it: Translation = {
   "feel.importPlaceholder": "MXBF1-…",
   "feel.imported": "{{name}} importato.",
   "feel.importFailed": "Impossibile importare questo codice",
+  "presets.duplicate": "Duplica",
+  "presets.duplicated": "Duplicato come {{name}}.",
+  "feel.edit": "Vedi e modifica cosa contiene",
+  "feel.editTitle": "{{name}}",
+  "feel.editBody":
+    "Tutte le impostazioni contenute in questo preset. Modificale qui — nulla arriva al gioco finché non lo applichi.",
+  "feel.editName": "Nome",
+  "feel.editNameClash": "Esiste già un feeling chiamato “{{name}}”.",
+  "feel.editSave": "Salva modifiche",
+  "feel.updated": "{{name}} aggiornato.",
+  "feel.groupControls": "Feeling dei comandi",
+  "feel.groupInput": "Input",
+  "feel.groupAids": "Aiuti di guida",
+  "feel.groupView": "Telecamera",
+  "feel.groupExtView": "Telecamera esterna",
+  "feel.groupGfx": "Qualità grafica",
   "settings.profilesDesc":
     "I preset leggono i tuoi profili da qui — il percorso qui sotto è quello che l'app sta usando adesso. È la cartella {{profiles}} dentro la tua cartella {{game}}, oppure {{documents}} se hai spostato la cartella delle mod. Impostalo solo se il tuo è altrove.",
   "settings.resetToDefault": "Ripristina il predefinito",

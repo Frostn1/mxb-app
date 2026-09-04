@@ -1085,8 +1085,6 @@ export const de: Translation = {
   "feel.saveCurrent": "Aktuelle Einstellungen speichern als",
   "feel.namePlaceholder": "Supercross",
   "feel.save": "Speichern",
-  "feel.saveHint":
-    "Liest Gas, Lean, Hilfen, Kamera und Grafikqualität direkt aus dem Profil — alles, was du in den Spieloptionen einstellst. Die Tastenbelegung bleibt: ein Fahrgefühl belegt deinen Controller nie neu.",
   "feel.savedTitle": "Gespeicherte Fahrgefühle",
   "feel.noneHint":
     "Noch nichts gespeichert. Stell das Spiel für eine Disziplin so ein, wie du es magst, und speichere es hier — dann dasselbe für die andere.",
@@ -1113,6 +1111,22 @@ export const de: Translation = {
   "feel.importPlaceholder": "MXBF1-…",
   "feel.imported": "{{name}} importiert.",
   "feel.importFailed": "Dieser Code ließ sich nicht importieren",
+  "presets.duplicate": "Duplizieren",
+  "presets.duplicated": "Als {{name}} dupliziert.",
+  "feel.edit": "Inhalt ansehen und ändern",
+  "feel.editTitle": "{{name}}",
+  "feel.editBody":
+    "Alle Einstellungen, die dieses Preset enthält. Ändere sie hier — nichts erreicht das Spiel, bis du es anwendest.",
+  "feel.editName": "Name",
+  "feel.editNameClash": "Ein Fahrgefühl heißt bereits „{{name}}“.",
+  "feel.editSave": "Änderungen speichern",
+  "feel.updated": "{{name}} aktualisiert.",
+  "feel.groupControls": "Steuergefühl",
+  "feel.groupInput": "Eingabe",
+  "feel.groupAids": "Fahrhilfen",
+  "feel.groupView": "Kamera",
+  "feel.groupExtView": "Verfolgerkamera",
+  "feel.groupGfx": "Grafikqualität",
   "settings.profilesDesc":
     "Presets lesen deine Profile von hier — der Pfad unten ist der, in dem die App gerade nachsieht. Das ist der Ordner {{profiles}} in deinem {{game}}-Ordner, oder {{documents}}, wenn du deinen Mod-Ordner verschoben hast. Setze ihn nur, wenn deiner woanders liegt.",
   "settings.resetToDefault": "Auf Standard zurücksetzen",
