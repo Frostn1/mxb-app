@@ -20,6 +20,10 @@
 - Duplicate any preset, look or feel, so you can fork one you already race and change a
   single thing.
 
+### Changed
+- Generated tracks carry their ground as a mesh, the way a published track does, and load
+  through the same path the game uses for its own terrain.
+
 ## 2026-09-02 — v0.13.5
 
 ### Added
