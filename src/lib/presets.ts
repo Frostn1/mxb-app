@@ -393,6 +393,22 @@ export function missingSlots(bikeid: string, loadout: Loadout, scans: Scans): Sl
   return SLOTS.filter((s) => isMissing(s, bikeid, loadout, scans));
 }
 
+/**
+ * A free name for a copy of `base`, given the names already in use.
+ *
+ * `Supercross` → `Supercross (copy)` → `Supercross (copy 2)`. Duplicating a copy re-uses
+ * the original's stem rather than growing `(copy) (copy)`, which is what a rider gets when
+ * they duplicate the same preset twice to try two variations of it.
+ */
+export function copyName(base: string, taken: string[]): string {
+  const used = new Set(taken.map((n) => n.trim().toLowerCase()));
+  const stem = base.trim().replace(/\s*\(copy(?: \d+)?\)$/i, "");
+  for (let n = 1; ; n++) {
+    const name = n === 1 ? `${stem} (copy)` : `${stem} (copy ${n})`;
+    if (!used.has(name.toLowerCase())) return name;
+  }
+}
+
 export function loadoutSummary(loadout: Loadout): string {
   const parts: string[] = [];
   if (loadout.helmet && loadout.helmet !== "default") parts.push(loadout.helmet);

@@ -14,6 +14,7 @@ import {
   UploadCloud,
   User,
   Pencil,
+  CopyPlus,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -22,6 +23,7 @@ import { Button, CHIP } from "../ui/button";
 import HelpHint from "../ui/help-hint";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
+import { Segmented } from "../ui/segmented";
 import {
   Select,
   SelectValue,
@@ -64,6 +66,7 @@ import type {
   PresetApplyOutcome,
 } from "../../types";
 import { SlotField } from "./SlotField";
+import FeelPresets from "./FeelPresets";
 import { Trans } from "../../i18n";
 import { useT, type TFunc, type TKey } from "../../i18n/context";
 import {
@@ -73,6 +76,7 @@ import {
   loadScans,
   missingSlots,
   loadoutSummary,
+  copyName,
   type Scans,
 } from "../../lib/presets";
 import { useGearPaints } from "../../lib/useGearPaints";
@@ -164,6 +168,8 @@ export default function Presets({
 
   const [sharePreset, setSharePreset] = useState<Preset | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  /** Which half of a rider's setup this page is showing: the look, or the feel. */
+  const [mode, setMode] = useState<"look" | "feel">("look");
 
   // The paints the chosen helmet, boots and protection carry — packed inside the model or
   // shipped with the game — merged with the loose ones the library scan found.
@@ -352,6 +358,25 @@ export default function Presets({
     setSharePreset(preset);
   }, []);
 
+  /** Save a copy under a free name, so a rider can fork a preset and change one slot
+   *  without losing the one they already race. */
+  const onDuplicate = useCallback(
+    async (preset: Preset) => {
+      const name = copyName(
+        preset.name,
+        saved.map((p) => p.name),
+      );
+      try {
+        await presetsSave({ ...preset, name, bundle: null });
+        await refreshSaved();
+        toast.success(t("presets.duplicated", { name }));
+      } catch (e) {
+        toast.error(String(e).replace(/^Error:\s*/, ""));
+      }
+    },
+    [saved, refreshSaved, t],
+  );
+
   const onDelete = useCallback(
     async (preset: Preset) => {
       if (!window.confirm(`Delete preset “${preset.name}”?`)) return;
@@ -420,11 +445,22 @@ export default function Presets({
             description={t("presets.help")}
           />
         </div>
+        <Segmented
+          size="sm"
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: "look", label: t("presets.tabLook") },
+            { value: "feel", label: t("presets.tabFeel") },
+          ]}
+        />
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
-            <Download className="size-3.5" />
-            Import
-          </Button>
+          {mode === "look" && (
+            <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+              <Download className="size-3.5" />
+              Import
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={() => void load()}>
             <RefreshCw className="size-3.5" />
             Refresh
@@ -469,6 +505,8 @@ export default function Presets({
             </Button>
           </div>
         </div>
+      ) : mode === "feel" ? (
+        <FeelPresets profiles={profiles} profile={profile} onProfile={setProfile} />
       ) : (
         <div className="flex min-h-0 flex-1 gap-5 overflow-hidden px-7 pb-6">
           {/* Builder */}
@@ -703,6 +741,7 @@ export default function Presets({
                   onApply={() => void applyLoadout(p.loadout, p.name, p.name)}
                   onLoad={() => setLoadout(p.loadout)}
                   onEdit={() => onEdit(p)}
+                  onDuplicate={() => void onDuplicate(p)}
                   onShare={() => onShare(p)}
                   onDelete={() => void onDelete(p)}
                   onViewInRider={
@@ -772,6 +811,7 @@ function PresetCard({
   onApply,
   onLoad,
   onEdit,
+  onDuplicate,
   onShare,
   onDelete,
   onViewInRider,
@@ -783,6 +823,7 @@ function PresetCard({
   onApply: () => void;
   onLoad: () => void;
   onEdit: () => void;
+  onDuplicate: () => void;
   onShare: () => void;
   onDelete: () => void;
   onViewInRider?: () => void;
@@ -821,6 +862,9 @@ function PresetCard({
           )}
           <IconBtn title={t("presets.editNameOrOptions")} onClick={onEdit}>
             <Pencil className="size-3.5" />
+          </IconBtn>
+          <IconBtn title={t("presets.duplicate")} onClick={onDuplicate}>
+            <CopyPlus className="size-3.5" />
           </IconBtn>
           <IconBtn chip title={t("presets.share")} onClick={onShare}>
             <Share2 className="size-3.5" />
