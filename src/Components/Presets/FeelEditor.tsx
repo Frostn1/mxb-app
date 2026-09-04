@@ -36,8 +36,70 @@ const SECTION_LABEL: Record<string, TKey> = {
   gfx: "feel.groupGfx",
 };
 
+/**
+ * Settings the game stores as a fraction and *shows* as a whole number.
+ *
+ * The Options dialog reads the stored float and multiplies it by 100 for its slider; the
+ * writer divides by 100 on the way back out. So `0.500000` in the file is the `50` the
+ * rider set, and showing them the raw float would be showing them a number they have never
+ * seen. Each slider has its own ceiling — deadzone clamps at 50, others run past 100 — so
+ * these render as a plain number rather than a bounded slider that could clamp a value the
+ * game accepts.
+ *
+ * Read off the binary: the writer divides exactly these by 100.0 (`0x140353948` /
+ * `0x140353a1c`), and the input dialog multiplies the tuning values by the same constant.
+ */
+const SHOWN_X100 = new Set([
+  // profile.ini
+  "leanhelp_scale",
+  "corner_anticipation_scale",
+  "lean_heading_scale",
+  "tilt",
+  "tilt_vr",
+  "pitch",
+  "pitch_vr",
+  "distance",
+  "height",
+  "latoffset",
+  "combined_brakes_min",
+  "combined_brakes_max",
+  // controls.txt tuning
+  "gain",
+  "deadzone",
+  "linearity",
+  "smooth/press",
+  "smooth/release",
+  "forcefeedback/maxforce",
+  "forcefeedback/deadzone",
+  "forcefeedback/linearity",
+]);
+
+/**
+ * Keys the game's own screens call something else.
+ *
+ * `leanhelp_scale` is the big one: the Input tab labels that slider **Direct Lean**, and
+ * the dialog pushes its value straight into `ID_DIRECTLEAN`. A rider who turned direct lean
+ * down would never find it under "Lean help scale".
+ */
+const LABELS: Record<string, string> = {
+  leanhelp_scale: "Direct lean",
+  leanhelp: "Lean help",
+  sit_direct: "Direct sit",
+  corner_anticipation_scale: "Corner anticipation amount",
+  lean_heading_scale: "Lean heading amount",
+  "smooth/enable": "Smoothing",
+  "smooth/press": "Smoothing on press",
+  "smooth/release": "Smoothing on release",
+  deadzone: "Dead zone",
+  show_HUD: "Show HUD",
+  "3d_grass": "3D grass",
+  drawdistance: "Draw distance",
+};
+
 /** `leanhelp_scale` → `Lean help scale`, `smooth/press` → `Smooth press`. */
 function prettify(key: string): string {
+  const known = LABELS[key];
+  if (known) return known;
   const spaced = key
     .replace(/[/_]/g, " ")
     .replace(/\blean\s?help\b/i, "lean help")
@@ -51,9 +113,23 @@ function prettify(key: string): string {
 }
 
 /** A value the game stores as a flag, so it reads as a switch rather than a number box. */
-function isToggle(value: string): boolean {
+function isToggle(key: string, value: string): boolean {
+  if (SHOWN_X100.has(key)) return false;
   const v = value.trim();
   return v === "0" || v === "1";
+}
+
+/** The stored fraction as the number the game's own slider shows, or null if it isn't one. */
+function toShown(key: string, stored: string): number | null {
+  if (!SHOWN_X100.has(key)) return null;
+  const n = Number.parseFloat(stored);
+  return Number.isFinite(n) ? Math.round(n * 1000) / 10 : null;
+}
+
+/** Back the other way, in the six-decimal shape the game writes. */
+function fromShown(shown: string): string {
+  const n = Number.parseFloat(shown);
+  return Number.isFinite(n) ? (n / 100).toFixed(6) : shown;
 }
 
 interface Props {
@@ -201,25 +277,69 @@ function Rows({
 }) {
   return (
     <div className="grid grid-cols-1 gap-x-5 gap-y-1.5 sm:grid-cols-2">
-      {entries.map(([key, value]) => (
-        <div key={key} className="flex items-center justify-between gap-3">
-          <span className="min-w-0 truncate text-[12px] text-muted-foreground" title={key}>
-            {prettify(key)}
-          </span>
-          {isToggle(value) ? (
-            <Switch
-              checked={value.trim() === "1"}
-              onCheckedChange={(on) => onChange(key, on ? "1" : "0")}
-            />
-          ) : (
-            <Input
-              className="h-7 w-[110px] flex-none text-right font-mono text-[11.5px]"
-              value={value}
-              onChange={(e) => onChange(key, e.target.value)}
-            />
-          )}
-        </div>
-      ))}
+      {entries.map(([key, value]) => {
+        const shown = toShown(key, value);
+        return (
+          <div key={key} className="flex items-center justify-between gap-3">
+            <span
+              className="min-w-0 truncate text-[12px] text-muted-foreground"
+              title={`${key} = ${value}`}
+            >
+              {prettify(key)}
+            </span>
+            {isToggle(key, value) ? (
+              <Switch
+                checked={value.trim() === "1"}
+                onCheckedChange={(on) => onChange(key, on ? "1" : "0")}
+              />
+            ) : shown === null ? (
+              <Input
+                className="h-7 w-[110px] flex-none text-right font-mono text-[11.5px]"
+                value={value}
+                onChange={(e) => onChange(key, e.target.value)}
+              />
+            ) : (
+              <ScaledInput
+                shown={shown}
+                stored={value}
+                onChange={(v) => onChange(key, fromShown(v))}
+              />
+            )}
+          </div>
+        );
+      })}
     </div>
+  );
+}
+
+/**
+ * A field for a value the game shows as a whole number and stores as a fraction.
+ *
+ * It holds the literal text while focused. Converting on every keystroke and rendering the
+ * conversion back would eat a half-typed decimal — `12.` round-trips to `12` before the `5`
+ * lands, so `12.5` is unreachable. The draft is dropped on blur, which is where the value
+ * snaps back to whatever the stored number really is.
+ */
+function ScaledInput({
+  shown,
+  stored,
+  onChange,
+}: {
+  shown: number;
+  stored: string;
+  onChange: (shown: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <Input
+      className="h-7 w-[110px] flex-none text-right font-mono text-[11.5px]"
+      value={draft ?? String(shown)}
+      title={stored}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        onChange(e.target.value);
+      }}
+      onBlur={() => setDraft(null)}
+    />
   );
 }
