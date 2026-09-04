@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-03
+
+### Added
+- Presets has a Feel tab. Save your throttle, lean, rider aids, camera and graphics quality
+  under a name, and switch between them with one click — a soft Supercross setup and a
+  snappy outdoor one, without walking the Options screens again.
+- Feel presets share like look presets do. The code carries the settings only, so it never
+  touches the receiver's bindings, controller or screen mode.
+
 ## 2026-09-02 — v0.13.5
 
 ### Added

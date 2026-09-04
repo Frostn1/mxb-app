@@ -408,7 +408,9 @@ fn check_feel(feel: &Feel) -> anyhow::Result<()> {
         if !clean(section) || section.contains(['[', ']']) {
             anyhow::bail!("share code has a malformed section ('{section}')");
         }
-        if !wanted_ini_key(section, "") && !section.eq_ignore_ascii_case(GFX_SECTION) {
+        let known = FEEL_SECTIONS.iter().any(|s| s.eq_ignore_ascii_case(section))
+            || section.eq_ignore_ascii_case(GFX_SECTION);
+        if !known {
             anyhow::bail!("share code carries settings outside a feel preset ('{section}')");
         }
         for (key, value) in keys {

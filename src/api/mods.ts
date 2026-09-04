@@ -2610,6 +2610,77 @@ export function presetsImport(text: string): Promise<Preset> {
   return invoke<Preset>("presets_import", { text });
 }
 
+/**
+ * A riding-feel preset: the settings half of a profile, saved by name.
+ *
+ * The game keeps these in two files — `profile.ini` (aids, view, input options, graphics
+ * quality) and `controls.txt` (per-control gain, deadzone, linearity, smoothing). A preset
+ * carries the settings from both and never the bindings, so a shared one can't rebind
+ * anyone's controller.
+ */
+export type Feel = {
+  name: string;
+  /** `profile.ini` values: section -> key -> value. */
+  ini: Record<string, Record<string, string>>;
+  /** `controls.txt` tuning, keyed by the control's own name (not its index). */
+  controls: Record<string, Record<string, string>>;
+};
+
+/** What applying a feel preset actually changed. */
+export type FeelApplyReport = {
+  /** `profile.ini` keys written. */
+  settings: number;
+  /** `controls.txt` tuning values written. */
+  tuning: number;
+  /** Controls the preset tunes that this profile hasn't bound. */
+  missingControls: string[];
+};
+
+/** All saved feel presets. */
+export function feelList(): Promise<Feel[]> {
+  return invoke<Feel[]>("feel_list");
+}
+
+/** Read the settings a profile is running right now, ready to be named and saved. */
+export function feelCapture(profile: string): Promise<Feel> {
+  return invoke<Feel>("feel_capture", { profile });
+}
+
+/** Save (or overwrite by name) a feel preset. */
+export function feelSave(feel: Feel): Promise<void> {
+  return invoke<void>("feel_save", { feel });
+}
+
+/** Delete a feel preset by name. */
+export function feelDelete(name: string): Promise<void> {
+  return invoke<void>("feel_delete", { name });
+}
+
+/**
+ * Write a saved feel back into a profile.
+ *
+ * Rejects while the game is running: MX Bikes holds both files for the session and writes
+ * them out on exit, so an apply mid-session would be silently overwritten.
+ */
+export function feelApply(profile: string, name: string): Promise<FeelApplyReport> {
+  return invoke<FeelApplyReport>("feel_apply", { profile, name });
+}
+
+/** Export a saved feel as a portable one-line share code (`MXBF1-…`). */
+export function feelExport(name: string): Promise<string> {
+  return invoke<string>("feel_export", { name });
+}
+
+/** Decode a feel code *without* saving — preview before importing. */
+export function feelDecode(text: string): Promise<Feel> {
+  return invoke<Feel>("feel_decode", { text });
+}
+
+/** Import a feel code: decode + save + return the stored preset. */
+export function feelImport(text: string): Promise<Feel> {
+  return invoke<Feel>("feel_import", { text });
+}
+
 /** Every mod the Manage tab can act on, enabled and disabled alike. */
 export function modsStateScan(): Promise<ModEntry[]> {
   return invoke<ModEntry[]>("mods_state_scan");

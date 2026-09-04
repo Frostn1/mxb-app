@@ -22,6 +22,7 @@ import { Button, CHIP } from "../ui/button";
 import HelpHint from "../ui/help-hint";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
+import { Segmented } from "../ui/segmented";
 import {
   Select,
   SelectValue,
@@ -64,6 +65,7 @@ import type {
   PresetApplyOutcome,
 } from "../../types";
 import { SlotField } from "./SlotField";
+import FeelPresets from "./FeelPresets";
 import { Trans } from "../../i18n";
 import { useT, type TFunc, type TKey } from "../../i18n/context";
 import {
@@ -164,6 +166,8 @@ export default function Presets({
 
   const [sharePreset, setSharePreset] = useState<Preset | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  /** Which half of a rider's setup this page is showing: the look, or the feel. */
+  const [mode, setMode] = useState<"look" | "feel">("look");
 
   // The paints the chosen helmet, boots and protection carry — packed inside the model or
   // shipped with the game — merged with the loose ones the library scan found.
@@ -420,11 +424,22 @@ export default function Presets({
             description={t("presets.help")}
           />
         </div>
+        <Segmented
+          size="sm"
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: "look", label: t("presets.tabLook") },
+            { value: "feel", label: t("presets.tabFeel") },
+          ]}
+        />
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
-            <Download className="size-3.5" />
-            Import
-          </Button>
+          {mode === "look" && (
+            <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+              <Download className="size-3.5" />
+              Import
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={() => void load()}>
             <RefreshCw className="size-3.5" />
             Refresh
@@ -469,6 +484,8 @@ export default function Presets({
             </Button>
           </div>
         </div>
+      ) : mode === "feel" ? (
+        <FeelPresets profiles={profiles} profile={profile} onProfile={setProfile} />
       ) : (
         <div className="flex min-h-0 flex-1 gap-5 overflow-hidden px-7 pb-6">
           {/* Builder */}
