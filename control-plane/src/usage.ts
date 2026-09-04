@@ -270,7 +270,10 @@ export interface Stats {
   sessions: number;
   minutes: number;
   daily: DayRow[];
+  /** Installs that ran each version at any point in the window. Overlaps — see `currentVersions`. */
   versions: Bucket[];
+  /** The version each install last reported. One bucket each, so these sum to the window's actives. */
+  currentVersions: Bucket[];
   platforms: Bucket[];
   games: Bucket[];
   events: EventRow[];
@@ -300,7 +303,7 @@ export async function collectStats(env: Env, days: number, now = Date.now()): Pr
       .bind(...binds)
       .all<T>();
 
-  const [active, ever, fresh, totals, daily, versions, platforms, games, events] =
+  const [active, ever, fresh, totals, daily, versions, current, platforms, games, events] =
     await Promise.all([
       q<{ day: number; week: number; month: number }>(
         "SELECT" +
@@ -336,6 +339,16 @@ export async function collectStats(env: Env, days: number, now = Date.now()): Pr
           " WHERE day >= ? GROUP BY version ORDER BY installs DESC, label DESC",
         from,
       ),
+      // What everyone is on now. `versions` counts an install under every version it ran,
+      // so it overcounts; here each install contributes once, from its most recent day.
+      q<Bucket>(
+        "SELECT label, COUNT(*) AS installs FROM (" +
+          " SELECT version AS label," +
+          " ROW_NUMBER() OVER (PARTITION BY install_id ORDER BY day DESC) AS rn" +
+          " FROM usage_daily WHERE day >= ?" +
+          ") WHERE rn = 1 GROUP BY label ORDER BY installs DESC, label DESC",
+        from,
+      ),
       q<Bucket>(
         "SELECT os AS label, COUNT(DISTINCT install_id) AS installs FROM usage_daily" +
           " WHERE day >= ? GROUP BY os ORDER BY installs DESC",
@@ -367,6 +380,7 @@ export async function collectStats(env: Env, days: number, now = Date.now()): Pr
     minutes: totals.results?.[0]?.minutes ?? 0,
     daily: daily.results ?? [],
     versions: versions.results ?? [],
+    currentVersions: current.results ?? [],
     platforms: platforms.results ?? [],
     games: games.results ?? [],
     events: rows,

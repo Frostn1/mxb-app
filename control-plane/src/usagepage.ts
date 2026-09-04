@@ -67,7 +67,8 @@ function render(s: Stats, url: URL): string {
 </section>
 
 <div class="cols">
-  ${buckets("Version", s.versions)}
+  ${buckets("Version now", s.currentVersions, "what each install last reported — one vote each")}
+  ${buckets("Versions seen", s.versions, "ran it at any point; an install that updated is in both")}
   ${buckets("Platform", s.platforms)}
   ${buckets("Title", s.games)}
 </div>
@@ -139,10 +140,11 @@ function chart(s: Stats): string {
 </svg>`;
 }
 
-function buckets(title: string, rows: Bucket[]): string {
-  if (!rows.length) return `<section class="panel"><h2>${esc(title)}</h2><p class="muted">Nothing yet.</p></section>`;
+function buckets(title: string, rows: Bucket[], hint?: string): string {
+  const head = `<h2>${esc(title)}</h2>${hint ? `<p class="muted hint">${esc(hint)}</p>` : ""}`;
+  if (!rows.length) return `<section class="panel">${head}<p class="muted">Nothing yet.</p></section>`;
   const max = Math.max(...rows.map((r) => r.installs));
-  return `<section class="panel"><h2>${esc(title)}</h2><ul class="bars">${rows
+  return `<section class="panel">${head}<ul class="bars">${rows
     .map(
       (r) => `<li><span class="k">${esc(r.label)}</span>
         <span class="bar"><i style="width:${((r.installs / max) * 100).toFixed(1)}%"></i></span>
@@ -205,6 +207,7 @@ body{margin:0;padding:24px;background:var(--bg);color:var(--ink);
 header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:20px}
 h1{font-size:18px;margin:0;letter-spacing:-.01em}
 h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 12px}
+.hint{margin:-8px 0 12px}
 nav a{color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px;margin-left:4px}
 nav a.on{background:var(--accent);color:#fff}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
