@@ -1,12 +1,27 @@
 # Changelog
 
-## 2026-09-02
+## 2026-09-03
+
+### Added
+- Presets has a Feel tab. Save your throttle, lean, rider aids, camera and graphics quality
+  under a name, and switch between them with one click — a soft Supercross setup and a
+  snappy outdoor one, without walking the Options screens again.
+- Feel presets share like look presets do. The code carries the settings only, so it never
+  touches the receiver's bindings, controller or screen mode.
+- Open a saved feel to see every setting inside it, grouped and named, and change any of
+  them without going back into the game.
+- Duplicate any preset, look or feel, so you can fork one you already race and change a
+  single thing.
 
 ### Changed
 - Generated tracks carry their ground as a mesh, the way a published track does, and load
   through the same path the game uses for its own terrain.
 
-## 2026-09-01
+## 2026-09-02 — v0.13.5
+
+### Added
+- Your rider name now comes from the game itself, so the name other riders see is the name
+  your paints are matched on. Nothing to type, and nothing to set up.
 
 ### Fixed
 - The track creator's left column scrolls, so the install and export buttons stay reachable

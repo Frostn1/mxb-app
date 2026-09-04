@@ -12,42 +12,13 @@
 import { isState, isTrust, parseMatched, type Matched, type State, type Trust } from "./diagnostics";
 import { PRESENCE_TTL_MS } from "./validate";
 
-/** Rows per page. One screen of a dense table, and one D1 read. */
-export const PAGE_SIZE = 50;
-
-/** The most rows a count query will count exactly. Past it the page says "10,000+". */
-export const MAX_COUNT = 10_000;
+// Paging and the search-box escaping live in `adminui.ts` — the paint views page and filter
+// the same way, and two copies of "what is page 2" is how they stop agreeing. Re-exported
+// rather than moved out of sight: every caller here has always read them from this module.
+export { likeTerm, MAX_COUNT, PAGE_SIZE, parsePage, type Paged } from "./adminui";
+import { MAX_COUNT, PAGE_SIZE, likeTerm, parsePage, type Paged } from "./adminui";
 
 const DAY_MS = 86_400_000;
-
-export interface Paged<T> {
-  rows: T[];
-  /** Matching rows, counted up to `MAX_COUNT`. */
-  total: number;
-  /** 1-based. */
-  page: number;
-  size: number;
-}
-
-/** `?page=` as a 1-based page number. Anything unusable is page 1. */
-export function parsePage(value: string | null): number {
-  const asked = Number(value ?? "1");
-  if (!Number.isFinite(asked)) return 1;
-  return Math.min(10_000, Math.max(1, Math.trunc(asked)));
-}
-
-/**
- * A search box turned into a LIKE pattern.
- *
- * `%` and `_` are wildcards and `\` is the escape, so someone searching `nvidia_share` gets
- * the underscore they typed rather than any character. Empty stays empty, which every caller
- * reads as "no filter".
- */
-export function likeTerm(query: string): string {
-  const trimmed = query.trim().slice(0, 96);
-  if (!trimmed) return "";
-  return `%${trimmed.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-}
 
 /** A window in days, clamped to something a page can draw. */
 export function clampDays(value: string | null, fallback = 30): number {
@@ -122,6 +93,9 @@ export interface RiderRow {
   /** Distinct files ever recorded for this account, and how many are unaccounted for. */
   files: number;
   flagged: number;
+  /** The paint sync half of the same account: equipped slots, and when they last published. */
+  paints: number;
+  paintedAt: number;
 }
 
 interface RiderRecord {
@@ -210,7 +184,7 @@ export async function searchRiders(env: Env, query: RiderQuery): Promise<Paged<R
     .all<RiderRecord>();
 
   const rows = (found.results ?? []).map(riderRow);
-  await attachFileCounts(env, rows);
+  await Promise.all([attachFileCounts(env, rows), attachPaintCounts(env, rows)]);
   return { rows, total: total?.n ?? rows.length, page: query.page, size: PAGE_SIZE };
 }
 
@@ -236,6 +210,8 @@ function riderRow(r: RiderRecord): RiderRow {
     lastServerId: "",
     files: 0,
     flagged: 0,
+    paints: 0,
+    paintedAt: 0,
   };
 }
 
@@ -261,6 +237,32 @@ async function attachFileCounts(env: Env, rows: RiderRow[]): Promise<void> {
   for (const row of rows) {
     row.files = byId.get(row.accountId)?.files ?? 0;
     row.flagged = byId.get(row.accountId)?.flagged ?? 0;
+  }
+}
+
+/**
+ * What paint sync holds for the same page of riders.
+ *
+ * The other half of the account, read the same way and for the same reason as the file
+ * counts above: one grouped read over the rows on screen rather than a subquery per row.
+ * Nothing joined the two dashboards before this, and they have always keyed on the same id.
+ */
+async function attachPaintCounts(env: Env, rows: RiderRow[]): Promise<void> {
+  if (!rows.length) return;
+  const ids = rows.map((r) => r.accountId);
+  const counts = await env.DB.prepare(
+    "SELECT p.account_id, COUNT(*) AS paints," +
+      " (SELECT MAX(l.updated_at) FROM loadouts l WHERE l.account_id = p.account_id) AS painted_at" +
+      ` FROM loadout_paints p WHERE p.account_id IN (${ids.map(() => "?").join(",")})` +
+      " GROUP BY p.account_id",
+  )
+    .bind(...ids)
+    .all<{ account_id: string; paints: number; painted_at: number | null }>();
+
+  const byId = new Map((counts.results ?? []).map((c) => [c.account_id, c]));
+  for (const row of rows) {
+    row.paints = byId.get(row.accountId)?.paints ?? 0;
+    row.paintedAt = byId.get(row.accountId)?.painted_at ?? 0;
   }
 }
 
@@ -381,7 +383,7 @@ export async function riderDetail(
   if (!record) return null;
 
   const rider = riderRow(record);
-  await attachFileCounts(env, [rider]);
+  await Promise.all([attachFileCounts(env, [rider]), attachPaintCounts(env, [rider])]);
 
   const where = ["account_id = ?"];
   const args: unknown[] = [rider.accountId];

@@ -13,6 +13,7 @@ mod cookie_session;
 mod downloads;
 mod dropzone;
 mod edf;
+mod feel;
 mod fileshare;
 mod firstpaint;
 mod frostmod;
@@ -25,6 +26,7 @@ mod gearrepair;
 mod heightfield;
 mod hub_clearance;
 mod hub_session;
+mod identity;
 mod imgcache;
 mod install;
 mod ledger;
@@ -6512,35 +6514,9 @@ async fn set_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
     claim_guid(&app, &guid).await
 }
 
-/// Register `guid` against this account and remember it locally.
-///
-/// Shared by the manual field and the automatic claim off a server roster, so both go
-/// through the same validation and land in the same place.
+/// Register `guid` against this account and remember it locally. See [`identity`].
 async fn claim_guid(app: &tauri::AppHandle, guid: &str) -> Result<(), String> {
-    let cfg = config::load_or_detect(app).unwrap_or_default();
-    if cfg.cp_token.trim().is_empty() {
-        return Err("Enroll with an invite code first.".into());
-    }
-    let resp = reqwest::Client::new()
-        .put(format!("{}/v1/me/guid", paintsync::control_plane()))
-        .bearer_auth(&cfg.cp_token)
-        .json(&serde_json::json!({ "guid": guid.trim() }))
-        .send()
-        .await
-        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
-    if !resp.status().is_success() {
-        let detail = resp.text().await.unwrap_or_default();
-        return Err(serde_json::from_str::<serde_json::Value>(&detail)
-            .ok()
-            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
-            .unwrap_or(detail));
-    }
-
-    // Re-read rather than reusing the config above: the round trip is long enough for
-    // something else to have written it.
-    let mut cfg = config::load_or_detect(app).unwrap_or_default();
-    cfg.cp_guid = guid.trim().to_string();
-    config::save(app, &cfg).map_err(|e| format!("{e:#}"))
+    identity::claim_guid(app, guid).await
 }
 
 /// Publish this rider's paints so everyone else on the server can see them.
@@ -7008,6 +6984,17 @@ fn live_server_key() -> Option<String> {
 fn live_session() -> Option<voice::gamesession::GameSession> {
     static GAME: std::sync::OnceLock<voice::gamesession::Reader> = std::sync::OnceLock::new();
     GAME.get_or_init(voice::gamesession::Reader::default).read()
+}
+
+/// What the running game says this player is called, for [`identity::claim_from_game`].
+///
+/// `None` when there is no session to read — no FrostMod, or one that has not reached
+/// `EventInit` yet — which is not the same as a session that reports empty fields.
+pub fn seen_identity() -> Option<identity::SeenIdentity> {
+    live_session().map(|s| identity::SeenIdentity {
+        guid: s.guid,
+        rider_name: s.rider_name,
+    })
 }
 
 /// Who is on the grid, and who has turned up since we last looked.
@@ -9001,6 +8988,70 @@ fn presets_import(app: tauri::AppHandle, text: String) -> Result<presets::Preset
     presets::import_code(&presets_dir(&app)?, &text).map_err(|e| format!("{e:#}"))
 }
 
+// ---------------------------------------------------------------------------
+// Feel presets — the settings half of a profile.
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn feel_list(app: tauri::AppHandle) -> Result<Vec<feel::Feel>, String> {
+    Ok(feel::load_feels(&presets_dir(&app)?))
+}
+
+/// Read what the profile is set to right now, ready to be named and saved.
+#[tauri::command]
+fn feel_capture(app: tauri::AppHandle, profile: String) -> Result<feel::Feel, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    feel::capture(&cfg.profiles_dir(), &profile).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_save(app: tauri::AppHandle, feel: feel::Feel) -> Result<(), String> {
+    feel::save_feel(&presets_dir(&app)?, feel).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_delete(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    feel::delete_feel(&presets_dir(&app)?, &name).map_err(|e| format!("{e:#}"))
+}
+
+/// Write a saved feel back into a profile.
+///
+/// Refused while the game is up. MX Bikes reads both files once at startup and writes them
+/// back when the Options screen closes, so an apply mid-session is invisible until the game
+/// overwrites it — the rider would see nothing change and then lose the preset.
+#[tauri::command]
+fn feel_apply(
+    app: tauri::AppHandle,
+    profile: String,
+    name: String,
+) -> Result<feel::ApplyReport, String> {
+    if gameproc::is_game_running() {
+        return Err("Close MX Bikes first — it rewrites your settings when it exits.".into());
+    }
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let saved = feel::find_feel(&presets_dir(&app)?, &name)
+        .ok_or_else(|| format!("no feel preset named '{name}'"))?;
+    if saved.is_empty() {
+        return Err(format!("'{name}' has no settings saved in it."));
+    }
+    feel::apply(&cfg.profiles_dir(), &profile, &saved).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_export(app: tauri::AppHandle, name: String) -> Result<String, String> {
+    feel::export_code(&presets_dir(&app)?, &name).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_decode(text: String) -> Result<feel::Feel, String> {
+    feel::decode_code(&text).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_import(app: tauri::AppHandle, text: String) -> Result<feel::Feel, String> {
+    feel::import_code(&presets_dir(&app)?, &text).map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 fn preset_bundle_stats(
     app: tauri::AppHandle,
@@ -10015,6 +10066,14 @@ fn main() {
             presets_export,
             presets_decode,
             presets_import,
+            feel_list,
+            feel_capture,
+            feel_save,
+            feel_delete,
+            feel_apply,
+            feel_export,
+            feel_decode,
+            feel_import,
             preset_bundle_stats,
             preset_bundle_create,
             preset_bundle_import,

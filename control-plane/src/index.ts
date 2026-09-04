@@ -36,6 +36,13 @@ import {
   diagnosticsRules,
   diagnosticsRulesPage,
 } from "./diagnosticspage";
+import {
+  paintFiles,
+  paintOne,
+  paintRider,
+  paintRiders,
+  paintThumbnail,
+} from "./paintspage";
 import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
 import { generateTrack } from "./trackgen";
 import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
@@ -223,6 +230,16 @@ async function route(request: Request, env: Env): Promise<Response> {
     return diagnosticsRules(request, url, env);
   }
 
+  // Who has published a look, and what we are shipping to a grid. Behind `ADMIN_KEY` and
+  // above the account gate on exactly the same terms as the two pages before it: it names
+  // riders, their GUIDs and their Steam ids, and no player's token should be enough to read
+  // any of that about anybody else.
+  if (method === "GET" && path === "/admin/paints") return paintRiders(request, url, env);
+  if (method === "GET" && path === "/admin/paints/rider") return paintRider(request, url, env);
+  if (method === "GET" && path === "/admin/paints/files") return paintFiles(request, url, env);
+  if (method === "GET" && path === "/admin/paints/paint") return paintOne(request, url, env);
+  if (method === "GET" && path === "/admin/paints/thumb") return paintThumbnail(request, url, env);
+
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
 
@@ -230,6 +247,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   // voice room for the server you said you are on.
   if (method === "GET" && path === "/v1/me") return me(account, env);
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
+  if (method === "PUT" && path === "/v1/me/name") return putName(request, account, env);
   if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
   if (method === "PUT" && path === "/v1/diagnostics") return putReport(request, account, env);
   if (method === "GET" && path === "/v1/voice/ice") return iceServers();
@@ -685,6 +703,41 @@ async function me(account: Account, env: Env): Promise<Response> {
  * account trying to take one already held, which is the whole point — otherwise anyone could
  * assert someone else's identity and have their paints served under it.
  */
+/**
+ * Take the rider name the game itself uses.
+ *
+ * The name an account enrolled under was whatever the app could find on disk, which is the
+ * *profile folder*'s name — and a player who never renamed their profile is called
+ * `unnamedProfile`, along with two hundred others. That name is not what the server shows:
+ * `EventInit` hands the plugin `m_szRiderName`, the name every other rider on the grid sees,
+ * and that is what arrives here.
+ *
+ * Idempotent, because it is sent from a poll: the same name twice is a no-op rather than an
+ * error. Uniqueness is only enforced for invited accounts (see 0012), so a clash is a real
+ * answer for those and impossible for the rest.
+ */
+async function putName(request: Request, account: Account, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const { riderName } = body as { riderName?: unknown };
+  if (!isRiderName(riderName)) return json(400, { error: "that isn't a usable rider name" });
+
+  const name = (riderName as string).trim();
+  if (name === account.rider_name) return json(200, { ok: true, riderName: name });
+
+  try {
+    await env.DB.prepare("UPDATE accounts SET rider_name = ? WHERE id = ?")
+      .bind(name, account.id)
+      .run();
+  } catch (err) {
+    if (String(err).includes("UNIQUE")) {
+      return json(409, { error: "another account already uses that rider name" });
+    }
+    throw err;
+  }
+  return json(200, { ok: true, riderName: name });
+}
+
 async function putGuid(request: Request, account: Account, env: Env): Promise<Response> {
   const body = await readJson(request);
   if (!body) return json(400, { error: "expected a JSON body" });
