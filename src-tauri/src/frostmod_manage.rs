@@ -55,6 +55,10 @@ pub struct FrostmodStatus {
     /// What became of a hand-installed `frostmod.dlo` in the game's own `plugins` folder.
     /// [`PluginCopy::Absent`] is the normal case — see [`refresh_game_plugin`].
     pub game_plugin: PluginCopy,
+    /// What became of *our* `frostmod_session.dlo` in that same folder. Unlike the one
+    /// above this is a copy the app installs, and [`PluginCopy::Current`] is the state we
+    /// want everyone in — see [`ensure_session_plugin`].
+    pub session_plugin: PluginCopy,
 }
 
 /// The state of a FrostMod plugin copy sitting in the game's `plugins` folder.
@@ -295,6 +299,14 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
         .map(|game| refresh_game_plugin(&frostmod_dir(app), game))
         .unwrap_or_default();
 
+    // And put our own plugin there, for the same reason it rides on the status poll: it has
+    // to reach the player who never opens Settings, and it has to run when we are already
+    // on the latest tag — a plugin copy is not something an update touches.
+    let session_plugin = game_dir
+        .as_deref()
+        .map(|game| ensure_session_plugin(&frostmod_dir(app), game, version.as_deref()))
+        .unwrap_or_default();
+
     FrostmodStatus {
         installed,
         version,
@@ -305,6 +317,7 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
         missing_runtimes: crate::vcruntime::missing(game_dir.as_deref()),
         stray_msvcr90,
         game_plugin,
+        session_plugin,
     }
 }
 
@@ -369,6 +382,98 @@ fn refresh_game_plugin(dir: &Path, game_dir: &Path) -> PluginCopy {
             let _ = std::fs::remove_file(&staged);
             log::warn!("[frostmod] couldn't refresh {}: {e}", dlo.display());
             disable_game_plugin(&dlo)
+        }
+    }
+}
+
+/// `<game>\plugins\frostmod_session.dlo` — the copy we install, and the name that puts
+/// FrostMod in session-only mode. Must match `frostmod::session::kSessionPluginFileName`.
+fn session_plugin_path(game_dir: &Path) -> PathBuf {
+    game_dir.join("plugins").join("frostmod_session.dlo")
+}
+
+/// Put the session plugin in the game's plugins folder, and keep it current.
+///
+/// **Why the app installs a plugin at all.** The server name only ever arrives through
+/// `EventInit`, and the game only calls that on a plugin it loaded itself from
+/// `plugins\*.dlo`. FrostMod injected as a `.dll` is never asked. So for every player the
+/// app drives, the block's `serverName` stayed empty forever — and with it, paint sync had
+/// no roster to scope itself to and voice chat had no room to join. In the seven days to
+/// 2026-09-04, 172 riders had the injected `frostmod.dll` in their game and 2 had a
+/// plugin; presence was reported for a real server exactly once.
+///
+/// This is a byte-identical copy of the `frostmod.dll` we already manage — the same trick
+/// `frostmod.dlo` uses — under a name FrostMod recognises as "publish the session and do
+/// nothing else": no hooks, no overlay, no offsets, its own shared block. That is the whole
+/// reason it is safe to load beside the injected copy.
+///
+/// It is only ever installed from a build that knows the name. An older one under it would
+/// run as a full plugin next to the injected copy, and two FrostMods hooking the same
+/// functions is what hangs the game at a black screen — see
+/// [`crate::frostmod::SESSION_PLUGIN_MIN_VERSION`]. A copy already there from a build that
+/// has since been rolled back is parked rather than left loading.
+fn ensure_session_plugin(dir: &Path, game_dir: &Path, tag: Option<&str>) -> PluginCopy {
+    let dlo = session_plugin_path(game_dir);
+    let installed = std::fs::metadata(&dlo);
+
+    if !crate::frostmod::session_plugin_is_safe(tag) {
+        // Not a build we may install from. If one of ours is already there it came from a
+        // build that was, and this one would load it as a full plugin: park it.
+        return match installed {
+            Ok(_) => disable_game_plugin(&dlo),
+            Err(_) => PluginCopy::Absent,
+        };
+    }
+
+    let Ok(dll_meta) = std::fs::metadata(dir.join("frostmod.dll")) else {
+        // Nothing to copy from. An existing copy is left exactly where it is — it may be
+        // perfectly current, and we can't tell.
+        return if installed.is_ok() { PluginCopy::Unmanaged } else { PluginCopy::Absent };
+    };
+
+    // Same staleness test as the hand-installed copy: a copy we made is the same size and
+    // no older, and that pair converges without reading a quarter-megabyte twice a poll.
+    if let Ok(dlo_meta) = &installed {
+        let fresh = dlo_meta.len() == dll_meta.len()
+            && match (dlo_meta.modified(), dll_meta.modified()) {
+                (Ok(a), Ok(b)) => a >= b,
+                _ => true,
+            };
+        if fresh {
+            return PluginCopy::Current;
+        }
+    }
+
+    let Some(plugins) = dlo.parent() else {
+        return PluginCopy::Absent;
+    };
+    if std::fs::create_dir_all(plugins).is_err() {
+        return PluginCopy::Locked;
+    }
+
+    // Rename-then-replace, as the binaries do: the game maps this file while it runs, and
+    // Windows won't open a mapped image for writing — but it will let it be renamed away.
+    let staged = dlo.with_extension("dlo.staging");
+    if std::fs::copy(dir.join("frostmod.dll"), &staged).is_err() {
+        let _ = std::fs::remove_file(&staged);
+        return if installed.is_ok() { PluginCopy::Locked } else { PluginCopy::Absent };
+    }
+    match swap_in(&dlo, &staged) {
+        Ok(retired) => {
+            if let Some(retired) = retired {
+                let _ = std::fs::remove_file(retired);
+            }
+            log::info!(
+                "[frostmod] session plugin in place at {} — the game hands it the server \
+                 name, which nothing injected is ever told",
+                dlo.display()
+            );
+            if installed.is_ok() { PluginCopy::Refreshed } else { PluginCopy::Current }
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&staged);
+            log::warn!("[frostmod] couldn't install the session plugin at {}: {e}", dlo.display());
+            if installed.is_ok() { PluginCopy::Locked } else { PluginCopy::Absent }
         }
     }
 }
@@ -1470,6 +1575,78 @@ mod plugin_copy_tests {
         std::fs::create_dir_all(&managed).unwrap();
         std::fs::create_dir_all(game.join("plugins")).unwrap();
         (managed, game)
+    }
+
+    /// A tag new enough to install the session plugin from, and one that isn't.
+    const NEW: &str = "v0.17.0";
+    const OLD: &str = "v0.16.3";
+
+    #[test]
+    fn the_session_plugin_is_installed_and_then_left_alone() {
+        let (managed, game) = dirs("session-install");
+        std::fs::write(managed.join("frostmod.dll"), b"v0.17.0-bytes").unwrap();
+
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(NEW)), PluginCopy::Current);
+        assert_eq!(
+            std::fs::read(session_plugin_path(&game)).unwrap(),
+            b"v0.17.0-bytes",
+            "the plugin is a byte-identical copy of the dll we inject"
+        );
+        // Every status poll runs this. It must settle, not re-copy a quarter-megabyte.
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(NEW)), PluginCopy::Current);
+    }
+
+    /// The rule that keeps this from being the thing that hangs the game: a build that
+    /// doesn't know the name would run as a *full* plugin beside the injected copy.
+    #[test]
+    fn a_build_that_predates_session_mode_never_installs_one() {
+        let (managed, game) = dirs("session-old");
+        std::fs::write(managed.join("frostmod.dll"), b"v0.16.3-bytes").unwrap();
+
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(OLD)), PluginCopy::Absent);
+        assert!(!session_plugin_path(&game).exists());
+        // An unreadable tag is the same answer, for the same reason.
+        assert_eq!(ensure_session_plugin(&managed, &game, None), PluginCopy::Absent);
+        assert!(!session_plugin_path(&game).exists());
+    }
+
+    /// A downgrade leaves ours behind, and the older build would load it as a full plugin.
+    #[test]
+    fn a_rollback_parks_the_session_plugin_it_left_behind() {
+        let (managed, game) = dirs("session-rollback");
+        std::fs::write(managed.join("frostmod.dll"), b"v0.17.0-bytes").unwrap();
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(NEW)), PluginCopy::Current);
+
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(OLD)), PluginCopy::Disabled);
+        assert!(
+            !session_plugin_path(&game).exists(),
+            "a plugin an older build would misread must stop being a .dlo"
+        );
+    }
+
+    #[test]
+    fn a_new_frostmod_refreshes_the_session_plugin() {
+        let (managed, game) = dirs("session-stale");
+        std::fs::write(managed.join("frostmod.dll"), b"old-bytes").unwrap();
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(NEW)), PluginCopy::Current);
+
+        // A longer file with a newer mtime: an update landed.
+        std::fs::write(managed.join("frostmod.dll"), b"much-newer-bytes").unwrap();
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(NEW)), PluginCopy::Refreshed);
+        assert_eq!(std::fs::read(session_plugin_path(&game)).unwrap(), b"much-newer-bytes");
+    }
+
+    /// A hand-installed `frostmod.dlo` is a different file with a different job, and this
+    /// must not touch it — it is somebody's deliberate full plugin-mode install.
+    #[test]
+    fn the_hand_installed_plugin_is_left_where_it_is() {
+        let (managed, game) = dirs("session-beside");
+        std::fs::write(managed.join("frostmod.dll"), b"v0.17.0-bytes").unwrap();
+        std::fs::write(game_plugin_path(&game), b"hand-installed").unwrap();
+
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(NEW)), PluginCopy::Current);
+        assert_eq!(std::fs::read(game_plugin_path(&game)).unwrap(), b"hand-installed");
+        assert!(session_plugin_path(&game).exists());
     }
 
     /// The case that cost a player their game: a plugin installed by hand months ago, which
