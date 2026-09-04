@@ -25,12 +25,13 @@ import {
   PAGE_SIZE,
   pager,
   parsePage,
+  shell,
   stamp,
   wrap,
-  CSS,
   type Ctx,
   type Paged,
   type Params,
+  type SubTab,
 } from "./adminui";
 import { adminAllowed } from "./usage";
 import { imageTable, paintThumb, pickImage, type PntImage } from "./pntthumb";
@@ -64,7 +65,7 @@ interface RiderRow {
   reported_at: number | null;
 }
 
-interface PaintRow {
+export interface PaintRow {
   sha256: string;
   file_name: string;
   names: number;
@@ -233,7 +234,7 @@ export async function paintRiders(request: Request, url: URL, env: Env): Promise
   const order = parseOrder(url, RIDER_COLUMNS, "published");
   const page = parsePage(url.searchParams.get("page"));
   const [sums, found] = await Promise.all([totals(env), searchRiders(env, q, order, page)]);
-  return html(shell("Paint sync", "riders", ridersView(sums, found, q, order, c), c));
+  return html(view("Paint sync", "riders", ridersView(sums, found, q, order, c), c));
 }
 
 /** `GET /admin/paints/rider?id=…` — one rider's bikes, slot by slot. */
@@ -255,7 +256,7 @@ export async function paintRider(request: Request, url: URL, env: Env): Promise<
       kind: string;
       created_at: number;
     }>();
-  if (!account) return html(shell("Paint sync", "riders", empty("No such account."), c), 404);
+  if (!account) return html(view("Paint sync", "riders", empty("No such account."), c), 404);
 
   const [slots, published, presence] = await Promise.all([
     env.DB.prepare(
@@ -274,7 +275,7 @@ export async function paintRider(request: Request, url: URL, env: Env): Promise<
 
   const when = new Map((published.results ?? []).map((r) => [r.bike_id, r.updated_at]));
   return html(
-    shell(
+    view(
       account.rider_name,
       "riders",
       riderView(account, slots.results ?? [], when, presence, c),
@@ -293,7 +294,7 @@ export async function paintFiles(request: Request, url: URL, env: Env): Promise<
   const order = parseOrder(url, PAINT_COLUMNS, "riders");
   const page = parsePage(url.searchParams.get("page"));
   const [sums, found] = await Promise.all([totals(env), searchPaints(env, q, order, page)]);
-  return html(shell("Paints", "paints", paintsView(sums, found, q, order, c), c));
+  return html(view("Paints", "paints", paintsView(sums, found, q, order, c), c));
 }
 
 /** `GET /admin/paints/paint?sha=…` — one paint: its sheets, and who is wearing it. */
@@ -304,7 +305,7 @@ export async function paintOne(request: Request, url: URL, env: Env): Promise<Re
   const c = ctx(url);
   const sha = (url.searchParams.get("sha") ?? "").toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(sha)) {
-    return html(shell("Paints", "paints", empty("That is not a paint digest."), c), 400);
+    return html(view("Paints", "paints", empty("That is not a paint digest."), c), 400);
   }
 
   const [wearers, stored, sheets] = await Promise.all([
@@ -330,10 +331,10 @@ export async function paintOne(request: Request, url: URL, env: Env): Promise<Re
 
   const rows = wearers.results ?? [];
   if (rows.length === 0 && !stored) {
-    return html(shell("Paints", "paints", empty("Nothing here has that digest."), c), 404);
+    return html(view("Paints", "paints", empty("Nothing here has that digest."), c), 404);
   }
   const title = rows[0]?.file_name ?? sha.slice(0, 12);
-  return html(shell(title, "paints", oneView(sha, rows, stored?.size ?? null, sheets, c), c));
+  return html(view(title, "paints", oneView(sha, rows, stored?.size ?? null, sheets, c), c));
 }
 
 /** `GET /admin/paints/thumb?sha=…` — the picture itself. */
@@ -415,7 +416,7 @@ async function searchRiders(
 
 const PAINT_MATCH = " (? = '' OR p.file_name LIKE ? ESCAPE '\\' OR p.sha256 LIKE ? ESCAPE '\\')";
 
-async function searchPaints(
+export async function searchPaints(
   env: Env,
   q: string,
   order: Order,
@@ -490,35 +491,17 @@ async function sheetsOf(
 }
 
 // ---------------------------------------------------------------------------
-// Shell
+// Views
 // ---------------------------------------------------------------------------
 
-function shell(title: string, tab: Tab, body: string, c: Ctx): string {
-  const nav = (
-    [
-      ["riders", "Riders", ROOT],
-      ["paints", "Paints", `${ROOT}/files`],
-    ] as const
-  )
-    .map(
-      ([id, text, path]) =>
-        `<a class="${id === tab ? "on" : ""}" href="${esc(href(path, {}, c.key))}">${text}</a>`,
-    )
-    .join("");
+const TABS: SubTab[] = [
+  { id: "riders", text: "Riders", path: ROOT },
+  { id: "paints", text: "Paints", path: `${ROOT}/files` },
+];
 
-  return `<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>${esc(title)} — MXB App paint sync</title>
-<style>${CSS}</style>
-</head><body>
-<header><h1>${esc(title)}</h1><nav>${nav}
-  <a class="out" href="${esc(href("/admin/diagnostics", {}, c.key))}">Diagnostics</a>
-  <a class="out" href="${esc(href("/admin/plugins", {}, c.key))}">Plugins</a></nav></header>
-${body}
-</body></html>`;
+/** This section's views, in the chrome every admin page shares. */
+function view(title: string, tab: Tab, body: string, c: Ctx): string {
+  return shell({ title, section: "paints", tabs: TABS, current: tab, body, c });
 }
 
 function empty(message: string): string {
@@ -542,7 +525,7 @@ function tiles(s: Totals): string {
 }
 
 /** The picture, linking to the paint it belongs to. */
-function thumb(sha: string, name: string, c: Ctx, big = false): string {
+export function thumb(sha: string, name: string, c: Ctx, big = false): string {
   return `<a class="thumblink" href="${esc(href(`${ROOT}/paint`, { sha }, c.key))}"
   ><img class="thumb${big ? " big" : ""}" loading="lazy" decoding="async"
     src="${esc(href(`${ROOT}/thumb`, { sha }, c.key))}" alt="${esc(name)}"></a>`;

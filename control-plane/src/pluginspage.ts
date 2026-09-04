@@ -12,9 +12,9 @@
  *   * **Keys** — mint a batch, and see every code with what became of it.
  *   * **Licenses** — who can run what right now, and the button that ends it.
  *
- * Plain HTML behind `ADMIN_KEY`, no scripts, like the diagnostics and paints dashboards it
- * sits beside — and for the same reason: a page that pulls anything from someone else's host
- * stops working the day that host does.
+ * A section of the one admin dashboard, drawn in the shell every other page uses. Plain HTML
+ * behind `ADMIN_KEY` and no scripts, for the reason the others give: a page that pulls
+ * anything from someone else's host stops working the day that host does.
  */
 
 import {
@@ -43,17 +43,18 @@ import {
   ago,
   count,
   ctx,
-  CSS,
   errorPage,
   esc,
   href,
   pager,
   parsePage,
+  shell,
   stamp,
   wrap,
   type Ctx,
   type Paged,
   type Params,
+  type SubTab,
 } from "./adminui";
 
 const ROOT = "/admin/plugins";
@@ -230,34 +231,23 @@ export async function pluginsAction(request: Request, url: URL, env: Env): Promi
 
 type Tab = "keys" | "licenses";
 
-function shell(title: string, tab: Tab, body: string, c: Ctx): string {
-  const nav = (
-    [
-      ["keys", "Keys", ROOT],
-      ["licenses", "Licenses", `${ROOT}/licenses`],
-    ] as const
-  )
-    .map(
-      ([id, text, path]) =>
-        `<a class="${id === tab ? "on" : ""}" href="${esc(href(path, {}, c.key))}">${text}</a>`,
-    )
-    .join("");
+const TABS: SubTab[] = [
+  { id: "keys", text: "Keys", path: ROOT },
+  { id: "licenses", text: "Licenses", path: `${ROOT}/licenses` },
+];
 
-  return `<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>${esc(title)} — MXB App plugins</title>
-<style>${CSS}${EXTRA}</style>
-</head><body>
-<header><h1>${esc(title)}</h1><nav>${nav}
-  <a class="out" href="${esc(href("/admin/diagnostics", {}, c.key))}">Diagnostics</a>
-  <a class="out" href="${esc(href("/admin/paints", {}, c.key))}">Paints</a></nav></header>
-${body}
-<footer class="muted">A license is checked offline for up to seven days. Revoking one stops the
-  app running the plugin at its next check — within the week, not within the minute.</footer>
-</body></html>`;
+/** This section's views, in the chrome every admin page shares. */
+function view(title: string, tab: Tab, body: string, c: Ctx): string {
+  return shell({
+    title,
+    section: "plugins",
+    tabs: TABS,
+    current: tab,
+    body,
+    footer: `A license is checked offline for up to seven days. Revoking one stops the app
+      running the plugin at its next check — within the week, not within the minute.`,
+    c,
+  });
 }
 
 /** What the last button did, if it did something worth a sentence. */
@@ -320,7 +310,7 @@ ${batch.length ? mintedPanel(batch) : ""}
   ${pager(ROOT, params, found, c)}
 </section>`;
 
-  return shell("Plugin keys", "keys", body, c);
+  return view("Plugin keys", "keys", body, c);
 }
 
 /**
@@ -455,7 +445,7 @@ ${notice(said)}
   ${pager(path, params, found, c)}
 </section>`;
 
-  return shell("Plugin licenses", "licenses", body, c);
+  return view("Plugin licenses", "licenses", body, c);
 }
 
 function licenseTable(rows: LicenseAdminRow[], c: Ctx): string {
@@ -537,10 +527,3 @@ function select<T extends string>(
     .join("");
   return `<select name="${esc(name)}" aria-label="${esc(name)}">${opts}</select>`;
 }
-
-/** The two things this page needs that no other admin view does. */
-const EXTRA = `
-.said{border-color:var(--ok)}
-.minted textarea{width:100%;max-width:34ch;padding:8px;border-radius:6px;border:1px solid var(--line);
-  background:var(--bg);color:var(--ink);resize:vertical}
-`;

@@ -68,15 +68,17 @@ import {
   bytes,
   count,
   ctx,
-  CSS,
   errorPage,
   esc,
   href,
   pager,
+  ranges,
+  shell,
   stamp,
   wrap,
   type Ctx,
   type Params,
+  type SubTab,
 } from "./adminui";
 
 /** Windows the header offers. Anything else still works via `?days=`. */
@@ -122,7 +124,7 @@ export async function diagnosticsDashboard(
 
   const c = ctx(url);
   const days = clampDays(url.searchParams.get("days"));
-  const [view, sums, recent] = await Promise.all([
+  const [live, sums, recent] = await Promise.all([
     collectAdminView(env),
     totals(env, days),
     searchFiles(env, {
@@ -135,7 +137,7 @@ export async function diagnosticsDashboard(
       page: 1,
     }),
   ]);
-  return html(overview(view, sums, recent, days, c));
+  return html(overview(live, sums, recent, days, c));
 }
 
 export async function diagnosticsRiders(request: Request, url: URL, env: Env): Promise<Response> {
@@ -149,11 +151,11 @@ export async function diagnosticsRider(request: Request, url: URL, env: Env): Pr
   const denied = gate(request, url, env);
   if (denied) return denied;
   const who = (url.searchParams.get("id") ?? "").trim().slice(0, 128);
-  if (!who) return html(shell("Rider", "riders", empty("No rider asked for."), ctx(url)), 400);
+  if (!who) return html(view("Rider", "riders", empty("No rider asked for."), ctx(url)), 400);
   const query = parseSightingQuery(url);
   const detail = await riderDetail(env, who, query);
   if (!detail) {
-    return html(shell("Rider", "riders", empty("No account matches that."), ctx(url)), 404);
+    return html(view("Rider", "riders", empty("No account matches that."), ctx(url)), 404);
   }
   return html(riderView(detail, query, ctx(url)));
 }
@@ -170,10 +172,10 @@ export async function diagnosticsFile(request: Request, url: URL, env: Env): Pro
   if (denied) return denied;
   const name = (url.searchParams.get("name") ?? "").trim().slice(0, 96);
   const sha256 = (url.searchParams.get("sha256") ?? "").trim().slice(0, 64);
-  if (!name) return html(shell("File", "files", empty("No file asked for."), ctx(url)), 400);
+  if (!name) return html(view("File", "files", empty("No file asked for."), ctx(url)), 400);
   const detail = await fileDetail(env, name, sha256, parsePage(url.searchParams.get("page")));
   if (!detail) {
-    return html(shell("File", "files", empty("Nothing has been seen under that name."), ctx(url)), 404);
+    return html(view("File", "files", empty("Nothing has been seen under that name."), ctx(url)), 404);
   }
   return html(fileView(detail, ctx(url)));
 }
@@ -185,8 +187,7 @@ export async function diagnosticsRulesPage(
 ): Promise<Response> {
   const denied = gate(request, url, env);
   if (denied) return denied;
-  const view = await collectAdminView(env);
-  return html(rulesView(view, ctx(url)));
+  return html(rulesView(await collectAdminView(env), ctx(url)));
 }
 
 /**
@@ -234,41 +235,31 @@ function redirect(to: string): Response {
 }
 
 // ---------------------------------------------------------------------------
-// Shell
+// Views
 // ---------------------------------------------------------------------------
 
 type Tab = "overview" | "riders" | "files" | "rules";
 
-function shell(title: string, tab: Tab, body: string, c: Ctx): string {
-  const nav = (
-    [
-      ["overview", "Overview", ROOT],
-      ["riders", "Riders", `${ROOT}/riders`],
-      ["files", "Files", `${ROOT}/files`],
-      ["rules", "Rules", `${ROOT}/rules`],
-    ] as const
-  )
-    .map(
-      ([id, text, path]) =>
-        `<a class="${id === tab ? "on" : ""}" href="${esc(href(path, {}, c.key))}">${text}</a>`,
-    )
-    .join("");
+const TABS: SubTab[] = [
+  { id: "overview", text: "Overview", path: ROOT },
+  { id: "riders", text: "Riders", path: `${ROOT}/riders` },
+  { id: "files", text: "Files", path: `${ROOT}/files` },
+  { id: "rules", text: "Rules", path: `${ROOT}/rules` },
+];
 
-  return `<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>${esc(title)} — MXB App diagnostics</title>
-<style>${CSS}</style>
-</head><body>
-<header><h1>${esc(title)}</h1><nav>${nav}
-  <a class="out" href="${esc(href("/admin/paints", {}, c.key))}">Paints</a>
-  <a class="out" href="${esc(href("/admin/plugins", {}, c.key))}">Plugins</a></nav></header>
-${body}
-<footer class="muted">Only clients running the app report. A missing row means nobody told us,
-  not that nothing happened.</footer>
-</body></html>`;
+/** This section's views, in the chrome every admin page shares. */
+function view(title: string, tab: Tab, body: string, c: Ctx, aside = ""): string {
+  return shell({
+    title,
+    section: "diagnostics",
+    tabs: TABS,
+    current: tab,
+    aside,
+    body,
+    footer: `Only clients running the app report. A missing row means nobody told us,
+      not that nothing happened.`,
+    c,
+  });
 }
 
 function empty(message: string): string {
@@ -314,18 +305,7 @@ function overview(
   ${top.length ? fileTable(top, c, false) : `<p class="muted">Nothing unaccounted for in this window.</p>`}
 </section>`;
 
-  return shell("Diagnostics", "overview", withRanges(body, ROOT, { days }, days, c), c);
-}
-
-/** The day-window switcher, above whichever view uses one. */
-function withRanges(body: string, path: string, params: Params, days: number, c: Ctx): string {
-  const links = RANGES.map(
-    (d) =>
-      `<a class="${d === days ? "on" : ""}" href="${esc(
-        href(path, { ...params, days: d, page: undefined }, c.key),
-      )}">${d}d</a>`,
-  ).join("");
-  return `<div class="ranges">${links}</div>${body}`;
+  return view("Diagnostics", "overview", body, c, ranges(days, RANGES, ROOT, {}, c));
 }
 
 function tile(label: string, value: number, hint: string, tone = ""): string {
@@ -408,7 +388,7 @@ function ridersView(found: Paged<RiderRow>, query: RiderQuery, c: Ctx): string {
   ${riderTable(found.rows, c)}
   ${pager(`${ROOT}/riders`, params, found, c)}
 </section>`;
-  return shell("Riders", "riders", body, c);
+  return view("Riders", "riders", body, c);
 }
 
 function riderTable(rows: RiderRow[], c: Ctx): string {
@@ -517,7 +497,7 @@ function riderView(d: RiderDetail, query: SightingQuery, c: Ctx): string {
   ${pager(`${ROOT}/rider`, params, d.files, c)}
 </section>`;
 
-  return shell(r.riderName || "Rider", "riders", body, c);
+  return view(r.riderName || "Rider", "riders", body, c);
 }
 
 function fact(label: string, value: string, mono = false): string {
@@ -597,7 +577,7 @@ function filesView(found: Paged<FileGroup>, query: FileQuery, c: Ctx): string {
   ${fileTable(found.rows, c, true)}
   ${pager(`${ROOT}/files`, params, found, c)}
 </section>`;
-  return shell("Files", "files", body, c);
+  return view("Files", "files", body, c);
 }
 
 function fileTable(rows: FileGroup[], c: Ctx, actions: boolean): string {
@@ -663,7 +643,7 @@ function fileView(d: FileDetail, c: Ctx): string {
   ${holderTable(d.holders.rows, c)}
   ${pager(`${ROOT}/file`, params, d.holders, c)}
 </section>`;
-  return shell(d.name, "files", body, c);
+  return view(d.name, "files", body, c);
 }
 
 function variantTable(d: FileDetail, c: Ctx): string {
@@ -744,7 +724,7 @@ function rulesView(v: AdminView, c: Ctx): string {
   <p class="muted">A name or a hash, not both. A name matches as a substring; a hash is exact
     and survives a rename. A deny rule says the person running that file is cheating.</p>
 </section>`;
-  return shell("Rules", "rules", body, c);
+  return view("Rules", "rules", body, c);
 }
 
 function ruleTable(rows: ModuleRule[], c: Ctx): string {
