@@ -15,6 +15,7 @@ import { Loader2, Save } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
+import { Slider } from "../ui/controls";
 import {
   Dialog,
   DialogContent,
@@ -37,21 +38,61 @@ const SECTION_LABEL: Record<string, TKey> = {
 };
 
 /**
- * Settings the game stores as a fraction and *shows* as a whole number.
+ * How a stored value maps onto the slider the game draws, for the settings whose mapping
+ * was read off the binary's own clamp code.
  *
- * The Options dialog reads the stored float and multiplies it by 100 for its slider; the
- * writer divides by 100 on the way back out. So `0.500000` in the file is the `50` the
- * rider set, and showing them the raw float would be showing them a number they have never
- * seen. Each slider has its own ceiling — deadzone clamps at 50, others run past 100 — so
- * these render as a plain number rather than a bounded slider that could clamp a value the
- * game accepts.
+ * The Options screens are sliders; the files hold fractions. The dialog converts on the way
+ * in and the writer converts on the way out, and the conversion is *not* one rule — deadzone
+ * clamps at 50, smoothing runs 0-100, and linearity is a 0-200 slider that runs backwards
+ * with two different slopes either side of centre. Showing a rider `0.500000` where they set
+ * `50`, or worse converting one of these the wrong way, is why each entry here is derived
+ * rather than assumed.
  *
- * Read off the binary: the writer divides exactly these by 100.0 (`0x140353948` /
- * `0x140353a1c`), and the input dialog multiplies the tuning values by the same constant.
+ * Anything not in this table keeps its stored value verbatim. An honest raw number beats a
+ * confidently wrong converted one.
+ */
+interface Scale {
+  min: number;
+  max: number;
+  step: number;
+  /** Stored value → the number on the game's slider. */
+  shown: (v: number) => number;
+  /** Back again. */
+  stored: (n: number) => number;
+}
+
+const PERCENT = (max: number): Scale => ({
+  min: 0,
+  max,
+  step: 1,
+  shown: (v) => Math.round(v * 100),
+  stored: (n) => n / 100,
+});
+
+const SCALES: Record<string, Scale> = {
+  // controls.txt — clamps at 0x1400cbde0 (deadzone) and 0x1400cc043 (smoothing).
+  deadzone: PERCENT(50),
+  "smooth/press": PERCENT(100),
+  "smooth/release": PERCENT(100),
+  // Linearity, from the clamp at 0x1400cbeb2: stored -0.5..2.0 maps to a 0..200 slider,
+  // inverted, hinging at 100. Below centre the slope is -200, above it -50.
+  linearity: {
+    min: 0,
+    max: 200,
+    step: 1,
+    shown: (v) => Math.round(v < 0 ? 100 - 200 * v : 100 - 50 * v),
+    stored: (n) => (n > 100 ? (100 - n) / 200 : (100 - n) / 50),
+  },
+  // profile.ini — the Input tab's Direct Lean slider, read at 0x1400cd5ce.
+  leanhelp_scale: PERCENT(100),
+};
+
+/**
+ * Proven to be shown as `stored x 100` but with no range derived, so they stay a number box
+ * rather than a slider whose ceiling would be a guess — a slider that clamps a value the
+ * game accepts is worse than no slider.
  */
 const SHOWN_X100 = new Set([
-  // profile.ini
-  "leanhelp_scale",
   "corner_anticipation_scale",
   "lean_heading_scale",
   "tilt",
@@ -63,15 +104,6 @@ const SHOWN_X100 = new Set([
   "latoffset",
   "combined_brakes_min",
   "combined_brakes_max",
-  // controls.txt tuning
-  "gain",
-  "deadzone",
-  "linearity",
-  "smooth/press",
-  "smooth/release",
-  "forcefeedback/maxforce",
-  "forcefeedback/deadzone",
-  "forcefeedback/linearity",
 ]);
 
 /**
@@ -114,22 +146,26 @@ function prettify(key: string): string {
 
 /** A value the game stores as a flag, so it reads as a switch rather than a number box. */
 function isToggle(key: string, value: string): boolean {
-  if (SHOWN_X100.has(key)) return false;
+  if (SHOWN_X100.has(key) || SCALES[key]) return false;
   const v = value.trim();
   return v === "0" || v === "1";
 }
 
 /** The stored fraction as the number the game's own slider shows, or null if it isn't one. */
 function toShown(key: string, stored: string): number | null {
-  if (!SHOWN_X100.has(key)) return null;
+  const scale = SCALES[key];
   const n = Number.parseFloat(stored);
-  return Number.isFinite(n) ? Math.round(n * 1000) / 10 : null;
+  if (!Number.isFinite(n)) return null;
+  if (scale) return scale.shown(n);
+  return SHOWN_X100.has(key) ? Math.round(n * 1000) / 10 : null;
 }
 
 /** Back the other way, in the six-decimal shape the game writes. */
-function fromShown(shown: string): string {
+function fromShown(key: string, shown: string): string {
   const n = Number.parseFloat(shown);
-  return Number.isFinite(n) ? (n / 100).toFixed(6) : shown;
+  if (!Number.isFinite(n)) return shown;
+  const scale = SCALES[key];
+  return (scale ? scale.stored(n) : n / 100).toFixed(6);
 }
 
 interface Props {
@@ -292,6 +328,17 @@ function Rows({
                 checked={value.trim() === "1"}
                 onCheckedChange={(on) => onChange(key, on ? "1" : "0")}
               />
+            ) : SCALES[key] && shown !== null ? (
+              <span className="flex w-[170px] flex-none items-center gap-1.5" title={value}>
+                <Slider
+                  value={shown}
+                  min={SCALES[key].min}
+                  max={SCALES[key].max}
+                  step={SCALES[key].step}
+                  onChange={(n) => onChange(key, fromShown(key, String(n)))}
+                  format={(n) => String(n)}
+                />
+              </span>
             ) : shown === null ? (
               <Input
                 className="h-7 w-[110px] flex-none text-right font-mono text-[11.5px]"
@@ -302,7 +349,7 @@ function Rows({
               <ScaledInput
                 shown={shown}
                 stored={value}
-                onChange={(v) => onChange(key, fromShown(v))}
+                onChange={(v) => onChange(key, fromShown(key, v))}
               />
             )}
           </div>
