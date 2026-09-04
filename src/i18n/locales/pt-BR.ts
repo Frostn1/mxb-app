@@ -1108,8 +1108,6 @@ export const ptBR: Translation = {
   "presets.duplicated": "Duplicado como {{name}}.",
   "feel.edit": "Ver e alterar o que tem dentro",
   "feel.editTitle": "{{name}}",
-  "feel.editBody":
-    "Todos os ajustes que este preset carrega. Altere aqui — nada chega ao jogo até você aplicar.",
   "feel.editName": "Nome",
   "feel.editNameClash": "Já existe uma pilotagem chamada “{{name}}”.",
   "feel.editSave": "Salvar alterações",

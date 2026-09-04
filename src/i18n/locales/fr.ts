@@ -1113,8 +1113,6 @@ export const fr: Translation = {
   "presets.duplicated": "Dupliqué en {{name}}.",
   "feel.edit": "Voir et modifier son contenu",
   "feel.editTitle": "{{name}}",
-  "feel.editBody":
-    "Tous les réglages que ce préréglage contient. Modifie-les ici — rien n'atteint le jeu tant que tu ne l'appliques pas.",
   "feel.editName": "Nom",
   "feel.editNameClash": "Un feeling s'appelle déjà « {{name}} ».",
   "feel.editSave": "Enregistrer",

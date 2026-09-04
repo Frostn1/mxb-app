@@ -1092,8 +1092,6 @@ export const en = {
   "presets.duplicated": "Duplicated as {{name}}.",
   "feel.edit": "See and change what's in it",
   "feel.editTitle": "{{name}}",
-  "feel.editBody":
-    "Every setting this preset carries. Change any of them here — nothing reaches the game until you apply it.",
   "feel.editName": "Name",
   "feel.editNameClash": "Another feel is already called “{{name}}”.",
   "feel.editSave": "Save changes",

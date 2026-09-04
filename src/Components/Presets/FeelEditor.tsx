@@ -21,7 +21,6 @@ import {
   DialogHeader,
   DialogFooter,
   DialogTitle,
-  DialogDescription,
 } from "../ui/dialog";
 import { useT, type TKey } from "../../i18n/context";
 import type { Feel } from "../../api/mods";
@@ -112,7 +111,6 @@ export default function FeelEditor({ feel, taken, onClose, onSave }: Props) {
       <DialogContent className="max-w-[720px]">
         <DialogHeader>
           <DialogTitle>{t("feel.editTitle", { name: feel.name })}</DialogTitle>
-          <DialogDescription>{t("feel.editBody")}</DialogDescription>
         </DialogHeader>
 
         <label className="flex flex-col gap-1">

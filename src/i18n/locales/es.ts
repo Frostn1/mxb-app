@@ -1108,8 +1108,6 @@ export const es: Translation = {
   "presets.duplicated": "Duplicado como {{name}}.",
   "feel.edit": "Ver y cambiar lo que contiene",
   "feel.editTitle": "{{name}}",
-  "feel.editBody":
-    "Todos los ajustes que lleva este preset. Cámbialos aquí — nada llega al juego hasta que lo apliques.",
   "feel.editName": "Nombre",
   "feel.editNameClash": "Ya hay un ajuste llamado “{{name}}”.",
   "feel.editSave": "Guardar cambios",
