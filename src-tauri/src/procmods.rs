@@ -27,6 +27,7 @@
 //!     settled session still says it is there.
 
 use crate::fileinfo::FileFacts;
+use crate::gameproc::ExecRegion;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -108,6 +109,164 @@ fn is_zero_i64(value: &i64) -> bool {
     *value == 0
 }
 
+/// The most unaccounted regions one report carries.
+///
+/// Small on purpose. Every one of these costs a read into the game's address space and a row
+/// on the other end, and a machine with two dozen of them has already said everything it is
+/// going to say — the twenty-fifth adds nothing the first did not.
+const MAX_REGIONS: usize = 24;
+
+/// The most files from the game's `plugins` folder one report carries.
+const MAX_FILES: usize = 32;
+
+/// The most regions one pass will read the head of.
+///
+/// A separate bound from [`MAX_REGIONS`], which counts what is kept. A process whose graphics
+/// driver builds a great deal of code at runtime can have hundreds of unaccounted regions and
+/// keep none of them, and without this the pass would read every one of them to find that out.
+/// The ranking puts everything worth reading at the front, so a cut here costs the least
+/// interesting reads.
+const MAX_REGION_READS: usize = 200;
+
+/// How much of a region is read looking for a PE header. One page is enough for the DOS
+/// stub, the PE header and the section table; the rest is reached by RVA and only if the
+/// headers point somewhere.
+const REGION_HEAD: usize = 4096;
+
+/// Executable memory in the game that no loaded module accounts for.
+///
+/// This is the half of the report the module list cannot produce. A DLL is only *in* the
+/// module list because it asked the loader to put it there; code written straight into the
+/// process and started with a thread never asks, and so has no name, no path and no file to
+/// hash. What it cannot avoid is being executable memory the loader does not cover, and that
+/// is what one of these is.
+///
+/// It carries no verdict, in the same way [`Module`] carries none. `rwx`, `private`,
+/// `thread: true` and a PDB called `kaizo.pdb` are four observations; what they add up to is
+/// decided against rules the client does not hold.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Region {
+    /// `image`, `mapped` or `private` — what the kernel says backs it.
+    pub kind: &'static str,
+    pub size: u64,
+    /// The page protection as letters: `rx`, `rwx`, and so on.
+    pub protect: String,
+    /// A thread in the game was created to start inside this region.
+    #[serde(skip_serializing_if = "is_false")]
+    pub thread: bool,
+    /// A PE header was found at the base. Manually mapped code is still a PE image, because
+    /// that is what it was compiled as and what its own loader stub needs it to be.
+    #[serde(skip_serializing_if = "is_false")]
+    pub image: bool,
+    /// What the image calls itself in its export directory, when it has one.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    /// The file name — never the folder — of the PDB the linker recorded.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub pdb: String,
+    /// The linker timestamp, part of what makes the fingerprint a build and not a machine.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub timestamp: u32,
+    /// A fingerprint of the build, from [`crate::peident::PeIdent::fingerprint`], or of the
+    /// first bytes when this is not an image at all.
+    ///
+    /// Deliberately not a hash of the region: a mapped image has had relocations applied
+    /// against wherever it happened to land, so the same payload on two machines hashes
+    /// differently and the hash identifies nothing. Header fields do not move.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub sha256: String,
+}
+
+/// What the game's threads look like, as three numbers.
+///
+/// Counts rather than a list, because the individual threads of a game are not interesting
+/// and the two numbers that are do not need one. A thread whose start address is in no
+/// loaded module was created to run code that came from nowhere the loader knows; a thread
+/// carrying an armed hardware breakpoint is being used to hook a function without altering
+/// a byte of it, which is a thing ordinary game code never does.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Threads {
+    pub total: u32,
+    pub foreign: u32,
+    pub breakpoints: u32,
+}
+
+/// A file sitting in the game's `plugins` folder.
+///
+/// MX Bikes loads every `.dlo` in there at startup, which makes it a way into the process
+/// that needs no injector at all — and one the module list only describes while the game is
+/// up and the plugin has actually loaded. A plugin that crashed, that the game refused, or
+/// that is waiting for the next launch is invisible to everything else in this report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskFile {
+    pub name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub sha256: String,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub size: u64,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub mtime: i64,
+    /// Whether this file is also in the game's module list right now.
+    #[serde(skip_serializing_if = "is_false")]
+    pub loaded: bool,
+    #[serde(flatten)]
+    pub facts: FileFacts,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
+}
+
+/// Order the unaccounted regions by how much they are worth reading, and mark the ones a
+/// foreign thread starts in.
+///
+/// Ranking rather than filtering, because what makes a region worth carrying is only known
+/// after its head has been read, and reading is the expensive part. The order is the policy:
+///
+///   1. **A `MEM_IMAGE` region nothing covers** — something mapped as an image that the
+///      loader's own list does not mention, which is what unlinking a module looks like.
+///   2. **A region holding a foreign thread's start address** — code that came from nowhere
+///      and is running.
+///   3. **The largest of what is left**, because a payload is bigger than a stub.
+pub fn rank_regions(regions: &[ExecRegion], starts: &[u64]) -> Vec<ExecRegion> {
+    let mut ranked: Vec<ExecRegion> = regions
+        .iter()
+        .map(|region| {
+            let end = region.base.saturating_add(region.size);
+            let thread = starts.iter().any(|&s| s >= region.base && s < end);
+            ExecRegion { thread, ..*region }
+        })
+        .collect();
+    ranked.sort_by(|a, b| {
+        let rank = |r: &ExecRegion| {
+            (
+                u8::from(r.kind == crate::gameproc::MEM_IMAGE),
+                u8::from(r.thread),
+            )
+        };
+        rank(b).cmp(&rank(a)).then_with(|| b.size.cmp(&a.size)).then_with(|| a.base.cmp(&b.base))
+    });
+    ranked
+}
+
+/// Is a ranked region worth carrying once its head has been read?
+///
+/// Three shapes, and the reason for each is that ordinary processes are full of executable
+/// memory that no module covers — a graphics driver building shader code, a runtime with a
+/// JIT — and reporting all of it would bury the answer in noise it can never be separated
+/// from. An unlisted image, a PE header somewhere it should not be, and a thread running
+/// code from nowhere are not that.
+pub fn worth_reporting(region: &ExecRegion, image: bool) -> bool {
+    region.kind == crate::gameproc::MEM_IMAGE || image || region.thread
+}
+
 /// What one report says.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -123,6 +282,15 @@ struct Payload<'a> {
     #[serde(skip_serializing_if = "str::is_empty")]
     guid: &'a str,
     modules: &'a [Module],
+    /// Executable memory in the game that no loaded module accounts for.
+    ///
+    /// Sent even when empty, and so are the thread counts: an absent field means an app too
+    /// old to have looked, and an empty one means it looked and found nothing. Collapsing
+    /// those two into the same silence is the mistake `available` exists to avoid.
+    regions: &'a [Region],
+    threads: Threads,
+    /// What is sitting in the game's `plugins` folder.
+    files: &'a [DiskFile],
 }
 
 /// What the last report said, so an unchanged session stays quiet.
@@ -180,7 +348,19 @@ pub fn tick(app: &tauri::AppHandle) {
         crate::gameproc::GameModules::NotRunning => return,
     };
 
-    let digest = digest(available, &modules);
+    // Everything the module list cannot describe: executable memory nothing accounts for,
+    // what the threads are doing, and what is sitting in the folder the game loads plugins
+    // from. Only asked when the module list was readable — without it there is nothing to
+    // measure a region against, and every mapping in the process would read as unaccounted.
+    let (regions, threads) = if available { look_inside() } else { (Vec::new(), Threads::default()) };
+    let files = if available {
+        let loaded: Vec<String> = modules.iter().map(|m| m.name.clone()).collect();
+        plugin_files(&std::path::PathBuf::from(cfg.install_dir()).join("plugins"), &loaded)
+    } else {
+        Vec::new()
+    };
+
+    let digest = digest(available, &modules, &regions, threads, &files);
     let due = match last_sent().lock() {
         Ok(slot) => match slot.as_ref() {
             Some(prev) => prev.digest != digest || prev.at.elapsed() >= HEARTBEAT,
@@ -210,7 +390,9 @@ pub fn tick(app: &tauri::AppHandle) {
 
     let version = app.package_info().version.to_string();
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = send(&token, &version, available, &guid, &modules).await {
+        if let Err(e) =
+            send(&token, &version, available, &guid, &modules, &regions, threads, &files).await
+        {
             log::debug!("[diag] report not sent: {e:#}");
         }
     });
@@ -390,11 +572,147 @@ fn sha256_of(path: &Path) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// Every file in the game's `plugins` folder, whether the game has loaded it or not.
+///
+/// The folder is small — a handful of files on a machine that has any — so it is read whole
+/// rather than filtered to `.dlo`. A file in there that the game does not load is still
+/// something that arrived in the folder the game loads from, and saying so costs one row.
+pub fn plugin_files(dir: &Path, loaded: &[String]) -> Vec<DiskFile> {
+    plugin_files_with(dir, loaded, &read_file)
+}
+
+pub fn plugin_files_with(
+    dir: &Path,
+    loaded: &[String],
+    read: &dyn Fn(&Path) -> FileRead,
+) -> Vec<DiskFile> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut out = Vec::new();
+    for entry in entries.flatten().take(MAX_FILES * 4) {
+        if out.len() >= MAX_FILES {
+            break;
+        }
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = file_name_of(&norm(&path));
+        if name.is_empty() {
+            continue;
+        }
+        let file = read(&path);
+        out.push(DiskFile {
+            loaded: loaded.iter().any(|m| *m == name),
+            name,
+            sha256: file.sha256,
+            size: file.size,
+            mtime: file.mtime,
+            facts: file.facts,
+        });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out.dedup_by(|a, b| a.name == b.name);
+    out
+}
+
+/// Look inside the running game for what its module list cannot describe.
+///
+/// One open handle does all of it: where the loaded modules are, what executable memory none
+/// of them covers, what the threads are doing, and — for anything unaccounted that turns out
+/// to have a PE header — who that image says it is.
+///
+/// Off Windows [`crate::gameproc::GameProbe::open`] answers `None` and this is one branch
+/// long. It is still the same function on every platform, because the half that reads a
+/// header and ranks a region is ordinary code that deserves to be tested on the machine it
+/// is written on.
+fn look_inside() -> (Vec<Region>, Threads) {
+    let Some(probe) = crate::gameproc::GameProbe::open() else {
+        return (Vec::new(), Threads::default());
+    };
+    let ranges = probe.module_ranges();
+    // No ranges means the snapshot failed, not that the game has no modules. Without them
+    // every region in the process reads as unaccounted, which would be a report full of the
+    // game's own code.
+    if ranges.is_empty() {
+        return (Vec::new(), Threads::default());
+    }
+
+    let survey = probe.threads(&ranges);
+    let (regions, _) = probe.exec_regions(&ranges);
+    let mut out = Vec::new();
+    for region in rank_regions(&regions, &survey.starts).into_iter().take(MAX_REGION_READS) {
+        if out.len() >= MAX_REGIONS {
+            break;
+        }
+        let Some(head) = probe.read(region.base, REGION_HEAD) else { continue };
+        // Reads inside the head we already have are answered from it; the export name and
+        // the PDB record are usually further in and cost a read each.
+        let ident = crate::peident::identify(&|rva, len| {
+            let at = rva as usize;
+            if let Some(end) = at.checked_add(len).filter(|end| *end <= head.len()) {
+                return Some(head[at..end].to_vec());
+            }
+            probe.read(region.base.saturating_add(rva), len)
+        });
+        let is_image = ident.is_some();
+        if !worth_reporting(&region, is_image) {
+            continue;
+        }
+        let (name, pdb, timestamp, sha256) = match ident {
+            Some(ident) if ident.is_useful() => (
+                ident.name.clone(),
+                ident.pdb.clone(),
+                ident.timestamp,
+                ident.fingerprint(),
+            ),
+            // Either not an image, or an image whose headers gave up nothing — and the
+            // second must not fingerprint, because a fingerprint over empty fields is the
+            // same on every machine in the world and a rule naming it would name everyone.
+            // The head bytes are all there is to know it by, and headers carry no
+            // relocations, so they read the same wherever the region landed.
+            _ => (String::new(), String::new(), 0, sha256_of_bytes(&head)),
+        };
+        out.push(Region {
+            kind: crate::gameproc::region_kind(region.kind),
+            size: region.size,
+            protect: crate::gameproc::protection(region.protect),
+            thread: region.thread,
+            image: is_image,
+            name,
+            pdb,
+            timestamp,
+            sha256,
+        });
+    }
+    (
+        out,
+        Threads {
+            total: survey.total,
+            foreign: survey.foreign,
+            breakpoints: survey.breakpoints,
+        },
+    )
+}
+
+/// SHA-256 of a run of bytes, lowercase hex.
+fn sha256_of_bytes(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
 /// A stable fingerprint of one answer, so an unchanged session sends nothing.
 ///
 /// FNV-1a over the sorted list. Not a cryptographic question: the only thing asked of it is
 /// whether this pass differs from the last one.
-fn digest(available: bool, modules: &[Module]) -> u64 {
+fn digest(
+    available: bool,
+    modules: &[Module],
+    regions: &[Region],
+    threads: Threads,
+    files: &[DiskFile],
+) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut eat = |bytes: &[u8]| {
         for b in bytes {
@@ -413,20 +731,41 @@ fn digest(available: bool, modules: &[Module]) -> u64 {
             Origin::Other => b"o",
         });
     }
+    for region in regions {
+        eat(region.kind.as_bytes());
+        eat(region.name.as_bytes());
+        eat(region.pdb.as_bytes());
+        eat(region.sha256.as_bytes());
+        eat(region.protect.as_bytes());
+        eat(&region.size.to_le_bytes());
+    }
+    // The counts, not the identities: a thread that comes and goes is the same answer, and
+    // one that appears where there were none is a different one.
+    eat(&threads.foreign.to_le_bytes());
+    eat(&threads.breakpoints.to_le_bytes());
+    for file in files {
+        eat(file.name.as_bytes());
+        eat(file.sha256.as_bytes());
+        eat(if file.loaded { b"1" } else { b"0" });
+    }
     hash
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn send(
     token: &str,
     app_version: &str,
     available: bool,
     guid: &str,
     modules: &[Module],
+    regions: &[Region],
+    threads: Threads,
+    files: &[DiskFile],
 ) -> anyhow::Result<()> {
     let res = reqwest::Client::new()
         .put(format!("{}/v1/diagnostics", crate::paintsync::control_plane()))
         .bearer_auth(token)
-        .json(&Payload { app_version, available, guid, modules })
+        .json(&Payload { app_version, available, guid, modules, regions, threads, files })
         .timeout(Duration::from_secs(10))
         .send()
         .await?;
@@ -587,11 +926,47 @@ mod tests {
     fn the_digest_only_changes_when_the_answer_does() {
         let a = collected(&["C:\\x\\a.dll", "C:\\x\\b.dll"]);
         let b = collected(&["C:\\x\\b.dll", "C:\\x\\a.dll"]);
-        assert_eq!(digest(true, &a), digest(true, &b), "order must not matter");
+        let quiet = |mods: &[Module]| digest(true, mods, &[], Threads::default(), &[]);
+        assert_eq!(quiet(&a), quiet(&b), "order must not matter");
         let c = collected(&["C:\\x\\a.dll"]);
-        assert_ne!(digest(true, &a), digest(true, &c));
+        assert_ne!(quiet(&a), quiet(&c));
         // "Could not look" is a different answer from "looked and found nothing".
-        assert_ne!(digest(true, &[]), digest(false, &[]));
+        assert_ne!(
+            digest(true, &[], &[], Threads::default(), &[]),
+            digest(false, &[], &[], Threads::default(), &[])
+        );
+    }
+
+    fn a_region() -> Region {
+        Region {
+            kind: "private",
+            size: 0x20_000,
+            protect: "rwx".into(),
+            thread: true,
+            image: true,
+            name: "kaizo.dll".into(),
+            pdb: "kaizo.pdb".into(),
+            timestamp: 0x6512_3456,
+            sha256: "b".repeat(64),
+        }
+    }
+
+    #[test]
+    fn a_region_appearing_is_something_new_to_say() {
+        let mods = collected(&["C:\\x\\a.dll"]);
+        let clean = digest(true, &mods, &[], Threads::default(), &[]);
+        assert_ne!(clean, digest(true, &mods, &[a_region()], Threads::default(), &[]));
+    }
+
+    #[test]
+    fn a_thread_from_nowhere_is_something_new_to_say() {
+        let mods = collected(&["C:\\x\\a.dll"]);
+        let clean = digest(true, &mods, &[], Threads::default(), &[]);
+        let foreign = Threads { total: 40, foreign: 1, breakpoints: 0 };
+        assert_ne!(clean, digest(true, &mods, &[], foreign, &[]));
+        // The total moves every time the game spawns a worker. On its own it is not news.
+        let busier = Threads { total: 41, foreign: 0, breakpoints: 0 };
+        assert_eq!(clean, digest(true, &mods, &[], busier, &[]));
     }
 
     /// The wire shape the control plane parses. Its validator refuses anything else outright,
@@ -604,6 +979,9 @@ mod tests {
             available: true,
             guid: "FF0110000108D7CFE3",
             modules: &mods,
+            regions: &[],
+            threads: Threads::default(),
+            files: &[],
         })
         .unwrap();
         assert!(json.contains(r#""appVersion":"0.13.1""#), "{json}");
@@ -625,6 +1003,9 @@ mod tests {
             available: true,
             guid: "",
             modules: &mods,
+            regions: &[],
+            threads: Threads::default(),
+            files: &[],
         })
         .unwrap();
         assert!(!anon.contains("guid"), "{anon}");
@@ -636,5 +1017,137 @@ mod tests {
         // file names and nothing else, so anything odd is dropped here.
         assert!(collected(&["/memfd:wayland-shm (deleted)"]).is_empty());
         assert!(collected(&["C:\\x\\"]).is_empty());
+    }
+
+    use crate::gameproc::{ExecRegion, MEM_IMAGE, MEM_PRIVATE};
+
+    fn region_at(base: u64, size: u64, kind: u32) -> ExecRegion {
+        ExecRegion { base, size, protect: 0x40, kind, thread: false }
+    }
+
+    #[test]
+    fn a_region_is_marked_when_a_thread_from_nowhere_starts_inside_it() {
+        let regions = [region_at(0x10_000, 0x1000, MEM_PRIVATE)];
+        let ranked = rank_regions(&regions, &[0x10_800]);
+        assert!(ranked[0].thread);
+        let elsewhere = rank_regions(&regions, &[0x11_000]);
+        assert!(!elsewhere[0].thread, "one past the end is not inside");
+    }
+
+    #[test]
+    fn an_unlisted_image_is_read_before_anything_else() {
+        // A big private region and a small one mapped as an image the loader never listed.
+        // The second is the loud one however small it is: nothing legitimate is an image
+        // that the loader's own list does not mention.
+        let regions = [
+            region_at(0x10_000, 0x40_000, MEM_PRIVATE),
+            region_at(0x90_000, 0x1000, MEM_IMAGE),
+        ];
+        let ranked = rank_regions(&regions, &[]);
+        assert_eq!(ranked[0].base, 0x90_000);
+    }
+
+    #[test]
+    fn a_region_running_a_thread_is_read_before_a_bigger_quiet_one() {
+        let regions = [
+            region_at(0x10_000, 0x40_000, MEM_PRIVATE),
+            region_at(0x90_000, 0x1000, MEM_PRIVATE),
+        ];
+        let ranked = rank_regions(&regions, &[0x90_100]);
+        assert_eq!(ranked[0].base, 0x90_000);
+        assert_eq!(ranked[1].base, 0x10_000, "then the largest of what is left");
+    }
+
+    #[test]
+    fn ordinary_executable_memory_is_not_carried() {
+        // A graphics driver building code at runtime looks exactly like this, and there are
+        // several of them in any game process. Counted, never enumerated.
+        let jit = region_at(0x10_000, 0x8000, MEM_PRIVATE);
+        assert!(!worth_reporting(&jit, false));
+
+        assert!(worth_reporting(&jit, true), "a PE header there is not ordinary");
+        assert!(
+            worth_reporting(&region_at(0x10_000, 0x8000, MEM_IMAGE), false),
+            "an image the loader does not list is not ordinary"
+        );
+        assert!(
+            worth_reporting(&ExecRegion { thread: true, ..jit }, false),
+            "code from nowhere that is running is not ordinary"
+        );
+    }
+
+    #[test]
+    fn the_plugins_folder_says_which_of_its_files_the_game_has_loaded() {
+        let dir = std::env::temp_dir().join(format!("mxb-plugins-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("frostmod.dlo"), b"a").unwrap();
+        std::fs::write(dir.join("something.dlo"), b"bb").unwrap();
+
+        let files = plugin_files_with(&dir, &["frostmod.dlo".to_string()], &|path| FileRead {
+            sha256: format!("{:0>64}", path.to_string_lossy().len()),
+            size: 2,
+            mtime: 7,
+            facts: FileFacts::default(),
+        });
+
+        let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, vec!["frostmod.dlo", "something.dlo"]);
+        assert!(files[0].loaded);
+        // The one the game has not loaded is the whole reason this folder is read: it is in
+        // no module list, so nothing else in the report mentions it at all.
+        assert!(!files[1].loaded);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_folder_with_no_plugins_in_it_is_no_rows() {
+        assert!(plugin_files(&std::path::PathBuf::from("/nowhere/at/all"), &[]).is_empty());
+    }
+
+    #[test]
+    fn the_new_half_of_the_payload_is_the_shape_the_other_end_reads() {
+        let json = serde_json::to_string(&Payload {
+            app_version: "0.13.1",
+            available: true,
+            guid: "",
+            modules: &[],
+            regions: &[a_region()],
+            threads: Threads { total: 44, foreign: 1, breakpoints: 2 },
+            files: &[DiskFile {
+                name: "frostmod.dlo".into(),
+                sha256: "c".repeat(64),
+                size: 12,
+                mtime: 99,
+                loaded: true,
+                facts: FileFacts::default(),
+            }],
+        })
+        .unwrap();
+        assert!(json.contains(r#""kind":"private""#), "{json}");
+        assert!(json.contains(r#""protect":"rwx""#), "{json}");
+        assert!(json.contains(r#""pdb":"kaizo.pdb""#), "{json}");
+        assert!(json.contains(r#""thread":true"#), "{json}");
+        assert!(json.contains(r#""threads":{"total":44,"foreign":1,"breakpoints":2}"#), "{json}");
+        assert!(json.contains(r#""loaded":true"#), "{json}");
+    }
+
+    /// An app that looked and found nothing must not read like one too old to have looked.
+    #[test]
+    fn a_clean_machine_still_says_so() {
+        let json = serde_json::to_string(&Payload {
+            app_version: "0.13.1",
+            available: true,
+            guid: "",
+            modules: &[],
+            regions: &[],
+            threads: Threads::default(),
+            files: &[],
+        })
+        .unwrap();
+        assert!(json.contains(r#""regions":[]"#), "{json}");
+        assert!(json.contains(r#""threads":{"total":0,"foreign":0,"breakpoints":0}"#), "{json}");
+        assert!(json.contains(r#""files":[]"#), "{json}");
     }
 }

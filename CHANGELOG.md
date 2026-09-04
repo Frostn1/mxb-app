@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-03
+
+### Changed
+- Session diagnostics cover more than the list of files your game has loaded: code running
+  inside the game that came from no file, and what is sitting in the game's plugins folder.
+
 ## 2026-09-02 — v0.13.5
 
 ### Added

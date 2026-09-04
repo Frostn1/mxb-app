@@ -2,9 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   classify,
   isUnaccounted,
+  MAX_FILES,
   MAX_MODULES,
+  MAX_REGIONS,
+  parseFiles,
   parseModules,
+  parseRegions,
+  parseThreads,
   stateRank,
+  withThreads,
   type ModuleRule,
   type Origin,
   type ReportedModule,
@@ -19,6 +25,7 @@ const BLANK = {
   company: "",
   product: "",
   description: "",
+  detail: "",
 };
 
 function mod(
@@ -257,5 +264,142 @@ describe("state ordering", () => {
     expect(stateRank("ok")).toBeLessThan(stateRank("warn"));
     expect(stateRank("warn")).toBeLessThan(stateRank("alert"));
     expect(stateRank("nonsense")).toBe(0);
+  });
+});
+
+describe("reading executable memory nothing accounts for", () => {
+  const region = (extra: Record<string, unknown> = {}) => ({
+    kind: "private",
+    size: 208896,
+    protect: "rwx",
+    thread: true,
+    image: true,
+    name: "kaizo.dll",
+    pdb: "kaizo.pdb",
+    timestamp: 1695000000,
+    sha256: HASH,
+    ...extra,
+  });
+
+  it("stores a region as a row like any other", () => {
+    const rows = parseRegions([region()])!;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe("kaizo.dll");
+    expect(rows[0].origin).toBe("memory");
+    expect(rows[0].sha256).toBe(HASH);
+    expect(rows[0].size).toBe(208896);
+    // Never a file, so never a signature and never a modification time.
+    expect(rows[0].trust).toBe("unchecked");
+    expect(rows[0].mtime).toBe(0);
+  });
+
+  it("says what shape it was in", () => {
+    const rows = parseRegions([region()])!;
+    expect(rows[0].detail).toContain("rwx private image");
+    expect(rows[0].detail).toContain("a thread starts here");
+  });
+
+  it("falls back to the pdb, and then to a name of its own", () => {
+    expect(parseRegions([region({ name: "" })])![0].name).toBe("kaizo.pdb");
+    expect(parseRegions([region({ name: "", pdb: "" })])![0].name).toBe("unnamed.region");
+  });
+
+  it("keeps the pdb visible when it is not already the name", () => {
+    const rows = parseRegions([region({ name: "d3d11.dll", pdb: "kaizo.pdb" })])!;
+    expect(rows[0].name).toBe("d3d11.dll");
+    expect(rows[0].detail).toContain("kaizo.pdb");
+  });
+
+  it("drops a name that is not one rather than storing a path", () => {
+    const rows = parseRegions([region({ name: "c:\\users\\somebody\\kaizo.dll", pdb: "" })])!;
+    expect(rows[0].name).toBe("unnamed.region");
+  });
+
+  it("refuses a list that is not one", () => {
+    expect(parseRegions("no")).toBeNull();
+    expect(parseRegions([region({ kind: "made-up" })])).toBeNull();
+    expect(parseRegions([region({ sha256: "not a hash" })])).toBeNull();
+    expect(parseRegions(new Array(MAX_REGIONS + 1).fill(region()))).toBeNull();
+  });
+
+  it("takes an absent one as an app too old to have looked", () => {
+    expect(parseRegions([])).toEqual([]);
+  });
+
+  it("records the same region once", () => {
+    expect(parseRegions([region(), region()])).toHaveLength(1);
+  });
+
+  it("needs a rule to be accounted for, wherever it is", () => {
+    const rows = parseRegions([region()])!;
+    expect(isUnaccounted(rows[0])).toBe(true);
+    expect(classify(rows, []).state).toBe("warn");
+    const deny: ModuleRule = { id: 4, kind: "deny", pattern: "", sha256: HASH, label: "Kaizo" };
+    const verdict = classify(rows, [deny]);
+    expect(verdict.state).toBe("alert");
+    expect(verdict.matched[0].label).toBe("Kaizo");
+  });
+
+  it("is silenced by allowing the fingerprint, not by a release", () => {
+    const rows = parseRegions([region()])!;
+    const allow: ModuleRule = { id: 5, kind: "allow", pattern: "", sha256: HASH, label: "ReShade" };
+    expect(classify(rows, [allow]).state).toBe("ok");
+  });
+});
+
+describe("reading the game's plugins folder", () => {
+  const file = (extra: Record<string, unknown> = {}) => ({
+    name: "something.dlo",
+    sha256: HASH,
+    size: 4096,
+    mtime: 1700000000,
+    loaded: false,
+    ...extra,
+  });
+
+  it("keeps only what the game has not loaded", () => {
+    const rows = parseFiles([file(), file({ name: "frostmod.dlo", loaded: true })])!;
+    expect(rows.map((r) => r.name)).toEqual(["something.dlo"]);
+    expect(rows[0].origin).toBe("disk");
+    expect(rows[0].detail).toBe("in the plugins folder, not loaded");
+  });
+
+  it("refuses a list that is not one", () => {
+    expect(parseFiles("no")).toBeNull();
+    expect(parseFiles([file({ name: "c:/games/x.dlo" })])).toBeNull();
+    expect(parseFiles(new Array(MAX_FILES + 1).fill(file()))).toBeNull();
+  });
+
+  it("needs a rule to be accounted for", () => {
+    expect(classify(parseFiles([file()])!, []).state).toBe("warn");
+  });
+});
+
+describe("what the threads say", () => {
+  it("is zeroes when an app is too old to have counted", () => {
+    expect(parseThreads(undefined)).toEqual({ total: 0, foreign: 0, breakpoints: 0 });
+  });
+
+  it("reads the three numbers and bounds them", () => {
+    expect(parseThreads({ total: 44, foreign: 1, breakpoints: 2 })).toEqual({
+      total: 44,
+      foreign: 1,
+      breakpoints: 2,
+    });
+    expect(parseThreads({ total: -5, foreign: 1e9, breakpoints: "x" })).toEqual({
+      total: 0,
+      foreign: 0,
+      breakpoints: 0,
+    });
+  });
+
+  it("raises a clean report to warn, and never past it", () => {
+    expect(withThreads("ok", { total: 40, foreign: 0, breakpoints: 0 })).toBe("ok");
+    expect(withThreads("ok", { total: 40, foreign: 1, breakpoints: 0 })).toBe("warn");
+    expect(withThreads("ok", { total: 40, foreign: 0, breakpoints: 1 })).toBe("warn");
+    // A thread is never the thing that names somebody.
+    expect(withThreads("alert", { total: 40, foreign: 1, breakpoints: 0 })).toBe("alert");
+    // And it never turns "we could not look" into an answer.
+    expect(withThreads("unknown", { total: 0, foreign: 1, breakpoints: 0 })).toBe("unknown");
   });
 });

@@ -341,7 +341,8 @@ function liveTable(rows: LiveRow[], c: Ctx): string {
   if (!rows.length) return `<p class="muted">Nobody is reporting right now.</p>`;
   return wrap(`<table>
   <thead><tr><th>Rider</th><th>State</th><th>Server</th><th>Named</th>
-    <th class="num">Unaccounted</th><th class="num">Modules</th><th>App</th><th>Seen</th></tr></thead>
+    <th class="num">Unaccounted</th><th>In the process</th><th class="num">Modules</th>
+    <th>App</th><th>Seen</th></tr></thead>
   <tbody>${rows
     .map((r) => {
       const peak = worst(r);
@@ -352,12 +353,29 @@ function liveTable(rows: LiveRow[], c: Ctx): string {
       <td class="muted">${esc(r.serverId || "—")}</td>
       <td>${named(r.matched, c)}</td>
       <td class="num">${r.unknownCount}</td>
+      <td class="muted">${esc(inside(r))}</td>
       <td class="num">${r.moduleCount}</td>
       <td class="muted">${esc(r.appVersion || "—")}</td>
       <td class="muted">${esc(ago(r.updatedAt))}</td>
     </tr>`;
     })
     .join("")}</tbody></table>`);
+}
+
+/**
+ * What is in the game that the module list cannot describe.
+ *
+ * Three things, and they are different kinds of unaccounted: memory nothing loaded, a thread
+ * that started outside every module, and a thread carrying a hardware breakpoint. A dash
+ * means all three were zero — not that nothing was looked at, which is what the `unknown`
+ * state is for.
+ */
+function inside(r: { regionCount: number; foreignThreads: number; breakpoints: number }): string {
+  const parts: string[] = [];
+  if (r.regionCount) parts.push(`${r.regionCount} in memory`);
+  if (r.foreignThreads) parts.push(`${r.foreignThreads} thread${r.foreignThreads === 1 ? "" : "s"}`);
+  if (r.breakpoints) parts.push(`${r.breakpoints} breakpoint${r.breakpoints === 1 ? "" : "s"}`);
+  return parts.length ? parts.join(" · ") : "—";
 }
 
 function named(matched: Matched[], c: Ctx): string {
@@ -484,6 +502,7 @@ function riderView(d: RiderDetail, query: SightingQuery, c: Ctx): string {
     ${fact("Last report", r.updatedAt ? `${ago(r.updatedAt)} · ${stamp(r.updatedAt)}` : "never")}
     ${fact("App", r.appVersion || "—")}
     ${fact("Modules", `${r.moduleCount} loaded, ${r.unknownCount} unaccounted`)}
+    ${fact("In the process", inside(r))}
     ${fact("Rules version", r.rulesVersion ? String(r.rulesVersion) : "—")}
     ${fact("Server now", r.serverId || "—")}
     ${fact("Files on record", `${r.files.toLocaleString("en-GB")}, ${r.flagged.toLocaleString("en-GB")} flagged`)}
@@ -538,7 +557,7 @@ function sightingTable(rows: Sighting[], c: Ctx): string {
         <div><code class="muted">${esc(r.sha256 ? r.sha256.slice(0, 16) : "not read")}</code></div></td>
       <td class="muted">${esc(r.origin)}</td>
       <td>${sig(r.trust, r.publisher)}</td>
-      <td class="muted">${esc(claimText(r.description, r.product, r.company) || "—")}</td>
+      <td class="muted">${esc(r.detail || claimText(r.description, r.product, r.company) || "—")}</td>
       <td class="num muted">${esc(bytes(r.size))}</td>
       <td class="muted">${esc(r.mtime ? ago(r.mtime * 1000) : "—")}</td>
       <td class="muted">${esc(ago(r.firstAt))}</td>
