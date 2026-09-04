@@ -1,21 +1,29 @@
 /**
  * The usage dashboard, rendered on the server.
  *
- * Plain HTML with its CSS inline and its one chart drawn as SVG. No scripts and no CDN,
- * because a page behind an admin key that pulls a charting library from someone else's host
- * is a page that stops working the day that host does — and this is the only view of the
- * numbers there is.
+ * Plain HTML with its one chart drawn as SVG. No scripts and no CDN, because a page behind an
+ * admin key that pulls a charting library from someone else's host is a page that stops
+ * working the day that host does — and this is the only view of the numbers there is.
+ *
+ * The chrome, the palette and the formatters come from `adminui.ts`. This page used to carry
+ * its own copy of all three, which is how it ended up a size and a shade away from the other
+ * two dashboards it is a tab of.
  */
 
+import { ctx, errorPage, esc, ranges, shell, wrap } from "./adminui";
 import { adminAllowed, collectStats, windowDays, type Bucket, type EventRow, type Stats } from "./usage";
 
 /** Windows the header offers. Anything else still works via `?days=`. */
 const RANGES = [7, 30, 90, 365];
 
+const TITLE = "MXB App usage";
+
 export async function usageDashboard(request: Request, url: URL, env: Env): Promise<Response> {
   const allowed = adminAllowed(request, url, env);
-  if (allowed === "unset") return page(503, "No admin key is configured on this deployment.");
-  if (allowed === "denied") return page(401, "Unauthorized.");
+  if (allowed === "unset") {
+    return errorPage(TITLE, 503, "No admin key is configured on this deployment.");
+  }
+  if (allowed === "denied") return errorPage(TITLE, 401, "Unauthorized.");
 
   const days = windowDays(url);
   const stats = await collectStats(env, days);
@@ -30,28 +38,12 @@ export async function usageDashboard(request: Request, url: URL, env: Env): Prom
 }
 
 function render(s: Stats, url: URL): string {
-  const key = url.searchParams.get("key");
-  const href = (d: number) => `?days=${d}${key ? `&key=${encodeURIComponent(key)}` : ""}`;
+  const c = ctx(url);
   const pages = s.events.filter((e) => e.name.startsWith("view."));
   const features = s.events.filter((e) => !e.name.startsWith("view.") && !e.name.startsWith("app."));
   const lifecycle = s.events.filter((e) => e.name.startsWith("app."));
 
-  return `<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>MXB App usage</title>
-<style>${CSS}</style>
-</head><body>
-<header>
-  <h1>MXB App usage</h1>
-  <nav>${RANGES.map(
-    (d) => `<a class="${d === s.days ? "on" : ""}" href="${esc(href(d))}">${d}d</a>`,
-  ).join("")}</nav>
-</header>
-
-<section class="tiles">
+  const body = `<section class="tiles">
   ${tile("Active today", s.active.day, "installs that reported in on today's UTC day")}
   ${tile("Active this week", s.active.week, "distinct installs over 7 days")}
   ${tile("Active this month", s.active.month, "distinct installs over 30 days")}
@@ -91,13 +83,21 @@ ${lifecycle.length ? `<section class="panel"><h2>Lifecycle</h2>${table(lifecycle
       ? `<ul class="unused">${s.unused.map((n) => `<li><code>${esc(n)}</code></li>`).join("")}</ul>`
       : `<p class="muted">Everything the app can report has been reported at least once.</p>`
   }
-</section>
+</section>`;
 
-<footer class="muted">
-  Anonymous counts keyed on a random install id. No rider names, no paths, no addresses.
-  Generated ${esc(new Date(s.generatedAt).toISOString().replace("T", " ").slice(0, 16))} UTC.
-</footer>
-</body></html>`;
+  return shell({
+    title: TITLE,
+    section: "usage",
+    // Back to the path that was asked for. This page answers on both `/admin` and
+    // `/admin/usage`, and switching the window should not move you off the one you typed.
+    aside: ranges(s.days, RANGES, url.pathname === "/admin/usage" ? "/admin/usage" : "/admin", {}, c),
+    body,
+    footer: `Anonymous counts keyed on a random install id. No rider names, no paths, no
+      addresses. Generated ${esc(
+        new Date(s.generatedAt).toISOString().replace("T", " ").slice(0, 16),
+      )} UTC.`,
+    c,
+  });
 }
 
 function tile(label: string, value: number, hint: string): string {
@@ -130,7 +130,8 @@ function chart(s: Stats): string {
   const first = s.daily[0];
   const last = s.daily[s.daily.length - 1];
 
-  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="active installs per day" preserveAspectRatio="none">
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img"
+  aria-label="active installs per day" preserveAspectRatio="none">
   <path d="${area}" class="area"/>
   <polyline points="${points.join(" ")}" class="line"/>
   <text x="${pad}" y="14" class="tick">${max}</text>
@@ -160,7 +161,9 @@ function buckets(title: string, rows: Bucket[]): string {
 function table(rows: EventRow[], activeMonth: number): string {
   if (!rows.length) return `<p class="muted">Nothing reported yet.</p>`;
   const max = Math.max(...rows.map((r) => r.reach));
-  return `<table>
+  // Wrapped, like every other table on these pages: five numeric columns is wider than a
+  // narrow window, and the one that gives should be the table rather than the page.
+  return wrap(`<table>
   <thead><tr><th>Name</th><th class="num">Installs</th><th class="num">Share</th>
     <th class="num">Times</th><th class="num">Per install</th></tr></thead>
   <tbody>${rows
@@ -174,67 +177,5 @@ function table(rows: EventRow[], activeMonth: number): string {
       <td class="num">${r.volume.toLocaleString("en-GB")}</td><td class="num">${per}</td>
     </tr>`;
     })
-    .join("")}</tbody></table>`;
+    .join("")}</tbody></table>`);
 }
-
-function page(status: number, message: string): Response {
-  return new Response(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>MXB App usage</title>
-<style>${CSS}</style></head><body><header><h1>MXB App usage</h1></header>
-<section class="panel"><p>${esc(message)}</p></section></body></html>`,
-    { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
-  );
-}
-
-function esc(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-const CSS = `
-:root{--bg:#f6f7f9;--panel:#fff;--ink:#16181d;--muted:#6b7280;--line:#e3e6ea;--accent:#e2492b}
-@media (prefers-color-scheme:dark){
-  :root{--bg:#0f1114;--panel:#171a1f;--ink:#e8eaed;--muted:#9aa3ae;--line:#262b32;--accent:#ff6a42}
-}
-*{box-sizing:border-box}
-body{margin:0;padding:24px;background:var(--bg);color:var(--ink);
-  font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:20px}
-h1{font-size:18px;margin:0;letter-spacing:-.01em}
-h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 12px}
-nav a{color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px;margin-left:4px}
-nav a.on{background:var(--accent);color:#fff}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
-.tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;
-  display:flex;flex-direction:column;gap:2px}
-.tile .n{font-size:26px;font-weight:600;letter-spacing:-.02em}
-.tile .l{font-size:13px}
-.tile .h,.muted{color:var(--muted);font-size:12px}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
-.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
-svg{width:100%;height:180px;display:block}
-.area{fill:var(--accent);opacity:.12}
-.line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round}
-.tick{fill:var(--muted);font-size:11px}
-.tick.end{text-anchor:end}
-.bars{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
-.bars li{display:grid;grid-template-columns:1fr 2fr auto;gap:10px;align-items:center}
-.bars .k{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bars .bar{background:var(--line);border-radius:4px;height:8px;overflow:hidden}
-.bars .bar i{display:block;height:100%;background:var(--accent)}
-.bars .v{color:var(--muted);font-variant-numeric:tabular-nums}
-table{width:100%;border-collapse:collapse}
-th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
-  font-weight:500;padding:0 8px 8px;border-bottom:1px solid var(--line)}
-td{padding:7px 8px;border-bottom:1px solid var(--line);position:relative}
-tr:last-child td{border-bottom:0}
-.num{text-align:right;font-variant-numeric:tabular-nums}
-.rowbar{position:absolute;left:0;top:2px;bottom:2px;background:var(--accent);opacity:.10;border-radius:4px}
-code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;position:relative}
-.unused{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
-.unused li{border:1px solid var(--line);border-radius:6px;padding:3px 8px}
-footer{color:var(--muted);font-size:12px;margin-top:8px}
-`;
