@@ -134,19 +134,25 @@ struct ControlsDoc {
     crlf: bool,
 }
 
-/// Split one line into key, separator and value, or `None` if it isn't a setting.
-fn split_line(line: &str) -> Option<(&str, &str, &str)> {
-    let t = line.trim();
-    if t.is_empty() || t.starts_with(';') || t.starts_with('[') {
+/// Split one line into its key, its value, and the offset the value starts at.
+///
+/// The offset is what lets a rewrite keep the line's own shape. PiBoSo writes `key = value`
+/// with spaces; re-rendering it as `key=value` would work but would churn every line the
+/// app touched, which is exactly what makes a diff of the game's own file unreadable.
+fn split_line(line: &str) -> Option<(&str, &str, usize)> {
+    let indent = line.len() - line.trim_start().len();
+    let body = &line[indent..];
+    if body.is_empty() || body.starts_with(';') || body.starts_with('[') {
         return None;
     }
-    let at = line.find('=').or_else(|| line.find(char::is_whitespace))?;
-    let sep = &line[at..=at];
-    let key = line[..at].trim();
+    let at = body.find('=').or_else(|| body.find(char::is_whitespace))?;
+    let key = body[..at].trim_end();
     if key.is_empty() {
         return None;
     }
-    Some((key, sep, line[at + 1..].trim()))
+    let rest = &body[at + 1..];
+    let start = indent + at + 1 + (rest.len() - rest.trim_start().len());
+    Some((key, line[start..].trim_end(), start))
 }
 
 impl ControlsDoc {
@@ -166,7 +172,7 @@ impl ControlsDoc {
 
     fn get(&self, key: &str) -> Option<&str> {
         self.lines.iter().find_map(|l| {
-            let (k, _, v) = split_line(l)?;
+            let (k, v, _) = split_line(l)?;
             k.eq_ignore_ascii_case(key).then_some(v)
         })
     }
@@ -177,13 +183,16 @@ impl ControlsDoc {
     /// wrote and can't read back onto anything.
     fn set(&mut self, key: &str, value: &str) -> bool {
         for line in self.lines.iter_mut() {
-            let Some((k, sep, _)) = split_line(line) else {
+            let Some((k, _, start)) = split_line(line) else {
                 continue;
             };
-            if k.eq_ignore_ascii_case(key) {
-                *line = format!("{k}{sep}{value}");
-                return true;
+            if !k.eq_ignore_ascii_case(key) {
+                continue;
             }
+            // Keep everything up to where the value began — indent, key and separator.
+            let head = line[..start].to_string();
+            *line = format!("{head}{value}");
+            return true;
         }
         false
     }
@@ -712,6 +721,14 @@ control1/input/num=0
         assert!(doc.set("control0/gain", "0.500000"));
         assert!(doc.render().contains("control0/gain 0.500000"));
         assert!(!doc.render().contains('='));
+    }
+
+    #[test]
+    fn controls_doc_keeps_pibosos_spacing_around_the_equals() {
+        let mut doc = ControlsDoc::parse("control0/name = Throttle\ncontrol0/gain = 1.000000\n");
+        assert_eq!(doc.get("control0/gain"), Some("1.000000"));
+        assert!(doc.set("control0/gain", "0.500000"));
+        assert!(doc.render().contains("control0/gain = 0.500000"));
     }
 
     #[test]
