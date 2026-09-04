@@ -220,7 +220,7 @@ export default function FeelEditor({ feel, taken, onClose, onSave }: Props) {
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-[720px]">
+      <DialogContent className="max-w-[1040px]">
         <DialogHeader>
           <DialogTitle>{t("feel.editTitle", { name: feel.name })}</DialogTitle>
         </DialogHeader>
@@ -241,7 +241,7 @@ export default function FeelEditor({ feel, taken, onClose, onSave }: Props) {
           )}
         </label>
 
-        <div className="-mx-1 max-h-[52vh] overflow-y-auto px-1">
+        <div className="-mx-1 max-h-[66vh] overflow-y-auto px-1">
           {controls.length > 0 && (
             <Group title={t("feel.groupControls")}>
               {controls.map((control) => (
@@ -312,11 +312,11 @@ function Rows({
   onChange: (key: string, value: string) => void;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-x-5 gap-y-1.5 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-x-7 gap-y-2 sm:grid-cols-2 xl:grid-cols-3">
       {entries.map(([key, value]) => {
         const shown = toShown(key, value);
         return (
-          <div key={key} className="flex items-center justify-between gap-3">
+          <div key={key} className="flex items-center justify-between gap-4">
             <span
               className="min-w-0 truncate text-[12px] text-muted-foreground"
               title={`${key} = ${value}`}
@@ -329,7 +329,7 @@ function Rows({
                 onCheckedChange={(on) => onChange(key, on ? "1" : "0")}
               />
             ) : SCALES[key] && shown !== null ? (
-              <span className="flex w-[170px] flex-none items-center gap-1.5" title={value}>
+              <span className="flex w-[190px] flex-none items-center gap-2" title={value}>
                 <Slider
                   value={shown}
                   min={SCALES[key].min}
@@ -337,6 +337,7 @@ function Rows({
                   step={SCALES[key].step}
                   onChange={(n) => onChange(key, fromShown(key, String(n)))}
                   format={(n) => String(n)}
+                  editable
                 />
               </span>
             ) : shown === null ? (
