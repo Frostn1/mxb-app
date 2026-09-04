@@ -263,7 +263,8 @@ function shell(title: string, tab: Tab, body: string, c: Ctx): string {
 <style>${CSS}</style>
 </head><body>
 <header><h1>${esc(title)}</h1><nav>${nav}
-  <a class="out" href="${esc(href("/admin/paints", {}, c.key))}">Paints</a></nav></header>
+  <a class="out" href="${esc(href("/admin/paints", {}, c.key))}">Paints</a>
+  <a class="out" href="${esc(href("/admin/plugins", {}, c.key))}">Plugins</a></nav></header>
 ${body}
 <footer class="muted">Only clients running the app report. A missing row means nobody told us,
   not that nothing happened.</footer>

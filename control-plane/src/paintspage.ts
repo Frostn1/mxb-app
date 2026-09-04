@@ -515,7 +515,8 @@ function shell(title: string, tab: Tab, body: string, c: Ctx): string {
 <style>${CSS}</style>
 </head><body>
 <header><h1>${esc(title)}</h1><nav>${nav}
-  <a class="out" href="${esc(href("/admin/diagnostics", {}, c.key))}">Diagnostics</a></nav></header>
+  <a class="out" href="${esc(href("/admin/diagnostics", {}, c.key))}">Diagnostics</a>
+  <a class="out" href="${esc(href("/admin/plugins", {}, c.key))}">Plugins</a></nav></header>
 ${body}
 </body></html>`;
 }

@@ -44,6 +44,7 @@ import {
   paintThumbnail,
 } from "./paintspage";
 import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
+import { pluginKeysPage, pluginLicensesPage, pluginsAction } from "./pluginspage";
 import { generateTrack } from "./trackgen";
 import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
 import { bearer, hashToken, newToken, tokenMatches } from "./auth";
@@ -239,6 +240,16 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/admin/paints/files") return paintFiles(request, url, env);
   if (method === "GET" && path === "/admin/paints/paint") return paintOne(request, url, env);
   if (method === "GET" && path === "/admin/paints/thumb") return paintThumbnail(request, url, env);
+
+  // Minting and revoking plugin keys. Behind `ADMIN_KEY` with the rest of `/admin`, and above
+  // the account gate for a sharper reason than the pages before it: these routes hand out and
+  // take away paid access, and an account token is exactly the credential a person who wants
+  // free access already holds.
+  if (method === "GET" && path === "/admin/plugins") return pluginKeysPage(request, url, env);
+  if (method === "GET" && path === "/admin/plugins/licenses") {
+    return pluginLicensesPage(request, url, env);
+  }
+  if (method === "POST" && path === "/admin/plugins") return pluginsAction(request, url, env);
 
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
