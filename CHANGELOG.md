@@ -15,6 +15,15 @@
   track came out one flat colour from fence to fence.
 - Every band takes the light: each one carries its own relief map, so soil reads as soil
   instead of a painted surface.
+- Sound mods install. The ones that come as a folder per bike, the ones that hand you an
+  `engine.scl` to drop in yourself, and the ones whose sample list isn't called
+  `engine.scl` — all of them download and land where the game reads them.
+- ReShade presets shared as a bare `.ini` install. That is about half the presets on the
+  site, and they used to stop with nothing to try but the same button again.
+- Downloads that point at a whole folder — a folder per bike, a designer's six liveries,
+  an unpacked bike — bring the folder down instead of guessing at one file inside it.
+- Anything a download holds beside its `mods` folder is installed too, and a download
+  holding several mods asks which bike each one is for rather than choosing for you.
 - Pictures load on machines where the app's image cache can't be reached. Browse, Shop and
   MXB Hub fall back to loading a thumbnail straight from the site, so the grids show what
   you are downloading instead of placeholder icons.
