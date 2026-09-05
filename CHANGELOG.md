@@ -2,6 +2,10 @@
 
 ## 2026-09-04
 
+### Changed
+- Session diagnostics cover more than the list of files your game has loaded: code running
+  inside the game that came from no file, and what is sitting in the game's plugins folder.
+
 ### Fixed
 - Paint sync and voice chat now know which server you are on. The app installs a small
   FrostMod plugin that reads the server name from the game, so you sync with the riders

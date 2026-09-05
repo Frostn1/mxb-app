@@ -138,16 +138,6 @@ mod ffi {
     /// it has finished with the string buffers we lent it.
     pub const SEE_MASK_NOASYNC: u32 = 0x0000_0100;
 
-    /// `MEM_COMMIT` — the page is backed, not merely reserved.
-    pub const MEM_COMMIT: u32 = 0x0000_1000;
-
-    /// The four page protections that permit execution. A start address whose page is not
-    /// one of these is not code, whatever the offset says it should be.
-    pub const PAGE_EXECUTE: u32 = 0x10;
-    pub const PAGE_EXECUTE_READ: u32 = 0x20;
-    pub const PAGE_EXECUTE_READWRITE: u32 = 0x40;
-    pub const PAGE_EXECUTE_WRITECOPY: u32 = 0x80;
-
     /// `MEMORY_BASIC_INFORMATION`. The two padding slots are the x64 layout's own
     /// `__alignment` members; without them `region_size` lands four bytes early and every
     /// field after it is read from the wrong place.
@@ -226,6 +216,69 @@ mod ffi {
         }
     }
 
+    /// `TH32CS_SNAPTHREAD` — the thread list, which is per-machine and filtered by owner.
+    pub const TH32CS_SNAPTHREAD: u32 = 0x0000_0004;
+
+    /// Enough to read a thread's start address and its debug registers. Both are granted on
+    /// a thread of a process of our own user.
+    pub const THREAD_QUERY_INFORMATION: u32 = 0x0040;
+    pub const THREAD_GET_CONTEXT: u32 = 0x0008;
+
+    /// `ThreadQuerySetWin32StartAddress` in `THREADINFOCLASS` — the address the thread was
+    /// created to run, which is the one thing about a thread that says where it came from.
+    pub const THREAD_START_ADDRESS_CLASS: i32 = 9;
+
+    /// `CONTEXT_AMD64 | CONTEXT_DEBUG_REGISTERS` — ask for `Dr0`–`Dr7` and nothing else.
+    pub const CONTEXT_DEBUG_REGISTERS: u32 = 0x0010_0010;
+
+    /// The x64 `CONTEXT`, as far as the debug registers and no further.
+    ///
+    /// `GetThreadContext` writes a whole `CONTEXT` whatever it was asked for, so the buffer
+    /// has to be the full 1232 bytes and 16-byte aligned or the call scribbles past it. The
+    /// tail is named `rest` because nothing here reads it: the fields up to `dr7` are at the
+    /// offsets Windows writes them to, and that is all this struct is for.
+    #[repr(C, align(16))]
+    pub struct Context {
+        pub p1_home: u64,
+        pub p2_home: u64,
+        pub p3_home: u64,
+        pub p4_home: u64,
+        pub p5_home: u64,
+        pub p6_home: u64,
+        pub context_flags: u32,
+        pub mx_csr: u32,
+        pub seg_cs: u16,
+        pub seg_ds: u16,
+        pub seg_es: u16,
+        pub seg_fs: u16,
+        pub seg_gs: u16,
+        pub seg_ss: u16,
+        pub eflags: u32,
+        pub dr0: u64,
+        pub dr1: u64,
+        pub dr2: u64,
+        pub dr3: u64,
+        pub dr6: u64,
+        pub dr7: u64,
+        pub rest: [u8; 1232 - 0x78],
+    }
+
+    /// Windows writes a whole `CONTEXT` whatever it was asked for, so getting this wrong
+    /// does not produce a wrong answer — it produces a write past the end of the buffer.
+    const _: () = assert!(std::mem::size_of::<Context>() == 1232);
+    const _: () = assert!(std::mem::align_of::<Context>() == 16);
+
+    #[repr(C)]
+    pub struct ThreadEntry32 {
+        pub dw_size: u32,
+        pub cnt_usage: u32,
+        pub th32_thread_id: u32,
+        pub th32_owner_process_id: u32,
+        pub tp_base_pri: i32,
+        pub tp_delta_pri: i32,
+        pub dw_flags: u32,
+    }
+
     #[repr(C)]
     pub struct ModuleEntry32 {
         pub dw_size: u32,
@@ -286,9 +339,29 @@ mod ffi {
         pub fn GetCurrentProcessId() -> u32;
         /// A pseudo-handle for our own process — a constant, not a handle to close.
         pub fn GetCurrentProcess() -> Handle;
+        pub fn Thread32First(snapshot: Handle, entry: *mut ThreadEntry32) -> i32;
+        pub fn Thread32Next(snapshot: Handle, entry: *mut ThreadEntry32) -> i32;
+        pub fn OpenThread(desired_access: u32, inherit: i32, thread_id: u32) -> Handle;
+        /// Only ever asked for `CONTEXT_DEBUG_REGISTERS` here: a hardware breakpoint is set
+        /// in `Dr0`–`Dr3` and armed in `Dr7`, and it is how code hooks a function without
+        /// writing a byte of it.
+        pub fn GetThreadContext(thread: Handle, context: *mut Context) -> i32;
         pub fn GetLastError() -> u32;
     }
 
+    #[link(name = "ntdll")]
+    extern "system" {
+        /// The thread's Win32 start address. There is no documented Win32 call for it, and
+        /// it is the only field that says whether a thread began inside a module or inside
+        /// something written into the process.
+        pub fn NtQueryInformationThread(
+            thread: Handle,
+            class: i32,
+            info: *mut c_void,
+            len: u32,
+            out_len: *mut u32,
+        ) -> i32;
+    }
     #[link(name = "advapi32")]
     extern "system" {
         pub fn OpenProcessToken(process: Handle, access: u32, token: *mut Handle) -> i32;
@@ -715,6 +788,414 @@ pub fn running_process_names() -> Option<Vec<String>> {
     }
 }
 
+/// What Windows reports about a region of address space.
+///
+/// Out here rather than in the Windows-only FFI block on purpose: these are numbers Windows
+/// hands *back*, and everything that reads them — deciding whether a region can execute,
+/// naming what backs it — is the same code on every platform and is tested on one that has
+/// never seen a Windows process.
+///
+/// `MEM_COMMIT` means the page is backed rather than merely reserved. `MEM_IMAGE` is a
+/// mapped executable, `MEM_MAPPED` a mapped data file, and `MEM_PRIVATE` memory the process
+/// allocated for itself — which is where a manually mapped image ends up, because nothing
+/// mapped it as an image.
+pub const MEM_COMMIT: u32 = 0x0000_1000;
+pub const MEM_IMAGE: u32 = 0x0100_0000;
+pub const MEM_MAPPED: u32 = 0x0004_0000;
+pub const MEM_PRIVATE: u32 = 0x0002_0000;
+
+/// The four page protections that permit execution. A start address whose page is not one
+/// of these is not code, whatever the offset says it should be.
+pub const PAGE_EXECUTE: u32 = 0x10;
+pub const PAGE_EXECUTE_READ: u32 = 0x20;
+pub const PAGE_EXECUTE_READWRITE: u32 = 0x40;
+pub const PAGE_EXECUTE_WRITECOPY: u32 = 0x80;
+
+/// What backs a region, in a word.
+pub fn region_kind(kind: u32) -> &'static str {
+    match kind {
+        MEM_IMAGE => "image",
+        MEM_MAPPED => "mapped",
+        MEM_PRIVATE => "private",
+        _ => "other",
+    }
+}
+
+/// A page protection as the letters it means: `r`, `w`, `x`, and `c` for copy-on-write.
+///
+/// `rwx` is the one worth recognising on sight. Ordinary code is `rx`; memory that is both
+/// writable and executable at once is what something building code at runtime needs, and
+/// almost nothing else does.
+pub fn protection(protect: u32) -> String {
+    let mut out = String::new();
+    // The low byte carries the protection; the high bits are `PAGE_GUARD` and friends.
+    match protect & 0xff {
+        PAGE_EXECUTE => out.push('x'),
+        PAGE_EXECUTE_READ => out.push_str("rx"),
+        PAGE_EXECUTE_READWRITE => out.push_str("rwx"),
+        PAGE_EXECUTE_WRITECOPY => out.push_str("rwxc"),
+        0x01 => out.push('-'),
+        0x02 => out.push('r'),
+        0x04 => out.push_str("rw"),
+        0x08 => out.push_str("rwc"),
+        _ => out.push('?'),
+    }
+    out
+}
+
+/// Is this region backed, rather than merely reserved?
+pub fn is_committed(state: u32) -> bool {
+    state == MEM_COMMIT
+}
+
+/// Can this page protection execute?
+pub fn is_executable(protect: u32) -> bool {
+    matches!(
+        protect & 0xff,
+        PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY
+    )
+}
+
+/// Where one loaded module sits in the game's address space.
+///
+/// Kept apart from the module *list* the rest of the app uses, which is a list of paths: the
+/// only question these answer is "does anything the loader knows about cover this address",
+/// and a path cannot answer it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModuleRange {
+    pub base: u64,
+    pub size: u64,
+}
+
+/// Does any module the loader lists cover `addr`?
+///
+/// The whole of what separates ordinary code from injected code, and it is one line: every
+/// byte of every legitimately loaded library is inside one of these ranges, because that is
+/// what loading a library does.
+pub fn covered(ranges: &[ModuleRange], addr: u64) -> bool {
+    // Compared as an offset rather than against `base + size`, which would have to either
+    // overflow or saturate at the top of the address space — and saturating quietly loses
+    // the last byte of the range that reaches it.
+    ranges.iter().any(|r| addr >= r.base && addr - r.base < r.size)
+}
+
+/// One committed, executable region of the game's address space that no loaded module covers.
+///
+/// The reason this exists at all: a DLL is only in the loader's list because it asked to be.
+/// Code written into a process by hand and started with a thread never asks, so it is in no
+/// list, has no path and no name — and is still, unavoidably, executable memory. That much
+/// cannot be hidden from anything that can read the mapping list, because the CPU needs it
+/// to be true.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ExecRegion {
+    pub base: u64,
+    pub size: u64,
+    pub protect: u32,
+    /// `MEM_IMAGE`, `MEM_MAPPED` or `MEM_PRIVATE` — what the kernel says backs it. An
+    /// `MEM_IMAGE` region here is the loud one: something mapped as an image that the
+    /// loader's own list does not mention, which is what unlinking a module looks like.
+    pub kind: u32,
+    /// A thread in the game was created to start inside this region.
+    pub thread: bool,
+}
+
+/// What one walk of the game's threads found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ThreadSurvey {
+    pub total: u32,
+    /// Threads whose start address is in no loaded module.
+    pub foreign: u32,
+    /// Threads with a hardware breakpoint armed — the way to hook a function without
+    /// altering a byte of it, and something no ordinary game thread has set.
+    pub breakpoints: u32,
+    /// The start addresses of the foreign ones, so a region can be told it holds one.
+    pub starts: Vec<u64>,
+}
+
+/// A read-only look inside the running game.
+///
+/// One open handle, used for a mapping walk, a thread walk and any number of memory reads,
+/// because opening the process is the expensive part and all three questions are asked
+/// together. Read access only: nothing here writes to the game, and the handle is not asked
+/// for the rights that would let it.
+///
+/// It never looks at any process but the game. The thread walk is the one place that could —
+/// Windows' thread snapshot is machine-wide and takes no pid — and it is filtered to the
+/// game's own threads before anything is read.
+#[cfg(windows)]
+pub struct GameProbe {
+    handle: ffi::Handle,
+    pid: u32,
+}
+
+/// The most one read will fetch. Everything read here is a header or a string.
+#[cfg(windows)]
+const MAX_READ: usize = 64 * 1024;
+
+/// User-mode address space ends here on x64; a walk that reaches it is done.
+#[cfg(windows)]
+const USER_SPACE_END: u64 = 0x0000_7fff_ffff_0000;
+
+/// A bound on the mapping walk. A real process has a few thousand regions.
+#[cfg(windows)]
+const MAX_REGION_STEPS: usize = 100_000;
+
+/// A bound on what the walk keeps. The count is still exact past this; only the list stops
+/// growing, and the caller reads at most a couple of dozen of them anyway.
+#[cfg(windows)]
+const MAX_REGIONS_KEPT: usize = 4096;
+
+#[cfg(windows)]
+impl GameProbe {
+    /// Open the running game for reading, or `None` if there is nothing to open or we are
+    /// not allowed to. A refusal here is the same wall the module walk hits, and means the
+    /// same thing: the game is above us.
+    pub fn open() -> Option<Self> {
+        let pid = find_game_pid()?;
+        // SAFETY: opening a process by pid; the handle is closed in `Drop` and nowhere else.
+        let handle = unsafe {
+            ffi::OpenProcess(ffi::PROCESS_QUERY_INFORMATION | ffi::PROCESS_VM_READ, 0, pid)
+        };
+        if handle.is_null() {
+            return None;
+        }
+        Some(Self { handle, pid })
+    }
+
+    /// Bytes at an address in the game, as far as the read got.
+    ///
+    /// A short answer is a real one: a read that runs off the end of a region returns what
+    /// it managed, and that is usually the whole header we were after. Only a read that
+    /// produced nothing is `None`.
+    pub fn read(&self, addr: u64, len: usize) -> Option<Vec<u8>> {
+        if addr == 0 || len == 0 || len > MAX_READ {
+            return None;
+        }
+        let mut buf = vec![0u8; len];
+        let mut got: usize = 0;
+        // SAFETY: `buf` is `len` bytes and stays alive across the call; the API writes at
+        // most `len` and reports how much through `got`.
+        unsafe {
+            ffi::ReadProcessMemory(
+                self.handle,
+                addr as *const std::os::raw::c_void,
+                buf.as_mut_ptr() as *mut std::os::raw::c_void,
+                len,
+                &mut got,
+            );
+        }
+        if got == 0 {
+            return None;
+        }
+        buf.truncate(got.min(len));
+        Some(buf)
+    }
+
+    /// Where every module the loader lists is mapped.
+    pub fn module_ranges(&self) -> Vec<ModuleRange> {
+        // SAFETY: module snapshot for our own game pid; the handle is closed on every path.
+        unsafe {
+            let snap = ffi::CreateToolhelp32Snapshot(
+                ffi::TH32CS_SNAPMODULE | ffi::TH32CS_SNAPMODULE32,
+                self.pid,
+            );
+            if snap == ffi::INVALID_HANDLE_VALUE {
+                return Vec::new();
+            }
+            let mut me: ffi::ModuleEntry32 = std::mem::zeroed();
+            me.dw_size = std::mem::size_of::<ffi::ModuleEntry32>() as u32;
+            let mut out = Vec::new();
+            if ffi::Module32First(snap, &mut me) != 0 {
+                loop {
+                    out.push(ModuleRange {
+                        base: me.mod_base_addr as u64,
+                        size: me.mod_base_size as u64,
+                    });
+                    if ffi::Module32Next(snap, &mut me) == 0 {
+                        break;
+                    }
+                }
+            }
+            ffi::CloseHandle(snap);
+            out
+        }
+    }
+
+    /// Walk the game's address space for executable memory no module accounts for.
+    ///
+    /// Returns the regions and, separately, how many executable regions there were in total.
+    /// The second number is the denominator: "four unaccounted" means one thing in a process
+    /// with forty executable regions and another in one with four hundred.
+    pub fn exec_regions(&self, ranges: &[ModuleRange]) -> (Vec<ExecRegion>, u32) {
+        let mut out = Vec::new();
+        let mut total: u32 = 0;
+        let mut addr: u64 = 0;
+        for _ in 0..MAX_REGION_STEPS {
+            // SAFETY: querying our own game handle at an address inside user space; the
+            // struct is zeroed and only read back after a non-zero return.
+            let mbi = unsafe {
+                let mut mbi: ffi::MemoryBasicInformation = std::mem::zeroed();
+                let got = ffi::VirtualQueryEx(
+                    self.handle,
+                    addr as *const std::os::raw::c_void,
+                    &mut mbi,
+                    std::mem::size_of::<ffi::MemoryBasicInformation>(),
+                );
+                if got == 0 {
+                    break;
+                }
+                mbi
+            };
+            let base = mbi.base_address as u64;
+            let size = mbi.region_size as u64;
+            if size == 0 {
+                break;
+            }
+            if is_committed(mbi.state) && is_executable(mbi.protect) {
+                total = total.saturating_add(1);
+                if !covered(ranges, base) && out.len() < MAX_REGIONS_KEPT {
+                    out.push(ExecRegion {
+                        base,
+                        size,
+                        protect: mbi.protect,
+                        kind: mbi.kind,
+                        thread: false,
+                    });
+                }
+            }
+            let next = base.saturating_add(size);
+            if next <= addr || next >= USER_SPACE_END {
+                break;
+            }
+            addr = next;
+        }
+        (out, total)
+    }
+
+    /// Walk the game's threads: how many, how many started outside every loaded module, and
+    /// how many carry an armed hardware breakpoint.
+    pub fn threads(&self, ranges: &[ModuleRange]) -> ThreadSurvey {
+        let mut survey = ThreadSurvey::default();
+        // SAFETY: the thread snapshot takes no pid — it is machine-wide by design — and
+        // every entry not owned by the game is skipped before anything is opened or read.
+        unsafe {
+            let snap = ffi::CreateToolhelp32Snapshot(ffi::TH32CS_SNAPTHREAD, 0);
+            if snap == ffi::INVALID_HANDLE_VALUE {
+                return survey;
+            }
+            let mut te: ffi::ThreadEntry32 = std::mem::zeroed();
+            te.dw_size = std::mem::size_of::<ffi::ThreadEntry32>() as u32;
+            if ffi::Thread32First(snap, &mut te) != 0 {
+                loop {
+                    if te.th32_owner_process_id == self.pid {
+                        survey.total = survey.total.saturating_add(1);
+                        self.inspect_thread(te.th32_thread_id, ranges, &mut survey);
+                    }
+                    if ffi::Thread32Next(snap, &mut te) == 0 {
+                        break;
+                    }
+                }
+            }
+            ffi::CloseHandle(snap);
+        }
+        survey.starts.sort_unstable();
+        survey.starts.dedup();
+        survey
+    }
+
+    /// One thread: where it was created to start, and whether it is carrying breakpoints.
+    #[cfg(windows)]
+    fn inspect_thread(&self, tid: u32, ranges: &[ModuleRange], survey: &mut ThreadSurvey) {
+        // SAFETY: opening a thread of the game by id; closed before return on every path.
+        unsafe {
+            let thread = ffi::OpenThread(
+                ffi::THREAD_QUERY_INFORMATION | ffi::THREAD_GET_CONTEXT,
+                0,
+                tid,
+            );
+            if thread.is_null() {
+                return;
+            }
+            let mut start: u64 = 0;
+            let ok = ffi::NtQueryInformationThread(
+                thread,
+                ffi::THREAD_START_ADDRESS_CLASS,
+                &mut start as *mut u64 as *mut std::os::raw::c_void,
+                std::mem::size_of::<u64>() as u32,
+                std::ptr::null_mut(),
+            );
+            if ok == 0 && start != 0 && !covered(ranges, start) {
+                survey.foreign = survey.foreign.saturating_add(1);
+                if survey.starts.len() < 64 {
+                    survey.starts.push(start);
+                }
+            }
+
+            let mut context: ffi::Context = std::mem::zeroed();
+            context.context_flags = ffi::CONTEXT_DEBUG_REGISTERS;
+            if ffi::GetThreadContext(thread, &mut context) != 0 && armed(context.dr7) {
+                survey.breakpoints = survey.breakpoints.saturating_add(1);
+            }
+            ffi::CloseHandle(thread);
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for GameProbe {
+    fn drop(&mut self) {
+        // SAFETY: the handle came from `OpenProcess` and is closed exactly once.
+        unsafe {
+            ffi::CloseHandle(self.handle);
+        }
+    }
+}
+
+/// Off Windows there is nothing to open.
+///
+/// On Linux the game is a Wine process whose *mappings* `/proc` will describe but whose
+/// threads, module bases and PE headers it will not, and on macOS the game runs in a bottle
+/// this app does not own the process tree of. Rather than half-answer, `open` says no and
+/// every question above it comes back empty — the same "we could not look" the module walk
+/// already reports, and deliberately not "we looked and it was clean".
+///
+/// The field is [`std::convert::Infallible`], so the methods are unreachable by type rather
+/// than by promise: there is no way to construct one of these, and the compiler knows it.
+#[cfg(not(windows))]
+pub struct GameProbe(std::convert::Infallible);
+
+#[cfg(not(windows))]
+impl GameProbe {
+    pub fn open() -> Option<Self> {
+        None
+    }
+
+    pub fn read(&self, _addr: u64, _len: usize) -> Option<Vec<u8>> {
+        match self.0 {}
+    }
+
+    pub fn module_ranges(&self) -> Vec<ModuleRange> {
+        match self.0 {}
+    }
+
+    pub fn exec_regions(&self, _ranges: &[ModuleRange]) -> (Vec<ExecRegion>, u32) {
+        match self.0 {}
+    }
+
+    pub fn threads(&self, _ranges: &[ModuleRange]) -> ThreadSurvey {
+        match self.0 {}
+    }
+}
+
+/// Is any of `Dr0`–`Dr3` armed?
+///
+/// The low eight bits of `Dr7` are the local and global enable bits, two per register. Every
+/// other bit says what kind of breakpoint it would be, which is not a question we are asking.
+#[cfg(windows)]
+fn armed(dr7: u64) -> bool {
+    dr7 & 0xff != 0
+}
+
 /// State threaded through the `EnumWindows` walk: the pid we want, the handle we found.
 #[cfg(windows)]
 struct WindowSearch {
@@ -904,13 +1385,13 @@ unsafe fn loader_looks_runnable(proc: ffi::Handle, base: *mut u8) -> Result<(), 
     if wrote == 0 {
         return Err(format!("VirtualQueryEx failed (error {})", ffi::GetLastError()));
     }
-    if info.state != ffi::MEM_COMMIT {
+    if info.state != MEM_COMMIT {
         return Err("the loader address isn't committed memory".into());
     }
-    let executable = ffi::PAGE_EXECUTE
-        | ffi::PAGE_EXECUTE_READ
-        | ffi::PAGE_EXECUTE_READWRITE
-        | ffi::PAGE_EXECUTE_WRITECOPY;
+    let executable = PAGE_EXECUTE
+        | PAGE_EXECUTE_READ
+        | PAGE_EXECUTE_READWRITE
+        | PAGE_EXECUTE_WRITECOPY;
     if info.protect & executable == 0 {
         return Err(format!("the loader address isn't executable (protect {:#x})", info.protect));
     }
@@ -1911,5 +2392,64 @@ mod tests {
         assert!(msg.contains("drive_c"), "names what's missing from the path: {msg}");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A range covers its own bytes and stops. This is the whole of what separates code the
+    /// loader put in the process from code that arrived some other way, so it is worth
+    /// pinning both ends of.
+    #[test]
+    fn a_module_covers_its_own_bytes_and_no_others() {
+        let ranges = [
+            ModuleRange { base: 0x1000, size: 0x100 },
+            ModuleRange { base: 0x8000, size: 0x10 },
+        ];
+        assert!(covered(&ranges, 0x1000), "the first byte is inside");
+        assert!(covered(&ranges, 0x10ff), "the last byte is inside");
+        assert!(!covered(&ranges, 0x1100), "one past the end is outside");
+        assert!(!covered(&ranges, 0x0fff), "one before the start is outside");
+        assert!(covered(&ranges, 0x8008), "a second range is looked at too");
+        assert!(!covered(&[], 0x1000), "nothing covers anything");
+    }
+
+    #[test]
+    fn a_range_at_the_top_of_the_address_space_does_not_wrap() {
+        let ranges = [ModuleRange { base: u64::MAX - 4, size: 0x100 }];
+        assert!(covered(&ranges, u64::MAX));
+        assert!(!covered(&ranges, 0));
+    }
+
+    #[test]
+    fn a_page_that_can_execute_is_recognised_whatever_else_it_can_do() {
+        assert!(is_executable(PAGE_EXECUTE));
+        assert!(is_executable(PAGE_EXECUTE_READ));
+        assert!(is_executable(PAGE_EXECUTE_READWRITE));
+        assert!(is_executable(PAGE_EXECUTE_WRITECOPY));
+        // PAGE_GUARD and PAGE_NOCACHE ride in the high bits; the protection is the low byte.
+        assert!(is_executable(PAGE_EXECUTE_READ | 0x100));
+        assert!(!is_executable(0x02), "read-only is not code");
+        assert!(!is_executable(0x04), "read-write is not code");
+    }
+
+    #[test]
+    fn only_committed_memory_is_memory() {
+        assert!(is_committed(MEM_COMMIT));
+        assert!(!is_committed(0x2000), "reserved is not backed by anything");
+    }
+
+    #[test]
+    fn a_region_is_named_by_what_backs_it() {
+        assert_eq!(region_kind(MEM_IMAGE), "image");
+        assert_eq!(region_kind(MEM_MAPPED), "mapped");
+        assert_eq!(region_kind(MEM_PRIVATE), "private");
+        assert_eq!(region_kind(0), "other");
+    }
+
+    #[test]
+    fn a_protection_reads_as_the_letters_it_means() {
+        assert_eq!(protection(PAGE_EXECUTE_READ), "rx");
+        assert_eq!(protection(PAGE_EXECUTE_READWRITE), "rwx");
+        assert_eq!(protection(PAGE_EXECUTE_WRITECOPY), "rwxc");
+        assert_eq!(protection(0x04), "rw");
+        assert_eq!(protection(PAGE_EXECUTE_READWRITE | 0x100), "rwx", "guard bits are not it");
     }
 }

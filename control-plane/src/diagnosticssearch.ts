@@ -84,6 +84,12 @@ export interface RiderRow {
   rulesVersion: number;
   moduleCount: number;
   unknownCount: number;
+  /** Executable memory in the game that no loaded module covered, in the last report. */
+  regionCount: number;
+  /** Threads that started somewhere no loaded module covers. */
+  foreignThreads: number;
+  /** Threads carrying an armed hardware breakpoint. */
+  breakpoints: number;
   appVersion: string;
   updatedAt: number;
   /** Where they are now, while their app is still reporting presence. */
@@ -110,6 +116,9 @@ interface RiderRecord {
   rules_version: number | null;
   module_count: number | null;
   unknown_count: number | null;
+  region_count: number | null;
+  foreign_threads: number | null;
+  breakpoints: number | null;
   app_version: string | null;
   updated_at: number | null;
   server_id: string | null;
@@ -119,7 +128,7 @@ interface RiderRecord {
 const RIDER_COLUMNS =
   "a.id, a.rider_name, a.guid, a.steam_id, a.created_at, c.state, c.worst_state," +
   " c.worst_at, c.rules_version, c.module_count, c.unknown_count, c.app_version," +
-  " c.updated_at," +
+  " c.updated_at, c.region_count, c.foreign_threads, c.breakpoints," +
   " (SELECT p.server_id FROM presence p WHERE p.account_id = a.id AND p.updated_at > ?)" +
   "  AS server_id";
 
@@ -204,6 +213,9 @@ function riderRow(r: RiderRecord): RiderRow {
     rulesVersion: r.rules_version ?? 0,
     moduleCount: r.module_count ?? 0,
     unknownCount: r.unknown_count ?? 0,
+    regionCount: r.region_count ?? 0,
+    foreignThreads: r.foreign_threads ?? 0,
+    breakpoints: r.breakpoints ?? 0,
     appVersion: r.app_version ?? "",
     updatedAt: r.updated_at ?? 0,
     serverId: r.server_id ?? "",
@@ -285,6 +297,8 @@ export interface Sighting {
   company: string;
   product: string;
   description: string;
+  /** One line about a row that is not a file: a region's shape, or an unloaded plugin. */
+  detail: string;
   size: number;
   mtime: number;
   serverId: string;
@@ -307,6 +321,7 @@ interface SightingRecord {
   company: string;
   product: string;
   description: string;
+  detail: string;
   size: number;
   mtime: number;
   server_id: string;
@@ -330,6 +345,7 @@ function sighting(r: SightingRecord): Sighting {
     company: r.company ?? "",
     product: r.product ?? "",
     description: r.description ?? "",
+    detail: r.detail ?? "",
     size: r.size ?? 0,
     mtime: r.mtime ?? 0,
     serverId: r.server_id ?? "",
@@ -408,7 +424,8 @@ export async function riderDetail(
       .first<{ n: number }>(),
     env.DB.prepare(
       "SELECT account_id, rider_name, name, sha256, origin, state, label, trust, publisher," +
-        " company, product, description, size, mtime, server_id, first_at, last_at, hits" +
+        " company, product, description, detail, size, mtime, server_id, first_at, last_at," +
+        " hits" +
         ` FROM client_module_seen${filter}` +
         ` ORDER BY ${stateRankSql("state")} DESC, last_at DESC LIMIT ? OFFSET ?`,
     )
@@ -448,7 +465,15 @@ export async function riderDetail(
 
 export const FILE_STATES = ["flagged", "any", "alert", "warn", "ok"] as const;
 export const FILE_TRUSTS = ["any", "signed", "unsigned", "untrusted", "unchecked"] as const;
-export const FILE_ORIGINS = ["any", "game", "app", "other"] as const;
+/**
+ * Where a row was found, as a filter.
+ *
+ * `memory` and `disk` are not files: the first is executable memory in the game that no
+ * loaded module covered, the second a file in the game's plugins folder that the game has
+ * not loaded. Both are worth asking for on their own — they are the rows the module list
+ * could never have produced.
+ */
+export const FILE_ORIGINS = ["any", "game", "app", "other", "memory", "disk"] as const;
 export const FILE_SORTS = ["state", "last", "accounts", "hits", "name"] as const;
 
 export interface FileQuery {
@@ -692,8 +717,8 @@ export async function fileDetail(
       .first<{ n: number }>(),
     env.DB.prepare(
       "SELECT s.account_id, s.rider_name, a.guid, s.name, s.sha256, s.origin, s.state," +
-        " s.label, s.trust, s.publisher, s.company, s.product, s.description, s.size," +
-        " s.mtime, s.server_id, s.first_at, s.last_at, s.hits" +
+        " s.label, s.trust, s.publisher, s.company, s.product, s.description, s.detail," +
+        " s.size, s.mtime, s.server_id, s.first_at, s.last_at, s.hits" +
         " FROM client_module_seen s LEFT JOIN accounts a ON a.id = s.account_id" +
         ` WHERE s.name = ?${sha256 ? " AND s.sha256 = ?" : ""}` +
         ` ORDER BY ${stateRankSql("s.state")} DESC, s.last_at DESC LIMIT ? OFFSET ?`,
