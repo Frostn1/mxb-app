@@ -2202,25 +2202,22 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
         }
     }
 
-    // The lists that follow the centreline, every one of them empty.
+    // `EXT` closes the file, immediately after the centreline.
     //
-    // A published `.trh` carries occluder boxes and several more lists here -- TrackEd writes
-    // them, and `tracked.exe` has the `occluder%d/pos/x` keys that fill them. We have none of
-    // it, and used to run the centreline straight into the `EXT` marker.
+    // A published `.trh` has a run of lists in between -- occluder boxes and more, the ones
+    // `tracked.exe` fills from its `occluder%d/*` keys -- and emulating the loader over ours
+    // showed it asking for a 66 MB record off the end where those lists should start. Ten
+    // zero words made the emulator walk out cleanly, so they were written.
     //
-    // That was the crash on entering a track. Measured by emulating the game's own `.trh`
-    // loader (0x1401f4f50, the branch the extension dispatcher takes for "TRH"): it reads a
-    // count word here unconditionally, and with `EXT\0` sitting in that slot it took the
-    // marker as a count of 5,523,013 and asked for a **66,331,452-byte** record off the end
-    // of the file. Ten zero words is what it takes to walk to the last byte and return, the
-    // same measurement that settled the `.map`.
-    for _ in 0..10 {
-        out.extend_from_slice(&0u32.to_le_bytes());
-    }
+    // In the game that change is what broke the track: the build without them loaded and
+    // could be ridden, and every build with them crashed at track selection, before the
+    // loading bar. The emulator models the read helper and not the loader's own idea of
+    // where a file stops; `EXT` is that, and putting anything in front of it is worse than
+    // the overrun it was meant to prevent.
+    //
+    // So: what the reader does past this marker is still unknown, and guessing at it cost a
+    // working track. Leave it alone until the real loader has been watched deciding.
     out.extend_from_slice(b"EXT\0");
-    // Published files carry a word here -- 432 on the ARL tracks, 192 on the JV ones. The
-    // loader never reads it; it is written so the file ends the way theirs do.
-    out.extend_from_slice(&432u32.to_le_bytes());
     out
 }
 
