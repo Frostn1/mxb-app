@@ -60,6 +60,10 @@ mod proton;
 mod sidecar;
 #[cfg(sidecar)]
 mod sidecar_lock;
+/// The world-server browser: speaks the master-server protocol to list live servers.
+/// Local-only, like [`sidecar`] — the public tree neither has the file nor the feature.
+#[cfg(worldnet)]
+mod worldnet;
 #[cfg(mxbsecure)]
 mod mxbsecure;
 mod steamid;
@@ -7688,6 +7692,49 @@ fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::Launc
     Ok(outcome)
 }
 
+/// One live server as the Servers tab shows it. Filled by the local-only `worldnet` module
+/// from the master-server list; a superset of [`paintsync::RegisteredServer`] so the tab's
+/// Join button reuses [`join_server`]. The struct carries no protocol detail — that all lives
+/// behind `cfg(worldnet)` — so it stays in the public tree and the command compiles either way.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorldServer {
+    /// Display name the operator gave the server.
+    pub name: String,
+    /// `ip:port`, the form the game's connect flag and [`join_server`] take.
+    pub address: String,
+    /// Riders currently connected, and the seat cap.
+    pub players: u32,
+    pub max_players: u32,
+    /// Round-trip to the server in milliseconds, or `None` if it wasn't measured.
+    pub ping_ms: Option<u32>,
+    /// The track the server is running, when the master reports it.
+    pub track: String,
+    /// Whether a password is required to join.
+    pub passworded: bool,
+    /// Free-text region/label, empty when unknown.
+    pub region: String,
+}
+
+/// The live MX Bikes server list, as the game's WORLD browser sees it.
+///
+/// All the work — the master-server protocol, the Steam auth ticket, the parsing — lives in
+/// the local-only `worldnet` module. Without it (the public tree, or a build that never had
+/// the file) the tab still exists but says the browser isn't included, rather than failing
+/// opaquely.
+#[tauri::command]
+async fn list_master_servers(app: tauri::AppHandle) -> Result<Vec<WorldServer>, String> {
+    #[cfg(worldnet)]
+    {
+        worldnet::list_servers(app).await
+    }
+    #[cfg(not(worldnet))]
+    {
+        let _ = app;
+        Err("The server browser isn't included in this build.".into())
+    }
+}
+
 /// Is MX Bikes running? Polled by the sidebar so Play can show the live state.
 #[tauri::command]
 fn game_running() -> bool {
@@ -10083,6 +10130,7 @@ fn main() {
             frostmod_stop,
             launch_game,
             join_server,
+            list_master_servers,
             experimental_state,
             enroll_account,
             // Paid plugins: the catalogue, redeeming a key, and getting a bundle on disk.

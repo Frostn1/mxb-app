@@ -1037,6 +1037,25 @@ export const en = {
   "servers.atCap": "{{cap}} servers are already running, which is the limit. Shut one down to start another.",
   "servers.help": "Share your liveries with everyone else on a server, and run a dedicated server of your own.",
 
+  // ── Server browser (the live world list) ───────────────────────────────────
+  "serverBrowser.help":
+    "Every live MX Bikes server, straight from the game's master server — with the address you need to join. Pick one and press Join to launch straight into it.",
+  "serverBrowser.searchPlaceholder": "Search servers…",
+  "serverBrowser.count": "{{count}} online",
+  "serverBrowser.refresh": "Refresh",
+  "serverBrowser.retry": "Try again",
+  "serverBrowser.loading": "Reading the server list…",
+  "serverBrowser.empty": "No servers are online right now.",
+  "serverBrowser.name": "Server",
+  "serverBrowser.players": "Players",
+  "serverBrowser.ping": "Ping",
+  "serverBrowser.address": "Address",
+  "serverBrowser.passworded": "Password required",
+  "serverBrowser.join": "Join",
+  "serverBrowser.joinFailed": "Couldn't join that server",
+  "serverBrowser.copyAddress": "Copy the address",
+  "serverBrowser.copied": "Address copied",
+
   "sync.autoNote":
     "Your look publishes itself — every bike, whenever you change it in the app or in the game's own garage. Everyone else's arrives when you press Play.",
 

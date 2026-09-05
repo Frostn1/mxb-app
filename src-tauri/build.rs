@@ -14,6 +14,14 @@ fn main() {
     println!("cargo::rerun-if-changed=src/sidecar.rs");
     println!("cargo::rerun-if-changed=src/sidecar_lock.rs");
 
+    // The world-server browser client, gated the same way: present locally, absent from the
+    // public tree. Holds the master-server protocol, so it never ships in the open source.
+    println!("cargo::rustc-check-cfg=cfg(worldnet)");
+    if Path::new("src/worldnet.rs").exists() {
+        println!("cargo::rustc-cfg=worldnet");
+    }
+    println!("cargo::rerun-if-changed=src/worldnet.rs");
+
     // The secure-content packer, gated independently of the sidecar modules above.
     println!("cargo::rustc-check-cfg=cfg(mxbsecure)");
     if Path::new("src/mxbsecure.rs").exists() {

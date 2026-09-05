@@ -1053,6 +1053,24 @@ export const ptBR: Translation = {
   "servers.atCap": "Já há {{cap}} servidores rodando, que é o limite. Desligue um para iniciar outro.",
   "servers.help": "Compartilhe suas pinturas com todo mundo num servidor e administre um servidor dedicado seu.",
 
+  "serverBrowser.help":
+    "Todos os servidores de MX Bikes online, direto do servidor mestre do jogo, com o endereço para entrar. Escolha um e clique em Entrar para iniciar direto nele.",
+  "serverBrowser.searchPlaceholder": "Buscar servidores…",
+  "serverBrowser.count": "{{count}} online",
+  "serverBrowser.refresh": "Atualizar",
+  "serverBrowser.retry": "Tentar de novo",
+  "serverBrowser.loading": "Lendo a lista de servidores…",
+  "serverBrowser.empty": "Nenhum servidor online no momento.",
+  "serverBrowser.name": "Servidor",
+  "serverBrowser.players": "Pilotos",
+  "serverBrowser.ping": "Ping",
+  "serverBrowser.address": "Endereço",
+  "serverBrowser.passworded": "Senha obrigatória",
+  "serverBrowser.join": "Entrar",
+  "serverBrowser.joinFailed": "Não foi possível entrar nesse servidor",
+  "serverBrowser.copyAddress": "Copiar o endereço",
+  "serverBrowser.copied": "Endereço copiado",
+
   "sync.autoNote":
     "Seu visual se publica sozinho — cada moto, sempre que você muda no app ou na garagem do jogo. O dos outros chega quando você aperta Jogar.",
 

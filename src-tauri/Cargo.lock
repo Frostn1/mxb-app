@@ -549,6 +549,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "blowfish"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e412e2cd0f2b2d93e02543ceae7917b3c70331573df19ee046bcbc35e45e87d7"
+dependencies = [
+ "byteorder",
+ "cipher",
+]
+
+[[package]]
 name = "brotli"
 version = "8.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3536,7 +3546,9 @@ version = "0.13.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "blowfish",
  "chacha20poly1305",
+ "cipher",
  "cpal",
  "dirs-next",
  "ed25519-dalek",
@@ -3546,6 +3558,7 @@ dependencies = [
  "html-escape",
  "http",
  "image",
+ "libloading 0.8.9",
  "log",
  "md-5",
  "mega",

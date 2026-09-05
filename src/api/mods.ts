@@ -2971,6 +2971,29 @@ export function cpServers(): Promise<RegisteredServer[]> {
   return invoke<RegisteredServer[]>("cp_servers");
 }
 
+/** One live server from the game's master list — what the Servers tab shows per row. */
+export interface MasterServer {
+  name: string;
+  /** `ip:port`, ready for {@link joinServer}. */
+  address: string;
+  players: number;
+  maxPlayers: number;
+  /** Round-trip in ms, or `null` when it wasn't measured. */
+  pingMs: number | null;
+  track: string;
+  passworded: boolean;
+  region: string;
+}
+
+/**
+ * Every live MX Bikes server, as the in-game WORLD browser sees it, read straight from
+ * PiBoSo's master server. Rejects with a human-readable message when the list can't be
+ * fetched (this build lacks the browser, or the master didn't answer) — the tab shows it.
+ */
+export function listMasterServers(): Promise<MasterServer[]> {
+  return invoke<MasterServer[]>("list_master_servers");
+}
+
 export type ServerAction = "start" | "stop" | "restart";
 
 export function listServers(): Promise<ServerRef[]> {
