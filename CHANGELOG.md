@@ -3,6 +3,10 @@
 ## 2026-09-05
 
 ### Added
+- Seven colorways in Settings. Frost is still the default; Ember, Moss, Violet, Rose and
+  Slate move the whole window, not just the buttons. Each works in light and dark.
+- Retro, a colorway that goes further: amber phosphor, monospaced type, square corners and
+  a scanline over the window. The overlay follows whatever you pick, straight away.
 - A Servers tab that lists every live MX Bikes server the way the in-game browser does —
   who's on each one, the track it's running, and its address. Press Join to launch straight
   into any of them.
