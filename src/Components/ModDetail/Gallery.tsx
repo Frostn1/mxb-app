@@ -6,7 +6,8 @@ import "swiper/css";
 import "swiper/css/navigation";
 import "swiper/css/pagination";
 import { cn } from "@/lib/utils";
-import { cachedImage, STRIP_THUMB_WIDTH } from "../../lib/imgcache";
+import { STRIP_THUMB_WIDTH } from "../../lib/imgcache";
+import CachedImg from "@/Components/ui/cached-img";
 
 interface GalleryProps {
   images: string[];
@@ -83,8 +84,8 @@ export default function Gallery({
                 is 16:9, and cropping to fill sliced the top and bottom off every one of them.
                 A 16:9 screenshot still fills the frame exactly, so mxb-mods is unaffected —
                 only images whose shape differs get letterboxed, which is the honest result. */}
-            <img
-              src={cachedImage(src)}
+            <CachedImg
+              src={src}
               alt={title}
               className="size-full bg-[#15181c] object-contain"
             />
@@ -105,8 +106,9 @@ export default function Gallery({
                   : "border-transparent opacity-60 hover:opacity-100",
               )}
             >
-              <img
-                src={cachedImage(src, STRIP_THUMB_WIDTH)}
+              <CachedImg
+                src={src}
+                width={STRIP_THUMB_WIDTH}
                 alt=""
                 className="size-full bg-[#15181c] object-contain"
               />
