@@ -342,11 +342,11 @@ export const it: Translation = {
   "cloud.evictedBody":
     "Alcune mod non sono davvero su questo PC: {{what}} le ha spostate nel cloud.",
   "cloud.evictedPitch":
-    "Il gioco le legge durante il caricamento e può bloccarsi lì. Sposta fuori la cartella mod, oppure scegli “Conserva sempre su questo dispositivo”.",
+    "L'app sta bene: è il gioco che può bloccarsi leggendole. Fai clic destro sulla cartella mod e scegli “Conserva sempre su questo dispositivo”.",
   "cloud.slowBody":
     "La tua cartella mod si trova dentro {{what}}.",
   "cloud.slowPitch":
-    "Il gioco legge ogni mod durante il caricamento, e le letture tramite {{what}} sono lente: con una collezione grande sembra che il gioco si sia bloccato. Spostare la cartella risolve.",
+    "L'app sta bene: il gioco carica solo lentamente perché legge tramite {{what}}. Spostare la cartella fuori risolve.",
   "runtime.installed": "Componente installato",
   "runtime.installedDesc":
     "Ora FrostMod dovrebbe raggiungere il gioco. Riavvia MX Bikes se è già aperto.",

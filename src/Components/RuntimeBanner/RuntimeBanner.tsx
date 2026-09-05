@@ -102,7 +102,9 @@ export default function RuntimeBanner() {
             values={{ what: <span className="font-semibold">{provider}</span> }}
           />
         }
-        pitch={t(evicted ? "cloud.evictedPitch" : "cloud.slowPitch")}
+        pitch={t(evicted ? "cloud.evictedPitch" : "cloud.slowPitch", {
+          what: provider,
+        })}
         onDismiss={() => setCloudDismissed(true)}
         dismissLabel={t("runtime.dismiss")}
       />
@@ -178,25 +180,25 @@ function Bar({
   const Icon = icon ?? (danger ? OctagonAlert : AlertTriangle);
   return (
     <div
-      className={`flex items-center gap-3 border-b px-4 py-2 text-sm text-foreground ${
+      className={`flex items-center gap-2 border-b px-3 py-1 text-xs text-foreground ${
         danger
           ? "border-red-500/25 bg-red-500/10"
           : "border-amber-500/25 bg-amber-500/10"
       }`}
     >
-      <Icon className={`size-4 shrink-0 ${danger ? "text-red-500" : "text-amber-500"}`} />
+      <Icon className={`size-3.5 shrink-0 ${danger ? "text-red-500" : "text-amber-500"}`} />
       <span className="min-w-0 truncate">
         {body}
         <span className="ml-1 text-muted-foreground">{pitch}</span>
       </span>
 
-      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+      <div className="ml-auto flex shrink-0 items-center gap-1">
         {action && ActionIcon && onAction && (
-          <Button size="sm" onClick={onAction} disabled={busy}>
+          <Button size="sm" className="h-6 px-2 text-xs" onClick={onAction} disabled={busy}>
             {busy ? (
-              <Loader2 className="size-3.5 animate-spin" />
+              <Loader2 className="size-3 animate-spin" />
             ) : (
-              <ActionIcon className="size-3.5" />
+              <ActionIcon className="size-3" />
             )}
             {busy ? busyLabel : action}
           </Button>
@@ -204,12 +206,12 @@ function Bar({
         <Button
           size="icon"
           variant="ghost"
-          className="size-8"
+          className="size-6"
           onClick={onDismiss}
           disabled={busy}
           aria-label={dismissLabel}
         >
-          <X className="size-4" />
+          <X className="size-3.5" />
         </Button>
       </div>
     </div>
