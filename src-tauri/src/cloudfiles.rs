@@ -58,7 +58,7 @@ pub fn warn_if_dehydrated(app: &AppHandle, cfg: &crate::config::AppConfig) {
     let root = crate::library::mods_root(&cfg.mods_path);
     let app = app.clone();
     std::thread::spawn(move || {
-        let found = scan(&root);
+        let mut found = scan(&root);
         // Two separate problems, and the second used to go unmentioned.
         //
         // Evicted bytes are the crash. But a tree that merely *sits* on a sync provider is
@@ -69,6 +69,11 @@ pub fn warn_if_dehydrated(app: &AppHandle, cfg: &crate::config::AppConfig) {
         if found.count == 0 && found.provider.is_none() {
             return;
         }
+        // The gate above is the *detected* provider; the name below is what the player is
+        // told. When the path doesn't say, don't hedge — on Windows this is OneDrive far
+        // more often than not, and "a cloud sync tool" only makes players insist they don't
+        // have one. It ships on, and it syncs Documents by default.
+        found.provider = found.provider.or_else(fallback_provider);
         let provider = found.provider.clone().unwrap_or_else(|| "a cloud sync tool".into());
         if found.count > 0 {
             log::warn!(
@@ -151,6 +156,18 @@ fn is_content(path: &std::path::Path) -> bool {
 /// That is the thing worth knowing before asking the game to re-walk the tree.
 pub fn mods_provider(cfg: &crate::config::AppConfig) -> Option<String> {
     provider_of(&crate::library::mods_root(&cfg.mods_path))
+}
+
+/// What to call the sync tool when the path doesn't name one. `None` where the platform
+/// has no obvious default, and the UI supplies a generic phrase instead.
+fn fallback_provider() -> Option<String> {
+    if cfg!(windows) {
+        Some("OneDrive".into())
+    } else if cfg!(target_os = "macos") {
+        Some("iCloud Drive".into())
+    } else {
+        None
+    }
 }
 
 fn provider_of(root: &std::path::Path) -> Option<String> {
