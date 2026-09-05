@@ -2117,12 +2117,32 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
     // The material table, which is also how a reader finds the end of the masks: it looks for
     // "asphalt" and counts back four bytes. Same six, in the same order, as every published
     // track carries.
-    out.extend_from_slice(&6u32.to_le_bytes());
-    for name in ["asphalt", "grass", "sand", "kerb", "soil", "concrete"] {
+    //
+    // The nine floats after each name are how the surface gives under a wheel: four
+    // (sinkage, load) points -- at 2, 5, 10 and 35 kPa -- and then how much of it stays as a
+    // rut. We wrote thirty-six zero bytes, which is a load curve whose every point sits at
+    // the origin, handed to the tyre model the instant a wheel touches the ground.
+    //
+    // These are not per-track values. Indiana, Millville, Flanders and Lambretta Lynds carry
+    // byte-identical tables: three hard surfaces, two medium, and sand. Read straight off
+    // them.
+    const SURFACES: [(&str, f32, f32, f32, f32); 6] = [
+        // name, sinkage at 2 kPa, at 5, at 10, and the rut left behind
+        ("asphalt", 0.0012, 0.0025, 0.005, 0.0),
+        ("grass", 0.0037, 0.0075, 0.015, -0.02),
+        ("sand", 0.0075, 0.015, 0.03, -0.04),
+        ("kerb", 0.0012, 0.0025, 0.005, 0.0),
+        ("soil", 0.0037, 0.0075, 0.015, -0.02),
+        ("concrete", 0.0012, 0.0025, 0.005, 0.0),
+    ];
+    out.extend_from_slice(&(SURFACES.len() as u32).to_le_bytes());
+    for (name, a, b, c, rut) in SURFACES {
         let mut field = [0u8; 16];
         field[..name.len()].copy_from_slice(name.as_bytes());
         out.extend_from_slice(&field);
-        out.extend_from_slice(&[0u8; 36]); // nine floats of physics we have nothing to say about
+        for v in [a, 2.0, b, 5.0, c, 10.0, 0.0, 35.0, rut] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
     }
 
     // And the centreline, in the same sixty-byte records a compiled track carries. Written
@@ -2142,7 +2162,6 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
             Segment::Arc { radius, angle, .. } => (radius, angle),
         };
         let mut rec = [0f32; 15];
-        rec[0] = if at == 0.0 { 0.0 } else { 1.0 };
         rec[1] = seg.length();
         rec[2] = radius;
         rec[3] = angle.abs();
@@ -2159,7 +2178,14 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
         rec[10] = theta.cos();
         rec[11] = z;
         rec[14] = 1.0;
-        for v in rec {
+        // Word zero is an integer, not a float, and it is the one field in the record that
+        // is. Every published line reads back as a plain 1 on every segment but the first --
+        // Indiana's 120 records say `0, 1, 1, 1, ...` -- while ours said 1.0, which is
+        // 1,065,353,216 to anything reading it as a count or a flag. The other fourteen
+        // words are floats and match in kind.
+        let first = at == 0.0;
+        out.extend_from_slice(&u32::from(!first).to_le_bytes());
+        for v in &rec[1..] {
             out.extend_from_slice(&v.to_le_bytes());
         }
         at += seg.length();
@@ -2175,7 +2201,25 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
         }
     }
 
+    // The lists that follow the centreline, every one of them empty.
+    //
+    // A published `.trh` carries occluder boxes and several more lists here -- TrackEd writes
+    // them, and `tracked.exe` has the `occluder%d/pos/x` keys that fill them. We have none of
+    // it, and used to run the centreline straight into the `EXT` marker.
+    //
+    // That was the crash on entering a track. Measured by emulating the game's own `.trh`
+    // loader (0x1401f4f50, the branch the extension dispatcher takes for "TRH"): it reads a
+    // count word here unconditionally, and with `EXT\0` sitting in that slot it took the
+    // marker as a count of 5,523,013 and asked for a **66,331,452-byte** record off the end
+    // of the file. Ten zero words is what it takes to walk to the last byte and return, the
+    // same measurement that settled the `.map`.
+    for _ in 0..10 {
+        out.extend_from_slice(&0u32.to_le_bytes());
+    }
     out.extend_from_slice(b"EXT\0");
+    // Published files carry a word here -- 432 on the ARL tracks, 192 on the JV ones. The
+    // loader never reads it; it is written so the file ends the way theirs do.
+    out.extend_from_slice(&432u32.to_le_bytes());
     out
 }
 

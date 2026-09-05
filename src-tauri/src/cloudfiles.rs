@@ -69,10 +69,10 @@ pub fn warn_if_dehydrated(app: &AppHandle, cfg: &crate::config::AppConfig) {
         if found.count == 0 && found.provider.is_none() {
             return;
         }
-        // The gate above uses the *detected* provider; the name below is what the player is
-        // told. When the path doesn't say, don't hedge — on Windows this is OneDrive far more
-        // often than not (it ships on, and syncs Documents by default), and "a cloud sync
-        // tool" only gets players insisting they don't have one.
+        // The gate above is the *detected* provider; the name below is what the player is
+        // told. When the path doesn't say, don't hedge — on Windows this is OneDrive far
+        // more often than not, and "a cloud sync tool" only makes players insist they don't
+        // have one. It ships on, and it syncs Documents by default.
         found.provider = found.provider.or_else(fallback_provider);
         let provider = found.provider.clone().unwrap_or_else(|| "a cloud sync tool".into());
         if found.count > 0 {
@@ -158,8 +158,8 @@ pub fn mods_provider(cfg: &crate::config::AppConfig) -> Option<String> {
     provider_of(&crate::library::mods_root(&cfg.mods_path))
 }
 
-/// What to call the sync tool when the path doesn't name one. `None` where the platform has
-/// no obvious default, and the UI falls back to a generic phrase.
+/// What to call the sync tool when the path doesn't name one. `None` where the platform
+/// has no obvious default, and the UI supplies a generic phrase instead.
 fn fallback_provider() -> Option<String> {
     if cfg!(windows) {
         Some("OneDrive".into())
