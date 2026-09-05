@@ -3,6 +3,11 @@
 ## 2026-09-04
 
 ### Changed
+- The app keeps FrostMod up to date on its own. It checks for a new release while it is
+  open and installs it in the background, so you get the newest one without opening
+  Settings.
+- An update waits until you are out of the game, so nothing is pulled out from under a
+  session you are riding.
 - Session diagnostics cover more than the list of files your game has loaded: code running
   inside the game that came from no file, and what is sitting in the game's plugins folder.
 
