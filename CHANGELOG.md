@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-04
+
+### Added
+- Tracks you generate build with a normal map and shader for every ground layer, so the
+  soil, the riding line and the grass each take the light and show their grain.
+- Rain changes the ground. Every soil layer ships a wet sheet with its own reflection, so a
+  rainy race runs on dark, shining dirt.
+
+### Changed
+- Ground textures tile to each axis, so the soil keeps its scale on a track that is wider
+  than it is deep.
+
 ## 2026-09-04 — v0.13.6 — Paint sync, in beta
 
 ### Added

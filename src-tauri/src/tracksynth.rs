@@ -285,6 +285,12 @@ const MASK_DIM: usize = 1024;
 /// How hard the ground's own luma pushes its normals. Enough to catch light on ruts and
 /// chop without turning the soil grain into relief.
 const NORMAL_STRENGTH: f32 = 6.0;
+/// The same, for a source `_n.tga` rather than the encoding baked into a `.map`.
+///
+/// Gentler, because there the whole normal is written rather than just its direction. Two
+/// lands on the example track's own sheet: blue averaging 235 against its 241, and red
+/// spread across [19, 236] against its [9, 246].
+const SHEET_NORMAL_STRENGTH: f32 = 2.0;
 
 /// The ground textures' edge, in pixels. A power of two, as MX Bikes requires.
 ///
@@ -302,6 +308,17 @@ const TILE_FIELD_M: f32 = 4.5;
 const TILE_LINE_M: f32 = 3.2;
 const TILE_SHOULDER_M: f32 = 3.8;
 const TILE_GRASS_M: f32 = 2.8;
+
+/// The cube a wet layer reflects, per face. Small on purpose: it is seen smeared across a
+/// film of water and never in focus. The example track's own faces are 128 too.
+const ENV_FACE_DIM: usize = 128;
+
+/// How far rain darkens the ground.
+///
+/// Measured against the example track's pair: `mud_wet.tga` averages (52.5, 35.8, 20.9)
+/// where `mud.tga` averages (68.6, 52.2, 36.5) — about three quarters of it, with the
+/// chroma left alone. Wet soil is darker soil, not bluer soil.
+const WET_DARKEN: f32 = 0.74;
 
 /// The UI pictures' edge, in pixels. Square and modest — they are shown at a few hundred
 /// pixels and stored uncompressed.
@@ -1830,37 +1847,67 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     put("area_off.tga", tga_alpha(MASK_DIM, MASK_DIM, &off), &mut wrote)?;
     put("area_start.tga", tga_alpha(MASK_DIM, MASK_DIM, &start), &mut wrote)?;
 
-    // Ground follows what the track is made of, so a sand national exports sand.
-    let (field, ridden, shoulder, turf) = ground_looks(prog.terrain.surface);
-    std::fs::create_dir_all(dir.join("maps")).context("make the maps folder")?;
+    // Each band writes four things, not one: the sheet, the normal map that gives it relief,
+    // the shader that ties the two together, and the sheet it wears in the rain.
+    std::fs::create_dir_all(dir.join("maps/env")).context("make the maps folder")?;
     let seed = prog.terrain.relief.seed;
-    put(
-        "maps/ground.tga",
-        ground_texture(GROUND_TEXTURE_DIM, &field, seed ^ 0x9A0D),
-        &mut wrote,
-    )?;
-    put(
-        "maps/line.tga",
-        ground_texture(GROUND_TEXTURE_DIM, &ridden, seed ^ 0x11E5),
-        &mut wrote,
-    )?;
-    put(
-        "maps/shoulder.tga",
-        ground_texture(GROUND_TEXTURE_DIM, &shoulder, seed ^ 0x30D2),
-        &mut wrote,
-    )?;
-    put(
-        "maps/grass.tga",
-        ground_texture(GROUND_TEXTURE_DIM, &turf, seed ^ 0x6A55),
-        &mut wrote,
-    )?;
+    for l in layers(prog) {
+        let px = ground_pixels(GROUND_TEXTURE_DIM, &l.look, seed ^ l.salt);
+        // A shader's bump takes one repetition count whatever shape the terrain is, so on a
+        // rectangular one it follows x and the sheet's own two counts do the rest.
+        let (rx, _) = repetitions(prog, l.tile_m);
+        let name = l.name;
+        put(
+            &format!("maps/{name}.tga"),
+            rgba_tga(GROUND_TEXTURE_DIM, &px),
+            &mut wrote,
+        )?;
+        put(
+            &format!("maps/{name}_n.tga"),
+            normal_tga(&px, GROUND_TEXTURE_DIM, SHEET_NORMAL_STRENGTH, l.spec),
+            &mut wrote,
+        )?;
+        put(
+            &format!("maps/{name}.shd"),
+            crlf(&shd(&format!("{name}_n.tga"), rx, l.shininess, None)),
+            &mut wrote,
+        )?;
+        if l.wet {
+            // The wet frame reuses the dry normal map — the example's does too, because
+            // rain darkens ground without reshaping it. What changes is the shader: a tight
+            // highlight and the sky coming back off the water.
+            put(
+                &format!("maps/{name}_wet.tga"),
+                rgba_tga(GROUND_TEXTURE_DIM, &wet_pixels(&px)),
+                &mut wrote,
+            )?;
+            put(
+                &format!("maps/{name}_wet.shd"),
+                crlf(&shd(
+                    &format!("{name}_n.tga"),
+                    rx,
+                    80,
+                    Some(Reflect {
+                        min: 0.0,
+                        max: 0.8,
+                        exp: 6.0,
+                    }),
+                )),
+                &mut wrote,
+            )?;
+        }
+    }
     put("maps/grassfx.tga", grass_billboard(128), &mut wrote)?;
+    for (face, bytes) in env_faces(ENV_FACE_DIM) {
+        put(&format!("maps/env/env_{face}.tga"), bytes, &mut wrote)?;
+    }
 
-    put("track.hmf", hmf(prog, syn).into_bytes(), &mut wrote)?;
-    put("track.tht", tht(prog, syn).into_bytes(), &mut wrote)?;
-    put("params.ini", PARAMS_INI.into(), &mut wrote)?;
-    put("trh_params.ini", TRH_PARAMS_INI.into(), &mut wrote)?;
-    put("track.tcl", tcl(prog).into_bytes(), &mut wrote)?;
+    // PiBoSo's own source files are CRLF, so ours are.
+    put("track.hmf", crlf(&hmf(prog, syn)), &mut wrote)?;
+    put("track.tht", crlf(&tht(prog, syn)), &mut wrote)?;
+    put("params.ini", crlf(PARAMS_INI), &mut wrote)?;
+    put("trh_params.ini", crlf(TRH_PARAMS_INI), &mut wrote)?;
+    put("track.tcl", crlf(&tcl(prog)), &mut wrote)?;
     // The game-facing files, byte for byte what the `.pkz` carries.
     put(&format!("{slug}/{slug}.ini"), crlf(&track_ini(prog)), &mut wrote)?;
     put(&format!("{slug}/{slug}.amb"), crlf(AMB), &mut wrote)?;
@@ -2656,9 +2703,9 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
         // How often the sheet repeats, the mask that says where this band covers the ground,
         // and the float that closes the layer. The terrain's layer reader takes these at
         // 0x14025f370 through 0x14025f405.
-        let reps = repetitions(prog, tile) as f32;
-        out.extend_from_slice(&f(reps));
-        out.extend_from_slice(&f(reps));
+        let (rx, rz) = repetitions(prog, tile);
+        out.extend_from_slice(&f(rx as f32));
+        out.extend_from_slice(&f(rz as f32));
         match mask_to {
             None => out.extend_from_slice(&u(0)),
             Some(edge) => {
@@ -3008,12 +3055,141 @@ struct GroundLook {
 /// with wrapping indices, so the sheet meets itself at every edge. A ground texture repeated
 /// a hundred and fifty times across a track shows every seam it has.
 fn ground_texture(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
-    let rgba = ground_pixels(dim, look, seed);
+    rgba_tga(dim, &ground_pixels(dim, look, seed))
+}
+
+/// RGBA pixels in the container TerrainEd reads: the same bytes with the channels swapped.
+fn rgba_tga(dim: usize, rgba: &[u8]) -> Vec<u8> {
     let mut px = Vec::with_capacity(rgba.len());
     for p in rgba.chunks_exact(4) {
         px.extend_from_slice(&[p[2], p[1], p[0], p[3]]);
     }
     tga_bgra(dim, dim, &px)
+}
+
+/// A ground sheet's normal map, in the form TerrainEd reads from a `.shd`.
+///
+/// Not the same encoding as the one baked into a compiled `.map`, which is two-channel with
+/// a constant blue — see [`normal_pixels`]. A source `_n.tga` carries the whole normal: the
+/// example track's `dirt_n.tga` averages (128, 127, 241) across its three colour channels,
+/// with red and green spread the full width of the byte. Its alpha is the specular level,
+/// which is where the shader picks the highlight up when `specular` names no map of its own.
+///
+/// The specular is modulated by the sheet's own luma, because the pale stones in soil catch
+/// light and the crevices between them do not.
+fn normal_tga(rgba: &[u8], dim: usize, strength: f32, spec: u8) -> Vec<u8> {
+    let luma = |x: usize, y: usize| -> f32 {
+        let i = (y % dim) * dim * 4 + (x % dim) * 4;
+        (0.299 * rgba[i] as f32 + 0.587 * rgba[i + 1] as f32 + 0.114 * rgba[i + 2] as f32) / 255.0
+    };
+    let mut px = Vec::with_capacity(dim * dim * 4);
+    for y in 0..dim {
+        for x in 0..dim {
+            let dx = luma((x + 1) % dim, y) - luma((x + dim - 1) % dim, y);
+            let dy = luma(x, (y + 1) % dim) - luma(x, (y + dim - 1) % dim);
+            let (nx, ny, nz) = (-dx * strength, -dy * strength, 1.0);
+            let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-6);
+            let enc = |v: f32| ((v / len * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0) as u8;
+            let a = (spec as f32 * (0.35 + 0.65 * luma(x, y))).clamp(0.0, 255.0) as u8;
+            // The container is BGRA, so the normal's z goes down first.
+            px.extend_from_slice(&[enc(nz), enc(ny), enc(nx), a]);
+        }
+    }
+    tga_bgra(dim, dim, &px)
+}
+
+/// The same ground after rain.
+///
+/// Water darkens soil: the film on top stops the surface scattering, so less light comes
+/// back. It does not tint it — see [`WET_DARKEN`], which is measured off the example track's
+/// own pair of sheets. The shine comes from the wet sheet's shader, not from its colour.
+fn wet_pixels(rgba: &[u8]) -> Vec<u8> {
+    rgba.chunks_exact(4)
+        .flat_map(|p| {
+            let w = |v: u8| (v as f32 * WET_DARKEN) as u8;
+            [w(p[0]), w(p[1]), w(p[2]), p[3]]
+        })
+        .collect()
+}
+
+/// How much of the sky a wet sheet throws back, and how sharply.
+struct Reflect {
+    min: f32,
+    max: f32,
+    exp: f32,
+}
+
+/// The shader that goes beside a ground sheet.
+///
+/// TerrainEd looks for `<sheet>.shd` next to every texture the `.hmf` names and bakes what it
+/// finds into the map. A sheet without one is lit flat — no relief, no highlight — which is
+/// what every terrain layer this generated used to be, and most of why the ground read as a
+/// painted surface rather than dirt.
+///
+/// Paths inside are relative to the sheet's own folder, not to the project: `maps/line.shd`
+/// says `line_n.tga`, not `maps/line_n.tga`.
+fn shd(normal: &str, repetitions: u32, shininess: u32, reflect: Option<Reflect>) -> String {
+    let mut s = format!(
+        "bump\n{{\n\tmap = {normal}\n\trepetitions = {repetitions}\n}}\n\n\
+         specular\n{{\n\tshininess = {shininess}\n}}\n"
+    );
+    if let Some(r) = reflect {
+        s.push_str(&format!(
+            "\nreflection\n{{\n\tfactormin = {}\n\tfactormax = {}\n\tfactorexp = {}\n\
+             \tenvmap = env/env.tga\n\tenvmap_add = 1\n}}\n",
+            r.min, r.max, r.exp
+        ));
+    }
+    s
+}
+
+/// The cube a wet layer reflects.
+///
+/// Six faces, because TerrainEd resolves `envmap = env/env.tga` to `env_right`, `env_left`,
+/// `env_top`, `env_bottom`, `env_front` and `env_back` beside it. What a film of water on
+/// soil actually shows is sky above the horizon and ground below it, so that is all these
+/// are — and they are never seen in focus.
+///
+/// The sky matches the `.amb`'s own fog, because the two are looked at together.
+fn env_faces(dim: usize) -> Vec<(&'static str, Vec<u8>)> {
+    const ZENITH: [f32; 3] = [96.0, 140.0, 196.0];
+    const HORIZON: [f32; 3] = [179.0, 179.0, 217.0];
+    const GROUND: [f32; 3] = [86.0, 74.0, 60.0];
+
+    let mix = |a: [f32; 3], b: [f32; 3], t: f32| -> [u8; 3] {
+        let t = t.clamp(0.0, 1.0);
+        [
+            (a[0] + (b[0] - a[0]) * t) as u8,
+            (a[1] + (b[1] - a[1]) * t) as u8,
+            (a[2] + (b[2] - a[2]) * t) as u8,
+        ]
+    };
+    let face = |shade: &dyn Fn(f32) -> [u8; 3]| -> Vec<u8> {
+        let mut px = Vec::with_capacity(dim * dim * 4);
+        for y in 0..dim {
+            let c = shade((y as f32 + 0.5) / dim as f32);
+            for _ in 0..dim {
+                px.extend_from_slice(&[c[2], c[1], c[0], 255]);
+            }
+        }
+        tga_bgra(dim, dim, &px)
+    };
+    // Row zero is the bottom of a TGA, so a side face runs ground first and sky last.
+    let side = face(&|v: f32| {
+        if v < 0.5 {
+            mix(GROUND, HORIZON, v * 2.0)
+        } else {
+            mix(HORIZON, ZENITH, (v - 0.5) * 2.0)
+        }
+    });
+    vec![
+        ("right", side.clone()),
+        ("left", side.clone()),
+        ("front", side.clone()),
+        ("back", side),
+        ("top", face(&|_| mix(ZENITH, ZENITH, 0.0))),
+        ("bottom", face(&|_| mix(GROUND, GROUND, 0.0))),
+    ]
 }
 
 /// The same ground as RGBA, which is what the `.map` embeds — the `.tga` is these pixels with
@@ -3487,42 +3663,143 @@ fn header(prog: &TrackProgram, syn: &Synth) -> String {
 
 /// How many times a sheet repeats across the terrain, for a wanted tile size on the ground.
 ///
-/// At least one, and rounded, because it is a count of tiles.
-fn repetitions(prog: &TrackProgram, tile_m: f32) -> u32 {
-    (prog.terrain.size_x.max(prog.terrain.size_z) / tile_m.max(0.5))
-        .round()
-        .clamp(1.0, 4096.0) as u32
+/// Per axis, at least one, and rounded, because it is a count of tiles. A rectangular
+/// terrain given a single count stretches its ground along the long axis — which is what
+/// TerrainEd's separate `repetitions_x` and `repetitions_z` are for.
+fn repetitions(prog: &TrackProgram, tile_m: f32) -> (u32, u32) {
+    let n = |m: f32| (m / tile_m.max(0.5)).round().clamp(1.0, 4096.0) as u32;
+    (n(prog.terrain.size_x), n(prog.terrain.size_z))
+}
+
+/// One band of ground: the sheet it paints with, what lets it through, and what it takes to
+/// wear away.
+///
+/// The `.hmf` names these files and [`write_source`] writes them, so both read this one
+/// list. Two lists drift, and a layer naming a sheet nobody wrote is a track TerrainEd stops
+/// on before it has drawn anything.
+struct Layer {
+    /// The sheet's base name under `maps/`. Everything beside it is named from this: the
+    /// normal map, the shader, and the wet frame.
+    name: &'static str,
+    look: GroundLook,
+    salt: u32,
+    /// How many metres of ground one tile of the sheet covers.
+    tile_m: f32,
+    /// `None` on layer zero: it is the ground everything else is painted over.
+    mask: Option<&'static str>,
+    /// And nothing under it to wear through to, so no thickness either.
+    thickness: Option<f32>,
+    /// How much of the sheet catches the light, in the normal map's alpha.
+    ///
+    /// Dirt is nearly matte. The example's own normal maps carry a specular that averages
+    /// about 10 of 255 and peaks near 65, and wet ground does not raise it — the shine in
+    /// the rain comes from the shader's reflection block, not from here.
+    spec: u8,
+    /// How tight the highlight is. The example's dry sheets say 12 and its wet ones 20 to 80.
+    shininess: u32,
+    /// Soil darkens and shines in the rain; turf does not, which is why the example gives a
+    /// wet frame to its mud, dirt and sand and none to its grass.
+    wet: bool,
+    /// Whether the layer scatters 3D grass over itself.
+    grass: bool,
+}
+
+/// The four bands, bottom first.
+///
+/// Field, graded shoulder, riding line, and the grass over the top. A track painted
+/// line-and-field is a brown ribbon on a green sheet, and the shoulder — the worked ground
+/// either side of the ribbon — is most of what is actually in front of a rider.
+fn layers(prog: &TrackProgram) -> Vec<Layer> {
+    // Ground follows what the track is made of, so a sand national exports sand.
+    let (field, ridden, shoulder, turf) = ground_looks(prog.terrain.surface);
+    vec![
+        Layer {
+            name: "ground",
+            look: field,
+            salt: 0x9A0D,
+            tile_m: TILE_FIELD_M,
+            mask: None,
+            thickness: None,
+            spec: 18,
+            shininess: 12,
+            wet: true,
+            grass: false,
+        },
+        Layer {
+            name: "shoulder",
+            look: shoulder,
+            salt: 0x30D2,
+            tile_m: TILE_SHOULDER_M,
+            mask: Some("mask_shoulder.tga"),
+            thickness: Some(0.05),
+            spec: 20,
+            shininess: 12,
+            wet: true,
+            grass: false,
+        },
+        Layer {
+            name: "line",
+            look: ridden,
+            salt: 0x11E5,
+            tile_m: TILE_LINE_M,
+            mask: Some("mask_dirt.tga"),
+            thickness: Some(0.1),
+            spec: 22,
+            shininess: 12,
+            wet: true,
+            grass: false,
+        },
+        Layer {
+            name: "grass",
+            look: turf,
+            salt: 0x6A55,
+            tile_m: TILE_GRASS_M,
+            mask: Some("mask_grass.tga"),
+            thickness: Some(0.01),
+            spec: 14,
+            shininess: 8,
+            wet: false,
+            grass: true,
+        },
+    ]
 }
 
 fn hmf(prog: &TrackProgram, syn: &Synth) -> String {
+    let layers = layers(prog);
     let mut s = header(prog, syn);
-    // Four bands, not three: field, graded shoulder, riding line, and the grass over the
-    // top. A track painted line-and-field is a brown ribbon on a green sheet, and the
-    // shoulder — the worked ground either side of the ribbon — is most of what is actually
-    // in front of a rider.
-    s.push_str("num_layers = 4\n");
-    // Layer zero carries no mask: it is the ground everything else is painted over.
-    s.push_str(&format!(
-        "layer0\n{{\n\tmap = maps/ground.tga\n\trepetitions = {}\n}}\n\n",
-        repetitions(prog, TILE_FIELD_M)
-    ));
-    s.push_str(&format!(
-        "layer1\n{{\n\tmap = maps/shoulder.tga\n\trepetitions = {}\n\
-         \tmask = mask_shoulder.tga\n\tthickness = 0.05\n}}\n\n",
-        repetitions(prog, TILE_SHOULDER_M)
-    ));
-    s.push_str(&format!(
-        "layer2\n{{\n\tmap = maps/line.tga\n\trepetitions = {}\n\tmask = mask_dirt.tga\n\
-         \tthickness = 0.1\n}}\n\n",
-        repetitions(prog, TILE_LINE_M)
-    ));
-    s.push_str(&format!(
-        "layer3\n{{\n\tmap = maps/grass.tga\n\trepetitions = {}\n\tmask = mask_grass.tga\n\
-         \tthickness = 0.01\n\n\tgrass\n\t{{\n\t\tmax_density = 20\n\t\theight = 0.2\n\
-         \t\theight_diff = 0.1\n\t\twidth = 0.25\n\t\twidth_diff = 0.1\n\
-         \t\ttexture = maps/grassfx.tga\n\t\tdensitymap = mask_grass.tga\n\t}}\n}}\n",
-        repetitions(prog, TILE_GRASS_M)
-    ));
+    s.push_str(&format!("num_layers = {}\n", layers.len()));
+    for (i, l) in layers.iter().enumerate() {
+        s.push_str(&format!("layer{i}\n{{\n\tmap = maps/{}.tga\n", l.name));
+        if l.wet {
+            // The rainy-weather sheet. TerrainEd bakes both frames into the map and the game
+            // picks between them with the weather — a layer without one keeps its dry
+            // ground in the rain, which is what every track this generated used to do.
+            s.push_str(&format!(
+                "\tframe1\n\t{{\n\t\tmap = maps/{}_wet.tga\n\t}}\n",
+                l.name
+            ));
+        }
+        let (rx, rz) = repetitions(prog, l.tile_m);
+        if rx == rz {
+            s.push_str(&format!("\trepetitions = {rx}\n"));
+        } else {
+            s.push_str(&format!("\trepetitions_x = {rx}\n\trepetitions_z = {rz}\n"));
+        }
+        if let Some(mask) = l.mask {
+            s.push_str(&format!("\tmask = {mask}\n"));
+        }
+        if let Some(t) = l.thickness {
+            s.push_str(&format!("\tthickness = {t}\n"));
+        }
+        if l.grass {
+            s.push_str(
+                "\n\tgrass\n\t{\n\t\tmax_density = 20\n\t\theight = 0.2\n\
+                 \t\theight_diff = 0.1\n\t\twidth = 0.25\n\t\twidth_diff = 0.1\n\
+                 \t\ttexture = maps/grassfx.tga\n\t\tdensitymap = mask_grass.tga\n\t}\n",
+            );
+        }
+        s.push_str("}\n\n");
+    }
     s
 }
 
@@ -4212,19 +4489,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         write_source(&p, &s, &dir).unwrap();
 
+        // The source files, and every shader they pull in beside a sheet — a `.shd` naming a
+        // normal map nobody wrote stops TerrainEd exactly as a missing texture does.
+        let mut files = vec!["track.hmf".to_string(), "track.tht".to_string()];
+        for l in layers(&p) {
+            files.push(format!("maps/{}.shd", l.name));
+            if l.wet {
+                files.push(format!("maps/{}_wet.shd", l.name));
+            }
+        }
+
         let mut named = Vec::new();
-        for f in ["track.hmf", "track.tht"] {
+        for f in &files {
             let text = std::fs::read_to_string(dir.join(f)).unwrap();
+            // Paths inside a shader are relative to the sheet's own folder, not the project.
+            let base = std::path::Path::new(f).parent().unwrap().to_path_buf();
             for line in text.lines() {
                 let Some((key, value)) = line.split_once('=') else {
                     continue;
                 };
-                // Every key whose value is a file name rather than a number.
-                if matches!(
-                    key.trim(),
-                    "map" | "mask" | "data" | "texture" | "densitymap"
-                ) {
-                    named.push((f, value.trim().to_string()));
+                let value = value.trim();
+                match key.trim() {
+                    // Every key whose value is a file name rather than a number.
+                    "map" | "mask" | "data" | "texture" | "densitymap" => {
+                        named.push((f.clone(), base.join(value).to_string_lossy().into_owned()));
+                    }
+                    // A cube map names six files at once, by suffix.
+                    "envmap" => {
+                        let (stem, ext) = value.rsplit_once('.').unwrap();
+                        for side in ["right", "left", "top", "bottom", "front", "back"] {
+                            named.push((
+                                f.clone(),
+                                base.join(format!("{stem}_{side}.{ext}"))
+                                    .to_string_lossy()
+                                    .into_owned(),
+                            ));
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -4248,6 +4550,115 @@ mod tests {
             assert!(dir.join(&f).is_file(), "{f} is missing");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A layer without a shader is lit flat, which is what the exported tracks were.
+    #[test]
+    fn every_ground_sheet_is_shaded() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let dir = std::env::temp_dir().join(format!("mxb-shd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        write_source(&p, &s, &dir).unwrap();
+
+        let hmf = std::fs::read_to_string(dir.join("track.hmf")).unwrap();
+        let sheets: Vec<&str> = hmf
+            .lines()
+            .filter_map(|l| l.split_once("map = maps/"))
+            .map(|(_, v)| v.trim().trim_end_matches(".tga"))
+            .filter(|v| *v != "grassfx")
+            .collect();
+        assert!(sheets.len() >= 4, "found {sheets:?}");
+        for sheet in sheets {
+            let shd = std::fs::read_to_string(dir.join(format!("maps/{sheet}.shd")))
+                .unwrap_or_else(|_| panic!("{sheet} has no shader beside it"));
+            assert!(shd.contains("bump"), "{sheet} has no normal map");
+            assert!(shd.contains("specular"), "{sheet} takes no highlight");
+            // Relative to the sheet, not the project — `line_n.tga`, not `maps/line_n.tga`.
+            assert!(
+                shd.contains("map = ") && !shd.contains("map = maps/"),
+                "the shader for {sheet} points out of its own folder:\n{shd}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Rain has to change the ground, and only the ground that rain changes.
+    #[test]
+    fn the_soil_layers_carry_a_wet_frame_and_the_turf_does_not() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let dir = std::env::temp_dir().join(format!("mxb-wet-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        write_source(&p, &s, &dir).unwrap();
+
+        let hmf = std::fs::read_to_string(dir.join("track.hmf")).unwrap();
+        assert_eq!(
+            hmf.matches("frame1").count(),
+            3,
+            "three soil bands get a wet sheet, the grass does not:\n{hmf}"
+        );
+        for l in layers(&p) {
+            let wet = dir.join(format!("maps/{}_wet.tga", l.name));
+            assert_eq!(wet.is_file(), l.wet, "{} wet sheet", l.name);
+        }
+        // And it is the same ground, darker — not a different sheet.
+        let dry = std::fs::metadata(dir.join("maps/line.tga")).unwrap().len();
+        let wet = std::fs::metadata(dir.join("maps/line_wet.tga"))
+            .unwrap()
+            .len();
+        assert_eq!(dry, wet, "the wet sheet is the dry one shaded, same shape");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Against the example track's own `dirt_n.tga`, which averages (128, 127, 241) with its
+    /// red spread across [9, 246] and a specular in alpha averaging 12.
+    #[test]
+    fn a_normal_map_matches_the_shape_of_the_examples_own() {
+        let (field, ..) = ground_looks(Surface::Soil);
+        let dim = 256;
+        let px = ground_pixels(dim, &field, 7);
+        let t = normal_tga(&px, dim, SHEET_NORMAL_STRENGTH, 18);
+        let body = &t[18..18 + dim * dim * 4];
+        // The container is BGRA, so blue is first and red third.
+        let mean = |o: usize| {
+            body.iter()
+                .skip(o)
+                .step_by(4)
+                .map(|&v| v as f64)
+                .sum::<f64>()
+                / (dim * dim) as f64
+        };
+        let (b, g, r, a) = (mean(0), mean(1), mean(2), mean(3));
+        assert!((120.0..136.0).contains(&r), "red is off centre at {r:.1}");
+        assert!((120.0..136.0).contains(&g), "green is off centre at {g:.1}");
+        assert!(
+            (215.0..252.0).contains(&b),
+            "blue at {b:.1} — the sheet is tilted far harder than the example's"
+        );
+        assert!((4.0..30.0).contains(&a), "specular at {a:.1}, not dirt's");
+    }
+
+    /// A rectangular terrain given one repetition count stretches its ground sideways.
+    #[test]
+    fn a_rectangular_terrain_tiles_each_axis_for_itself() {
+        // Twice as wide as it is deep, so the grid stays square-celled — the synthesiser
+        // insists on that and the ratio has to be a power of two for it.
+        let mut p = oval();
+        p.terrain.size_x = 800.0;
+        let s = synthesise(&p).unwrap();
+        let text = hmf(&p, &s);
+        assert!(
+            !text.contains("\trepetitions = "),
+            "still one count:\n{text}"
+        );
+        assert!(text.contains("repetitions_x = "));
+        assert!(text.contains("repetitions_z = "));
+
+        // And a square one keeps saying it the short way, the way the example does.
+        let sq = oval();
+        let s = synthesise(&sq).unwrap();
+        assert!(hmf(&sq, &s).contains("\trepetitions = "));
     }
 
     #[test]
