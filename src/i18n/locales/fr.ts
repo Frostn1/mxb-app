@@ -1058,6 +1058,24 @@ export const fr: Translation = {
   "servers.atCap": "{{cap}} serveurs tournent déjà, c'est la limite. Éteignez-en un pour en démarrer un autre.",
   "servers.help": "Partagez vos livrées avec tout le monde sur un serveur, et gérez votre propre serveur dédié.",
 
+  "serverBrowser.help":
+    "Tous les serveurs MX Bikes en ligne, directement depuis le serveur maître du jeu, avec l'adresse pour les rejoindre. Choisis-en un et clique sur Rejoindre pour y entrer directement.",
+  "serverBrowser.searchPlaceholder": "Rechercher des serveurs…",
+  "serverBrowser.count": "{{count}} en ligne",
+  "serverBrowser.refresh": "Actualiser",
+  "serverBrowser.retry": "Réessayer",
+  "serverBrowser.loading": "Chargement de la liste des serveurs…",
+  "serverBrowser.empty": "Aucun serveur en ligne pour le moment.",
+  "serverBrowser.name": "Serveur",
+  "serverBrowser.players": "Pilotes",
+  "serverBrowser.ping": "Ping",
+  "serverBrowser.address": "Adresse",
+  "serverBrowser.passworded": "Mot de passe requis",
+  "serverBrowser.join": "Rejoindre",
+  "serverBrowser.joinFailed": "Impossible de rejoindre ce serveur",
+  "serverBrowser.copyAddress": "Copier l'adresse",
+  "serverBrowser.copied": "Adresse copiée",
+
   "sync.autoNote":
     "Votre look se publie tout seul — chaque moto, dès que vous le changez dans l'app ou dans le garage du jeu. Celui des autres arrive quand vous appuyez sur Jouer.",
 

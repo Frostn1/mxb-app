@@ -12,6 +12,7 @@ import {
   Loader2,
   Gamepad2,
   SlidersHorizontal,
+  Server,
   Store,
   ShoppingBag,
   Brush,
@@ -58,6 +59,7 @@ import DownloadQueue from "./DownloadQueue";
 export type DashboardView =
   | `plugin:${string}`
   | "browse"
+  | "servers"
   | "shop"
   | "hub"
   | "library"
@@ -113,6 +115,9 @@ const entryLabel = (t: TFunc, e: NavEntry) => e.rawLabel ?? t(e.label);
 
 const NAV: NavEntry[] = [
   { id: "browse", label: "nav.browse", icon: Home },
+  // The live server list from the game's master server — a second catalog, of servers
+  // rather than mods, so it sits right under Browse.
+  { id: "servers", label: "nav.servers", icon: Server },
   {
     id: "library",
     label: "nav.library",

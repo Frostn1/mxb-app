@@ -10,6 +10,7 @@ import Manage from "../Manage/Manage";
 import Secure from "../Secure/Secure";
 import Studio, { type StudioTab } from "../Studio/Studio";
 import Browse from "../Browse/Browse";
+import Servers from "../Servers/Servers";
 import Shop from "../Shop/Shop";
 import Hub from "../Hub/Hub";
 import ModDetail from "../ModDetail/ModDetail";
@@ -228,6 +229,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onOpenMod={openMod}
               onChangeType={changeType}
             />
+          ) : view === "servers" ? (
+            <Servers />
           ) : view === "shop" ? (
             <Shop refreshKey={libraryVersion} />
           ) : view === "hub" ? (

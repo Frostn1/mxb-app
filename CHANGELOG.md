@@ -2,6 +2,11 @@
 
 ## 2026-09-05
 
+### Added
+- A Servers tab that lists every live MX Bikes server the way the in-game browser does —
+  who's on each one, the track it's running, and its address. Press Join to launch straight
+  into any of them.
+
 ### Fixed
 - Tracks you build in the app have a riding line again. The ground is painted in four bands
   — field, worked shoulder, the line itself and the grass over the top — where before every

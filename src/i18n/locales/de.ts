@@ -1060,6 +1060,24 @@ export const de: Translation = {
   "servers.atCap": "Es laufen bereits {{cap}} Server, das ist das Limit. Schalte einen ab, um einen neuen zu starten.",
   "servers.help": "Teile deine Designs mit allen auf einem Server und betreibe einen eigenen Dedicated Server.",
 
+  "serverBrowser.help":
+    "Alle laufenden MX-Bikes-Server, direkt vom Master-Server des Spiels – mit der Adresse zum Beitreten. Wähle einen aus und klicke auf Beitreten, um direkt zu starten.",
+  "serverBrowser.searchPlaceholder": "Server suchen…",
+  "serverBrowser.count": "{{count}} online",
+  "serverBrowser.refresh": "Aktualisieren",
+  "serverBrowser.retry": "Erneut versuchen",
+  "serverBrowser.loading": "Serverliste wird geladen…",
+  "serverBrowser.empty": "Gerade sind keine Server online.",
+  "serverBrowser.name": "Server",
+  "serverBrowser.players": "Fahrer",
+  "serverBrowser.ping": "Ping",
+  "serverBrowser.address": "Adresse",
+  "serverBrowser.passworded": "Passwort erforderlich",
+  "serverBrowser.join": "Beitreten",
+  "serverBrowser.joinFailed": "Konnte diesem Server nicht beitreten",
+  "serverBrowser.copyAddress": "Adresse kopieren",
+  "serverBrowser.copied": "Adresse kopiert",
+
   "sync.autoNote":
     "Dein Look veröffentlicht sich selbst — jedes Bike, sobald du ihn in der App oder in der Garage des Spiels änderst. Der der anderen kommt, wenn du auf Spielen drückst.",
 
