@@ -1843,8 +1843,39 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         tga_alpha(MASK_DIM, MASK_DIM, &shoulder),
         &mut wrote,
     )?;
+    // The pit lane, in the same place the race data puts its stalls. It runs along the
+    // opening straight, so the straight's own frame gives the side the lane is on — the
+    // distance the other masks read is unsigned and would paint a lane on both sides.
+    let pits = pit_lane(prog);
+    let (fx, fz) = crate::trackprog::heading_vector(prog.start.angle.to_radians());
+    let (rx, rz) = crate::trackprog::right_vector(prog.start.angle.to_radians());
+    let pit_area = mask_from(syn, MASK_DIM, |_, _, x, z| {
+        let (dx, dz) = (x - prog.start.x, z - prog.start.z);
+        let along = dx * fx + dz * fz;
+        let lat = dx * rx + dz * rz;
+        u8::from(
+            along >= pits.from - 6.0
+                && along <= pits.to + 6.0
+                && (lat - pits.lat).abs() <= pits.half_width,
+        ) * 255
+    });
+    // What the 3D grass is coloured by. Terrain-wide, like the density map it sits beside in
+    // the same block, rather than tiled like the blade sprite: the two `*map` keys are
+    // siblings and read the ground the same way.
+    let (.., turf) = ground_looks(prog.terrain.surface);
+    let grass_color = mask_rect(syn, MASK_DIM, MASK_DIM, |_, _, x, z| {
+        // One channel is enough to carry the variation; the tint itself is written below.
+        (140.0 + 90.0 * fbm(x * 0.02, z * 0.02, seed ^ 0x4B12)).clamp(0.0, 255.0) as u8
+    });
+
     put("mask_grass.tga", tga_alpha(MASK_DIM, MASK_DIM, &grass), &mut wrote)?;
+    put(
+        "grass_color.tga",
+        tga_tinted(MASK_DIM, MASK_DIM, &grass_color, turf.base),
+        &mut wrote,
+    )?;
     put("area_off.tga", tga_alpha(MASK_DIM, MASK_DIM, &off), &mut wrote)?;
+    put("area_pits.tga", tga_alpha(MASK_DIM, MASK_DIM, &pit_area), &mut wrote)?;
     put("area_start.tga", tga_alpha(MASK_DIM, MASK_DIM, &start), &mut wrote)?;
 
     // Each band writes four things, not one: the sheet, the normal map that gives it relief,
@@ -1908,6 +1939,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     put("params.ini", crlf(PARAMS_INI), &mut wrote)?;
     put("trh_params.ini", crlf(TRH_PARAMS_INI), &mut wrote)?;
     put("track.tcl", crlf(&tcl(prog)), &mut wrote)?;
+    put("track_start.tcl", crlf(&start_tcl(prog)), &mut wrote)?;
     // The game-facing files, byte for byte what the `.pkz` carries.
     put(&format!("{slug}/{slug}.ini"), crlf(&track_ini(prog)), &mut wrote)?;
     put(&format!("{slug}/{slug}.amb"), crlf(AMB), &mut wrote)?;
@@ -1930,7 +1962,8 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     )?;
     put(
         "_centerline.bat",
-        format!("tracked -merge {slug}/{slug}.trh cl track.tcl\r\n").into_bytes(),
+        format!("tracked -merge {slug}/{slug}.trh cl track.tcl sa track_start.tcl\r\n")
+            .into_bytes(),
         &mut wrote,
     )?;
     put("README.txt", readme(prog, syn, &slug).into_bytes(), &mut wrote)?;
@@ -2175,12 +2208,49 @@ fn ground(s: Surface) -> (u32, f32) {
 ///
 /// Untested against the game — nothing here has been loaded by MX Bikes. The structure is
 /// right; whether every field means what it looks like is not something a macOS box can say.
+/// Where the finish line and the gate row sit, in metres round the lap.
+///
+/// Shared, because the race data places them, the start `.tcl` begins at the gate, and the
+/// collision file paints the start area around it. Three files disagreeing about where a
+/// race starts is a race that starts in the wrong place.
+fn start_marks(prog: &TrackProgram) -> (f32, f32) {
+    // Far enough in that the gate behind it is still on the opening straight.
+    let line = (prog.lap_length() * 0.06).clamp(10.0, 40.0);
+    (line, (line - 12.0).max(1.0))
+}
+
+/// The pit lane: alongside the opening straight, a track's width off the racing line.
+///
+/// Stated once, because the race data puts the stalls here and the collision file has to
+/// paint the same strip as pit surface. A pit lane the ground disagrees with is one the game
+/// scores you off the track for using.
+struct PitLane {
+    stalls: usize,
+    /// Signed metres from the centreline. Negative is the rider's left.
+    lat: f32,
+    /// Metres round the lap: the first stall, and the last.
+    from: f32,
+    to: f32,
+    /// Half the width of the strip of pit surface under them.
+    half_width: f32,
+}
+
+fn pit_lane(prog: &TrackProgram) -> PitLane {
+    let (_, gate_at) = start_marks(prog);
+    let stalls = 16;
+    PitLane {
+        stalls,
+        lat: -(prog.width * 0.5 + 6.0),
+        from: gate_at,
+        to: gate_at + (stalls - 1) as f32 * 5.0,
+        half_width: 4.0,
+    }
+}
+
 fn rdf(prog: &TrackProgram) -> String {
     let lap = prog.lap_length();
     let half = prog.width * 0.5;
-    // Far enough in that the gate behind it is still on the opening straight.
-    let line = (lap * 0.06).clamp(10.0, 40.0);
-    let gate_at = (line - 12.0).max(1.0);
+    let (line, gate_at) = start_marks(prog);
 
     let mut s = String::new();
     let mark = |s: &mut String, name: &str, at: f32, w: f32| {
@@ -2193,9 +2263,8 @@ fn rdf(prog: &TrackProgram) -> String {
     mark(&mut s, "split1", (line + lap / 3.0) % lap, half);
     mark(&mut s, "split2", (line + lap * 2.0 / 3.0) % lap, half);
 
-    // The pit lane runs alongside the opening straight, a track's width off the racing line.
-    let stalls = 16;
-    let lane_lat = -(half + 6.0);
+    let pits = pit_lane(prog);
+    let (stalls, lane_lat) = (pits.stalls, pits.lat);
     s.push_str(&format!(
         "pit_lane\n{{\n\tnumstalls = {stalls}\n\tstarttype = 1\n\tstartstartlong = 0.000000\n\
          \tstartdifflong = 0.000000\n\tstartstartlat = 0.000000\n\tstartendlat = 0.000000\n\
@@ -3627,6 +3696,20 @@ fn ui_images(syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>) {
 
 /// Uncompressed 32-bit BGRA, the mask in the alpha channel — the shape the official example's
 /// own masks are in, down to the descriptor byte and the file footer.
+/// A colour sheet from one channel of variation and a base tint.
+///
+/// The 3D grass reads its colour off one of these, so it wants the turf's own green with
+/// enough patching across the terrain that a field of blades isn't one flat colour.
+fn tga_tinted(w: usize, h: usize, level: &[u8], base: [f32; 3]) -> Vec<u8> {
+    let mut px = Vec::with_capacity(w * h * 4);
+    for &l in level {
+        let k = l as f32 / 190.0;
+        let c = |i: usize| (base[i] * k).clamp(0.0, 255.0) as u8;
+        px.extend_from_slice(&[c(2), c(1), c(0), 255]);
+    }
+    tga_bgra(w, h, &px)
+}
+
 fn tga_alpha(w: usize, h: usize, alpha: &[u8]) -> Vec<u8> {
     let mut px = Vec::with_capacity(w * h * 4);
     for a in alpha {
@@ -3795,7 +3878,8 @@ fn hmf(prog: &TrackProgram, syn: &Synth) -> String {
             s.push_str(
                 "\n\tgrass\n\t{\n\t\tmax_density = 20\n\t\theight = 0.2\n\
                  \t\theight_diff = 0.1\n\t\twidth = 0.25\n\t\twidth_diff = 0.1\n\
-                 \t\ttexture = maps/grassfx.tga\n\t\tdensitymap = mask_grass.tga\n\t}\n",
+                 \t\ttexture = maps/grassfx.tga\n\t\tcolormap = grass_color.tga\n\
+                 \t\tdensitymap = mask_grass.tga\n\t}\n",
             );
         }
         s.push_str("}\n\n");
@@ -3805,9 +3889,13 @@ fn hmf(prog: &TrackProgram, syn: &Synth) -> String {
 
 fn tht(prog: &TrackProgram, syn: &Synth) -> String {
     let mut s = header(prog, syn);
-    s.push_str("num_surface_layers = 2\n\n");
+    // Off, pit, start — the order PiBoSo's example writes them in, and it matters: the pit
+    // lane sits outside the shoulder, so the layer that says "pit" has to come after the one
+    // that says "off the track".
+    s.push_str("num_surface_layers = 3\n\n");
     s.push_str("surface_layer0\n{\n\tsurface = off\n\tmask = area_off.tga\n}\n\n");
-    s.push_str("surface_layer1\n{\n\tsurface = start\n\tmask = area_start.tga\n}\n\n");
+    s.push_str("surface_layer1\n{\n\tsurface = pit\n\tmask = area_pits.tga\n}\n\n");
+    s.push_str("surface_layer2\n{\n\tsurface = start\n\tmask = area_start.tga\n}\n\n");
     s.push_str("num_material_layers = 3\n\n");
     // The base is whatever the ground is; the line is worked soil on top of it, and the
     // field is grass. Same three bands the height file paints, said in physics.
@@ -3822,18 +3910,15 @@ fn tht(prog: &TrackProgram, syn: &Synth) -> String {
     s
 }
 
-/// The centreline, in the form `tracked -merge` reads: a start pose and the same straights
-/// and arcs the program was written in.
-fn tcl(prog: &TrackProgram) -> String {
+/// A centreline in the form `tracked -merge` reads: a start pose, and a run of straights and
+/// arcs with the length each one is to be written at.
+fn tcl_of(x: f32, z: f32, angle: f32, segs: &[(&Segment, f32)]) -> String {
     let mut s = format!(
-        "x = {:.3}\nz = {:.3}\nangle = {:.4}\nnumsegment = {}\n",
-        prog.start.x,
-        prog.start.z,
-        prog.start.angle,
-        prog.segments.len()
+        "x = {x:.3}\nz = {z:.3}\nangle = {angle:.4}\nnumsegment = {}\n",
+        segs.len()
     );
-    for (i, seg) in prog.segments.iter().enumerate() {
-        let (radius, angle) = match *seg {
+    for (i, (seg, length)) in segs.iter().enumerate() {
+        let (radius, angle) = match **seg {
             Segment::Straight { .. } => (0.0, 0.0),
             Segment::Arc { radius, angle, .. } => (radius, angle.abs()),
         };
@@ -3843,13 +3928,53 @@ fn tcl(prog: &TrackProgram) -> String {
             1
         };
         s.push_str(&format!(
-            "segment{i}\n{{\n\ttype = {kind}\n\tlength = {:.6}\n\tradius = {radius:.6}\n\
+            "segment{i}\n{{\n\ttype = {kind}\n\tlength = {length:.6}\n\tradius = {radius:.6}\n\
              \tangle = {angle:.6}\n\theight = {:.6}\n\theightlock = 0\n}}\n",
-            seg.length(),
             seg.rise()
         ));
     }
     s
+}
+
+/// The racing line: the same straights and arcs the program was written in.
+fn tcl(prog: &TrackProgram) -> String {
+    let segs: Vec<(&Segment, f32)> = prog.segments.iter().map(|s| (s, s.length())).collect();
+    tcl_of(prog.start.x, prog.start.z, prog.start.angle, &segs)
+}
+
+/// How much of the lap the start line covers: far enough that the field has funnelled in.
+const START_LINE_M: f32 = 150.0;
+
+/// The start line, which `tracked -merge` takes under `sa` as it takes the racing line under
+/// `cl` — PiBoSo's own example merges both.
+///
+/// The gate row sits on the lap's opening straight, so the start line is the lap's own
+/// leading segments with the first shortened to begin where the gates do.
+fn start_tcl(prog: &TrackProgram) -> String {
+    let (_, gate_at) = start_marks(prog);
+    let mut segs: Vec<(&Segment, f32)> = Vec::new();
+    let mut run = 0.0f32;
+    let mut trimmed = 0.0f32;
+    for seg in &prog.segments {
+        let mut len = seg.length();
+        // Only the first, and only when it is a straight with room to give.
+        if segs.is_empty() && matches!(seg, Segment::Straight { .. }) && len > gate_at + 20.0 {
+            trimmed = gate_at;
+            len -= gate_at;
+        }
+        segs.push((seg, len));
+        run += len;
+        if run >= START_LINE_M {
+            break;
+        }
+    }
+    let (fx, fz) = crate::trackprog::heading_vector(prog.start.angle.to_radians());
+    tcl_of(
+        prog.start.x + fx * trimmed,
+        prog.start.z + fz * trimmed,
+        prog.start.angle,
+        &segs,
+    )
 }
 
 /// The track's own description, in the shape published tracks write it.
@@ -4511,7 +4636,7 @@ mod tests {
                 let value = value.trim();
                 match key.trim() {
                     // Every key whose value is a file name rather than a number.
-                    "map" | "mask" | "data" | "texture" | "densitymap" => {
+                    "map" | "mask" | "data" | "texture" | "densitymap" | "colormap" => {
                         named.push((f.clone(), base.join(value).to_string_lossy().into_owned()));
                     }
                     // A cube map names six files at once, by suffix.
@@ -4659,6 +4784,88 @@ mod tests {
         let sq = oval();
         let s = synthesise(&sq).unwrap();
         assert!(hmf(&sq, &s).contains("\trepetitions = "));
+    }
+
+    /// The ground has to agree with the race data about where the pit lane is.
+    #[test]
+    fn the_pit_strip_lands_where_the_race_data_puts_its_stalls() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let dir = std::env::temp_dir().join(format!("mxb-pits-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        write_source(&p, &s, &dir).unwrap();
+
+        let tga = std::fs::read(dir.join("area_pits.tga")).unwrap();
+        let px = &tga[18..18 + MASK_DIM * MASK_DIM * 4];
+        let pits = pit_lane(&p);
+        let (fx, fz) = crate::trackprog::heading_vector(p.start.angle.to_radians());
+        let (rx, rz) = crate::trackprog::right_vector(p.start.angle.to_radians());
+
+        let (mut n, mut lat, mut along) = (0u32, 0.0f64, 0.0f64);
+        for y in 0..MASK_DIM {
+            for x in 0..MASK_DIM {
+                if px[(y * MASK_DIM + x) * 4 + 3] < 128 {
+                    continue;
+                }
+                // The mask is stretched over the terrain, so a texel is a fraction of it.
+                let wx = x as f32 / MASK_DIM as f32 * p.terrain.size_x - p.start.x;
+                let wz = y as f32 / MASK_DIM as f32 * p.terrain.size_z - p.start.z;
+                lat += (wx * rx + wz * rz) as f64;
+                along += (wx * fx + wz * fz) as f64;
+                n += 1;
+            }
+        }
+        assert!(n > 200, "the pit strip is {n} texels, which is nothing");
+        let (lat, along) = (lat / n as f64, along / n as f64);
+        assert!(
+            (lat - pits.lat as f64).abs() < 2.0,
+            "the strip sits at {lat:.1} m across, the stalls at {:.1}",
+            pits.lat
+        );
+        let middle = (pits.from + pits.to) as f64 / 2.0;
+        assert!(
+            (along - middle).abs() < 8.0,
+            "the strip sits at {along:.1} m round, the stalls at {middle:.1}"
+        );
+        assert!(
+            std::fs::read_to_string(dir.join("track.tht"))
+                .unwrap()
+                .contains("surface = pit"),
+            "nothing tells the game that strip is pit lane"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `tracked -merge` takes a start line beside the racing one, and it begins at the gate.
+    #[test]
+    fn the_start_line_begins_at_the_gate_row() {
+        let p = oval();
+        let (_, gate_at) = start_marks(&p);
+        let text = start_tcl(&p);
+
+        let value = |key: &str| -> f32 {
+            text.lines()
+                .find_map(|l| l.trim().strip_prefix(&format!("{key} = ")))
+                .unwrap_or_else(|| panic!("no {key} in\n{text}"))
+                .parse()
+                .unwrap()
+        };
+        // The oval opens along +z, so the gate is that far up the straight from the origin.
+        assert!((value("x") - p.start.x).abs() < 0.01);
+        assert!((value("z") - (p.start.z + gate_at)).abs() < 0.01);
+        // And the first segment gives up exactly what the pose took.
+        let first = p.segments[0].length();
+        assert!(
+            (value("length") - (first - gate_at)).abs() < 0.01,
+            "first segment is {} where the lap's is {first}",
+            value("length")
+        );
+        assert!(value("numsegment") >= 1.0);
+        // It covers the run into the track and stops, rather than restating the lap.
+        assert!(
+            value("numsegment") < p.segments.len() as f32,
+            "the start line is the whole lap again"
+        );
     }
 
     #[test]

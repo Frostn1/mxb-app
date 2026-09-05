@@ -5,7 +5,7 @@
 //! ```text
 //! terrained.exe track.hmf mytrack/mytrack.map params.ini      graphics
 //! terrained.exe track.tht mytrack/mytrack.trh trh_params.ini  collision
-//! tracked.exe -merge mytrack/mytrack.trh cl track.tcl         the centreline
+//! tracked.exe -merge mytrack/mytrack.trh cl track.tcl sa track_start.tcl   the lines
 //! ```
 //!
 //! Which the app can run for you, so exporting and compiling are one button rather than a
@@ -104,16 +104,15 @@ pub fn compile(tools: &Tools, dir: &Path, slug: &str, game_path: &str) -> Result
         Some(&trh),
     )?);
 
-    // The centreline is merged into the collision file, so it can only run once that exists.
+    // The lines are merged into the collision file, so this can only run once that exists.
+    // Both of them, as PiBoSo's own example does: `cl` is the racing line and `sa` the start,
+    // and a track merged without the second starts its races off the line it drew.
     if let (Some(tracked), true) = (&tools.tracked, dir.join(&trh).is_file()) {
-        steps.push(run(
-            "centerline",
-            tracked,
-            &["-merge", &trh, "cl", "track.tcl"],
-            dir,
-            game_path,
-            Some(&trh),
-        )?);
+        let mut args = vec!["-merge", trh.as_str(), "cl", "track.tcl"];
+        if dir.join("track_start.tcl").is_file() {
+            args.extend_from_slice(&["sa", "track_start.tcl"]);
+        }
+        steps.push(run("centerline", tracked, &args, dir, game_path, Some(&trh))?);
     }
     Ok(steps)
 }
