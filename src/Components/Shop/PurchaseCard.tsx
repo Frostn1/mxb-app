@@ -3,7 +3,8 @@ import { Check, Download, ExternalLink, Loader2, Store } from "lucide-react";
 import type { ShopMod } from "../../types";
 import type { ShopItem } from "../../api/mods";
 import { openShopUrl } from "../../api/shop";
-import { cachedImage, GRID_THUMB_WIDTH } from "../../lib/imgcache";
+import { GRID_THUMB_WIDTH } from "../../lib/imgcache";
+import CachedImg from "@/Components/ui/cached-img";
 import { useT } from "../../i18n/context";
 import { Button } from "@/Components/ui/button";
 import {
@@ -89,11 +90,12 @@ export default function PurchaseCard({
             className="relative aspect-square cursor-default overflow-hidden bg-gradient-to-br from-[#3a3f45] to-[#20242a] disabled:cursor-not-allowed"
           >
             {listing?.image && !broken ? (
-              <img
-                src={cachedImage(listing.image, GRID_THUMB_WIDTH)}
+              <CachedImg
+                src={listing.image}
+                width={GRID_THUMB_WIDTH}
                 alt={product}
                 loading="lazy"
-                onError={() => setBroken(true)}
+                onUnavailable={() => setBroken(true)}
                 className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
               />
             ) : (

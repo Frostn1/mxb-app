@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-05
+
+### Fixed
+- Pictures load on machines where the app's image cache can't be reached. Browse, Shop and
+  MXB Hub fall back to loading a thumbnail straight from the site, so the grids show what
+  you are downloading instead of placeholder icons.
+
 ## 2026-09-04 — v0.13.6 — Paint sync, in beta
 
 ### Added
