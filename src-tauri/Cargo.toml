@@ -148,6 +148,15 @@ tungstenite = { version = "0.24", default-features = false, features = [
     "rustls-tls-webpki-roots",
 ] }
 
+# Used only by the local-only `worldnet` module (the server browser). Pure-Rust and tiny, so
+# they cost the public build a few unused crates rather than a native link: `blowfish`+`cipher`
+# are the master protocol's cipher, and `libloading` reaches Steam's flat C API at runtime the
+# same way the app reads Steam identity from files — no build-time `steam_api` linkage (see
+# `steamid.rs`).
+blowfish = "0.9"
+cipher = "0.4"
+libloading = "0.8"
+
 # Only for putting a mod back after an uninstall. `trash` calls `trashItemAtURL` but throws
 # away the destination it reports, and the Trash folder can't simply be read back — macOS
 # refuses `~/.Trash` to an app without Full Disk Access. Asking the API where it put the file

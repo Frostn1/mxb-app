@@ -857,6 +857,65 @@ fn parse_ini_mods_folder(bytes: &[u8]) -> Option<String> {
     fallback
 }
 
+/// The master server the client talks to when the `.ini` names none. Community-documented,
+/// not shipped in the binary (which reads the address from the `.ini` — see `parse_master_servers`).
+pub const DEFAULT_MASTER: &str = "master.mx-bikes.com:54200";
+
+/// Pull the `[master]` server addresses out of a PiBoSo `.ini`.
+///
+/// The game reads up to ten — `server`, `server2` … `server10` — and tries each in turn, so
+/// this returns them in that order. Same forgiving Windows-1252 `[section]`/`key = value`
+/// parse as [`parse_ini_mods_folder`]; empty when the file has no `[master]` section.
+pub fn parse_master_servers(bytes: &[u8]) -> Vec<String> {
+    let text: String = bytes.iter().map(|&b| b as char).collect();
+    let mut section = String::new();
+    // Keyed by index so `server`, `server2`, … come back in the order the game reads them,
+    // regardless of the order they appear in the file.
+    let mut found: Vec<(u32, String)> = Vec::new();
+    for line in text.lines() {
+        let line = line.split(';').next().unwrap_or("").trim();
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            section = name.trim().to_ascii_lowercase();
+            continue;
+        }
+        if section != "master" {
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else { continue };
+        let (k, v) = (k.trim().to_ascii_lowercase(), v.trim().trim_matches('"').trim());
+        if v.is_empty() {
+            continue;
+        }
+        // `server` is index 1; `serverN` is index N. Anything else in the section is ignored.
+        let idx = match k.strip_prefix("server") {
+            Some("") => Some(1),
+            Some(n) => n.parse::<u32>().ok(),
+            None => None,
+        };
+        if let Some(idx) = idx {
+            found.push((idx, v.to_string()));
+        }
+    }
+    found.sort_by_key(|(idx, _)| *idx);
+    found.into_iter().map(|(_, addr)| addr).collect()
+}
+
+/// The master addresses to query for this install: the `.ini`'s if it names any, else the
+/// documented default so a fresh install still reaches the public list.
+pub fn master_servers(cfg: &AppConfig) -> Vec<String> {
+    let name = game_ini_name(cfg.game());
+    let from_ini = [cfg.game_path.trim(), cfg.mods_path.trim()]
+        .into_iter()
+        .filter(|d| !d.is_empty())
+        .map(|d| crate::library::resolve_child(Path::new(d), &name))
+        .filter(|p| p.is_file())
+        .find_map(|ini| {
+            let servers = parse_master_servers(&std::fs::read(&ini).ok()?);
+            (!servers.is_empty()).then_some(servers)
+        });
+    from_ini.unwrap_or_else(|| vec![DEFAULT_MASTER.to_string()])
+}
+
 /// The game's user folder inside a Wine prefix.
 ///
 /// Wherever the game runs as a Windows process — Proton on Linux, CrossOver/Whisky on
@@ -1511,6 +1570,30 @@ mod tests {
             Some("C:\\modsé".to_string()),
             "Windows-1252, like every other file these games write",
         );
+    }
+
+    /// The master list drives the server browser, so its order and its bounds matter: the
+    /// game reads `server`, `server2` … `server10` in that order and tries each in turn.
+    #[test]
+    fn parses_the_master_servers_out_of_a_piboso_ini() {
+        // One server, the stock file.
+        assert_eq!(
+            parse_master_servers(b"[master]\nserver = master.mx-bikes.com:54200\n\n[mods]\nfolder = C:\\mods\n"),
+            vec!["master.mx-bikes.com:54200".to_string()],
+        );
+
+        // Several, returned in game order even when the file lists them out of order.
+        assert_eq!(
+            parse_master_servers(b"[master]\nserver2 = b:2\nserver = a:1\nserver10 = j:10\n"),
+            vec!["a:1".to_string(), "b:2".to_string(), "j:10".to_string()],
+        );
+
+        // A `server` key outside `[master]`, an empty value, and a non-numbered stray are all
+        // ignored; nothing to read yields nothing (the caller falls back to the default).
+        assert_eq!(parse_master_servers(b"[net]\nserver = elsewhere:1\n"), Vec::<String>::new());
+        assert_eq!(parse_master_servers(b"[master]\nserver =\n"), Vec::<String>::new());
+        assert_eq!(parse_master_servers(b"[master]\nserverfoo = x:1\n"), Vec::<String>::new());
+        assert_eq!(parse_master_servers(b""), Vec::<String>::new());
     }
 
     /// A value that doesn't resolve to a real mods tree is thrown away rather than
