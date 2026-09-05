@@ -80,11 +80,29 @@ pub fn transmitting() -> bool {
 // Enumeration
 // ---------------------------------------------------------------------------------------
 
+/// Walking the host's device list is not safe to do from two threads at once.
+///
+/// On Windows cpal reaches WASAPI through COM, and two threads enumerating endpoints
+/// concurrently takes the process down with an access violation — not an error a caller can
+/// handle. It showed up on CI, where the runner has no sound card and so every one of these
+/// calls goes down the same path at the same moment, and it showed up as the whole test
+/// binary dying with `STATUS_ACCESS_VIOLATION` and no test named.
+///
+/// The app can reach here from the settings screen and the voice thread at the same time, so
+/// the lock belongs in front of the enumeration rather than in the tests. A poisoned lock is
+/// taken anyway: the data it guards is `()`, and refusing to list devices because an earlier
+/// caller panicked would turn a recoverable moment into a silent microphone.
+fn enumerating() -> std::sync::MutexGuard<'static, ()> {
+    static ENUMERATION: Mutex<()> = Mutex::new(());
+    ENUMERATION.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// List every input and output the host offers.
 ///
 /// Enumerated fresh on every call rather than cached at startup: the whole point is to
 /// notice the headset that was plugged in after the app launched.
 pub fn devices() -> Devices {
+    let _guard = enumerating();
     let host = cpal::default_host();
     let default_in = host.default_input_device().and_then(|d| device_name(&d));
     let default_out = host.default_output_device().and_then(|d| device_name(&d));
@@ -127,6 +145,7 @@ fn collect<I: Iterator<Item = cpal::Device>>(list: Option<I>, default: Option<&s
 /// can't find → the default too, but the caller is told, because a player who picked a
 /// specific headset needs to know they're not on it.
 pub(super) fn resolve(wanted: &str, input: bool) -> Result<(cpal::Device, Option<String>), String> {
+    let _guard = enumerating();
     let host = cpal::default_host();
     let default = || {
         if input { host.default_input_device() } else { host.default_output_device() }
