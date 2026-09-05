@@ -8,6 +8,8 @@
   into any of them.
 
 ### Fixed
+- Sharing a track goes through. Big shares upload in smaller pieces and a piece the host
+  drops is sent again, so a share code comes back instead of an upload error.
 - Tracks you build in the app have a riding line again. The ground is painted in four bands
   — field, worked shoulder, the line itself and the grass over the top — where before every
   track came out one flat colour from fence to fence.

@@ -175,8 +175,9 @@ custom-protocol = ["tauri/custom-protocol"]
 # of a normal build, so the shipped binary never gets the `test` feature.
 tauri = { version = "2", features = ["test"] }
 # `#[tokio::test]` for the live network checks against mxb-mods.com. Dev-only, so the
-# shipped binary keeps the minimal `time`-only tokio it already had.
-tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }
+# shipped binary keeps the minimal `time`-only tokio it already had. `test-util` lets the
+# upload retry tests skip their backoff instead of sleeping through it.
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time", "test-util"] }
 
 # `tauri dev` builds this profile, and cargo's default leaves everything at opt-level 0 —
 # which is fine for our own glue but not for the crates doing the heavy lifting. Unpacking one
