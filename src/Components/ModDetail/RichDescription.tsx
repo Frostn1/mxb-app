@@ -4,6 +4,7 @@ import {
   cachedImage,
   DESCRIPTION_IMAGE_WIDTH,
   isCacheableImage,
+  schemeIsBroken,
 } from "../../lib/imgcache";
 
 interface RichDescriptionProps {
@@ -73,6 +74,10 @@ export default function RichDescription({ html }: RichDescriptionProps) {
  */
 function proxyImages(html: string): string {
   if (typeof DOMParser === "undefined") return html;
+  // Rewriting into a scheme that has already proved unusable on this machine would turn
+  // images that load today into ones that cannot. `CachedImg` recovers per image; this is
+  // markup, so the whole rewrite steps aside instead.
+  if (schemeIsBroken()) return html;
 
   const doc = new DOMParser().parseFromString(html, "text/html");
   for (const img of doc.querySelectorAll("img[src]")) {
