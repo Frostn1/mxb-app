@@ -12,6 +12,8 @@
   into any of them.
 
 ### Fixed
+- The cloud-storage warning names OneDrive instead of guessing at "a cloud sync tool", says
+  the app itself is fine, and takes up one thin line instead of a block.
 - Sharing a track goes through. Big shares upload in smaller pieces and a piece the host
   drops is sent again, so a share code comes back instead of an upload error.
 - Tracks you build in the app have a riding line. The ground is painted in four bands —
