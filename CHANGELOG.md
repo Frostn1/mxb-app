@@ -10,9 +10,9 @@
 ### Fixed
 - Sharing a track goes through. Big shares upload in smaller pieces and a piece the host
   drops is sent again, so a share code comes back instead of an upload error.
-- Tracks you build in the app have a riding line again. The ground is painted in four bands
-  — field, worked shoulder, the line itself and the grass over the top — where before every
-  track came out one flat colour from fence to fence.
+- Tracks you build in the app have a riding line. The ground is painted in four bands —
+  field, worked shoulder, the line itself and the grass over the top — and you can see all
+  four: nothing is laid over the top of them any more.
 - Every band takes the light: each one carries its own relief map, so soil reads as soil
   instead of a painted surface.
 - Sound mods install. The ones that come as a folder per bike, the ones that hand you an
