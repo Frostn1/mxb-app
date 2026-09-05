@@ -4289,6 +4289,10 @@ mod tests {
         assert!(before.abs() < 1.2, "it comes back {before:.2} m off");
     }
 
+    /// A lap has to come back to where it started, in height as well as in position. One
+    /// step-up used to raise everything after it and nothing put it back, so the start line —
+    /// where the two ends of the lap meet in the ground — was a cliff the height of the
+    /// step-up. It measured 1.30 m in a single sample on the demo, and no test saw it.
     #[test]
     fn climbs_and_drops_cancel_however_many_there_are() {
         let mut p = oval();
@@ -5124,17 +5128,6 @@ mod tests {
         n
     }
 
-    /// A corner does not wear one groove down the middle. Everybody takes roughly the same
-    /// line and nobody takes exactly it, so what a tight turn ends up with is a comb — which
-    /// is what a published track's collision terrain shows and what a single rut does not.
-    #[test]
-    /// Which side a corner's bank stands on. The berm the corner grows on its own used to
-    /// stand on the *inside*, and nothing caught it because the demo declares a berm at every
-    /// corner and a declared one replaced it.
-    /// A lap has to come back to where it started, in height as well as in position. One
-    /// step-up used to raise everything after it and nothing put it back, so the start line —
-    /// where the two ends of the lap meet in the ground — was a cliff the height of the
-    /// step-up. It measured 1.30 m in a single sample on the demo, and no test saw it.
     /// No straight line across the terrain, whichever direction it runs.
     ///
     /// A straight line in ground is always a defect — real terrain has no reason to step along
@@ -5277,6 +5270,9 @@ mod tests {
         );
     }
 
+    /// Which side a corner's bank stands on. The berm the corner grows on its own used to
+    /// stand on the *inside*, and nothing caught it because the demo declares a berm at every
+    /// corner and a declared one replaced it.
     #[test]
     fn a_corner_banks_on_its_outside() {
         let p = hairpins(); // right-hand, and no berm declared anywhere
@@ -5302,6 +5298,9 @@ mod tests {
         assert!(n >= 1, "the straight wore {n} grooves");
     }
 
+    /// A corner does not wear one groove down the middle. Everybody takes roughly the same
+    /// line and nobody takes exactly it, so what a tight turn ends up with is a comb — which
+    /// is what a published track's collision terrain shows and what a single rut does not.
     #[test]
     fn a_corner_wears_a_bundle_of_ruts() {
         let p = hairpins();
