@@ -7,13 +7,13 @@ const POLL_MS = 5000;
 /**
  * Whether MX Bikes is running, polled in the background.
  *
- * Kept out of `FrostmodProvider` on purpose: that context tracks FrostMod's own process,
- * and the game is a separate thing to watch. `refresh` is exposed so a launch can check
- * straight away instead of waiting out the interval.
+ * A separate thing from FrostMod's own process, which is why this stayed out of
+ * `FrostmodProvider`'s probe — that context consumes this hook rather than folding the two
+ * answers into one call. `refresh` is exposed so a launch can check straight away instead
+ * of waiting out the interval.
  *
- * Windows and macOS both really probe (Win32 on one, `ps` on the other — under Wine the
- * game is a normal process). Linux is permanently `false`, which is harmless: the backend
- * routes through Steam, and Steam focuses the running game rather than starting a second.
+ * All three platforms really probe: Win32 on Windows, `ps` on macOS and `/proc` on Linux,
+ * where the game is an ordinary process under Wine/Proton whose argv still names the exe.
  */
 export function useGameRunning(): { running: boolean; refresh: () => void } {
   const [running, setRunning] = useState(false);

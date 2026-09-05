@@ -28,10 +28,22 @@ import {
 import type { Attachment, FrostmodStatus, VcRuntime } from "../types";
 import { ATTACH_PROBLEM } from "../types";
 import { displayName } from "../lib/mods";
+import { autoInstallAction } from "../lib/frostmodAuto";
+import { useGameRunning } from "../lib/useGameRunning";
 import { useT, type TFunc } from "../i18n/context";
 import { FrostmodContext } from "./FrostmodContext";
 
 const POLL_MS = 5000;
+
+/**
+ * How often to ask GitHub whether FrostMod has a newer release.
+ *
+ * The check used to run once, at mount, so an app left open never learned about a release
+ * published after it started. Half-hourly is two calls an hour against GitHub's 60/hr
+ * unauthenticated limit, and it also re-runs the sweeps `status()` carries — the stray
+ * `msvcr90.dll` and the stale game plugin — which only ever ran that one time too.
+ */
+const VERSION_CHECK_MS = 30 * 60 * 1000;
 
 /**
  * Name what the folder watcher picked up. The watcher reports mods as `<type>/<name>`;
@@ -53,6 +65,9 @@ function watchDescription(mods: string[], t: TFunc): string {
 
 export function FrostmodProvider({ children }: { children: ReactNode }) {
   const t = useT();
+  // Only ever read to decide whether an unattended update may run now — FrostMod's own
+  // process is `running` below, and the two are separate things to watch.
+  const { running: gameRunning } = useGameRunning();
   const [running, setRunning] = useState<boolean | null>(null);
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   // What we last warned about, so a problem that persists across the 5s poll is reported
@@ -125,9 +140,12 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     probe();
     void refreshStatus();
     const id = setInterval(probe, POLL_MS);
+    // Its own, much slower interval: this one hits the network, the one above doesn't.
+    const versionId = setInterval(() => void refreshStatus(), VERSION_CHECK_MS);
     return () => {
       mounted.current = false;
       clearInterval(id);
+      clearInterval(versionId);
     };
   }, [probe, refreshStatus]);
 
@@ -352,39 +370,33 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
 
   const dismissRuntimeWarning = useCallback(() => setRuntimeDismissed(true), []);
 
-  // FrostMod is core to the app, so set it up automatically on first run instead
-  // of prompting: once we learn it isn't installed, download + start it silently.
-  //
-  // `needsRepair` gets the same treatment. An install that recorded a version it never
-  // finished applying looks current to every version check, so nobody would think to
-  // press anything — and the binaries it's short of are the ones the game actually
-  // loads. Repairing it unasked is the only thing that reaches those players.
-  //
-  // So does `supportedForGame`: a build too old for the active title can't be started at
-  // all, and the player has no way to know why. Updating unasked is the fix — and if the
-  // newest release is still too old, the attempt is capped at one per session and the
-  // panel falls back to telling them.
+  // FrostMod is core to the app, so it is installed, repaired and updated without anyone
+  // being asked — `autoInstallAction` holds the whole decision table. A build that is
+  // missing, half-applied or too old for the active title does nothing at all and gives the
+  // player no way to know why; one that is merely out of date used to sit behind a button
+  // in a panel most people never open, which is the half this now covers too.
   //
   // `missingRuntimes` is deliberately NOT in here. Reinstalling FrostMod cannot put a
   // Visual C++ runtime on the machine, so auto-installing on that flag would download
   // FrostMod again to no effect — and the flag would still be set afterwards. It needs
   // the user's admin consent anyway, so it stays a banner they press.
-  //
-  // Runs at most once per session; a failed status check (`statusError`) is skipped so
-  // we only act on a confirmed snapshot, never an offline guess.
-  const autoInstallTried = useRef(false);
+  const triedRepair = useRef(false);
+  const updatedTo = useRef<string | null>(null);
   useEffect(() => {
-    if (
-      !autoInstallTried.current &&
-      status &&
-      (!status.installed || status.needsRepair || !status.supportedForGame) &&
-      !statusError &&
-      !installing
-    ) {
-      autoInstallTried.current = true;
-      void install();
-    }
-  }, [status, statusError, installing, install]);
+    const action = autoInstallAction(status, {
+      statusError,
+      installing,
+      gameRunning,
+      triedRepair: triedRepair.current,
+      updatedTo: updatedTo.current,
+    });
+    if (!action) return;
+    // Recorded before the install, not after: it must count as attempted even if it
+    // throws, or a failure would retry on every poll.
+    if (action === "repair") triedRepair.current = true;
+    else updatedTo.current = status?.latest ?? null;
+    void install();
+  }, [status, statusError, installing, gameRunning, install]);
 
   const value = useMemo(
     () => ({

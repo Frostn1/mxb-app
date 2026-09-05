@@ -2,6 +2,13 @@
 
 ## 2026-09-04
 
+### Changed
+- The app keeps FrostMod up to date on its own. It checks for a new release while it is
+  open and installs it in the background, so you get the newest one without opening
+  Settings.
+- An update waits until you are out of the game, so nothing is pulled out from under a
+  session you are riding.
+
 ### Fixed
 - Paint sync and voice chat now know which server you are on. The app installs a small
   FrostMod plugin that reads the server name from the game, so you sync with the riders

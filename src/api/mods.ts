@@ -2202,7 +2202,8 @@ export function joinServer(address: string): Promise<LaunchOutcome> {
   return invoke<LaunchOutcome>("join_server", { address });
 }
 
-/** Is MX Bikes currently running? Always false off Windows — the probe is Win32-only. */
+/** Is MX Bikes currently running? Probes for real on all three platforms — under Wine and
+ *  Proton the game is an ordinary process whose argv still names the exe. */
 export function isGameRunning(): Promise<boolean> {
   return invoke<boolean>("game_running");
 }
