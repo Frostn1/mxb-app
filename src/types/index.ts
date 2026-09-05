@@ -1135,6 +1135,16 @@ export interface FrostmodStatus {
    * v0.16.2 install, which hung the game before the loading screen.
    */
   gamePlugin: PluginCopy;
+  /**
+   * What became of the app's own `frostmod_session.dlo` in that same folder.
+   *
+   * This one the app installs, so `current` is the state everyone should be in. It is a
+   * copy of the injected `frostmod.dll` under a name FrostMod reads as "publish the server
+   * name and do nothing else" — no hooks, no overlay. It exists because the game only hands
+   * the server name to a plugin it loaded itself, so without it the app cannot tell which
+   * server anyone is on, and paint sync and voice have nothing to key on.
+   */
+  sessionPlugin: PluginCopy;
 }
 
 /**

@@ -13,6 +13,7 @@ mod cookie_session;
 mod downloads;
 mod dropzone;
 mod edf;
+mod feel;
 mod fileshare;
 mod firstpaint;
 mod frostmod;
@@ -8988,6 +8989,70 @@ fn presets_import(app: tauri::AppHandle, text: String) -> Result<presets::Preset
     presets::import_code(&presets_dir(&app)?, &text).map_err(|e| format!("{e:#}"))
 }
 
+// ---------------------------------------------------------------------------
+// Feel presets — the settings half of a profile.
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn feel_list(app: tauri::AppHandle) -> Result<Vec<feel::Feel>, String> {
+    Ok(feel::load_feels(&presets_dir(&app)?))
+}
+
+/// Read what the profile is set to right now, ready to be named and saved.
+#[tauri::command]
+fn feel_capture(app: tauri::AppHandle, profile: String) -> Result<feel::Feel, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    feel::capture(&cfg.profiles_dir(), &profile).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_save(app: tauri::AppHandle, feel: feel::Feel) -> Result<(), String> {
+    feel::save_feel(&presets_dir(&app)?, feel).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_delete(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    feel::delete_feel(&presets_dir(&app)?, &name).map_err(|e| format!("{e:#}"))
+}
+
+/// Write a saved feel back into a profile.
+///
+/// Refused while the game is up. MX Bikes reads both files once at startup and writes them
+/// back when the Options screen closes, so an apply mid-session is invisible until the game
+/// overwrites it — the rider would see nothing change and then lose the preset.
+#[tauri::command]
+fn feel_apply(
+    app: tauri::AppHandle,
+    profile: String,
+    name: String,
+) -> Result<feel::ApplyReport, String> {
+    if gameproc::is_game_running() {
+        return Err("Close MX Bikes first — it rewrites your settings when it exits.".into());
+    }
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let saved = feel::find_feel(&presets_dir(&app)?, &name)
+        .ok_or_else(|| format!("no feel preset named '{name}'"))?;
+    if saved.is_empty() {
+        return Err(format!("'{name}' has no settings saved in it."));
+    }
+    feel::apply(&cfg.profiles_dir(), &profile, &saved).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_export(app: tauri::AppHandle, name: String) -> Result<String, String> {
+    feel::export_code(&presets_dir(&app)?, &name).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_decode(text: String) -> Result<feel::Feel, String> {
+    feel::decode_code(&text).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_import(app: tauri::AppHandle, text: String) -> Result<feel::Feel, String> {
+    feel::import_code(&presets_dir(&app)?, &text).map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 fn preset_bundle_stats(
     app: tauri::AppHandle,
@@ -10002,6 +10067,14 @@ fn main() {
             presets_export,
             presets_decode,
             presets_import,
+            feel_list,
+            feel_capture,
+            feel_save,
+            feel_delete,
+            feel_apply,
+            feel_export,
+            feel_decode,
+            feel_import,
             preset_bundle_stats,
             preset_bundle_create,
             preset_bundle_import,

@@ -364,6 +364,29 @@ pub fn reads_command_files(tag: Option<&str>) -> bool {
     }
 }
 
+/// The oldest FrostMod that may be installed as the session plugin.
+///
+/// A safety floor, and the sharpest one here. The session plugin is a copy of
+/// `frostmod.dll` under the name `frostmod_session.dlo`, and FrostMod decides from that
+/// name to install no hooks, draw nothing and only publish the server name. A build that
+/// predates the name doesn't know it: dropped into the game's `plugins` folder it runs as a
+/// *full* plugin, alongside the copy we inject, and two FrostMods hooking the same
+/// functions in one process is how the game hangs at a black screen before the loading
+/// screen. That has happened to a player once already, from a stale hand-installed plugin.
+///
+/// So an unreadable tag is a no, and so is anything below this: we would rather not know
+/// which server a rider is on than take their game down finding out.
+pub const SESSION_PLUGIN_MIN_VERSION: &str = "v0.17.0";
+
+/// May we install the session plugin from the FrostMod tagged `tag`?
+#[cfg_attr(not(any(windows, target_os = "linux", target_os = "macos")), allow(dead_code))]
+pub fn session_plugin_is_safe(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(SESSION_PLUGIN_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
+}
+
 /// The oldest FrostMod that is safe to run against GP Bikes.
 ///
 /// Same shape as [`MODEL_REFRESH_MIN_VERSION`], and the same kind of reason. FrostMod

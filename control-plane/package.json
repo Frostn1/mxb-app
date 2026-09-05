@@ -11,6 +11,9 @@
     "test": "vitest run",
     "render:bootstrap": "tsx scripts/render-bootstrap.ts"
   },
+  "engines": {
+    "node": ">=22.13"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260801.1",
     "tsx": "^4.23.12",

@@ -60,7 +60,7 @@ READ  = 0x140158a90     # read(handle, size, dest)
 ALLOC = 0x14015b4f0     # alloc(size)
 FREE  = 0x14015b540
 MEMSET= 0x1402ab340
-ENTRY = 0x14025f180
+ENTRY = int(os.environ.get("ENTRY", "0x14025f180"), 16)
 
 HEAP  = 0x200000000
 STACK = 0x300000000
@@ -74,7 +74,7 @@ mu.mem_map(STACK, 0x100000)
 mu.mem_map(0, 0x100000)          # scratch for writes through null pointers
 
 data = open(MAP,'rb').read()
-state = {"cursor": int(sys.argv[1]) if len(sys.argv)>1 else 312,
+state = {"cursor": int(os.environ.get("CURSOR", sys.argv[1] if len(sys.argv)>1 else 312)),
          "heap": HEAP + 0x1000, "log": [], "depth": 0, "overran": None}
 
 _stub_targets = set()
@@ -138,7 +138,11 @@ def hook_code(uc, addr, size, _):
         chunk = data[off:off+n]
         try: uc.mem_write(dst, chunk)
         except Exception: pass
-        state["log"].append((off, n, dst))
+        try:
+            _ret = struct.unpack('<Q', uc.mem_read(uc.reg_read(UC_X86_REG_RSP), 8))[0]
+        except Exception:
+            _ret = 0
+        state["log"].append((off, n, dst, _ret))
         state["cursor"] += n
         # return 0 and emulate `ret`
         uc.reg_write(UC_X86_REG_RAX, 0)
@@ -290,8 +294,8 @@ if state["overran"]:
     print(f"stopped at the end of the file: a read of {n:,} bytes at {off:,} "
           f"(file is {len(data):,}). Everything up to here is real; nothing past it would be.")
 SZ = len(data)
-for i,(o,n,d) in enumerate(log):
+for i,(o,n,d,ret) in enumerate(log):
     if o > SZ:
         print(f"  ... ran past the end of the file after {i} reads")
         break
-    print(f"  {i:3}  off={o:>12,}  size={n:>10,}")
+    print(f"  {i:3}  off={o:>12,}  size={n:>10,}  from={ret:#x}")

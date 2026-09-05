@@ -42,7 +42,16 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/bmac/webhook` | HMAC signature | Buy Me a Coffee announcing a supporter. Posted on to Discord. |
 | POST | `/v1/usage` | — | Anonymous usage counters from an install. Unauthenticated because most people who run the app never claim an invite; bounded by body size, event count and a per-address daily cap. |
 | GET | `/v1/usage/stats` | `ADMIN_KEY` | The same numbers as JSON, for anything that scripts them |
-| GET | `/admin/usage` | `ADMIN_KEY` | The usage dashboard, server-rendered |
+| GET | `/admin` | `ADMIN_KEY` | The dashboard. One URL, four tabs — usage, diagnostics, paint sync, plugins — and a search box on every page of it |
+| GET | `/admin/search` | `ADMIN_KEY` | One query asked of all three at once: riders, mod files, paints |
+| GET | `/admin/usage` | `ADMIN_KEY` | The usage tab on its own. What `/admin` opens on |
+| GET | `/v1/plugins` | — | The paid-plugin catalogue. Public: what is on offer is not a secret. |
+| GET | `/v1/me/plugins` | bearer | What this account holds, each with a freshly signed license |
+| POST | `/v1/plugins/redeem` | bearer | Trade a key for months on a license |
+| GET | `/v1/plugins/:id/bundle` | bearer + license | The build itself, streamed rather than redirected to |
+| GET | `/admin/plugins` | `ADMIN_KEY` | Mint keys, and every code with what became of it |
+| GET | `/admin/plugins/licenses` | `ADMIN_KEY` | Who can run what, and the button that ends it |
+| POST | `/admin/plugins` | `ADMIN_KEY` | Mint, grant, revoke, restore |
 
 Enrollment by invite code stands in for Steam sign-in until there's an API key. `accounts`
 already carries a nullable `steam_id`, so adding Steam is a backfill rather than a rewrite
@@ -96,6 +105,29 @@ words can't restyle the embed or ping the server. `bmac_events` records what has
 announced: BMAC retries a delivery up to four more times, and a reply it never received looks
 exactly like a failure, so without that table one coffee arrives five times.
 
+### Plugin keys and licenses
+
+A paid plugin is bought in months. A **key** is a one-shot code that adds its months to an
+account's **license**, and the app runs the plugin on a short-lived signed statement it can
+check with no network — so a license is honoured for up to seven days with nobody to ask.
+
+Both halves are revocable from `/admin/plugins`, which is also where keys are minted:
+
+- **Revoking a key** withdraws a code that has not been spent. Redeeming it then answers
+  "revoked" rather than "already used", because those are different next steps for whoever
+  is holding it.
+- **Revoking a license** ends access without waiting for the month to run out. It takes
+  effect at the app's next check — within the grace window, not within the minute, which is
+  the cost of the plugin working on a plane. `expires_at` is left alone, so lifting the
+  revocation gives back the months that were paid for.
+
+Months never land on a revoked license: redeeming a key against one is refused rather than
+spending the code, and granting is refused rather than silently changing nothing.
+
+`Grant months` hands an account a license with no key in between — for a tester, or for
+putting someone right. `scripts/mint-plugin-key.ts` still prints SQL for a machine that
+cannot reach the page.
+
 ### Usage counters
 
 How many people run the app, and which parts they open — the question release downloads and
@@ -118,7 +150,10 @@ opens the track studio" and "one person lives in it" are different answers. Rows
 npx wrangler secret put ADMIN_KEY   # without it both admin routes answer 503, not 401
 ```
 
-Then `https://<worker>/admin/usage?key=<ADMIN_KEY>`, optionally `&days=7|30|90|365`.
+Then `https://<worker>/admin?key=<ADMIN_KEY>` — the one URL worth bookmarking. It opens on
+usage (`&days=7|30|90|365`), and the tabs across the top reach the diagnostics and paint-sync
+dashboards without a second browser tab. The search box in the header answers across all
+three: a rider name, a GUID, a Steam id, a file name, a signer or a digest.
 
 The app's side is `src-tauri/src/usage.rs`. It is off in debug builds unless
 `MXB_ANALYTICS_DEV=1`, off for a run with `MXB_NO_ANALYTICS=1`, and off for good from the

@@ -159,15 +159,50 @@ fn text(bytes: &[u8], at: usize, len: usize) -> String {
 // The mapping
 // ---------------------------------------------------------------------------------------
 
-/// Reads the block FrostMod publishes.
+/// Merge what the two blocks each know into one session.
 ///
-/// Holds the mapping open once found: this is polled every few seconds now and will be
+/// Neither is complete on its own. The injected copy has the grid — it reads the entry list
+/// out of the game itself — but it is never handed the server name, because the game only
+/// delivers `EventInit` to a plugin it loaded from its own `plugins` folder. The session
+/// plugin is handed exactly that, and nothing else.
+///
+/// So: the grid comes from the injected block, the server name from whichever block has one,
+/// and either block alone is still a session. A rider whose injection was refused by Windows
+/// still gets a server name this way, which is the difference between paint sync working for
+/// them and not.
+fn merge(injected: Option<GameSession>, plugin: Option<GameSession>) -> Option<GameSession> {
+    match (injected, plugin) {
+        (None, other) | (other, None) => other,
+        (Some(mut injected), Some(plugin)) => {
+            // Field by field, because "empty" is a real answer from either side: the
+            // injected block has no server name to give, and the plugin has no riders.
+            let fill = |mine: &mut String, theirs: String| {
+                if mine.trim().is_empty() {
+                    *mine = theirs;
+                }
+            };
+            fill(&mut injected.server_name, plugin.server_name);
+            fill(&mut injected.track_id, plugin.track_id);
+            fill(&mut injected.guid, plugin.guid);
+            fill(&mut injected.rider_name, plugin.rider_name);
+            Some(injected)
+        }
+    }
+}
+
+/// Reads the blocks FrostMod publishes.
+///
+/// Holds each mapping open once found: this is polled every few seconds now and will be
 /// polled at frame rate for proximity, and re-opening it each time would be the expensive
 /// part of a cheap operation.
 #[derive(Default)]
 pub struct Reader {
+    /// The injected `frostmod.dll`'s block: the grid, and nothing about the server.
     #[cfg(windows)]
     view: Mutex<Option<MappedBlock>>,
+    /// The session plugin's block: the server, and nothing about the grid.
+    #[cfg(windows)]
+    plugin_view: Mutex<Option<MappedBlock>>,
 }
 
 impl Reader {
@@ -178,9 +213,18 @@ impl Reader {
     /// isn't joined yet.
     #[cfg(windows)]
     pub fn read(&self) -> Option<GameSession> {
-        let mut guard = self.view.lock().ok()?;
+        merge(
+            Self::read_one(&self.view, MappedBlock::NAME),
+            Self::read_one(&self.plugin_view, MappedBlock::PLUGIN_NAME),
+        )
+    }
+
+    /// One block, opened if it isn't already, and read under its seqlock.
+    #[cfg(windows)]
+    fn read_one(slot: &Mutex<Option<MappedBlock>>, name: &'static [u8]) -> Option<GameSession> {
+        let mut guard = slot.lock().ok()?;
         if guard.is_none() {
-            *guard = MappedBlock::open();
+            *guard = MappedBlock::open(name);
         }
         let mapped = guard.as_ref()?;
 
@@ -248,9 +292,13 @@ impl MappedBlock {
     /// Must match `frostmod::session::kMappingName`.
     const NAME: &'static [u8] = b"Local\\FrostModSession\0";
 
-    fn open() -> Option<MappedBlock> {
+    /// Must match `frostmod::session::kPluginMappingName` — the block the session plugin
+    /// writes. Deliberately a second block rather than a second writer in the first one.
+    const PLUGIN_NAME: &'static [u8] = b"Local\\FrostModPluginSession\0";
+
+    fn open(name: &[u8]) -> Option<MappedBlock> {
         // SAFETY: a NUL-terminated name; a null return just means FrostMod isn't running.
-        let handle = unsafe { ffi::OpenFileMappingA(ffi::FILE_MAP_READ, 0, Self::NAME.as_ptr()) };
+        let handle = unsafe { ffi::OpenFileMappingA(ffi::FILE_MAP_READ, 0, name.as_ptr()) };
         if handle.is_null() {
             return None;
         }
@@ -423,6 +471,76 @@ mod tests {
         let session = decode(&BlockBuilder::new().build()).expect("a session");
         assert_eq!(session.race_num, -1);
         assert_eq!(session.race_num_for_room(), 0);
+    }
+
+    /// A session with everything the injected block can know and nothing it can't.
+    fn injected(riders: usize) -> GameSession {
+        GameSession {
+            server_name: String::new(),
+            track_id: "practice".into(),
+            guid: "guid-1".into(),
+            rider_name: "Frost".into(),
+            race_num: 7,
+            riders: (0..riders)
+                .map(|i| Rider {
+                    race_num: i as i32,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    yaw_deg: 0.0,
+                    crashed: false,
+                    name: format!("rider{i}"),
+                })
+                .collect(),
+        }
+    }
+
+    /// What the session plugin publishes: the server, and no grid at all.
+    fn from_plugin(server: &str) -> GameSession {
+        GameSession {
+            server_name: server.into(),
+            track_id: "practice".into(),
+            guid: "guid-1".into(),
+            rider_name: "Frost".into(),
+            race_num: -1,
+            riders: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_server_name_comes_from_the_plugin_and_the_grid_from_the_injection() {
+        // The case every rider the app drives is in: injected FrostMod knows who is on the
+        // grid and cannot know where, and the plugin is the other way round.
+        let merged = merge(Some(injected(3)), Some(from_plugin("AMX Series"))).expect("a session");
+        assert_eq!(merged.server_name, "AMX Series");
+        assert_eq!(merged.riders.len(), 3);
+        assert!(merged.on_a_server());
+    }
+
+    #[test]
+    fn either_block_on_its_own_is_still_a_session() {
+        // No plugin installed yet: the grid still works, there is just nowhere to sync to.
+        let alone = merge(Some(injected(2)), None).expect("a session");
+        assert_eq!(alone.riders.len(), 2);
+        assert!(!alone.on_a_server());
+
+        // Injection refused by Windows, plugin loaded: we can still name the server, which
+        // is what paint sync needs most.
+        let plugin_only = merge(None, Some(from_plugin("AMX Series"))).expect("a session");
+        assert!(plugin_only.on_a_server());
+        assert!(plugin_only.riders.is_empty());
+
+        assert!(merge(None, None).is_none());
+    }
+
+    #[test]
+    fn a_server_name_the_injected_block_already_has_is_kept() {
+        // A hand-installed `frostmod.dlo` runs in full plugin mode and does get EventInit,
+        // so its block can carry a server name. Ours must not overwrite it.
+        let mut hand_installed = injected(1);
+        hand_installed.server_name = "Hand Installed".into();
+        let merged = merge(Some(hand_installed), Some(from_plugin("AMX Series"))).expect("a session");
+        assert_eq!(merged.server_name, "Hand Installed");
     }
 
     #[test]

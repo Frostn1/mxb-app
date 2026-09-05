@@ -1,10 +1,32 @@
 # Changelog
 
-## 2026-09-03
+## 2026-09-04
 
 ### Changed
 - Session diagnostics cover more than the list of files your game has loaded: code running
   inside the game that came from no file, and what is sitting in the game's plugins folder.
+
+### Fixed
+- Paint sync and voice chat now know which server you are on. The app installs a small
+  FrostMod plugin that reads the server name from the game, so you sync with the riders
+  you are actually riding with instead of nobody.
+
+## 2026-09-03
+
+### Added
+- Presets has a Feel tab. Save your throttle, lean, rider aids, camera and graphics quality
+  under a name, and switch between them with one click — a soft Supercross setup and a
+  snappy outdoor one, without walking the Options screens again.
+- Feel presets share like look presets do. The code carries the settings only, so it never
+  touches the receiver's bindings, controller or screen mode.
+- Open a saved feel to see every setting inside it, grouped and named, and change any of
+  them without going back into the game.
+- Duplicate any preset, look or feel, so you can fork one you already race and change a
+  single thing.
+
+### Changed
+- Generated tracks carry their ground as a mesh, the way a published track does, and load
+  through the same path the game uses for its own terrain.
 
 ## 2026-09-02 — v0.13.5
 
