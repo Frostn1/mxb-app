@@ -2764,10 +2764,40 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
         out.extend_from_slice(&[0u8; 8]);
         out.extend_from_slice(&px);
 
-        // One zero word ends a sheet. The reader takes the word after a payload as a format
-        // (0x140210346) and returns straight to its epilogue when it is zero. The mesh
-        // carries the normal map for the ground; a layer does not need its own.
-        out.extend_from_slice(&u(0));
+        // A secondary map hangs off the colour sheet, and it is what gives the band relief.
+        //
+        // Measured by tracing the game's loader over a published map (JV Spain, version 304,
+        // the same as ours): its `soil_light_c` layer sets this word to one, follows it with
+        // four words, and then a sheet record for `soil_white_n_s` — after which the loader
+        // goes straight to the tiling floats, with no second flag. Its `soil_dark_c` layer
+        // sets the word to zero and the tiling follows immediately, which is what we used to
+        // write for every band: colour with nothing to catch the light.
+        //
+        // The secondary's header is NOT the primary's. The loader takes its dimensions at
+        // name+100 where a colour sheet's are at name+104 — there is no flag word in front
+        // of them — and then the hash, a zero, and a length counting the eight bytes behind
+        // it. Reusing the colour record's shape here puts every field one word out.
+        out.extend_from_slice(&u(1));
+        for w in [0u32, 0, 1, 0] {
+            out.extend_from_slice(&u(w));
+        }
+        let nrm = normal_pixels(&rgba, dim, NORMAL_STRENGTH);
+        let packed = deflate_raw(&nrm);
+        // Name, dimensions, hash, a zero, and the length: 132 bytes, then the eight the
+        // length counts, then the pixels. Every offset off the trace of Spain's own.
+        let mut rec = vec![0u8; 132];
+        // Published maps name them off the colour sheet: `soil_light_c` carries
+        // `soil_white_n_s`. Ours drop the `_c` and take `_n_s`.
+        let name = format!("{}_n_s", sheet.trim_end_matches("_c"));
+        let n = name.len().min(99);
+        rec[..n].copy_from_slice(&name.as_bytes()[..n]);
+        rec[100..104].copy_from_slice(&(dim as u32).to_le_bytes());
+        rec[104..108].copy_from_slice(&(dim as u32).to_le_bytes());
+        rec[108..124].copy_from_slice(&sheet_hash(&nrm));
+        rec[128..132].copy_from_slice(&((packed.len() + 8) as u32).to_le_bytes());
+        out.extend_from_slice(&rec);
+        out.extend_from_slice(&[0u8; 8]);
+        out.extend_from_slice(&packed);
 
         // How often the sheet repeats, the mask that says where this band covers the ground,
         // and the float that closes the layer. The terrain's layer reader takes these at
@@ -2794,8 +2824,17 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
                 out.extend_from_slice(&packed);
             }
         }
-        out.extend_from_slice(&f(if mask_to.is_none() { 0.0 } else { 1.0 }));
-        out.extend_from_slice(&u(1));
+        // One word closes a layer, and only one. Measured by running the game's own loader
+        // over the file: after a layer's sheet it reads five words -- the secondary-map
+        // flag, the two tiling floats, the mask flag and this one -- and then goes straight
+        // to the next layer's fifty-six byte material record.
+        //
+        // We wrote three words here instead of one, so every layer after the first was read
+        // eight bytes out of phase. Layer 1's material came back as (1.4e-45, 0.0, ...)
+        // where a real one is (0.0, 1.0, 1.0, ...), its sheet count as zero, and the loader
+        // walked on through the rest as empty records. The shoulder, the riding line and the
+        // grass were never drawn: a generated track's ground was the base sheet alone, one
+        // flat colour from fence to fence.
         out.extend_from_slice(&u(0));
     }
 
@@ -4872,6 +4911,94 @@ mod tests {
         );
     }
 
+    /// Every band's material record has to be where the loader looks for it.
+    ///
+    /// It reads five words after a layer's sheet — the secondary-map flag, the two tiling
+    /// floats, the mask flag and one closing word — and then takes the next fifty-six bytes
+    /// as the following layer's material. Writing one word too many there is invisible to a
+    /// walk of the file, because the drift is self-consistent and nothing ever reads past
+    /// the end; it is fatal to the ground, because every band after the base sheet is then
+    /// read as an empty record and never drawn.
+    ///
+    /// Measured by emulating the game's own loader over our output: with three words here
+    /// it made 1,327,319 reads and loaded a single sheet; with one it makes 144 and loads
+    /// all four bands, each with its normal map.
+    #[test]
+    fn every_ground_band_is_where_the_loader_looks_for_it() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let m = map(&p, &s);
+        let u = |o: usize| u32::from_le_bytes(m[o..o + 4].try_into().unwrap()) as usize;
+        let fl = |o: usize| f32::from_le_bytes(m[o..o + 4].try_into().unwrap());
+
+        // Past the mesh: materials, vertices, triangles, then the node tree.
+        let mut o = 12 + u(8) * 56;
+        o += 4 + u(o) * 80;
+        o += 4 + u(o) * 12;
+        let nodes = u(o);
+        o += 4;
+        for _ in 0..nodes {
+            o += 44 + u(o + 40) * 24;
+        }
+        // The mesh's own sheet count, then its two sheets: a colour record with its
+        // descriptor, and the secondary normal map hanging off it.
+        assert_eq!(u(o), 1, "the mesh declares one sheet");
+        o += 4;
+        o += 144 + (u(o + 132) - 8) + 24;
+        o += 136 + (u(o + 124) - 8);
+        // The words that close the sheet reader, the empty per-material list, and the run
+        // between it and the terrain.
+        o += 12 + 4 + 112;
+        // The terrain: the grid, its samples, the ground's size and the height budget.
+        let (gw, gh) = (u(o), u(o + 4));
+        o += 8 + gw * gh * 2 + 12 + 12;
+
+        let count = u(o);
+        o += 4;
+        assert_eq!(count, layers(&p).len(), "one layer per painted band");
+        for band in 0..count {
+            // A material record, which is the thing that goes wrong: read a word out of
+            // step and it is (1.4e-45, 0.0, ...) rather than (0.0, 1.0, 1.0, ...).
+            assert_eq!(fl(o), 0.0, "band {band} material word 0");
+            for w in 1..=6 {
+                assert_eq!(fl(o + w * 4), 1.0, "band {band} material word {w}");
+            }
+            o += 56;
+            assert_eq!(u(o), 1, "band {band} declares one sheet");
+            o += 4;
+            // The sheet: a hundred-byte name, the flag, the dimensions, the hash, and a
+            // length that counts the eight zero bytes behind it.
+            let dim = GROUND_TEXTURE_DIM;
+            assert_eq!((u(o + 104), u(o + 108)), (dim as u32 as usize, dim), "band {band} sheet size");
+            // The length counts the eight zero bytes behind it, and the pixels follow those.
+            o += 136 + u(o + 132);
+            // A secondary map, and the four words in front of it. Its header is a word
+            // shorter than the colour sheet's: dimensions at name+100, not name+104.
+            assert_eq!(u(o), 1, "band {band} declares its normal map");
+            o += 4 + 16;
+            assert_eq!((u(o + 100), u(o + 104)), (dim, dim), "band {band} normal map size");
+            o += 132 + u(o + 128);
+            let (rx, rz) = (fl(o), fl(o + 4));
+            assert!(rx >= 1.0 && rz >= 1.0, "band {band} tiles {rx} x {rz}");
+            o += 8;
+            // Layer zero covers everything and carries no mask; the rest are masked.
+            let masked = u(o);
+            assert_eq!(masked == 1, band > 0, "band {band} mask");
+            o += 4;
+            if masked == 1 {
+                o += 12 + u(o + 8);
+            }
+            o += 4;
+        }
+        // What is left is the trailing lists, which are zero and deliberately roomy.
+        assert!(o <= m.len(), "the layers run past the end of the file");
+        assert!(
+            m[o..].iter().all(|&b| b == 0),
+            "{} bytes after the last band are not the empty lists",
+            m.len() - o
+        );
+    }
+
     #[test]
     fn the_demo_program_parses_and_closes() {
         let p: TrackProgram = serde_json::from_str(DEMO).expect("the demo program is valid JSON");
@@ -5531,3 +5658,31 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod map_emit {
+    use super::*;
+    /// Write a `.map` where `scripts/map-loader-trace.py` can read it, and print the offset
+    /// its trailing block starts at — the cursor the trace has to be given.
+    #[test]
+    #[ignore]
+    fn emit_map() {
+        let p: TrackProgram = serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
+        let s = synthesise(&p).unwrap();
+        let m = map(&p, &s);
+        let out = std::env::var("MXB_MAP_OUT").unwrap();
+        std::fs::write(&out, &m).unwrap();
+        let u = |o: usize| u32::from_le_bytes(m[o..o + 4].try_into().unwrap()) as usize;
+        let mut o = 12 + u(8) * 56;
+        let vc = u(o);
+        o += 4 + vc * 80;
+        o += 4 + u(o) * 12;
+        let nodes = u(o);
+        o += 4;
+        for _ in 0..nodes {
+            let g = u(o + 40);
+            o += 44 + g * 24;
+        }
+        println!("wrote {} bytes; mesh ends at {o}", m.len());
+    }
+}

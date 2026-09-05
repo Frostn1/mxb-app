@@ -3,6 +3,11 @@
 ## 2026-09-05
 
 ### Fixed
+- Tracks you build in the app have a riding line again. The ground is painted in four bands
+  — field, worked shoulder, the line itself and the grass over the top — where before every
+  track came out one flat colour from fence to fence.
+- Every band takes the light: each one carries its own relief map, so soil reads as soil
+  instead of a painted surface.
 - Pictures load on machines where the app's image cache can't be reached. Browse, Shop and
   MXB Hub fall back to loading a thumbnail straight from the site, so the grids show what
   you are downloading instead of placeholder icons.
