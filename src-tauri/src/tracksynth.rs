@@ -2117,12 +2117,32 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
     // The material table, which is also how a reader finds the end of the masks: it looks for
     // "asphalt" and counts back four bytes. Same six, in the same order, as every published
     // track carries.
-    out.extend_from_slice(&6u32.to_le_bytes());
-    for name in ["asphalt", "grass", "sand", "kerb", "soil", "concrete"] {
+    //
+    // The nine floats after each name are how the surface gives under a wheel: four
+    // (sinkage, load) points -- at 2, 5, 10 and 35 kPa -- and then how much of it stays as a
+    // rut. We wrote thirty-six zero bytes, which is a load curve whose every point sits at
+    // the origin, handed to the tyre model the instant a wheel touches the ground.
+    //
+    // These are not per-track values. Indiana, Millville, Flanders and Lambretta Lynds carry
+    // byte-identical tables: three hard surfaces, two medium, and sand. Read straight off
+    // them.
+    const SURFACES: [(&str, f32, f32, f32, f32); 6] = [
+        // name, sinkage at 2 kPa, at 5, at 10, and the rut left behind
+        ("asphalt", 0.0012, 0.0025, 0.005, 0.0),
+        ("grass", 0.0037, 0.0075, 0.015, -0.02),
+        ("sand", 0.0075, 0.015, 0.03, -0.04),
+        ("kerb", 0.0012, 0.0025, 0.005, 0.0),
+        ("soil", 0.0037, 0.0075, 0.015, -0.02),
+        ("concrete", 0.0012, 0.0025, 0.005, 0.0),
+    ];
+    out.extend_from_slice(&(SURFACES.len() as u32).to_le_bytes());
+    for (name, a, b, c, rut) in SURFACES {
         let mut field = [0u8; 16];
         field[..name.len()].copy_from_slice(name.as_bytes());
         out.extend_from_slice(&field);
-        out.extend_from_slice(&[0u8; 36]); // nine floats of physics we have nothing to say about
+        for v in [a, 2.0, b, 5.0, c, 10.0, 0.0, 35.0, rut] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
     }
 
     // And the centreline, in the same sixty-byte records a compiled track carries. Written
