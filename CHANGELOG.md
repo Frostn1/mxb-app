@@ -16,8 +16,6 @@
   the app itself is fine, and takes up one thin line instead of a block.
 - Sharing a track goes through. Big shares upload in smaller pieces and a piece the host
   drops is sent again, so a share code comes back instead of an upload error.
-- Tracks you build in the app carry trackside cameras, which every published track has and
-  the game sets up as you enter one.
 - Tracks you build in the app have a riding line. The ground is painted in four bands —
   field, worked shoulder, the line itself and the grass over the top — and you can see all
   four: nothing is laid over the top of them any more.

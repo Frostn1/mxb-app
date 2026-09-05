@@ -1946,7 +1946,6 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     put(&format!("{slug}/gfx.cfg"), crlf(&gfx_cfg(prog)), &mut wrote)?;
     put(&format!("{slug}/{slug}.rdf"), crlf(&rdf(prog)), &mut wrote)?;
     put(&format!("{slug}/{slug}.ssc"), SSC.into(), &mut wrote)?;
-    put(&format!("{slug}/{slug}.tsc"), crlf(&tsc(prog, syn)), &mut wrote)?;
     let (map_img, shot) = ui_images(syn, UI_IMAGE_DIM);
     put(&format!("{slug}/{slug}_map.tga"), map_img, &mut wrote)?;
     put(&format!("{slug}/{slug}.tga"), shot, &mut wrote)?;
@@ -2801,7 +2800,6 @@ pub fn write_pkz(
         (format!("{slug}/gfx.cfg"), crlf(&gfx_cfg(prog))),
         // Empty on the reference track, and on every track that ships one.
         (format!("{slug}/{slug}.ssc"), SSC.into()),
-        (format!("{slug}/{slug}.tsc"), crlf(&tsc(prog, syn))),
         (format!("{slug}/{slug}_map.tga"), map_img),
         (format!("{slug}/{slug}.tga"), shot),
     ] {
@@ -3845,91 +3843,6 @@ fn start_tcl(prog: &TrackProgram) -> String {
         prog.start.angle,
         &segs,
     )
-}
-
-/// The trackside cameras.
-///
-/// Every published track ships one of these -- all twelve in the reference set, the only file
-/// that is in every one of them -- and the game sets its cameras up as a track is entered.
-/// Ours shipped none at all.
-///
-/// Eight, evenly round the lap, standing back from the outside of the line and looking at it,
-/// in the shape Millville's own file uses: one set, `type = 0` for a fixed camera, a yaw in
-/// degrees, and an autozoom block with the numbers every published file carries.
-fn tsc(prog: &TrackProgram, syn: &Synth) -> String {
-    const COUNT: usize = 8;
-    /// How far to the outside of the line a camera stands, and how high above the ground.
-    const BACK_M: f32 = 25.0;
-    const HIGH_M: f32 = 8.0;
-
-    let lap = prog.lap_length();
-    let ground = |x: f32, z: f32| -> f32 {
-        let c = (x / syn.mps).round().clamp(0.0, (syn.gw - 1) as f32) as usize;
-        let r = (z / syn.mps).round().clamp(0.0, (syn.gh - 1) as f32) as usize;
-        syn.heights[r * syn.gw + c]
-    };
-
-    // Walk the lap the same way the centreline is written, stopping at each camera's arc.
-    let mut want: Vec<f32> = (0..COUNT).map(|i| lap * i as f32 / COUNT as f32).collect();
-    want.reverse();
-    let mut shots: Vec<(f32, f32, f32)> = Vec::new();
-    let (mut x, mut z) = (prog.start.x, prog.start.z);
-    let mut theta = prog.start.angle.to_radians();
-    let mut at = 0.0f32;
-    for seg in &prog.segments {
-        let radius = match *seg {
-            Segment::Straight { .. } => 0.0,
-            Segment::Arc { radius, .. } => radius,
-        };
-        while want.last().is_some_and(|w| *w < at + seg.length()) {
-            let d = want.pop().unwrap() - at;
-            let (px, pz, pt) = if radius == 0.0 {
-                let (hx, hz) = crate::trackprog::heading_vector(theta);
-                (x + d * hx, z + d * hz, theta)
-            } else {
-                let next = theta + d / radius;
-                (
-                    x + radius * (theta.cos() - next.cos()),
-                    z + radius * (next.sin() - theta.sin()),
-                    next,
-                )
-            };
-            shots.push((px, pz, pt));
-        }
-        at += seg.length();
-        if radius == 0.0 {
-            let (hx, hz) = crate::trackprog::heading_vector(theta);
-            x += seg.length() * hx;
-            z += seg.length() * hz;
-        } else {
-            let next = theta + seg.length() / radius;
-            x += radius * (theta.cos() - next.cos());
-            z += radius * (next.sin() - theta.sin());
-            theta = next;
-        }
-    }
-
-    let mut s = format!(
-        "numcamset = 1\n\ncamset0\n{{\n\tname = TV_Cameras\n\tsurface = 0\n\
-         \tnumcameras = {}\n",
-        shots.len()
-    );
-    for (i, (px, pz, pt)) in shots.iter().enumerate() {
-        // Stand off to the rider's right and look back at the line.
-        let (rx, rz) = crate::trackprog::right_vector(*pt);
-        let (cx, cz) = (px + rx * BACK_M, pz + rz * BACK_M);
-        let (dx, dz) = (px - cx, pz - cz);
-        let yaw = dx.atan2(dz).to_degrees();
-        s.push_str(&format!(
-            "\tcamera{i}\n\t{{\n\t\ttype = 0\n\t\tpos = {cx:.2}, {:.2}, {cz:.2}\n\
-             \t\tfov = 60\n\t\trot = {yaw:.1}\n\t\tautozoom\n\t\t{{\n\
-             \t\t\tenable = 1\n\t\t\treference = 0.1\n\t\t\tmin = 5\n\
-             \t\t\tmax = 70\n\t\t}}\n\t}}\n",
-            ground(cx, cz) + HIGH_M
-        ));
-    }
-    s.push_str("}\n");
-    s
 }
 
 /// The track's own description, in the shape published tracks write it.
