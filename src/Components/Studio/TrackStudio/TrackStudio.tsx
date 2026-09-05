@@ -48,6 +48,7 @@ import {
   baseTrackProgram,
   blankTrackProgram,
   buildTrack,
+  downloadTrackTools,
   closeTrackLap,
   fitTrackBudget,
   checkTrack,
@@ -94,7 +95,7 @@ export default function TrackStudio() {
   const t = useT();
   const [brief, setBrief] = useState("");
   const [busy, setBusy] = useState<
-    "generate" | "preview" | "install" | "export" | "build" | null
+    "generate" | "preview" | "install" | "export" | "build" | "tools" | null
   >(null);
   const [program, setProgram] = useState<TrackProgram | null>(null);
   const [preview, setPreview] = useState<TrackPreview | null>(null);
@@ -462,22 +463,38 @@ export default function TrackStudio() {
     }
   }
 
+  async function onGetTools() {
+    if (busy) return;
+    setBusy("tools");
+    try {
+      const next = await downloadTrackTools();
+      setTools(next);
+      toast.success(t("track.toolsReady"));
+    } catch (e) {
+      toast.error(t("track.toolsFailed"), { description: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Build the whole way and put it where the game reads it. No folder to pick: the app has
+  // one of its own, and a track you have to go and find afterwards isn't finished.
   async function onBuild() {
     if (!program || busy) return;
-    const dir = await openDialog({ multiple: false, directory: true });
-    if (typeof dir !== "string") return;
     setBusy("build");
     setSteps([]);
     try {
-      const ran = await buildTrack(program, dir);
-      setSteps(ran);
-      const failed = ran.find((s) => !s.ok);
+      const built = await buildTrack(program, null, true);
+      setSteps(built.steps);
+      const failed = built.steps.find((s) => !s.ok);
       if (failed) {
         toast.error(t("track.buildStepFailed", { step: failed.name }), {
           description: failed.output.slice(0, 400),
         });
       } else {
-        toast.success(t("track.compiled"), { description: dir });
+        toast.success(t("track.rideIt"), {
+          description: built.installed ?? built.pkz ?? built.dir,
+        });
       }
     } catch (e) {
       toast.error(t("track.compileFailed"), { description: String(e) });
@@ -732,17 +749,22 @@ export default function TrackStudio() {
                 </Button>
               </div>
               {tools?.found ? (
-                <Button
-                  variant="outline"
-                  onClick={() => void onBuild()}
-                  disabled={blocked || busy !== null}
-                >
+                <Button onClick={() => void onBuild()} disabled={blocked || busy !== null}>
                   {busy === "build" ? t("track.compiling") : t("track.compile")}
                 </Button>
               ) : (
-                <Button variant="ghost" onClick={() => void onPointAtTools()} disabled={busy !== null}>
-                  {t("track.pointAtTools")}
-                </Button>
+                <>
+                  <Button onClick={() => void onGetTools()} disabled={busy !== null}>
+                    {busy === "tools" ? t("track.gettingTools") : t("track.getTools")}
+                  </Button>
+                  <button
+                    className="text-[11.5px] text-muted-foreground underline-offset-2 hover:underline"
+                    onClick={() => void onPointAtTools()}
+                    disabled={busy !== null}
+                  >
+                    {t("track.pointAtTools")}
+                  </button>
+                </>
               )}
               {steps.length > 0 && (
                 <ul className="space-y-1 text-[11.5px] leading-snug">
