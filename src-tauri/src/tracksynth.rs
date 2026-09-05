@@ -2142,7 +2142,6 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
             Segment::Arc { radius, angle, .. } => (radius, angle),
         };
         let mut rec = [0f32; 15];
-        rec[0] = if at == 0.0 { 0.0 } else { 1.0 };
         rec[1] = seg.length();
         rec[2] = radius;
         rec[3] = angle.abs();
@@ -2159,7 +2158,14 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
         rec[10] = theta.cos();
         rec[11] = z;
         rec[14] = 1.0;
-        for v in rec {
+        // Word zero is an integer, not a float, and it is the one field in the record that
+        // is. Every published line reads back as a plain 1 on every segment but the first --
+        // Indiana's 120 records say `0, 1, 1, 1, ...` -- while ours said 1.0, which is
+        // 1,065,353,216 to anything reading it as a count or a flag. The other fourteen
+        // words are floats and match in kind.
+        let first = at == 0.0;
+        out.extend_from_slice(&u32::from(!first).to_le_bytes());
+        for v in &rec[1..] {
             out.extend_from_slice(&v.to_le_bytes());
         }
         at += seg.length();
