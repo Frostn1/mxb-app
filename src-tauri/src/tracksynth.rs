@@ -5686,3 +5686,20 @@ mod map_emit {
         println!("wrote {} bytes; mesh ends at {o}", m.len());
     }
 }
+
+#[cfg(test)]
+mod pkz_emit {
+    use super::*;
+    /// Build a playable `.pkz` from the demo program under a chosen name, for testing a
+    /// change in the game without waiting on a release.
+    #[test]
+    #[ignore]
+    fn emit_pkz() {
+        let mut p: TrackProgram = serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
+        p.name = std::env::var("MXB_TRACK_NAME").unwrap_or_else(|_| "Testing 112".into());
+        let s = synthesise(&p).unwrap();
+        let out = std::path::PathBuf::from(std::env::var("MXB_PKZ_OUT").unwrap());
+        let n = write_pkz(&p, &s, &out, false).unwrap();
+        println!("wrote {} ({n} bytes) as \"{}\"", out.display(), p.name);
+    }
+}
