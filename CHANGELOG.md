@@ -3,6 +3,11 @@
 ## 2026-09-05
 
 ### Fixed
+- Tracks you build in the app have a riding line again. The ground is painted in four bands
+  — field, worked shoulder, the line itself and the grass over the top — where before every
+  track came out one flat colour from fence to fence.
+- Every band takes the light: each one carries its own relief map, so soil reads as soil
+  instead of a painted surface.
 - Sound mods install. The ones that come as a folder per bike, the ones that hand you an
   `engine.scl` to drop in yourself, and the ones whose sample list isn't called
   `engine.scl` — all of them download and land where the game reads them.
@@ -15,6 +20,25 @@
 - Pictures load on machines where the app's image cache can't be reached. Browse, Shop and
   MXB Hub fall back to loading a thumbnail straight from the site, so the grids show what
   you are downloading instead of placeholder icons.
+
+## 2026-09-04
+
+### Added
+- Build a track and ride it without leaving the app. Press Build & install and the app
+  fetches PiBoSo's track tools, compiles the track and puts it in your mods folder, ready
+  to pick in MX Bikes.
+- Tracks you generate build with a normal map and shader for every ground layer, so the
+  soil, the riding line and the grass each take the light and show their grain.
+- Rain changes the ground. Every soil layer ships a wet sheet with its own reflection, so a
+  rainy race runs on dark, shining dirt.
+- The pit lane counts as pit lane, so sitting in it isn't scored as leaving the track.
+- Grass varies in colour across a track instead of being one flat green.
+
+### Changed
+- Ground textures tile to each axis, so the soil keeps its scale on a track that is wider
+  than it is deep.
+- Races start on the line the track draws: the start line is built and merged with the
+  racing line.
 
 ## 2026-09-04 — v0.13.6 — Paint sync, in beta
 

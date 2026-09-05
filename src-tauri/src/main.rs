@@ -1488,35 +1488,126 @@ async fn set_track_tools(app: tauri::AppHandle, dir: String) -> Result<TrackTool
     track_tools_status(app).await
 }
 
-/// Export a track and run the compilers over it.
+/// Where PiBoSo's track tools live once the app has fetched them.
+fn track_tools_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("no data directory: {e}"))?
+        .join("track-tools"))
+}
+
+/// Fetch PiBoSo's track tools, so nobody has to leave the app to find them.
 ///
-/// One step from the studio's point of view, because the folder on its own is homework. The
-/// compilers are PiBoSo's and Windows-only; on macOS they run through the same Wine prefix
-/// the game does.
+/// They are a public download and not ours to ship, so the app gets them on request rather
+/// than carrying them. This was the last step of building a track that needed a browser.
+#[tauri::command]
+async fn download_track_tools(app: tauri::AppHandle) -> Result<TrackToolsStatus, String> {
+    const URL: &str = "https://www.kartracing-pro.com/downloads/tt.zip";
+    let dir = track_tools_dir(&app)?;
+
+    let bytes = reqwest::Client::new()
+        .get(URL)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("couldn't reach {URL}: {e}"))?
+        .bytes()
+        .await
+        .map_err(|e| format!("the download stopped early: {e}"))?;
+
+    let extracted = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+            .map_err(|e| format!("that download isn't a zip: {e}"))?;
+        // Flat: the archive nests each tool in its own folder, and `find` looks one level
+        // down anyway — but the fonts `tracked.exe` reads sit beside it, so keep the shape.
+        zip.extract(&dir).map_err(|e| format!("{e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("download_track_tools task failed: {e}"))?;
+    extracted?;
+
+    let dir = track_tools_dir(&app)?;
+    if trackbuild::find(&dir).is_none() {
+        return Err("the download arrived but there's no terrained.exe in it".into());
+    }
+    set_track_tools(app, dir.to_string_lossy().into_owned()).await
+}
+
+/// Everything a build produced, and where it ended up.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildResult {
+    /// Each compiler run, in order.
+    steps: Vec<trackbuild::Step>,
+    /// The folder the source and the compiled files are in.
+    dir: String,
+    /// The archive, once every step has succeeded.
+    pkz: Option<String>,
+    /// Where it was installed, when it was asked for and worked.
+    installed: Option<String>,
+}
+
+/// Export a track, run the compilers over it, and put the result where the game reads it.
+///
+/// The whole way, because a folder of source is homework and a compiled folder is still
+/// homework — a track you can ride is a `.pkz` in the mods tree. The compilers are PiBoSo's
+/// and Windows-only; on macOS they run through the same Wine prefix the game does.
 #[tauri::command]
 async fn build_track(
     app: tauri::AppHandle,
     program: serde_json::Value,
-    dir: String,
-) -> Result<Vec<trackbuild::Step>, String> {
+    dir: Option<String>,
+    install: bool,
+) -> Result<BuildResult, String> {
     let prog = track_program(program)?;
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     if cfg.track_tools_path.trim().is_empty() {
-        return Err("Point at PiBoSo's track editing tools first.".into());
+        return Err("Get PiBoSo's track tools first.".into());
     }
+    let slug = tracksynth::slug(&prog.name);
+    // Somewhere of its own when nobody picked a folder, so building is one press.
+    let root = match dir {
+        Some(d) if !d.trim().is_empty() => std::path::PathBuf::from(d),
+        _ => app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("no data directory: {e}"))?
+            .join("track-builds")
+            .join(&slug),
+    };
+    let tracks = install.then(|| track_install_dir(&cfg)).transpose()?;
+
     tauri::async_runtime::spawn_blocking(move || {
         let tools = trackbuild::find(std::path::Path::new(&cfg.track_tools_path))
             .ok_or("There's no terrained.exe in that folder.".to_string())?;
         let syn = tracksynth::synthesise(&prog).map_err(|e| format!("{e:#}"))?;
-        let root = std::path::Path::new(&dir);
-        tracksynth::write_source(&prog, &syn, root).map_err(|e| format!("{e:#}"))?;
-        let slug: String = prog
-            .name
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .collect();
-        trackbuild::compile(&tools, root, slug.trim_matches('_'), &cfg.game_path)
-            .map_err(|e| format!("{e:#}"))
+        std::fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
+        tracksynth::write_source(&prog, &syn, &root).map_err(|e| format!("{e:#}"))?;
+        let steps = trackbuild::compile(&tools, &root, &slug, &cfg.game_path)
+            .map_err(|e| format!("{e:#}"))?;
+
+        let mut out = BuildResult {
+            dir: root.to_string_lossy().into_owned(),
+            pkz: None,
+            installed: None,
+            steps,
+        };
+        // Only a build that got all the way through is worth packaging: a `.pkz` missing its
+        // `.map` is a track the game lists and then refuses to load.
+        if out.steps.iter().all(|s| s.ok) {
+            let pkz = root.join(format!("{slug}.pkz"));
+            trackbuild::package(&root, &slug, &pkz).map_err(|e| format!("{e:#}"))?;
+            out.pkz = Some(pkz.to_string_lossy().into_owned());
+            if let Some(tracks) = tracks {
+                let at = trackbuild::install(&pkz, &tracks).map_err(|e| format!("{e:#}"))?;
+                usage::track("track.build.install");
+                out.installed = Some(at.to_string_lossy().into_owned());
+            }
+        }
+        Ok(out)
     })
     .await
     .map_err(|e| format!("build_track task failed: {e}"))?
@@ -9852,6 +9943,7 @@ fn main() {
             export_track_source,
             track_tools_status,
             set_track_tools,
+            download_track_tools,
             build_track,
             load_track_overview,
             load_track_scenery,

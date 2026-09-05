@@ -5,7 +5,7 @@
 //! ```text
 //! terrained.exe track.hmf mytrack/mytrack.map params.ini      graphics
 //! terrained.exe track.tht mytrack/mytrack.trh trh_params.ini  collision
-//! tracked.exe -merge mytrack/mytrack.trh cl track.tcl         the centreline
+//! tracked.exe -merge mytrack/mytrack.trh cl track.tcl sa track_start.tcl   the lines
 //! ```
 //!
 //! Which the app can run for you, so exporting and compiling are one button rather than a
@@ -104,18 +104,84 @@ pub fn compile(tools: &Tools, dir: &Path, slug: &str, game_path: &str) -> Result
         Some(&trh),
     )?);
 
-    // The centreline is merged into the collision file, so it can only run once that exists.
+    // The lines are merged into the collision file, so this can only run once that exists.
+    // Both of them, as PiBoSo's own example does: `cl` is the racing line and `sa` the start,
+    // and a track merged without the second starts its races off the line it drew.
     if let (Some(tracked), true) = (&tools.tracked, dir.join(&trh).is_file()) {
-        steps.push(run(
-            "centerline",
-            tracked,
-            &["-merge", &trh, "cl", "track.tcl"],
-            dir,
-            game_path,
-            Some(&trh),
-        )?);
+        let args = merge_args(&trh, dir.join("track_start.tcl").is_file());
+        steps.push(run("centerline", tracked, &args, dir, game_path, Some(&trh))?);
     }
     Ok(steps)
+}
+
+/// The archive the game reads, from the folder the compilers just filled.
+///
+/// Everything under `<dir>/<slug>/` and nothing else. The source beside it — the heightmap,
+/// the masks, the sheets and their shaders — is a couple of hundred megabytes the game never
+/// opens, and every published track ships only what is inside the folder named after it.
+pub fn package(dir: &Path, slug: &str, to: &Path) -> Result<u64> {
+    let root = dir.join(slug);
+    if !root.is_dir() {
+        bail!("nothing was compiled: there's no {slug} folder in {dir:?}");
+    }
+    let file = std::fs::File::create(to).with_context(|| format!("create {to:?}"))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let opts: zip::write::FileOptions<'_, ()> =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    let mut n = 0usize;
+    let mut stack = vec![root.clone()];
+    while let Some(at) = stack.pop() {
+        for e in std::fs::read_dir(&at)
+            .with_context(|| format!("read {at:?}"))?
+            .flatten()
+        {
+            let path = e.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            // Named from the track folder up, so the archive nests the way the game expects.
+            let rel = path
+                .strip_prefix(dir)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            use std::io::Write;
+            zip.start_file(rel, opts)?;
+            zip.write_all(&std::fs::read(&path)?)?;
+            n += 1;
+        }
+    }
+    zip.finish()?;
+    if n == 0 {
+        bail!("{root:?} is empty — nothing to package");
+    }
+    Ok(std::fs::metadata(to).map(|m| m.len()).unwrap_or(0))
+}
+
+/// Put the archive where the game lists it.
+///
+/// Overwrites: a rebuild of the same track is the same track, and leaving the old one beside
+/// it is two entries in the game's list with one name.
+pub fn install(pkz: &Path, tracks_dir: &Path) -> Result<PathBuf> {
+    std::fs::create_dir_all(tracks_dir)
+        .with_context(|| format!("make {tracks_dir:?}"))?;
+    let to = tracks_dir.join(
+        pkz.file_name()
+            .ok_or_else(|| anyhow::anyhow!("{pkz:?} has no file name"))?,
+    );
+    std::fs::copy(pkz, &to).with_context(|| format!("copy to {to:?}"))?;
+    Ok(to)
+}
+
+/// What `tracked -merge` is given: the racing line always, the start line when there is one.
+fn merge_args(trh: &str, has_start: bool) -> Vec<&str> {
+    let mut args = vec!["-merge", trh, "cl", "track.tcl"];
+    if has_start {
+        args.extend_from_slice(&["sa", "track_start.tcl"]);
+    }
+    args
 }
 
 fn run(
@@ -226,6 +292,62 @@ mod tests {
         std::fs::create_dir_all(&inner).unwrap();
         std::fs::write(inner.join("terrained.exe"), b"").unwrap();
         assert!(find(&dir).is_some());
+    }
+
+    #[test]
+    fn packaging_nests_the_track_folder_and_leaves_the_source_behind() {
+        let dir = scratch("package");
+        std::fs::create_dir_all(dir.join("mytrack/sub")).unwrap();
+        std::fs::write(dir.join("mytrack/mytrack.map"), b"map").unwrap();
+        std::fs::write(dir.join("mytrack/sub/deep.tga"), b"tga").unwrap();
+        // The source beside it, which the game never opens.
+        std::fs::write(dir.join("heightmap.raw"), vec![0u8; 4096]).unwrap();
+
+        let pkz = dir.join("mytrack.pkz");
+        assert!(package(&dir, "mytrack", &pkz).unwrap() > 0);
+
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&pkz).unwrap()).unwrap();
+        let mut names: Vec<String> = (0..zip.len())
+            .map(|i| zip.by_index(i).unwrap().name().to_string())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["mytrack/mytrack.map", "mytrack/sub/deep.tga"]);
+    }
+
+    #[test]
+    fn packaging_a_folder_that_was_never_compiled_says_so() {
+        let dir = scratch("package-empty");
+        let err = package(&dir, "mytrack", &dir.join("x.pkz"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("nothing was compiled"), "{err}");
+    }
+
+    #[test]
+    fn installing_replaces_the_track_that_was_there() {
+        let dir = scratch("install");
+        let tracks = dir.join("mods/tracks");
+        std::fs::write(dir.join("t.pkz"), b"new").unwrap();
+        std::fs::create_dir_all(&tracks).unwrap();
+        std::fs::write(tracks.join("t.pkz"), b"old").unwrap();
+
+        let at = install(&dir.join("t.pkz"), &tracks).unwrap();
+        assert_eq!(at, tracks.join("t.pkz"));
+        assert_eq!(std::fs::read(&at).unwrap(), b"new");
+    }
+
+    /// PiBoSo's example merges both lines, and a track without the start one starts its
+    /// races off the line it drew.
+    #[test]
+    fn both_lines_are_merged_when_both_are_there() {
+        assert_eq!(
+            merge_args("t/t.trh", true),
+            ["-merge", "t/t.trh", "cl", "track.tcl", "sa", "track_start.tcl"]
+        );
+        assert_eq!(
+            merge_args("t/t.trh", false),
+            ["-merge", "t/t.trh", "cl", "track.tcl"]
+        );
     }
 
     #[test]

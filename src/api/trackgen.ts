@@ -416,13 +416,41 @@ export function setTrackTools(dir: string): Promise<TrackToolsStatus> {
 }
 
 /**
- * Export and compile in one.
+ * Fetch PiBoSo's track tools, so nobody has to leave the app to find them.
+ *
+ * They are a public download and not ours to ship. Small — about a megabyte.
+ */
+export function downloadTrackTools(): Promise<TrackToolsStatus> {
+  return invoke<TrackToolsStatus>("download_track_tools");
+}
+
+/** Everything a build produced, and where it ended up. */
+export interface BuildResult {
+  steps: BuildStep[];
+  /** The folder the source and the compiled files are in. */
+  dir: string;
+  /** The archive, once every step has succeeded. */
+  pkz: string | null;
+  /** Where it was installed, when it was asked for and worked. */
+  installed: string | null;
+}
+
+/**
+ * Export, compile, package and install, in one.
+ *
+ * `dir` picks where the work happens; leave it null and the app uses a folder of its own,
+ * which is what makes building one press. `install` puts the finished `.pkz` in the mods
+ * tree, where the game lists it.
  *
  * The compilers are PiBoSo's and Windows-only; on macOS they go through the same Wine prefix
  * the game does. Minutes, not seconds — TerrainEd bakes shadow maps over the whole terrain.
  */
-export function buildTrack(program: TrackProgram, dir: string): Promise<BuildStep[]> {
-  return invoke<BuildStep[]>("build_track", { program, dir });
+export function buildTrack(
+  program: TrackProgram,
+  dir: string | null,
+  install: boolean,
+): Promise<BuildResult> {
+  return invoke<BuildResult>("build_track", { program, dir, install });
 }
 
 /**
