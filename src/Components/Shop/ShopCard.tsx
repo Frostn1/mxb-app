@@ -3,7 +3,8 @@ import { ExternalLink, ShoppingBag, Store } from "lucide-react";
 import type { ShopMod } from "../../types";
 import PriceTag from "./PriceTag";
 import { openShopUrl } from "../../api/shop";
-import { cachedImage, GRID_THUMB_WIDTH } from "../../lib/imgcache";
+import { GRID_THUMB_WIDTH } from "../../lib/imgcache";
+import CachedImg from "@/Components/ui/cached-img";
 import { useT } from "../../i18n/context";
 import {
   ContextMenu,
@@ -47,11 +48,12 @@ export default function ShopCard({ mod, currency, onOpen }: ShopCardProps) {
               // it edge to edge without cropping anything off the ~93% that are square. Only
               // the rare widescreen one loses a sliver at the sides, which beats letterboxing
               // every card to accommodate the exception.
-              <img
-                src={cachedImage(mod.image, GRID_THUMB_WIDTH)}
+              <CachedImg
+                src={mod.image}
+                width={GRID_THUMB_WIDTH}
                 alt={mod.title}
                 loading="lazy"
-                onError={() => setBroken(true)}
+                onUnavailable={() => setBroken(true)}
                 className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
               />
             ) : (
