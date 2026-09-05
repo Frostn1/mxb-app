@@ -47,6 +47,7 @@ mod overlay;
 mod paint;
 mod paintstudio;
 mod paintwatch;
+mod peident;
 mod pkz;
 /// Paid plugins: what this install may run, and how it proves it offline.
 mod plugins;

@@ -49,8 +49,15 @@ export interface Account {
   guid?: string | null;
 }
 
-/** Where the client loaded a module from. Its judgement of location, not of character. */
-export type Origin = "game" | "system" | "app" | "other";
+/**
+ * Where the client found this. Its judgement of location, not of character.
+ *
+ * The first four are where a *file* was loaded from. The last two are not files at all:
+ * `memory` is executable memory in the game that no loaded module covers, and `disk` is a
+ * file sitting in the game's `plugins` folder that the game has not loaded. Both are things
+ * the module list is structurally unable to mention, which is why they are here.
+ */
+export type Origin = "game" | "system" | "app" | "other" | "memory" | "disk";
 
 export type State = "unknown" | "ok" | "warn" | "alert";
 
@@ -98,6 +105,12 @@ export interface ReportedModule {
   product: string;
   /** `FileDescription`, the field Explorer shows. */
   description: string;
+  /**
+   * One line about a row that is not a file: a region's protection and shape, or why a
+   * plugin file is worth a row of its own. Empty for everything that came off the module
+   * list, which the seven fields above already describe.
+   */
+  detail: string;
 }
 
 export interface ModuleRule {
@@ -141,7 +154,7 @@ const MAX_SIZE = 8 * 1024 * 1024 * 1024;
 const MIN_MTIME = 946_684_800;
 const MAX_MTIME = 4_102_444_800;
 
-const ORIGINS: readonly string[] = ["game", "system", "app", "other"];
+const ORIGINS: readonly string[] = ["game", "system", "app", "other", "memory", "disk"];
 
 /** Anything but a plain file name: a path would carry the player's user folder with it. */
 const NAME_SHAPE = /^[a-z0-9._+()-]+$/;
@@ -214,9 +227,179 @@ export function parseModules(value: unknown): ReportedModule[] | null {
       company: field(e.company),
       product: field(e.product),
       description: field(e.description),
+      detail: "",
     });
   }
   return out;
+}
+
+/** The most regions and plugin files one report may carry. The client caps the same numbers. */
+export const MAX_REGIONS = 24;
+export const MAX_FILES = 32;
+
+/** What the client says backs a region. Anything else is not a report we wrote. */
+const REGION_KINDS: readonly string[] = ["image", "mapped", "private", "other"];
+
+/** A page protection as letters — `rx`, `rwx`, `rwxc`. */
+const PROTECT_SHAPE = /^[-rwxc?]{1,4}$/;
+
+/**
+ * A region with nothing to call itself.
+ *
+ * Shaped like a file name because everything downstream of here — the name column, the
+ * search, the rule matcher — takes file names and refuses anything else. An unnamed region
+ * is still worth a row: it is told apart from the others by its fingerprint, and a rule can
+ * name that.
+ */
+const UNNAMED_REGION = "unnamed.region";
+
+/** Three numbers about the game's threads. */
+export interface ReportedThreads {
+  total: number;
+  foreign: number;
+  breakpoints: number;
+}
+
+/**
+ * Read the regions off a report, as rows.
+ *
+ * Parsed straight into the shape everything else is stored in, which is the point: a region
+ * has a name, a hash and a place it was seen, so it is a row like any other and it goes
+ * through the same rules, the same prevalence read and the same search. A rule naming a
+ * fingerprint reads exactly like a rule naming a file hash, and nothing had to learn a new
+ * kind of thing to make that work.
+ *
+ * `null` if this is not a region list. An absent one is not that — an app too old to look
+ * sends no field at all — and the caller passes `[]` for it.
+ */
+export function parseRegions(value: unknown): ReportedModule[] | null {
+  if (!Array.isArray(value)) return null;
+  if (value.length > MAX_REGIONS) return null;
+  const out: ReportedModule[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") return null;
+    const e = entry as Record<string, unknown>;
+    const kind = typeof e.kind === "string" ? e.kind : "";
+    if (!REGION_KINDS.includes(kind)) return null;
+    const hash = typeof e.sha256 === "string" ? e.sha256.trim().toLowerCase() : "";
+    if (hash && !isSha256(hash)) return null;
+    const protect = typeof e.protect === "string" && PROTECT_SHAPE.test(e.protect) ? e.protect : "";
+    const image = e.image === true;
+    const thread = e.thread === true;
+    const name = shapedName(e.name);
+    const pdb = shapedName(e.pdb);
+    const label = name || pdb || UNNAMED_REGION;
+    const key = `${label} ${hash}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      name: label,
+      origin: "memory",
+      sha256: hash,
+      size: bounded(e.size, MAX_SIZE),
+      // A run of bytes in memory was never written to a disk. Left at zero rather than
+      // filled with the time it was noticed, which would read as a fact about the thing.
+      mtime: 0,
+      trust: "unchecked",
+      publisher: "",
+      company: "",
+      product: "",
+      description: "",
+      detail: regionDetail(protect, kind, image, thread, label, pdb),
+    });
+  }
+  return out;
+}
+
+/** The one line a region gets on the page. */
+function regionDetail(
+  protect: string,
+  kind: string,
+  image: boolean,
+  thread: boolean,
+  name: string,
+  pdb: string,
+): string {
+  const parts = [[protect, kind, image ? "image" : ""].filter(Boolean).join(" ")];
+  if (thread) parts.push("a thread starts here");
+  if (pdb && pdb !== name) parts.push(pdb);
+  return parts.filter(Boolean).join(" · ").slice(0, MAX_FIELD);
+}
+
+/**
+ * Read the game's `plugins` folder off a report, as rows — keeping only what is *not*
+ * loaded.
+ *
+ * The client sends the whole folder because it is the client's job to describe what it saw,
+ * not to decide what matters. Storing the loaded ones again would be storing them twice:
+ * they are already rows, from the module list, under the same name and the same hash, and
+ * the two would fight over one primary key and flip its origin on every report.
+ *
+ * What is left is the reason the folder is read at all. MX Bikes loads every `.dlo` in there
+ * at startup, so a file sitting in it that is *not* loaded is one the game refused, one that
+ * crashed on load, or one waiting for the next launch — and none of those appear anywhere
+ * else in a report.
+ */
+export function parseFiles(value: unknown): ReportedModule[] | null {
+  if (!Array.isArray(value)) return null;
+  if (value.length > MAX_FILES) return null;
+  const out: ReportedModule[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") return null;
+    const e = entry as Record<string, unknown>;
+    const name = shapedName(e.name);
+    if (!name) return null;
+    const hash = typeof e.sha256 === "string" ? e.sha256.trim().toLowerCase() : "";
+    if (hash && !isSha256(hash)) return null;
+    if (e.loaded === true) continue;
+    const key = `${name} ${hash}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      name,
+      origin: "disk",
+      sha256: hash,
+      size: bounded(e.size, MAX_SIZE),
+      mtime: stamp(e.mtime),
+      trust: isTrust(e.trust) ? e.trust : "unchecked",
+      publisher: field(e.publisher),
+      company: field(e.company),
+      product: field(e.product),
+      description: field(e.description),
+      detail: "in the plugins folder, not loaded",
+    });
+  }
+  return out;
+}
+
+/**
+ * Three numbers about the game's threads, or zeroes.
+ *
+ * Never refuses a report: an app too old to count threads sends no field, and a report
+ * thrown away over a number is worse than one that says less than it could. The two that
+ * matter are `foreign` — threads that started somewhere no module covers — and
+ * `breakpoints`, threads carrying an armed hardware breakpoint, which is how a function is
+ * hooked without altering a byte of it.
+ */
+export function parseThreads(value: unknown): ReportedThreads {
+  if (!value || typeof value !== "object") return { total: 0, foreign: 0, breakpoints: 0 };
+  const e = value as Record<string, unknown>;
+  const cap = 4096;
+  return {
+    total: bounded(e.total, cap),
+    foreign: bounded(e.foreign, cap),
+    breakpoints: bounded(e.breakpoints, cap),
+  };
+}
+
+/** A file name off a client, or empty. The same shape the module list is held to. */
+function shapedName(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const clean = value.trim().toLowerCase();
+  if (!clean || clean.length > MAX_NAME) return "";
+  return NAME_SHAPE.test(clean) ? clean : "";
 }
 
 /** One string a file said about itself: trimmed, bounded, and stripped of control characters. */
@@ -324,7 +507,10 @@ export async function putReport(request: Request, account: Account, env: Env): P
     return json(400, { error: "expected a JSON body" });
   }
   if (!body || typeof body !== "object") return json(400, { error: "expected a JSON body" });
-  const { modules, appVersion, available, guid } = body as Record<string, unknown>;
+  const { modules, appVersion, available, guid, regions, threads, files } = body as Record<
+    string,
+    unknown
+  >;
 
   // Tie the report to the player, not just the install. The game already publishes this GUID
   // to every server the player joins, so it is the identity the rest of the system keys on.
@@ -344,30 +530,59 @@ export async function putReport(request: Request, account: Account, env: Env): P
   // difference between "nothing was loaded" and "we were not allowed to look", and an app
   // running below the game's integrity level reports it every pass.
   if (available === false) {
-    await store(env, account, "unknown", 0, 0, 0, [], [], version, now);
+    await store(env, account, "unknown", 0, 0, 0, [], [], NO_THREADS, 0, version, now);
     return json(200, { ok: true });
   }
 
   const list = parseModules(modules);
   if (!list) return json(400, { error: "that is not a module list" });
 
+  // Absent rather than empty is an app too old to have looked, and is not an error. Present
+  // and malformed is, and is refused the same way a bad module list is.
+  const found = parseRegions(regions ?? []);
+  if (!found) return json(400, { error: "that is not a region list" });
+  const plugins = parseFiles(files ?? []);
+  if (!plugins) return json(400, { error: "that is not a plugins folder" });
+  const counted = parseThreads(threads);
+
   const { rules, version: rulesVersion } = await loadRules(env);
-  const verdict = classify(list, rules);
+  // One list, because they are one question. A region and a file in the plugins folder are
+  // both "something is in the game that we cannot account for", and the rules that read a
+  // module read them without knowing there was ever a difference.
+  const verdict = classify([...list, ...found, ...plugins], rules);
   await store(
     env,
     account,
-    verdict.state,
+    withThreads(verdict.state, counted),
     rulesVersion,
     list.length,
     verdict.unknown.length,
     verdict.matched,
     // System libraries are not recorded per-file: hundreds of them, identical everywhere,
     // and they would bury the rows worth reading.
-    list.filter((m) => m.origin !== "system"),
+    [...list.filter((m) => m.origin !== "system"), ...found, ...plugins],
+    counted,
+    found.length,
     version,
     now,
   );
   return json(200, { ok: true });
+}
+
+/** What an app that could not look reports about threads. */
+const NO_THREADS: ReportedThreads = { total: 0, foreign: 0, breakpoints: 0 };
+
+/**
+ * Raise a report's state for what the thread counts say.
+ *
+ * Not `alert`, ever, and deliberately: a thread that started outside every loaded module is
+ * the strongest thing in a report that still has an innocent explanation — a debugger is
+ * attached, an overlay nobody has listed yet did something unusual — and `warn` is what this
+ * page means by "something here is not accounted for". Only a rule names a thing.
+ */
+export function withThreads(state: State, threads: ReportedThreads): State {
+  if (state === "unknown" || state === "alert") return state;
+  return threads.foreign > 0 || threads.breakpoints > 0 ? "warn" : state;
 }
 
 /**
@@ -386,6 +601,8 @@ async function store(
   unknownCount: number,
   matched: Matched[],
   seen: ReportedModule[],
+  threads: ReportedThreads,
+  regionCount: number,
   appVersion: string,
   now: number,
 ): Promise<void> {
@@ -410,13 +627,16 @@ async function store(
   const statements = [
     env.DB.prepare(
       "INSERT INTO client_modules (account_id, state, rules_version, module_count," +
-        " unknown_count, matched, worst_state, worst_at, app_version, updated_at)" +
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" +
+        " unknown_count, matched, worst_state, worst_at, app_version, updated_at," +
+        " region_count, foreign_threads, breakpoints)" +
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" +
         " ON CONFLICT(account_id) DO UPDATE SET state = excluded.state," +
         " rules_version = excluded.rules_version, module_count = excluded.module_count," +
         " unknown_count = excluded.unknown_count, matched = excluded.matched," +
         " worst_state = excluded.worst_state, worst_at = excluded.worst_at," +
-        " app_version = excluded.app_version, updated_at = excluded.updated_at",
+        " app_version = excluded.app_version, updated_at = excluded.updated_at," +
+        " region_count = excluded.region_count," +
+        " foreign_threads = excluded.foreign_threads, breakpoints = excluded.breakpoints",
     ).bind(
       account.id,
       state,
@@ -428,6 +648,9 @@ async function store(
       keepWorst ? prev!.worst_at : now,
       appVersion,
       now,
+      regionCount,
+      threads.foreign,
+      threads.breakpoints,
     ),
   ];
 
@@ -440,14 +663,15 @@ async function store(
       env.DB.prepare(
         "INSERT INTO client_module_seen (account_id, name, sha256, origin, state, label," +
           " rider_name, server_id, first_at, last_at, hits," +
-          " size, mtime, trust, publisher, company, product, description)" +
-          " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)" +
+          " size, mtime, trust, publisher, company, product, description, detail)" +
+          " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)" +
           " ON CONFLICT(account_id, name, sha256) DO UPDATE SET origin = excluded.origin," +
           " state = excluded.state, label = excluded.label, rider_name = excluded.rider_name," +
           " server_id = excluded.server_id, last_at = excluded.last_at, hits = hits + 1," +
           " size = excluded.size, mtime = excluded.mtime, trust = excluded.trust," +
           " publisher = excluded.publisher, company = excluded.company," +
-          " product = excluded.product, description = excluded.description",
+          " product = excluded.product, description = excluded.description," +
+          " detail = excluded.detail",
       ).bind(
         account.id,
         mod.name,
@@ -466,6 +690,7 @@ async function store(
         mod.company,
         mod.product,
         mod.description,
+        mod.detail,
       ),
     );
   }
@@ -488,6 +713,10 @@ async function store(
 export function isUnaccounted(mod: ReportedModule): boolean {
   if (mod.origin === "system") return false;
   if (mod.origin === "app") return LOADER_NAMES.includes(mod.name);
+  // `memory` and `disk` fall through to the same answer the game's own folder gets, and for
+  // the same reason: being there is not a credential. Executable memory nothing loaded, and
+  // a file in the folder the game loads plugins from, both need a rule to be accounted for
+  // — and an `allow` rule on the fingerprint is how one stops being asked about.
   return true;
 }
 
@@ -510,6 +739,12 @@ export interface LiveRow {
   moduleCount: number;
   unknownCount: number;
   matched: Matched[];
+  /** Executable memory in the game that no loaded module covered, when this was reported. */
+  regionCount: number;
+  /** Threads that started somewhere no loaded module covers. */
+  foreignThreads: number;
+  /** Threads carrying an armed hardware breakpoint. */
+  breakpoints: number;
   appVersion: string;
   updatedAt: number;
 }
@@ -533,6 +768,7 @@ export async function collectAdminView(env: Env): Promise<AdminView> {
   const live = await env.DB.prepare(
     "SELECT c.account_id, a.rider_name, a.guid, c.state, c.rules_version, c.module_count," +
       " c.unknown_count, c.matched, c.worst_state, c.worst_at, c.app_version, c.updated_at," +
+      " c.region_count, c.foreign_threads, c.breakpoints," +
       " (SELECT p.server_id FROM presence p WHERE p.account_id = c.account_id" +
       "  AND p.updated_at > ?) AS server_id" +
       " FROM client_modules c JOIN accounts a ON a.id = c.account_id" +
@@ -552,6 +788,9 @@ export async function collectAdminView(env: Env): Promise<AdminView> {
       worst_at: number;
       app_version: string;
       updated_at: number;
+      region_count: number | null;
+      foreign_threads: number | null;
+      breakpoints: number | null;
       server_id: string | null;
     }>();
 
@@ -572,6 +811,9 @@ export async function collectAdminView(env: Env): Promise<AdminView> {
         moduleCount: r.module_count,
         unknownCount: r.unknown_count,
         matched: parseMatched(r.matched),
+        regionCount: r.region_count ?? 0,
+        foreignThreads: r.foreign_threads ?? 0,
+        breakpoints: r.breakpoints ?? 0,
         appVersion: r.app_version ?? "",
         updatedAt: r.updated_at,
       }))

@@ -8,6 +8,8 @@
   Settings.
 - An update waits until you are out of the game, so nothing is pulled out from under a
   session you are riding.
+- Session diagnostics cover more than the list of files your game has loaded: code running
+  inside the game that came from no file, and what is sitting in the game's plugins folder.
 
 ### Fixed
 - Paint sync and voice chat now know which server you are on. The app installs a small
