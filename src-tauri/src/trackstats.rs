@@ -1340,6 +1340,134 @@ mod tests {
     /// held against a published one.
     ///
     /// ```text
+    /// Where a published grid's stalls actually are: its `long`/`lat` walked along the lap,
+    /// against the start line's own start.
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn published_stalls_in_world() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::Path::new(&var);
+        let names = crate::track::entry_names(path).unwrap();
+        let rdf = names.iter().find(|n| n.to_lowercase().ends_with(".rdf")).unwrap();
+        let text = String::from_utf8_lossy(&crate::track::read_entry(path, rdf).unwrap()).to_string();
+
+        let entry = crate::track::heightfield_entries(&names).into_iter().next().unwrap();
+        let bytes = crate::track::read_entry(path, &entry).unwrap();
+        let layout = crate::heightfield::probe(&bytes, None).unwrap();
+        let at = layout.offset + layout.width as usize * layout.height as usize * layout.sample.size();
+        let lap = crate::trackline::read(&bytes[at..]).expect("a lap");
+        let prog = crate::trackprog::TrackProgram {
+            name: String::new(), author: String::new(), location: String::new(),
+            terrain: crate::trackprog::Terrain {
+                size_x: 1000.0, size_z: 1000.0, samples: 513, scale: 100.0,
+                relief: Default::default(), surface: Default::default(),
+            },
+            start: crate::trackprog::Start { x: lap.start.0, z: lap.start.1, angle: lap.heading },
+            segments: lap.program_segments(), width: 12.0, features: Vec::new(),
+            blend: 1.2, elevation: Vec::new(),
+        };
+        let st = prog.stations(1.0);
+        let place = |long: f32, lat: f32| -> (f32, f32) {
+            let q = st.iter().min_by(|a, b| (a.s - long).abs().total_cmp(&(b.s - long).abs())).unwrap();
+            let (rx, rz) = crate::trackprog::right_vector(q.heading);
+            (q.x + rx * lat, q.z + rz * lat)
+        };
+        // The grid's own anchor, and the first three stalls read as lap coordinates.
+        let val = |key: &str| -> Option<f32> {
+            text.lines().find_map(|l| l.trim().strip_prefix(&format!("{key} = "))).and_then(|v| v.parse().ok())
+        };
+        println!("  grid anchor ({:.1}, {:.1}) angle {:.0}", val("posx").unwrap_or(0.0), val("posz").unwrap_or(0.0), val("angle").unwrap_or(0.0));
+        // The grid's own stalls, read straight out of the block rather than by scanning for
+        // the word "stall" — the pit lane's are called `start_stall` and come first.
+        if let Some(gi) = text.find("starting_grid") {
+            let tail = &text[gi..];
+            let mut seen = 0;
+            let mut it = tail.lines().map(|l| l.trim()).peekable();
+            while let Some(l) = it.next() {
+                if l.starts_with("stall") && !l.starts_with("start_stall") && seen < 4 {
+                    let (mut long, mut lat, mut ang) = (0.0f32, 0.0f32, 0.0f32);
+                    for _ in 0..5 {
+                        match it.next() {
+                            Some(v) if v.starts_with("long = ") => long = v[7..].parse().unwrap_or(0.0),
+                            Some(v) if v.starts_with("lat = ") => lat = v[6..].parse().unwrap_or(0.0),
+                            Some(v) if v.starts_with("angle = ") => ang = v[8..].parse().unwrap_or(0.0),
+                            Some("}") => break,
+                            _ => {}
+                        }
+                    }
+                    let (x, z) = place(long, lat);
+                    let q = st.iter().min_by(|a, b| (a.s - long).abs().total_cmp(&(b.s - long).abs())).unwrap();
+                    println!(
+                        "  grid stall {seen}: long {long:.1} lat {lat:.1} angle {ang:.0} -> ({x:.1}, {z:.1}); \
+                         lap heading there {:.0}, stall angle - lap heading {:.0}",
+                        q.heading.to_degrees(),
+                        ang - q.heading.to_degrees(),
+                    );
+                    seen += 1;
+                }
+            }
+        }
+        let mut it = text.lines().map(|l| l.trim());
+        let mut shown = 0;
+        while let Some(l) = it.next() {
+            if l.starts_with("stall") && shown < 3 {
+                let (mut long, mut lat) = (0.0, 0.0);
+                for _ in 0..5 {
+                    match it.next() {
+                        Some(v) if v.starts_with("long = ") => long = v[7..].parse().unwrap_or(0.0),
+                        Some(v) if v.starts_with("lat = ") => lat = v[6..].parse().unwrap_or(0.0),
+                        Some("}") => break,
+                        _ => {}
+                    }
+                }
+                let (x, z) = place(long, lat);
+                println!("  stall {shown}: long {long:.1} lat {lat:.1} -> ({x:.1}, {z:.1})");
+                shown += 1;
+            }
+        }
+    }
+
+    /// A published track's race data: where it puts its grid, and in what coordinates.
+    ///
+    /// ```text
+    /// FROST_TRACK=…/indiana.pkz cargo test -- --ignored --nocapture published_rdf
+    /// ```
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn published_rdf() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::Path::new(&var);
+        let names = crate::track::entry_names(path).unwrap();
+        let rdf = names
+            .iter()
+            .find(|n| n.to_lowercase().ends_with(".rdf"))
+            .expect("a .rdf");
+        let bytes = crate::track::read_entry(path, rdf).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        // The grid block and the first few of its stalls, plus anything that names a position.
+        let mut in_grid = false;
+        let mut stalls = 0usize;
+        for line in text.lines() {
+            let t = line.trim();
+            if t == "starting_grid" {
+                in_grid = true;
+            }
+            if in_grid {
+                if t.starts_with("stall") {
+                    stalls += 1;
+                }
+                if stalls <= 3 {
+                    println!("  {t}");
+                }
+                if stalls > 40 {
+                    in_grid = false;
+                }
+            } else if t.starts_with("30secondsboard") || t.starts_with("pit_lane") {
+                println!("  {t}");
+            }
+        }
+    }
+
     /// FROST_TRACK=…/indiana.pkz cargo test -- --ignored --nocapture cross_sections
     /// ```
     #[test]

@@ -1065,6 +1065,12 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // line the ground was benched by a different rule, and the two rules do not meet.
             let spur_e = d - wide;
             let lap_e = dist[i] - widths.at(arc[i]);
+            // Track surface wherever the start covers it, whatever the ground under it is
+            // doing: this is the same width the `.trh` and the `.map` paint, and a corridor
+            // that disagreed with them measured eight metres narrower than the file it wrote.
+            if d <= wide && back > 0.0 {
+                corridor[i] = true;
+            }
             let claim = smoothstep(((lap_e - spur_e) / SHOULDER_M).clamp(0.0, 1.0)) * back;
             if claim <= 0.0 {
                 continue;
@@ -1080,9 +1086,6 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 * if ground > deck { CUT_SHOULDER } else { FILL_SHOULDER };
             let w = bench_weight(d, wide, shoulder) * claim;
             heights[i] = ground * (1.0 - w) + deck * w;
-            if d <= wide {
-                corridor[i] = true;
-            }
         }
     }
 
@@ -2686,6 +2689,9 @@ pub struct StartSpur {
     len: f32,
 }
 
+/// How much of the start straight's last stretch is already the width of the lap it joins.
+const MERGE_TAIL_M: f32 = 12.0;
+
 /// How much further the start pad's cut and fill reach than a track's shoulder does.
 const START_BANK: f32 = 2.0;
 
@@ -2775,8 +2781,12 @@ impl StartSpur {
         };
         let half = START_FAN_HALF_M.max(prog.width * 0.5);
         let funnel = crate::trackprog::START_SPRINT_M;
+        let len_all = stations.last().map(|q| q.s).unwrap_or(1.0).max(1.0);
+        // The same width the pad comes out — see `at`, which this has to agree with or the
+        // level is taken across ground the start does not cover.
         let wide_at = |s: f32| {
-            let u = ((s - GATE_INSET_M) / (funnel - GATE_INSET_M).max(1.0)).clamp(0.0, 1.0);
+            let (from, to) = (funnel, (len_all - MERGE_TAIL_M).max(funnel + 1.0));
+            let u = ((s - from) / (to - from)).clamp(0.0, 1.0);
             half + (prog.width * 0.5 - half) * smoothstep(u)
         };
         let mut deck: Vec<f32> = stations.iter().map(|q| across(q, wide_at(q.s))).collect();
@@ -2826,10 +2836,18 @@ impl StartSpur {
         a + (b - a) * (x - i as f32)
     }
 
-    /// How wide the start is, this far along it: the gate row's width, easing down to the
-    /// riding line's by the end of the sprint.
+    /// How wide the start is, this far along it.
+    ///
+    /// Full width the whole way down the sprint, and then narrowing *through the turn* — not
+    /// tapering along the straight. Forty riders leave the gate abreast and are still abreast
+    /// when they arrive at turn one; what squeezes them into single file is the corner, which
+    /// is why a start straight reads as a wide slab with a funnel on the end of it rather than
+    /// as a wedge.
     pub fn at(&self, s: f32) -> f32 {
-        let u = ((s - GATE_INSET_M) / (self.funnel - GATE_INSET_M).max(1.0)).clamp(0.0, 1.0);
+        // The turn: from where the sprint ends to a little short of the merge, so the last
+        // few metres are already the width of the track they join.
+        let (from, to) = (self.funnel, (self.len - MERGE_TAIL_M).max(self.funnel + 1.0));
+        let u = ((s - from) / (to - from)).clamp(0.0, 1.0);
         self.half + (self.line_half - self.half) * smoothstep(u)
     }
 
@@ -2884,6 +2902,28 @@ fn rdf(prog: &TrackProgram, spur: Option<&StartSpur>) -> String {
     let lap = prog.lap_length();
     let half = prog.width * 0.5;
     let line = finish_at(prog);
+    // Everything the file places by a `long` and a `lat` is placed *on the lap*, whatever it
+    // is standing on — read straight off published tracks, whose gate rows sit out on a start
+    // spur and are still stated in lap coordinates: Indiana's row is `long 457, lat -30`, and
+    // the row it draws lands 30 m off the racing line at that point. Getting this wrong is
+    // not subtle. Written along the start straight instead, the game read `long 5, lat -24`
+    // as five metres round the lap and put forty riders across the middle of the track.
+    let stations = prog.stations(0.5);
+    let onto_lap = |x: f32, z: f32, heading_deg: f32| -> (f32, f32, f32) {
+        let Some(q) = stations.iter().min_by(|a, b| {
+            let da = (a.x - x).powi(2) + (a.z - z).powi(2);
+            let db = (b.x - x).powi(2) + (b.z - z).powi(2);
+            da.total_cmp(&db)
+        }) else {
+            return (0.0, 0.0, 0.0);
+        };
+        let (rx, rz) = crate::trackprog::right_vector(q.heading);
+        let lat = (x - q.x) * rx + (z - q.z) * rz;
+        // And the angle relative to the lap's own direction there, which is how a published
+        // stall states which way its bike faces.
+        let angle = (heading_deg - q.heading.to_degrees()).rem_euclid(360.0);
+        (q.s, lat, angle)
+    };
 
     let mut s = String::new();
     let mark = |s: &mut String, name: &str, at: f32, w: f32| {
@@ -2948,22 +2988,26 @@ fn rdf(prog: &TrackProgram, spur: Option<&StartSpur>) -> String {
     };
     let (fx, fz) = crate::trackprog::heading_vector(gate.angle.to_radians());
     let (rx, rz) = crate::trackprog::right_vector(gate.angle.to_radians());
-    let anchor_x = gate.x + fx * gate_at + rx * span * 0.5;
-    let anchor_z = gate.z + fz * gate_at + rz * span * 0.5;
+    // The row's own middle, on the line it stands on — not one end of it. Indiana anchors at
+    // (224, 148.5) and its start line begins at (220, 148); Briarcliff nineteen metres along
+    // its own. Both sit on the centreline with the gates spread either side.
+    let (mid_x, mid_z) = (gate.x + fx * gate_at, gate.z + fz * gate_at);
     s.push_str(&format!(
-        "starting_grid\n{{\n\tnumstalls = {grid}\n\ttype = 1\n\tposx = {anchor_x:.6}\n\
-         \tposz = {anchor_z:.6}\n\tangle = {:.6}\n\tnumstallsperrow = {grid}\n\
+        "starting_grid\n{{\n\tnumstalls = {grid}\n\ttype = 1\n\tposx = {mid_x:.6}\n\
+         \tposz = {mid_z:.6}\n\tangle = {:.6}\n\tnumstallsperrow = {grid}\n\
          \tdistfromstartline = 0.000000\n\tlanespacing = 0.000000\n\trowspacing = 0.000000\n\
          \tdifflat = 0.000000\n\tlanewidth = {:.6}\n\tlatshift = 0.000000\n\tside = 1\n",
         gate.angle, -lane
     ));
     for i in 0..grid {
-        // Spread across the whole row, so a stall's own position agrees with the row the
-        // gate is drawn on.
-        let lat = -span * 0.5 + (i as f32 + 0.5) * lane;
+        // Where the gate actually is, in the world, and then that point read back as a
+        // position on the lap.
+        let t = -span * 0.5 + (i as f32 + 0.5) * lane;
+        let (x, z) = (mid_x + rx * t, mid_z + rz * t);
+        let (long, lat, angle) = onto_lap(x, z, gate.angle);
         s.push_str(&format!(
-            "\tstall{i}\n\t{{\n\t\tlong = {gate_at:.6}\n\t\tlat = {lat:.6}\n\
-             \t\tangle = 0.000000\n\t}}\n"
+            "\tstall{i}\n\t{{\n\t\tlong = {long:.6}\n\t\tlat = {lat:.6}\n\
+             \t\tangle = {angle:.6}\n\t}}\n"
         ));
     }
     s.push_str("}\n");
@@ -2983,16 +3027,19 @@ fn rdf(prog: &TrackProgram, spur: Option<&StartSpur>) -> String {
     }
 
     // The thirty-second board stands beside the gate row, out past the edge of the start
-    // straight — which is the widest the track gets anywhere.
+    // straight — and it too is stated on the lap.
     let board_lat = spur.map(|sp| sp.at(sp.gate_at()) + 3.0).unwrap_or(half + 3.0);
+    let (bx, bz) = (
+        mid_x - fx * 4.0 - rx * board_lat,
+        mid_z - fz * 4.0 - rz * board_lat,
+    );
+    let (board_long, board_off, board_angle) = onto_lap(bx, bz, gate.angle);
     s.push_str(&format!(
-        "30secondsboard_posx = {:.6}\n30secondsboard_posz = {:.6}\n30secondsboard_angle = {:.6}\n\
-         30seconds_board\n{{\n\tlong = {:.6}\n\tlat = {:.6}\n\tangle = 0.000000\n}}\n",
-        gate.x,
-        gate.z,
+        "30secondsboard_posx = {bx:.6}\n30secondsboard_posz = {bz:.6}\n\
+         30secondsboard_angle = {:.6}\n\
+         30seconds_board\n{{\n\tlong = {board_long:.6}\n\tlat = {board_off:.6}\n\
+         \tangle = {board_angle:.6}\n}}\n",
         gate.angle - 90.0,
-        (gate_at - 4.0).max(0.5),
-        -board_lat
     ));
     s
 }
@@ -5122,6 +5169,66 @@ mod tests {
         );
     }
 
+    /// The gates the game reads have to be the gates we built. Every position in a `.rdf` is
+    /// stated on the lap, so a row standing out on the start straight is written as a long
+    /// way round the lap and a big lateral offset — and if it is written as a distance along
+    /// the start straight instead, the game puts forty riders across the middle of the track.
+    #[test]
+    fn the_grid_the_game_reads_lands_on_the_start_straight() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let spur = s.spur.as_ref().expect("a start straight");
+        let text = rdf(&p, Some(spur));
+
+        // Read the stalls back the way the game does: a distance round the lap and an offset
+        // across it.
+        let st = p.stations(0.5);
+        let block = &text[text.find("starting_grid").expect("a grid")..];
+        let mut it = block.lines().map(|l| l.trim());
+        let mut placed = Vec::new();
+        while let Some(l) = it.next() {
+            if !l.starts_with("stall") {
+                continue;
+            }
+            let (mut long, mut lat) = (0.0f32, 0.0f32);
+            for _ in 0..5 {
+                match it.next() {
+                    Some(v) if v.starts_with("long = ") => long = v[7..].parse().unwrap(),
+                    Some(v) if v.starts_with("lat = ") => lat = v[6..].parse().unwrap(),
+                    Some("}") => break,
+                    _ => {}
+                }
+            }
+            let q = st
+                .iter()
+                .min_by(|a, b| (a.s - long).abs().total_cmp(&(b.s - long).abs()))
+                .unwrap();
+            let (rx, rz) = crate::trackprog::right_vector(q.heading);
+            placed.push((q.x + rx * lat, q.z + rz * lat));
+        }
+        assert_eq!(placed.len(), GRID_STALLS, "every gate is written");
+
+        // Each one on the start straight, and none of them on the lap.
+        let line = p.start_line().expect("a start line");
+        let walk = TrackProgram { start: line.start, segments: line.segments.clone(), ..p.clone() };
+        let spur_st = walk.stations(1.0);
+        for (i, (x, z)) in placed.iter().enumerate() {
+            let to_spur = spur_st
+                .iter()
+                .map(|q| ((q.x - x).powi(2) + (q.z - z).powi(2)).sqrt())
+                .fold(f32::MAX, f32::min);
+            let to_lap = st
+                .iter()
+                .map(|q| ((q.x - x).powi(2) + (q.z - z).powi(2)).sqrt())
+                .fold(f32::MAX, f32::min);
+            assert!(
+                to_spur < spur.at(spur.gate_at()) + 2.0,
+                "gate {i} lands {to_spur:.0} m off the start straight"
+            );
+            assert!(to_lap > p.width, "gate {i} lands on the lap, {to_lap:.0} m from its line");
+        }
+    }
+
     /// A rider on a flying lap must never cross the gates: the start is a spur beside the
     /// circuit, not a stretch of it.
     #[test]
@@ -5947,7 +6054,25 @@ mod tests {
             s.gw, s.gh, p.terrain.size_x, p.terrain.size_z, s.mps, s.used_m, s.budget_m
         );
 
-        let c = crate::trackstats::measure("synth", &s.corridor, &s.heights, s.gw, s.gh, s.mps);
+        // The riding line only. The start pad is track — 54 m of it across the gate row — but
+        // it is not riding line, and the corpus figures this is held to describe the ribbon a
+        // rider goes round on.
+        let lap_only: Vec<bool> = (0..s.gw * s.gh)
+            .map(|i| s.corridor[i] && !s.on_the_start(i, p.width * 0.5))
+            .collect();
+        let c = crate::trackstats::measure("synth", &lap_only, &s.heights, s.gw, s.gh, s.mps);
+        // And the whole track surface, pad and all, which is what a reader of the written
+        // file sees — the `.trh` surfaces the start as track, because it is.
+        let all = crate::trackstats::measure("synth", &s.corridor, &s.heights, s.gw, s.gh, s.mps);
+        if let Some(spur) = &s.spur {
+            let pad = (0..s.gw * s.gh).filter(|i| s.corridor[*i] && !lap_only[*i]).count();
+            println!(
+                "start: {:.0} m long, {:.0} m across the gate row, {:.0} m² of pad",
+                spur.length(),
+                spur.width_m(),
+                pad as f32 * s.mps * s.mps,
+            );
+        }
         println!(
             "measured: {:>5.1}% area {:>4.0}% joined  w {:>4.1}/{:<4.1}m  len {:>5.0}m  \
              slope p90 {:>4.1}° p99 {:>4.1}°  relief p90 {:>4.2}m  {:>4} lips  h p50 {:>4.2}m  \
@@ -6061,10 +6186,11 @@ mod tests {
                 bc.lips
             );
             assert!(
-                (bc.width_from_mean_m - c.width_from_mean_m).abs() < 1.0,
-                "the .pkz measures {:.1} m wide where the terrain it was written from is {:.1}",
+                (bc.width_from_mean_m - all.width_from_mean_m).abs() < 1.5,
+                "the .pkz measures {:.1} m of track where the terrain it was written from is \
+                 {:.1} — riding line and start pad together",
                 bc.width_from_mean_m,
-                c.width_from_mean_m
+                all.width_from_mean_m
             );
 
             preview(&s, &dir.join("preview.ppm"));
@@ -6330,7 +6456,14 @@ mod tests {
             let _ = crate::trackllm::repair_for_tests(&mut p);
             let s = synthesise(&p).unwrap();
             match (&s.spur, p.start_line()) {
-                (Some(spur), Some(line)) => println!(
+                (Some(spur), Some(line)) => { for (i, sg) in line.segments.iter().enumerate() {
+                    match sg {
+                        crate::trackprog::Segment::Straight { length, .. } =>
+                            println!("    {i}: straight {length:.0} m"),
+                        crate::trackprog::Segment::Arc { radius, angle, .. } =>
+                            println!("    {i}: arc r{radius:.0} through {angle:.0}° = {:.0} m", sg.length()),
+                    }
+                } println!(
                     "{name}: start straight {:.0} m off the lap, {:.0} m long in {} segments, \
                      {:.0} m wide at the gates against a {:.0} m track; joins the lap at \
                      {:.0} m of {:.0}",
@@ -6341,7 +6474,7 @@ mod tests {
                     p.width,
                     line.joins_at,
                     p.lap_length(),
-                ),
+                ) },
                 _ => println!("{name}: no start straight"),
             }
         }
