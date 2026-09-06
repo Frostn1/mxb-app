@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /**
  * A track program: the document a track is generated from.
@@ -446,6 +447,41 @@ export function buildTrack(
   install: boolean,
 ): Promise<BuildResult> {
   return invoke<BuildResult>("build_track", { program, dir, install });
+}
+
+/** The phases of a build, in the order they run. */
+export type BuildPhase =
+  | "synthesising"
+  | "writing"
+  | "map"
+  | "trh"
+  | "centerline"
+  | "packaging"
+  | "installing";
+
+/**
+ * How far a build has got.
+ *
+ * Mirrors `BuildProgress` and `trackbuild::Progress` in `src-tauri`. A phase says where it
+ * sits on the bar and how long it is expected to run, and the studio eases across that span
+ * over that long — the compilers themselves say nothing until they exit, so this is the only
+ * sign of life a build has.
+ */
+export interface BuildProgress {
+  /** Which build this belongs to, so a second one can't drive the first one's bar. */
+  slug: string;
+  phase: BuildPhase;
+  /** Where the phase starts and ends on the bar, 0–1. */
+  from: number;
+  to: number;
+  /** Seconds it is expected to run for. */
+  expect: number;
+}
+
+export function onBuildProgress(
+  cb: (p: BuildProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<BuildProgress>("track-build-progress", (e) => cb(e.payload));
 }
 
 /**

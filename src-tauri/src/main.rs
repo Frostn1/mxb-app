@@ -1538,6 +1538,22 @@ async fn ensure_track_tools(app: &tauri::AppHandle) -> Result<String, String> {
     Ok(got.path)
 }
 
+/// How far a track build has got.
+///
+/// A build is minutes of work with nothing to look at, so it reports where it is rather than
+/// only what it produced. Keyed by slug: the studio's bar belongs to one track, and a second
+/// build must not drive the first one's.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildProgress {
+    slug: String,
+    #[serde(flatten)]
+    at: trackbuild::Progress,
+}
+
+/// The event a build reports itself on.
+const BUILD_EVENT: &str = "track-build-progress";
+
 /// Everything a build produced, and where it ended up.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1583,11 +1599,30 @@ async fn build_track(
     tauri::async_runtime::spawn_blocking(move || {
         let tools = trackbuild::find(std::path::Path::new(&tools_at))
             .ok_or("There's no terrained.exe in that folder.".to_string())?;
+        let mut plan = trackbuild::Plan::new(
+            prog.terrain.samples,
+            tools.tracked.is_some(),
+            tracks.is_some(),
+        );
+        let slug_for_events = slug.clone();
+        let say = |at: trackbuild::Progress| {
+            let _ = app.emit(
+                BUILD_EVENT,
+                BuildProgress { slug: slug_for_events.clone(), at },
+            );
+        };
+
+        say(plan.start("synthesising"));
         let syn = tracksynth::synthesise(&prog).map_err(|e| format!("{e:#}"))?;
+
+        say(plan.start("writing"));
         std::fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
         tracksynth::write_source(&prog, &syn, &root).map_err(|e| format!("{e:#}"))?;
-        let steps = trackbuild::compile(&tools, &root, &slug, &cfg.game_path)
-            .map_err(|e| format!("{e:#}"))?;
+
+        let steps = trackbuild::compile(&tools, &root, &slug, &cfg.game_path, &mut |phase| {
+            say(plan.start(phase))
+        })
+        .map_err(|e| format!("{e:#}"))?;
 
         let mut out = BuildResult {
             dir: root.to_string_lossy().into_owned(),
@@ -1598,15 +1633,20 @@ async fn build_track(
         // Only a build that got all the way through is worth packaging: a `.pkz` missing its
         // `.map` is a track the game lists and then refuses to load.
         if out.steps.iter().all(|s| s.ok) {
+            say(plan.start("packaging"));
             let pkz = root.join(format!("{slug}.pkz"));
             trackbuild::package(&root, &slug, &pkz).map_err(|e| format!("{e:#}"))?;
             out.pkz = Some(pkz.to_string_lossy().into_owned());
             if let Some(tracks) = tracks {
+                say(plan.start("installing"));
                 let at = trackbuild::install(&pkz, &tracks).map_err(|e| format!("{e:#}"))?;
                 usage::track("track.build.install");
                 out.installed = Some(at.to_string_lossy().into_owned());
             }
         }
+        // Closes the last phase, so what it cost is remembered and the next build is paced
+        // by this machine rather than by the one the defaults were measured on.
+        plan.finish();
         Ok(out)
     })
     .await
@@ -10248,6 +10288,31 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod build_progress_tests {
+    use super::*;
+
+    /// The studio reads these five names off the event. `#[serde(flatten)]` is the only thing
+    /// holding the phase's own fields at the top level, and nothing about that is checked by
+    /// the compiler — get it wrong and the bar simply never moves.
+    #[test]
+    fn a_build_reports_one_flat_object() {
+        let at = trackbuild::Plan::new(2049, true, true).start("map");
+        let json = serde_json::to_value(BuildProgress {
+            slug: "corpus_national".into(),
+            at,
+        })
+        .unwrap();
+        let obj = json.as_object().expect("an object");
+        let mut names: Vec<&str> = obj.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["expect", "from", "phase", "slug", "to"]);
+        assert_eq!(obj["phase"], "map");
+        assert_eq!(obj["slug"], "corpus_national");
+        assert!(obj["to"].as_f64().unwrap() > obj["from"].as_f64().unwrap());
+    }
 }
 
 #[cfg(test)]

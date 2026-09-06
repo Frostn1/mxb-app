@@ -37,17 +37,18 @@ import {
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { TrackViewer } from "../../Viewer/TrackViewer";
+import BuildCard from "./BuildCard";
 import ElevationCurve from "./ElevationCurve";
 import { Switch } from "../../ui/switch";
 import { Segmented } from "../../ui/segmented";
 import { loadTrackOverview, loadTrackTerrain } from "../../../api/tracks";
 import type { TrackOverview, TrackTerrain } from "../../../types";
 import { useT } from "../../../i18n/context";
+import { isRunning, useTrackBuild } from "../../../Context/TrackBuild";
 import { cn } from "@/lib/utils";
 import {
   baseTrackProgram,
   blankTrackProgram,
-  buildTrack,
   closeTrackLap,
   fitTrackBudget,
   checkTrack,
@@ -68,7 +69,6 @@ import {
   roomiestGap,
   setTrackTools,
   trackToolsStatus,
-  type BuildStep,
   type LapStep,
   type TrackFeature,
   type TrackFeatureKind,
@@ -92,9 +92,15 @@ import {
 export default function TrackStudio() {
   const t = useT();
   const [brief, setBrief] = useState("");
-  const [busy, setBusy] = useState<
-    "generate" | "preview" | "export" | "build" | null
-  >(null);
+  const [working, setWorking] = useState<"generate" | "preview" | "export" | null>(null);
+  // The build itself lives above this component — see `Context/TrackBuild` — so that leaving
+  // the tab doesn't take the bar with it. To everything here that asks "is the studio busy?"
+  // it is still one answer.
+  const { build, start: startBuild } = useTrackBuild();
+  const building = build !== null && isRunning(build.state);
+  const busy: "generate" | "preview" | "export" | "build" | null = building
+    ? "build"
+    : working;
   const [program, setProgram] = useState<TrackProgram | null>(null);
   const [preview, setPreview] = useState<TrackPreview | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
@@ -134,7 +140,6 @@ export default function TrackStudio() {
   const [live, setLive] = useState(false);
   const rebuild = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tools, setTools] = useState<TrackToolsStatus | null>(null);
-  const [steps, setSteps] = useState<BuildStep[]>([]);
 
   // Whether the compilers are here decides whether the last step is a button or a folder of
   // homework, so it is worth knowing before anyone has generated anything.
@@ -180,7 +185,7 @@ export default function TrackStudio() {
 
   async function onGenerate() {
     if (!brief.trim() || busy) return;
-    setBusy("generate");
+    setWorking("generate");
     setPreview(null);
     setProblems([]);
     try {
@@ -190,7 +195,7 @@ export default function TrackStudio() {
     } catch (e) {
       toast.error(t("track.generateFailed"), { description: String(e) });
     } finally {
-      setBusy(null);
+      setWorking(null);
     }
   }
 
@@ -208,7 +213,7 @@ export default function TrackStudio() {
 
   async function reallyLoad(load: () => Promise<TrackProgram>) {
     if (busy) return;
-    setBusy("generate");
+    setWorking("generate");
     setPreview(null);
     setProblems([]);
     try {
@@ -220,7 +225,7 @@ export default function TrackStudio() {
     } catch (e) {
       toast.error(t("track.generateFailed"), { description: String(e) });
     } finally {
-      setBusy(null);
+      setWorking(null);
     }
   }
 
@@ -265,7 +270,7 @@ export default function TrackStudio() {
 
   async function onPreview() {
     if (!program || busy) return;
-    setBusy("preview");
+    setWorking("preview");
     try {
       const p = await previewTrack(program);
       setPreview(p);
@@ -280,7 +285,7 @@ export default function TrackStudio() {
     } catch (e) {
       toast.error(t("track.buildFailed"), { description: String(e) });
     } finally {
-      setBusy(null);
+      setWorking(null);
     }
   }
 
@@ -288,14 +293,14 @@ export default function TrackStudio() {
     if (!program || busy) return;
     const dir = await openDialog({ multiple: false, directory: true });
     if (typeof dir !== "string") return;
-    setBusy("export");
+    setWorking("export");
     try {
       const wrote = await exportTrackSource(program, dir);
       toast.success(t("track.exported", { count: wrote.length }), { description: dir });
     } catch (e) {
       toast.error(t("track.exportFailed"), { description: String(e) });
     } finally {
-      setBusy(null);
+      setWorking(null);
     }
   }
 
@@ -449,31 +454,23 @@ export default function TrackStudio() {
   }
 
   // Build the whole way and put it where the game reads it. No folder to pick: the app has
-  // one of its own, and a track you have to go and find afterwards isn't finished.
-  async function onBuild() {
+  // one of its own, and a track you have to go and find afterwards isn't finished. Handed
+  // over rather than awaited here: the build outlives this screen.
+  function onBuild() {
     if (!program || busy) return;
-    setBusy("build");
-    setSteps([]);
-    try {
-      const built = await buildTrack(program, null, true);
-      setSteps(built.steps);
-      setTools(await trackToolsStatus().catch(() => null));
-      const failed = built.steps.find((s) => !s.ok);
-      if (failed) {
-        toast.error(t("track.buildStepFailed", { step: failed.name }), {
-          description: failed.output.slice(0, 400),
-        });
-      } else {
-        toast.success(t("track.rideIt"), {
-          description: built.installed ?? built.pkz ?? built.dir,
-        });
-      }
-    } catch (e) {
-      toast.error(t("track.compileFailed"), { description: String(e) });
-    } finally {
-      setBusy(null);
-    }
+    startBuild(program);
   }
+
+  // A build fetches the compilers if this machine hasn't got them, so what the studio knows
+  // about them can be out of date the moment one finishes. Keyed on the phase, not the whole
+  // build: that object is replaced five times a second while the bar is moving.
+  const buildState = build?.state;
+  useEffect(() => {
+    if (!buildState || isRunning(buildState)) return;
+    trackToolsStatus()
+      .then(setTools)
+      .catch(() => {});
+  }, [buildState]);
 
   const blocked = problems.length > 0;
 
@@ -705,8 +702,8 @@ export default function TrackStudio() {
                 exported source, fetching them first if this machine hasn't got them — there
                 is no second path that produces a track the game will ride. */}
             <div className="mt-auto flex flex-col gap-2">
-              <Button onClick={() => void onBuild()} disabled={blocked || busy !== null}>
-                {busy === "build" ? t("track.compiling") : t("track.compile")}
+              <Button onClick={onBuild} disabled={blocked || busy !== null}>
+                {building ? t("track.compiling") : t("track.compile")}
               </Button>
               <Button
                 variant="outline"
@@ -724,16 +721,7 @@ export default function TrackStudio() {
                   {t("track.pointAtTools")}
                 </button>
               )}
-              {steps.length > 0 && (
-                <ul className="space-y-1 text-[11.5px] leading-snug">
-                  {steps.map((s) => (
-                    <li key={s.name} className={s.ok ? "text-muted-foreground" : "text-destructive"}>
-                      {s.ok ? "✓" : "✕"} {s.name}
-                      {s.produced ? ` → ${s.produced}` : ""}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {build && <BuildCard />}
             </div>
           </div>
 

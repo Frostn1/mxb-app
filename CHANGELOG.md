@@ -2,6 +2,13 @@
 
 ## 2026-09-06
 
+### Added
+- A progress bar while a track compiles, saying what it is working on and how far along it is.
+- A compiling track shows in the top bar from anywhere in the app, and keeps building if you
+  leave the Track Studio — the bar is still there when you come back.
+
+## 2026-09-06
+
 ### Changed
 - Sharing a track is quicker. The app packs it straight out of your mods folder instead of
   making a copy of it first.
@@ -13,6 +20,11 @@
 ## 2026-09-06
 
 ### Changed
+- A generated track has a riding line in it. The corridor is worked dirt with a darker line
+  worn through it and tyre marks in the ruts, instead of one dark ribbon from edge to edge.
+- Generated tracks are painted with real ground. The soil, the riding line, the packed bottom
+  of a rut and the grass outside the track are photographs of ground rather than drawn dirt,
+  so a lap reads like somewhere that has been ridden.
 - The trackside advertising is a hoarding: printed plastic boards bolted edge to edge into
   runs down both sides of the lap, sharing an upright at every join, with clear ground between
   one run and the next. They used to be single banners slung every fifty metres.

@@ -204,12 +204,28 @@ const RUT_LIP_EDGE: (f32, f32) = (0.0, 0.52);
 /// The contrast has to come from the gap between floor and wall, not from taking the floor
 /// away: a line solid enough to follow, with the ground beside each groove pulled hard out of
 /// it.
-const RUT_PAINT_FLOOR: f32 = 0.52;
+const RUT_PAINT_FLOOR: f32 = 0.22;
 const RUT_PAINT_WALL: f32 = 1.55;
 
 /// How much of the packed sheet is available off the racing line, where the ground still has
 /// grooves in it but no strip was ever painted.
-const RUT_PAINT_OFF_LINE: f32 = 0.72;
+const RUT_PAINT_OFF_LINE: f32 = 0.30;
+
+/// Over how many metres the ground painted inside the corridor fades out at its edge.
+///
+/// Whatever this is, the masks have to stop *past* it. A cut inside the fade is a hard
+/// boundary at the resolution of the terrain grid — a sawtooth a cell deep and two long,
+/// running the length of the track — and it is the first thing the eye finds in a corner.
+const RUT_CORRIDOR_FADE_M: f32 = 1.6;
+
+/// How wide the ridden line is either side of the racing line, how much wider it gets through
+/// a corner, and how far its own edge fades.
+///
+/// Measured off what a corner looks like rather than picked: riders take a straight in a file
+/// about three metres wide and a corner across most of it.
+const LINE_HALF_WIDTH_M: f32 = 2.1;
+const LINE_CORNER_SPREAD: f32 = 0.85;
+const LINE_FADE_M: f32 = 0.8;
 
 /// And how strongly the wall beside a groove takes the dry, loose sheet instead, and how
 /// quickly it gets there. A bank is loose over all of itself, not in proportion to how tall it
@@ -2456,6 +2472,22 @@ fn sample(h: &[f32], gw: usize, gh: usize, x: f32, y: f32) -> f32 {
     h[yi * gw + xi]
 }
 
+/// The same, between the samples.
+///
+/// The game draws the terrain as a mesh and lights it off interpolated normals. Anything that
+/// lights it off [`sample`] instead gets one flat normal per cell, which at riding scale is a
+/// staircase down every slope — a picture of the grid rather than of the ground.
+fn sample_smooth(h: &[f32], gw: usize, gh: usize, x: f32, y: f32) -> f32 {
+    let (fx, fy) = (x.clamp(0.0, (gw - 1) as f32), y.clamp(0.0, (gh - 1) as f32));
+    let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
+    let (x1, y1) = ((x0 + 1).min(gw - 1), (y0 + 1).min(gh - 1));
+    let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+    let at = |xi: usize, yi: usize| h[yi * gw + xi];
+    let top = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * tx;
+    let bot = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * tx;
+    top + (bot - top) * ty
+}
+
 // ---------------------------------------------------------------------------
 // Noise
 // ---------------------------------------------------------------------------
@@ -2537,22 +2569,20 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     // Every band is measured from the edge of the track — the lap's, or the start straight's,
     // whichever the cell is nearer. The start is a track surface too, and painting by the lap
     // alone leaves forty gates standing in a field.
-    let dirt = mask_outside(syn, MASK_DIM, half, |e, x, z| {
-        soft_edge(1.5 + edge_noise(x, z, seed ^ 0xD127, 1.6, 0.7), 2.0, e)
-    });
-    // The shoulder: worked ground either side of the line, painted from the edge of the
-    // riding surface out to where the field starts. It is most of what a rider sees.
-    let shoulder = mask_outside(syn, MASK_DIM, half, |e, x, z| {
-        255 - soft_edge(
-            SHOULDER_M * 0.75 + edge_noise(x, z, seed ^ 0x5A1D, 2.4, 1.0),
-            5.0,
-            e,
-        )
-    });
-    let grass = mask_outside(syn, MASK_DIM, half, |e, x, z| {
-        let past = 255 - soft_edge(SHOULDER_M + edge_noise(x, z, seed ^ 0x6EE2, 3.2, 1.2), 6.0, e);
-        (past as f32 * turf_cover(x, z, seed)) as u8
-    });
+    // Off `layers`, like everything else here. These three used to be a second set of edges
+    // written out by hand — dirt 1.5 m wider than its band and fading over two metres, the
+    // shoulder at three quarters of its width fading over five, grass over six — so the masks
+    // TerrainEd compiles into the shipped track were not the bands the `.map` writer and every
+    // picture of the ground draw. The ground nobody could judge from a picture was this.
+    let band_of = |b: BandMask| band_mask(syn, b, half, seed, MASK_DIM, MASK_DIM);
+    let bands = layers(prog);
+    let band_named = |name: &str| -> Vec<u8> {
+        let l = bands.iter().find(|l| l.name == name).expect("a band by that name");
+        band_of(l.band)
+    };
+    let dirt = band_named("line");
+    let shoulder = band_named("shoulder");
+    let grass = band_named("grass");
     // Off-track starts where the graded shoulder ends: the rider is on the track, or in the
     // field, with the shoulder belonging to neither. This one decides where the game says a
     // rider has gone off, so it is the one boundary that stays smooth.
@@ -2631,7 +2661,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     std::fs::create_dir_all(dir.join("maps/env")).context("make the maps folder")?;
     let seed = prog.terrain.relief.seed;
     for l in layers(prog) {
-        let px = ground_pixels(GROUND_TEXTURE_DIM, &l.look, seed ^ l.salt);
+        let px = band_pixels(GROUND_TEXTURE_DIM, &l.look, seed ^ l.salt);
         // A shader's bump takes one repetition count whatever shape the terrain is, so on a
         // rectangular one it follows x and the sheet's own two counts do the rest.
         let (rx, _) = repetitions(prog, l.tile_m);
@@ -3743,7 +3773,7 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
         out.extend_from_slice(&u(0));
         out.extend_from_slice(&u(dim as u32));
         out.extend_from_slice(&u(dim as u32));
-        let rgba = ground_pixels(dim, look, seed ^ salt);
+        let rgba = band_pixels(dim, look, seed ^ salt);
         // The game keys its texture cache on this, and it is the MD5 of the pixels before
         // they are deflated. Leave it zero and every sheet in the file is the same texture.
         out.extend_from_slice(&sheet_hash(&rgba));
@@ -4188,6 +4218,13 @@ enum BandMask {
     Out(f32),
     /// Past the shoulder — the field and the turf on it.
     Beyond,
+    /// The ridden line: a strip about where people actually go, this many metres either side
+    /// of it before the edge starts to tear.
+    ///
+    /// Not `Out(0.0)`. That is the whole corridor, and painting the ridden colour over all of
+    /// it is a black ribbon from edge to edge with nothing for a mark to stand against — the
+    /// corridor is worked dirt, and the line worn through it is the dark part.
+    Line(f32),
     /// The packed racing line.
     Rut,
     /// Loose dirt off the line and round the outside of a bend.
@@ -4218,6 +4255,7 @@ fn band_mask(
         BandMask::Out(extra) => mask_rect_outside(syn, mw, mh, half, move |e, x, z| {
             band_edge(e, x, z, extra, seed ^ 0xB3ED)
         }),
+        BandMask::Line(w) => line_mask(syn, half, w, seed, mw, mh),
     }
 }
 
@@ -4283,6 +4321,33 @@ fn start_loose(syn: &Synth, i: usize, seed: u32) -> Option<u8> {
     Some((255.0 * (patchy * packed * edge * 0.8).clamp(0.0, 1.0)) as u8)
 }
 
+/// The ridden line: the strip of the corridor people actually ride, worn dark.
+///
+/// It leans and wanders with the racing line, tears at its edges like every other band, and
+/// thins where the ground is loose — a line is not a stripe of constant width, and the places
+/// it frays are the places a rider reads to find it.
+fn line_mask(syn: &Synth, half: f32, w: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
+    mask_across(syn, mw, mh, |c| {
+        // The start pad is ridden ground too — forty bikes leave it dark.
+        if let Some(v) = start_loose(syn, c.i, seed) {
+            return (v as f32 * 0.85) as u8;
+        }
+        if c.lat.abs() > half + RUT_CORRIDOR_FADE_M + 0.1 {
+            return 0;
+        }
+        // Wider up the face of a jump, where everybody's line is written down, and wider
+        // again through a corner, where they spread across the whole of it.
+        let spread = 1.0 + LINE_CORNER_SPREAD * (c.k.abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
+        let width = w * spread + edge_noise(c.x, c.z, seed ^ 0x64B1, 1.1, 0.8);
+        let strip = soft_edge(width, LINE_FADE_M, c.off.abs()) as f32 / 255.0;
+        let corridor = soft_edge(half, RUT_CORRIDOR_FADE_M, c.lat.abs()) as f32 / 255.0;
+        // Never solid. A line packs unevenly and the gaps are what make it read as ground
+        // somebody rode rather than as a stripe somebody painted.
+        let patchy = (0.72 + 0.40 * fbm(c.x * 0.07, c.z * 0.07, seed ^ 0x51A9)).clamp(0.55, 1.0);
+        (255.0 * strip * corridor * patchy) as u8
+    })
+}
+
 fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
     mask_across(syn, mw, mh, |c| {
         // The start pad's own marks: forty bikes pulling out of forty stalls leave a comb of
@@ -4291,7 +4356,11 @@ fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> 
         if let Some(v) = start_rut(syn, c.i, seed) {
             return v;
         }
-        if c.lat.abs() > half + 0.5 {
+        // Past where the corridor's own fade reaches, and not a step inside it: the fade
+        // below runs 1.6 m out from the edge, so cutting at half a metre truncated it at
+        // about seventy per cent coverage — a hard boundary at the resolution of the terrain
+        // grid, which is the staircase that ran down the edge of every corner.
+        if c.lat.abs() > half + RUT_CORRIDOR_FADE_M + 0.1 {
             return 0;
         }
         // Up the face of a jump the strip widens and slides towards the side riders are
@@ -4318,8 +4387,10 @@ fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> 
         // The strip still leads: it is full strength on the line and falls to a floor across
         // the rest of the corridor, and `keyed` below decides where within that the sheet
         // actually lands. The ground's own rut signal is what places it.
-        let strip = soft_edge(w, 1.3, off.abs()) as f32 / 255.0;
-        let corridor = soft_edge(half, 1.6, c.lat.abs()) as f32 / 255.0;
+        // A ridden strip has an edge. Fading it over a metre and a third is what turned the
+        // line into a smear with no boundary — a rider reads where the good dirt stops.
+        let strip = soft_edge(w, 0.6, off.abs()) as f32 / 255.0;
+        let corridor = soft_edge(half, RUT_CORRIDOR_FADE_M, c.lat.abs()) as f32 / 255.0;
         let band = (strip + (1.0 - strip) * RUT_PAINT_OFF_LINE) * corridor;
         // Into the grooves and off the walls beside them.
         //
@@ -4332,7 +4403,7 @@ fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> 
         // taking it straight paints a gradient across the pair — which at riding scale is a
         // soft stripe, not a groove with a lit side and a shaded one. Raised to a power the
         // floor is dark over its whole width and the bank is not, so the eye gets an edge.
-        let floor = (-c.rut).clamp(0.0, 1.0).powf(0.45);
+        let floor = (-c.rut).clamp(0.0, 1.0).powf(0.7);
         let wall = c.rut.clamp(0.0, 1.0).powf(0.45);
         let keyed = (RUT_PAINT_FLOOR + (1.0 - RUT_PAINT_FLOOR) * floor - RUT_PAINT_WALL * wall)
             .clamp(0.0, 1.0);
@@ -4360,7 +4431,7 @@ fn loose_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8
         if let Some(v) = start_loose(syn, c.i, seed) {
             return v;
         }
-        if c.lat.abs() > half + 0.2 {
+        if c.lat.abs() > half + RUT_CORRIDOR_FADE_M + 0.1 {
             return 0;
         }
         let bend = (c.k.abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
@@ -4376,7 +4447,11 @@ fn loose_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8
         // Loose ground off the line is patchy; the bank beside a groove is not. Letting the
         // same patchiness eat into it is what left the wall at a quarter coverage and the rut
         // reading nine levels off its own floor.
-        let v = (edge.max(outside) * patchy).max(wall * (0.8 + 0.2 * patchy));
+        // Faded at the corridor's edge for the same reason the line is. Loose dirt ran to
+        // full coverage and stopped dead at the boundary, which put the same staircase down
+        // the outside of the track that the line had down its inside.
+        let corridor = soft_edge(half, RUT_CORRIDOR_FADE_M, c.lat.abs()) as f32 / 255.0;
+        let v = (edge.max(outside) * patchy).max(wall * (0.8 + 0.2 * patchy)) * corridor;
         (255.0 * v) as u8
     })
 }
@@ -4391,7 +4466,11 @@ fn edge_noise(x: f32, z: f32, seed: u32, long_m: f32, short_m: f32) -> f32 {
     // ground must not look like. The third is at the scale of the ground itself.
     fbm(x / 34.0, z / 34.0, seed) * long_m
         + fbm(x / 6.0, z / 6.0, seed ^ 0x9F1) * short_m
-        + fbm(x / 1.6, z / 1.6, seed ^ 0x3C7) * short_m * 0.55
+        // The tearing one. At 1.6 m and a fifth of a metre it was there in principle and
+        // invisible in a picture: an edge has to move about as far as it is soft, or the fade
+        // smooths the wander back into the straight line it was put there to break up.
+        + fbm(x / 1.6, z / 1.6, seed ^ 0x3C7) * short_m * 1.6
+        + fbm(x / 0.7, z / 0.7, seed ^ 0x1D5) * short_m * 0.7
 }
 
 /// Full inside `edge`, gone `fade` metres past it — masks are blended, so a hard cut shows as
@@ -4419,7 +4498,7 @@ const BAND_FADE_M: f32 = 0.5;
 ///
 /// Feathered but straight, a band edge is still a line a fixed distance from the centre of the
 /// track, and it reads as one. The dirt on a real track reaches where the machine reached.
-const BAND_WANDER_M: f32 = 0.45;
+const BAND_WANDER_M: f32 = 0.9;
 
 /// Where a band cut by distance from the riding line ends: full inside, gone a fade past it,
 /// and the edge itself wandering.
@@ -4517,6 +4596,15 @@ struct GroundLook {
     /// of it lands both — Indiana's dark soil measures a spread of 21 grey levels about a
     /// mean of 39, and its light soil only 28 about a mean of 142.
     contrast: f32,
+    /// The published sheet this band is painted with — see [`photo`].
+    ///
+    /// Ground is a photograph. Everything above draws one instead, and only gets the chance
+    /// when the asset will not decode.
+    photo: Option<&'static str>,
+    /// What to multiply that photograph by, so a sand track comes out sand.
+    ///
+    /// `[1.0; 3]` on soil, which is what the sheets were shot on.
+    tone: [f32; 3],
 }
 
 /// Ground, rendered rather than noised.
@@ -4540,7 +4628,93 @@ struct GroundLook {
 /// with wrapping indices, so the sheet meets itself at every edge. A ground texture repeated
 /// a hundred and fifty times across a track shows every seam it has.
 fn ground_texture(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
-    rgba_tga(dim, &ground_pixels(dim, look, seed))
+    rgba_tga(dim, &band_pixels(dim, look, seed))
+}
+
+/// A published track's own ground, as a photograph.
+///
+/// Indiana Pro's own terrain sheets, lifted out of its `.map` by [`tests::dump_ground_sheets`]:
+/// the light soil over the whole site, the dark soil of its riding line, the packed bottom its
+/// ruts wear down to, and its grass. [`ground_pixels`] draws ground instead of photographing
+/// it, and is the fallback behind these.
+///
+/// Returns `(dim, rgba)`; the sheets are square.
+fn photo(name: &str) -> Option<&'static (usize, Vec<u8>)> {
+    macro_rules! sheet_of {
+        ($cell:ident, $file:literal) => {{
+            static $cell: std::sync::OnceLock<(usize, Vec<u8>)> = std::sync::OnceLock::new();
+            let sheet = $cell.get_or_init(|| {
+                match image::load_from_memory(include_bytes!($file)) {
+                    Ok(img) => {
+                        let img = img.to_rgba8();
+                        (img.width() as usize, img.into_raw())
+                    }
+                    Err(_) => (0, Vec::new()),
+                }
+            });
+            (sheet.0 > 0).then_some(sheet)
+        }};
+    }
+    match name {
+        "soil_light" => sheet_of!(A, "../assets/ground/soil_light_c.jpg"),
+        "soil_dark" => sheet_of!(B, "../assets/ground/soil_dark_c.jpg"),
+        "packed" => sheet_of!(C, "../assets/ground/sand_bottom.jpg"),
+        "grass" => sheet_of!(D, "../assets/ground/hm_grass.jpg"),
+        _ => None,
+    }
+}
+
+/// One band's sheet at `dim`: the photograph it names, toned and resampled.
+///
+/// The one place a band's pixels come from — the exported `.tga`, the sheet baked into the
+/// `.map` and every picture drawn of the ground all come through here.
+fn band_pixels(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
+    let Some((sheet_dim, src)) = look.photo.and_then(photo) else {
+        return ground_pixels(dim, look, seed);
+    };
+    let mut px = resample_sheet(src, *sheet_dim, dim);
+    if look.tone != [1.0; 3] {
+        for p in px.chunks_exact_mut(4) {
+            for c in 0..3 {
+                p[c] = (p[c] as f32 * look.tone[c]).clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    px
+}
+
+/// Box-average a square RGBA sheet to `dim`. Nearest where that would be an enlargement,
+/// which nothing shipped asks for — the sheets are 1024 and so is the size they go out at.
+fn resample_sheet(src: &[u8], sheet_dim: usize, dim: usize) -> Vec<u8> {
+    if sheet_dim == dim {
+        return src.to_vec();
+    }
+    let mut out = Vec::with_capacity(dim * dim * 4);
+    for y in 0..dim {
+        let y0 = y * sheet_dim / dim;
+        let y1 = ((y + 1) * sheet_dim / dim).max(y0 + 1).min(sheet_dim);
+        for x in 0..dim {
+            let x0 = x * sheet_dim / dim;
+            let x1 = ((x + 1) * sheet_dim / dim).max(x0 + 1).min(sheet_dim);
+            let mut sum = [0u32; 3];
+            for yy in y0..y1 {
+                for xx in x0..x1 {
+                    let i = (yy * sheet_dim + xx) * 4;
+                    for c in 0..3 {
+                        sum[c] += src[i + c] as u32;
+                    }
+                }
+            }
+            let n = ((y1 - y0) * (x1 - x0)) as u32;
+            out.extend_from_slice(&[
+                (sum[0] / n) as u8,
+                (sum[1] / n) as u8,
+                (sum[2] / n) as u8,
+                255,
+            ]);
+        }
+    }
+    out
 }
 
 /// RGBA pixels in the container TerrainEd reads: the same bytes with the channels swapped.
@@ -4929,7 +5103,7 @@ fn ground_palette(s: Surface) -> ([u8; 3], [u8; 3]) {
     let (field, ridden) = (g.field, g.ridden);
     let mean = |look: &GroundLook| -> [u8; 3] {
         const DIM: usize = 256;
-        let px = ground_pixels(DIM, look, 0x9A0D);
+        let px = band_pixels(DIM, look, 0x9A0D);
         let mut sum = [0u64; 3];
         for p in px.chunks_exact(4) {
             for c in 0..3 {
@@ -4979,8 +5153,18 @@ fn ground_looks(surface: Surface) -> Grounds {
         Surface::Sand => ([214.0, 193.0, 152.0], [176.0, 152.0, 114.0]),
         Surface::Grass => ([174.0, 142.0, 100.0], [84.0, 62.0, 43.0]),
     };
+    // The sheets were shot on Indiana, which is soil, so a soil track takes them as they are
+    // and a sand or grass one pulls them to its own palette by the ratio of the two bases.
+    let soil = |b: [f32; 3], of: [f32; 3]| -> [f32; 3] {
+        std::array::from_fn(|c| if of[c] > 0.0 { b[c] / of[c] } else { 1.0 })
+    };
+    let (soil_base, soil_line) = ([179.0, 140.0, 104.0], [86.0, 63.0, 44.0]);
+    let ground_tone = soil(base, soil_base);
+    let line_tone = soil(line, soil_line);
     let field = GroundLook {
         base,
+        photo: Some("soil_light"),
+        tone: ground_tone,
         grain_tint: (0.82, 1.13),
         fleck: [196.0, 190.0, 176.0],
         fleck_density: 0.03,
@@ -4995,6 +5179,8 @@ fn ground_looks(surface: Surface) -> Grounds {
     };
     let ridden = GroundLook {
         base: line,
+        photo: Some("soil_dark"),
+        tone: line_tone,
         grain_tint: (0.70, 1.28),
         fleck: [150.0, 146.0, 138.0],
         fleck_density: 0.03,
@@ -5018,6 +5204,12 @@ fn ground_looks(surface: Surface) -> Grounds {
             base[1] * 1.04 + 5.0,
             base[2] * 1.02 + 4.0,
         ],
+        photo: Some("soil_light"),
+        tone: [
+            ground_tone[0] * 1.06,
+            ground_tone[1] * 1.04,
+            ground_tone[2] * 1.02,
+        ],
         grain_tint: (0.85, 1.11),
         fleck: [165.0, 160.0, 150.0],
         fleck_density: 0.03,
@@ -5032,6 +5224,8 @@ fn ground_looks(surface: Surface) -> Grounds {
     };
     let grass = GroundLook {
         base: [100.0, 114.0, 62.0],
+        photo: Some("grass"),
+        tone: [1.0; 3],
         grain_tint: (0.55, 1.32),
         fleck: [126.0, 132.0, 78.0],
         fleck_density: 0.02,
@@ -5057,6 +5251,10 @@ fn ground_looks(surface: Surface) -> Grounds {
         // ground's own rut signal — which is a contrast *within* the line rather than of the
         // line against everything else.
         base: [line[0] * 0.78, line[1] * 0.78, line[2] * 0.76],
+        // Not the line's sheet darkened: a rut's floor is polished rather than worked, and
+        // Indiana ships that as its own photograph.
+        photo: Some("packed"),
+        tone: [line_tone[0], line_tone[1], line_tone[2]],
         // Polished is not featureless. Measured against the sheets a published track bakes
         // into its own `.map`, this one read a spread of 6.1 grey levels and a pixel-to-pixel
         // grain of 2.59, where Indiana's three terrain sheets run 16-20 and 11-17 — near
@@ -5083,6 +5281,12 @@ fn ground_looks(surface: Surface) -> Grounds {
             line[1] + (base[1] - line[1]) * 0.52,
             line[2] + (base[2] - line[2]) * 0.52,
         ],
+        // The field's own soil, thrown about and dried out: lighter than the line it is
+        // beside and darker than the ground it came off.
+        photo: Some("soil_light"),
+        tone: std::array::from_fn(|c| {
+            (line[c] + (base[c] - line[c]) * 0.52) / soil_base[c].max(1.0)
+        }),
         grain_tint: (0.84, 1.14),
         fleck: [188.0, 182.0, 168.0],
         fleck_density: 0.04,
@@ -5304,7 +5508,7 @@ fn ground_sheet(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<[f32; 3]> {
 /// Small on purpose — 32 px is 1024 samples of the same generator, which settles the mean of
 /// anything the sheet does — and cheap enough to call per band per picture.
 fn sheet_mean(look: &GroundLook, salt: u32) -> [f32; 3] {
-    let px = ground_pixels(32, look, salt);
+    let px = band_pixels(32, look, salt);
     let mut sum = [0.0f32; 3];
     let n = (px.len() / 4).max(1);
     for p in px.chunks_exact(4) {
@@ -5456,7 +5660,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         Layer {
             name: "line",
             sheet: "dirt_line_c",
-            band: BandMask::Out(0.0),
+            band: BandMask::Line(LINE_HALF_WIDTH_M),
             look: ridden,
             salt: 0x11E5,
             tile_m: TILE_LINE_M,
@@ -5879,6 +6083,84 @@ pub fn slug(name: &str) -> String {
 mod tests {
     use super::*;
     use crate::trackprog::{Relief, Start, Terrain};
+
+    /// Pull a published track's ground sheets out of its `.map`, as PNGs.
+    ///
+    /// How `assets/ground/*.jpg` were made. Indiana Pro bakes its terrain sheets into its
+    /// `.map` at 1024²; this lists every sheet it carries and writes the ones named in
+    /// `FROST_SHEETS` out where they can be looked at and re-encoded.
+    ///
+    /// `FROST_ALL` drops the `_c` filter, and it is the one that matters here: a track's
+    /// *scenery* sheets carry PiBoSo's suffixes, but the ones its terrain is painted with
+    /// are named by whoever built it — Indiana's grass is `hm_grass` and the bottom of its
+    /// ruts is `sand_bottom`, and neither shows up in a list of `_c` names.
+    ///
+    /// ```text
+    /// FROST_ALL=1 FROST_MAP=…/2024_ARLMX_RD11_INDIANA_PRO.map FROST_DUMP=/tmp/sheets \
+    ///   FROST_SHEETS=soil_dark_c,soil_light_c,sand_bottom,hm_grass \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture dump_ground_sheets
+    /// ```
+    #[test]
+    #[ignore = "needs a real .map — set FROST_MAP"]
+    fn dump_ground_sheets() {
+        let path = std::env::var("FROST_MAP").expect("set FROST_MAP");
+        let bytes = std::fs::read(&path).expect("read the map");
+        let texs = crate::edf::embedded_textures(&bytes);
+        let want: Vec<String> = std::env::var("FROST_SHEETS")
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+        let dump = std::env::var("FROST_DUMP").ok();
+        if let Some(d) = &dump {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        for t in &texs {
+            let all = std::env::var("FROST_ALL").is_ok();
+            if !all && !(t.name.ends_with("_c") || t.name.ends_with("_c_a")) {
+                continue;
+            }
+            let Some(px) = crate::edf::inflate_texture(&bytes, t) else {
+                continue;
+            };
+            if px.len() != t.width as usize * t.height as usize * 4 {
+                continue;
+            }
+            let mut sum = [0u64; 3];
+            for p in px.chunks_exact(4) {
+                for c in 0..3 {
+                    sum[c] += p[c] as u64;
+                }
+            }
+            let n = (t.width * t.height) as u64;
+            println!(
+                "{:<34} {}x{}  mean ({}, {}, {})",
+                t.name,
+                t.width,
+                t.height,
+                sum[0] / n,
+                sum[1] / n,
+                sum[2] / n
+            );
+            if let Some(d) = &dump {
+                if want.iter().any(|w| w == &t.name) {
+                    // Bottom-up in the file, like every PiBoSo sheet.
+                    let mut px = px.clone();
+                    for y in 0..(t.height as usize / 2) {
+                        let (a, b) = (y, t.height as usize - 1 - y);
+                        for i in 0..t.width as usize * 4 {
+                            px.swap(a * t.width as usize * 4 + i, b * t.width as usize * 4 + i);
+                        }
+                    }
+                    let img: image::RgbaImage =
+                        image::ImageBuffer::from_raw(t.width, t.height, px).unwrap();
+                    img.save(format!("{d}/{}.png", t.name)).unwrap();
+                    println!("   -> {d}/{}.png", t.name);
+                }
+            }
+        }
+    }
 
     /// A lap that closes: two straights joined by two half-circle turns.
     pub(super) fn oval() -> TrackProgram {
@@ -7555,6 +7837,59 @@ mod tests {
         );
     }
 
+    /// Every band is painted with a published sheet, and the sheet decodes.
+    ///
+    /// [`band_pixels`] falls back to the generator when an asset will not load, which is the
+    /// right thing to do at runtime and a silent regression in a build: the track still comes
+    /// out, painted with noise. So the assets are checked here, where it is not silent.
+    #[test]
+    fn every_band_is_painted_with_a_published_sheet() {
+        let p: TrackProgram = serde_json::from_str(DEMO).unwrap();
+        for l in layers(&p) {
+            let name = l.look.photo.unwrap_or_else(|| panic!("{} names no sheet", l.name));
+            let (dim, px) = photo(name)
+                .unwrap_or_else(|| panic!("{}'s sheet {name} did not decode", l.name));
+            assert_eq!(*dim, GROUND_TEXTURE_DIM, "{name} is {dim} and the bands go out at 1024");
+            assert_eq!(px.len(), dim * dim * 4, "{name} is not whole");
+        }
+    }
+
+    /// And what goes out is the published pixels, not a version of them.
+    ///
+    /// A soil track is what these sheets were shot on, so its tone is 1 and the `.tga` it
+    /// exports is Indiana's own sheet level for level. Anything that quietly re-tints them —
+    /// a shading pass, a palette — moves these means.
+    #[test]
+    fn a_soil_track_ships_the_published_sheets_untouched() {
+        let g = ground_looks(Surface::Soil);
+        let mean = |look: &GroundLook| -> [f32; 3] {
+            let px = band_pixels(GROUND_TEXTURE_DIM, look, 3);
+            let mut sum = [0.0f64; 3];
+            for p in px.chunks_exact(4) {
+                for c in 0..3 {
+                    sum[c] += p[c] as f64;
+                }
+            }
+            let n = (px.len() / 4) as f64;
+            std::array::from_fn(|c| (sum[c] / n) as f32)
+        };
+        // Indiana's own, measured off its `.map` by `dump_ground_sheets`.
+        for (what, look, want) in [
+            ("the field", &g.field, [171.0, 134.0, 99.0]),
+            ("the riding line", &g.ridden, [49.0, 35.0, 23.0]),
+            ("the grass", &g.turf, [93.0, 97.0, 50.0]),
+        ] {
+            let got = mean(look);
+            for c in 0..3 {
+                assert!(
+                    (got[c] - want[c]).abs() < 3.0,
+                    "{what} came out {:?} against the published {want:?}",
+                    got.map(|v| v.round())
+                );
+            }
+        }
+    }
+
     /// The soil is calibrated against a published track's own sheets rather than picked.
     ///
     /// Indiana ships `soil_light_c` at a mean of (172, 134, 99) and `soil_dark_c` at
@@ -7899,7 +8234,7 @@ mod tests {
             let bands = layers(prog)
                 .into_iter()
                 .map(|l| {
-                    let sheet = ground_pixels(Self::SHEET, &l.look, seed ^ l.salt);
+                    let sheet = band_pixels(Self::SHEET, &l.look, seed ^ l.salt);
                     let mask = match l.band {
                         BandMask::Everywhere => None,
                         band => Some(band_mask(syn, band, half, seed, mw, mh)),
@@ -7951,7 +8286,8 @@ mod tests {
             // The terrain's own relief, which is the other half of what a rider reads off a
             // rut — and the half the paint has to agree with rather than fight. Lit by the sun
             // the track ships: `params.ini` states it.
-            let h = |ox: f32, oz: f32| sample(&syn.heights, syn.gw, syn.gh, gu + ox, gv + oz);
+            let h =
+                |ox: f32, oz: f32| sample_smooth(&syn.heights, syn.gw, syn.gh, gu + ox, gv + oz);
             let dx = (h(1.0, 0.0) - h(-1.0, 0.0)) / (2.0 * syn.mps);
             let dz = (h(0.0, 1.0) - h(0.0, -1.0)) / (2.0 * syn.mps);
             let (nx, ny, nz) = (-dx, 1.0, -dz);
@@ -8759,7 +9095,7 @@ mod tests {
         let bands: Vec<(Vec<u8>, f32, Option<Vec<u8>>)> = layers(&p)
             .into_iter()
             .map(|l| {
-                let sheet = ground_pixels(SHEET, &l.look, seed ^ l.salt);
+                let sheet = band_pixels(SHEET, &l.look, seed ^ l.salt);
                 let (mw, mh) = (s.gw - 1, s.gh - 1);
                 let mask = match l.band {
                     BandMask::Everywhere => None,
@@ -8811,16 +9147,32 @@ mod tests {
                         continue;
                     }
                     // Tiled, which is the whole point: the sheet repeats every `tile_m`.
+                    //
+                    // Averaged over the pixel's own footprint rather than sampled at its
+                    // centre. A 26 m crop is 33 mm a pixel and the sheet is 9 mm a texel, so
+                    // a point sample shows one grain in sixteen — which is the sheet's noise,
+                    // not the sheet. The game mipmaps for the same reason.
                     let sx = ((wx / tile_m).rem_euclid(1.0) * SHEET as f32) as usize % SHEET;
                     let sy = ((wz / tile_m).rem_euclid(1.0) * SHEET as f32) as usize % SHEET;
-                    let t = &sheet[(sy * SHEET + sx) * 4..];
+                    let step = ((span / dim as f32) / tile_m * SHEET as f32).round().max(1.0) as usize;
+                    let mut t = [0.0f32; 3];
+                    for oy in 0..step {
+                        for ox in 0..step {
+                            let i = (((sy + oy) % SHEET) * SHEET + (sx + ox) % SHEET) * 4;
+                            for j in 0..3 {
+                                t[j] += sheet[i + j] as f32;
+                            }
+                        }
+                    }
+                    let n = (step * step) as f32;
                     for j in 0..3 {
-                        c[j] = c[j] * (1.0 - cover) + t[j] as f32 * cover;
+                        c[j] = c[j] * (1.0 - cover) + t[j] / n * cover;
                     }
                 }
 
                 // Lit off the ground's own slope, so relief reads the way it does in the game.
-                let h = |ox: f32, oz: f32| sample(&s.heights, s.gw, s.gh, cx + ox, cy + oz);
+                let h =
+                    |ox: f32, oz: f32| sample_smooth(&s.heights, s.gw, s.gh, cx + ox, cy + oz);
                 let (dx, dz) = (h(1.0, 0.0) - h(-1.0, 0.0), h(0.0, 1.0) - h(0.0, -1.0));
                 let n = [-dx, 2.0 * s.mps, -dz];
                 let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
