@@ -9067,11 +9067,26 @@ mod tests {
                         continue;
                     }
                     // Tiled, which is the whole point: the sheet repeats every `tile_m`.
+                    //
+                    // Averaged over the pixel's own footprint rather than sampled at its
+                    // centre. A 26 m crop is 33 mm a pixel and the sheet is 9 mm a texel, so
+                    // a point sample shows one grain in sixteen — which is the sheet's noise,
+                    // not the sheet. The game mipmaps for the same reason.
                     let sx = ((wx / tile_m).rem_euclid(1.0) * SHEET as f32) as usize % SHEET;
                     let sy = ((wz / tile_m).rem_euclid(1.0) * SHEET as f32) as usize % SHEET;
-                    let t = &sheet[(sy * SHEET + sx) * 4..];
+                    let step = ((span / dim as f32) / tile_m * SHEET as f32).round().max(1.0) as usize;
+                    let mut t = [0.0f32; 3];
+                    for oy in 0..step {
+                        for ox in 0..step {
+                            let i = (((sy + oy) % SHEET) * SHEET + (sx + ox) % SHEET) * 4;
+                            for j in 0..3 {
+                                t[j] += sheet[i + j] as f32;
+                            }
+                        }
+                    }
+                    let n = (step * step) as f32;
                     for j in 0..3 {
-                        c[j] = c[j] * (1.0 - cover) + t[j] as f32 * cover;
+                        c[j] = c[j] * (1.0 - cover) + t[j] / n * cover;
                     }
                 }
 
