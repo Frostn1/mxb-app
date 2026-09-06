@@ -2631,7 +2631,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     std::fs::create_dir_all(dir.join("maps/env")).context("make the maps folder")?;
     let seed = prog.terrain.relief.seed;
     for l in layers(prog) {
-        let px = ground_pixels(GROUND_TEXTURE_DIM, &l.look, seed ^ l.salt);
+        let px = band_pixels(GROUND_TEXTURE_DIM, &l.look, seed ^ l.salt);
         // A shader's bump takes one repetition count whatever shape the terrain is, so on a
         // rectangular one it follows x and the sheet's own two counts do the rest.
         let (rx, _) = repetitions(prog, l.tile_m);
@@ -3743,7 +3743,7 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
         out.extend_from_slice(&u(0));
         out.extend_from_slice(&u(dim as u32));
         out.extend_from_slice(&u(dim as u32));
-        let rgba = ground_pixels(dim, look, seed ^ salt);
+        let rgba = band_pixels(dim, look, seed ^ salt);
         // The game keys its texture cache on this, and it is the MD5 of the pixels before
         // they are deflated. Leave it zero and every sheet in the file is the same texture.
         out.extend_from_slice(&sheet_hash(&rgba));
@@ -4517,6 +4517,15 @@ struct GroundLook {
     /// of it lands both — Indiana's dark soil measures a spread of 21 grey levels about a
     /// mean of 39, and its light soil only 28 about a mean of 142.
     contrast: f32,
+    /// The published sheet this band is painted with — see [`photo`].
+    ///
+    /// Ground is a photograph. Everything above draws one instead, and only gets the chance
+    /// when the asset will not decode.
+    photo: Option<&'static str>,
+    /// What to multiply that photograph by, so a sand track comes out sand.
+    ///
+    /// `[1.0; 3]` on soil, which is what the sheets were shot on.
+    tone: [f32; 3],
 }
 
 /// Ground, rendered rather than noised.
@@ -4540,7 +4549,93 @@ struct GroundLook {
 /// with wrapping indices, so the sheet meets itself at every edge. A ground texture repeated
 /// a hundred and fifty times across a track shows every seam it has.
 fn ground_texture(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
-    rgba_tga(dim, &ground_pixels(dim, look, seed))
+    rgba_tga(dim, &band_pixels(dim, look, seed))
+}
+
+/// A published track's own ground, as a photograph.
+///
+/// Indiana Pro's own terrain sheets, lifted out of its `.map` by [`tests::dump_ground_sheets`]:
+/// the light soil over the whole site, the dark soil of its riding line, the packed bottom its
+/// ruts wear down to, and its grass. [`ground_pixels`] draws ground instead of photographing
+/// it, and is the fallback behind these.
+///
+/// Returns `(dim, rgba)`; the sheets are square.
+fn photo(name: &str) -> Option<&'static (usize, Vec<u8>)> {
+    macro_rules! sheet_of {
+        ($cell:ident, $file:literal) => {{
+            static $cell: std::sync::OnceLock<(usize, Vec<u8>)> = std::sync::OnceLock::new();
+            let sheet = $cell.get_or_init(|| {
+                match image::load_from_memory(include_bytes!($file)) {
+                    Ok(img) => {
+                        let img = img.to_rgba8();
+                        (img.width() as usize, img.into_raw())
+                    }
+                    Err(_) => (0, Vec::new()),
+                }
+            });
+            (sheet.0 > 0).then_some(sheet)
+        }};
+    }
+    match name {
+        "soil_light" => sheet_of!(A, "../assets/ground/soil_light_c.jpg"),
+        "soil_dark" => sheet_of!(B, "../assets/ground/soil_dark_c.jpg"),
+        "packed" => sheet_of!(C, "../assets/ground/sand_bottom.jpg"),
+        "grass" => sheet_of!(D, "../assets/ground/hm_grass.jpg"),
+        _ => None,
+    }
+}
+
+/// One band's sheet at `dim`: the photograph it names, toned and resampled.
+///
+/// The one place a band's pixels come from — the exported `.tga`, the sheet baked into the
+/// `.map` and every picture drawn of the ground all come through here.
+fn band_pixels(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
+    let Some((sheet_dim, src)) = look.photo.and_then(photo) else {
+        return ground_pixels(dim, look, seed);
+    };
+    let mut px = resample_sheet(src, *sheet_dim, dim);
+    if look.tone != [1.0; 3] {
+        for p in px.chunks_exact_mut(4) {
+            for c in 0..3 {
+                p[c] = (p[c] as f32 * look.tone[c]).clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    px
+}
+
+/// Box-average a square RGBA sheet to `dim`. Nearest where that would be an enlargement,
+/// which nothing shipped asks for — the sheets are 1024 and so is the size they go out at.
+fn resample_sheet(src: &[u8], sheet_dim: usize, dim: usize) -> Vec<u8> {
+    if sheet_dim == dim {
+        return src.to_vec();
+    }
+    let mut out = Vec::with_capacity(dim * dim * 4);
+    for y in 0..dim {
+        let y0 = y * sheet_dim / dim;
+        let y1 = ((y + 1) * sheet_dim / dim).max(y0 + 1).min(sheet_dim);
+        for x in 0..dim {
+            let x0 = x * sheet_dim / dim;
+            let x1 = ((x + 1) * sheet_dim / dim).max(x0 + 1).min(sheet_dim);
+            let mut sum = [0u32; 3];
+            for yy in y0..y1 {
+                for xx in x0..x1 {
+                    let i = (yy * sheet_dim + xx) * 4;
+                    for c in 0..3 {
+                        sum[c] += src[i + c] as u32;
+                    }
+                }
+            }
+            let n = ((y1 - y0) * (x1 - x0)) as u32;
+            out.extend_from_slice(&[
+                (sum[0] / n) as u8,
+                (sum[1] / n) as u8,
+                (sum[2] / n) as u8,
+                255,
+            ]);
+        }
+    }
+    out
 }
 
 /// RGBA pixels in the container TerrainEd reads: the same bytes with the channels swapped.
@@ -4929,7 +5024,7 @@ fn ground_palette(s: Surface) -> ([u8; 3], [u8; 3]) {
     let (field, ridden) = (g.field, g.ridden);
     let mean = |look: &GroundLook| -> [u8; 3] {
         const DIM: usize = 256;
-        let px = ground_pixels(DIM, look, 0x9A0D);
+        let px = band_pixels(DIM, look, 0x9A0D);
         let mut sum = [0u64; 3];
         for p in px.chunks_exact(4) {
             for c in 0..3 {
@@ -4979,8 +5074,18 @@ fn ground_looks(surface: Surface) -> Grounds {
         Surface::Sand => ([214.0, 193.0, 152.0], [176.0, 152.0, 114.0]),
         Surface::Grass => ([174.0, 142.0, 100.0], [84.0, 62.0, 43.0]),
     };
+    // The sheets were shot on Indiana, which is soil, so a soil track takes them as they are
+    // and a sand or grass one pulls them to its own palette by the ratio of the two bases.
+    let soil = |b: [f32; 3], of: [f32; 3]| -> [f32; 3] {
+        std::array::from_fn(|c| if of[c] > 0.0 { b[c] / of[c] } else { 1.0 })
+    };
+    let (soil_base, soil_line) = ([179.0, 140.0, 104.0], [86.0, 63.0, 44.0]);
+    let ground_tone = soil(base, soil_base);
+    let line_tone = soil(line, soil_line);
     let field = GroundLook {
         base,
+        photo: Some("soil_light"),
+        tone: ground_tone,
         grain_tint: (0.82, 1.13),
         fleck: [196.0, 190.0, 176.0],
         fleck_density: 0.03,
@@ -4995,6 +5100,8 @@ fn ground_looks(surface: Surface) -> Grounds {
     };
     let ridden = GroundLook {
         base: line,
+        photo: Some("soil_dark"),
+        tone: line_tone,
         grain_tint: (0.70, 1.28),
         fleck: [150.0, 146.0, 138.0],
         fleck_density: 0.03,
@@ -5018,6 +5125,12 @@ fn ground_looks(surface: Surface) -> Grounds {
             base[1] * 1.04 + 5.0,
             base[2] * 1.02 + 4.0,
         ],
+        photo: Some("soil_light"),
+        tone: [
+            ground_tone[0] * 1.06,
+            ground_tone[1] * 1.04,
+            ground_tone[2] * 1.02,
+        ],
         grain_tint: (0.85, 1.11),
         fleck: [165.0, 160.0, 150.0],
         fleck_density: 0.03,
@@ -5032,6 +5145,8 @@ fn ground_looks(surface: Surface) -> Grounds {
     };
     let grass = GroundLook {
         base: [100.0, 114.0, 62.0],
+        photo: Some("grass"),
+        tone: [1.0; 3],
         grain_tint: (0.55, 1.32),
         fleck: [126.0, 132.0, 78.0],
         fleck_density: 0.02,
@@ -5057,6 +5172,10 @@ fn ground_looks(surface: Surface) -> Grounds {
         // ground's own rut signal — which is a contrast *within* the line rather than of the
         // line against everything else.
         base: [line[0] * 0.78, line[1] * 0.78, line[2] * 0.76],
+        // Not the line's sheet darkened: a rut's floor is polished rather than worked, and
+        // Indiana ships that as its own photograph.
+        photo: Some("packed"),
+        tone: [line_tone[0], line_tone[1], line_tone[2]],
         // Polished is not featureless. Measured against the sheets a published track bakes
         // into its own `.map`, this one read a spread of 6.1 grey levels and a pixel-to-pixel
         // grain of 2.59, where Indiana's three terrain sheets run 16-20 and 11-17 — near
@@ -5083,6 +5202,12 @@ fn ground_looks(surface: Surface) -> Grounds {
             line[1] + (base[1] - line[1]) * 0.52,
             line[2] + (base[2] - line[2]) * 0.52,
         ],
+        // The field's own soil, thrown about and dried out: lighter than the line it is
+        // beside and darker than the ground it came off.
+        photo: Some("soil_light"),
+        tone: std::array::from_fn(|c| {
+            (line[c] + (base[c] - line[c]) * 0.52) / soil_base[c].max(1.0)
+        }),
         grain_tint: (0.84, 1.14),
         fleck: [188.0, 182.0, 168.0],
         fleck_density: 0.04,
@@ -5304,7 +5429,7 @@ fn ground_sheet(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<[f32; 3]> {
 /// Small on purpose — 32 px is 1024 samples of the same generator, which settles the mean of
 /// anything the sheet does — and cheap enough to call per band per picture.
 fn sheet_mean(look: &GroundLook, salt: u32) -> [f32; 3] {
-    let px = ground_pixels(32, look, salt);
+    let px = band_pixels(32, look, salt);
     let mut sum = [0.0f32; 3];
     let n = (px.len() / 4).max(1);
     for p in px.chunks_exact(4) {
@@ -5879,6 +6004,84 @@ pub fn slug(name: &str) -> String {
 mod tests {
     use super::*;
     use crate::trackprog::{Relief, Start, Terrain};
+
+    /// Pull a published track's ground sheets out of its `.map`, as PNGs.
+    ///
+    /// How `assets/ground/*.jpg` were made. Indiana Pro bakes its terrain sheets into its
+    /// `.map` at 1024²; this lists every sheet it carries and writes the ones named in
+    /// `FROST_SHEETS` out where they can be looked at and re-encoded.
+    ///
+    /// `FROST_ALL` drops the `_c` filter, and it is the one that matters here: a track's
+    /// *scenery* sheets carry PiBoSo's suffixes, but the ones its terrain is painted with
+    /// are named by whoever built it — Indiana's grass is `hm_grass` and the bottom of its
+    /// ruts is `sand_bottom`, and neither shows up in a list of `_c` names.
+    ///
+    /// ```text
+    /// FROST_ALL=1 FROST_MAP=…/2024_ARLMX_RD11_INDIANA_PRO.map FROST_DUMP=/tmp/sheets \
+    ///   FROST_SHEETS=soil_dark_c,soil_light_c,sand_bottom,hm_grass \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture dump_ground_sheets
+    /// ```
+    #[test]
+    #[ignore = "needs a real .map — set FROST_MAP"]
+    fn dump_ground_sheets() {
+        let path = std::env::var("FROST_MAP").expect("set FROST_MAP");
+        let bytes = std::fs::read(&path).expect("read the map");
+        let texs = crate::edf::embedded_textures(&bytes);
+        let want: Vec<String> = std::env::var("FROST_SHEETS")
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+        let dump = std::env::var("FROST_DUMP").ok();
+        if let Some(d) = &dump {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        for t in &texs {
+            let all = std::env::var("FROST_ALL").is_ok();
+            if !all && !(t.name.ends_with("_c") || t.name.ends_with("_c_a")) {
+                continue;
+            }
+            let Some(px) = crate::edf::inflate_texture(&bytes, t) else {
+                continue;
+            };
+            if px.len() != t.width as usize * t.height as usize * 4 {
+                continue;
+            }
+            let mut sum = [0u64; 3];
+            for p in px.chunks_exact(4) {
+                for c in 0..3 {
+                    sum[c] += p[c] as u64;
+                }
+            }
+            let n = (t.width * t.height) as u64;
+            println!(
+                "{:<34} {}x{}  mean ({}, {}, {})",
+                t.name,
+                t.width,
+                t.height,
+                sum[0] / n,
+                sum[1] / n,
+                sum[2] / n
+            );
+            if let Some(d) = &dump {
+                if want.iter().any(|w| w == &t.name) {
+                    // Bottom-up in the file, like every PiBoSo sheet.
+                    let mut px = px.clone();
+                    for y in 0..(t.height as usize / 2) {
+                        let (a, b) = (y, t.height as usize - 1 - y);
+                        for i in 0..t.width as usize * 4 {
+                            px.swap(a * t.width as usize * 4 + i, b * t.width as usize * 4 + i);
+                        }
+                    }
+                    let img: image::RgbaImage =
+                        image::ImageBuffer::from_raw(t.width, t.height, px).unwrap();
+                    img.save(format!("{d}/{}.png", t.name)).unwrap();
+                    println!("   -> {d}/{}.png", t.name);
+                }
+            }
+        }
+    }
 
     /// A lap that closes: two straights joined by two half-circle turns.
     pub(super) fn oval() -> TrackProgram {
@@ -7555,6 +7758,59 @@ mod tests {
         );
     }
 
+    /// Every band is painted with a published sheet, and the sheet decodes.
+    ///
+    /// [`band_pixels`] falls back to the generator when an asset will not load, which is the
+    /// right thing to do at runtime and a silent regression in a build: the track still comes
+    /// out, painted with noise. So the assets are checked here, where it is not silent.
+    #[test]
+    fn every_band_is_painted_with_a_published_sheet() {
+        let p: TrackProgram = serde_json::from_str(DEMO).unwrap();
+        for l in layers(&p) {
+            let name = l.look.photo.unwrap_or_else(|| panic!("{} names no sheet", l.name));
+            let (dim, px) = photo(name)
+                .unwrap_or_else(|| panic!("{}'s sheet {name} did not decode", l.name));
+            assert_eq!(*dim, GROUND_TEXTURE_DIM, "{name} is {dim} and the bands go out at 1024");
+            assert_eq!(px.len(), dim * dim * 4, "{name} is not whole");
+        }
+    }
+
+    /// And what goes out is the published pixels, not a version of them.
+    ///
+    /// A soil track is what these sheets were shot on, so its tone is 1 and the `.tga` it
+    /// exports is Indiana's own sheet level for level. Anything that quietly re-tints them —
+    /// a shading pass, a palette — moves these means.
+    #[test]
+    fn a_soil_track_ships_the_published_sheets_untouched() {
+        let g = ground_looks(Surface::Soil);
+        let mean = |look: &GroundLook| -> [f32; 3] {
+            let px = band_pixels(GROUND_TEXTURE_DIM, look, 3);
+            let mut sum = [0.0f64; 3];
+            for p in px.chunks_exact(4) {
+                for c in 0..3 {
+                    sum[c] += p[c] as f64;
+                }
+            }
+            let n = (px.len() / 4) as f64;
+            std::array::from_fn(|c| (sum[c] / n) as f32)
+        };
+        // Indiana's own, measured off its `.map` by `dump_ground_sheets`.
+        for (what, look, want) in [
+            ("the field", &g.field, [171.0, 134.0, 99.0]),
+            ("the riding line", &g.ridden, [49.0, 35.0, 23.0]),
+            ("the grass", &g.turf, [93.0, 97.0, 50.0]),
+        ] {
+            let got = mean(look);
+            for c in 0..3 {
+                assert!(
+                    (got[c] - want[c]).abs() < 3.0,
+                    "{what} came out {:?} against the published {want:?}",
+                    got.map(|v| v.round())
+                );
+            }
+        }
+    }
+
     /// The soil is calibrated against a published track's own sheets rather than picked.
     ///
     /// Indiana ships `soil_light_c` at a mean of (172, 134, 99) and `soil_dark_c` at
@@ -7899,7 +8155,7 @@ mod tests {
             let bands = layers(prog)
                 .into_iter()
                 .map(|l| {
-                    let sheet = ground_pixels(Self::SHEET, &l.look, seed ^ l.salt);
+                    let sheet = band_pixels(Self::SHEET, &l.look, seed ^ l.salt);
                     let mask = match l.band {
                         BandMask::Everywhere => None,
                         band => Some(band_mask(syn, band, half, seed, mw, mh)),
@@ -8759,7 +9015,7 @@ mod tests {
         let bands: Vec<(Vec<u8>, f32, Option<Vec<u8>>)> = layers(&p)
             .into_iter()
             .map(|l| {
-                let sheet = ground_pixels(SHEET, &l.look, seed ^ l.salt);
+                let sheet = band_pixels(SHEET, &l.look, seed ^ l.salt);
                 let (mw, mh) = (s.gw - 1, s.gh - 1);
                 let mask = match l.band {
                     BandMask::Everywhere => None,
@@ -8811,11 +9067,26 @@ mod tests {
                         continue;
                     }
                     // Tiled, which is the whole point: the sheet repeats every `tile_m`.
+                    //
+                    // Averaged over the pixel's own footprint rather than sampled at its
+                    // centre. A 26 m crop is 33 mm a pixel and the sheet is 9 mm a texel, so
+                    // a point sample shows one grain in sixteen — which is the sheet's noise,
+                    // not the sheet. The game mipmaps for the same reason.
                     let sx = ((wx / tile_m).rem_euclid(1.0) * SHEET as f32) as usize % SHEET;
                     let sy = ((wz / tile_m).rem_euclid(1.0) * SHEET as f32) as usize % SHEET;
-                    let t = &sheet[(sy * SHEET + sx) * 4..];
+                    let step = ((span / dim as f32) / tile_m * SHEET as f32).round().max(1.0) as usize;
+                    let mut t = [0.0f32; 3];
+                    for oy in 0..step {
+                        for ox in 0..step {
+                            let i = (((sy + oy) % SHEET) * SHEET + (sx + ox) % SHEET) * 4;
+                            for j in 0..3 {
+                                t[j] += sheet[i + j] as f32;
+                            }
+                        }
+                    }
+                    let n = (step * step) as f32;
                     for j in 0..3 {
-                        c[j] = c[j] * (1.0 - cover) + t[j] as f32 * cover;
+                        c[j] = c[j] * (1.0 - cover) + t[j] / n * cover;
                     }
                 }
 
