@@ -143,6 +143,7 @@ mod trackline;
 mod trackllm;
 mod trackobjects;
 mod trackprog;
+mod trackscenery;
 mod trackstats;
 mod tracksynth;
 mod upload;
