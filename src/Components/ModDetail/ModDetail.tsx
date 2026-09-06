@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   ChevronLeft,
@@ -8,6 +9,9 @@ import {
   Copy,
   Snowflake,
   FileDown,
+  Maximize2,
+  ChevronRight,
+  X,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
@@ -116,6 +120,8 @@ export default function ModDetail({
   /** Which screenshot the hero is showing. Declared with the other hooks: it used to
    *  sit below the loading and error returns, which is a rules-of-hooks violation. */
   const [heroIdx, setHeroIdx] = useState(0);
+  /** Whether the screenshot is open full-window. */
+  const [zoom, setZoom] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // The raw file list — only for destination folders and their counts. The badge uses
@@ -320,7 +326,11 @@ export default function ModDetail({
       : undefined;
   const idx = myActive ? stageIndex(myActive.stage) : -1;
 
-  const shot = detail.images[Math.min(heroIdx, Math.max(0, detail.images.length - 1))];
+  // Clamped once: opening a mod with fewer screenshots than the last one leaves the index
+  // past the end, and the thumbnail strip and the viewer have to agree with the hero on
+  // which picture that is.
+  const shotIdx = Math.min(heroIdx, Math.max(0, detail.images.length - 1));
+  const shot = detail.images[shotIdx];
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -343,15 +353,43 @@ export default function ModDetail({
           every catalog has; this is the one the mockup drew. */}
       <div className="relative h-[330px] flex-none overflow-hidden bg-card">
         {shot && (
-          <CachedImg
-            src={shot}
-            width={1280}
-            alt={detail.title}
-            className="absolute inset-0 size-full object-cover"
-          />
+          <>
+            {/* A blurred copy fills the band; the screenshot itself is shown whole beside it.
+                `object-cover` here cropped a 16:9 shot into a 4:1 slot — most of the picture
+                was off-screen, and cycling the thumbnails just swapped one sliver for another.
+                The 42% column is exactly the width a 16:9 image fills at this height, so the
+                two gradients below stop where the picture starts and never wash over it. */}
+            <CachedImg
+              src={shot}
+              width={640}
+              alt=""
+              aria-hidden
+              className="absolute inset-0 size-full scale-125 object-cover opacity-60 blur-[22px]"
+            />
+            <button
+              onClick={() => setZoom(true)}
+              aria-label={detail.title}
+              className="group absolute inset-y-0 right-0 w-[42%] cursor-default"
+            >
+              <CachedImg
+                src={shot}
+                width={1280}
+                alt={detail.title}
+                // `drop-shadow`, not `shadow`: with `object-contain` the element is the whole
+                // 42% column, so a box shadow would draw an edge where the picture isn't. A
+                // filter follows the pixels, which is what has to lift off the blur behind it.
+                className="size-full object-contain object-right drop-shadow-[-16px_0_26px_rgba(0,0,0,0.45)]"
+              />
+              <span className="absolute right-3 top-3 grid size-7 place-items-center border border-white/25 bg-black/45 text-white/85 opacity-0 transition-opacity group-hover:opacity-100">
+                <Maximize2 className="size-3.5" />
+              </span>
+            </button>
+          </>
         )}
-        <div className="absolute inset-0 bg-gradient-to-r from-[rgba(6,6,7,0.92)] via-[rgba(6,6,7,0.45)] to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background to-transparent" />
+        {/* Both scrims stop at 58% — the picture's edge — so the title stays readable over a
+            bright screenshot without any of it washing across the picture itself. */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[rgba(6,6,7,0.92)] via-[rgba(6,6,7,0.6)] via-35% to-transparent to-58%" />
+        <div className="pointer-events-none absolute bottom-0 left-0 h-[200px] w-[58%] bg-gradient-to-t from-[rgba(6,6,7,0.9)] via-[rgba(6,6,7,0.45)] via-50% to-transparent" />
 
         <button
           onClick={onBack}
@@ -365,7 +403,7 @@ export default function ModDetail({
           </span>
         </button>
 
-        <div className="absolute inset-x-0 bottom-0 px-7 pb-5">
+        <div className="absolute inset-x-0 bottom-0 max-w-[58%] px-7 pb-5">
           <h1 className="font-cond text-[42px] font-bold uppercase leading-[0.94] tracking-[0.005em] text-white">
             {detail.title}
           </h1>
@@ -402,7 +440,7 @@ export default function ModDetail({
                   onClick={() => setHeroIdx(i)}
                   className={cn(
                     "u-notch relative h-[62px] w-[104px] flex-none overflow-hidden bg-card transition-opacity",
-                    i === heroIdx ? "outline outline-2 -outline-offset-2 outline-primary" : "opacity-60 hover:opacity-100",
+                    i === shotIdx ? "outline outline-2 -outline-offset-2 outline-primary" : "opacity-60 hover:opacity-100",
                   )}
                 >
                   <CachedImg src={img} width={240} alt="" className="size-full object-cover" />
@@ -558,7 +596,108 @@ export default function ModDetail({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {zoom && shot && (
+        <Lightbox
+          images={detail.images}
+          index={shotIdx}
+          onIndex={setHeroIdx}
+          onClose={() => setZoom(false)}
+          title={detail.title}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * One screenshot at the size the window allows.
+ *
+ * The hero band shows the whole picture but it is still a strip across the top of the page;
+ * this is the look-at-it-properly view. Arrow keys walk the set, Escape and a click anywhere
+ * off the picture leave.
+ */
+function Lightbox({
+  images,
+  index,
+  onIndex,
+  onClose,
+  title,
+}: {
+  images: string[];
+  index: number;
+  onIndex: (i: number) => void;
+  onClose: () => void;
+  title: string;
+}) {
+  const t = useT();
+  const step = useCallback(
+    (d: number) => onIndex((index + d + images.length) % images.length),
+    [index, images.length, onIndex],
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowRight") step(1);
+      else if (e.key === "ArrowLeft") step(-1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, step]);
+
+  // Portalled: the detail page sits inside a clipped column, and a viewer that covers the
+  // window has to be a child of the window.
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/92 px-16 py-12"
+      onClick={onClose}
+    >
+      <CachedImg
+        src={images[index]}
+        alt={title}
+        className="max-h-full max-w-full object-contain"
+        onClick={(e) => e.stopPropagation()}
+      />
+
+      <button
+        onClick={onClose}
+        aria-label={t("common.close")}
+        title={t("common.close")}
+        className="absolute right-5 top-5 grid size-9 cursor-default place-items-center border border-white/20 bg-black/50 text-white/75 transition-colors hover:text-white"
+      >
+        <X className="size-4" />
+      </button>
+
+      {images.length > 1 && (
+        <>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              step(-1);
+            }}
+            aria-label={t("common.back")}
+            className="absolute left-4 top-1/2 grid size-10 -translate-y-1/2 cursor-default place-items-center border border-white/20 bg-black/50 text-white/75 transition-colors hover:text-white"
+          >
+            <ChevronLeft className="size-5" />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              step(1);
+            }}
+            aria-label={t("common.next")}
+            className="absolute right-4 top-1/2 grid size-10 -translate-y-1/2 cursor-default place-items-center border border-white/20 bg-black/50 text-white/75 transition-colors hover:text-white"
+          >
+            <ChevronRight className="size-5" />
+          </button>
+          <span className="absolute inset-x-0 bottom-5 text-center font-mono text-[12px] tabular-figures text-white/55">
+            {index + 1} / {images.length}
+          </span>
+        </>
+      )}
+    </div>,
+    document.body,
   );
 }
 
