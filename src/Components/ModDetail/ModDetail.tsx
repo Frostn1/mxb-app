@@ -37,7 +37,6 @@ import type {
   InstallStage,
   ModDetail as Detail,
 } from "../../types";
-import Gallery from "./Gallery";
 import { ContextBarLeft } from "../Shell/ContextBar";
 import CachedImg from "@/Components/ui/cached-img";
 import RichDescription from "./RichDescription";
@@ -318,6 +317,9 @@ export default function ModDetail({
       : undefined;
   const idx = myActive ? stageIndex(myActive.stage) : -1;
 
+  const [heroIdx, setHeroIdx] = useState(0);
+  const shot = detail.images[Math.min(heroIdx, Math.max(0, detail.images.length - 1))];
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Browse's type tabs go with Browse, so the bar above would otherwise be an empty
@@ -337,16 +339,16 @@ export default function ModDetail({
 
       {/* The artwork carries the name. A breadcrumb over a text column was the same page
           every catalog has; this is the one the mockup drew. */}
-      <div className="relative h-[248px] flex-none overflow-hidden bg-card">
-        {detail.images[0] && (
+      <div className="relative h-[330px] flex-none overflow-hidden bg-card">
+        {shot && (
           <CachedImg
-            src={detail.images[0]}
+            src={shot}
             width={1280}
             alt={detail.title}
             className="absolute inset-0 size-full object-cover"
           />
         )}
-        <div className="absolute inset-0 bg-gradient-to-r from-[rgba(6,6,7,0.95)] via-[rgba(6,6,7,0.7)] to-[rgba(6,6,7,0.15)]" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[rgba(6,6,7,0.92)] via-[rgba(6,6,7,0.45)] to-transparent" />
         <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background to-transparent" />
 
         <button
@@ -390,12 +392,22 @@ export default function ModDetail({
       <div className="flex min-h-0 flex-1 gap-6 px-7 pb-5 pt-4">
         {/* left: gallery + description */}
         <div className="flex min-w-0 flex-1 flex-col gap-3.5 overflow-y-auto pr-1">
-          <Gallery
-            images={detail.images}
-            title={detail.title}
-            emptyLabel="No screenshots"
-          />
-
+          {detail.images.length > 1 && (
+            <div className="flex flex-none gap-2 overflow-x-auto pb-1">
+              {detail.images.map((img, i) => (
+                <button
+                  key={img}
+                  onClick={() => setHeroIdx(i)}
+                  className={cn(
+                    "u-notch relative h-[62px] w-[104px] flex-none overflow-hidden bg-card transition-opacity",
+                    i === heroIdx ? "outline outline-2 -outline-offset-2 outline-primary" : "opacity-60 hover:opacity-100",
+                  )}
+                >
+                  <CachedImg src={img} width={240} alt="" className="size-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="flex flex-col gap-2 pt-1">
             <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
