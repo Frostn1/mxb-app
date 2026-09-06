@@ -1,61 +1,102 @@
-import type { ReactNode } from "react";
+import { createContext, useContext, type ReactNode, type Ref } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { useT } from "../../i18n/context";
 import type { StudioTab } from "../Studio/Studio";
 import type { DashboardView, RailItem } from "./nav";
+
+/**
+ * The two ends of the context bar, handed to whichever screen is mounted.
+ *
+ * A screen's own toolbar belongs in this row, not in a third row of its own — that stacking
+ * is what made the old shell feel like a dashboard. Screens fill the ends by portalling
+ * into them, so nothing has to be lifted into `Dashboard` state and re-rendered from there.
+ */
+export const ContextSlots = createContext<{ left: HTMLElement | null; right: HTMLElement | null }>({
+  left: null,
+  right: null,
+});
+
+/** Tabs or filters, beside the rail item's own tabs. */
+export function ContextBarLeft({ children }: { children: ReactNode }) {
+  const { left } = useContext(ContextSlots);
+  return left ? createPortal(children, left) : null;
+}
+
+/** Search, sort, a primary action — pinned right. */
+export function ContextBarRight({ children }: { children: ReactNode }) {
+  const { right } = useContext(ContextSlots);
+  return right ? createPortal(children, right) : null;
+}
+
+/** One tab, so a screen's own tabs are indistinguishable from the rail item's. */
+export function ContextTab({
+  active,
+  onSelect,
+  children,
+}: {
+  active: boolean;
+  onSelect: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onSelect}
+      className={cn(
+        "relative flex cursor-default items-center font-cond text-[12.5px] font-semibold uppercase tracking-[0.16em] transition-colors",
+        active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {children}
+      {active && <span className="u-skew absolute inset-x-[-3px] bottom-0 h-[2px] bg-primary" />}
+    </button>
+  );
+}
 
 interface ContextBarProps {
   item?: RailItem;
   view: DashboardView;
   studioTab: StudioTab;
   onNavigate: (view: DashboardView, studio?: StudioTab) => void;
-  /** Per-screen controls — search, sort, a primary action — pinned to the right. */
-  right?: ReactNode;
+  leftRef: Ref<HTMLDivElement>;
+  rightRef: Ref<HTMLDivElement>;
 }
 
 /**
- * The row under the rail: the active rail item's tabs, and whatever the screen wants on
- * the right.
+ * The row under the rail: the active rail item's tabs, then whatever the screen adds.
  *
- * A rail item with one tab (or none) still gets the bar when it has `right` content to
- * show, but renders no tabs — a lone tab is a label, not a choice.
+ * Always rendered, even when there is nothing in it — the chrome is a fixed height, and a
+ * bar that appears and disappears would shift every screen by 44px as you navigate.
  */
-export default function ContextBar({ item, view, studioTab, onNavigate, right }: ContextBarProps) {
+export default function ContextBar({
+  item,
+  view,
+  studioTab,
+  onNavigate,
+  leftRef,
+  rightRef,
+}: ContextBarProps) {
   const t = useT();
   const tabs = item?.tabs ?? [];
-  if (tabs.length < 2 && !right) return null;
 
   return (
     <div className="flex h-11 flex-none items-stretch gap-[22px] border-b border-border bg-window px-7">
+      {/* A lone tab is a label, not a choice. */}
       {tabs.length > 1 &&
-        tabs.map((tab) => {
-          // Studio's tabs all share `view: "studio"`, so the active one is the tab whose
-          // sub-view is showing rather than the one whose view matches.
-          const on = tab.studio
-            ? view === "studio" && studioTab === tab.studio
-            : view === tab.view;
-          return (
-            <button
-              key={tab.studio ?? tab.view}
-              onClick={() => onNavigate(tab.view, tab.studio)}
-              className={cn(
-                "relative flex cursor-default items-center font-cond text-[12.5px] font-semibold uppercase tracking-[0.16em] transition-colors",
-                on ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {tab.rawLabel ?? t(tab.label)}
-              {on && (
-                <span className="u-skew absolute inset-x-[-3px] bottom-0 h-[2px] bg-primary" />
-              )}
-            </button>
-          );
-        })}
-      {right && (
-        <>
-          <div className="flex-1" />
-          <div className="flex items-center gap-3 self-center">{right}</div>
-        </>
-      )}
+        tabs.map((tab) => (
+          <ContextTab
+            key={tab.studio ?? tab.view}
+            // Studio's tabs all share `view: "studio"`, so the active one is the tab whose
+            // sub-view is showing rather than the one whose view matches.
+            active={tab.studio ? view === "studio" && studioTab === tab.studio : view === tab.view}
+            onSelect={() => onNavigate(tab.view, tab.studio)}
+          >
+            {tab.rawLabel ?? t(tab.label)}
+          </ContextTab>
+        ))}
+      <div ref={leftRef} className="flex items-stretch gap-[22px]" />
+      <div className="flex-1" />
+      <div ref={rightRef} className="flex items-center gap-3 self-center" />
     </div>
   );
 }

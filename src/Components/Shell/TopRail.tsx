@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type Ref } from "react";
 import { Settings as SettingsIcon, Play, Gamepad2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -24,6 +24,9 @@ interface TopRailProps {
   studioTab: StudioTab;
   plugins: LoadedPlugin[];
   onNavigate: (view: DashboardView, studio?: StudioTab) => void;
+  /** Where the mounted screen portals its own toolbar — see `ContextBar`. */
+  leftRef: Ref<HTMLDivElement>;
+  rightRef: Ref<HTMLDivElement>;
 }
 
 /**
@@ -38,7 +41,7 @@ interface TopRailProps {
  * `data-tauri-drag-region={undefined}` by simply being a button — Tauri only drags from
  * elements carrying the attribute.
  */
-export default function TopRail({ view, studioTab, plugins, onNavigate }: TopRailProps) {
+export default function TopRail({ view, studioTab, plugins, onNavigate, leftRef, rightRef }: TopRailProps) {
   const t = useT();
   const { game } = useConfig();
   const caps = game.caps;
@@ -168,7 +171,14 @@ export default function TopRail({ view, studioTab, plugins, onNavigate }: TopRai
 
       <WindowControls className="ml-4" />
     </div>
-    <ContextBar item={active} view={view} studioTab={studioTab} onNavigate={onNavigate} />
+    <ContextBar
+      item={active}
+      view={view}
+      studioTab={studioTab}
+      onNavigate={onNavigate}
+      leftRef={leftRef}
+      rightRef={rightRef}
+    />
     </>
   );
 }
