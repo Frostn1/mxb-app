@@ -3,6 +3,9 @@
 ## 2026-09-06
 
 ### Changed
+- Generated tracks are painted with real ground. The soil, the riding line, the packed bottom
+  of a rut and the grass outside the track are photographs of ground rather than drawn dirt,
+  so a lap reads like somewhere that has been ridden.
 - The trackside advertising is a hoarding: printed plastic boards bolted edge to edge into
   runs down both sides of the lap, sharing an upright at every join, with clear ground between
   one run and the next. They used to be single banners slung every fifty metres.
