@@ -287,7 +287,7 @@ export default function InstallDialog({
         key={`${m.url}-${idx}`}
         onClick={() => chooseMirror(idx)}
         className={cn(
-          "flex cursor-default items-center gap-[11px] rounded-[9px] border bg-background px-3 py-2.5 text-left transition-colors",
+          "flex cursor-default items-center gap-[11px] border bg-background px-3 py-2.5 text-left transition-colors",
           on ? "border-primary/50" : "border-input hover:border-white/20",
         )}
       >
@@ -369,7 +369,7 @@ export default function InstallDialog({
             {/* A ReShade preset doesn't live in the mods tree and has exactly one home, so
                 it shows where it lands and offers no folder to change. */}
             {outsideMods ? (
-              <div className="flex items-center gap-2.5 rounded-[9px] border border-input bg-background px-3 py-2.5">
+              <div className="flex items-center gap-2.5 border border-input bg-background px-3 py-2.5">
                 <ChevronRight className="size-3.5 flex-none text-primary" />
                 <span className="flex-1 truncate text-left font-mono text-[12px] text-muted-foreground">
                   <b className="text-foreground">{RESHADE_DEST}</b>
@@ -378,7 +378,7 @@ export default function InstallDialog({
             ) : (
               <button
                 onClick={() => setFolderOpen((v) => !v)}
-                className="flex cursor-default items-center gap-2.5 rounded-[9px] border border-input bg-background px-3 py-2.5"
+                className="flex cursor-default items-center gap-2.5 border border-input bg-background px-3 py-2.5"
               >
                 <ChevronRight className="size-3.5 flex-none text-primary" />
                 <span className="flex-1 truncate text-left font-mono text-[12px] text-muted-foreground">
@@ -392,7 +392,7 @@ export default function InstallDialog({
             )}
 
             {folderOpen && !outsideMods && (
-              <div className="flex flex-col overflow-hidden rounded-[10px] border border-input bg-popover shadow-[0_12px_32px_rgba(0,0,0,0.5)]">
+              <div className="flex flex-col overflow-hidden border border-input bg-popover shadow-[0_12px_32px_rgba(0,0,0,0.5)]">
                 {/* command-style search */}
                 <div className="flex items-center gap-2 border-b border-border px-3 py-2">
                   <Search className="size-3.5 flex-none text-faint" />
@@ -483,7 +483,7 @@ export default function InstallDialog({
               {/* A mod with nothing but server files is worth saying outright: it installs
                   fine and then does nothing in-game, which reads as a broken install. */}
               {serverOnly && (
-                <div className="flex items-start gap-2.5 rounded-[10px] border border-warning/30 bg-warning/[0.07] px-3 py-2.5">
+                <div className="flex items-start gap-2.5 border border-warning/30 bg-warning/[0.07] px-3 py-2.5">
                   <AlertTriangle className="mt-px size-3.5 flex-none text-warning" />
                   <span className="text-[11.5px] text-warning/90">
                     {t("installDialog.serverOnlyNotice")}

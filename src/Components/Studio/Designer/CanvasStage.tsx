@@ -1060,11 +1060,11 @@ export function CanvasStage({
           title={t("designer.flankWashHint")}
         >
           <span className="flex items-center gap-1">
-            <span className="size-2 rounded-[2px] bg-[hsl(28_95%_55%)]" />
+            <span className="size-2 bg-[hsl(28_95%_55%)]" />
             {t("designer.flank.left")}
           </span>
           <span className="flex items-center gap-1">
-            <span className="size-2 rounded-[2px] bg-[hsl(205_95%_60%)]" />
+            <span className="size-2 bg-[hsl(205_95%_60%)]" />
             {t("designer.flank.right")}
           </span>
         </div>

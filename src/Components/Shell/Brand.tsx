@@ -1,3 +1,19 @@
+import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
+
+/**
+ * The mark's shape on its own, for the screens that show an icon rather than the wordmark
+ * — setup, the welcome slides, the tour. It replaces a rounded-square gradient tile, which
+ * is the single most recognisable "generated app" tell there is.
+ */
+export function Plate({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <span className={cn("u-skew grid place-items-center bg-primary text-primary-foreground", className)}>
+      <span className="u-unskew grid place-items-center">{children}</span>
+    </span>
+  );
+}
+
 /**
  * The wordmark: a race plate carrying MXB, then APP.
  *
