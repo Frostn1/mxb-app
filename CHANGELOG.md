@@ -3,6 +3,15 @@
 ## 2026-09-06
 
 ### Changed
+- The printed banners are gone.
+- A third as many blocks round a corner, and each one now has a dark foot under its white body
+  so it reads as a block rather than a paper cube.
+- Jumps are flagged rather than posted: a yellow pennant on top of the marker, and only on the
+  jumps big enough to need warning of.
+
+## 2026-09-06
+
+### Changed
 - The start straight keeps its distance from the lap until the two meet at turn one. There is
   a strip of ground between them, so a rider on a flying lap has no way back onto it.
 - White blocks sit at the edge of the track rather than out in the field, the printed banners
