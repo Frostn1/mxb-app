@@ -22,27 +22,84 @@ use crate::edfwrite::{self, Mesh, Part, Texture};
 use crate::trackprog::TrackProgram;
 use crate::tracksynth::Synth;
 
-/// The line of stakes that marks the edge of the riding line, metres out. The corpus median
-/// for what lines a track is 7.5; this keeps it just clear of the shoulder on a wide track.
-const STAKE_OFF_M: f32 = 7.5;
-/// Metres round the lap between stakes.
+/// The line of stakes that marks the edge of the riding line, and what one is.
 ///
-/// Not the corpus's 3.1. That figure is the gap between *islands*, and an island is one quad
-/// of a baked mesh rather than one object — so a banner made of four quads counted as four
-/// banners three metres apart. Read literally it put 1272 boards round a lap and the track
-/// looked fenced in by its own edge marking.
-const STAKE_GAP_M: f32 = 15.0;
-const STAKE_H_M: f32 = 1.15;
-/// A stake is a stake: thin enough that what you see is a line of points, not a wall.
-const STAKE_W_M: f32 = 0.07;
+/// Measured off Indiana's `.map` piece by piece — `trackobjects`' `edge_marking` test — rather
+/// than pooled over the corpus, because the corpus clusters and clustering loses a stake. It
+/// carries 96 of them, evenly both sides, and its own `.rdf` puts the finish line at ±7 m: the
+/// stake line *is* the track edge, not something set back from it.
+///
+/// The four figures move together. A stake at Indiana is **0.66 m tall and 4 cm wide**, half
+/// the size this used to build, and that is what lets it stand every 6.2 m without the line
+/// reading as a fence — which is the thing the gap was widened to 15 m to escape. Shrink the
+/// post and the real spacing works.
+const STAKE_OFF_M: f32 = 7.0;
+const STAKE_GAP_M: f32 = 6.5;
+const STAKE_H_M: f32 = 0.7;
+const STAKE_W_M: f32 = 0.045;
 
 /// Banners are the big printed panels, and there are few of them.
+///
+/// Indiana's are 4–7 m wide on posts about 5.7 m tall, and every one of them is a **wordmark
+/// on a solid ground** — fourteen sponsors baked into one atlas, the title sponsor repeated
+/// down the lap. [`BANNER_PANELS`] is the same idea with our own names on it.
 const BANNER_OFF_M: f32 = 9.5;
 const BANNER_GAP_M: f32 = 55.0;
 const BANNER_W_M: f32 = 4.0;
 const BANNER_H_M: f32 = 1.2;
 /// How far off the ground the panel is slung.
 const BANNER_LIFT_M: f32 = 0.35;
+
+/// One printed banner: a wordmark on a coloured ground, and whether it carries the app's mark.
+///
+/// The anatomy is taken from the real ones. Every sponsor panel on Indiana's atlas is a mark,
+/// a wordmark and a small strapline under the name — RACE TECH over "THE SCIENCE OF
+/// SUSPENSION", and thirteen others follow the same rule.
+///
+/// The wordmark is **artwork**, not type drawn here. A banner is somebody's brand: MXB App's
+/// is Barlow Condensed on `--primary`, Creste's is Cormorant Garamond over Hanken Grotesk in
+/// its own `--ink` and `--accent`, and nothing in this crate can rasterise a `.ttf`. Drawing a
+/// look-alike face was tried and it is exactly as convincing as a look-alike logo. So each
+/// lockup is set once in the real faces and committed beside the icon, which is what a sponsor
+/// hands a track builder anyway.
+struct Panel {
+    /// The name of the artwork in [`artwork`], which is also what the banner says.
+    art: &'static str,
+    ground: [u8; 3],
+    /// The app's snowflake at the left. Off for a panel that is not ours.
+    mark: bool,
+}
+
+/// What the banners say.
+///
+/// A lap cycles through them, which is why the app's own name is on two of the five — that is
+/// how a title sponsor reads at a real meeting, not an accident of the list. Every ground is a
+/// token straight out of `src/index.css`, except Creste's, which is its own `--paper`.
+const BANNER_PANELS: [Panel; 5] = [
+    // `--primary` on `--primary-foreground`.
+    Panel { art: "mxbapp-ice", ground: [13, 18, 22], mark: true },
+    // `--foreground` on `--secondary`, so the two dark panels don't read as one.
+    Panel { art: "frost", ground: [38, 38, 44], mark: true },
+    // Creste's own `--paper`.
+    Panel { art: "creste", ground: [20, 19, 16], mark: false },
+    // The light theme's `--primary`.
+    Panel { art: "frostmod", ground: [28, 120, 151], mark: true },
+    // The icon's own way round: dark on the ice blue.
+    Panel { art: "mxbapp-dark", ground: [156, 207, 236], mark: true },
+];
+
+/// The banner atlas is one square sheet: four printed cells stacked down it, and a plain band
+/// at the foot for the posts to wear. Cells rather than a sheet each because a model takes one
+/// material — see the note where the kinds are assembled — and because it is what a published
+/// track does.
+const BANNER_CELLS: usize = BANNER_PANELS.len();
+const BANNER_ATLAS_PX: u32 = 1024;
+/// Rows per printed cell. Five of these plus a 124-row post band fills the square exactly.
+///
+/// A thousand pixels across rather than five hundred because the letters are drawn from
+/// strokes: at half this the diagonals stair-step and the type goes back to looking pixelled,
+/// which is the whole thing it is here to avoid. Published tracks bake 1024-square sheets.
+const BANNER_CELL_PX: u32 = 180;
 
 /// How far off the edge of the start straight anything trackside has to stand.
 const OFF_THE_START_M: f32 = 2.5;
@@ -253,6 +310,19 @@ fn inside(prog: &TrackProgram, x: f32, z: f32, margin: f32) -> bool {
 // Sheets
 // ---------------------------------------------------------------------------
 
+/// Build a square sheet from a function of `(u, v)`.
+///
+/// `v` runs **down**: zero is the top of whatever wears it, which is the convention
+/// [`edfwrite::card`] uses — its `v` is zero at the card's top edge. Published tracks use the
+/// opposite one, and [`crate::map::textures`] flips a sheet's rows on the way in to suit it.
+/// So a sheet written here comes back out of a compiled `.map` looking upside down, and it is
+/// right anyway: the two inversions cancel, because ours flips the pixels *and* the UVs.
+///
+/// Proved rather than argued — `trackobjects`' `edge_marking` test rebuilds a banner from the
+/// compiled map through its own UVs and its own sheet, and the wordmark comes out upright on
+/// a generated track and on Indiana alike. Do not "fix" this by flipping the pixels alone:
+/// that puts the letters on their heads in the game and leaves them looking right in every
+/// dump, which is the worst way round to have it.
 fn sheet(name: &str, dim: u32, f: impl Fn(f32, f32) -> [u8; 4]) -> Texture {
     let mut rgba = Vec::with_capacity((dim * dim * 4) as usize);
     for y in 0..dim {
@@ -269,42 +339,234 @@ fn grain(u: f32, v: f32, seed: u32, scale: f32) -> f32 {
     rnd(seed, i)
 }
 
-/// A stake: bare timber with the top painted, which is what marks the edge of every
-/// motocross track there is.
-fn stake_sheet() -> Texture {
-    sheet("stake_c", 32, |u, v| {
-        let g = grain(u, v * 0.25, 0x33A1, 26.0);
-        if v < 0.34 {
-            // The painted top, so a line of them reads at speed.
-            let s = 0.88 + 0.12 * g;
-            [(238.0 * s) as u8, (238.0 * s) as u8, (232.0 * s) as u8, 255]
-        } else {
-            let s = 0.80 + 0.30 * g;
-            [(166.0 * s) as u8, (132.0 * s) as u8, (88.0 * s) as u8, 255]
+/// The app's own mark, traced out of the icon the app actually ships.
+///
+/// Drawing a snowflake by hand gets the idea and not the logo — the barbs came out as a blob
+/// and it was recognisably *a* snowflake rather than *ours*. This lifts the silhouette
+/// straight from `icons/128x128@2x.png`: the mark is the dark shape on the icon's blue, so
+/// anything opaque and dark is the logo and everything else is the tile behind it. Cropped to
+/// its own bounds and cached, because it is the same picture on every panel.
+///
+/// Returns `(width, height, coverage)` — one byte a pixel, 255 where the mark is.
+fn mark_mask() -> &'static (u32, u32, Vec<u8>) {
+    static MARK: std::sync::OnceLock<(u32, u32, Vec<u8>)> = std::sync::OnceLock::new();
+    MARK.get_or_init(|| {
+        const ICON: &[u8] = include_bytes!("../icons/128x128@2x.png");
+        let Ok(img) = image::load_from_memory(ICON) else {
+            return (0, 0, Vec::new());
+        };
+        let img = img.to_rgba8();
+        let (w, h) = img.dimensions();
+        let dark = |x: u32, y: u32| -> u8 {
+            let p = img.get_pixel(x, y).0;
+            if p[3] < 160 {
+                return 0;
+            }
+            let luma = 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32;
+            // The icon's flake is near-black on a light blue tile; the midpoint separates
+            // them with room to spare, and the ramp keeps the antialiased edge.
+            (((110.0 - luma) / 40.0).clamp(0.0, 1.0) * 255.0) as u8
+        };
+        let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0u32, 0u32);
+        for y in 0..h {
+            for x in 0..w {
+                if dark(x, y) > 20 {
+                    x0 = x0.min(x);
+                    y0 = y0.min(y);
+                    x1 = x1.max(x);
+                    y1 = y1.max(y);
+                }
+            }
         }
+        if x1 <= x0 || y1 <= y0 {
+            return (0, 0, Vec::new());
+        }
+        let (mw, mh) = (x1 - x0 + 1, y1 - y0 + 1);
+        let mut mask = Vec::with_capacity((mw * mh) as usize);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                mask.push(dark(x, y));
+            }
+        }
+        (mw, mh, mask)
     })
 }
 
-/// A printed banner panel, cut out of its sheet so the sling above it reads as rope.
+/// Brand artwork, decoded once and cached.
+///
+/// Creste's wordmark is Cormorant Garamond over Hanken Grotesk, and nothing in this crate can
+/// rasterise a `.ttf`. So the lockup is set once in the real faces and committed as artwork —
+/// which is what a sponsor hands a track builder anyway. The stroked face this module draws is
+/// for the moto brands; a house serif is not something to approximate.
+///
+/// Returns `(width, height, rgba)`.
+fn artwork(name: &str) -> Option<&'static (u32, u32, Vec<u8>)> {
+    macro_rules! sheet_of {
+        ($cell:ident, $file:literal) => {{
+            static $cell: std::sync::OnceLock<(u32, u32, Vec<u8>)> = std::sync::OnceLock::new();
+            Some($cell.get_or_init(|| match image::load_from_memory(include_bytes!($file)) {
+                Ok(img) => {
+                    let img = img.to_rgba8();
+                    let (w, h) = img.dimensions();
+                    (w, h, img.into_raw())
+                }
+                Err(_) => (0, 0, Vec::new()),
+            }))
+        }};
+    }
+    match name {
+        "mxbapp-ice" => sheet_of!(A, "../assets/mxbapp-ice.png"),
+        "frost" => sheet_of!(B, "../assets/frost.png"),
+        "creste" => sheet_of!(C, "../assets/creste.png"),
+        "frostmod" => sheet_of!(D, "../assets/frostmod.png"),
+        "mxbapp-dark" => sheet_of!(E, "../assets/mxbapp-dark.png"),
+        _ => None,
+    }
+}
+
+/// Sample artwork at `(u, v)`, both 0..1 across its own box. Bilinear, premultiplied by its
+/// own alpha so the edges stay clean over any ground.
+fn art_at(art: &(u32, u32, Vec<u8>), u: f32, v: f32) -> ([f32; 3], f32) {
+    let (w, h, px) = art;
+    if *w == 0 || !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
+        return ([0.0; 3], 0.0);
+    }
+    let (fx, fy) = (u * (*w - 1) as f32, v * (*h - 1) as f32);
+    let (x0, y0) = (fx.floor() as u32, fy.floor() as u32);
+    let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+    let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+    let at = |x: u32, y: u32, k: usize| px[((y * w + x) * 4) as usize + k] as f32;
+    let mix = |k: usize| {
+        let top = at(x0, y0, k) * (1.0 - tx) + at(x1, y0, k) * tx;
+        let bot = at(x0, y1, k) * (1.0 - tx) + at(x1, y1, k) * tx;
+        top * (1.0 - ty) + bot * ty
+    };
+    (std::array::from_fn(mix), mix(3) / 255.0)
+}
+
+/// How much of the mark covers `(u, v)`, both 0..1 across its own box. Bilinear, so the edge
+/// stays smooth however large it is drawn.
+fn mark_at(u: f32, v: f32) -> f32 {
+    let (w, h, mask) = mark_mask();
+    if *w == 0 || !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
+        return 0.0;
+    }
+    let (fx, fy) = (u * (*w - 1) as f32, v * (*h - 1) as f32);
+    let (x0, y0) = (fx.floor() as u32, fy.floor() as u32);
+    let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+    let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+    let at = |x: u32, y: u32| mask[(y * w + x) as usize] as f32 / 255.0;
+    let top = at(x0, y0) * (1.0 - tx) + at(x1, y0) * tx;
+    let bot = at(x0, y1) * (1.0 - tx) + at(x1, y1) * tx;
+    top * (1.0 - ty) + bot * ty
+}
+
+
+/// A stake: white plastic, scuffed at the foot. What marks the edge of a motocross track.
+///
+/// Not bare timber with a painted tip, which is what this used to draw. Indiana's stakes
+/// measure a flat light grey — rgb(138,140,135) sampled through their own UVs — with no
+/// second population beside them, so the line is all one thing and the variety comes from
+/// how they lean rather than from what they are made of.
+fn stake_sheet() -> Texture {
+    sheet("stake_c", 32, |u, v| {
+        let g = grain(u, v * 0.25, 0x33A1, 26.0);
+        // Ground-in dirt up the bottom third, because that is the half a rider sees.
+        let dirt = ((v - 0.62) / 0.38).clamp(0.0, 1.0) * (0.55 + 0.45 * g);
+        let s = 0.94 + 0.06 * g;
+        let mix = |clean: f32, soil: f32| ((clean * s) * (1.0 - dirt) + soil * dirt) as u8;
+        [mix(238.0, 132.0), mix(240.0, 106.0), mix(236.0, 74.0), 255]
+    })
+}
+
+/// Where cell `i` of the banner atlas sits down the sheet, as a `v` range.
+fn banner_cell(i: usize) -> (f32, f32) {
+    let h = BANNER_CELL_PX as f32 / BANNER_ATLAS_PX as f32;
+    let top = i as f32 * h;
+    (top, top + h)
+}
+
+/// The plain band at the foot of the atlas that the posts wear.
+fn banner_post_band() -> (f32, f32) {
+    (BANNER_CELLS as f32 * BANNER_CELL_PX as f32 / BANNER_ATLAS_PX as f32, 1.0)
+}
+
+/// The banner atlas: [`BANNER_PANELS`] printed one under another, and a post band under them.
+///
+/// One sheet rather than one per panel because a model takes a single material — see the note
+/// where the kinds are assembled — and because it is how a published track carries a lap's
+/// worth of sponsors. Each panel is a wordmark on a solid ground with a keyline round it,
+/// which is what every one of Indiana's fourteen is.
 fn banner_sheet() -> Texture {
-    sheet("banner_c_a", 128, |u, v| {
-        if v < 0.12 {
-            // The tie line along the top.
-            return if (u * 40.0).fract() < 0.55 { [40, 40, 44, 255] } else { [0, 0, 0, 0] };
+    let (band_top, _) = banner_post_band();
+    // The cell's height over its width. Everything laid out below is in cell coordinates, and
+    // artwork has to be told the difference or it comes out stretched.
+    let aspect = BANNER_CELL_PX as f32 / BANNER_ATLAS_PX as f32;
+    // Decode once up front rather than inside the pixel loop's first call.
+    let _ = mark_mask();
+    for p in &BANNER_PANELS {
+        let _ = artwork(p.art);
+    }
+    sheet("banner_c", BANNER_ATLAS_PX, |u, v| {
+        if v >= band_top {
+            // The posts: dull galvanised, no print.
+            let g = grain(u, v, 0x71B4, 40.0);
+            let s = 0.86 + 0.20 * g;
+            return [(150.0 * s) as u8, (152.0 * s) as u8, (156.0 * s) as u8, 255];
         }
-        let g = grain(u, v, 0x5C2D, 30.0);
-        // A block of colour with a lighter bar through it — enough that it reads as printed
-        // rather than as a slab, without pretending to be anyone's logo.
-        let base = if (0.34..0.62).contains(&v) {
-            [238.0, 238.0, 234.0]
-        } else if u < 0.5 {
-            [196.0, 62.0, 40.0]
-        } else {
-            [34.0, 78.0, 150.0]
-        };
-        let s = 0.92 + 0.10 * g;
+        let cell = ((v / aspect) as usize).min(BANNER_CELLS - 1);
+        let (top, bot) = banner_cell(cell);
+        let cv = (v - top) / (bot - top);
+        let p = &BANNER_PANELS[cell];
+
+        let g = grain(u, cv, 0x5C2D + cell as u32, 30.0);
+        let s = 0.94 + 0.08 * g;
+        let mut base: [f32; 3] = std::array::from_fn(|k| p.ground[k] as f32);
+        // A hem all the way round, darker than the ground, so a panel has an edge.
+        if cv < 0.055 || cv > 0.945 || u < 0.010 || u > 0.990 {
+            base = std::array::from_fn(|k| p.ground[k] as f32 * 0.7);
+            return [(base[0] * s) as u8, (base[1] * s) as u8, (base[2] * s) as u8, 255];
+        }
+
+        // Everything sits to the right of the mark, where there is one.
+        let left = if p.mark { 0.225 } else { 0.05 };
+        if p.mark {
+            let (mw, mh) = (0.15f32, 0.78f32);
+            let a = mark_at((u - 0.045) / mw, (cv - 0.11) / mh);
+            // The mark takes the wordmark's own ink, which every lockup shares with it.
+            let ink = mark_ink(p.art);
+            for k in 0..3 {
+                base[k] = base[k] * (1.0 - a) + ink[k] as f32 * a;
+            }
+        }
+
+        // The lockup, fitted inside what is left of the panel and never stretched.
+        if let Some(art) = artwork(p.art) {
+            let (aw, ah) = (art.0 as f32, art.1 as f32);
+            let (bu0, bu1) = (left, 0.965);
+            let (box_w, box_h) = (bu1 - bu0, 0.74f32);
+            let scale = (box_w / aw).min(box_h * aspect / ah);
+            let (fw, fh) = (aw * scale, ah * scale / aspect);
+            let (au, av) = (
+                (u - (bu0 + bu1) * 0.5 + fw * 0.5) / fw,
+                (cv - 0.5 + fh * 0.5) / fh,
+            );
+            let (col, a) = art_at(art, au, av);
+            for k in 0..3 {
+                base[k] = base[k] * (1.0 - a) + col[k] * a;
+            }
+        }
         [(base[0] * s) as u8, (base[1] * s) as u8, (base[2] * s) as u8, 255]
     })
+}
+
+/// The colour the mark is printed in on a given panel — the wordmark's own ink.
+fn mark_ink(art: &str) -> [u8; 3] {
+    match art {
+        "mxbapp-ice" => [156, 207, 236],
+        "mxbapp-dark" => [13, 18, 22],
+        _ => [242, 243, 245],
+    }
 }
 
 /// Mesh fencing: a grid you can see through, which is the whole reason it is a cut-out.
@@ -460,19 +722,6 @@ fn dome_sheet() -> Texture {
         let c = |i: usize| (base[i] * (1.0 - cloud) + 246.0 * cloud).clamp(0.0, 255.0) as u8;
         [c(0), c(1), c(2), 255]
     })
-}
-
-/// The same post with its texture read out of the sheet's wood: a stake with no painted tip.
-///
-/// Half of them, because a line of identical posts reads as a fence and what a track has is
-/// whatever was to hand.
-fn bare(m: &Mesh) -> Mesh {
-    let mut out = m.clone();
-    for uv in out.uvs.chunks_exact_mut(2) {
-        // The sheet paints its top third; anything below that is bare wood.
-        uv[1] = 0.42 + uv[1] * 0.55;
-    }
-    out
 }
 
 /// The yellow post that stands beside a jump's takeoff.
@@ -668,15 +917,34 @@ fn tree_mesh(h: f32, seed: u32, i: u32) -> Mesh {
 }
 
 /// A banner: a printed panel slung between two stakes.
-fn banner_mesh() -> Mesh {
-    let mut m = edfwrite::double_sided(&edfwrite::moved(
-        &edfwrite::card(BANNER_W_M, BANNER_H_M),
-        [0.0, BANNER_LIFT_M, 0.0],
-    ));
+/// Squeeze a mesh's `v` into one band of the atlas, leaving `u` alone.
+fn in_band(mesh: &Mesh, (top, bot): (f32, f32)) -> Mesh {
+    let mut m = mesh.clone();
+    for uv in m.uvs.chunks_exact_mut(2) {
+        uv[1] = top + uv[1].clamp(0.0, 1.0) * (bot - top);
+    }
+    m
+}
+
+/// A banner: the `cell`-th printed panel slung between two posts.
+///
+/// The panel takes its own cell of the atlas and the posts take the plain band under them, so
+/// a lap's banners are one mesh and one material and still say four different things.
+fn banner_mesh(cell: usize) -> Mesh {
+    let mut m = in_band(
+        &edfwrite::double_sided(&edfwrite::moved(
+            &edfwrite::card(BANNER_W_M, BANNER_H_M),
+            [0.0, BANNER_LIFT_M, 0.0],
+        )),
+        banner_cell(cell % BANNER_CELLS),
+    );
     for side in [-1.0f32, 1.0] {
-        m.append(&edfwrite::moved(
-            &edfwrite::cuboid(0.08, BANNER_LIFT_M + BANNER_H_M, 0.08),
-            [side * BANNER_W_M * 0.5, 0.0, 0.0],
+        m.append(&in_band(
+            &edfwrite::moved(
+                &edfwrite::cuboid(0.08, BANNER_LIFT_M + BANNER_H_M, 0.08),
+                [side * BANNER_W_M * 0.5, 0.0, 0.0],
+            ),
+            banner_post_band(),
         ));
     }
     m
@@ -714,8 +982,9 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let mut gate = Mesh::default();
     let mut tally = Vec::new();
 
-    // 1. The edge line: bare stakes with a painted top, which is how a motocross track is
-    // marked. Thin, so what you see down the track is a line of points rather than a wall.
+    // 1. The edge line: little white plastic stakes at the track edge, which is how a
+    // motocross track is marked and what Indiana measures — see [`STAKE_OFF_M`]. Thin and
+    // low, so what you see down the track is a line of points rather than a wall.
     let stake_off = (half + 1.0).max(STAKE_OFF_M);
     let mut n = 0usize;
     let mut s = 0.0f32;
@@ -731,14 +1000,14 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
                 continue;
             }
             let key = (s / STAKE_GAP_M) as u32 * 2 + (side > 0.0) as u32;
-            let h = STAKE_H_M * (0.92 + 0.16 * rnd(seed ^ 0x12, key));
-            // Some painted, some bare: a line of identical posts reads as a fence, and what a
-            // track has is whatever was to hand, half of it with a tip of white on it.
-            let painted = rnd(seed ^ 0x14, key) < 0.55;
-            let lean = (rnd(seed ^ 0x13, key) - 0.5) * 16.0;
+            let h = STAKE_H_M * (0.88 + 0.24 * rnd(seed ^ 0x12, key));
+            // They all wear the same plastic, so the variety is in the lean — which is what a
+            // line of stakes actually looks like once a meeting has been run on it. Wider than
+            // it was, because a shorter stake needs more of it to read as knocked about.
+            let lean = (rnd(seed ^ 0x13, key) - 0.5) * 26.0;
             let post = edfwrite::cuboid(STAKE_W_M, h, STAKE_W_M);
             stakes.append(&edfwrite::moved(
-                &edfwrite::turned(&if painted { post } else { bare(&post) }, lean),
+                &edfwrite::turned(&post, lean),
                 [x, ground(syn, x, z) - 0.03, z],
             ));
             n += 1;
@@ -763,8 +1032,10 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         {
             let (lo, hi) = ground_span(syn, x, z, along(st.heading), BANNER_W_M);
             if hi - lo < 1.0 {
+                // Which panel: walked round the lap rather than drawn at random, so the
+                // same name never lands twice in a row where a rider would see both.
                 banners.append(&edfwrite::moved(
-                    &edfwrite::turned(&banner_mesh(), along(st.heading)),
+                    &edfwrite::turned(&banner_mesh(n), along(st.heading)),
                     [x, (lo + hi) * 0.5 - 0.05, z],
                 ));
                 n += 1;
@@ -1102,6 +1373,111 @@ mod tests {
         );
     }
 
+    /// Every panel says something, and no two of them say the same thing in the same place.
+    ///
+    /// The failure this guards against is silent: a cell whose text renders as nothing, or a
+    /// UV band a rounding off, leaves a lap of blank coloured slabs that still builds and
+    /// still ships. Ink coverage is the cheapest proof that a wordmark is actually printed.
+    #[test]
+    fn every_banner_panel_is_printed_and_they_all_differ() {
+        let t = banner_sheet();
+        assert_eq!(t.width, BANNER_ATLAS_PX);
+        assert_eq!(t.height, BANNER_ATLAS_PX);
+        let row = |v: f32| (v * t.height as f32) as u32;
+
+        let mut seen: Vec<Vec<u8>> = Vec::new();
+        for cell in 0..BANNER_CELLS {
+            let (top, bot) = banner_cell(cell);
+            // The middle band of the cell, where the line of text sits.
+            let (y0, y1) = (row(top + (bot - top) * 0.3), row(top + (bot - top) * 0.7));
+            let mut ink = 0usize;
+            let mut total = 0usize;
+            let mut hist = std::collections::BTreeMap::<[u8; 3], usize>::new();
+            for y in y0..y1 {
+                for x in 0..t.width {
+                    let o = ((y * t.width + x) * 4) as usize;
+                    let px = [t.rgba[o], t.rgba[o + 1], t.rgba[o + 2]];
+                    *hist.entry(px.map(|c| c / 32 * 32)).or_default() += 1;
+                    total += 1;
+                }
+            }
+            // The commonest colour is the ground; anything else is print.
+            let ground = *hist.iter().max_by_key(|(_, n)| **n).unwrap().0;
+            for (px, n) in &hist {
+                if *px != ground {
+                    ink += n;
+                }
+            }
+            let share = ink as f32 / total as f32;
+            let text = BANNER_PANELS[cell].art;
+            assert!(
+                (0.05..0.60).contains(&share),
+                "panel {cell} ({text}) is {:.0}% ink — blank or solid, not printed",
+                share * 100.0
+            );
+            let strip: Vec<u8> = (0..t.width)
+                .map(|x| t.rgba[(((y0 + y1) / 2 * t.width + x) * 4) as usize])
+                .collect();
+            assert!(
+                !seen.contains(&strip),
+                "panel {cell} ({text}) prints the same line as one before it"
+            );
+            seen.push(strip);
+        }
+
+        // And the posts wear the plain band, not a slice of somebody's name.
+        let (band, _) = banner_post_band();
+        let m = banner_mesh(0);
+        let post_vs: Vec<f32> = m.uvs.chunks_exact(2).skip(8).map(|uv| uv[1]).collect();
+        assert!(
+            !post_vs.is_empty() && post_vs.iter().all(|v| *v >= band - 1e-4),
+            "the posts sample the printed cells"
+        );
+    }
+
+    /// Write the sheets out as PNGs, which is the only way to judge whether a banner reads.
+    ///
+    /// ```text
+    /// FROST_SHEETS=/tmp/gen cargo test --bin mxb-app -- --ignored --nocapture the_sheets
+    /// ```
+    #[test]
+    #[ignore = "writes PNGs — set FROST_SHEETS"]
+    fn the_sheets() {
+        let dir = std::env::var("FROST_SHEETS").expect("set FROST_SHEETS");
+        std::fs::create_dir_all(&dir).unwrap();
+        for t in [banner_sheet(), stake_sheet(), jumpmark_sheet(), bale_sheet()] {
+            let file = format!("{dir}/{}.png", t.name);
+            image::RgbaImage::from_raw(t.width, t.height, t.rgba.clone())
+                .unwrap()
+                .save(&file)
+                .unwrap();
+            println!("{file} {}x{}", t.width, t.height);
+        }
+    }
+
+    /// A lap shows more than one banner. One cell used everywhere is the same failure as a
+    /// blank cell, and it only shows up on the bike.
+    #[test]
+    fn a_lap_cycles_through_the_panels() {
+        let (p, s) = demo();
+        let sc = build(&p, &s);
+        let banners = sc.tally.iter().find(|(k, _)| *k == "banners").unwrap().1;
+        assert!(banners >= BANNER_CELLS, "{banners} banners — too few to cycle");
+        let edf = &sc.files.iter().find(|(f, _)| f == "banners.edf").unwrap().1;
+        let nodes = crate::edf::parse_world(edf);
+        assert!(!nodes.is_empty(), "the banner model reads back");
+        let bands: std::collections::BTreeSet<u32> = nodes
+            .iter()
+            .flat_map(|n| n.uvs.chunks_exact(2))
+            .map(|uv| (uv[1] * BANNER_ATLAS_PX as f32 / BANNER_CELL_PX as f32) as u32)
+            .collect();
+        assert!(
+            bands.len() > BANNER_CELLS,
+            "banners sample {} bands of the atlas — the lap is not cycling",
+            bands.len()
+        );
+    }
+
     #[test]
     fn jumps_are_marked_and_rollers_are_not() {
         let (p, s) = demo();
@@ -1294,7 +1670,15 @@ mod built {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
-        let p: TrackProgram = serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
+        // `FROST_PROGRAM` builds a track of your own; without it, the example.
+        let src = match std::env::var("FROST_PROGRAM") {
+            Ok(f) => std::fs::read_to_string(f).expect("the program file"),
+            Err(_) => crate::trackprog::EXAMPLE.to_string(),
+        };
+        let mut p: TrackProgram = serde_json::from_str(&src).unwrap();
+        for note in crate::trackllm::repair_for_tests(&mut p) {
+            println!("  repair: {note}");
+        }
         let syn = crate::tracksynth::synthesise(&p).unwrap();
         let slug = crate::tracksynth::write_source(&p, &syn, &dir).unwrap();
         println!("{}: {:.0} m lap, {} files", p.name, p.lap_length(), slug.len());
