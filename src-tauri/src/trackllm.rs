@@ -327,9 +327,7 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
     {
         let st = prog.stations(2.0);
         if !st.is_empty() {
-            // Enough for the start fan, not just the riding line: the opening straight
-            // widens out to hold a 48 m gate row, and it needs to be on the plot.
-            let margin = (prog.width.max(1.0) * 1.5).max(tracksynth::START_FAN_HALF_M + 8.0);
+            let margin = prog.width.max(1.0) * 1.5;
             let (mut lo_x, mut hi_x) = (f32::MAX, f32::MIN);
             let (mut lo_z, mut hi_z) = (f32::MAX, f32::MIN);
             for s in &st {
@@ -337,6 +335,25 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
                 hi_x = hi_x.max(s.x);
                 lo_z = lo_z.min(s.z);
                 hi_z = hi_z.max(s.z);
+            }
+            // The start straight stands off to the side of the lap and is 54 m wide across
+            // the gate row, so the ground has to hold it as well as the circuit — otherwise
+            // it is dropped for want of somewhere to put it.
+            if let Some(line) = prog.start_line() {
+                let walk = TrackProgram {
+                    start: line.start,
+                    segments: line.segments.clone(),
+                    features: Vec::new(),
+                    elevation: Vec::new(),
+                    ..prog.clone()
+                };
+                let reach = tracksynth::START_FAN_HALF_M + 12.0;
+                for q in walk.stations(4.0) {
+                    lo_x = lo_x.min(q.x - reach);
+                    hi_x = hi_x.max(q.x + reach);
+                    lo_z = lo_z.min(q.z - reach);
+                    hi_z = hi_z.max(q.z + reach);
+                }
             }
             let need_x = (hi_x - lo_x) + margin * 2.0;
             let need_z = (hi_z - lo_z) + margin * 2.0;
@@ -620,32 +637,46 @@ pub fn review(prog: &TrackProgram) -> Review {
              ±360°."
         ));
     }
-    // Where the race starts. Not structural — a lap with no straight on it builds and rides
-    // — but everything the `.rdf` puts at the start goes on the opening straight, and a gate
-    // row is forty gates in a line 48 m across. Round a bend it is forty gates in a hedge.
+    // Where the race starts. Not structural — a lap with no straight on it builds and rides —
+    // but a start is a spur beside the circuit: a gate row 40 m off it, a sprint, and a corner
+    // that merges in. Without a straight to run alongside there is nowhere to put one, and the
+    // track ships with its gates on the lap itself.
     let opening = prog.opening_straight();
-    if opening < crate::trackprog::START_STRAIGHT_M {
+    if prog.start_line().is_none() {
+        let need = crate::trackprog::START_STRAIGHT_M;
         let longest = prog
             .straight_runs()
             .into_iter()
-            .max_by(|a, b| a.2.total_cmp(&b.2));
-        let need = crate::trackprog::START_STRAIGHT_M;
-        notes.push(match longest {
-            Some((_, at, len)) if len >= need => format!(
-                "the lap opens with {opening:.0} m of straight and the start needs {need:.0} — \
-                 the gate row, the finish line and a run at turn one. There is a {len:.0} m \
-                 straight {at:.0} m round; start the lap from there."
-            ),
-            Some((_, _, len)) => format!(
-                "the lap's longest straight is {len:.0} m and a start needs {need:.0} — a gate \
-                 row is 48 m across and it has to stand in a line. Give the lap one straight \
-                 that long and begin it there."
-            ),
-            None => format!(
-                "the lap is all corners, and a start needs {need:.0} m of straight to put the \
-                 gate row, the finish line and the run at turn one on."
-            ),
-        });
+            .map(|r| r.2)
+            .fold(0.0f32, f32::max);
+        notes.push(format!(
+            "there is nowhere to put a start: the lap opens with {opening:.0} m of straight and \
+             its longest is {longest:.0} m, where a start straight needs about {need:.0} m to \
+             run beside. Give the lap one straight that long and begin the lap on it."
+        ));
+    } else if let Some(line) = prog.start_line() {
+        // It fits the lap; does it fit the ground? The synthesiser drops a start straight that
+        // hangs off the plot, and a track with no gates is worth saying out loud.
+        let reach = tracksynth::START_FAN_HALF_M + 12.0;
+        let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
+        let walk = TrackProgram {
+            start: line.start,
+            segments: line.segments.clone(),
+            features: Vec::new(),
+            elevation: Vec::new(),
+            ..prog.clone()
+        };
+        if walk.stations(4.0).iter().any(|q| {
+            q.x < reach || q.z < reach || q.x > sx - reach || q.z > sz - reach
+        }) {
+            notes.push(format!(
+                "the start straight runs off the ground: it stands {:.0} m to the side of the \
+                 lap and is {:.0} m wide across the gate row, and the plot is {sx:.0} x {sz:.0} \
+                 m. Give the track more ground, or move the lap away from that edge.",
+                crate::trackprog::START_OFFSET_M,
+                tracksynth::START_FAN_HALF_M * 2.0,
+            ));
+        }
     }
     if let Some((a, b, gap)) = self_crossing(prog) {
         // Named in the model's own terms. It wrote a list of segments, not a distance round

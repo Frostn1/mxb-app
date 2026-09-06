@@ -27,25 +27,47 @@ const STEP: f32 = 1.0;
 
 /// How hard a bike can hold a corner, m/s².
 ///
-/// About 0.87 g. A motocross bike in a rut carries more lateral load than the same bike on
-/// hardpack and much less than anything on tarmac; this is the middle of it and it is the one
-/// number here that decides corner speed outright.
-const A_LAT: f32 = 8.5;
-
-/// Drive and brakes, m/s².
+/// Not a grip figure. A motocross corner is not limited by how much lateral load the tyres
+/// will take — it is limited by how fast a rider can change direction in a rut, get the bike
+/// turned and be pointing at the exit, and that is a lot slower than the tyres allow. At 8.5
+/// this put a ten-metre hairpin at 33 km/h and the whole lap averaged 66; a national lap
+/// averages nearer 55, and its hairpins are taken in first gear.
 ///
-/// Asymmetric, and the asymmetry is most of what shapes the profile: a 450 pulls hard but is
-/// traction-limited on dirt, while the brakes are limited by the same grip that holds a
-/// corner. That is why the chop on the way out of a turn is longer and lower than the
-/// washboard on the way in.
-const A_DRIVE: f32 = 4.5;
-const A_BRAKE: f32 = 7.0;
+/// 4.6 puts a 10 m hairpin at 24 km/h, a 20 m turn at 35 and a 40 m sweeper at 49.
+const A_LAT: f32 = 4.6;
 
-/// The fastest anything goes on a national, m/s — about 100 km/h.
-const V_MAX: f32 = 28.0;
+/// The most a 450 can put down, m/s², before power runs out of it.
+///
+/// Traction and wheelie, not engine. It only applies at the bottom of the rev range and out
+/// of a corner, which is exactly where a rider is not using all of it anyway.
+const A_TRACTION: f32 = 4.0;
+
+/// Specific power, watts per kilogram of bike and rider, as it reaches the ground.
+///
+/// This is the correction that mattered, and its absence is what made every jump too big.
+/// Acceleration was a flat `A_DRIVE` all the way to the top, so a bike left a hairpin at
+/// 33 km/h and was doing 100 sixty metres later — and the gate then sized a gap for 100 km/h
+/// that a rider arrives at doing seventy. Reported from the seat as "we barely made it on a
+/// 450", against a model that said the jump carried nearly twice what it needed.
+///
+/// A 450 makes about 40 kW at the crank. Nothing like all of it reaches the ground on dirt:
+/// what is left after wheelspin, the rider's own limits and a surface that moves is a small
+/// fraction, and 30 W/kg is what puts a lap where a lap actually is. It gives 3.0 m/s² at
+/// 10 m/s, 1.5 at 20 and 1.2 at 25 — a bike that pulls hard out of a turn and then stops
+/// gaining.
+const P_SPEC: f32 = 30.0;
+
+/// Brakes, m/s². Limited by the same ground that limits everything else.
+const A_BRAKE: f32 = 6.0;
+
+/// The fastest anything goes on a national, m/s — about 79 km/h.
+///
+/// Measured off lap times rather than picked: a 2 km national lap runs about two minutes,
+/// which is a 60 km/h average, and a lap whose *average* is 60 does not have a 100 km/h top.
+const V_MAX: f32 = 22.0;
 
 /// The slowest a corner is ever taken, m/s. A first-gear pivot turn is still moving.
-const V_MIN: f32 = 3.5;
+const V_MIN: f32 = 3.0;
 
 /// Gravity, m/s².
 const G: f32 = 9.81;
@@ -105,7 +127,7 @@ impl Speed {
 
     /// And how hard they are driving.
     pub fn driving(&self, s: f32) -> f32 {
-        (self.along(s) / A_DRIVE).clamp(0.0, 1.0)
+        (self.along(s) / A_TRACTION).clamp(0.0, 1.0)
     }
 
     /// How far a bike thrown off a lip of this height reaches before it is back to the height
@@ -120,6 +142,11 @@ impl Speed {
         let theta = (face_deg * LAUNCH_SHARE).to_radians();
         v * v * (2.0 * theta).sin() / G
     }
+}
+
+/// What the bike has left at this speed, m/s².
+fn drive(v: f32) -> f32 {
+    A_TRACTION.min(P_SPEC / v.max(2.0))
 }
 
 /// Walk the lap and work out what speed it allows.
@@ -172,10 +199,13 @@ pub fn of(prog: &TrackProgram) -> Speed {
     // Then the two sweeps. Twice round each, so the first lap only primes the carry and the
     // second is the answer — a lap has no start, and a profile that begins at rest at the
     // finish line is a profile with a corner in it that is not there.
+    // Under power, and the power is what runs out. Acceleration is whichever is smaller —
+    // what the ground will take, or what is left of the engine at this speed — so a straight
+    // gives less and less the further down it you are, which is the shape a real one has.
     for _ in 0..2 {
         for i in 0..n {
             let j = (i + 1) % n;
-            let a = (A_DRIVE + grade[i]).max(0.5);
+            let a = (drive(v[i]) + grade[i]).max(0.3);
             let reach = (v[i] * v[i] + 2.0 * a * STEP).max(0.0).sqrt();
             if reach < v[j] {
                 v[j] = reach;
@@ -224,8 +254,10 @@ mod tests {
         let apex = s.at(300.0 + std::f32::consts::PI * 10.0 * 0.5);
         let straight = s.at(250.0);
         assert!(apex < straight * 0.5, "apex {apex:.1} m/s against {straight:.1} on the straight");
-        // And a ten-metre corner is held by grip alone: sqrt(8.5 * 10) is 9.2 m/s.
-        assert!((apex - 9.2).abs() < 0.6, "a 10 m corner should be about 9.2 m/s, not {apex:.1}");
+        // A ten-metre hairpin comes to sqrt(A_LAT * 10) — 6.8 m/s, which is 24 km/h and first
+        // gear. It read 9.2 while `A_LAT` was a grip figure, and a lap built on that put its
+        // jumps where a rider arriving thirty per cent slower could not reach them.
+        assert!((apex - 6.8).abs() < 0.6, "a 10 m corner should be about 6.8 m/s, not {apex:.1}");
     }
 
     #[test]
@@ -282,5 +314,47 @@ mod tests {
         // is 625 * sin(48°) / 9.81 — a little over forty-seven metres.
         let flat = Speed { v: vec![25.0; 8], lap: 8.0 };
         assert!((flat.carry(0.0, 30.0) - 47.3).abs() < 1.0, "{:.1}", flat.carry(0.0, 30.0));
+    }
+
+    #[test]
+    #[ignore]
+    fn diag_speed() {
+        let path = std::env::var("FROST_PROGRAM").expect("set FROST_PROGRAM");
+        let p: TrackProgram =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let s = of(&p);
+        let n = s.v.len() as f32;
+        let mean: f32 = s.v.iter().sum::<f32>() / n;
+        let mut sorted = s.v.clone();
+        sorted.sort_by(f32::total_cmp);
+        // A lap's time is the sum of dt = ds/v, which is what a lap time actually is.
+        let secs: f32 = s.v.iter().map(|v| STEP / v.max(0.5)).sum();
+        println!(
+            "mean {:.1} km/h   min {:.1}   p10 {:.1}   median {:.1}   p90 {:.1}   max {:.1}",
+            mean * 3.6,
+            sorted[0] * 3.6,
+            sorted[sorted.len() / 10] * 3.6,
+            sorted[sorted.len() / 2] * 3.6,
+            sorted[sorted.len() * 9 / 10] * 3.6,
+            sorted[sorted.len() - 1] * 3.6,
+        );
+        println!(
+            "lap {:.0} m in {:.0}:{:04.1} — average {:.1} km/h",
+            s.lap, (secs / 60.0).floor(), secs % 60.0, s.lap / secs * 3.6
+        );
+        for f in &p.features {
+            if let crate::trackprog::Feature::Double { at, height, gap, lip } = f {
+                let fa = crate::trackprog::double_faces(*height, *lip);
+                let crest = at + fa.ramp;
+                let deg = crate::trackprog::face_sweep(*height, fa.ramp).to_degrees();
+                println!(
+                    "  double at {at:.0}: {height:.1} m, gap {gap:.0} m — lip at {:.0} km/h, \
+                     model says it carries {:.0} m and needs {:.0}",
+                    s.at(crest) * 3.6,
+                    s.carry(crest, deg),
+                    fa.back + gap + fa.face * 0.25
+                );
+            }
+        }
     }
 }

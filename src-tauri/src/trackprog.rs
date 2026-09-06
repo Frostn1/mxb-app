@@ -423,13 +423,49 @@ pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
     (up, top, down)
 }
 
-/// The shortest straight a start will fit on, metres.
+/// The shortest straight a start will fit beside, metres.
 ///
-/// A motocross start is a gate row, the finish line a dozen metres past it, and a run at the
-/// first turn — all of it in a line, because forty gates cannot be laid round a bend.
-/// Published start straights are longer than this; it is the floor below which the layout
-/// stops fitting on the track.
+/// A motocross start is a gate row and a sprint at the first turn, all of it in a line,
+/// because forty gates cannot be laid round a bend. The lap needs a straight this long for
+/// the start to run alongside.
 pub const START_STRAIGHT_M: f32 = 60.0;
+
+/// How far off the lap the gate row stands, metres.
+///
+/// Measured off six published tracks, whose start lines are carried in their own height
+/// files: Indiana 37.9, SandPoint 36.4, Briarcliff 41.0, I40 47.2, SFDR 48.9, Smokey Pines
+/// 34.0. The start is *not* part of the lap on any of them — it is a spur that runs beside it
+/// and merges in, so a rider on a flying lap never crosses the gates.
+pub const START_OFFSET_M: f32 = 40.0;
+
+/// How long the gate straight is before it starts turning in, metres. Published: 79–91.
+pub const START_SPRINT_M: f32 = 85.0;
+
+/// The tightest the merge back onto the lap may turn, metres. Published start lines join
+/// through 10–46 m radii; this is the floor.
+pub const START_MERGE_RADIUS_M: f32 = 18.0;
+
+/// The start straight: where the gate row stands, and the line from it into the lap.
+///
+/// Its own line, not a stretch of the lap. `tracked -merge` takes it as `sa` beside the
+/// racing line's `cl`, and every published track carries one: a straight off to the side of
+/// the circuit, then a corner or two that feeds into it, 67–208 m all told.
+#[derive(Clone, Debug)]
+pub struct StartLine {
+    /// The gate row's pose: the line begins where the gates stand.
+    pub start: Start,
+    pub segments: Vec<Segment>,
+    /// Metres round the lap where it merges in.
+    pub joins_at: f32,
+    /// Which side of the lap it stands on: +1 is the rider's right.
+    pub side: f32,
+}
+
+impl StartLine {
+    pub fn length(&self) -> f32 {
+        self.segments.iter().map(|s| s.length()).sum()
+    }
+}
 
 /// Under this many degrees an arc is a drift, not a corner — a builder nudging a straight
 /// back onto line.
@@ -650,7 +686,8 @@ impl Feature {
 /// not star-shaped: Indiana folds back across its own infield four times. A loop grown on a
 /// lattice folds as often as it likes and is still simple, so it cannot cross either.
 ///
-/// It begins on its longest straight, all 145 m of it, because that is where a start goes: the gate row, the finish
+/// It begins on its longest straight, all 145 m of it, with the start straight running
+/// beside it — 176 m from the gate row to where it merges back on: the gate row, the finish
 /// line and the run at turn one all sit on the lap's opening straight, and a lap that opens on
 /// a corner puts forty gates round a bend. Turned round to start there rather than redrawn —
 /// see [`TrackProgram::rotate_start`], and the printer beside its tests.
@@ -666,12 +703,12 @@ pub const EXAMPLE: &str = r#"{
       "name": "Corpus National",
       "author": "MXB App",
       "location": "Generated",
-      "width": 12.0,
+      "width": 12,
       "terrain": {
-        "sizeX": 500.0, "sizeZ": 500.0, "samples": 2049, "scale": 63.0,
-        "relief": { "amplitude": 7.0, "wavelength": 420.0, "seed": 3, "tilt": 26.0, "tiltAngle": 35.0, "landforms": 6, "landformHeight": 18.0 }
+        "sizeX": 500, "sizeZ": 500, "samples": 2049, "scale": 63,
+        "relief": { "amplitude": 7, "wavelength": 420, "seed": 3, "texture": 0.085, "tilt": 26, "tiltAngle": 35, "landforms": 6, "landformHeight": 18 }
       },
-      "start": { "x": 336.20, "z": 61.04, "angle": 272.27 },
+      "start": { "x": 337.80, "z": 97.64, "angle": 272.27 },
       "segments": [
         { "kind": "straight", "length": 145.1504 },
         { "kind": "arc", "radius": 63.4878, "angle": 8.1222 },
@@ -812,45 +849,45 @@ pub const EXAMPLE: &str = r#"{
         { "kind": "arc", "radius": -118.9746, "angle": 0.4816 }
       ],
       "features": [
-        { "kind": "roller", "at": 31.299774, "length": 11.3, "height": 0.8 },
-        { "kind": "tabletop", "at": 64.49979, "length": 22.6, "height": 1.5 },
-        { "kind": "stepUp", "at": 97.799774, "length": 20.9, "height": 2.0 },
-        { "kind": "roller", "at": 130.99979, "length": 14.4, "height": 0.75 },
-        { "kind": "berm", "at": 265.4998, "length": 8.0, "height": 1.7 },
-        { "kind": "double", "at": 295.6998, "height": 1.5, "gap": 8.8, "lip": 5.5 },
+        { "kind": "roller", "at": 31.2998, "length": 11.3, "height": 0.8 },
+        { "kind": "tabletop", "at": 64.4998, "length": 22.6, "height": 1.5 },
+        { "kind": "stepUp", "at": 97.7998, "length": 20.9, "height": 2 },
+        { "kind": "roller", "at": 130.9998, "length": 14.4, "height": 0.75 },
+        { "kind": "berm", "at": 265.4998, "length": 8, "height": 1.7 },
+        { "kind": "double", "at": 295.6998, "height": 1.5, "gap": 7.0, "lip": 5.5 },
         { "kind": "roller", "at": 408.6998, "length": 11.1, "height": 0.79 },
-        { "kind": "tabletop", "at": 481.59982, "length": 29.5, "height": 3.4 },
+        { "kind": "tabletop", "at": 481.5998, "length": 29.5, "height": 3.4 },
         { "kind": "roller", "at": 501.8998, "length": 11.6, "height": 0.8 },
         { "kind": "double", "at": 522.1998, "height": 1.9, "gap": 9.2, "lip": 5.5 },
-        { "kind": "double", "at": 583.1998, "height": 3.6, "gap": 14.6, "lip": 6.0 },
+        { "kind": "double", "at": 583.1998, "height": 3.6, "gap": 7.0, "lip": 6 },
         { "kind": "stepUp", "at": 600.7998, "length": 19.3, "height": 2.2 },
         { "kind": "roller", "at": 618.3998, "length": 13.5, "height": 0.46 },
-        { "kind": "whoops", "at": 680.49976, "count": 7, "spacing": 4.2, "height": 0.57 },
-        { "kind": "double", "at": 698.99976, "height": 1.2, "gap": 12.7, "lip": 5.5 },
+        { "kind": "whoops", "at": 680.4998, "count": 7, "spacing": 4.2, "height": 0.57 },
+        { "kind": "double", "at": 698.9998, "height": 1.2, "gap": 8.0, "lip": 5.5 },
         { "kind": "tabletop", "at": 748.3998, "length": 20.3, "height": 1.2 },
-        { "kind": "tabletop", "at": 841.8998, "length": 16.9, "height": 1.0 },
+        { "kind": "tabletop", "at": 841.8998, "length": 16.9, "height": 1 },
         { "kind": "double", "at": 859.2998, "height": 1.6, "gap": 8.2, "lip": 5.5 },
         { "kind": "stepUp", "at": 925.6998, "length": 25.2, "height": 1.9 },
-        { "kind": "roller", "at": 990.59973, "length": 14.8, "height": 0.6 },
+        { "kind": "roller", "at": 990.5997, "length": 14.8, "height": 0.6 },
         { "kind": "tabletop", "at": 1064.8998, "length": 24.4, "height": 2.5 },
         { "kind": "roller", "at": 1090.7998, "length": 14.4, "height": 0.82 },
         { "kind": "roller", "at": 1116.6998, "length": 13.2, "height": 0.58 },
         { "kind": "tabletop", "at": 1183.1998, "length": 24.1, "height": 1.1 },
-        { "kind": "double", "at": 1253.8998, "height": 3.6, "gap": 16.4, "lip": 6.0 },
+        { "kind": "double", "at": 1253.8998, "height": 3.6, "gap": 13.0, "lip": 6 },
         { "kind": "roller", "at": 1297.0997, "length": 14.6, "height": 0.64 },
         { "kind": "tabletop", "at": 1340.2998, "length": 17.3, "height": 1.2 },
         { "kind": "tabletop", "at": 1383.4998, "length": 18.2, "height": 1.4 },
         { "kind": "roller", "at": 1426.6998, "length": 11.5, "height": 0.77 },
-        { "kind": "whoops", "at": 1524.4998, "count": 7, "spacing": 5.0, "height": 0.75 },
+        { "kind": "whoops", "at": 1524.4998, "count": 7, "spacing": 5, "height": 0.75 },
         { "kind": "tabletop", "at": 1566.4998, "length": 22.5, "height": 1.6 },
         { "kind": "tabletop", "at": 1634.8657, "length": 28.7, "height": 2.5 },
         { "kind": "double", "at": 1657.4657, "height": 1.7, "gap": 10.2, "lip": 5.5 },
         { "kind": "double", "at": 1680.0657, "height": 1.3, "gap": 8.9, "lip": 5.5 },
         { "kind": "roller", "at": 1702.7656, "length": 15.9, "height": 0.54 },
         { "kind": "roller", "at": 1766.7656, "length": 14.3, "height": 0.79 },
-        { "kind": "tabletop", "at": 1782.0657, "length": 19.0, "height": 1.1 },
+        { "kind": "tabletop", "at": 1782.0657, "length": 19, "height": 1.1 },
         { "kind": "tabletop", "at": 1833.9657, "length": 18.4, "height": 1.1 },
-        { "kind": "berm", "at": 1857.3657, "length": 15.0, "height": 1.7 },
+        { "kind": "berm", "at": 1857.3657, "length": 15, "height": 1.7 },
         { "kind": "tabletop", "at": 1873.8658, "length": 31.3, "height": 3.1 }
       ]
     }"#;
@@ -867,6 +904,65 @@ fn wrap(a: f32) -> f32 {
         x += tau;
     }
     x
+}
+
+/// Segments that ride from one pose to another: a turn, a straight and a turn.
+///
+/// The shorter of the two same-direction Dubins paths. Both are tried and the shorter kept,
+/// which is enough for the two things that need it — a lap that has drifted open under an
+/// edit, and the start straight coming back onto the lap — because in both the two poses are
+/// much further apart than the turning circles. The mixed-direction paths only matter when
+/// they are not.
+///
+/// `None` when the poses are already the same one.
+pub fn join(from: Start, to: Start, radius: f32) -> Option<Vec<Segment>> {
+    let r = radius.abs().max(1.0);
+    let (fx, fz, fh) = (from.x, from.z, from.angle.to_radians());
+    let goal = (to.x, to.z, to.angle.to_radians());
+
+    let gap = ((fx - goal.0).powi(2) + (fz - goal.1).powi(2)).sqrt();
+    if gap < 0.5 && wrap(goal.2 - fh).abs() < 0.02 {
+        return None;
+    }
+
+    // `turn` is +1 for a pair of right-hand circles, -1 for left.
+    let solve = |turn: f32| -> Option<(f32, f32, f32)> {
+        let centre = |x: f32, z: f32, th: f32| {
+            let (rx, rz) = right_vector(th);
+            (x + rx * r * turn, z + rz * r * turn)
+        };
+        let c1 = centre(fx, fz, fh);
+        let c2 = centre(goal.0, goal.1, goal.2);
+        let (dx, dz) = (c2.0 - c1.0, c2.1 - c1.1);
+        let run = (dx * dx + dz * dz).sqrt();
+        if run < 1e-3 {
+            return None;
+        }
+        // The straight's heading, in the same convention the walk uses.
+        let th_s = dx.atan2(dz);
+        let sweep = |from: f32, to: f32| {
+            let d = wrap(to - from) * turn;
+            if d < 0.0 { d + std::f32::consts::TAU } else { d }
+        };
+        Some((sweep(fh, th_s), run, sweep(th_s, goal.2)))
+    };
+
+    let mut best: Option<(f32, Vec<Segment>)> = None;
+    for turn in [1.0f32, -1.0] {
+        let Some((a1, run, a2)) = solve(turn) else {
+            continue;
+        };
+        let cost = (a1 + a2) * r + run;
+        let segs = vec![
+            Segment::Arc { radius: r * turn, angle: a1.to_degrees(), rise: 0.0 },
+            Segment::Straight { length: run, rise: 0.0 },
+            Segment::Arc { radius: r * turn, angle: a2.to_degrees(), rise: 0.0 },
+        ];
+        if best.as_ref().map(|b| cost < b.0).unwrap_or(true) {
+            best = Some((cost, segs));
+        }
+    }
+    best.map(|(_, segs)| segs)
 }
 
 /// Where a run of segments leaves you, ridden from `from`.
@@ -971,6 +1067,88 @@ impl TrackProgram {
         let end = end_pose(self.start, &self.segments);
         let gap = ((end.x - self.start.x).powi(2) + (end.z - self.start.z).powi(2)).sqrt();
         gap < 1.0 && wrap((end.angle - self.start.angle).to_radians()).abs() < 0.02
+    }
+
+    /// Where the race starts: a straight off to the side of the opening straight, and the
+    /// turn that brings it back onto the lap.
+    ///
+    /// Built rather than stated, because it is not a design decision — it is where the lap
+    /// already is. The gate row stands [`START_OFFSET_M`] off the opening straight on
+    /// whichever side has the room, runs [`START_SPRINT_M`] alongside it, and then joins the
+    /// lap wherever the join is shortest, which is turn one.
+    ///
+    /// `None` when the lap has no straight to run beside — the gates would have nothing to
+    /// line up against, and [`crate::trackllm::review`] says so.
+    pub fn start_line(&self) -> Option<StartLine> {
+        let run = self.opening_straight();
+        if run < START_SPRINT_M * 0.5 || self.segments.is_empty() {
+            return None;
+        }
+        let st = self.stations(4.0);
+        if st.len() < 8 {
+            return None;
+        }
+        // The side with the room. The lap folds back on itself, so one side of the opening
+        // straight is usually its own next pass and the other is the field.
+        let (fx, fz) = heading_vector(self.start.angle.to_radians());
+        let (rx, rz) = right_vector(self.start.angle.to_radians());
+        let room = |side: f32| -> f32 {
+            let mut worst = f32::MAX;
+            for a in st.iter().filter(|q| q.s <= run) {
+                for b in &st {
+                    if (b.s - a.s).abs().min(self.lap_length() - (b.s - a.s).abs()) < 40.0 {
+                        continue;
+                    }
+                    let (dx, dz) = (b.x - a.x, b.z - a.z);
+                    if (dx * fx + dz * fz).abs() > 20.0 {
+                        continue;
+                    }
+                    let lat = dx * rx + dz * rz;
+                    if lat * side > 0.0 {
+                        worst = worst.min(lat.abs());
+                    }
+                }
+            }
+            worst
+        };
+        let side = if room(1.0) >= room(-1.0) { 1.0 } else { -1.0 };
+
+        // The gate row: beside the lap's own start, far enough out that the lap never runs
+        // through it.
+        let start = Start {
+            x: self.start.x + rx * side * START_OFFSET_M,
+            z: self.start.z + rz * side * START_OFFSET_M,
+            angle: self.start.angle,
+        };
+        // Down the sprint, and then back onto the lap. Every candidate join is tried and the
+        // shortest kept — which lands on turn one, because that is what is nearest.
+        let after = end_pose(start, &[Segment::Straight { length: START_SPRINT_M, rise: 0.0 }]);
+        let mut best: Option<(f32, Vec<Segment>, f32)> = None;
+        for q in st.iter().filter(|q| q.s >= run * 0.5 && q.s <= run + 400.0) {
+            let onto = Start { x: q.x, z: q.z, angle: q.heading.to_degrees() };
+            let Some(merge) = join(after, onto, START_MERGE_RADIUS_M) else {
+                continue;
+            };
+            let turned: f32 = merge
+                .iter()
+                .map(|s| match s {
+                    Segment::Arc { angle, .. } => angle.abs(),
+                    _ => 0.0,
+                })
+                .sum();
+            // A join that has to swing right round is not a merge, it is a detour.
+            if turned > 200.0 {
+                continue;
+            }
+            let cost: f32 = merge.iter().map(|s| s.length()).sum::<f32>() + turned * 0.35;
+            if best.as_ref().map(|b| cost < b.0).unwrap_or(true) {
+                best = Some((cost, merge, q.s));
+            }
+        }
+        let (_, merge, joins_at) = best?;
+        let mut segments = vec![Segment::Straight { length: START_SPRINT_M, rise: 0.0 }];
+        segments.extend(merge.into_iter().filter(|s| s.length() > 0.5));
+        Some(StartLine { start, segments, joins_at, side })
     }
 
     /// Begin the lap at segment `index`: the same track, ridden from a different point on it.
@@ -1166,55 +1344,9 @@ impl TrackProgram {
     /// Closing the *pose* is what closes the lap. Position alone leaves a kink at the line;
     /// heading alone leaves it parallel and somewhere else.
     pub fn closing_segments(&self, radius: f32) -> Option<Vec<Segment>> {
-        let st = self.stations(1.0);
-        let last = *st.last()?;
-        let r = radius.abs().max(1.0);
-        let goal = (self.start.x, self.start.z, self.start.angle.to_radians());
-
-        let gap = ((last.x - goal.0).powi(2) + (last.z - goal.1).powi(2)).sqrt();
-        let turned = wrap(goal.2 - last.heading).abs();
-        if gap < 0.5 && turned < 0.02 {
-            return None;
-        }
-
-        // `turn` is +1 for a pair of right-hand circles, -1 for left.
-        let solve = |turn: f32| -> Option<(f32, f32, f32)> {
-            let centre = |x: f32, z: f32, th: f32| {
-                let (rx, rz) = right_vector(th);
-                (x + rx * r * turn, z + rz * r * turn)
-            };
-            let c1 = centre(last.x, last.z, last.heading);
-            let c2 = centre(goal.0, goal.1, goal.2);
-            let (dx, dz) = (c2.0 - c1.0, c2.1 - c1.1);
-            let run = (dx * dx + dz * dz).sqrt();
-            if run < 1e-3 {
-                return None;
-            }
-            // The straight's heading, in the same convention the walk uses.
-            let th_s = dx.atan2(dz);
-            let sweep = |from: f32, to: f32| {
-                let d = wrap(to - from) * turn;
-                if d < 0.0 { d + std::f32::consts::TAU } else { d }
-            };
-            Some((sweep(last.heading, th_s), run, sweep(th_s, goal.2)))
-        };
-
-        let mut best: Option<(f32, f32, Vec<Segment>)> = None;
-        for turn in [1.0f32, -1.0] {
-            let Some((a1, run, a2)) = solve(turn) else {
-                continue;
-            };
-            let cost = (a1 + a2) * r + run;
-            let segs = vec![
-                Segment::Arc { radius: r * turn, angle: a1.to_degrees(), rise: 0.0 },
-                Segment::Straight { length: run, rise: 0.0 },
-                Segment::Arc { radius: r * turn, angle: a2.to_degrees(), rise: 0.0 },
-            ];
-            if best.as_ref().map(|b| cost < b.0).unwrap_or(true) {
-                best = Some((cost, run, segs));
-            }
-        }
-        best.map(|(_, _, segs)| segs)
+        let last = *self.stations(1.0).last()?;
+        let from = Start { x: last.x, z: last.z, angle: last.heading.to_degrees() };
+        join(from, self.start, radius)
     }
 
     /// How far the finish is from the start. A lap that doesn't close is a dead end, and the
@@ -1345,54 +1477,28 @@ mod tests {
         p.check().expect("nothing hangs off the end of the lap");
     }
 
-    /// Prints [`EXAMPLE`] turned round to begin on a straight, in the layout the constant is
-    /// written in. Run when the example changes:
+    /// Prints [`EXAMPLE`] as the repair pass leaves it — begun on a straight, on ground big
+    /// enough to hold the start beside it. Run when the example changes:
     ///
     /// ```text
     /// cargo test -- --ignored --nocapture print_the_example
     /// ```
     #[test]
     #[ignore = "prints a program"]
-    fn print_the_example_started_on_its_straight() {
+    fn print_the_example() {
         let mut p: TrackProgram = serde_json::from_str(EXAMPLE).unwrap();
-        let features = p.features.clone();
-        let clear_from = |at: f32| {
-            !features.iter().any(|f| {
-                f.at() + f.length() > at + 0.01 && f.at() < at + START_STRAIGHT_M - 0.01
-            })
-        };
-        let runs = p.straight_runs();
-        let longest = |it: &mut dyn Iterator<Item = &(usize, f32, f32)>| {
-            it.max_by(|a, b| a.2.total_cmp(&b.2)).copied()
-        };
-        let (index, _, len) = longest(
-            &mut runs.iter().filter(|(_, at, len)| *len >= START_STRAIGHT_M && clear_from(*at)),
-        )
-        .or_else(|| longest(&mut runs.iter()))
-        .expect("a straight to start on");
-        p.rotate_start(index);
-        println!("// {len:.0} m opening straight, closes to {:.2} m", p.closure_error());
+        let done = crate::trackllm::repair_for_tests(&mut p);
+        for line in &done {
+            println!("// {line}");
+        }
+        let line = p.start_line();
         println!(
-            "      \"start\": {{ \"x\": {:.2}, \"z\": {:.2}, \"angle\": {:.2} }},",
-            p.start.x, p.start.z, p.start.angle
+            "// opens on {:.0} m of straight, closes to {:.2} m, start straight {:.0} m",
+            p.opening_straight(),
+            p.closure_error(),
+            line.map(|l| l.length()).unwrap_or(0.0),
         );
-        println!("      \"segments\": [");
-        for seg in &p.segments {
-            match seg {
-                Segment::Straight { length, .. } => {
-                    println!("        {{ \"kind\": \"straight\", \"length\": {length:.4} }},")
-                }
-                Segment::Arc { radius, angle, .. } => println!(
-                    "        {{ \"kind\": \"arc\", \"radius\": {radius:.4}, \"angle\": {angle:.4} }},"
-                ),
-            }
-        }
-        println!("      ],");
-        println!("      \"features\": [");
-        for f in &p.features {
-            println!("        {},", serde_json::to_string(f).unwrap());
-        }
-        println!("      ]");
+        println!("{}", serde_json::to_string(&p).unwrap());
     }
 
     #[test]
