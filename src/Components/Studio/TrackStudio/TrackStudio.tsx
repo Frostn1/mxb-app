@@ -1284,7 +1284,9 @@ function Num({
     <input
       type="number"
       step={step}
-      value={draft ?? value}
+      // Rounded while it sits there, full precision the moment you type in it. The model
+      // keeps whatever it had — blurring without editing commits nothing.
+      value={draft ?? Number(value.toFixed(2))}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
         const n = Number(draft);
@@ -1292,7 +1294,11 @@ function Num({
         setDraft(null);
       }}
       className={cn(
-        "w-[58px] rounded-md border border-input bg-transparent px-1.5 py-0.5 tabular-nums",
+        // 58px minus the native spinner left about thirty for the digits, so every radius
+        // and length in the program was clipped mid-number. The spinner goes; a track
+        // program is typed, not nudged one step at a time.
+        "w-[76px] border border-input bg-transparent px-1.5 py-0.5 tabular-nums",
+        "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
       )}
     />
