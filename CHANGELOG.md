@@ -2,6 +2,12 @@
 
 ## 2026-09-05
 
+### Fixed
+- Tracks you build match their own map. The ground was being handed to the compiler upside
+  down, so the jumps and ruts sat mirrored against the paint, the mini-map and the racing
+  line — at the start gate the ground was 4 m out and further round the lap 15 m. It now
+  lines up exactly.
+
 ### Changed
 - Building a track now runs MX Bikes' own track compilers over it. The Track Studio
   fetches PiBoSo's tools the first time you build and does the whole job in one press —
