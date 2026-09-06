@@ -459,6 +459,7 @@ export const en = {
   "browseSort.popularWeek": "Popular this week",
   "browse.loadFailed": "Couldn't load mods",
   "browse.empty": "No {{type}} found.",
+  "browse.featured": "Featured",
   "browse.loadMore": "Load more",
   "browse.selectedCount": "{{count}} selected",
   "browse.quickInstallCount": "Quick install {{count}}",

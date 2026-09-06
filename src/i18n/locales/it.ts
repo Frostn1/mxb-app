@@ -463,6 +463,7 @@ export const it: Translation = {
   "browseSort.popularWeek": "Popolari questa settimana",
   "browse.loadFailed": "Impossibile caricare le mod",
   "browse.empty": "Nessun risultato per {{type}}.",
+  "browse.featured": "In evidenza",
   "browse.loadMore": "Carica altre",
   "browse.selectedCount": "{{count}} selezionate",
   "browse.quickInstallCount": "Installa rapidamente {{count}}",

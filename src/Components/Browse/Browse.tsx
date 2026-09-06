@@ -9,6 +9,7 @@ import type { ModSummary } from "../../types";
 import { useInstall } from "../../Context/Install";
 import { useT } from "../../i18n/context";
 import ModCard from "./ModCard";
+import FeaturedMod from "./FeaturedMod";
 import { Button } from "@/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "@/Components/ui/help-hint";
@@ -194,6 +195,13 @@ export default function Browse({
 
   const isBike = modType.id === "bikes";
 
+  // "Newest, with a picture" is the only claim the catalog actually supports, so the
+  // banner appears on the default sort with nothing filtered and stands down otherwise.
+  const featured =
+    !query.trim() && categoryId === null && activeSort === sortOptions[0]?.value
+      ? mods.find((m) => m.image)
+      : undefined;
+
   return (
     <div className="flex h-full flex-col">
       {/* The type tabs and the search/sort controls live in the shell's context bar. The
@@ -289,8 +297,17 @@ export default function Browse({
           </p>
         ) : (
           <>
+            {featured && (
+              <FeaturedMod
+                mod={featured}
+                rating={ratings.get(featured.id)}
+                installed={isInstalled(featured)}
+                onOpen={() => onOpenMod(featured.slug, categoryId ?? modType.categoryId)}
+                onInstall={() => quickInstall(featured)}
+              />
+            )}
             <div className="grid grid-cols-[repeat(auto-fill,minmax(178px,1fr))] gap-3.5">
-              {mods.map((m) => (
+              {mods.filter((m) => m !== featured).map((m) => (
                 <ModCard
                   key={m.id}
                   mod={m}

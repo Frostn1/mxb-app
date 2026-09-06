@@ -466,6 +466,7 @@ export const ptBR: Translation = {
   "browseSort.popularWeek": "Populares esta semana",
   "browse.loadFailed": "Não foi possível carregar os mods",
   "browse.empty": "Nenhum resultado em {{type}}.",
+  "browse.featured": "Destaque",
   "browse.loadMore": "Carregar mais",
   "browse.selectedCount": "{{count}} selecionados",
   "browse.quickInstallCount": "Instalar {{count}} rapidamente",
