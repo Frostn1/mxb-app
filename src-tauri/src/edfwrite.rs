@@ -18,14 +18,33 @@
 //!   f32[vc*3] normal   | f32[vc*4] tangent and its handedness            72 B a vertex
 //! u32                     triangle count
 //!   u32[tc*3]             a plain triangle list
-//! u32                     submesh count
+//! u32                     submesh count, which is 1 whatever the group count is
 //! char[104]               the node's name
 //! f32[16]                 the node's placement matrix, row-major
-//! …                       zeros, then one 24 B group record per submesh and its own bounds
+//! 72 B                    zeros
+//! u32 group count, u32 0
+//!   per group, 24 B:      material | tri start | tri count | vert start | vert count | end
+//! u32 0, f32[6]           the node's own bounds
 //! u32                     texture count
 //!   per texture:          char[104] name | u32 w | u32 h | 16 B | 0 | u32 size | 8 B zeros
 //!                         | raw-DEFLATE RGBA, `size - 8` bytes
 //! ```
+//!
+//! **A model of several materials is one node of several groups, not several nodes.**
+//! `finish_gate.edf` settles it: four materials, four groups, one node called
+//! `finishgate_proxy`, and its groups' triangle counts sum to the node's exactly. Written as
+//! several nodes instead, TerrainEd faults on a null write and produces nothing — which is
+//! how this was found, because a one-part model happens to be byte-identical either way.
+//!
+//! **One sheet per model.** TerrainEd accepts everything here with a single material —
+//! boxes, cut-out cards, two groups sharing one sheet, two hundred copies in one node — and
+//! faults on the *second material*, however the geometry is arranged. See
+//! `which_ingredient_terrained_refuses`, which is the test that says so, case by case. The
+//! reason is in the texture block: real files put a trailer between records whose length
+//! varies with the record (8, 24 and 40 bytes in the two example models), and nothing here
+//! knows what it says yet. So a model written here carries one sheet, and a thing with
+//! several materials is several models — which is exactly what PiBoSo's own example track
+//! does, shipping `finish_gate`, `flagpoles` and `standings_tower` as three `scene` blocks.
 //!
 //! Written this way a file reads back through [`crate::edf::parse`] with its positions, UVs
 //! and normals intact. That is the first of three checks; the other two are that
@@ -200,25 +219,31 @@ fn tangents(mesh: &Mesh) -> Vec<[f32; 4]> {
 
 /// Write a model: its parts, and the textures they wear.
 ///
-/// One node per part, in the order given, then every texture once at the end. A material is
-/// emitted per part and binds the texture that part names.
-pub fn write(parts: &[Part], textures: &[Texture]) -> Vec<u8> {
+/// The parts become **groups of one node**, in the order given, each binding the texture it
+/// names. A part's `name` is for our own bookkeeping — a group has no name field in the file;
+/// only the node does, and it takes `name`.
+pub fn write(name: &str, parts: &[Part], textures: &[Texture]) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(b"EDF\0");
 
-    // The bounds are written over the *placed* geometry, and these are placed where they were
-    // authored — the node matrix below is identity — so the union of the parts is it.
-    let (mut lo, mut hi) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+    // One combined mesh, and where each part landed in it.
+    let mut mesh = Mesh::default();
+    let mut ranges: Vec<Range> = Vec::with_capacity(parts.len());
     for p in parts {
-        let (a, b) = p.mesh.bounds();
-        for k in 0..3 {
-            lo[k] = lo[k].min(a[k]);
-            hi[k] = hi[k].max(b[k]);
-        }
+        let r = Range {
+            material: ranges.len() as u32,
+            tri_start: mesh.triangle_count() as u32,
+            tri_count: p.mesh.triangle_count() as u32,
+            vert_start: mesh.vertex_count() as u32,
+            vert_count: p.mesh.vertex_count() as u32,
+        };
+        mesh.append(&p.mesh);
+        ranges.push(r);
     }
-    if !lo[0].is_finite() {
-        (lo, hi) = ([0.0; 3], [0.0; 3]);
-    }
+
+    // The bounds are written over the placed geometry, and the node matrix below is identity,
+    // so the combined mesh is it.
+    let (lo, hi) = mesh.bounds();
     for v in lo.iter().chain(hi.iter()) {
         put_f32(&mut out, *v);
     }
@@ -240,9 +265,8 @@ pub fn write(parts: &[Part], textures: &[Texture]) -> Vec<u8> {
         debug_assert_eq!(out.len() - start, MAT_STRIDE);
     }
 
-    for p in parts {
-        write_node(&mut out, p);
-    }
+    write_node(&mut out, name, &mesh, &ranges);
+
     // One count for the whole model, then the records back to back. `finish_gate.edf` is
     // what says this is a count rather than a per-node word: it writes 4 here and carries
     // four sheets, where the one-sheet models write 1.
@@ -253,8 +277,17 @@ pub fn write(parts: &[Part], textures: &[Texture]) -> Vec<u8> {
     out
 }
 
-fn write_node(out: &mut Vec<u8>, part: &Part) {
-    let mesh = &part.mesh;
+/// One group of a node: which material paints which run of triangles.
+#[derive(Clone, Copy, Debug)]
+struct Range {
+    material: u32,
+    tri_start: u32,
+    tri_count: u32,
+    vert_start: u32,
+    vert_count: u32,
+}
+
+fn write_node(out: &mut Vec<u8>, name: &str, mesh: &Mesh, ranges: &[Range]) {
     let vc = mesh.vertex_count();
     let tc = mesh.triangle_count();
     let tans = tangents(mesh);
@@ -286,10 +319,12 @@ fn write_node(out: &mut Vec<u8>, part: &Part) {
     for i in &mesh.indices {
         put_u32(out, *i);
     }
-    put_u32(out, 1); // one submesh: the node is one piece
+    // One, whatever the group count is — `finish_gate.edf` writes 1 here and carries four
+    // groups.
+    put_u32(out, 1);
 
     let name_at = out.len();
-    put_name(out, &part.name);
+    put_name(out, name);
     debug_assert_eq!(out.len() - name_at, NODE_MAT_OFF);
 
     // Placed where it was authored.
@@ -301,15 +336,20 @@ fn write_node(out: &mut Vec<u8>, part: &Part) {
     for _ in 0..GROUP_GAP / 4 {
         put_u32(out, 0);
     }
-    // The group block: one group covering the whole node, and the bounds it covers.
-    put_u32(out, 1);
-    for _ in 0..3 {
-        put_u32(out, 0);
-    }
-    put_u32(out, tc as u32);
+
+    put_u32(out, ranges.len() as u32);
     put_u32(out, 0);
-    put_u32(out, vc as u32);
-    put_u32(out, vc as u32);
+    for (i, r) in ranges.iter().enumerate() {
+        put_u32(out, r.material);
+        put_u32(out, r.tri_start);
+        put_u32(out, r.tri_count);
+        put_u32(out, r.vert_start);
+        put_u32(out, r.vert_count);
+        // Zero on every group but the last, which carries the vertex the node ends at. Both
+        // worked examples do this and nothing here needs to know why.
+        let last = i + 1 == ranges.len();
+        put_u32(out, if last { r.vert_start + r.vert_count } else { 0 });
+    }
     put_u32(out, 0);
     let (lo, hi) = mesh.bounds();
     for v in lo.iter().chain(hi.iter()) {
@@ -443,6 +483,7 @@ mod tests {
         let mesh = cuboid(2.0, 3.0, 1.0);
         let (vc, tc) = (mesh.vertex_count(), mesh.triangle_count());
         let bytes = write(
+            "probe",
             &[Part { name: "post".into(), mesh: mesh.clone(), texture: 0 }],
             &[sheet("post_c", 64, [200, 180, 60, 255])],
         );
@@ -451,7 +492,7 @@ mod tests {
         let nodes = crate::edf::parse_world(&bytes);
         assert_eq!(nodes.len(), 1, "one part, one node");
         let n = &nodes[0];
-        assert_eq!(n.name, "post");
+        assert_eq!(n.name, "probe", "the node takes the model's name");
         assert_eq!(n.positions.len(), vc * 3);
         assert_eq!(n.normals.len(), vc * 3);
         assert_eq!(n.uvs.len(), vc * 2);
@@ -469,6 +510,7 @@ mod tests {
         // checks placed geometry against it — see `edf::header_aabb`.
         let mesh = moved(&cuboid(2.0, 3.0, 1.0), [5.0, 0.0, -4.0]);
         let bytes = write(
+            "probe",
             &[Part { name: "post".into(), mesh: mesh.clone(), texture: 0 }],
             &[sheet("post_c", 64, [1, 2, 3, 255])],
         );
@@ -484,6 +526,7 @@ mod tests {
     fn the_texture_comes_back_out_of_the_file() {
         let tex = sheet("bark_c_a", 64, [10, 120, 30, 255]);
         let bytes = write(
+            "probe",
             &[Part { name: "trunk".into(), mesh: card(1.0, 4.0), texture: 0 }],
             &[tex.clone()],
         );
@@ -496,22 +539,29 @@ mod tests {
     }
 
     #[test]
-    fn several_parts_each_bind_their_own_sheet() {
+    fn several_parts_are_one_node_of_several_groups() {
         let bytes = write(
+            "tree",
             &[
                 Part { name: "trunk".into(), mesh: cuboid(0.4, 4.0, 0.4), texture: 0 },
                 Part { name: "canopy".into(), mesh: crossed(5.0, 5.0, 2), texture: 1 },
             ],
             &[sheet("bark_c", 64, [90, 60, 40, 255]), sheet("leaf_c_a", 64, [40, 110, 40, 128])],
         );
+        // One node. Written as two, TerrainEd faults on a null write — see the module note.
         let nodes = crate::edf::parse_world(&bytes);
-        let names: Vec<&str> = nodes.iter().map(|n| n.name.as_str()).collect();
-        assert!(names.contains(&"trunk") && names.contains(&"canopy"), "{names:?}");
-        assert_eq!(crate::edf::embedded_textures(&bytes).len(), 2);
-        // Which material each node names — the binding a compiler will read.
-        let textures = crate::edf::embedded_textures(&bytes).len();
-        let table = crate::edf::node_material_table(&bytes, 0x1c + 4 + MAT_STRIDE * 2, textures);
+        assert_eq!(nodes.len(), 1, "several materials are one node, not several");
+        assert_eq!(nodes[0].name, "tree");
+
+        // Both sheets travel, and the node's material table names them in order.
+        let found = crate::edf::embedded_textures(&bytes);
+        assert_eq!(found.len(), 2);
+        let table = crate::edf::node_material_table(&bytes, 0x1c + 4 + MAT_STRIDE * 2, found.len());
         assert_eq!(table, vec![Some(0), Some(1)], "two materials, two sheets, in order");
+
+        // And the groups split the triangles between them the way the parts were given.
+        let (trunk_t, canopy_t) = (cuboid(0.4, 4.0, 0.4).triangle_count(), crossed(5.0, 5.0, 2).triangle_count());
+        assert_eq!(nodes[0].indices.len() / 3, trunk_t + canopy_t);
     }
 
     #[test]
@@ -522,6 +572,7 @@ mod tests {
         // this module builds crosses cards or boxes them, so nothing real sits below eight,
         // but a bare `card` node would vanish and it is better to have said so.
         let bytes = write(
+            "lone",
             &[Part { name: "lone".into(), mesh: card(1.0, 1.0), texture: 0 }],
             &[sheet("x_c", 64, [1, 1, 1, 255])],
         );
@@ -582,6 +633,7 @@ mod compiles {
         // where the scene block says and nowhere else.
         let (w, h) = (2.0f32, 4.0f32);
         let bytes = write(
+            "probe",
             &[Part { name: "probe".into(), mesh: cuboid(w, h, w), texture: 0 }],
             &[checks("probe_c", 64, [220, 40, 40, 255], [250, 250, 250, 255])],
         );
@@ -632,6 +684,165 @@ mod compiles {
             names.iter().any(|n| n.eq_ignore_ascii_case("probe_c")),
             "the sheet the model embedded is not in the map: {names:?}"
         );
+    }
+
+    /// The same, but a model of several parts wearing several sheets — which is what a
+    /// track's scenery is, and which the single-part proof above does not cover.
+    #[test]
+    #[ignore = "needs PiBoSo's compilers and a Wine prefix"]
+    fn terrained_bakes_a_model_of_several_parts() {
+        let dir = PathBuf::from(std::env::var("FROST_SCENE").expect("set FROST_SCENE"));
+        let tools = PathBuf::from(std::env::var("FROST_TOOLS").expect("set FROST_TOOLS"));
+        let terrained = crate::trackbuild::find(&tools)
+            .expect("terrained.exe under FROST_TOOLS")
+            .terrained;
+
+        let parts = vec![
+            Part { name: "posts".into(), mesh: cuboid(1.0, 4.0, 1.0), texture: 0 },
+            Part { name: "boards".into(), mesh: moved(&crossed(3.0, 2.0, 2), [6.0, 0.0, 0.0]), texture: 1 },
+            Part { name: "canopy".into(), mesh: moved(&crossed(4.0, 5.0, 3), [-6.0, 0.0, 0.0]), texture: 2 },
+        ];
+        let sheets = vec![
+            checks("posts_c", 64, [200, 60, 60, 255], [240, 240, 240, 255]),
+            checks("boards_c_a", 64, [40, 90, 200, 255], [255, 255, 255, 0]),
+            checks("canopy_c_a", 64, [40, 150, 60, 255], [255, 255, 255, 0]),
+        ];
+        let bytes = write("probe", &parts, &sheets);
+        std::fs::write(dir.join("probe.edf"), &bytes).unwrap();
+        println!("probe.edf: {} bytes, {} parts, {} sheets", bytes.len(), parts.len(), sheets.len());
+
+        let map = "out/multi.map";
+        let _ = std::fs::remove_file(dir.join(map));
+        let out = run(&terrained, &["track.hmf", map, "params.ini"], &dir);
+        println!("--- terrained ---\n{out}\n---");
+
+        assert!(dir.join(map).is_file(), "terrained wrote no {map}");
+        let mb = std::fs::read(dir.join(map)).unwrap();
+        let mesh = crate::map::parse(&mb).expect("the .map parses");
+        let names: Vec<String> = crate::map::survey(&mb).into_iter().map(|(n, ..)| n).collect();
+        println!(
+            "{} materials, {} triangles, sheets {names:?}",
+            mesh.materials,
+            mesh.triangle_count()
+        );
+        for want in ["posts_c", "boards_c_a", "canopy_c_a"] {
+            assert!(names.iter().any(|n| n.eq_ignore_ascii_case(want)), "{want} missing: {names:?}");
+        }
+    }
+
+    /// Which ingredient TerrainEd refuses, one at a time.
+    ///
+    /// A control it is known to accept, then one change each: a second group, a cut-out
+    /// sheet, cards instead of boxes. Cheap because the scene is 129 samples square; the
+    /// answer is which rows say `ok`.
+    #[test]
+    #[ignore = "needs PiBoSo's compilers and a Wine prefix"]
+    fn which_ingredient_terrained_refuses() {
+        let dir = PathBuf::from(std::env::var("FROST_SCENE").expect("set FROST_SCENE"));
+        let tools = PathBuf::from(std::env::var("FROST_TOOLS").expect("set FROST_TOOLS"));
+        let terrained = crate::trackbuild::find(&tools).expect("terrained").terrained;
+
+        let opaque = |n: &str| checks(n, 64, [210, 60, 50, 255], [240, 240, 240, 255]);
+        let cutout = |n: &str| checks(n, 64, [60, 150, 70, 255], [0, 0, 0, 0]);
+
+        let cases: Vec<(&str, Vec<Part>, Vec<Texture>)> = vec![
+            ("1 box, opaque (control)",
+             vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0 }],
+             vec![opaque("a_c")]),
+            ("2 boxes, 2 sheets",
+             vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0 },
+                  Part { name: "b".into(), mesh: moved(&cuboid(2.0, 3.0, 2.0), [6.0, 0.0, 0.0]), texture: 1 }],
+             vec![opaque("a_c"), opaque("b_c")]),
+            ("1 box, cut-out sheet",
+             vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0 }],
+             vec![cutout("a_c_a")]),
+            ("1 set of crossed cards",
+             vec![Part { name: "a".into(), mesh: crossed(4.0, 5.0, 3), texture: 0 }],
+             vec![cutout("a_c_a")]),
+            ("3 parts, mixed",
+             vec![Part { name: "a".into(), mesh: cuboid(1.0, 4.0, 1.0), texture: 0 },
+                  Part { name: "b".into(), mesh: moved(&crossed(3.0, 2.0, 2), [6.0, 0.0, 0.0]), texture: 1 },
+                  Part { name: "c".into(), mesh: moved(&crossed(4.0, 5.0, 3), [-6.0, 0.0, 0.0]), texture: 2 }],
+             vec![opaque("a_c"), cutout("b_c_a"), cutout("c_c_a")]),
+        ];
+
+        let mut verdict = Vec::new();
+        for (i, (label, parts, sheets)) in cases.iter().enumerate() {
+            let bytes = write("probe", parts, sheets);
+            std::fs::write(dir.join("probe.edf"), &bytes).unwrap();
+            let map = format!("out/case{i}.map");
+            let _ = std::fs::remove_file(dir.join(&map));
+            let out = run(&terrained, &["track.hmf", &map, "params.ini"], &dir);
+            let ok = dir.join(&map).is_file();
+            let tris = ok
+                .then(|| std::fs::read(dir.join(&map)).ok())
+                .flatten()
+                .and_then(|b| crate::map::parse(&b))
+                .map(|m| m.triangle_count())
+                .unwrap_or(0);
+            println!(
+                "{:<26} {:>10}  {:>5} tris  ({} B edf)  {}",
+                label,
+                if ok { "ok" } else { "REFUSED" },
+                tris,
+                bytes.len(),
+                out.lines().next().unwrap_or("")
+            );
+            verdict.push((label, ok));
+        }
+        println!();
+        for (l, ok) in &verdict {
+            println!("  {} {l}", if *ok { "ok " } else { "NO " });
+        }
+        assert!(verdict[0].1, "the control has to compile or nothing here means anything");
+    }
+
+    /// Write one probe model to `FROST_SCENE/probe.edf` and stop. Lets the compiler be driven
+    /// from outside, one case at a time, so a crash costs one run instead of the whole set.
+    #[test]
+    #[ignore = "writes a probe model — set FROST_SCENE and FROST_CASE"]
+    fn write_probe_case() {
+        let dir = PathBuf::from(std::env::var("FROST_SCENE").expect("set FROST_SCENE"));
+        let case: usize = std::env::var("FROST_CASE").unwrap_or_default().parse().unwrap_or(0);
+        let opaque = |n: &str| checks(n, 64, [210, 60, 50, 255], [240, 240, 240, 255]);
+        let cutout = |n: &str| checks(n, 64, [60, 150, 70, 255], [0, 0, 0, 0]);
+        let (label, parts, sheets): (&str, Vec<Part>, Vec<Texture>) = match case {
+            0 => ("1 box, opaque (control)",
+                  vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0 }],
+                  vec![opaque("a_c")]),
+            1 => ("2 boxes, 2 sheets",
+                  vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0 },
+                       Part { name: "b".into(), mesh: moved(&cuboid(2.0, 3.0, 2.0), [6.0, 0.0, 0.0]), texture: 1 }],
+                  vec![opaque("a_c"), opaque("b_c")]),
+            2 => ("1 box, cut-out sheet",
+                  vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0 }],
+                  vec![cutout("a_c_a")]),
+            3 => ("1 set of crossed cards",
+                  vec![Part { name: "a".into(), mesh: crossed(4.0, 5.0, 3), texture: 0 }],
+                  vec![cutout("a_c_a")]),
+            4 => ("2 boxes, 1 shared sheet",
+                  vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0 },
+                       Part { name: "b".into(), mesh: moved(&cuboid(2.0, 3.0, 2.0), [6.0, 0.0, 0.0]), texture: 0 }],
+                  vec![opaque("a_c")]),
+            5 => ("1 box, 200 copies",
+                  vec![Part { name: "a".into(), mesh: {
+                      let mut m = Mesh::default();
+                      for i in 0..200 {
+                          let (x, z) = ((i % 20) as f32 * 3.0, (i / 20) as f32 * 3.0);
+                          m.append(&moved(&cuboid(1.0, 2.0, 1.0), [20.0 + x, 0.0, 20.0 + z]));
+                      }
+                      m
+                  }, texture: 0 }],
+                  vec![opaque("a_c")]),
+            _ => ("3 parts, mixed",
+                  vec![Part { name: "a".into(), mesh: cuboid(1.0, 4.0, 1.0), texture: 0 },
+                       Part { name: "b".into(), mesh: moved(&crossed(3.0, 2.0, 2), [6.0, 0.0, 0.0]), texture: 1 },
+                       Part { name: "c".into(), mesh: moved(&crossed(4.0, 5.0, 3), [-6.0, 0.0, 0.0]), texture: 2 }],
+                  vec![opaque("a_c"), cutout("b_c_a"), cutout("c_c_a")]),
+        };
+        let bytes = write("probe", &parts, &sheets);
+        std::fs::write(dir.join("probe.edf"), &bytes).unwrap();
+        println!("case {case}: {label} — {} parts, {} sheets, {} B", parts.len(), sheets.len(), bytes.len());
     }
 
     fn run(exe: &Path, args: &[&str], dir: &Path) -> String {

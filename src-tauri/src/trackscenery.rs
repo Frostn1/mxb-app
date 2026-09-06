@@ -410,8 +410,14 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     while s < lap {
         let st = at(s);
         let (rx, rz) = crate::trackprog::right_vector(st.heading);
+        // Keyed on where round the lap we are, not on how many have been placed. Keyed on
+        // the count, every station drew the same three numbers — because the count only
+        // moves when a tree is accepted — so every station after the first proposed trees in
+        // the same three spots and the spacing rule threw them all away. One tree on the
+        // whole track, and it looked like the spacing rule was too strict.
+        let step = (s / TREE_SPACING_M) as u32;
         for k in 0..3u32 {
-            let i = (n as u32) * 7 + k;
+            let i = step * 7 + k;
             if rnd(seed ^ 0x41, i) > 0.45 {
                 continue;
             }
@@ -463,58 +469,46 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let _ = (fx, fz);
     tally.push(("gate", 1));
 
-    // One model, one node a kind. Empty kinds are dropped so nothing writes a node with no
-    // geometry in it.
-    let kinds: Vec<(&str, Mesh, usize)> = vec![
-        ("markers", markers, 0),
-        ("fence", fence, 1),
-        ("bales", bales, 2),
-        ("trees", trees, 3),
-        ("gate", gate, 4),
+    // One model a kind, each with its own single sheet. Not one model of five materials:
+    // TerrainEd faults on the second material in a model whatever the geometry — see
+    // `edfwrite`'s note and the case-by-case test behind it. PiBoSo's own example track is
+    // built the same way, three `scene` blocks for three objects.
+    //
+    // Empty kinds are dropped so nothing writes a node with no geometry in it, and anything
+    // under eight vertices would be invisible to our own reader besides.
+    let kinds: Vec<(&str, Mesh, Texture, bool)> = vec![
+        ("markers", markers, marker_sheet(), false),
+        ("fence", fence, fence_sheet(), false),
+        ("bales", bales, bale_sheet(), true),
+        ("trees", trees, leaf_sheet(), false),
+        ("gate", gate, gate_sheet(), true),
     ];
-    let sheets = vec![
-        marker_sheet(),
-        fence_sheet(),
-        bale_sheet(),
-        leaf_sheet(),
-        gate_sheet(),
-    ];
-    let parts: Vec<Part> = kinds
-        .into_iter()
-        .filter(|(_, m, _)| m.vertex_count() >= 8)
-        .map(|(name, mesh, texture)| Part { name: name.into(), mesh, texture })
-        .collect();
 
-    let bytes = edfwrite::write(&parts, &sheets);
-    let at_origin = Scene {
-        file: "scenery.edf".into(),
-        pos: [0.0, 0.0, 0.0],
-        rot: [0.0, 0.0, 0.0],
-    };
-
-    // Collision is a second model holding only what should stop a bike: the bales and the
-    // gate posts. Foliage and the marker line are cards — solid, they would be invisible
-    // walls, and a rider who clips a track-edge board should ride on.
-    let solid_parts: Vec<Part> = parts
-        .iter()
-        .filter(|p| p.name == "bales" || p.name == "gate")
-        .cloned()
-        .collect();
-    let mut files = vec![("scenery.edf".to_string(), bytes)];
+    let mut files = Vec::new();
+    let mut drawn = Vec::new();
     let mut solid = Vec::new();
-    if !solid_parts.is_empty() {
-        files.push((
-            "solids.edf".to_string(),
-            edfwrite::write(&solid_parts, &sheets),
-        ));
-        solid.push(Scene {
-            file: "solids.edf".into(),
-            pos: [0.0, 0.0, 0.0],
-            rot: [0.0, 0.0, 0.0],
-        });
+    for (name, mesh, sheet, is_solid) in kinds {
+        if mesh.vertex_count() < 8 {
+            continue;
+        }
+        let file = format!("{name}.edf");
+        let bytes = edfwrite::write(
+            name,
+            &[Part { name: name.into(), mesh, texture: 0 }],
+            &[sheet],
+        );
+        files.push((file.clone(), bytes));
+        let at = Scene { file, pos: [0.0, 0.0, 0.0], rot: [0.0, 0.0, 0.0] };
+        // Collision only for what should stop a bike. Foliage and the marker line are cards:
+        // solid, they would be invisible walls, and a rider who clips a track-edge board
+        // should ride on.
+        if is_solid {
+            solid.push(at.clone());
+        }
+        drawn.push(at);
     }
 
-    Scenery { files, drawn: vec![at_origin], solid, tally }
+    Scenery { files, drawn, solid, tally }
 }
 
 /// The `scene<N>` blocks, in the form TerrainEd reads them.
@@ -555,12 +549,28 @@ mod tests {
     }
 
     #[test]
+    fn a_lap_gets_a_treeline_and_not_one_tree() {
+        let (p, s) = demo();
+        let sc = build(&p, &s);
+        let trees = sc.tally.iter().find(|(k, _)| *k == "trees").unwrap().1;
+        // Corpus p50 is 118 near trees per km over the tracks that have them, and the loop is
+        // deliberately thinner than that. What this catches is the failure that actually
+        // happened: randomness keyed on the placed count, so every station drew the same
+        // numbers and the whole lap ended up with one tree.
+        let per_km = trees as f32 / (p.lap_length() / 1000.0);
+        assert!(per_km > 20.0, "{trees} trees is {per_km:.0}/km over {:.0} m", p.lap_length());
+    }
+
+    #[test]
     fn nothing_stands_on_the_riding_line() {
         let (p, s) = demo();
         let sc = build(&p, &s);
-        let bytes = &sc.files[0].1;
-        let nodes = crate::edf::parse_world(bytes);
-        assert!(!nodes.is_empty(), "the model has nodes");
+        let nodes: Vec<crate::edf::EdfNode> = sc
+            .files
+            .iter()
+            .flat_map(|(_, b)| crate::edf::parse_world(b))
+            .collect();
+        assert!(nodes.len() >= 4, "a kind a model: {}", nodes.len());
 
         // Every vertex, against the corridor the track was built with. The edge line sits
         // just outside the shoulder; nothing may sit inside the riding surface itself.
@@ -621,29 +631,35 @@ mod tests {
     }
 
     #[test]
-    fn the_blocks_read_the_way_terrained_writes_them() {
-        let s = blocks(&[Scene {
-            file: "scenery.edf".into(),
-            pos: [1.0, 2.0, 3.0],
-            rot: [0.0, 90.0, 0.0],
-        }]);
-        assert!(s.contains("scene0"));
-        assert!(s.contains("name = scenery.edf"));
-        assert!(s.contains("x = 1.000") && s.contains("y = 2.000") && s.contains("z = 3.000"));
-        assert!(s.contains("y = 90.000"));
-    }
-
-    #[test]
     fn collision_is_only_what_should_stop_a_bike() {
         let (p, s) = demo();
         let sc = build(&p, &s);
-        assert_eq!(sc.solid.len(), 1, "one collision model");
-        let names: Vec<String> = crate::edf::parse_world(&sc.files[1].1)
-            .into_iter()
-            .map(|n| n.name)
-            .collect();
-        assert!(names.iter().any(|n| n == "bales"), "{names:?}");
-        assert!(!names.iter().any(|n| n == "trees"), "foliage cards are not walls: {names:?}");
+        let named = |v: &[Scene]| -> Vec<String> { v.iter().map(|s| s.file.clone()).collect() };
+        let drawn = named(&sc.drawn);
+        let solid = named(&sc.solid);
+        assert!(drawn.contains(&"trees.edf".to_string()), "{drawn:?}");
+        assert!(drawn.contains(&"markers.edf".to_string()), "{drawn:?}");
+        // Only the things a bike should hit.
+        assert!(solid.contains(&"bales.edf".to_string()), "{solid:?}");
+        assert!(solid.contains(&"gate.edf".to_string()), "{solid:?}");
+        assert!(!solid.contains(&"trees.edf".to_string()), "foliage cards are not walls: {solid:?}");
+        assert!(!solid.contains(&"markers.edf".to_string()), "{solid:?}");
+        // And every placed model is one the export actually writes.
+        for f in solid.iter().chain(drawn.iter()) {
+            assert!(sc.files.iter().any(|(n, _)| n == f), "{f} is placed but never written");
+        }
+    }
+
+    #[test]
+    fn the_blocks_read_the_way_terrained_writes_them() {
+        let s = blocks(&[
+            Scene { file: "trees.edf".into(), pos: [1.0, 2.0, 3.0], rot: [0.0, 90.0, 0.0] },
+            Scene { file: "bales.edf".into(), pos: [0.0, 0.0, 0.0], rot: [0.0, 0.0, 0.0] },
+        ]);
+        assert!(s.contains("scene0") && s.contains("scene1"), "{s}");
+        assert!(s.contains("name = trees.edf") && s.contains("name = bales.edf"));
+        assert!(s.contains("x = 1.000") && s.contains("y = 2.000") && s.contains("z = 3.000"));
+        assert!(s.contains("y = 90.000"));
     }
 }
 
@@ -688,13 +704,7 @@ mod built {
 
         let tools = PathBuf::from(std::env::var("FROST_TOOLS").expect("set FROST_TOOLS"));
         let t = crate::trackbuild::find(&tools).expect("compilers under FROST_TOOLS");
-        let stem = dir
-            .join("track.hmf")
-            .exists()
-            .then(|| slug.iter().find_map(|f| f.strip_suffix(".map").map(|s| s.to_string())))
-            .flatten()
-            .unwrap_or_default();
-        let name = stem.split('/').next_back().unwrap_or("track").to_string();
+        let name = crate::tracksynth::slug(&p.name);
         println!("slug: {name}");
 
         let map_rel = format!("{name}/{name}.map");
