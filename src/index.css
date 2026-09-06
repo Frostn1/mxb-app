@@ -563,6 +563,17 @@ input[type="range"]:disabled {
   opacity: 0.45;
 }
 
+/* The context bar can carry two groups of tabs: the rail item's (which page) and the
+   screen's own (which type). Run together at one spacing they read as one list, so the
+   screen's group takes a rule in front of it — but only when it has content. */
+.ctx-divider:not(:empty)::before {
+  content: "";
+  align-self: center;
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+}
+
 @keyframes frost-indeterminate {
   0% {
     transform: translateX(-100%);

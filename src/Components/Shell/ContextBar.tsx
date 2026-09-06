@@ -94,7 +94,14 @@ export default function ContextBar({
             {tab.rawLabel ?? t(tab.label)}
           </ContextTab>
         ))}
-      <div ref={leftRef} className="flex items-stretch gap-[22px]" />
+      <div
+        ref={leftRef}
+        className={cn(
+          "flex items-stretch gap-[22px]",
+          // Only divide when there is something on both sides of the line.
+          tabs.length > 1 && "ctx-divider",
+        )}
+      />
       <div className="flex-1" />
       <div ref={rightRef} className="flex items-center gap-3 self-center" />
     </div>

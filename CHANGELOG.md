@@ -12,6 +12,9 @@
   installing before you click it.
 - Every page puts its filters, categories and search in one bar under the navigation,
   so there are two rows of controls above your mods instead of four.
+- Race mode opens with what the game is set to load: how many mods are on, and how much
+  they weigh. Its filters, search and the enable/disable buttons moved up into the bar.
+- The page you get when something goes wrong offers one way out — Reload app.
 
 ### Added
 - Seven colorways in Settings. Frost is still the default; Ember, Moss, Violet, Rose and

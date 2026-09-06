@@ -1793,6 +1793,8 @@ export const de: Translation = {
     "MX Bikes lädt beim Start jede Mod in deinem Ordner. Gib einem Preset die Strecke, auf der es fährt, klick auf Rennmodus, und alles andere tritt beiseite — gelöscht wird nichts, es wandert nur in einen Parkordner, bis du es zurückholst.",
   "manage.tabRace": "Rennpresets",
   "manage.tabMods": "Mods",
+  "manage.loadCostLabel": "Ladekosten",
+  "manage.parkedLabel": "Geparkt",
   "manage.disabledCount_one": "{{count}} Mod deaktiviert",
   "manage.disabledCount_other": "{{count}} Mods deaktiviert",
   "manage.restoreAll": "Alles aktivieren",

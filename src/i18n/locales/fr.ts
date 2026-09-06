@@ -1784,6 +1784,8 @@ export const fr: Translation = {
     "MX Bikes charge tous les mods de votre dossier au démarrage. Donnez à un preset la piste sur laquelle il court, cliquez sur Mode course et tout le reste s'écarte — rien n'est supprimé, le contenu part dans un dossier d'attente jusqu'à ce que vous le rameniez.",
   "manage.tabRace": "Presets de course",
   "manage.tabMods": "Mods",
+  "manage.loadCostLabel": "Coût de chargement",
+  "manage.parkedLabel": "En pause",
   "manage.disabledCount_one": "{{count}} mod désactivé",
   "manage.disabledCount_other": "{{count}} mods désactivés",
   "manage.restoreAll": "Tout réactiver",

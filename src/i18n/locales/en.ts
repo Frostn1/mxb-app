@@ -1755,6 +1755,8 @@ export const en = {
     "MX Bikes loads every mod in your folder at startup. Give a preset the track it races on, hit Race mode, and everything else steps aside — nothing is deleted, it just moves to a holding folder until you bring it back.",
   "manage.tabRace": "Race presets",
   "manage.tabMods": "Mods",
+  "manage.loadCostLabel": "Load cost",
+  "manage.parkedLabel": "Parked",
   "manage.disabledCount_one": "{{count}} mod disabled",
   "manage.disabledCount_other": "{{count}} mods disabled",
   "manage.restoreAll": "Enable everything",

@@ -1773,6 +1773,8 @@ export const ptBR: Translation = {
     "O MX Bikes carrega todos os mods da sua pasta ao iniciar. Dê a um preset a pista em que ele corre, clique em Modo corrida e todo o resto sai do caminho — nada é apagado, só vai para uma pasta de espera até você trazer de volta.",
   "manage.tabRace": "Presets de corrida",
   "manage.tabMods": "Mods",
+  "manage.loadCostLabel": "Custo de carga",
+  "manage.parkedLabel": "Em pausa",
   "manage.disabledCount_one": "{{count}} mod desativado",
   "manage.disabledCount_other": "{{count}} mods desativados",
   "manage.restoreAll": "Ativar tudo",

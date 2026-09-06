@@ -1775,6 +1775,8 @@ export const it: Translation = {
     "MX Bikes carica ogni mod della cartella all'avvio. Assegna a un preset la pista su cui corre, premi Modalità gara e tutto il resto si fa da parte — niente viene eliminato, si sposta solo in una cartella di sosta finché non lo riporti indietro.",
   "manage.tabRace": "Preset gara",
   "manage.tabMods": "Mod",
+  "manage.loadCostLabel": "Costo di caricamento",
+  "manage.parkedLabel": "In pausa",
   "manage.disabledCount_one": "{{count}} mod disattivata",
   "manage.disabledCount_other": "{{count}} mod disattivate",
   "manage.restoreAll": "Riattiva tutto",

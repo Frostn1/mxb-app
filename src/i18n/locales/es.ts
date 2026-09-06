@@ -1780,6 +1780,8 @@ export const es: Translation = {
     "MX Bikes carga todos los mods de tu carpeta al arrancar. Dale a un preset la pista en la que corre, pulsa Modo carrera y todo lo demás se aparta — no se borra nada, solo se mueve a una carpeta de espera hasta que lo traigas de vuelta.",
   "manage.tabRace": "Presets de carrera",
   "manage.tabMods": "Mods",
+  "manage.loadCostLabel": "Coste de carga",
+  "manage.parkedLabel": "Aparcados",
   "manage.disabledCount_one": "{{count}} mod desactivado",
   "manage.disabledCount_other": "{{count}} mods desactivados",
   "manage.restoreAll": "Activar todo",
