@@ -48,13 +48,11 @@ import {
   baseTrackProgram,
   blankTrackProgram,
   buildTrack,
-  downloadTrackTools,
   closeTrackLap,
   fitTrackBudget,
   checkTrack,
   exportTrackSource,
   generateTrack,
-  installTrackPreview,
   lapLength,
   FEATURE_COLOUR,
   elevationAt,
@@ -95,7 +93,7 @@ export default function TrackStudio() {
   const t = useT();
   const [brief, setBrief] = useState("");
   const [busy, setBusy] = useState<
-    "generate" | "preview" | "install" | "export" | "build" | "tools" | null
+    "generate" | "preview" | "export" | "build" | null
   >(null);
   const [program, setProgram] = useState<TrackProgram | null>(null);
   const [preview, setPreview] = useState<TrackPreview | null>(null);
@@ -286,19 +284,6 @@ export default function TrackStudio() {
     }
   }
 
-  async function onInstall() {
-    if (!program || busy) return;
-    setBusy("install");
-    try {
-      const path = await installTrackPreview(program);
-      toast.success(t("track.installed"), { description: path });
-    } catch (e) {
-      toast.error(t("track.installFailed"), { description: String(e) });
-    } finally {
-      setBusy(null);
-    }
-  }
-
   async function onExport() {
     if (!program || busy) return;
     const dir = await openDialog({ multiple: false, directory: true });
@@ -463,20 +448,6 @@ export default function TrackStudio() {
     }
   }
 
-  async function onGetTools() {
-    if (busy) return;
-    setBusy("tools");
-    try {
-      const next = await downloadTrackTools();
-      setTools(next);
-      toast.success(t("track.toolsReady"));
-    } catch (e) {
-      toast.error(t("track.toolsFailed"), { description: String(e) });
-    } finally {
-      setBusy(null);
-    }
-  }
-
   // Build the whole way and put it where the game reads it. No folder to pick: the app has
   // one of its own, and a track you have to go and find afterwards isn't finished.
   async function onBuild() {
@@ -486,6 +457,7 @@ export default function TrackStudio() {
     try {
       const built = await buildTrack(program, null, true);
       setSteps(built.steps);
+      setTools(await trackToolsStatus().catch(() => null));
       const failed = built.steps.find((s) => !s.ok);
       if (failed) {
         toast.error(t("track.buildStepFailed", { step: failed.name }), {
@@ -729,42 +701,28 @@ export default function TrackStudio() {
               </div>
             )}
 
+            {/* One way out of the studio. Building runs PiBoSo's own compilers over the
+                exported source, fetching them first if this machine hasn't got them — there
+                is no second path that produces a track the game will ride. */}
             <div className="mt-auto flex flex-col gap-2">
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => void onInstall()}
-                  disabled={blocked || busy !== null}
+              <Button onClick={() => void onBuild()} disabled={blocked || busy !== null}>
+                {busy === "build" ? t("track.compiling") : t("track.compile")}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => void onExport()}
+                disabled={blocked || busy !== null}
+              >
+                {t("track.export")}
+              </Button>
+              {!tools?.found && (
+                <button
+                  className="text-[11.5px] text-muted-foreground underline-offset-2 hover:underline"
+                  onClick={() => void onPointAtTools()}
+                  disabled={busy !== null}
                 >
-                  {t("track.install")}
-                </Button>
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => void onExport()}
-                  disabled={blocked || busy !== null}
-                >
-                  {t("track.export")}
-                </Button>
-              </div>
-              {tools?.found ? (
-                <Button onClick={() => void onBuild()} disabled={blocked || busy !== null}>
-                  {busy === "build" ? t("track.compiling") : t("track.compile")}
-                </Button>
-              ) : (
-                <>
-                  <Button onClick={() => void onGetTools()} disabled={busy !== null}>
-                    {busy === "tools" ? t("track.gettingTools") : t("track.getTools")}
-                  </Button>
-                  <button
-                    className="text-[11.5px] text-muted-foreground underline-offset-2 hover:underline"
-                    onClick={() => void onPointAtTools()}
-                    disabled={busy !== null}
-                  >
-                    {t("track.pointAtTools")}
-                  </button>
-                </>
+                  {t("track.pointAtTools")}
+                </button>
               )}
               {steps.length > 0 && (
                 <ul className="space-y-1 text-[11.5px] leading-snug">
@@ -775,11 +733,6 @@ export default function TrackStudio() {
                     </li>
                   ))}
                 </ul>
-              )}
-              {tools?.found && (
-                <p className="text-[11.5px] leading-snug text-muted-foreground">
-                  {t("track.stillNeeded")}
-                </p>
               )}
             </div>
           </div>

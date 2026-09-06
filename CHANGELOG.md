@@ -3,6 +3,10 @@
 ## 2026-09-05
 
 ### Changed
+- Building a track now runs MX Bikes' own track compilers over it. The Track Studio
+  fetches PiBoSo's tools the first time you build and does the whole job in one press —
+  export, compile, package, install — so what lands in your tracks folder is a track the
+  game built, not one the app guessed at.
 - A new look. Navigation moved out of the sidebar into a bar across the top, so mod
   artwork gets the full width of the window — seven mods to a row instead of five.
 - Locker and Presets sit together under Garage, and Race mode has its own place in the
