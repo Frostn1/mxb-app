@@ -3,6 +3,21 @@
 ## 2026-09-06
 
 ### Changed
+- Jumps are sized to the speed a bike actually carries. Acceleration used to hold flat all the
+  way to the top, so a lap left a hairpin at 33 km/h and was doing 100 sixty metres later, and
+  gaps got built for a speed nobody arrives at. A two-kilometre lap now runs where one runs.
+- No two jumps on a lap are the same size any more, and a lap carries a handful of doubles
+  rather than one every hundred metres.
+- Corners wear three or four lines rather than one groove and a spread, so there is a choice
+  of ways through after a few motos.
+- Ruts read much harder against the ground beside them: the packed floor is darker, the bank
+  beside it drier, and the shape shows at speed instead of only being felt. They are deeper,
+  too — matched against a published national's own ground rather than estimated.
+- Tyre marks up the face of a jump are cut into the ground as well as painted on it, fanned
+  towards the side the last corner sends you in from.
+- The racing line is smooth where the wheels run. Braking chop, acceleration chop and the
+  ground's own grain used to cover the whole width, which took away most of what the bike
+  makes down a straight.
 - The start on a track you build is its own straight beside the circuit now, the way a real
   one is: the gate row stands 40 m off the lap, sprints 85 m, and turns in to join the track
   at turn one. A flying lap never crosses the gates.
