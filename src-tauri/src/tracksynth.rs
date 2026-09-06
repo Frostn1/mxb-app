@@ -114,6 +114,29 @@ const PASS_DEPTH_M: f32 = 0.022;
 /// at the scale of a jump.
 const TEXTURE_WAVELENGTH_M: f32 = 1.8;
 
+/// And how far down the scales that texture carries.
+///
+/// Four octaves at a half gain put a fifth of the surface's energy below half a metre, and
+/// measured as roughness after a one-metre detrend that is a lap running 0.012 m against
+/// Indiana's 0.007 — half again as rough as a real track at the scale a wheel bounces on,
+/// everywhere across the width. Worked ground is lumpy at the scale of a clod and smooth
+/// under that; it is not fractal all the way down.
+/// How far along the track the ridden ground is averaged, in how many taps, and how much of
+/// the result is taken.
+///
+/// Half a metre either way: long enough to take out what a wheel would bounce on, short
+/// enough to leave a braking bump — those run at two metres and up — most of its height.
+const RIDDEN_SMOOTH_M: f32 = 0.5;
+const RIDDEN_SMOOTH_TAPS: u32 = 3;
+const RIDDEN_SMOOTH: f32 = 0.85;
+
+const TEXTURE_OCTAVES: u32 = 3;
+const TEXTURE_GAIN: f32 = 0.34;
+
+/// The same, for the field that lays out where the grooves go.
+const RUT_FIELD_OCTAVES: u32 = 2;
+const RUT_FIELD_GAIN: f32 = 0.32;
+
 /// How much the riding line's width wanders, as a fraction. A track of exactly constant
 /// width reads as machine-made from the first glance — real ones pinch into corners and open
 /// out on the straights.
@@ -905,6 +928,10 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     // 3. Bench the corridor in, then build on it.
     let mut corridor = vec![false; gw * gh];
     let mut rut = vec![0.0f32; gw * gh];
+    // How ridden each cell is, and which way the track runs there — read by the pass that
+    // smooths the ground along its own direction.
+    let mut ridden_at = vec![0.0f32; gw * gh];
+    let mut heading_at = vec![0.0f32; gw * gh];
     let mut arc = vec![0.0f32; gw * gh];
     for i in 0..gw * gh {
         let (d, s, t) = local_frame(
@@ -1104,8 +1131,20 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             let off = t - mid;
             if off.abs() <= reach || carved > 0.0 {
                 let fade = 1.0 - (off.abs() / reach).min(1.0).powi(2);
-                let field =
-                    |at: f32| fbm(at / feel.rut_spacing, s / RUT_ALONG_M, r.seed ^ 0x2117);
+                // Two octaves, not four. A groove field summed over four octaves carries as
+                // much shape at a third of the spacing as at the spacing itself, so a corner
+                // came out with half again as many grooves as a real one, packed 2.0 m apart
+                // against Indiana's 2.5, each with a floor a fifth narrower. A rut is one
+                // wavelength with a bottom on it — see `RUT_EDGE` — not a spectrum.
+                let field = |at: f32| {
+                    fbm_of(
+                        at / feel.rut_spacing,
+                        s / RUT_ALONG_M,
+                        r.seed ^ 0x2117,
+                        RUT_FIELD_OCTAVES,
+                        RUT_FIELD_GAIN,
+                    )
+                };
                 // Ground, wall, floor — see `RUT_EDGE`. Saturating the field rather than
                 // scaling it is what gives a groove a bottom to sit on and leaves the ground
                 // between two of them flat.
@@ -1152,6 +1191,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         // seams between one station's territory and the next. Out at the centre of a corner's
         // arc those seams are metres wide and the jump draws a crease across the infield.
         let w = bench_weight(d, half, SPOIL_WIDTH_M);
+        ridden_at[i] = w;
+        heading_at[i] = stations[station[i] as usize].heading;
         // Worn hardest where the wheels are. Riders use the middle of a track and the edges
         // barely at all, so the ridden texture tapers across it rather than covering the
         // corridor evenly — which is what it did, and it is measurable: Indiana's surface
@@ -1167,10 +1208,12 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         if r.texture > 0.0 && w > 0.0 {
             let (wx, wz) = ((i % gw) as f32 * mps_x, (i / gw) as f32 * mps_z);
             let gain = chop.rough.at(s);
-            heights[i] += fbm(
+            heights[i] += fbm_of(
                 wx / TEXTURE_WAVELENGTH_M,
                 wz / TEXTURE_WAVELENGTH_M,
                 r.seed ^ 0x5EED,
+                TEXTURE_OCTAVES,
+                TEXTURE_GAIN,
             ) * r.texture
                 * gain
                 * polished
@@ -1196,6 +1239,45 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let ripple = ((s / feel.accel.0 + drift) * std::f32::consts::TAU).sin();
                 heights[i] += ripple * feel.accel.1 * 0.5 * out * across * polished;
             }
+        }
+    }
+
+    // 3b. Smooth the ridden ground along the way it was ridden.
+    //
+    // A rut is a groove somebody drove down: sharp across, smooth along. Everything above
+    // builds it out of fields that are equally rough in both directions, and the difference
+    // is measurable — Indiana's ground carries 0.007 m of roughness after a one-metre
+    // detrend and ours carried 0.012, half again as much, at exactly the scale a wheel
+    // bounces on. Two thirds of that came from the rut carving and the ridden texture, and
+    // neither can simply be turned down: they are also what makes the groove.
+    //
+    // So it is taken out where it does not belong rather than never put in. Averaging along
+    // the track direction leaves anything that runs *with* the track — a groove, a berm, the
+    // line — untouched, and takes the edge off anything that does not.
+    //
+    // Braking chop runs across the track and so is attenuated by this; `RIDDEN_SMOOTH_M` is
+    // kept under a quarter of the shortest chop wavelength for that reason.
+    {
+        let src = heights.clone();
+        let taps = RIDDEN_SMOOTH_TAPS as i32;
+        for i in 0..gw * gh {
+            let w = ridden_at[i];
+            if w <= 0.0 {
+                continue;
+            }
+            let (fx, fz) = crate::trackprog::heading_vector(heading_at[i]);
+            let (cx, cz) = ((i % gw) as f32 * mps_x, (i / gw) as f32 * mps_z);
+            let mut sum = 0.0;
+            let mut norm = 0.0;
+            for k in -taps..=taps {
+                let d = k as f32 * RIDDEN_SMOOTH_M / taps as f32;
+                let g = sample_smooth(&src, gw, gh, (cx + fx * d) / mps_x, (cz + fz * d) / mps_z);
+                let weight = 1.0 - (k.abs() as f32 / (taps + 1) as f32);
+                sum += g * weight;
+                norm += weight;
+            }
+            let smoothed = sum / norm.max(1e-6);
+            heights[i] += (smoothed - heights[i]) * w * RIDDEN_SMOOTH;
         }
     }
 
@@ -6083,6 +6165,47 @@ pub fn slug(name: &str) -> String {
 mod tests {
     use super::*;
     use crate::trackprog::{Relief, Start, Terrain};
+
+    /// What our ruts are shaped like, on the same statistic a published track is measured by.
+    ///
+    /// ```text
+    /// cargo test --bin mxb-app -- --ignored --nocapture our_rut_shape
+    /// ```
+    /// Indiana, for comparison: across 0.115 m rms, along 0.068, anisotropy 1.70, floor
+    /// 0.99 m, wall 35 deg, 2.9 grooves at 2.48 m.
+    #[test]
+    #[ignore = "slow — synthesises a lap"]
+    fn our_rut_shape() {
+        let p: TrackProgram = match std::env::var("FROST_PROGRAM") {
+            Ok(path) => serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(),
+            Err(_) => serde_json::from_str(DEMO).unwrap(),
+        };
+        let s = synthesise(&p).unwrap();
+        let g = crate::trackstats::Grid {
+            w: s.gw,
+            h: s.gh,
+            size_x: p.terrain.size_x,
+            size_z: p.terrain.size_z,
+            v: s.heights.clone(),
+        };
+        let step = STATION_STEP;
+        let stations: Vec<(f32, f32, f32)> =
+            s.stations.iter().map(|st| (st.x, st.z, st.heading)).collect();
+        let r = crate::trackstats::rut_shape(&stations, step, &g).expect("a rut shape");
+        println!("  {} stations over {:.0} m", stations.len(), stations.len() as f32 * step);
+        println!(
+            "  across {:.3} m rms   along {:.3} m rms   anisotropy {:.2}",
+            r.across_rms_m, r.along_rms_m, r.anisotropy
+        );
+        println!(
+            "  floor {:.2} m   wall {:.0} deg   {:.1} grooves at {:.2} m   chatter {:.3} m",
+            r.floor_m, r.wall_deg, r.grooves, r.spacing_m, r.chatter_m
+        );
+        println!(
+            "  chatter on the line {:.3} m   2 m off {:.3}   4 m off {:.3}",
+            r.chatter_zones_m[0], r.chatter_zones_m[1], r.chatter_zones_m[2]
+        );
+    }
 
     /// Pull a published track's ground sheets out of its `.map`, as PNGs.
     ///

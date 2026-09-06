@@ -10,6 +10,9 @@
 ## 2026-09-06
 
 ### Changed
+- Ruts are shaped the way a ridden track's are: fewer grooves, further apart, with flatter
+  bottoms, and smooth along their length instead of chopped up at every scale. A lap holds
+  a line rather than shaking the bike over it.
 - A generated track has a riding line in it. The corridor is worked dirt with a darker line
   worn through it and tyre marks in the ruts, instead of one dark ribbon from edge to edge.
 - Generated tracks are painted with real ground. The soil, the riding line, the packed bottom
