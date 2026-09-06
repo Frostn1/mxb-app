@@ -423,6 +423,14 @@ pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
     (up, top, down)
 }
 
+/// The shortest straight a start will fit on, metres.
+///
+/// A motocross start is a gate row, the finish line a dozen metres past it, and a run at the
+/// first turn — all of it in a line, because forty gates cannot be laid round a bend.
+/// Published start straights are longer than this; it is the floor below which the layout
+/// stops fitting on the track.
+pub const START_STRAIGHT_M: f32 = 60.0;
+
 /// Under this many degrees an arc is a drift, not a corner — a builder nudging a straight
 /// back onto line.
 pub const CORNER_DEG: f32 = 1.0;
@@ -556,6 +564,21 @@ impl Feature {
         }
     }
 
+    /// Where it sits, to move it. Rotating the lap's start moves everything placed by
+    /// distance round it, and a feature is placed by distance round it.
+    pub fn at_mut(&mut self) -> &mut f32 {
+        match self {
+            Feature::Tabletop { at, .. }
+            | Feature::Double { at, .. }
+            | Feature::Roller { at, .. }
+            | Feature::Whoops { at, .. }
+            | Feature::StepUp { at, .. }
+            | Feature::Berm { at, .. }
+            | Feature::Rut { at, .. }
+            | Feature::Custom { at, .. } => at,
+        }
+    }
+
     /// How much of the lap it occupies.
     pub fn length(&self) -> f32 {
         match self {
@@ -627,6 +650,11 @@ impl Feature {
 /// not star-shaped: Indiana folds back across its own infield four times. A loop grown on a
 /// lattice folds as often as it likes and is still simple, so it cannot cross either.
 ///
+/// It begins on its longest straight, all 145 m of it, because that is where a start goes: the gate row, the finish
+/// line and the run at turn one all sit on the lap's opening straight, and a lap that opens on
+/// a corner puts forty gates round a bend. Turned round to start there rather than redrawn —
+/// see [`TrackProgram::rotate_start`], and the printer beside its tests.
+///
 /// 1905 m, 137 segments of which 109 are arcs, seventeen corners at a median 12.6 m through
 /// their tightest point — Indiana's is 10.6 — and 2651° of turning. Forty features, seven of them over 2.2 m and the
 /// rest small ground, which is the ratio Indiana has. It climbs 22 m round the lap, which is
@@ -643,31 +671,8 @@ pub const EXAMPLE: &str = r#"{
         "sizeX": 500.0, "sizeZ": 500.0, "samples": 2049, "scale": 63.0,
         "relief": { "amplitude": 7.0, "wavelength": 420.0, "seed": 3, "tilt": 26.0, "tiltAngle": 35.0, "landforms": 6, "landformHeight": 18.0 }
       },
-      "start": { "x": 282.02, "z": 225.07, "angle": 195.0 },
+      "start": { "x": 336.20, "z": 61.04, "angle": 272.27 },
       "segments": [
-        { "kind": "arc", "radius": -32.8954, "angle": 13.9340 },
-        { "kind": "straight", "length": 11.1325 },
-        { "kind": "arc", "radius": 125.4045, "angle": 0.9138 },
-        { "kind": "straight", "length": 90.3427 },
-        { "kind": "arc", "radius": -29.7662, "angle": 15.3989 },
-        { "kind": "arc", "radius": -12.1796, "angle": 32.9296 },
-        { "kind": "arc", "radius": -14.3360, "angle": 35.9696 },
-        { "kind": "arc", "radius": -26.7612, "angle": 17.1280 },
-        { "kind": "arc", "radius": -62.8691, "angle": 10.0249 },
-        { "kind": "straight", "length": 14.8925 },
-        { "kind": "arc", "radius": 85.2827, "angle": 2.0155 },
-        { "kind": "straight", "length": 8.0000 },
-        { "kind": "arc", "radius": 58.4038, "angle": 6.6786 },
-        { "kind": "arc", "radius": 30.0985, "angle": 17.1325 },
-        { "kind": "arc", "radius": 20.2107, "angle": 34.8569 },
-        { "kind": "arc", "radius": 58.4731, "angle": 11.9787 },
-        { "kind": "arc", "radius": 81.8716, "angle": 8.8265 },
-        { "kind": "arc", "radius": 48.2785, "angle": 9.4942 },
-        { "kind": "arc", "radius": 16.6843, "angle": 24.0389 },
-        { "kind": "arc", "radius": 11.4412, "angle": 75.1175 },
-        { "kind": "arc", "radius": 36.3257, "angle": 12.0854 },
-        { "kind": "straight", "length": 24.1297 },
-        { "kind": "arc", "radius": -118.9746, "angle": 0.4816 },
         { "kind": "straight", "length": 145.1504 },
         { "kind": "arc", "radius": 63.4878, "angle": 8.1222 },
         { "kind": "arc", "radius": 24.3538, "angle": 16.4685 },
@@ -781,49 +786,72 @@ pub const EXAMPLE: &str = r#"{
         { "kind": "arc", "radius": -54.6225, "angle": 12.4011 },
         { "kind": "arc", "radius": -52.9898, "angle": 32.2688 },
         { "kind": "arc", "radius": -12.0022, "angle": 36.2527 },
-        { "kind": "arc", "radius": -12.8808, "angle": 31.1370 }
+        { "kind": "arc", "radius": -12.8808, "angle": 31.1370 },
+        { "kind": "arc", "radius": -32.8954, "angle": 13.9340 },
+        { "kind": "straight", "length": 11.1325 },
+        { "kind": "arc", "radius": 125.4045, "angle": 0.9138 },
+        { "kind": "straight", "length": 90.3427 },
+        { "kind": "arc", "radius": -29.7662, "angle": 15.3989 },
+        { "kind": "arc", "radius": -12.1796, "angle": 32.9296 },
+        { "kind": "arc", "radius": -14.3360, "angle": 35.9696 },
+        { "kind": "arc", "radius": -26.7612, "angle": 17.1280 },
+        { "kind": "arc", "radius": -62.8691, "angle": 10.0249 },
+        { "kind": "straight", "length": 14.8925 },
+        { "kind": "arc", "radius": 85.2827, "angle": 2.0155 },
+        { "kind": "straight", "length": 8.0000 },
+        { "kind": "arc", "radius": 58.4038, "angle": 6.6786 },
+        { "kind": "arc", "radius": 30.0985, "angle": 17.1325 },
+        { "kind": "arc", "radius": 20.2107, "angle": 34.8569 },
+        { "kind": "arc", "radius": 58.4731, "angle": 11.9787 },
+        { "kind": "arc", "radius": 81.8716, "angle": 8.8265 },
+        { "kind": "arc", "radius": 48.2785, "angle": 9.4942 },
+        { "kind": "arc", "radius": 16.6843, "angle": 24.0389 },
+        { "kind": "arc", "radius": 11.4412, "angle": 75.1175 },
+        { "kind": "arc", "radius": 36.3257, "angle": 12.0854 },
+        { "kind": "straight", "length": 24.1297 },
+        { "kind": "arc", "radius": -118.9746, "angle": 0.4816 }
       ],
       "features": [
-        { "kind": "tabletop", "at": 25.8, "length": 28.7, "height": 2.50 },
-        { "kind": "double", "at": 48.4, "height": 1.70, "gap": 10.2, "lip": 5.5 },
-        { "kind": "double", "at": 71.0, "height": 1.30, "gap": 8.9, "lip": 5.5 },
-        { "kind": "roller", "at": 93.7, "length": 15.9, "height": 0.54 },
-        { "kind": "roller", "at": 157.7, "length": 14.3, "height": 0.79 },
-        { "kind": "tabletop", "at": 173.0, "length": 19.0, "height": 1.10 },
-        { "kind": "tabletop", "at": 224.9, "length": 18.4, "height": 1.10 },
-        { "kind": "berm", "at": 248.3, "length": 15.0, "height": 1.70 },
-        { "kind": "tabletop", "at": 294.1, "length": 31.3, "height": 3.10 },
-        { "kind": "roller", "at": 327.4, "length": 11.3, "height": 0.80 },
-        { "kind": "tabletop", "at": 360.6, "length": 22.6, "height": 1.50 },
-        { "kind": "stepUp", "at": 393.9, "length": 20.9, "height": 2.00 },
-        { "kind": "roller", "at": 427.1, "length": 14.4, "height": 0.75 },
-        { "kind": "berm", "at": 561.6, "length": 8.0, "height": 1.70 },
-        { "kind": "double", "at": 591.8, "height": 1.50, "gap": 8.8, "lip": 5.5 },
-        { "kind": "roller", "at": 704.8, "length": 11.1, "height": 0.79 },
-        { "kind": "tabletop", "at": 777.7, "length": 29.5, "height": 3.40 },
-        { "kind": "roller", "at": 798.0, "length": 11.6, "height": 0.80 },
-        { "kind": "double", "at": 818.3, "height": 1.90, "gap": 9.2, "lip": 5.5 },
-        { "kind": "double", "at": 879.3, "height": 3.60, "gap": 14.6, "lip": 6.0 },
-        { "kind": "stepUp", "at": 896.9, "length": 19.3, "height": 2.20 },
-        { "kind": "roller", "at": 914.5, "length": 13.5, "height": 0.46 },
-        { "kind": "whoops", "at": 976.6, "count": 7, "spacing": 4.2, "height": 0.57 },
-        { "kind": "double", "at": 995.1, "height": 1.20, "gap": 12.7, "lip": 5.5 },
-        { "kind": "tabletop", "at": 1044.5, "length": 20.3, "height": 1.20 },
-        { "kind": "tabletop", "at": 1138.0, "length": 16.9, "height": 1.00 },
-        { "kind": "double", "at": 1155.4, "height": 1.60, "gap": 8.2, "lip": 5.5 },
-        { "kind": "stepUp", "at": 1221.8, "length": 25.2, "height": 1.90 },
-        { "kind": "roller", "at": 1286.7, "length": 14.8, "height": 0.60 },
-        { "kind": "tabletop", "at": 1361.0, "length": 24.4, "height": 2.50 },
-        { "kind": "roller", "at": 1386.9, "length": 14.4, "height": 0.82 },
-        { "kind": "roller", "at": 1412.8, "length": 13.2, "height": 0.58 },
-        { "kind": "tabletop", "at": 1479.3, "length": 24.1, "height": 1.10 },
-        { "kind": "double", "at": 1550.0, "height": 3.60, "gap": 16.4, "lip": 6.0 },
-        { "kind": "roller", "at": 1593.2, "length": 14.6, "height": 0.64 },
-        { "kind": "tabletop", "at": 1636.4, "length": 17.3, "height": 1.20 },
-        { "kind": "tabletop", "at": 1679.6, "length": 18.2, "height": 1.40 },
-        { "kind": "roller", "at": 1722.8, "length": 11.5, "height": 0.77 },
-        { "kind": "whoops", "at": 1820.6, "count": 7, "spacing": 5.0, "height": 0.75 },
-        { "kind": "tabletop", "at": 1862.6, "length": 22.5, "height": 1.60 }
+        { "kind": "roller", "at": 31.299774, "length": 11.3, "height": 0.8 },
+        { "kind": "tabletop", "at": 64.49979, "length": 22.6, "height": 1.5 },
+        { "kind": "stepUp", "at": 97.799774, "length": 20.9, "height": 2.0 },
+        { "kind": "roller", "at": 130.99979, "length": 14.4, "height": 0.75 },
+        { "kind": "berm", "at": 265.4998, "length": 8.0, "height": 1.7 },
+        { "kind": "double", "at": 295.6998, "height": 1.5, "gap": 8.8, "lip": 5.5 },
+        { "kind": "roller", "at": 408.6998, "length": 11.1, "height": 0.79 },
+        { "kind": "tabletop", "at": 481.59982, "length": 29.5, "height": 3.4 },
+        { "kind": "roller", "at": 501.8998, "length": 11.6, "height": 0.8 },
+        { "kind": "double", "at": 522.1998, "height": 1.9, "gap": 9.2, "lip": 5.5 },
+        { "kind": "double", "at": 583.1998, "height": 3.6, "gap": 14.6, "lip": 6.0 },
+        { "kind": "stepUp", "at": 600.7998, "length": 19.3, "height": 2.2 },
+        { "kind": "roller", "at": 618.3998, "length": 13.5, "height": 0.46 },
+        { "kind": "whoops", "at": 680.49976, "count": 7, "spacing": 4.2, "height": 0.57 },
+        { "kind": "double", "at": 698.99976, "height": 1.2, "gap": 12.7, "lip": 5.5 },
+        { "kind": "tabletop", "at": 748.3998, "length": 20.3, "height": 1.2 },
+        { "kind": "tabletop", "at": 841.8998, "length": 16.9, "height": 1.0 },
+        { "kind": "double", "at": 859.2998, "height": 1.6, "gap": 8.2, "lip": 5.5 },
+        { "kind": "stepUp", "at": 925.6998, "length": 25.2, "height": 1.9 },
+        { "kind": "roller", "at": 990.59973, "length": 14.8, "height": 0.6 },
+        { "kind": "tabletop", "at": 1064.8998, "length": 24.4, "height": 2.5 },
+        { "kind": "roller", "at": 1090.7998, "length": 14.4, "height": 0.82 },
+        { "kind": "roller", "at": 1116.6998, "length": 13.2, "height": 0.58 },
+        { "kind": "tabletop", "at": 1183.1998, "length": 24.1, "height": 1.1 },
+        { "kind": "double", "at": 1253.8998, "height": 3.6, "gap": 16.4, "lip": 6.0 },
+        { "kind": "roller", "at": 1297.0997, "length": 14.6, "height": 0.64 },
+        { "kind": "tabletop", "at": 1340.2998, "length": 17.3, "height": 1.2 },
+        { "kind": "tabletop", "at": 1383.4998, "length": 18.2, "height": 1.4 },
+        { "kind": "roller", "at": 1426.6998, "length": 11.5, "height": 0.77 },
+        { "kind": "whoops", "at": 1524.4998, "count": 7, "spacing": 5.0, "height": 0.75 },
+        { "kind": "tabletop", "at": 1566.4998, "length": 22.5, "height": 1.6 },
+        { "kind": "tabletop", "at": 1634.8657, "length": 28.7, "height": 2.5 },
+        { "kind": "double", "at": 1657.4657, "height": 1.7, "gap": 10.2, "lip": 5.5 },
+        { "kind": "double", "at": 1680.0657, "height": 1.3, "gap": 8.9, "lip": 5.5 },
+        { "kind": "roller", "at": 1702.7656, "length": 15.9, "height": 0.54 },
+        { "kind": "roller", "at": 1766.7656, "length": 14.3, "height": 0.79 },
+        { "kind": "tabletop", "at": 1782.0657, "length": 19.0, "height": 1.1 },
+        { "kind": "tabletop", "at": 1833.9657, "length": 18.4, "height": 1.1 },
+        { "kind": "berm", "at": 1857.3657, "length": 15.0, "height": 1.7 },
+        { "kind": "tabletop", "at": 1873.8658, "length": 31.3, "height": 3.1 }
       ]
     }"#;
 
@@ -839,6 +867,35 @@ fn wrap(a: f32) -> f32 {
         x += tau;
     }
     x
+}
+
+/// Where a run of segments leaves you, ridden from `from`.
+///
+/// The same walk [`TrackProgram::stations`] does, without the sampling: arcs are stepped from
+/// their centre, so a hundred segments end exactly where their radii and angles say.
+fn end_pose(from: Start, segs: &[Segment]) -> Start {
+    let (mut x, mut z) = (from.x, from.z);
+    let mut theta = from.angle.to_radians();
+    for seg in segs {
+        match *seg {
+            Segment::Straight { .. } => {
+                let (dx, dz) = heading_vector(theta);
+                x += dx * seg.length();
+                z += dz * seg.length();
+            }
+            Segment::Arc { radius, angle, .. } => {
+                let turn = radius.signum();
+                let r = radius.abs().max(0.01);
+                let (rx, rz) = right_vector(theta);
+                let (cx, cz) = (x + rx * r * turn, z + rz * r * turn);
+                theta += turn * angle.abs().to_radians();
+                let (rx, rz) = right_vector(theta);
+                x = cx - rx * r * turn;
+                z = cz - rz * r * turn;
+            }
+        }
+    }
+    Start { x, z, angle: theta.to_degrees() }
 }
 
 /// One point on the riding line, and which way it faces there.
@@ -858,6 +915,100 @@ pub struct Station {
 impl TrackProgram {
     pub fn lap_length(&self) -> f32 {
         self.segments.iter().map(|s| s.length()).sum()
+    }
+
+    /// How much straight the lap opens with, metres.
+    ///
+    /// The leading run, not the first segment: consecutive straights are colinear, so three
+    /// of them in a row are one straight to everything that rides it. This is what the start
+    /// gets laid out on — the gate row, the finish line and the run at turn one all sit on
+    /// it, and every file that mentions the start measures from where it begins.
+    pub fn opening_straight(&self) -> f32 {
+        self.segments
+            .iter()
+            .take_while(|s| matches!(s, Segment::Straight { .. }))
+            .map(|s| s.length())
+            .sum()
+    }
+
+    /// Every straight on the lap: `(segment index, metres round the lap, length)`.
+    ///
+    /// Runs of consecutive straights are merged for the same reason as above, and so is the
+    /// pair either side of the finish — a lap that ends on a straight and begins on one has
+    /// a single straight through the line, and it is usually the longest thing on the track.
+    pub fn straight_runs(&self) -> Vec<(usize, f32, f32)> {
+        let mut out: Vec<(usize, f32, f32)> = Vec::new();
+        let mut at = 0.0f32;
+        for (i, seg) in self.segments.iter().enumerate() {
+            let len = seg.length();
+            if matches!(seg, Segment::Straight { .. }) {
+                match out.last_mut() {
+                    // Carrying on the run the segment before it started.
+                    Some(run) if (run.1 + run.2 - at).abs() < 1e-3 => run.2 += len,
+                    _ => out.push((i, at, len)),
+                }
+            }
+            at += len;
+        }
+        // Across the finish, when the lap both ends and begins on one — and only when it
+        // closes, because two straights either side of a lap that doesn't meet itself are two
+        // straights pointing different ways in different places.
+        if out.len() > 1 && self.closes() {
+            let first = out[0];
+            let last = *out.last().expect("more than one run");
+            if first.0 == 0 && (last.1 + last.2 - at).abs() < 1e-3 {
+                out.pop();
+                out.remove(0);
+                out.push((last.0, last.1, last.2 + first.2));
+            }
+        }
+        out
+    }
+
+    /// Whether the finish meets the start, pose and all — near enough that the two ends are
+    /// the same piece of track.
+    pub fn closes(&self) -> bool {
+        let end = end_pose(self.start, &self.segments);
+        let gap = ((end.x - self.start.x).powi(2) + (end.z - self.start.z).powi(2)).sqrt();
+        gap < 1.0 && wrap((end.angle - self.start.angle).to_radians()).abs() < 0.02
+    }
+
+    /// Begin the lap at segment `index`: the same track, ridden from a different point on it.
+    ///
+    /// Where a lap starts is not part of its shape — it decides where the gate row stands and
+    /// what `long = 0` means in every file that states a distance round the lap, and nothing
+    /// else. So a lap drawn starting halfway round a corner can be given a proper start
+    /// straight without redrawing it: turn the list of segments round and walk the start pose
+    /// to where the new first segment begins.
+    ///
+    /// Everything placed by distance moves with it — the features and the elevation knots —
+    /// and a feature left straddling the new finish is pulled back to end on it, which is
+    /// what the studio does to a stranded jump.
+    ///
+    /// Returns how far round the old lap the new start is.
+    pub fn rotate_start(&mut self, index: usize) -> f32 {
+        if self.segments.is_empty() || index == 0 || index >= self.segments.len() {
+            return 0.0;
+        }
+        let lap = self.lap_length();
+        let shift: f32 = self.segments[..index].iter().map(|s| s.length()).sum();
+        self.start = end_pose(self.start, &self.segments[..index]);
+        // Back into a circle: the walk adds every turn to the heading, so starting partway
+        // round a lap that turns 2651° leaves the pose facing 541 degrees.
+        self.start.angle = self.start.angle.rem_euclid(360.0);
+        self.segments.rotate_left(index);
+
+        for f in &mut self.features {
+            let len = f.length();
+            let at = (f.at() - shift).rem_euclid(lap.max(1.0));
+            *f.at_mut() = if at + len > lap { (lap - len).max(0.0) } else { at };
+        }
+        self.features.sort_by(|a, b| a.at().total_cmp(&b.at()));
+        for k in &mut self.elevation {
+            k.at = (k.at - shift).rem_euclid(lap.max(1.0));
+        }
+        self.elevation.sort_by(|a, b| a.at.total_cmp(&b.at));
+        shift
     }
 
     /// The centreline, sampled every `step` metres.
@@ -1106,6 +1257,153 @@ mod tests {
             blend: default_blend(),
             elevation: Vec::new(),
         }
+    }
+
+    /// An oval: two straights of different lengths, so which one the start lands on is
+    /// visible in the numbers.
+    fn oval() -> TrackProgram {
+        prog(vec![
+            Segment::Arc { radius: 40.0, angle: 180.0, rise: 0.0 },
+            Segment::Straight { length: 30.0, rise: 0.0 },
+            Segment::Arc { radius: 40.0, angle: 180.0, rise: 0.0 },
+            Segment::Straight { length: 30.0, rise: 0.0 },
+        ])
+    }
+
+    #[test]
+    fn straight_runs_merge_what_rides_as_one_straight() {
+        let p = prog(vec![
+            Segment::Straight { length: 20.0, rise: 0.0 },
+            Segment::Straight { length: 25.0, rise: 0.0 },
+            Segment::Arc { radius: 30.0, angle: 90.0, rise: 0.0 },
+            Segment::Straight { length: 10.0, rise: 0.0 },
+        ]);
+        let runs = p.straight_runs();
+        assert_eq!(runs.len(), 2, "{runs:?}");
+        assert_eq!(runs[0].0, 0);
+        assert!((runs[0].2 - 45.0).abs() < 0.01, "{runs:?}");
+    }
+
+    #[test]
+    fn a_straight_through_the_finish_is_one_straight() {
+        // An oval whose finish sits in the middle of a straight: 20 m of it before the line
+        // and 30 m after, which is one 50 m straight and not two.
+        let p = prog(vec![
+            Segment::Straight { length: 30.0, rise: 0.0 },
+            Segment::Arc { radius: 40.0, angle: 180.0, rise: 0.0 },
+            Segment::Straight { length: 50.0, rise: 0.0 },
+            Segment::Arc { radius: 40.0, angle: 180.0, rise: 0.0 },
+            Segment::Straight { length: 20.0, rise: 0.0 },
+        ]);
+        let runs = p.straight_runs();
+        assert_eq!(runs.len(), 2, "{runs:?}");
+        let through = runs.iter().find(|r| r.0 == 4).expect("the run through the finish");
+        assert!((through.2 - 50.0).abs() < 0.01, "{runs:?}");
+    }
+
+    #[test]
+    fn a_rotated_lap_is_the_same_lap() {
+        let before = oval();
+        let mut after = before.clone();
+        let shift = after.rotate_start(1);
+        assert!((shift - 40.0 * std::f32::consts::PI).abs() < 0.01, "{shift}");
+        assert!((after.lap_length() - before.lap_length()).abs() < 0.01);
+        assert!(after.closure_error() < 0.05, "{}", after.closure_error());
+
+        // Every point of the rotated lap is a point of the original, at the shifted distance.
+        let lap = before.lap_length();
+        let was = before.stations(1.0);
+        for st in after.stations(1.0) {
+            let s = (st.s + shift).rem_euclid(lap);
+            let near = was
+                .iter()
+                .map(|q| ((q.x - st.x).powi(2) + (q.z - st.z).powi(2)).sqrt())
+                .fold(f32::MAX, f32::min);
+            assert!(near < 0.6, "{:.1} m off the old lap at {s:.0} m", near);
+        }
+    }
+
+    #[test]
+    fn rotating_carries_the_features_round() {
+        let mut p = oval();
+        p.features = vec![Feature::Tabletop { at: 150.0, length: 20.0, height: 1.5 }];
+        p.elevation = vec![Knot { at: 150.0, height: 2.0 }];
+        let shift = p.rotate_start(1);
+        assert!((p.features[0].at() - (150.0 - shift)).abs() < 0.01, "{:?}", p.features[0]);
+        assert!((p.elevation[0].at - (150.0 - shift)).abs() < 0.01, "{:?}", p.elevation[0]);
+        p.check().expect("and the lap is still one the synthesiser will take");
+    }
+
+    #[test]
+    fn a_feature_left_straddling_the_finish_is_pulled_back_onto_it() {
+        let mut p = oval();
+        // Sits over the point the lap is about to start at, which after the rotation would
+        // put it half before the start and half past the finish.
+        let at = 40.0 * std::f32::consts::PI - 5.0;
+        p.features = vec![Feature::Tabletop { at, length: 20.0, height: 1.5 }];
+        p.rotate_start(1);
+        p.check().expect("nothing hangs off the end of the lap");
+    }
+
+    /// Prints [`EXAMPLE`] turned round to begin on a straight, in the layout the constant is
+    /// written in. Run when the example changes:
+    ///
+    /// ```text
+    /// cargo test -- --ignored --nocapture print_the_example
+    /// ```
+    #[test]
+    #[ignore = "prints a program"]
+    fn print_the_example_started_on_its_straight() {
+        let mut p: TrackProgram = serde_json::from_str(EXAMPLE).unwrap();
+        let features = p.features.clone();
+        let clear_from = |at: f32| {
+            !features.iter().any(|f| {
+                f.at() + f.length() > at + 0.01 && f.at() < at + START_STRAIGHT_M - 0.01
+            })
+        };
+        let runs = p.straight_runs();
+        let longest = |it: &mut dyn Iterator<Item = &(usize, f32, f32)>| {
+            it.max_by(|a, b| a.2.total_cmp(&b.2)).copied()
+        };
+        let (index, _, len) = longest(
+            &mut runs.iter().filter(|(_, at, len)| *len >= START_STRAIGHT_M && clear_from(*at)),
+        )
+        .or_else(|| longest(&mut runs.iter()))
+        .expect("a straight to start on");
+        p.rotate_start(index);
+        println!("// {len:.0} m opening straight, closes to {:.2} m", p.closure_error());
+        println!(
+            "      \"start\": {{ \"x\": {:.2}, \"z\": {:.2}, \"angle\": {:.2} }},",
+            p.start.x, p.start.z, p.start.angle
+        );
+        println!("      \"segments\": [");
+        for seg in &p.segments {
+            match seg {
+                Segment::Straight { length, .. } => {
+                    println!("        {{ \"kind\": \"straight\", \"length\": {length:.4} }},")
+                }
+                Segment::Arc { radius, angle, .. } => println!(
+                    "        {{ \"kind\": \"arc\", \"radius\": {radius:.4}, \"angle\": {angle:.4} }},"
+                ),
+            }
+        }
+        println!("      ],");
+        println!("      \"features\": [");
+        for f in &p.features {
+            println!("        {},", serde_json::to_string(f).unwrap());
+        }
+        println!("      ]");
+    }
+
+    #[test]
+    fn the_example_starts_on_a_straight_long_enough_for_a_start() {
+        let p: TrackProgram = serde_json::from_str(EXAMPLE).unwrap();
+        assert!(
+            p.opening_straight() >= START_STRAIGHT_M,
+            "the example opens with {:.0} m of straight",
+            p.opening_straight()
+        );
+        assert!(p.closes(), "and it still meets itself");
     }
 
     #[test]

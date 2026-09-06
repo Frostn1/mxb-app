@@ -237,6 +237,12 @@ what ten published circuits are made of:
 So: build each corner as a run of arcs, keep the straights short, and let the lap wander.
 Count the arcs before you send it — if straights outnumber corners you have written a shape.
 
+START THE LAP ON A STRAIGHT. A motocross start is forty gates in a line 48 m across, and the
+gate row, the finish line and the run at turn one all sit on the lap's opening straight — a lap
+that begins on a corner has its gates laid round a bend. So the FIRST segment is a straight of
+60-100 m, and the lap has to come back to it. That is the one long straight; the rest stay
+short. Leave it clear — no jumps in the first 40 m, riders are forty abreast there.
+
 THE LAP MUST STILL CLOSE, and a lap like this closes the same way: the signed angles sum to
 ±360° and the straights bring it home. A serpentine that turns 2400° in total and 360° net is
 exactly what the published tracks do — they alternate a big turn one way with a slightly
