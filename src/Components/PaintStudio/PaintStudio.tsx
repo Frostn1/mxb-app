@@ -282,10 +282,10 @@ export default function PaintStudio({ onSendToDesigner }: PaintStudioProps) {
 
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 px-7 pb-6">
-      {/* Same one-row treatment as the Designer: where it goes and what it's called are
-          answered once, and the sheets are what the screen is actually for. */}
-      <div className="flex flex-none flex-wrap items-center gap-2">
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* One band: where it goes, what it is called, and everything that puts sheets on
+          the screen. Saving is the run bar at the bottom, like Protect and the Designer. */}
+      <div className="flex flex-none flex-wrap items-center gap-2 px-7 pb-3 pt-4">
         <PaintDestBar state={destState} className="w-[290px]" />
         <Input
           value={name}
@@ -297,23 +297,30 @@ export default function PaintStudio({ onSendToDesigner }: PaintStudioProps) {
           }}
           onKeyDown={(e) => e.key === "Enter" && void save()}
         />
-        <Button
-          size="sm"
-          disabled={busy || !!blocked}
-          title={blocked ?? undefined}
-          onClick={() => void save()}
-        >
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-          {t("paints.save")}
-        </Button>
-        <span className="h-5 w-px flex-none bg-border" />
         <Button variant="outline" size="sm" onClick={() => void unpack()} disabled={busy}>
           <PackageOpen className="size-3.5" /> {t("paints.unpack")}
         </Button>
-        {blocked && (
-          <span className="ml-auto max-w-[40%] truncate text-[11px] text-faint" title={blocked}>
-            {blocked}
-          </span>
+        <span className="h-5 w-px flex-none bg-border" />
+        <Button size="sm" variant="secondary" onClick={() => void addImages()} disabled={busy}>
+          <ImagePlus className="size-3.5" /> {t("paints.addImages")}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void reload()}
+          disabled={busy || !sheets.length}
+        >
+          <RefreshCw className={cn("size-3.5", busy && "animate-spin")} /> {t("paints.reload")}
+        </Button>
+        {!!sheets.length && onSendToDesigner && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() => onSendToDesigner(sheets)}
+          >
+            <Brush className="size-3.5" /> {t("paints.toDesigner")}
+          </Button>
         )}
       </div>
 
@@ -337,29 +344,14 @@ export default function PaintStudio({ onSendToDesigner }: PaintStudioProps) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-7 pb-5">
         {/* ── The sheets ────────────────────────────────────────────────────── */}
         <section className="flex min-w-0 flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-[13px] font-semibold">{t("paints.sheetsTitle")}</h2>
-            <div className="ml-auto flex gap-2">
-              {!!sheets.length && onSendToDesigner && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => onSendToDesigner(sheets)}
-                >
-                  <Brush className="size-3.5" /> {t("paints.toDesigner")}
-                </Button>
-              )}
-              <Button variant="outline" size="sm" onClick={() => void reload()} disabled={busy || !sheets.length}>
-                <RefreshCw className={cn("size-3.5", busy && "animate-spin")} /> {t("paints.reload")}
-              </Button>
-              <Button size="sm" onClick={() => void addImages()} disabled={busy}>
-                <ImagePlus className="size-3.5" /> {t("paints.addImages")}
-              </Button>
-            </div>
+          <div className="flex items-center gap-2.5">
+            <span className="u-skew h-3 w-1 bg-primary" />
+            <h2 className="font-cond text-[13px] font-bold uppercase tracking-[0.2em] text-foreground">
+              {t("paints.sheetsTitle")}
+            </h2>
           </div>
 
           {hints.length > 0 && (
@@ -460,6 +452,17 @@ export default function PaintStudio({ onSendToDesigner }: PaintStudioProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Saving lives here, in the same place on every Studio screen, with the reason it
+          is disabled beside it rather than floating at the end of the toolbar. */}
+      <div className="flex h-[52px] flex-none items-center gap-3 border-t border-border bg-window px-7">
+        {blocked && <span className="text-[11.5px] text-muted-foreground">{blocked}</span>}
+        <div className="flex-1" />
+        <Button disabled={busy || !!blocked} title={blocked ?? undefined} onClick={() => void save()}>
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+          {t("paints.save")}
+        </Button>
+      </div>
 
       <ViewerDialog
         open={view3d}
