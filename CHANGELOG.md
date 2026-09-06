@@ -21,6 +21,10 @@
   goes before anything is written.
 
 ### Fixed
+- Corners on a generated track wear a bundle of ruts rather than a single deep gouge. The
+  deepest groove now cuts about 0.45 m where it used to cut a metre.
+- Braking bumps appear on the approach to every corner, not just the handful that follow a
+  dead-straight section, and there is acceleration chop on the way out.
 - The cloud-storage warning names OneDrive instead of guessing at "a cloud sync tool", says
   the app itself is fine, and takes up one thin line instead of a block.
 - Sharing a track goes through. Big shares upload in smaller pieces and a piece the host
