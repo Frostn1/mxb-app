@@ -140,6 +140,7 @@ mod track;
 mod trackbuild;
 mod trackline;
 mod trackllm;
+mod trackobjects;
 mod trackprog;
 mod trackstats;
 mod tracksynth;
