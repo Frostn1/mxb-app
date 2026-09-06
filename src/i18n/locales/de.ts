@@ -52,6 +52,7 @@ export const de: Translation = {
   "nav.shop": "Shop",
   "nav.hub": "MXB Hub",
   "nav.library": "Bibliothek",
+  "nav.garage": "Garage",
   "nav.downloads": "Downloads",
   "nav.locker": "Spind",
   "nav.presets": "Presets",

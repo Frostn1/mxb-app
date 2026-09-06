@@ -2,6 +2,13 @@
 
 ## 2026-09-05
 
+### Changed
+- A new look. Navigation moved out of the sidebar into a bar across the top, so mod
+  artwork gets the full width of the window — seven mods to a row instead of five.
+- Locker and Presets sit together under Garage, and Race mode has its own place in the
+  top bar.
+- Text is set in Barlow, which ships inside the app so it reads the same offline.
+
 ### Added
 - A Servers tab that lists every live MX Bikes server the way the in-game browser does —
   who's on each one, the track it's running, and its address. Press Join to launch straight

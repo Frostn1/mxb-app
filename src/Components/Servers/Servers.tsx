@@ -20,6 +20,7 @@ import {
   type MasterServer,
 } from "../../api/mods";
 import { useT } from "../../i18n/context";
+import JoinServerDialog from "../Shell/JoinServerDialog";
 
 /**
  * The live MX Bikes server list, read straight from PiBoSo's master server — the same
@@ -38,6 +39,7 @@ const Servers = () => {
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [joining, setJoining] = useState<string | null>(null);
+  const [joinOpen, setJoinOpen] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -136,9 +138,18 @@ const Servers = () => {
               <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
               {t("serverBrowser.refresh")}
             </Button>
+            {/* Join by address, for a server the master list doesn't carry. It lived in the
+                sidebar next to Play; with the sidebar gone this is where someone looks for
+                it — the page that is already about joining servers. */}
+            <Button variant="outline" size="sm" onClick={() => setJoinOpen(true)}>
+              <Plug className="size-3.5" />
+              {t("join.title")}
+            </Button>
           </div>
         </div>
       </header>
+
+      <JoinServerDialog open={joinOpen} onOpenChange={setJoinOpen} onJoined={load} />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
         {servers === null ? (

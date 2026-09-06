@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import Sidebar, { type DashboardView } from "../Shell/Sidebar";
+import TopRail from "../Shell/TopRail";
+import { type DashboardView } from "../Shell/nav";
 import { parsePluginView, usePlugins } from "@/lib/usePlugins";
 import Library from "../Library/Library";
 import Downloads from "../Downloads/Downloads";
@@ -15,6 +16,8 @@ import Shop from "../Shop/Shop";
 import Hub from "../Hub/Hub";
 import ModDetail from "../ModDetail/ModDetail";
 import DropZone from "../Dropzone/DropZone";
+import RuntimeBanner from "../RuntimeBanner/RuntimeBanner";
+import UpdateBanner from "../UpdateBanner/UpdateBanner";
 import Settings, { type SectionId } from "../Settings/Settings";
 import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import ReleaseShowcase from "../Showcase/ReleaseShowcase";
@@ -207,8 +210,15 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           there is nowhere to install to before the MX Bikes folder is known. The overlay
           window renders its own tree and deliberately gets no drop target. */}
       <DropZone />
+      <TopRail
+        view={view}
+        studioTab={studioTab}
+        plugins={plugins}
+        onNavigate={navigate}
+      />
+      <RuntimeBanner />
+      <UpdateBanner />
       <div className="flex min-h-0 flex-1">
-        <Sidebar view={view} studioTab={studioTab} plugins={plugins} onNavigate={navigate} />
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
           {pluginPanel ? (
             <pluginPanel.component />

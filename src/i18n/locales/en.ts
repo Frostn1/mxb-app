@@ -46,6 +46,7 @@ export const en = {
   "nav.shop": "Shop",
   "nav.hub": "MXB Hub",
   "nav.library": "Library",
+  "nav.garage": "Garage",
   "nav.downloads": "Downloads",
   "nav.locker": "Locker",
   "nav.presets": "Presets",

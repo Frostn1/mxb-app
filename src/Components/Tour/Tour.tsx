@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 import { useT, type TKey } from "../../i18n/context";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
-import type { DashboardView } from "../Shell/Sidebar";
+import type { DashboardView } from "../Shell/nav";
 import type { StudioTab } from "../Studio/Studio";
 
 /** Bumped when the tour changes enough to warrant showing it again. */

@@ -50,6 +50,7 @@ export const ptBR: Translation = {
   "nav.shop": "Loja",
   "nav.hub": "MXB Hub",
   "nav.library": "Biblioteca",
+  "nav.garage": "Garagem",
   "nav.downloads": "Downloads",
   "nav.locker": "Armário",
   "nav.presets": "Presets",

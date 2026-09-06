@@ -47,6 +47,7 @@ export const it: Translation = {
   "nav.shop": "Shop",
   "nav.hub": "MXB Hub",
   "nav.library": "Libreria",
+  "nav.garage": "Garage",
   "nav.downloads": "Download",
   "nav.locker": "Armadietto",
   "nav.presets": "Preset",

@@ -3,111 +3,121 @@
    declare our source globs explicitly instead. Paths are relative to this file. */
 @import "tailwindcss" source(none);
 @import "tw-animate-css";
+@import "./fonts.css";
 @source "./**/*.{ts,tsx}";
 @source "../index.html";
 
 @custom-variant dark (&:is(.dark *));
 
 /* ------------------------------------------------------------------ *
- * mxb-app design tokens — dark is the primary theme (from the redesign) *
+ * "Paddock" — the launcher redesign. Dark is the primary theme.
+ *
+ * Two rules carry the look, and both are easy to undo by accident:
+ *   - the ground is near-black and almost achromatic, so the blue is the
+ *     only saturated thing on screen. Don't tint the surfaces.
+ *   - geometry is square. Radius is 0 by design; corners are cut with
+ *     `.u-notch` and emphasis comes from `.u-skew`, not from rounding.
  * ------------------------------------------------------------------ */
 :root {
-  --radius: 0.7rem;
+  --radius: 0px;
 
   /* Chrome + surfaces */
-  --window: #0d0f12; /* titlebar + sidebar */
-  --background: #121417; /* main content area */
-  --foreground: #eef2f5;
-  --card: #1a1d22;
-  --card-foreground: #eef2f5;
-  --popover: #22262c; /* menus, toasts */
-  --popover-foreground: #eef2f5;
+  --window: #08080a; /* top rail */
+  --background: #0c0c0e; /* main content area */
+  --foreground: #f2f3f5;
+  --card: #141417;
+  --card-foreground: #f2f3f5;
+  --popover: #1c1c21; /* menus, toasts */
+  --popover-foreground: #f2f3f5;
 
-  /* Accent (icy frost) */
+  /* Accent — unchanged from the previous theme on purpose. */
   --primary: #9ccfec;
   --primary-foreground: #0d1216;
 
   /* Segmented / neutral fills */
-  --secondary: #2a2f36;
-  --secondary-foreground: #eef2f5;
-  --muted: #1a1d22;
-  --muted-foreground: #8a949c;
-  --faint: #5f6a73;
+  --secondary: #26262c;
+  --secondary-foreground: #f2f3f5;
+  --muted: #141417;
+  --muted-foreground: #97979f;
+  --faint: #6d6d76;
 
-  /* Sidebar active tint */
-  --accent: rgba(156, 207, 236, 0.12);
-  --accent-foreground: #c3e3f7;
+  /* Active-row tint */
+  --accent: #1c1c21;
+  --accent-foreground: #ffffff;
 
   /* Status */
-  --destructive: #e88f8f;
-  --destructive-foreground: #1c0f0f;
-  --success: #7fd6a4;
-  --warning: #e8c07f;
+  --destructive: #ef8078;
+  --destructive-foreground: #1a0c0b;
+  --success: #6fd99a;
+  --warning: #e8bd6a;
 
   /* Lines + controls */
   --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.12);
   --ring: #9ccfec;
 }
 
 .dark {
-  --window: #0d0f12;
-  --background: #121417;
-  --foreground: #eef2f5;
-  --card: #1a1d22;
-  --card-foreground: #eef2f5;
-  --popover: #22262c;
-  --popover-foreground: #eef2f5;
+  --window: #08080a;
+  --background: #0c0c0e;
+  --foreground: #f2f3f5;
+  --card: #141417;
+  --card-foreground: #f2f3f5;
+  --popover: #1c1c21;
+  --popover-foreground: #f2f3f5;
   --primary: #9ccfec;
   --primary-foreground: #0d1216;
-  --secondary: #2a2f36;
-  --secondary-foreground: #eef2f5;
-  --muted: #1a1d22;
-  --muted-foreground: #8a949c;
-  --faint: #5f6a73;
-  --accent: rgba(156, 207, 236, 0.12);
-  --accent-foreground: #c3e3f7;
-  --destructive: #e88f8f;
-  --destructive-foreground: #1c0f0f;
-  --success: #7fd6a4;
-  --warning: #e8c07f;
+  --secondary: #26262c;
+  --secondary-foreground: #f2f3f5;
+  --muted: #141417;
+  --muted-foreground: #97979f;
+  --faint: #6d6d76;
+  --accent: #1c1c21;
+  --accent-foreground: #ffffff;
+  --destructive: #ef8078;
+  --destructive-foreground: #1a0c0b;
+  --success: #6fd99a;
+  --warning: #e8bd6a;
   --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.12);
   --ring: #9ccfec;
 }
 
-/* Light theme — adapted from the app's previous light palette */
+/* Light theme — same structure, inverted ground. The accent darkens because
+   #9ccfec has nowhere near enough contrast against a light surface. */
 .light {
-  --window: #cfd6da;
-  --background: #dee4e7;
-  --foreground: #0a0b0d;
-  --card: #eef2f4;
-  --card-foreground: #0a0b0d;
+  --window: #e4e4e2;
+  --background: #f1f1ef;
+  --foreground: #131317;
+  --card: #ffffff;
+  --card-foreground: #131317;
   --popover: #ffffff;
-  --popover-foreground: #0a0b0d;
-  --primary: #2081a3;
+  --popover-foreground: #131317;
+  --primary: #1c7897;
   --primary-foreground: #ffffff;
-  --secondary: #cbd3d7;
-  --secondary-foreground: #0a0b0d;
-  --muted: #e4e9eb;
-  --muted-foreground: rgba(0, 0, 0, 0.55);
-  --faint: rgba(0, 0, 0, 0.42);
-  --accent: rgba(32, 129, 163, 0.12);
-  --accent-foreground: #17627d;
-  --destructive: #c4453c;
+  --secondary: #e0e0de;
+  --secondary-foreground: #131317;
+  --muted: #eaeae8;
+  --muted-foreground: #5a5a63;
+  --faint: #85858e;
+  --accent: #e0e0de;
+  --accent-foreground: #131317;
+  --destructive: #b93a31;
   --destructive-foreground: #ffffff;
-  --success: #2e9e6b;
-  --warning: #b7861f;
-  --border: rgba(0, 0, 0, 0.1);
-  --input: rgba(0, 0, 0, 0.12);
-  --ring: #2081a3;
+  --success: #1c8a5c;
+  --warning: #96690f;
+  --border: rgba(0, 0, 0, 0.11);
+  --input: rgba(0, 0, 0, 0.16);
+  --ring: #1c7897;
 }
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  /* Square by design — see the note at the top. These stay mapped so the
+     shadcn primitives keep compiling; they simply resolve to nothing. */
+  --radius-sm: var(--radius);
+  --radius-md: var(--radius);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-xl: var(--radius);
 
   --color-window: var(--window);
   --color-background: var(--background);
@@ -133,8 +143,9 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  --font-sans: "Hanken Grotesk", system-ui, sans-serif;
-  --font-mono: ui-monospace, Menlo, monospace;
+  --font-sans: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-cond: "Barlow Condensed", "Barlow", system-ui, sans-serif;
+  --font-mono: ui-monospace, Menlo, Consolas, monospace;
 }
 
 @layer base {
@@ -169,14 +180,20 @@
     overflow: hidden;
   }
 
-  /* Custom scrollbars to match the dark chrome */
+  /* Numbers sit in columns all over this app — sizes, speeds, ping, lap times,
+     rider counts. Tabular figures stop them jittering as they tick. */
+  .tabular-figures,
+  time,
+  output {
+    font-variant-numeric: tabular-nums;
+  }
+
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
     background: color-mix(in srgb, var(--foreground) 14%, transparent);
-    border-radius: 99px;
     border: 3px solid transparent;
     background-clip: content-box;
   }
@@ -187,6 +204,21 @@
   ::-webkit-scrollbar-track {
     background: transparent;
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Shape utilities. The redesign's geometry comes from a motocross number
+ * plate: a shallow left-leaning skew, and a corner cut off the card.
+ * `.u-skew` always wraps `.u-unskew` on its text, or the label leans too.
+ * ------------------------------------------------------------------ */
+.u-skew {
+  transform: skewX(-11deg);
+}
+.u-unskew {
+  transform: skewX(11deg);
+}
+.u-notch {
+  clip-path: polygon(0 0, 100% 0, 100% 86%, 91% 100%, 0 100%);
 }
 
 @keyframes frost-indeterminate {
@@ -207,13 +239,16 @@
 }
 .mod-description :is(h1, h2, h3, h4) {
   color: var(--foreground);
+  font-family: var(--font-cond);
   font-weight: 700;
-  margin: 1.1em 0 0.4em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 1.2em 0 0.45em;
   line-height: 1.25;
 }
-.mod-description h1 { font-size: 1.35em; }
-.mod-description h2 { font-size: 1.2em; }
-.mod-description h3 { font-size: 1.08em; }
+.mod-description h1 { font-size: 1.3em; }
+.mod-description h2 { font-size: 1.18em; }
+.mod-description h3 { font-size: 1.06em; }
 .mod-description p { margin: 0 0 0.85em; }
 .mod-description a {
   color: var(--primary);
@@ -225,15 +260,13 @@
 .mod-description img {
   max-width: 100%;
   height: auto;
-  border-radius: 10px;
   margin: 0.5em 0;
 }
 .mod-description :is(strong, b) { color: var(--foreground); font-weight: 700; }
 .mod-description hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
 
-/* Swiper overrides to match the frost palette */
+/* Swiper overrides */
 .frost-gallery {
-  border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--border);
 }
@@ -244,10 +277,10 @@
 }
 .frost-gallery .swiper-pagination-bullet {
   background: rgba(255, 255, 255, 0.5);
+  border-radius: 0;
   opacity: 1;
 }
 .frost-gallery .swiper-pagination-bullet-active {
-  background: #fff;
+  background: var(--primary);
   width: 16px;
-  border-radius: 99px;
 }
