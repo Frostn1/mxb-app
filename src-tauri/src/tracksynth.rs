@@ -204,12 +204,28 @@ const RUT_LIP_EDGE: (f32, f32) = (0.0, 0.52);
 /// The contrast has to come from the gap between floor and wall, not from taking the floor
 /// away: a line solid enough to follow, with the ground beside each groove pulled hard out of
 /// it.
-const RUT_PAINT_FLOOR: f32 = 0.52;
+const RUT_PAINT_FLOOR: f32 = 0.22;
 const RUT_PAINT_WALL: f32 = 1.55;
 
 /// How much of the packed sheet is available off the racing line, where the ground still has
 /// grooves in it but no strip was ever painted.
-const RUT_PAINT_OFF_LINE: f32 = 0.72;
+const RUT_PAINT_OFF_LINE: f32 = 0.30;
+
+/// Over how many metres the ground painted inside the corridor fades out at its edge.
+///
+/// Whatever this is, the masks have to stop *past* it. A cut inside the fade is a hard
+/// boundary at the resolution of the terrain grid — a sawtooth a cell deep and two long,
+/// running the length of the track — and it is the first thing the eye finds in a corner.
+const RUT_CORRIDOR_FADE_M: f32 = 1.6;
+
+/// How wide the ridden line is either side of the racing line, how much wider it gets through
+/// a corner, and how far its own edge fades.
+///
+/// Measured off what a corner looks like rather than picked: riders take a straight in a file
+/// about three metres wide and a corner across most of it.
+const LINE_HALF_WIDTH_M: f32 = 2.1;
+const LINE_CORNER_SPREAD: f32 = 0.85;
+const LINE_FADE_M: f32 = 0.8;
 
 /// And how strongly the wall beside a groove takes the dry, loose sheet instead, and how
 /// quickly it gets there. A bank is loose over all of itself, not in proportion to how tall it
@@ -2456,6 +2472,22 @@ fn sample(h: &[f32], gw: usize, gh: usize, x: f32, y: f32) -> f32 {
     h[yi * gw + xi]
 }
 
+/// The same, between the samples.
+///
+/// The game draws the terrain as a mesh and lights it off interpolated normals. Anything that
+/// lights it off [`sample`] instead gets one flat normal per cell, which at riding scale is a
+/// staircase down every slope — a picture of the grid rather than of the ground.
+fn sample_smooth(h: &[f32], gw: usize, gh: usize, x: f32, y: f32) -> f32 {
+    let (fx, fy) = (x.clamp(0.0, (gw - 1) as f32), y.clamp(0.0, (gh - 1) as f32));
+    let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
+    let (x1, y1) = ((x0 + 1).min(gw - 1), (y0 + 1).min(gh - 1));
+    let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+    let at = |xi: usize, yi: usize| h[yi * gw + xi];
+    let top = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * tx;
+    let bot = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * tx;
+    top + (bot - top) * ty
+}
+
 // ---------------------------------------------------------------------------
 // Noise
 // ---------------------------------------------------------------------------
@@ -2537,22 +2569,20 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     // Every band is measured from the edge of the track — the lap's, or the start straight's,
     // whichever the cell is nearer. The start is a track surface too, and painting by the lap
     // alone leaves forty gates standing in a field.
-    let dirt = mask_outside(syn, MASK_DIM, half, |e, x, z| {
-        soft_edge(1.5 + edge_noise(x, z, seed ^ 0xD127, 1.6, 0.7), 2.0, e)
-    });
-    // The shoulder: worked ground either side of the line, painted from the edge of the
-    // riding surface out to where the field starts. It is most of what a rider sees.
-    let shoulder = mask_outside(syn, MASK_DIM, half, |e, x, z| {
-        255 - soft_edge(
-            SHOULDER_M * 0.75 + edge_noise(x, z, seed ^ 0x5A1D, 2.4, 1.0),
-            5.0,
-            e,
-        )
-    });
-    let grass = mask_outside(syn, MASK_DIM, half, |e, x, z| {
-        let past = 255 - soft_edge(SHOULDER_M + edge_noise(x, z, seed ^ 0x6EE2, 3.2, 1.2), 6.0, e);
-        (past as f32 * turf_cover(x, z, seed)) as u8
-    });
+    // Off `layers`, like everything else here. These three used to be a second set of edges
+    // written out by hand — dirt 1.5 m wider than its band and fading over two metres, the
+    // shoulder at three quarters of its width fading over five, grass over six — so the masks
+    // TerrainEd compiles into the shipped track were not the bands the `.map` writer and every
+    // picture of the ground draw. The ground nobody could judge from a picture was this.
+    let band_of = |b: BandMask| band_mask(syn, b, half, seed, MASK_DIM, MASK_DIM);
+    let bands = layers(prog);
+    let band_named = |name: &str| -> Vec<u8> {
+        let l = bands.iter().find(|l| l.name == name).expect("a band by that name");
+        band_of(l.band)
+    };
+    let dirt = band_named("line");
+    let shoulder = band_named("shoulder");
+    let grass = band_named("grass");
     // Off-track starts where the graded shoulder ends: the rider is on the track, or in the
     // field, with the shoulder belonging to neither. This one decides where the game says a
     // rider has gone off, so it is the one boundary that stays smooth.
@@ -4188,6 +4218,13 @@ enum BandMask {
     Out(f32),
     /// Past the shoulder — the field and the turf on it.
     Beyond,
+    /// The ridden line: a strip about where people actually go, this many metres either side
+    /// of it before the edge starts to tear.
+    ///
+    /// Not `Out(0.0)`. That is the whole corridor, and painting the ridden colour over all of
+    /// it is a black ribbon from edge to edge with nothing for a mark to stand against — the
+    /// corridor is worked dirt, and the line worn through it is the dark part.
+    Line(f32),
     /// The packed racing line.
     Rut,
     /// Loose dirt off the line and round the outside of a bend.
@@ -4218,6 +4255,7 @@ fn band_mask(
         BandMask::Out(extra) => mask_rect_outside(syn, mw, mh, half, move |e, x, z| {
             band_edge(e, x, z, extra, seed ^ 0xB3ED)
         }),
+        BandMask::Line(w) => line_mask(syn, half, w, seed, mw, mh),
     }
 }
 
@@ -4283,6 +4321,33 @@ fn start_loose(syn: &Synth, i: usize, seed: u32) -> Option<u8> {
     Some((255.0 * (patchy * packed * edge * 0.8).clamp(0.0, 1.0)) as u8)
 }
 
+/// The ridden line: the strip of the corridor people actually ride, worn dark.
+///
+/// It leans and wanders with the racing line, tears at its edges like every other band, and
+/// thins where the ground is loose — a line is not a stripe of constant width, and the places
+/// it frays are the places a rider reads to find it.
+fn line_mask(syn: &Synth, half: f32, w: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
+    mask_across(syn, mw, mh, |c| {
+        // The start pad is ridden ground too — forty bikes leave it dark.
+        if let Some(v) = start_loose(syn, c.i, seed) {
+            return (v as f32 * 0.85) as u8;
+        }
+        if c.lat.abs() > half + RUT_CORRIDOR_FADE_M + 0.1 {
+            return 0;
+        }
+        // Wider up the face of a jump, where everybody's line is written down, and wider
+        // again through a corner, where they spread across the whole of it.
+        let spread = 1.0 + LINE_CORNER_SPREAD * (c.k.abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
+        let width = w * spread + edge_noise(c.x, c.z, seed ^ 0x64B1, 1.1, 0.8);
+        let strip = soft_edge(width, LINE_FADE_M, c.off.abs()) as f32 / 255.0;
+        let corridor = soft_edge(half, RUT_CORRIDOR_FADE_M, c.lat.abs()) as f32 / 255.0;
+        // Never solid. A line packs unevenly and the gaps are what make it read as ground
+        // somebody rode rather than as a stripe somebody painted.
+        let patchy = (0.72 + 0.40 * fbm(c.x * 0.07, c.z * 0.07, seed ^ 0x51A9)).clamp(0.55, 1.0);
+        (255.0 * strip * corridor * patchy) as u8
+    })
+}
+
 fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
     mask_across(syn, mw, mh, |c| {
         // The start pad's own marks: forty bikes pulling out of forty stalls leave a comb of
@@ -4291,7 +4356,11 @@ fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> 
         if let Some(v) = start_rut(syn, c.i, seed) {
             return v;
         }
-        if c.lat.abs() > half + 0.5 {
+        // Past where the corridor's own fade reaches, and not a step inside it: the fade
+        // below runs 1.6 m out from the edge, so cutting at half a metre truncated it at
+        // about seventy per cent coverage — a hard boundary at the resolution of the terrain
+        // grid, which is the staircase that ran down the edge of every corner.
+        if c.lat.abs() > half + RUT_CORRIDOR_FADE_M + 0.1 {
             return 0;
         }
         // Up the face of a jump the strip widens and slides towards the side riders are
@@ -4318,8 +4387,10 @@ fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> 
         // The strip still leads: it is full strength on the line and falls to a floor across
         // the rest of the corridor, and `keyed` below decides where within that the sheet
         // actually lands. The ground's own rut signal is what places it.
-        let strip = soft_edge(w, 1.3, off.abs()) as f32 / 255.0;
-        let corridor = soft_edge(half, 1.6, c.lat.abs()) as f32 / 255.0;
+        // A ridden strip has an edge. Fading it over a metre and a third is what turned the
+        // line into a smear with no boundary — a rider reads where the good dirt stops.
+        let strip = soft_edge(w, 0.6, off.abs()) as f32 / 255.0;
+        let corridor = soft_edge(half, RUT_CORRIDOR_FADE_M, c.lat.abs()) as f32 / 255.0;
         let band = (strip + (1.0 - strip) * RUT_PAINT_OFF_LINE) * corridor;
         // Into the grooves and off the walls beside them.
         //
@@ -4332,7 +4403,7 @@ fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> 
         // taking it straight paints a gradient across the pair — which at riding scale is a
         // soft stripe, not a groove with a lit side and a shaded one. Raised to a power the
         // floor is dark over its whole width and the bank is not, so the eye gets an edge.
-        let floor = (-c.rut).clamp(0.0, 1.0).powf(0.45);
+        let floor = (-c.rut).clamp(0.0, 1.0).powf(0.7);
         let wall = c.rut.clamp(0.0, 1.0).powf(0.45);
         let keyed = (RUT_PAINT_FLOOR + (1.0 - RUT_PAINT_FLOOR) * floor - RUT_PAINT_WALL * wall)
             .clamp(0.0, 1.0);
@@ -4360,7 +4431,7 @@ fn loose_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8
         if let Some(v) = start_loose(syn, c.i, seed) {
             return v;
         }
-        if c.lat.abs() > half + 0.2 {
+        if c.lat.abs() > half + RUT_CORRIDOR_FADE_M + 0.1 {
             return 0;
         }
         let bend = (c.k.abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
@@ -4376,7 +4447,11 @@ fn loose_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8
         // Loose ground off the line is patchy; the bank beside a groove is not. Letting the
         // same patchiness eat into it is what left the wall at a quarter coverage and the rut
         // reading nine levels off its own floor.
-        let v = (edge.max(outside) * patchy).max(wall * (0.8 + 0.2 * patchy));
+        // Faded at the corridor's edge for the same reason the line is. Loose dirt ran to
+        // full coverage and stopped dead at the boundary, which put the same staircase down
+        // the outside of the track that the line had down its inside.
+        let corridor = soft_edge(half, RUT_CORRIDOR_FADE_M, c.lat.abs()) as f32 / 255.0;
+        let v = (edge.max(outside) * patchy).max(wall * (0.8 + 0.2 * patchy)) * corridor;
         (255.0 * v) as u8
     })
 }
@@ -4391,7 +4466,11 @@ fn edge_noise(x: f32, z: f32, seed: u32, long_m: f32, short_m: f32) -> f32 {
     // ground must not look like. The third is at the scale of the ground itself.
     fbm(x / 34.0, z / 34.0, seed) * long_m
         + fbm(x / 6.0, z / 6.0, seed ^ 0x9F1) * short_m
-        + fbm(x / 1.6, z / 1.6, seed ^ 0x3C7) * short_m * 0.55
+        // The tearing one. At 1.6 m and a fifth of a metre it was there in principle and
+        // invisible in a picture: an edge has to move about as far as it is soft, or the fade
+        // smooths the wander back into the straight line it was put there to break up.
+        + fbm(x / 1.6, z / 1.6, seed ^ 0x3C7) * short_m * 1.6
+        + fbm(x / 0.7, z / 0.7, seed ^ 0x1D5) * short_m * 0.7
 }
 
 /// Full inside `edge`, gone `fade` metres past it — masks are blended, so a hard cut shows as
@@ -4419,7 +4498,7 @@ const BAND_FADE_M: f32 = 0.5;
 ///
 /// Feathered but straight, a band edge is still a line a fixed distance from the centre of the
 /// track, and it reads as one. The dirt on a real track reaches where the machine reached.
-const BAND_WANDER_M: f32 = 0.45;
+const BAND_WANDER_M: f32 = 0.9;
 
 /// Where a band cut by distance from the riding line ends: full inside, gone a fade past it,
 /// and the edge itself wandering.
@@ -5581,7 +5660,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         Layer {
             name: "line",
             sheet: "dirt_line_c",
-            band: BandMask::Out(0.0),
+            band: BandMask::Line(LINE_HALF_WIDTH_M),
             look: ridden,
             salt: 0x11E5,
             tile_m: TILE_LINE_M,
@@ -8207,7 +8286,8 @@ mod tests {
             // The terrain's own relief, which is the other half of what a rider reads off a
             // rut — and the half the paint has to agree with rather than fight. Lit by the sun
             // the track ships: `params.ini` states it.
-            let h = |ox: f32, oz: f32| sample(&syn.heights, syn.gw, syn.gh, gu + ox, gv + oz);
+            let h =
+                |ox: f32, oz: f32| sample_smooth(&syn.heights, syn.gw, syn.gh, gu + ox, gv + oz);
             let dx = (h(1.0, 0.0) - h(-1.0, 0.0)) / (2.0 * syn.mps);
             let dz = (h(0.0, 1.0) - h(0.0, -1.0)) / (2.0 * syn.mps);
             let (nx, ny, nz) = (-dx, 1.0, -dz);
@@ -9091,7 +9171,8 @@ mod tests {
                 }
 
                 // Lit off the ground's own slope, so relief reads the way it does in the game.
-                let h = |ox: f32, oz: f32| sample(&s.heights, s.gw, s.gh, cx + ox, cy + oz);
+                let h =
+                    |ox: f32, oz: f32| sample_smooth(&s.heights, s.gw, s.gh, cx + ox, cy + oz);
                 let (dx, dz) = (h(1.0, 0.0) - h(-1.0, 0.0), h(0.0, 1.0) - h(0.0, -1.0));
                 let n = [-dx, 2.0 * s.mps, -dz];
                 let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
