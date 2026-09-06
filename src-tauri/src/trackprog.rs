@@ -110,6 +110,29 @@ pub struct Terrain {
     /// with them what the track looks like.
     #[serde(default)]
     pub surface: Surface,
+    /// How raced the ground arrives, 0 to 1.
+    ///
+    /// A generated track used to ship one state of ground: fully raced. The corner grooves,
+    /// the braking washboard and the acceleration chop were all baked into the terrain at
+    /// full depth, and the game then went on deforming from there — so every session began
+    /// at the end of the third moto and only ever got worse. There was nowhere for a track
+    /// to *become* rough, because it already was.
+    ///
+    /// This is the dial between the two. At 0 the ground is freshly prepped: the shapes are
+    /// there but the wear is not, and the deformable stack underneath is at full depth so a
+    /// session cuts its own lines. At 1 it is a Sunday afternoon — everything baked in, and
+    /// the stack thinned to match, because material already cut into the terrain is material
+    /// the ground no longer has to give. The sum of the two is near enough constant, which
+    /// is what stops a heavily raced track digging itself to pieces.
+    ///
+    /// Defaults to a track that has seen a session rather than to either end.
+    #[serde(default = "default_wear")]
+    pub wear: f32,
+}
+
+/// Half-worn: shapes settled, grooves started, most of the ground still to give.
+pub(crate) fn default_wear() -> f32 {
+    0.55
 }
 
 /// The ground a track is cut into.
@@ -242,13 +265,19 @@ impl Segment {
     }
 }
 
-/// The steepest face a jump is allowed, degrees.
+/// The steepest face a jump is allowed, degrees — measured at the lip, which is where an
+/// arc is steepest.
 ///
 /// Thirty because that is the ceiling across every published track measured, not a judgement:
 /// their steepest faces run 19.2–29.6° at the ninetieth percentile and Millville, the steepest
 /// of the ten, does not reach 30. A dirt lip pushed up by a machine cannot stand steeper than
 /// the material holds.
 pub const JUMP_FACE_DEG: f32 = 30.0;
+
+/// The gentlest face — the one a landing gets. Published landings measure 19.0° at the
+/// ninetieth against a takeoff's 27.0: a built takeoff is short because that is what throws
+/// you, and the landing is long because that is what catches you.
+pub const JUMP_LANDING_DEG: f32 = 22.0;
 
 /// The shortest a face may be however small the jump.
 ///
@@ -257,50 +286,122 @@ pub const JUMP_FACE_DEG: f32 = 30.0;
 /// ones, not a target for all of them.
 pub const JUMP_FACE_MIN_M: f32 = 4.0;
 
-/// How long a double's ramp and its lip's back face are, in metres, for a given height.
+/// The shape of a jump's face: a circle's quadrant, not a smoothstep.
+///
+/// This is what a machine actually leaves. A smoothstep is flat at both ends and steepest
+/// halfway up, so it rounds the lip off — and the lip is the one part of a takeoff that has
+/// to be an edge. Sized to peak at thirty degrees it spends its steepest metre in the middle
+/// of the ramp and arrives at the top already flattening, which is why our jumps rode like
+/// rollers however tall they were built.
+///
+/// A blade pushing dirt up into a lip sweeps an arc: tangent to the ground where the face
+/// starts, and steepest where it ends. `t` runs 0 at the foot to 1 at the lip and the return
+/// is the fraction of the jump's height, so the curve is concave all the way up and the
+/// steepest ground on it is the last of it.
+///
+/// Run backwards it is the same curve convex — steep off the crest and flattening into the
+/// ground — which is a landing, and the reason one function serves both. A face and the
+/// landing that answers it are the same arc ridden in opposite directions.
+///
+/// `sweep` is how far round the circle the face goes, in radians, which is twice the angle it
+/// would average: an arc that ends at θ has risen `tan(θ/2)` for every metre it ran.
+pub fn face_arc(t: f32, sweep: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    // Below about a degree the arc and its own chord differ by less than the grid can hold,
+    // and the divide below loses all its significance. A quadratic is the arc's own limit
+    // there — still tangent at the foot, still steepest at the lip.
+    if !(sweep > 1e-3) {
+        return t * t;
+    }
+    let (sin_s, cos_s) = (sweep.sin(), sweep.cos());
+    // Where along the sweep this point sits, from how far along the chord it is.
+    let phi = (t * sin_s).clamp(-1.0, 1.0).asin();
+    (1.0 - phi.cos()) / (1.0 - cos_s)
+}
+
+/// How far a face has to run to reach `height` without standing steeper than `deg` at its lip.
+///
+/// The half-angle, because the shape is an arc: a quadrant that ends at θ has risen
+/// `tan(θ/2)` per metre of run, so a 30° face is 3.73 times as long as it is tall. The old
+/// shape was a smoothstep and carried a 1.5 for the same reason — a smoothstep peaks at half
+/// again its average — and this replaces that fudge rather than joining it. Faces come out
+/// about 44% longer, which is the length a built one actually is.
+pub fn face_run(height: f32, deg: f32) -> f32 {
+    let half = (deg * 0.5).to_radians().tan().max(1e-4);
+    (height.abs() / half).max(JUMP_FACE_MIN_M)
+}
+
+/// The sweep angle a face of this run and rise actually turns through, radians.
+///
+/// Derived from the two lengths rather than from [`JUMP_FACE_DEG`], so a face that came out
+/// longer than the angle asked for — because [`JUMP_FACE_MIN_M`] caught it, or because a
+/// programme stated its own lip — is a shallower arc rather than the same arc stretched. The
+/// curve is always tangent to the ground it leaves.
+pub fn face_sweep(height: f32, run: f32) -> f32 {
+    2.0 * (height.abs() / run.max(1e-3)).atan()
+}
+
+/// A double's four faces, in metres, for a given height.
 ///
 /// One definition, used by both the shape and by [`Feature::length`], because they have to
 /// agree about where the feature ends.
 ///
-/// The 1.5 is not a fudge, and leaving it out is why this was still a wall after being fixed
-/// once: a smoothstep's steepest point is half again as steep as its average, so a face sized
-/// to *average* 30° peaks at 45. A 3.6 m double dropped at 53.5° at a flat four metres, 40.9°
-/// sized by the average, and 30.0° sized by the peak.
-pub fn double_faces(height: f32, lip: f32) -> (f32, f32) {
-    let face = 1.5 * height.abs() / JUMP_FACE_DEG.to_radians().tan();
-    let back = face.max(JUMP_FACE_MIN_M);
-    // A short lip on a tall jump is a wall whichever side of it you are on.
-    (lip.max(back), back)
+/// Four rather than two, and that is the whole point. The old pair made a double a mirror of
+/// itself: the same ramp up either side of the gap, so the face a rider cases into stood as
+/// steep as the one that launched them. [`JUMP_LANDING_DEG`] had been measured off published
+/// ground and was used by nothing but the tabletop.
+///
+/// - `ramp` — what you ride up. Concave, steepest at the lip, at least as long as the
+///   programme's own `lip` if it asked for a longer one.
+/// - `back` — the back of that lip, falling into the gap. A cut face, not a ridden one, so it
+///   keeps the takeoff angle.
+/// - `face` — out of the gap to the landing's crest. Also a cut face: it is the wall you hit
+///   coming up short, and making it gentle would turn the gap into something you ride through.
+/// - `run` — the far side of the landing, which is the ground that actually catches you.
+///   Long and shallow, at the landing angle.
+pub struct DoubleFaces {
+    pub ramp: f32,
+    pub back: f32,
+    pub face: f32,
+    pub run: f32,
 }
 
-/// The gentlest face — the one a landing gets. Published landings measure 19.0° at the
-/// ninetieth against a takeoff's 27.0: a built takeoff is short because that is what throws
-/// you, and the landing is long because that is what catches you.
-pub const JUMP_LANDING_DEG: f32 = 22.0;
+impl DoubleFaces {
+    /// The whole footprint, gap included.
+    pub fn total(&self, gap: f32) -> f32 {
+        self.ramp + self.back + gap + self.face + self.run
+    }
+}
+
+pub fn double_faces(height: f32, lip: f32) -> DoubleFaces {
+    let cut = face_run(height, JUMP_FACE_DEG);
+    DoubleFaces {
+        // A short lip on a tall jump is a wall whichever side of it you are on.
+        ramp: lip.max(cut),
+        back: cut,
+        face: cut,
+        run: face_run(height, JUMP_LANDING_DEG),
+    }
+}
 
 /// A tabletop's ramp up, its flat top and its ramp down, in metres.
 ///
 /// The ramps used to be fixed fractions of the feature's length — 27% up and 44% down — so a
 /// short tabletop got a short ramp however tall it was asked to be, and how steep it came out
 /// depended on nothing but the ratio of the two numbers. A 3 m tabletop 16 m long ramped at
-/// 39°. Sized from the height and an angle instead, the way a double's faces now are.
+/// 39°. Sized from the height and an angle instead, the way a double's faces are.
 ///
 /// The stated length is what the *top* is measured against: the ramps are added to it, so a
 /// tabletop's footprint is longer than the number asked for and [`Feature::length`] reports
 /// the whole thing.
 pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
-    let h = height.abs();
     // Whichever is longer: the angle's, or the fraction of the stated length the ramps used
     // to be. The angle alone makes a *short* jump steeper than it was — at 30° a one-metre
     // tabletop gets a 2.6 m ramp where 27% of a 22 m length gave it 5.9 m — which is the same
     // way round as it bit on the double. The angle is a ceiling for the tall ones, not a
     // target for all of them.
-    let up = (1.5 * h / JUMP_FACE_DEG.to_radians().tan())
-        .max(length * 0.27)
-        .max(JUMP_FACE_MIN_M);
-    let down = (1.5 * h / JUMP_LANDING_DEG.to_radians().tan())
-        .max(length * 0.44)
-        .max(JUMP_FACE_MIN_M);
+    let up = face_run(height, JUMP_FACE_DEG).max(length * 0.27);
+    let down = face_run(height, JUMP_LANDING_DEG).max(length * 0.44);
     // Whatever the asked-for length has left once the faces are in it, and never negative:
     // a tabletop too short for its own height is a peaked jump, which is a real thing.
     let top = (length - up - down).max(0.0);
@@ -455,17 +556,14 @@ impl Feature {
             | Feature::Berm { length, .. }
             | Feature::Rut { length, .. }
             | Feature::Custom { length, .. } => *length,
-            // Two faces up and two back down, with the gap between them. The two lengths
-            // come from `double_faces` rather than being written out again here: they used
-            // to be, and when the faces were lengthened this went on reporting the old
-            // figure, so the profile was written up to a point eight metres short of where
-            // the shape actually ended and the last ramp was cut off into a step.
+            // Ramp, lip's back, gap, landing face, landing run-off. The lengths come from
+            // `double_faces` rather than being written out again here: they used to be, and
+            // when the faces were lengthened this went on reporting the old figure, so the
+            // profile was written up to a point eight metres short of where the shape
+            // actually ended and the last ramp was cut off into a step.
             Feature::Double {
                 height, gap, lip, ..
-            } => {
-                let (lip, back) = double_faces(*height, *lip);
-                (lip + back) * 2.0 + gap
-            }
+            } => double_faces(*height, *lip).total(*gap),
             Feature::Whoops {
                 count, spacing, ..
             } => *count as f32 * spacing,
@@ -980,6 +1078,7 @@ mod tests {
                 scale: 20.0,
                 relief: Relief::default(),
                 surface: Surface::default(),
+                wear: default_wear(),
             },
             start: Start {
                 x: 200.0,
@@ -1151,5 +1250,107 @@ mod tests {
         assert!(p.check().is_ok());
         p.terrain.samples = 1025;
         assert!(p.check().is_ok());
+    }
+
+    /// How steep the face runs, in degrees, over `n` even steps along its length.
+    ///
+    /// The step count is a measurement decision rather than a detail. A face differenced at
+    /// two thousand steps reads as much as 0.013° *backwards* here and there — the arc is
+    /// monotonic, but a single-precision difference between two neighbouring samples of it
+    /// is mostly rounding by then. Two hundred and fifty steps is 6 cm of a 15 m face, far
+    /// finer than the terrain grid can hold, and the noise falls below a thousandth of a
+    /// degree.
+    fn face_slopes_n(height: f32, run: f32, n: usize) -> Vec<f32> {
+        let sweep = face_sweep(height, run);
+        (0..n)
+            .map(|i| {
+                let (t0, t1) = (i as f32 / n as f32, (i + 1) as f32 / n as f32);
+                let dy = (face_arc(t1, sweep) - face_arc(t0, sweep)) * height;
+                let dx = (t1 - t0) * run;
+                dy.atan2(dx).to_degrees()
+            })
+            .collect()
+    }
+
+    fn face_slopes(height: f32, run: f32) -> Vec<f32> {
+        face_slopes_n(height, run, 250)
+    }
+
+    #[test]
+    fn a_jump_face_is_steepest_at_its_lip() {
+        // The whole point of the arc, and what a smoothstep cannot do. A smoothstep peaks
+        // halfway up and arrives at the lip at 0.03° — dead flat over the last metre before
+        // the rider leaves the ground, which is why a jump built on one rode like a roller
+        // however tall it stood.
+        for height in [1.0f32, 2.5, 4.0] {
+            let run = face_run(height, JUMP_FACE_DEG);
+            let s = face_slopes(height, run);
+            let peak = s.iter().copied().fold(f32::MIN, f32::max);
+            assert!(s[0].abs() < 0.5, "the foot leaves the ground tangent: {:.2}°", s[0]);
+            assert!(
+                (s[s.len() - 1] - peak).abs() < 0.1,
+                "the lip is the steepest of it: lip {:.2}° against peak {:.2}°",
+                s[s.len() - 1],
+                peak
+            );
+            // Monotonic: it never eases off partway up and then steepens again.
+            assert!(
+                s.windows(2).all(|w| w[1] >= w[0] - 0.01),
+                "the face steepens the whole way up"
+            );
+        }
+    }
+
+    #[test]
+    fn a_face_never_stands_steeper_than_the_corpus_allows() {
+        // Sized by the half-angle, so the ceiling lands on the lip rather than being
+        // overshot there the way the smoothstep's 1.5 fudge had to correct for.
+        for height in [0.4f32, 1.0, 2.5, 4.0, 5.9] {
+            let run = face_run(height, JUMP_FACE_DEG);
+            let peak = face_slopes(height, run).into_iter().fold(f32::MIN, f32::max);
+            assert!(peak <= JUMP_FACE_DEG + 0.1, "{height} m peaks at {peak:.2}°");
+            // And a jump held above the minimum length is not made gentler than it is:
+            // only the ones the floor catches come out shallower.
+            if run > JUMP_FACE_MIN_M + 0.01 {
+                assert!(peak > JUMP_FACE_DEG - 0.5, "{height} m only reaches {peak:.2}°");
+            }
+        }
+    }
+
+    #[test]
+    fn a_landing_is_longer_and_gentler_than_the_takeoff_that_feeds_it() {
+        // The asymmetry the corpus measures — takeoffs 27° at the ninetieth, landings 19° —
+        // which `JUMP_LANDING_DEG` carried while nothing but the tabletop read it.
+        let f = double_faces(2.5, 10.0);
+        assert!(
+            f.run > f.ramp,
+            "the run-off catches over more ground than the ramp throws over: {:.1} m against {:.1}",
+            f.run,
+            f.ramp
+        );
+        let steepest = |run: f32| {
+            face_slopes(2.5, run).into_iter().fold(f32::MIN, f32::max)
+        };
+        assert!(
+            steepest(f.run) < steepest(f.back) - 3.0,
+            "and it is the gentler of the two: {:.1}° against {:.1}°",
+            steepest(f.run),
+            steepest(f.back)
+        );
+    }
+
+    #[test]
+    fn a_shape_and_the_length_it_reports_end_at_the_same_place() {
+        // These two used to be written out separately and drifted apart, cutting the last
+        // ramp off into a step. Now `total` is the only statement of it.
+        for (height, gap, lip) in [(2.5f32, 8.0f32, 10.0f32), (1.2, 4.0, 6.0), (4.0, 14.0, 12.0)] {
+            let f = double_faces(height, lip);
+            let stated = Feature::Double { at: 0.0, height, gap, lip }.length();
+            assert!(
+                (stated - f.total(gap)).abs() < 1e-3,
+                "{stated} against {}",
+                f.total(gap)
+            );
+        }
     }
 }

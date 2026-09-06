@@ -1669,6 +1669,16 @@ fn apply_step_ups(along: &mut [f32], st: &[Station], features: &[Feature]) {
 }
 
 /// A feature's shape along the track. `t` runs 0–1 across it, `u` is metres from its start.
+/// A jump face's own shape, at `t` from its foot to its lip.
+///
+/// The sweep comes from the face's real run and rise rather than from the angle it was sized
+/// against, so a face lengthened by [`crate::trackprog::JUMP_FACE_MIN_M`] or by a programme's
+/// own `lip` is a shallower arc rather than the same arc stretched over more ground. Either
+/// way it leaves the ground tangent and arrives at the lip steepest.
+fn arc_up(t: f32, height: f32, run: f32) -> f32 {
+    crate::trackprog::face_arc(t, crate::trackprog::face_sweep(height, run))
+}
+
 fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
     // Drawn by hand: eased between the points it was given, which is the same easing the lap's
     // own height curve uses. Nothing else here has a shape someone chose point by point.
@@ -1684,11 +1694,15 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
         Feature::Tabletop { height, length, .. } => {
             let (up, top, down) = crate::trackprog::tabletop_faces(height, length);
             if u <= up {
-                height * smoothstep(u / up)
+                // Concave: tangent to the ground at the foot and steepest at the lip, which
+                // is the edge the rider leaves the ground over.
+                height * arc_up(u / up, height, up)
             } else if u <= up + top {
                 height
             } else {
-                height * smoothstep(1.0 - (u - up - top) / down)
+                // The same arc ridden the other way, so the far side is convex — steep off
+                // the crest and flattening into the ground that catches you.
+                height * arc_up(1.0 - (u - up - top) / down, height, down)
             }
         }
         Feature::Roller { height, .. } => height * (0.5 - 0.5 * (t * std::f32::consts::TAU).cos()),
@@ -1701,20 +1715,21 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
         Feature::Double {
             height, gap, lip, ..
         } => {
-            // Both faces from one definition, shared with `Feature::length` so the two
+            // All four faces from one definition, shared with `Feature::length` so the two
             // cannot disagree about where the shape ends.
-            let (lip, back) = crate::trackprog::double_faces(height, lip);
-            let takeoff = lip + back;
-            if u <= lip {
-                height * smoothstep(u / lip)
-            } else if u <= takeoff {
-                height * smoothstep(1.0 - (u - lip) / back)
-            } else if u <= takeoff + gap {
+            let f = crate::trackprog::double_faces(height, lip);
+            let crest = f.ramp + f.back;
+            let land = crest + gap;
+            if u <= f.ramp {
+                height * arc_up(u / f.ramp, height, f.ramp)
+            } else if u <= crest {
+                height * arc_up(1.0 - (u - f.ramp) / f.back, height, f.back)
+            } else if u <= land {
                 0.0
-            } else if u <= takeoff + gap + back {
-                height * smoothstep((u - takeoff - gap) / back)
+            } else if u <= land + f.face {
+                height * arc_up((u - land) / f.face, height, f.face)
             } else {
-                height * smoothstep(1.0 - (u - takeoff - gap - back) / lip)
+                height * arc_up(1.0 - (u - land - f.face) / f.run, height, f.run)
             }
         }
         Feature::Whoops {
@@ -4039,6 +4054,69 @@ fn hmf(prog: &TrackProgram, syn: &Synth) -> String {
     s
 }
 
+/// The deformable stack a surface is made of: what the wheels dig through, and how far.
+///
+/// This is where a track's *durability* lives, and it is the one part of the pipeline that
+/// nothing measured. MX Bikes deforms terrain through these layers — each `thickness` is how
+/// deep that material goes before the wheel reaches the one beneath, and the base layer at
+/// the bottom has none, so it is where digging stops.
+///
+/// PiBoSo's own example track ships six layers with two of them unmasked, so every square
+/// metre of the plot has 0.2 m of ground that can move. We shipped three, and the only
+/// deformable one was masked to the riding line — off the line the surface was bare
+/// `compact soil`, which is hardpack. That is why a generated track never grew a second line
+/// however long it was ridden: there was nothing off the main one for a second line to be cut
+/// into, and the main one bottomed out on rock after ten centimetres.
+///
+/// The material names are not a guess. They are the whole vocabulary out of `terrained.exe`'s
+/// own string table — `compact soil`, `soil`, `soft soil`, `sand`, `gravel`, `rock`, `grass`
+/// — and anything else fails to parse.
+struct Dig {
+    /// The floor. No thickness: nothing digs past it.
+    base: &'static str,
+    /// The bed, over the whole plot.
+    bed: (&'static str, f32),
+    /// What sits on the bed, also over the whole plot. Together with it, this is how deep
+    /// ordinary ground can be cut.
+    top: (&'static str, f32),
+    /// The chewed-up stuff off the line and round the outside of a bend, which is deeper
+    /// than the ground beside it because nothing packs it down.
+    loose: (&'static str, f32),
+    /// The packed racing line: a firm crust over softer ground, which is what a line worn
+    /// into a track actually is.
+    packed: (&'static str, f32),
+}
+
+fn dig(s: Surface) -> Dig {
+    match s {
+        // Worked loam: a hand's depth of workable ground over hardpack.
+        Surface::Soil => Dig {
+            base: "compact soil",
+            bed: ("soil", 0.10),
+            top: ("soft soil", 0.10),
+            loose: ("soft soil", 0.16),
+            packed: ("soil", 0.04),
+        },
+        // Sand is deep everywhere, and that is the whole character of a sand national — the
+        // ruts are what you ride, not what you avoid.
+        Surface::Sand => Dig {
+            base: "compact soil",
+            bed: ("soil", 0.10),
+            top: ("sand", 0.22),
+            loose: ("sand", 0.32),
+            packed: ("sand", 0.08),
+        },
+        // A grasstrack barely cuts up at all: root-bound ground over firm soil.
+        Surface::Grass => Dig {
+            base: "compact soil",
+            bed: ("soil", 0.06),
+            top: ("soft soil", 0.05),
+            loose: ("soft soil", 0.09),
+            packed: ("soil", 0.03),
+        },
+    }
+}
+
 fn tht(prog: &TrackProgram, syn: &Synth) -> String {
     let mut s = header(prog, syn);
     // Off, pit, start — the order PiBoSo's example writes them in, and it matters: the pit
@@ -4048,17 +4126,35 @@ fn tht(prog: &TrackProgram, syn: &Synth) -> String {
     s.push_str("surface_layer0\n{\n\tsurface = off\n\tmask = area_off.tga\n}\n\n");
     s.push_str("surface_layer1\n{\n\tsurface = pit\n\tmask = area_pits.tga\n}\n\n");
     s.push_str("surface_layer2\n{\n\tsurface = start\n\tmask = area_start.tga\n}\n\n");
-    s.push_str("num_material_layers = 3\n\n");
-    // The base is whatever the ground is; the line is worked soil on top of it, and the
-    // field is grass. Same three bands the height file paints, said in physics.
-    let base = match prog.terrain.surface {
-        Surface::Soil => "compact soil",
-        Surface::Sand => "sand",
-        Surface::Grass => "grass",
+
+    let d = dig(prog.terrain.surface);
+    // Ground already cut into the terrain is ground the surface no longer has to give. A
+    // freshly prepped track carries its whole depth; a fully raced one has spent half of it,
+    // and the ruts baked into the heightmap are where it went. Without this the two add up:
+    // we would hand the game a surface already dug half a metre and then tell it there is
+    // another twenty centimetres underneath.
+    let left = 1.0 - 0.5 * prog.terrain.wear.clamp(0.0, 1.0);
+    let layer = |n: usize, (material, thickness): (&str, f32), mask: Option<&str>| {
+        let mut b = format!("material_layer{n}\n{{\n\tmaterial = {material}\n");
+        b.push_str(&format!("\tthickness = {:.3}\n", (thickness * left).max(0.005)));
+        if let Some(m) = mask {
+            b.push_str(&format!("\tmask = {m}\n"));
+        }
+        b.push_str("}\n\n");
+        b
     };
-    s.push_str(&format!("material_layer0\n{{\n\tmaterial = {base}\n}}\n\n"));
-    s.push_str("material_layer1\n{\n\tmaterial = soil\n\tthickness = 0.1\n\tmask = mask_dirt.tga\n}\n\n");
-    s.push_str("material_layer2\n{\n\tmaterial = grass\n\tthickness = 0.01\n\tmask = mask_grass.tga\n}\n");
+
+    s.push_str("num_material_layers = 6\n\n");
+    // The base carries no thickness, which is what makes it the floor.
+    s.push_str(&format!("material_layer0\n{{\n\tmaterial = {}\n}}\n\n", d.base));
+    // Two unmasked layers over the whole plot, as the example has. This is the change that
+    // lets a line form anywhere rather than only where we painted one.
+    s.push_str(&layer(1, d.bed, None));
+    s.push_str(&layer(2, d.top, None));
+    // Then the places that differ from ordinary ground.
+    s.push_str(&layer(3, d.loose, Some("mask_loose.tga")));
+    s.push_str(&layer(4, d.packed, Some("mask_rut.tga")));
+    s.push_str(&layer(5, ("grass", 0.01), Some("mask_grass.tga")));
     s
 }
 
@@ -4237,6 +4333,7 @@ mod tests {
                     landform_height: 12.0,
                                 },
                 surface: crate::trackprog::Surface::Soil,
+                wear: crate::trackprog::default_wear(),
             },
             start: Start {
                 x: 140.0,
@@ -5737,6 +5834,97 @@ mod tests {
             (st.z / s.mps).round() as usize,
         );
         s.heights[gy.min(s.gh - 1) * s.gw + gx.min(s.gw - 1)]
+    }
+
+    /// What the surface stack comes out as, for eyeballing as much as for asserting.
+    fn stack(surface: crate::trackprog::Surface, wear: f32) -> String {
+        let mut p = oval();
+        p.terrain.surface = surface;
+        p.terrain.wear = wear;
+        let syn = synthesise(&p).expect("synthesise");
+        tht(&p, &syn)
+    }
+
+    /// Every thickness the stack declares, added up: how deep the ground can be cut.
+    fn dig_depth(s: &str) -> f32 {
+        s.lines()
+            .filter_map(|l| l.trim().strip_prefix("thickness = "))
+            .filter_map(|v| v.parse::<f32>().ok())
+            .sum()
+    }
+
+    #[test]
+    fn the_whole_plot_has_ground_that_can_move() {
+        // The durability fix, and the thing three layers could not do. Two unmasked
+        // deformable layers, as PiBoSo's own example ships — so a line can be cut anywhere
+        // rather than only where we painted one.
+        let s = stack(crate::trackprog::Surface::Soil, 0.55);
+        assert!(s.contains("num_material_layers = 6"), "{s}");
+        let unmasked = s
+            .split("material_layer")
+            .filter(|b| b.contains("thickness") && !b.contains("mask ="))
+            .count();
+        assert_eq!(unmasked, 2, "two layers over the whole plot:\n{s}");
+        // And the floor still carries none, which is what makes it the floor.
+        let base = s.split("material_layer1").next().unwrap();
+        assert!(
+            base.contains("material = compact soil") && !base.contains("thickness"),
+            "{base}"
+        );
+    }
+
+    #[test]
+    fn every_material_named_is_one_the_compiler_knows() {
+        // The whole vocabulary out of `terrained.exe`'s own string table. Anything else is a
+        // track that will not compile, and the failure would surface far from here.
+        const KNOWN: [&str; 7] =
+            ["compact soil", "soil", "soft soil", "sand", "gravel", "rock", "grass"];
+        for surface in [
+            crate::trackprog::Surface::Soil,
+            crate::trackprog::Surface::Sand,
+            crate::trackprog::Surface::Grass,
+        ] {
+            for line in stack(surface, 0.55).lines() {
+                if let Some(m) = line.trim().strip_prefix("material = ") {
+                    assert!(KNOWN.contains(&m), "{surface:?} names an unknown material {m:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_sand_track_is_sand_where_the_tyres_are() {
+        // It was not. The riding line was written as `soil` whatever the track was made of,
+        // and the sand only appeared as the base layer underneath — masked out at exactly
+        // the place anyone rides. A sand national rode on soil.
+        let sand = stack(crate::trackprog::Surface::Sand, 0.55);
+        let soil = stack(crate::trackprog::Surface::Soil, 0.55);
+        assert!(sand.contains("material = sand"), "{sand}");
+        assert!(!soil.contains("material = sand"), "{soil}");
+        // And it is deeper than worked loam, which is most of what a sand track rides like.
+        assert!(
+            dig_depth(&sand) > dig_depth(&soil),
+            "{:.2} m against {:.2}",
+            dig_depth(&sand),
+            dig_depth(&soil)
+        );
+    }
+
+    #[test]
+    fn a_raced_track_has_already_spent_half_its_depth() {
+        // The knob. Ground cut into the heightmap is ground the surface no longer has to
+        // give, so the two cannot both be at full depth — that is what would have made a
+        // heavily raced track dig itself to pieces once the stack got deeper.
+        let (fresh, raced) = (
+            dig_depth(&stack(crate::trackprog::Surface::Soil, 0.0)),
+            dig_depth(&stack(crate::trackprog::Surface::Soil, 1.0)),
+        );
+        assert!(fresh > raced, "fresh {fresh:.3} m against raced {raced:.3}");
+        assert!(
+            (raced / fresh - 0.5).abs() < 0.02,
+            "a fully raced track keeps half of it: {:.3}",
+            raced / fresh
+        );
     }
 }
 
