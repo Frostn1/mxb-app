@@ -2184,9 +2184,19 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         put(&format!("maps/env/env_{face}.tga"), bytes, &mut wrote)?;
     }
 
+    // What stands beside the track: the models, and the blocks that place them. The `.hmf`
+    // draws them; the `.tht` gets only what should stop a bike, so a rider clips a foliage
+    // card and rides on but hits a bale.
+    let scenery = crate::trackscenery::build(prog, syn);
+    for (name, bytes) in &scenery.files {
+        put(name, bytes.clone(), &mut wrote)?;
+    }
+
     // PiBoSo's own source files are CRLF, so ours are.
-    put("track.hmf", crlf(&hmf(prog, syn)), &mut wrote)?;
-    put("track.tht", crlf(&tht(prog, syn)), &mut wrote)?;
+    let hmf_text = hmf(prog, syn) + &crate::trackscenery::blocks(&scenery.drawn);
+    let tht_text = tht(prog, syn) + &crate::trackscenery::blocks(&scenery.solid);
+    put("track.hmf", crlf(&hmf_text), &mut wrote)?;
+    put("track.tht", crlf(&tht_text), &mut wrote)?;
     put("params.ini", crlf(PARAMS_INI), &mut wrote)?;
     put("trh_params.ini", crlf(TRH_PARAMS_INI), &mut wrote)?;
     put("track.tcl", crlf(&tcl(prog)), &mut wrote)?;

@@ -77,6 +77,47 @@ impl Lap {
     }
 }
 
+/// A point on the lap: where it is, which way it faces, and how far round it sits.
+#[derive(Clone, Copy, Debug)]
+pub struct Station {
+    pub x: f32,
+    pub z: f32,
+    /// Radians, per [`crate::trackprog::heading_vector`].
+    pub heading: f32,
+    /// Metres round the lap.
+    pub at: f32,
+}
+
+impl Lap {
+    /// Walk the lap at roughly `step` metres.
+    ///
+    /// Each station is placed from its own segment's stated pose rather than integrated from
+    /// the one before, which is what keeps a two-kilometre walk from drifting.
+    pub fn stations(&self, step: f32) -> Vec<Station> {
+        let step = step.max(0.05);
+        let mut out = Vec::new();
+        for seg in &self.segments {
+            let steps = ((seg.length / step) as usize).max(1);
+            for k in 0..steps {
+                let d = k as f32 * seg.length / steps as f32;
+                let (x, z, heading) = if seg.radius == 0.0 {
+                    let (hx, hz) = crate::trackprog::heading_vector(seg.heading);
+                    (seg.x + d * hx, seg.z + d * hz, seg.heading)
+                } else {
+                    let h = seg.heading + d / seg.radius;
+                    (
+                        seg.x + seg.radius * (seg.heading.cos() - h.cos()),
+                        seg.z + seg.radius * (h.sin() - seg.heading.sin()),
+                        h,
+                    )
+                };
+                out.push(Station { x, z, heading, at: seg.at + d });
+            }
+        }
+        out
+    }
+}
+
 /// Read the centreline out of a height file's trailing block.
 ///
 /// The block's tail is fixed once the coverage masks are behind you, and the material table
