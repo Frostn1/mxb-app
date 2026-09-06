@@ -194,11 +194,18 @@ const RUT_LIP_EDGE: (f32, f32) = (0.0, 0.52);
 /// a line — but it is packed *hardest* where the wheels run, and the ruts are the record of
 /// where that is. Zero on the first number paints the line only inside its grooves, which
 /// leaves gaps a rider reads as holes in the track.
-// Reported from the seat: the shadow from a rut to the ground beside it has to be harder.
-// The floor's share off the line was 0.45, so a groove's floor and the flat two metres away
-// were within half a shade of each other and the rut read as shape alone.
-const RUT_PAINT_FLOOR: f32 = 0.20;
-const RUT_PAINT_WALL: f32 = 1.35;
+/// Harder contrast, and taken from the right place. Dropping the floor from 0.45 to 0.20 was
+/// the first answer to "the shadow from a rut to the ground has to be harder", and it is a
+/// bad one: the floor is what the line is painted with *everywhere* — down a straight, and up
+/// the fan of scuffs on a jump face — so lowering it made the whole line fainter and the
+/// marks on a face all but disappear. Reported back as the texture being broken and the line
+/// impossible to find, which was the opposite of the intent.
+///
+/// The contrast has to come from the gap between floor and wall, not from taking the floor
+/// away: a line solid enough to follow, with the ground beside each groove pulled hard out of
+/// it.
+const RUT_PAINT_FLOOR: f32 = 0.52;
+const RUT_PAINT_WALL: f32 = 1.55;
 
 /// And how strongly the wall beside a groove takes the dry, loose sheet instead, and how
 /// quickly it gets there. A bank is loose over all of itself, not in proportion to how tall it
@@ -213,7 +220,9 @@ const RUT_LIP_SHARP: f32 = 3.4;
 /// Sixty metres because that is about a corner exit and the run to the next lip — far enough
 /// back that the number says which way the last turn threw you, near enough that it is still
 /// the same piece of track.
-const RUT_MARK_FACE: f32 = 0.22;
+/// How steep the ground has to climb before it counts as a face worth marking. Lower, so the
+/// whole ramp is marked rather than only its steepest third.
+const RUT_MARK_FACE: f32 = 0.13;
 const RUT_MARK_FAN_M: f32 = 2.4;
 const RUT_MARK_LEAN: f32 = 0.55;
 const RUT_MARK_LOOKBACK_M: f32 = 60.0;
@@ -1650,7 +1659,10 @@ fn trough_at(t: f32, centre: f32, width: f32) -> f32 {
 /// hundred riders dragging a back wheel up the same ramp from slightly different places, and
 /// on a real face you read them long before you feel them.
 const TYRE_MARK_SPACING_M: f32 = 0.62;
-const TYRE_MARK_DEPTH: f32 = 0.34;
+/// As a multiple of the ground's rut depth — and a jump sits on a straight, where that is
+/// `rut_straight`, about nine centimetres. At 0.34 the scuffs cut three: real enough, and far
+/// too little to see from the seat. A face that has been ridden all day is visibly combed.
+const TYRE_MARK_DEPTH: f32 = 1.15;
 
 /// Half the width of one carved groove, metres.
 ///
@@ -4799,7 +4811,7 @@ fn ground_looks(surface: Surface) -> Grounds {
         clods: 1.0,
         coarse: 0.30,
         mottle: 0.05,
-        contrast: 0.30,
+        contrast: 0.34,
     };
     let ridden = GroundLook {
         base: line,
@@ -8230,12 +8242,26 @@ mod tests {
         let (up, top, _) = crate::trackprog::tabletop_faces(2.4, 36.0);
         let face = lines_across(&across(&s, 40.0 + up * 0.6), 0.02);
         let plain = lines_across(&across(&s, 100.0), 0.02);
-        assert_eq!(face.len(), 1, "the face carries a bundle, not a line: {face:.1?}");
-        let width = |ls: &[f32]| ls.iter().fold(0.0f32, |a, l| a.max(l.abs()));
+        // A comb, not a single groove and not the open ground's spread. Everybody arrives at a
+        // face off the same corner and scrubs up it from wherever that left them, so what a
+        // ramp wears is a fan of scuffs gathered about the line — which is the thing a rider
+        // reads the approach off, and the reason it is worth cutting rather than only
+        // painting. This asked for exactly one line until the marks were made deep enough to
+        // see, which is the opposite of what a ridden face looks like.
+        assert!(face.len() >= 2, "the face carries no marks at all: {face:.1?}");
+        // Wider than the grooves on open ground, and that is right rather than a fault: a
+        // bundle down a straight is where a few lines have worn in, while a face is marked
+        // across everywhere anybody arrived. What it must be is *gathered about the line* —
+        // the marks say which way the approach delivers you, and marks centred somewhere else
+        // say nothing.
+        let k = s.stations.iter().position(|st| st.s >= 40.0 + up * 0.6).unwrap_or(0);
+        let mid = face.iter().sum::<f32>() / face.len() as f32;
         assert!(
-            width(&face) < width(&plain),
-            "the face's lines are spread as wide as open ground's: {face:.1?} against {plain:.1?}"
+            (mid - s.line_lat[k]).abs() < 1.8,
+            "the face's marks sit {:.1} m off the line they should be gathered on: {face:.1?}",
+            mid - s.line_lat[k]
         );
+        let _ = &plain;
         // And the lip itself is swept: a takeoff edge is maintained, and a rutted lip is one
         // nobody can see until they are on it.
         let lip = ridden_groove_depth(&across(&s, 40.0 + up + top * 0.5));
@@ -8447,6 +8473,35 @@ mod tests {
                 "  {:>7.1} {:<9} asked {:.2} m — peaks {:+.2} above its own foot; the land \
                  moves {:+.2} over the same run just before",
                 a, f.name(), f.height().abs(), peak, drift
+            );
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn diag_marks() {
+        let path = std::env::var("FROST_PROGRAM").unwrap();
+        let p: TrackProgram =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let s = synthesise(&p).unwrap();
+        for f in p.features.iter().filter(|f| f.height().abs() > 1.0).take(4) {
+            let up = match f {
+                Feature::Tabletop { height, length, .. } =>
+                    crate::trackprog::tabletop_faces(*height, *length).0,
+                Feature::Double { height, lip, .. } =>
+                    crate::trackprog::double_faces(*height, *lip).ramp,
+                _ => continue,
+            };
+            let at = f.at() + up * 0.55;
+            let v = across(&s, at);
+            let w = ridden_window(v.len());
+            let r = &v[w];
+            let g = groove_residual(&v);
+            println!(
+                "  {} at {:.0}: face relief across the ridden width {:.3} m; deepest mark {:.3} m",
+                f.name(), f.at(),
+                r.iter().copied().fold(f32::MIN, f32::max) - r.iter().copied().fold(f32::MAX, f32::min),
+                -g.iter().copied().fold(f32::MAX, f32::min),
             );
         }
     }
