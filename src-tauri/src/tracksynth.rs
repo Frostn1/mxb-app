@@ -48,6 +48,23 @@ const STATION_STEP: f32 = 0.5;
 /// the number: side by side at 6 m the edge is crisp and at 9 m it is not.
 const SHOULDER_M: f32 = 6.0;
 
+/// Half the width of the packed strip the tyres leave, metres. Two of these across is a bike
+/// and a bit either side, which is what a line worn into a track actually measures.
+const RUT_HALF_WIDTH_M: f32 = 1.35;
+
+/// The corner radius at which the racing line leans as far inside as it will go. Tighter than
+/// this and it is already all the way over; a 40 m sweeper barely moves off centre.
+const FULL_LEAN_RADIUS_M: f32 = 14.0;
+
+/// How close to the edge of the track the racing line is willing to run, metres. It is a line,
+/// not a wall-ride: leaving this much between it and the shoulder is what keeps a berm
+/// readable as something outside the line rather than part of it.
+const LINE_KEEPS_OFF_EDGE_M: f32 = 1.6;
+
+/// Metres of lap the racing line's lean is smoothed over. This is what makes it enter a corner
+/// wide, tighten through it and drift out again, out of nothing but per-station curvature.
+const LINE_LEAN_SMOOTH_M: f32 = 34.0;
+
 /// Metres of lap the track's own elevation is smoothed over. Short enough to follow a hill,
 /// long enough not to follow a bush.
 ///
@@ -319,6 +336,11 @@ const TILE_FIELD_M: f32 = 4.5;
 const TILE_LINE_M: f32 = 3.2;
 const TILE_SHOULDER_M: f32 = 3.8;
 const TILE_GRASS_M: f32 = 2.8;
+/// The loose dirt tiles coarser than the line it sits on, so the two read as different ground
+/// and not as one sheet at two brightnesses.
+const TILE_LOOSE_M: f32 = 4.1;
+/// And the packed line finer, which is what being driven over does to it.
+const TILE_RUT_M: f32 = 2.4;
 
 /// The cube a wet layer reflects, per face. Small on purpose: it is seen smeared across a
 /// film of water and never in focus. The example track's own faces are 128 too.
@@ -365,7 +387,14 @@ pub struct Synth {
     pub dist: Vec<f32>,
     /// Metres round the lap.
     pub arc: Vec<f32>,
+    /// Which station each cell is nearest. Lets a mask ask the line's heading and curvature
+    /// where the cell is, which is what tells it the rider's left from their right.
+    pub station: Vec<u32>,
     pub stations: Vec<Station>,
+    /// Where the racing line sits across the track at each station, signed metres, positive
+    /// to the rider's right. Smoothed along the lap, so it leans into a corner before the
+    /// corner and drifts back out after it rather than stepping across at the seams.
+    pub line_lat: Vec<f32>,
     /// What the terrain actually used of its budget, and what the budget was.
     pub used_m: f32,
     pub budget_m: f32,
@@ -869,6 +898,22 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         *v = *v - lo + floor;
     }
 
+    // Where the racing line runs across the track. A rider hugs the inside of a corner, so
+    // the line leans to whichever side the curvature points at and by more the tighter the
+    // corner. Smoothing that over a stretch of lap is what turns it into a line rather than a
+    // set of steps: it starts moving across before the corner arrives and drifts back out
+    // after it, which is the shape the real one takes and the reason it reads as a line to
+    // follow rather than a stripe down the middle.
+    let reach = (prog.width * 0.5 - LINE_KEEPS_OFF_EDGE_M).max(0.0);
+    let mut line_lat: Vec<f32> = stations
+        .iter()
+        .map(|st| {
+            let lean = (st.curvature.abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
+            st.curvature.signum() * lean * reach
+        })
+        .collect();
+    smooth_along(&mut line_lat, (LINE_LEAN_SMOOTH_M / STATION_STEP) as usize);
+
     Ok(Synth {
         gw,
         gh,
@@ -877,6 +922,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         corridor,
         dist,
         arc,
+        station,
+        line_lat,
         stations,
         used_m: used,
         budget_m: budget,
@@ -1856,7 +1903,11 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
             0
         }
     });
+    let rut = rut_mask(syn, half, seed, MASK_DIM);
+    let loose = loose_mask(syn, half, seed, MASK_DIM);
     put("mask_dirt.tga", tga_alpha(MASK_DIM, MASK_DIM, &dirt), &mut wrote)?;
+    put("mask_loose.tga", tga_alpha(MASK_DIM, MASK_DIM, &loose), &mut wrote)?;
+    put("mask_rut.tga", tga_alpha(MASK_DIM, MASK_DIM, &rut), &mut wrote)?;
     put(
         "mask_shoulder.tga",
         tga_alpha(MASK_DIM, MASK_DIM, &shoulder),
@@ -1881,7 +1932,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     // What the 3D grass is coloured by. Terrain-wide, like the density map it sits beside in
     // the same block, rather than tiled like the blade sprite: the two `*map` keys are
     // siblings and read the ground the same way.
-    let (.., turf) = ground_looks(prog.terrain.surface);
+    let turf = ground_looks(prog.terrain.surface).turf;
     let grass_color = mask_rect(syn, MASK_DIM, MASK_DIM, |_, _, x, z| {
         // One channel is enough to carry the variation; the tint itself is written below.
         (140.0 + 90.0 * fbm(x * 0.02, z * 0.02, seed ^ 0x4B12)).clamp(0.0, 255.0) as u8
@@ -2574,17 +2625,21 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
 
     // One layer per painted band, in the order they are painted over each other. The first
     // covers everything and so carries no mask; the rest are masked.
-    let (field, ridden, shoulder, turf) = ground_looks(prog.terrain.surface);
+    let Grounds { field, ridden, shoulder, rut, loose, turf } = ground_looks(prog.terrain.surface);
     let seed = prog.terrain.relief.seed;
     let dim = GROUND_TEXTURE_DIM;
     let half = prog.width * 0.5;
     let (_, shoulder_scale) = ground(prog.terrain.surface);
-    let bands: [(&str, &GroundLook, u32, f32, Option<f32>); 4] = [
-        ("ground_c", &field, 0x9A0D, TILE_FIELD_M, None),
+    // The same bands the exported track is painted with, so what the studio draws is what
+    // gets ridden. Anything keyed off the racing line comes from the shared mask functions.
+    let bands: [(&str, &GroundLook, u32, f32, BandMask); 6] = [
+        ("ground_c", &field, 0x9A0D, TILE_FIELD_M, BandMask::Everywhere),
         ("shoulder_c", &shoulder, 0x30D2, TILE_SHOULDER_M,
-         Some(half + SHOULDER_M * shoulder_scale)),
-        ("dirt_line_c", &ridden, 0x11E5, TILE_LINE_M, Some(half)),
-        ("grass_c", &turf, 0x6A55, TILE_GRASS_M, Some(-1.0)),
+         BandMask::Within(half + SHOULDER_M * shoulder_scale)),
+        ("dirt_line_c", &ridden, 0x11E5, TILE_LINE_M, BandMask::Within(half)),
+        ("loose_c", &loose, 0x7C41, TILE_LOOSE_M, BandMask::Loose),
+        ("rut_c", &rut, 0x5B93, TILE_RUT_M, BandMask::Rut),
+        ("grass_c", &turf, 0x6A55, TILE_GRASS_M, BandMask::Beyond),
     ];
     out.extend_from_slice(&u(bands.len() as u32));
     for (sheet, look, salt, tile, mask_to) in bands {
@@ -2657,14 +2712,21 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
         out.extend_from_slice(&f(rx as f32));
         out.extend_from_slice(&f(rz as f32));
         match mask_to {
-            None => out.extend_from_slice(&u(0)),
-            Some(edge) => {
-                let grass = edge < 0.0;
-                let to = if grass { half + SHOULDER_M } else { edge };
+            BandMask::Everywhere => out.extend_from_slice(&u(0)),
+            edge => {
                 let (mw, mh) = (syn.gw - 1, syn.gh - 1);
-                let m = mask_rect(syn, mw, mh, |d, _, _, _| {
-                    u8::from(if grass { d > to } else { d <= to }) * 255
-                });
+                let m = match edge {
+                    BandMask::Everywhere => unreachable!(),
+                    BandMask::Rut => rut_mask(syn, half, seed, mw),
+                    BandMask::Loose => loose_mask(syn, half, seed, mw),
+                    BandMask::Beyond => {
+                        let to = half + SHOULDER_M;
+                        mask_rect(syn, mw, mh, |d, _, _, _| u8::from(d > to) * 255)
+                    }
+                    BandMask::Within(to) => {
+                        mask_rect(syn, mw, mh, |d, _, _, _| u8::from(d <= to) * 255)
+                    }
+                };
                 let packed = deflate_raw(&m);
                 out.extend_from_slice(&u(1));
                 out.extend_from_slice(&u(mw as u32));
@@ -2912,6 +2974,96 @@ fn mask_from(syn: &Synth, dim: usize, f: impl Fn(f32, f32, f32, f32) -> u8) -> V
         }
     }
     out
+}
+
+/// A mask whose value depends on which side of the line a cell is, not just how far off it.
+///
+/// `mask_from` hands out an unsigned distance, which is all a band symmetric about the
+/// centreline needs. Anything that reads as a *track* rather than a stripe is not symmetric:
+/// the racing line sits inside the corner, the berm is outside it, the roost lands on one
+/// shoulder. Those need the rider's left told from their right, which is what the nearest
+/// station's heading gives.
+///
+/// The callback gets, in order: metres off the centreline (signed, positive to the rider's
+/// right), metres off the *racing* line (same sign), the line's curvature there (positive
+/// turning right), metres round the lap, and the cell's place on the ground.
+fn mask_across(syn: &Synth, dim: usize, f: impl Fn(f32, f32, f32, f32, f32, f32) -> u8) -> Vec<u8> {
+    let mut out = vec![0u8; dim * dim];
+    for y in 0..dim {
+        let gy = (y * syn.gh / dim).min(syn.gh - 1);
+        for x in 0..dim {
+            let gx = (x * syn.gw / dim).min(syn.gw - 1);
+            let i = gy * syn.gw + gx;
+            let at = syn.station[i] as usize;
+            let st = &syn.stations[at];
+            let (wx, wz) = (gx as f32 * syn.mps, gy as f32 * syn.mps);
+            let (rx, rz) = crate::trackprog::right_vector(st.heading);
+            let lat = (wx - st.x) * rx + (wz - st.z) * rz;
+            out[y * dim + x] = f(
+                lat,
+                lat - syn.line_lat[at],
+                st.curvature,
+                syn.arc[i],
+                wx,
+                wz,
+            );
+        }
+    }
+    out
+}
+
+/// Which cells a band of the preview map covers.
+#[derive(Clone, Copy)]
+enum BandMask {
+    /// The base band: everything, and so no mask at all.
+    Everywhere,
+    /// Within this many metres of the centreline.
+    Within(f32),
+    /// Past the shoulder — the field and the turf on it.
+    Beyond,
+    /// The packed racing line.
+    Rut,
+    /// Loose dirt off the line and round the outside of a bend.
+    Loose,
+}
+
+/// The racing line: the strip the tyres actually pack down, damp and dark.
+///
+/// It leans to the inside of a corner because `line_lat` does, and it wanders, because a band
+/// of exactly constant width running the whole lap reads as a stripe painted down the middle
+/// rather than as ground anyone has ridden on.
+///
+/// Shared by the exported masks and the preview map, so the studio cannot show a line in a
+/// different place from the one the game gets.
+fn rut_mask(syn: &Synth, half: f32, seed: u32, dim: usize) -> Vec<u8> {
+    mask_across(syn, dim, |lat, off, _, _, x, z| {
+        if lat.abs() > half + 0.5 {
+            return 0;
+        }
+        let w = RUT_HALF_WIDTH_M + edge_noise(x, z, seed ^ 0x51C7, 0.75, 0.28);
+        soft_edge(w, 1.3, off.abs())
+    })
+}
+
+/// Loose dirt: the outside of a bend and the edges of the track, where the roost lands and
+/// nothing packs it down.
+///
+/// Two things put it there — how far a cell is off the racing line, and how far round the
+/// outside of a corner it is — and it takes the stronger of the two, so a straight still gets
+/// dry edges without the corner term inventing any.
+fn loose_mask(syn: &Synth, half: f32, seed: u32, dim: usize) -> Vec<u8> {
+    mask_across(syn, dim, |lat, off, k, _, x, z| {
+        if lat.abs() > half + 0.2 {
+            return 0;
+        }
+        let bend = (k.abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
+        let outside = (-k.signum() * lat / half.max(0.1)).clamp(0.0, 1.0) * bend;
+        let edge = ((off.abs() - RUT_HALF_WIDTH_M - 1.1) / 2.0).clamp(0.0, 1.0);
+        // Patchy, at a scale you read at riding speed rather than from the map, and never
+        // quite solid — ground you can still see the track's own colour through.
+        let patchy = (0.54 + 0.46 * fbm(x * 0.045, z * 0.045, seed ^ 0x2D18)).clamp(0.0, 0.92);
+        (255.0 * (edge.max(outside) * patchy)) as u8
+    })
 }
 
 /// How far in or out a painted edge wanders at a given place on the ground, metres.
@@ -3411,7 +3563,8 @@ fn ground_pixels(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
 /// shading takes about a quarter of it back out, so quoting the base here would spray dirt
 /// visibly lighter than the dirt it came from. A small tile costs nothing and cannot drift.
 fn ground_palette(s: Surface) -> ([u8; 3], [u8; 3]) {
-    let (field, ridden, ..) = ground_looks(s);
+    let g = ground_looks(s);
+    let (field, ridden) = (g.field, g.ridden);
     let mean = |look: &GroundLook| -> [u8; 3] {
         const DIM: usize = 256;
         let px = ground_pixels(DIM, look, 0x9A0D);
@@ -3426,12 +3579,29 @@ fn ground_palette(s: Surface) -> ([u8; 3], [u8; 3]) {
     (mean(&field), mean(&ridden))
 }
 
-/// The three grounds a track is painted with, from what it says it is made of.
+/// Every ground a track is painted with, from what it says it is made of.
+struct Grounds {
+    /// Bound ground with stones showing: everything the track is not.
+    field: GroundLook,
+    /// The corridor's base — worked soil, darker and wetter, nearly all clods.
+    ridden: GroundLook,
+    /// The graded shoulder, between the two, and most of what a rider sees from the seat.
+    shoulder: GroundLook,
+    /// The strip the tyres pack down: darker again, and smooth where the clods are gone.
+    rut: GroundLook,
+    /// Dry chewed dirt off the line and round the outside of a bend, where the roost lands.
+    loose: GroundLook,
+    /// The turf over the top.
+    turf: GroundLook,
+}
+
+/// The grounds, from what the track says it is made of.
 ///
-/// The riding line is worked soil: darker, wetter, nearly all clods, and no grass in it. The
-/// field either side is bound ground with stones showing. The graded shoulder is between the
-/// two, and is most of what a rider actually sees from the seat.
-fn ground_looks(surface: Surface) -> (GroundLook, GroundLook, GroundLook, GroundLook) {
+/// A track that is one colour from edge to edge is one a rider cannot read: nothing says
+/// where the line goes or where the track stops until they are already there. So the corridor
+/// is not one band but three — the base, the packed line inside it and the loose stuff at its
+/// edges — and they are spread far enough apart in tone to tell apart at speed.
+fn ground_looks(surface: Surface) -> Grounds {
     // Read off Indiana's own sheets rather than picked. `soil_light_c` averages (172, 134,
     // 99) and `soil_dark_c` (50, 36, 24) — a bright tan field against a nearly black riding
     // line, and the gap between them is far wider than any two colours anyone would guess.
@@ -3471,10 +3641,14 @@ fn ground_looks(surface: Surface) -> (GroundLook, GroundLook, GroundLook, Ground
     };
     // The graded shoulder: the field's colour, worked over like the line.
     let shoulder = GroundLook {
+        // Graded and dry, and brighter than the field it runs beside. Sitting it halfway
+        // between the field and the line put it at the same brightness as the turf, which
+        // left the edge of the track with no step in it — only a change of hue, and hue is
+        // the first thing to go at speed and in flat light.
         base: [
-            (base[0] + line[0]) * 0.5,
-            (base[1] + line[1]) * 0.5,
-            (base[2] + line[2]) * 0.5,
+            base[0] * 1.06 + 6.0,
+            base[1] * 1.04 + 5.0,
+            base[2] * 1.02 + 4.0,
         ],
         grain_tint: (0.46, 1.46),
         fleck: [165.0, 160.0, 150.0],
@@ -3502,7 +3676,45 @@ fn ground_looks(surface: Surface) -> (GroundLook, GroundLook, GroundLook, Ground
         mottle: 0.26,
         contrast: 0.8,
     };
-    (field, ridden, shoulder, grass)
+    // The packed line: darker and wetter than the ground it is worn into, and smoother —
+    // the clods are gone where a tyre has been over them a thousand times. Kept a good way
+    // off `ridden` in tone, because two shades of the same brown at riding speed is one
+    // shade.
+    let rut = GroundLook {
+        base: [line[0] * 0.72, line[1] * 0.72, line[2] * 0.70],
+        grain_tint: (0.42, 1.44),
+        fleck: [128.0, 124.0, 118.0],
+        fleck_density: 0.015,
+        litter: [120.0, 104.0, 72.0],
+        litter_density: 0.1,
+        blade: ([0.0; 3], [0.0; 3]),
+        blade_density: 0.0,
+        clods: 0.35,
+        coarse: 0.55,
+        mottle: 0.14,
+        contrast: 0.78,
+    };
+    // Loose dirt: dry, so it reads light against everything around it, and coarse, because
+    // it is the stuff that has been thrown there rather than driven on.
+    let loose = GroundLook {
+        base: [
+            line[0] + (base[0] - line[0]) * 0.38,
+            line[1] + (base[1] - line[1]) * 0.38,
+            line[2] + (base[2] - line[2]) * 0.38,
+        ],
+        grain_tint: (0.52, 1.50),
+        fleck: [188.0, 182.0, 168.0],
+        fleck_density: 0.06,
+        litter: [180.0, 162.0, 108.0],
+        litter_density: 0.5,
+        blade: ([0.0; 3], [0.0; 3]),
+        blade_density: 0.0,
+        clods: 1.0,
+        coarse: 1.0,
+        mottle: 0.24,
+        contrast: 0.9,
+    };
+    Grounds { field, ridden, shoulder, rut, loose, turf: grass }
 }
 
 /// The blade sprite the grass layer scatters. Alpha-cut, like every foliage sheet in the
@@ -3708,7 +3920,7 @@ struct Layer {
 /// either side of the ribbon — is most of what is actually in front of a rider.
 fn layers(prog: &TrackProgram) -> Vec<Layer> {
     // Ground follows what the track is made of, so a sand national exports sand.
-    let (field, ridden, shoulder, turf) = ground_looks(prog.terrain.surface);
+    let Grounds { field, ridden, shoulder, rut, loose, turf } = ground_looks(prog.terrain.surface);
     vec![
         Layer {
             name: "ground",
@@ -3743,6 +3955,32 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             thickness: Some(0.1),
             spec: 22,
             shininess: 12,
+            wet: true,
+            grass: false,
+        },
+        // Painted over the corridor's base, in the order the ground gets that way: the loose
+        // stuff is thrown over the worked soil, and the line is worn back through it.
+        Layer {
+            name: "loose",
+            look: loose,
+            salt: 0x7C41,
+            tile_m: TILE_LOOSE_M,
+            mask: Some("mask_loose.tga"),
+            thickness: Some(0.14),
+            spec: 16,
+            shininess: 10,
+            wet: true,
+            grass: false,
+        },
+        Layer {
+            name: "rut",
+            look: rut,
+            salt: 0x5B93,
+            tile_m: TILE_RUT_M,
+            mask: Some("mask_rut.tga"),
+            thickness: Some(0.08),
+            spec: 30,
+            shininess: 20,
             wet: true,
             grass: false,
         },
@@ -4622,8 +4860,8 @@ mod tests {
         let hmf = std::fs::read_to_string(dir.join("track.hmf")).unwrap();
         assert_eq!(
             hmf.matches("frame1").count(),
-            3,
-            "three soil bands get a wet sheet, the grass does not:\n{hmf}"
+            5,
+            "every soil band gets a wet sheet, the grass does not:\n{hmf}"
         );
         for l in layers(&p) {
             let wet = dir.join(format!("maps/{}_wet.tga", l.name));
@@ -4642,7 +4880,7 @@ mod tests {
     /// red spread across [9, 246] and a specular in alpha averaging 12.
     #[test]
     fn a_normal_map_matches_the_shape_of_the_examples_own() {
-        let (field, ..) = ground_looks(Surface::Soil);
+        let field = ground_looks(Surface::Soil).field;
         let dim = 256;
         let px = ground_pixels(dim, &field, 7);
         let t = normal_tga(&px, dim, SHEET_NORMAL_STRENGTH, 18);
@@ -5338,7 +5576,7 @@ mod tests {
     /// so a seam is not a detail — it is a grid drawn over the whole map.
     #[test]
     fn the_ground_sheets_meet_themselves_at_the_edges() {
-        let (field, ..) = ground_looks(Surface::Soil);
+        let field = ground_looks(Surface::Soil).field;
         let dim = 128;
         let tga = ground_texture(dim, &field, 9);
         // Past the 18-byte header, BGRA rows.
@@ -5366,7 +5604,8 @@ mod tests {
     /// generated track looks, so it is worth a test rather than a comment.
     #[test]
     fn the_soil_lands_where_the_published_sheets_do() {
-        let (field, ridden, ..) = ground_looks(Surface::Soil);
+        let g = ground_looks(Surface::Soil);
+        let (field, ridden) = (g.field, g.ridden);
         let mean = |look: &GroundLook| -> [f32; 3] {
             let dim = 256;
             let tga = ground_texture(dim, look, 11);
