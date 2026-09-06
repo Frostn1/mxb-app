@@ -137,11 +137,6 @@ export function previewTrack(program: TrackProgram): Promise<TrackPreview> {
   return invoke<TrackPreview>("preview_track", { program });
 }
 
-/** Put the preview in the game's tracks folder. Terrain only — it previews, it doesn't play. */
-export function installTrackPreview(program: TrackProgram): Promise<string> {
-  return invoke<string>("install_track_preview", { program });
-}
-
 /** Write the folder TerrainEd compiles. Returns the file names written. */
 export function exportTrackSource(program: TrackProgram, dir: string): Promise<string[]> {
   return invoke<string[]>("export_track_source", { program, dir });

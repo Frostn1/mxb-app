@@ -1329,4 +1329,499 @@ mod tests {
             println!("wrote {out}");
         }
     }
+
+    /// The ground across the riding line at a track's tightest corners, drawn.
+    ///
+    /// Percentiles say how deep a groove is. They cannot say what *shape* it is, and shape is
+    /// the whole question when the complaint is that a corner rides like a trench: a cut with
+    /// nothing beside it and the same cut with a wall on its outer side measure the same
+    /// prominence and ride nothing alike. This prints the profile itself, detrended exactly
+    /// the way [`ridden`] detrends it before counting grooves, so a generated corner can be
+    /// held against a published one.
+    ///
+    /// ```text
+    /// Where a published grid's stalls actually are: its `long`/`lat` walked along the lap,
+    /// against the start line's own start.
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn published_stalls_in_world() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::Path::new(&var);
+        let names = crate::track::entry_names(path).unwrap();
+        let rdf = names.iter().find(|n| n.to_lowercase().ends_with(".rdf")).unwrap();
+        let text = String::from_utf8_lossy(&crate::track::read_entry(path, rdf).unwrap()).to_string();
+
+        let entry = crate::track::heightfield_entries(&names).into_iter().next().unwrap();
+        let bytes = crate::track::read_entry(path, &entry).unwrap();
+        let layout = crate::heightfield::probe(&bytes, None).unwrap();
+        let at = layout.offset + layout.width as usize * layout.height as usize * layout.sample.size();
+        let lap = crate::trackline::read(&bytes[at..]).expect("a lap");
+        let prog = crate::trackprog::TrackProgram {
+            name: String::new(), author: String::new(), location: String::new(),
+            terrain: crate::trackprog::Terrain {
+                size_x: 1000.0, size_z: 1000.0, samples: 513, scale: 100.0,
+                relief: Default::default(), surface: Default::default(),
+                wear: crate::trackprog::default_wear(),
+            },
+            start: crate::trackprog::Start { x: lap.start.0, z: lap.start.1, angle: lap.heading },
+            segments: lap.program_segments(), width: 12.0, features: Vec::new(),
+            blend: 1.2, elevation: Vec::new(),
+        };
+        let st = prog.stations(1.0);
+        let place = |long: f32, lat: f32| -> (f32, f32) {
+            let q = st.iter().min_by(|a, b| (a.s - long).abs().total_cmp(&(b.s - long).abs())).unwrap();
+            let (rx, rz) = crate::trackprog::right_vector(q.heading);
+            (q.x + rx * lat, q.z + rz * lat)
+        };
+        // The grid's own anchor, and the first three stalls read as lap coordinates.
+        let val = |key: &str| -> Option<f32> {
+            text.lines().find_map(|l| l.trim().strip_prefix(&format!("{key} = "))).and_then(|v| v.parse().ok())
+        };
+        println!("  grid anchor ({:.1}, {:.1}) angle {:.0}", val("posx").unwrap_or(0.0), val("posz").unwrap_or(0.0), val("angle").unwrap_or(0.0));
+        // The grid's own stalls, read straight out of the block rather than by scanning for
+        // the word "stall" — the pit lane's are called `start_stall` and come first.
+        if let Some(gi) = text.find("starting_grid") {
+            let tail = &text[gi..];
+            let mut seen = 0;
+            let mut it = tail.lines().map(|l| l.trim()).peekable();
+            while let Some(l) = it.next() {
+                if l.starts_with("stall") && !l.starts_with("start_stall") && seen < 4 {
+                    let (mut long, mut lat, mut ang) = (0.0f32, 0.0f32, 0.0f32);
+                    for _ in 0..5 {
+                        match it.next() {
+                            Some(v) if v.starts_with("long = ") => long = v[7..].parse().unwrap_or(0.0),
+                            Some(v) if v.starts_with("lat = ") => lat = v[6..].parse().unwrap_or(0.0),
+                            Some(v) if v.starts_with("angle = ") => ang = v[8..].parse().unwrap_or(0.0),
+                            Some("}") => break,
+                            _ => {}
+                        }
+                    }
+                    let (x, z) = place(long, lat);
+                    let q = st.iter().min_by(|a, b| (a.s - long).abs().total_cmp(&(b.s - long).abs())).unwrap();
+                    println!(
+                        "  grid stall {seen}: long {long:.1} lat {lat:.1} angle {ang:.0} -> ({x:.1}, {z:.1}); \
+                         lap heading there {:.0}, stall angle - lap heading {:.0}",
+                        q.heading.to_degrees(),
+                        ang - q.heading.to_degrees(),
+                    );
+                    seen += 1;
+                }
+            }
+        }
+        let mut it = text.lines().map(|l| l.trim());
+        let mut shown = 0;
+        while let Some(l) = it.next() {
+            if l.starts_with("stall") && shown < 3 {
+                let (mut long, mut lat) = (0.0, 0.0);
+                for _ in 0..5 {
+                    match it.next() {
+                        Some(v) if v.starts_with("long = ") => long = v[7..].parse().unwrap_or(0.0),
+                        Some(v) if v.starts_with("lat = ") => lat = v[6..].parse().unwrap_or(0.0),
+                        Some("}") => break,
+                        _ => {}
+                    }
+                }
+                let (x, z) = place(long, lat);
+                println!("  stall {shown}: long {long:.1} lat {lat:.1} -> ({x:.1}, {z:.1})");
+                shown += 1;
+            }
+        }
+    }
+
+    /// Everything a published track ships, by name and size — what files it carries at all.
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn published_files() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::Path::new(&var);
+        for n in crate::track::entry_names(path).unwrap() {
+            println!("  {n}");
+        }
+    }
+
+    /// The ground across a published start straight: how wide the flat pad is, and whether it
+    /// runs into the lap or stops short of it.
+    ///
+    /// ```text
+    /// FROST_TRACK=…/track.pkz cargo test -- --ignored --nocapture published_start_ground
+    /// ```
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn published_start_ground() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::Path::new(&var);
+        let names = crate::track::entry_names(path).unwrap();
+        let entry = crate::track::heightfield_entries(&names).into_iter().next().unwrap();
+        let bytes = crate::track::read_entry(path, &entry).unwrap();
+        let layout = crate::heightfield::probe(&bytes, None).unwrap();
+        let mps = layout.metres_per_sample.expect("a track in metres");
+        let (gw, gh, heights) =
+            crate::heightfield::read_grid(&bytes, &layout, layout.width.max(layout.height));
+        let (gw, gh) = (gw as usize, gh as usize);
+        let at = |x: f32, z: f32| -> f32 {
+            let (ix, iz) = ((x / mps) as usize, (z / mps) as usize);
+            heights[iz.min(gh - 1) * gw + ix.min(gw - 1)]
+        };
+
+        // The lap, and the start line beside it.
+        let block_at =
+            layout.offset + layout.width as usize * layout.height as usize * layout.sample.size();
+        let block = &bytes[block_at..];
+        let lap = crate::trackline::read(block).expect("a lap");
+        let prog = crate::trackprog::TrackProgram {
+            name: String::new(), author: String::new(), location: String::new(),
+            terrain: crate::trackprog::Terrain {
+                size_x: mps * (gw - 1) as f32, size_z: mps * (gh - 1) as f32,
+                samples: 513, scale: 100.0,
+                relief: Default::default(), surface: Default::default(),
+                wear: Default::default(),
+            },
+            start: crate::trackprog::Start { x: lap.start.0, z: lap.start.1, angle: lap.heading },
+            segments: lap.program_segments(), width: 12.0, features: Vec::new(),
+            blend: 1.2, elevation: Vec::new(),
+        };
+        let lap_st = prog.stations(1.0);
+
+        // Find the start line the way `second_line` does.
+        let table = crate::track::material_table_offset(block).unwrap();
+        let u32_at = |o: usize| u32::from_le_bytes(block[o..o + 4].try_into().unwrap());
+        let f32_at = |o: usize| f32::from_le_bytes(block[o..o + 4].try_into().unwrap());
+        let materials = u32_at(table) as usize;
+        let after = table + 4 + materials * 52 + 4 + u32_at(table + 4 + materials * 52) as usize * 60;
+        let mut line: Option<(f32, f32, f32, Vec<(f32, f32, f32)>)> = None;
+        let mut k = after;
+        while k + 16 < block.len() {
+            let (x, z, ang) = (f32_at(k), f32_at(k + 4), f32_at(k + 8));
+            let n = u32_at(k + 12) as usize;
+            let sane = (0.0..4000.0).contains(&x) && (0.0..4000.0).contains(&z)
+                && ang.abs() <= 720.0 && n > 0 && n < 64 && k + 16 + n * 60 <= block.len();
+            if sane {
+                let (mut total, mut ok, mut segs) = (0.0f32, true, Vec::new());
+                for i in 0..n {
+                    let o = k + 16 + i * 60;
+                    let (len, r, a, s0) = (f32_at(o + 4), f32_at(o + 8), f32_at(o + 12), f32_at(o + 20));
+                    if !(0.0..2000.0).contains(&len) || (s0 - total).abs() > 0.5 {
+                        ok = false;
+                        break;
+                    }
+                    total += len;
+                    segs.push((len, r, a));
+                }
+                if ok && total > 20.0 {
+                    line = Some((x, z, ang, segs));
+                    break;
+                }
+            }
+            k += 4;
+        }
+        let Some((sx, sz, sang, segs)) = line else {
+            println!("  no start line");
+            return;
+        };
+        let walk = crate::trackprog::TrackProgram {
+            start: crate::trackprog::Start { x: sx, z: sz, angle: sang },
+            segments: segs
+                .iter()
+                .map(|(len, r, a)| {
+                    if *r == 0.0 || *a == 0.0 {
+                        crate::trackprog::Segment::Straight { length: *len, rise: 0.0 }
+                    } else {
+                        crate::trackprog::Segment::Arc { radius: *r, angle: a.abs(), rise: 0.0 }
+                    }
+                })
+                .collect(),
+            ..prog.clone()
+        };
+
+        println!("  along  flat±   to the lap   step at the join");
+        for q in walk.stations(1.0).iter().step_by(10) {
+            let (rx, rz) = crate::trackprog::right_vector(q.heading);
+            // How far the ground stays flat either side: walk out until it tilts hard.
+            let mut reach = [0.0f32; 2];
+            for (i, side) in [-1.0f32, 1.0].into_iter().enumerate() {
+                let mut last = at(q.x, q.z);
+                for m in 1..60 {
+                    let t = m as f32;
+                    let (x, z) = (q.x + rx * t * side, q.z + rz * t * side);
+                    if x < 1.0 || z < 1.0 || x > prog.terrain.size_x - 1.0 || z > prog.terrain.size_z - 1.0 {
+                        break;
+                    }
+                    let h = at(x, z);
+                    if (h - last).abs() > 0.55 {
+                        break;
+                    }
+                    last = h;
+                    reach[i] = t;
+                }
+            }
+            let (near, _) = lap_st.iter().fold((f32::MAX, 0.0f32), |b, p| {
+                let d = ((p.x - q.x).powi(2) + (p.z - q.z).powi(2)).sqrt();
+                if d < b.0 { (d, p.s) } else { b }
+            });
+            println!(
+                "  {:>5.0}m  {:>4.0}/{:<4.0} {:>8.0} m   {}",
+                q.s, reach[0], reach[1], near,
+                if near < reach[0].max(reach[1]) + 2.0 { "flat right up to it" } else { "" },
+            );
+        }
+    }
+
+    /// A published track's race data: where it puts its grid, and in what coordinates.
+    ///
+    /// ```text
+    /// FROST_TRACK=…/indiana.pkz cargo test -- --ignored --nocapture published_rdf
+    /// ```
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn published_rdf() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::Path::new(&var);
+        let names = crate::track::entry_names(path).unwrap();
+        let rdf = names
+            .iter()
+            .find(|n| n.to_lowercase().ends_with(".rdf"))
+            .expect("a .rdf");
+        let bytes = crate::track::read_entry(path, rdf).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        // The grid block and the first few of its stalls, plus anything that names a position.
+        let mut in_grid = false;
+        let mut stalls = 0usize;
+        for line in text.lines() {
+            let t = line.trim();
+            if t == "starting_grid" {
+                in_grid = true;
+            }
+            if in_grid {
+                if t.starts_with("stall") {
+                    stalls += 1;
+                }
+                if stalls <= 3 {
+                    println!("  {t}");
+                }
+                if stalls > 40 {
+                    in_grid = false;
+                }
+            } else if t.starts_with("30secondsboard") || t.starts_with("pit_lane") {
+                println!("  {t}");
+            }
+        }
+    }
+
+    /// FROST_TRACK=…/indiana.pkz cargo test -- --ignored --nocapture cross_sections
+    /// ```
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn cross_sections() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK to a track .pkz/folder");
+        let path = Path::new(&var);
+        let names = track::entry_names(path).unwrap();
+        let entry = track::heightfield_entries(&names)
+            .into_iter()
+            .next()
+            .expect("a heightfield");
+        let bytes = track::read_entry(path, &entry).unwrap();
+        let layout = heightfield::probe(&bytes, None).expect("a terrain grid");
+        let mps_src = layout.metres_per_sample.expect("a stated footprint");
+        let size_x = mps_src * (layout.width.max(2) - 1) as f32;
+        let size_z = mps_src * (layout.height.max(2) - 1) as f32;
+        let block_at =
+            layout.offset + layout.width as usize * layout.height as usize * layout.sample.size();
+        let block = bytes.get(block_at..).unwrap_or(&[]);
+        let lap = crate::trackline::read(block).expect("a centreline");
+        let (fw, fh, v) = heightfield::read_grid(&bytes, &layout, layout.width.max(layout.height));
+        let g = Grid { w: fw as usize, h: fh as usize, size_x, size_z, v };
+
+        let n = (2.0 * RIDDEN_REACH_M / RIDDEN_LATERAL_M) as usize + 1;
+        let u_at = |i: usize| i as f32 * RIDDEN_LATERAL_M - RIDDEN_REACH_M;
+        let win = (RUT_DETREND_M / RIDDEN_LATERAL_M / 2.0) as usize;
+
+        // Every station on the lap, with the radius it was drawn at, so the tightest ground
+        // can be picked out of it afterwards.
+        let mut cross: Vec<(f32, f32, Vec<f32>)> = Vec::new();
+        let mut s_at = 0.0f32;
+        for seg in &lap.segments {
+            let steps = ((seg.length / RIDDEN_STEP_M) as usize).max(1);
+            for k in 0..steps {
+                let d = k as f32 * seg.length / steps as f32;
+                let (x, z, h) = if seg.radius == 0.0 {
+                    let (hx, hz) = crate::trackprog::heading_vector(seg.heading);
+                    (seg.x + d * hx, seg.z + d * hz, seg.heading)
+                } else {
+                    let h = seg.heading + d / seg.radius;
+                    (
+                        seg.x + seg.radius * (seg.heading.cos() - h.cos()),
+                        seg.z + seg.radius * (h.sin() - seg.heading.sin()),
+                        h,
+                    )
+                };
+                let (rx, rz) = crate::trackprog::right_vector(h);
+                let p: Vec<f32> = (0..n).map(|i| g.at(x + u_at(i) * rx, z + u_at(i) * rz)).collect();
+                cross.push((seg.radius, s_at + d, p));
+            }
+            s_at += seg.length;
+        }
+
+        // The tightest corners on the lap, spread round it rather than eight samples of the
+        // same hairpin: one station per corner, taken where the radius is smallest.
+        let mut picks: Vec<usize> = Vec::new();
+        let mut order: Vec<usize> = (0..cross.len())
+            .filter(|i| cross[*i].0 != 0.0 && cross[*i].0.abs() < RIDDEN_CORNER_R_M)
+            .collect();
+        order.sort_by(|a, b| cross[*a].0.abs().partial_cmp(&cross[*b].0.abs()).unwrap());
+        for i in order {
+            if picks.iter().all(|p| (cross[*p].1 - cross[i].1).abs() > 60.0) {
+                picks.push(i);
+            }
+            if picks.len() == 6 {
+                break;
+            }
+        }
+        picks.sort_by(|a, b| cross[*a].1.partial_cmp(&cross[*b].1).unwrap());
+
+        println!(
+            "\n{}  —  {:.0} m lap, ground at {:.3} m a sample\n",
+            path.file_stem().unwrap_or_default().to_string_lossy(),
+            s_at,
+            size_x / (g.w.max(2) - 1) as f32,
+        );
+
+        // The profile as a picture. Detrended over the same six metres the rut count uses, so
+        // what is drawn is what gets counted — the camber is taken out and what is left is
+        // the grooves and whatever stands between them.
+        const ROWS: usize = 15;
+        const SPAN_M: f32 = 0.30; // half the height of the plot
+        let mut all: Vec<f32> = Vec::new();
+        for &i in &picks {
+            let (radius, s, p) = &cross[i];
+            let base = smooth_ring(p, win, false);
+            let r: Vec<f32> = (0..n).map(|k| p[k] - base[k]).collect();
+            // Only the ridden half of the profile is worth drawing; past that it is field.
+            let cols: Vec<usize> = (0..n).filter(|k| u_at(*k).abs() <= 6.0).collect();
+            let mut grid = vec![b' '; ROWS * cols.len()];
+            for (cx, &k) in cols.iter().enumerate() {
+                let t = ((SPAN_M - r[k]) / (2.0 * SPAN_M) * ROWS as f32).round();
+                let row = t.clamp(0.0, ROWS as f32 - 1.0) as usize;
+                grid[row * cols.len() + cx] = b'#';
+            }
+            let lo = r[cols[0]..=cols[cols.len() - 1]].iter().fold(f32::MAX, |a, b| a.min(*b));
+            let hi = r[cols[0]..=cols[cols.len() - 1]].iter().fold(f32::MIN, |a, b| a.max(*b));
+            println!(
+                "  {:>5.0} m round, R {:>5.1} m   relief {:+.2} to {:+.2} m, {:.2} m peak to peak",
+                s,
+                radius.abs(),
+                lo,
+                hi,
+                hi - lo
+            );
+            for row in 0..ROWS {
+                let h = SPAN_M - (row as f32 + 0.5) / ROWS as f32 * 2.0 * SPAN_M;
+                println!(
+                    "    {:+.2} |{}",
+                    h,
+                    String::from_utf8_lossy(&grid[row * cols.len()..(row + 1) * cols.len()])
+                );
+            }
+            println!("          |{}", "-".repeat(cols.len()));
+            let mut axis = vec![b' '; cols.len()];
+            axis[..4].copy_from_slice(b"-6 m");
+            axis[cols.len() / 2] = b'0';
+            axis[cols.len() - 4..].copy_from_slice(b"+6 m");
+            println!("           {}", String::from_utf8_lossy(&axis));
+
+            // And the grooves the rut count would find here, so the picture and the number
+            // are the same measurement.
+            let inside: Vec<usize> = (0..n).filter(|k| u_at(*k).abs() <= RIDDEN_HALF_M).collect();
+            let mut found: Vec<(f32, f32)> = Vec::new();
+            for w in inside.windows(3) {
+                let (a, k, b) = (w[0], w[1], w[2]);
+                if !(r[k] <= r[a] && r[k] < r[b]) {
+                    continue;
+                }
+                let mut l = k;
+                while l > inside[0] && r[l - 1] >= r[l] {
+                    l -= 1;
+                }
+                let mut m = k;
+                while m < inside[inside.len() - 1] && r[m + 1] >= r[m] {
+                    m += 1;
+                }
+                let prom = (r[l] - r[k]).min(r[m] - r[k]);
+                if prom >= RUT_PROMINENCE_M {
+                    found.push((u_at(k), prom));
+                }
+            }
+            let listed: Vec<String> =
+                found.iter().map(|(u, d)| format!("{u:+.1}m/{d:.2}")).collect();
+            println!("           {} grooves: {}\n", found.len(), listed.join("  "));
+            all.extend(found.iter().map(|(_, d)| *d));
+        }
+        let s = spread(&mut all);
+        println!(
+            "  over {} grooves in {} corners: p10 {:.2}  p50 {:.2}  p90 {:.2}  max {:.2} m",
+            s.count, picks.len(), s.p10, s.p50, s.p90, s.max
+        );
+        // ---- along the line -------------------------------------------------
+        //
+        // Across the track says what a corner's shape is. It says nothing about how the
+        // ground feels *under* the wheels, which is a different measurement entirely — a
+        // corner can be smooth across and still buzz, and buzz is what a rider calls rough.
+        // So the centreline's own height, detrended over the same six metres, and the size of
+        // what is left.
+        let mid = n / 2;
+        let line: Vec<f32> = cross.iter().map(|c| c.2[mid]).collect();
+        let along_win = (RUT_DETREND_M / RIDDEN_STEP_M / 2.0) as usize;
+        let base = smooth_ring(&line, along_win, true);
+        let res: Vec<f32> = (0..line.len()).map(|i| line[i] - base[i]).collect();
+        let rms = |v: &[f32]| -> f32 {
+            if v.is_empty() {
+                return 0.0;
+            }
+            (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt()
+        };
+        let corner: Vec<f32> = (0..res.len())
+            .filter(|i| cross[*i].0 != 0.0 && cross[*i].0.abs() < RIDDEN_CORNER_R_M)
+            .map(|i| res[i])
+            .collect();
+        let straight: Vec<f32> = (0..res.len())
+            .filter(|i| cross[*i].0 == 0.0)
+            .map(|i| res[i])
+            .collect();
+        println!(
+            "  along the line, {:.0} m detrended: rms {:.3} m overall, {:.3} in corners, \
+             {:.3} on straights",
+            RUT_DETREND_M,
+            rms(&res),
+            rms(&corner),
+            rms(&straight),
+        );
+
+        // And the strip through the tightest corner, drawn the same way as the sections.
+        if let Some(&i0) = picks.first() {
+            let span = (60.0 / RIDDEN_STEP_M) as usize;
+            let from = i0.saturating_sub(span / 2);
+            let cols: Vec<usize> = (from..(from + span).min(res.len())).collect();
+            let mut grid = vec![b' '; ROWS * cols.len()];
+            for (cx, &k) in cols.iter().enumerate() {
+                let t = ((SPAN_M - res[k]) / (2.0 * SPAN_M) * ROWS as f32).round();
+                let row = t.clamp(0.0, ROWS as f32 - 1.0) as usize;
+                grid[row * cols.len() + cx] = b'#';
+            }
+            println!(
+                "\n  60 m of centreline through the {:.1} m corner at {:.0} m",
+                cross[i0].0.abs(),
+                cross[i0].1
+            );
+            for row in 0..ROWS {
+                let h = SPAN_M - (row as f32 + 0.5) / ROWS as f32 * 2.0 * SPAN_M;
+                println!(
+                    "    {:+.2} |{}",
+                    h,
+                    String::from_utf8_lossy(&grid[row * cols.len()..(row + 1) * cols.len()])
+                );
+            }
+            println!("          |{}", "-".repeat(cols.len()));
+        }
+
+    }
+
 }

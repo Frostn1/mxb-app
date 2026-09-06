@@ -1,5 +1,145 @@
 # Changelog
 
+## 2026-09-06
+
+### Changed
+- The gates are in one row. They were stated against whichever bit of lap was nearest to each
+  one, which put a stagger through the row.
+- The start pad is ridden ground: the comb of grooves the gate leaves is painted as well as
+  cut, and the pad is churned dirt rather than bare fill.
+
+### Fixed
+- Sharing a bundle made by an older build no longer gives up on a short part. It asks the host
+  what it is holding and retries that part, instead of only noticing when the joined file does
+  not add up.
+
+## 2026-09-06
+
+### Changed
+- The parked vans are gone. They stood close enough to the riding line to be something a rider
+  runs into.
+- The banners are back.
+- Jump posts stand at the top of the takeoff face rather than at its foot: the post grows with
+  the jump, so the flag sits at the crest.
+- No gap between the start straight and the lap. The tracks this is measured against are flat
+  ground from the gate row right up to the racing line, and the two are one surface.
+
+## 2026-09-06
+
+### Changed
+- The printed banners are gone.
+- A third as many blocks round a corner, and each one now has a dark foot under its white body
+  so it reads as a block rather than a paper cube.
+- Jumps are flagged rather than posted: a yellow pennant on top of the marker, and only on the
+  jumps big enough to need warning of.
+
+## 2026-09-06
+
+### Changed
+- The start straight keeps its distance from the lap until the two meet at turn one. There is
+  a strip of ground between them, so a rider on a flying lap has no way back onto it.
+- White blocks sit at the edge of the track rather than out in the field, the printed banners
+  are back, and there are fewer marker posts — some with a painted white tip, some bare.
+- Jumps are marked with a yellow post at the top of the takeoff face rather than a board
+  standing before it.
+
+## 2026-09-06
+
+### Added
+- Yellow boards either side of every jump's takeoff, on the ones worth marking. A rider coming
+  at a blind crest reads the boards, not the dirt.
+
+### Changed
+- Half as many white blocks round a corner — a run of them with ground showing between, rather
+  than a wall.
+- The printed banners are gone.
+
+## 2026-09-06
+
+### Changed
+- The start straight ends in turn one. It runs down the outside of the first corner and joins
+  the lap inside it, so the gate drop delivers you into the turn instead of onto a piece of
+  track with no clue which way it goes.
+- The riding line is lighter. Under the track's own sky a line at the colour a soil sheet
+  measures on its own was one you could not find; the gap to the field that makes a line
+  visible is still there, and the line now reads at speed.
+- The sky is a band round the horizon rather than a lid. A closed dome put the whole track in
+  its own shadow, which is what made the ground so dark.
+- Marker boards are thinner on the ground, blocks are plain white and laid in a line along the
+  outside of a corner rather than scattered, and a few trees stand in the infield.
+
+## 2026-09-06
+
+### Added
+- A wood behind the track. The tracks people rate carry thousands of trees past 60 m and only
+  a handful trackside, so that is what a built track gets now — a backdrop of mixed pine and
+  broadleaf out to the edge of the ground, with a few standing closer in.
+- Poles and parked vans down both sides, at the spacing the same tracks use, and a sky of the
+  track's own instead of the game's default one.
+- The start pad is ridden ground: the same surface texture the rest of the track has, and the
+  comb of grooves forty bikes leave pulling out of forty stalls.
+
+### Changed
+- The ground round a track is grass in patches over bare worked dirt rather than one flat
+  green field.
+- Marker blocks are white.
+- Nothing is planted on the start straight any more, and the fence is gone for now — it ran
+  along the lap and closed the start off.
+
+### Fixed
+- The start straight ends where the gates are. Its surface ran on behind the row for as far
+  as the ground went.
+- The picture a track is listed by shows the colours it will actually have. It was mixing
+  each band's base colour rather than the sheet made from it, which turned a green field into
+  a desert.
+
+## 2026-09-06
+
+### Changed
+- Jumps stand up on the ground they are built on. A track cut into a hillside had its ground
+  falling three metres across a jump's own footprint, so a metre-and-a-quarter tabletop rose a
+  handspan above its own foot and a lap read as having no jumps on it at all. Every jump now
+  gets a pad cut level under it, the way a builder does it.
+- Ruts are rounded, with a bank of material beside each one to lean on, instead of a
+  square-edged slot cut into the ground. There are fewer of them and they sit further apart.
+- Jumps are sized for a 250, not a 450. A gap only the fastest bike on the gate can clear is
+  one most riders single.
+- Jumps are sized to the speed a bike actually carries. Acceleration used to hold flat all the
+  way to the top, so a lap left a hairpin at 33 km/h and was doing 100 sixty metres later, and
+  gaps got built for a speed nobody arrives at. A two-kilometre lap now runs where one runs.
+- No two jumps on a lap are the same size any more, and a lap carries a handful of doubles
+  rather than one every hundred metres.
+- Corners wear three or four lines rather than one groove and a spread, so there is a choice
+  of ways through after a few motos.
+- Ruts read much harder against the ground beside them: the packed floor is darker, the bank
+  beside it drier, and the shape shows at speed instead of only being felt. They are deeper,
+  too — matched against a published national's own ground rather than estimated.
+- Tyre marks up the face of a jump are cut into the ground as well as painted on it, fanned
+  towards the side the last corner sends you in from.
+- The racing line is smooth where the wheels run. Braking chop, acceleration chop and the
+  ground's own grain used to cover the whole width, which took away most of what the bike
+  makes down a straight.
+- The start on a track you build is its own straight beside the circuit now, the way a real
+  one is: the gate row stands 40 m off the lap, sprints 85 m, and turns in to join the track
+  at turn one. A flying lap never crosses the gates.
+- The gates stand on a start pad 54 m across — wide enough for all forty of them. It holds
+  that width the whole way down the sprint and comes down through the turn into the track,
+  rather than tapering along the straight. The pit lane sits on the other side of the main
+  straight, out of the way.
+
+### Fixed
+- Riders start on the gate row. Every position in a track's race data is stated against the
+  lap, wherever it physically stands, and the gates were being written against the start
+  straight instead — so the game put the field across the middle of the track.
+
+### Added
+- A track you build now has things standing beside it. Stakes with painted tops mark the edge
+  of the riding line the whole way round, the way they do on a real track, with fencing behind
+  them, banners at intervals, hay bales on the outside of the corners, trees back in the field
+  and a gantry over the start.
+- A tree, a bale, a banner and the gantry stop a bike. A stake does not, so clipping one on
+  the way past costs you nothing.
+
 ## 2026-09-05
 
 ### Changed
@@ -21,6 +161,69 @@
   time you leave the page and return, or switch between its tabs.
 - A share code says which of its files you already have before you import it. The ones it
   would replace are marked in the list.
+- Jump faces are shaped the way a machine leaves them: curving up from flat ground and
+  steepest right at the lip. They used to flatten off over the last metre before the edge,
+  which is why a big jump could still ride like a roller.
+- Landings are longer and gentler than the takeoffs that feed them, instead of a mirror image
+  of them.
+- Jumps are sized to the speed there is. A gap the lap cannot deliver you to at speed gets
+  shortened, and a big double goes where there is a run at it rather than straight out of a
+  hairpin.
+- Braking bumps form where you are actually braking, and for as long as you are — a long
+  approach to a hairpin builds a long braking zone, a flat kink builds almost none.
+- Corners grow a second line beside the first, so there is more than one way through after a
+  few motos.
+- The dark packed line you steer by and the groove you drop into are now the same line.
+- A jump's face carries a single line up it, and the lip stays swept.
+- Sand tracks ride like sand: deeper ruts further apart, far bigger berms, and long swells
+  under braking instead of a sharp washboard. Grass circuits barely wear at all.
+- Tracks can be built anywhere from freshly prepped to raced-in, and there is ground left for
+  a session to cut its own lines into either way.
+- The picture the game lists a built track by is now a view of the place rather than a
+  diagram of it: the ground rendered from above and off to one side, lit by the track's own
+  sun, with the lap cut into it and the country running out to the haze.
+- Tracks you build now start where a start belongs. The lap begins on its longest straight,
+  with the gate row a few metres onto it, the finish line past that and the run at turn one
+  beyond — instead of the gates landing wherever the lap happened to be forty metres in.
+- The start opens out to hold the whole row. Forty gates are 48 m across, so the track fans
+  out to 54 m where they stand, graded flat as far as the ground beside it allows, and
+  funnels back down to riding width by turn one. The pit lane, the thirty-second board and
+  the timing line move out with it.
+- Corners on a track you build now have ruts you can sit in. A groove is cut shallow and the
+  dirt out of it stands as a low smooth bank on its outer side, with flat ground between one
+  and the next — so a corner gives you something to lean on instead of a set of holes.
+- You can see the ruts. The packed dark line follows the floor of each groove and the dry
+  light dirt sits on the bank beside it, so the shape reads at speed instead of only being
+  felt.
+- Tyre marks up the face of every jump, fanned towards the side the last corner sends you —
+  so the face tells you where the riders ahead came from.
+- The riding line varies along its length instead of running as one flat stripe.
+- Ground textures are finer. The soil sheets carried a patch big enough to repeat with the
+  tile, which printed a faint chequerboard over the whole track.
+
+### Fixed
+- Sharing a big preset or file no longer produces a code that downloads without complaint and
+  then does not open. Each slice is checked against the size it should be, on the way up and
+  on the way down, and a short one is retried instead of passed on.
+
+### Changed
+- Tracks you build now read as tracks. The riding surface was one flat brown from edge to
+  edge, with nothing to tell you where the line went or where the track stopped. It is now
+  painted in five: a bright graded verge either side, dry loose dirt at the edges and round
+  the outside of a bend, the worked soil between, and the packed racing line running through
+  it — leaning into each corner and drifting back out on the way to the next.
+
+### Fixed
+- Tracks you build match their own map. The ground was being handed to the compiler upside
+  down, so the jumps and ruts sat mirrored against the paint, the mini-map and the racing
+  line — at the start gate the ground was 4 m out and further round the lap 15 m. It now
+  lines up exactly.
+
+### Changed
+- Building a track now runs MX Bikes' own track compilers over it. The Track Studio
+  fetches PiBoSo's tools the first time you build and does the whole job in one press —
+  export, compile, package, install — so what lands in your tracks folder is a track the
+  game built, not one the app guessed at.
 
 ### Added
 - Seven colorways in Settings. Frost is still the default; Ember, Moss, Violet, Rose and
@@ -35,12 +238,14 @@
   goes before anything is written.
 
 ### Fixed
+- Corners on a generated track wear a bundle of ruts rather than a single deep gouge. The
+  deepest groove now cuts about 0.45 m where it used to cut a metre.
+- Braking bumps appear on the approach to every corner, not just the handful that follow a
+  dead-straight section, and there is acceleration chop on the way out.
 - The cloud-storage warning names OneDrive instead of guessing at "a cloud sync tool", says
   the app itself is fine, and takes up one thin line instead of a block.
 - Sharing a track goes through. Big shares upload in smaller pieces and a piece the host
   drops is sent again, so a share code comes back instead of an upload error.
-- Tracks you build in the app open. Going to the track from the loading screen brings up
-  the track instead of stopping there.
 - Tracks you build in the app have a riding line. The ground is painted in four bands —
   field, worked shoulder, the line itself and the grass over the top — and you can see all
   four: nothing is laid over the top of them any more.

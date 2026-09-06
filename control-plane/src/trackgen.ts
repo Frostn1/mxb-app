@@ -135,7 +135,14 @@ const TrackProgram = z.object({
     }),
     surface: z
       .enum(["soil", "sand", "grass"])
-      .describe("what the ground is, either side of the riding line"),
+      .describe(
+        "what the ground is. It decides how the track rides as well as how it looks: sand cuts deeper ruts, banks bigger berms and replaces the braking washboard with long swells; grass barely wears at all.",
+      ),
+    wear: z
+      .number()
+      .describe(
+        "how raced the ground arrives, 0 to 1. 0 is freshly prepped — the shapes are there but the grooves are not, and the ground has its whole depth left to give over a session. 1 is a Sunday afternoon, everything worn in. 0.55 is a track that has seen a session; pick from the brief.",
+      ),
   }),
   start: z.object({
     x: z.number(),
@@ -230,6 +237,12 @@ what ten published circuits are made of:
 So: build each corner as a run of arcs, keep the straights short, and let the lap wander.
 Count the arcs before you send it — if straights outnumber corners you have written a shape.
 
+START THE LAP ON A STRAIGHT. A motocross start is forty gates in a line 48 m across, and the
+gate row, the finish line and the run at turn one all sit on the lap's opening straight — a lap
+that begins on a corner has its gates laid round a bend. So the FIRST segment is a straight of
+60-100 m, and the lap has to come back to it. That is the one long straight; the rest stay
+short. Leave it clear — no jumps in the first 40 m, riders are forty abreast there.
+
 THE LAP MUST STILL CLOSE, and a lap like this closes the same way: the signed angles sum to
 ±360° and the straights bring it home. A serpentine that turns 2400° in total and 360° net is
 exactly what the published tracks do — they alternate a big turn one way with a slightly
@@ -297,6 +310,17 @@ explicitly asks otherwise:
                       the handful that matter (it measures about 0.75x that against the
                       landscape). Published lips top out at 3.0–5.9 m.
   jump spacing        20–50 m between takeoffs
+  jumps and speed     A JUMP IS ONLY AS BIG AS THE RUN AT IT. This is checked and it is the
+                      most common thing to get wrong after closure. A rider leaves a hairpin
+                      at about 33 km/h and needs 60–80 m of straight to reach 90. So: a big
+                      double (2.5–4 m, a 15–25 m gap) needs 80 m or more of run at it; a
+                      small double (1–2 m, an 8–12 m gap) needs 40; anything less than 30 m
+                      out of a tight corner is a roller or a small tabletop, not a gap. Put
+                      the big jumps where the long straights are and let the ground right
+                      after a corner be small. A gap the lap cannot deliver a rider to comes
+                      back as a problem with the number.
+  after a corner      small first, then bigger. That progression is what a rhythm section is,
+                      and it falls out of the speed rather than being a style.
   whoop spacing       4–6 m crest to crest
   corner radius       7–30 m at the tightest point of a corner; 40 m and up barely turns
   steepest ground     27–41°

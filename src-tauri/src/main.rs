@@ -13,6 +13,7 @@ mod cookie_session;
 mod downloads;
 mod dropzone;
 mod edf;
+mod edfwrite;
 mod feel;
 mod fileshare;
 mod firstpaint;
@@ -140,7 +141,11 @@ mod track;
 mod trackbuild;
 mod trackline;
 mod trackllm;
+mod trackobjects;
 mod trackprog;
+mod trackscenery;
+mod trackshot;
+mod trackspeed;
 mod trackstats;
 mod tracksynth;
 mod upload;
@@ -1413,32 +1418,6 @@ fn track_install_dir(cfg: &AppConfig) -> Result<std::path::PathBuf, String> {
     Ok(library::mods_subdir(&cfg.mods_path, "mods/tracks"))
 }
 
-/// Install the preview into the game's tracks folder.
-///
-/// Terrain only, so the game will list it and fail to load it — the studio says so. It is
-/// there to be looked at in the app, and to be the thing you ride once TerrainEd has been
-/// run over the source folder.
-#[tauri::command]
-async fn install_track_preview(
-    app: tauri::AppHandle,
-    program: serde_json::Value,
-) -> Result<String, String> {
-    let prog = track_program(program)?;
-    let cfg = config::load_or_detect(&app).unwrap_or_default();
-    let dir = track_install_dir(&cfg)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let syn = tracksynth::synthesise(&prog).map_err(|e| format!("{e:#}"))?;
-        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        // The archive's own name, so the `.pkz` and the folder inside it agree.
-        let path = dir.join(format!("{}.pkz", tracksynth::slug(&prog.name)));
-        tracksynth::write_pkz(&prog, &syn, &path, false).map_err(|e| format!("{e:#}"))?;
-        usage::track("track.install");
-        Ok(path.to_string_lossy().into_owned())
-    })
-    .await
-    .map_err(|e| format!("install_track_preview task failed: {e}"))?
-}
-
 /// Write the folder TerrainEd compiles: the heightmap, the masks, and every config file.
 #[tauri::command]
 async fn export_track_source(
@@ -1540,6 +1519,25 @@ async fn download_track_tools(app: tauri::AppHandle) -> Result<TrackToolsStatus,
     set_track_tools(app, dir.to_string_lossy().into_owned()).await
 }
 
+/// The compilers, fetched if this machine hasn't got them yet.
+///
+/// A track is only a track once `terrained.exe` has been over it — there is no second way to
+/// produce a `.map` the game will ride. So the download belongs to the build rather than to a
+/// step someone has to know to take first.
+async fn ensure_track_tools(app: &tauri::AppHandle) -> Result<String, String> {
+    let at = config::load_or_detect(app)
+        .unwrap_or_default()
+        .track_tools_path;
+    if !at.trim().is_empty() && trackbuild::find(std::path::Path::new(&at)).is_some() {
+        return Ok(at);
+    }
+    let got = download_track_tools(app.clone()).await?;
+    if !got.found {
+        return Err("PiBoSo's track tools downloaded but there's no terrained.exe in them".into());
+    }
+    Ok(got.path)
+}
+
 /// Everything a build produced, and where it ended up.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1567,10 +1565,8 @@ async fn build_track(
     install: bool,
 ) -> Result<BuildResult, String> {
     let prog = track_program(program)?;
+    let tools_at = ensure_track_tools(&app).await?;
     let cfg = config::load_or_detect(&app).unwrap_or_default();
-    if cfg.track_tools_path.trim().is_empty() {
-        return Err("Get PiBoSo's track tools first.".into());
-    }
     let slug = tracksynth::slug(&prog.name);
     // Somewhere of its own when nobody picked a folder, so building is one press.
     let root = match dir {
@@ -1585,7 +1581,7 @@ async fn build_track(
     let tracks = install.then(|| track_install_dir(&cfg)).transpose()?;
 
     tauri::async_runtime::spawn_blocking(move || {
-        let tools = trackbuild::find(std::path::Path::new(&cfg.track_tools_path))
+        let tools = trackbuild::find(std::path::Path::new(&tools_at))
             .ok_or("There's no terrained.exe in that folder.".to_string())?;
         let syn = tracksynth::synthesise(&prog).map_err(|e| format!("{e:#}"))?;
         std::fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
@@ -9995,7 +9991,6 @@ fn main() {
             close_track_lap,
             fit_track_budget,
             preview_track,
-            install_track_preview,
             export_track_source,
             track_tools_status,
             set_track_tools,
