@@ -10,6 +10,13 @@
   and funnelling down to riding width by the time it meets the lap. The pit lane sits on the
   other side of the main straight, out of the way.
 
+### Added
+- A track you build now has things standing beside it. Marker boards line both sides of the
+  riding line the whole way round, fencing runs behind them, hay bales guard the outside of
+  the corners, trees stand back in the field and a gantry crosses the start.
+- Bales and the start gantry stop a bike. Marker boards and trees do not, so clipping one
+  costs you nothing.
+
 ## 2026-09-05
 
 ### Changed
