@@ -2140,6 +2140,8 @@ export interface ModelViewerProps {
   onCaptureReady?: (capture: CaptureFn | null) => void;
   /** Offer the pose panel. Off by default: a preview nobody is posing shouldn't grow chrome. */
   poseControls?: boolean;
+  /** No room for them — the docked preview in the Designer is 240px tall. */
+  hideHints?: boolean;
   /**
    * Offer the placement panel — moving each model about the scene.
    *
@@ -2169,6 +2171,7 @@ export function ModelViewer({
   photo = false,
   onCaptureReady,
   poseControls = false,
+  hideHints = false,
   placeControls = false,
   loading = false,
   noStandIn = false,
@@ -2363,7 +2366,7 @@ export function ModelViewer({
           />
         </Canvas>
       </ErrorBoundary>
-      {!loading && !photo && <ControlsHint tight={placeControls || poseControls} />}
+      {!loading && !photo && !hideHints && <ControlsHint tight={placeControls || poseControls} />}
       {/* One stack, so the two panels line up on the same edge whether both are offered or
           only one — placement above, because moving a model comes before fussing its joints. */}
       {!loading && !photo && (placeControls || poseControls) && (

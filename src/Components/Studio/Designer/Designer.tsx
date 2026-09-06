@@ -2112,38 +2112,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
 
         </section>
 
-        {/* ── The sheet, with the model floating over it ───────────────────────── */}
-        <section className="relative flex min-h-0 flex-col">
-          {/* Docked over the sheet rather than taking a column of its own: you judge a
-              livery on the model, but you draw it on the flat sheet. It hides, because
-              where it sits is exactly where the bottom-right of every sheet is. */}
-          <div className="pointer-events-none absolute bottom-3 right-3 z-10 flex flex-col items-end gap-2">
-            {previewOpen && (
-              <div className="pointer-events-auto h-[232px] w-[320px] overflow-hidden border border-border bg-window/95 backdrop-blur">
-                <PreviewPanel
-                  state={destState}
-                  overrides={overrides}
-                  frameToken={version}
-                  onGeometry={onGeometry}
-                  onStock={onStock}
-                  highlight={hoverIsland}
-                  className="h-full"
-                />
-              </div>
-            )}
-            <button
-              onClick={() => togglePreview()}
-              title={t(previewOpen ? "designer.hideModel" : "designer.showModel")}
-              className="u-skew pointer-events-auto flex h-7 cursor-default items-center gap-2 border border-border bg-window/95 px-3 text-muted-foreground backdrop-blur transition-colors hover:text-foreground"
-            >
-              <span className="u-unskew flex items-center gap-2">
-                <Box className="size-3.5" />
-                <span className="font-cond text-[11.5px] font-semibold uppercase tracking-[0.14em]">
-                  {t(previewOpen ? "designer.hideModel" : "designer.showModel")}
-                </span>
-              </span>
-            </button>
-          </div>
+        {/* ── The sheet ────────────────────────────────────────────────────────── */}
+        <section className="flex min-h-0 flex-col">
           {active ? (
             <CanvasStage
               className="flex-1"
@@ -2267,8 +2237,29 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         </DropdownMenu>
       </section>
 
-      {/* ── Tools, beside the sheet they act on ──────────────────────────────── */}
+      {/* ── The model and the tools, beside the sheet they act on ────────────── */}
       <section className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+        {previewOpen ? (
+          <div className="h-[240px] flex-none overflow-hidden border border-border">
+            <PreviewPanel
+              compact
+              state={destState}
+              overrides={overrides}
+              frameToken={version}
+              onGeometry={onGeometry}
+              onStock={onStock}
+              highlight={hoverIsland}
+              className="h-full"
+            />
+          </div>
+        ) : null}
+        <button
+          onClick={() => togglePreview()}
+          className="flex flex-none cursor-default items-center justify-center gap-2 border border-border py-1.5 font-cond text-[11.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <Box className="size-3.5" />
+          {t(previewOpen ? "designer.hideModel" : "designer.showModel")}
+        </button>
           {active && (
             <PaintTools
               settings={paint}
