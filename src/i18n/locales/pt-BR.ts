@@ -346,11 +346,11 @@ export const ptBR: Translation = {
   "cloud.evictedBody":
     "Alguns mods não estão realmente neste PC — o {{what}} os moveu para a nuvem.",
   "cloud.evictedPitch":
-    "O jogo os lê ao carregar e pode travar aí. Tire a pasta de mods de lá, ou marque “Manter sempre neste dispositivo”.",
+    "O app está bem: quem pode travar ao lê-los é o jogo. Clique com o botão direito na pasta de mods e marque “Manter sempre neste dispositivo”.",
   "cloud.slowBody":
     "Sua pasta de mods está dentro do {{what}}.",
   "cloud.slowPitch":
-    "O jogo lê todos os mods ao carregar, e leituras pelo {{what}} são lentas — numa coleção grande parece que o jogo travou. Mover a pasta para fora resolve.",
+    "O app está bem: o jogo só carrega devagar porque lê pelo {{what}}. Mover a pasta para fora resolve.",
   "runtime.installed": "Componente instalado",
   "runtime.installedDesc":
     "O FrostMod já deve alcançar o jogo. Reinicie o MX Bikes se ele estiver aberto.",
@@ -704,6 +704,14 @@ export const ptBR: Translation = {
   "settings.themeLight": "Claro",
   "settings.themeDark": "Escuro",
   "settings.themeSystem": "Sistema",
+  "settings.colorway": "Paleta",
+  "settings.colorwayFrost": "Gelo",
+  "settings.colorwayEmber": "Brasa",
+  "settings.colorwayMoss": "Musgo",
+  "settings.colorwayViolet": "Violeta",
+  "settings.colorwayRose": "Rosa",
+  "settings.colorwaySlate": "Ardósia",
+  "settings.colorwayRetro": "Retrô",
   "settings.language": "Idioma",
   "settings.languageSystem": "Sistema",
   "settings.analytics": "Compartilhar estatísticas de uso anônimas",

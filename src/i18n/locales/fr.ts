@@ -347,11 +347,11 @@ export const fr: Translation = {
   "cloud.evictedBody":
     "Certains mods ne sont pas vraiment sur ce PC — {{what}} les a déplacés dans le cloud.",
   "cloud.evictedPitch":
-    "Le jeu les lit au chargement et peut planter à ce moment. Sors le dossier mods, ou choisis «\xa0Toujours conserver sur cet appareil\xa0».",
+    "L'app n'a rien\xa0: c'est le jeu qui peut planter en les lisant. Clic droit sur ton dossier mods, puis «\xa0Toujours conserver sur cet appareil\xa0».",
   "cloud.slowBody":
     "Ton dossier mods est dans {{what}}.",
   "cloud.slowPitch":
-    "Le jeu lit tous les mods au chargement, et les lectures via {{what}} sont lentes — sur une grosse collection, on dirait que le jeu a gelé. Déplacer le dossier règle le problème.",
+    "L'app n'a rien\xa0: le jeu charge simplement lentement en lisant via {{what}}. Déplacer le dossier règle le problème.",
   "runtime.installed": "Composant installé",
   "runtime.installedDesc":
     "FrostMod devrait maintenant atteindre le jeu. Relancez MX Bikes s'il est déjà ouvert.",
@@ -706,6 +706,14 @@ export const fr: Translation = {
   "settings.themeLight": "Clair",
   "settings.themeDark": "Sombre",
   "settings.themeSystem": "Système",
+  "settings.colorway": "Palette",
+  "settings.colorwayFrost": "Givre",
+  "settings.colorwayEmber": "Braise",
+  "settings.colorwayMoss": "Mousse",
+  "settings.colorwayViolet": "Violet",
+  "settings.colorwayRose": "Rose",
+  "settings.colorwaySlate": "Ardoise",
+  "settings.colorwayRetro": "Rétro",
   "settings.language": "Langue",
   "settings.languageSystem": "Système",
   "settings.analytics": "Partager des statistiques d'usage anonymes",

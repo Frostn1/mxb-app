@@ -111,6 +111,284 @@
   --ring: #1c7897;
 }
 
+/* ------------------------------------------------------------------ *
+ * Colorways — a palette layered on top of light/dark.                 *
+ *                                                                     *
+ * `Theme.tsx` puts the pick on <html> as `data-colorway`, so every     *
+ * rule here is `.dark[data-colorway="x"]` / `.light[data-colorway="x"]` *
+ * — one class plus one attribute, which outranks the plain `.dark` /   *
+ * `.light` blocks above without an `!important` anywhere.              *
+ *                                                                     *
+ * A colorway moves the chrome, not just the accent: the surfaces carry *
+ * the same hue as the primary, because an app whose only coloured      *
+ * pixel is its buttons doesn't read as a different colourway.          *
+ * ------------------------------------------------------------------ */
+
+/* `frost` needs no block: it *is* the base palette above. The rest restate the
+   surfaces, so the card/popover/secondary text has to follow --foreground
+   rather than stay pinned to frost's near-white. */
+[data-colorway] {
+  --card-foreground: var(--foreground);
+  --popover-foreground: var(--foreground);
+  --secondary-foreground: var(--foreground);
+}
+
+/* --- Ember: warm amber over roasted brown --- */
+.dark[data-colorway="ember"] {
+  --window: #120e0b;
+  --background: #171310;
+  --card: #221b16;
+  --popover: #2b231d;
+  --secondary: #352c25;
+  --muted: #221b16;
+  --muted-foreground: #9c8b7e;
+  --faint: #6f6155;
+  --foreground: #f5eee8;
+  --primary: #f0a878;
+  --primary-foreground: #1a0f06;
+  --accent: rgba(240, 168, 120, 0.12);
+  --accent-foreground: #f8c9a6;
+  --ring: #f0a878;
+}
+.light[data-colorway="ember"] {
+  --window: #ded1c6;
+  --background: #eae0d6;
+  --card: #f7f2ec;
+  --popover: #fffdfa;
+  --secondary: #dcd0c3;
+  --muted: #efe8e0;
+  --muted-foreground: rgba(40, 26, 15, 0.58);
+  --faint: rgba(40, 26, 15, 0.44);
+  --foreground: #1d130a;
+  --primary: #a85c22;
+  --primary-foreground: #ffffff;
+  --accent: rgba(168, 92, 34, 0.12);
+  --accent-foreground: #7d4416;
+  --border: rgba(40, 26, 15, 0.12);
+  --input: rgba(40, 26, 15, 0.14);
+  --ring: #a85c22;
+}
+
+/* --- Moss: dry green over deep pine --- */
+.dark[data-colorway="moss"] {
+  --window: #0b1210;
+  --background: #101714;
+  --card: #16211c;
+  --popover: #1d2b25;
+  --secondary: #24352e;
+  --muted: #16211c;
+  --muted-foreground: #85988e;
+  --faint: #5c6d65;
+  --foreground: #eaf3ee;
+  --primary: #8fd6a8;
+  --primary-foreground: #06180f;
+  --accent: rgba(143, 214, 168, 0.12);
+  --accent-foreground: #b5e6c6;
+  --ring: #8fd6a8;
+}
+.light[data-colorway="moss"] {
+  --window: #c8d6cb;
+  --background: #dbe6dd;
+  --card: #eef4ef;
+  --popover: #fbfdfb;
+  --secondary: #c9d7cc;
+  --muted: #e5eee7;
+  --muted-foreground: rgba(8, 32, 20, 0.58);
+  --faint: rgba(8, 32, 20, 0.44);
+  --foreground: #082014;
+  --primary: #2f7d52;
+  --primary-foreground: #ffffff;
+  --accent: rgba(47, 125, 82, 0.12);
+  --accent-foreground: #22603d;
+  --border: rgba(8, 32, 20, 0.12);
+  --input: rgba(8, 32, 20, 0.14);
+  --ring: #2f7d52;
+}
+
+/* --- Violet: soft lilac over ink --- */
+.dark[data-colorway="violet"] {
+  --window: #100d16;
+  --background: #15121c;
+  --card: #1e1a28;
+  --popover: #272132;
+  --secondary: #302a3d;
+  --muted: #1e1a28;
+  --muted-foreground: #948da6;
+  --faint: #675f78;
+  --foreground: #efecf7;
+  --primary: #b9a3f0;
+  --primary-foreground: #100a1e;
+  --accent: rgba(185, 163, 240, 0.12);
+  --accent-foreground: #d3c6f7;
+  --ring: #b9a3f0;
+}
+.light[data-colorway="violet"] {
+  --window: #d2cede;
+  --background: #e2dfec;
+  --card: #f2f0f8;
+  --popover: #fdfcff;
+  --secondary: #d0ccdf;
+  --muted: #e9e7f1;
+  --muted-foreground: rgba(22, 15, 40, 0.58);
+  --faint: rgba(22, 15, 40, 0.44);
+  --foreground: #160f28;
+  --primary: #5b45a6;
+  --primary-foreground: #ffffff;
+  --accent: rgba(91, 69, 166, 0.12);
+  --accent-foreground: #45327e;
+  --border: rgba(22, 15, 40, 0.12);
+  --input: rgba(22, 15, 40, 0.14);
+  --ring: #5b45a6;
+}
+
+/* --- Rose: dusty pink over oxblood --- */
+.dark[data-colorway="rose"] {
+  --window: #140c10;
+  --background: #191015;
+  --card: #24181e;
+  --popover: #2d1f26;
+  --secondary: #37272f;
+  --muted: #24181e;
+  --muted-foreground: #a08a92;
+  --faint: #715f66;
+  --foreground: #f6ecef;
+  --primary: #f0a0b8;
+  --primary-foreground: #1c0810;
+  --accent: rgba(240, 160, 184, 0.12);
+  --accent-foreground: #f7c4d3;
+  --ring: #f0a0b8;
+}
+.light[data-colorway="rose"] {
+  --window: #ddccd2;
+  --background: #ece0e4;
+  --card: #f8f1f3;
+  --popover: #fffcfd;
+  --secondary: #dbcbd1;
+  --muted: #f0e8eb;
+  --muted-foreground: rgba(40, 12, 24, 0.58);
+  --faint: rgba(40, 12, 24, 0.44);
+  --foreground: #280c18;
+  --primary: #ab3d61;
+  --primary-foreground: #ffffff;
+  --accent: rgba(171, 61, 97, 0.12);
+  --accent-foreground: #872f4b;
+  --border: rgba(40, 12, 24, 0.12);
+  --input: rgba(40, 12, 24, 0.14);
+  --ring: #ab3d61;
+}
+
+/* --- Slate: no hue at all, for anyone who wants the app to stay out of the way --- */
+.dark[data-colorway="slate"] {
+  --window: #0e0e0f;
+  --background: #131314;
+  --card: #1c1c1e;
+  --popover: #242426;
+  --secondary: #2d2d30;
+  --muted: #1c1c1e;
+  --muted-foreground: #929295;
+  --faint: #66666a;
+  --foreground: #f0f0f1;
+  --primary: #cfd3d8;
+  --primary-foreground: #16181a;
+  --accent: rgba(207, 211, 216, 0.1);
+  --accent-foreground: #e6e9ec;
+  --ring: #cfd3d8;
+}
+.light[data-colorway="slate"] {
+  --window: #d2d4d6;
+  --background: #e2e4e6;
+  --card: #f1f2f3;
+  --popover: #ffffff;
+  --secondary: #cfd1d3;
+  --muted: #e8e9ea;
+  --muted-foreground: rgba(16, 18, 20, 0.58);
+  --faint: rgba(16, 18, 20, 0.44);
+  --foreground: #101214;
+  --primary: #4a5157;
+  --primary-foreground: #ffffff;
+  --accent: rgba(74, 81, 87, 0.12);
+  --accent-foreground: #363c41;
+  --border: rgba(16, 18, 20, 0.12);
+  --input: rgba(16, 18, 20, 0.14);
+  --ring: #4a5157;
+}
+
+/* --- Retro: amber phosphor. More than a palette — see the treatment below. --- */
+.dark[data-colorway="retro"] {
+  --window: #0a0806;
+  --background: #0f0c07;
+  --card: #16110a;
+  --popover: #1c160d;
+  --secondary: #241c11;
+  --muted: #16110a;
+  /* Warm bone rather than full phosphor: a whole app in #f0b429 is a novelty
+     for about a minute and then it's unreadable. The amber is the accent. */
+  --foreground: #ecdfc2;
+  --muted-foreground: #a08e6a;
+  --faint: #6f624a;
+  --primary: #f0b429;
+  --primary-foreground: #140d02;
+  --accent: rgba(240, 180, 41, 0.14);
+  --accent-foreground: #f7d9a0;
+  --ring: #f0b429;
+  --success: #b9d17a;
+  --warning: #f0b429;
+  --destructive: #e8846a;
+  --border: rgba(240, 180, 41, 0.16);
+  --input: rgba(240, 180, 41, 0.2);
+}
+.light[data-colorway="retro"] {
+  --window: #ddd2ba;
+  --background: #ece2c9;
+  --card: #f6efdc;
+  --popover: #fdf9ec;
+  --secondary: #ded2b6;
+  --muted: #f0e8d2;
+  --foreground: #2e2618;
+  --muted-foreground: rgba(46, 38, 24, 0.62);
+  --faint: rgba(46, 38, 24, 0.46);
+  --primary: #9a6b12;
+  --primary-foreground: #fdf9ec;
+  --accent: rgba(154, 107, 18, 0.14);
+  --accent-foreground: #74500b;
+  --success: #4d7a1f;
+  --warning: #9a6b12;
+  --destructive: #a8402a;
+  --border: rgba(46, 38, 24, 0.16);
+  --input: rgba(46, 38, 24, 0.2);
+  --ring: #9a6b12;
+}
+
+/* Retro is a mode, not a hue: monospaced type and hard corners, because the
+   thing being imitated had no font choice and no rounding to give. */
+[data-colorway="retro"] {
+  --radius: 0.25rem;
+  --font-sans: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+    monospace;
+}
+
+/* Tailwind's `font-sans` utility bakes the family in (the theme block is
+   `inline`), so the spans that ask for it by class would sit in the proportional
+   face while everything around them went mono. */
+[data-colorway="retro"] .font-sans {
+  font-family: var(--font-sans);
+}
+
+/* And a scanline over the whole window. Held off the overlay: that window is
+   transparent on purpose, and a fixed sheet there would tint the game. */
+html[data-colorway="retro"]:not(.overlay-window) body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--foreground) 4%, transparent) 0 1px,
+    transparent 1px 3px
+  );
+}
+
 @theme inline {
   /* Square by design — see the note at the top. These stay mapped so the
      shadcn primitives keep compiling; they simply resolve to nothing. */

@@ -10,16 +10,24 @@
 - Text is set in Barlow, which ships inside the app so it reads the same offline.
 
 ### Added
+- Seven colorways in Settings. Frost is still the default; Ember, Moss, Violet, Rose and
+  Slate move the whole window, not just the buttons. Each works in light and dark.
+- Retro, a colorway that goes further: amber phosphor, monospaced type, square corners and
+  a scanline over the window. The overlay follows whatever you pick, straight away.
 - A Servers tab that lists every live MX Bikes server the way the in-game browser does —
   who's on each one, the track it's running, and its address. Press Join to launch straight
   into any of them.
 
 ### Fixed
+- The cloud-storage warning names OneDrive instead of guessing at "a cloud sync tool", says
+  the app itself is fine, and takes up one thin line instead of a block.
 - Sharing a track goes through. Big shares upload in smaller pieces and a piece the host
   drops is sent again, so a share code comes back instead of an upload error.
-- Tracks you build in the app have a riding line again. The ground is painted in four bands
-  — field, worked shoulder, the line itself and the grass over the top — where before every
-  track came out one flat colour from fence to fence.
+- Tracks you build in the app open. Going to the track from the loading screen brings up
+  the track instead of stopping there.
+- Tracks you build in the app have a riding line. The ground is painted in four bands —
+  field, worked shoulder, the line itself and the grass over the top — and you can see all
+  four: nothing is laid over the top of them any more.
 - Every band takes the light: each one carries its own relief map, so soil reads as soil
   instead of a painted surface.
 - Sound mods install. The ones that come as a folder per bike, the ones that hand you an

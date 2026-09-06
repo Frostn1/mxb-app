@@ -337,11 +337,11 @@ export const en = {
   "cloud.evictedBody":
     "Some of your mods aren’t really on this PC — {{what}} has moved them to the cloud.",
   "cloud.evictedPitch":
-    "The game reads them while loading and can crash there. Move your mods folder out, or set “Always keep on this device”.",
+    "Nothing is wrong with the app — it's the game that can crash reading them. Right-click your mods folder and pick “Always keep on this device”.",
   "cloud.slowBody":
     "Your mods folder is inside {{what}}.",
   "cloud.slowPitch":
-    "The game reads every mod while loading, and reads through {{what}} are slow — on a big collection it can look like the game has frozen. Moving the folder out fixes it.",
+    "Nothing is wrong with the app — the game just loads slowly reading through {{what}}. Moving the folder out fixes it.",
   "runtime.installed": "Component installed",
   "runtime.installedDesc":
     "FrostMod should reach the game now. Restart MX Bikes if it's already open.",
@@ -696,6 +696,14 @@ export const en = {
   "settings.themeLight": "Light",
   "settings.themeDark": "Dark",
   "settings.themeSystem": "System",
+  "settings.colorway": "Colorway",
+  "settings.colorwayFrost": "Frost",
+  "settings.colorwayEmber": "Ember",
+  "settings.colorwayMoss": "Moss",
+  "settings.colorwayViolet": "Violet",
+  "settings.colorwayRose": "Rose",
+  "settings.colorwaySlate": "Slate",
+  "settings.colorwayRetro": "Retro",
   "settings.language": "Language",
   "settings.languageSystem": "System",
   "settings.analytics": "Share anonymous usage stats",

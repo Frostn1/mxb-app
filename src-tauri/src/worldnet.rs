@@ -448,7 +448,9 @@ mod tests {
     #[test]
     fn blowfish_matches_the_standard_vectors() {
         fn enc(key: &[u8], pt: [u8; 8]) -> [u8; 8] {
-            let bf = Blowfish::new_from_slice(key).unwrap();
+            // Annotated: with the block handed straight to `encrypt_block`, nothing else
+            // pins the cipher's byte order, and `Blowfish` is generic over it.
+            let bf: Blowfish = Blowfish::new_from_slice(key).unwrap();
             let mut ga = GenericArray::clone_from_slice(&pt);
             bf.encrypt_block(&mut ga);
             ga.into()
@@ -465,7 +467,11 @@ mod tests {
 
     #[test]
     fn encrypt_then_decrypt_round_trips_with_the_game_key() {
-        let body = Writer::default().field("GETLIST").int(1).finish();
+        // `field` and `int` hand back a borrow, so the writer has to outlive the chain
+        // before `finish` can take it by value.
+        let mut w = Writer::default();
+        w.field("GETLIST").int(1);
+        let body = w.finish();
         let round = decrypt(&encrypt(body.clone()));
         // Decryption yields the padded body; the meaningful prefix is intact.
         assert!(round.starts_with(&body));

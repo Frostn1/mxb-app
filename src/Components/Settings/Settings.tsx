@@ -84,7 +84,13 @@ import { useConfig } from "../../Context/Config";
 import GameSwitcher from "../Shell/GameSwitcher";
 import ReshadeCard from "./ReshadeCard";
 import SupportersCard from "./SupportersCard";
-import { useTheme, type ThemeMode } from "../../Context/Theme";
+import {
+  COLORWAYS,
+  COLORWAY_SWATCH,
+  useTheme,
+  type Colorway,
+  type ThemeMode,
+} from "../../Context/Theme";
 import { Trans } from "../../i18n";
 import { useI18n, type LocalePref, type TKey } from "../../i18n/context";
 import { getLocale, LOCALE_OPTIONS } from "../../i18n/core";
@@ -291,7 +297,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // everywhere it runs: natively on Windows, under Proton on Linux, in a CrossOver/Whisky
   // bottle on macOS. The app starts FrostMod in whichever prefix holds the game.
   const hasFrostmod = isWindows || platform === "linux" || isMac;
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, colorway, setColorway } = useTheme();
   const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes, strayMsvcr90, clearingStray, clearStrayMsvcr90 } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
@@ -1653,6 +1659,45 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               />
             </div>
 
+            {/* Swatches rather than a Select: a palette is the one setting whose
+                value you can just look at. Each is two-tone — accent over that
+                colorway's own chrome — because the chrome moves too. */}
+            <div className="mt-3 flex items-start justify-between gap-4">
+              <span className="text-[12.5px] text-foreground/85">
+                {t("settings.colorway")}
+              </span>
+              <div className="flex flex-col items-end gap-1.5">
+                <div className="flex gap-1.5">
+                  {COLORWAYS.map((c) => {
+                    const [tint, chrome] = COLORWAY_SWATCH[c];
+                    const label = t(COLORWAY_LABEL[c]);
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        title={label}
+                        aria-label={label}
+                        aria-pressed={colorway === c}
+                        onClick={() => setColorway(c)}
+                        className={cn(
+                          "size-6 cursor-default rounded-full border transition-shadow",
+                          colorway === c
+                            ? "border-primary ring-2 ring-primary/40"
+                            : "border-input hover:border-foreground/30",
+                        )}
+                        style={{
+                          background: `linear-gradient(135deg, ${tint} 0 50%, ${chrome} 50% 100%)`,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+                <span className="text-[11px] text-muted-foreground">
+                  {t(COLORWAY_LABEL[colorway])}
+                </span>
+              </div>
+            </div>
+
             {/* A Select, not a Segmented control — seven options don't fit the
                 segmented track, and each is named in its own language so someone
                 who lands in a script they can't read can still get back out. */}
@@ -2349,6 +2394,17 @@ function Callout({
     </div>
   );
 }
+
+/** Each colorway's name, so the picker stays type-checked against the dictionary. */
+const COLORWAY_LABEL: Record<Colorway, TKey> = {
+  frost: "settings.colorwayFrost",
+  ember: "settings.colorwayEmber",
+  moss: "settings.colorwayMoss",
+  violet: "settings.colorwayViolet",
+  rose: "settings.colorwayRose",
+  slate: "settings.colorwaySlate",
+  retro: "settings.colorwayRetro",
+};
 
 function Section({
   title,
