@@ -85,7 +85,7 @@ export default function DownloadQueue({ collapsed }: { collapsed: boolean }) {
         ) : (
           <button
             title={t("downloads.open")}
-            className="flex cursor-default flex-col gap-[7px] border border-white/[0.07] bg-[color-mix(in_srgb,var(--card)_60%,var(--window))] px-3 py-2.5 text-left transition-colors hover:border-white/[0.12]"
+            className="flex cursor-default flex-col gap-[7px] rounded-[10px] border border-white/[0.07] bg-[color-mix(in_srgb,var(--card)_60%,var(--window))] px-3 py-2.5 text-left transition-colors hover:border-white/[0.12]"
           >
             <div className="flex items-baseline justify-between gap-2">
               <span className="truncate text-[11.5px] font-semibold text-foreground/85">

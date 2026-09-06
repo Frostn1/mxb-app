@@ -3,112 +3,104 @@
    declare our source globs explicitly instead. Paths are relative to this file. */
 @import "tailwindcss" source(none);
 @import "tw-animate-css";
-@import "./fonts.css";
 @source "./**/*.{ts,tsx}";
 @source "../index.html";
 
 @custom-variant dark (&:is(.dark *));
 
 /* ------------------------------------------------------------------ *
- * "Paddock" — the launcher redesign. Dark is the primary theme.
- *
- * Two rules carry the look, and both are easy to undo by accident:
- *   - the ground is near-black and almost achromatic, so the blue is the
- *     only saturated thing on screen. Don't tint the surfaces.
- *   - geometry is square. Radius is 0 by design; corners are cut with
- *     `.u-notch` and emphasis comes from `.u-skew`, not from rounding.
+ * mxb-app design tokens — dark is the primary theme (from the redesign) *
  * ------------------------------------------------------------------ */
 :root {
-  --radius: 0px;
+  --radius: 0.7rem;
 
   /* Chrome + surfaces */
-  --window: #08080a; /* top rail */
-  --background: #0c0c0e; /* main content area */
-  --foreground: #f2f3f5;
-  --card: #141417;
-  --card-foreground: #f2f3f5;
-  --popover: #1c1c21; /* menus, toasts */
-  --popover-foreground: #f2f3f5;
+  --window: #0d0f12; /* titlebar + sidebar */
+  --background: #121417; /* main content area */
+  --foreground: #eef2f5;
+  --card: #1a1d22;
+  --card-foreground: #eef2f5;
+  --popover: #22262c; /* menus, toasts */
+  --popover-foreground: #eef2f5;
 
-  /* Accent — unchanged from the previous theme on purpose. */
+  /* Accent (icy frost) */
   --primary: #9ccfec;
   --primary-foreground: #0d1216;
 
   /* Segmented / neutral fills */
-  --secondary: #26262c;
-  --secondary-foreground: #f2f3f5;
-  --muted: #141417;
-  --muted-foreground: #97979f;
-  --faint: #6d6d76;
+  --secondary: #2a2f36;
+  --secondary-foreground: #eef2f5;
+  --muted: #1a1d22;
+  --muted-foreground: #8a949c;
+  --faint: #5f6a73;
 
-  /* Selected/hover wash, same shape as every colorway's */
+  /* Sidebar active tint */
   --accent: rgba(156, 207, 236, 0.12);
   --accent-foreground: #c3e3f7;
 
   /* Status */
-  --destructive: #ef8078;
-  --destructive-foreground: #1a0c0b;
-  --success: #6fd99a;
-  --warning: #e8bd6a;
+  --destructive: #e88f8f;
+  --destructive-foreground: #1c0f0f;
+  --success: #7fd6a4;
+  --warning: #e8c07f;
 
   /* Lines + controls */
   --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.12);
+  --input: rgba(255, 255, 255, 0.1);
   --ring: #9ccfec;
 }
 
 .dark {
-  --window: #08080a;
-  --background: #0c0c0e;
-  --foreground: #f2f3f5;
-  --card: #141417;
-  --card-foreground: #f2f3f5;
-  --popover: #1c1c21;
-  --popover-foreground: #f2f3f5;
+  --window: #0d0f12;
+  --background: #121417;
+  --foreground: #eef2f5;
+  --card: #1a1d22;
+  --card-foreground: #eef2f5;
+  --popover: #22262c;
+  --popover-foreground: #eef2f5;
   --primary: #9ccfec;
   --primary-foreground: #0d1216;
-  --secondary: #26262c;
-  --secondary-foreground: #f2f3f5;
-  --muted: #141417;
-  --muted-foreground: #97979f;
-  --faint: #6d6d76;
+  --secondary: #2a2f36;
+  --secondary-foreground: #eef2f5;
+  --muted: #1a1d22;
+  --muted-foreground: #8a949c;
+  --faint: #5f6a73;
   --accent: rgba(156, 207, 236, 0.12);
   --accent-foreground: #c3e3f7;
-  --destructive: #ef8078;
-  --destructive-foreground: #1a0c0b;
-  --success: #6fd99a;
-  --warning: #e8bd6a;
+  --destructive: #e88f8f;
+  --destructive-foreground: #1c0f0f;
+  --success: #7fd6a4;
+  --warning: #e8c07f;
   --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.12);
+  --input: rgba(255, 255, 255, 0.1);
   --ring: #9ccfec;
 }
 
-/* Light theme — same structure, inverted ground. The accent darkens because
-   #9ccfec has nowhere near enough contrast against a light surface. */
+/* Light theme — adapted from the app's previous light palette */
 .light {
-  --window: #e4e4e2;
-  --background: #f1f1ef;
-  --foreground: #131317;
-  --card: #ffffff;
-  --card-foreground: #131317;
+  --window: #cfd6da;
+  --background: #dee4e7;
+  --foreground: #0a0b0d;
+  --card: #eef2f4;
+  --card-foreground: #0a0b0d;
   --popover: #ffffff;
-  --popover-foreground: #131317;
-  --primary: #1c7897;
+  --popover-foreground: #0a0b0d;
+  --primary: #2081a3;
   --primary-foreground: #ffffff;
-  --secondary: #e0e0de;
-  --secondary-foreground: #131317;
-  --muted: #eaeae8;
-  --muted-foreground: #5a5a63;
-  --faint: #85858e;
-  --accent: rgba(28, 120, 151, 0.12);
-  --accent-foreground: #155f78;
-  --destructive: #b93a31;
+  --secondary: #cbd3d7;
+  --secondary-foreground: #0a0b0d;
+  --muted: #e4e9eb;
+  --muted-foreground: rgba(0, 0, 0, 0.55);
+  --faint: rgba(0, 0, 0, 0.42);
+  --accent: rgba(32, 129, 163, 0.12);
+  --accent-foreground: #17627d;
+  --destructive: #c4453c;
   --destructive-foreground: #ffffff;
-  --success: #1c8a5c;
-  --warning: #96690f;
-  --border: rgba(0, 0, 0, 0.11);
-  --input: rgba(0, 0, 0, 0.16);
-  --ring: #1c7897;
+  --success: #2e9e6b;
+  --warning: #b7861f;
+  --border: rgba(0, 0, 0, 0.1);
+  --input: rgba(0, 0, 0, 0.12);
+  --ring: #2081a3;
 }
 
 /* ------------------------------------------------------------------ *
@@ -390,12 +382,10 @@ html[data-colorway="retro"]:not(.overlay-window) body::after {
 }
 
 @theme inline {
-  /* Square by design — see the note at the top. These stay mapped so the
-     shadcn primitives keep compiling; they simply resolve to nothing. */
-  --radius-sm: var(--radius);
-  --radius-md: var(--radius);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
-  --radius-xl: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 
   --color-window: var(--window);
   --color-background: var(--background);
@@ -421,9 +411,8 @@ html[data-colorway="retro"]:not(.overlay-window) body::after {
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  --font-sans: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-cond: "Barlow Condensed", "Barlow", system-ui, sans-serif;
-  --font-mono: ui-monospace, Menlo, Consolas, monospace;
+  --font-sans: "Hanken Grotesk", system-ui, sans-serif;
+  --font-mono: ui-monospace, Menlo, monospace;
 }
 
 @layer base {
@@ -458,20 +447,14 @@ html[data-colorway="retro"]:not(.overlay-window) body::after {
     overflow: hidden;
   }
 
-  /* Numbers sit in columns all over this app — sizes, speeds, ping, lap times,
-     rider counts. Tabular figures stop them jittering as they tick. */
-  .tabular-figures,
-  time,
-  output {
-    font-variant-numeric: tabular-nums;
-  }
-
+  /* Custom scrollbars to match the dark chrome */
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
     background: color-mix(in srgb, var(--foreground) 14%, transparent);
+    border-radius: 99px;
     border: 3px solid transparent;
     background-clip: content-box;
   }
@@ -482,21 +465,6 @@ html[data-colorway="retro"]:not(.overlay-window) body::after {
   ::-webkit-scrollbar-track {
     background: transparent;
   }
-}
-
-/* ------------------------------------------------------------------ *
- * Shape utilities. The redesign's geometry comes from a motocross number
- * plate: a shallow left-leaning skew, and a corner cut off the card.
- * `.u-skew` always wraps `.u-unskew` on its text, or the label leans too.
- * ------------------------------------------------------------------ */
-.u-skew {
-  transform: skewX(-11deg);
-}
-.u-unskew {
-  transform: skewX(11deg);
-}
-.u-notch {
-  clip-path: polygon(0 0, 100% 0, 100% 86%, 91% 100%, 0 100%);
 }
 
 @keyframes frost-indeterminate {
@@ -517,16 +485,13 @@ html[data-colorway="retro"]:not(.overlay-window) body::after {
 }
 .mod-description :is(h1, h2, h3, h4) {
   color: var(--foreground);
-  font-family: var(--font-cond);
   font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  margin: 1.2em 0 0.45em;
+  margin: 1.1em 0 0.4em;
   line-height: 1.25;
 }
-.mod-description h1 { font-size: 1.3em; }
-.mod-description h2 { font-size: 1.18em; }
-.mod-description h3 { font-size: 1.06em; }
+.mod-description h1 { font-size: 1.35em; }
+.mod-description h2 { font-size: 1.2em; }
+.mod-description h3 { font-size: 1.08em; }
 .mod-description p { margin: 0 0 0.85em; }
 .mod-description a {
   color: var(--primary);
@@ -538,13 +503,15 @@ html[data-colorway="retro"]:not(.overlay-window) body::after {
 .mod-description img {
   max-width: 100%;
   height: auto;
+  border-radius: 10px;
   margin: 0.5em 0;
 }
 .mod-description :is(strong, b) { color: var(--foreground); font-weight: 700; }
 .mod-description hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
 
-/* Swiper overrides */
+/* Swiper overrides to match the frost palette */
 .frost-gallery {
+  border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--border);
 }
@@ -555,10 +522,10 @@ html[data-colorway="retro"]:not(.overlay-window) body::after {
 }
 .frost-gallery .swiper-pagination-bullet {
   background: rgba(255, 255, 255, 0.5);
-  border-radius: 0;
   opacity: 1;
 }
 .frost-gallery .swiper-pagination-bullet-active {
-  background: var(--primary);
+  background: #fff;
   width: 16px;
+  border-radius: 99px;
 }

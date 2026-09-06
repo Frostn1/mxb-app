@@ -12,9 +12,8 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/Components/ui/button";
-import { Segmented } from "@/Components/ui/segmented";
-import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "@/Components/ui/help-hint";
+import { Segmented } from "@/Components/ui/segmented";
 import { Switch } from "@/Components/ui/switch";
 import {
   Select,
@@ -233,41 +232,49 @@ export default function Manage() {
 
   return (
     <div className="flex h-full flex-col">
-      <ContextBarLeft>
-        <ContextTab active={tab === "race"} onSelect={() => setTab("race")}>
-          {t("manage.tabRace")}
-        </ContextTab>
-        <ContextTab active={tab === "mods"} onSelect={() => setTab("mods")}>
-          <span className="flex items-center gap-1.5">
-            {t("manage.tabMods")}
-            <span className="tabular-figures text-faint">{mods.length}</span>
-          </span>
-        </ContextTab>
-      </ContextBarLeft>
-
-      <ContextBarRight>
-        {disabledCount > 0 && (
-          <>
-            <span className="text-[12px] text-muted-foreground">
-              {t("manage.disabledCount", { count: disabledCount })}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={() => setRestoreOpen(true)}
-            >
-              <RotateCcw className="size-3.5" /> {t("manage.restoreAll")}
-            </Button>
-          </>
-        )}
-        <Button variant="outline" size="sm" onClick={load} disabled={loading || busy}>
-          <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />{" "}
-          {t("locker.rescan")}
-        </Button>
-        <HelpHint title={t("nav.manage")} description={t("manage.help")} />
-      </ContextBarRight>
-
+      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
+        <div className="flex items-center gap-1.5">
+          <h1 className="text-[21px] font-bold tracking-[-0.2px]">{t("nav.manage")}</h1>
+          <HelpHint title={t("nav.manage")} description={t("manage.help")} />
+        </div>
+        <Segmented
+          value={tab}
+          onChange={(v) => setTab(v as Tab)}
+          options={[
+            { value: "race", label: t("manage.tabRace") },
+            {
+              value: "mods",
+              label: (
+                <span className="flex items-center gap-1.5">
+                  {t("manage.tabMods")}
+                  <span className="text-muted-foreground">{mods.length}</span>
+                </span>
+              ),
+            },
+          ]}
+        />
+        <div className="ml-auto flex items-center gap-2">
+          {disabledCount > 0 && (
+            <>
+              <span className="text-[12px] text-muted-foreground">
+                {t("manage.disabledCount", { count: disabledCount })}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={() => setRestoreOpen(true)}
+              >
+                <RotateCcw className="size-3.5" /> {t("manage.restoreAll")}
+              </Button>
+            </>
+          )}
+          <Button variant="outline" size="sm" onClick={load} disabled={loading || busy}>
+            <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />{" "}
+            {t("locker.rescan")}
+          </Button>
+        </div>
+      </header>
 
       {error ? (
         <p className="select-text px-7 py-16 text-center text-[13px] text-destructive">
