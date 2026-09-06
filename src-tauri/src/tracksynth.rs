@@ -6854,7 +6854,8 @@ mod tests {
         // why what is left over is one.
         let n = v.len() as f32;
         let x = |i: usize| i as f32 / (v.len() - 1) as f32 - 0.5;
-        let (mut s0, mut s1, mut s2, mut s3, mut s4) = (n, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        let s0 = n;
+        let (mut s1, mut s2, mut s3, mut s4) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
         let (mut t0, mut t1, mut t2) = (0.0f32, 0.0f32, 0.0f32);
         for (i, h) in v.iter().enumerate() {
             let (a, h) = (x(i), *h);

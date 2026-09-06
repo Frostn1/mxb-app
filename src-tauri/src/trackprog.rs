@@ -321,7 +321,7 @@ pub fn face_arc(t: f32, sweep: f32) -> f32 {
     // Below about a degree the arc and its own chord differ by less than the grid can hold,
     // and the divide below loses all its significance. A quadratic is the arc's own limit
     // there — still tangent at the foot, still steepest at the lip.
-    if !(sweep > 1e-3) {
+    if !sweep.is_finite() || sweep <= 1e-3 {
         return t * t;
     }
     let (sin_s, cos_s) = (sweep.sin(), sweep.cos());
