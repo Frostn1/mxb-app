@@ -399,7 +399,7 @@ export function PaintDestCard({ state, bare }: { state: PaintDestState; bare?: b
             className={cn(
               "rounded-md border px-2 py-1 text-[11.5px] font-medium transition-colors",
               kind.id === k.id
-                ? "border-primary bg-primary text-primary-foreground"
+                ? "u-selected border-transparent"
                 : "border-border text-muted-foreground hover:text-foreground",
             )}
           >

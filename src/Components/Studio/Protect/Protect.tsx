@@ -167,178 +167,183 @@ export default function Protect() {
 
   const ready = lockable.length > 0 && valid.length > 0 && outDir.length > 0;
 
+  const head = (label: string) => (
+    <div className="flex flex-none items-center gap-2.5 px-6 pb-2.5 pt-4">
+      <span className="u-skew h-3 w-1 bg-primary" />
+      <h2 className="font-cond text-[13px] font-bold uppercase tracking-[0.2em] text-foreground">
+        {label}
+      </h2>
+    </div>
+  );
+
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto px-7 pb-7">
-      {/* Your own GUID. Not needed to lock anything for anyone else — it's here because
-          this is the screen where GUIDs are the currency, and locking a test copy to
-          yourself is how you check a mod before you send it out. */}
-      <section className="rounded-xl border border-border/60 bg-card/40 p-4">
-        <h2 className="text-[13px] font-semibold">{t("protect.ownTitle")}</h2>
-        <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
-          {t("protect.ownDesc")}
-        </p>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <code
-            className={cn(
-              "rounded-md border border-border/60 px-2.5 py-1.5 font-mono text-[12.5px]",
-              own ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {own || t("protect.ownUnknown")}
-          </code>
-          {own && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                void navigator.clipboard.writeText(own);
-                toast.success(t("protect.copied"));
-              }}
-            >
-              {t("protect.copy")}
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-0 flex-1">
+        {/* ── What is being locked ─────────────────────────────────────────── */}
+        <section className="flex min-w-0 flex-1 flex-col border-r border-border">
+          {head(t("protect.filesTitle"))}
+          <div className="flex flex-none flex-wrap items-center gap-2 px-6 pb-3">
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void pick(false)}>
+              <FileLock2 className="size-3.5" /> {t("protect.addFiles")}
             </Button>
-          )}
-          <Button size="sm" variant="outline" disabled={reading} onClick={() => void readOwn()}>
-            {reading ? (
-              <Loader2 className="size-3.5 animate-spin" />
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void pick(true)}>
+              <FolderOpen className="size-3.5" /> {t("protect.addFolder")}
+            </Button>
+            {items.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => {
+                  setItems([]);
+                  setRoots([]);
+                }}
+              >
+                <Trash2 className="size-3.5" /> {t("protect.clear")}
+              </Button>
+            )}
+            {items.length > 0 && (
+              <span className="ml-auto tabular-figures text-[11.5px] text-muted-foreground">
+                {t("protect.summary", { files: lockable.length, size: formatBytes(totalBytes) })}
+                {skipped > 0 && ` · ${t("protect.summarySkipped", { count: skipped })}`}
+              </span>
+            )}
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-6">
+            {items.length > 0 ? (
+              <ul className="border border-border bg-card text-[12px]">
+                {items.map((it) => (
+                  <li
+                    key={it.abs}
+                    className={cn(
+                      "flex items-center justify-between gap-3 border-b border-border/60 px-3 py-1.5 last:border-b-0",
+                      it.skip && "text-muted-foreground",
+                    )}
+                  >
+                    <span className="truncate font-mono">{it.rel}</span>
+                    <span className="flex-none tabular-figures text-[11px] text-muted-foreground">
+                      {it.skip ? t(SKIP_LABEL[it.skip]) : formatBytes(it.bytes)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             ) : (
-              <RefreshCw className="size-3.5" />
+              <p className="border border-dashed border-border px-4 py-8 text-center text-[12.5px] leading-relaxed text-muted-foreground">
+                {t("protect.filesDesc")}
+              </p>
             )}
-            {t("protect.readOwn")}
-          </Button>
-          {own && (
-            <button
-              onClick={() => setGuidText((s) => (s ? `${s.trimEnd()}\n${own}` : own))}
-              className="cursor-default text-[11.5px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
-            >
-              {t("protect.useMine")}
-            </button>
-          )}
-        </div>
-      </section>
+          </div>
 
-      <section className="rounded-xl border border-border/60 bg-card/40 p-4">
-        <h2 className="text-[13px] font-semibold">{t("protect.filesTitle")}</h2>
-        <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
-          {t("protect.filesDesc")}
-        </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void pick(false)}>
-            <FileLock2 className="size-3.5" /> {t("protect.addFiles")}
-          </Button>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void pick(true)}>
-            <FolderOpen className="size-3.5" /> {t("protect.addFolder")}
-          </Button>
-          {items.length > 0 && (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => {
-                setItems([]);
-                setRoots([]);
-              }}
-            >
-              <Trash2 className="size-3.5" /> {t("protect.clear")}
-            </Button>
-          )}
-        </div>
+          <div className="mx-6 my-4 flex flex-none items-center gap-2.5 border-l-2 border-primary bg-primary-tint px-3 py-2.5">
+            <span className="text-[11.5px] leading-snug text-muted-foreground">
+              {t("protect.outDesc")}
+            </span>
+          </div>
+        </section>
 
-        {items.length > 0 && (
-          <>
-            <ul className="mt-3 max-h-64 overflow-y-auto rounded-lg border border-border/50 text-[12px]">
-              {items.map((it) => (
-                <li
-                  key={it.abs}
-                  className={cn(
-                    "flex items-center justify-between gap-3 border-b border-border/40 px-3 py-1.5 last:border-b-0",
-                    it.skip && "text-muted-foreground",
-                  )}
-                >
-                  <span className="truncate font-mono">{it.rel}</span>
-                  <span className="flex-none text-[11px] text-muted-foreground">
-                    {it.skip ? t(SKIP_LABEL[it.skip]) : formatBytes(it.bytes)}
+        {/* ── Who it is being locked to ─────────────────────────────────────── */}
+        <aside className="flex w-[452px] flex-none flex-col overflow-y-auto">
+          {head(t("protect.guidsTitle"))}
+          <p className="flex-none px-6 pb-3 text-[11.5px] leading-relaxed text-muted-foreground">
+            {t("protect.guidsDesc")}
+          </p>
+
+          <div className="flex-none px-6">
+            <textarea
+              value={guidText}
+              onChange={(e) => setGuidText(e.target.value)}
+              spellCheck={false}
+              rows={4}
+              placeholder={t("protect.guidsPlaceholder")}
+              className="w-full border border-input bg-card px-3 py-2 font-mono text-[12.5px] outline-none focus:border-ring"
+            />
+            {guids.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {guids.map((g) => (
+                  <span
+                    key={g.guid}
+                    title={g.ok ? undefined : t("protect.guidBad")}
+                    className={cn(
+                      "border px-2 py-0.5 font-mono text-[11px]",
+                      g.ok
+                        ? "border-border text-muted-foreground"
+                        : "border-destructive/40 bg-destructive/10 text-destructive",
+                    )}
+                  >
+                    {g.guid}
                   </span>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 text-[11.5px] text-muted-foreground">
-              {t("protect.summary", {
-                files: lockable.length,
-                size: formatBytes(totalBytes),
-              })}
-              {skipped > 0 && ` · ${t("protect.summarySkipped", { count: skipped })}`}
-            </p>
-          </>
-        )}
-      </section>
+                ))}
+              </div>
+            )}
+          </div>
 
-      <section className="rounded-xl border border-border/60 bg-card/40 p-4">
-        <h2 className="text-[13px] font-semibold">{t("protect.guidsTitle")}</h2>
-        <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
-          {t("protect.guidsDesc")}
-        </p>
-        <textarea
-          value={guidText}
-          onChange={(e) => setGuidText(e.target.value)}
-          spellCheck={false}
-          rows={4}
-          placeholder={t("protect.guidsPlaceholder")}
-          className="mt-3 w-full rounded-lg border border-border/60 bg-background px-3 py-2 font-mono text-[12.5px] outline-none focus:border-border"
-        />
-        {guids.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {guids.map((g) => (
-              <span
-                key={g.guid}
-                title={g.ok ? undefined : t("protect.guidBad")}
+          {/* Your own GUID lives with the others: this is the box it gets pasted into,
+              and locking a test copy to yourself is how you check a mod before sending it. */}
+          <div className="mt-4 flex-none border-t border-border px-6 pt-4">
+            <div className="font-cond text-[10.5px] font-semibold uppercase tracking-[0.2em] text-faint">
+              {t("protect.ownTitle")}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <code
                 className={cn(
-                  "rounded-md border px-2 py-0.5 font-mono text-[11px]",
-                  g.ok
-                    ? "border-border/60 text-muted-foreground"
-                    : "border-destructive/40 bg-destructive/10 text-destructive",
+                  "border border-border px-2.5 py-1.5 font-mono text-[12.5px]",
+                  own ? "text-foreground" : "text-muted-foreground",
                 )}
               >
-                {g.guid}
-              </span>
-            ))}
+                {own || t("protect.ownUnknown")}
+              </code>
+              <Button size="sm" variant="outline" disabled={reading} onClick={() => void readOwn()}>
+                {reading ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-3.5" />
+                )}
+                {t("protect.readOwn")}
+              </Button>
+              {own && (
+                <button
+                  onClick={() => setGuidText((s) => (s ? `${s.trimEnd()}\n${own}` : own))}
+                  className="cursor-default text-[11.5px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                >
+                  {t("protect.useMine")}
+                </button>
+              )}
+            </div>
           </div>
-        )}
-      </section>
 
-      <section className="rounded-xl border border-border/60 bg-card/40 p-4">
-        <h2 className="text-[13px] font-semibold">{t("protect.outTitle")}</h2>
-        <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
-          {t("protect.outDesc")}
-        </p>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Input
-            value={outDir}
-            onChange={(e) => setOutDir(e.target.value)}
-            spellCheck={false}
-            placeholder={t("protect.outPlaceholder")}
-            className="h-8 flex-1 text-[12.5px]"
-          />
-          <Button size="sm" variant="outline" onClick={() => void pickOut()}>
-            <FolderOpen className="size-3.5" /> {t("protect.browse")}
-          </Button>
-        </div>
-      </section>
+          <div className="mt-4 flex-none border-t border-border px-6 pb-5 pt-4">
+            <div className="font-cond text-[10.5px] font-semibold uppercase tracking-[0.2em] text-faint">
+              {t("protect.outTitle")}
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <Input
+                value={outDir}
+                onChange={(e) => setOutDir(e.target.value)}
+                spellCheck={false}
+                placeholder={t("protect.outPlaceholder")}
+                className="h-8 flex-1 text-[12.5px]"
+              />
+              <Button size="sm" variant="outline" onClick={() => void pickOut()}>
+                <FolderOpen className="size-3.5" /> {t("protect.browse")}
+              </Button>
+            </div>
+          </div>
+        </aside>
+      </div>
 
-      <div className="flex flex-wrap items-center gap-3 pb-2">
-        <Button disabled={busy || !ready} onClick={() => void run()}>
-          {busy ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <Lock className="size-4" />
-          )}
-          {t("protect.lock", { files: lockable.length, guids: valid.length })}
-        </Button>
+      {/* ── Run ───────────────────────────────────────────────────────────── */}
+      <div className="flex h-[52px] flex-none items-center gap-3 border-t border-border bg-window px-6">
         {progress && (
           <span className="font-mono text-[11.5px] text-muted-foreground">
             {progress.done}/{progress.total} · {progress.guid} · {progress.file}
           </span>
         )}
+        <div className="flex-1" />
+        <Button disabled={busy || !ready} onClick={() => void run()}>
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Lock className="size-4" />}
+          {t("protect.lock", { files: lockable.length, guids: valid.length })}
+        </Button>
       </div>
     </div>
   );

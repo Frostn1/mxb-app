@@ -12,6 +12,7 @@ import {
   FlipVertical2,
   Grid3x3,
   Group,
+  Box,
   Layers as LayersIcon,
   Link2,
   Link2Off,
@@ -43,6 +44,8 @@ import {
 } from "../../../api/mods";
 import { useT } from "../../../i18n/context";
 import { IMAGE_EXTS, PaintDestBar, isBikeKind, usePaintDest } from "../paintDest";
+const PREVIEW_OPEN_KEY = "mxb:designer:preview:v1";
+
 import { CanvasStage } from "./CanvasStage";
 import { Row, Slider } from "./controls";
 import { PreviewPanel } from "./PreviewPanel";
@@ -203,6 +206,18 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // The sheets/layers rail folds away, because once a paint is set up the thing worth the
   // width is the canvas and the model — not the list of what you already chose.
   const [railOpen, setRailOpen] = useState(true);
+  // Remembered: someone who paints with it hidden wants it hidden next session too.
+  const [previewOpen, setPreviewOpen] = useState(
+    () => localStorage.getItem(PREVIEW_OPEN_KEY) !== "0",
+  );
+  const togglePreview = useCallback(
+    () =>
+      setPreviewOpen((open) => {
+        localStorage.setItem(PREVIEW_OPEN_KEY, open ? "0" : "1");
+        return !open;
+      }),
+    [],
+  );
   // One bump per change to any sheet's pixels. The canvas stage and the 3D preview both
   // follow it rather than trying to work out for themselves what a "change" is.
   const [version, setVersion] = useState(0);
@@ -2045,19 +2060,14 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           <FileImage className="size-3.5" />
           {t("designer.exportPsd")}
         </Button>
-        {blocked && (
-          <span className="ml-auto max-w-[40%] truncate text-[11px] text-faint" title={blocked}>
-            {blocked}
-          </span>
-        )}
       </div>
 
       <div
         className={cn(
           "grid min-h-0 flex-1 gap-3",
           railOpen
-            ? "xl:grid-cols-[224px_minmax(0,1fr)_minmax(0,1fr)]"
-            : "xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]",
+            ? "xl:grid-cols-[224px_minmax(0,1fr)_300px]"
+            : "xl:grid-cols-[minmax(0,1fr)_300px]",
         )}
       >
         {/* ── Sheets, layers, and the selected layer ───────────────────────────── */}
@@ -2100,53 +2110,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             />
           )}
 
-          {active && (
-            <PaintTools
-              settings={paint}
-              onTool={pickTool}
-              onChange={(patch) => setPaint((p) => ({ ...p, ...patch }))}
-              canUndo={canUndo}
-              canRedo={canRedo}
-              onUndo={undo}
-              onRedo={redo}
-              onAddImage={() => void addImage()}
-              onAddText={addText}
-              busy={busy}
-            />
-          )}
-
-          {active && (
-            <LayerList
-              layers={active.layers}
-              selection={selection}
-              onSelect={select}
-              onToggle={(id, visible) => {
-                patchLayer(id, (l) => ({ ...l, visible }));
-                bump();
-              }}
-              onRemove={(id) => removeLayers([id])}
-              onReorder={reorder}
-              onAdd={addPaintLayer}
-            />
-          )}
-          {!!chosen.length && active && (
-            <LayerInspector
-              layers={chosen}
-              all={active.layers}
-              width={active.width}
-              height={active.height}
-              parts={parts}
-              mirrorReady={mirrorReady}
-              onClip={clipLayer}
-              onFit={fitLayer}
-              onMirror={mirrorSelected}
-              onUnlink={unlinkSelection}
-              onSelect={(id) => select([id], "replace")}
-              onGroup={groupSelection}
-              onUngroup={ungroupSelection}
-              onChange={(fn) => patchSelection(fn, `layer:${selection.join(",")}`)}
-            />
-          )}
         </section>
 
         {/* ── The sheet ────────────────────────────────────────────────────────── */}
@@ -2274,17 +2237,76 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         </DropdownMenu>
       </section>
 
-      {/* ── The model ────────────────────────────────────────────────────────── */}
-      <section className="flex min-h-0 flex-col">
-        <PreviewPanel
-          state={destState}
-          overrides={overrides}
-          frameToken={version}
-          onGeometry={onGeometry}
-          onStock={onStock}
-          highlight={hoverIsland}
-          className="flex-1"
-        />
+      {/* ── The model and the tools, beside the sheet they act on ────────────── */}
+      <section className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+        {previewOpen ? (
+          <div className="h-[240px] flex-none overflow-hidden border border-border">
+            <PreviewPanel
+              compact
+              state={destState}
+              overrides={overrides}
+              frameToken={version}
+              onGeometry={onGeometry}
+              onStock={onStock}
+              highlight={hoverIsland}
+              className="h-full"
+            />
+          </div>
+        ) : null}
+        <button
+          onClick={() => togglePreview()}
+          className="flex flex-none cursor-default items-center justify-center gap-2 border border-border py-1.5 font-cond text-[11.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <Box className="size-3.5" />
+          {t(previewOpen ? "designer.hideModel" : "designer.showModel")}
+        </button>
+          {active && (
+            <PaintTools
+              settings={paint}
+              onTool={pickTool}
+              onChange={(patch) => setPaint((p) => ({ ...p, ...patch }))}
+              canUndo={canUndo}
+              canRedo={canRedo}
+              onUndo={undo}
+              onRedo={redo}
+              onAddImage={() => void addImage()}
+              onAddText={addText}
+              busy={busy}
+            />
+          )}
+
+          {active && (
+            <LayerList
+              layers={active.layers}
+              selection={selection}
+              onSelect={select}
+              onToggle={(id, visible) => {
+                patchLayer(id, (l) => ({ ...l, visible }));
+                bump();
+              }}
+              onRemove={(id) => removeLayers([id])}
+              onReorder={reorder}
+              onAdd={addPaintLayer}
+            />
+          )}
+          {!!chosen.length && active && (
+            <LayerInspector
+              layers={chosen}
+              all={active.layers}
+              width={active.width}
+              height={active.height}
+              parts={parts}
+              mirrorReady={mirrorReady}
+              onClip={clipLayer}
+              onFit={fitLayer}
+              onMirror={mirrorSelected}
+              onUnlink={unlinkSelection}
+              onSelect={(id) => select([id], "replace")}
+              onGroup={groupSelection}
+              onUngroup={ungroupSelection}
+              onChange={(fn) => patchSelection(fn, `layer:${selection.join(",")}`)}
+            />
+          )}
       </section>
       </div>
     </div>

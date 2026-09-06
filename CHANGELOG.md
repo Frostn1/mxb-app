@@ -143,6 +143,24 @@
 ## 2026-09-05
 
 ### Changed
+- A new look. Navigation moved out of the sidebar into a bar across the top, so mod
+  artwork gets the full width of the window — seven mods to a row instead of five.
+- Locker and Presets sit together under Garage, and Race mode has its own place in the
+  top bar.
+- Text is set in Barlow, which ships inside the app so it reads the same offline.
+- Browse opens on a full-width banner for the newest mod, so you can see what you are
+  installing before you click it.
+- Every page puts its filters, categories and search in one bar under the navigation,
+  so there are two rows of controls above your mods instead of four.
+- Race mode opens with what the game is set to load: how many mods are on, and how much
+  they weigh. Its filters, search and the enable/disable buttons moved up into the bar.
+- The page you get when something goes wrong offers one way out — Reload app.
+- A share code goes on your clipboard the moment the upload finishes, even if you left
+  the app to wait. Nothing to click before you paste it — tracks, mods and presets alike.
+- Coming back to the Library is instant. It no longer re-measures every mod folder each
+  time you leave the page and return, or switch between its tabs.
+- A share code says which of its files you already have before you import it. The ones it
+  would replace are marked in the list.
 - Jump faces are shaped the way a machine leaves them: curving up from flat ground and
   steepest right at the lip. They used to flatten off over the last metre before the edge,
   which is why a big jump could still ride like a roller.

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  SharePreview,
   Attachment,
   ModsDehydrated,
   BikeModels,
@@ -2754,8 +2755,8 @@ export function fileShareCreate(paths: string[]): Promise<string> {
 }
 
 /** Read a share code *without* downloading — preview what it carries. */
-export function fileSharePreview(text: string): Promise<FileShare> {
-  return invoke<FileShare>("file_share_preview", { text });
+export function fileSharePreview(text: string): Promise<SharePreview> {
+  return invoke<SharePreview>("file_share_preview", { text });
 }
 
 /** Download a share code's files and install them where the sender had them. */

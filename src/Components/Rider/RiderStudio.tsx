@@ -29,10 +29,10 @@ const RIDER_GROUPS = SLOT_GROUPS.filter((g) => g.id !== "bike");
  * on the desktop and 1024 on the laptop wants a different answer on each, and neither is
  * worth a round trip to the config file.
  */
-const PREVIEW_W_KEY = "mxb.rider.previewWidth";
-const PREVIEW_W = { min: 320, max: 900, initial: 420 };
+const PICKERS_W_KEY = "mxb.rider.pickersWidth:v2";
+const PICKERS_W = { min: 330, max: 620, initial: 380 };
 /** What the picker column keeps for itself, however far the preview is dragged. */
-const PICKERS_MIN = 300;
+const PREVIEW_MIN = 380;
 
 /**
  * The bike slots the preview actually draws.
@@ -82,17 +82,17 @@ export default function RiderStudio() {
   // The preview column's width, dragged by the handle on its left edge. A 420px window onto
   // a bike and a rider side by side is a small one, and this tab is where a look is composed.
   const row = useRef<HTMLDivElement>(null);
-  const [previewW, setPreviewW] = useState(() => {
-    const saved = Number(localStorage.getItem(PREVIEW_W_KEY));
-    return saved >= PREVIEW_W.min && saved <= PREVIEW_W.max ? saved : PREVIEW_W.initial;
+  const [pickersW, setPickersW] = useState(() => {
+    const saved = Number(localStorage.getItem(PICKERS_W_KEY));
+    return saved >= PICKERS_W.min && saved <= PICKERS_W.max ? saved : PICKERS_W.initial;
   });
   const drag = useRef<{ from: number; was: number } | null>(null);
 
   // Clamped against the row as it is now, not just the fixed limits: on a narrow window the
   // pickers have to stay usable, and they're the half that can't be scrolled sideways.
   const widen = useCallback((to: number) => {
-    const room = (row.current?.clientWidth ?? PREVIEW_W.max) - PICKERS_MIN;
-    setPreviewW(Math.max(PREVIEW_W.min, Math.min(to, Math.min(PREVIEW_W.max, room))));
+    const room = (row.current?.clientWidth ?? PICKERS_W.max) - PREVIEW_MIN;
+    setPickersW(Math.max(PICKERS_W.min, Math.min(to, Math.min(PICKERS_W.max, room))));
   }, []);
 
   const onDragMove = useCallback(
@@ -105,18 +105,18 @@ export default function RiderStudio() {
 
   // Remembered wherever the width came from — the drag, the double-click, the arrow keys.
   useEffect(() => {
-    localStorage.setItem(PREVIEW_W_KEY, String(previewW));
-  }, [previewW]);
+    localStorage.setItem(PICKERS_W_KEY, String(pickersW));
+  }, [pickersW]);
 
   // A width dragged out on a wide window would otherwise squeeze the pickers to nothing when
   // the window is made small again — re-clamp against the room there actually is.
   useEffect(() => {
     const el = row.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => widen(previewW));
+    const ro = new ResizeObserver(() => widen(pickersW));
     ro.observe(el);
     return () => ro.disconnect();
-  }, [widen, previewW]);
+  }, [widen, pickersW]);
 
   const onSave = useCallback(async () => {
     const nm = name.trim();
@@ -275,7 +275,10 @@ export default function RiderStudio() {
 
       <div ref={row} className="flex min-h-0 flex-1 gap-5 overflow-hidden px-7 pb-6">
         {/* Picker column */}
-        <section className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+        <section
+          className="flex flex-none flex-col gap-4 overflow-y-auto pr-1"
+          style={{ width: pickersW }}
+        >
           {/* Show-on-model toggles */}
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-white/[0.07] bg-card/40 p-3.5">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">
@@ -295,12 +298,13 @@ export default function RiderStudio() {
               <h2 className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 {t("slotGroup.bike")}
               </h2>
-              <div className="grid grid-cols-1 gap-x-3.5 gap-y-2 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-2">
                 {/* Searchable, and matching the two slot fields beside it. A mods folder
                     runs to dozens of bikes, which is a long way to scroll for a name you
                     already know. Neither free text nor empty is a bike, so both are off. */}
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[11px] font-medium text-muted-foreground">
+                {/* Same row as every other slot — it is one, it just isn't a `SlotField`. */}
+                <div className="flex flex-col border border-border bg-card px-3 py-1.5">
+                  <span className="font-cond text-[10.5px] font-semibold uppercase tracking-[0.2em] text-faint">
                     {t("slotGroup.bike")}
                   </span>
                   <Combobox
@@ -310,12 +314,13 @@ export default function RiderStudio() {
                     placeholder={t("slotGroup.bike")}
                     allowCreate={false}
                     allowEmpty={false}
-                    className="h-7 text-[12px]"
+                    className="h-6 border-0 bg-transparent px-0 text-[12.5px]"
                   />
                 </div>
                 {BIKE_SLOTS.map((slot) => (
                   <SlotField
-                    key={slot.key}
+                    row
+                                        key={slot.key}
                     slot={slot}
                     value={loadout[slot.key]}
                     options={optionsFor(slot, bike, scans)}
@@ -334,9 +339,10 @@ export default function RiderStudio() {
               <h2 className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 {t(g.label)}
               </h2>
-              <div className="grid grid-cols-1 gap-x-3.5 gap-y-2 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-2">
                 {g.slots.map((slot) => (
                   <SlotField
+                    row
                     key={slot.key}
                     slot={slot}
                     value={loadout[slot.key]}
@@ -352,7 +358,7 @@ export default function RiderStudio() {
         </section>
 
         {/* Live render — the rider, and the bike beside them when this build can draw one */}
-        <div className="relative flex-none" style={{ width: previewW }}>
+        <div className="relative min-w-0 flex-1">
           {/* Drag the preview wider. It sits in the gap between the two columns rather than
               inside either, so neither loses a pixel to it. */}
           <div
@@ -363,17 +369,17 @@ export default function RiderStudio() {
             tabIndex={0}
             onPointerDown={(e) => {
               e.currentTarget.setPointerCapture(e.pointerId);
-              drag.current = { from: e.clientX, was: previewW };
+              drag.current = { from: e.clientX, was: pickersW };
             }}
             onPointerMove={onDragMove}
             onPointerUp={() => (drag.current = null)}
             onPointerCancel={() => (drag.current = null)}
-            onDoubleClick={() => widen(PREVIEW_W.initial)}
+            onDoubleClick={() => widen(PICKERS_W.initial)}
             onKeyDown={(e) => {
-              const step = e.key === "ArrowLeft" ? 24 : e.key === "ArrowRight" ? -24 : 0;
+              const step = e.key === "ArrowLeft" ? -24 : e.key === "ArrowRight" ? 24 : 0;
               if (!step) return;
               e.preventDefault();
-              widen(previewW + step);
+              widen(pickersW + step);
             }}
             className="group absolute -left-3.5 top-0 z-10 h-full w-3 cursor-col-resize touch-none focus:outline-none"
           >

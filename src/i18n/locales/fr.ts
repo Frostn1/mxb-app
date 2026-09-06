@@ -49,6 +49,7 @@ export const fr: Translation = {
   "nav.shop": "Boutique",
   "nav.hub": "MXB Hub",
   "nav.library": "Bibliothèque",
+  "nav.garage": "Garage",
   "nav.downloads": "Téléchargements",
   "nav.locker": "Casier",
   "nav.presets": "Presets",
@@ -466,6 +467,7 @@ export const fr: Translation = {
   "browseSort.popularWeek": "Populaires cette semaine",
   "browse.loadFailed": "Impossible de charger les mods",
   "browse.empty": "Aucun résultat pour {{type}}.",
+  "browse.featured": "À la une",
   "browse.loadMore": "Charger plus",
   "browse.selectedCount": "{{count}} sélectionné(s)",
   "browse.quickInstallCount": "Installation rapide de {{count}}",
@@ -1100,8 +1102,6 @@ export const fr: Translation = {
   "presets.makeActiveBike": "Faire de celle-ci la moto active",
   "presets.nameClash":
     "Un autre preset s'appelle déjà « {{name}} » — l'enregistrer l'écrasera aussi.",
-  "presets.shareWarning":
-    "Envoie vers un lien public et temporaire — cela redistribue des fichiers de mods créés par d'autres, alors partagez de façon responsable.",
   // ── Préréglages de feeling (la moitié réglages d'un profil) ────────────────
   "presets.tabLook": "Look",
   "presets.tabFeel": "Feeling",
@@ -1258,8 +1258,7 @@ export const fr: Translation = {
   "share.action": "Partager…",
   "share.rightClickHint": "Clic droit pour partager",
   "share.title": "Partager ces fichiers",
-  "share.hint":
-    "On les empaquette, on les envoie, et tu récupères un seul code à coller où tu veux. Celui qui le colle retrouve les fichiers dans les mêmes dossiers.",
+  "share.hint": "Un code à coller n'importe où. Qui le colle reçoit les fichiers dans les bons dossiers.",
   "share.hintDone": "Envoie ce code : il installe tout ce qui est listé au-dessus.",
   "share.nothingToShare":
     "Rien à partager ici : seuls les fichiers de ton dossier mods peuvent entrer dans un code.",
@@ -1276,6 +1275,9 @@ export const fr: Translation = {
   "share.importBody":
     "Colle le code qu'on t'a envoyé. Les fichiers s'installent là où l'expéditeur les avait.",
   "share.downloadNotice": "Télécharge {{size}} depuis {{host}}.",
+  "share.replacesTag": "Remplace le tien",
+  "share.willReplace_one": "1 de ces éléments remplace quelque chose que tu as déjà — l'import l'écrase.",
+  "share.willReplace_other": "{{count}} de ces éléments remplacent des choses que tu as déjà — l'import les écrase.",
   "share.install": "Télécharger et installer",
   "share.installed_one": "1 fichier installé.",
   "share.installed_other": "{{count}} fichiers installés.",
@@ -1785,6 +1787,8 @@ export const fr: Translation = {
     "MX Bikes charge tous les mods de votre dossier au démarrage. Donnez à un preset la piste sur laquelle il court, cliquez sur Mode course et tout le reste s'écarte — rien n'est supprimé, le contenu part dans un dossier d'attente jusqu'à ce que vous le rameniez.",
   "manage.tabRace": "Presets de course",
   "manage.tabMods": "Mods",
+  "manage.loadCostLabel": "Coût de chargement",
+  "manage.parkedLabel": "En pause",
   "manage.disabledCount_one": "{{count}} mod désactivé",
   "manage.disabledCount_other": "{{count}} mods désactivés",
   "manage.restoreAll": "Tout réactiver",
@@ -2092,6 +2096,8 @@ export const fr: Translation = {
   "designer.startFromPaint": "Partir d'une déco…",
   "designer.startFromPsd": "Partir d'un PSD…",
   "designer.exportPsd": "Exporter en PSD",
+  "designer.hideModel": "Masquer le modèle",
+  "designer.showModel": "Afficher le modèle",
   "designer.exportPsdHint": "Écrit chaque planche en .psd avec ses calques, dans un dossier de votre choix.",
   "designer.exportedPsd_one": "1 planche écrite dans {{dir}}",
   "designer.exportedPsd_other": "{{count}} planches écrites dans {{dir}}",

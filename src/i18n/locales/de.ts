@@ -52,6 +52,7 @@ export const de: Translation = {
   "nav.shop": "Shop",
   "nav.hub": "MXB Hub",
   "nav.library": "Bibliothek",
+  "nav.garage": "Garage",
   "nav.downloads": "Downloads",
   "nav.locker": "Spind",
   "nav.presets": "Presets",
@@ -470,6 +471,7 @@ export const de: Translation = {
   "browseSort.popularWeek": "Beliebt diese Woche",
   "browse.loadFailed": "Mods konnten nicht geladen werden",
   "browse.empty": "Keine {{type}} gefunden.",
+  "browse.featured": "Empfohlen",
   "browse.loadMore": "Mehr laden",
   "browse.selectedCount": "{{count}} ausgewählt",
   "browse.quickInstallCount": "{{count}} schnell installieren",
@@ -1102,8 +1104,6 @@ export const de: Translation = {
   "presets.makeActiveBike": "Dieses Motorrad aktiv setzen",
   "presets.nameClash":
     "Ein anderes Preset heißt bereits „{{name}}“ — beim Speichern wird es ebenfalls überschrieben.",
-  "presets.shareWarning":
-    "Lädt zu einem öffentlichen, temporären Link hoch — dabei werden Mod-Dateien anderer weiterverbreitet, also teile verantwortungsvoll.",
   // ── Fahrgefühl-Presets (die Einstellungshälfte eines Profils) ──────────────
   "presets.tabLook": "Optik",
   "presets.tabFeel": "Fahrgefühl",
@@ -1264,8 +1264,7 @@ export const de: Translation = {
   "share.action": "Teilen…",
   "share.rightClickHint": "Rechtsklick zum Teilen",
   "share.title": "Diese Dateien teilen",
-  "share.hint":
-    "Wir packen sie ein, laden sie hoch und geben dir einen einzigen Code zum Einfügen. Wer ihn einfügt, bekommt die Dateien in denselben Ordnern.",
+  "share.hint": "Ein Code, überall einfügbar. Wer ihn einfügt, bekommt die Dateien in den richtigen Ordnern.",
   "share.hintDone": "Schick diesen Code weiter — er installiert alles von oben.",
   "share.nothingToShare":
     "Hier gibt es nichts zu teilen — in einen Code passen nur Dateien aus deinem mods-Ordner.",
@@ -1282,6 +1281,9 @@ export const de: Translation = {
   "share.importBody":
     "Füg den Code ein, den du bekommen hast. Die Dateien landen dort, wo der Absender sie hatte.",
   "share.downloadNotice": "Lädt {{size}} von {{host}}.",
+  "share.replacesTag": "Ersetzt deins",
+  "share.willReplace_one": "1 davon ersetzt etwas, das du schon hast — der Import überschreibt es.",
+  "share.willReplace_other": "{{count}} davon ersetzen Dinge, die du schon hast — der Import überschreibt sie.",
   "share.install": "Herunterladen & installieren",
   "share.installed_one": "1 Datei installiert.",
   "share.installed_other": "{{count}} Dateien installiert.",
@@ -1794,6 +1796,8 @@ export const de: Translation = {
     "MX Bikes lädt beim Start jede Mod in deinem Ordner. Gib einem Preset die Strecke, auf der es fährt, klick auf Rennmodus, und alles andere tritt beiseite — gelöscht wird nichts, es wandert nur in einen Parkordner, bis du es zurückholst.",
   "manage.tabRace": "Rennpresets",
   "manage.tabMods": "Mods",
+  "manage.loadCostLabel": "Ladekosten",
+  "manage.parkedLabel": "Geparkt",
   "manage.disabledCount_one": "{{count}} Mod deaktiviert",
   "manage.disabledCount_other": "{{count}} Mods deaktiviert",
   "manage.restoreAll": "Alles aktivieren",
@@ -2101,6 +2105,8 @@ export const de: Translation = {
   "designer.startFromPaint": "Von einem Design ausgehen…",
   "designer.startFromPsd": "Von einer PSD ausgehen…",
   "designer.exportPsd": "Als PSD exportieren",
+  "designer.hideModel": "Modell ausblenden",
+  "designer.showModel": "Modell einblenden",
   "designer.exportPsdHint": "Schreibt jede Bahn als PSD mit Ebenen in einen Ordner deiner Wahl.",
   "designer.exportedPsd_one": "1 Bahn nach {{dir}} geschrieben",
   "designer.exportedPsd_other": "{{count}} Bahnen nach {{dir}} geschrieben",

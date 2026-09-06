@@ -1394,6 +1394,12 @@ export interface FileShare {
   bundle: BundleRef;
 }
 
+/** A decoded code, plus what importing it would land on top of. */
+export interface SharePreview extends FileShare {
+  /** Rels the importer already has. An import overwrites them. */
+  existing: string[];
+}
+
 export type SlotSource =
   | "bikePaint" // liveries for the selected bike
   | "helmet" // helmet models

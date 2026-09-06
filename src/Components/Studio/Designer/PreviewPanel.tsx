@@ -9,7 +9,7 @@ import { useTyresPick } from "../../Viewer/tyresPick";
 import { loadBikeModel, loadRiderModel, scanLibrary } from "../../../api/mods";
 import { displayName } from "../../../lib/mods";
 import { EMPTY_LOADOUT } from "../../../lib/presets";
-import type { EdfNode, Loadout, PaintTexture, RiderPart } from "../../../types";
+import type { BikeRig, EdfNode, Loadout, PaintTexture, RiderPart } from "../../../types";
 import { useT, type TKey } from "../../../i18n/context";
 import { useConfig } from "../../../Context/Config";
 import { gearPartOf, isBikeKind, type PaintDestState } from "../paintDest";
@@ -49,6 +49,7 @@ export function PreviewPanel({
   onStock,
   highlight,
   className,
+  compact = false,
 }: {
   state: PaintDestState;
   overrides: Map<string, THREE.Texture>;
@@ -82,11 +83,15 @@ export function PreviewPanel({
    */
   onStock?: (textures: PaintTexture[]) => void;
   className?: string;
+  /** Docked over the sheet rather than filling a column: drop the body's height floor,
+   *  which is taller than the dock and was cutting the panel off. */
+  compact?: boolean;
 }) {
   const t = useT();
   const { game } = useConfig();
   const { kind, model, bikePreview } = state;
   const [nodes, setNodes] = useState<EdfNode[] | null>(null);
+  const [rig, setRig] = useState<BikeRig | null>(null);
   // Reported by the backend with the mesh, never inferred here — see `BikeModel.assembled`.
   const [assembled, setAssembled] = useState(false);
   const [textures, setTextures] = useState<PaintTexture[]>([]);
@@ -188,6 +193,7 @@ export function PreviewPanel({
       .then((m) => {
         if (!alive) return;
         setNodes(m.nodes);
+        setRig(m.rig ?? null);
         setAssembled(m.assembled);
         // The model's own look, under the drawing — so parts this paint doesn't cover still
         // read as the bike rather than as untextured grey.
@@ -330,15 +336,31 @@ export function PreviewPanel({
     </>
   );
 
+  /** A black bike on a black panel has no silhouette — the case you hit the moment you
+   *  start a blank sheet. This sits behind the model, not on it. */
+  const backdrop = (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0"
+      style={{
+        background:
+          "radial-gradient(120% 90% at 50% 18%, color-mix(in srgb, var(--foreground) 13%, transparent), transparent 62%)",
+      }}
+    />
+  );
+
   const body = unavailable ? (
     <Message text={why} />
   ) : soloEmpty && !loading ? (
     <Message text={t("designer.noModelFound", { model })} />
   ) : (
     <>
+      {backdrop}
       <ModelViewer
+        hideHints={compact}
         mode={isBike ? "bike" : "rider"}
         nodes={nodes}
+        rig={rig}
         highlight={highlight}
         textures={textures}
         riderParts={shownParts}
@@ -380,14 +402,16 @@ export function PreviewPanel({
           className,
         )}
       >
-        <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[12.5px] font-medium">
-          <Box className="size-3.5 text-muted-foreground" />
-          {t("viewer.preview3d")}
+        <div className="flex items-center gap-2 overflow-x-auto border-b border-border px-3 py-1.5 text-[12.5px] font-medium">
+          <Box className="size-3.5 flex-none text-muted-foreground" />
+          <span className="flex-none whitespace-nowrap">{t("viewer.preview3d")}</span>
           {controls}
         </div>
         {/* Empty while the fullscreen view has it: the canvas is moved rather than copied, so
             there is only ever one model on a GPU and one camera to have turned. */}
-        <div className="relative min-h-[240px] flex-1">{!full && body}</div>
+        <div className={cn("relative flex-1", compact ? "min-h-0" : "min-h-[240px]")}>
+          {!full && body}
+        </div>
         {note}
       </div>
 

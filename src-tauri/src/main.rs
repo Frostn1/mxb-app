@@ -9246,10 +9246,15 @@ async fn file_share_create(
         .map_err(|e| format!("{e:#}"))
 }
 
-/// Read a share code without downloading anything — the import dialog's preview.
+/// Read a share code without downloading anything — the import dialog's preview. Says
+/// which of its files the importer already has, since an import overwrites them.
 #[tauri::command]
-fn file_share_preview(text: String) -> Result<fileshare::FileShare, String> {
-    fileshare::decode(&text).map_err(|e| format!("{e:#}"))
+fn file_share_preview(
+    app: tauri::AppHandle,
+    text: String,
+) -> Result<fileshare::SharePreview, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    fileshare::preview(&cfg, &text).map_err(|e| format!("{e:#}"))
 }
 
 /// Download a share code's files and install them where they came from.
@@ -9649,6 +9654,10 @@ fn main() {
         // a code to transcribe. See `handle_deep_link`.
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
+        // Copying happens minutes after the click that started it — a share code is
+        // born when the upload lands — so the web clipboard's focus and gesture rules
+        // rule it out. This writes from the process instead.
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(

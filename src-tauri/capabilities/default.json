@@ -23,6 +23,7 @@
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
-    "log:default"
+    "log:default",
+    "clipboard-manager:allow-write-text"
   ]
 }

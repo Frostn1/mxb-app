@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ChevronLeft,
   ArrowLeft,
   ExternalLink,
   Check,
@@ -36,13 +37,13 @@ import type {
   InstallStage,
   ModDetail as Detail,
 } from "../../types";
-import Gallery from "./Gallery";
+import { ContextBarLeft } from "../Shell/ContextBar";
+import CachedImg from "@/Components/ui/cached-img";
 import RichDescription from "./RichDescription";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
 import { useInstall } from "../../Context/Install";
 import type { InstalledIndex } from "../../lib/installedMatch";
 import { fileFormat, formatDate } from "../../lib/mods";
-import { Badge } from "@/Components/ui/badge";
 import { Button } from "@/Components/ui/button";
 import {
   AlertDialog,
@@ -112,6 +113,9 @@ export default function ModDetail({
     [game, modType, categoryId],
   );
   const [derivedDest, setDerivedDest] = useState(false);
+  /** Which screenshot the hero is showing. Declared with the other hooks: it used to
+   *  sit below the loading and error returns, which is a rules-of-hooks violation. */
+  const [heroIdx, setHeroIdx] = useState(0);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // The raw file list — only for destination folders and their counts. The badge uses
@@ -316,24 +320,96 @@ export default function ModDetail({
       : undefined;
   const idx = myActive ? stageIndex(myActive.stage) : -1;
 
-  return (
-    <div className="flex h-full flex-col overflow-hidden px-7 py-5">
-      <Breadcrumb
-        modType={modType}
-        title={detail.title}
-        onBack={onBack}
-        link={detail.link}
-      />
+  const shot = detail.images[Math.min(heroIdx, Math.max(0, detail.images.length - 1))];
 
-      <div className="mt-4 flex min-h-0 flex-1 gap-6">
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Browse's type tabs go with Browse, so the bar above would otherwise be an empty
+          44px band. It carries where you are instead. */}
+      <ContextBarLeft>
+        <span className="flex items-center gap-2 font-cond text-[12.5px] font-semibold uppercase tracking-[0.16em]">
+          <button
+            onClick={onBack}
+            className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {t(modType.label)}
+          </button>
+          <span className="text-faint">/</span>
+          <span className="max-w-[420px] truncate text-foreground">{detail.title}</span>
+        </span>
+      </ContextBarLeft>
+
+      {/* The artwork carries the name. A breadcrumb over a text column was the same page
+          every catalog has; this is the one the mockup drew. */}
+      <div className="relative h-[330px] flex-none overflow-hidden bg-card">
+        {shot && (
+          <CachedImg
+            src={shot}
+            width={1280}
+            alt={detail.title}
+            className="absolute inset-0 size-full object-cover"
+          />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-r from-[rgba(6,6,7,0.92)] via-[rgba(6,6,7,0.45)] to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background to-transparent" />
+
+        <button
+          onClick={onBack}
+          className="u-skew absolute left-7 top-5 flex h-8 cursor-default items-center border border-white/25 bg-black/40 px-3 text-white/85 transition-colors hover:text-white"
+        >
+          <span className="u-unskew flex items-center gap-1.5">
+            <ChevronLeft className="size-3.5" />
+            <span className="font-cond text-[12px] font-semibold uppercase tracking-[0.14em]">
+              {t(modType.label)}
+            </span>
+          </span>
+        </button>
+
+        <div className="absolute inset-x-0 bottom-0 px-7 pb-5">
+          <h1 className="font-cond text-[42px] font-bold uppercase leading-[0.94] tracking-[0.005em] text-white">
+            {detail.title}
+          </h1>
+          <div className="mt-2.5 flex flex-wrap items-center gap-2.5 text-[12.5px] text-white/65">
+            {detail.author && <span className="text-white/85">{detail.author}</span>}
+            {detail.author && <span className="text-white/30">/</span>}
+            <span className="tabular-figures">{formatDate(detail.date)}</span>
+            {detail.version && (
+              <>
+                <span className="text-white/30">/</span>
+                <span className="font-mono text-[11.5px]">{detail.version}</span>
+              </>
+            )}
+            {isInstalled && (
+              <>
+                <span className="text-white/30">/</span>
+                <span className="flex items-center gap-1 text-success">
+                  <Check className="size-3" strokeWidth={3} /> In library
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1 gap-6 px-7 pb-5 pt-4">
         {/* left: gallery + description */}
         <div className="flex min-w-0 flex-1 flex-col gap-3.5 overflow-y-auto pr-1">
-          <Gallery
-            images={detail.images}
-            title={detail.title}
-            emptyLabel="No screenshots"
-          />
-
+          {detail.images.length > 1 && (
+            <div className="flex flex-none gap-2 overflow-x-auto pb-1">
+              {detail.images.map((img, i) => (
+                <button
+                  key={img}
+                  onClick={() => setHeroIdx(i)}
+                  className={cn(
+                    "u-notch relative h-[62px] w-[104px] flex-none overflow-hidden bg-card transition-opacity",
+                    i === heroIdx ? "outline outline-2 -outline-offset-2 outline-primary" : "opacity-60 hover:opacity-100",
+                  )}
+                >
+                  <CachedImg src={img} width={240} alt="" className="size-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="flex flex-col gap-2 pt-1">
             <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
@@ -346,47 +422,6 @@ export default function ModDetail({
 
         {/* right rail */}
         <div className="flex w-[340px] flex-none flex-col gap-3 overflow-y-auto">
-          <div className="flex flex-col gap-1.5">
-            <h1 className="text-[24px] font-bold leading-tight tracking-[-0.3px]">
-              {detail.title}
-            </h1>
-            {/* Who made it, right under the name — the same byline the browse card carries.
-                Clickable through to their profile, which is where their other mods are. */}
-            {detail.author &&
-              (detail.authorUrl ? (
-                <button
-                  onClick={() => open(detail.authorUrl!)}
-                  className="flex cursor-default items-center gap-1 self-start text-[12.5px] text-primary hover:brightness-110"
-                  title={detail.authorUrl}
-                >
-                  <span className="truncate">
-                    {t("browse.byAuthor", { author: detail.author })}
-                  </span>
-                  <ExternalLink className="size-3 flex-none" />
-                </button>
-              ) : (
-                <span className="truncate text-[12.5px] text-muted-foreground">
-                  {t("browse.byAuthor", { author: detail.author })}
-                </span>
-              ))}
-            <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
-              <span>{formatDate(detail.date)}</span>
-              {detail.version && (
-                <>
-                  <span className="text-faint">·</span>
-                  <span className="rounded-[5px] bg-foreground/[0.07] px-1.5 py-px font-mono text-[11px]">
-                    {detail.version}
-                  </span>
-                </>
-              )}
-              {isInstalled && (
-                <Badge variant="success" className="ml-0.5">
-                  <Check className="size-3" strokeWidth={3} /> In library
-                </Badge>
-              )}
-            </div>
-          </div>
-
           {/* install panel */}
           <div className="flex flex-col gap-3 rounded-xl border border-input bg-card p-4">
             {myActive && idx >= 0 ? (
@@ -431,7 +466,7 @@ export default function ModDetail({
                     button, not after the install: it lands in the library either way and
                     then does nothing in-game, which reads as a broken mod. */}
                 {serverOnly && (
-                  <div className="flex items-start gap-2.5 rounded-[10px] border border-warning/30 bg-warning/[0.07] px-3 py-2.5">
+                  <div className="flex items-start gap-2.5 border border-warning/30 bg-warning/[0.07] px-3 py-2.5">
                     <AlertTriangle className="mt-px size-3.5 flex-none text-warning" />
                     <span className="text-[12px] text-warning/90">
                       {t("modDetail.serverOnlyNotice")}
@@ -458,7 +493,7 @@ export default function ModDetail({
           {/* What happens once the install finishes. FrostMod hot-reloads the game, but
               it's an MX Bikes plugin — promising a reload for a title that has none is
               worse than saying nothing, so that case gets the honest instruction. */}
-          <div className="flex items-center gap-2.5 rounded-[10px] border border-success/25 bg-success/[0.06] px-3 py-2.5">
+          <div className="flex items-center gap-2.5 border border-success/25 bg-success/[0.06] px-3 py-2.5">
             <span className="size-[7px] flex-none rounded-full bg-success" />
             <span className="text-[12px] text-success/90">
               {t(game.caps.frostmod ? "modDetail.frostmodHint" : "modDetail.restartHint", {

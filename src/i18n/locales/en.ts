@@ -46,6 +46,7 @@ export const en = {
   "nav.shop": "Shop",
   "nav.hub": "MXB Hub",
   "nav.library": "Library",
+  "nav.garage": "Garage",
   "nav.downloads": "Downloads",
   "nav.locker": "Locker",
   "nav.presets": "Presets",
@@ -458,6 +459,7 @@ export const en = {
   "browseSort.popularWeek": "Popular this week",
   "browse.loadFailed": "Couldn't load mods",
   "browse.empty": "No {{type}} found.",
+  "browse.featured": "Featured",
   "browse.loadMore": "Load more",
   "browse.selectedCount": "{{count}} selected",
   "browse.quickInstallCount": "Quick install {{count}}",
@@ -1080,8 +1082,6 @@ export const en = {
   "presets.makeActiveBike": "Make this the active bike",
   "presets.nameClash":
     "Another preset is already named “{{name}}” — saving will overwrite it too.",
-  "presets.shareWarning":
-    "Uploads to a public, temporary link — it redistributes mod files made by others, so share responsibly.",
   // ── Feel presets (the settings half of a profile) ──────────────────────────
   "presets.tabLook": "Look",
   "presets.tabFeel": "Feel",
@@ -1238,8 +1238,7 @@ export const en = {
   "share.action": "Share…",
   "share.rightClickHint": "Right-click to share",
   "share.title": "Share these files",
-  "share.hint":
-    "Packs them up, uploads them, and gives you one code to paste anywhere. Whoever pastes it back gets the files in the same folders.",
+  "share.hint": "One code, pasted anywhere. Whoever pastes it back gets the files in the right folders.",
   "share.hintDone": "Send this code — it installs everything listed above.",
   "share.nothingToShare":
     "Nothing here can be shared — only files inside your mods folder can go in a code.",
@@ -1256,6 +1255,9 @@ export const en = {
   "share.importBody":
     "Paste a share code someone sent you. The files install where they had them.",
   "share.downloadNotice": "Downloads {{size}} from {{host}}.",
+  "share.replacesTag": "Replaces yours",
+  "share.willReplace_one": "1 of these replaces something you already have — importing overwrites it.",
+  "share.willReplace_other": "{{count}} of these replace things you already have — importing overwrites them.",
   "share.install": "Download & install",
   "share.installed_one": "Installed 1 file.",
   "share.installed_other": "Installed {{count}} files.",
@@ -1756,6 +1758,8 @@ export const en = {
     "MX Bikes loads every mod in your folder at startup. Give a preset the track it races on, hit Race mode, and everything else steps aside — nothing is deleted, it just moves to a holding folder until you bring it back.",
   "manage.tabRace": "Race presets",
   "manage.tabMods": "Mods",
+  "manage.loadCostLabel": "Load cost",
+  "manage.parkedLabel": "Parked",
   "manage.disabledCount_one": "{{count}} mod disabled",
   "manage.disabledCount_other": "{{count}} mods disabled",
   "manage.restoreAll": "Enable everything",
@@ -2060,6 +2064,8 @@ export const en = {
   "designer.startFromPaint": "Start from a paint…",
   "designer.startFromPsd": "Start from a PSD…",
   "designer.exportPsd": "Export PSD",
+  "designer.hideModel": "Hide model",
+  "designer.showModel": "Show model",
   "designer.exportPsdHint": "Write every sheet out as a layered .psd, into a folder you pick.",
   "designer.exportedPsd_one": "Wrote 1 sheet to {{dir}}",
   "designer.exportedPsd_other": "Wrote {{count}} sheets to {{dir}}",

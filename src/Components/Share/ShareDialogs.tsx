@@ -15,7 +15,7 @@ import {
   fileSharePreview,
   onFileShareProgress,
 } from "../../api/mods";
-import type { BundlePhase, FileShare, SharePlan } from "../../types";
+import type { BundlePhase, SharePlan, SharePreview } from "../../types";
 import { formatBytes } from "../../lib/mods";
 import { copyText } from "../../lib/clipboard";
 import { useT, type TFunc } from "../../i18n/context";
@@ -44,8 +44,20 @@ function phaseLabel(phase: BundlePhase, t: TFunc): string {
   }
 }
 
-/** The files a share carries, listed with the folder each one goes back into. */
-function ItemList({ items }: { items: { rel: string; name: string; size: number }[] }) {
+/**
+ * The files a share carries, listed with the folder each one goes back into.
+ *
+ * `replaces` names the ones already on this machine. An import overwrites without asking,
+ * so the row says so before the download rather than after.
+ */
+function ItemList({
+  items,
+  replaces,
+}: {
+  items: { rel: string; name: string; size: number }[];
+  replaces?: Set<string>;
+}) {
+  const t = useT();
   return (
     <div className="max-h-40 overflow-y-auto rounded-lg border border-white/[0.07] bg-card/40">
       {items.map((item) => (
@@ -55,6 +67,11 @@ function ItemList({ items }: { items: { rel: string; name: string; size: number 
         >
           <span className="truncate font-semibold">{item.name}</span>
           <span className="truncate text-[11px] text-faint">{item.rel}</span>
+          {replaces?.has(item.rel) && (
+            <span className="flex-none text-[10.5px] font-semibold uppercase tracking-wide text-warning">
+              {t("share.replacesTag")}
+            </span>
+          )}
           <span className="ml-auto flex-none text-[11px] text-muted-foreground">
             {formatBytes(item.size)}
           </span>
@@ -163,12 +180,7 @@ export function ShareDialog({
             onFocus={(e) => e.currentTarget.select()}
             className="h-24 w-full resize-none rounded-lg border border-input bg-transparent p-2.5 font-mono text-[11px] leading-snug"
           />
-        ) : (
-          plan &&
-          count > 0 && (
-            <p className="text-[11px] text-faint">{t("presets.shareWarning")}</p>
-          )
-        )}
+        ) : null}
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
@@ -225,7 +237,7 @@ export function ImportShareDialog({
 }) {
   const t = useT();
   const [text, setText] = useState(initialCode);
-  const [preview, setPreview] = useState<FileShare | null>(null);
+  const [preview, setPreview] = useState<SharePreview | null>(null);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<BundlePhase | null>(null);
@@ -304,7 +316,15 @@ export function ImportShareDialog({
 
         {preview && (
           <>
-            <ItemList items={preview.items} />
+            <ItemList items={preview.items} replaces={new Set(preview.existing)} />
+            {preview.existing.length > 0 && (
+              <p className="flex items-start gap-1.5 text-[11.5px] text-warning">
+                <AlertTriangle className="mt-px size-3.5 flex-none" />
+                <span>
+                  {t("share.willReplace", { count: preview.existing.length })}
+                </span>
+              </p>
+            )}
             <p className="flex items-start gap-1.5 text-[11.5px] text-emerald-500">
               <Share2 className="mt-px size-3.5 flex-none" />
               <span>

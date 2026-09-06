@@ -14,6 +14,7 @@ import { Trans } from "../../i18n";
 import { useT } from "../../i18n/context";
 import { Button } from "@/Components/ui/button";
 import type { GameInfo } from "../../types";
+import { Plate } from "../Shell/Brand";
 
 interface SetupProps {
   onComplete: () => void;
@@ -123,9 +124,9 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
       <div className="grid min-h-0 flex-1 place-items-center px-10">
         <div className="flex w-full max-w-[480px] flex-col items-center gap-7 pb-16">
           <div className="flex flex-col items-center gap-3.5">
-            <div className="grid size-14 place-items-center rounded-[15px] bg-gradient-to-br from-[#9ccfec] to-[#5d8fb0] text-[#0d0f12]">
+            <Plate className="size-14">
               <Snowflake className="size-7" strokeWidth={2.5} />
-            </div>
+            </Plate>
             <div className="flex flex-col items-center gap-1.5">
               <h1 className="text-[26px] font-extrabold tracking-[-0.4px]">
                 {t("setup.title")}
@@ -165,9 +166,9 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
     <div className="grid min-h-0 flex-1 place-items-center px-10">
       <div className="flex w-full max-w-[480px] flex-col items-center gap-7 pb-16">
         <div className="flex flex-col items-center gap-3.5">
-          <div className="grid size-14 place-items-center rounded-[15px] bg-gradient-to-br from-[#9ccfec] to-[#5d8fb0] text-[#0d0f12]">
+          <Plate className="size-14">
             <Snowflake className="size-7" strokeWidth={2.5} />
-          </div>
+          </Plate>
           <div className="flex flex-col items-center gap-1.5">
             <h1 className="text-[26px] font-extrabold tracking-[-0.4px]">
               {picked.display}
@@ -191,7 +192,7 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
             {t("setup.modsFolder", { game: picked.display })}
           </span>
           {chosen ? (
-            <div className="flex items-center gap-2.5 rounded-[10px] border border-input bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
+            <div className="flex items-center gap-2.5 border border-input bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
               <FolderOpen className="size-4 flex-none text-primary" />
               <span className="flex-1 truncate" title={chosen}>
                 {chosen}
@@ -222,13 +223,13 @@ export default function Setup({ onComplete, game, games, firstRun }: SetupProps)
             {t("setup.gameInstall", { game: picked.display })}
           </span>
           {detecting ? (
-            <div className="flex items-center gap-2.5 rounded-[10px] border border-input bg-card px-3.5 py-3 text-[12.5px] text-muted-foreground">
+            <div className="flex items-center gap-2.5 border border-input bg-card px-3.5 py-3 text-[12.5px] text-muted-foreground">
               <Loader2 className="size-4 flex-none animate-spin text-primary" />
               <span>{t("setup.detecting", { game: picked.display })}</span>
             </div>
           ) : gamePath ? (
             <>
-              <div className="flex items-center gap-2.5 rounded-[10px] border border-input bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
+              <div className="flex items-center gap-2.5 border border-input bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
                 <Gamepad2 className="size-4 flex-none text-primary" />
                 <span className="flex-1 truncate" title={gamePath}>
                   {gamePath}

@@ -1,12 +1,21 @@
 /**
  * Copy text to the clipboard, saying whether it worked.
  *
- * The async Clipboard API is the right call and fails anyway in a webview that hasn't
- * focused the document — which is exactly the moment a player clicks "Copy code". The
- * `execCommand` fallback is deprecated everywhere and still the one that lands there, so
- * both paths stay until the webviews agree.
+ * The process writes it, not the webview. A share code is copied at the moment its upload
+ * finishes — minutes after the click that started it, and often with the window in the
+ * background — and both web paths refuse there: the async Clipboard API wants a focused
+ * document, `execCommand` wants a live user gesture. Neither survives the wait. The web
+ * calls stay behind it for the browser, where there is no process to ask.
  */
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+
 export async function copyText(text: string): Promise<boolean> {
+  try {
+    await writeText(text);
+    return true;
+  } catch {
+    // Not in the app, or the plugin is missing: fall back to the webview's own paths.
+  }
   try {
     await navigator.clipboard.writeText(text);
     return true;
