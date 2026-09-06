@@ -3,6 +3,17 @@
 ## 2026-09-06
 
 ### Changed
+- The trackside advertising is a hoarding: printed plastic boards bolted edge to edge into
+  runs down both sides of the lap, sharing an upright at every join, with clear ground between
+  one run and the next. They used to be single banners slung every fifty metres.
+
+### Fixed
+- Generated laps no longer run over their own ground. A lap is checked for crossing itself
+  before it is built, and how much it turns in total is held to what published tracks measure.
+
+## 2026-09-06
+
+### Changed
 - Jumps are shaped the way built ones are. A takeoff now stands at the angle a published one
   measures rather than at the steepest in the whole corpus, and a small jump is a long low rise
   instead of carrying the same lip as a big one — so a lap has a range of jumps in it rather
