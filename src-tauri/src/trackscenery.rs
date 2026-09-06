@@ -603,21 +603,31 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     }
     tally.push(("trees", n));
 
-    // 6. The start gantry. Each post stands on its own ground — level them together and one
-    // is buried and the other in the air — and the beam clears the higher of the two.
+    // 6. The start gantry, over the gate row — which is on the start straight, off to the
+    //    side of the lap, not on the lap itself. It spans the whole row, and the row is 54 m
+    //    wide where the gates stand.
     //
-    // The beam spans *across* the track, so it turns by `across`. Turned by `along` it lay
-    // down the track instead of over it, which is the ninety degrees you could see.
-    let st = at(2.0);
+    // Each post stands on its own ground: level them together and one is buried and the other
+    // is in the air. The beam clears the higher of the two, and it spans *across* the track,
+    // so it turns by `across` — turned by `along` it lay down the track instead of over it,
+    // which is the ninety degrees you could see.
+    let (st, gate_span) = match &syn.spur {
+        Some(spur) => {
+            let g = spur.gate_at();
+            let i = ((g / 0.5) as usize).min(spur.stations.len().saturating_sub(1));
+            (spur.stations[i], spur.at(g) + 3.0)
+        }
+        None => (at(2.0), half + 3.0),
+    };
     let (rx, rz) = crate::trackprog::right_vector(st.heading);
     let mut highest = f32::NEG_INFINITY;
     for side in [-1.0f32, 1.0] {
-        let (x, z) = (st.x + rx * (half + 3.0) * side, st.z + rz * (half + 3.0) * side);
+        let (x, z) = (st.x + rx * gate_span * side, st.z + rz * gate_span * side);
         let foot = ground(syn, x, z);
         highest = highest.max(foot);
         gate.append(&edfwrite::moved(&edfwrite::cuboid(0.5, 5.0, 0.5), [x, foot, z]));
     }
-    let span = (half + 3.0) * 2.0;
+    let span = gate_span * 2.0;
     let beam = edfwrite::turned(&edfwrite::cuboid(span, 1.2, 0.3), across(st.heading));
     gate.append(&edfwrite::moved(&beam, [st.x, highest + 4.6, st.z]));
     tally.push(("gate", 1));

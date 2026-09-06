@@ -2,12 +2,21 @@
 
 ## 2026-09-06
 
+### Changed
+- The start on a track you build is its own straight beside the circuit now, the way a real
+  one is: the gate row stands 40 m off the lap, sprints 85 m, and turns in to join the track
+  at turn one. A flying lap never crosses the gates.
+- The gates stand on a start pad 54 m across — wide enough for all forty of them — graded flat
+  and funnelling down to riding width by the time it meets the lap. The pit lane sits on the
+  other side of the main straight, out of the way.
+
 ### Added
-- A track you build now has things standing beside it. Marker boards line both sides of the
-  riding line the whole way round, fencing runs behind them, hay bales guard the outside of
-  the corners, trees stand back in the field and a gantry crosses the start.
-- Bales and the start gantry stop a bike. Marker boards and trees do not, so clipping one
-  costs you nothing.
+- A track you build now has things standing beside it. Stakes with painted tops mark the edge
+  of the riding line the whole way round, the way they do on a real track, with fencing behind
+  them, banners at intervals, hay bales on the outside of the corners, trees back in the field
+  and a gantry over the start.
+- A tree, a bale, a banner and the gantry stop a bike. A stake does not, so clipping one on
+  the way past costs you nothing.
 
 ## 2026-09-05
 
