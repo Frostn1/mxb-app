@@ -145,6 +145,7 @@ mod trackobjects;
 mod trackprog;
 mod trackscenery;
 mod trackshot;
+mod trackspeed;
 mod trackstats;
 mod tracksynth;
 mod upload;

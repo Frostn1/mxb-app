@@ -798,8 +798,9 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
                 Some((at + up + top * 0.15, *height))
             }
             crate::trackprog::Feature::Double { at, height, lip, .. } => {
-                let (lip, _) = crate::trackprog::double_faces(*height, *lip);
-                Some((at + lip, *height))
+                // The lip is where the rider leaves the ground, which is the end of the ramp.
+                let ramp = crate::trackprog::double_faces(*height, *lip).ramp;
+                Some((at + ramp, *height))
             }
             crate::trackprog::Feature::StepUp { at, length, height, .. } => {
                 Some((at + length * 0.8, *height))

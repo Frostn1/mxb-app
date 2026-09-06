@@ -63,6 +63,29 @@
 ## 2026-09-06
 
 ### Changed
+- Jumps stand up on the ground they are built on. A track cut into a hillside had its ground
+  falling three metres across a jump's own footprint, so a metre-and-a-quarter tabletop rose a
+  handspan above its own foot and a lap read as having no jumps on it at all. Every jump now
+  gets a pad cut level under it, the way a builder does it.
+- Ruts are rounded, with a bank of material beside each one to lean on, instead of a
+  square-edged slot cut into the ground. There are fewer of them and they sit further apart.
+- Jumps are sized for a 250, not a 450. A gap only the fastest bike on the gate can clear is
+  one most riders single.
+- Jumps are sized to the speed a bike actually carries. Acceleration used to hold flat all the
+  way to the top, so a lap left a hairpin at 33 km/h and was doing 100 sixty metres later, and
+  gaps got built for a speed nobody arrives at. A two-kilometre lap now runs where one runs.
+- No two jumps on a lap are the same size any more, and a lap carries a handful of doubles
+  rather than one every hundred metres.
+- Corners wear three or four lines rather than one groove and a spread, so there is a choice
+  of ways through after a few motos.
+- Ruts read much harder against the ground beside them: the packed floor is darker, the bank
+  beside it drier, and the shape shows at speed instead of only being felt. They are deeper,
+  too — matched against a published national's own ground rather than estimated.
+- Tyre marks up the face of a jump are cut into the ground as well as painted on it, fanned
+  towards the side the last corner sends you in from.
+- The racing line is smooth where the wheels run. Braking chop, acceleration chop and the
+  ground's own grain used to cover the whole width, which took away most of what the bike
+  makes down a straight.
 - The start on a track you build is its own straight beside the circuit now, the way a real
   one is: the gate row stands 40 m off the lap, sprints 85 m, and turns in to join the track
   at turn one. A flying lap never crosses the gates.
@@ -87,6 +110,24 @@
 ## 2026-09-05
 
 ### Changed
+- Jump faces are shaped the way a machine leaves them: curving up from flat ground and
+  steepest right at the lip. They used to flatten off over the last metre before the edge,
+  which is why a big jump could still ride like a roller.
+- Landings are longer and gentler than the takeoffs that feed them, instead of a mirror image
+  of them.
+- Jumps are sized to the speed there is. A gap the lap cannot deliver you to at speed gets
+  shortened, and a big double goes where there is a run at it rather than straight out of a
+  hairpin.
+- Braking bumps form where you are actually braking, and for as long as you are — a long
+  approach to a hairpin builds a long braking zone, a flat kink builds almost none.
+- Corners grow a second line beside the first, so there is more than one way through after a
+  few motos.
+- The dark packed line you steer by and the groove you drop into are now the same line.
+- A jump's face carries a single line up it, and the lip stays swept.
+- Sand tracks ride like sand: deeper ruts further apart, far bigger berms, and long swells
+  under braking instead of a sharp washboard. Grass circuits barely wear at all.
+- Tracks can be built anywhere from freshly prepped to raced-in, and there is ground left for
+  a session to cut its own lines into either way.
 - The picture the game lists a built track by is now a view of the place rather than a
   diagram of it: the ground rendered from above and off to one side, lit by the track's own
   sun, with the lap cut into it and the country running out to the haze.

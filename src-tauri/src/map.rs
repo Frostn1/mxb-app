@@ -1708,4 +1708,68 @@ mod tests {
         assert!(m.indices.iter().all(|i| (*i as usize) < m.vertex_count()));
         assert!(hi[0] - lo[0] > 1.0, "a real map spans real ground");
     }
+
+    /// What a published track's ground sheets actually are: their names, their sizes, and the
+    /// statistics that decide whether ground reads as ground.
+    ///
+    /// The terrain's own textures are the last records in a `.map`'s table — the `dirt`,
+    /// `grass` and `gravel` a track paints its ground with — and until now nothing had ever
+    /// looked at them. Ours were designed against Indiana's *loose sheets* on disk, which is
+    /// a different thing from what the compiler bakes in.
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn ground_sheets() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::Path::new(&var);
+        let names = crate::track::entry_names(path).unwrap();
+        let entry = names
+            .iter()
+            .find(|n| n.to_ascii_lowercase().ends_with(".map"))
+            .expect("a .map")
+            .clone();
+        let bytes = crate::track::read_entry(path, &entry).unwrap();
+        let sheets = textures(&bytes, 512);
+        println!("{}  —  {} sheets", path.file_stem().unwrap().to_string_lossy(), sheets.len());
+        for t in &sheets {
+            if t.rgba.is_empty() {
+                continue;
+            }
+            let n = (t.rgba.len() / 4) as f32;
+            let mut sum = [0.0f32; 3];
+            for p in t.rgba.chunks_exact(4) {
+                for c in 0..3 {
+                    sum[c] += p[c] as f32;
+                }
+            }
+            let mean = [sum[0] / n, sum[1] / n, sum[2] / n];
+            // Spread of luminance: how much grain the sheet carries, which is what makes
+            // ground read as ground rather than as a flat colour.
+            let mut var = 0.0f32;
+            let lum = |p: &[u8]| 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32;
+            let mean_l = 0.299 * mean[0] + 0.587 * mean[1] + 0.114 * mean[2];
+            for p in t.rgba.chunks_exact(4) {
+                let d = lum(p) - mean_l;
+                var += d * d;
+            }
+            let sd = (var / n).sqrt();
+            // And how much of that grain is fine rather than blotchy: the mean absolute
+            // difference between neighbouring pixels.
+            let w = t.width as usize;
+            let mut grad = 0.0f32;
+            let mut k = 0.0f32;
+            for y in 0..t.height as usize {
+                for x in 1..w {
+                    let a = &t.rgba[(y * w + x) * 4..];
+                    let b = &t.rgba[(y * w + x - 1) * 4..];
+                    grad += (lum(a) - lum(b)).abs();
+                    k += 1.0;
+                }
+            }
+            println!(
+                "  {:<28} {:>4}x{:<4} mean ({:>5.1},{:>5.1},{:>5.1}) luma {:>5.1}  \
+                 spread {:>5.1}  grain {:>4.2}",
+                t.name, t.width, t.height, mean[0], mean[1], mean[2], mean_l, sd, grad / k.max(1.0)
+            );
+        }
+    }
 }

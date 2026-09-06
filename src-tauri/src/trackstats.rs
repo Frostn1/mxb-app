@@ -1361,6 +1361,7 @@ mod tests {
             terrain: crate::trackprog::Terrain {
                 size_x: 1000.0, size_z: 1000.0, samples: 513, scale: 100.0,
                 relief: Default::default(), surface: Default::default(),
+                wear: crate::trackprog::default_wear(),
             },
             start: crate::trackprog::Start { x: lap.start.0, z: lap.start.1, angle: lap.heading },
             segments: lap.program_segments(), width: 12.0, features: Vec::new(),
