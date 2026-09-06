@@ -38,35 +38,45 @@ const STAKE_GAP_M: f32 = 6.5;
 const STAKE_H_M: f32 = 0.7;
 const STAKE_W_M: f32 = 0.045;
 
-/// Banners are the big printed panels, and there are few of them.
+/// The advertising boards, and where they run.
 ///
-/// Indiana's are 4–7 m wide on posts about 5.7 m tall, and every one of them is a **wordmark
-/// on a solid ground** — fourteen sponsors baked into one atlas, the title sponsor repeated
-/// down the lap. [`BANNER_PANELS`] is the same idea with our own names on it.
-const BANNER_OFF_M: f32 = 9.5;
-const BANNER_GAP_M: f32 = 55.0;
+/// Not banners slung one at a time every fifty metres, which is what this used to build. What
+/// a track carries is a **continuous hoarding**: printed plastic panels bolted edge to edge
+/// into a run, sharing an upright at every join. Indiana measures the same thing — a line
+/// 1.35 m tall at 10.8 m from the centreline, in ~1.1 m pieces, both sides, covering 99% of
+/// the lap — and it is the one object that lines the whole circuit.
+///
+/// So the numbers here are its numbers: 10.5 m out, 1.35 m tall, panels butted with no gap.
+const BANNER_OFF_M: f32 = 10.5;
 const BANNER_W_M: f32 = 4.0;
-const BANNER_H_M: f32 = 1.2;
-/// How far off the ground the panel is slung.
-const BANNER_LIFT_M: f32 = 0.35;
+const BANNER_H_M: f32 = 1.35;
+/// How far off the ground the bottom rail sits. Low: a hoarding is a wall, not a sling.
+const BANNER_LIFT_M: f32 = 0.12;
+/// Panels in a run, and metres of clear ground between one run and the next. A hoarding that
+/// never breaks is a fence; what a track has is runs with the gate, the crossings and the
+/// marshal posts between them.
+const BANNER_RUN_MIN: usize = 5;
+const BANNER_RUN_MAX: usize = 14;
+const BANNER_BREAK_MIN_M: f32 = 22.0;
+const BANNER_BREAK_MAX_M: f32 = 70.0;
 
-/// One printed banner: a wordmark on a coloured ground, and whether it carries the app's mark.
+/// One printed board: a wordmark on a coloured ground, and whether it carries the app's mark.
 ///
 /// The anatomy is taken from the real ones. Every sponsor panel on Indiana's atlas is a mark,
 /// a wordmark and a small strapline under the name — RACE TECH over "THE SCIENCE OF
 /// SUSPENSION", and thirteen others follow the same rule.
 ///
-/// The wordmark is **artwork**, not type drawn here. A banner is somebody's brand: MXB App's
-/// is Barlow Condensed on `--primary`, Creste's is Cormorant Garamond over Hanken Grotesk in
-/// its own `--ink` and `--accent`, and nothing in this crate can rasterise a `.ttf`. Drawing a
+/// The wordmark is **artwork**, not type drawn here. A board is somebody's brand: MXB App's is
+/// Barlow Condensed on `--primary`, Creste's is Cormorant Garamond over Hanken Grotesk in its
+/// own `--ink` and `--accent`, and nothing in this crate can rasterise a `.ttf`. Drawing a
 /// look-alike face was tried and it is exactly as convincing as a look-alike logo. So each
 /// lockup is set once in the real faces and committed beside the icon, which is what a sponsor
 /// hands a track builder anyway.
 struct Panel {
-    /// The name of the artwork in [`artwork`], which is also what the banner says.
+    /// The name of the artwork in [`artwork`], which is also what the board says.
     art: &'static str,
     ground: [u8; 3],
-    /// The app's snowflake at the left. Off for a panel that is not ours.
+    /// The app's snowflake at the left. Off for a board that is not ours.
     mark: bool,
 }
 
@@ -926,11 +936,13 @@ fn in_band(mesh: &Mesh, (top, bot): (f32, f32)) -> Mesh {
     m
 }
 
-/// A banner: the `cell`-th printed panel slung between two posts.
+/// One board of a hoarding: the `cell`-th printed panel, with an upright at its left end.
 ///
-/// The panel takes its own cell of the atlas and the posts take the plain band under them, so
-/// a lap's banners are one mesh and one material and still say four different things.
-fn banner_mesh(cell: usize) -> Mesh {
+/// Left only, because the panels are bolted edge to edge and the next one's upright is this
+/// one's right-hand post. `end_post` adds the one that closes a run. Doubling them up at every
+/// join is the obvious way to build it and it puts two posts in the same 8 cm of ground, which
+/// z-fights and reads as a smear.
+fn banner_mesh(cell: usize, end_post: bool) -> Mesh {
     let mut m = in_band(
         &edfwrite::double_sided(&edfwrite::moved(
             &edfwrite::card(BANNER_W_M, BANNER_H_M),
@@ -938,14 +950,18 @@ fn banner_mesh(cell: usize) -> Mesh {
         )),
         banner_cell(cell % BANNER_CELLS),
     );
-    for side in [-1.0f32, 1.0] {
+    let mut post = |x: f32| {
         m.append(&in_band(
             &edfwrite::moved(
-                &edfwrite::cuboid(0.08, BANNER_LIFT_M + BANNER_H_M, 0.08),
-                [side * BANNER_W_M * 0.5, 0.0, 0.0],
+                &edfwrite::cuboid(0.09, BANNER_LIFT_M + BANNER_H_M + 0.06, 0.09),
+                [x, 0.0, 0.0],
             ),
             banner_post_band(),
         ));
+    };
+    post(-BANNER_W_M * 0.5);
+    if end_post {
+        post(BANNER_W_M * 0.5);
     }
     m
 }
@@ -1016,34 +1032,93 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     }
     tally.push(("stakes", n));
 
-    // 2. Banners: few, big, and facing the rider.
+    // 2. The hoarding: printed plastic boards bolted edge to edge, in runs down both sides.
+    //
+    //    Walked along its *own* offset line rather than along the centreline, for the reason
+    //    the fence below spells out: stepping the centreline and offsetting each step spaces
+    //    panels by the centreline's arc length, and the offset line's is longer round the
+    //    outside of a corner and shorter round the inside — so a run gaps through every turn
+    //    one way and piles up the other. A hoarding is the shape that shows that up worst,
+    //    because its panels touch.
     let mut n = 0usize;
-    let mut s = BANNER_GAP_M * 0.5;
-    while s < lap {
-        let st = at(s);
-        let (rx, rz) = crate::trackprog::right_vector(st.heading);
-        let key = (s / BANNER_GAP_M) as u32;
-        let side = if rnd(seed ^ 0x51, key) < 0.5 { -1.0f32 } else { 1.0 };
-        let off = BANNER_OFF_M.max(half + 2.5);
-        let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
-        if inside(prog, x, z, 3.0)
-            && clearance(&coarse, x, z) > off - 1.0
-            && clear_of_the_start(x, z)
-        {
-            let (lo, hi) = ground_span(syn, x, z, along(st.heading), BANNER_W_M);
-            if hi - lo < 1.0 {
-                // Which panel: walked round the lap rather than drawn at random, so the
-                // same name never lands twice in a row where a rider would see both.
-                banners.append(&edfwrite::moved(
-                    &edfwrite::turned(&banner_mesh(n), along(st.heading)),
-                    [x, (lo + hi) * 0.5 - 0.05, z],
-                ));
-                n += 1;
+    let mut runs = 0usize;
+    let banner_off = BANNER_OFF_M.max(half + 2.5);
+    for side in [-1.0f32, 1.0] {
+        let line: Vec<(f32, f32)> = stations
+            .iter()
+            .map(|st| {
+                let (rx, rz) = crate::trackprog::right_vector(st.heading);
+                (st.x + rx * banner_off * side, st.z + rz * banner_off * side)
+            })
+            .collect();
+        // Where this side's first run starts, so the two sides don't break in the same places.
+        let mut carried = BANNER_BREAK_MIN_M * (0.5 + 0.5 * rnd(seed ^ 0x61, side as u32));
+        let mut left_in_run = 0usize;
+        let mut run_key = side as u32;
+        let mut placed: Option<(f32, f32)> = None;
+        let mut run = 0.0f32;
+        let mut last = line[0];
+        for w in line.windows(2) {
+            run += ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt();
+            if carried > 0.0 {
+                // Still in the gap between runs.
+                carried -= ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt();
+                last = w[1];
+                run = 0.0;
+                continue;
+            }
+            if run < BANNER_W_M {
+                continue;
+            }
+            run = 0.0;
+            let (x, z) = ((last.0 + w[1].0) * 0.5, (last.1 + w[1].1) * 0.5);
+            let deg = (w[1].0 - last.0).atan2(w[1].1 - last.1).to_degrees() + 90.0;
+            last = w[1];
+
+            if left_in_run == 0 {
+                run_key = run_key.wrapping_mul(2_654_435_761).wrapping_add(1);
+                left_in_run = BANNER_RUN_MIN
+                    + ((rnd(seed ^ 0x62, run_key) * (BANNER_RUN_MAX - BANNER_RUN_MIN) as f32)
+                        as usize);
+            }
+
+            // A board needs level ground under its whole width and room to stand clear.
+            let ok = inside(prog, x, z, 3.0)
+                && clearance(&coarse, x, z) > banner_off - 1.5
+                && clear_of_the_start(x, z);
+            let (lo, hi) = ground_span(syn, x, z, deg, BANNER_W_M);
+            if !ok || hi - lo > 0.9 {
+                // Break the run here rather than leaving a board hanging in the air.
+                left_in_run = 0;
+                carried = BANNER_BREAK_MIN_M;
+                placed = None;
+                continue;
+            }
+            // Where the two sides fold back on each other, one side's run can land inside the
+            // other's. Spacing along a run does not catch it — the runs are walked separately.
+            if let Some((px, pz)) = placed {
+                if (px - x).powi(2) + (pz - z).powi(2) < (BANNER_W_M * 0.55).powi(2) {
+                    continue;
+                }
+            }
+            placed = Some((x, z));
+            left_in_run -= 1;
+            // The upright that closes the run: only the last board of one carries it.
+            banners.append(&edfwrite::moved(
+                &edfwrite::turned(&banner_mesh(n, left_in_run == 0), deg),
+                [x, (lo + hi) * 0.5 - 0.04, z],
+            ));
+            n += 1;
+            if left_in_run == 0 {
+                runs += 1;
+                let t = rnd(seed ^ 0x63, run_key ^ 0x9E37);
+                carried = BANNER_BREAK_MIN_M + t * (BANNER_BREAK_MAX_M - BANNER_BREAK_MIN_M);
+                placed = None;
             }
         }
-        s += BANNER_GAP_M;
     }
-    tally.push(("banners", n));
+    tally.push(("banner boards", n));
+    tally.push(("banner runs", runs));
 
 
 
@@ -1427,11 +1502,11 @@ mod tests {
 
         // And the posts wear the plain band, not a slice of somebody's name.
         let (band, _) = banner_post_band();
-        let m = banner_mesh(0);
+        let m = banner_mesh(0, true);
         let post_vs: Vec<f32> = m.uvs.chunks_exact(2).skip(8).map(|uv| uv[1]).collect();
         assert!(
             !post_vs.is_empty() && post_vs.iter().all(|v| *v >= band - 1e-4),
-            "the posts sample the printed cells"
+            "the uprights sample the printed cells"
         );
     }
 
@@ -1461,8 +1536,15 @@ mod tests {
     fn a_lap_cycles_through_the_panels() {
         let (p, s) = demo();
         let sc = build(&p, &s);
-        let banners = sc.tally.iter().find(|(k, _)| *k == "banners").unwrap().1;
-        assert!(banners >= BANNER_CELLS, "{banners} banners — too few to cycle");
+        let boards = sc.tally.iter().find(|(k, _)| *k == "banner boards").unwrap().1;
+        let runs = sc.tally.iter().find(|(k, _)| *k == "banner runs").unwrap().1;
+        assert!(boards >= BANNER_CELLS, "{boards} boards — too few to cycle");
+        // A hoarding is boards bolted together, so a run has to be a run. One board per run
+        // is the failure the break logic causes when it fires on every step.
+        assert!(
+            runs > 0 && boards / runs >= BANNER_RUN_MIN / 2,
+            "{boards} boards in {runs} runs — the hoarding is not joined up"
+        );
         let edf = &sc.files.iter().find(|(f, _)| f == "banners.edf").unwrap().1;
         let nodes = crate::edf::parse_world(edf);
         assert!(!nodes.is_empty(), "the banner model reads back");
@@ -1679,6 +1761,17 @@ mod built {
         for note in crate::trackllm::repair_for_tests(&mut p) {
             println!("  repair: {note}");
         }
+        // What `review` makes of it. `repair` cannot uncross a lap — that is a re-route, and
+        // a re-route is the layout — so the complaint has to be read rather than waited for.
+        // A hand-written program that skips this builds happily and comes out crossing itself.
+        let notes = crate::trackllm::validate(&p);
+        if notes.is_empty() {
+            println!("  review: nothing to say");
+        }
+        for note in &notes {
+            println!("  review: {note}");
+        }
+
         let syn = crate::tracksynth::synthesise(&p).unwrap();
         let slug = crate::tracksynth::write_source(&p, &syn, &dir).unwrap();
         println!("{}: {:.0} m lap, {} files", p.name, p.lap_length(), slug.len());
