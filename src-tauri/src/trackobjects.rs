@@ -656,3 +656,343 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod edge_marking {
+    use super::*;
+
+    /// What a published track marks its riding line with, island by island.
+    ///
+    /// `survey` clusters, and clustering is wrong for this question: the exporter cuts a
+    /// marker line into one piece per metre, so what a placement rule needs — how tall a
+    /// stake is, how wide, how far out and how far apart — is only in the raw pieces. They
+    /// are grouped by how bright the sheet is where the piece samples it, because a marker
+    /// stake is whatever thin pale thing stands beside the line, whichever sheet it wears.
+    ///
+    /// ```text
+    /// FROST_TRACK=~/Projects/pkz/tracks/2024_ARLMX_RD11_INDIANA_PRO.pkz \
+    /// FROST_DUMP=/tmp/sheets cargo test --bin mxb-app -- --ignored --nocapture edge_marking
+    /// ```
+    ///
+    /// `FROST_DUMP` writes every sheet out as a PNG — the only way to read what a banner
+    /// says. `FROST_SHEET` widens the net from thin uprights to every piece of one sheet.
+    #[test]
+    #[ignore = "needs a real track — set FROST_TRACK"]
+    fn edge_marking() {
+        let track = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::PathBuf::from(&track);
+        let names = crate::track::entry_names(&path).unwrap();
+        let stem = path.file_stem().unwrap().to_string_lossy().to_ascii_lowercase();
+
+        // The lap, the same way `survey` reads it.
+        let hf = crate::track::heightfield_entries(&names).into_iter().next().unwrap();
+        let hb = crate::track::read_entry(&path, &hf).unwrap();
+        let layout = crate::heightfield::probe(&hb, None).unwrap();
+        let block_at =
+            layout.offset + layout.width as usize * layout.height as usize * layout.sample.size();
+        let stations = crate::trackline::read(&hb[block_at..]).unwrap().stations(1.0);
+
+        let entry = names
+            .iter()
+            .find(|n| n.to_ascii_lowercase() == format!("{stem}/{stem}.map"))
+            .or_else(|| names.iter().find(|n| n.to_ascii_lowercase().ends_with(".map")))
+            .expect("a .map")
+            .clone();
+        let bytes = crate::track::read_entry(&path, &entry).unwrap();
+        let mesh = map::parse(&bytes).expect("parses");
+        let sheets = map::declared(&bytes);
+        let tex = map::textures(&bytes, 512);
+        println!("{entry}: {} islands, {} sheets", mesh.objects.len(), sheets.len());
+
+        // Mean colour of a material over the UV box one piece uses. Sheets come back already
+        // row-flipped, so V maps straight to a row.
+        let colour = |mat: u32, u0: f32, u1: f32, v0: f32, v1: f32| -> Option<[f32; 3]> {
+            let t = tex.iter().find(|t| t.material == mat)?;
+            if t.width == 0 || t.height == 0 {
+                return None;
+            }
+            let px = |f: f32, d: u32| ((f.fract() + 1.0).fract() * d as f32) as u32 % d;
+            let (mut sum, mut n) = ([0f64; 3], 0u32);
+            for i in 0..12 {
+                for j in 0..12 {
+                    let u = u0 + (u1 - u0) * i as f32 / 11.0;
+                    let v = v0 + (v1 - v0) * j as f32 / 11.0;
+                    let o = ((px(1.0 - v, t.height) * t.width + px(u, t.width)) * 4) as usize;
+                    if t.rgba[o + 3] < 32 {
+                        continue;
+                    }
+                    for k in 0..3 {
+                        sum[k] += t.rgba[o + k] as f64;
+                    }
+                    n += 1;
+                }
+            }
+            (n > 0).then(|| std::array::from_fn(|k| (sum[k] / n as f64) as f32))
+        };
+
+        let want = std::env::var("FROST_SHEET").unwrap_or_default().to_ascii_lowercase();
+        #[derive(Default)]
+        struct Row {
+            off: Vec<f32>,
+            along: Vec<f32>,
+            h: Vec<f32>,
+            w: Vec<f32>,
+            col: Vec<[f32; 3]>,
+        }
+        let mut by: std::collections::BTreeMap<String, Row> = Default::default();
+        for o in &mesh.objects {
+            let (w, h, d) = (o.max[0] - o.min[0], o.max[1] - o.min[1], o.max[2] - o.min[2]);
+            let named = sheets
+                .get(o.material as usize)
+                .map(|(n, ..)| n.to_ascii_lowercase())
+                .unwrap_or_default();
+            if want.is_empty() {
+                // A stake: a hand's breadth in plan, knee to shoulder high.
+                if w.max(d) > 0.5 || !(0.4..2.6).contains(&h) {
+                    continue;
+                }
+            } else if !named.contains(&want) {
+                continue;
+            }
+            let (cx, cz) = ((o.min[0] + o.max[0]) * 0.5, (o.min[2] + o.max[2]) * 0.5);
+            let (along, off) = nearest(&stations, cx, cz);
+            if off.abs() > NEAR_M {
+                continue;
+            }
+            let (mut u0, mut u1, mut v0, mut v1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+            for t in o.tri_start as usize..(o.tri_start + o.tri_count) as usize {
+                for k in 0..3 {
+                    let i = mesh.indices[t * 3 + k] as usize;
+                    let (u, v) = (mesh.uvs[i * 2], mesh.uvs[i * 2 + 1]);
+                    (u0, u1) = (u0.min(u), u1.max(u));
+                    (v0, v1) = (v0.min(v), v1.max(v));
+                }
+            }
+            let c = colour(o.material, u0, u1, v0, v1);
+            let luma = c.map(|c| 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]).unwrap_or(0.0);
+            let shade = if luma > 170.0 {
+                "bright"
+            } else if luma > 110.0 {
+                "light"
+            } else {
+                "dark"
+            };
+            let span = w.max(d);
+            let size = if want.is_empty() {
+                String::new()
+            } else if span < 0.5 {
+                " post    ".into()
+            } else if span < 8.0 {
+                format!(" panel{span:>2.0}m ")
+            } else {
+                " big     ".into()
+            };
+            let e = by.entry(format!("{size}{shade:<7}{named}")).or_default();
+            e.off.push(off);
+            e.along.push(along);
+            e.h.push(h);
+            e.w.push(span);
+            e.col.extend(c);
+        }
+
+        println!("\n=== pieces within {NEAR_M:.0} m of the line ===");
+        for (name, mut r) in by {
+            if r.off.len() < 6 {
+                continue;
+            }
+            let mut absoff: Vec<f32> = r.off.iter().map(|v| v.abs()).collect();
+            let left = r.off.iter().filter(|v| **v < 0.0).count();
+            // Gap along the lap, per side — the two sides interleave, so pooling them halves
+            // the figure a placement rule wants.
+            let mut gaps = Vec::new();
+            for side in [false, true] {
+                let mut a: Vec<f32> = r
+                    .off
+                    .iter()
+                    .zip(&r.along)
+                    .filter(|(o, _)| (**o > 0.0) == side)
+                    .map(|(_, a)| *a)
+                    .collect();
+                a.sort_by(|x, y| x.partial_cmp(y).unwrap());
+                gaps.extend(a.windows(2).map(|w| w[1] - w[0]).filter(|g| *g > 0.05));
+            }
+            let mean = |k: usize| {
+                if r.col.is_empty() {
+                    0.0
+                } else {
+                    r.col.iter().map(|c| c[k]).sum::<f32>() / r.col.len() as f32
+                }
+            };
+            let (rr, gg, bb) = (mean(0), mean(1), mean(2));
+            let n = r.off.len();
+            println!(
+                "  {name:<38} n {n:>5}  L/R {left}/{}  off {:>5.1}/{:>5.1}/{:>5.1}  \
+                 tall {:>4.2}/{:>4.2}/{:>4.2}  wide {:>4.2}  gap {:>5.1}/{:>5.1}/{:>5.1}  \
+                 rgb ({rr:>3.0},{gg:>3.0},{bb:>3.0})",
+                n - left,
+                spread(&mut absoff).p10, spread(&mut absoff).p50, spread(&mut absoff).p90,
+                spread(&mut r.h).p10, spread(&mut r.h).p50, spread(&mut r.h).p90,
+                spread(&mut r.w).p50,
+                spread(&mut gaps).p10, spread(&mut gaps).p50, spread(&mut gaps).p90,
+            );
+        }
+
+        // Which way up a sheet is meant to be read, which is the one thing about a printed
+        // banner that cannot be checked by looking at the numbers. `V` against world height,
+        // over the pieces that stand up: positive means `V` grows upward, so `V` zero is a
+        // card's foot and the file's first row is the picture's bottom. Anything generated has
+        // to agree with the sign a published track uses, or its wordmarks come out on their
+        // heads in the game and right way up in every dump.
+        let (mut sxy, mut sxx, mut syy, mut sx, mut sy, mut n) = (0f64, 0f64, 0f64, 0f64, 0f64, 0u64);
+        for o in &mesh.objects {
+            if o.max[1] - o.min[1] < 0.6 {
+                continue;
+            }
+            // `FROST_SHEET` narrows this to one sheet, which is how a banner's own convention
+            // is read rather than the average of everything that stands up.
+            if !want.is_empty()
+                && !sheets
+                    .get(o.material as usize)
+                    .map(|(n, ..)| n.to_ascii_lowercase().contains(&want))
+                    .unwrap_or(false)
+            {
+                continue;
+            }
+            for t in o.tri_start as usize..(o.tri_start + o.tri_count) as usize {
+                for k in 0..3 {
+                    let i = mesh.indices[t * 3 + k] as usize;
+                    let (y, v) = (mesh.positions[i * 3 + 1] as f64, mesh.uvs[i * 2 + 1] as f64);
+                    sx += y;
+                    sy += v;
+                    sxx += y * y;
+                    syy += v * v;
+                    sxy += y * v;
+                    n += 1;
+                }
+            }
+        }
+        if n > 2 {
+            let d = ((n as f64 * sxx - sx * sx) * (n as f64 * syy - sy * sy)).sqrt();
+            let r = if d > 0.0 { (n as f64 * sxy - sx * sy) / d } else { 0.0 };
+            println!(
+                "\ncorr(world Y, V) = {r:+.3} over {n} vertices of standing geometry \
+                 — {} ",
+                if r > 0.0 { "V grows upward, file row 0 is the picture's bottom" }
+                else { "V grows downward, file row 0 is the picture's top" }
+            );
+        }
+
+        // The one thing about a printed banner that numbers cannot settle: which way up it is
+        // seen. A correlation of world height against `V` says nothing on an atlas, because
+        // each panel sits in its own band of it. So rebuild the widest standing panel the way
+        // the game sees it — world across against world up, sampled through the panel's own
+        // UVs and the sheet as `map::textures` hands it over — and look at it.
+        if let Ok(dump) = std::env::var("FROST_DUMP") {
+            std::fs::create_dir_all(&dump).ok();
+            let mut best: Option<(&map::MapObject, f32)> = None;
+            for o in &mesh.objects {
+                let (w, h, d) = (o.max[0] - o.min[0], o.max[1] - o.min[1], o.max[2] - o.min[2]);
+                let span = w.max(d);
+                if h < 0.6 || span < 1.5 || h > span {
+                    continue;
+                }
+                if !want.is_empty()
+                    && !sheets
+                        .get(o.material as usize)
+                        .map(|(n, ..)| n.to_ascii_lowercase().contains(&want))
+                        .unwrap_or(false)
+                {
+                    continue;
+                }
+                if best.map(|(_, s)| span > s).unwrap_or(true) {
+                    best = Some((o, span));
+                }
+            }
+            if let Some((o, _)) = best {
+                let t = tex.iter().find(|t| t.material == o.material);
+                let (w, d) = (o.max[0] - o.min[0], o.max[2] - o.min[2]);
+                // The panel's long axis in plan, so a banner facing any direction rebuilds.
+                let across_x = w >= d;
+                let (out_w, out_h) = (720u32, 200u32);
+                let mut img = image::RgbaImage::new(out_w, out_h);
+                for py in 0..out_h {
+                    for px in 0..out_w {
+                        let fx = px as f32 / (out_w - 1) as f32;
+                        // Down the image is down the world.
+                        let fy = 1.0 - py as f32 / (out_h - 1) as f32;
+                        let wx = if across_x {
+                            o.min[0] + w * fx
+                        } else {
+                            o.min[2] + d * fx
+                        };
+                        let wy = o.min[1] + (o.max[1] - o.min[1]) * fy;
+                        // The triangle this point falls in, and its UV interpolated across
+                        // it. Nearest-vertex was tried and it samples four texels for the
+                        // whole panel, which reads as two flat bands and settles nothing.
+                        let mut buv: Option<(f32, f32)> = None;
+                        for tri in o.tri_start as usize..(o.tri_start + o.tri_count) as usize {
+                            let at = |k: usize| {
+                                let i = mesh.indices[tri * 3 + k] as usize;
+                                let vx = if across_x {
+                                    mesh.positions[i * 3]
+                                } else {
+                                    mesh.positions[i * 3 + 2]
+                                };
+                                ((vx, mesh.positions[i * 3 + 1]), (mesh.uvs[i * 2], mesh.uvs[i * 2 + 1]))
+                            };
+                            let (a, ua) = at(0);
+                            let (b, ub) = at(1);
+                            let (c, uc) = at(2);
+                            let area = (b.0 - a.0) * (c.1 - a.1) - (c.0 - a.0) * (b.1 - a.1);
+                            if area.abs() < 1e-9 {
+                                continue;
+                            }
+                            let w0 = ((b.0 - wx) * (c.1 - wy) - (c.0 - wx) * (b.1 - wy)) / area;
+                            let w1 = ((c.0 - wx) * (a.1 - wy) - (a.0 - wx) * (c.1 - wy)) / area;
+                            let w2 = 1.0 - w0 - w1;
+                            if w0 < -1e-3 || w1 < -1e-3 || w2 < -1e-3 {
+                                continue;
+                            }
+                            buv = Some((
+                                ua.0 * w0 + ub.0 * w1 + uc.0 * w2,
+                                ua.1 * w0 + ub.1 * w1 + uc.1 * w2,
+                            ));
+                            break;
+                        }
+                        let Some(buv) = buv else {
+                            img.put_pixel(px, py, image::Rgba([90, 90, 96, 255]));
+                            continue;
+                        };
+                        let col = match t {
+                            Some(t) if t.width > 0 => {
+                                let sx = ((buv.0.rem_euclid(1.0)) * t.width as f32) as u32
+                                    % t.width;
+                                let sy = ((1.0 - buv.1.rem_euclid(1.0)) * t.height as f32) as u32
+                                    % t.height;
+                                let o = ((sy * t.width + sx) * 4) as usize;
+                                [t.rgba[o], t.rgba[o + 1], t.rgba[o + 2], 255]
+                            }
+                            _ => [255, 0, 255, 255],
+                        };
+                        img.put_pixel(px, py, image::Rgba(col));
+                    }
+                }
+                let file = format!("{dump}/panel-as-seen.png");
+                img.save(&file).unwrap();
+                println!("\nrebuilt the widest standing panel as the game frames it: {file}");
+            }
+        }
+
+        // And the pictures, because a banner's text is only in its sheet.
+        let Ok(dump) = std::env::var("FROST_DUMP") else { return };
+        std::fs::create_dir_all(&dump).unwrap();
+        for t in map::textures(&bytes, 1024) {
+            let file = format!("{dump}/{:02}_{}.png", t.material, t.name);
+            image::RgbaImage::from_raw(t.width, t.height, t.rgba.clone())
+                .unwrap()
+                .save(&file)
+                .unwrap();
+        }
+        println!("\nsheets written to {dump}");
+    }
+}
