@@ -1,4 +1,5 @@
 use anyhow::Context;
+use futures_util::{StreamExt, TryStreamExt};
 use obfstr::obfstr;
 use reqwest::multipart::{Form, Part};
 use reqwest::Client;
@@ -93,6 +94,15 @@ enum UploadFail {
 }
 use UploadFail::{Fatal, Short};
 
+/// Slices in flight at once.
+///
+/// The slices are independent — separate POSTs, separate links — and a good half of what one
+/// costs is not the transfer at all but the wait for catbox to finish writing it (see
+/// [`settled_len`]). Sending them one at a time spent that wait doing nothing. Three, not
+/// more: the drops this file exists to survive are catbox being busy, and there is no sense
+/// in being the reason it is.
+const UPLOAD_CONCURRENCY: usize = 3;
+
 async fn upload_sliced(
     client: &Client,
     file: &Path,
@@ -101,31 +111,48 @@ async fn upload_sliced(
     on_part: &impl Fn(usize, usize),
 ) -> Result<Upload, UploadFail> {
     let plan = part_plan_of(size, part_bytes);
-    let mut handle = std::fs::File::open(file)
-        .with_context(|| format!("reading {}", file.display()))
-        .map_err(Fatal)?;
+    let n = plan.len();
     let stem = file
         .file_stem()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "preset-bundle".to_string());
 
-    let mut parts = Vec::with_capacity(plan.len());
-    let mut sizes = Vec::with_capacity(plan.len());
-    for (i, &(offset, len)) in plan.iter().enumerate() {
-        on_part(i + 1, plan.len());
-        let bytes = read_slice(&mut handle, offset, len)
-            .with_context(|| format!("reading {}", file.display()))
-            .map_err(Fatal)?;
-        // Keep the .zip extension on every slice — catbox screens uploads by extension.
-        let name = if plan.len() == 1 {
-            format!("{stem}.zip")
-        } else {
-            format!("{stem}.part{}of{}.zip", i + 1, plan.len())
-        };
-        parts.push(catbox_upload(client, endpoint(), &name, &bytes, len).await?);
-        sizes.push(len);
-    }
+    // Counted rather than indexed: with several in flight the useful number is how many are
+    // behind us, so the dialog names the slice being waited on and never jumps backwards.
+    let done = std::sync::atomic::AtomicUsize::new(0);
+    on_part(1, n);
 
+    let jobs: Vec<_> = plan
+        .iter()
+        .enumerate()
+        .map(|(i, &(offset, len))| {
+            // Keep the .zip extension on every slice — catbox screens uploads by extension.
+            let name = if n == 1 {
+                format!("{stem}.zip")
+            } else {
+                format!("{stem}.part{}of{}.zip", i + 1, n)
+            };
+            let done = &done;
+            async move {
+                // Its own handle per slice: the reads are interleaved now, so a shared cursor
+                // would have them seeking over each other.
+                let bytes = read_slice_at(file, offset, len)
+                    .with_context(|| format!("reading {}", file.display()))
+                    .map_err(Fatal)?;
+                let url = catbox_upload(client, endpoint(), &name, &bytes, len).await?;
+                let behind = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                on_part((behind + 1).min(n), n);
+                Ok::<(String, u64), UploadFail>((url, len))
+            }
+        })
+        .collect();
+
+    let uploaded: Vec<(String, u64)> = futures_util::stream::iter(jobs)
+        .buffered(UPLOAD_CONCURRENCY)
+        .try_collect()
+        .await?;
+
+    let (parts, sizes) = uploaded.into_iter().unzip();
     Ok(Upload { parts, host: HOST.to_string(), size, part_sizes: sizes })
 }
 
@@ -150,6 +177,11 @@ fn part_plan_of(size: u64, part: u64) -> Vec<(u64, u64)> {
         spans.push((0, 0));
     }
     spans
+}
+
+/// Read one slice through a handle of its own — see [`upload_sliced`].
+fn read_slice_at(path: &Path, offset: u64, len: u64) -> std::io::Result<Vec<u8>> {
+    read_slice(&mut std::fs::File::open(path)?, offset, len)
 }
 
 fn read_slice(file: &mut std::fs::File, offset: u64, len: u64) -> std::io::Result<Vec<u8>> {
@@ -202,26 +234,28 @@ pub(crate) async fn hosted_len(client: &Client, url: &str) -> Option<u64> {
     }
 }
 
-/// How long to let the host finish writing a part before believing what it says about it.
+/// The gaps between asking the host what it is holding, in seconds — and so how many times
+/// it is asked before we believe the answer.
 ///
 /// catbox answers with the link the moment it has taken the POST and keeps writing the file
 /// afterwards: ask straight away and a 20 MB part reads as 2.8 MB, then reads as 20 MB a few
 /// seconds later. Without this the upload check condemned every part that was merely still
 /// being stored, retried all three attempts, and gave up on a bundle that was fine.
-const SETTLE_TRIES: u32 = 8;
-const SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+///
+/// The gaps used to be a flat three seconds, which every part that had already finished
+/// storing paid in full. The last look still lands around twenty seconds in, so a slow store
+/// has the room it always had.
+const SETTLE_WAITS: [u64; 7] = [1, 2, 3, 3, 4, 4, 5];
 
 /// What the host is holding, once it has stopped growing — or the last thing it said.
 async fn settled_len(client: &Client, url: &str, expect: u64) -> Option<u64> {
-    let mut last = None;
-    for i in 0..SETTLE_TRIES {
-        last = hosted_len(client, url).await;
+    let mut last = hosted_len(client, url).await;
+    for wait in SETTLE_WAITS {
         if last == Some(expect) {
             return last;
         }
-        if i + 1 < SETTLE_TRIES {
-            tokio::time::sleep(SETTLE_WAIT).await;
-        }
+        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+        last = hosted_len(client, url).await;
     }
     last
 }

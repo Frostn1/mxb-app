@@ -44,6 +44,47 @@ pub(crate) fn emit_progress(
     emit(app, slug, stage, received, total);
 }
 
+/// Bytes received by each of several downloads sharing one bar.
+///
+/// A multi-part bundle used to fetch its slices one after another and each filled the bar
+/// from nothing — three parts, three bars, three times the wait. They run together now, so
+/// each reports into its own slot and what the player sees is the sum against the whole
+/// download.
+pub(crate) struct SharedProgress {
+    slots: Vec<std::sync::atomic::AtomicU64>,
+    total: Option<u64>,
+}
+
+impl SharedProgress {
+    pub(crate) fn new(parts: usize, total: Option<u64>) -> Self {
+        Self {
+            slots: (0..parts).map(|_| std::sync::atomic::AtomicU64::new(0)).collect(),
+            total,
+        }
+    }
+
+    fn record(&self, slot: usize, received: u64) -> (u64, Option<u64>) {
+        use std::sync::atomic::Ordering::Relaxed;
+        if let Some(s) = self.slots.get(slot) {
+            s.store(received, Relaxed);
+        }
+        (self.slots.iter().map(|s| s.load(Relaxed)).sum(), self.total)
+    }
+}
+
+/// Which bar a download reports into: its own, or one slot of a shared one.
+pub(crate) type Slot<'a> = Option<(&'a SharedProgress, usize)>;
+
+fn report(app: &AppHandle, slug: &str, progress: Slot<'_>, received: u64, total: Option<u64>) {
+    match progress {
+        Some((shared, slot)) => {
+            let (sum, whole) = shared.record(slot, received);
+            emit(app, slug, "downloading", Some(sum), whole);
+        }
+        None => emit(app, slug, "downloading", Some(received), total),
+    }
+}
+
 fn emit(app: &AppHandle, slug: &str, stage: &'static str, received: Option<u64>, total: Option<u64>) {
     let _ = app.emit(
         "install-progress",
@@ -1377,6 +1418,22 @@ pub(crate) async fn download(
     url: &str,
     dir: &Path,
 ) -> anyhow::Result<PathBuf> {
+    download_into(app, client, slug, url, dir, None).await
+}
+
+/// How much of a body is held before it reaches the disk. reqwest hands back chunks of a few
+/// kilobytes, and writing each one straight through was a syscall per chunk for the whole
+/// length of a track.
+const DOWNLOAD_BUF: usize = 1024 * 1024;
+
+pub(crate) async fn download_into(
+    app: &AppHandle,
+    client: &Client,
+    slug: &str,
+    url: &str,
+    dir: &Path,
+    progress: Slot<'_>,
+) -> anyhow::Result<PathBuf> {
     // Grabbed once: the chunk loop below polls this per chunk, and that has to be an atomic
     // load rather than a lock on the registry.
     let cancel = crate::cancel::token(slug);
@@ -1390,7 +1447,7 @@ pub(crate) async fn download(
     // redirect chain landed. Re-asking the original would start the dance over.
     let source = resp.url().clone();
 
-    let mut file = File::create(&path)?;
+    let mut file = std::io::BufWriter::with_capacity(DOWNLOAD_BUF, File::create(&path)?);
     let mut received: u64 = 0;
     let mut last_emit: u64 = 0;
     let mut next = Some(resp);
@@ -1411,7 +1468,7 @@ pub(crate) async fn download(
                     // The host ignored `Range` and started the file over, so we have to
                     // as well — appending its second copy onto our first would corrupt
                     // the archive in a way only the extractor would notice.
-                    file = File::create(&path)?;
+                    file = std::io::BufWriter::with_capacity(DOWNLOAD_BUF, File::create(&path)?);
                     received = 0;
                     last_emit = 0;
                     r
@@ -1431,7 +1488,7 @@ pub(crate) async fn download(
         };
 
         let end = stream_to_file(
-            app, slug, &cancel, resp, &mut file, &mut received, &mut last_emit, total,
+            app, slug, &cancel, resp, &mut file, &mut received, &mut last_emit, total, progress,
         )
         .await?;
         // A body can come up short without erroring — some hosts just close the socket
@@ -1453,12 +1510,12 @@ pub(crate) async fn download(
             return Err(stalled(received, total, breaks, last_err));
         }
         // Hold the last reported byte count on screen; the bar picks up where it stalled.
-        emit(app, slug, "downloading", Some(received), total);
+        report(app, slug, progress, received, total);
         tokio::time::sleep(Duration::from_millis(600 * breaks as u64)).await;
     }
 
     file.flush()?;
-    emit(app, slug, "downloading", Some(received), total);
+    report(app, slug, progress, received, total);
     Ok(path)
 }
 
@@ -1589,10 +1646,11 @@ async fn stream_to_file(
     slug: &str,
     cancel: &crate::cancel::Token,
     resp: reqwest::Response,
-    file: &mut File,
+    file: &mut std::io::BufWriter<File>,
     received: &mut u64,
     last_emit: &mut u64,
     total: Option<u64>,
+    progress: Slot<'_>,
 ) -> anyhow::Result<BodyEnd> {
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
@@ -1605,7 +1663,7 @@ async fn stream_to_file(
                 *received += chunk.len() as u64;
                 if *received - *last_emit >= EMIT_EVERY_BYTES {
                     *last_emit = *received;
-                    emit(app, slug, "downloading", Some(*received), total);
+                    report(app, slug, progress, *received, total);
                 }
             }
             // Not fatal by itself — the caller asks for the rest with a `Range` request.
@@ -1796,14 +1854,7 @@ fn is_usable_filename(name: &str) -> bool {
 
 pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()> {
     match detect_ext(archive)?.as_str() {
-        "zip" => {
-            let file = File::open(archive)?;
-            zip::ZipArchive::new(file)?.extract(dest)?;
-            // `zip` filters `..` out of entry names, but a symlink entry is the escape a
-            // name filter can't see: the link lands inside `dest` and points anywhere, and
-            // the entries after it are written straight through it. Sweep it like the rest.
-            purge_escapees(archive, dest)?;
-        }
+        "zip" => extract_zip_from(File::open(archive)?, dest, archive)?,
         "7z" => {
             sevenz_rust::decompress_file(archive, dest)
                 .map_err(|e| anyhow::anyhow!("7z extraction failed: {e}"))?;
@@ -1824,6 +1875,23 @@ pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()>
         other => anyhow::bail!("Unsupported archive type: .{other}"),
     }
     Ok(())
+}
+
+/// Unpack a zip from anything that reads like one.
+///
+/// Taking a reader rather than a path is what lets a multi-part bundle be unpacked from its
+/// slices where they lie, instead of joining them into one file first and reading that.
+/// `label` only names the archive in an error.
+pub(crate) fn extract_zip_from<R: Read + std::io::Seek>(
+    reader: R,
+    dest: &Path,
+    label: &Path,
+) -> anyhow::Result<()> {
+    zip::ZipArchive::new(reader)?.extract(dest)?;
+    // `zip` filters `..` out of entry names, but a symlink entry is the escape a name filter
+    // can't see: the link lands inside `dest` and points anywhere, and the entries after it
+    // are written straight through it. Sweep it like the rest.
+    purge_escapees(label, dest)
 }
 
 /// What a dropped path turned out to be once staged.
