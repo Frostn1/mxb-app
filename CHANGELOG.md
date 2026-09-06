@@ -21,6 +21,9 @@
 - A Servers tab that lists every live MX Bikes server the way the in-game browser does —
   who's on each one, the track it's running, and its address. Press Join to launch straight
   into any of them.
+- The overlay reviews an install the way the main window does. A pack you download without
+  leaving the game comes up in the same sheet, listing what it found and where each piece
+  goes before anything is written.
 
 ### Fixed
 - The cloud-storage warning names OneDrive instead of guessing at "a cloud sync tool", says
