@@ -75,7 +75,7 @@ export default function ReleaseShowcase({
         {/* The headline feature, given the room the others don't get. */}
         <div className="flex flex-col gap-3 rounded-xl border border-primary/25 bg-primary/[0.07] p-4">
           <div className="flex items-start gap-3">
-            <div className="grid size-9 flex-none place-items-center rounded-[10px] bg-gradient-to-br from-[#9ccfec] to-[#5d8fb0] text-[#0d0f12]">
+            <div className="grid size-9 flex-none place-items-center bg-gradient-to-br from-[#9ccfec] to-[#5d8fb0] text-[#0d0f12]">
               <HeroIcon className="size-[18px]" strokeWidth={2.5} />
             </div>
             <div className="flex flex-col gap-1">

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { ContextBarRight } from "../Shell/ContextBar";
 import HelpHint from "../ui/help-hint";
 import { useT } from "../../i18n/context";
 import { useConfig } from "../../Context/Config";
@@ -92,10 +93,10 @@ export default function Studio({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-none items-center gap-1.5 px-7 pb-3 pt-4">
-        <h1 className="text-[21px] font-bold tracking-[-0.2px]">{help.title}</h1>
+      <ContextBarRight>
         <HelpHint title={help.title} description={help.body} />
-      </header>
+      </ContextBarRight>
+
 
       {/* Hidden, not unmounted. These hold real work — a stack of layers, a list of sheets,
           a half-built kit — and losing it because you glanced at the tab next door is the

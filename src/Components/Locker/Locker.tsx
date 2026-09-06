@@ -18,6 +18,8 @@ import {
 import { toast } from "sonner";
 import { Share2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/Components/ui/button";
+import { ContextBarRight } from "../Shell/ContextBar";
 import HelpHint from "@/Components/ui/help-hint";
 import {
   scanModelSwaps,
@@ -299,21 +301,14 @@ export default function Locker() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
-            {t("nav.locker")}
-          </h1>
-          <HelpHint title={t("nav.locker")} description={t("locker.help")} />
-        </div>
-        <button
-          onClick={() => void load()}
-          className="ml-auto flex items-center gap-1.5 rounded-lg border border-input bg-card px-3 py-2 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground"
-        >
+      <ContextBarRight>
+        <Button variant="outline" size="sm" onClick={() => void load()}>
           <RefreshCw className={cn("size-3.5", rows === null && "animate-spin")} />
           {t("locker.rescan")}
-        </button>
-      </header>
+        </Button>
+        <HelpHint title={t("nav.locker")} description={t("locker.help")} />
+      </ContextBarRight>
+
 
       {orphaned
         .filter((o) => !hiddenOrphans.has(orphanKey(o)))

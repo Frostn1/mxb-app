@@ -26,8 +26,9 @@ import { cn } from "@/lib/utils";
 import { useT, type TKey } from "../../i18n/context";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
-import type { DashboardView } from "../Shell/Sidebar";
+import type { DashboardView } from "../Shell/nav";
 import type { StudioTab } from "../Studio/Studio";
+import { Plate } from "../Shell/Brand";
 
 /** Bumped when the tour changes enough to warrant showing it again. */
 export const TOUR_DONE_KEY = "mxb:tourDone:v1";
@@ -239,9 +240,9 @@ export default function Tour({ navigate, onDone }: TourProps) {
         style={bubbleStyle(rect, bubbleH)}
       >
         <div className="flex flex-col gap-3">
-          <div className="grid size-11 place-items-center rounded-[13px] bg-gradient-to-br from-[#9ccfec] to-[#5d8fb0] text-[#0d0f12]">
+          <Plate className="size-11">
             <Icon className="size-[22px]" strokeWidth={2.5} />
-          </div>
+          </Plate>
           <div className="flex flex-col gap-1.5">
             <h2 className="text-[17px] font-extrabold tracking-[-0.3px]">
               {t(step.title)}

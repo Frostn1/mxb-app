@@ -89,7 +89,7 @@ export default function PriceTag({
           {price.discountPct !== null && price.discountPct > 0 && (
             <span
               className={cn(
-                "rounded-[5px] bg-emerald-500/15 px-1.5 py-[1px] font-semibold text-emerald-400",
+                "bg-emerald-500/15 px-1.5 py-[1px] font-semibold text-emerald-400",
                 big ? "text-[12px]" : "text-[10.5px]",
               )}
             >
