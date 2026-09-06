@@ -69,6 +69,8 @@ export interface RailItem extends Gated {
  */
 export const RAIL: RailItem[] = [
   { id: "browse", label: "nav.browse", view: "browse" },
+  { id: "shop", label: "nav.shop", view: "shop", cap: "shop" },
+  { id: "hub", label: "nav.hub", view: "hub", cap: "shop" },
   {
     id: "library",
     label: "nav.library",
@@ -104,16 +106,6 @@ export const RAIL: RailItem[] = [
   },
   { id: "manage", label: "nav.manage", view: "manage", cap: "manage" },
   { id: "servers", label: "nav.servers", view: "servers" },
-  {
-    id: "shop",
-    label: "nav.shop",
-    view: "shop",
-    cap: "shop",
-    tabs: [
-      { view: "shop", label: "nav.shop", cap: "shop" },
-      { view: "hub", label: "nav.hub", cap: "shop" },
-    ],
-  },
 ];
 
 /** Which rail item owns a view, so the right item lights up and the right tabs show. */

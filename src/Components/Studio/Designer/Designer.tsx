@@ -2056,8 +2056,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         className={cn(
           "grid min-h-0 flex-1 gap-3",
           railOpen
-            ? "xl:grid-cols-[224px_minmax(0,1fr)_minmax(0,1fr)]"
-            : "xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]",
+            ? "xl:grid-cols-[224px_minmax(0,1fr)_300px]"
+            : "xl:grid-cols-[minmax(0,1fr)_300px]",
         )}
       >
         {/* ── Sheets, layers, and the selected layer ───────────────────────────── */}
@@ -2100,57 +2100,25 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             />
           )}
 
-          {active && (
-            <PaintTools
-              settings={paint}
-              onTool={pickTool}
-              onChange={(patch) => setPaint((p) => ({ ...p, ...patch }))}
-              canUndo={canUndo}
-              canRedo={canRedo}
-              onUndo={undo}
-              onRedo={redo}
-              onAddImage={() => void addImage()}
-              onAddText={addText}
-              busy={busy}
-            />
-          )}
-
-          {active && (
-            <LayerList
-              layers={active.layers}
-              selection={selection}
-              onSelect={select}
-              onToggle={(id, visible) => {
-                patchLayer(id, (l) => ({ ...l, visible }));
-                bump();
-              }}
-              onRemove={(id) => removeLayers([id])}
-              onReorder={reorder}
-              onAdd={addPaintLayer}
-            />
-          )}
-          {!!chosen.length && active && (
-            <LayerInspector
-              layers={chosen}
-              all={active.layers}
-              width={active.width}
-              height={active.height}
-              parts={parts}
-              mirrorReady={mirrorReady}
-              onClip={clipLayer}
-              onFit={fitLayer}
-              onMirror={mirrorSelected}
-              onUnlink={unlinkSelection}
-              onSelect={(id) => select([id], "replace")}
-              onGroup={groupSelection}
-              onUngroup={ungroupSelection}
-              onChange={(fn) => patchSelection(fn, `layer:${selection.join(",")}`)}
-            />
-          )}
         </section>
 
-        {/* ── The sheet ────────────────────────────────────────────────────────── */}
-        <section className="flex min-h-0 flex-col">
+        {/* ── The sheet, with the model floating over it ───────────────────────── */}
+        <section className="relative flex min-h-0 flex-col">
+          {/* Docked over the sheet rather than taking a column of its own: you judge a
+              livery on the model, but you draw it on the flat sheet. */}
+          <div className="pointer-events-none absolute bottom-3 right-3 z-10 h-[232px] w-[320px]">
+            <div className="pointer-events-auto h-full overflow-hidden border border-border bg-window/95 backdrop-blur">
+              <PreviewPanel
+                state={destState}
+                overrides={overrides}
+                frameToken={version}
+                onGeometry={onGeometry}
+                onStock={onStock}
+                highlight={hoverIsland}
+                className="h-full"
+              />
+            </div>
+          </div>
           {active ? (
             <CanvasStage
               className="flex-1"
@@ -2274,17 +2242,55 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         </DropdownMenu>
       </section>
 
-      {/* ── The model ────────────────────────────────────────────────────────── */}
-      <section className="flex min-h-0 flex-col">
-        <PreviewPanel
-          state={destState}
-          overrides={overrides}
-          frameToken={version}
-          onGeometry={onGeometry}
-          onStock={onStock}
-          highlight={hoverIsland}
-          className="flex-1"
-        />
+      {/* ── Tools, beside the sheet they act on ──────────────────────────────── */}
+      <section className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+          {active && (
+            <PaintTools
+              settings={paint}
+              onTool={pickTool}
+              onChange={(patch) => setPaint((p) => ({ ...p, ...patch }))}
+              canUndo={canUndo}
+              canRedo={canRedo}
+              onUndo={undo}
+              onRedo={redo}
+              onAddImage={() => void addImage()}
+              onAddText={addText}
+              busy={busy}
+            />
+          )}
+
+          {active && (
+            <LayerList
+              layers={active.layers}
+              selection={selection}
+              onSelect={select}
+              onToggle={(id, visible) => {
+                patchLayer(id, (l) => ({ ...l, visible }));
+                bump();
+              }}
+              onRemove={(id) => removeLayers([id])}
+              onReorder={reorder}
+              onAdd={addPaintLayer}
+            />
+          )}
+          {!!chosen.length && active && (
+            <LayerInspector
+              layers={chosen}
+              all={active.layers}
+              width={active.width}
+              height={active.height}
+              parts={parts}
+              mirrorReady={mirrorReady}
+              onClip={clipLayer}
+              onFit={fitLayer}
+              onMirror={mirrorSelected}
+              onUnlink={unlinkSelection}
+              onSelect={(id) => select([id], "replace")}
+              onGroup={groupSelection}
+              onUngroup={ungroupSelection}
+              onChange={(fn) => patchSelection(fn, `layer:${selection.join(",")}`)}
+            />
+          )}
       </section>
       </div>
     </div>
