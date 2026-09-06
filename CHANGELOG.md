@@ -2,6 +2,56 @@
 
 ## 2026-09-06
 
+### Added
+- Yellow boards either side of every jump's takeoff, on the ones worth marking. A rider coming
+  at a blind crest reads the boards, not the dirt.
+
+### Changed
+- Half as many white blocks round a corner — a run of them with ground showing between, rather
+  than a wall.
+- The printed banners are gone.
+
+## 2026-09-06
+
+### Changed
+- The start straight ends in turn one. It runs down the outside of the first corner and joins
+  the lap inside it, so the gate drop delivers you into the turn instead of onto a piece of
+  track with no clue which way it goes.
+- The riding line is lighter. Under the track's own sky a line at the colour a soil sheet
+  measures on its own was one you could not find; the gap to the field that makes a line
+  visible is still there, and the line now reads at speed.
+- The sky is a band round the horizon rather than a lid. A closed dome put the whole track in
+  its own shadow, which is what made the ground so dark.
+- Marker boards are thinner on the ground, blocks are plain white and laid in a line along the
+  outside of a corner rather than scattered, and a few trees stand in the infield.
+
+## 2026-09-06
+
+### Added
+- A wood behind the track. The tracks people rate carry thousands of trees past 60 m and only
+  a handful trackside, so that is what a built track gets now — a backdrop of mixed pine and
+  broadleaf out to the edge of the ground, with a few standing closer in.
+- Poles and parked vans down both sides, at the spacing the same tracks use, and a sky of the
+  track's own instead of the game's default one.
+- The start pad is ridden ground: the same surface texture the rest of the track has, and the
+  comb of grooves forty bikes leave pulling out of forty stalls.
+
+### Changed
+- The ground round a track is grass in patches over bare worked dirt rather than one flat
+  green field.
+- Marker blocks are white.
+- Nothing is planted on the start straight any more, and the fence is gone for now — it ran
+  along the lap and closed the start off.
+
+### Fixed
+- The start straight ends where the gates are. Its surface ran on behind the row for as far
+  as the ground went.
+- The picture a track is listed by shows the colours it will actually have. It was mixing
+  each band's base colour rather than the sheet made from it, which turned a green field into
+  a desert.
+
+## 2026-09-06
+
 ### Changed
 - Jumps stand up on the ground they are built on. A track cut into a hillside had its ground
   falling three metres across a jump's own footprint, so a metre-and-a-quarter tabletop rose a
@@ -29,9 +79,15 @@
 - The start on a track you build is its own straight beside the circuit now, the way a real
   one is: the gate row stands 40 m off the lap, sprints 85 m, and turns in to join the track
   at turn one. A flying lap never crosses the gates.
-- The gates stand on a start pad 54 m across — wide enough for all forty of them — graded flat
-  and funnelling down to riding width by the time it meets the lap. The pit lane sits on the
-  other side of the main straight, out of the way.
+- The gates stand on a start pad 54 m across — wide enough for all forty of them. It holds
+  that width the whole way down the sprint and comes down through the turn into the track,
+  rather than tapering along the straight. The pit lane sits on the other side of the main
+  straight, out of the way.
+
+### Fixed
+- Riders start on the gate row. Every position in a track's race data is stated against the
+  lap, wherever it physically stands, and the gates were being written against the start
+  straight instead — so the game put the field across the middle of the track.
 
 ### Added
 - A track you build now has things standing beside it. Stakes with painted tops mark the edge

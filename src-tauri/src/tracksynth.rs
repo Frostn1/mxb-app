@@ -1181,7 +1181,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         let (_, which) = nearest_station(&spur.stations, gw, gh, mps_x, mps_z);
         for i in 0..gw * gh {
             let (wx, wz) = ((i % gw) as f32 * mps_x, (i / gw) as f32 * mps_z);
-            let (mut d, s, _) = local_frame(&spur.stations, which[i] as usize, wx, wz);
+            let (mut d, s, t) = local_frame(&spur.stations, which[i] as usize, wx, wz);
             // Behind the gate row the frame runs out and every distance becomes radial, which
             // rounds the back of the pad off into a lollipop. A start has a straight back edge
             // — the bank the gates are set against — so back there the width is measured
@@ -1197,6 +1197,13 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     back = smoothstep(
                         ((BACK_OF_THE_GATE_M - behind) / BACK_OF_THE_GATE_M).clamp(0.0, 1.0),
                     );
+                    // And it ends there. Everything that paints the ground reads `spur_dist`,
+                    // and a station's frame runs on for ever — so without this the start is
+                    // surfaced as track for as far behind the gate row as the grid goes, which
+                    // from the gate is a wide slab running off into nothing.
+                    if behind > BACK_OF_THE_GATE_M {
+                        d = f32::MAX;
+                    }
                 }
             }
             spur_dist[i] = d;
@@ -1210,6 +1217,12 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // line the ground was benched by a different rule, and the two rules do not meet.
             let spur_e = d - wide;
             let lap_e = dist[i] - widths.at(arc[i]);
+            // Track surface wherever the start covers it, whatever the ground under it is
+            // doing: this is the same width the `.trh` and the `.map` paint, and a corridor
+            // that disagreed with them measured eight metres narrower than the file it wrote.
+            if d <= wide && back > 0.0 {
+                corridor[i] = true;
+            }
             let claim = smoothstep(((lap_e - spur_e) / SHOULDER_M).clamp(0.0, 1.0)) * back;
             if claim <= 0.0 {
                 continue;
@@ -1225,8 +1238,33 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 * if ground > deck { CUT_SHOULDER } else { FILL_SHOULDER };
             let w = bench_weight(d, wide, shoulder) * claim;
             heights[i] = ground * (1.0 - w) + deck * w;
-            if d <= wide {
-                corridor[i] = true;
+
+            if d > wide {
+                continue;
+            }
+            // Ridden ground. The pad is track, and a track with no texture on it is a slab —
+            // the same fine roughness the lap gets, tapered across the width the way it is
+            // there, because the middle of a start is used and its far corners are not.
+            let across = 1.0 - (d / wide.max(1e-3)).min(1.0).powi(2);
+            if r.texture > 0.0 {
+                heights[i] += fbm(
+                    wx / TEXTURE_WAVELENGTH_M,
+                    wz / TEXTURE_WAVELENGTH_M,
+                    r.seed ^ 0x5EED,
+                ) * r.texture
+                    * (0.25 + 0.75 * across)
+                    * claim;
+            }
+            // And the grooves the gate leaves: forty bikes pulling out of forty stalls dig
+            // forty lines, deepest a few metres off the row and gone by the time the pack has
+            // spread. The one piece of ground on a track whose ruts are laid out in a comb.
+            let from_gate = s - spur.gate_at();
+            let row = GRID_STALLS as f32 * GRID_LANE_M * 0.5;
+            if from_gate > -1.0 && from_gate < GATE_RUT_M && t.abs() < row {
+                let along = smoothstep(1.0 - (from_gate.max(0.0) / GATE_RUT_M));
+                let lane = (t / GRID_LANE_M) * std::f32::consts::TAU;
+                let groove = 0.5 - 0.5 * lane.cos();
+                heights[i] -= GATE_RUT_DEPTH_M * along * groove * claim;
             }
         }
     }
@@ -2495,7 +2533,8 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         )
     });
     let grass = mask_outside(syn, MASK_DIM, half, |e, x, z| {
-        255 - soft_edge(SHOULDER_M + edge_noise(x, z, seed ^ 0x6EE2, 3.2, 1.2), 6.0, e)
+        let past = 255 - soft_edge(SHOULDER_M + edge_noise(x, z, seed ^ 0x6EE2, 3.2, 1.2), 6.0, e);
+        (past as f32 * turf_cover(x, z, seed)) as u8
     });
     // Off-track starts where the graded shoulder ends: the rider is on the track, or in the
     // field, with the shoulder belonging to neither. This one decides where the game says a
@@ -3065,6 +3104,16 @@ pub struct StartSpur {
     len: f32,
 }
 
+/// How far past the gate row its grooves run, and how deep they are at their deepest.
+///
+/// A start is the one place on a track where the ruts are a comb: every rider pulls out of
+/// their own stall in a line, and the lines stay parallel until the pack starts to spread.
+const GATE_RUT_M: f32 = 35.0;
+const GATE_RUT_DEPTH_M: f32 = 0.09;
+
+/// How much of the start straight's last stretch is already the width of the lap it joins.
+const MERGE_TAIL_M: f32 = 12.0;
+
 /// How much further the start pad's cut and fill reach than a track's shoulder does.
 const START_BANK: f32 = 2.0;
 
@@ -3154,8 +3203,12 @@ impl StartSpur {
         };
         let half = START_FAN_HALF_M.max(prog.width * 0.5);
         let funnel = crate::trackprog::START_SPRINT_M;
+        let len_all = stations.last().map(|q| q.s).unwrap_or(1.0).max(1.0);
+        // The same width the pad comes out — see `at`, which this has to agree with or the
+        // level is taken across ground the start does not cover.
         let wide_at = |s: f32| {
-            let u = ((s - GATE_INSET_M) / (funnel - GATE_INSET_M).max(1.0)).clamp(0.0, 1.0);
+            let (from, to) = (funnel, (len_all - MERGE_TAIL_M).max(funnel + 1.0));
+            let u = ((s - from) / (to - from)).clamp(0.0, 1.0);
             half + (prog.width * 0.5 - half) * smoothstep(u)
         };
         let mut deck: Vec<f32> = stations.iter().map(|q| across(q, wide_at(q.s))).collect();
@@ -3205,10 +3258,18 @@ impl StartSpur {
         a + (b - a) * (x - i as f32)
     }
 
-    /// How wide the start is, this far along it: the gate row's width, easing down to the
-    /// riding line's by the end of the sprint.
+    /// How wide the start is, this far along it.
+    ///
+    /// Full width the whole way down the sprint, and then narrowing *through the turn* — not
+    /// tapering along the straight. Forty riders leave the gate abreast and are still abreast
+    /// when they arrive at turn one; what squeezes them into single file is the corner, which
+    /// is why a start straight reads as a wide slab with a funnel on the end of it rather than
+    /// as a wedge.
     pub fn at(&self, s: f32) -> f32 {
-        let u = ((s - GATE_INSET_M) / (self.funnel - GATE_INSET_M).max(1.0)).clamp(0.0, 1.0);
+        // The turn: from where the sprint ends to a little short of the merge, so the last
+        // few metres are already the width of the track they join.
+        let (from, to) = (self.funnel, (self.len - MERGE_TAIL_M).max(self.funnel + 1.0));
+        let u = ((s - from) / (to - from)).clamp(0.0, 1.0);
         self.half + (self.line_half - self.half) * smoothstep(u)
     }
 
@@ -3263,6 +3324,28 @@ fn rdf(prog: &TrackProgram, spur: Option<&StartSpur>) -> String {
     let lap = prog.lap_length();
     let half = prog.width * 0.5;
     let line = finish_at(prog);
+    // Everything the file places by a `long` and a `lat` is placed *on the lap*, whatever it
+    // is standing on — read straight off published tracks, whose gate rows sit out on a start
+    // spur and are still stated in lap coordinates: Indiana's row is `long 457, lat -30`, and
+    // the row it draws lands 30 m off the racing line at that point. Getting this wrong is
+    // not subtle. Written along the start straight instead, the game read `long 5, lat -24`
+    // as five metres round the lap and put forty riders across the middle of the track.
+    let stations = prog.stations(0.5);
+    let onto_lap = |x: f32, z: f32, heading_deg: f32| -> (f32, f32, f32) {
+        let Some(q) = stations.iter().min_by(|a, b| {
+            let da = (a.x - x).powi(2) + (a.z - z).powi(2);
+            let db = (b.x - x).powi(2) + (b.z - z).powi(2);
+            da.total_cmp(&db)
+        }) else {
+            return (0.0, 0.0, 0.0);
+        };
+        let (rx, rz) = crate::trackprog::right_vector(q.heading);
+        let lat = (x - q.x) * rx + (z - q.z) * rz;
+        // And the angle relative to the lap's own direction there, which is how a published
+        // stall states which way its bike faces.
+        let angle = (heading_deg - q.heading.to_degrees()).rem_euclid(360.0);
+        (q.s, lat, angle)
+    };
 
     let mut s = String::new();
     let mark = |s: &mut String, name: &str, at: f32, w: f32| {
@@ -3327,22 +3410,26 @@ fn rdf(prog: &TrackProgram, spur: Option<&StartSpur>) -> String {
     };
     let (fx, fz) = crate::trackprog::heading_vector(gate.angle.to_radians());
     let (rx, rz) = crate::trackprog::right_vector(gate.angle.to_radians());
-    let anchor_x = gate.x + fx * gate_at + rx * span * 0.5;
-    let anchor_z = gate.z + fz * gate_at + rz * span * 0.5;
+    // The row's own middle, on the line it stands on — not one end of it. Indiana anchors at
+    // (224, 148.5) and its start line begins at (220, 148); Briarcliff nineteen metres along
+    // its own. Both sit on the centreline with the gates spread either side.
+    let (mid_x, mid_z) = (gate.x + fx * gate_at, gate.z + fz * gate_at);
     s.push_str(&format!(
-        "starting_grid\n{{\n\tnumstalls = {grid}\n\ttype = 1\n\tposx = {anchor_x:.6}\n\
-         \tposz = {anchor_z:.6}\n\tangle = {:.6}\n\tnumstallsperrow = {grid}\n\
+        "starting_grid\n{{\n\tnumstalls = {grid}\n\ttype = 1\n\tposx = {mid_x:.6}\n\
+         \tposz = {mid_z:.6}\n\tangle = {:.6}\n\tnumstallsperrow = {grid}\n\
          \tdistfromstartline = 0.000000\n\tlanespacing = 0.000000\n\trowspacing = 0.000000\n\
          \tdifflat = 0.000000\n\tlanewidth = {:.6}\n\tlatshift = 0.000000\n\tside = 1\n",
         gate.angle, -lane
     ));
     for i in 0..grid {
-        // Spread across the whole row, so a stall's own position agrees with the row the
-        // gate is drawn on.
-        let lat = -span * 0.5 + (i as f32 + 0.5) * lane;
+        // Where the gate actually is, in the world, and then that point read back as a
+        // position on the lap.
+        let t = -span * 0.5 + (i as f32 + 0.5) * lane;
+        let (x, z) = (mid_x + rx * t, mid_z + rz * t);
+        let (long, lat, angle) = onto_lap(x, z, gate.angle);
         s.push_str(&format!(
-            "\tstall{i}\n\t{{\n\t\tlong = {gate_at:.6}\n\t\tlat = {lat:.6}\n\
-             \t\tangle = 0.000000\n\t}}\n"
+            "\tstall{i}\n\t{{\n\t\tlong = {long:.6}\n\t\tlat = {lat:.6}\n\
+             \t\tangle = {angle:.6}\n\t}}\n"
         ));
     }
     s.push_str("}\n");
@@ -3362,16 +3449,19 @@ fn rdf(prog: &TrackProgram, spur: Option<&StartSpur>) -> String {
     }
 
     // The thirty-second board stands beside the gate row, out past the edge of the start
-    // straight — which is the widest the track gets anywhere.
+    // straight — and it too is stated on the lap.
     let board_lat = spur.map(|sp| sp.at(sp.gate_at()) + 3.0).unwrap_or(half + 3.0);
+    let (bx, bz) = (
+        mid_x - fx * 4.0 - rx * board_lat,
+        mid_z - fz * 4.0 - rz * board_lat,
+    );
+    let (board_long, board_off, board_angle) = onto_lap(bx, bz, gate.angle);
     s.push_str(&format!(
-        "30secondsboard_posx = {:.6}\n30secondsboard_posz = {:.6}\n30secondsboard_angle = {:.6}\n\
-         30seconds_board\n{{\n\tlong = {:.6}\n\tlat = {:.6}\n\tangle = 0.000000\n}}\n",
-        gate.x,
-        gate.z,
+        "30secondsboard_posx = {bx:.6}\n30secondsboard_posz = {bz:.6}\n\
+         30secondsboard_angle = {:.6}\n\
+         30seconds_board\n{{\n\tlong = {board_long:.6}\n\tlat = {board_off:.6}\n\
+         \tangle = {board_angle:.6}\n}}\n",
         gate.angle - 90.0,
-        (gate_at - 4.0).max(0.5),
-        -board_lat
     ));
     s
 }
@@ -3407,6 +3497,20 @@ impl Synth {
             }
         }
         e
+    }
+
+    /// How far outside the start straight's edge a point in the world is — negative on it,
+    /// `None` where the track has no start straight.
+    ///
+    /// For anything that has to keep off the start: the pad is track, and a fence post or a
+    /// hay bale standing on it is standing where forty riders are about to be.
+    pub fn outside_the_start(&self, x: f32, z: f32) -> Option<f32> {
+        let spur = self.spur.as_ref()?;
+        let gx = (x / self.mps).round().clamp(0.0, (self.gw - 1) as f32) as usize;
+        let gy = (z / self.mps).round().clamp(0.0, (self.gh - 1) as f32) as usize;
+        let i = gy * self.gw + gx;
+        let d = self.spur_dist[i];
+        d.is_finite().then(|| d - spur.at(self.spur_arc[i]))
     }
 
     /// Whether a cell is on the start straight rather than on the lap.
@@ -3645,8 +3749,8 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
                     BandMask::Everywhere => unreachable!(),
                     BandMask::Rut => rut_mask(syn, half, seed, mw, mh),
                     BandMask::Loose => loose_mask(syn, half, seed, mw, mh),
-                    BandMask::Beyond => mask_rect_outside(syn, mw, mh, half, |e, _, _| {
-                        u8::from(e > SHOULDER_M) * 255
+                    BandMask::Beyond => mask_rect_outside(syn, mw, mh, half, |e, x, z| {
+                        (u8::from(e > SHOULDER_M) as f32 * 255.0 * turf_cover(x, z, seed)) as u8
                     }),
                     BandMask::Out(extra) => mask_rect_outside(syn, mw, mh, half, |e, _, _| {
                         u8::from(e <= extra) * 255
@@ -3888,6 +3992,26 @@ fn mask_rect(syn: &Synth, mw: usize, mh: usize, f: impl Fn(f32, f32, f32, f32) -
         }
     }
     out
+}
+
+/// How big the patches of grass in the field are, metres.
+const TURF_PATCH_M: f32 = 55.0;
+
+/// How much turf covers the field at a point: 1 where grass has taken, 0 where the ground is
+/// bare.
+///
+/// The field used to be one flat sheet of grass from the shoulder to the fence, which is a
+/// lawn — and no venue is a lawn. Two scales of noise, thresholded, so what comes out is
+/// patches of grass in worked ground with bare tracks between them, which is what the ground
+/// round a motocross track actually looks like.
+fn turf_cover(x: f32, z: f32, seed: u32) -> f32 {
+    let broad = fbm(x / TURF_PATCH_M, z / TURF_PATCH_M, seed ^ 0x3C71);
+    let fine = fbm(x / (TURF_PATCH_M * 0.28), z / (TURF_PATCH_M * 0.28), seed ^ 0x3C72);
+    let n = broad * 0.72 + fine * 0.28;
+    // `fbm` runs either side of zero, so the threshold does too: bare where the field dips
+    // well below it, full turf where it rises, and a soft edge in between. About two thirds
+    // of the ground comes out grassed, which is what a venue looks like from the air.
+    smoothstep(((n + 0.25) * 2.5).clamp(0.0, 1.0))
 }
 
 /// A mask of the track's edge — the lap's and the start straight's together.
@@ -4653,9 +4777,15 @@ fn ground_looks(surface: Surface) -> Grounds {
     // line, and the gap between them is far wider than any two colours anyone would guess.
     // These are the numbers *before* shading, which lands around three quarters of them.
     let (base, line): ([f32; 3], [f32; 3]) = match surface {
-        Surface::Soil => ([179.0, 140.0, 104.0], [56.0, 40.0, 27.0]),
-        Surface::Sand => ([214.0, 193.0, 152.0], [166.0, 142.0, 105.0]),
-        Surface::Grass => ([174.0, 142.0, 100.0], [55.0, 40.0, 27.0]),
+        // The line is lighter than Indiana's own (50, 36, 24) on purpose. That figure is what
+        // a sheet averages under a photographer's light; in the game, with the track's sky
+        // over it and its own shadows on it, a line that dark stops reading as a line at all —
+        // ridden, you cannot see where the groove is. Lifted until it does, and no further:
+        // the gap to the field is what makes a racing line visible, and that gap is still
+        // more than a hundred levels.
+        Surface::Soil => ([179.0, 140.0, 104.0], [86.0, 63.0, 44.0]),
+        Surface::Sand => ([214.0, 193.0, 152.0], [176.0, 152.0, 114.0]),
+        Surface::Grass => ([174.0, 142.0, 100.0], [84.0, 62.0, 43.0]),
     };
     let field = GroundLook {
         base,
@@ -4727,7 +4857,14 @@ fn ground_looks(surface: Surface) -> Grounds {
     // off `ridden` in tone, because two shades of the same brown at riding speed is one
     // shade.
     let rut = GroundLook {
-        base: [line[0] * 0.55, line[1] * 0.54, line[2] * 0.52],
+        // main's, not this branch's 0.55. Darkening the sheet was one way to answer "the
+        // shadow from a rut to the ground has to be harder", and it is the wrong one: under
+        // the track's own sky and shadows a line that dark is one a rider cannot find, which
+        // is the other half of the same report. The contrast this branch wanted comes from
+        // `RUT_PAINT_FLOOR`, `RUT_PAINT_WALL` and `RUT_LIP_SHARP` keying the paint to the
+        // ground's own rut signal — which is a contrast *within* the line rather than of the
+        // line against everything else.
+        base: [line[0] * 0.78, line[1] * 0.78, line[2] * 0.76],
         grain_tint: (0.74, 1.20),
         fleck: [128.0, 124.0, 118.0],
         fleck_density: 0.015,
@@ -4927,12 +5064,19 @@ fn ground_sheet(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<[f32; 3]> {
     let half = prog.width * 0.5;
     let mut px = vec![[0.0f32; 3]; dim * dim];
     for l in layers(prog) {
+        // What this band's sheet actually averages, generated the way the shipped one is.
+        //
+        // It used to take the look's own `base` and a flat 0.78 for the shading, which is a
+        // guess about a sheet the code can simply make: the ground sheet averages 0.98 of its
+        // base and the turf 0.55 of its own, because a sheet of grass is mostly blades. That
+        // gap is why a track that comes out green in the game was a desert in its picture.
+        let mean = sheet_mean(&l.look, seed ^ l.salt);
         let cover = match l.band {
             BandMask::Everywhere => vec![255u8; dim * dim],
             BandMask::Rut => rut_mask(syn, half, seed, dim, dim),
             BandMask::Loose => loose_mask(syn, half, seed, dim, dim),
-            BandMask::Beyond => mask_rect_outside(syn, dim, dim, half, |e, _, _| {
-                u8::from(e > SHOULDER_M) * 255
+            BandMask::Beyond => mask_rect_outside(syn, dim, dim, half, |e, x, z| {
+                (u8::from(e > SHOULDER_M) as f32 * 255.0 * turf_cover(x, z, seed)) as u8
             }),
             BandMask::Out(extra) => mask_rect_outside(syn, dim, dim, half, |e, _, _| {
                 u8::from(e <= extra) * 255
@@ -4950,10 +5094,10 @@ fn ground_sheet(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<[f32; 3]> {
                 // The same patching `ground_pixels` gives the sheets, at the only scale a
                 // picture this size can hold it: without it the ground is flat colour and the
                 // track reads as a drawing again.
-                let k = SHEET_SHADE * (1.0 + l.look.mottle * fbm(wx * 0.06, wz * 0.06, seed ^ l.salt));
+                let k = 1.0 + l.look.mottle * fbm(wx * 0.06, wz * 0.06, seed ^ l.salt);
                 let at = y * dim + x;
                 for c in 0..3 {
-                    px[at][c] += (l.look.base[c] * k - px[at][c]) * a;
+                    px[at][c] += (mean[c] * k - px[at][c]) * a;
                 }
             }
         }
@@ -4967,6 +5111,22 @@ fn ground_sheet(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<[f32; 3]> {
 /// comes out lands around three quarters of the colour that went in. The picture composites
 /// the base colours directly, so it has to take the same cut or every band in it is brighter
 /// than the ground it is a picture of.
+/// The average colour of a band's sheet, made the way the shipped one is made.
+///
+/// Small on purpose — 32 px is 1024 samples of the same generator, which settles the mean of
+/// anything the sheet does — and cheap enough to call per band per picture.
+fn sheet_mean(look: &GroundLook, salt: u32) -> [f32; 3] {
+    let px = ground_pixels(32, look, salt);
+    let mut sum = [0.0f32; 3];
+    let n = (px.len() / 4).max(1);
+    for p in px.chunks_exact(4) {
+        sum[0] += p[0] as f32;
+        sum[1] += p[1] as f32;
+        sum[2] += p[2] as f32;
+    }
+    [sum[0] / n as f32, sum[1] / n as f32, sum[2] / n as f32]
+}
+
 const SHEET_SHADE: f32 = 0.78;
 
 /// Uncompressed 32-bit BGRA, the mask in the alpha channel — the shape the official example's
@@ -5671,6 +5831,66 @@ mod tests {
             narrowed < p.width,
             "it is still {narrowed:.1} m wide where it meets the lap"
         );
+    }
+
+    /// The gates the game reads have to be the gates we built. Every position in a `.rdf` is
+    /// stated on the lap, so a row standing out on the start straight is written as a long
+    /// way round the lap and a big lateral offset — and if it is written as a distance along
+    /// the start straight instead, the game puts forty riders across the middle of the track.
+    #[test]
+    fn the_grid_the_game_reads_lands_on_the_start_straight() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let spur = s.spur.as_ref().expect("a start straight");
+        let text = rdf(&p, Some(spur));
+
+        // Read the stalls back the way the game does: a distance round the lap and an offset
+        // across it.
+        let st = p.stations(0.5);
+        let block = &text[text.find("starting_grid").expect("a grid")..];
+        let mut it = block.lines().map(|l| l.trim());
+        let mut placed = Vec::new();
+        while let Some(l) = it.next() {
+            if !l.starts_with("stall") {
+                continue;
+            }
+            let (mut long, mut lat) = (0.0f32, 0.0f32);
+            for _ in 0..5 {
+                match it.next() {
+                    Some(v) if v.starts_with("long = ") => long = v[7..].parse().unwrap(),
+                    Some(v) if v.starts_with("lat = ") => lat = v[6..].parse().unwrap(),
+                    Some("}") => break,
+                    _ => {}
+                }
+            }
+            let q = st
+                .iter()
+                .min_by(|a, b| (a.s - long).abs().total_cmp(&(b.s - long).abs()))
+                .unwrap();
+            let (rx, rz) = crate::trackprog::right_vector(q.heading);
+            placed.push((q.x + rx * lat, q.z + rz * lat));
+        }
+        assert_eq!(placed.len(), GRID_STALLS, "every gate is written");
+
+        // Each one on the start straight, and none of them on the lap.
+        let line = p.start_line().expect("a start line");
+        let walk = TrackProgram { start: line.start, segments: line.segments.clone(), ..p.clone() };
+        let spur_st = walk.stations(1.0);
+        for (i, (x, z)) in placed.iter().enumerate() {
+            let to_spur = spur_st
+                .iter()
+                .map(|q| ((q.x - x).powi(2) + (q.z - z).powi(2)).sqrt())
+                .fold(f32::MAX, f32::min);
+            let to_lap = st
+                .iter()
+                .map(|q| ((q.x - x).powi(2) + (q.z - z).powi(2)).sqrt())
+                .fold(f32::MAX, f32::min);
+            assert!(
+                to_spur < spur.at(spur.gate_at()) + 2.0,
+                "gate {i} lands {to_spur:.0} m off the start straight"
+            );
+            assert!(to_lap > p.width, "gate {i} lands on the lap, {to_lap:.0} m from its line");
+        }
     }
 
     /// A rider on a flying lap must never cross the gates: the start is a spur beside the
@@ -6498,7 +6718,25 @@ mod tests {
             s.gw, s.gh, p.terrain.size_x, p.terrain.size_z, s.mps, s.used_m, s.budget_m
         );
 
-        let c = crate::trackstats::measure("synth", &s.corridor, &s.heights, s.gw, s.gh, s.mps);
+        // The riding line only. The start pad is track — 54 m of it across the gate row — but
+        // it is not riding line, and the corpus figures this is held to describe the ribbon a
+        // rider goes round on.
+        let lap_only: Vec<bool> = (0..s.gw * s.gh)
+            .map(|i| s.corridor[i] && !s.on_the_start(i, p.width * 0.5))
+            .collect();
+        let c = crate::trackstats::measure("synth", &lap_only, &s.heights, s.gw, s.gh, s.mps);
+        // And the whole track surface, pad and all, which is what a reader of the written
+        // file sees — the `.trh` surfaces the start as track, because it is.
+        let all = crate::trackstats::measure("synth", &s.corridor, &s.heights, s.gw, s.gh, s.mps);
+        if let Some(spur) = &s.spur {
+            let pad = (0..s.gw * s.gh).filter(|i| s.corridor[*i] && !lap_only[*i]).count();
+            println!(
+                "start: {:.0} m long, {:.0} m across the gate row, {:.0} m² of pad",
+                spur.length(),
+                spur.width_m(),
+                pad as f32 * s.mps * s.mps,
+            );
+        }
         println!(
             "measured: {:>5.1}% area {:>4.0}% joined  w {:>4.1}/{:<4.1}m  len {:>5.0}m  \
              slope p90 {:>4.1}° p99 {:>4.1}°  relief p90 {:>4.2}m  {:>4} lips  h p50 {:>4.2}m  \
@@ -6612,10 +6850,11 @@ mod tests {
                 bc.lips
             );
             assert!(
-                (bc.width_from_mean_m - c.width_from_mean_m).abs() < 1.0,
-                "the .pkz measures {:.1} m wide where the terrain it was written from is {:.1}",
+                (bc.width_from_mean_m - all.width_from_mean_m).abs() < 1.5,
+                "the .pkz measures {:.1} m of track where the terrain it was written from is \
+                 {:.1} — riding line and start pad together",
                 bc.width_from_mean_m,
-                c.width_from_mean_m
+                all.width_from_mean_m
             );
 
             preview(&s, &dir.join("preview.ppm"));
@@ -6881,7 +7120,15 @@ mod tests {
             let _ = crate::trackllm::repair_for_tests(&mut p);
             let s = synthesise(&p).unwrap();
             match (&s.spur, p.start_line()) {
-                (Some(spur), Some(line)) => println!(
+                (Some(spur), Some(line)) => {
+                for (i, sg) in line.segments.iter().enumerate() {
+                    match sg {
+                        crate::trackprog::Segment::Straight { length, .. } =>
+                            println!("    {i}: straight {length:.0} m"),
+                        crate::trackprog::Segment::Arc { radius, angle, .. } =>
+                            println!("    {i}: arc r{radius:.0} through {angle:.0}° = {:.0} m", sg.length()),
+                    }
+                } println!(
                     "{name}: start straight {:.0} m off the lap, {:.0} m long in {} segments, \
                      {:.0} m wide at the gates against a {:.0} m track; joins the lap at \
                      {:.0} m of {:.0}",
@@ -6892,7 +7139,7 @@ mod tests {
                     p.width,
                     line.joins_at,
                     p.lap_length(),
-                ),
+                ) },
                 _ => println!("{name}: no start straight"),
             }
         }
@@ -7088,19 +7335,26 @@ mod tests {
                 (sum[2] / (dim * dim) as f64) as f32,
             ]
         };
-        for (what, got, want) in [
-            ("the field", mean(&field), [172.0, 134.0, 99.0]),
-            ("the riding line", mean(&ridden), [50.0, 36.0, 24.0]),
-        ] {
-            for c in 0..3 {
-                assert!(
-                    (got[c] - want[c]).abs() < 14.0,
-                    "{what} came out {:?}, and the published sheet it is calibrated \
-                     against is {want:?}",
-                    got.map(|v| v.round())
-                );
-            }
+        // The field is Indiana's, level for level. The riding line is deliberately lighter
+        // than its (50, 36, 24): that figure is what a sheet averages on its own, and in the
+        // game — under the track's own sky, with its own shadows on it — a line that dark is
+        // one a rider cannot find. What has to survive is the *gap*, because the gap is what
+        // makes a racing line visible from the seat.
+        for c in 0..3 {
+            assert!(
+                (mean(&field)[c] - [172.0, 134.0, 99.0][c]).abs() < 14.0,
+                "the field came out {:?}, and Indiana's sheet is [172, 134, 99]",
+                mean(&field).map(|v| v.round())
+            );
         }
+        let (f, r) = (mean(&field), mean(&ridden));
+        let gap = (f[0] - r[0] + f[1] - r[1] + f[2] - r[2]) / 3.0;
+        assert!(
+            (60.0..130.0).contains(&gap),
+            "the line stands {gap:.0} levels off the field: {:?} against {:?}",
+            r.map(|v| v.round()),
+            f.map(|v| v.round())
+        );
     }
 
 
@@ -7117,7 +7371,10 @@ mod tests {
         let g = ground_looks(Surface::Soil);
         for (what, look, most) in [
             ("the field", &g.field, 34.0),
-            ("the riding line", &g.ridden, 26.0),
+            // The line's bound is above the field's own 26 because the sheet is lighter than
+            // Indiana's: the same relative grain lands in more grey levels on a brighter
+            // base, and the grain is what stops a track reading as painted plastic.
+            ("the riding line", &g.ridden, 30.0),
             ("the shoulder", &g.shoulder, 34.0),
             ("the loose dirt", &g.loose, 34.0),
         ] {
@@ -7402,7 +7659,7 @@ mod tests {
                         BandMask::Loose => Some(loose_mask(syn, half, seed, mw, mh)),
                         BandMask::Beyond => Some(mask_rect_outside(
                             syn, mw, mh, half,
-                            |e, _, _| u8::from(e > SHOULDER_M) * 255,
+                            |e, x, z| (u8::from(e > SHOULDER_M) as f32 * 255.0 * turf_cover(x, z, seed)) as u8,
                         )),
                         BandMask::Out(extra) => Some(mask_rect_outside(
                             syn, mw, mh, half,

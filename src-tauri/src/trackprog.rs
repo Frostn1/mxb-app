@@ -438,12 +438,38 @@ pub const START_STRAIGHT_M: f32 = 60.0;
 /// and merges in, so a rider on a flying lap never crosses the gates.
 pub const START_OFFSET_M: f32 = 40.0;
 
-/// How long the gate straight is before it starts turning in, metres. Published: 79–91.
-pub const START_SPRINT_M: f32 = 85.0;
+/// How long the gate straight is before it starts turning in, metres.
+///
+/// Published start lines run 79–91 m of straight before their first corner, and 67–208 m all
+/// told. Shorter than the middle of that on purpose: ridden, 85 m of sprint and 90 m of
+/// turn-in is a long way to the first corner, and the whole point of a start straight is that
+/// it ends at one.
+pub const START_SPRINT_M: f32 = 70.0;
+
+/// How far the start straight is angled towards the lap, degrees. Over the sprint it closes
+/// about a fifth of the offset, which leaves one corner to do the rest.
+pub const START_CONVERGE_DEG: f32 = 10.0;
+
+/// Tighter than this and an arc is turn one rather than a bend the straight is drifting
+/// through. Published first corners run 10–46 m; this sits above them so it catches the whole
+/// corner rather than only its apex.
+pub const TURN_ONE_RADIUS_M: f32 = 60.0;
+
+/// Half the width of the start pad, metres: the gate row plus a margin.
+///
+/// Forty gates at 1.2 m is 48 m across, and the pad has to hold it. Stated here rather than
+/// in the synthesiser because the *layout* needs it — a start line whose centreline clears
+/// the lap by fifteen metres still lays its pad straight over it.
+pub const START_FAN_HALF_M: f32 = 27.0;
+
+/// How much a start line is expected to turn on its way onto the lap. Published ones sweep
+/// 100–180°, and what that buys is a pack that arrives *in* the corner.
+pub const TURN_ONE_SWEEP_DEG: f32 = 110.0;
 
 /// The tightest the merge back onto the lap may turn, metres. Published start lines join
-/// through 10–46 m radii; this is the floor.
-pub const START_MERGE_RADIUS_M: f32 = 18.0;
+/// through 10–46 m radii; this is the floor, and a tight one keeps turn one close to the
+/// gates rather than a long sweep away from them.
+pub const START_MERGE_RADIUS_M: f32 = 15.0;
 
 /// The start straight: where the gate row stands, and the line from it into the lap.
 ///
@@ -965,6 +991,98 @@ pub fn join(from: Start, to: Start, radius: f32) -> Option<Vec<Segment>> {
     best.map(|(_, segs)| segs)
 }
 
+/// Two arcs from one pose to another, tangent where they meet: a corner rather than a
+/// dog-leg.
+///
+/// [`join`] answers the same question with a turn, a straight and a turn, which is right for
+/// closing a lap that has drifted open — the two ends are far apart and mostly need
+/// travelling between. It is wrong for a start straight coming back onto the lap: what that
+/// wants is *turn one*, and every published start line is exactly that, a corner of 100–180°
+/// with no straight in it at all. Given a Dubins path, our merges came out as a seven-metre
+/// arc, a ninety-four metre straight and another arc — a start straight that never ends.
+///
+/// The equal-chord biarc: the joint is placed so the two arcs have the same chord length,
+/// which is the standard construction and needs no search.
+///
+/// `None` when the poses are already the same, or when the geometry wants an arc tighter
+/// than `min_radius`.
+pub fn biarc(from: Start, to: Start, min_radius: f32) -> Option<Vec<Segment>> {
+    let (fx, fz) = heading_vector(from.angle.to_radians());
+    let (tx, tz) = heading_vector(to.angle.to_radians());
+    let (dx, dz) = (to.x - from.x, to.z - from.z);
+    let chord = (dx * dx + dz * dz).sqrt();
+    if chord < 1.0 {
+        return None;
+    }
+
+    // How far along each tangent the joint sits.
+    let dot_t = fx * tx + fz * tz;
+    let denom = 2.0 * (1.0 - dot_t);
+    let b = dx * (fx + tx) + dz * (fz + tz);
+    let c = dx * dx + dz * dz;
+    let d1 = if denom.abs() < 1e-4 {
+        // Tangents parallel: the joint falls out of the chord alone.
+        let along = dx * tx + dz * tz;
+        if along.abs() < 1e-4 {
+            return None;
+        }
+        c / (4.0 * along)
+    } else {
+        let disc = b * b + denom * c;
+        if disc < 0.0 {
+            return None;
+        }
+        (-b + disc.sqrt()) / denom
+    };
+    if !d1.is_finite() || d1 <= 0.1 {
+        return None;
+    }
+    let joint = (
+        ((from.x + fx * d1) + (to.x - tx * d1)) * 0.5,
+        ((from.z + fz * d1) + (to.z - tz * d1)) * 0.5,
+    );
+
+    // Each arc from its own end, through the chord to the joint.
+    let arc = |px: f32, pz: f32, hx: f32, hz: f32, qx: f32, qz: f32| -> Option<Segment> {
+        let (cx, cz) = (qx - px, qz - pz);
+        let len = (cx * cx + cz * cz).sqrt();
+        if len < 0.01 {
+            return None;
+        }
+        let (ux, uz) = (cx / len, cz / len);
+        // The chord subtends twice the angle between the tangent and it; which way round is
+        // the cross product, negative being a right-hand turn in this convention.
+        let cross = hx * uz - hz * ux;
+        let half = (hx * ux + hz * uz).clamp(-1.0, 1.0).acos();
+        if half < 1e-4 {
+            return Some(Segment::Straight { length: len, rise: 0.0 });
+        }
+        let radius = len / (2.0 * half.sin());
+        Some(Segment::Arc {
+            radius: radius * if cross > 0.0 { -1.0 } else { 1.0 },
+            angle: (2.0 * half).to_degrees(),
+            rise: 0.0,
+        })
+    };
+
+    let first = arc(from.x, from.z, fx, fz, joint.0, joint.1)?;
+    // The second runs from the joint to the goal, and its tangent there is the goal's — so it
+    // is fitted backwards from the goal and then turned round.
+    let second = arc(to.x, to.z, -tx, -tz, joint.0, joint.1).map(|s| match s {
+        Segment::Arc { radius, angle, rise } => Segment::Arc { radius: -radius, angle, rise },
+        other => other,
+    })?;
+
+    for seg in [&first, &second] {
+        if let Segment::Arc { radius, angle, .. } = seg {
+            if radius.abs() < min_radius || angle.abs() > 200.0 {
+                return None;
+            }
+        }
+    }
+    Some(vec![first, second])
+}
+
 /// Where a run of segments leaves you, ridden from `from`.
 ///
 /// The same walk [`TrackProgram::stations`] does, without the sampling: arcs are stepped from
@@ -1111,22 +1229,74 @@ impl TrackProgram {
             }
             worst
         };
-        let side = if room(1.0) >= room(-1.0) { 1.0 } else { -1.0 };
+        // Which side to stand on. The outside of turn one, so the sprint delivers the pack
+        // into the corner rather than across it — unless that side has no room, in which case
+        // room wins, because a start straight that doesn't fit isn't one.
+        let (room_r, room_l) = (room(1.0), room(-1.0));
+        let outside = st
+            .iter()
+            .find(|q| q.s > run * 0.8 && q.curvature.abs() > 1.0 / TURN_ONE_RADIUS_M)
+            .map(|q| -q.curvature.signum())
+            .unwrap_or(0.0);
+        let side = if outside != 0.0
+            && (if outside > 0.0 { room_r } else { room_l }) > START_OFFSET_M * 1.15
+        {
+            outside
+        } else if room_r >= room_l {
+            1.0
+        } else {
+            -1.0
+        };
 
         // The gate row: beside the lap's own start, far enough out that the lap never runs
         // through it.
+        // Angled a little towards the lap rather than parallel to it, so what brings the two
+        // together is one corner instead of an S. That is the shape published start lines
+        // have: Indiana's straight runs 90 m and then turns *once*, through 170°, onto the
+        // racing line.
         let start = Start {
             x: self.start.x + rx * side * START_OFFSET_M,
             z: self.start.z + rz * side * START_OFFSET_M,
-            angle: self.start.angle,
+            angle: self.start.angle - side * START_CONVERGE_DEG,
         };
-        // Down the sprint, and then back onto the lap. Every candidate join is tried and the
-        // shortest kept — which lands on turn one, because that is what is nearest.
+        // Where turn one is: the first station past the opening straight that is properly
+        // turning, not drifting. Everything below is measured against it, because a start
+        // straight that lands on a straight is a start that leaves a rider guessing which way
+        // to go — what a real one does is deliver the pack into the first corner.
+        let tight = |q: &Station| q.curvature.abs() > 1.0 / TURN_ONE_RADIUS_M;
+        let corner_at = st
+            .iter()
+            .find(|q| q.s > run * 0.8 && tight(q))
+            .map(|q| q.s)
+            .unwrap_or(run);
+        // And how far it runs. The start joins *inside* turn one rather than at its mouth:
+        // that is what published start lines do — Indiana's own turns through 46 m, then 10,
+        // then 17 before it meets the racing line — and it is what turns the pack instead of
+        // handing it a fork.
+        let corner_end = st
+            .iter()
+            .find(|q| q.s > corner_at + 12.0 && !tight(q))
+            .map(|q| q.s)
+            .unwrap_or(corner_at + 60.0);
+        let land_at = corner_at + (corner_end - corner_at).min(30.0) * 0.35;
+
+        // Down the sprint, and then into it.
+        //
+        // Three goes, each asking for less: land inside turn one without the pad crossing the
+        // lap; failing that, land anywhere it can without crossing; failing that, take the
+        // shortest merge there is. A track whose ground will not hold the ideal start still
+        // gets one, and it is the same search each time.
         let after = end_pose(start, &[Segment::Straight { length: START_SPRINT_M, rise: 0.0 }]);
+        let search = |aim_at_the_corner: bool, keep_clear: bool| -> Option<(f32, Vec<Segment>, f32)> {
         let mut best: Option<(f32, Vec<Segment>, f32)> = None;
-        for q in st.iter().filter(|q| q.s >= run * 0.5 && q.s <= run + 400.0) {
+        for q in st.iter().filter(|q| q.s >= run * 0.5 && q.s <= corner_end + 120.0) {
             let onto = Start { x: q.x, z: q.z, angle: q.heading.to_degrees() };
-            let Some(merge) = join(after, onto, START_MERGE_RADIUS_M) else {
+            // A corner, not a dog-leg: two arcs that meet tangentially, which is the shape
+            // every published start line joins the lap with. The Dubins path is the fallback
+            // for a geometry the biarc cannot fit.
+            let Some(merge) = biarc(after, onto, START_MERGE_RADIUS_M)
+                .or_else(|| join(after, onto, START_MERGE_RADIUS_M))
+            else {
                 continue;
             };
             let turned: f32 = merge
@@ -1140,12 +1310,112 @@ impl TrackProgram {
             if turned > 200.0 {
                 continue;
             }
-            let cost: f32 = merge.iter().map(|s| s.length()).sum::<f32>() + turned * 0.35;
+            // Anything in a merge that isn't turning is a start straight that has not ended —
+            // a straight, or an arc so open it rides as one. Both cost the same.
+            let straight: f32 = merge
+                .iter()
+                .filter(|s| match s {
+                    Segment::Straight { .. } => true,
+                    Segment::Arc { radius, .. } => radius.abs() > TURN_ONE_RADIUS_M * 2.5,
+                })
+                .map(|s| s.length())
+                .sum();
+            // And the sooner it is back on the lap the better: a merge that picks a join a
+            // hundred metres further round is a gentle sweep that reads as more straight.
+            // Published start lines turn 100–180° through 10–46 m radii and are done with it.
+            // And it lands in the corner. A join onto straight track is cheap to build and
+            // reads as a slip road: the pack arrives on the racing line with nothing telling
+            // it where the track goes. Joining where the lap is already turning is what makes
+            // the start straight end in turn one, which is what every real one does.
+            // Two things it is scored on beyond its length: landing well inside turn one, and
+            // turning like one. Published merges turn 100–180° all told; a merge that turns
+            // twenty is a slip road, whatever else is right about it.
+            let into_the_turn = if aim_at_the_corner { (q.s - land_at).abs() } else { 0.0 };
+            // One-way, and the same way as the corner it lands in. An S — right then left —
+            // is what you get joining straight track from a parallel offset, and it rides as
+            // a chicane on the way to a fork. A published start turns *with* turn one and
+            // hands the pack to it already leant over.
+            let ways: Vec<f32> = merge
+                .iter()
+                .filter_map(|s| match s {
+                    Segment::Arc { radius, angle, .. } if angle.abs() > 8.0 => {
+                        Some(radius.signum())
+                    }
+                    _ => None,
+                })
+                .collect();
+            let s_shaped = ways.windows(2).any(|w| w[0] != w[1]);
+            let with_the_corner = match (ways.last(), q.curvature) {
+                (Some(way), k) if k.abs() > 1.0 / TURN_ONE_RADIUS_M => *way == k.signum(),
+                _ => true,
+            };
+            // It may not cross the lap to get there. Reaching a corner two hundred metres round
+            // by sweeping over the main straight is a start straight that runs through the
+            // track — which is the thing this whole spur exists to avoid.
+            let path = TrackProgram {
+                start: after,
+                segments: merge.clone(),
+                features: Vec::new(),
+                elevation: Vec::new(),
+                ..self.clone()
+            };
+            let mut crosses = false;
+            for a in path.stations(3.0) {
+                for b in &st {
+                    let apart = (b.s - q.s).abs().min(self.lap_length() - (b.s - q.s).abs());
+                    // Near the join the two are meant to be together: a start straight and the
+                    // approach it merges into share their ground for the last stretch, which
+                    // is what makes one surface out of two at turn one. What the rule is for
+                    // is the pad lying across a *different* part of the lap.
+                    if apart < 90.0 {
+                        continue;
+                    }
+                    // Nor is the opening straight a thing to cross: the start runs beside it
+                    // by construction, forty metres out, and the pad reaching towards it is
+                    // the whole idea. What matters is the rest of the lap.
+                    if b.s <= run + 10.0 {
+                        continue;
+                    }
+                    // Against the *pad*, not the centreline: the start is 54 m across at the
+                    // gates and still twenty by the middle of the merge, and a line that
+                    // clears the lap by fifteen metres lays its pad straight over it.
+                    let taper = (a.s / (START_SPRINT_M * 0.9).max(1.0)).clamp(0.0, 1.0);
+                    let pad = START_FAN_HALF_M + (self.width * 0.5 - START_FAN_HALF_M) * taper;
+                    // The riding line has to stay outside the pad — that is what "crossing"
+                    // means here. Anything more generous is unsatisfiable on a lap that folds
+                    // back on itself every eighty metres.
+                    let want = pad + 2.0;
+                    if (b.x - a.x).powi(2) + (b.z - a.z).powi(2) < want * want {
+                        crosses = true;
+                        break;
+                    }
+                }
+                if crosses {
+                    break;
+                }
+            }
+            if crosses && keep_clear {
+                continue;
+            }
+            // Landing in the corner is what this is for, so it outweighs everything else. The
+            // straight in a merge still costs — a start straight that has not ended reads as
+            // one — but only enough to break a tie: Indiana runs 90 m of straight before its
+            // own corner, and a gentle approach into turn one is exactly right.
+            let cost: f32 = merge.iter().map(|s| s.length()).sum::<f32>()
+                + straight * 0.6
+                + into_the_turn * 3.0
+                + (TURN_ONE_SWEEP_DEG - turned).max(0.0) * 0.9
+                + if s_shaped { 90.0 } else { 0.0 }
+                + if with_the_corner { 0.0 } else { 90.0 };
             if best.as_ref().map(|b| cost < b.0).unwrap_or(true) {
                 best = Some((cost, merge, q.s));
             }
         }
-        let (_, merge, joins_at) = best?;
+        best
+        };
+        let (_, merge, joins_at) = search(true, true)
+            .or_else(|| search(false, true))
+            .or_else(|| search(false, false))?;
         let mut segments = vec![Segment::Straight { length: START_SPRINT_M, rise: 0.0 }];
         segments.extend(merge.into_iter().filter(|s| s.length() > 0.5));
         Some(StartLine { start, segments, joins_at, side })
