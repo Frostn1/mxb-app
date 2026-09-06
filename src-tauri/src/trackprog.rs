@@ -268,16 +268,21 @@ impl Segment {
 /// The steepest face a jump is allowed, degrees — measured at the lip, which is where an
 /// arc is steepest.
 ///
-/// Thirty because that is the ceiling across every published track measured, not a judgement:
-/// their steepest faces run 19.2–29.6° at the ninetieth percentile and Millville, the steepest
-/// of the ten, does not reach 30. A dirt lip pushed up by a machine cannot stand steeper than
-/// the material holds.
-pub const JUMP_FACE_DEG: f32 = 30.0;
+/// Twenty-seven, which is what a published takeoff measures at its ninetieth percentile.
+///
+/// Thirty is a different number and it was the one here: the ceiling across all ten tracks,
+/// the steepest faces on the steepest of them. Now that the face is an arc the ceiling lands
+/// exactly on the lip, so every jump tall enough for the angle to bind — anything over about
+/// a metre — was built with the steepest lip in the corpus. A generated lap measured 17.8° at
+/// the median face against Indiana's 12.0, which is what "the jumps are too big" turns out to
+/// mean: not their height, which already matches, but that every one of them is as abrupt as
+/// the worst one on a real track.
+pub const JUMP_FACE_DEG: f32 = 27.0;
 
 /// The gentlest face — the one a landing gets. Published landings measure 19.0° at the
 /// ninetieth against a takeoff's 27.0: a built takeoff is short because that is what throws
 /// you, and the landing is long because that is what catches you.
-pub const JUMP_LANDING_DEG: f32 = 22.0;
+pub const JUMP_LANDING_DEG: f32 = 19.0;
 
 /// The steepest a face nobody rides may stand, degrees.
 ///
@@ -290,12 +295,43 @@ pub const JUMP_LANDING_DEG: f32 = 22.0;
 /// the worked example's own jumps stopped being jumpable the moment the faces grew.
 pub const JUMP_CUT_DEG: f32 = 38.0;
 
-/// The shortest a face may be however small the jump.
+/// The shortest deck a tabletop may have, metres.
 ///
-/// The angle alone makes a small jump *worse*: at 30° a 1.2 m double would get a two-metre
-/// face where a flat four gives it twenty-four degrees. The angle is a ceiling on the tall
-/// ones, not a target for all of them.
-pub const JUMP_FACE_MIN_M: f32 = 4.0;
+/// A tabletop is the safe jump precisely because it has a top: land anywhere along it and you
+/// have landed. Its deck was whatever the two faces left of the stated length, and the faces
+/// are sized from the height — so on the four biggest tables of the worked example, 2.5 m and
+/// up, the faces ate the whole length and the two ramps met at a point. That is a double, in
+/// the only way a rider can tell one, and it is why a lap that lists fifteen tabletops rides
+/// as though it has none.
+///
+/// Six because published decks run six to twelve metres across. It is a floor and not a
+/// target: a program that asks for a longer top gets it, and one that asks for a jump too
+/// short for its own height gets a longer footprint instead of a peak.
+pub const TABLETOP_DECK_M: f32 = 6.0;
+
+/// The shortest a takeoff may be however small the jump.
+///
+/// This is what gives a lap a *spread* of faces instead of one. The angle is a ceiling, and a
+/// ceiling alone makes every jump that reaches it identical: at a four-metre floor the angle
+/// bound on anything over 1.07 m, so all but the smallest ground on a track stood at the same
+/// steepest-allowed lip. Published tracks are not like that — Indiana's faces run 12.0° at the
+/// median against 27.4 at the ninetieth, because a small jump there is a long low rise and
+/// only the big ones are abrupt.
+///
+/// Nine metres puts the crossover at 2.16 m. Under it the floor governs and the lip angle
+/// falls with the height — 12.7° at a metre, 18.9° at a metre and a half, 24.9° at two — and
+/// over it the angle takes over at 27. That is the published spread, from the same two numbers.
+pub const JUMP_FACE_MIN_M: f32 = 9.0;
+
+/// The shortest a landing may be, metres. Longer than a takeoff, for the reason
+/// [`JUMP_LANDING_DEG`] is gentler than [`JUMP_FACE_DEG`]: it is the side that catches you.
+pub const JUMP_LANDING_MIN_M: f32 = 12.0;
+
+/// The shortest the back of a lip may be — the short face nobody lands on.
+///
+/// Four, where it has always been. It is the one face a takeoff floor must not reach: the back
+/// of a lip is short on purpose, and stretching it to nine turns every double into a hump.
+pub const JUMP_CUT_MIN_M: f32 = 4.0;
 
 /// The shape of a jump's face: a circle's quadrant, not a smoothstep.
 ///
@@ -337,9 +373,9 @@ pub fn face_arc(t: f32, sweep: f32) -> f32 {
 /// shape was a smoothstep and carried a 1.5 for the same reason — a smoothstep peaks at half
 /// again its average — and this replaces that fudge rather than joining it. Faces come out
 /// about 44% longer, which is the length a built one actually is.
-pub fn face_run(height: f32, deg: f32) -> f32 {
+pub fn face_run(height: f32, deg: f32, min_m: f32) -> f32 {
     let half = (deg * 0.5).to_radians().tan().max(1e-4);
-    (height.abs() / half).max(JUMP_FACE_MIN_M)
+    (height.abs() / half).max(min_m)
 }
 
 /// The sweep angle a face of this run and rise actually turns through, radians.
@@ -386,16 +422,16 @@ impl DoubleFaces {
 }
 
 pub fn double_faces(height: f32, lip: f32) -> DoubleFaces {
-    let ramp = face_run(height, JUMP_FACE_DEG);
+    let ramp = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M);
     // Dumped, not bladed: a smoothstep rather than an arc, so the half-angle relation does
     // not apply and the run is `1.5 h / tan(deg)` — the smoothstep's own peak-to-average.
-    let cut = (1.5 * height.abs() / JUMP_CUT_DEG.to_radians().tan()).max(JUMP_FACE_MIN_M);
+    let cut = (1.5 * height.abs() / JUMP_CUT_DEG.to_radians().tan()).max(JUMP_CUT_MIN_M);
     DoubleFaces {
         // A short lip on a tall jump is a wall whichever side of it you are on.
         ramp: lip.max(ramp),
         back: cut,
         face: cut,
-        run: face_run(height, JUMP_LANDING_DEG),
+        run: face_run(height, JUMP_LANDING_DEG, JUMP_LANDING_MIN_M),
     }
 }
 
@@ -415,11 +451,12 @@ pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
     // tabletop gets a 2.6 m ramp where 27% of a 22 m length gave it 5.9 m — which is the same
     // way round as it bit on the double. The angle is a ceiling for the tall ones, not a
     // target for all of them.
-    let up = face_run(height, JUMP_FACE_DEG).max(length * 0.27);
-    let down = face_run(height, JUMP_LANDING_DEG).max(length * 0.44);
-    // Whatever the asked-for length has left once the faces are in it, and never negative:
-    // a tabletop too short for its own height is a peaked jump, which is a real thing.
-    let top = (length - up - down).max(0.0);
+    let up = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M).max(length * 0.27);
+    let down = face_run(height, JUMP_LANDING_DEG, JUMP_LANDING_MIN_M).max(length * 0.44);
+    // Whatever the asked-for length has left once the faces are in it — but never less than a
+    // deck. The deck wins and the footprint grows; the other way round, keeping the length by
+    // steepening the faces to fit a top inside it, is the same jump built worse.
+    let top = (length - up - down).max(TABLETOP_DECK_M);
     (up, top, down)
 }
 
@@ -875,46 +912,44 @@ pub const EXAMPLE: &str = r#"{
         { "kind": "arc", "radius": -118.9746, "angle": 0.4816 }
       ],
       "features": [
-        { "kind": "roller", "at": 31.2998, "length": 11.3, "height": 0.8 },
-        { "kind": "tabletop", "at": 64.4998, "length": 22.6, "height": 1.5 },
-        { "kind": "stepUp", "at": 97.7998, "length": 20.9, "height": 2 },
-        { "kind": "roller", "at": 130.9998, "length": 14.4, "height": 0.75 },
-        { "kind": "berm", "at": 265.4998, "length": 8, "height": 1.7 },
-        { "kind": "double", "at": 295.6998, "height": 1.5, "gap": 5.0, "lip": 5.5 },
-        { "kind": "roller", "at": 408.6998, "length": 11.1, "height": 0.79 },
-        { "kind": "tabletop", "at": 481.5998, "length": 29.5, "height": 3.4 },
-        { "kind": "roller", "at": 501.8998, "length": 11.6, "height": 0.8 },
-        { "kind": "double", "at": 522.1998, "height": 1.9, "gap": 7.0, "lip": 5.5 },
-        { "kind": "tabletop", "at": 583.1998, "height": 3.6, "length": 20.0 },
-        { "kind": "stepUp", "at": 600.7998, "length": 19.3, "height": 2.2 },
-        { "kind": "roller", "at": 618.3998, "length": 13.5, "height": 0.46 },
-        { "kind": "whoops", "at": 680.4998, "count": 7, "spacing": 4.2, "height": 0.57 },
-        { "kind": "double", "at": 698.9998, "height": 1.2, "gap": 6.0, "lip": 5.5 },
-        { "kind": "tabletop", "at": 748.3998, "length": 20.3, "height": 1.2 },
-        { "kind": "tabletop", "at": 841.8998, "length": 16.9, "height": 1 },
-        { "kind": "double", "at": 859.2998, "height": 1.6, "gap": 6.5, "lip": 5.5 },
-        { "kind": "stepUp", "at": 925.6998, "length": 25.2, "height": 1.9 },
-        { "kind": "roller", "at": 990.5997, "length": 14.8, "height": 0.6 },
-        { "kind": "tabletop", "at": 1064.8998, "length": 24.4, "height": 2.5 },
-        { "kind": "roller", "at": 1090.7998, "length": 14.4, "height": 0.82 },
-        { "kind": "roller", "at": 1116.6998, "length": 13.2, "height": 0.58 },
-        { "kind": "tabletop", "at": 1183.1998, "length": 24.1, "height": 1.1 },
-        { "kind": "tabletop", "at": 1253.8998, "height": 3.6, "length": 22.0 },
-        { "kind": "roller", "at": 1297.0997, "length": 14.6, "height": 0.64 },
-        { "kind": "tabletop", "at": 1340.2998, "length": 17.3, "height": 1.2 },
-        { "kind": "tabletop", "at": 1383.4998, "length": 18.2, "height": 1.4 },
-        { "kind": "roller", "at": 1426.6998, "length": 11.5, "height": 0.77 },
-        { "kind": "whoops", "at": 1524.4998, "count": 7, "spacing": 5, "height": 0.75 },
-        { "kind": "tabletop", "at": 1566.4998, "length": 22.5, "height": 1.6 },
-        { "kind": "tabletop", "at": 1634.8657, "length": 28.7, "height": 2.5 },
-        { "kind": "double", "at": 1657.4657, "height": 1.7, "gap": 7.5, "lip": 5.5 },
-        { "kind": "double", "at": 1680.0657, "height": 1.3, "gap": 6.5, "lip": 5.5 },
-        { "kind": "roller", "at": 1702.7656, "length": 15.9, "height": 0.54 },
-        { "kind": "roller", "at": 1766.7656, "length": 14.3, "height": 0.79 },
-        { "kind": "tabletop", "at": 1782.0657, "length": 19, "height": 1.1 },
-        { "kind": "tabletop", "at": 1833.9657, "length": 18.4, "height": 1.1 },
-        { "kind": "berm", "at": 1857.3657, "length": 15, "height": 1.7 },
-        { "kind": "tabletop", "at": 1873.8658, "length": 31.3, "height": 3.1 }
+        { "kind": "roller", "at": 31.3, "length": 11.3, "height": 0.8 },
+        { "kind": "tabletop", "at": 64.5, "length": 33.0, "height": 1.5 },
+        { "kind": "stepUp", "at": 97.8, "length": 20.9, "height": 2.0 },
+        { "kind": "roller", "at": 131.0, "length": 14.4, "height": 0.75 },
+        { "kind": "berm", "at": 265.5, "length": 8.0, "height": 1.7 },
+        { "kind": "tabletop", "at": 295.7, "length": 30.0, "height": 1.5 },
+        { "kind": "roller", "at": 408.7, "length": 11.1, "height": 0.79 },
+        { "kind": "tabletop", "at": 481.6, "length": 21.0, "height": 3.4 },
+        { "kind": "roller", "at": 540.0, "length": 11.6, "height": 0.8 },
+        { "kind": "roller", "at": 565.0, "length": 12.0, "height": 0.6 },
+        { "kind": "tabletop", "at": 600.0, "length": 22.0, "height": 3.6 },
+        { "kind": "stepUp", "at": 655.0, "length": 19.3, "height": 2.2 },
+        { "kind": "whoops", "at": 690.0, "count": 7, "spacing": 4.2, "height": 0.57 },
+        { "kind": "roller", "at": 725.0, "length": 13.0, "height": 0.8 },
+        { "kind": "roller", "at": 800.0, "length": 14.0, "height": 0.8 },
+        { "kind": "roller", "at": 845.0, "length": 15.0, "height": 0.85 },
+        { "kind": "tabletop", "at": 870.0, "length": 30.0, "height": 1.6 },
+        { "kind": "stepUp", "at": 925.7, "length": 25.2, "height": 1.9 },
+        { "kind": "roller", "at": 990.6, "length": 14.8, "height": 0.6 },
+        { "kind": "tabletop", "at": 1064.9, "length": 20.0, "height": 2.5 },
+        { "kind": "roller", "at": 1110.0, "length": 14.4, "height": 0.82 },
+        { "kind": "roller", "at": 1135.0, "length": 13.2, "height": 0.58 },
+        { "kind": "tabletop", "at": 1183.2, "length": 24.0, "height": 1.3 },
+        { "kind": "tabletop", "at": 1253.9, "length": 22.0, "height": 3.6 },
+        { "kind": "roller", "at": 1310.0, "length": 14.6, "height": 0.64 },
+        { "kind": "tabletop", "at": 1340.3, "length": 26.0, "height": 1.5 },
+        { "kind": "roller", "at": 1383.5, "length": 15.0, "height": 0.85 },
+        { "kind": "roller", "at": 1426.7, "length": 11.5, "height": 0.77 },
+        { "kind": "tabletop", "at": 1450.0, "length": 20.0, "height": 3.1 },
+        { "kind": "whoops", "at": 1524.5, "count": 7, "spacing": 5.0, "height": 0.75 },
+        { "kind": "tabletop", "at": 1566.5, "length": 30.0, "height": 1.6 },
+        { "kind": "tabletop", "at": 1634.9, "length": 20.0, "height": 2.5 },
+        { "kind": "roller", "at": 1685.0, "length": 13.0, "height": 0.65 },
+        { "kind": "double", "at": 1706.0, "height": 1.3, "gap": 2.0, "lip": 5.5 },
+        { "kind": "roller", "at": 1766.8, "length": 14.3, "height": 0.79 },
+        { "kind": "roller", "at": 1790.0, "length": 15.0, "height": 0.7 },
+        { "kind": "berm", "at": 1830.0, "length": 15.0, "height": 1.7 },
+        { "kind": "tabletop", "at": 1874.0, "length": 27.0, "height": 1.1 }
       ]
     }"#;
 
@@ -1972,7 +2007,7 @@ mod tests {
         // the rider leaves the ground, which is why a jump built on one rode like a roller
         // however tall it stood.
         for height in [1.0f32, 2.5, 4.0] {
-            let run = face_run(height, JUMP_FACE_DEG);
+            let run = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M);
             let s = face_slopes(height, run);
             let peak = s.iter().copied().fold(f32::MIN, f32::max);
             assert!(s[0].abs() < 0.5, "the foot leaves the ground tangent: {:.2}°", s[0]);
@@ -1995,7 +2030,7 @@ mod tests {
         // Sized by the half-angle, so the ceiling lands on the lip rather than being
         // overshot there the way the smoothstep's 1.5 fudge had to correct for.
         for height in [0.4f32, 1.0, 2.5, 4.0, 5.9] {
-            let run = face_run(height, JUMP_FACE_DEG);
+            let run = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M);
             let peak = face_slopes(height, run).into_iter().fold(f32::MIN, f32::max);
             assert!(peak <= JUMP_FACE_DEG + 0.1, "{height} m peaks at {peak:.2}°");
             // And a jump held above the minimum length is not made gentler than it is:

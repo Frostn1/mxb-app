@@ -3,6 +3,17 @@
 ## 2026-09-06
 
 ### Changed
+- Jumps are shaped the way built ones are. A takeoff now stands at the angle a published one
+  measures rather than at the steepest in the whole corpus, and a small jump is a long low rise
+  instead of carrying the same lip as a big one — so a lap has a range of jumps in it rather
+  than thirty of the same abrupt shape.
+- Every tabletop has a top. A tall one used to have its deck eaten by its own two ramps and
+  came out as a peak, which rides as a double however it was written.
+- The worked example carries the mix a published lap does: a handful of big jumps, and the
+  rest ground under a metre.
+- Ground edges wander. Where the riding line meets the shoulder, and the shoulder the grass,
+  the paint fades across the boundary and the boundary itself wanders, so the track reads as
+  ground somebody dug rather than as a stripe with a stepped edge.
 - Generated tracks are marked the way a real one is: a line of little white plastic stakes
   down each edge of the riding line, at the track edge and every six and a half metres. They
   are half the size they were, which is what lets them stand that close without the edge

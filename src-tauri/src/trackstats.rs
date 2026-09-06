@@ -1824,4 +1824,161 @@ mod tests {
 
     }
 
+
+    /// Every jump on a lap as a shape rather than a height: its footprint, how much flat deck
+    /// sits on top of it, and how steep the two faces are.
+    ///
+    /// The pooled `lip_height_m` is a prominence against a sixty-metre mean, and a jump long
+    /// enough hides inside its own window — so a table that reads 1.9 m there can still be the
+    /// 3.6 m the program asked for. This prints the shape, which is the thing to compare.
+    ///
+    /// ```text
+    /// FROST_TRACK=…/indiana.pkz cargo test -- --ignored --nocapture jump_profiles
+    /// ```
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn jump_profiles() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK to a track .pkz/folder");
+        let path = Path::new(&var);
+        let names = track::entry_names(path).unwrap();
+        let entry = track::heightfield_entries(&names).into_iter().next().expect("a heightfield");
+        let bytes = track::read_entry(path, &entry).unwrap();
+        let layout = heightfield::probe(&bytes, None).expect("a terrain grid");
+        let mps_src = layout.metres_per_sample.expect("a stated footprint");
+        let size_x = mps_src * (layout.width.max(2) - 1) as f32;
+        let size_z = mps_src * (layout.height.max(2) - 1) as f32;
+        let block_at =
+            layout.offset + layout.width as usize * layout.height as usize * layout.sample.size();
+        let block = bytes.get(block_at..).unwrap_or(&[]);
+        let lap = crate::trackline::read(block).expect("a centreline");
+        let (fw, fh, v) = heightfield::read_grid(&bytes, &layout, layout.width.max(layout.height));
+        let g = Grid { w: fw as usize, h: fh as usize, size_x, size_z, v };
+
+        let n = (2.0 * RIDDEN_REACH_M / RIDDEN_LATERAL_M) as usize + 1;
+        let u_at = |i: usize| i as f32 * RIDDEN_LATERAL_M - RIDDEN_REACH_M;
+        let mut along: Vec<f32> = Vec::new();
+        for seg in &lap.segments {
+            let steps = ((seg.length / RIDDEN_STEP_M) as usize).max(1);
+            for k in 0..steps {
+                let d = k as f32 * seg.length / steps as f32;
+                let (x, z, h) = if seg.radius == 0.0 {
+                    let (hx, hz) = crate::trackprog::heading_vector(seg.heading);
+                    (seg.x + d * hx, seg.z + d * hz, seg.heading)
+                } else {
+                    let h = seg.heading + d / seg.radius;
+                    (
+                        seg.x + seg.radius * (seg.heading.cos() - h.cos()),
+                        seg.z + seg.radius * (h.sin() - seg.heading.sin()),
+                        h,
+                    )
+                };
+                let (rx, rz) = crate::trackprog::right_vector(h);
+                let mut band: Vec<f32> = (0..n)
+                    .filter(|i| u_at(*i).abs() <= 3.0)
+                    .map(|i| g.at(x + u_at(i) * rx, z + u_at(i) * rz))
+                    .collect();
+                band.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                along.push(band[band.len() / 2]);
+            }
+        }
+
+        // A longer baseline than the pooled statistic uses, because a big table is longer than
+        // sixty metres end to end and vanishes into its own window at that width.
+        let base = smooth_ring(&along, (140.0 / RIDDEN_STEP_M / 2.0) as usize, true);
+        let rel: Vec<f32> = (0..along.len()).map(|i| along[i] - base[i]).collect();
+        let m = rel.len();
+        const DECK_M: f32 = 0.12;
+
+        let mut rows: Vec<(f32, f32, f32, f32, f32, f32)> = Vec::new();
+        for i in 0..m {
+            if !(rel[i] >= rel[(i + m - 1) % m] && rel[i] > rel[(i + 1) % m]) {
+                continue;
+            }
+            let (mut l, mut k) = (0usize, 0usize);
+            while l < m / 2 && rel[(i + m - l - 1) % m] <= rel[(i + m - l) % m] {
+                l += 1;
+            }
+            while k < m / 2 && rel[(i + k + 1) % m] <= rel[(i + k) % m] {
+                k += 1;
+            }
+            let prom = (rel[i] - rel[(i + m - l) % m]).min(rel[i] - rel[(i + k) % m]);
+            if prom < RIDDEN_LIP_M {
+                continue;
+            }
+            let mut a = 0usize;
+            while a < l && rel[(i + m - a - 1) % m] >= rel[i] - DECK_M {
+                a += 1;
+            }
+            let mut b = 0usize;
+            while b < k && rel[(i + b + 1) % m] >= rel[i] - DECK_M {
+                b += 1;
+            }
+            let deck = (a + b) as f32 * RIDDEN_STEP_M;
+            let foot = (l + k) as f32 * RIDDEN_STEP_M;
+            let span = (3.0 / RIDDEN_STEP_M) as usize;
+            let (mut up, mut down) = (0.0f32, 0.0f32);
+            for t in 0..l.saturating_sub(span) {
+                let p = (i + m - l + t) % m;
+                up = up.max((along[(p + span) % m] - along[p]) / 3.0);
+            }
+            for t in 0..k.saturating_sub(span) {
+                let p = (i + t) % m;
+                down = down.max((along[p] - along[(p + span) % m]) / 3.0);
+            }
+            rows.push((
+                i as f32 * RIDDEN_STEP_M,
+                prom,
+                deck,
+                foot,
+                up.atan().to_degrees(),
+                down.atan().to_degrees(),
+            ));
+        }
+        rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let mut kept: Vec<(f32, f32, f32, f32, f32, f32)> = Vec::new();
+        for r in rows {
+            match kept.last_mut() {
+                Some(p) if r.0 - p.0 < 6.0 => {
+                    if r.1 > p.1 {
+                        *p = r;
+                    }
+                }
+                _ => kept.push(r),
+            }
+        }
+
+        println!(
+            "\n{}  —  {:.0} m lap\n      at      h    deck  footprint   up   down",
+            path.file_stem().unwrap_or_default().to_string_lossy(),
+            lap.length,
+        );
+        for r in &kept {
+            println!(
+                "  {:>6.0} {:>6.2} {:>6.1} {:>9.1} {:>5.1} {:>6.1}{}",
+                r.0, r.1, r.2, r.3, r.4, r.5,
+                if r.1 >= 1.0 { "  <" } else { "" },
+            );
+        }
+        let big: Vec<_> = kept.iter().filter(|r| r.1 >= 1.0).collect();
+        let tables = big.iter().filter(|r| r.2 >= 5.0).count();
+        let mut decks: Vec<f32> = big.iter().map(|r| r.2).collect();
+        decks.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mut hs: Vec<f32> = big.iter().map(|r| r.1).collect();
+        hs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        println!(
+            "\n  {} lips, {} over 1 m ({:.1}/km); of those {} carry a deck of 5 m or more",
+            kept.len(),
+            big.len(),
+            big.len() as f32 / (lap.length / 1000.0),
+            tables,
+        );
+        if !big.is_empty() {
+            println!(
+                "  over 1 m: h p50 {:.2} max {:.2}   deck p50 {:.1} m max {:.1} m",
+                hs[hs.len() / 2], hs[hs.len() - 1],
+                decks[decks.len() / 2], decks[decks.len() - 1],
+            );
+        }
+    }
+
 }

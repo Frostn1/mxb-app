@@ -484,7 +484,39 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
         }
     }
 
-    // 5. Fit the height budget. It exists only because samples are quantised against it, and
+    // 5. Slide back anything that runs off the end of the lap.
+    //
+    //    Also arithmetic, and also a thing the model gets wrong in one direction only: it
+    //    places a feature by where it wants it and does not add up the footprint, which it
+    //    cannot see anyway — a jump's ramps are sized from its height by code the model has
+    //    never been shown. Sending "the roller at 1285 m ends 34 m past the finish" back is
+    //    asking it to do that arithmetic blind, and four attempts in a row came back with the
+    //    same overrun and the loop gave up with nothing.
+    //
+    //    Moved rather than shortened: a feature's length is what it is for, and where it sits
+    //    is the part with slack in it.
+    {
+        let lap = prog.lap_length();
+        let mut moved: Vec<String> = Vec::new();
+        for f in &mut prog.features {
+            let end = f.at() + f.length();
+            if end <= lap {
+                continue;
+            }
+            let want = (lap - f.length()).max(0.0);
+            moved.push(format!("{} at {:.0} m goes to {want:.0}", f.name(), f.at()));
+            *f.at_mut() = want;
+        }
+        if !moved.is_empty() {
+            done.push(format!(
+                "moved {} feature(s) back inside the lap — {}",
+                moved.len(),
+                moved.join(", ")
+            ));
+        }
+    }
+
+    // 6. Fit the height budget. It exists only because samples are quantised against it, and
     //    it is a number the synthesiser already knows — there was never a reason to make the
     //    model guess it and then be told off for guessing wrong.
     if let Ok(fitted) = crate::tracksynth::with_fitted_budget(prog) {
