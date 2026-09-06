@@ -232,20 +232,26 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
     //    After the closing, because rotating a lap that doesn't meet itself moves the part
     //    that comes after the seam by however far the gap is.
     if prog.opening_straight() < crate::trackprog::START_STRAIGHT_M {
+        let need = crate::trackprog::START_STRAIGHT_M;
         let features = prog.features.clone();
-        let on_a_feature = |at: f32| {
-            features
+        // Nothing built on the stretch a start needs. Forty riders leave the gate abreast and
+        // reach the first jump in a pack, so a start straight is bare ground — and a jump that
+        // began before the new start line would be left straddling the finish.
+        let clear_from = |at: f32| {
+            !features
                 .iter()
-                .any(|f| at > f.at() + 0.01 && at < f.at() + f.length() - 0.01)
+                .any(|f| f.at() + f.length() > at + 0.01 && f.at() < at + need - 0.01)
         };
         let runs = prog.straight_runs();
-        // The longest straight the lap has, preferring one whose beginning isn't under a jump
-        // — starting there would leave the jump straddling the finish.
         let longest = |it: &mut dyn Iterator<Item = &(usize, f32, f32)>| {
             it.max_by(|a, b| a.2.total_cmp(&b.2)).copied()
         };
-        let best = longest(&mut runs.iter().filter(|(_, at, _)| !on_a_feature(*at)))
-            .or_else(|| longest(&mut runs.iter()));
+        // Long enough and clear first; failing that, the longest the lap has — a start on a
+        // short straight still beats one laid round a bend.
+        let best = longest(
+            &mut runs.iter().filter(|(_, at, len)| *len >= need && clear_from(*at)),
+        )
+        .or_else(|| longest(&mut runs.iter()));
         if let Some((index, at, len)) = best {
             if len > prog.opening_straight() + 5.0 {
                 prog.rotate_start(index);

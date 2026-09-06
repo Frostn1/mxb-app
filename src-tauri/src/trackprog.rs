@@ -537,7 +537,7 @@ impl Feature {
 /// not star-shaped: Indiana folds back across its own infield four times. A loop grown on a
 /// lattice folds as often as it likes and is still simple, so it cannot cross either.
 ///
-/// It begins on a 90 m straight, because that is where a start goes: the gate row, the finish
+/// It begins on its longest straight, all 145 m of it, because that is where a start goes: the gate row, the finish
 /// line and the run at turn one all sit on the lap's opening straight, and a lap that opens on
 /// a corner puts forty gates round a bend. Turned round to start there rather than redrawn —
 /// see [`TrackProgram::rotate_start`], and the printer beside its tests.
@@ -558,28 +558,8 @@ pub const EXAMPLE: &str = r#"{
         "sizeX": 500.0, "sizeZ": 500.0, "samples": 2049, "scale": 63.0,
         "relief": { "amplitude": 7.0, "wavelength": 420.0, "seed": 3, "tilt": 26.0, "tiltAngle": 35.0, "landforms": 6, "landformHeight": 18.0 }
       },
-      "start": { "x": 280.64, "z": 204.04, "angle": 181.98 },
+      "start": { "x": 336.20, "z": 61.04, "angle": 272.27 },
       "segments": [
-        { "kind": "straight", "length": 90.3427 },
-        { "kind": "arc", "radius": -29.7662, "angle": 15.3989 },
-        { "kind": "arc", "radius": -12.1796, "angle": 32.9296 },
-        { "kind": "arc", "radius": -14.3360, "angle": 35.9696 },
-        { "kind": "arc", "radius": -26.7612, "angle": 17.1280 },
-        { "kind": "arc", "radius": -62.8691, "angle": 10.0249 },
-        { "kind": "straight", "length": 14.8925 },
-        { "kind": "arc", "radius": 85.2827, "angle": 2.0155 },
-        { "kind": "straight", "length": 8.0000 },
-        { "kind": "arc", "radius": 58.4038, "angle": 6.6786 },
-        { "kind": "arc", "radius": 30.0985, "angle": 17.1325 },
-        { "kind": "arc", "radius": 20.2107, "angle": 34.8569 },
-        { "kind": "arc", "radius": 58.4731, "angle": 11.9787 },
-        { "kind": "arc", "radius": 81.8716, "angle": 8.8265 },
-        { "kind": "arc", "radius": 48.2785, "angle": 9.4942 },
-        { "kind": "arc", "radius": 16.6843, "angle": 24.0389 },
-        { "kind": "arc", "radius": 11.4412, "angle": 75.1175 },
-        { "kind": "arc", "radius": 36.3257, "angle": 12.0854 },
-        { "kind": "straight", "length": 24.1297 },
-        { "kind": "arc", "radius": -118.9746, "angle": 0.4816 },
         { "kind": "straight", "length": 145.1504 },
         { "kind": "arc", "radius": 63.4878, "angle": 8.1222 },
         { "kind": "arc", "radius": 24.3538, "angle": 16.4685 },
@@ -696,49 +676,69 @@ pub const EXAMPLE: &str = r#"{
         { "kind": "arc", "radius": -12.8808, "angle": 31.1370 },
         { "kind": "arc", "radius": -32.8954, "angle": 13.9340 },
         { "kind": "straight", "length": 11.1325 },
-        { "kind": "arc", "radius": 125.4045, "angle": 0.9138 }
+        { "kind": "arc", "radius": 125.4045, "angle": 0.9138 },
+        { "kind": "straight", "length": 90.3427 },
+        { "kind": "arc", "radius": -29.7662, "angle": 15.3989 },
+        { "kind": "arc", "radius": -12.1796, "angle": 32.9296 },
+        { "kind": "arc", "radius": -14.3360, "angle": 35.9696 },
+        { "kind": "arc", "radius": -26.7612, "angle": 17.1280 },
+        { "kind": "arc", "radius": -62.8691, "angle": 10.0249 },
+        { "kind": "straight", "length": 14.8925 },
+        { "kind": "arc", "radius": 85.2827, "angle": 2.0155 },
+        { "kind": "straight", "length": 8.0000 },
+        { "kind": "arc", "radius": 58.4038, "angle": 6.6786 },
+        { "kind": "arc", "radius": 30.0985, "angle": 17.1325 },
+        { "kind": "arc", "radius": 20.2107, "angle": 34.8569 },
+        { "kind": "arc", "radius": 58.4731, "angle": 11.9787 },
+        { "kind": "arc", "radius": 81.8716, "angle": 8.8265 },
+        { "kind": "arc", "radius": 48.2785, "angle": 9.4942 },
+        { "kind": "arc", "radius": 16.6843, "angle": 24.0389 },
+        { "kind": "arc", "radius": 11.4412, "angle": 75.1175 },
+        { "kind": "arc", "radius": 36.3257, "angle": 12.0854 },
+        { "kind": "straight", "length": 24.1297 },
+        { "kind": "arc", "radius": -118.9746, "angle": 0.4816 }
       ],
       "features": [
-        { "kind": "tabletop", "at": 4.6674767, "length": 28.7, "height": 2.5 },
-        { "kind": "double", "at": 27.267479, "height": 1.7, "gap": 10.2, "lip": 5.5 },
-        { "kind": "double", "at": 49.867477, "height": 1.3, "gap": 8.9, "lip": 5.5 },
-        { "kind": "roller", "at": 72.567474, "length": 15.9, "height": 0.54 },
-        { "kind": "roller", "at": 136.56747, "length": 14.3, "height": 0.79 },
-        { "kind": "tabletop", "at": 151.86748, "length": 19.0, "height": 1.1 },
-        { "kind": "tabletop", "at": 203.76747, "length": 18.4, "height": 1.1 },
-        { "kind": "berm", "at": 227.16748, "length": 15.0, "height": 1.7 },
-        { "kind": "tabletop", "at": 272.96747, "length": 31.3, "height": 3.1 },
-        { "kind": "roller", "at": 306.26746, "length": 11.3, "height": 0.8 },
-        { "kind": "tabletop", "at": 339.46747, "length": 22.6, "height": 1.5 },
-        { "kind": "stepUp", "at": 372.76746, "length": 20.9, "height": 2.0 },
-        { "kind": "roller", "at": 405.96747, "length": 14.4, "height": 0.75 },
-        { "kind": "berm", "at": 540.46747, "length": 8.0, "height": 1.7 },
-        { "kind": "double", "at": 570.6675, "height": 1.5, "gap": 8.8, "lip": 5.5 },
-        { "kind": "roller", "at": 683.6675, "length": 11.1, "height": 0.79 },
-        { "kind": "tabletop", "at": 756.5675, "length": 29.5, "height": 3.4 },
-        { "kind": "roller", "at": 776.8675, "length": 11.6, "height": 0.8 },
-        { "kind": "double", "at": 797.1675, "height": 1.9, "gap": 9.2, "lip": 5.5 },
-        { "kind": "double", "at": 858.1675, "height": 3.6, "gap": 14.6, "lip": 6.0 },
-        { "kind": "stepUp", "at": 875.7675, "length": 19.3, "height": 2.2 },
-        { "kind": "roller", "at": 893.3675, "length": 13.5, "height": 0.46 },
-        { "kind": "whoops", "at": 955.46747, "count": 7, "spacing": 4.2, "height": 0.57 },
-        { "kind": "double", "at": 973.96747, "height": 1.2, "gap": 12.7, "lip": 5.5 },
-        { "kind": "tabletop", "at": 1023.3675, "length": 20.3, "height": 1.2 },
-        { "kind": "tabletop", "at": 1116.8674, "length": 16.9, "height": 1.0 },
-        { "kind": "double", "at": 1134.2675, "height": 1.6, "gap": 8.2, "lip": 5.5 },
-        { "kind": "stepUp", "at": 1200.6675, "length": 25.2, "height": 1.9 },
-        { "kind": "roller", "at": 1265.5674, "length": 14.8, "height": 0.6 },
-        { "kind": "tabletop", "at": 1339.8674, "length": 24.4, "height": 2.5 },
-        { "kind": "roller", "at": 1365.7675, "length": 14.4, "height": 0.82 },
-        { "kind": "roller", "at": 1391.6675, "length": 13.2, "height": 0.58 },
-        { "kind": "tabletop", "at": 1458.1675, "length": 24.1, "height": 1.1 },
-        { "kind": "double", "at": 1528.8674, "height": 3.6, "gap": 16.4, "lip": 6.0 },
-        { "kind": "roller", "at": 1572.0674, "length": 14.6, "height": 0.64 },
-        { "kind": "tabletop", "at": 1615.2675, "length": 17.3, "height": 1.2 },
-        { "kind": "tabletop", "at": 1658.4674, "length": 18.2, "height": 1.4 },
-        { "kind": "roller", "at": 1701.6675, "length": 11.5, "height": 0.77 },
-        { "kind": "whoops", "at": 1799.4674, "count": 7, "spacing": 5.0, "height": 0.75 },
-        { "kind": "tabletop", "at": 1841.4674, "length": 22.5, "height": 1.6 }
+        { "kind": "roller", "at": 31.299774, "length": 11.3, "height": 0.8 },
+        { "kind": "tabletop", "at": 64.49979, "length": 22.6, "height": 1.5 },
+        { "kind": "stepUp", "at": 97.799774, "length": 20.9, "height": 2.0 },
+        { "kind": "roller", "at": 130.99979, "length": 14.4, "height": 0.75 },
+        { "kind": "berm", "at": 265.4998, "length": 8.0, "height": 1.7 },
+        { "kind": "double", "at": 295.6998, "height": 1.5, "gap": 8.8, "lip": 5.5 },
+        { "kind": "roller", "at": 408.6998, "length": 11.1, "height": 0.79 },
+        { "kind": "tabletop", "at": 481.59982, "length": 29.5, "height": 3.4 },
+        { "kind": "roller", "at": 501.8998, "length": 11.6, "height": 0.8 },
+        { "kind": "double", "at": 522.1998, "height": 1.9, "gap": 9.2, "lip": 5.5 },
+        { "kind": "double", "at": 583.1998, "height": 3.6, "gap": 14.6, "lip": 6.0 },
+        { "kind": "stepUp", "at": 600.7998, "length": 19.3, "height": 2.2 },
+        { "kind": "roller", "at": 618.3998, "length": 13.5, "height": 0.46 },
+        { "kind": "whoops", "at": 680.49976, "count": 7, "spacing": 4.2, "height": 0.57 },
+        { "kind": "double", "at": 698.99976, "height": 1.2, "gap": 12.7, "lip": 5.5 },
+        { "kind": "tabletop", "at": 748.3998, "length": 20.3, "height": 1.2 },
+        { "kind": "tabletop", "at": 841.8998, "length": 16.9, "height": 1.0 },
+        { "kind": "double", "at": 859.2998, "height": 1.6, "gap": 8.2, "lip": 5.5 },
+        { "kind": "stepUp", "at": 925.6998, "length": 25.2, "height": 1.9 },
+        { "kind": "roller", "at": 990.59973, "length": 14.8, "height": 0.6 },
+        { "kind": "tabletop", "at": 1064.8998, "length": 24.4, "height": 2.5 },
+        { "kind": "roller", "at": 1090.7998, "length": 14.4, "height": 0.82 },
+        { "kind": "roller", "at": 1116.6998, "length": 13.2, "height": 0.58 },
+        { "kind": "tabletop", "at": 1183.1998, "length": 24.1, "height": 1.1 },
+        { "kind": "double", "at": 1253.8998, "height": 3.6, "gap": 16.4, "lip": 6.0 },
+        { "kind": "roller", "at": 1297.0997, "length": 14.6, "height": 0.64 },
+        { "kind": "tabletop", "at": 1340.2998, "length": 17.3, "height": 1.2 },
+        { "kind": "tabletop", "at": 1383.4998, "length": 18.2, "height": 1.4 },
+        { "kind": "roller", "at": 1426.6998, "length": 11.5, "height": 0.77 },
+        { "kind": "whoops", "at": 1524.4998, "count": 7, "spacing": 5.0, "height": 0.75 },
+        { "kind": "tabletop", "at": 1566.4998, "length": 22.5, "height": 1.6 },
+        { "kind": "tabletop", "at": 1634.8657, "length": 28.7, "height": 2.5 },
+        { "kind": "double", "at": 1657.4657, "height": 1.7, "gap": 10.2, "lip": 5.5 },
+        { "kind": "double", "at": 1680.0657, "height": 1.3, "gap": 8.9, "lip": 5.5 },
+        { "kind": "roller", "at": 1702.7656, "length": 15.9, "height": 0.54 },
+        { "kind": "roller", "at": 1766.7656, "length": 14.3, "height": 0.79 },
+        { "kind": "tabletop", "at": 1782.0657, "length": 19.0, "height": 1.1 },
+        { "kind": "tabletop", "at": 1833.9657, "length": 18.4, "height": 1.1 },
+        { "kind": "berm", "at": 1857.3657, "length": 15.0, "height": 1.7 },
+        { "kind": "tabletop", "at": 1873.8658, "length": 31.3, "height": 3.1 }
       ]
     }"#;
 
@@ -880,6 +880,9 @@ impl TrackProgram {
         let lap = self.lap_length();
         let shift: f32 = self.segments[..index].iter().map(|s| s.length()).sum();
         self.start = end_pose(self.start, &self.segments[..index]);
+        // Back into a circle: the walk adds every turn to the heading, so starting partway
+        // round a lap that turns 2651° leaves the pose facing 541 degrees.
+        self.start.angle = self.start.angle.rem_euclid(360.0);
         self.segments.rotate_left(index);
 
         for f in &mut self.features {
@@ -1239,18 +1242,20 @@ mod tests {
     fn print_the_example_started_on_its_straight() {
         let mut p: TrackProgram = serde_json::from_str(EXAMPLE).unwrap();
         let features = p.features.clone();
-        let on_a_feature = |at: f32| {
-            features
-                .iter()
-                .any(|f| at > f.at() + 0.01 && at < f.at() + f.length() - 0.01)
+        let clear_from = |at: f32| {
+            !features.iter().any(|f| {
+                f.at() + f.length() > at + 0.01 && f.at() < at + START_STRAIGHT_M - 0.01
+            })
         };
         let runs = p.straight_runs();
         let longest = |it: &mut dyn Iterator<Item = &(usize, f32, f32)>| {
             it.max_by(|a, b| a.2.total_cmp(&b.2)).copied()
         };
-        let (index, _, len) = longest(&mut runs.iter().filter(|(_, at, _)| !on_a_feature(*at)))
-            .or_else(|| longest(&mut runs.iter()))
-            .expect("a straight to start on");
+        let (index, _, len) = longest(
+            &mut runs.iter().filter(|(_, at, len)| *len >= START_STRAIGHT_M && clear_from(*at)),
+        )
+        .or_else(|| longest(&mut runs.iter()))
+        .expect("a straight to start on");
         p.rotate_start(index);
         println!("// {len:.0} m opening straight, closes to {:.2} m", p.closure_error());
         println!(
