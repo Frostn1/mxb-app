@@ -2,6 +2,20 @@
 
 ## 2026-09-06
 
+### Changed
+- The start straight ends in turn one. It runs down the outside of the first corner and joins
+  the lap inside it, so the gate drop delivers you into the turn instead of onto a piece of
+  track with no clue which way it goes.
+- The riding line is lighter. Under the track's own sky a line at the colour a soil sheet
+  measures on its own was one you could not find; the gap to the field that makes a line
+  visible is still there, and the line now reads at speed.
+- The sky is a band round the horizon rather than a lid. A closed dome put the whole track in
+  its own shadow, which is what made the ground so dark.
+- Marker boards are thinner on the ground, blocks are plain white and laid in a line along the
+  outside of a corner rather than scattered, and a few trees stand in the infield.
+
+## 2026-09-06
+
 ### Added
 - A wood behind the track. The tracks people rate carry thousands of trees past 60 m and only
   a handful trackside, so that is what a built track gets now — a backdrop of mixed pine and

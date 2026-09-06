@@ -31,7 +31,7 @@ const STAKE_OFF_M: f32 = 7.5;
 /// of a baked mesh rather than one object — so a banner made of four quads counted as four
 /// banners three metres apart. Read literally it put 1272 boards round a lap and the track
 /// looked fenced in by its own edge marking.
-const STAKE_GAP_M: f32 = 6.0;
+const STAKE_GAP_M: f32 = 9.0;
 const STAKE_H_M: f32 = 1.15;
 /// A stake is a stake: thin enough that what you see is a line of points, not a wall.
 const STAKE_W_M: f32 = 0.07;
@@ -82,6 +82,10 @@ const TREE_TO_M: f32 = 58.0;
 const TREE_SPACING_M: f32 = 45.0;
 const TREE_H_M: f32 = 8.0;
 
+/// How high the sky band reaches, in degrees above the horizon — below the sun, which stands
+/// at 54°. See `dome_mesh`.
+const SKY_TOP_DEG: f32 = 34.0;
+
 /// How far apart the poles and the parked vans go, from the per-kilometre counts above.
 const POLE_GAP_M: f32 = 50.0;
 const POLE_H_M: f32 = 7.5;
@@ -90,6 +94,11 @@ const VAN_GAP_M: f32 = 40.0;
 /// The backdrop: where the wood starts, and how thickly it stands out to the edge of the plot.
 const WOOD_FROM_M: f32 = 64.0;
 const WOOD_STEP_M: f32 = 9.0;
+
+/// How close to the track a tree may stand when it is inside the lap rather than behind it,
+/// and how few of the candidates there are taken.
+const INFIELD_TREE_FROM_M: f32 = 30.0;
+const INFIELD_TREE_SHARE: f32 = 0.16;
 
 /// How much of the wood is pine. A wood of one tree is wallpaper; the venues this is measured
 /// against are half conifer, and the silhouette is most of what says where you are.
@@ -361,29 +370,30 @@ fn gate_sheet() -> Texture {
 ///
 /// UVs put the trunk in the left half of the sheet and the foliage in the right; see
 /// [`tree_sheet`].
-/// The sky, as a dome over the whole plot.
+/// The sky, as a band round the horizon rather than a lid over the plot.
 ///
-/// Every track people rate ships one — Mt Morris carries `dome_R26.edf` inside its own `.pkz`
-/// — and a track without one gets whatever the game draws by default, which is the same sky
-/// on every generated track. It is drawn from the inside: a hemisphere whose faces point in,
-/// big enough that the plot sits well within it.
+/// A closed dome is what a track ships — Mt Morris carries `dome_R26.edf` — but a closed dome
+/// built here came out *dark*: TerrainEd bakes shadow volumes from every scene in the file,
+/// the sun stands 54° up, and a lid over the whole plot puts the entire track in its shadow.
+/// The riding line went from dark brown to unreadable.
+///
+/// Open above [`SKY_TOP_DEG`] and the sun comes through, while the part a rider actually sees
+/// — the horizon and a little way up from it — is still the track's own. Looking straight up
+/// gets the game's sky, which is no loss on a bike.
 fn dome_mesh(radius: f32) -> Mesh {
-    const RINGS: usize = 8;
+    const RINGS: usize = 5;
     const SIDES: usize = 24;
     let mut m = Mesh::default();
+    let top = SKY_TOP_DEG.to_radians().tan();
     let mut ring_at = |mesh: &mut Mesh, t: f32| -> u32 {
         let start = mesh.vertex_count() as u32;
-        // `t` runs 0 at the horizon to 1 at the zenith, eased so the ring spacing tightens
-        // where the eye is — near the horizon.
-        let phi = t * std::f32::consts::FRAC_PI_2;
-        let (y, r) = (radius * phi.sin() * 0.55, radius * phi.cos());
+        let y = radius * top * t;
         for k in 0..=SIDES {
             let a = std::f32::consts::TAU * k as f32 / SIDES as f32;
-            let (x, z) = (a.sin() * r, a.cos() * r);
+            let (x, z) = (a.sin() * radius, a.cos() * radius);
             mesh.positions.extend_from_slice(&[x, y, z]);
-            // Facing inwards: this is a lid, and it is looked at from underneath.
-            let l = (x * x + y * y + z * z).sqrt().max(1e-4);
-            mesh.normals.extend_from_slice(&[-x / l, -y / l, -z / l]);
+            let l = (x * x + z * z).sqrt().max(1e-4);
+            mesh.normals.extend_from_slice(&[-x / l, 0.0, -z / l]);
             mesh.uvs.extend_from_slice(&[k as f32 / SIDES as f32 * 4.0, 1.0 - t]);
         }
         start
@@ -394,7 +404,6 @@ fn dome_mesh(radius: f32) -> Mesh {
         for k in 0..SIDES as u32 {
             let (a, b) = (lo + k, lo + k + 1);
             let (c, d) = (hi + k, hi + k + 1);
-            // Wound so the inside is the front face.
             m.indices.extend_from_slice(&[a, c, b]);
             m.indices.extend_from_slice(&[b, c, d]);
         }
@@ -703,17 +712,19 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         if st.curvature.abs() > 1.0 / 45.0 {
             let side = -st.curvature.signum();
             let (rx, rz) = crate::trackprog::right_vector(st.heading);
-            let key = (s / 4.0) as u32;
-            let off = BALE_OFF_M + (rnd(seed ^ 0x31, key) - 0.5) * 2.0;
+            // A fixed offset and no jitter: a row of blocks is a *row*, and a row that
+            // wanders reads as rubbish left at the edge of a corner rather than as something
+            // somebody laid out.
+            let off = BALE_OFF_M;
             let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
             if inside(prog, x, z, 3.0)
                 && clearance(&coarse, x, z) > half + 2.0
                 && clear_of_the_start(x, z)
             {
-                let deg = along(st.heading) + 10.0 * (rnd(seed ^ 0x32, key) - 0.5);
+                let deg = along(st.heading);
                 let (lo, hi) = ground_foot(syn, x, z, deg, BALE_W_M, BALE_D_M);
                 if hi - lo > 0.8 {
-                    s += 4.0;
+                    s += BALE_W_M + 0.35;
                     continue;
                 }
                 bales.append(&edfwrite::moved(
@@ -723,7 +734,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
                 n += 1;
             }
         }
-        s += 4.0;
+        s += BALE_W_M + 0.35;
     }
     tally.push(("bales", n));
 
@@ -790,8 +801,18 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             if rnd(seed ^ 0x63, key) > 0.62 || !inside(prog, x, z, 4.0) {
                 continue;
             }
-            // Everything on the venue side of the wood belongs to somebody else.
-            if clearance(&coarse, x, z) < WOOD_FROM_M || !clear_of_the_start(x, z) {
+            if !clear_of_the_start(x, z) {
+                continue;
+            }
+            // The wood proper stands past everything else. Inside that — the infield, and the
+            // pockets the lap folds round — a *few* trees, thinned right down: they are what
+            // stops the middle of a track being a bare field, and any more would be a hedge
+            // across the view of the next corner.
+            let room = clearance(&coarse, x, z);
+            if room < INFIELD_TREE_FROM_M {
+                continue;
+            }
+            if room < WOOD_FROM_M && rnd(seed ^ 0x66, key) > INFIELD_TREE_SHARE {
                 continue;
             }
             let h = TREE_H_M * (0.75 + 0.7 * rnd(seed ^ 0x64, key));
@@ -855,7 +876,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     // 7. The sky over all of it.
     let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
     let sky = edfwrite::moved(
-        &dome_mesh(sx.max(sz) * 1.35),
+        &dome_mesh(sx.max(sz) * 0.95),
         [sx * 0.5, ground(syn, sx * 0.5, sz * 0.5) - 2.0, sz * 0.5],
     );
     tally.push(("sky", 1));
