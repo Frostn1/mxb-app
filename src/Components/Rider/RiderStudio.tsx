@@ -295,7 +295,7 @@ export default function RiderStudio() {
               <h2 className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 {t("slotGroup.bike")}
               </h2>
-              <div className="grid grid-cols-1 gap-x-3.5 gap-y-2 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-3.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {/* Searchable, and matching the two slot fields beside it. A mods folder
                     runs to dozens of bikes, which is a long way to scroll for a name you
                     already know. Neither free text nor empty is a bike, so both are off. */}
@@ -334,7 +334,7 @@ export default function RiderStudio() {
               <h2 className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 {t(g.label)}
               </h2>
-              <div className="grid grid-cols-1 gap-x-3.5 gap-y-2 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-3.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {g.slots.map((slot) => (
                   <SlotField
                     key={slot.key}

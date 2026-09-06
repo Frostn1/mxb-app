@@ -2094,6 +2094,8 @@ export const fr: Translation = {
   "designer.startFromPaint": "Partir d'une déco…",
   "designer.startFromPsd": "Partir d'un PSD…",
   "designer.exportPsd": "Exporter en PSD",
+  "designer.hideModel": "Masquer le modèle",
+  "designer.showModel": "Afficher le modèle",
   "designer.exportPsdHint": "Écrit chaque planche en .psd avec ses calques, dans un dossier de votre choix.",
   "designer.exportedPsd_one": "1 planche écrite dans {{dir}}",
   "designer.exportedPsd_other": "{{count}} planches écrites dans {{dir}}",

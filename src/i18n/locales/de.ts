@@ -2103,6 +2103,8 @@ export const de: Translation = {
   "designer.startFromPaint": "Von einem Design ausgehen…",
   "designer.startFromPsd": "Von einer PSD ausgehen…",
   "designer.exportPsd": "Als PSD exportieren",
+  "designer.hideModel": "Modell ausblenden",
+  "designer.showModel": "Modell einblenden",
   "designer.exportPsdHint": "Schreibt jede Bahn als PSD mit Ebenen in einen Ordner deiner Wahl.",
   "designer.exportedPsd_one": "1 Bahn nach {{dir}} geschrieben",
   "designer.exportedPsd_other": "{{count}} Bahnen nach {{dir}} geschrieben",

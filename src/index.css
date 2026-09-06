@@ -499,6 +499,38 @@ html[data-colorway="retro"]:not(.overlay-window) body::after {
   clip-path: polygon(0 0, 100% 0, 100% 86%, 91% 100%, 0 100%);
 }
 
+/* Range inputs. The native control keeps its own rounded track and pill thumb whatever
+   `accent-color` says, so it was the last rounded thing left in the window. `--fill` is
+   set inline by the control, because a native track cannot know its own value. */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  background: transparent;
+  cursor: default;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  background: linear-gradient(
+    to right,
+    var(--primary) 0,
+    var(--primary) var(--fill, 0%),
+    color-mix(in srgb, var(--foreground) 12%, transparent) var(--fill, 0%)
+  );
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 8px;
+  height: 14px;
+  margin-top: -5.5px;
+  border: 0;
+  background: var(--primary);
+  transform: skewX(-11deg);
+}
+input[type="range"]:disabled {
+  opacity: 0.45;
+}
+
 @keyframes frost-indeterminate {
   0% {
     transform: translateX(-100%);

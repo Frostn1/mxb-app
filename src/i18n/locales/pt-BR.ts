@@ -2082,6 +2082,8 @@ export const ptBR: Translation = {
   "designer.startFromPaint": "Começar de uma pintura…",
   "designer.startFromPsd": "Começar de um PSD…",
   "designer.exportPsd": "Exportar PSD",
+  "designer.hideModel": "Ocultar modelo",
+  "designer.showModel": "Mostrar modelo",
   "designer.exportPsdHint": "Grava cada folha como um .psd com camadas, em uma pasta que você escolher.",
   "designer.exportedPsd_one": "1 folha gravada em {{dir}}",
   "designer.exportedPsd_other": "{{count}} folhas gravadas em {{dir}}",

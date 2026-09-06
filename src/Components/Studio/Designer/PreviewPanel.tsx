@@ -380,9 +380,9 @@ export function PreviewPanel({
           className,
         )}
       >
-        <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[12.5px] font-medium">
-          <Box className="size-3.5 text-muted-foreground" />
-          {t("viewer.preview3d")}
+        <div className="flex items-center gap-2 overflow-x-auto border-b border-border px-3 py-1.5 text-[12.5px] font-medium">
+          <Box className="size-3.5 flex-none text-muted-foreground" />
+          <span className="flex-none whitespace-nowrap">{t("viewer.preview3d")}</span>
           {controls}
         </div>
         {/* Empty while the fullscreen view has it: the canvas is moved rather than copied, so

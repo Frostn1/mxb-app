@@ -24,7 +24,7 @@ export function Toaster(props: ToasterProps) {
           actionButton: "!bg-primary !text-primary-foreground !rounded-md !text-[11.5px] !font-semibold",
           cancelButton: "!bg-transparent !text-muted-foreground !text-[11.5px]",
           closeButton:
-            "!bg-popover !text-muted-foreground hover:!text-foreground !border !border-input !rounded-full",
+            "!bg-popover !text-muted-foreground hover:!text-foreground !border !border-input",
           error: "!border-destructive/40",
           success: "!border-input",
         },

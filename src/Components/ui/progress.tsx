@@ -12,13 +12,13 @@ function Progress({ value, className, barClassName }: ProgressProps) {
   return (
     <div
       className={cn(
-        "relative h-1 overflow-hidden rounded-full bg-foreground/[0.08]",
+        "relative h-1 overflow-hidden bg-foreground/[0.08]",
         className,
       )}
     >
       <div
         className={cn(
-          "h-full rounded-full bg-primary transition-[width] duration-300",
+          "h-full bg-primary transition-[width] duration-300",
           indeterminate && "w-1/3 animate-[frost-indeterminate_1.2s_ease-in-out_infinite]",
           barClassName,
         )}

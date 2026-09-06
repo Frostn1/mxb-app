@@ -405,12 +405,15 @@ export function ViewerPanel({
           className,
         )}
       >
-        <div className="flex items-center justify-between border-b border-border px-3 py-2">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <Box className="h-4 w-4 text-muted-foreground" />
+        {/* Wraps rather than clips: this header carries a title plus up to four pickers,
+            and the Rider tab's preview column is narrow enough that the last one used to
+            sit half outside the panel. The title itself never breaks. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b border-border px-3 py-2">
+          <div className="flex flex-none items-center gap-2 whitespace-nowrap text-sm font-medium">
+            <Box className="h-4 w-4 flex-none text-muted-foreground" />
             {t("viewer.preview3d")}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {withBike && <TyresPicker pick={tyresPick} />}
             {!riderOnly && (
               <ModeToggle

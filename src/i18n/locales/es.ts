@@ -2089,6 +2089,8 @@ export const es: Translation = {
   "designer.startFromPaint": "Empezar desde una pintura…",
   "designer.startFromPsd": "Empezar desde un PSD…",
   "designer.exportPsd": "Exportar PSD",
+  "designer.hideModel": "Ocultar modelo",
+  "designer.showModel": "Mostrar modelo",
   "designer.exportPsdHint": "Guarda cada hoja como un .psd con capas, en una carpeta que elijas.",
   "designer.exportedPsd_one": "1 hoja guardada en {{dir}}",
   "designer.exportedPsd_other": "{{count}} hojas guardadas en {{dir}}",

@@ -2083,6 +2083,8 @@ export const it: Translation = {
   "designer.startFromPaint": "Parti da una livrea…",
   "designer.startFromPsd": "Parti da un PSD…",
   "designer.exportPsd": "Esporta PSD",
+  "designer.hideModel": "Nascondi modello",
+  "designer.showModel": "Mostra modello",
   "designer.exportPsdHint": "Salva ogni foglio come .psd a livelli, in una cartella scelta da te.",
   "designer.exportedPsd_one": "1 foglio salvato in {{dir}}",
   "designer.exportedPsd_other": "{{count}} fogli salvati in {{dir}}",

@@ -226,7 +226,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
       <RuntimeBanner />
       <UpdateBanner />
       <div className="flex min-h-0 flex-1">
-        <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden pt-3">
           <ContextSlots.Provider value={ctxSlots}>
           {pluginPanel ? (
             <pluginPanel.component />

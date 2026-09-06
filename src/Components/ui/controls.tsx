@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 
 /**
  * The small labelled controls a side panel is made of.
@@ -47,7 +47,14 @@ export function Slider({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-1 min-w-0 flex-1 accent-primary"
+        // The track paints its filled portion from this; see `input[type="range"]` in
+        // `index.css`. A native track has no way to read its own value.
+        style={
+          {
+            "--fill": `${max > min ? ((value - min) / (max - min)) * 100 : 0}%`,
+          } as CSSProperties
+        }
+        className="min-w-0 flex-1"
       />
       {editable ? (
         <input

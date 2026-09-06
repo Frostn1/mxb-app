@@ -2062,6 +2062,8 @@ export const en = {
   "designer.startFromPaint": "Start from a paint…",
   "designer.startFromPsd": "Start from a PSD…",
   "designer.exportPsd": "Export PSD",
+  "designer.hideModel": "Hide model",
+  "designer.showModel": "Show model",
   "designer.exportPsdHint": "Write every sheet out as a layered .psd, into a folder you pick.",
   "designer.exportedPsd_one": "Wrote 1 sheet to {{dir}}",
   "designer.exportedPsd_other": "Wrote {{count}} sheets to {{dir}}",

@@ -1978,16 +1978,16 @@ function ControlsHint({ tight }: { tight?: boolean }) {
   return (
     <div
       className={cn(
-        "pointer-events-none absolute bottom-2 left-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45",
-        // Panels on the other corner: wrap onto more lines rather than run under them. A
-        // 320px-wide preview has room for one or the other, not both side by side.
-        tight && "max-w-[calc(100%-248px)]",
+        "pointer-events-none absolute bottom-2 left-2 flex items-center gap-x-3 bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45",
+        // In a narrow preview the labels wrapped one word to a line, which read as broken
+        // rather than as a hint. There the icons carry it and the label is the tooltip.
+        tight && "gap-x-2",
       )}
     >
       {items.map(({ Icon, label }) => (
-        <span key={label} className="flex items-center gap-1">
-          <Icon className="h-3.5 w-3.5" />
-          {label}
+        <span key={label} className="flex items-center gap-1 whitespace-nowrap" title={label}>
+          <Icon className="h-3.5 w-3.5 flex-none" />
+          {!tight && label}
         </span>
       ))}
     </div>

@@ -12,6 +12,7 @@ import {
   FlipVertical2,
   Grid3x3,
   Group,
+  Box,
   Layers as LayersIcon,
   Link2,
   Link2Off,
@@ -43,6 +44,8 @@ import {
 } from "../../../api/mods";
 import { useT } from "../../../i18n/context";
 import { IMAGE_EXTS, PaintDestBar, isBikeKind, usePaintDest } from "../paintDest";
+const PREVIEW_OPEN_KEY = "mxb:designer:preview:v1";
+
 import { CanvasStage } from "./CanvasStage";
 import { Row, Slider } from "./controls";
 import { PreviewPanel } from "./PreviewPanel";
@@ -203,6 +206,18 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // The sheets/layers rail folds away, because once a paint is set up the thing worth the
   // width is the canvas and the model — not the list of what you already chose.
   const [railOpen, setRailOpen] = useState(true);
+  // Remembered: someone who paints with it hidden wants it hidden next session too.
+  const [previewOpen, setPreviewOpen] = useState(
+    () => localStorage.getItem(PREVIEW_OPEN_KEY) !== "0",
+  );
+  const togglePreview = useCallback(
+    () =>
+      setPreviewOpen((open) => {
+        localStorage.setItem(PREVIEW_OPEN_KEY, open ? "0" : "1");
+        return !open;
+      }),
+    [],
+  );
   // One bump per change to any sheet's pixels. The canvas stage and the 3D preview both
   // follow it rather than trying to work out for themselves what a "change" is.
   const [version, setVersion] = useState(0);
@@ -2045,11 +2060,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           <FileImage className="size-3.5" />
           {t("designer.exportPsd")}
         </Button>
-        {blocked && (
-          <span className="ml-auto max-w-[40%] truncate text-[11px] text-faint" title={blocked}>
-            {blocked}
-          </span>
-        )}
       </div>
 
       <div
@@ -2105,19 +2115,34 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         {/* ── The sheet, with the model floating over it ───────────────────────── */}
         <section className="relative flex min-h-0 flex-col">
           {/* Docked over the sheet rather than taking a column of its own: you judge a
-              livery on the model, but you draw it on the flat sheet. */}
-          <div className="pointer-events-none absolute bottom-3 right-3 z-10 h-[232px] w-[320px]">
-            <div className="pointer-events-auto h-full overflow-hidden border border-border bg-window/95 backdrop-blur">
-              <PreviewPanel
-                state={destState}
-                overrides={overrides}
-                frameToken={version}
-                onGeometry={onGeometry}
-                onStock={onStock}
-                highlight={hoverIsland}
-                className="h-full"
-              />
-            </div>
+              livery on the model, but you draw it on the flat sheet. It hides, because
+              where it sits is exactly where the bottom-right of every sheet is. */}
+          <div className="pointer-events-none absolute bottom-3 right-3 z-10 flex flex-col items-end gap-2">
+            {previewOpen && (
+              <div className="pointer-events-auto h-[232px] w-[320px] overflow-hidden border border-border bg-window/95 backdrop-blur">
+                <PreviewPanel
+                  state={destState}
+                  overrides={overrides}
+                  frameToken={version}
+                  onGeometry={onGeometry}
+                  onStock={onStock}
+                  highlight={hoverIsland}
+                  className="h-full"
+                />
+              </div>
+            )}
+            <button
+              onClick={() => togglePreview()}
+              title={t(previewOpen ? "designer.hideModel" : "designer.showModel")}
+              className="u-skew pointer-events-auto flex h-7 cursor-default items-center gap-2 border border-border bg-window/95 px-3 text-muted-foreground backdrop-blur transition-colors hover:text-foreground"
+            >
+              <span className="u-unskew flex items-center gap-2">
+                <Box className="size-3.5" />
+                <span className="font-cond text-[11.5px] font-semibold uppercase tracking-[0.14em]">
+                  {t(previewOpen ? "designer.hideModel" : "designer.showModel")}
+                </span>
+              </span>
+            </button>
           </div>
           {active ? (
             <CanvasStage
