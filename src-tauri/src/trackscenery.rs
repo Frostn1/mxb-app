@@ -479,14 +479,14 @@ fn bare(m: &Mesh) -> Mesh {
 ///
 /// A post and not a board: every track marks its jumps, and what it marks them with is a
 /// stake — a rider coming at a blind crest reads the line of colour, not a sign.
-fn jumpmark_mesh() -> Mesh {
-    let mut m = edfwrite::cuboid(JUMPMARK_W_M, JUMPMARK_H_M, JUMPMARK_W_M);
+fn jumpmark_mesh(h: f32) -> Mesh {
+    let mut m = edfwrite::cuboid(JUMPMARK_W_M, h, JUMPMARK_W_M);
     // A pennant at the top: a triangle off one side of the post, doubled so it reads from
     // both. It is the flag a rider picks up out of the corner of an eye, not the post.
-    let (w, h) = (JUMPMARK_FLAG_M, JUMPMARK_FLAG_M * 0.62);
-    let y = JUMPMARK_H_M * 0.5 - h * 0.5;
+    let (w, flag_h) = (JUMPMARK_FLAG_M, JUMPMARK_FLAG_M * 0.62);
+    let y = h * 0.5 - flag_h * 0.5;
     let mut flag = Mesh::default();
-    for (px, py) in [(0.0, y + h * 0.5), (0.0, y - h * 0.5), (w, y)] {
+    for (px, py) in [(0.0, y + flag_h * 0.5), (0.0, y - flag_h * 0.5), (w, y)] {
         flag.positions.extend_from_slice(&[px, py, 0.0]);
         flag.normals.extend_from_slice(&[0.0, 0.0, 1.0]);
         flag.uvs.extend_from_slice(&[px / w, 0.5 - py * 0.1]);
@@ -747,9 +747,32 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     }
     tally.push(("stakes", n));
 
-    // 2. No banners. White panels with a red block and a blue one: they read as nothing in
-    //    particular from a bike, and there is nothing they could be advertising. Gone.
-    let _ = &mut banners;
+    // 2. Banners: few, big, and facing the rider.
+    let mut n = 0usize;
+    let mut s = BANNER_GAP_M * 0.5;
+    while s < lap {
+        let st = at(s);
+        let (rx, rz) = crate::trackprog::right_vector(st.heading);
+        let key = (s / BANNER_GAP_M) as u32;
+        let side = if rnd(seed ^ 0x51, key) < 0.5 { -1.0f32 } else { 1.0 };
+        let off = BANNER_OFF_M.max(half + 2.5);
+        let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
+        if inside(prog, x, z, 3.0)
+            && clearance(&coarse, x, z) > off - 1.0
+            && clear_of_the_start(x, z)
+        {
+            let (lo, hi) = ground_span(syn, x, z, along(st.heading), BANNER_W_M);
+            if hi - lo < 1.0 {
+                banners.append(&edfwrite::moved(
+                    &edfwrite::turned(&banner_mesh(), along(st.heading)),
+                    [x, (lo + hi) * 0.5 - 0.05, z],
+                ));
+                n += 1;
+            }
+        }
+        s += BANNER_GAP_M;
+    }
+    tally.push(("banners", n));
 
 
 
@@ -832,13 +855,18 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         let st = at(crest % lap);
         let (rx, rz) = crate::trackprog::right_vector(st.heading);
         for side in [-1.0f32, 1.0] {
-            let off = half + 0.8;
+            let off = half + 0.4;
             let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
             if !inside(prog, x, z, 2.0) || !clear_of_the_start(x, z) {
                 continue;
             }
+            // Tall enough to reach the top of the face. A jump's shape fades out across the
+            // width of the track, so the ground a post stands on at the edge is the *foot* of
+            // the jump — and a flag down there is a flag on the run-up, which is what it
+            // looked like. The post grows with the jump so the pennant sits at the crest.
+            let h = JUMPMARK_H_M + height.abs() * 0.9;
             jumpmarks.append(&edfwrite::moved(
-                &edfwrite::turned(&jumpmark_mesh(), along(st.heading)),
+                &edfwrite::turned(&jumpmark_mesh(h), along(st.heading)),
                 [x, ground(syn, x, z) - 0.05, z],
             ));
             n += 1;
@@ -956,30 +984,11 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     }
     tally.push(("poles", n));
 
-    let mut n = 0usize;
-    let mut s = VAN_GAP_M * 0.5;
-    while s < lap {
-        let st = at(s);
-        let (rx, rz) = crate::trackprog::right_vector(st.heading);
-        let key = (s / VAN_GAP_M) as u32;
-        let side = if rnd(seed ^ 0x81, key) < 0.5 { -1.0f32 } else { 1.0 };
-        let off = 15.0 + 12.0 * rnd(seed ^ 0x82, key);
-        let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
-        if inside(prog, x, z, 6.0) && clearance(&coarse, x, z) > off - 2.0 && clear_of_the_start(x, z)
-        {
-            // Parked on level ground, or it stands on one wheel.
-            let (lo, hi) = ground_span(syn, x, z, along(st.heading), 6.0);
-            if hi - lo < 0.8 {
-                vans.append(&edfwrite::moved(
-                    &edfwrite::turned(&van_mesh(), along(st.heading) + 90.0 * rnd(seed ^ 0x83, key)),
-                    [x, lo - 0.1, z],
-                ));
-                n += 1;
-            }
-        }
-        s += VAN_GAP_M;
-    }
-    tally.push(("vans", n));
+    // No parked vans. They are what a paddock is full of, but ours stood close enough to the
+    // riding line to be something a rider hits — a white box with a stripe down it, solid, in
+    // the way. Out until they can be put somewhere that is actually a paddock.
+    let _ = &mut vans;
+
 
     // 7. The sky over all of it.
     let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
@@ -1024,12 +1033,12 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     // built the same way, three `scene` blocks for three objects.
     let kinds: Vec<(&str, Mesh, Texture, bool)> = vec![
         ("stakes", stakes, stake_sheet(), false),
+        ("banners", banners, banner_sheet(), true),
         ("bales", bales, bale_sheet(), true),
         // Not solid: clipping a marker board should cost a rider nothing.
         ("jumpmarks", jumpmarks, jumpmark_sheet(), false),
         ("trees", trees, tree_sheet(), true),
         ("poles", poles, pole_sheet(), false),
-        ("vans", vans, van_sheet(), true),
         // The sky is drawn and nothing else: a dome you can ride into is not a sky.
         ("sky", sky, dome_sheet(), false),
         ("gate", gate, gate_sheet(), true),

@@ -3,6 +3,17 @@
 ## 2026-09-06
 
 ### Changed
+- The parked vans are gone. They stood close enough to the riding line to be something a rider
+  runs into.
+- The banners are back.
+- Jump posts stand at the top of the takeoff face rather than at its foot: the post grows with
+  the jump, so the flag sits at the crest.
+- No gap between the start straight and the lap. The tracks this is measured against are flat
+  ground from the gate row right up to the racing line, and the two are one surface.
+
+## 2026-09-06
+
+### Changed
 - The printed banners are gone.
 - A third as many blocks round a corner, and each one now has a dark foot under its white body
   so it reads as a block rather than a paper cube.

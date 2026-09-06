@@ -1439,6 +1439,133 @@ mod tests {
         }
     }
 
+    /// The ground across a published start straight: how wide the flat pad is, and whether it
+    /// runs into the lap or stops short of it.
+    ///
+    /// ```text
+    /// FROST_TRACK=…/track.pkz cargo test -- --ignored --nocapture published_start_ground
+    /// ```
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn published_start_ground() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::Path::new(&var);
+        let names = crate::track::entry_names(path).unwrap();
+        let entry = crate::track::heightfield_entries(&names).into_iter().next().unwrap();
+        let bytes = crate::track::read_entry(path, &entry).unwrap();
+        let layout = crate::heightfield::probe(&bytes, None).unwrap();
+        let mps = layout.metres_per_sample.expect("a track in metres");
+        let (gw, gh, heights) =
+            crate::heightfield::read_grid(&bytes, &layout, layout.width.max(layout.height));
+        let (gw, gh) = (gw as usize, gh as usize);
+        let at = |x: f32, z: f32| -> f32 {
+            let (ix, iz) = ((x / mps) as usize, (z / mps) as usize);
+            heights[iz.min(gh - 1) * gw + ix.min(gw - 1)]
+        };
+
+        // The lap, and the start line beside it.
+        let block_at =
+            layout.offset + layout.width as usize * layout.height as usize * layout.sample.size();
+        let block = &bytes[block_at..];
+        let lap = crate::trackline::read(block).expect("a lap");
+        let prog = crate::trackprog::TrackProgram {
+            name: String::new(), author: String::new(), location: String::new(),
+            terrain: crate::trackprog::Terrain {
+                size_x: mps * (gw - 1) as f32, size_z: mps * (gh - 1) as f32,
+                samples: 513, scale: 100.0,
+                relief: Default::default(), surface: Default::default(),
+                wear: Default::default(),
+            },
+            start: crate::trackprog::Start { x: lap.start.0, z: lap.start.1, angle: lap.heading },
+            segments: lap.program_segments(), width: 12.0, features: Vec::new(),
+            blend: 1.2, elevation: Vec::new(),
+        };
+        let lap_st = prog.stations(1.0);
+
+        // Find the start line the way `second_line` does.
+        let table = crate::track::material_table_offset(block).unwrap();
+        let u32_at = |o: usize| u32::from_le_bytes(block[o..o + 4].try_into().unwrap());
+        let f32_at = |o: usize| f32::from_le_bytes(block[o..o + 4].try_into().unwrap());
+        let materials = u32_at(table) as usize;
+        let after = table + 4 + materials * 52 + 4 + u32_at(table + 4 + materials * 52) as usize * 60;
+        let mut line: Option<(f32, f32, f32, Vec<(f32, f32, f32)>)> = None;
+        let mut k = after;
+        while k + 16 < block.len() {
+            let (x, z, ang) = (f32_at(k), f32_at(k + 4), f32_at(k + 8));
+            let n = u32_at(k + 12) as usize;
+            let sane = (0.0..4000.0).contains(&x) && (0.0..4000.0).contains(&z)
+                && ang.abs() <= 720.0 && n > 0 && n < 64 && k + 16 + n * 60 <= block.len();
+            if sane {
+                let (mut total, mut ok, mut segs) = (0.0f32, true, Vec::new());
+                for i in 0..n {
+                    let o = k + 16 + i * 60;
+                    let (len, r, a, s0) = (f32_at(o + 4), f32_at(o + 8), f32_at(o + 12), f32_at(o + 20));
+                    if !(0.0..2000.0).contains(&len) || (s0 - total).abs() > 0.5 {
+                        ok = false;
+                        break;
+                    }
+                    total += len;
+                    segs.push((len, r, a));
+                }
+                if ok && total > 20.0 {
+                    line = Some((x, z, ang, segs));
+                    break;
+                }
+            }
+            k += 4;
+        }
+        let Some((sx, sz, sang, segs)) = line else {
+            println!("  no start line");
+            return;
+        };
+        let walk = crate::trackprog::TrackProgram {
+            start: crate::trackprog::Start { x: sx, z: sz, angle: sang },
+            segments: segs
+                .iter()
+                .map(|(len, r, a)| {
+                    if *r == 0.0 || *a == 0.0 {
+                        crate::trackprog::Segment::Straight { length: *len, rise: 0.0 }
+                    } else {
+                        crate::trackprog::Segment::Arc { radius: *r, angle: a.abs(), rise: 0.0 }
+                    }
+                })
+                .collect(),
+            ..prog.clone()
+        };
+
+        println!("  along  flat±   to the lap   step at the join");
+        for q in walk.stations(1.0).iter().step_by(10) {
+            let (rx, rz) = crate::trackprog::right_vector(q.heading);
+            // How far the ground stays flat either side: walk out until it tilts hard.
+            let mut reach = [0.0f32; 2];
+            for (i, side) in [-1.0f32, 1.0].into_iter().enumerate() {
+                let mut last = at(q.x, q.z);
+                for m in 1..60 {
+                    let t = m as f32;
+                    let (x, z) = (q.x + rx * t * side, q.z + rz * t * side);
+                    if x < 1.0 || z < 1.0 || x > prog.terrain.size_x - 1.0 || z > prog.terrain.size_z - 1.0 {
+                        break;
+                    }
+                    let h = at(x, z);
+                    if (h - last).abs() > 0.55 {
+                        break;
+                    }
+                    last = h;
+                    reach[i] = t;
+                }
+            }
+            let (near, _) = lap_st.iter().fold((f32::MAX, 0.0f32), |b, p| {
+                let d = ((p.x - q.x).powi(2) + (p.z - q.z).powi(2)).sqrt();
+                if d < b.0 { (d, p.s) } else { b }
+            });
+            println!(
+                "  {:>5.0}m  {:>4.0}/{:<4.0} {:>8.0} m   {}",
+                q.s, reach[0], reach[1], near,
+                if near < reach[0].max(reach[1]) + 2.0 { "flat right up to it" } else { "" },
+            );
+        }
+    }
+
     /// A published track's race data: where it puts its grid, and in what coordinates.
     ///
     /// ```text
