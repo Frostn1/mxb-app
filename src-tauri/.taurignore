@@ -1,0 +1,3 @@
+# build.rs stages the injected client DLL here on every build. The dev watcher would see
+# that write as a change, restart the app, and stage it again — an endless rebuild loop.
+resources/*.dll
