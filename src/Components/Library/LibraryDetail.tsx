@@ -25,6 +25,7 @@ import {
 } from "../../lib/mods";
 import { CATEGORY_ICON, CATEGORY_LABEL, categoryIcon } from "./categories";
 import { Trans } from "../../i18n";
+import { ContextBarLeft } from "../Shell/ContextBar";
 import { useT } from "../../i18n/context";
 import { Button } from "@/Components/ui/button";
 
@@ -126,18 +127,21 @@ export default function LibraryDetail({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-none items-center gap-3 px-7 pb-3.5 pt-5">
-        <button
-          onClick={onClose}
-          className="flex cursor-default items-center gap-1 text-[12.5px] font-semibold text-primary hover:brightness-110"
-        >
-          <ArrowLeft className="size-3.5" /> Library
-        </button>
-        <span className="text-faint">/</span>
-        <span className="truncate text-[12.5px] text-muted-foreground">{title}</span>
-      </header>
+      <ContextBarLeft>
+        <span className="flex items-center gap-2 font-cond text-[12.5px] font-semibold uppercase tracking-[0.16em]">
+          <button
+            onClick={onClose}
+            className="flex cursor-default items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ArrowLeft className="size-3.5" />
+            {t("nav.library")}
+          </button>
+          <span className="text-faint">/</span>
+          <span className="max-w-[420px] truncate text-foreground">{title}</span>
+        </span>
+      </ContextBarLeft>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-8">
+      <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-8 pt-4">
         <div className="flex gap-6">
           {/* left: preview */}
           <div className="flex w-[420px] flex-none flex-col gap-3">
@@ -208,9 +212,12 @@ export default function LibraryDetail({
           <div className="flex min-w-0 flex-1 flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[1.2px] text-faint">
-                <Icon className="size-3.5" /> {CATEGORY_LABEL[entry.category] ?? "Mod"}
+                <Icon className="size-3.5" />{" "}
+                {CATEGORY_LABEL[entry.category]
+                  ? t(CATEGORY_LABEL[entry.category])
+                  : t("libraryDetail.mod")}
               </div>
-              <h1 className="text-[22px] font-bold leading-tight tracking-[-0.3px]">
+              <h1 className="font-cond text-[26px] font-bold uppercase leading-[1.05] tracking-[0.04em]">
                 {title}
               </h1>
             </div>
@@ -276,7 +283,7 @@ export default function LibraryDetail({
                 {related.map(([category, items]) => (
                   <div key={category} className="flex flex-col gap-2">
                     <span className="text-[11px] font-bold uppercase tracking-[1.2px] text-faint">
-                      {CATEGORY_LABEL[category] ?? category} · {items.length}
+                      {CATEGORY_LABEL[category] ? t(CATEGORY_LABEL[category]) : category} · {items.length}
                     </span>
                     <div className="flex flex-col gap-1">
                       {items.map((it) => {

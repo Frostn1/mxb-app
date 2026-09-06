@@ -611,6 +611,7 @@ export default function Library({
   useEffect(() => setOpenSwaps(new Set()), [modType]);
 
   useEffect(() => setDetail(null), [modType]);
+
   // Arriving from a download row: search for that mod so the jump lands on it, not just on
   // the right tab. Consumed on arrival — a later visit is not still about that one mod.
   useEffect(() => {
@@ -639,6 +640,7 @@ export default function Library({
   // has no file to act on.
   const visibleItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
   const visibleCount = visibleItems.length;
+
 
   const ghosts = useMemo(
     () => (showRemoved ? ghostsFor(ledger, modType, search) : []),
