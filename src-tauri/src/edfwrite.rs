@@ -382,7 +382,8 @@ pub fn card(w: f32, h: f32) -> Mesh {
         positions: vec![-hw, 0.0, 0.0, hw, 0.0, 0.0, hw, y, 0.0, -hw, y, 0.0],
         uvs: vec![0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0],
         normals: vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
-        indices: vec![0, 1, 2, 0, 2, 3],
+        // Wound for the game's frame — see [`cuboid`].
+        indices: vec![0, 2, 1, 0, 3, 2],
     }
 }
 
@@ -399,6 +400,25 @@ pub fn crossed(w: f32, h: f32, n: usize) -> Mesh {
         mesh.append(&turned(&card(w, h), deg));
     }
     mesh
+}
+
+/// The same surface drawn from both sides.
+///
+/// A card has one face, and the game does not draw its back. A fence panel turned the same
+/// way down both sides of a track therefore faces the track on one side and away on the
+/// other, so half the fence is invisible from the riding line and appears only once you are
+/// behind it — which is exactly how it looked. Anything flat that can be seen from either
+/// side goes through this.
+pub fn double_sided(mesh: &Mesh) -> Mesh {
+    let mut out = mesh.clone();
+    let base = mesh.vertex_count() as u32;
+    out.positions.extend_from_slice(&mesh.positions);
+    out.uvs.extend_from_slice(&mesh.uvs);
+    out.normals.extend(mesh.normals.iter().map(|n| -n));
+    for t in mesh.indices.chunks_exact(3) {
+        out.indices.extend_from_slice(&[t[0] + base, t[2] + base, t[1] + base]);
+    }
+    out
 }
 
 /// Rotate a mesh about Y, degrees.
@@ -426,6 +446,13 @@ pub fn moved(mesh: &Mesh, by: [f32; 3]) -> Mesh {
 }
 
 /// A box with its base on y = 0, `w` by `d` and `h` tall, centred on the origin in x and z.
+///
+/// **Wound for the game's frame, which is left-handed.** Laid out the way the arithmetic here
+/// reads — counter-clockwise seen from outside, in the right-handed sense — every face of
+/// every box came out back-to-front: the three faces pointing away from you were drawn and
+/// the three facing you were culled, so a bale was a hollow shell you could see into. The
+/// normals are unchanged and still point out; only the triangle order is reversed. Nothing
+/// caught it here because `scripts/track-render.py` used to draw both sides of everything.
 pub fn cuboid(w: f32, h: f32, d: f32) -> Mesh {
     let (hw, hd) = (w * 0.5, d * 0.5);
     let mut mesh = Mesh::default();
@@ -454,7 +481,7 @@ pub fn cuboid(w: f32, h: f32, d: f32) -> Mesh {
         mesh.uvs
             .extend_from_slice(&[0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0]);
         mesh.indices
-            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            .extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
     }
     mesh
 }
@@ -578,6 +605,49 @@ mod tests {
         );
         assert!(crate::edf::parse_world(&bytes).is_empty());
         assert_eq!(crate::edf::embedded_textures(&bytes).len(), 1, "the sheet is still there");
+    }
+
+    #[test]
+    fn a_box_is_wound_for_the_game_and_not_for_the_maths() {
+        // The game's frame is left-handed, so a face that reads counter-clockwise from
+        // outside in ordinary right-handed arithmetic is the one it culls. Every box came out
+        // inside-out that way — you saw the three far faces and not the three near ones.
+        //
+        // So: for each triangle, the right-handed normal of its winding must point *against*
+        // the outward normal its vertices carry. That is the whole convention, stated once.
+        let m = cuboid(2.0, 2.0, 2.0);
+        for t in m.indices.chunks_exact(3) {
+            let p = |i: u32| {
+                let i = i as usize * 3;
+                [m.positions[i], m.positions[i + 1], m.positions[i + 2]]
+            };
+            let (a, b, c) = (p(t[0]), p(t[1]), p(t[2]));
+            let e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let w = [
+                e1[1] * e2[2] - e1[2] * e2[1],
+                e1[2] * e2[0] - e1[0] * e2[2],
+                e1[0] * e2[1] - e1[1] * e2[0],
+            ];
+            let i = t[0] as usize * 3;
+            let n = [m.normals[i], m.normals[i + 1], m.normals[i + 2]];
+            let dot = w[0] * n[0] + w[1] * n[1] + w[2] * n[2];
+            assert!(dot < 0.0, "a face is wound the wrong way: {w:?} against {n:?}");
+        }
+    }
+
+    #[test]
+    fn a_double_sided_card_can_be_seen_from_behind() {
+        let one = card(2.0, 2.0);
+        let two = double_sided(&one);
+        assert_eq!(two.triangle_count(), one.triangle_count() * 2);
+        assert_eq!(two.vertex_count(), one.vertex_count() * 2);
+        // The copy faces the other way.
+        let n0 = &two.normals[..3];
+        let n1 = &two.normals[one.vertex_count() * 3..one.vertex_count() * 3 + 3];
+        for k in 0..3 {
+            assert!((n0[k] + n1[k]).abs() < 1e-6, "{n0:?} vs {n1:?}");
+        }
     }
 
     #[test]

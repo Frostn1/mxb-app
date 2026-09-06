@@ -11,11 +11,12 @@
   other side of the main straight, out of the way.
 
 ### Added
-- A track you build now has things standing beside it. Marker boards line both sides of the
-  riding line the whole way round, fencing runs behind them, hay bales guard the outside of
-  the corners, trees stand back in the field and a gantry crosses the start.
-- Bales and the start gantry stop a bike. Marker boards and trees do not, so clipping one
-  costs you nothing.
+- A track you build now has things standing beside it. Stakes with painted tops mark the edge
+  of the riding line the whole way round, the way they do on a real track, with fencing behind
+  them, banners at intervals, hay bales on the outside of the corners, trees back in the field
+  and a gantry over the start.
+- A tree, a bale, a banner and the gantry stop a bike. A stake does not, so clipping one on
+  the way past costs you nothing.
 
 ## 2026-09-05
 

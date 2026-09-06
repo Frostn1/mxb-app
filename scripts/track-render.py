@@ -123,9 +123,20 @@ def render(d, eye, target, W=1100, Hh=680, fov=58.0, sky=(150,178,205)):
         sx = (cam[:, 0] / (zc * th * ar) * 0.5 + 0.5) * W
         sy = (0.5 - cam[:, 1] / (zc * th) * 0.5) * Hh
         order = np.argsort(-zc[I].mean(1))             # far to near; the z-buffer settles ties
+        culled = 0
         for tri in order:
             a, bq, c = I[tri]
             if zc[a] <= 0.2 or zc[bq] <= 0.2 or zc[c] <= 0.2:
+                continue
+            # Backface culling, the way the game does it. Its frame is left-handed, so a face
+            # is front-facing when the right-handed normal of its winding points *away* from
+            # the eye. Drawing both sides instead is why the first pass of this renderer
+            # showed solid bales while the game showed hollow shells: it could not see a
+            # winding fault at all, which is the one thing worth culling for.
+            e1 = P[bq] - P[a]; e2 = P[c] - P[a]
+            wn = np.cross(e1, e2)
+            if float(np.dot(wn, eye - P[a])) >= 0:
+                culled += 1
                 continue
             xs = np.array([sx[a], sx[bq], sx[c]]); ys = np.array([sy[a], sy[bq], sy[c]])
             x0 = max(int(np.floor(xs.min())), 0); x1 = min(int(np.ceil(xs.max())) + 1, W)
@@ -170,6 +181,9 @@ def render(d, eye, target, W=1100, Hh=680, fov=58.0, sky=(150,178,205)):
             sd[vis] = depth[vis]
             tdepth[y0:y1, x0:x1] = sd
 
+    if len(I):
+        print(f'   {culled} of {len(I)} triangles culled as back faces')
+
     # distance haze
     fog = np.clip((tdepth - 90.0) / 700.0, 0, 0.72)[..., None]
     img = img * (1 - fog) + np.array(sky)/255.0 * fog
@@ -190,10 +204,11 @@ if __name__ == '__main__':
     gy = float(sample_h(d['H'], d['mps'], np.array([cx]), np.array([cz]))[0])
 
     views = {
-      'rider': (( cx - dirv[0]*22, gy + 2.4, cz - dirv[1]*22),
-                ( cx + dirv[0]*60, gy + 1.0, cz + dirv[1]*60), 62.0),
-      'trackside': (( cx - dirv[1]*34, gy + 9.0, cz + dirv[0]*34),
-                    ( cx + dirv[0]*25, gy + 1.0, cz + dirv[1]*25), 55.0),
+      # Close in: a rut is a few centimetres deep, so from 80 m out it is one pixel of shading.
+      'rider': (( cx - dirv[0]*9, gy + 1.9, cz - dirv[1]*9),
+                ( cx + dirv[0]*20, gy + 0.5, cz + dirv[1]*20), 62.0),
+      'trackside': (( cx - dirv[1]*13, gy + 6.0, cz + dirv[0]*13),
+                    ( cx + dirv[0]*7, gy + 0.4, cz + dirv[1]*7), 55.0),
       'aerial': ((d['size_x']*0.5 - 210, gy + 210, d['size_x']*0.5 - 250),
                  (d['size_x']*0.5, gy + 2, d['size_x']*0.5), 60.0),
     }
