@@ -2,6 +2,17 @@
 
 ## 2026-09-06
 
+### Changed
+- Generated tracks are marked the way a real one is: a line of little white plastic stakes
+  down each edge of the riding line, at the track edge and every six and a half metres. They
+  are half the size they were, which is what lets them stand that close without the edge
+  reading as a fence.
+- The trackside banners are printed. Five panels — MXB App, Frost, FrostMod and Creste — each
+  set in its own brand's typeface and colours with the app's snowflake beside it, and a lap
+  cycles through them instead of showing the same blank panel every fifty metres.
+
+## 2026-09-06
+
 ### Fixed
 - Sharing a large preset or track works again. The host stores files by their contents, so once
   it had kept only part of an upload it handed back that same broken copy every time the same
