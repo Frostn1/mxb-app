@@ -2,6 +2,19 @@
 
 ## 2026-09-05
 
+### Changed
+- Corners on a track you build now have ruts you can sit in. A groove is cut shallow and the
+  dirt out of it stands as a low smooth bank on its outer side, with flat ground between one
+  and the next — so a corner gives you something to lean on instead of a set of holes.
+- You can see the ruts. The packed dark line follows the floor of each groove and the dry
+  light dirt sits on the bank beside it, so the shape reads at speed instead of only being
+  felt.
+- Tyre marks up the face of every jump, fanned towards the side the last corner sends you —
+  so the face tells you where the riders ahead came from.
+- The riding line varies along its length instead of running as one flat stripe.
+- Ground textures are finer. The soil sheets carried a patch big enough to repeat with the
+  tile, which printed a faint chequerboard over the whole track.
+
 ### Fixed
 - Sharing a big preset or file no longer produces a code that downloads without complaint and
   then does not open. Each slice is checked against the size it should be, on the way up and

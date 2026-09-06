@@ -138,11 +138,77 @@ const RUT_RADIUS_M: (f32, f32) = (40.0, 14.0);
 /// every one of those tracks wears 0.09–0.16 m of groove down its straights. Ruts everywhere,
 /// deeper through the corners, is the shape of the measurement. Ruts only in corners was ours.
 ///
-/// This is the depth of the deepest groove in the tightest corner on the lap, which puts it in
-/// the middle of that ninetieth rather than at the top of it. It only means that with the gain
-/// below set to match the field; before, 0.68 here was a metre in the ground.
-const RUT_DEPTH_M: f32 = 0.45;
-const RUT_DEPTH_STRAIGHT_M: f32 = 0.17;
+/// This is how deep the tyre *cuts* at the deepest groove in the tightest corner on the lap,
+/// and it is the smaller half of what a rider meets. The other half is the wall of material
+/// the cut threw up beside it (see [`RUT_LIP_GAIN`]), and the published figures above measure
+/// the pair — a groove's depth below the ground either side of it, not below where the ground
+/// started. Reading them as a cut is what put a half-metre trench through every corner with
+/// nothing beside it to lean on.
+const RUT_DEPTH_M: f32 = 0.38;
+const RUT_DEPTH_STRAIGHT_M: f32 = 0.09;
+
+/// The material the cut displaced, which does not disappear.
+///
+/// It stands outboard of the groove — to the outside of the bend, and on a straight to
+/// whichever side of the bundle the groove already lies — as a low smooth wall about a tyre
+/// across. This is a rut as anyone rides one: not a hole, but a shallow floor with a bank on
+/// its outer side that a rider leans against.
+///
+/// Sampling the same field a lip-width inboard is what puts a wall beside every groove and
+/// none on the ground between two of them. Placing them instead puts a mound wherever two
+/// grooves merged, which is the one place there is no material to have come from.
+const RUT_LIP_OFFSET_M: f32 = 1.05;
+/// How high the wall stands, against how deep the cut is. Taller than the cut is deep: the
+/// floor is packed down over a day and the bank is loose material piled on undisturbed ground.
+const RUT_LIP_GAIN: f32 = 1.00;
+
+/// Where the field stops being ground and starts being wall, and where the wall tops out.
+///
+/// A rut is not a wave. Indiana's corners are flat on the bottom, flat between one groove and
+/// the next, and change over about a metre in between — a rider settles *into* one and the
+/// ground beside it is ground. Ours was the raw noise field, which curves everywhere and is
+/// flat nowhere, so a corner came out as one continuous undulation with no floor to sit in.
+/// That is what "rough" means with a cross-section measuring 0.24 m peak to peak against
+/// Indiana's 0.64: not deeper, just never still.
+///
+/// So the field is saturated rather than scaled. Below the first number it is untouched
+/// ground, above the second it is floor, and the span between the two is the wall. The lip
+/// takes a wider span because piled material stands at a shallower angle than a tyre cuts.
+const RUT_EDGE: (f32, f32) = (0.05, 0.26);
+const RUT_LIP_EDGE: (f32, f32) = (0.02, 0.34);
+
+/// How much of the packed strip is there whatever the ground did, and how much of it is the
+/// floor of a groove; and how far the wall beside a groove is left out of it.
+///
+/// Not all or nothing. A racing line is packed along its whole length — that is what makes it
+/// a line — but it is packed *hardest* where the wheels run, and the ruts are the record of
+/// where that is. Zero on the first number paints the line only inside its grooves, which
+/// leaves gaps a rider reads as holes in the track.
+const RUT_PAINT_FLOOR: f32 = 0.45;
+const RUT_PAINT_WALL: f32 = 1.0;
+
+/// And how strongly the wall beside a groove takes the dry, loose sheet instead, and how
+/// quickly it gets there. A bank is loose over all of itself, not in proportion to how tall it
+/// happens to be, so the signal saturates well before its own peak.
+const RUT_LIP_LOOSE: f32 = 1.0;
+const RUT_LIP_SHARP: f32 = 2.4;
+
+/// Tyre marks up the face of a jump: the grade at which a face is fully marked, how much wider
+/// the marks fan than the line that fed them, how far they lean towards the side the approach
+/// delivers, and how far back "the approach" is.
+///
+/// Sixty metres because that is about a corner exit and the run to the next lip — far enough
+/// back that the number says which way the last turn threw you, near enough that it is still
+/// the same piece of track.
+const RUT_MARK_FACE: f32 = 0.22;
+const RUT_MARK_FAN_M: f32 = 1.5;
+const RUT_MARK_LEAN: f32 = 0.55;
+const RUT_MARK_LOOKBACK_M: f32 = 60.0;
+
+/// Metres either side of a station the face grade is measured over. A jump's ramp is about ten
+/// metres long, so three of them across is steep enough to be on the face and short enough not
+/// to average the crest in with it.
+const FACE_STEP_M: f32 = 1.5;
 
 /// Ruts do not come one at a time.
 ///
@@ -158,19 +224,6 @@ const RUT_DEPTH_STRAIGHT_M: f32 = 0.17;
 /// Two metres, counted off ten published tracks: they carry one to three grooves deep enough
 /// to find at a time, 1.75–4.0 m apart, spanning six or seven metres of an eleven-metre line.
 const RUT_SPACING_M: f32 = 2.05;
-
-/// How much of the field is cut, and how hard. A higher power leaves narrower grooves with
-/// more untouched ground between them; the gain puts the deepest of them back at full depth
-/// after the sharpening has taken the top off.
-///
-/// The gain has to match the field it is applied to, and it did not: the sharpened noise peaks
-/// at about 0.57, a gain of 2.9 multiplied straight through it, and the deepest ground on the
-/// lap came out 1.04 m below the bench — a ditch across the track rather than a rut. At 1.75
-/// the asked depth is what the deepest groove actually cuts. The sharpening went with it:
-/// 1.35 left the cut at zero across most of the width, so what a corner grew was two isolated
-/// gouges instead of the bundle above.
-const RUT_SHARP: f32 = 1.0;
-const RUT_GAIN: f32 = 1.75;
 
 /// How much of the half-width the bundle covers, at the loosest corner that ruts at all and
 /// at the tightest.
@@ -210,7 +263,17 @@ const BRAKING_M: f32 = 22.0;
 const BRAKING_WAVELENGTH_M: f32 = 2.2;
 
 /// How much rougher the surface gets in and around a corner, as a multiplier on the texture.
-const CORNER_ROUGHNESS: f32 = 1.8;
+///
+/// One, not two. Measured along the centreline over a six-metre detrend, Indiana's corners run
+/// 0.069 m rms against 0.097 on its straights — a corner there is *smoother* under the wheels
+/// than the straight before it, because the ruts carry the relief and the ground between them
+/// is packed flat. There is no case for making ours the rougher of the two.
+///
+/// It is not, though, the reason a corner felt rough: taking this from 1.8 to 0.9 moved the
+/// measured corner roughness by 0.002 m, because the chatter in a corner is the braking and
+/// acceleration bumps, which are sized on their own. What made a corner ride badly was the
+/// cross-section — see [`RUT_EDGE`].
+const CORNER_ROUGHNESS: f32 = 1.0;
 
 /// How tall a braking bump stands, trough to crest, metres.
 ///
@@ -308,8 +371,13 @@ const JUMP_HOLLOW_M: f32 = 22.0;
 /// face of a jump that is a step in the ground you can see across the whole straight.
 const PROFILE_STEP: f32 = 0.1;
 
-/// Masks are stretched over the terrain, so they cost nothing to keep coarser than it.
-const MASK_DIM: usize = 1024;
+/// The resolution the exported `.tga` masks are written at.
+///
+/// The terrain's own, not half of it. A groove is a metre or so across and the paint now
+/// follows the grooves; at 1024 over a 500 m track that is two pixels a rut, which is a
+/// smudge. The `.map` the game actually reads has always written its masks at the grid's
+/// resolution — this only brings the TerrainEd source files up to the same ground.
+const MASK_DIM: usize = 2048;
 /// How hard the ground's own luma pushes its normals. Enough to catch light on ruts and
 /// chop without turning the soil grain into relief.
 const NORMAL_STRENGTH: f32 = 6.0;
@@ -383,6 +451,16 @@ pub struct Synth {
     pub heights: Vec<f32>,
     /// The riding line.
     pub corridor: Vec<bool>,
+    /// What the ruts did to each cell, as a fraction of the local rut depth: -1 on the floor
+    /// of a groove, positive on the wall standing beside it, 0 on ground no rut reached.
+    ///
+    /// Carried out of synthesis because the paint needs it. A rut is only half shape — the
+    /// other half is being able to see it, and a mask keyed off the racing line alone has no
+    /// way of knowing where inside that line the grooves actually fell.
+    pub rut: Vec<f32>,
+    /// How steeply the built ground climbs along the lap at each station — the grade of a
+    /// jump's face, positive up a takeoff and negative down a landing.
+    pub face: Vec<f32>,
     /// Metres from the centreline.
     pub dist: Vec<f32>,
     /// Metres round the lap.
@@ -699,6 +777,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
 
     // 3. Bench the corridor in, then build on it.
     let mut corridor = vec![false; gw * gh];
+    let mut rut = vec![0.0f32; gw * gh];
     let mut arc = vec![0.0f32; gw * gh];
     for i in 0..gw * gh {
         let (d, s, t) = local_frame(
@@ -820,13 +899,36 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             let reach = (half * spread).max(RUT_SPACING_M) + RUT_SPACING_M;
             let off = t - mid;
             if off.abs() <= reach {
-                let v = fbm(off / RUT_SPACING_M, s / RUT_ALONG_M, r.seed ^ 0x2117);
-                // Cut down, not up: a rut is a trough and the ground between two of them is
-                // only what was pushed aside. Taking the positive half and sharpening it
-                // leaves narrow grooves with wide ground between, which is the shape of it.
-                let cut = v.max(0.0).powf(RUT_SHARP);
                 let fade = 1.0 - (off.abs() / reach).min(1.0).powi(2);
-                heights[i] -= depth * cut * fade * RUT_GAIN;
+                let field = |at: f32| fbm(at / RUT_SPACING_M, s / RUT_ALONG_M, r.seed ^ 0x2117);
+                // Ground, wall, floor — see `RUT_EDGE`. Saturating the field rather than
+                // scaling it is what gives a groove a bottom to sit on and leaves the ground
+                // between two of them flat.
+                let shape = |v: f32, e: (f32, f32)| {
+                    smoothstep(((v - e.0) / (e.1 - e.0)).clamp(0.0, 1.0))
+                };
+                let cut = shape(field(off), RUT_EDGE);
+                // And the material that came out of it, standing on the groove's outer side.
+                //
+                // Which side that is comes from the bend, and on a straight from which side
+                // of the bundle the cell is on — blended between the two rather than switched,
+                // because a hard flip at the middle of a straight's bundle draws a seam down
+                // the length of it. The two candidate walls are sampled and mixed, not the
+                // offset: mixing the offset instead samples the groove itself at the middle
+                // and fills in the very rut it is meant to bank.
+                let k = turn.at(s);
+                let bend = (k.abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
+                let outward = -k.signum() * bend
+                    + (off / RUT_SPACING_M).clamp(-1.0, 1.0) * (1.0 - bend);
+                let w = 0.5 * (1.0 + outward.clamp(-1.0, 1.0));
+                let lip = shape(field(off + RUT_LIP_OFFSET_M), RUT_LIP_EDGE) * (1.0 - w)
+                    + shape(field(off - RUT_LIP_OFFSET_M), RUT_LIP_EDGE) * w;
+                // Held as a signal of its own as well as added to the ground: what a rider
+                // reads off a rut is half its shape and half the paint on it, and the paint
+                // cannot follow a groove it has no way of knowing is there.
+                let relief = (lip * RUT_LIP_GAIN - cut) * fade;
+                heights[i] += depth * relief;
+                rut[i] = relief;
             }
         }
 
@@ -914,12 +1016,26 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         .collect();
     smooth_along(&mut line_lat, (LINE_LEAN_SMOOTH_M / STATION_STEP) as usize);
 
+    // How steeply the ground the features built climbs along the lap, per station: the faces
+    // of every jump on it. Taken from the feature profile rather than from the finished
+    // terrain, so a hill the lap was routed over is not read as a takeoff — a jump is
+    // something built on the line, and this is the record of what was built.
+    let face: Vec<f32> = stations
+        .iter()
+        .map(|st| {
+            let h = FACE_STEP_M;
+            (feat.at(st.s + h) - feat.at(st.s - h)) / (2.0 * h)
+        })
+        .collect();
+
     Ok(Synth {
         gw,
         gh,
         mps,
         heights,
         corridor,
+        rut,
+        face,
         dist,
         arc,
         station,
@@ -1903,8 +2019,8 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
             0
         }
     });
-    let rut = rut_mask(syn, half, seed, MASK_DIM);
-    let loose = loose_mask(syn, half, seed, MASK_DIM);
+    let rut = rut_mask(syn, half, seed, MASK_DIM, MASK_DIM);
+    let loose = loose_mask(syn, half, seed, MASK_DIM, MASK_DIM);
     put("mask_dirt.tga", tga_alpha(MASK_DIM, MASK_DIM, &dirt), &mut wrote)?;
     put("mask_loose.tga", tga_alpha(MASK_DIM, MASK_DIM, &loose), &mut wrote)?;
     put("mask_rut.tga", tga_alpha(MASK_DIM, MASK_DIM, &rut), &mut wrote)?;
@@ -2625,24 +2741,17 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
 
     // One layer per painted band, in the order they are painted over each other. The first
     // covers everything and so carries no mask; the rest are masked.
-    let Grounds { field, ridden, shoulder, rut, loose, turf } = ground_looks(prog.terrain.surface);
+    //
+    // The same list the exported track is painted from, so what the studio draws is what gets
+    // ridden. It used to be a second copy of it here, and two lists that have to agree by hand
+    // are two lists that will not.
     let seed = prog.terrain.relief.seed;
     let dim = GROUND_TEXTURE_DIM;
     let half = prog.width * 0.5;
-    let (_, shoulder_scale) = ground(prog.terrain.surface);
-    // The same bands the exported track is painted with, so what the studio draws is what
-    // gets ridden. Anything keyed off the racing line comes from the shared mask functions.
-    let bands: [(&str, &GroundLook, u32, f32, BandMask); 6] = [
-        ("ground_c", &field, 0x9A0D, TILE_FIELD_M, BandMask::Everywhere),
-        ("shoulder_c", &shoulder, 0x30D2, TILE_SHOULDER_M,
-         BandMask::Within(half + SHOULDER_M * shoulder_scale)),
-        ("dirt_line_c", &ridden, 0x11E5, TILE_LINE_M, BandMask::Within(half)),
-        ("loose_c", &loose, 0x7C41, TILE_LOOSE_M, BandMask::Loose),
-        ("rut_c", &rut, 0x5B93, TILE_RUT_M, BandMask::Rut),
-        ("grass_c", &turf, 0x6A55, TILE_GRASS_M, BandMask::Beyond),
-    ];
+    let bands = layers(prog);
     out.extend_from_slice(&u(bands.len() as u32));
-    for (sheet, look, salt, tile, mask_to) in bands {
+    for l in bands {
+        let (sheet, look, salt, tile, mask_to) = (l.sheet, &l.look, l.salt, l.tile_m, l.band);
         // A material record: fourteen floats, the shape every published map uses. This is not
         // a name field -- writing text here hands the renderer garbage coefficients.
         out.extend_from_slice(&f(0.0));
@@ -2717,8 +2826,8 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
                 let (mw, mh) = (syn.gw - 1, syn.gh - 1);
                 let m = match edge {
                     BandMask::Everywhere => unreachable!(),
-                    BandMask::Rut => rut_mask(syn, half, seed, mw),
-                    BandMask::Loose => loose_mask(syn, half, seed, mw),
+                    BandMask::Rut => rut_mask(syn, half, seed, mw, mh),
+                    BandMask::Loose => loose_mask(syn, half, seed, mw, mh),
                     BandMask::Beyond => {
                         let to = half + SHOULDER_M;
                         mask_rect(syn, mw, mh, |d, _, _, _| u8::from(d > to) * 255)
@@ -2984,32 +3093,63 @@ fn mask_from(syn: &Synth, dim: usize, f: impl Fn(f32, f32, f32, f32) -> u8) -> V
 /// shoulder. Those need the rider's left told from their right, which is what the nearest
 /// station's heading gives.
 ///
-/// The callback gets, in order: metres off the centreline (signed, positive to the rider's
-/// right), metres off the *racing* line (same sign), the line's curvature there (positive
-/// turning right), metres round the lap, and the cell's place on the ground.
-fn mask_across(syn: &Synth, dim: usize, f: impl Fn(f32, f32, f32, f32, f32, f32) -> u8) -> Vec<u8> {
-    let mut out = vec![0u8; dim * dim];
-    for y in 0..dim {
-        let gy = (y * syn.gh / dim).min(syn.gh - 1);
-        for x in 0..dim {
-            let gx = (x * syn.gw / dim).min(syn.gw - 1);
+/// The callback gets a [`Where`], which is everything a mask can ask about one cell.
+///
+/// Sized as a width and a height rather than one edge. The `.map` asks for a mask the shape of
+/// the terrain grid, and on a track that is not square this handed it a square one — the right
+/// number of bytes only when `gw == gh`, and a mask read row-shifted against the ground on
+/// every rectangular track.
+fn mask_across(syn: &Synth, mw: usize, mh: usize, f: impl Fn(Where) -> u8) -> Vec<u8> {
+    let back = (RUT_MARK_LOOKBACK_M / STATION_STEP) as usize;
+    let n = syn.stations.len();
+    let mut out = vec![0u8; mw * mh];
+    for y in 0..mh {
+        let gy = (y * syn.gh / mh).min(syn.gh - 1);
+        for x in 0..mw {
+            let gx = (x * syn.gw / mw).min(syn.gw - 1);
             let i = gy * syn.gw + gx;
             let at = syn.station[i] as usize;
             let st = &syn.stations[at];
             let (wx, wz) = (gx as f32 * syn.mps, gy as f32 * syn.mps);
             let (rx, rz) = crate::trackprog::right_vector(st.heading);
             let lat = (wx - st.x) * rx + (wz - st.z) * rz;
-            out[y * dim + x] = f(
+            out[y * mw + x] = f(Where {
                 lat,
-                lat - syn.line_lat[at],
-                st.curvature,
-                syn.arc[i],
-                wx,
-                wz,
-            );
+                off: lat - syn.line_lat[at],
+                k: st.curvature,
+                s: syn.arc[i],
+                x: wx,
+                z: wz,
+                rut: syn.rut[i],
+                face: syn.face[at],
+                lead: syn.line_lat[(at + n - back % n) % n] - syn.line_lat[at],
+            });
         }
     }
     out
+}
+
+/// One cell of the ground, as a mask sees it.
+struct Where {
+    /// Metres off the centreline, signed, positive to the rider's right.
+    lat: f32,
+    /// Metres off the *racing* line, same sign.
+    off: f32,
+    /// The line's curvature here, positive turning right.
+    k: f32,
+    /// Metres round the lap.
+    s: f32,
+    /// And where on the ground the cell actually is.
+    x: f32,
+    z: f32,
+    /// What the ruts did here — see [`Synth::rut`].
+    rut: f32,
+    /// How steeply the built ground climbs along the lap here: positive up a takeoff, negative
+    /// down a landing, zero on the flat. See [`Synth::face`].
+    face: f32,
+    /// Where the racing line was a corner's-length back, relative to where it is here, in the
+    /// same frame as `off`. This is the side riders are arriving from.
+    lead: f32,
 }
 
 /// Which cells a band of the preview map covers.
@@ -3035,13 +3175,43 @@ enum BandMask {
 ///
 /// Shared by the exported masks and the preview map, so the studio cannot show a line in a
 /// different place from the one the game gets.
-fn rut_mask(syn: &Synth, half: f32, seed: u32, dim: usize) -> Vec<u8> {
-    mask_across(syn, dim, |lat, off, _, _, x, z| {
-        if lat.abs() > half + 0.5 {
+fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
+    mask_across(syn, mw, mh, |c| {
+        if c.lat.abs() > half + 0.5 {
             return 0;
         }
-        let w = RUT_HALF_WIDTH_M + edge_noise(x, z, seed ^ 0x51C7, 0.75, 0.28);
-        soft_edge(w, 1.3, off.abs())
+        // Up the face of a jump the strip widens and slides towards the side riders are
+        // arriving from.
+        //
+        // A takeoff is the one place on a track where everybody's line is written down. They
+        // come off the last corner wherever it left them and scrub up the ramp from there, so
+        // a face after a corner that runs you wide is black on the outside and clean on the
+        // inside — which is a thing a rider reads the approach off, and the reason the marks
+        // are worth having at all rather than being a texture detail.
+        let up = (c.face / RUT_MARK_FACE).clamp(0.0, 1.0);
+        let w = RUT_HALF_WIDTH_M
+            + edge_noise(c.x, c.z, seed ^ 0x51C7, 0.75, 0.28)
+            + RUT_MARK_FAN_M * up;
+        let off = c.off - c.lead * RUT_MARK_LEAN * up;
+        let band = soft_edge(w, 1.3, off.abs()) as f32 / 255.0;
+        // Into the grooves and off the walls beside them.
+        //
+        // The packed strip is not the whole width of the line: it is the floor a tyre
+        // polished, and the bank thrown up beside it is material nothing has driven on. Keying
+        // the coverage to the ground's own rut signal is what makes the two read apart at
+        // riding speed — without it a rut is only a shape, and a shape painted the colour of
+        // the ground it is cut into is a shape nobody sees until they are in it.
+        let floor = (-c.rut).clamp(0.0, 1.0);
+        let wall = c.rut.clamp(0.0, 1.0);
+        let keyed = (RUT_PAINT_FLOOR + (1.0 - RUT_PAINT_FLOOR) * floor - RUT_PAINT_WALL * wall)
+            .clamp(0.0, 1.0);
+        // And never a solid sheet of it. A line packs unevenly — damp here, blown out there —
+        // and one texture at full coverage down the whole lap is the single thing that made
+        // the line read as a stripe of paint rather than as ground.
+        let patchy = (0.66 + 0.42 * fbm(c.x * 0.085, c.z * 0.085, seed ^ 0x3A71)
+            + 0.16 * fbm(c.x * 0.31, c.z * 0.31, seed ^ 0x77C2))
+            .clamp(0.48, 1.0);
+        (255.0 * band * keyed * patchy) as u8
     })
 }
 
@@ -3051,18 +3221,26 @@ fn rut_mask(syn: &Synth, half: f32, seed: u32, dim: usize) -> Vec<u8> {
 /// Two things put it there — how far a cell is off the racing line, and how far round the
 /// outside of a corner it is — and it takes the stronger of the two, so a straight still gets
 /// dry edges without the corner term inventing any.
-fn loose_mask(syn: &Synth, half: f32, seed: u32, dim: usize) -> Vec<u8> {
-    mask_across(syn, dim, |lat, off, k, _, x, z| {
-        if lat.abs() > half + 0.2 {
+fn loose_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
+    mask_across(syn, mw, mh, |c| {
+        if c.lat.abs() > half + 0.2 {
             return 0;
         }
-        let bend = (k.abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
-        let outside = (-k.signum() * lat / half.max(0.1)).clamp(0.0, 1.0) * bend;
-        let edge = ((off.abs() - RUT_HALF_WIDTH_M - 1.1) / 2.0).clamp(0.0, 1.0);
-        // Patchy, at a scale you read at riding speed rather than from the map, and never
-        // quite solid — ground you can still see the track's own colour through.
-        let patchy = (0.54 + 0.46 * fbm(x * 0.045, z * 0.045, seed ^ 0x2D18)).clamp(0.0, 0.92);
-        (255.0 * (edge.max(outside) * patchy)) as u8
+        let bend = (c.k.abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
+        let outside = (-c.k.signum() * c.lat / half.max(0.1)).clamp(0.0, 1.0) * bend;
+        let edge = ((c.off.abs() - RUT_HALF_WIDTH_M - 1.1) / 2.0).clamp(0.0, 1.0);
+        // And the wall beside every groove, which is the loosest ground on the track: material
+        // a tyre threw there this morning and nothing has driven on since. It is also the half
+        // of a rut that catches the light, so painting it the dry colour is what turns a
+        // groove from a dark smear into something with a lit side and a shaded one.
+        let wall = (c.rut * RUT_LIP_SHARP).clamp(0.0, 1.0) * RUT_LIP_LOOSE;
+        let patchy =
+            (0.54 + 0.46 * fbm(c.x * 0.045, c.z * 0.045, seed ^ 0x2D18)).clamp(0.0, 0.92);
+        // Loose ground off the line is patchy; the bank beside a groove is not. Letting the
+        // same patchiness eat into it is what left the wall at a quarter coverage and the rut
+        // reading nine levels off its own floor.
+        let v = (edge.max(outside) * patchy).max(wall * (0.8 + 0.2 * patchy));
+        (255.0 * v) as u8
     })
 }
 
@@ -3338,9 +3516,17 @@ fn ground_pixels(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
     for y in 0..dim {
         for x in 0..dim {
             let (u, v) = (x as f32 / dim as f32, y as f32 / dim as f32);
+            // Starting at three cells across the tile put a metre-and-a-half blotch in every
+            // copy of a four-metre sheet, and a sheet laid a hundred times across a track
+            // repeats every blotch with it — which from the seat is a chequerboard printed on
+            // the ground. Indiana's soil has no blotch at any scale: it is grain, and its
+            // whole tile spreads 21 grey levels about its mean where ours spread nearly thirty
+            // on the low frequency alone. So the patching starts finer and carries less, and
+            // the variation a rider actually reads across a track comes from the masks, which
+            // are stretched over the terrain once and do not repeat at all.
             let mut m = 0.0;
             let mut amp = 1.0;
-            let mut period = 3;
+            let mut period = 7;
             for o in 0..3 {
                 m += tile_noise(u * period as f32, v * period as f32, period, seed ^ (o * 131))
                     * amp;
@@ -3613,21 +3799,21 @@ fn ground_looks(surface: Surface) -> Grounds {
     };
     let field = GroundLook {
         base,
-        grain_tint: (0.50, 1.38),
+        grain_tint: (0.82, 1.13),
         fleck: [196.0, 190.0, 176.0],
-        fleck_density: 0.05,
+        fleck_density: 0.03,
         litter: [186.0, 168.0, 112.0],
         litter_density: 1.0,
         blade: ([0.0; 3], [0.0; 3]),
         blade_density: 0.0,
         clods: 1.0,
         coarse: 0.30,
-        mottle: 0.16,
-        contrast: 0.52,
+        mottle: 0.05,
+        contrast: 0.30,
     };
     let ridden = GroundLook {
         base: line,
-        grain_tint: (0.34, 1.72),
+        grain_tint: (0.70, 1.28),
         fleck: [150.0, 146.0, 138.0],
         fleck_density: 0.03,
         litter: [140.0, 122.0, 84.0],
@@ -3636,8 +3822,8 @@ fn ground_looks(surface: Surface) -> Grounds {
         blade_density: 0.0,
         clods: 1.0,
         coarse: 1.0,
-        mottle: 0.20,
-        contrast: 1.0,
+        mottle: 0.06,
+        contrast: 0.62,
     };
     // The graded shoulder: the field's colour, worked over like the line.
     let shoulder = GroundLook {
@@ -3650,17 +3836,17 @@ fn ground_looks(surface: Surface) -> Grounds {
             base[1] * 1.04 + 5.0,
             base[2] * 1.02 + 4.0,
         ],
-        grain_tint: (0.46, 1.46),
+        grain_tint: (0.85, 1.11),
         fleck: [165.0, 160.0, 150.0],
-        fleck_density: 0.07,
+        fleck_density: 0.03,
         litter: [172.0, 156.0, 106.0],
         litter_density: 0.6,
         blade: ([0.0; 3], [0.0; 3]),
         blade_density: 0.0,
         clods: 1.0,
         coarse: 0.65,
-        mottle: 0.18,
-        contrast: 0.72,
+        mottle: 0.05,
+        contrast: 0.31,
     };
     let grass = GroundLook {
         base: [100.0, 114.0, 62.0],
@@ -3673,8 +3859,8 @@ fn ground_looks(surface: Surface) -> Grounds {
         blade_density: 34.0,
         clods: 0.35,
         coarse: 0.25,
-        mottle: 0.26,
-        contrast: 0.8,
+        mottle: 0.08,
+        contrast: 0.7,
     };
     // The packed line: darker and wetter than the ground it is worn into, and smoother —
     // the clods are gone where a tyre has been over them a thousand times. Kept a good way
@@ -3682,7 +3868,7 @@ fn ground_looks(surface: Surface) -> Grounds {
     // shade.
     let rut = GroundLook {
         base: [line[0] * 0.72, line[1] * 0.72, line[2] * 0.70],
-        grain_tint: (0.42, 1.44),
+        grain_tint: (0.74, 1.20),
         fleck: [128.0, 124.0, 118.0],
         fleck_density: 0.015,
         litter: [120.0, 104.0, 72.0],
@@ -3691,28 +3877,28 @@ fn ground_looks(surface: Surface) -> Grounds {
         blade_density: 0.0,
         clods: 0.35,
         coarse: 0.55,
-        mottle: 0.14,
-        contrast: 0.78,
+        mottle: 0.05,
+        contrast: 0.48,
     };
     // Loose dirt: dry, so it reads light against everything around it, and coarse, because
     // it is the stuff that has been thrown there rather than driven on.
     let loose = GroundLook {
         base: [
-            line[0] + (base[0] - line[0]) * 0.38,
-            line[1] + (base[1] - line[1]) * 0.38,
-            line[2] + (base[2] - line[2]) * 0.38,
+            line[0] + (base[0] - line[0]) * 0.52,
+            line[1] + (base[1] - line[1]) * 0.52,
+            line[2] + (base[2] - line[2]) * 0.52,
         ],
-        grain_tint: (0.52, 1.50),
+        grain_tint: (0.84, 1.14),
         fleck: [188.0, 182.0, 168.0],
-        fleck_density: 0.06,
+        fleck_density: 0.04,
         litter: [180.0, 162.0, 108.0],
         litter_density: 0.5,
         blade: ([0.0; 3], [0.0; 3]),
         blade_density: 0.0,
         clods: 1.0,
         coarse: 1.0,
-        mottle: 0.24,
-        contrast: 0.9,
+        mottle: 0.06,
+        contrast: 0.40,
     };
     Grounds { field, ridden, shoulder, rut, loose, turf: grass }
 }
@@ -3890,8 +4076,13 @@ struct Layer {
     /// The sheet's base name under `maps/`. Everything beside it is named from this: the
     /// normal map, the shader, and the wet frame.
     name: &'static str,
+    /// And what the same band is called inside a `.map`, which is not the same word.
+    sheet: &'static str,
     look: GroundLook,
     salt: u32,
+    /// Which cells the band covers, for the `.map` and for anything else compositing the
+    /// ground. The exported `.tga` masks are built from the same functions this names.
+    band: BandMask,
     /// How many metres of ground one tile of the sheet covers.
     tile_m: f32,
     /// `None` on layer zero: it is the ground everything else is painted over.
@@ -3921,9 +4112,13 @@ struct Layer {
 fn layers(prog: &TrackProgram) -> Vec<Layer> {
     // Ground follows what the track is made of, so a sand national exports sand.
     let Grounds { field, ridden, shoulder, rut, loose, turf } = ground_looks(prog.terrain.surface);
+    let half = prog.width * 0.5;
+    let (_, shoulder_scale) = ground(prog.terrain.surface);
     vec![
         Layer {
             name: "ground",
+            sheet: "ground_c",
+            band: BandMask::Everywhere,
             look: field,
             salt: 0x9A0D,
             tile_m: TILE_FIELD_M,
@@ -3936,6 +4131,8 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         },
         Layer {
             name: "shoulder",
+            sheet: "shoulder_c",
+            band: BandMask::Within(half + SHOULDER_M * shoulder_scale),
             look: shoulder,
             salt: 0x30D2,
             tile_m: TILE_SHOULDER_M,
@@ -3948,6 +4145,8 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         },
         Layer {
             name: "line",
+            sheet: "dirt_line_c",
+            band: BandMask::Within(half),
             look: ridden,
             salt: 0x11E5,
             tile_m: TILE_LINE_M,
@@ -3962,6 +4161,8 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         // stuff is thrown over the worked soil, and the line is worn back through it.
         Layer {
             name: "loose",
+            sheet: "loose_c",
+            band: BandMask::Loose,
             look: loose,
             salt: 0x7C41,
             tile_m: TILE_LOOSE_M,
@@ -3974,6 +4175,8 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         },
         Layer {
             name: "rut",
+            sheet: "rut_c",
+            band: BandMask::Rut,
             look: rut,
             salt: 0x5B93,
             tile_m: TILE_RUT_M,
@@ -3986,6 +4189,8 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         },
         Layer {
             name: "grass",
+            sheet: "grass_c",
+            band: BandMask::Beyond,
             look: turf,
             salt: 0x6A55,
             tile_m: TILE_GRASS_M,
@@ -5185,12 +5390,15 @@ mod tests {
         };
         between("corridor width", c.width_from_mean_m, 8.0, 20.0);
         between("lip height p50", c.lip_height_m.p50, 1.0, 1.8);
-        // Wider than the corpus's own 13.2–16.2 on purpose. The median here sits at 11.86 m
-        // and does not move: three different feature layouts — 34, 52 and 46 jumps, whoops at
-        // 4.5, 5 and 6 m — all measured 11.864832. A figure that ignores what it is measuring
-        // is the detector talking, not the track, so this is a sanity bound until the lip
-        // detector is understood well enough to be an acceptance test. See tasks/.
-        between("lip spacing p50", c.lip_spacing_m.p50, 9.0, 25.0);
+        // Wider than the corpus's own 13.2–16.2 on purpose, and wider again since the ruts
+        // were given floors: this detector counts a corner's chop as lips, so smoothing the
+        // ground between the grooves took a crowd of phantom jumps out of it and the gaps
+        // between the real ones roughly doubled — 20.3 m before, 28.3 m after, over one fewer
+        // lip. The track's jumps did not move. Indiana's own centreline puts 34.5 m between
+        // its lips, so the number this now reports is the plausible one and the number it used
+        // to report was the chop talking. Still a sanity bound rather than an acceptance test,
+        // for the same reason as before. See tasks/.
+        between("lip spacing p50", c.lip_spacing_m.p50, 9.0, 36.0);
         between("feature relief p90", c.feature_relief_m.p90, 0.5, 1.8);
         between("slope p99", c.slope_deg.p99, 20.0, 55.0);
         assert!(
@@ -5638,6 +5846,54 @@ mod tests {
         }
     }
 
+
+    /// And they are not blotchy.
+    ///
+    /// A ground sheet is laid over a hundred times across a track, so anything it carries at
+    /// the scale of the tile repeats at the scale of the tile — a metre-wide patch of lighter
+    /// soil becomes a chequerboard printed on the ground, and that is what "the ground reads
+    /// coarse" turns out to mean when you go and measure it. Indiana's sheets carry none: its
+    /// dark soil spreads 21 grey levels about a mean of 39 and its light soil 28 about 142,
+    /// which is grain and nothing else.
+    #[test]
+    fn the_ground_sheets_are_grain_and_not_blotches() {
+        let g = ground_looks(Surface::Soil);
+        for (what, look, most) in [
+            ("the field", &g.field, 34.0),
+            ("the riding line", &g.ridden, 26.0),
+            ("the shoulder", &g.shoulder, 34.0),
+            ("the loose dirt", &g.loose, 34.0),
+        ] {
+            let dim = 256;
+            let px = ground_pixels(dim, look, 11);
+            let l: Vec<f32> = px
+                .chunks_exact(4)
+                .map(|p| 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32)
+                .collect();
+            let mean = l.iter().sum::<f32>() / l.len() as f32;
+            let sd = (l.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / l.len() as f32)
+                .sqrt();
+            // The grain is allowed its own spread; what is not allowed is the *blur* of it
+            // carrying one, because that is the part that survives being seen from a distance
+            // and turns into a grid. Measured on a copy blurred over an eighth of the tile.
+            let blur = box_blur_wrap(&l, dim, dim / 16);
+            let bmean = blur.iter().sum::<f32>() / blur.len() as f32;
+            let bsd = (blur.iter().map(|v| (v - bmean) * (v - bmean)).sum::<f32>()
+                / blur.len() as f32)
+                .sqrt();
+            println!("  {what:<16} mean {mean:>5.1}  grain sd {sd:>5.1}  blotch sd {bsd:>4.1}");
+            assert!(
+                sd <= most,
+                "{what} spreads {sd:.1} grey levels, and Indiana's widest sheet spreads 28"
+            );
+            assert!(
+                bsd <= 5.0,
+                "{what} still spreads {bsd:.1} levels once the grain is blurred out — that is \
+                 a patch the size of the tile, and it repeats with the tile"
+            );
+        }
+    }
+
     /// Build a track program from a file, the way the studio does but without the studio.
     ///
     /// ```text
@@ -5680,6 +5936,323 @@ mod tests {
             write_pkz(&p, &s, &dir.join(format!("{}.pkz", slug(&p.name))), true).unwrap();
             preview(&s, &dir.join("preview.ppm"));
             println!("wrote {} files to {}", wrote.len() + 2, dir.display());
+        }
+    }
+
+
+
+    /// What a corner looks like, and whether the rut in it can be seen.
+    ///
+    /// Two questions, and the second is the one the shape alone never answered. A groove is
+    /// only a rut to a rider if the eye can find it at speed, and that is a contrast between
+    /// the floor and the bank beside it — the paint and the light on it together. So this
+    /// renders the ground through the same bands the `.map` carries and then counts what it
+    /// rendered: how much darker the floor of a groove reads than the wall outboard of it,
+    /// across the tightest corners on the lap.
+    ///
+    /// ```text
+    /// FROST_BUILD=/tmp/out cargo test -- --ignored --nocapture the_ruts_can_be_seen
+    /// ```
+    #[test]
+    #[ignore = "renders ground — slow, and writes pictures with FROST_BUILD"]
+    fn the_ruts_can_be_seen() {
+        let p: TrackProgram = serde_json::from_str(DEMO).unwrap();
+        let s = synthesise(&p).unwrap();
+
+        // The tightest corners on the lap, spread round it rather than four samples of one.
+        let mut picks: Vec<usize> = Vec::new();
+        let mut order: Vec<usize> = (0..s.stations.len())
+            .filter(|i| s.stations[*i].curvature.abs() > 1.0 / 20.0)
+            .collect();
+        order.sort_by(|a, b| {
+            s.stations[*b]
+                .curvature
+                .abs()
+                .partial_cmp(&s.stations[*a].curvature.abs())
+                .unwrap()
+        });
+        for i in order {
+            if picks.iter().all(|k| (s.stations[*k].s - s.stations[i].s).abs() > 80.0) {
+                picks.push(i);
+            }
+            if picks.len() == 3 {
+                break;
+            }
+        }
+        assert!(!picks.is_empty(), "the demo has no corner tight enough to rut");
+        let look = Painted::of(&p, &s);
+
+        // Across the line at each of them: the ground's own rut signal against the luma the
+        // paint and the light give it. A rut that reads is one where the two agree.
+        let mut floors: Vec<f32> = Vec::new();
+        let mut walls: Vec<f32> = Vec::new();
+        for &k in &picks {
+            let st = s.stations[k];
+            let (rx, rz) = crate::trackprog::right_vector(st.heading);
+            // One pixel every 4 cm across twelve metres of track, at the station itself.
+            let steps = 300;
+            let mut row: Vec<(f32, f32, f32)> = Vec::new();
+            for i in 0..=steps {
+                let t = (i as f32 / steps as f32 - 0.5) * 12.0;
+                let (x, z) = (st.x + rx * t, st.z + rz * t);
+                let (gx, gy) = (
+                    (x / s.mps).round().clamp(0.0, (s.gw - 1) as f32) as usize,
+                    (z / s.mps).round().clamp(0.0, (s.gh - 1) as f32) as usize,
+                );
+                let i = gy * s.gw + gx;
+                row.push((t, s.rut[i], look.luma(&s, x, z)));
+            }
+            for (_, r, l) in &row {
+                if *r < -0.35 {
+                    floors.push(*l);
+                } else if *r > 0.35 {
+                    walls.push(*l);
+                }
+            }
+            let mean = |v: &[(f32, f32, f32)], f: fn(f32) -> bool| -> (f32, usize) {
+                let hit: Vec<f32> = v.iter().filter(|(_, r, _)| f(*r)).map(|(_, _, l)| *l).collect();
+                (
+                    if hit.is_empty() { 0.0 } else { hit.iter().sum::<f32>() / hit.len() as f32 },
+                    hit.len(),
+                )
+            };
+            let (fl, nf) = mean(&row, |r| r < -0.35);
+            let (wl, nw) = mean(&row, |r| r > 0.35);
+            println!(
+                "  corner at {:>5.0} m, R {:>4.1} m: floor {:.0} over {nf} samples, \
+                 wall {:.0} over {nw}, difference {:+.0}",
+                st.s,
+                1.0 / st.curvature.abs(),
+                fl,
+                wl,
+                wl - fl
+            );
+        }
+
+        let avg = |v: &[f32]| v.iter().sum::<f32>() / v.len().max(1) as f32;
+        let (fl, wl) = (avg(&floors), avg(&walls));
+        println!(
+            "\n  floor {:.1} against wall {:.1}: {:+.1} levels of 255, {:.0}% of the floor",
+            fl,
+            wl,
+            wl - fl,
+            (wl - fl).abs() / fl.max(1.0) * 100.0
+        );
+        if let Ok(dir) = std::env::var("FROST_BUILD") {
+            let dir = Path::new(&dir);
+            for (n, &k) in picks.iter().enumerate() {
+                let st = s.stations[k];
+                look.crop(&s, &dir.join(format!("corner{n}.ppm")), (st.x, st.z), 36.0, 720);
+                preview_crop(
+                    &s,
+                    &dir.join(format!("corner{n}_shape.ppm")),
+                    ((st.x - 18.0) / s.mps).max(0.0) as usize,
+                    ((st.z - 18.0) / s.mps).max(0.0) as usize,
+                    (36.0 / s.mps) as usize,
+                    (36.0 / s.mps) as usize,
+                );
+            }
+            println!("  wrote {} corner pictures to {}", picks.len() * 2, dir.display());
+
+            // And the steepest takeoff on the lap, which is where the tyre marks are.
+            let up = (0..s.stations.len())
+                .max_by(|a, b| s.face[*a].partial_cmp(&s.face[*b]).unwrap())
+                .unwrap();
+            let st = s.stations[up];
+            look.crop(&s, &dir.join("jumpface.ppm"), (st.x, st.z), 30.0, 700);
+            println!(
+                "  and the face at {:.0} m, climbing {:.2} m a metre",
+                st.s, s.face[up]
+            );
+
+            // Where the marks actually sit, against where the approach says they should. The
+            // picture cannot tell a fan that leans from one that only got wider, and leaning
+            // is the whole claim.
+            let mark = rut_mask(&s, p.width * 0.5, p.terrain.relief.seed, s.gw - 1, s.gh - 1);
+            let centroid = |at: usize| -> (f32, f32) {
+                let station = &s.stations[at];
+                let (rx, rz) = crate::trackprog::right_vector(station.heading);
+                let (mut sum, mut wsum) = (0.0f32, 0.0f32);
+                let mut t = -6.0f32;
+                while t <= 6.0 {
+                    let (x, z) = (station.x + rx * t, station.z + rz * t);
+                    let (gx, gy) = (
+                        (x / s.mps).round().clamp(0.0, (s.gw - 2) as f32) as usize,
+                        (z / s.mps).round().clamp(0.0, (s.gh - 2) as f32) as usize,
+                    );
+                    let a = mark[gy * (s.gw - 1) + gx] as f32 / 255.0;
+                    sum += (t - s.line_lat[at]) * a;
+                    wsum += a;
+                    t += 0.05;
+                }
+                (if wsum > 0.0 { sum / wsum } else { 0.0 }, wsum * 0.05)
+            };
+            let n = s.stations.len();
+            let back = (RUT_MARK_LOOKBACK_M / STATION_STEP) as usize;
+            let lead = s.line_lat[(up + n - back % n) % n] - s.line_lat[up];
+            let flat = (0..n)
+                .min_by(|a, b| s.face[*a].abs().partial_cmp(&s.face[*b].abs()).unwrap())
+                .unwrap();
+            let (fc, fw) = centroid(up);
+            let (gc, gw_) = centroid(flat);
+            println!(
+                "  marks on the face sit {fc:+.2} m off the line and are {fw:.1} m wide; on                  flat ground {gc:+.2} m and {gw_:.1} m. The approach comes from {lead:+.2} m."
+            );
+        }
+
+        // Ten levels is about where a step stops being a gradient and starts being an edge on
+        // a screen; a rut you cannot pick out at riding speed is decoration. Asserted last, so
+        // a failure still leaves the pictures that explain it.
+        assert!(
+            (wl - fl).abs() >= 10.0,
+            "the wall reads {:.0} and the floor {:.0} — a rut nobody can see",
+            wl,
+            fl
+        );
+    }
+
+    /// The painted ground, composited the way the `.map` says it and lit like terrain.
+    ///
+    /// The slope preview answers whether the *shape* is right. It cannot answer whether a
+    /// rider can see a rut, which is a different question with a different answer: a groove
+    /// painted the colour of the ground it is cut into is invisible until you are in it, and
+    /// no amount of depth fixes that. So every band's sheet is tiled over the ground at its
+    /// own pitch, laid through its own mask in the order the game blends them, and shaded by
+    /// the terrain's own normal under the light the track ships in `params.ini`.
+    struct Painted {
+        /// Sheet pixels, metres per tile, and the band's mask over the whole terrain.
+        bands: Vec<(Vec<u8>, f32, Option<Vec<u8>>)>,
+        mw: usize,
+        mh: usize,
+    }
+
+    impl Painted {
+        /// Small sheets on purpose: 512 at a 3 m tile is 6 mm a pixel, finer than any crop
+        /// this is drawn into, and the shipped 1024 costs a minute a band to scatter.
+        const SHEET: usize = 512;
+
+        fn of(prog: &TrackProgram, syn: &Synth) -> Self {
+            let seed = prog.terrain.relief.seed;
+            let half = prog.width * 0.5;
+            let (mw, mh) = (syn.gw - 1, syn.gh - 1);
+            let bands = layers(prog)
+                .into_iter()
+                .map(|l| {
+                    let sheet = ground_pixels(Self::SHEET, &l.look, seed ^ l.salt);
+                    let mask = match l.band {
+                        BandMask::Everywhere => None,
+                        BandMask::Rut => Some(rut_mask(syn, half, seed, mw, mh)),
+                        BandMask::Loose => Some(loose_mask(syn, half, seed, mw, mh)),
+                        BandMask::Beyond => {
+                            let to = half + SHOULDER_M;
+                            Some(mask_rect(syn, mw, mh, |d, _, _, _| u8::from(d > to) * 255))
+                        }
+                        BandMask::Within(to) => {
+                            Some(mask_rect(syn, mw, mh, |d, _, _, _| u8::from(d <= to) * 255))
+                        }
+                    };
+                    (sheet, l.tile_m, mask)
+                })
+                .collect();
+            Painted { bands, mw, mh }
+        }
+
+        /// The colour of one point of ground, lit.
+        fn at(&self, syn: &Synth, x: f32, z: f32) -> [u8; 3] {
+            let (gu, gv) = (x / syn.mps, z / syn.mps);
+            let bi = |v: &[u8], w: usize, h: usize, u: f32, t: f32| -> f32 {
+                let (u, t) = (u.max(0.0), t.max(0.0));
+                let (x0, y0) = (u.floor() as usize, t.floor() as usize);
+                let (fx, fy) = (u - x0 as f32, t - y0 as f32);
+                let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+                let (x0, y0) = (x0.min(w - 1), y0.min(h - 1));
+                let a =
+                    v[y0 * w + x0] as f32 + (v[y0 * w + x1] as f32 - v[y0 * w + x0] as f32) * fx;
+                let b =
+                    v[y1 * w + x0] as f32 + (v[y1 * w + x1] as f32 - v[y1 * w + x0] as f32) * fx;
+                a + (b - a) * fy
+            };
+            let mut col = [0.0f32; 3];
+            for (k, (sheet, tile, mask)) in self.bands.iter().enumerate() {
+                let d = Self::SHEET as f32;
+                let sx = (x / tile * d).rem_euclid(d) as usize % Self::SHEET;
+                let sy = (z / tile * d).rem_euclid(d) as usize % Self::SHEET;
+                let i = (sy * Self::SHEET + sx) * 4;
+                let c = [sheet[i] as f32, sheet[i + 1] as f32, sheet[i + 2] as f32];
+                let a = match mask {
+                    Some(m) if k > 0 => {
+                        bi(
+                            m,
+                            self.mw,
+                            self.mh,
+                            gu * self.mw as f32 / syn.gw as f32,
+                            gv * self.mh as f32 / syn.gh as f32,
+                        ) / 255.0
+                    }
+                    _ => 1.0,
+                };
+                for ch in 0..3 {
+                    col[ch] += (c[ch] - col[ch]) * a;
+                }
+            }
+            // The terrain's own relief, which is the other half of what a rider reads off a
+            // rut — and the half the paint has to agree with rather than fight. Lit by the sun
+            // the track ships: `params.ini` states it.
+            let h = |ox: f32, oz: f32| sample(&syn.heights, syn.gw, syn.gh, gu + ox, gv + oz);
+            let dx = (h(1.0, 0.0) - h(-1.0, 0.0)) / (2.0 * syn.mps);
+            let dz = (h(0.0, 1.0) - h(0.0, -1.0)) / (2.0 * syn.mps);
+            let (nx, ny, nz) = (-dx, 1.0, -dz);
+            let inv = 1.0 / (nx * nx + ny * ny + nz * nz).sqrt();
+            let (lx, ly, lz) = (2.0f32, 10.0f32, -7.0f32);
+            let ln = (lx * lx + ly * ly + lz * lz).sqrt();
+            let lam = ((nx * lx + ny * ly + nz * lz) * inv / ln).max(0.0);
+            let shade = 0.42 + 0.58 * lam;
+            [
+                (col[0] * shade).clamp(0.0, 255.0) as u8,
+                (col[1] * shade).clamp(0.0, 255.0) as u8,
+                (col[2] * shade).clamp(0.0, 255.0) as u8,
+            ]
+        }
+
+        fn luma(&self, syn: &Synth, x: f32, z: f32) -> f32 {
+            let c = self.at(syn, x, z);
+            0.299 * c[0] as f32 + 0.587 * c[1] as f32 + 0.114 * c[2] as f32
+        }
+
+        /// A square of ground, written as a PPM.
+        ///
+        /// Supersampled, because the sheets are far finer than the crop: a 3 m tile over 512
+        /// pixels is 6 mm a pixel and a 36 m crop is 50 mm, so point-sampling picks one grain
+        /// in eight and draws the tiling as a checkerboard that is not there. The game has
+        /// mipmaps for this; sixteen samples a pixel is the cheap stand-in.
+        fn crop(&self, syn: &Synth, out: &Path, centre: (f32, f32), span_m: f32, px: usize) {
+            const SUB: usize = 4;
+            let mut ppm = format!("P6\n{px} {px}\n255\n").into_bytes();
+            for py in 0..px {
+                for pxi in 0..px {
+                    let mut acc = [0u32; 3];
+                    for sy in 0..SUB {
+                        for sx in 0..SUB {
+                            let n = (px * SUB) as f32;
+                            let u = (pxi * SUB + sx) as f32 + 0.5;
+                            let v = (py * SUB + sy) as f32 + 0.5;
+                            let x = centre.0 - span_m * 0.5 + span_m * u / n;
+                            let z = centre.1 - span_m * 0.5 + span_m * v / n;
+                            let c = self.at(syn, x, z);
+                            for ch in 0..3 {
+                                acc[ch] += c[ch] as u32;
+                            }
+                        }
+                    }
+                    let n = (SUB * SUB) as u32;
+                    ppm.extend_from_slice(&[
+                        (acc[0] / n) as u8,
+                        (acc[1] / n) as u8,
+                        (acc[2] / n) as u8,
+                    ]);
+                }
+            }
+            let _ = std::fs::write(out, ppm);
         }
     }
 
