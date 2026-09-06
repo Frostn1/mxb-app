@@ -86,6 +86,14 @@ const TREE_H_M: f32 = 8.0;
 /// at 54°. See `dome_mesh`.
 const SKY_TOP_DEG: f32 = 34.0;
 
+/// How tall a feature has to be before it is worth marking. A roller with a sign on it is a
+/// track that has run out of things to say.
+const JUMPMARK_FROM_M: f32 = 0.9;
+
+/// A jump board: wide enough to read from a hundred metres, low enough to clip harmlessly.
+const JUMPMARK_W_M: f32 = 1.1;
+const JUMPMARK_H_M: f32 = 0.75;
+
 /// How far apart the poles and the parked vans go, from the per-kilometre counts above.
 const POLE_GAP_M: f32 = 50.0;
 const POLE_H_M: f32 = 7.5;
@@ -431,6 +439,31 @@ fn dome_sheet() -> Texture {
     })
 }
 
+/// The yellow board that stands beside a jump's takeoff.
+///
+/// Every track marks its jumps — a rider coming over a blind crest is reading the boards, not
+/// the dirt — and they are yellow because that is the one colour nothing else on a motocross
+/// track is.
+fn jumpmark_mesh() -> Mesh {
+    let mut m = edfwrite::double_sided(&edfwrite::moved(
+        &edfwrite::card(JUMPMARK_W_M, JUMPMARK_H_M),
+        [0.0, JUMPMARK_H_M * 0.5 + 0.35, 0.0],
+    ));
+    m.append(&edfwrite::moved(&edfwrite::cuboid(0.07, 0.5, 0.07), [0.0, 0.15, 0.0]));
+    m
+}
+
+fn jumpmark_sheet() -> Texture {
+    sheet("jumpmark_c", 32, |u, v| {
+        let g = grain(u, v, 0x8B31, 22.0);
+        // A dark edge round it, so it reads as a board and not as a glow.
+        let edge = u < 0.08 || u > 0.92 || v < 0.08 || v > 0.92;
+        let base = if edge { [96.0, 78.0, 20.0] } else { [242.0, 206.0, 34.0] };
+        let k = 0.92 + 0.12 * g;
+        [(base[0] * k) as u8, (base[1] * k) as u8, (base[2] * k) as u8, 255]
+    })
+}
+
 /// A pole: a post with a crossbar near the top. Power, floodlight or flag — at the distance
 /// these stand it is a vertical, and what it does is break up the skyline.
 fn pole_mesh(h: f32) -> Mesh {
@@ -636,6 +669,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let mut bales = Mesh::default();
     let mut trees = Mesh::default();
     let mut poles = Mesh::default();
+    let mut jumpmarks = Mesh::default();
     let mut vans = Mesh::default();
     let mut gate = Mesh::default();
     let mut tally = Vec::new();
@@ -669,32 +703,11 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     }
     tally.push(("stakes", n));
 
-    // 2. Banners: few, big, and facing the rider.
-    let mut n = 0usize;
-    let mut s = BANNER_GAP_M * 0.5;
-    while s < lap {
-        let st = at(s);
-        let (rx, rz) = crate::trackprog::right_vector(st.heading);
-        let key = (s / BANNER_GAP_M) as u32;
-        let side = if rnd(seed ^ 0x51, key) < 0.5 { -1.0f32 } else { 1.0 };
-        let off = BANNER_OFF_M.max(half + 2.5);
-        let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
-        if inside(prog, x, z, 3.0)
-            && clearance(&coarse, x, z) > off - 1.0
-            && clear_of_the_start(x, z)
-        {
-            let (lo, hi) = ground_span(syn, x, z, along(st.heading), BANNER_W_M);
-            if hi - lo < 1.0 {
-                banners.append(&edfwrite::moved(
-                    &edfwrite::turned(&banner_mesh(), along(st.heading)),
-                    [x, (lo + hi) * 0.5 - 0.05, z],
-                ));
-                n += 1;
-            }
-        }
-        s += BANNER_GAP_M;
-    }
-    tally.push(("banners", n));
+    // 2. No banners. The printed panels — white with a red block and a blue one — read as
+    //    nothing in particular from a bike, and nobody could say what they were meant to be.
+    //    Out until there is something worth printing on them.
+    let _ = &mut banners;
+
 
     // 3. No fence. It ran along the lap and closed the start straight off — the spur runs
     //    beside the circuit and a fence between the two is a wall across where the field
@@ -727,16 +740,60 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
                     s += BALE_W_M + 0.35;
                     continue;
                 }
-                bales.append(&edfwrite::moved(
-                    &edfwrite::turned(&edfwrite::cuboid(BALE_W_M, BALE_H_M, BALE_D_M), deg),
-                    [x, (lo + hi) * 0.5, z],
-                ));
+                // Every other one. A solid wall of blocks round a corner is a barrier; what a
+                // track has is a run of them with the ground showing between.
+                if n % 2 == 0 {
+                    bales.append(&edfwrite::moved(
+                        &edfwrite::turned(&edfwrite::cuboid(BALE_W_M, BALE_H_M, BALE_D_M), deg),
+                        [x, (lo + hi) * 0.5, z],
+                    ));
+                }
                 n += 1;
             }
         }
         s += BALE_W_M + 0.35;
     }
-    tally.push(("bales", n));
+    tally.push(("bales", n / 2));
+
+    // 4b. A yellow board either side of every jump, at the takeoff — which is where a rider
+    //     needs to know one is coming. Nothing on the small stuff: a roller with a sign on it
+    //     is a track that has run out of things to say.
+    let mut n = 0usize;
+    for f in &prog.features {
+        let takeoff = match f {
+            crate::trackprog::Feature::Tabletop { at, height, length, .. } => {
+                let (up, _, _) = crate::trackprog::tabletop_faces(*height, *length);
+                Some((at + up, *height))
+            }
+            crate::trackprog::Feature::Double { at, height, lip, .. } => {
+                let (lip, _) = crate::trackprog::double_faces(*height, *lip);
+                Some((at + lip, *height))
+            }
+            crate::trackprog::Feature::StepUp { at, length, height, .. } => {
+                Some((at + length * 0.5, *height))
+            }
+            _ => None,
+        };
+        let Some((crest, height)) = takeoff else { continue };
+        if height.abs() < JUMPMARK_FROM_M {
+            continue;
+        }
+        let st = at(crest % lap);
+        let (rx, rz) = crate::trackprog::right_vector(st.heading);
+        for side in [-1.0f32, 1.0] {
+            let off = half + 1.4;
+            let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
+            if !inside(prog, x, z, 2.0) || !clear_of_the_start(x, z) {
+                continue;
+            }
+            jumpmarks.append(&edfwrite::moved(
+                &edfwrite::turned(&jumpmark_mesh(), along(st.heading)),
+                [x, ground(syn, x, z) - 0.05, z],
+            ));
+            n += 1;
+        }
+    }
+    tally.push(("jump boards", n));
 
     // 5. Trees, out past the fence, thinned so they don't line up with the lap.
     let mut n = 0usize;
@@ -916,8 +973,9 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     // built the same way, three `scene` blocks for three objects.
     let kinds: Vec<(&str, Mesh, Texture, bool)> = vec![
         ("stakes", stakes, stake_sheet(), false),
-        ("banners", banners, banner_sheet(), true),
         ("bales", bales, bale_sheet(), true),
+        // Not solid: clipping a marker board should cost a rider nothing.
+        ("jumpmarks", jumpmarks, jumpmark_sheet(), false),
         ("trees", trees, tree_sheet(), true),
         ("poles", poles, pole_sheet(), false),
         ("vans", vans, van_sheet(), true),
@@ -985,16 +1043,29 @@ mod tests {
     }
 
     #[test]
-    fn banners_are_few_and_big() {
+    fn jumps_are_marked_and_rollers_are_not() {
         let (p, s) = demo();
         let sc = build(&p, &s);
-        let banners = sc.tally.iter().find(|(k, _)| *k == "banners").unwrap().1;
-        let stakes = sc.tally.iter().find(|(k, _)| *k == "stakes").unwrap().1;
-        // A banner is a thing you notice, not the edge marking. If the two counts are the
-        // same order the track is fenced in by its own advertising, which is what the first
-        // pass looked like.
-        assert!(banners < stakes / 8, "{banners} banners against {stakes} stakes");
-        assert!(banners > 10, "only {banners} banners on a {:.0} m lap", p.lap_length());
+        let boards = sc.tally.iter().find(|(k, _)| *k == "jump boards").unwrap().1;
+        // Two boards a jump, and only for the ones worth marking.
+        let worth = p
+            .features
+            .iter()
+            .filter(|f| {
+                f.height().abs() >= JUMPMARK_FROM_M
+                    && matches!(
+                        f,
+                        crate::trackprog::Feature::Tabletop { .. }
+                            | crate::trackprog::Feature::Double { .. }
+                            | crate::trackprog::Feature::StepUp { .. }
+                    )
+            })
+            .count();
+        assert!(worth > 0, "the demo has jumps worth marking");
+        assert!(
+            boards >= worth && boards <= worth * 2,
+            "{boards} boards for {worth} jumps"
+        );
     }
 
     #[test]
@@ -1115,11 +1186,11 @@ mod tests {
         let drawn = named(&sc.drawn);
         let solid = named(&sc.solid);
         // No fence: it ran along the lap and closed the start straight off. See `build`.
-        for want in ["stakes.edf", "banners.edf", "bales.edf", "trees.edf", "gate.edf"] {
+        for want in ["stakes.edf", "bales.edf", "trees.edf", "gate.edf"] {
             assert!(drawn.contains(&want.to_string()), "{want} not drawn: {drawn:?}");
         }
         // A tree, a bale and the gantry stop a bike.
-        for want in ["bales.edf", "trees.edf", "gate.edf", "banners.edf"] {
+        for want in ["bales.edf", "trees.edf", "gate.edf"] {
             assert!(solid.contains(&want.to_string()), "{want} should be solid: {solid:?}");
         }
         // A stake snaps rather than stopping you, and the fence run has gaps where the ground

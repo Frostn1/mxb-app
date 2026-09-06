@@ -2,6 +2,17 @@
 
 ## 2026-09-06
 
+### Added
+- Yellow boards either side of every jump's takeoff, on the ones worth marking. A rider coming
+  at a blind crest reads the boards, not the dirt.
+
+### Changed
+- Half as many white blocks round a corner — a run of them with ground showing between, rather
+  than a wall.
+- The printed banners are gone.
+
+## 2026-09-06
+
 ### Changed
 - The start straight ends in turn one. It runs down the outside of the first corner and joins
   the lap inside it, so the gate drop delivers you into the turn instead of onto a piece of
