@@ -2,6 +2,13 @@
 
 ## 2026-09-05
 
+### Changed
+- Tracks you build now read as tracks. The riding surface was one flat brown from edge to
+  edge, with nothing to tell you where the line went or where the track stopped. It is now
+  painted in five: a bright graded verge either side, dry loose dirt at the edges and round
+  the outside of a bend, the worked soil between, and the packed racing line running through
+  it — leaning into each corner and drifting back out on the way to the next.
+
 ### Fixed
 - Tracks you build match their own map. The ground was being handed to the compiler upside
   down, so the jumps and ruts sat mirrored against the paint, the mini-map and the racing
