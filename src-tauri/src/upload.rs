@@ -20,10 +20,19 @@ pub struct Upload {
 const HOST: &str = "catbox";
 
 /// catbox takes a 200 MB file in principle, but a POST that big comes back empty far more
-/// often than it succeeds — measured against the live endpoint, 190 MiB failed every attempt
-/// and 100 MiB two in three, while nothing at 48 MiB or under ever dropped. Slice small
-/// enough that each request is a few seconds long.
-const PART_BYTES: u64 = 48 * 1024 * 1024;
+/// often than it succeeds. 48 MiB was the figure that used to hold and no longer does:
+/// measured again against the live endpoint on 2026-09-06, a 48 MiB upload answered with a
+/// perfectly good link and stored **nothing** through curl and 22.4 MB of 48 through ours,
+/// while 8, 16, 24 and 32 MiB all stored to the byte. A 68 MB track shared at 48 MiB came
+/// back half a megabyte short and there was nothing in the error to say why.
+///
+/// Twenty-four, not thirty-two: the same number of parts on the sizes that matter, and room
+/// underneath for wherever the host's real limit sits this month.
+const PART_BYTES: u64 = 24 * 1024 * 1024;
+
+/// The slicings to try, in order. Each is a different cut of the same file, so each is
+/// content the host has not seen before — see `upload_file`.
+const PART_STEPS: [u64; 3] = [PART_BYTES, PART_BYTES * 3 / 4, PART_BYTES / 2];
 
 /// Attempts per part. An empty 200 is catbox dropping an upload it never refused, and the
 /// next attempt usually takes it.
@@ -53,9 +62,48 @@ pub async fn upload_file(
         );
     }
 
-    let plan = part_plan(size);
+    // Slicing the file differently on each go, and that is the point rather than a detail.
+    //
+    // catbox deduplicates by content: upload the same bytes twice and it hands back the same
+    // link both times, without storing anything again. So when it keeps only part of an
+    // upload — which it does, and then answers with a perfectly good URL — that truncated
+    // object is what every later upload of those exact bytes resolves to. Retrying is useless;
+    // measured against the live host, a slice that stored 2,908,160 of 21,472,742 bytes came
+    // back at exactly 2,908,160 on every attempt after it, through our client and through
+    // curl, under a different name and a different extension.
+    //
+    // Cutting the file at a different offset makes different bytes, which makes a different
+    // hash, which is a fresh upload the host has to actually store. It is also why a user who
+    // shares the same track twice gets the same broken bundle twice.
+    let mut last: Option<anyhow::Error> = None;
+    for part_bytes in PART_STEPS {
+        match upload_sliced(client, file, size, part_bytes, &on_part).await {
+            Ok(up) => return Ok(up),
+            Err(Short(e)) => last = Some(e),
+            Err(Fatal(e)) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| anyhow::anyhow!("the upload could not be stored")))
+}
+
+/// A failure that a different slicing might get past, and one that never will.
+enum UploadFail {
+    Short(anyhow::Error),
+    Fatal(anyhow::Error),
+}
+use UploadFail::{Fatal, Short};
+
+async fn upload_sliced(
+    client: &Client,
+    file: &Path,
+    size: u64,
+    part_bytes: u64,
+    on_part: &impl Fn(usize, usize),
+) -> Result<Upload, UploadFail> {
+    let plan = part_plan_of(size, part_bytes);
     let mut handle = std::fs::File::open(file)
-        .with_context(|| format!("reading {}", file.display()))?;
+        .with_context(|| format!("reading {}", file.display()))
+        .map_err(Fatal)?;
     let stem = file
         .file_stem()
         .map(|n| n.to_string_lossy().into_owned())
@@ -66,7 +114,8 @@ pub async fn upload_file(
     for (i, &(offset, len)) in plan.iter().enumerate() {
         on_part(i + 1, plan.len());
         let bytes = read_slice(&mut handle, offset, len)
-            .with_context(|| format!("reading {}", file.display()))?;
+            .with_context(|| format!("reading {}", file.display()))
+            .map_err(Fatal)?;
         // Keep the .zip extension on every slice — catbox screens uploads by extension.
         let name = if plan.len() == 1 {
             format!("{stem}.zip")
@@ -84,10 +133,16 @@ pub async fn upload_file(
 /// still gets one span, so an empty upload fails at catbox rather than silently succeeding
 /// with no parts at all.
 fn part_plan(size: u64) -> Vec<(u64, u64)> {
+    part_plan_of(size, PART_BYTES)
+}
+
+/// The same, cut at a given part size — see [`upload_file`] on why the size varies between
+/// attempts.
+fn part_plan_of(size: u64, part: u64) -> Vec<(u64, u64)> {
     let mut spans = Vec::new();
     let mut offset = 0u64;
     while offset < size {
-        let len = PART_BYTES.min(size - offset);
+        let len = part.min(size - offset);
         spans.push((offset, len));
         offset += len;
     }
@@ -111,12 +166,64 @@ fn endpoint() -> String {
 
 /// What the host says it is holding at `url`, if it will say.
 ///
-/// `None` means the question could not be answered — no `Content-Length`, or the request never
-/// got through — and an unanswered question is not evidence against an upload, so the caller
-/// treats it as a pass rather than failing a part that is probably fine.
+/// `None` means the question could not be answered, and a caller must not read that as zero.
+///
+/// It asks for the first byte rather than sending a HEAD, because **catbox answers HEAD with
+/// `content-length: 0`** for a file it is holding perfectly well — measured against the live
+/// host: HEAD on a 2,000,000-byte upload says nought, a plain GET brings back all two million,
+/// and a `Range: bytes=0-0` answers `206` with `content-range: bytes 0-0/2000000`. Trusting
+/// the HEAD made every upload look like a file the host had dropped, and every part of a
+/// shared bundle look short.
 pub(crate) async fn hosted_len(client: &Client, url: &str) -> Option<u64> {
-    let resp = client.head(url).send().await.ok()?;
-    resp.status().is_success().then(|| resp.content_length())?
+    let resp = client
+        .get(url)
+        .header(reqwest::header::RANGE, "bytes=0-0")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    // `content-range: bytes 0-0/2000000` — the size is what follows the slash.
+    if let Some(range) = resp.headers().get(reqwest::header::CONTENT_RANGE) {
+        if let Some(total) = range
+            .to_str()
+            .ok()
+            .and_then(|v| v.rsplit('/').next().map(|s| s.trim().to_string()))
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            return Some(total);
+        }
+    }
+    // A host that ignored the range and sent the whole thing has still answered the question.
+    match resp.content_length() {
+        Some(n) if n > 1 => Some(n),
+        _ => None,
+    }
+}
+
+/// How long to let the host finish writing a part before believing what it says about it.
+///
+/// catbox answers with the link the moment it has taken the POST and keeps writing the file
+/// afterwards: ask straight away and a 20 MB part reads as 2.8 MB, then reads as 20 MB a few
+/// seconds later. Without this the upload check condemned every part that was merely still
+/// being stored, retried all three attempts, and gave up on a bundle that was fine.
+const SETTLE_TRIES: u32 = 8;
+const SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// What the host is holding, once it has stopped growing — or the last thing it said.
+async fn settled_len(client: &Client, url: &str, expect: u64) -> Option<u64> {
+    let mut last = None;
+    for i in 0..SETTLE_TRIES {
+        last = hosted_len(client, url).await;
+        if last == Some(expect) {
+            return last;
+        }
+        if i + 1 < SETTLE_TRIES {
+            tokio::time::sleep(SETTLE_WAIT).await;
+        }
+    }
+    last
 }
 
 /// Upload one part, retrying the drops. Refusals — anything catbox puts prose behind — are
@@ -132,21 +239,24 @@ async fn catbox_upload(
     name: &str,
     bytes: &[u8],
     expect: u64,
-) -> anyhow::Result<String> {
+) -> Result<String, UploadFail> {
     for attempt in 1..=ATTEMPTS {
-        let (status, body) = catbox_post(client, &url, name, bytes.to_vec()).await?;
+        let (status, body) = catbox_post(client, &url, name, bytes.to_vec())
+            .await
+            .map_err(Fatal)?;
 
         // Failures come back as plain prose, sometimes under a 200, so the URL is the only tell.
         if body.starts_with("https://") {
-            match hosted_len(client, &body).await {
+            match settled_len(client, &body, expect).await {
                 Some(got) if got != expect => {
                     if attempt == ATTEMPTS {
-                        anyhow::bail!(
-                            "catbox stored {} of a {} part and kept answering with a link. \
-                             Try sharing again in a minute.",
+                        return Err(Short(anyhow::anyhow!(
+                            "catbox is holding {} of a {} part and hands back the same \
+                             truncated copy however many times it is sent — it stores by \
+                             content, so the only way past is a different cut of the file.",
                             crate::bundle::human_size(got),
                             crate::bundle::human_size(expect)
-                        )
+                        )));
                     }
                     tokio::time::sleep(RETRY_WAIT * attempt).await;
                     continue;
@@ -159,12 +269,12 @@ async fn catbox_upload(
         let dropped = body.is_empty() || status.is_server_error();
         if !dropped || attempt == ATTEMPTS {
             if body.is_empty() {
-                anyhow::bail!(
+                return Err(Short(anyhow::anyhow!(
                     "catbox took the upload but returned no link (HTTP {status}) — it drops \
-                     large uploads when it's busy. Try again in a minute."
-                )
+                     large uploads when it's busy."
+                )));
             }
-            anyhow::bail!("catbox upload failed: {body}")
+            return Err(Fatal(anyhow::anyhow!("catbox upload failed: {body}")));
         }
         tokio::time::sleep(RETRY_WAIT * attempt).await;
     }
@@ -204,6 +314,64 @@ async fn catbox_post(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// The whole round trip against the live host: upload a real file, ask what came back,
+    /// and put the parts together again.
+    ///
+    /// ```text
+    /// FROST_UPLOAD=…/track.pkz cargo test -- --ignored --nocapture round_trips_a_real_file
+    /// ```
+    ///
+    /// This is the only thing that answers "why did a shared bundle come back short" — the
+    /// stubbed tests below cannot, because what goes wrong is the host keeping some of a file
+    /// and still handing back a link for it.
+    #[test]
+    #[ignore = "uploads to the live host — set FROST_UPLOAD"]
+    fn round_trips_a_real_file() {
+        let path = std::path::PathBuf::from(std::env::var("FROST_UPLOAD").expect("set FROST_UPLOAD"));
+        let size = std::fs::metadata(&path).unwrap().len();
+        let plan = part_plan(size);
+        println!("  {} is {} in {} part(s)", path.display(), crate::bundle::human_size(size), plan.len());
+
+        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            let client = match std::env::var("FROST_H1") {
+                Ok(_) => Client::builder()
+                    .user_agent(crate::frostmod_manage::UA)
+                    .http1_only()
+                    .build()
+                    .unwrap(),
+                Err(_) => crate::install::build_client().expect("a client"),
+            };
+            let up = upload_file(&client, &path, |i, n| println!("  uploading part {i} of {n}…"))
+                .await
+                .expect("the upload goes through");
+            println!("  host says {} bytes total across {:?}", up.size, up.part_sizes);
+
+            let mut joined = 0u64;
+            for (i, url) in up.parts.iter().enumerate() {
+                let head = hosted_len(&client, url).await;
+                let body = client.get(url).send().await.expect("a part downloads");
+                let len = body.bytes().await.expect("its bytes").len() as u64;
+                println!(
+                    "  part {}: uploaded {}, HEAD says {:?}, GET gave {} — {}",
+                    i + 1,
+                    up.part_sizes[i],
+                    head,
+                    len,
+                    if len == up.part_sizes[i] { "matches" } else { "SHORT" }
+                );
+                joined += len;
+            }
+            println!(
+                "  joined {} against {} — {}",
+                crate::bundle::human_size(joined),
+                crate::bundle::human_size(size),
+                if joined == size { "matches" } else { "SHORT" }
+            );
+            assert_eq!(joined, size, "the parts do not add up to the file");
+        });
+    }
 
     /// A stand-in catbox that hands back `replies` in order, one per request.
     fn serve_replies(replies: Vec<&'static str>) -> String {
@@ -257,7 +425,11 @@ mod tests {
     async fn upload_against(replies: Vec<&'static str>) -> anyhow::Result<String> {
         let url = serve_replies(replies);
         let client = Client::builder().build().unwrap();
-        catbox_upload(&client, url, "part.zip", b"zip bytes", b"zip bytes".len() as u64).await
+        catbox_upload(&client, url, "part.zip", b"zip bytes", b"zip bytes".len() as u64)
+            .await
+            .map_err(|e| match e {
+                Short(e) | Fatal(e) => e,
+            })
     }
 
     /// The reported failure: catbox answers 200 with nothing in it. That is a drop, not a
@@ -280,7 +452,9 @@ mod tests {
             .expect_err("an upload that never lands fails");
         let msg = err.to_string();
         assert!(msg.contains("returned no link"), "{msg}");
-        assert!(msg.contains("Try again"), "{msg}");
+        // No "try again" any more: the caller retries for us, with the file cut differently,
+        // because sending the same bytes to a host that stores by content changes nothing.
+        assert!(msg.contains("drops large uploads"), "{msg}");
     }
 
     /// A refusal is about the request, so it stands on the first answer and keeps its words.
