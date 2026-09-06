@@ -7,15 +7,6 @@
   fetches PiBoSo's tools the first time you build and does the whole job in one press —
   export, compile, package, install — so what lands in your tracks folder is a track the
   game built, not one the app guessed at.
-- A new look. Navigation moved out of the sidebar into a bar across the top, so mod
-  artwork gets the full width of the window — seven mods to a row instead of five.
-- Locker and Presets sit together under Garage, and Race mode has its own place in the
-  top bar.
-- Text is set in Barlow, which ships inside the app so it reads the same offline.
-- Browse opens on a full-width banner for the newest mod, so you can see what you are
-  installing before you click it.
-- Every page puts its filters and search in the bar under the navigation, which leaves
-  more of the window for mods and less for headings.
 
 ### Added
 - Seven colorways in Settings. Frost is still the default; Ember, Moss, Violet, Rose and
@@ -25,6 +16,9 @@
 - A Servers tab that lists every live MX Bikes server the way the in-game browser does —
   who's on each one, the track it's running, and its address. Press Join to launch straight
   into any of them.
+- The overlay reviews an install the way the main window does. A pack you download without
+  leaving the game comes up in the same sheet, listing what it found and where each piece
+  goes before anything is written.
 
 ### Fixed
 - The cloud-storage warning names OneDrive instead of guessing at "a cloud sync tool", says
