@@ -282,9 +282,22 @@ pub async fn create(
     entries.push(bundle::ZipEntry { rel: "share.json".to_string(), src: manifest });
 
     let zip_path = work.join(format!("{}.zip", archive_stem(&items)));
-    bundle::zip_entries(&entries, &zip_path)?;
+    // Off the runtime: packing a track copies eighty-odd megabytes through a blocking read
+    // and write, and doing that on a runtime thread freezes every other async task in the
+    // app — the upload that follows included. `file_share_plan` beside it already does this.
+    let packed = std::time::Instant::now();
+    let zp = zip_path.clone();
+    tauri::async_runtime::spawn_blocking(move || bundle::zip_entries(&entries, &zp))
+        .await
+        .map_err(|e| anyhow::anyhow!("packing the share failed: {e}"))??;
 
     let size = bundle::file_size(&zip_path);
+    log::info!(
+        "share: packed {} into {} in {:.1}s",
+        bundle::human_size(size),
+        zip_path.display(),
+        packed.elapsed().as_secs_f32()
+    );
     let total = bundle::human_size(size);
     bundle::emit(app, EVENT, "uploading", Some(format!("Uploading {total}…")));
     let client = install::build_client()?;
