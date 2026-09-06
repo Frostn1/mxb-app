@@ -1005,8 +1005,11 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
     try {
       const c = await presetBundleCreate(preset.name);
       setFullCode(c);
-      setCopied(false);
-      toast.success(t("presets.bundleUploaded"));
+      // Straight to the clipboard. The code exists to be pasted somewhere, and whoever
+      // waited out the upload shouldn't have to click again to collect it.
+      const onClipboard = await copyText(c);
+      setCopied(onClipboard);
+      toast.success(t(onClipboard ? "share.uploadedCopied" : "presets.bundleUploaded"));
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
     } finally {

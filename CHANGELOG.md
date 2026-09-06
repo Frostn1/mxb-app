@@ -15,6 +15,10 @@
 - Race mode opens with what the game is set to load: how many mods are on, and how much
   they weigh. Its filters, search and the enable/disable buttons moved up into the bar.
 - The page you get when something goes wrong offers one way out — Reload app.
+- A share code goes on your clipboard the moment the upload finishes, even if you left
+  the app to wait. Nothing to click before you paste it — tracks, mods and presets alike.
+- Coming back to the Library is instant. It no longer re-measures every mod folder each
+  time you leave the page and return, or switch between its tabs.
 
 ### Added
 - Seven colorways in Settings. Frost is still the default; Ember, Moss, Violet, Rose and

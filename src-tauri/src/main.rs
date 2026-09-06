@@ -9653,6 +9653,10 @@ fn main() {
         // a code to transcribe. See `handle_deep_link`.
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
+        // Copying happens minutes after the click that started it — a share code is
+        // born when the upload lands — so the web clipboard's focus and gesture rules
+        // rule it out. This writes from the process instead.
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(

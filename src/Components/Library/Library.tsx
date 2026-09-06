@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
   Search,
@@ -83,6 +83,11 @@ import { entryViewerProps } from "../Viewer/entryViewer";
 import { useConfig } from "../../Context/Config";
 import { useImport } from "../Dropzone/useImport";
 import { useShare } from "../../Context/Share";
+import { cachedScan, dropScans, putScan } from "./scanCache";
+
+/** Where the model-swap scan is remembered. Not a mods subpath, so it can't collide
+ *  with one. */
+const SWAPS_KEY = "\u0000model-swaps";
 import { useInstall } from "../../Context/Install";
 import { Button } from "@/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
@@ -547,14 +552,17 @@ export default function Library({
   // Joined to ledger rows so a mod the app installed can be fetched again from the row.
   const [history, setHistory] = useState<DownloadRecord[]>([]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  /** Scan the folder. `quiet` refreshes behind a list already on screen, so a cached
+   *  library isn't replaced by a spinner to be redrawn identically. */
+  const load = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const scanned = await scanLibrary(modType.installSubpath);
       // Pull everything already known in one round trip, so a library that's been
       // opened before renders complete without touching a single archive.
       await primeMetaCache(scanned);
+      putScan(modType.installSubpath, scanned);
       setEntries(scanned);
       // With the cache warm, snapshotting the installed mods costs a file read each — and it
       // has to happen now, while they still exist. Never blocks the scan being shown.
@@ -583,9 +591,23 @@ export default function Library({
     };
   }, [showRemoved, modType, refreshKey]);
 
+  // What `refreshKey` was last time. A bump means something installed, moved or was
+  // removed, so every remembered scan is stale — including the other tabs'.
+  const seenRefresh = useRef(refreshKey);
+
   useEffect(() => {
-    load();
-  }, [load, refreshKey]);
+    const changed = seenRefresh.current !== refreshKey;
+    seenRefresh.current = refreshKey;
+    if (changed) dropScans();
+    const hit = changed ? null : cachedScan<LibraryEntry[]>(modType.installSubpath);
+    if (!hit) {
+      void load();
+      return;
+    }
+    setEntries(hit.value);
+    setLoading(false);
+    if (!hit.fresh) void load({ quiet: true });
+  }, [load, refreshKey, modType]);
 
   // Model swaps, for the bikes tab only — one scan of the whole tree, indexed by bike
   // folder. Installing a mod or editing the folder changes what's swappable, so it rides
@@ -596,9 +618,13 @@ export default function Library({
       setSwaps(new Map());
       return;
     }
+    const hit = cachedScan<BikeModels[]>(SWAPS_KEY);
+    if (hit) setSwaps(new Map(hit.value.map((r) => [r.bike.toLowerCase(), r])));
+    if (hit?.fresh) return;
     let alive = true;
     void scanModelSwaps()
       .then((rows) => {
+        putScan(SWAPS_KEY, rows);
         if (alive) setSwaps(new Map(rows.map((r) => [r.bike.toLowerCase(), r])));
       })
       .catch(() => {});
