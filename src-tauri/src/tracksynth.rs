@@ -4865,17 +4865,23 @@ fn ground_looks(surface: Surface) -> Grounds {
         // ground's own rut signal — which is a contrast *within* the line rather than of the
         // line against everything else.
         base: [line[0] * 0.78, line[1] * 0.78, line[2] * 0.76],
-        grain_tint: (0.74, 1.20),
+        // Polished is not featureless. Measured against the sheets a published track bakes
+        // into its own `.map`, this one read a spread of 6.1 grey levels and a pixel-to-pixel
+        // grain of 2.59, where Indiana's three terrain sheets run 16-20 and 11-17 — near
+        // enough a solid colour. A solid colour laid down the middle of the track is what
+        // reads from the seat as the texture being broken and the line impossible to find. A
+        // packed rut is smooth in its *shape*; the dirt in it is still dirt.
+        grain_tint: (0.44, 1.52),
         fleck: [128.0, 124.0, 118.0],
-        fleck_density: 0.015,
+        fleck_density: 0.045,
         litter: [120.0, 104.0, 72.0],
-        litter_density: 0.1,
+        litter_density: 0.28,
         blade: ([0.0; 3], [0.0; 3]),
         blade_density: 0.0,
-        clods: 0.35,
-        coarse: 0.55,
-        mottle: 0.05,
-        contrast: 0.48,
+        clods: 0.72,
+        coarse: 0.42,
+        mottle: 0.18,
+        contrast: 1.00,
     };
     // Loose dirt: dry, so it reads light against everything around it, and coarse, because
     // it is the stuff that has been thrown there rather than driven on.
