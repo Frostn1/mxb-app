@@ -38,6 +38,7 @@ import type {
   ModDetail as Detail,
 } from "../../types";
 import Gallery from "./Gallery";
+import { ContextBarLeft } from "../Shell/ContextBar";
 import CachedImg from "@/Components/ui/cached-img";
 import RichDescription from "./RichDescription";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
@@ -319,6 +320,21 @@ export default function ModDetail({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
+      {/* Browse's type tabs go with Browse, so the bar above would otherwise be an empty
+          44px band. It carries where you are instead. */}
+      <ContextBarLeft>
+        <span className="flex items-center gap-2 font-cond text-[12.5px] font-semibold uppercase tracking-[0.16em]">
+          <button
+            onClick={onBack}
+            className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {t(modType.label)}
+          </button>
+          <span className="text-faint">/</span>
+          <span className="max-w-[420px] truncate text-foreground">{detail.title}</span>
+        </span>
+      </ContextBarLeft>
+
       {/* The artwork carries the name. A breadcrumb over a text column was the same page
           every catalog has; this is the one the mockup drew. */}
       <div className="relative h-[248px] flex-none overflow-hidden bg-card">
