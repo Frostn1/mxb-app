@@ -2197,7 +2197,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     put(&format!("{slug}/gfx.cfg"), crlf(&gfx_cfg(prog)), &mut wrote)?;
     put(&format!("{slug}/{slug}.rdf"), crlf(&rdf(prog, &syn.fan)), &mut wrote)?;
     put(&format!("{slug}/{slug}.ssc"), SSC.into(), &mut wrote)?;
-    let (map_img, shot) = ui_images(syn, UI_IMAGE_DIM);
+    let (map_img, shot) = ui_images(prog, syn, UI_IMAGE_DIM);
     put(&format!("{slug}/{slug}_map.tga"), map_img, &mut wrote)?;
     put(&format!("{slug}/{slug}.tga"), shot, &mut wrote)?;
 
@@ -3323,7 +3323,7 @@ pub fn write_pkz(
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     use std::io::Write;
-    let (map_img, shot) = ui_images(syn, UI_IMAGE_DIM);
+    let (map_img, shot) = ui_images(prog, syn, UI_IMAGE_DIM);
     // Every published track puts its files in a folder named after itself, and the game
     // looks for them there — flat at the archive root they are not found at all.
     for (name, bytes) in [
@@ -3807,9 +3807,13 @@ fn shd(normal: &str, repetitions: u32, shininess: u32, reflect: Option<Reflect>)
 /// are — and they are never seen in focus.
 ///
 /// The sky matches the `.amb`'s own fog, because the two are looked at together.
+///
+/// The two colours are up here rather than inside `env_faces` because the track's picture is
+/// rendered under the same sky the game puts over it, and a picture with its own weather in it
+/// is a picture of a different track.
+const ZENITH: [f32; 3] = [96.0, 140.0, 196.0];
+const HORIZON: [f32; 3] = [179.0, 179.0, 217.0];
 fn env_faces(dim: usize) -> Vec<(&'static str, Vec<u8>)> {
-    const ZENITH: [f32; 3] = [96.0, 140.0, 196.0];
-    const HORIZON: [f32; 3] = [179.0, 179.0, 217.0];
     const GROUND: [f32; 3] = [86.0, 74.0, 60.0];
 
     let mix = |a: [f32; 3], b: [f32; 3], t: f32| -> [u8; 3] {
@@ -4304,50 +4308,154 @@ rainy\n{\n\tambient\n\t{\n\t\tred = 0.6\n\t\tgreen = 0.6\n\t\tblue = 0.85\n\t}\n
 
 /// The two pictures the game's UI wants: an overhead of the lap, and something to show
 /// beside the track's name. Neither is optional — a track without them lists as a blank.
-fn ui_images(syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>) {
+///
+/// They are not the same kind of picture and never were. The map is a diagram: the game draws
+/// the route and the riders over it, so it stays flat, north-up and unshaded. The other one is
+/// a photograph of the place, and it is rendered as one — see [`ui_shot`].
+fn ui_images(prog: &TrackProgram, syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>) {
     let mut map = vec![0u8; dim * dim * 4];
-    let mut shot = vec![0u8; dim * dim * 4];
-    // Sampled down to the picture's own size *before* blurring. Blurring the full grid to
-    // shade a postage stamp costs two copies of the terrain and changes nothing you can see.
-    let small: Vec<f32> = (0..dim * dim)
-        .map(|i| {
-            let gy = ((i / dim) * syn.gh / dim).min(syn.gh - 1);
-            let gx = ((i % dim) * syn.gw / dim).min(syn.gw - 1);
-            syn.heights[gy * syn.gw + gx]
-        })
-        .collect();
-    let base_small = crate::trackstats::box_blur(&small, dim, dim, 3);
     for y in 0..dim {
-        // One orientation for the whole picture. The corridor used to be read from the far
-        // edge back while the relief was read straight through, so the shading and the line
-        // it was shading disagreed by a flip — and the lap came out mirrored against the
-        // route the game draws over it.
+        // Row zero of a TGA is the bottom of the picture, and row zero of the grid is `z = 0`,
+        // so the read runs from the far edge back. Get this wrong and the lap comes out
+        // mirrored against the route the game draws over it.
         let row = dim - 1 - y;
         let gy = (row * syn.gh / dim).min(syn.gh - 1);
         for x in 0..dim {
             let gx = (x * syn.gw / dim).min(syn.gw - 1);
-            let i = gy * syn.gw + gx;
-            let at = (y * dim + x) * 4;
-
-            // The map: the lap as a shape, on paper.
-            let on = syn.corridor[i];
-            let c: [u8; 3] = if on { [60, 70, 150] } else { [232, 232, 236] };
-            map[at..at + 4].copy_from_slice(&[c[2], c[1], c[0], 255]);
-
-            // The picture: the terrain's own relief, with the line picked out.
-            let here = row * dim + x;
-            let relief =
-                ((small[here] - base_small[here]) * 90.0 + 128.0).clamp(0.0, 255.0) as u8;
-            let s: [u8; 3] = if on {
-                [relief.saturating_add(40), relief / 2, relief / 3]
+            let c: [u8; 3] = if syn.corridor[gy * syn.gw + gx] {
+                [60, 70, 150]
             } else {
-                [relief / 2, (relief as f32 * 0.62) as u8, relief / 3]
+                [232, 232, 236]
             };
-            shot[at..at + 4].copy_from_slice(&[s[2], s[1], s[0], 255]);
+            let at = (y * dim + x) * 4;
+            map[at..at + 4].copy_from_slice(&[c[2], c[1], c[0], 255]);
         }
     }
-    (tga_bgra(dim, dim, &map), tga_bgra(dim, dim, &shot))
+    (tga_bgra(dim, dim, &map), ui_shot(prog, syn, dim))
 }
+
+/// The picture beside the track's name: the terrain rendered from above and off to one side.
+///
+/// It used to be a false-colour relief of the heightfield with the corridor tinted orange over
+/// it — the same plan view as the map, in worse colours, and it told a player nothing about
+/// the place they were about to ride. This is the ground as it will actually look: the six
+/// painted bands the `.map` ships, lit by the sun the `.amb` declares, seen from a camera that
+/// places itself to fit the lap and to keep the sun behind it.
+fn ui_shot(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<u8> {
+    // The camera has to frame the lap, not the terrain — a track in one corner of a big
+    // landscape would otherwise be a smudge in the middle of a field. Every eighth corridor
+    // cell is plenty to bound a shape with.
+    let mut focus = Vec::new();
+    for gy in (0..syn.gh).step_by(8) {
+        for gx in (0..syn.gw).step_by(8) {
+            if syn.corridor[gy * syn.gw + gx] {
+                focus.push((gx as f32 * syn.mps, gy as f32 * syn.mps));
+            }
+        }
+    }
+    // A track with no corridor at all is not one anybody asked for, but the camera still has
+    // to go somewhere: the terrain itself.
+    if focus.is_empty() {
+        focus = vec![
+            (0.0, 0.0),
+            (prog.terrain.size_x, 0.0),
+            (0.0, prog.terrain.size_z),
+            (prog.terrain.size_x, prog.terrain.size_z),
+        ];
+    }
+
+    let albedo = ground_sheet(prog, syn, dim);
+    // Straight off the `.amb`: `sun_position`, and the `clear` condition's light. The picture
+    // is of the track in the weather the game opens it in.
+    let sun = {
+        let v = [2.0f32, 10.0, -7.0];
+        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        [v[0] / l, v[1] / l, v[2] / l]
+    };
+    let scene = crate::trackshot::Scene {
+        gw: syn.gw,
+        gh: syn.gh,
+        mps: syn.mps,
+        heights: &syn.heights,
+        albedo: &albedo,
+        adim: dim,
+        focus: &focus,
+        sun,
+        sun_colour: [1.10, 0.95, 0.70],
+        ambient: [0.40, 0.45, 0.55],
+        zenith: ZENITH,
+        horizon: HORIZON,
+        // The `.amb`'s own fog colour, which is what the distance goes to in the game too.
+        haze: [179.0, 179.0, 217.0],
+        tilt_deg: crate::trackshot::TILT_DEG,
+    };
+    let rgb = crate::trackshot::render(&scene, dim);
+    // The renderer hands back rows from the top; a TGA's row zero is the bottom.
+    let mut px = Vec::with_capacity(dim * dim * 4);
+    for y in (0..dim).rev() {
+        for x in 0..dim {
+            let c = rgb[y * dim + x];
+            px.extend_from_slice(&[c[2], c[1], c[0], 255]);
+        }
+    }
+    tga_bgra(dim, dim, &px)
+}
+
+/// The ground's colour across the terrain: the same bands the `.map` paints, composited in
+/// the same order they are painted in.
+///
+/// It walks `layers` rather than listing the bands again, so the picture cannot show a track
+/// painted differently from the one shipped beside it. What it does not do is tile the sheets
+/// — at a couple of metres to the pixel a 4.5 m tile of soil is below the picture's own
+/// resolution — so each band contributes its base colour with the broad mottle that survives
+/// at this scale and nothing finer.
+fn ground_sheet(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<[f32; 3]> {
+    let seed = prog.terrain.relief.seed;
+    let half = prog.width * 0.5;
+    let fan = &syn.fan;
+    let mut px = vec![[0.0f32; 3]; dim * dim];
+    for l in layers(prog) {
+        let cover = match l.band {
+            BandMask::Everywhere => vec![255u8; dim * dim],
+            BandMask::Rut => rut_mask(syn, half, seed, dim, dim),
+            BandMask::Loose => loose_mask(syn, half, seed, dim, dim),
+            BandMask::Beyond => mask_rect(syn, dim, dim, |d, s, _, _| {
+                u8::from(d > fan.at(s) + SHOULDER_M) * 255
+            }),
+            BandMask::Out(extra) => mask_rect(syn, dim, dim, |d, s, _, _| {
+                u8::from(d <= fan.at(s) + extra) * 255
+            }),
+        };
+        for y in 0..dim {
+            let gy = (y * syn.gh / dim).min(syn.gh - 1);
+            for x in 0..dim {
+                let a = cover[y * dim + x] as f32 / 255.0;
+                if a <= 0.0 {
+                    continue;
+                }
+                let gx = (x * syn.gw / dim).min(syn.gw - 1);
+                let (wx, wz) = (gx as f32 * syn.mps, gy as f32 * syn.mps);
+                // The same patching `ground_pixels` gives the sheets, at the only scale a
+                // picture this size can hold it: without it the ground is flat colour and the
+                // track reads as a drawing again.
+                let k = SHEET_SHADE * (1.0 + l.look.mottle * fbm(wx * 0.06, wz * 0.06, seed ^ l.salt));
+                let at = y * dim + x;
+                for c in 0..3 {
+                    px[at][c] += (l.look.base[c] * k - px[at][c]) * a;
+                }
+            }
+        }
+    }
+    px
+}
+
+/// How much of its base colour a painted sheet keeps once it is shaded.
+///
+/// `ground_pixels` draws each band as clods and crevice rather than as flat colour, and what
+/// comes out lands around three quarters of the colour that went in. The picture composites
+/// the base colours directly, so it has to take the same cut or every band in it is brighter
+/// than the ground it is a picture of.
+const SHEET_SHADE: f32 = 0.78;
 
 /// Uncompressed 32-bit BGRA, the mask in the alpha channel — the shape the official example's
 /// own masks are in, down to the descriptor byte and the file footer.
@@ -6683,6 +6791,137 @@ mod tests {
             }
             let _ = std::fs::write(out, ppm);
         }
+    }
+
+    /// The picture the game lists a track by, as rows from the top.
+    fn shot_rows(p: &TrackProgram, dim: usize) -> Vec<[u8; 3]> {
+        let s = synthesise(p).unwrap();
+        let tga = ui_shot(p, &s, dim);
+        let px = &tga[18..18 + dim * dim * 4];
+        // A TGA's row zero is the bottom of the picture, and it is stored BGRA.
+        let mut out = Vec::with_capacity(dim * dim);
+        for y in (0..dim).rev() {
+            for x in 0..dim {
+                let at = (y * dim + x) * 4;
+                out.push([px[at + 2], px[at + 1], px[at]]);
+            }
+        }
+        out
+    }
+
+    /// The distance is at the top of the picture, which is the only place a camera looking
+    /// down at the ground can put it.
+    ///
+    /// Air is the tell: the far ground is hazed towards the sky's own colour and the near
+    /// ground is not, so the top of the picture has to be the paler half. This is the whole
+    /// chain — the camera, the render and the flip into a bottom-up TGA — and every one of
+    /// them has turned it over at some point.
+    #[test]
+    fn the_track_picture_is_the_right_way_up() {
+        let dim = 160;
+        let rows = shot_rows(&oval(), dim);
+        let haze = [179.0f32, 179.0, 217.0];
+        let off = |from: usize, to: usize| -> f32 {
+            let mut d = 0.0;
+            for y in from..to {
+                for x in 0..dim {
+                    let c = rows[y * dim + x];
+                    d += (0..3).map(|k| (c[k] as f32 - haze[k]).abs()).sum::<f32>();
+                }
+            }
+            d / ((to - from) * dim) as f32
+        };
+        // The oval measures about three quarters. Upside down it would measure about four
+        // thirds, so anything under one separates the two — this leaves room for a track that
+        // hazes less without letting a flipped one through.
+        let (top, bottom) = (off(0, dim / 8), off(dim - dim / 8, dim));
+        assert!(
+            top < bottom * 0.85,
+            "the top of the picture should be the hazy distance: {top:.0} against {bottom:.0} \
+             at the bottom"
+        );
+    }
+
+    /// And the lap is in it, across most of it.
+    ///
+    /// The camera places itself to fit the corridor rather than the terrain, so a track built
+    /// on one corner of a big landscape is still the subject. If the fit gives up, the lap
+    /// ends up a smudge in the middle of a field — which is what a picture framed on the
+    /// terrain looks like, and it is not obviously wrong until you measure it.
+    #[test]
+    fn the_lap_fills_the_track_picture() {
+        let dim = 160;
+        let rows = shot_rows(&oval(), dim);
+        // The ridden line is far darker than the ground it is cut into — Indiana's own soil
+        // measures a mean of 39 against its field's 142 — so the darkest of the picture is
+        // the track and nothing else.
+        let luma = |c: [u8; 3]| 0.3 * c[0] as f32 + 0.6 * c[1] as f32 + 0.1 * c[2] as f32;
+        let mut sorted: Vec<f32> = rows.iter().map(|&c| luma(c)).collect();
+        sorted.sort_by(f32::total_cmp);
+        let dark = sorted[rows.len() / 25];
+        let (mut x0, mut x1, mut y0, mut y1) = (dim, 0usize, dim, 0usize);
+        for (i, &c) in rows.iter().enumerate() {
+            if luma(c) <= dark {
+                let (x, y) = (i % dim, i / dim);
+                x0 = x0.min(x);
+                x1 = x1.max(x);
+                y0 = y0.min(y);
+                y1 = y1.max(y);
+            }
+        }
+        let (w, h) = (x1 + 1 - x0, y1 + 1 - y0);
+        assert!(
+            w * 10 >= dim * 7,
+            "the lap spans {w} of {dim} across the picture"
+        );
+        assert!(h * 10 >= dim * 2, "the lap spans {h} of {dim} down the picture");
+    }
+
+    /// Look at the pictures the game lists a track by.
+    ///
+    /// The shot is a render, and a render is judged by looking at it — so this writes both of
+    /// them out as `.ppm` beside each other, for a couple of laps.
+    ///
+    /// ```text
+    /// FROST_SHOT=/tmp/shots cargo test -- --ignored --nocapture the_track_pictures
+    /// ```
+    #[test]
+    #[ignore = "writes pictures to look at — set FROST_SHOT"]
+    fn the_track_pictures() {
+        let dir = std::env::var("FROST_SHOT").expect("set FROST_SHOT");
+        let dir = Path::new(&dir);
+        std::fs::create_dir_all(dir).unwrap();
+        // A flat stadium, a tight one, and one cut into real ground — the last is the only
+        // one that says whether the picture shows relief at all.
+        let rolling = {
+            let mut p = oval();
+            p.name = "Test Rolling".into();
+            p.terrain.relief.landforms = 8;
+            p.terrain.relief.landform_height = 14.0;
+            p.terrain.scale = 50.0;
+            p
+        };
+        for p in [oval(), hairpins(), rolling] {
+            let s = synthesise(&p).unwrap();
+            let (map, shot) = ui_images(&p, &s, UI_IMAGE_DIM);
+            let name = slug(&p.name);
+            tga_to_ppm(&map, UI_IMAGE_DIM, &dir.join(format!("{name}_map.ppm")));
+            tga_to_ppm(&shot, UI_IMAGE_DIM, &dir.join(format!("{name}.ppm")));
+            println!("wrote {name}.ppm and {name}_map.ppm to {}", dir.display());
+        }
+    }
+
+    /// Our own 32-bit BGRA TGA, bottom-up, back into something a viewer opens.
+    fn tga_to_ppm(tga: &[u8], dim: usize, out: &Path) {
+        let px = &tga[18..18 + dim * dim * 4];
+        let mut ppm = format!("P6\n{dim} {dim}\n255\n").into_bytes();
+        for y in (0..dim).rev() {
+            for x in 0..dim {
+                let at = (y * dim + x) * 4;
+                ppm.extend_from_slice(&[px[at + 2], px[at + 1], px[at]]);
+            }
+        }
+        std::fs::write(out, ppm).unwrap();
     }
 
     /// The terrain, slope-shaded, with the riding line tinted.
