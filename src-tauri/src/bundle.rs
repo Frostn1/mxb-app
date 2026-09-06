@@ -439,8 +439,11 @@ pub async fn create(
         .ok_or_else(|| anyhow::anyhow!("the upload returned no link"))?;
     // `url` stays the first slice so a one-part bundle reads exactly as it always has;
     // `parts` is only carried when there's more than one to stitch.
-    let parts = if up.parts.len() > 1 { up.parts } else { Vec::new() };
-    preset.bundle = Some(BundleRef { url: first, host: up.host, size: up.size, parts });
+    let multi = up.parts.len() > 1;
+    let parts = if multi { up.parts } else { Vec::new() };
+    let part_sizes = if multi { up.part_sizes } else { Vec::new() };
+    preset.bundle =
+        Some(BundleRef { url: first, host: up.host, size: up.size, parts, part_sizes });
     let code = presets::encode_code_public(&preset);
     phase(app, "done", None);
     Ok(code)
@@ -516,6 +519,11 @@ pub(crate) async fn fetch(
     }
 }
 
+/// Tries per slice when the one that arrives is not the size the code says it should be.
+/// Two, not more: a host that is only holding half a file will keep saying so, and the point
+/// of retrying at all is to ride out the case where the transfer, not the upload, was short.
+const PART_ATTEMPTS: u32 = 2;
+
 /// Fetch every slice of a multi-part bundle and stitch them back into one zip. The slices are
 /// raw byte ranges, so concatenating them in order reproduces the original file exactly.
 async fn download_parts(
@@ -535,13 +543,45 @@ async fn download_parts(
         // Each part lands in its own folder: the host names the file, and two parts of the
         // same bundle can easily come back under the same name.
         let into = dir.join(format!("part{}", i + 1));
-        std::fs::create_dir_all(&into)?;
         let direct = install::resolve_direct_url(client, url, &bundle.host).await?;
-        paths.push(
-            install::download(app, client, slug, &direct, &into)
+        // What this slice should weigh, when the code was made recently enough to say. A
+        // download that matches its own `Content-Length` can still be the wrong file — the
+        // host may only be holding part of it — and without this the shortfall does not
+        // surface until the parts are joined, by which point nothing knows which one it was.
+        let expect = bundle.part_sizes.get(i).copied();
+        let mut got = None;
+        for attempt in 1..=PART_ATTEMPTS {
+            let _ = std::fs::remove_dir_all(&into);
+            std::fs::create_dir_all(&into)?;
+            let path = install::download(app, client, slug, &direct, &into)
                 .await
-                .with_context(|| format!("part {} of {n} couldn't be downloaded", i + 1))?,
-        );
+                .with_context(|| format!("part {} of {n} couldn't be downloaded", i + 1))?;
+            let have = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            match expect {
+                Some(want) if have != want => {
+                    if attempt == PART_ATTEMPTS {
+                        anyhow::bail!(
+                            "Part {} of {n} is {} where it should be {} — the host is only \
+                             holding some of it. Ask whoever shared it for a fresh code.",
+                            i + 1,
+                            human_size(have),
+                            human_size(want)
+                        )
+                    }
+                    emit(
+                        app,
+                        event,
+                        "downloading",
+                        Some(format!("Part {} of {n} came back short — retrying…", i + 1)),
+                    );
+                }
+                _ => {
+                    got = Some(path);
+                    break;
+                }
+            }
+        }
+        paths.push(got.expect("the loop stores a path or bails"));
     }
 
     emit(app, event, "downloading", Some(format!("Joining {n} parts…")));

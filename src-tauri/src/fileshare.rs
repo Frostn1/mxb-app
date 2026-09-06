@@ -285,11 +285,13 @@ pub async fn create(
         .ok_or_else(|| anyhow::anyhow!("the upload returned no link"))?;
     // As in the preset bundle: `url` is the first slice, and `parts` is only carried when
     // there's more than one to stitch back together.
-    let parts = if up.parts.len() > 1 { up.parts } else { Vec::new() };
+    let multi = up.parts.len() > 1;
+    let parts = if multi { up.parts } else { Vec::new() };
+    let part_sizes = if multi { up.part_sizes } else { Vec::new() };
     let share = FileShare {
         items,
         total_size: up.size,
-        bundle: BundleRef { url: first, host: up.host, size: up.size, parts },
+        bundle: BundleRef { url: first, host: up.host, size: up.size, parts, part_sizes },
     };
     bundle::emit(app, EVENT, "done", None);
     Ok(encode(&share))
@@ -543,6 +545,7 @@ mod tests {
                 host: "catbox".into(),
                 size: 1,
                 parts: Vec::new(),
+                part_sizes: Vec::new(),
             },
         };
         let good = "https://files.catbox.moe/a.zip";
@@ -574,6 +577,7 @@ mod tests {
                 host: "catbox".into(),
                 size: 40,
                 parts: Vec::new(),
+                part_sizes: Vec::new(),
             },
         };
 
