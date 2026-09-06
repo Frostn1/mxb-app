@@ -30,6 +30,7 @@ use blowfish::Blowfish;
 use cipher::generic_array::GenericArray;
 use cipher::{BlockDecrypt, BlockEncrypt, KeyInit};
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 /// The 32-byte ASCII key the exe builds on the stack and hands to the Blowfish schedule.
@@ -39,6 +40,18 @@ const NL: u8 = 0x0A;
 /// The exe's per-record struct is 0x1d8 bytes; the readable payload never approaches that, but
 /// the guard keeps a hostile reply from steering the parser.
 const MAX_REPLY: usize = 64 * 1024;
+/// The client version the master gates on, written as `LOGIN`'s second field (`0x28` at
+/// `0x1402a72e0`). Verified live: 39 is answered `Auth NO Old Version: please update`, 40 gets
+/// past the gate. It tracks the game, so a build that bumps it breaks the list until we follow
+/// — `MXB_WORLDNET_VERSION` is the stopgap.
+const CLIENT_VERSION: i64 = 40;
+
+fn client_version() -> i64 {
+    std::env::var("MXB_WORLDNET_VERSION")
+        .ok()
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(CLIENT_VERSION)
+}
 
 fn blowfish() -> Blowfish {
     Blowfish::new_from_slice(KEY).expect("32-byte key is a valid Blowfish key")
@@ -179,19 +192,31 @@ pub async fn list_servers(app: tauri::AppHandle) -> Result<Vec<WorldServer>, Str
     } else {
         cfg.cp_rider_name.trim().to_string()
     };
-    tauri::async_runtime::spawn_blocking(move || fetch(&masters, &rider))
+    let install = std::path::PathBuf::from(cfg.install_dir());
+    tauri::async_runtime::spawn_blocking(move || fetch(&masters, &rider, &install))
         .await
         .map_err(|e| format!("server-list task failed: {e}"))?
 }
 
-/// Try each master: browse (no auth) first, then a Steam-ticket `LOGIN` fallback.
-fn fetch(masters: &[String], rider: &str) -> Result<Vec<WorldServer>, String> {
+/// Try each master: the Steam-ticket `LOGIN` the game uses, then a no-auth browse.
+///
+/// The public master ignores a `GETLIST` that never logged in — verified live against
+/// `master.mx-bikes.com`, which answers nothing at all to a bare browse — so the ticket is what
+/// actually returns a list. Browse still runs after it: it costs one datagram, it's the only
+/// path off Windows, and a private master may well answer it.
+fn fetch(masters: &[String], rider: &str, install: &Path) -> Result<Vec<WorldServer>, String> {
     if masters.is_empty() {
         return Err("No master server is configured.".into());
     }
     let sock = UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("couldn't open a socket: {e}"))?;
     sock.set_read_timeout(Some(Duration::from_secs(3))).ok();
 
+    // One ticket for the whole sweep — each one costs a Steam init and a callback pump.
+    let ticket = steam_ticket(install);
+    match &ticket {
+        Ok(t) => log::info!("[worldnet] Steam ticket: {} bytes", t.len()),
+        Err(e) => log::info!("[worldnet] no Steam ticket, browsing instead: {e}"),
+    }
     let mut last_err = String::new();
     for master in masters {
         let target = match resolve(master) {
@@ -201,24 +226,25 @@ fn fetch(masters: &[String], rider: &str) -> Result<Vec<WorldServer>, String> {
                 continue;
             }
         };
-        // No-auth browse first — most servers list this way and it needs no Steam.
-        match query(&sock, target, None) {
-            Ok(list) if !list.is_empty() => return Ok(list),
-            Ok(_) => {}
-            Err(e) => last_err = e,
-        }
-        // Fall back to the authenticated path the game uses to join.
-        match steam_ticket() {
-            Ok(ticket) => match query(&sock, target, Some((rider, &ticket))) {
-                Ok(list) if !list.is_empty() => return Ok(list),
+        match &ticket {
+            Ok(ticket) => match query(&sock, target, Some((rider, ticket))) {
+                Ok(list) if !list.is_empty() => {
+                    log::info!("[worldnet] {} server(s) from {master}", list.len());
+                    return Ok(list);
+                }
                 Ok(_) => last_err = "The master server accepted the login but sent no servers.".into(),
                 Err(e) => last_err = e,
             },
             Err(e) => {
                 if last_err.is_empty() {
-                    last_err = e;
+                    last_err = e.clone();
                 }
             }
+        }
+        match query(&sock, target, None) {
+            Ok(list) if !list.is_empty() => return Ok(list),
+            Ok(_) => {}
+            Err(e) => last_err = e,
         }
     }
     Err(if last_err.is_empty() {
@@ -327,9 +353,19 @@ fn parse_list(r: &mut Reader, out: &mut Vec<WorldServer>) {
 /// identity fields, mode 1 (Steam), the rider name, an empty password, the Steam id string,
 /// then the ticket length and the ticket bytes. Succeeds when the master replies `AUTH … OK`.
 fn login(sock: &UdpSocket, target: SocketAddr, rider: &str, ticket: &[u8]) -> Result<(), String> {
+    sock.send_to(&encrypt(login_message(rider, ticket)), target)
+        .map_err(|e| format!("login send failed: {e}"))?;
+
+    let mut buf = [0u8; 4096];
+    let (n, _) = sock.recv_from(&mut buf).map_err(|_| "the master didn't answer the login".to_string())?;
+    auth_verdict(&decrypt(&buf[..n.min(MAX_REPLY)]))
+}
+
+/// The `LOGIN` body, in the exe's field order (built at `0x1402a72a8`).
+fn login_message(rider: &str, ticket: &[u8]) -> Vec<u8> {
     let mut w = Writer::default();
     w.field("LOGIN")
-        .int(0) // sequence
+        .int(client_version()) // client version — the master refuses anything older
         .field(rider) // identity string
         .int(0) // identity number
         .int(1) // mode 1 = Steam
@@ -338,14 +374,19 @@ fn login(sock: &UdpSocket, target: SocketAddr, rider: &str, ticket: &[u8]) -> Re
         .field(rider) // steam id string (best-effort; the ticket is what's checked)
         .int(ticket.len() as i64)
         .raw(ticket);
-    sock.send_to(&encrypt(w.finish()), target).map_err(|e| format!("login send failed: {e}"))?;
+    w.finish()
+}
 
-    let mut buf = [0u8; 4096];
-    let (n, _) = sock.recv_from(&mut buf).map_err(|_| "the master didn't answer the login".to_string())?;
-    let clear = decrypt(&buf[..n.min(MAX_REPLY)]);
-    let mut r = Reader::new(&clear);
-    if r.field() == "AUTH" && r.field().eq_ignore_ascii_case("OK") {
+/// Read the master's answer to a `LOGIN`: `Auth` — mixed case on the wire, so compare loosely —
+/// then OK/NO, then a human reason when it refuses ("Old Version: please update", "Invalid
+/// Key"). Passing that reason through is the difference between a fixable report and a shrug.
+fn auth_verdict(clear: &[u8]) -> Result<(), String> {
+    let mut r = Reader::new(clear);
+    let (tag, verdict, reason) = (r.field(), r.field(), r.field());
+    if tag.eq_ignore_ascii_case("AUTH") && verdict.eq_ignore_ascii_case("OK") {
         Ok(())
+    } else if !reason.trim().is_empty() {
+        Err(format!("The master server refused the login: {}.", reason.trim()))
     } else {
         Err("The master server rejected the login.".into())
     }
@@ -362,63 +403,158 @@ fn hex(b: &[u8]) -> String {
 // without the SDK. Windows only; unverifiable off Windows, so elsewhere it's a clear error and
 // the browse path is what runs.
 #[cfg(windows)]
-fn steam_ticket() -> Result<Vec<u8>, String> {
-    steam_win::auth_ticket()
+fn steam_ticket(install: &Path) -> Result<Vec<u8>, String> {
+    steam_win::auth_ticket(install)
 }
 
 #[cfg(not(windows))]
-fn steam_ticket() -> Result<Vec<u8>, String> {
+fn steam_ticket(_install: &Path) -> Result<Vec<u8>, String> {
     Err("A Steam login is only available on Windows; the browser used the public list instead.".into())
 }
 
 #[cfg(windows)]
 mod steam_win {
+    use libloading::os::windows::{Library as WinLibrary, LOAD_WITH_ALTERED_SEARCH_PATH};
     use libloading::{Library, Symbol};
     use std::ffi::c_void;
+    use std::path::{Path, PathBuf};
 
     /// MX Bikes' Steam AppID, so the ticket authenticates as this game.
     const APPID: &str = "655500";
+    const DLL: &str = "steam_api64.dll";
 
     type InitFn = unsafe extern "C" fn() -> bool;
     type ShutdownFn = unsafe extern "C" fn();
     type RunCallbacksFn = unsafe extern "C" fn();
     type SteamUserFn = unsafe extern "C" fn() -> *mut c_void;
-    // GetAuthSessionTicket(self, buf, cbMax, *pcbTicket, *pSteamNetworkingIdentity) -> handle
+    type CreateInterfaceFn = unsafe extern "C" fn(*const u8) -> *mut c_void;
+    type HandleFn = unsafe extern "C" fn() -> i32;
+    // GetISteamUser(client, hUser, hPipe, version) -> ISteamUser*
+    type GetIUserFn = unsafe extern "C" fn(*mut c_void, i32, i32, *const u8) -> *mut c_void;
+    // GetAuthSessionTicket(self, buf, cbMax, *pcbTicket, *pSteamNetworkingIdentity) -> handle.
+    // The identity argument arrived in a later SDK; on the Microsoft x64 ABI an older DLL just
+    // ignores the extra register, so one signature covers both.
     type GetTicketFn = unsafe extern "C" fn(*mut c_void, *mut u8, i32, *mut u32, *const c_void) -> u32;
 
-    /// Find `steam_api64.dll`: beside the game if we can, else let the loader search the
-    /// process's DLL path (Steam puts it there for a running client).
-    fn load() -> Result<Library, String> {
-        unsafe { Library::new("steam_api64.dll") }.map_err(|e| format!("steam_api64.dll not available: {e}"))
+    /// Every `ISteamUser` accessor Valve has shipped, newest first. A DLL from before they
+    /// existed is handled by [`user_via_client`].
+    const ACCESSORS: [&[u8]; 5] = [
+        b"SteamAPI_SteamUser_v023\0",
+        b"SteamAPI_SteamUser_v022\0",
+        b"SteamAPI_SteamUser_v021\0",
+        b"SteamAPI_SteamUser_v020\0",
+        b"SteamAPI_SteamUser\0",
+    ];
+    /// Interface versions for the old route, the game's own first (`SteamClient017` /
+    /// `SteamUser019` at `0x140130288`). Steam still serves an old version to a new DLL.
+    const CLIENTS: [&[u8]; 4] = [b"SteamClient017\0", b"SteamClient020\0", b"SteamClient021\0", b"SteamClient022\0"];
+    const USERS: [&[u8]; 5] = [b"SteamUser019\0", b"SteamUser020\0", b"SteamUser021\0", b"SteamUser022\0", b"SteamUser023\0"];
+
+    /// libloading's `Display` is just "LoadLibraryExW failed"; the OS reason — module not found
+    /// vs. a bad image — is in the source, and that reason is the whole diagnosis.
+    fn why(e: &libloading::Error) -> String {
+        match std::error::Error::source(e) {
+            Some(src) => format!("{e}: {src}"),
+            None => e.to_string(),
+        }
     }
 
-    pub fn auth_ticket() -> Result<Vec<u8>, String> {
+    /// The dirs that can hold the DLL: the game's install first, then ours.
+    ///
+    /// Nothing puts `steam_api64.dll` on the app's search path — we don't ship it and Steam
+    /// didn't launch us — so a bare `LoadLibrary` fails with "module not found" on every
+    /// machine. The copy that exists is the one beside `mxbikes.exe`, and
+    /// `LOAD_WITH_ALTERED_SEARCH_PATH` lets it resolve its own dependencies from there.
+    fn candidates(install: &Path) -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
+        if !install.as_os_str().is_empty() {
+            dirs.push(install.to_path_buf());
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                dirs.push(dir.to_path_buf());
+            }
+        }
+        dirs
+    }
+
+    fn load(install: &Path) -> Result<Library, String> {
+        let mut tried: Vec<String> = Vec::new();
+        for dir in candidates(install) {
+            let path = dir.join(DLL);
+            if !path.is_file() {
+                tried.push(format!("{} (not there)", path.display()));
+                continue;
+            }
+            match unsafe { WinLibrary::load_with_flags(&path, LOAD_WITH_ALTERED_SEARCH_PATH) } {
+                Ok(lib) => return Ok(Library::from(lib)),
+                Err(e) => tried.push(format!("{}: {}", path.display(), why(&e))),
+            }
+        }
+        match unsafe { Library::new(DLL) } {
+            Ok(lib) => Ok(lib),
+            Err(e) => {
+                tried.push(format!("the loader's search path: {}", why(&e)));
+                Err(format!("{DLL} not available — tried {}", tried.join("; ")))
+            }
+        }
+    }
+
+    /// The old route to `ISteamUser`, for a DLL that predates the accessors: create the client
+    /// interface and ask it, exactly as the game does — all exported functions, no vtables.
+    unsafe fn user_via_client(lib: &Library) -> Option<*mut c_void> {
+        let create: Symbol<CreateInterfaceFn> = lib.get(b"SteamInternal_CreateInterface\0").ok()?;
+        let get_user: Symbol<GetIUserFn> = lib.get(b"SteamAPI_ISteamClient_GetISteamUser\0").ok()?;
+        let h_user: Symbol<HandleFn> = lib.get(b"SteamAPI_GetHSteamUser\0").ok()?;
+        let h_pipe: Symbol<HandleFn> = lib.get(b"SteamAPI_GetHSteamPipe\0").ok()?;
+        let (user, pipe) = (h_user(), h_pipe());
+        for client_ver in CLIENTS {
+            let client = create(client_ver.as_ptr());
+            if client.is_null() {
+                continue;
+            }
+            for user_ver in USERS {
+                let iface = get_user(client, user, pipe, user_ver.as_ptr());
+                if !iface.is_null() {
+                    return Some(iface);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn auth_ticket(install: &Path) -> Result<Vec<u8>, String> {
         // Init as the game's AppID. The env vars are how the flat API learns which app it is
         // when the process wasn't launched by Steam.
         std::env::set_var("SteamAppId", APPID);
         std::env::set_var("SteamGameId", APPID);
 
-        let lib = load()?;
+        let lib = load(install)?;
         unsafe {
-            let init: Symbol<InitFn> = lib.get(b"SteamAPI_Init\0").map_err(|e| e.to_string())?;
+            let init: Symbol<InitFn> = lib.get(b"SteamAPI_Init\0").map_err(|e| why(&e))?;
             if !init() {
                 return Err("Steam isn't running, or this account doesn't own MX Bikes.".into());
             }
-            let shutdown: Symbol<ShutdownFn> = lib.get(b"SteamAPI_Shutdown\0").map_err(|e| e.to_string())?;
-            let run: Symbol<RunCallbacksFn> = lib.get(b"SteamAPI_RunCallbacks\0").map_err(|e| e.to_string())?;
-            // Accessor version is SDK-pinned; verify against the shipped steam_api64.dll on a
-            // Windows tester if a future SDK renames it.
-            let user_fn: Symbol<SteamUserFn> =
-                lib.get(b"SteamAPI_SteamUser_v023\0").map_err(|_| "Steam user interface unavailable".to_string())?;
-            let get_ticket: Symbol<GetTicketFn> = lib
-                .get(b"SteamAPI_ISteamUser_GetAuthSessionTicket\0")
-                .map_err(|e| e.to_string())?;
-
-            let user = user_fn();
-            if user.is_null() {
+            let shutdown: Symbol<ShutdownFn> = lib.get(b"SteamAPI_Shutdown\0").map_err(|e| why(&e))?;
+            let run: Symbol<RunCallbacksFn> = lib.get(b"SteamAPI_RunCallbacks\0").map_err(|e| why(&e))?;
+            // Newer DLLs hand the interface over directly; the game ships one old enough to
+            // predate that (it asks Steam for `SteamUser019`), so fall back to the client.
+            let user = ACCESSORS
+                .iter()
+                .find_map(|name| lib.get::<SteamUserFn>(name).ok().map(|f| f()))
+                .filter(|u| !u.is_null())
+                .or_else(|| user_via_client(&lib));
+            let Some(user) = user else {
                 shutdown();
                 return Err("Steam user interface unavailable.".into());
-            }
+            };
+            let get_ticket: Symbol<GetTicketFn> = lib
+                .get(b"SteamAPI_ISteamUser_GetAuthSessionTicket\0")
+                .map_err(|e| {
+                    shutdown();
+                    format!("this {DLL} has no auth-ticket call: {}", why(&e))
+                })?;
+
             let mut ticket = vec![0u8; 1024];
             let mut written: u32 = 0;
             let _handle = get_ticket(user, ticket.as_mut_ptr(), ticket.len() as i32, &mut written, std::ptr::null());
@@ -475,6 +611,25 @@ mod tests {
         let round = decrypt(&encrypt(body.clone()));
         // Decryption yields the padded body; the meaningful prefix is intact.
         assert!(round.starts_with(&body));
+    }
+
+    /// The master gates on the version field: 39 is answered "Old Version: please update",
+    /// 40 gets past it (probed live). Losing this again costs the whole server list.
+    #[test]
+    fn login_carries_the_client_version() {
+        let body = login_message("Frost", b"ticket");
+        let mut r = Reader::new(&body);
+        assert_eq!(r.field(), "LOGIN");
+        assert_eq!(r.field(), CLIENT_VERSION.to_string());
+    }
+
+    #[test]
+    fn a_refusal_carries_the_masters_own_reason() {
+        // Exactly what master.mx-bikes.com sends an out-of-date client, casing included.
+        let refused = b"Auth\nNO\nOld Version: please update\n";
+        let err = auth_verdict(refused).unwrap_err();
+        assert!(err.contains("Old Version: please update"), "{err}");
+        assert!(auth_verdict(b"Auth\nOK\n").is_ok());
     }
 
     #[test]
