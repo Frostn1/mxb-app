@@ -3,6 +3,19 @@
 ## 2026-09-06
 
 ### Changed
+- The gates are in one row. They were stated against whichever bit of lap was nearest to each
+  one, which put a stagger through the row.
+- The start pad is ridden ground: the comb of grooves the gate leaves is painted as well as
+  cut, and the pad is churned dirt rather than bare fill.
+
+### Fixed
+- Sharing a bundle made by an older build no longer gives up on a short part. It asks the host
+  what it is holding and retries that part, instead of only noticing when the joined file does
+  not add up.
+
+## 2026-09-06
+
+### Changed
 - The parked vans are gone. They stood close enough to the riding line to be something a rider
   runs into.
 - The banners are back.
