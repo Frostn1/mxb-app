@@ -3,6 +3,9 @@
 ## 2026-09-05
 
 ### Changed
+- The picture the game lists a built track by is now a view of the place rather than a
+  diagram of it: the ground rendered from above and off to one side, lit by the track's own
+  sun, with the lap cut into it and the country running out to the haze.
 - Tracks you build now start where a start belongs. The lap begins on its longest straight,
   with the gate row a few metres onto it, the finish line past that and the run at turn one
   beyond — instead of the gates landing wherever the lap happened to be forty metres in.
