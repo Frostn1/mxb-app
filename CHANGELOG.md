@@ -2,6 +2,14 @@
 
 ## 2026-09-06
 
+### Fixed
+- Sharing a large preset or track works again. The host stores files by their contents, so once
+  it had kept only part of an upload it handed back that same broken copy every time the same
+  file was shared — no amount of retrying could shift it. A share that comes back short is now
+  cut into different pieces and sent again, which is bytes the host has to store afresh.
+
+## 2026-09-06
+
 ### Changed
 - The gates are in one row. They were stated against whichever bit of lap was nearest to each
   one, which put a stagger through the row.
