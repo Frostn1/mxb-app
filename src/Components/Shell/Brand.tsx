@@ -31,7 +31,7 @@ export default function Brand() {
           MXB
         </span>
       </span>
-      <span className="ml-[9px] font-cond text-[16px] font-semibold uppercase leading-none tracking-[0.2em] text-muted-foreground">
+      <span className="ml-[9px] font-cond text-[16px] font-semibold leading-none tracking-[0.12em] text-muted-foreground">
         App
       </span>
     </div>

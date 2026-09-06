@@ -113,6 +113,9 @@ export default function ModDetail({
     [game, modType, categoryId],
   );
   const [derivedDest, setDerivedDest] = useState(false);
+  /** Which screenshot the hero is showing. Declared with the other hooks: it used to
+   *  sit below the loading and error returns, which is a rules-of-hooks violation. */
+  const [heroIdx, setHeroIdx] = useState(0);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // The raw file list — only for destination folders and their counts. The badge uses
@@ -317,7 +320,6 @@ export default function ModDetail({
       : undefined;
   const idx = myActive ? stageIndex(myActive.stage) : -1;
 
-  const [heroIdx, setHeroIdx] = useState(0);
   const shot = detail.images[Math.min(heroIdx, Math.max(0, detail.images.length - 1))];
 
   return (
