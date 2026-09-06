@@ -2,6 +2,12 @@
 
 ## 2026-09-06
 
+### Changed
+- A mod's screenshots are shown whole on its page. Clicking one opens it full screen, where the
+  arrow keys move through the set and Escape closes it.
+
+## 2026-09-06
+
 ### Added
 - A progress bar while a track compiles, saying what it is working on and how far along it is.
 - A compiling track shows in the top bar from anywhere in the app, and keeps building if you
