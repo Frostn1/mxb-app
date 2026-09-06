@@ -78,9 +78,28 @@ pub async fn upload_file(
     // shares the same track twice gets the same broken bundle twice.
     let mut last: Option<anyhow::Error> = None;
     for part_bytes in PART_STEPS {
+        let started = std::time::Instant::now();
         match upload_sliced(client, file, size, part_bytes, &on_part).await {
-            Ok(up) => return Ok(up),
-            Err(Short(e)) => last = Some(e),
+            Ok(up) => {
+                log::info!(
+                    "share: uploaded {} in {} part(s) of {} in {:.1}s",
+                    crate::bundle::human_size(size),
+                    up.parts.len(),
+                    crate::bundle::human_size(part_bytes),
+                    started.elapsed().as_secs_f32()
+                );
+                return Ok(up);
+            }
+            Err(Short(e)) => {
+                // Worth a line of its own: a recut sends the whole file again, so this is
+                // the difference between a twenty-second share and a three-minute one.
+                log::warn!(
+                    "share: a {} cut came back short after {:.1}s — recutting: {e:#}",
+                    crate::bundle::human_size(part_bytes),
+                    started.elapsed().as_secs_f32()
+                );
+                last = Some(e);
+            }
             Err(Fatal(e)) => return Err(e),
         }
     }
@@ -133,13 +152,27 @@ async fn upload_sliced(
                 format!("{stem}.part{}of{}.zip", i + 1, n)
             };
             let done = &done;
+            let src = file.to_path_buf();
             async move {
-                // Its own handle per slice: the reads are interleaved now, so a shared cursor
-                // would have them seeking over each other.
-                let bytes = read_slice_at(file, offset, len)
-                    .with_context(|| format!("reading {}", file.display()))
-                    .map_err(Fatal)?;
+                // Its own handle per slice, and off the runtime: the reads are interleaved
+                // now, so a shared cursor would have them seeking over each other — and a
+                // blocking 24 MiB read on a runtime thread stalls the slices beside it.
+                let started = std::time::Instant::now();
+                let bytes = tokio::task::spawn_blocking({
+                    let src = src.clone();
+                    move || read_slice_at(&src, offset, len)
+                })
+                .await
+                .map_err(|e| Fatal(anyhow::anyhow!("reading {} failed: {e}", src.display())))?
+                .with_context(|| format!("reading {}", src.display()))
+                .map_err(Fatal)?;
                 let url = catbox_upload(client, endpoint(), &name, &bytes, len).await?;
+                log::info!(
+                    "share: part {} of {n} ({}) took {:.1}s",
+                    i + 1,
+                    crate::bundle::human_size(len),
+                    started.elapsed().as_secs_f32()
+                );
                 let behind = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                 on_part((behind + 1).min(n), n);
                 Ok::<(String, u64), UploadFail>((url, len))
@@ -247,15 +280,26 @@ pub(crate) async fn hosted_len(client: &Client, url: &str) -> Option<u64> {
 /// has the room it always had.
 const SETTLE_WAITS: [u64; 7] = [1, 2, 3, 3, 4, 4, 5];
 
+/// How many times running the host may decline to answer before we stop asking.
+///
+/// A `None` is not a short part — it is the host not saying, and [`catbox_upload`] accepts
+/// the part on `None` however long we wait for it. So sitting out the whole ladder on an
+/// unanswerable probe bought nothing and cost twenty-two seconds a part, which on a
+/// four-part track is most of a minute of an upload that had already finished. Two, not one:
+/// a 404 straight after the POST is catbox still registering the file, and that one clears.
+const NONE_PROBES: usize = 2;
+
 /// What the host is holding, once it has stopped growing — or the last thing it said.
 async fn settled_len(client: &Client, url: &str, expect: u64) -> Option<u64> {
     let mut last = hosted_len(client, url).await;
+    let mut unanswered = usize::from(last.is_none());
     for wait in SETTLE_WAITS {
-        if last == Some(expect) {
+        if last == Some(expect) || unanswered >= NONE_PROBES {
             return last;
         }
         tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
         last = hosted_len(client, url).await;
+        unanswered = if last.is_none() { unanswered + 1 } else { 0 };
     }
     last
 }
@@ -447,6 +491,60 @@ mod tests {
                 return;
             }
         }
+    }
+
+    /// The same stand-in, but it keeps answering — the last reply repeats — and says how
+    /// many times it was asked. Counting the asks is the whole point: what went wrong with
+    /// the settle ladder was never a wrong answer, it was how long it kept asking for one.
+    fn serve_counting(
+        replies: Vec<&'static str>,
+    ) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = hits.clone();
+        std::thread::spawn(move || loop {
+            let Ok((mut sock, _)) = listener.accept() else { return };
+            let i = seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            drain_request(&mut sock);
+            let _ = sock.write_all(replies[i.min(replies.len() - 1)].as_bytes());
+            let _ = sock.flush();
+        });
+        (format!("http://127.0.0.1:{port}/part.zip"), hits)
+    }
+
+    /// What a host holding `total` bytes answers a `Range: bytes=0-0` with.
+    fn ranged(total: u64) -> &'static str {
+        Box::leak(
+            format!(
+                "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-0/{total}\r\n\
+                 Content-Length: 1\r\nConnection: close\r\n\r\nx"
+            )
+            .into_boxed_str(),
+        )
+    }
+
+    /// A host that will not say what it is holding is not a host holding a short part, and
+    /// [`catbox_upload`] takes the part either way. So the ladder must stop asking rather
+    /// than sit out all seven waits to reach the answer it had at the second one — on a
+    /// four-part track that dead wait was most of a minute of an upload already finished.
+    #[tokio::test(start_paused = true)]
+    async fn an_unanswerable_probe_stops_asking() {
+        let missing: &'static str = Box::leak(reply("404 Not Found", "nope").into_boxed_str());
+        let (url, hits) = serve_counting(vec![missing]);
+        let client = Client::builder().build().unwrap();
+        assert_eq!(settled_len(&client, &url, 100).await, None);
+        assert_eq!(hits.load(std::sync::atomic::Ordering::Relaxed), NONE_PROBES);
+    }
+
+    /// The other direction, and the reason the ladder exists: a host that *is* answering,
+    /// with a part it is still writing, gets waited on until the number stops moving.
+    #[tokio::test(start_paused = true)]
+    async fn a_part_still_being_written_is_waited_out() {
+        let (url, hits) = serve_counting(vec![ranged(50), ranged(50), ranged(100)]);
+        let client = Client::builder().build().unwrap();
+        assert_eq!(settled_len(&client, &url, 100).await, Some(100));
+        assert_eq!(hits.load(std::sync::atomic::Ordering::Relaxed), 3);
     }
 
     fn reply(status: &str, body: &str) -> String {
