@@ -2,6 +2,12 @@
 
 ## 2026-09-06
 
+### Fixed
+- The Servers tab lists the live MX Bikes servers. The app signs in to the master server the
+  same way the game does, through your Steam copy of MX Bikes.
+
+## 2026-09-06
+
 ### Changed
 - A mod's screenshots are shown whole on its page. Clicking one opens it full screen, where the
   arrow keys move through the set and Escape closes it.
