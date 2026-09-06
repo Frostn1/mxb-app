@@ -3,6 +3,24 @@
 ## 2026-09-05
 
 ### Changed
+- Corners on a track you build now have ruts you can sit in. A groove is cut shallow and the
+  dirt out of it stands as a low smooth bank on its outer side, with flat ground between one
+  and the next — so a corner gives you something to lean on instead of a set of holes.
+- You can see the ruts. The packed dark line follows the floor of each groove and the dry
+  light dirt sits on the bank beside it, so the shape reads at speed instead of only being
+  felt.
+- Tyre marks up the face of every jump, fanned towards the side the last corner sends you —
+  so the face tells you where the riders ahead came from.
+- The riding line varies along its length instead of running as one flat stripe.
+- Ground textures are finer. The soil sheets carried a patch big enough to repeat with the
+  tile, which printed a faint chequerboard over the whole track.
+
+### Fixed
+- Sharing a big preset or file no longer produces a code that downloads without complaint and
+  then does not open. Each slice is checked against the size it should be, on the way up and
+  on the way down, and a short one is retried instead of passed on.
+
+### Changed
 - Tracks you build now read as tracks. The riding surface was one flat brown from edge to
   edge, with nothing to tell you where the line went or where the track stopped. It is now
   painted in five: a bright graded verge either side, dry loose dirt at the edges and round
@@ -42,8 +60,6 @@
   the app itself is fine, and takes up one thin line instead of a block.
 - Sharing a track goes through. Big shares upload in smaller pieces and a piece the host
   drops is sent again, so a share code comes back instead of an upload error.
-- Tracks you build in the app open. Going to the track from the loading screen brings up
-  the track instead of stopping there.
 - Tracks you build in the app have a riding line. The ground is painted in four bands —
   field, worked shoulder, the line itself and the grass over the top — and you can see all
   four: nothing is laid over the top of them any more.
