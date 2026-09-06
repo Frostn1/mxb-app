@@ -41,9 +41,9 @@
   --muted-foreground: #97979f;
   --faint: #6d6d76;
 
-  /* Active-row tint */
-  --accent: #1c1c21;
-  --accent-foreground: #ffffff;
+  /* Selected/hover wash, same shape as every colorway's */
+  --accent: rgba(156, 207, 236, 0.12);
+  --accent-foreground: #c3e3f7;
 
   /* Status */
   --destructive: #ef8078;
@@ -72,8 +72,8 @@
   --muted: #141417;
   --muted-foreground: #97979f;
   --faint: #6d6d76;
-  --accent: #1c1c21;
-  --accent-foreground: #ffffff;
+  --accent: rgba(156, 207, 236, 0.12);
+  --accent-foreground: #c3e3f7;
   --destructive: #ef8078;
   --destructive-foreground: #1a0c0b;
   --success: #6fd99a;
@@ -100,8 +100,8 @@
   --muted: #eaeae8;
   --muted-foreground: #5a5a63;
   --faint: #85858e;
-  --accent: #e0e0de;
-  --accent-foreground: #131317;
+  --accent: rgba(28, 120, 151, 0.12);
+  --accent-foreground: #155f78;
   --destructive: #b93a31;
   --destructive-foreground: #ffffff;
   --success: #1c8a5c;
