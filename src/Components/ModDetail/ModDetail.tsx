@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ChevronLeft,
   ArrowLeft,
   ExternalLink,
   Check,
@@ -37,12 +38,12 @@ import type {
   ModDetail as Detail,
 } from "../../types";
 import Gallery from "./Gallery";
+import CachedImg from "@/Components/ui/cached-img";
 import RichDescription from "./RichDescription";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
 import { useInstall } from "../../Context/Install";
 import type { InstalledIndex } from "../../lib/installedMatch";
 import { fileFormat, formatDate } from "../../lib/mods";
-import { Badge } from "@/Components/ui/badge";
 import { Button } from "@/Components/ui/button";
 import {
   AlertDialog,
@@ -317,15 +318,60 @@ export default function ModDetail({
   const idx = myActive ? stageIndex(myActive.stage) : -1;
 
   return (
-    <div className="flex h-full flex-col overflow-hidden px-7 py-5">
-      <Breadcrumb
-        modType={modType}
-        title={detail.title}
-        onBack={onBack}
-        link={detail.link}
-      />
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* The artwork carries the name. A breadcrumb over a text column was the same page
+          every catalog has; this is the one the mockup drew. */}
+      <div className="relative h-[248px] flex-none overflow-hidden bg-card">
+        {detail.images[0] && (
+          <CachedImg
+            src={detail.images[0]}
+            width={1280}
+            alt={detail.title}
+            className="absolute inset-0 size-full object-cover"
+          />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-r from-[rgba(6,6,7,0.95)] via-[rgba(6,6,7,0.7)] to-[rgba(6,6,7,0.15)]" />
+        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background to-transparent" />
 
-      <div className="mt-4 flex min-h-0 flex-1 gap-6">
+        <button
+          onClick={onBack}
+          className="u-skew absolute left-7 top-5 flex h-8 cursor-default items-center border border-white/25 bg-black/40 px-3 text-white/85 transition-colors hover:text-white"
+        >
+          <span className="u-unskew flex items-center gap-1.5">
+            <ChevronLeft className="size-3.5" />
+            <span className="font-cond text-[12px] font-semibold uppercase tracking-[0.14em]">
+              {t(modType.label)}
+            </span>
+          </span>
+        </button>
+
+        <div className="absolute inset-x-0 bottom-0 px-7 pb-5">
+          <h1 className="font-cond text-[42px] font-bold uppercase leading-[0.94] tracking-[0.005em] text-white">
+            {detail.title}
+          </h1>
+          <div className="mt-2.5 flex flex-wrap items-center gap-2.5 text-[12.5px] text-white/65">
+            {detail.author && <span className="text-white/85">{detail.author}</span>}
+            {detail.author && <span className="text-white/30">/</span>}
+            <span className="tabular-figures">{formatDate(detail.date)}</span>
+            {detail.version && (
+              <>
+                <span className="text-white/30">/</span>
+                <span className="font-mono text-[11.5px]">{detail.version}</span>
+              </>
+            )}
+            {isInstalled && (
+              <>
+                <span className="text-white/30">/</span>
+                <span className="flex items-center gap-1 text-success">
+                  <Check className="size-3" strokeWidth={3} /> In library
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1 gap-6 px-7 pb-5 pt-4">
         {/* left: gallery + description */}
         <div className="flex min-w-0 flex-1 flex-col gap-3.5 overflow-y-auto pr-1">
           <Gallery
@@ -346,47 +392,6 @@ export default function ModDetail({
 
         {/* right rail */}
         <div className="flex w-[340px] flex-none flex-col gap-3 overflow-y-auto">
-          <div className="flex flex-col gap-1.5">
-            <h1 className="text-[24px] font-bold leading-tight tracking-[-0.3px]">
-              {detail.title}
-            </h1>
-            {/* Who made it, right under the name — the same byline the browse card carries.
-                Clickable through to their profile, which is where their other mods are. */}
-            {detail.author &&
-              (detail.authorUrl ? (
-                <button
-                  onClick={() => open(detail.authorUrl!)}
-                  className="flex cursor-default items-center gap-1 self-start text-[12.5px] text-primary hover:brightness-110"
-                  title={detail.authorUrl}
-                >
-                  <span className="truncate">
-                    {t("browse.byAuthor", { author: detail.author })}
-                  </span>
-                  <ExternalLink className="size-3 flex-none" />
-                </button>
-              ) : (
-                <span className="truncate text-[12.5px] text-muted-foreground">
-                  {t("browse.byAuthor", { author: detail.author })}
-                </span>
-              ))}
-            <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
-              <span>{formatDate(detail.date)}</span>
-              {detail.version && (
-                <>
-                  <span className="text-faint">·</span>
-                  <span className="bg-foreground/[0.07] px-1.5 py-px font-mono text-[11px]">
-                    {detail.version}
-                  </span>
-                </>
-              )}
-              {isInstalled && (
-                <Badge variant="success" className="ml-0.5">
-                  <Check className="size-3" strokeWidth={3} /> In library
-                </Badge>
-              )}
-            </div>
-          </div>
-
           {/* install panel */}
           <div className="flex flex-col gap-3 rounded-xl border border-input bg-card p-4">
             {myActive && idx >= 0 ? (
