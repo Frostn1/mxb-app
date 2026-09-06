@@ -2102,11 +2102,30 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
 
     for (id, m) in &masks {
         out.extend_from_slice(&id.to_le_bytes());
-        out.extend_from_slice(&0u32.to_le_bytes());
+        // How deep the layer is. Indiana 0.5, Millville 0.4, Lambretta Lynds 0.3/0.4/0.2/1.0
+        // -- ours were zero, the same empty physics field the material table had.
+        let depth: f32 = match id {
+            10 => 0.2,
+            4 => 0.4,
+            _ => 0.3,
+        };
+        out.extend_from_slice(&depth.to_le_bytes());
         out.extend_from_slice(&(dim as u32).to_le_bytes());
         out.extend_from_slice(&(dim as u32).to_le_bytes());
         out.extend_from_slice(m);
     }
+
+    // One zero word closes the mask list, and the loader branches on it.
+    //
+    // Watched under emulation: after the last mask it reads a word at 0x1401f522c. Millville
+    // has a zero there and goes on to 0x1401f5317 and the eleven hundred reads that make up
+    // the rest of the file. Ours had no word at all, so the loader took the first float of
+    // the pose block -- 282.02, which is 1,133,314,703 -- and left down a branch that reads
+    // three more words and stops.
+    //
+    // Thirty reads against Millville's 1,165. Everything past this point in our file has
+    // been written and never once read.
+    out.extend_from_slice(&0u32.to_le_bytes());
 
     // The pose block, which sits forty bytes ahead of the material table in every published
     // file: where the lap starts, how long it is, and the box it lives in.
@@ -2138,12 +2157,25 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
     // These are not per-track values. Indiana, Millville, Flanders and Lambretta Lynds carry
     // byte-identical tables: three hard surfaces, two medium, and sand. Read straight off
     // them.
-    out.extend_from_slice(&6u32.to_le_bytes());
-    for name in ["asphalt", "grass", "sand", "kerb", "soil", "concrete"] {
+    // The nine floats after each name are how the surface gives under a wheel: four
+    // (sinkage, load) points -- at 2, 5, 10 and 35 kPa -- and how much stays as a rut.
+    // Identical in Indiana, Millville, Flanders and Lambretta Lynds, so read off them.
+    const SURFACES: [(&str, f32, f32, f32, f32); 6] = [
+        ("asphalt", 0.0012, 0.0025, 0.005, 0.0),
+        ("grass", 0.0037, 0.0075, 0.015, -0.02),
+        ("sand", 0.0075, 0.015, 0.03, -0.04),
+        ("kerb", 0.0012, 0.0025, 0.005, 0.0),
+        ("soil", 0.0037, 0.0075, 0.015, -0.02),
+        ("concrete", 0.0012, 0.0025, 0.005, 0.0),
+    ];
+    out.extend_from_slice(&(SURFACES.len() as u32).to_le_bytes());
+    for (name, a, b, c, rut) in SURFACES {
         let mut field = [0u8; 16];
         field[..name.len()].copy_from_slice(name.as_bytes());
         out.extend_from_slice(&field);
-        out.extend_from_slice(&[0u8; 36]);
+        for v in [a, 2.0, b, 5.0, c, 10.0, 0.0, 35.0, rut] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
     }
 
     // And the centreline, in the same sixty-byte records a compiled track carries. Written
@@ -2184,8 +2216,11 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
         // Indiana's 120 records say `0, 1, 1, 1, ...` -- while ours said 1.0, which is
         // 1,065,353,216 to anything reading it as a count or a flag. The other fourteen
         // words are floats and match in kind.
-        rec[0] = if at == 0.0 { 0.0 } else { 1.0 };
-        for v in rec {
+        // Word zero is an integer, not a float: Indiana's line reads 0, 1, 1, ... and ours
+        // wrote 1.0, which is 1,065,353,216 to anything taking it as a flag.
+        let first = at == 0.0;
+        out.extend_from_slice(&u32::from(!first).to_le_bytes());
+        for v in &rec[1..] {
             out.extend_from_slice(&v.to_le_bytes());
         }
         at += seg.length();
@@ -2216,6 +2251,19 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
     //
     // So: what the reader does past this marker is still unknown, and guessing at it cost a
     // working track. Leave it alone until the real loader has been watched deciding.
+    // The lists that follow the centreline, every one of them empty.
+    //
+    // A published `.trh` carries occluder boxes and more here. Ten zero words is what the
+    // loader takes to walk out: with none it asks for a 66 MB record off the end, with four
+    // it is 40 bytes over, with eight 4, and with ten it reaches the last byte and returns.
+    //
+    // This was written once before and reverted, because the build carrying it crashed. It
+    // was not the cause: the loader was bailing out four megabytes upstream, at the mask
+    // list, and never reached these words at all. The measurement was sound and taken on a
+    // file the game had already stopped reading.
+    for _ in 0..10 {
+        out.extend_from_slice(&0u32.to_le_bytes());
+    }
     out.extend_from_slice(b"EXT\0");
     out
 }
