@@ -3,6 +3,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { Lock, Loader2, FileUp, Check, X } from "lucide-react";
 import { Button } from "../ui/button";
+import { ContextBarRight } from "../Shell/ContextBar";
 import HelpHint from "@/Components/ui/help-hint";
 import { cn } from "@/lib/utils";
 import { mxbsecureGenerate, type SecureGenerateOutcome } from "../../api/mods";
@@ -72,13 +73,15 @@ const Secure = () => {
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
-      <header className="flex flex-none items-center gap-1.5 px-7 pb-2 pt-5">
-        <h1 className="text-[21px] font-bold tracking-[-0.2px]">{t("nav.secure")}</h1>
-        <HelpHint title={t("nav.secure")} description={t("secure.help")} />
-        <span className="ml-1 rounded-full border border-warning/40 bg-warning/[0.08] px-2 py-0.5 text-[10.5px] font-medium text-warning">
-          {t("secure.experimental")}
+      <ContextBarRight>
+        <span className="u-skew border border-warning/40 bg-warning/[0.08] px-2 py-0.5">
+          <span className="u-unskew block font-cond text-[10.5px] font-semibold uppercase tracking-[0.14em] text-warning">
+            {t("secure.experimental")}
+          </span>
         </span>
-      </header>
+        <HelpHint title={t("nav.secure")} description={t("secure.help")} />
+      </ContextBarRight>
+
 
       <div className="mx-auto w-full max-w-2xl px-7 pb-10">
         <div className="rounded-xl border border-primary/30 bg-primary/[0.04] p-5">

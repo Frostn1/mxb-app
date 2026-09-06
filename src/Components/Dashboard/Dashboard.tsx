@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import Sidebar, { type DashboardView } from "../Shell/Sidebar";
+import TopRail from "../Shell/TopRail";
+import { ContextSlots } from "../Shell/ContextBar";
+import { type DashboardView } from "../Shell/nav";
 import { parsePluginView, usePlugins } from "@/lib/usePlugins";
 import Library from "../Library/Library";
 import Downloads from "../Downloads/Downloads";
@@ -15,6 +17,8 @@ import Shop from "../Shop/Shop";
 import Hub from "../Hub/Hub";
 import ModDetail from "../ModDetail/ModDetail";
 import DropZone from "../Dropzone/DropZone";
+import RuntimeBanner from "../RuntimeBanner/RuntimeBanner";
+import UpdateBanner from "../UpdateBanner/UpdateBanner";
 import Settings, { type SectionId } from "../Settings/Settings";
 import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import ReleaseShowcase from "../Showcase/ReleaseShowcase";
@@ -180,6 +184,10 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     [openMod, modType.categoryId, navigate],
   );
 
+  const [ctxLeft, setCtxLeft] = useState<HTMLDivElement | null>(null);
+  const [ctxRight, setCtxRight] = useState<HTMLDivElement | null>(null);
+  const ctxSlots = useMemo(() => ({ left: ctxLeft, right: ctxRight }), [ctxLeft, ctxRight]);
+
   // Jump from Presets into the Rider tab with a preset loaded, to view it on the model.
   const openInRider = useCallback((lo: Loadout, bike: string) => {
     setRiderPreset(lo);
@@ -207,9 +215,19 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           there is nowhere to install to before the MX Bikes folder is known. The overlay
           window renders its own tree and deliberately gets no drop target. */}
       <DropZone />
+      <TopRail
+        view={view}
+        studioTab={studioTab}
+        plugins={plugins}
+        onNavigate={navigate}
+        leftRef={setCtxLeft}
+        rightRef={setCtxRight}
+      />
+      <RuntimeBanner />
+      <UpdateBanner />
       <div className="flex min-h-0 flex-1">
-        <Sidebar view={view} studioTab={studioTab} plugins={plugins} onNavigate={navigate} />
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+          <ContextSlots.Provider value={ctxSlots}>
           {pluginPanel ? (
             <pluginPanel.component />
           ) : view === "browse" && selectedSlug ? (
@@ -278,6 +296,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onShowWhatsNew={replayShowcase}
             />
           )}
+          </ContextSlots.Provider>
         </div>
       </div>
       {tourRun && <Tour navigate={navigate} onDone={endTour} />}

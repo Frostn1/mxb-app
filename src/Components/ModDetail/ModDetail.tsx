@@ -374,7 +374,7 @@ export default function ModDetail({
               {detail.version && (
                 <>
                   <span className="text-faint">·</span>
-                  <span className="rounded-[5px] bg-foreground/[0.07] px-1.5 py-px font-mono text-[11px]">
+                  <span className="bg-foreground/[0.07] px-1.5 py-px font-mono text-[11px]">
                     {detail.version}
                   </span>
                 </>
@@ -431,7 +431,7 @@ export default function ModDetail({
                     button, not after the install: it lands in the library either way and
                     then does nothing in-game, which reads as a broken mod. */}
                 {serverOnly && (
-                  <div className="flex items-start gap-2.5 rounded-[10px] border border-warning/30 bg-warning/[0.07] px-3 py-2.5">
+                  <div className="flex items-start gap-2.5 border border-warning/30 bg-warning/[0.07] px-3 py-2.5">
                     <AlertTriangle className="mt-px size-3.5 flex-none text-warning" />
                     <span className="text-[12px] text-warning/90">
                       {t("modDetail.serverOnlyNotice")}
@@ -458,7 +458,7 @@ export default function ModDetail({
           {/* What happens once the install finishes. FrostMod hot-reloads the game, but
               it's an MX Bikes plugin — promising a reload for a title that has none is
               worse than saying nothing, so that case gets the honest instruction. */}
-          <div className="flex items-center gap-2.5 rounded-[10px] border border-success/25 bg-success/[0.06] px-3 py-2.5">
+          <div className="flex items-center gap-2.5 border border-success/25 bg-success/[0.06] px-3 py-2.5">
             <span className="size-[7px] flex-none rounded-full bg-success" />
             <span className="text-[12px] text-success/90">
               {t(game.caps.frostmod ? "modDetail.frostmodHint" : "modDetail.restartHint", {

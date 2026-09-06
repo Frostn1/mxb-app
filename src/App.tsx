@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
-import TitleBar from "./Components/TitleBar/TitleBar";
+import MiniRail from "./Components/Shell/MiniRail";
 import Dashboard from "./Components/Dashboard/Dashboard";
 import Setup from "./Components/Setup/Setup";
 import Welcome from "./Components/Welcome/Welcome";
@@ -146,14 +146,11 @@ const App = () => {
                 against a `1fr` grid track, which collapsed the app to content
                 height when a view's content was short. */}
             <div className="flex h-screen flex-col overflow-hidden">
-              <div className="h-[42px] flex-none">
-                <TitleBar />
-              </div>
-              {/* Above the update banner on purpose: one is a broken state the player
-                  can fix right now, the other is an offer. Updating the app wouldn't
-                  put the missing runtime on their PC anyway. */}
-              <RuntimeBanner />
-              <UpdateBanner />
+              {/* Before there is a config there is nothing to navigate, but the window
+                  still has to be draggable and closable — a startup that stalls behind a
+                  slow folder scan must not need the task manager. The Dashboard renders
+                  the full rail in place of this as soon as it mounts. */}
+              {!ready && <MiniRail />}
               <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
                 {ready && (
                   // The provider wraps *both* branches, not just the dashboard: the setup
@@ -179,6 +176,13 @@ const App = () => {
                     {config?.modsPath ? (
                       <Dashboard key={activeGame.id} welcomeActive={showWelcome} />
                     ) : (
+                      <>
+                      <MiniRail />
+                      {/* Above the update banner on purpose: one is a broken state the
+                          player can fix right now, the other is an offer. Updating the app
+                          wouldn't put the missing runtime on their PC anyway. */}
+                      <RuntimeBanner />
+                      <UpdateBanner />
                       <Setup
                         onComplete={reloadConfig}
                         game={activeGame}
@@ -188,6 +192,7 @@ const App = () => {
                         // config means we got here by switching, and that's already answered.
                         firstRun={!config}
                       />
+                      </>
                     )}
                   </ConfigContext.Provider>
                 )}
