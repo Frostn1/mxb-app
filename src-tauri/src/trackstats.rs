@@ -875,6 +875,175 @@ struct Cross {
     p: Vec<f32>,
 }
 
+/// What a rut is shaped like, as distinct from how deep it is.
+///
+/// Depth was already measured and it is not what tells a real corner from a generated one.
+/// Three things do:
+///
+/// - **Anisotropy.** A rut is a groove somebody drove down: sharp across, smooth along. Noise
+///   is rough both ways. This is the ratio of the two, and it is the number that says whether
+///   the ground was ridden or shaken.
+/// - **Floor.** A worn groove is flat-bottomed — a tyre's width of it sits within a fifth of
+///   its own depth. A sine wave has no floor at all.
+/// - **Wall.** How steeply the ground climbs out of one, in degrees.
+///
+/// Measured on a band `RIDDEN_HALF_M` either side of the line, detrended over six metres so
+/// the track's own shape drops out and only what is cut into it is left.
+#[derive(Debug, Clone, Copy)]
+pub struct RutShape {
+    /// Roughness across the line, RMS metres after the six-metre detrend.
+    pub across_rms_m: f32,
+    /// And along it, the same way.
+    pub along_rms_m: f32,
+    /// `across / along`. One is noise; a ridden surface is well above it.
+    pub anisotropy: f32,
+    /// How much of a groove's width sits within a fifth of its depth, metres.
+    pub floor_m: f32,
+    /// The steepest wall out of a groove, degrees.
+    pub wall_deg: f32,
+    /// Grooves per cross-section, and how far apart they are.
+    pub grooves: f32,
+    pub spacing_m: f32,
+    /// Roughness along the line at the scale a wheel feels rather than a lap: RMS metres
+    /// after a one-metre detrend. Long undulations drop out; chatter does not.
+    pub chatter_m: f32,
+    /// The same, by how far off the line it is: on it (within a metre), two metres off, and
+    /// four. A real track is polished where the wheels go and chopped up either side, and one
+    /// number for the whole width cannot tell that from a lap that is rough everywhere.
+    pub chatter_zones_m: [f32; 3],
+}
+
+/// Detrend a series against a running mean `half` samples either side, wrapping.
+fn detrend(v: &[f32], half: usize) -> Vec<f32> {
+    let n = v.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    (0..n)
+        .map(|i| {
+            let mut sum = 0.0;
+            let mut count = 0.0;
+            for k in 0..=2 * half {
+                let j = (i + n + k - half.min(i + n)) % n;
+                sum += v[j];
+                count += 1.0;
+            }
+            v[i] - sum / count
+        })
+        .collect()
+}
+
+fn rms(v: &[f32]) -> f32 {
+    if v.is_empty() {
+        return 0.0;
+    }
+    (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt()
+}
+
+/// [`RutShape`] for a lap over a heightfield, published or generated.
+///
+/// `stations` is the centreline: `(x, z, heading)` every `step_m` metres.
+pub fn rut_shape(stations: &[(f32, f32, f32)], step_m: f32, g: &Grid) -> Option<RutShape> {
+    if stations.len() < 64 {
+        return None;
+    }
+    let lat = RIDDEN_LATERAL_M;
+    let n = (2.0 * RIDDEN_HALF_M / lat) as usize + 1;
+    let u_at = |i: usize| i as f32 * lat - RIDDEN_HALF_M;
+    // Heights across the line at every station, and the same grid read the other way.
+    let rows: Vec<Vec<f32>> = stations
+        .iter()
+        .map(|&(x, z, h)| {
+            let (rx, rz) = crate::trackprog::right_vector(h);
+            (0..n).map(|i| g.at(x + u_at(i) * rx, z + u_at(i) * rz)).collect()
+        })
+        .collect();
+
+    // Across: detrend each row over six metres of *width*.
+    let half_across = ((3.0 / lat) as usize).max(1);
+    let mut across: Vec<f32> = Vec::new();
+    let mut floors: Vec<f32> = Vec::new();
+    let mut walls: Vec<f32> = Vec::new();
+    let mut counts: Vec<f32> = Vec::new();
+    let mut gaps: Vec<f32> = Vec::new();
+    for row in &rows {
+        let d = detrend(row, half_across);
+        across.extend(d.iter().copied());
+        // Grooves: runs below a fifth of the section's own deepest cut.
+        let deepest = -d.iter().copied().fold(f32::INFINITY, f32::min);
+        if deepest < 0.02 {
+            continue;
+        }
+        let cut = -0.2 * deepest;
+        let (mut run, mut last_centre, mut found) = (0usize, None::<f32>, 0usize);
+        for i in 0..d.len() {
+            if d[i] <= cut {
+                run += 1;
+            } else if run > 0 {
+                found += 1;
+                floors.push(run as f32 * lat);
+                let centre = (i as f32 - run as f32 * 0.5) * lat - RIDDEN_HALF_M;
+                if let Some(prev) = last_centre {
+                    gaps.push(centre - prev);
+                }
+                last_centre = Some(centre);
+                run = 0;
+            }
+        }
+        counts.push(found as f32);
+        for i in 1..d.len() {
+            walls.push(((d[i] - d[i - 1]).abs() / lat).atan().to_degrees());
+        }
+    }
+
+    // Along: the same detrend down each lateral offset, over six metres of *track*.
+    let half_along = ((3.0 / step_m) as usize).max(1);
+    let half_chatter = ((0.5 / step_m) as usize).max(1);
+    let mut along: Vec<f32> = Vec::new();
+    let mut chatter: Vec<f32> = Vec::new();
+    let mut zones: [Vec<f32>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    for i in 0..n {
+        let col: Vec<f32> = rows.iter().map(|r| r[i]).collect();
+        along.extend(detrend(&col, half_along));
+        let fine = detrend(&col, half_chatter);
+        let u = u_at(i).abs();
+        // On the line, two metres off it, four metres off it.
+        let zone = if u <= 1.0 {
+            Some(0)
+        } else if (1.5..2.5).contains(&u) {
+            Some(1)
+        } else if (3.5..4.5).contains(&u) {
+            Some(2)
+        } else {
+            None
+        };
+        if let Some(z) = zone {
+            zones[z].extend(fine.iter().copied());
+        }
+        chatter.extend(fine);
+    }
+
+    let mut walls_sorted = walls;
+    walls_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let wall_deg = walls_sorted
+        .get((walls_sorted.len() as f32 * 0.98) as usize)
+        .copied()
+        .unwrap_or(0.0);
+    let mean = |v: &[f32]| if v.is_empty() { 0.0 } else { v.iter().sum::<f32>() / v.len() as f32 };
+    let (a, b) = (rms(&across), rms(&along));
+    Some(RutShape {
+        across_rms_m: a,
+        along_rms_m: b,
+        anisotropy: if b > 1e-6 { a / b } else { 0.0 },
+        floor_m: mean(&floors),
+        wall_deg,
+        grooves: mean(&counts),
+        spacing_m: mean(&gaps),
+        chatter_m: rms(&chatter),
+        chatter_zones_m: [rms(&zones[0]), rms(&zones[1]), rms(&zones[2])],
+    })
+}
+
 pub fn ridden(lap: &crate::trackline::Lap, g: &Grid) -> Option<RiddenStats> {
     let n = (2.0 * RIDDEN_REACH_M / RIDDEN_LATERAL_M) as usize + 1;
     let u_at = |i: usize| i as f32 * RIDDEN_LATERAL_M - RIDDEN_REACH_M;
@@ -1564,6 +1733,42 @@ mod tests {
                 if near < reach[0].max(reach[1]) + 2.0 { "flat right up to it" } else { "" },
             );
         }
+    }
+
+    /// What a published track's ruts are shaped like.
+    ///
+    /// ```text
+    /// FROST_TRACK=…/indiana.pkz cargo test --bin mxb-app -- --ignored --nocapture rut_shape_of
+    /// ```
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn rut_shape_of() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::Path::new(&var);
+        let names = track::entry_names(path).unwrap();
+        let entry = track::heightfield_entries(&names)
+            .into_iter()
+            .next()
+            .expect("a heightfield");
+        let bytes = track::read_entry(path, &entry).unwrap();
+        let layout = heightfield::probe(&bytes, None).expect("a terrain grid");
+        let mps_src = layout.metres_per_sample.expect("a stated footprint");
+        let size_x = mps_src * (layout.width.max(2) - 1) as f32;
+        let size_z = mps_src * (layout.height.max(2) - 1) as f32;
+        let block_at =
+            layout.offset + layout.width as usize * layout.height as usize * layout.sample.size();
+        let block = bytes.get(block_at..).unwrap_or(&[]);
+        let lap = crate::trackline::read(block).expect("a centreline");
+        let (fw, fh, v) = heightfield::read_grid(&bytes, &layout, layout.width.max(layout.height));
+        let g = &Grid { w: fw as usize, h: fh as usize, size_x, size_z, v };
+        let step = 0.5f32;
+        let stations: Vec<(f32, f32, f32)> =
+            lap.stations(step).into_iter().map(|st| (st.x, st.z, st.heading)).collect();
+        let r = super::rut_shape(&stations, step, g).expect("a rut shape");
+        println!("  {} stations over {:.0} m", stations.len(), stations.len() as f32 * step);
+        println!("  across {:.3} m rms   along {:.3} m rms   anisotropy {:.2}", r.across_rms_m, r.along_rms_m, r.anisotropy);
+        println!("  floor {:.2} m   wall {:.0} deg   {:.1} grooves at {:.2} m   chatter {:.3} m", r.floor_m, r.wall_deg, r.grooves, r.spacing_m, r.chatter_m);
+        println!("  chatter on the line {:.3} m   2 m off {:.3}   4 m off {:.3}", r.chatter_zones_m[0], r.chatter_zones_m[1], r.chatter_zones_m[2]);
     }
 
     /// A published track's race data: where it puts its grid, and in what coordinates.
