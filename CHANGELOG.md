@@ -13,6 +13,12 @@
 - Ruts are shaped the way a ridden track's are: fewer grooves, further apart, with flatter
   bottoms, and smooth along their length instead of chopped up at every scale. A lap holds
   a line rather than shaking the bike over it.
+- Sharing a track is quicker. The app packs it straight out of your mods folder instead of
+  making a copy of it first.
+- A share code sends and fetches its parts three at a time instead of one after another, and a
+  download fills one progress bar for the whole thing rather than restarting it per part.
+- Importing a share unpacks beside your mods folder, so the files are moved into place rather
+  than copied across drives.
 - A generated track has a riding line in it. The corridor is worked dirt with a darker line
   worn through it and tyre marks in the ruts, instead of one dark ribbon from edge to edge.
 - Generated tracks are painted with real ground. The soil, the riding line, the packed bottom

@@ -261,32 +261,28 @@ pub async fn create(
     bundle::emit(app, EVENT, "bundling", None);
     let work = std::env::temp_dir().join(format!("mxb-share-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&work);
-    let root = work.join("share");
-    std::fs::create_dir_all(&root)?;
+    std::fs::create_dir_all(&work)?;
 
+    // Named, not copied. Sharing a track used to write the whole `.pkz` into a staging tree
+    // and then read it straight back out to build the zip; the zip stores its payload
+    // uncompressed, so that first pass only ever cost time. Folders are still resolved
+    // rather than linked — a junction into the sender's tree means nothing on the machine
+    // this is headed for — which is what `entries_under` walks for.
+    let mut entries: Vec<bundle::ZipEntry> = Vec::new();
     for Pick { item, src } in &picks {
-        let dest = root.join("mods").join(bundle::rel_to_native(&item.rel));
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        if item.is_dir {
-            // Resolved, not linked: a junction into the sender's tree means nothing on the
-            // machine this is headed for. Same reason the preset bundle resolves its folders.
-            bundle::copy_tree(src, &dest)?;
-        } else {
-            std::fs::copy(src, &dest)
-                .with_context(|| format!("copying {}", src.display()))?;
-        }
+        entries.extend(bundle::entries_under(&format!("mods/{}", item.rel), src));
     }
 
     let items: Vec<ShareItem> = picks.into_iter().map(|p| p.item).collect();
 
     // A manifest for anyone who unzips the archive by hand rather than pasting the code.
     // `place_mod` routes on the `mods/` child alone, so this sits beside it harmlessly.
-    std::fs::write(root.join("share.json"), serde_json::to_vec_pretty(&items)?)?;
+    let manifest = work.join("share.json");
+    std::fs::write(&manifest, serde_json::to_vec_pretty(&items)?)?;
+    entries.push(bundle::ZipEntry { rel: "share.json".to_string(), src: manifest });
 
     let zip_path = work.join(format!("{}.zip", archive_stem(&items)));
-    bundle::zip_dir(&root, &zip_path)?;
+    bundle::zip_entries(&entries, &zip_path)?;
 
     let size = bundle::file_size(&zip_path);
     let total = bundle::human_size(size);
@@ -368,16 +364,16 @@ pub async fn import(
 ) -> anyhow::Result<FileShare> {
     let share = decode(text)?;
 
-    let work = std::env::temp_dir().join(format!("mxb-share-import-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&work);
-    std::fs::create_dir_all(&work)?;
+    // Beside the mods tree, not in `%TEMP%`: what lands here is renamed into place a moment
+    // later, and a rename only costs nothing when both ends are on one drive.
+    let work = bundle::scratch_dir(cfg, "share-import");
 
-    let archive = bundle::fetch(app, EVENT, SLUG, &share.bundle, &work).await?;
+    let fetched = bundle::fetch(app, EVENT, SLUG, &share.bundle, &work).await?;
 
     bundle::emit(app, EVENT, "installing", None);
     let extracted = work.join("extracted");
     std::fs::create_dir_all(&extracted)?;
-    install::extract_archive(&archive, &extracted)?;
+    fetched.extract(&extracted)?;
     let mods_dir = library::mods_subdir(&cfg.mods_path, "mods");
     // The archive is a `mods/` tree, which routes as a merge — the type folder is only a
     // fallback for shapes this never produces, but naming the real one keeps the log honest.
@@ -663,18 +659,41 @@ mod tests {
         assert!(err.contains("Presets tab"), "{err}");
     }
 
-    /// End to end minus the network: what `create` stages has to be what `import` lays down,
+    /// End to end minus the network: what `create` packs has to be what `import` lays down,
     /// in the same folders, on a machine that has none of it.
+    ///
+    /// Packed the way `create` packs — straight off the sender's mods tree, with no staging
+    /// copy in between — so the paths inside the archive are the ones a real share carries.
     #[test]
-    fn a_staged_share_lands_back_in_the_same_folders() {
+    fn a_share_lands_back_in_the_same_folders() {
         let root = tmp("roundtrip");
-        let staged = root.join("share");
-        touch(&staged.join("mods/tracks/EU/RedBud.pkz"));
-        touch(&staged.join("mods/rider/helmets/AGV/paints/Blue.pnt"));
-        touch(&staged.join("share.json"));
+        let sender = root.join("sender/mods");
+        touch(&sender.join("tracks/EU/RedBud.pkz"));
+        touch(&sender.join("rider/helmets/AGV/paints/Blue.pnt"));
+        // A picked folder, to prove its interior travels too.
+        touch(&sender.join("tracks/Loose/track.pkz"));
+        touch(&sender.join("tracks/Loose/maps/ground.tga"));
+
+        let cfg = AppConfig {
+            mods_path: root.join("sender").to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let (picks, skipped) = picks(
+            &cfg,
+            &[
+                "tracks/EU/RedBud.pkz".to_string(),
+                "rider/helmets/AGV/paints/Blue.pnt".to_string(),
+                "tracks/Loose".to_string(),
+            ],
+        );
+        assert!(skipped.is_empty(), "{skipped:?}");
+        let entries: Vec<bundle::ZipEntry> = picks
+            .iter()
+            .flat_map(|p| bundle::entries_under(&format!("mods/{}", p.item.rel), &p.src))
+            .collect();
 
         let zip_path = root.join("share.zip");
-        bundle::zip_dir(&staged, &zip_path).unwrap();
+        bundle::zip_entries(&entries, &zip_path).unwrap();
 
         let extracted = root.join("extracted");
         std::fs::create_dir_all(&extracted).unwrap();
@@ -684,6 +703,8 @@ mod tests {
 
         assert!(mods.join("tracks/EU/RedBud.pkz").exists());
         assert!(mods.join("rider/helmets/AGV/paints/Blue.pnt").exists());
+        assert!(mods.join("tracks/Loose/track.pkz").exists());
+        assert!(mods.join("tracks/Loose/maps/ground.tga").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
