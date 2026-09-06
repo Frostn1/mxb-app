@@ -1036,7 +1036,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         let (_, which) = nearest_station(&spur.stations, gw, gh, mps_x, mps_z);
         for i in 0..gw * gh {
             let (wx, wz) = ((i % gw) as f32 * mps_x, (i / gw) as f32 * mps_z);
-            let (mut d, s, _) = local_frame(&spur.stations, which[i] as usize, wx, wz);
+            let (mut d, s, t) = local_frame(&spur.stations, which[i] as usize, wx, wz);
             // Behind the gate row the frame runs out and every distance becomes radial, which
             // rounds the back of the pad off into a lollipop. A start has a straight back edge
             // — the bank the gates are set against — so back there the width is measured
@@ -1052,6 +1052,13 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     back = smoothstep(
                         ((BACK_OF_THE_GATE_M - behind) / BACK_OF_THE_GATE_M).clamp(0.0, 1.0),
                     );
+                    // And it ends there. Everything that paints the ground reads `spur_dist`,
+                    // and a station's frame runs on for ever — so without this the start is
+                    // surfaced as track for as far behind the gate row as the grid goes, which
+                    // from the gate is a wide slab running off into nothing.
+                    if behind > BACK_OF_THE_GATE_M {
+                        d = f32::MAX;
+                    }
                 }
             }
             spur_dist[i] = d;
@@ -1086,6 +1093,34 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 * if ground > deck { CUT_SHOULDER } else { FILL_SHOULDER };
             let w = bench_weight(d, wide, shoulder) * claim;
             heights[i] = ground * (1.0 - w) + deck * w;
+
+            if d > wide {
+                continue;
+            }
+            // Ridden ground. The pad is track, and a track with no texture on it is a slab —
+            // the same fine roughness the lap gets, tapered across the width the way it is
+            // there, because the middle of a start is used and its far corners are not.
+            let across = 1.0 - (d / wide.max(1e-3)).min(1.0).powi(2);
+            if r.texture > 0.0 {
+                heights[i] += fbm(
+                    wx / TEXTURE_WAVELENGTH_M,
+                    wz / TEXTURE_WAVELENGTH_M,
+                    r.seed ^ 0x5EED,
+                ) * r.texture
+                    * (0.25 + 0.75 * across)
+                    * claim;
+            }
+            // And the grooves the gate leaves: forty bikes pulling out of forty stalls dig
+            // forty lines, deepest a few metres off the row and gone by the time the pack has
+            // spread. The one piece of ground on a track whose ruts are laid out in a comb.
+            let from_gate = s - spur.gate_at();
+            let row = GRID_STALLS as f32 * GRID_LANE_M * 0.5;
+            if from_gate > -1.0 && from_gate < GATE_RUT_M && t.abs() < row {
+                let along = smoothstep(1.0 - (from_gate.max(0.0) / GATE_RUT_M));
+                let lane = (t / GRID_LANE_M) * std::f32::consts::TAU;
+                let groove = 0.5 - 0.5 * lane.cos();
+                heights[i] -= GATE_RUT_DEPTH_M * along * groove * claim;
+            }
         }
     }
 
@@ -2119,7 +2154,8 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         )
     });
     let grass = mask_outside(syn, MASK_DIM, half, |e, x, z| {
-        255 - soft_edge(SHOULDER_M + edge_noise(x, z, seed ^ 0x6EE2, 3.2, 1.2), 6.0, e)
+        let past = 255 - soft_edge(SHOULDER_M + edge_noise(x, z, seed ^ 0x6EE2, 3.2, 1.2), 6.0, e);
+        (past as f32 * turf_cover(x, z, seed)) as u8
     });
     // Off-track starts where the graded shoulder ends: the rider is on the track, or in the
     // field, with the shoulder belonging to neither. This one decides where the game says a
@@ -2689,6 +2725,13 @@ pub struct StartSpur {
     len: f32,
 }
 
+/// How far past the gate row its grooves run, and how deep they are at their deepest.
+///
+/// A start is the one place on a track where the ruts are a comb: every rider pulls out of
+/// their own stall in a line, and the lines stay parallel until the pack starts to spread.
+const GATE_RUT_M: f32 = 35.0;
+const GATE_RUT_DEPTH_M: f32 = 0.09;
+
 /// How much of the start straight's last stretch is already the width of the lap it joins.
 const MERGE_TAIL_M: f32 = 12.0;
 
@@ -3077,6 +3120,20 @@ impl Synth {
         e
     }
 
+    /// How far outside the start straight's edge a point in the world is — negative on it,
+    /// `None` where the track has no start straight.
+    ///
+    /// For anything that has to keep off the start: the pad is track, and a fence post or a
+    /// hay bale standing on it is standing where forty riders are about to be.
+    pub fn outside_the_start(&self, x: f32, z: f32) -> Option<f32> {
+        let spur = self.spur.as_ref()?;
+        let gx = (x / self.mps).round().clamp(0.0, (self.gw - 1) as f32) as usize;
+        let gy = (z / self.mps).round().clamp(0.0, (self.gh - 1) as f32) as usize;
+        let i = gy * self.gw + gx;
+        let d = self.spur_dist[i];
+        d.is_finite().then(|| d - spur.at(self.spur_arc[i]))
+    }
+
     /// Whether a cell is on the start straight rather than on the lap.
     pub fn on_the_start(&self, i: usize, half: f32) -> bool {
         match &self.spur {
@@ -3313,8 +3370,8 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
                     BandMask::Everywhere => unreachable!(),
                     BandMask::Rut => rut_mask(syn, half, seed, mw, mh),
                     BandMask::Loose => loose_mask(syn, half, seed, mw, mh),
-                    BandMask::Beyond => mask_rect_outside(syn, mw, mh, half, |e, _, _| {
-                        u8::from(e > SHOULDER_M) * 255
+                    BandMask::Beyond => mask_rect_outside(syn, mw, mh, half, |e, x, z| {
+                        (u8::from(e > SHOULDER_M) as f32 * 255.0 * turf_cover(x, z, seed)) as u8
                     }),
                     BandMask::Out(extra) => mask_rect_outside(syn, mw, mh, half, |e, _, _| {
                         u8::from(e <= extra) * 255
@@ -3556,6 +3613,26 @@ fn mask_rect(syn: &Synth, mw: usize, mh: usize, f: impl Fn(f32, f32, f32, f32) -
         }
     }
     out
+}
+
+/// How big the patches of grass in the field are, metres.
+const TURF_PATCH_M: f32 = 55.0;
+
+/// How much turf covers the field at a point: 1 where grass has taken, 0 where the ground is
+/// bare.
+///
+/// The field used to be one flat sheet of grass from the shoulder to the fence, which is a
+/// lawn — and no venue is a lawn. Two scales of noise, thresholded, so what comes out is
+/// patches of grass in worked ground with bare tracks between them, which is what the ground
+/// round a motocross track actually looks like.
+fn turf_cover(x: f32, z: f32, seed: u32) -> f32 {
+    let broad = fbm(x / TURF_PATCH_M, z / TURF_PATCH_M, seed ^ 0x3C71);
+    let fine = fbm(x / (TURF_PATCH_M * 0.28), z / (TURF_PATCH_M * 0.28), seed ^ 0x3C72);
+    let n = broad * 0.72 + fine * 0.28;
+    // `fbm` runs either side of zero, so the threshold does too: bare where the field dips
+    // well below it, full turf where it rises, and a soft edge in between. About two thirds
+    // of the ground comes out grassed, which is what a venue looks like from the air.
+    smoothstep(((n + 0.25) * 2.5).clamp(0.0, 1.0))
 }
 
 /// A mask of the track's edge — the lap's and the start straight's together.
@@ -4595,12 +4672,19 @@ fn ground_sheet(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<[f32; 3]> {
     let half = prog.width * 0.5;
     let mut px = vec![[0.0f32; 3]; dim * dim];
     for l in layers(prog) {
+        // What this band's sheet actually averages, generated the way the shipped one is.
+        //
+        // It used to take the look's own `base` and a flat 0.78 for the shading, which is a
+        // guess about a sheet the code can simply make: the ground sheet averages 0.98 of its
+        // base and the turf 0.55 of its own, because a sheet of grass is mostly blades. That
+        // gap is why a track that comes out green in the game was a desert in its picture.
+        let mean = sheet_mean(&l.look, seed ^ l.salt);
         let cover = match l.band {
             BandMask::Everywhere => vec![255u8; dim * dim],
             BandMask::Rut => rut_mask(syn, half, seed, dim, dim),
             BandMask::Loose => loose_mask(syn, half, seed, dim, dim),
-            BandMask::Beyond => mask_rect_outside(syn, dim, dim, half, |e, _, _| {
-                u8::from(e > SHOULDER_M) * 255
+            BandMask::Beyond => mask_rect_outside(syn, dim, dim, half, |e, x, z| {
+                (u8::from(e > SHOULDER_M) as f32 * 255.0 * turf_cover(x, z, seed)) as u8
             }),
             BandMask::Out(extra) => mask_rect_outside(syn, dim, dim, half, |e, _, _| {
                 u8::from(e <= extra) * 255
@@ -4618,10 +4702,10 @@ fn ground_sheet(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<[f32; 3]> {
                 // The same patching `ground_pixels` gives the sheets, at the only scale a
                 // picture this size can hold it: without it the ground is flat colour and the
                 // track reads as a drawing again.
-                let k = SHEET_SHADE * (1.0 + l.look.mottle * fbm(wx * 0.06, wz * 0.06, seed ^ l.salt));
+                let k = 1.0 + l.look.mottle * fbm(wx * 0.06, wz * 0.06, seed ^ l.salt);
                 let at = y * dim + x;
                 for c in 0..3 {
-                    px[at][c] += (l.look.base[c] * k - px[at][c]) * a;
+                    px[at][c] += (mean[c] * k - px[at][c]) * a;
                 }
             }
         }
@@ -4635,6 +4719,22 @@ fn ground_sheet(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<[f32; 3]> {
 /// comes out lands around three quarters of the colour that went in. The picture composites
 /// the base colours directly, so it has to take the same cut or every band in it is brighter
 /// than the ground it is a picture of.
+/// The average colour of a band's sheet, made the way the shipped one is made.
+///
+/// Small on purpose — 32 px is 1024 samples of the same generator, which settles the mean of
+/// anything the sheet does — and cheap enough to call per band per picture.
+fn sheet_mean(look: &GroundLook, salt: u32) -> [f32; 3] {
+    let px = ground_pixels(32, look, salt);
+    let mut sum = [0.0f32; 3];
+    let n = (px.len() / 4).max(1);
+    for p in px.chunks_exact(4) {
+        sum[0] += p[0] as f32;
+        sum[1] += p[1] as f32;
+        sum[2] += p[2] as f32;
+    }
+    [sum[0] / n as f32, sum[1] / n as f32, sum[2] / n as f32]
+}
+
 const SHEET_SHADE: f32 = 0.78;
 
 /// Uncompressed 32-bit BGRA, the mask in the alpha channel — the shape the official example's
@@ -6978,7 +7078,7 @@ mod tests {
                         BandMask::Loose => Some(loose_mask(syn, half, seed, mw, mh)),
                         BandMask::Beyond => Some(mask_rect_outside(
                             syn, mw, mh, half,
-                            |e, _, _| u8::from(e > SHOULDER_M) * 255,
+                            |e, x, z| (u8::from(e > SHOULDER_M) as f32 * 255.0 * turf_cover(x, z, seed)) as u8,
                         )),
                         BandMask::Out(extra) => Some(mask_rect_outside(
                             syn, mw, mh, half,

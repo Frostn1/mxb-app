@@ -1427,6 +1427,17 @@ mod tests {
         }
     }
 
+    /// Everything a published track ships, by name and size — what files it carries at all.
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn published_files() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::Path::new(&var);
+        for n in crate::track::entry_names(path).unwrap() {
+            println!("  {n}");
+        }
+    }
+
     /// A published track's race data: where it puts its grid, and in what coordinates.
     ///
     /// ```text

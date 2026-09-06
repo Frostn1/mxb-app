@@ -2,6 +2,31 @@
 
 ## 2026-09-06
 
+### Added
+- A wood behind the track. The tracks people rate carry thousands of trees past 60 m and only
+  a handful trackside, so that is what a built track gets now — a backdrop of mixed pine and
+  broadleaf out to the edge of the ground, with a few standing closer in.
+- Poles and parked vans down both sides, at the spacing the same tracks use, and a sky of the
+  track's own instead of the game's default one.
+- The start pad is ridden ground: the same surface texture the rest of the track has, and the
+  comb of grooves forty bikes leave pulling out of forty stalls.
+
+### Changed
+- The ground round a track is grass in patches over bare worked dirt rather than one flat
+  green field.
+- Marker blocks are white.
+- Nothing is planted on the start straight any more, and the fence is gone for now — it ran
+  along the lap and closed the start off.
+
+### Fixed
+- The start straight ends where the gates are. Its surface ran on behind the row for as far
+  as the ground went.
+- The picture a track is listed by shows the colours it will actually have. It was mixing
+  each band's base colour rather than the sheet made from it, which turned a green field into
+  a desert.
+
+## 2026-09-06
+
 ### Changed
 - The start on a track you build is its own straight beside the circuit now, the way a real
   one is: the gate row stands 40 m off the lap, sprints 85 m, and turns in to join the track
