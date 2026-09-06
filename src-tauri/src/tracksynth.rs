@@ -256,10 +256,12 @@ const RUT_INSIDE: f32 = -0.022;
 /// way, half of it at five metres, and by twenty it is different ground.
 const RUT_ALONG_M: f32 = 34.0;
 
-/// Metres before a corner that riders brake in, and so where the ground gets chopped up.
-const BRAKING_M: f32 = 22.0;
-
 /// Metres between braking bumps.
+///
+/// How *far* they run is no longer a constant. It was 22 m before anything under a
+/// forty-metre radius, which gave a 90 km/h approach to a hairpin and a 40 km/h approach to a
+/// flat left the same washboard. A braking zone is as long as the braking is, and
+/// [`crate::trackspeed`] is what knows that.
 const BRAKING_WAVELENGTH_M: f32 = 2.2;
 
 /// How much rougher the surface gets in and around a corner, as a multiplier on the texture.
@@ -283,10 +285,9 @@ const CORNER_ROUGHNESS: f32 = 1.0;
 /// braking bumps either, which is backwards.
 const BRAKING_HEIGHT_M: f32 = 0.13;
 
-/// How far a corner's exit is chopped up by everyone driving out of it, metres, and how tall
-/// that chop stands. Longer and lower than braking: acceleration bumps are stretched out by
-/// the wheel spinning across them.
-const ACCEL_M: f32 = 30.0;
+/// How far apart the chop everyone's rear wheel leaves on the way out of a corner is, and how
+/// tall it stands. Longer and lower than braking: acceleration bumps are stretched out by the
+/// wheel spinning across them.
 const ACCEL_WAVELENGTH_M: f32 = 3.4;
 const ACCEL_HEIGHT_M: f32 = 0.07;
 
@@ -773,7 +774,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     let berms = berm_profile(&prog.features, &turn, lap);
     let ruts = rut_profile(&prog.features, &turn, lap, r.seed);
     let widths = width_profile(prog.width * 0.5, lap, r.seed);
-    let chop = roughness_profile(&turn, lap);
+    let speed = crate::trackspeed::of(prog);
+    let chop = roughness_profile(&turn, &speed, lap);
 
     // Where the racing line runs across the track. A rider hugs the inside of a corner, so
     // the line leans to whichever side the curvature points at and by more the tighter the
@@ -1644,59 +1646,44 @@ struct Chop {
     accel: Profile,
 }
 
-fn roughness_profile(turn: &Profile, lap: f32) -> Chop {
+fn roughness_profile(turn: &Profile, speed: &crate::trackspeed::Speed, lap: f32) -> Chop {
     let mut rough = Profile::blank(lap);
     let mut braking = Profile::blank(lap);
     let mut accel = Profile::blank(lap);
     for i in 0..rough.v.len() {
         rough.v[i] = 1.0;
     }
-    let n = rough.v.len();
-    let back = (BRAKING_M / PROFILE_STEP) as usize;
-    let ahead = (ACCEL_M / PROFILE_STEP) as usize;
-    // A corner, not merely curved ground. Almost every metre of a real lap is on some arc —
-    // the demo's own straights are 100 m-radius bends — so testing for curvature at all
-    // excluded the whole lap from braking bumps and left 5% of it with any. What an approach
-    // must not be is the exit of *another corner*, and that is a radius tight enough to be
-    // one.
-    let in_corner = |j: usize| {
-        let k = turn.at((j % n) as f32 * PROFILE_STEP).abs();
-        k > 0.0 && 1.0 / k < RUT_RADIUS_M.0
-    };
-    for i in 0..n {
+    for i in 0..rough.v.len() {
         let s = i as f32 * PROFILE_STEP;
+        // Where the rider is braking, for as long as they are braking, and hard in
+        // proportion to how hard — which is the only definition of a braking bump there is.
+        //
+        // It used to be a fixed twenty-two metres before anything under a forty-metre
+        // radius, and thirty metres of chop after it. So a 90 km/h approach to a hairpin and
+        // a 40 km/h approach to a flat left got identical washboard, and a corner whose
+        // approach happened to be another corner got none at all — the exclusion that rule
+        // needed to stop a corner exit reading as the next one's approach. None of that
+        // survives: the speed profile already knows the difference, because it is the
+        // difference.
+        braking.v[i] = speed.braking(s);
+        accel.v[i] = speed.driving(s);
+
+        // How chopped up the ground is, which is a different question from where the bumps
+        // are: a corner is worked over by every wheel that turns in it.
         let k = turn.at(s).abs();
-        if k <= 0.0 {
-            continue;
-        }
-        let radius = 1.0 / k;
-        if radius >= RUT_RADIUS_M.0 {
-            continue;
-        }
-        let corner = smoothstep((RUT_RADIUS_M.0 - radius) / (RUT_RADIUS_M.0 - RUT_RADIUS_M.1));
-        // Inside the corner the ground is chopped up, but not in ridges: that is the rut's
-        // job, and noise's.
-        rough.v[i] = rough.v[i].max(1.0 + (CORNER_ROUGHNESS - 1.0) * corner);
-        // Braking bumps only on the way in, growing towards the turn-in point. Indexed round
-        // the lap, so a corner that starts just after the finish line still has an approach.
-        for step in 1..=back {
-            let j = (i + n - step) % n;
-            if in_corner(j) {
-                continue; // already in a corner — this is another corner's exit, not an approach
+        if k > 0.0 {
+            let radius = 1.0 / k;
+            if radius < RUT_RADIUS_M.0 {
+                let corner =
+                    smoothstep((RUT_RADIUS_M.0 - radius) / (RUT_RADIUS_M.0 - RUT_RADIUS_M.1));
+                rough.v[i] = rough.v[i].max(1.0 + (CORNER_ROUGHNESS - 1.0) * corner);
             }
-            let near = 1.0 - step as f32 / back as f32;
-            braking.v[j] = braking.v[j].max(corner * smoothstep(near));
-        }
-        // And acceleration chop on the way out, fading with distance from the exit.
-        for step in 1..=ahead {
-            let j = (i + step) % n;
-            if in_corner(j) {
-                continue;
-            }
-            let near = 1.0 - step as f32 / ahead as f32;
-            accel.v[j] = accel.v[j].max(corner * smoothstep(near));
         }
     }
+    // Both are read off a one-metre profile and land on a half-metre one, so they step where
+    // the speed does. A metre of easing takes the stair out without moving anything.
+    smooth_along(&mut braking.v, (1.0 / PROFILE_STEP).round() as usize);
+    smooth_along(&mut accel.v, (1.0 / PROFILE_STEP).round() as usize);
     Chop {
         rough,
         braking,
@@ -2020,11 +2007,13 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
             if u <= f.ramp {
                 height * arc_up(u / f.ramp, height, f.ramp)
             } else if u <= crest {
-                height * arc_up(1.0 - (u - f.ramp) / f.back, height, f.back)
+                // Dumped faces, so a smoothstep: rounded at the lip it leaves and at the
+                // ground it meets, which is how a tipped load settles.
+                height * smoothstep(1.0 - (u - f.ramp) / f.back)
             } else if u <= land {
                 0.0
             } else if u <= land + f.face {
-                height * arc_up((u - land) / f.face, height, f.face)
+                height * smoothstep((u - land) / f.face)
             } else {
                 height * arc_up(1.0 - (u - land - f.face) / f.run, height, f.run)
             }

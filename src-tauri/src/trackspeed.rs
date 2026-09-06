@@ -87,6 +87,27 @@ impl Speed {
         (self.at(s + STEP) - self.at(s - STEP)) / (2.0 * STEP)
     }
 
+    /// The acceleration along the direction of travel at a point, m/s². Negative under
+    /// braking.
+    ///
+    /// This and not [`Speed::slope`] is what a bump forms in proportion to. A rider hauling a
+    /// bike down from 25 m/s and one scrubbing the last of it off at 8 both change speed per
+    /// metre, and the second changes it faster — but it is the first that is standing on the
+    /// brake, and it is the first that builds the washboard.
+    pub fn along(&self, s: f32) -> f32 {
+        self.at(s) * self.slope(s)
+    }
+
+    /// How hard the rider is braking here, 0 to 1 of everything the brakes have.
+    pub fn braking(&self, s: f32) -> f32 {
+        (-self.along(s) / A_BRAKE).clamp(0.0, 1.0)
+    }
+
+    /// And how hard they are driving.
+    pub fn driving(&self, s: f32) -> f32 {
+        (self.along(s) / A_DRIVE).clamp(0.0, 1.0)
+    }
+
     /// How far a bike thrown off a lip of this height reaches before it is back to the height
     /// it left, in metres.
     ///

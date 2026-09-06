@@ -107,6 +107,52 @@ pub trait Ask {
         -> impl std::future::Future<Output = Result<String>>;
 }
 
+/// What a double asks of the rider, and what the lap gives them.
+///
+/// The one thing nobody could say anything about. Features were placed by how far round the
+/// lap they were and checked on height, spacing and density; whether there was any speed
+/// where they sat was never asked, so a 2.5 m double with an eight-metre gap could legally
+/// stand fifteen metres after a ten-metre hairpin and pass every check.
+struct Rhythm {
+    /// The least a rider can carry and still be on the landing: across the gap and a little
+    /// way up the far face.
+    ///
+    /// Not "reach the landing's crest". A tight double is the point of a rhythm section and
+    /// coming up a bit short is casing, not a crash — what must not happen is landing in the
+    /// gap. Measured the strict way, four of the worked example's eight doubles failed, and
+    /// the worked example is what published tracks were measured into.
+    needs: f32,
+    /// Metres the speed at the lip actually carries.
+    gives: f32,
+    /// Metres round the lap the rider leaves the ground.
+    lip_at: f32,
+    /// The gap that speed would allow, metres — never below zero.
+    gap_allowed: f32,
+}
+
+/// How far up the landing's face a rider has to reach, as a fraction of it, before the jump
+/// counts as one they got over.
+const LANDS_ON_THE_FACE: f32 = 0.25;
+
+fn rhythm(f: &Feature, speed: &crate::trackspeed::Speed) -> Option<Rhythm> {
+    let Feature::Double { at, height, gap, lip } = *f else {
+        return None;
+    };
+    let faces = crate::trackprog::double_faces(height, lip);
+    // Measured at the lip, which is where the rider leaves the ground.
+    let crest = at + faces.ramp;
+    // The face's own angle, not the ceiling it was sized against: a short jump caught by
+    // JUMP_FACE_MIN_M leaves flatter, and it should be judged on what it is.
+    let deg = crate::trackprog::face_sweep(height, faces.ramp).to_degrees();
+    let gives = speed.carry(crest, deg);
+    Some(Rhythm {
+        needs: faces.back + gap + faces.face * LANDS_ON_THE_FACE,
+        gives,
+        lip_at: crest,
+        gap_allowed: (gives - faces.back - faces.face * LANDS_ON_THE_FACE).max(0.0),
+    })
+}
+
 /// Where the lap runs over its own ground, if it does.
 ///
 /// Returns the two distances round the lap and how close they come. Nothing else caught this:
@@ -357,7 +403,38 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
         }
     }
 
-    // 4. Fit the height budget. It exists only because samples are quantised against it, and
+    // 4. Shrink any gap the lap cannot deliver a rider to.
+    //
+    //    The model gets this wrong in one direction only — it writes the gap it wants rather
+    //    than the gap the run-up allows — and the fix is arithmetic, not judgement: there is
+    //    exactly one longest gap that a given speed clears. Sending it back costs an attempt
+    //    and usually comes back with the same number.
+    {
+        let speed = crate::trackspeed::of(prog);
+        let mut shrunk: Vec<String> = Vec::new();
+        for f in &mut prog.features {
+            let Some(r) = rhythm(f, &speed) else { continue };
+            if r.needs <= r.gives {
+                continue;
+            }
+            let crate::trackprog::Feature::Double { at, gap, .. } = f else {
+                continue;
+            };
+            // A tenth off what it will just carry, because "just" is not a margin.
+            let want = (r.gap_allowed * 0.9).max(0.0);
+            shrunk.push(format!("{:.0} m: {gap:.0} m gap becomes {want:.0}", *at));
+            *gap = want;
+        }
+        if !shrunk.is_empty() {
+            done.push(format!(
+                "shrank {} double(s) to what the run-up carries — {}",
+                shrunk.len(),
+                shrunk.join(", ")
+            ));
+        }
+    }
+
+    // 5. Fit the height budget. It exists only because samples are quantised against it, and
     //    it is a number the synthesiser already knows — there was never a reason to make the
     //    model guess it and then be told off for guessing wrong.
     if let Ok(fitted) = crate::tracksynth::with_fitted_budget(prog) {
@@ -598,7 +675,58 @@ pub fn review(prog: &TrackProgram) -> Review {
 
     // Per-feature, where the complaint can name the thing that's wrong.
     let turn = prog.stations(1.0);
+    let speed = crate::trackspeed::of(prog);
     for f in &prog.features {
+        // Can it be jumped from where it stands? A gap is only a gap if the lap delivers a
+        // rider to it with the speed to cross it; put the same double after a hairpin and it
+        // is a hole in the ground.
+        if let Some(r) = rhythm(f, &speed) {
+            if r.needs > r.gives {
+                out.push(format!(
+                    "the double at {:.0} m cannot be cleared from where it stands: it needs \
+                     {:.0} m of air to reach the landing and the lap arrives at its lip doing \
+                     {:.0} km/h, which carries {:.0} m. Either shorten the gap to about \
+                     {:.0} m, move it somewhere with a longer run at it, or make it a \
+                     tabletop.",
+                    f.at(),
+                    r.needs,
+                    speed.at(r.lip_at) * 3.6,
+                    r.gives,
+                    r.gap_allowed
+                ));
+            }
+        }
+        // A jump built in a corner is a jump nobody can take straight. Not a problem — step-ups
+        // out of a bowl turn are real — but it is almost never what was meant.
+        if matches!(f, Feature::Tabletop { .. } | Feature::Double { .. }) {
+            // At the lip, and only there. Taken as the tightest radius anywhere under the
+            // feature it fires on almost everything: a published lap is 61–91% arcs, a jump's
+            // footprint is fifty metres of it, and something in that fifty metres is always
+            // bending. What matters is the ground the rider is on when they leave it.
+            let lip = match f {
+                Feature::Double { height, lip, .. } => {
+                    f.at() + crate::trackprog::double_faces(*height, *lip).ramp
+                }
+                Feature::Tabletop { height, length, .. } => {
+                    f.at() + crate::trackprog::tabletop_faces(*height, *length).0
+                }
+                _ => f.at(),
+            };
+            let k = turn
+                .iter()
+                .min_by(|a, b| (a.s - lip).abs().total_cmp(&(b.s - lip).abs()))
+                .map(|st| st.curvature.abs())
+                .unwrap_or(0.0);
+            if k > 0.0 && 1.0 / k < corpus::TURN_RADIUS_M.0 * 2.0 {
+                notes.push(format!(
+                    "the {} at {:.0} m takes off inside a {:.0} m corner — a rider cannot \
+                     leave the ground square out of a turn that tight",
+                    f.name(),
+                    f.at(),
+                    1.0 / k
+                ));
+            }
+        }
         let h = f.height().abs();
         if h < corpus::FEATURE_HEIGHT_M.0 || h > corpus::FEATURE_HEIGHT_M.1 {
             out.push(format!(
@@ -1069,5 +1197,79 @@ mod tests {
                 panic!("gave up after {tries} attempts in {:.0}s: {e:#}", started.elapsed().as_secs_f32());
             }
         }
+    }
+
+    /// A lap with one hairpin and a long straight, so a feature can be put where there is
+    /// speed or where there is not.
+    fn hairpin_then_straight() -> TrackProgram {
+        let mut p = tweaked(|_| {});
+        p.features.clear();
+        p.segments = vec![
+            Segment::Straight { length: 250.0, rise: 0.0 },
+            Segment::Arc { radius: 10.0, angle: 180.0, rise: 0.0 },
+            Segment::Straight { length: 250.0, rise: 0.0 },
+            Segment::Arc { radius: 10.0, angle: 180.0, rise: 0.0 },
+        ];
+        // On ground it fits, and centred on it. `review` does not repair, so a lap hanging
+        // over the edge stops at the structural check and never reaches the speed one — which
+        // is what made this test look like the gate was silent when it had not been asked.
+        p.terrain.size_x = 600.0;
+        p.terrain.size_z = 600.0;
+        p.terrain.relief.amplitude = 2.0;
+        p.terrain.relief.tilt = 0.0;
+        p.terrain.relief.landforms = 0;
+        p.start = crate::trackprog::Start { x: 295.0, z: 170.0, angle: 0.0 };
+        p
+    }
+
+    /// The straights are long enough to reach a bike's own limit, and the turns are not.
+    #[test]
+    fn the_test_lap_fits_the_ground_it_is_given() {
+        assert!(hairpin_then_straight().check().is_ok());
+    }
+
+    #[test]
+    fn a_double_out_of_a_hairpin_is_caught() {
+        // The whole point of knowing how fast anyone is going. The same jump is fine down a
+        // straight and impossible fifteen metres out of a ten-metre turn, and nothing in the
+        // pipeline could tell the two apart: height, spacing and density all pass either way.
+        // Five metres out of a ten-metre turn, so the lip arrives at about 53 km/h — and a
+        // twenty-four metre gap wants half as much again.
+        let hairpin_exit = 250.0 + std::f32::consts::PI * 10.0 + 5.0;
+        let mut p = hairpin_then_straight();
+        p.features = vec![Feature::Double { at: hairpin_exit, height: 2.5, gap: 24.0, lip: 10.0 }];
+        let complaint = review(&p)
+            .problems
+            .into_iter()
+            .find(|c| c.contains("cannot be cleared"))
+            .expect("a 24 m gap five metres out of a hairpin should not pass");
+        assert!(complaint.contains("shorten the gap"), "{complaint}");
+
+        // And the same jump two hundred metres down the straight is nobody's business.
+        let mut ok = hairpin_then_straight();
+        ok.features = vec![Feature::Double { at: 150.0, height: 2.5, gap: 24.0, lip: 10.0 }];
+        assert!(
+            !review(&ok).problems.iter().any(|c| c.contains("cannot be cleared")),
+            "{:?}",
+            review(&ok).problems
+        );
+    }
+
+    #[test]
+    fn an_uncleavable_gap_is_shrunk_rather_than_sent_back() {
+        // Arithmetic, not judgement: there is exactly one longest gap a given speed clears,
+        // so asking the model to guess again costs an attempt and usually returns the same
+        // number.
+        let hairpin_exit = 250.0 + std::f32::consts::PI * 10.0 + 5.0;
+        let mut p = hairpin_then_straight();
+        p.features = vec![Feature::Double { at: hairpin_exit, height: 2.5, gap: 24.0, lip: 10.0 }];
+        let done = repair(&mut p);
+        assert!(done.iter().any(|d| d.contains("shrank")), "{done:?}");
+        let Feature::Double { gap, .. } = p.features[0] else { panic!("still a double") };
+        assert!(gap < 24.0, "the gap was not shrunk: {gap:.1} m");
+        assert!(
+            !review(&p).problems.iter().any(|c| c.contains("cannot be cleared")),
+            "shrinking it did not settle the complaint"
+        );
     }
 }

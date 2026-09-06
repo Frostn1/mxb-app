@@ -279,6 +279,17 @@ pub const JUMP_FACE_DEG: f32 = 30.0;
 /// you, and the landing is long because that is what catches you.
 pub const JUMP_LANDING_DEG: f32 = 22.0;
 
+/// The steepest a face nobody rides may stand, degrees.
+///
+/// The back of a takeoff lip and the wall a landing presents to the gap are cut faces: dirt
+/// dumped and left at the angle it holds, not ground a blade shapes for a wheel. So they are
+/// steeper than a ridden face and — this is the part that matters — much shorter, because
+/// what a rider has to clear is measured crest to crest and both of them are in it.
+///
+/// Sizing them like ramps is what made a 3.6 m double 41 m of air across a 14.6 m gap, and
+/// the worked example's own jumps stopped being jumpable the moment the faces grew.
+pub const JUMP_CUT_DEG: f32 = 38.0;
+
 /// The shortest a face may be however small the jump.
 ///
 /// The angle alone makes a small jump *worse*: at 30° a 1.2 m double would get a two-metre
@@ -353,8 +364,9 @@ pub fn face_sweep(height: f32, run: f32) -> f32 {
 ///
 /// - `ramp` — what you ride up. Concave, steepest at the lip, at least as long as the
 ///   programme's own `lip` if it asked for a longer one.
-/// - `back` — the back of that lip, falling into the gap. A cut face, not a ridden one, so it
-///   keeps the takeoff angle.
+/// - `back` — the back of that lip, falling into the gap. A cut face at [`JUMP_CUT_DEG`]:
+///   short and steep, because it is dumped dirt rather than a shaped ramp and because every
+///   metre of it is a metre the rider has to carry.
 /// - `face` — out of the gap to the landing's crest. Also a cut face: it is the wall you hit
 ///   coming up short, and making it gentle would turn the gap into something you ride through.
 /// - `run` — the far side of the landing, which is the ground that actually catches you.
@@ -374,10 +386,13 @@ impl DoubleFaces {
 }
 
 pub fn double_faces(height: f32, lip: f32) -> DoubleFaces {
-    let cut = face_run(height, JUMP_FACE_DEG);
+    let ramp = face_run(height, JUMP_FACE_DEG);
+    // Dumped, not bladed: a smoothstep rather than an arc, so the half-angle relation does
+    // not apply and the run is `1.5 h / tan(deg)` — the smoothstep's own peak-to-average.
+    let cut = (1.5 * height.abs() / JUMP_CUT_DEG.to_radians().tan()).max(JUMP_FACE_MIN_M);
     DoubleFaces {
         // A short lip on a tall jump is a wall whichever side of it you are on.
-        ramp: lip.max(cut),
+        ramp: lip.max(ramp),
         back: cut,
         face: cut,
         run: face_run(height, JUMP_LANDING_DEG),
