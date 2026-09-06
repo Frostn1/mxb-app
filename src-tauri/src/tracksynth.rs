@@ -1798,7 +1798,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         Ok(())
     };
 
-    put("heightmap.raw", raw16(syn, prog.terrain.scale), &mut wrote)?;
+    put("heightmap.raw", heightmap_raw(syn, prog.terrain.scale), &mut wrote)?;
 
     // The riding line, and everything that isn't it. Every boundary is torn rather than
     // drawn — see `edge_noise`.
@@ -2818,12 +2818,36 @@ fn crlf(text: &str) -> Vec<u8> {
     text.replace("\r\n", "\n").replace('\n', "\r\n").into_bytes()
 }
 
-/// The heightmap: little-endian u16, quantised against the height budget.
+/// The heightmap samples, little-endian u16, quantised against the height budget, in the
+/// order the rest of this module indexes rows: `z = row * mps_z`.
 fn raw16(syn: &Synth, scale: f32) -> Vec<u8> {
     let mut out = Vec::with_capacity(syn.heights.len() * 2);
     for h in &syn.heights {
         let v = (h / scale * u16::MAX as f32).round().clamp(0.0, 65535.0) as u16;
         out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
+/// The same samples as `heightmap.raw` wants them: **bottom row first**.
+///
+/// TerrainEd reads the raw the way it reads a TGA — from the bottom of the picture up — so
+/// the last row of the file is the one that lands at `z = 0`. Everything else this module
+/// writes counts rows the other way: the masks (bottom-left-origin TGAs, which come out the
+/// right way round on their own), the centreline, the start line. Handing TerrainEd the rows
+/// in `syn` order put the ground upside down under paint that wasn't, and a track's jumps
+/// ended up nowhere near where it was painted.
+///
+/// Measured, not guessed. Compile a track, then correlate the `.trh` heightfield against the
+/// raw that made it: in `syn` order it comes back +0.067 as-is and +1.0000 vertically
+/// flipped; written this way it is +1.0000 as-is, which is the score the masks already had.
+fn heightmap_raw(syn: &Synth, scale: f32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(syn.heights.len() * 2);
+    for row in syn.heights.chunks_exact(syn.gw).rev() {
+        for h in row {
+            let v = (h / scale * u16::MAX as f32).round().clamp(0.0, 65535.0) as u16;
+            out.extend_from_slice(&v.to_le_bytes());
+        }
     }
     out
 }
@@ -4190,6 +4214,36 @@ mod tests {
             "the line spans {:.1} m for two 4 m climbs",
             peak - floor
         );
+    }
+
+    /// The fault this guards: the heightmap went to TerrainEd in `syn` row order while the
+    /// masks went in theirs, so the ground came out mirrored north-south under its own paint
+    /// and a track's jumps were nowhere near where it was painted.
+    #[test]
+    fn the_heightmap_lands_on_the_same_rows_as_the_masks() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let raw = heightmap_raw(&s, p.terrain.scale);
+        assert_eq!(raw.len(), s.heights.len() * 2);
+        // TerrainEd reads the raw from the bottom up, so reading it back that way has to
+        // give the rows in `syn` order — which is the order the masks, the centreline and
+        // the start line all count in.
+        let step = p.terrain.scale / u16::MAX as f32;
+        for gy in 0..s.gh {
+            let from_bottom = s.gh - 1 - gy;
+            for gx in (0..s.gw).step_by(7) {
+                let v = u16::from_le_bytes([
+                    raw[(from_bottom * s.gw + gx) * 2],
+                    raw[(from_bottom * s.gw + gx) * 2 + 1],
+                ]);
+                let want = s.heights[gy * s.gw + gx];
+                assert!(
+                    (v as f32 * step - want).abs() <= step,
+                    "row {gy} col {gx}: file says {:.3} m, the terrain is {want:.3} m",
+                    v as f32 * step
+                );
+            }
+        }
     }
 
     #[test]
