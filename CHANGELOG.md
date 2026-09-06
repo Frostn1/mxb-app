@@ -2,6 +2,12 @@
 
 ## 2026-09-05
 
+### Changed
+- Building a track now runs MX Bikes' own track compilers over it. The Track Studio
+  fetches PiBoSo's tools the first time you build and does the whole job in one press —
+  export, compile, package, install — so what lands in your tracks folder is a track the
+  game built, not one the app guessed at.
+
 ### Added
 - Seven colorways in Settings. Frost is still the default; Ember, Moss, Violet, Rose and
   Slate move the whole window, not just the buttons. Each works in light and dark.
