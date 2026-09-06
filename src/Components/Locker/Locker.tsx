@@ -196,6 +196,9 @@ export default function Locker() {
   // The swap being previewed in 3D, if any. Nothing on disk moves to show it.
   const [preview, setPreview] = useState<{ bike: string; variant: string } | null>(null);
   const [rows, setRows] = useState<Row[] | null>(null);
+  /** Which bike the detail pane is showing. A stacked accordion of every bike meant
+   *  scrolling past nine of them to reach the tenth; this is a list and one bike. */
+  const [picked, setPicked] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Bike name currently being mutated (disables its rows + spins the target).
   const [busy, setBusy] = useState<string | null>(null);
@@ -377,7 +380,7 @@ export default function Locker() {
         </button>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {error ? (
           <p className="select-text py-16 text-center text-[13px] text-destructive">{error}</p>
         ) : rows === null ? (
@@ -432,26 +435,65 @@ export default function Locker() {
             </button>
           </div>
         ) : (
-          <div className="flex flex-col gap-4">
-            {rows.map((r) => (
-              <BikeCard
-                key={r.bike}
-                row={r}
-                busy={busy === r.bike}
-                disabled={busy !== null}
-                onModelSwap={onModelSwap}
-                onSoundSwap={onSoundSwap}
-                onAssignPaints={(models, model) => setAssigning({ models, model })}
-                onPreview={
-                  bikePreview
-                    ? (bike, variant) => setPreview({ bike, variant })
-                    : undefined
-                }
-                onBind={onBind}
-                onUnbind={onUnbind}
-                onChanged={() => void load()}
-              />
-            ))}
+          <div className="flex min-h-0 flex-1">
+            {/* The bikes, as a list */}
+            <aside className="flex w-[288px] flex-none flex-col border-r border-border">
+              <div className="flex flex-none items-center gap-2.5 px-4 pb-2.5 pt-1">
+                <span className="u-skew h-3 w-1 bg-primary" />
+                <span className="font-cond text-[12px] font-bold uppercase tracking-[0.2em] text-foreground">
+                  {t("nav.locker")}
+                </span>
+                <span className="ml-auto tabular-figures text-[11.5px] text-faint">
+                  {rows.length}
+                </span>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {rows.map((r) => {
+                  const on = (picked ?? rows[0]?.bike) === r.bike;
+                  return (
+                    <button
+                      key={r.bike}
+                      onClick={() => setPicked(r.bike)}
+                      className={cn(
+                        "relative flex w-full cursor-default items-center gap-2 border-b border-border/60 px-4 py-2.5 text-left transition-colors",
+                        on ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {on && <span className="u-skew absolute inset-y-2 left-0 w-[3px] bg-primary" />}
+                      <span className="truncate font-cond text-[13px] font-semibold uppercase tracking-[0.06em]">
+                        {r.bike}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </aside>
+
+            {/* …and the one you picked */}
+            <div className="min-w-0 flex-1 overflow-y-auto px-6 py-1">
+              {(() => {
+                const r = rows.find((x) => x.bike === picked) ?? rows[0];
+                return r ? (
+                  <BikeCard
+                    key={r.bike}
+                    row={r}
+                    busy={busy === r.bike}
+                    disabled={busy !== null}
+                    onModelSwap={onModelSwap}
+                    onSoundSwap={onSoundSwap}
+                    onAssignPaints={(models, model) => setAssigning({ models, model })}
+                    onPreview={
+                      bikePreview
+                        ? (bike, variant) => setPreview({ bike, variant })
+                        : undefined
+                    }
+                    onBind={onBind}
+                    onUnbind={onUnbind}
+                    onChanged={() => void load()}
+                  />
+                ) : null;
+              })()}
+            </div>
           </div>
         )}
       </div>
