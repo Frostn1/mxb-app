@@ -2,6 +2,13 @@
 
 ## 2026-09-06
 
+### Added
+- A progress bar while a track compiles, saying what it is working on and how far along it is.
+- A compiling track shows in the top bar from anywhere in the app, and keeps building if you
+  leave the Track Studio — the bar is still there when you come back.
+
+## 2026-09-06
+
 ### Changed
 - The trackside advertising is a hoarding: printed plastic boards bolted edge to edge into
   runs down both sides of the lap, sharing an upright at every join, with clear ground between

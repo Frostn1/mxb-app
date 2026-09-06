@@ -11,6 +11,7 @@ import type { GameCaps } from "../../types";
 import type { StudioTab } from "../Studio/Studio";
 import { RAIL, railItemFor, type DashboardView, type RailItem } from "./nav";
 import DownloadQueue from "./DownloadQueue";
+import TrackBuildBadge from "./TrackBuildBadge";
 import Brand from "./Brand";
 import ContextBar from "./ContextBar";
 import WindowControls, { IS_MAC } from "./WindowControls";
@@ -124,6 +125,9 @@ export default function TopRail({ view, studioTab, plugins, onNavigate, leftRef,
       <div data-tauri-drag-region className="flex-1" />
 
       <div className="flex items-center gap-1 text-muted-foreground">
+        {/* A track compiles for minutes; this is what makes that visible from anywhere but
+            the Studio, and the way back to it. */}
+        <TrackBuildBadge onOpen={() => onNavigate("studio", "track")} />
         <DownloadQueue collapsed />
         <button
           onClick={() => onNavigate("settings")}
