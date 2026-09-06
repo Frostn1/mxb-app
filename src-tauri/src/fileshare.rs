@@ -481,6 +481,7 @@ mod tests {
                 host: "example".into(),
                 size: 2,
                 parts: vec![],
+                part_sizes: vec![],
             },
         });
 
