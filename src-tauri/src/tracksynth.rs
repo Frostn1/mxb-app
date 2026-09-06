@@ -815,7 +815,15 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     );
     let feat = feature_profile(&prog.features, lap, prog.blend.max(0.0));
     let berms = berm_profile(&prog.features, &turn, lap);
-    let feel = ride(prog.terrain.surface);
+    let mut feel = ride(prog.terrain.surface);
+    // How raced the ground arrives. It thins the deformable stack in `tht` and deepens what
+    // is already cut here, so the two move opposite ways and their sum stays near constant —
+    // which is what stops a heavily raced track digging itself to pieces.
+    let worn = worn(prog);
+    feel.rut_depth *= worn;
+    feel.rut_straight *= worn;
+    feel.brake.1 *= worn;
+    feel.accel.1 *= worn;
     let ruts = rut_profile(&prog.features, &turn, lap, r.seed, &feel);
     // The start fan, against the deck the lap is benched to: all of it is track, and as much
     // of it as the ground beside the straight has room for is cut flat.
@@ -4921,6 +4929,21 @@ struct Ride {
     accel: (f32, f32),
 }
 
+/// How much of a surface's wear is already cut into the terrain, from `terrain.wear`.
+///
+/// Anchored on the default rather than on either end, and that is the whole of it: every rut
+/// figure in this module is measured off published `.trh` files, and a published `.trh` is a
+/// track as its builder shipped it — worked in, not groomed flat and not the end of a long
+/// day. So [`crate::trackprog::default_wear`] has to come out at exactly 1.0 or the
+/// measurements stop meaning anything, and the dial moves either side of it.
+///
+/// The stack under the ground moves the opposite way in [`tht`]: ground already cut into the
+/// heightmap is ground the surface no longer has to give.
+fn worn(prog: &TrackProgram) -> f32 {
+    let w = prog.terrain.wear.clamp(0.0, 1.0);
+    (1.0 - crate::trackprog::default_wear() + w).max(0.05)
+}
+
 fn ride(s: Surface) -> Ride {
     match s {
         // The measured case. Every figure here is the one the corpus was read into and the
@@ -7689,6 +7712,38 @@ mod tests {
             assert!(r.brake.0 < r.accel.0, "{s:?} brakes in longer waves than it drives in");
             assert!(r.brake.1 > r.accel.1, "{s:?} builds taller bumps under power than under braking");
         }
+    }
+
+    #[test]
+    fn wear_moves_the_ground_and_the_stack_opposite_ways() {
+        // The dial's whole claim. Ground already cut into the heightmap is ground the surface
+        // no longer has to give, so a raced track arrives with deeper grooves and less left
+        // underneath — and a prepped one the other way round. Without both halves it is just
+        // a way to make a track shallower.
+        let cut = |w: f32| {
+            let mut p = hairpins();
+            p.terrain.wear = w;
+            let s = synthesise(&p).expect("synthesise");
+            (130..=170)
+                .step_by(5)
+                .map(|at| {
+                    let g = groove_residual(&across(&s, at as f32));
+                    -g.iter().copied().fold(f32::MAX, f32::min)
+                })
+                .fold(0.0f32, f32::max)
+        };
+        let stack = |w: f32| {
+            let mut p = oval();
+            p.terrain.wear = w;
+            let s = synthesise(&p).expect("synthesise");
+            dig_depth(&tht(&p, &s))
+        };
+        assert!(cut(1.0) > cut(0.0) * 1.5, "{:.3} against {:.3}", cut(1.0), cut(0.0));
+        assert!(stack(1.0) < stack(0.0), "{:.3} against {:.3}", stack(1.0), stack(0.0));
+        // And the default is the point every rut figure in this module was measured at, so a
+        // programme that says nothing about wear gets the corpus's own ground.
+        let d = crate::trackprog::default_wear();
+        assert!((worn(&{ let mut p = oval(); p.terrain.wear = d; p }) - 1.0).abs() < 1e-6);
     }
 }
 
