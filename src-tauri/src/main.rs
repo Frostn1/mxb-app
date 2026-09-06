@@ -144,6 +144,7 @@ mod trackllm;
 mod trackobjects;
 mod trackprog;
 mod trackscenery;
+mod trackshot;
 mod trackstats;
 mod tracksynth;
 mod upload;

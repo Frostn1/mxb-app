@@ -12,6 +12,16 @@
 ## 2026-09-05
 
 ### Changed
+- The picture the game lists a built track by is now a view of the place rather than a
+  diagram of it: the ground rendered from above and off to one side, lit by the track's own
+  sun, with the lap cut into it and the country running out to the haze.
+- Tracks you build now start where a start belongs. The lap begins on its longest straight,
+  with the gate row a few metres onto it, the finish line past that and the run at turn one
+  beyond — instead of the gates landing wherever the lap happened to be forty metres in.
+- The start opens out to hold the whole row. Forty gates are 48 m across, so the track fans
+  out to 54 m where they stand, graded flat as far as the ground beside it allows, and
+  funnels back down to riding width by turn one. The pit lane, the thirty-second board and
+  the timing line move out with it.
 - Corners on a track you build now have ruts you can sit in. A groove is cut shallow and the
   dirt out of it stands as a low smooth bank on its outer side, with flat ground between one
   and the next — so a corner gives you something to lean on instead of a set of holes.
