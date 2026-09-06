@@ -24,6 +24,7 @@ import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import ReleaseShowcase from "../Showcase/ReleaseShowcase";
 import { useReleaseShowcase } from "../Showcase/useReleaseShowcase";
 import { InstallProvider } from "../../Context/Install";
+import { TrackBuildProvider } from "../../Context/TrackBuild";
 import { DownloadsProvider } from "../../Context/Downloads";
 import { DropReviewProvider } from "../../Context/DropReview";
 import { ShareProvider } from "../../Context/Share";
@@ -208,6 +209,10 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
         anywhere in the window and the Shop's purchases grid both finish in this one sheet. */}
     <DropReviewProvider onInstalled={onInstalled}>
     <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
+    {/* Above the views, because the Studio is unmounted the moment you look at another one
+        and compiling a track is a minute of work — held here it keeps going, keeps its bar,
+        and is still there when you come back. */}
+    <TrackBuildProvider onInstalled={onInstalled}>
       {/* Owns the share/import dialogs for every screen that lists installed content, and
           watches for a share code pasted into the window. */}
       <ShareProvider onImported={onInstalled}>
@@ -310,6 +315,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
         />
       )}
       </ShareProvider>
+    </TrackBuildProvider>
       </InstallProvider>
     </DropReviewProvider>
     </DownloadsProvider>

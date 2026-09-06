@@ -20,7 +20,10 @@
 #![allow(dead_code)]
 
 use anyhow::{bail, Context, Result};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Instant;
 
 /// The compilers, once found.
 #[derive(Clone, Debug, serde::Serialize)]
@@ -74,17 +77,139 @@ pub struct Step {
     pub produced: Option<String>,
 }
 
+/// What a build is doing, and where that sits on the studio's bar.
+///
+/// The compilers say nothing useful while they run. TerrainEd prints a line per stage, but
+/// its stdout is block-buffered whenever it isn't a console, so the whole log arrives at
+/// once when the process exits — measured on 2026-09-06, a 45-second graphics pass delivered
+/// every one of its 90 stage lines inside the last 100 ms. Watching that output would give a
+/// bar that sat still and then finished, so the bar is driven by the phases of the build
+/// instead: each one says where it starts and ends, and how long it is expected to run, and
+/// the studio eases across that span over that long.
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Progress {
+    /// One of the names in [`Plan`] — the studio has a line of its own for each.
+    pub phase: &'static str,
+    /// Where this phase starts and ends on the bar, 0–1.
+    pub from: f32,
+    pub to: f32,
+    /// Seconds it is expected to run for.
+    pub expect: f32,
+}
+
+/// Seconds a phase takes per million terrain samples, as a first guess.
+///
+/// Measured on 2026-09-06 against a generated 2049² track — 4.2 megasamples — with PiBoSo's
+/// compilers under Wine on an M4: synthesis 1.7 s, writing the source folder 2.5 s, the
+/// graphics pass 45 s, collision 2 s, the centreline merge 2 s, packaging the 74 MB archive
+/// 2 s. Per sample rather than flat because that is what every one of these phases is
+/// chewing through, and a track can be a quarter the size or four times it.
+///
+/// Only ever the first build's guess — [`Plan::finish`] replaces each figure with what this
+/// machine actually did. Windows without Wine is several times quicker, and a bar paced by a
+/// Mac's numbers there would crawl and then jump.
+const PHASES: [(&str, f32); 7] = [
+    // Measured on a debug build, so a shipped one beats it — which only means the bar leaves
+    // this phase early on the first build, and the figure below is its own after that.
+    ("synthesising", 0.4),
+    ("writing", 0.6),
+    ("map", 10.7),
+    ("trh", 0.5),
+    ("centerline", 0.5),
+    ("packaging", 0.5),
+    ("installing", 0.1),
+];
+
+/// What the phases really cost on this machine, per megasample. Empty until a build has
+/// finished one, and never written to disk: a stale figure from another version of the
+/// compilers is worth less than one honest build's worth of measuring.
+static LEARNED: Mutex<BTreeMap<&'static str, f32>> = Mutex::new(BTreeMap::new());
+
+/// The phases one build will go through, and how far along each of them sits.
+pub struct Plan {
+    /// Name and expected seconds, in the order they run.
+    phases: Vec<(&'static str, f32)>,
+    total: f32,
+    /// Terrain samples in millions — what every expectation is scaled by.
+    mega: f32,
+    running: Option<(&'static str, Instant)>,
+}
+
+impl Plan {
+    /// `samples` is the terrain's edge in samples, the same number the program carries.
+    pub fn new(samples: u32, centerline: bool, install: bool) -> Self {
+        let mega = ((samples as f32).powi(2) / 1.0e6).max(0.05);
+        let learned = LEARNED.lock().unwrap_or_else(|e| e.into_inner());
+        let phases: Vec<(&'static str, f32)> = PHASES
+            .iter()
+            .filter(|(name, _)| match *name {
+                "centerline" => centerline,
+                "installing" => install,
+                _ => true,
+            })
+            .map(|(name, per)| (*name, learned.get(name).copied().unwrap_or(*per) * mega))
+            .collect();
+        let total = phases.iter().map(|(_, s)| s).sum::<f32>().max(0.001);
+        Self { phases, total, mega, running: None }
+    }
+
+    /// Begin a phase, closing the one before it.
+    ///
+    /// By name rather than in turn, so a build that skips one — no `tracked.exe`, nothing to
+    /// install — lands on the right span instead of shifting everything after it.
+    pub fn start(&mut self, phase: &'static str) -> Progress {
+        self.finish();
+        let at = self.phases.iter().position(|(n, _)| *n == phase).unwrap_or(0);
+        let from = self.phases[..at].iter().map(|(_, s)| s).sum::<f32>() / self.total;
+        let expect = self.phases[at].1;
+        self.running = Some((phase, Instant::now()));
+        Progress { phase, from, to: from + expect / self.total, expect }
+    }
+
+    /// Close the running phase, remembering what it really took.
+    pub fn finish(&mut self) {
+        let Some((phase, since)) = self.running.take() else {
+            return;
+        };
+        let ran = since.elapsed().as_secs_f32();
+        // A phase that was over before it started did nothing worth timing — an install onto
+        // a warm cache, or a step that bailed. Learning from it would tell the next build
+        // that the whole thing is instant.
+        if ran < 0.05 {
+            return;
+        }
+        let per = ran / self.mega;
+        // Blended with what was already known rather than replacing it: one build that
+        // fought a cold disk cache shouldn't set the pace for every build after it.
+        let mut learned = LEARNED.lock().unwrap_or_else(|e| e.into_inner());
+        let now = learned.entry(phase).or_insert(per);
+        *now = *now * 0.5 + per * 0.5;
+    }
+}
+
 /// The three runs, in order. Stops at the first failure that makes the next one pointless.
 ///
 /// `game_path` is only used to find a Wine prefix on macOS — the compilers are Windows
 /// binaries and the prefix that runs the game is the one that has the runtime they need.
-pub fn compile(tools: &Tools, dir: &Path, slug: &str, game_path: &str) -> Result<Vec<Step>> {
+///
+/// `starting` is called with each run's name just before it begins. It is the only sign of
+/// life there is while a build is going: see [`Progress`] for why the compilers' own output
+/// can't be watched.
+pub fn compile(
+    tools: &Tools,
+    dir: &Path,
+    slug: &str,
+    game_path: &str,
+    starting: &mut dyn FnMut(&'static str),
+) -> Result<Vec<Step>> {
     if !dir.join("track.hmf").is_file() {
         bail!("{dir:?} doesn't look like an exported track — there's no track.hmf in it");
     }
     let mut steps = Vec::new();
 
     let map = format!("{slug}/{slug}.map");
+    starting("map");
     steps.push(run(
         "map",
         &tools.terrained,
@@ -95,6 +220,7 @@ pub fn compile(tools: &Tools, dir: &Path, slug: &str, game_path: &str) -> Result
     )?);
 
     let trh = format!("{slug}/{slug}.trh");
+    starting("trh");
     steps.push(run(
         "trh",
         &tools.terrained,
@@ -108,6 +234,7 @@ pub fn compile(tools: &Tools, dir: &Path, slug: &str, game_path: &str) -> Result
     // Both of them, as PiBoSo's own example does: `cl` is the racing line and `sa` the start,
     // and a track merged without the second starts its races off the line it drew.
     if let (Some(tracked), true) = (&tools.tracked, dir.join(&trh).is_file()) {
+        starting("centerline");
         let args = merge_args(&trh, dir.join("track_start.tcl").is_file());
         steps.push(run("centerline", tracked, &args, dir, game_path, Some(&trh))?);
     }
@@ -350,6 +477,48 @@ mod tests {
         );
     }
 
+    /// The bar runs 0 to 1 once, in order, with no gap between one phase and the next.
+    #[test]
+    fn the_phases_tile_the_whole_bar() {
+        let mut plan = Plan::new(2049, true, true);
+        let mut at = 0.0f32;
+        for phase in ["synthesising", "writing", "map", "trh", "centerline", "packaging", "installing"] {
+            let p = plan.start(phase);
+            assert!((p.from - at).abs() < 1e-4, "{phase} starts at {} not {at}", p.from);
+            assert!(p.to > p.from, "{phase} takes no time");
+            at = p.to;
+        }
+        assert!((at - 1.0).abs() < 1e-4, "the bar ends at {at}");
+    }
+
+    /// Without `tracked.exe` there is no centreline step, and nothing after it should be
+    /// left waiting on a phase that never runs.
+    #[test]
+    fn a_skipped_phase_leaves_no_hole() {
+        let mut plan = Plan::new(2049, false, false);
+        let packaging = plan.start("packaging");
+        assert!(packaging.to > 0.99, "packaging is the last phase, ending at {}", packaging.to);
+        assert!(packaging.from < packaging.to);
+    }
+
+    /// The graphics pass is the one worth waiting for, so it has to own most of the bar —
+    /// measured at 45 s of a 56 s build.
+    #[test]
+    fn the_graphics_pass_owns_most_of_the_bar() {
+        let mut plan = Plan::new(2049, true, true);
+        let map = plan.start("map");
+        assert!(map.to - map.from > 0.6, "the map pass covers {:.2}", map.to - map.from);
+    }
+
+    /// A bigger terrain is more of everything, so it is expected to take proportionally
+    /// longer — the spans stay put, only the seconds grow.
+    #[test]
+    fn a_bigger_terrain_expects_longer() {
+        let small = Plan::new(1025, true, true).start("map").expect;
+        let big = Plan::new(2049, true, true).start("map").expect;
+        assert!(big > small * 3.5, "{big} vs {small}");
+    }
+
     #[test]
     fn compiling_something_that_isnt_a_track_says_so() {
         let dir = scratch("not-a-track");
@@ -357,8 +526,25 @@ mod tests {
             terrained: dir.join("terrained.exe"),
             tracked: None,
         };
-        let err = compile(&tools, &dir, "x", "").unwrap_err().to_string();
+        let err = compile(&tools, &dir, "x", "", &mut |_| {}).unwrap_err().to_string();
         assert!(err.contains("no track.hmf"), "{err}");
+    }
+
+    /// The bar is driven by these calls and nothing else, so a run that never announces
+    /// itself is a build that looks frozen. Checked on the failing path deliberately: the
+    /// first compiler can't start here, and the phase still has to be reported before it is
+    /// tried, or the studio would sit on "writing the source" through the whole graphics pass.
+    #[test]
+    fn each_run_says_so_before_it_starts() {
+        let dir = scratch("announces");
+        std::fs::write(dir.join("track.hmf"), b"").unwrap();
+        let tools = Tools {
+            terrained: dir.join("terrained.exe"),
+            tracked: None,
+        };
+        let mut said = Vec::new();
+        let _ = compile(&tools, &dir, "x", "", &mut |phase| said.push(phase));
+        assert_eq!(said.first(), Some(&"map"), "said {said:?}");
     }
 
     /// Not on Windows, and not inside a Wine prefix, the failure has to name the reason
@@ -372,3 +558,4 @@ mod tests {
         assert!(err.contains("Wine prefix"), "{err}");
     }
 }
+
