@@ -3,6 +3,8 @@
 ## 2026-09-06
 
 ### Changed
+- A generated track has a riding line in it. The corridor is worked dirt with a darker line
+  worn through it and tyre marks in the ruts, instead of one dark ribbon from edge to edge.
 - Generated tracks are painted with real ground. The soil, the riding line, the packed bottom
   of a rut and the grass outside the track are photographs of ground rather than drawn dirt,
   so a lap reads like somewhere that has been ridden.
