@@ -2966,8 +2966,15 @@ fn deflate_raw(bytes: &[u8]) -> Vec<u8> {
     e.finish().unwrap_or_default()
 }
 
-/// The preview as a `.pkz` the app can open: a plain zip, which is what the reader falls back
-/// to when a file isn't one of PiBoSo's encrypted ones.
+/// The preview as a `.pkz` **the app** can open: a plain zip, which is what the reader falls
+/// back to when a file isn't one of PiBoSo's encrypted ones.
+///
+/// **The game cannot load what this writes, and it is not meant to.** The `.map` and `.trh` in
+/// here are ours; the game's are `terrained.exe`'s, and every generated-track crash from
+/// 2026-08-31 to 2026-09-05 came from installing one of these. It exists for the studio's own
+/// viewer, which parses it, and for the tests. Anything going to a game folder is built by
+/// [`write_source`] and then compiled — `_map.bat`, `_trh.bat` and `_centerline.bat` beside the
+/// exported files are the three commands, in that order.
 pub fn write_pkz(
     prog: &TrackProgram,
     syn: &Synth,
@@ -6345,16 +6352,26 @@ mod map_emit {
 #[cfg(test)]
 mod pkz_emit {
     use super::*;
-    /// Build a playable `.pkz` from the demo program under a chosen name, for testing a
-    /// change in the game without waiting on a release.
+    /// Build a **preview** `.pkz` from the demo program under a chosen name.
+    ///
+    /// Not playable, whatever the old name of this test suggested: it carries a `.map` and
+    /// `.trh` we wrote, and the game crashes at the track-graphics stage on those. Dropping one
+    /// of these into a tracks folder is the mistake that produced every generated-track crash
+    /// in the record, and it was made again on 2026-09-06 because this said "playable".
+    ///
+    /// To get a track that actually loads, export the source with `builds_a_track` and run the
+    /// three commands it writes beside them — `_map.bat`, `_trh.bat`, `_centerline.bat` — then
+    /// zip the folder. They run under Wine on macOS.
     #[test]
     #[ignore]
-    fn emit_pkz() {
+    fn emit_preview_pkz() {
         let mut p: TrackProgram = serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
         p.name = std::env::var("MXB_TRACK_NAME").unwrap_or_else(|_| "Testing 112".into());
         let s = synthesise(&p).unwrap();
         let out = std::path::PathBuf::from(std::env::var("MXB_PKZ_OUT").unwrap());
         let n = write_pkz(&p, &s, &out, false).unwrap();
         println!("wrote {} ({n} bytes) as \"{}\"", out.display(), p.name);
+        println!("  this is a PREVIEW archive — the game cannot load it. Compile the exported");
+        println!("  source with terrained/tracked for a track that runs.");
     }
 }
