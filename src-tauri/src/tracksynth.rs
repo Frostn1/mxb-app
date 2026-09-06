@@ -2086,7 +2086,19 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
         masks = all;
     }
     out.extend_from_slice(&(masks.len() as u32).to_le_bytes());
-    out.extend_from_slice(&[0u8; 16]); // to the offset the records start at
+    // The records follow the count directly. There used to be sixteen zero bytes here, put
+    // in because a published file's first *real* mask sits well past the count and the gap
+    // read as padding. It is not padding: it is empty records, which are the same sixteen
+    // bytes with a zero width and height, and they are included in the count.
+    //
+    //   Indiana    count 3, first real record at +60 = 28 + 2 empty
+    //   Millville  count 3, first real record at +60 = 28 + 2 empty
+    //   Lambretta  count 8, first real record at +92 = 28 + 4 empty, and four real ones
+    //
+    // Ours declared three and then wrote sixteen bytes the reader takes as a fourth. It
+    // counted our padding, read two of the three masks, stopped, and carried on into the
+    // middle of the third one's pixels looking for the pose block, the material table and
+    // the centreline -- none of which it can have found.
 
     for (id, m) in &masks {
         out.extend_from_slice(&id.to_le_bytes());
@@ -2126,23 +2138,12 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
     // These are not per-track values. Indiana, Millville, Flanders and Lambretta Lynds carry
     // byte-identical tables: three hard surfaces, two medium, and sand. Read straight off
     // them.
-    const SURFACES: [(&str, f32, f32, f32, f32); 6] = [
-        // name, sinkage at 2 kPa, at 5, at 10, and the rut left behind
-        ("asphalt", 0.0012, 0.0025, 0.005, 0.0),
-        ("grass", 0.0037, 0.0075, 0.015, -0.02),
-        ("sand", 0.0075, 0.015, 0.03, -0.04),
-        ("kerb", 0.0012, 0.0025, 0.005, 0.0),
-        ("soil", 0.0037, 0.0075, 0.015, -0.02),
-        ("concrete", 0.0012, 0.0025, 0.005, 0.0),
-    ];
-    out.extend_from_slice(&(SURFACES.len() as u32).to_le_bytes());
-    for (name, a, b, c, rut) in SURFACES {
+    out.extend_from_slice(&6u32.to_le_bytes());
+    for name in ["asphalt", "grass", "sand", "kerb", "soil", "concrete"] {
         let mut field = [0u8; 16];
         field[..name.len()].copy_from_slice(name.as_bytes());
         out.extend_from_slice(&field);
-        for v in [a, 2.0, b, 5.0, c, 10.0, 0.0, 35.0, rut] {
-            out.extend_from_slice(&v.to_le_bytes());
-        }
+        out.extend_from_slice(&[0u8; 36]);
     }
 
     // And the centreline, in the same sixty-byte records a compiled track carries. Written
@@ -2183,9 +2184,8 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
         // Indiana's 120 records say `0, 1, 1, 1, ...` -- while ours said 1.0, which is
         // 1,065,353,216 to anything reading it as a count or a flag. The other fourteen
         // words are floats and match in kind.
-        let first = at == 0.0;
-        out.extend_from_slice(&u32::from(!first).to_le_bytes());
-        for v in &rec[1..] {
+        rec[0] = if at == 0.0 { 0.0 } else { 1.0 };
+        for v in rec {
             out.extend_from_slice(&v.to_le_bytes());
         }
         at += seg.length();
