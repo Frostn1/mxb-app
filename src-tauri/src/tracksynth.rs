@@ -8840,7 +8840,32 @@ mod tests {
         println!("wrote {out} — {span:.0} m of ground at {at:.0} m round the lap");
     }
 
-
+    #[test]
+    #[ignore]
+    fn diag_spur() {
+        let path = std::env::var("FROST_PROGRAM").unwrap();
+        let p: TrackProgram =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let s = synthesise(&p).unwrap();
+        match &s.spur {
+            None => println!("  NO START SPUR — the lap is riding its own opening straight"),
+            Some(sp) => println!("  spur: {} stations", sp.stations.len()),
+        }
+        let st = p.stations(2.0);
+        let (mut lo_x, mut hi_x, mut lo_z, mut hi_z) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for q in &st {
+            lo_x = lo_x.min(q.x); hi_x = hi_x.max(q.x);
+            lo_z = lo_z.min(q.z); hi_z = hi_z.max(q.z);
+        }
+        println!(
+            "  plot {:.0}x{:.0}; lap x {lo_x:.0}..{hi_x:.0} z {lo_z:.0}..{hi_z:.0}; \
+             nearest edge {:.0} m",
+            p.terrain.size_x, p.terrain.size_z,
+            lo_x.min(lo_z).min(p.terrain.size_x - hi_x).min(p.terrain.size_z - hi_z)
+        );
+        println!("  a spur needs {:.0} m of clear ground beside the opening straight",
+                 START_FAN_HALF_M + SHOULDER_M * START_BANK);
+    }
 }
 
 
