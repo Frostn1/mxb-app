@@ -141,6 +141,7 @@ mod trackbuild;
 mod trackline;
 mod trackllm;
 mod trackprog;
+mod trackspeed;
 mod trackstats;
 mod tracksynth;
 mod upload;
