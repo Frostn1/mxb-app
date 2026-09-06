@@ -1072,13 +1072,25 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // line the ground was benched by a different rule, and the two rules do not meet.
             let spur_e = d - wide;
             let lap_e = dist[i] - widths.at(arc[i]);
+            // The strip of ground between the start and the lap, kept clear until they meet
+            // — see `Synth::outside`, which every mask reads and which has to agree with this
+            // or the ground is benched into one apron and painted as two.
+            let lap_e = dist[i] - widths.at(arc[i]);
+            if lap_e <= START_GAP_M && !spur.merging(s) {
+                continue;
+            }
+            // The pad's hold on the ground fades out across that strip rather than stopping
+            // at the edge of it, or the gap is a wall instead of a gap.
+            let hold = if spur.merging(s) { 0.0 } else { START_GAP_M };
             // Track surface wherever the start covers it, whatever the ground under it is
             // doing: this is the same width the `.trh` and the `.map` paint, and a corridor
             // that disagreed with them measured eight metres narrower than the file it wrote.
             if d <= wide && back > 0.0 {
                 corridor[i] = true;
             }
-            let claim = smoothstep(((lap_e - spur_e) / SHOULDER_M).clamp(0.0, 1.0)) * back;
+            let claim = smoothstep(((lap_e - spur_e) / SHOULDER_M).clamp(0.0, 1.0))
+                * smoothstep(((lap_e - hold) / SHOULDER_M).clamp(0.0, 1.0))
+                * back;
             if claim <= 0.0 {
                 continue;
             }
@@ -2744,6 +2756,14 @@ const START_BANK: f32 = 2.0;
 const TIE_NEAR_M: f32 = 22.0;
 const TIE_FAR_M: f32 = 70.0;
 
+/// How much of the start's last stretch counts as the join, where the two surfaces are meant
+/// to be one.
+const MERGE_JOIN_M: f32 = 45.0;
+
+/// How much unridden ground is left between the start straight and the lap, metres, before
+/// the two meet.
+const START_GAP_M: f32 = 5.0;
+
 /// How much ground the pad keeps behind the gate row, metres — where a real start has its
 /// bank and its scoring tower.
 const BACK_OF_THE_GATE_M: f32 = 8.0;
@@ -2901,6 +2921,12 @@ impl StartSpur {
     /// How wide the row of gates comes out, across the whole start.
     pub fn width_m(&self) -> f32 {
         self.half * 2.0
+    }
+
+    /// Whether the start is at the point of joining the lap. Everywhere before that the two
+    /// are separate pieces of track with ground between them.
+    pub fn merging(&self, s: f32) -> bool {
+        s > self.len - MERGE_JOIN_M
     }
 
     /// Where the gate row stands, in metres along the start straight.
@@ -3110,10 +3136,17 @@ impl Synth {
     /// the distance to the lap, because the start straight is track too: paint it by the lap
     /// alone and forty gates stand in a field.
     pub fn outside(&self, i: usize, half: f32) -> f32 {
-        let mut e = self.dist[i] - half;
+        let lap = self.dist[i] - half;
+        let mut e = lap;
         if let Some(spur) = &self.spur {
             let d = self.spur_dist[i];
-            if d.is_finite() {
+            // A strip of ground between the two, right up until they meet. Ridden, the start
+            // straight and the lap are two pieces of track that touch once — at turn one —
+            // and a rider on a flying lap should have no way onto the other one. Without this
+            // the pad's edge runs into the lap's for a hundred metres and the two are one
+            // apron you can wander across.
+            let apart = lap > START_GAP_M || spur.merging(self.spur_arc[i]);
+            if d.is_finite() && apart {
                 e = e.min(d - spur.at(self.spur_arc[i]));
             }
         }
