@@ -3799,10 +3799,11 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
                     BandMask::Rut => rut_mask(syn, half, seed, mw, mh),
                     BandMask::Loose => loose_mask(syn, half, seed, mw, mh),
                     BandMask::Beyond => mask_rect_outside(syn, mw, mh, half, |e, x, z| {
-                        (u8::from(e > SHOULDER_M) as f32 * 255.0 * turf_cover(x, z, seed)) as u8
+                        (band_beyond(e, x, z, SHOULDER_M, seed ^ 0xB3ED) as f32
+                            * turf_cover(x, z, seed)) as u8
                     }),
-                    BandMask::Out(extra) => mask_rect_outside(syn, mw, mh, half, |e, _, _| {
-                        u8::from(e <= extra) * 255
+                    BandMask::Out(extra) => mask_rect_outside(syn, mw, mh, half, move |e, x, z| {
+                        band_edge(e, x, z, extra, seed ^ 0xB3ED)
                     }),
                 };
                 let packed = deflate_raw(&m);
@@ -4361,6 +4362,36 @@ fn soft_edge(edge: f32, fade: f32, d: f32) -> u8 {
     } else {
         (smoothstep(1.0 - (d - edge) / fade) * 255.0) as u8
     }
+}
+
+/// Over how many metres a band cut by distance from the line fades out at its edge.
+///
+/// [`soft_edge`] says why a hard cut cannot be used, and the bands cut by distance — the
+/// shoulder, the riding line, the grass beyond them — were the ones still using one. A mask
+/// is blended, so at a quarter of a metre a sample the boundary came back as a staircase a
+/// sample deep and two long, on every band edge on the track. It is what made a generated
+/// track's ground read as jagged teeth rather than as ground somebody dug.
+const BAND_FADE_M: f32 = 0.5;
+
+/// And how far that edge wanders off the distance defining it, metres.
+///
+/// Feathered but straight, a band edge is still a line a fixed distance from the centre of the
+/// track, and it reads as one. The dirt on a real track reaches where the machine reached.
+const BAND_WANDER_M: f32 = 0.45;
+
+/// Where a band cut by distance from the riding line ends: full inside, gone a fade past it,
+/// and the edge itself wandering.
+///
+/// One definition, because the same bands are cut three times over — into the `.map` the game
+/// reads, into the `.tga` masks TerrainEd is handed, and into the preview the app draws — and
+/// three edges that disagree are a track whose picture is not its ground.
+fn band_edge(e: f32, x: f32, z: f32, at: f32, seed: u32) -> u8 {
+    soft_edge(at + edge_noise(x, z, seed, BAND_WANDER_M, BAND_WANDER_M * 0.45), BAND_FADE_M, e)
+}
+
+/// The ground past every band, which is the same edge read from the other side.
+fn band_beyond(e: f32, x: f32, z: f32, at: f32, seed: u32) -> u8 {
+    255 - band_edge(e, x, z, at, seed)
 }
 
 /// Tileable value noise. The lattice wraps at `period`, so the texture it builds meets
@@ -5201,10 +5232,11 @@ fn ground_sheet(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<[f32; 3]> {
             BandMask::Rut => rut_mask(syn, half, seed, dim, dim),
             BandMask::Loose => loose_mask(syn, half, seed, dim, dim),
             BandMask::Beyond => mask_rect_outside(syn, dim, dim, half, |e, x, z| {
-                (u8::from(e > SHOULDER_M) as f32 * 255.0 * turf_cover(x, z, seed)) as u8
+                (band_beyond(e, x, z, SHOULDER_M, seed ^ 0xB3ED) as f32 * turf_cover(x, z, seed))
+                    as u8
             }),
-            BandMask::Out(extra) => mask_rect_outside(syn, dim, dim, half, |e, _, _| {
-                u8::from(e <= extra) * 255
+            BandMask::Out(extra) => mask_rect_outside(syn, dim, dim, half, move |e, x, z| {
+                band_edge(e, x, z, extra, seed ^ 0xB3ED)
             }),
         };
         for y in 0..dim {
@@ -7843,11 +7875,12 @@ mod tests {
                         BandMask::Loose => Some(loose_mask(syn, half, seed, mw, mh)),
                         BandMask::Beyond => Some(mask_rect_outside(
                             syn, mw, mh, half,
-                            |e, x, z| (u8::from(e > SHOULDER_M) as f32 * 255.0 * turf_cover(x, z, seed)) as u8,
+                            |e, x, z| (band_beyond(e, x, z, SHOULDER_M, seed ^ 0xB3ED) as f32
+                                * turf_cover(x, z, seed)) as u8,
                         )),
                         BandMask::Out(extra) => Some(mask_rect_outside(
                             syn, mw, mh, half,
-                            move |e, _, _| u8::from(e <= extra) * 255,
+                            move |e, x, z| band_edge(e, x, z, extra, seed ^ 0xB3ED),
                         )),
                     };
                     (sheet, l.tile_m, mask)

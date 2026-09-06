@@ -2,6 +2,11 @@
 
 ## 2026-09-06
 
+### Changed
+- Ground edges wander. Where the riding line meets the shoulder, and the shoulder the grass,
+  the paint fades across the boundary and the boundary itself wanders, so the track reads as
+  ground somebody dug rather than as a stripe with a stepped edge.
+
 ### Fixed
 - Sharing a large preset or track works again. The host stores files by their contents, so once
   it had kept only part of an upload it handed back that same broken copy every time the same
