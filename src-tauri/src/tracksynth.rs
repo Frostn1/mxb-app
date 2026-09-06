@@ -120,7 +120,11 @@ const RUT_RADIUS_M: (f32, f32) = (40.0, 14.0);
 /// at the median and 0.35–0.67 m at the ninetieth; and a *straight* is not smooth either —
 /// every one of those tracks wears 0.09–0.16 m of groove down its straights. Ruts everywhere,
 /// deeper through the corners, is the shape of the measurement. Ruts only in corners was ours.
-const RUT_DEPTH_M: f32 = 0.68;
+///
+/// This is the depth of the deepest groove in the tightest corner on the lap, which puts it in
+/// the middle of that ninetieth rather than at the top of it. It only means that with the gain
+/// below set to match the field; before, 0.68 here was a metre in the ground.
+const RUT_DEPTH_M: f32 = 0.45;
 const RUT_DEPTH_STRAIGHT_M: f32 = 0.17;
 
 /// Ruts do not come one at a time.
@@ -141,8 +145,15 @@ const RUT_SPACING_M: f32 = 2.05;
 /// How much of the field is cut, and how hard. A higher power leaves narrower grooves with
 /// more untouched ground between them; the gain puts the deepest of them back at full depth
 /// after the sharpening has taken the top off.
-const RUT_SHARP: f32 = 1.35;
-const RUT_GAIN: f32 = 2.9;
+///
+/// The gain has to match the field it is applied to, and it did not: the sharpened noise peaks
+/// at about 0.57, a gain of 2.9 multiplied straight through it, and the deepest ground on the
+/// lap came out 1.04 m below the bench — a ditch across the track rather than a rut. At 1.75
+/// the asked depth is what the deepest groove actually cuts. The sharpening went with it:
+/// 1.35 left the cut at zero across most of the width, so what a corner grew was two isolated
+/// gouges instead of the bundle above.
+const RUT_SHARP: f32 = 1.0;
+const RUT_GAIN: f32 = 1.75;
 
 /// How much of the half-width the bundle covers, at the loosest corner that ruts at all and
 /// at the tightest.
@@ -1299,7 +1310,15 @@ fn roughness_profile(turn: &Profile, lap: f32) -> Chop {
     let n = rough.v.len();
     let back = (BRAKING_M / PROFILE_STEP) as usize;
     let ahead = (ACCEL_M / PROFILE_STEP) as usize;
-    let in_corner = |j: usize| turn.at((j % n) as f32 * PROFILE_STEP) != 0.0;
+    // A corner, not merely curved ground. Almost every metre of a real lap is on some arc —
+    // the demo's own straights are 100 m-radius bends — so testing for curvature at all
+    // excluded the whole lap from braking bumps and left 5% of it with any. What an approach
+    // must not be is the exit of *another corner*, and that is a radius tight enough to be
+    // one.
+    let in_corner = |j: usize| {
+        let k = turn.at((j % n) as f32 * PROFILE_STEP).abs();
+        k > 0.0 && 1.0 / k < RUT_RADIUS_M.0
+    };
     for i in 0..n {
         let s = i as f32 * PROFILE_STEP;
         let k = turn.at(s).abs();
