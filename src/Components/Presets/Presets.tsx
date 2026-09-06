@@ -20,10 +20,10 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button, CHIP } from "../ui/button";
+import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "../ui/help-hint";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
-import { Segmented } from "../ui/segmented";
 import {
   Select,
   SelectValue,
@@ -435,38 +435,29 @@ export default function Presets({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
-            {t("nav.presets")}
-          </h1>
-          <HelpHint
-            title={t("nav.presets")}
-            description={t("presets.help")}
-          />
-        </div>
-        <Segmented
-          size="sm"
-          value={mode}
-          onChange={setMode}
-          options={[
-            { value: "look", label: t("presets.tabLook") },
-            { value: "feel", label: t("presets.tabFeel") },
-          ]}
-        />
-        <div className="ml-auto flex items-center gap-2">
-          {mode === "look" && (
-            <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
-              <Download className="size-3.5" />
-              Import
-            </Button>
-          )}
-          <Button variant="ghost" size="sm" onClick={() => void load()}>
-            <RefreshCw className="size-3.5" />
-            Refresh
+      <ContextBarLeft>
+        <ContextTab active={mode === "look"} onSelect={() => setMode("look")}>
+          {t("presets.tabLook")}
+        </ContextTab>
+        <ContextTab active={mode === "feel"} onSelect={() => setMode("feel")}>
+          {t("presets.tabFeel")}
+        </ContextTab>
+      </ContextBarLeft>
+
+      <ContextBarRight>
+        {mode === "look" && (
+          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+            <Download className="size-3.5" />
+            Import
           </Button>
-        </div>
-      </header>
+        )}
+        <Button variant="ghost" size="sm" onClick={() => void load()}>
+          <RefreshCw className="size-3.5" />
+          Refresh
+        </Button>
+        <HelpHint title={t("nav.presets")} description={t("presets.help")} />
+      </ContextBarRight>
+
 
       {error && (
         <div className="mx-7 mb-3 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12.5px] text-destructive">

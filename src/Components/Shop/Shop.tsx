@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { shopCatalogAvailable } from "../../api/shop";
 import ShopCatalog from "./ShopCatalog";
 import MyDownloads from "./MyDownloads";
+import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "@/Components/ui/help-hint";
 import { cn } from "@/lib/utils";
 import { useT } from "../../i18n/context";
@@ -51,25 +52,21 @@ export default function Shop({ refreshKey }: ShopProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <h1 className="text-[21px] font-bold tracking-[-0.2px]">{t("nav.shop")}</h1>
+      {/* The store's own two halves sit beside the rail's Shop/Hub tabs. */}
+      {catalogAvailable && (
+      <ContextBarLeft>
+        <ContextTab active={tab === "catalog"} onSelect={() => setTab("catalog")}>
+          {t("shopTab.catalog")}
+        </ContextTab>
+        <ContextTab active={tab === "purchases"} onSelect={() => setTab("purchases")}>
+          {t("shopTab.purchases")}
+        </ContextTab>
+      </ContextBarLeft>
+      )}
+      <ContextBarRight>
         <HelpHint title={t("nav.shop")} description={t("shop.help")} />
+      </ContextBarRight>
 
-        {catalogAvailable && (
-          <div className="flex items-center gap-0.5 rounded-lg border border-input bg-card p-0.5">
-            <TabButton
-              label={t("shopTab.catalog")}
-              on={tab === "catalog"}
-              onClick={() => setTab("catalog")}
-            />
-            <TabButton
-              label={t("shopTab.purchases")}
-              on={tab === "purchases"}
-              onClick={() => setTab("purchases")}
-            />
-          </div>
-        )}
-      </header>
 
       {/* Both stay mounted: switching tabs must not re-fetch the catalog or drop a sign-in,
           and each half is cheap to keep in the tree once it has loaded. */}
@@ -83,26 +80,3 @@ export default function Shop({ refreshKey }: ShopProps) {
   );
 }
 
-function TabButton({
-  label,
-  on,
-  onClick,
-}: {
-  label: string;
-  on: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "cursor-default rounded-md px-3 py-1 text-[12px] font-medium transition-colors",
-        on
-          ? "bg-foreground font-semibold text-background"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {label}
-    </button>
-  );
-}
