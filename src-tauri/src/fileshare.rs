@@ -73,6 +73,32 @@ pub struct FileShare {
     pub bundle: BundleRef,
 }
 
+/// A decoded code, and what importing it would land on top of.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharePreview {
+    #[serde(flatten)]
+    pub share: FileShare,
+    /// The rels the importer already has. [`import`] places with
+    /// [`install::OnConflict::Overwrite`], so these are replaced without being asked —
+    /// which is worth saying before the download, not after.
+    pub existing: Vec<String>,
+}
+
+/// Read a code and check what it carries against the mods tree.
+pub fn preview(cfg: &AppConfig, text: &str) -> anyhow::Result<SharePreview> {
+    let share = decode(text)?;
+    let existing = share
+        .items
+        .iter()
+        // Through `mods_subdir` rather than a plain join: it resolves each segment against
+        // what is really on disk, so a sender whose folder is `Tracks` still matches ours.
+        .filter(|i| library::mods_subdir(&cfg.mods_path, &format!("mods/{}", i.rel)).exists())
+        .map(|i| i.rel.clone())
+        .collect();
+    Ok(SharePreview { share, existing })
+}
+
 /// Turn one pick into the file it names and the rel a code would carry, or the reason it
 /// can't be shared.
 ///
@@ -421,6 +447,44 @@ mod tests {
         assert_eq!(rels, ["rider/helmets/AGV/paints/Blue.pnt", "tracks/EU/RedBud.pkz"]);
         assert!(p.skipped.is_empty(), "{:?}", p.skipped);
         assert_eq!(p.total_size, 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The one thing an importer can't see for themselves: the code is about to land on
+    /// top of a track they already ride. `import` overwrites without asking, so the preview
+    /// has to name what it replaces — and match the folder whatever case it was written in.
+    #[test]
+    fn a_preview_names_what_it_would_replace() {
+        let root = tmp("preview");
+        touch(&root.join("mods/tracks/EU/RedBud.pkz"));
+
+        let code = encode(&FileShare {
+            items: vec![
+                ShareItem {
+                    name: "RedBud.pkz".into(),
+                    rel: "Tracks/EU/RedBud.pkz".into(),
+                    size: 1,
+                    is_dir: false,
+                },
+                ShareItem {
+                    name: "Hangtown.pkz".into(),
+                    rel: "tracks/EU/Hangtown.pkz".into(),
+                    size: 1,
+                    is_dir: false,
+                },
+            ],
+            total_size: 2,
+            bundle: BundleRef {
+                url: "https://example.invalid/x.zip".into(),
+                host: "example".into(),
+                size: 2,
+                parts: vec![],
+            },
+        });
+
+        let p = preview(&cfg_at(&root), &code).unwrap();
+        assert_eq!(p.existing, ["Tracks/EU/RedBud.pkz"], "only the one already there");
+        assert_eq!(p.share.items.len(), 2, "and the code still carries both");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -19,6 +19,8 @@
   the app to wait. Nothing to click before you paste it — tracks, mods and presets alike.
 - Coming back to the Library is instant. It no longer re-measures every mod folder each
   time you leave the page and return, or switch between its tabs.
+- A share code says which of its files you already have before you import it. The ones it
+  would replace are marked in the list.
 
 ### Added
 - Seven colorways in Settings. Frost is still the default; Ember, Moss, Violet, Rose and

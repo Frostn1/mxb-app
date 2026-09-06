@@ -1270,6 +1270,9 @@ export const ptBR: Translation = {
   "share.importBody":
     "Cole o código que te mandaram. Os arquivos são instalados onde quem compartilhou os mantinha.",
   "share.downloadNotice": "Baixa {{size}} de {{host}}.",
+  "share.replacesTag": "Substitui o seu",
+  "share.willReplace_one": "1 destes substitui algo que você já tem — importar sobrescreve.",
+  "share.willReplace_other": "{{count}} destes substituem coisas que você já tem — importar sobrescreve.",
   "share.install": "Baixar e instalar",
   "share.installed_one": "1 arquivo instalado.",
   "share.installed_other": "{{count}} arquivos instalados.",

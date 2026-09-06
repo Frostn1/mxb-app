@@ -1255,6 +1255,9 @@ export const en = {
   "share.importBody":
     "Paste a share code someone sent you. The files install where they had them.",
   "share.downloadNotice": "Downloads {{size}} from {{host}}.",
+  "share.replacesTag": "Replaces yours",
+  "share.willReplace_one": "1 of these replaces something you already have — importing overwrites it.",
+  "share.willReplace_other": "{{count}} of these replace things you already have — importing overwrites them.",
   "share.install": "Download & install",
   "share.installed_one": "Installed 1 file.",
   "share.installed_other": "Installed {{count}} files.",

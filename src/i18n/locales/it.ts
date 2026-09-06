@@ -1268,6 +1268,9 @@ export const it: Translation = {
   "share.importBody":
     "Incolla il codice che ti hanno mandato. I file si installano dove li teneva chi li ha condivisi.",
   "share.downloadNotice": "Scarica {{size}} da {{host}}.",
+  "share.replacesTag": "Sostituisce il tuo",
+  "share.willReplace_one": "1 di questi sostituisce qualcosa che hai già — l'importazione lo sovrascrive.",
+  "share.willReplace_other": "{{count}} di questi sostituiscono cose che hai già — l'importazione le sovrascrive.",
   "share.install": "Scarica e installa",
   "share.installed_one": "Installato 1 file.",
   "share.installed_other": "Installati {{count}} file.",

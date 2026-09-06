@@ -1281,6 +1281,9 @@ export const de: Translation = {
   "share.importBody":
     "Füg den Code ein, den du bekommen hast. Die Dateien landen dort, wo der Absender sie hatte.",
   "share.downloadNotice": "Lädt {{size}} von {{host}}.",
+  "share.replacesTag": "Ersetzt deins",
+  "share.willReplace_one": "1 davon ersetzt etwas, das du schon hast — der Import überschreibt es.",
+  "share.willReplace_other": "{{count}} davon ersetzen Dinge, die du schon hast — der Import überschreibt sie.",
   "share.install": "Herunterladen & installieren",
   "share.installed_one": "1 Datei installiert.",
   "share.installed_other": "{{count}} Dateien installiert.",
