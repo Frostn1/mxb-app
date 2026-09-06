@@ -13,7 +13,6 @@ import {
 import ShopCard from "./ShopCard";
 import ShopDetail from "./ShopDetail";
 import CategoryPill from "./CategoryPill";
-import { ContextBarRight } from "../Shell/ContextBar";
 import { Button } from "@/Components/ui/button";
 import { Skeleton } from "@/Components/ui/skeleton";
 import {
@@ -169,24 +168,30 @@ export default function ShopCatalog() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* No title of its own — `Shop` owns the heading and the tab strip above this. */}
-      {/* No title of its own — `Shop` owns the heading and the tab strip above this. */}
-      <ContextBarRight>
-        <div className="flex h-7 w-[220px] items-center gap-2 border border-input bg-card px-2.5">
-          <Search className="size-3.5 text-faint" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("shopCatalog.searchPlaceholder")}
-            className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
-          />
+      <header className="flex flex-none flex-col gap-4 px-7 pb-3.5">
+        <div className="flex items-center gap-3.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void refresh()}
+            disabled={refreshing}
+            className="flex-none"
+          >
+            <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+            {refreshing ? t("shopCatalog.refreshing") : t("shopCatalog.refresh")}
+          </Button>
+          <div className="ml-auto flex w-[280px] items-center gap-2 rounded-lg border border-input bg-card px-3 py-2">
+            <Search className="size-3.5 text-faint" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t("shopCatalog.searchPlaceholder")}
+              className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
+            />
+          </div>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={refreshing}>
-          <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-          {refreshing ? t("shopCatalog.refreshing") : t("shopCatalog.refresh")}
-        </Button>
-      </ContextBarRight>
 
-        <div className="flex flex-none flex-wrap items-center gap-2 px-7 pb-3 pt-3.5">
+        <div className="flex flex-wrap items-center gap-2">
           <CategoryPill
             label={t("shopCatalog.allCategories")}
             on={categoryId === null}
@@ -274,6 +279,7 @@ export default function ShopCatalog() {
             )}
           </div>
         )}
+      </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
         {error ? (

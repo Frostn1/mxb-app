@@ -18,11 +18,8 @@ import type { GameId } from "../../types";
  *
  * Hidden entirely when the build only knows one game, so a single-title install doesn't
  * carry a control with nothing to choose.
- *
- * `compact` is the top-rail shape: one line beside the wordmark, where a stacked
- * label-over-value would not fit the 52px row. Settings uses the full form.
  */
-export default function GameSwitcher({ compact = false }: { compact?: boolean }) {
+export default function GameSwitcher() {
   const t = useT();
   const { games, game, switchGame } = useConfig();
   const [busy, setBusy] = useState(false);
@@ -47,25 +44,16 @@ export default function GameSwitcher({ compact = false }: { compact?: boolean })
     <DropdownMenu>
       <DropdownMenuTrigger
         disabled={busy}
-        className={cn(
-          "flex cursor-default items-center gap-2 border border-input text-left transition-colors hover:bg-foreground/[0.05] disabled:opacity-60",
-          compact ? "h-7 px-2.5" : "w-full rounded-lg px-3 py-2",
-        )}
+        className="flex w-full cursor-default items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 text-left transition-colors hover:bg-foreground/[0.05] disabled:opacity-60"
       >
-        {compact ? (
-          <span className="truncate font-cond text-[12.5px] font-semibold uppercase tracking-[0.1em]">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            {t("game.label")}
+          </span>
+          <span className="truncate text-[12.5px] font-semibold">
             {game.display}
           </span>
-        ) : (
-          <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              {t("game.label")}
-            </span>
-            <span className="truncate text-[12.5px] font-semibold">
-              {game.display}
-            </span>
-          </div>
-        )}
+        </div>
         {busy ? (
           <Loader2 className="size-3.5 flex-none animate-spin text-muted-foreground" />
         ) : (

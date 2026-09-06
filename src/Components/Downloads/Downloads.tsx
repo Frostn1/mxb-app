@@ -29,8 +29,8 @@ import { useDownloads } from "../../Context/Downloads";
 import { useInstall, type ModTarget } from "../../Context/Install";
 import { useT, type TFunc } from "../../i18n/context";
 import { dayStart, displayName, formatBytes, formatDay, formatTime } from "../../lib/mods";
+import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
-import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "@/Components/ui/help-hint";
 import {
   DropdownMenu,
@@ -159,34 +159,40 @@ export default function Downloads({
 
   return (
     <div className="flex h-full flex-col">
-      {/* Filters left, search and clear right, both in the shell's context bar — the
-          rail already names the page, so there is no heading to repeat here. */}
-      <ContextBarLeft>
-        {(["all", "installed", "failed"] as const).map((v) => (
-          <ContextTab key={v} active={filter === v} onSelect={() => setFilter(v)}>
-            <span className="flex items-center gap-1.5">
-              {t(
-                v === "all"
-                  ? "downloads.filterAll"
-                  : v === "installed"
-                    ? "common.installed"
-                    : "downloads.filterFailed",
-              )}
-              <span
-                className={cn(
-                  "tabular-figures text-faint",
-                  v === "failed" && counts.failed > 0 && "text-destructive",
+      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
+        <div className="flex items-center gap-1.5">
+          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
+            {t("nav.downloads")}
+          </h1>
+          <HelpHint title={t("nav.downloads")} description={t("downloads.help")} />
+        </div>
+        <Segmented
+          value={filter}
+          onChange={(v) => setFilter(v as Filter)}
+          options={(["all", "installed", "failed"] as const).map((v) => ({
+            value: v,
+            label: (
+              <span className="flex items-center gap-1.5">
+                {t(
+                  v === "all"
+                    ? "downloads.filterAll"
+                    : v === "installed"
+                      ? "common.installed"
+                      : "downloads.filterFailed",
                 )}
-              >
-                {counts[v]}
+                <span
+                  className={cn(
+                    "text-muted-foreground",
+                    v === "failed" && counts.failed > 0 && "text-destructive",
+                  )}
+                >
+                  {counts[v]}
+                </span>
               </span>
-            </span>
-          </ContextTab>
-        ))}
-      </ContextBarLeft>
-
-      <ContextBarRight>
-        <div className="flex h-7 w-[220px] items-center gap-2 border border-input bg-card px-2.5">
+            ),
+          }))}
+        />
+        <div className="ml-auto flex w-[240px] items-center gap-2 rounded-lg border border-input bg-card px-3 py-2">
           <Search className="size-3.5 text-faint" />
           <input
             value={search}
@@ -203,9 +209,7 @@ export default function Downloads({
         >
           <Trash2 className="size-3.5" /> {t("downloads.clearAction")}
         </Button>
-        <HelpHint title={t("nav.downloads")} description={t("downloads.help")} />
-      </ContextBarRight>
-
+      </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
         {loading ? (

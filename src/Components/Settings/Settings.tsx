@@ -82,7 +82,6 @@ import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "../../lib/usePlatform";
 import { useConfig } from "../../Context/Config";
 import GameSwitcher from "../Shell/GameSwitcher";
-import { ContextBarLeft, ContextBarRight } from "../Shell/ContextBar";
 import ReshadeCard from "./ReshadeCard";
 import SupportersCard from "./SupportersCard";
 import {
@@ -1002,16 +1001,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
 
   return (
     <div className="flex h-full">
-      <ContextBarLeft>
-      <span className="flex items-center font-cond text-[12.5px] font-semibold uppercase tracking-[0.16em] text-foreground">
-        {t("nav.settings")}
-      </span>
-    </ContextBarLeft>
-    <ContextBarRight>
-      <HelpHint title={t("nav.settings")} description={t("settings.help")} />
-    </ContextBarRight>
-
-    <nav className="flex w-[170px] flex-none flex-col gap-4 overflow-y-auto px-4 pb-5 pt-[70px]">
+      <nav className="flex w-[170px] flex-none flex-col gap-4 overflow-y-auto px-4 pb-5 pt-[70px]">
         {groups.map((g) => (
           <div key={g.label} className="flex flex-col gap-0.5">
             <span className="px-3 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-faint">
@@ -1037,6 +1027,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
 
       <div ref={pane} className="min-h-0 flex-1 overflow-y-auto px-2 py-5">
         <div className="flex max-w-[640px] flex-col gap-[18px]">
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-[21px] font-bold tracking-[-0.2px]">
+              {t("nav.settings")}
+            </h1>
+            <HelpHint
+              title={t("nav.settings")}
+              description={t("settings.help")}
+            />
+          </div>
+
           {/* game — which title the app is driving. Its own card, above the folders it
               scopes: everything below belongs to whatever is picked here, so it isn't a
               property of the folder setting it used to sit inside. */}

@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { Search, Download, X } from "lucide-react";
+import { Search, Download, X, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
 import { resolveQuickInstall, type ModSort, type ModType } from "../../api/mods";
 import { useConfig } from "../../Context/Config";
@@ -9,9 +9,8 @@ import type { ModSummary } from "../../types";
 import { useInstall } from "../../Context/Install";
 import { useT } from "../../i18n/context";
 import ModCard from "./ModCard";
-import FeaturedMod from "./FeaturedMod";
+import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
-import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "@/Components/ui/help-hint";
 import { Skeleton } from "@/Components/ui/skeleton";
 import {
@@ -195,76 +194,77 @@ export default function Browse({
 
   const isBike = modType.id === "bikes";
 
-  // "Newest, with a picture" is the only claim the catalog actually supports, so the
-  // banner appears on the default sort with nothing filtered and stands down otherwise.
-  const featured =
-    !query.trim() && categoryId === null && activeSort === sortOptions[0]?.value
-      ? mods.find((m) => m.image)
-      : undefined;
-
   return (
     <div className="flex h-full flex-col">
-      {/* The type tabs and the search/sort controls live in the shell's context bar. The
-          rail already says BROWSE, so the page does not repeat it as a heading — that
-          stacked title-then-tabs-then-filters column is what read as a dashboard. */}
-      <ContextBarLeft>
-        {modTypes.map((mt) => (
-          <ContextTab
-            key={mt.id}
-            active={mt.id === modType.id}
-            onSelect={() => onChangeType(mt)}
-          >
-            {t(mt.label)}
-          </ContextTab>
-        ))}
-      </ContextBarLeft>
-
-      <ContextBarRight>
-        <div className="flex h-7 w-[210px] items-center gap-2 border border-input bg-card px-2.5">
-          <Search className="size-3.5 text-faint" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("browse.searchPlaceholder", { type: t(modType.labelInline) })}
-            className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
+      <header className="flex flex-none flex-col gap-4 px-7 pb-3.5 pt-5">
+        <div className="flex items-center gap-3.5">
+          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
+            {t("nav.browse")}
+          </h1>
+          <HelpHint
+            title={t("nav.browse")}
+            description={t("browse.help")}
           />
+          <Segmented
+            value={modType.id}
+            onChange={(id) => {
+              const next = modTypes.find((mt) => mt.id === id);
+              if (next) onChangeType(next);
+            }}
+            options={modTypes.map((mt) => ({
+              value: mt.id,
+              label: t(mt.label),
+            }))}
+          />
+          <div className="ml-auto flex w-[280px] items-center gap-2 rounded-lg border border-input bg-card px-3 py-2">
+            <Search className="size-3.5 text-faint" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t("browse.searchPlaceholder", {
+                type: t(modType.labelInline),
+              })}
+              className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
+            />
+          </div>
         </div>
-        <Select value={activeSort} onValueChange={(v) => setSort(v as ModSort)}>
-          {/* Wide enough for the longest translated label ("Popolari questa
-              settimana") rather than the English one. */}
-          <SelectTrigger className="h-7 w-[196px] bg-card text-[12px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {sortOptions.map((s) => (
-              <SelectItem key={s.value} value={s.value}>
-                {t(s.label)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <HelpHint title={t("nav.browse")} description={t("browse.help")} />
-      </ContextBarRight>
-
-      <div className="flex flex-none flex-wrap items-center gap-2 px-7 pb-3 pt-3.5">
-        {modType.categories.map((c) => {
-          const on = c.id === categoryId;
-          return (
-            <button
-              key={c.id}
-              onClick={() => setCategoryId(c.id)}
-              className={cn(
-                "u-skew cursor-default px-3 py-[4px] font-cond text-[12px] font-semibold uppercase tracking-[0.12em] transition-colors",
-                on
-                  ? "bg-primary text-primary-foreground"
-                  : "border border-input text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <span className="u-unskew block">{t(c.label)}</span>
-            </button>
-          );
-        })}
-      </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {modType.categories.map((c) => {
+            const on = c.id === categoryId;
+            return (
+              <button
+                key={c.id}
+                onClick={() => setCategoryId(c.id)}
+                className={cn(
+                  "cursor-default rounded-full px-3.5 py-[5px] text-[12px] font-medium transition-colors",
+                  on
+                    ? "bg-foreground font-semibold text-background"
+                    : "border border-input text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t(c.label)}
+              </button>
+            );
+          })}
+          <div className="ml-auto flex items-center gap-2 self-center">
+            <ArrowUpDown className="size-3.5 text-faint" />
+            <Select value={activeSort} onValueChange={(v) => setSort(v as ModSort)}>
+              {/* Wide enough for the longest translated label ("Popolari questa
+                  settimana") rather than the English one. */}
+              <SelectTrigger className="h-8 w-[210px] bg-card">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {sortOptions.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>
+                    {t(s.label)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </header>
 
       <div
         ref={grid}
@@ -286,7 +286,7 @@ export default function Browse({
             </Button>
           </div>
         ) : loading ? (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(178px,1fr))] gap-3.5">
+          <div className="grid grid-cols-4 gap-3.5">
             {Array.from({ length: 8 }).map((_, i) => (
               <Skeleton key={i} className="aspect-[4/3] rounded-xl" />
             ))}
@@ -297,17 +297,8 @@ export default function Browse({
           </p>
         ) : (
           <>
-            {featured && (
-              <FeaturedMod
-                mod={featured}
-                rating={ratings.get(featured.id)}
-                installed={isInstalled(featured)}
-                onOpen={() => onOpenMod(featured.slug, categoryId ?? modType.categoryId)}
-                onInstall={() => quickInstall(featured)}
-              />
-            )}
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(178px,1fr))] gap-3.5">
-              {mods.filter((m) => m !== featured).map((m) => (
+            <div className="grid grid-cols-4 gap-3.5">
+              {mods.map((m) => (
                 <ModCard
                   key={m.id}
                   mod={m}

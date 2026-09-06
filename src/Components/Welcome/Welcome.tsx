@@ -4,7 +4,6 @@ import type { LucideIcon } from "lucide-react";
 import { useT, type TKey } from "../../i18n/context";
 import { Button } from "@/Components/ui/button";
 import { cn } from "@/lib/utils";
-import { Plate } from "../Shell/Brand";
 
 interface WelcomeProps {
   /** Called when the user finishes or skips the tour. */
@@ -42,9 +41,9 @@ export default function Welcome({ onDone }: WelcomeProps) {
     <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 backdrop-blur-sm px-10">
       <div className="flex w-full max-w-[480px] flex-col items-center gap-8 rounded-2xl border border-input bg-card p-9 shadow-2xl">
         <div className="flex flex-col items-center gap-4">
-          <Plate className="size-14">
+          <div className="grid size-14 place-items-center rounded-[15px] bg-gradient-to-br from-[#9ccfec] to-[#5d8fb0] text-[#0d0f12]">
             <Icon className="size-7" strokeWidth={2.5} />
-          </Plate>
+          </div>
           <div className="flex flex-col items-center gap-2">
             <h1 className="text-center text-[24px] font-extrabold tracking-[-0.4px]">
               {t(slide.title)}
