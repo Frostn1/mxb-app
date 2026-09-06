@@ -8,6 +8,10 @@
 - Locker and Presets sit together under Garage, and Race mode has its own place in the
   top bar.
 - Text is set in Barlow, which ships inside the app so it reads the same offline.
+- Browse opens on a full-width banner for the newest mod, so you can see what you are
+  installing before you click it.
+- Every page puts its filters and search in the bar under the navigation, which leaves
+  more of the window for mods and less for headings.
 
 ### Added
 - Seven colorways in Settings. Frost is still the default; Ember, Moss, Violet, Rose and
