@@ -6,9 +6,15 @@
 - The start on a track you build is its own straight beside the circuit now, the way a real
   one is: the gate row stands 40 m off the lap, sprints 85 m, and turns in to join the track
   at turn one. A flying lap never crosses the gates.
-- The gates stand on a start pad 54 m across — wide enough for all forty of them — graded flat
-  and funnelling down to riding width by the time it meets the lap. The pit lane sits on the
-  other side of the main straight, out of the way.
+- The gates stand on a start pad 54 m across — wide enough for all forty of them. It holds
+  that width the whole way down the sprint and comes down through the turn into the track,
+  rather than tapering along the straight. The pit lane sits on the other side of the main
+  straight, out of the way.
+
+### Fixed
+- Riders start on the gate row. Every position in a track's race data is stated against the
+  lap, wherever it physically stands, and the gates were being written against the start
+  straight instead — so the game put the field across the middle of the track.
 
 ### Added
 - A track you build now has things standing beside it. Stakes with painted tops mark the edge

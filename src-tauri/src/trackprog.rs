@@ -322,12 +322,22 @@ pub const START_STRAIGHT_M: f32 = 60.0;
 /// and merges in, so a rider on a flying lap never crosses the gates.
 pub const START_OFFSET_M: f32 = 40.0;
 
-/// How long the gate straight is before it starts turning in, metres. Published: 79–91.
-pub const START_SPRINT_M: f32 = 85.0;
+/// How long the gate straight is before it starts turning in, metres.
+///
+/// Published start lines run 79–91 m of straight before their first corner, and 67–208 m all
+/// told. Shorter than the middle of that on purpose: ridden, 85 m of sprint and 90 m of
+/// turn-in is a long way to the first corner, and the whole point of a start straight is that
+/// it ends at one.
+pub const START_SPRINT_M: f32 = 70.0;
+
+/// How far the start straight is angled towards the lap, degrees. Over the sprint it closes
+/// about a fifth of the offset, which leaves one corner to do the rest.
+pub const START_CONVERGE_DEG: f32 = 10.0;
 
 /// The tightest the merge back onto the lap may turn, metres. Published start lines join
-/// through 10–46 m radii; this is the floor.
-pub const START_MERGE_RADIUS_M: f32 = 18.0;
+/// through 10–46 m radii; this is the floor, and a tight one keeps turn one close to the
+/// gates rather than a long sweep away from them.
+pub const START_MERGE_RADIUS_M: f32 = 15.0;
 
 /// The start straight: where the gate row stands, and the line from it into the lap.
 ///
@@ -852,6 +862,98 @@ pub fn join(from: Start, to: Start, radius: f32) -> Option<Vec<Segment>> {
     best.map(|(_, segs)| segs)
 }
 
+/// Two arcs from one pose to another, tangent where they meet: a corner rather than a
+/// dog-leg.
+///
+/// [`join`] answers the same question with a turn, a straight and a turn, which is right for
+/// closing a lap that has drifted open — the two ends are far apart and mostly need
+/// travelling between. It is wrong for a start straight coming back onto the lap: what that
+/// wants is *turn one*, and every published start line is exactly that, a corner of 100–180°
+/// with no straight in it at all. Given a Dubins path, our merges came out as a seven-metre
+/// arc, a ninety-four metre straight and another arc — a start straight that never ends.
+///
+/// The equal-chord biarc: the joint is placed so the two arcs have the same chord length,
+/// which is the standard construction and needs no search.
+///
+/// `None` when the poses are already the same, or when the geometry wants an arc tighter
+/// than `min_radius`.
+pub fn biarc(from: Start, to: Start, min_radius: f32) -> Option<Vec<Segment>> {
+    let (fx, fz) = heading_vector(from.angle.to_radians());
+    let (tx, tz) = heading_vector(to.angle.to_radians());
+    let (dx, dz) = (to.x - from.x, to.z - from.z);
+    let chord = (dx * dx + dz * dz).sqrt();
+    if chord < 1.0 {
+        return None;
+    }
+
+    // How far along each tangent the joint sits.
+    let dot_t = fx * tx + fz * tz;
+    let denom = 2.0 * (1.0 - dot_t);
+    let b = dx * (fx + tx) + dz * (fz + tz);
+    let c = dx * dx + dz * dz;
+    let d1 = if denom.abs() < 1e-4 {
+        // Tangents parallel: the joint falls out of the chord alone.
+        let along = dx * tx + dz * tz;
+        if along.abs() < 1e-4 {
+            return None;
+        }
+        c / (4.0 * along)
+    } else {
+        let disc = b * b + denom * c;
+        if disc < 0.0 {
+            return None;
+        }
+        (-b + disc.sqrt()) / denom
+    };
+    if !d1.is_finite() || d1 <= 0.1 {
+        return None;
+    }
+    let joint = (
+        ((from.x + fx * d1) + (to.x - tx * d1)) * 0.5,
+        ((from.z + fz * d1) + (to.z - tz * d1)) * 0.5,
+    );
+
+    // Each arc from its own end, through the chord to the joint.
+    let arc = |px: f32, pz: f32, hx: f32, hz: f32, qx: f32, qz: f32| -> Option<Segment> {
+        let (cx, cz) = (qx - px, qz - pz);
+        let len = (cx * cx + cz * cz).sqrt();
+        if len < 0.01 {
+            return None;
+        }
+        let (ux, uz) = (cx / len, cz / len);
+        // The chord subtends twice the angle between the tangent and it; which way round is
+        // the cross product, negative being a right-hand turn in this convention.
+        let cross = hx * uz - hz * ux;
+        let half = (hx * ux + hz * uz).clamp(-1.0, 1.0).acos();
+        if half < 1e-4 {
+            return Some(Segment::Straight { length: len, rise: 0.0 });
+        }
+        let radius = len / (2.0 * half.sin());
+        Some(Segment::Arc {
+            radius: radius * if cross > 0.0 { -1.0 } else { 1.0 },
+            angle: (2.0 * half).to_degrees(),
+            rise: 0.0,
+        })
+    };
+
+    let first = arc(from.x, from.z, fx, fz, joint.0, joint.1)?;
+    // The second runs from the joint to the goal, and its tangent there is the goal's — so it
+    // is fitted backwards from the goal and then turned round.
+    let second = arc(to.x, to.z, -tx, -tz, joint.0, joint.1).map(|s| match s {
+        Segment::Arc { radius, angle, rise } => Segment::Arc { radius: -radius, angle, rise },
+        other => other,
+    })?;
+
+    for seg in [&first, &second] {
+        if let Segment::Arc { radius, angle, .. } = seg {
+            if radius.abs() < min_radius || angle.abs() > 200.0 {
+                return None;
+            }
+        }
+    }
+    Some(vec![first, second])
+}
+
 /// Where a run of segments leaves you, ridden from `from`.
 ///
 /// The same walk [`TrackProgram::stations`] does, without the sampling: arcs are stepped from
@@ -1002,10 +1104,14 @@ impl TrackProgram {
 
         // The gate row: beside the lap's own start, far enough out that the lap never runs
         // through it.
+        // Angled a little towards the lap rather than parallel to it, so what brings the two
+        // together is one corner instead of an S. That is the shape published start lines
+        // have: Indiana's straight runs 90 m and then turns *once*, through 170°, onto the
+        // racing line.
         let start = Start {
             x: self.start.x + rx * side * START_OFFSET_M,
             z: self.start.z + rz * side * START_OFFSET_M,
-            angle: self.start.angle,
+            angle: self.start.angle - side * START_CONVERGE_DEG,
         };
         // Down the sprint, and then back onto the lap. Every candidate join is tried and the
         // shortest kept — which lands on turn one, because that is what is nearest.
@@ -1013,7 +1119,12 @@ impl TrackProgram {
         let mut best: Option<(f32, Vec<Segment>, f32)> = None;
         for q in st.iter().filter(|q| q.s >= run * 0.5 && q.s <= run + 400.0) {
             let onto = Start { x: q.x, z: q.z, angle: q.heading.to_degrees() };
-            let Some(merge) = join(after, onto, START_MERGE_RADIUS_M) else {
+            // A corner, not a dog-leg: two arcs that meet tangentially, which is the shape
+            // every published start line joins the lap with. The Dubins path is the fallback
+            // for a geometry the biarc cannot fit.
+            let Some(merge) = biarc(after, onto, START_MERGE_RADIUS_M)
+                .or_else(|| join(after, onto, START_MERGE_RADIUS_M))
+            else {
                 continue;
             };
             let turned: f32 = merge
@@ -1027,7 +1138,19 @@ impl TrackProgram {
             if turned > 200.0 {
                 continue;
             }
-            let cost: f32 = merge.iter().map(|s| s.length()).sum::<f32>() + turned * 0.35;
+            // Straight in a merge is a start straight that has not ended, so it costs double.
+            let straight: f32 = merge
+                .iter()
+                .filter(|s| matches!(s, Segment::Straight { .. }))
+                .map(|s| s.length())
+                .sum();
+            // And the sooner it is back on the lap the better: a merge that picks a join a
+            // hundred metres further round is a gentle sweep that reads as more straight.
+            // Published start lines turn 100–180° through 10–46 m radii and are done with it.
+            let cost: f32 = merge.iter().map(|s| s.length()).sum::<f32>()
+                + turned * 0.35
+                + straight * 2.0
+                + (q.s - run).max(0.0) * 1.2;
             if best.as_ref().map(|b| cost < b.0).unwrap_or(true) {
                 best = Some((cost, merge, q.s));
             }
