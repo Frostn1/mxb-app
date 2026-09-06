@@ -2,6 +2,11 @@
 
 ## 2026-09-05
 
+### Fixed
+- Sharing a big preset or file no longer produces a code that downloads without complaint and
+  then does not open. Each slice is checked against the size it should be, on the way up and
+  on the way down, and a short one is retried instead of passed on.
+
 ### Changed
 - Tracks you build now read as tracks. The riding surface was one flat brown from edge to
   edge, with nothing to tell you where the line went or where the track stopped. It is now
