@@ -207,8 +207,8 @@ if __name__ == '__main__':
       # Close in: a rut is a few centimetres deep, so from 80 m out it is one pixel of shading.
       'rider': (( cx - dirv[0]*9, gy + 1.9, cz - dirv[1]*9),
                 ( cx + dirv[0]*20, gy + 0.5, cz + dirv[1]*20), 62.0),
-      'trackside': (( cx - dirv[1]*15, gy + 4.5, cz + dirv[0]*15),
-                    ( cx + dirv[0]*9, gy + 0.6, cz + dirv[1]*9), 55.0),
+      'trackside': (( cx - dirv[1]*13, gy + 6.0, cz + dirv[0]*13),
+                    ( cx + dirv[0]*7, gy + 0.4, cz + dirv[1]*7), 55.0),
       'aerial': ((d['size_x']*0.5 - 210, gy + 210, d['size_x']*0.5 - 250),
                  (d['size_x']*0.5, gy + 2, d['size_x']*0.5), 60.0),
     }
