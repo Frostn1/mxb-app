@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-06
+
+### Changed
+- The start on a track you build is its own straight beside the circuit now, the way a real
+  one is: the gate row stands 40 m off the lap, sprints 85 m, and turns in to join the track
+  at turn one. A flying lap never crosses the gates.
+- The gates stand on a start pad 54 m across — wide enough for all forty of them — graded flat
+  and funnelling down to riding width by the time it meets the lap. The pit lane sits on the
+  other side of the main straight, out of the way.
+
 ## 2026-09-05
 
 ### Changed
