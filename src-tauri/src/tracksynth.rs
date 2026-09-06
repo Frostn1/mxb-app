@@ -147,7 +147,7 @@ const RUT_RADIUS_M: (f32, f32) = (40.0, 14.0);
 // Measured against Indiana on the same statistic the corpus survey prints, which is the only
 // way to compare: at 0.38 a built lap came back with corner grooves at p50 0.13 and p90 0.24
 // against Indiana's 0.21 and 0.44 — half the depth, and a corner you can see but not sit in.
-const RUT_DEPTH_M: f32 = 0.62;
+const RUT_DEPTH_M: f32 = 0.50;
 const RUT_DEPTH_STRAIGHT_M: f32 = 0.09;
 
 /// The material the cut displaced, which does not disappear.
@@ -163,7 +163,9 @@ const RUT_DEPTH_STRAIGHT_M: f32 = 0.09;
 const RUT_LIP_OFFSET_M: f32 = 1.05;
 /// How high the wall stands, against how deep the cut is. Taller than the cut is deep: the
 /// floor is packed down over a day and the bank is loose material piled on undisturbed ground.
-const RUT_LIP_GAIN: f32 = 1.00;
+// Raised so a groove comes with something to lean on. What was asked for from the seat is a
+// "mini berm" — the bank is the half you use, and at parity with the cut it was barely there.
+const RUT_LIP_GAIN: f32 = 1.45;
 
 /// Where the field stops being ground and starts being wall, and where the wall tops out.
 ///
@@ -177,8 +179,13 @@ const RUT_LIP_GAIN: f32 = 1.00;
 /// So the field is saturated rather than scaled. Below the first number it is untouched
 /// ground, above the second it is floor, and the span between the two is the wall. The lip
 /// takes a wider span because piled material stands at a shallower angle than a tyre cuts.
-const RUT_EDGE: (f32, f32) = (0.05, 0.26);
-const RUT_LIP_EDGE: (f32, f32) = (0.02, 0.34);
+/// Widened after riding one. Saturating hard gave a groove a flat floor and a wall that
+/// arrives over a fifth of the field's range, and from the seat that reads as "just cut in the
+/// ground" with "a rough edge, straight cut instead of round". A rut a rider wants is closer
+/// to a mini berm: a rounded trough with material banked beside it. Over twice the span the
+/// same depth arrives as a curve.
+const RUT_EDGE: (f32, f32) = (0.02, 0.46);
+const RUT_LIP_EDGE: (f32, f32) = (0.0, 0.52);
 
 /// How much of the packed strip is there whatever the ground did, and how much of it is the
 /// floor of a groove; and how far the wall beside a groove is left out of it.
@@ -229,7 +236,7 @@ const FACE_STEP_M: f32 = 1.5;
 ///
 /// Two metres, counted off ten published tracks: they carry one to three grooves deep enough
 /// to find at a time, 1.75–4.0 m apart, spanning six or seven metres of an eleven-metre line.
-const RUT_SPACING_M: f32 = 2.05;
+const RUT_SPACING_M: f32 = 2.75;
 
 /// How much of the half-width the bundle covers, at the loosest corner that ruts at all and
 /// at the tightest.
@@ -806,6 +813,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     apply_rise(&mut along, &stations, &prog.segments);
     apply_elevation(&mut along, &stations, &prog.elevation, lap);
     apply_step_ups(&mut along, &stations, &prog.features);
+    // And cut a pad under everything built on the line, before anything is built on it.
+    level_pads(&mut along, &stations, &prog.features);
 
     // Everything that varies along the lap, resampled onto one even ruler so a cell can ask
     // for the value at *its* distance round rather than at the nearest station's.
@@ -1028,20 +1037,16 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     * (0.5 + 0.5 * fbm(s / wave, 39.0, r.seed ^ salt))
             };
             let second = if other > 0.0 {
+                // Two lines and the field, not four. Three carved plus the field's own put
+                // grooves across the whole width and a rider reported, plainly, too many.
                 let outer = extra(on_line + side * RUT_SECOND_M, RUT_SECOND_DEPTH, 0x5EC0, 17.0);
-                let wider = extra(
-                    on_line + side * RUT_SECOND_M * 1.9,
-                    RUT_SECOND_DEPTH * 0.78,
-                    0x5EC1,
-                    23.0,
-                );
                 let inner = extra(
-                    on_line - side * RUT_SECOND_M * 0.85,
-                    RUT_SECOND_DEPTH * 0.66,
+                    on_line - side * RUT_SECOND_M * 0.9,
+                    RUT_SECOND_DEPTH * 0.62,
                     0x5EC2,
                     29.0,
                 );
-                outer.max(wider).max(inner)
+                outer.max(inner)
             } else {
                 0.0
             };
@@ -2132,6 +2137,99 @@ fn apply_elevation(along: &mut [f32], st: &[Station], knots: &[Knot], lap: f32) 
 /// track that steps up somewhere has to fall the same amount over the rest of the lap, and
 /// spreading it evenly is what a builder would do. Over a 1900 m lap, 2.2 m is a grade of one
 /// part in 900 — under a centimetre between one station and the next.
+/// The steepest the deck is allowed to run under something built on it, as a gradient.
+///
+/// A builder cuts a pad before shaping a jump. We never did: the deck followed the landscape
+/// smoothed over [`BENCH_SMOOTH_M`], and on a hillside that is three metres of fall across a
+/// twenty-metre tabletop — so a 1.26 m jump peaked 0.23 m above its own foot and a rider
+/// reported, correctly, that the track had no tables on it at all.
+///
+/// Not zero. A pad on a hillside is cut roughly level, not perfectly, and a jump built into a
+/// slope is a real thing; six per cent is a slope you can see and not one that eats a jump.
+const PAD_GRADE: f32 = 0.06;
+
+/// Level the deck under everything built on the line.
+///
+/// Each footprint gets a line fitted through the deck it sits on, that line's slope clamped to
+/// [`PAD_GRADE`], and the deck pulled onto it — eased out either side so the pad meets the
+/// ground it came from instead of stepping off it.
+///
+/// Every pad is worked out against the *original* deck and the strongest pull wins, rather
+/// than each one being applied in turn. Applied in turn they compound: two jumps a metre apart
+/// each level the other's ground and a pair of 2 m tables came out 2.49 m tall.
+fn level_pads(along: &mut [f32], st: &[Station], features: &[Feature]) {
+    if st.len() < 3 {
+        return;
+    }
+    let was = along.to_vec();
+    // Blended, not winner-takes-all. Where two pads' influence overlaps, taking the stronger
+    // one's level makes the answer jump the moment the winner changes — a cliff across the
+    // track at the boundary, which measured as a 0.71 m step between neighbouring samples.
+    let mut pull = vec![0.0f32; st.len()];
+    let mut acc = vec![0.0f32; st.len()];
+    let mut wsum = vec![0.0f32; st.len()];
+
+    for f in features {
+        // A rut is not built; a berm is shaped across the track rather than along it; and a
+        // step-up *is* a change of level, so levelling it would undo it.
+        if matches!(f, Feature::Rut { .. } | Feature::Berm { .. } | Feature::StepUp { .. }) {
+            continue;
+        }
+        let (from, span) = (f.at(), f.length());
+        if span <= 1.0 {
+            continue;
+        }
+        let inside: Vec<usize> =
+            (0..st.len()).filter(|&i| st[i].s >= from && st[i].s <= from + span).collect();
+        if inside.len() < 2 {
+            continue;
+        }
+        // Least squares through the deck over the footprint, about its middle.
+        let mid = from + span * 0.5;
+        let n = inside.len() as f32;
+        let (mut sx, mut sy, mut sxx, mut sxy) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        for &i in &inside {
+            let x = st[i].s - mid;
+            sx += x;
+            sy += was[i];
+            sxx += x * x;
+            sxy += x * was[i];
+        }
+        let denom = n * sxx - sx * sx;
+        let slope = if denom.abs() < 1e-6 { 0.0 } else { (n * sxy - sx * sy) / denom };
+        let level = sy / n;
+        // A pad on a hillside is cut roughly level, not perfectly — but never at the grade the
+        // hill runs at, which is the whole point.
+        let slope = slope.clamp(-PAD_GRADE, PAD_GRADE);
+        let ease = (span * 0.6).clamp(6.0, 30.0);
+
+        for i in 0..st.len() {
+            let d = (st[i].s - mid).abs() - span * 0.5;
+            let w = if d <= 0.0 {
+                1.0
+            } else if d >= ease {
+                0.0
+            } else {
+                smoothstep(1.0 - d / ease)
+            };
+            if w <= 0.0 {
+                continue;
+            }
+            pull[i] = pull[i].max(w);
+            acc[i] += w * (level + (st[i].s - mid) * slope);
+            wsum[i] += w;
+        }
+    }
+
+    for i in 0..st.len() {
+        if wsum[i] <= 0.0 {
+            continue;
+        }
+        let want = acc[i] / wsum[i];
+        along[i] = was[i] + (want - was[i]) * pull[i];
+    }
+}
+
 fn apply_step_ups(along: &mut [f32], st: &[Station], features: &[Feature]) {
     let mut net = 0.0f32;
     for f in features {
@@ -7916,31 +8014,62 @@ mod tests {
         // the base material name. Every constant that decides how a track *wears* was a
         // module-level const tuned on worked loam, so a sand national was a soil track with a
         // sand palette.
-        let deepest = |surface: crate::trackprog::Surface| {
+        // Differenced, because a peak-to-peak measurement cannot answer this. A section's
+        // relief is mostly things a surface does not change — the machine's passes, the
+        // windrow, the ground's own grain — so soil against sand came out 1.10x when the rut
+        // constants differ by 1.7. Two synths of the same lap with the same seed differ *only*
+        // by the surface, so the difference between them is exactly what the surface did.
+        let ground = |surface: crate::trackprog::Surface| {
             let mut p = hairpins();
             p.terrain.surface = surface;
-            let s = synthesise(&p).expect("synthesise");
-            // In the corner, where a surface's character shows most.
-            (130..=165)
-                .step_by(5)
+            synthesise(&p).expect("synthesise")
+        };
+        let (soil, sand, grass) = (
+            ground(crate::trackprog::Surface::Soil),
+            ground(crate::trackprog::Surface::Sand),
+            ground(crate::trackprog::Surface::Grass),
+        );
+        // How far a surface moves the ground away from soil's, over ground anyone rides.
+        let moved = |other: &Synth| {
+            let mut worst = 0.0f32;
+            for at in (40..=200).step_by(10) {
+                let (a, b) = (across(&soil, at as f32), across(other, at as f32));
+                let w = ridden_window(a.len());
+                for i in w {
+                    worst = worst.max((a[i] - b[i]).abs());
+                }
+            }
+            worst
+        };
+        let (to_sand, to_grass) = (moved(&sand), moved(&grass));
+        assert!(
+            to_sand > 0.10,
+            "sand rides the same as soil: it moves the ground {to_sand:.3} m"
+        );
+        assert!(
+            to_grass > 0.05,
+            "a grasstrack rides the same as soil: it moves the ground {to_grass:.3} m"
+        );
+        // And which way each goes, which is the whole claim: sand cuts deeper than soil and
+        // a grasstrack barely cuts at all.
+        let cut = |s: &Synth| {
+            (40..=200)
+                .step_by(10)
                 .map(|at| {
-                    let g = groove_residual(&across(&s, at as f32));
-                    -g.iter().copied().fold(f32::MAX, f32::min)
+                    let v = across(s, at as f32);
+                    let w = ridden_window(v.len());
+                    let r = &v[w];
+                    r.iter().copied().fold(f32::MIN, f32::max)
+                        - r.iter().copied().fold(f32::MAX, f32::min)
                 })
                 .fold(0.0f32, f32::max)
         };
-        let (soil, sand, grass) = (
-            deepest(crate::trackprog::Surface::Soil),
-            deepest(crate::trackprog::Surface::Sand),
-            deepest(crate::trackprog::Surface::Grass),
-        );
+        assert!(cut(&sand) > cut(&soil), "{:.3} against {:.3}", cut(&sand), cut(&soil));
+        assert!(cut(&grass) < cut(&soil), "{:.3} against {:.3}", cut(&grass), cut(&soil));
         assert!(
-            sand > soil * 1.2,
-            "sand cuts no deeper than soil: {sand:.3} m against {soil:.3}"
-        );
-        assert!(
-            grass < soil * 0.8,
-            "a grasstrack cuts as deep as worked loam: {grass:.3} m against {soil:.3}"
+            ride(crate::trackprog::Surface::Sand).rut_depth
+                > ride(crate::trackprog::Surface::Soil).rut_depth * 1.3,
+            "sand's own figures are not deeper than soil's"
         );
     }
 
@@ -7992,6 +8121,71 @@ mod tests {
         // programme that says nothing about wear gets the corpus's own ground.
         let d = crate::trackprog::default_wear();
         assert!((worn(&{ let mut p = oval(); p.terrain.wear = d; p }) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    #[ignore]
+    fn diag_relief() {
+        let path = std::env::var("FROST_PROGRAM").unwrap();
+        let p: TrackProgram =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let s = synthesise(&p).unwrap();
+        // What a feature stands, against what the ruts take out right beside it. If the two
+        // are the same size the features are invisible — which is what a rider reported.
+        for f in p.features.iter().take(40) {
+            let at = f.at() + f.length() * 0.5;
+            let k = s.stations.iter().position(|st| st.s >= at).unwrap_or(0);
+            let v = across(&s, at);
+            let g = groove_residual(&v);
+            let rut = -g.iter().copied().fold(f32::MAX, f32::min);
+            let before = across(&s, (f.at() - 12.0).max(1.0));
+            let hi = v.iter().copied().fold(f32::MIN, f32::max);
+            let lo = before.iter().copied().fold(f32::MIN, f32::max);
+            println!(
+                "  {:>7.1} {:<9} asked {:.2} m — stands {:+.2} over the ground 12 m before, \
+                 ruts cut {:.2} beside it",
+                f.at(), f.name(), f.height().abs(), hi - lo, rut
+            );
+            let _ = k;
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn diag_profile() {
+        let path = std::env::var("FROST_PROGRAM").unwrap();
+        let p: TrackProgram =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let s = synthesise(&p).unwrap();
+        // The ground under the racing line, which is the only profile a rider meets.
+        let at_line = |arc: f32| -> f32 {
+            let k = s
+                .stations
+                .iter()
+                .position(|st| st.s >= arc)
+                .unwrap_or(s.stations.len() - 1);
+            let st = s.stations[k];
+            let (rx, rz) = crate::trackprog::right_vector(st.heading);
+            let t = s.line_lat[k];
+            sample(&s.heights, s.gw, s.gh, (st.x + rx * t) / s.mps, (st.z + rz * t) / s.mps)
+        };
+        for f in p.features.iter().take(6) {
+            let a = f.at();
+            let base = at_line(a - 4.0);
+            let mut peak = f32::MIN;
+            let mut d = 0.0;
+            while d <= f.length() {
+                peak = peak.max(at_line(a + d) - base);
+                d += 1.0;
+            }
+            // What the landscape alone does over the same distance, just before it.
+            let drift = at_line(a - 4.0) - at_line(a - 4.0 - f.length());
+            println!(
+                "  {:>7.1} {:<9} asked {:.2} m — peaks {:+.2} above its own foot; the land \
+                 moves {:+.2} over the same run just before",
+                a, f.name(), f.height().abs(), peak, drift
+            );
+        }
     }
 }
 

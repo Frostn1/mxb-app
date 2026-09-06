@@ -3,6 +3,14 @@
 ## 2026-09-06
 
 ### Changed
+- Jumps stand up on the ground they are built on. A track cut into a hillside had its ground
+  falling three metres across a jump's own footprint, so a metre-and-a-quarter tabletop rose a
+  handspan above its own foot and a lap read as having no jumps on it at all. Every jump now
+  gets a pad cut level under it, the way a builder does it.
+- Ruts are rounded, with a bank of material beside each one to lean on, instead of a
+  square-edged slot cut into the ground. There are fewer of them and they sit further apart.
+- Jumps are sized for a 250, not a 450. A gap only the fastest bike on the gate can clear is
+  one most riders single.
 - Jumps are sized to the speed a bike actually carries. Acceleration used to hold flat all the
   way to the top, so a lap left a hairpin at 33 km/h and was doing 100 sixty metres later, and
   gaps got built for a speed nobody arrives at. A two-kilometre lap now runs where one runs.

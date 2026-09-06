@@ -1348,8 +1348,8 @@ mod tests {
         // The whole point of knowing how fast anyone is going. The same jump is fine down a
         // straight and impossible fifteen metres out of a ten-metre turn, and nothing in the
         // pipeline could tell the two apart: height, spacing and density all pass either way.
-        // Five metres out of a ten-metre turn, so the lip arrives at about 53 km/h — and a
-        // twenty-four metre gap wants half as much again.
+        // Five metres out of a ten-metre turn, so the lip arrives barely moving — and a
+        // twenty-four metre gap wants far more than that.
         let hairpin_exit = 250.0 + std::f32::consts::PI * 10.0 + 5.0;
         let mut p = hairpin_then_straight();
         p.features = vec![Feature::Double { at: hairpin_exit, height: 2.5, gap: 24.0, lip: 10.0 }];
@@ -1362,7 +1362,7 @@ mod tests {
 
         // And the same jump two hundred metres down the straight is nobody's business.
         let mut ok = hairpin_then_straight();
-        ok.features = vec![Feature::Double { at: 150.0, height: 2.5, gap: 24.0, lip: 10.0 }];
+        ok.features = vec![Feature::Double { at: 150.0, height: 2.5, gap: 16.0, lip: 10.0 }];
         assert!(
             !review(&ok).problems.iter().any(|c| c.contains("cannot be cleared")),
             "{:?}",

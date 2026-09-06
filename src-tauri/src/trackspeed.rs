@@ -40,7 +40,7 @@ const A_LAT: f32 = 4.6;
 ///
 /// Traction and wheelie, not engine. It only applies at the bottom of the rev range and out
 /// of a corner, which is exactly where a rider is not using all of it anyway.
-const A_TRACTION: f32 = 4.0;
+const A_TRACTION: f32 = 3.4;
 
 /// Specific power, watts per kilogram of bike and rider, as it reaches the ground.
 ///
@@ -52,10 +52,18 @@ const A_TRACTION: f32 = 4.0;
 ///
 /// A 450 makes about 40 kW at the crank. Nothing like all of it reaches the ground on dirt:
 /// what is left after wheelspin, the rider's own limits and a surface that moves is a small
-/// fraction, and 30 W/kg is what puts a lap where a lap actually is. It gives 3.0 m/s² at
-/// 10 m/s, 1.5 at 20 and 1.2 at 25 — a bike that pulls hard out of a turn and then stops
-/// gaining.
-const P_SPEC: f32 = 30.0;
+/// fraction.
+///
+/// And a track is not built for the fastest bike on it. Reported from the seat, on a 250:
+/// "on a two fifty I could maybe clear one or two of them, the other one I couldn't jump, I
+/// just singled everything" — against gaps this had already been slowed once to size. A 250
+/// carries perhaps three quarters of a 450's drive out of a turn, and a track only the
+/// fastest bike can ride is a track most people push round.
+///
+/// So the figure is a 250's, not a 450's. It gives 2.2 m/s² at 10 m/s and 1.1 at 20 — a bike
+/// that gets going and then stops gaining, which is what a rider actually has under them
+/// halfway down a straight.
+const P_SPEC: f32 = 22.0;
 
 /// Brakes, m/s². Limited by the same ground that limits everything else.
 const A_BRAKE: f32 = 6.0;
@@ -64,7 +72,7 @@ const A_BRAKE: f32 = 6.0;
 ///
 /// Measured off lap times rather than picked: a 2 km national lap runs about two minutes,
 /// which is a 60 km/h average, and a lap whose *average* is 60 does not have a 100 km/h top.
-const V_MAX: f32 = 22.0;
+const V_MAX: f32 = 20.0;
 
 /// The slowest a corner is ever taken, m/s. A first-gear pivot turn is still moving.
 const V_MIN: f32 = 3.0;
@@ -79,7 +87,9 @@ const G: f32 = 9.81;
 /// on whether the rider is trying to jump it or scrub it, none of which this knows. Four
 /// fifths is the conservative reading: it *under*-states the carry, so a gap this says is too
 /// long really is too long, which is the direction a check should err in.
-const LAUNCH_SHARE: f32 = 0.8;
+/// Lowered with the rest. A gap the arithmetic says is *exactly* reachable is one a rider
+/// cases, and twice now a built track has come back with jumps that were only just clearable.
+const LAUNCH_SHARE: f32 = 0.72;
 
 /// What a rider carries round the lap.
 pub struct Speed {
@@ -310,10 +320,10 @@ mod tests {
             "{down_the_straight:.1} m off the straight against {out_of_the_corner:.1} m out of \
              the hairpin"
         );
-        // And the arithmetic itself: 25 m/s off a 30° lip, leaving at four fifths of it,
-        // is 625 * sin(48°) / 9.81 — a little over forty-seven metres.
+        // And the arithmetic itself: 25 m/s off a 30° lip, leaving at `LAUNCH_SHARE` of it,
+        // is 625 * sin(2 * 21.6°) / 9.81 — a little under forty-four metres.
         let flat = Speed { v: vec![25.0; 8], lap: 8.0 };
-        assert!((flat.carry(0.0, 30.0) - 47.3).abs() < 1.0, "{:.1}", flat.carry(0.0, 30.0));
+        assert!((flat.carry(0.0, 30.0) - 43.6).abs() < 1.0, "{:.1}", flat.carry(0.0, 30.0));
     }
 
     #[test]
