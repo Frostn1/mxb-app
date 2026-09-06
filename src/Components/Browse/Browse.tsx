@@ -31,7 +31,6 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@/Components/ui/alert-dialog";
-import { cn } from "@/lib/utils";
 
 interface BrowseProps {
   modType: ModType;
@@ -198,7 +197,9 @@ export default function Browse({
   // "Newest, with a picture" is the only claim the catalog actually supports, so the
   // banner appears on the default sort with nothing filtered and stands down otherwise.
   const featured =
-    !query.trim() && categoryId === null && activeSort === sortOptions[0]?.value
+    !query.trim() &&
+    (categoryId === null || categoryId === modType.categoryId) &&
+    activeSort === sortOptions[0]?.value
       ? mods.find((m) => m.image)
       : undefined;
 
@@ -229,6 +230,24 @@ export default function Browse({
             className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
           />
         </div>
+        {/* The category filter was a row of pills of its own. Three bands of chrome
+            before the first mod is what this redesign set out to remove, so it folds in
+            here beside the sort it belongs with. */}
+        <Select
+          value={String(categoryId ?? modType.categoryId)}
+          onValueChange={(v) => setCategoryId(Number(v))}
+        >
+          <SelectTrigger className="h-7 w-[164px] bg-card text-[12px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {modType.categories.map((c) => (
+              <SelectItem key={c.id} value={String(c.id)}>
+                {t(c.label)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Select value={activeSort} onValueChange={(v) => setSort(v as ModSort)}>
           {/* Wide enough for the longest translated label ("Popolari questa
               settimana") rather than the English one. */}
@@ -245,26 +264,6 @@ export default function Browse({
         </Select>
         <HelpHint title={t("nav.browse")} description={t("browse.help")} />
       </ContextBarRight>
-
-      <div className="flex flex-none flex-wrap items-center gap-2 px-7 pb-3 pt-3.5">
-        {modType.categories.map((c) => {
-          const on = c.id === categoryId;
-          return (
-            <button
-              key={c.id}
-              onClick={() => setCategoryId(c.id)}
-              className={cn(
-                "u-skew cursor-default px-3 py-[4px] font-cond text-[12px] font-semibold uppercase tracking-[0.12em] transition-colors",
-                on
-                  ? "bg-primary text-primary-foreground"
-                  : "border border-input text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <span className="u-unskew block">{t(c.label)}</span>
-            </button>
-          );
-        })}
-      </div>
 
       <div
         ref={grid}

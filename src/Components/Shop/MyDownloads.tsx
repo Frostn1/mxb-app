@@ -60,6 +60,7 @@ import {
 } from "@/Components/ui/alert-dialog";
 import ShopDetail from "./ShopDetail";
 import CategoryPill from "./CategoryPill";
+import { ContextBarRight } from "../Shell/ContextBar";
 import { Button } from "@/Components/ui/button";
 import { Skeleton } from "@/Components/ui/skeleton";
 import {
@@ -528,15 +529,17 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-none items-center gap-2 px-7 pb-3">
-        <span className="text-[12.5px] text-muted-foreground">
+      {/* Count and account controls ride in the shell's context bar beside the
+          Shop/Hub tabs, rather than opening a band of their own under them. */}
+      <ContextBarRight>
+        <span className="tabular-figures text-[12.5px] text-muted-foreground">
           {loggedIn && !loading
             ? t("purchases.count", { count: shown.length })
             : t("shop.myDownloads")}
         </span>
         {loggedIn && (
-          <div className="ml-auto flex items-center gap-2">
-            <div className="flex w-[240px] items-center gap-2 rounded-lg border border-input bg-card px-3 py-1.5">
+          <>
+            <div className="flex h-7 w-[220px] items-center gap-2 border border-input bg-card px-2.5">
               <Search className="size-3.5 text-faint" />
               <input
                 value={query}
@@ -556,9 +559,9 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
             <Button variant="outline" size="sm" onClick={() => void logout()}>
               <LogOut className="size-3.5" /> {t("shop.logOut")}
             </Button>
-          </div>
+          </>
         )}
-      </div>
+      </ContextBarRight>
 
       {/* Laid out like the catalog's, so the two tabs read as one screen. */}
       {loggedIn && !loading && purchases.length > 0 && (

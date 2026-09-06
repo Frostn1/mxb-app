@@ -14,7 +14,6 @@ import {
   ListChecks,
   CheckCircle2,
   Circle,
-  PackagePlus,
   FileArchive,
   Folder,
   Loader2,
@@ -994,40 +993,25 @@ export default function Library({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <HelpHint title={t("nav.library")} description={t("library.help")} />
-      </ContextBarRight>
-
-      <div className="flex flex-none flex-wrap items-center gap-2 px-7 pb-3 pt-3.5">
-        {/* The library only ever showed what is on disk. This is the rest of the story —
-            what used to be there, which is the only way to name a mod you already deleted. */}
-        <Button
-          variant={showRemoved ? "default" : "outline"}
-          size="sm"
-          onClick={() => setShowRemoved((v) => !v)}
-          title={t("library.showRemovedHint")}
-        >
-          <History className="size-3.5" /> {t("library.showRemoved")}
-        </Button>
         <Button
           variant={selectMode ? "default" : "outline"}
           size="sm"
           onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
           disabled={loading}
         >
-          <ListChecks className="size-3.5" />{" "}
+          <ListChecks className="size-3.5" />
           {selectMode ? t("common.done") : t("common.select")}
         </Button>
-        {/* The same install flow as dropping, for anyone the OS drop event never reaches —
-            and a discoverable one for anyone who never thought to drag a file here. */}
+        {/* Everything that changes what is on disk, behind one control. These were a row
+            of their own, which put three bands of chrome above the first mod. */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" disabled={staging}>
+            <Button variant="outline" size="icon" className="h-8 w-8" title={t("import.action")}>
               {staging ? (
                 <Loader2 className="size-3.5 animate-spin" />
               ) : (
-                <PackagePlus className="size-3.5" />
-              )}{" "}
-              {staging ? t("import.staging") : t("import.action")}
+                <MoreHorizontal className="size-4" />
+              )}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -1039,20 +1023,23 @@ export default function Library({
               <Folder className="size-3.5" />
               {t("import.pickFolder")}
             </DropdownMenuItem>
-            {/* The other end of the Share action below — someone pasted you a code. */}
-            <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => importShare()}>
               <ClipboardPaste className="size-3.5" />
               {t("share.importAction")}
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => setShowRemoved((v) => !v)}>
+              <History className="size-3.5" />
+              {t("library.showRemoved")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void load()} disabled={loading || busy}>
+              <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+              {t("locker.rescan")}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="outline" size="sm" onClick={load} disabled={loading || busy}>
-          <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />{" "}
-          {t("locker.rescan")}
-        </Button>
-      </div>
-
+        <HelpHint title={t("nav.library")} description={t("library.help")} />
+      </ContextBarRight>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
         {error ? (

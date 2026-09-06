@@ -11,7 +11,6 @@ import type { GameCaps } from "../../types";
 import type { StudioTab } from "../Studio/Studio";
 import { RAIL, railItemFor, type DashboardView, type RailItem } from "./nav";
 import DownloadQueue from "./DownloadQueue";
-import GameSwitcher from "./GameSwitcher";
 import Brand from "./Brand";
 import ContextBar from "./ContextBar";
 import WindowControls, { IS_MAC } from "./WindowControls";
@@ -93,17 +92,15 @@ export default function TopRail({ view, studioTab, plugins, onNavigate, leftRef,
       data-tauri-drag-region
       className={cn(
         "flex h-[52px] flex-none select-none items-center border-b border-border bg-window",
-        // Clear the space macOS reserves for its traffic-lights.
-        IS_MAC ? "pl-[82px]" : "pl-[18px]",
+        // Clear the space macOS reserves for its traffic-lights — and pad the trailing
+        // edge there too, because mac draws none of our own window controls, so PLAY
+        // would otherwise sit flush against the window edge.
+        IS_MAC ? "pl-[82px] pr-4" : "pl-[18px]",
       )}
     >
       <Brand />
 
-      <div className="ml-3">
-        <GameSwitcher compact />
-      </div>
-
-      <nav className="ml-6 flex h-full items-stretch gap-[22px]">
+      <nav className="ml-7 flex h-full items-stretch gap-[22px]">
         {items.map((item) => {
           const on = active?.id === item.id;
           return (
