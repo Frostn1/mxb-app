@@ -46,59 +46,54 @@ const Arc = z.object({
 });
 
 /**
- * The four features that are the same shape as each other, carried as one variant.
+ * Every feature, as one object tagged by `kind`, with every field always present.
  *
- * Not a simplification of the track program — the wire format is byte-for-byte what eight
- * separate variants produced, because each object still names its own `kind`. It is a
- * constrained-decoding limit: the API compiles this schema into a grammar, and a union of
- * eight object alternatives inside an array compiles to one too large to accept. Measured
- * rather than guessed — eight is rejected and six is accepted, on every model from Haiku 4.5
- * up to Opus 5, so this was never a question of paying for a bigger model.
+ * Two constraints shaped this, and neither is about the track.
  *
- * Collapsing the four that share `at`/`length`/`height` into a single variant tagged by an
- * enum takes the union to five and costs nothing. If a fifth same-shaped feature is ever
- * added, it belongs in this enum rather than beside it.
+ * The API compiles the schema into a grammar for constrained decoding, and there is a ceiling
+ * on how big that grammar may be. A union of eight object alternatives is over it. Collapsing
+ * the same-shaped ones to five was still over it. What actually costs is **alternatives**, and
+ * an optional field is an alternative too: written as `.nullable()`, ten fields put nine
+ * `anyOf`s inside the object and the program went straight back over the ceiling — the collapse
+ * bought nothing because it paid the same price a different way.
+ *
+ * Measured, not reasoned: the same program with the nullables removed and *nothing else*
+ * changed compiles, with the two-variant segment union still in it. So there are no optional
+ * fields here. Every kind writes every field, and the ones that mean nothing to it are 0 (or
+ * an empty `shape`). Which fields a kind actually reads is in the prompt, and the app ignores
+ * the rest — a tabletop has never looked at `gap`.
+ *
+ * Ugly, and the alternative is a Generate button that returns 502 for everyone.
  */
-const SimpleFeature = z.object({
-  kind: z.enum(["tabletop", "roller", "stepUp", "berm"]),
+const Feature = z.object({
+  kind: z.enum([
+    "tabletop",
+    "roller",
+    "stepUp",
+    "berm",
+    "double",
+    "whoops",
+    "rut",
+    "custom",
+  ]),
   at: z.number().describe("metres round the lap from the start"),
-  length: z.number(),
+  length: z
+    .number()
+    .describe(
+      "tabletop/roller/stepUp/berm/rut/custom; 0 otherwise. A tabletop's is its WHOLE footprint, ramp to ramp",
+    ),
   height: z
     .number()
-    .describe("metres; for stepUp, the ground gained — negative for a step down"),
+    .describe("metres, all but rut and custom; for stepUp the ground gained, negative for a step down; 0 otherwise"),
+  gap: z.number().describe("double: metres of flat ground between the two jumps; 0 otherwise"),
+  lip: z.number().describe("double: metres of takeoff face; 0 otherwise"),
+  count: z.number().int().describe("whoops: how many; 0 otherwise"),
+  spacing: z.number().describe("whoops: metres crest to crest; 0 otherwise"),
+  depth: z.number().describe("rut: metres deep; 0 otherwise"),
+  shape: z
+    .array(z.object({ u: z.number(), h: z.number() }))
+    .describe("custom: heights along the feature, u running 0 at its start to 1 at its end; [] otherwise"),
 });
-
-const Feature = z.discriminatedUnion("kind", [
-  SimpleFeature,
-  z.object({
-    kind: z.literal("double"),
-    at: z.number(),
-    height: z.number(),
-    gap: z.number().describe("metres of flat ground between the two jumps"),
-    lip: z.number().describe("metres of takeoff face"),
-  }),
-  z.object({
-    kind: z.literal("whoops"),
-    at: z.number(),
-    count: z.number().int(),
-    spacing: z.number().describe("metres crest to crest"),
-    height: z.number(),
-  }),
-  z.object({
-    kind: z.literal("custom"),
-    at: z.number(),
-    length: z.number(),
-    shape: z
-      .array(z.object({ u: z.number(), h: z.number() }))
-      .describe('heights along the feature; u runs 0 at its start to 1 at its end'),
-  }),
-  z.object({
-    kind: z.literal("rut"),
-    at: z.number(),
-    length: z.number(),
-    depth: z.number().describe("metres; corners grow their own, this is for elsewhere"),
-  }),
-]);
 
 const TrackProgram = z.object({
   name: z.string(),
