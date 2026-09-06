@@ -28,6 +28,13 @@
 ## 2026-09-06
 
 ### Changed
+- The step in the ground is gone. Where two legs of a lap graded into the same piece of
+  field, the ground between them could stand a metre and a half proud in one sample — ground
+  outside the track now slumps to a slope instead of standing as a wall.
+- Ruts read as ruts again: the floor of a groove is darker than the line it is worn into, and
+  the dry dirt thrown off the line is paler than the ground around it rather than darker.
+- Band edges no longer come out as teeth. An edge was wandering at three quarters of a metre
+  where the ground is drawn at four tenths, which no mask can hold.
 - Ruts are shaped the way a ridden track's are: fewer grooves, further apart, with flatter
   bottoms, and smooth along their length instead of chopped up at every scale. A lap holds
   a line rather than shaking the bike over it.
