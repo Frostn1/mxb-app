@@ -3,6 +3,24 @@
 ## 2026-09-05
 
 ### Changed
+- Jump faces are shaped the way a machine leaves them: curving up from flat ground and
+  steepest right at the lip. They used to flatten off over the last metre before the edge,
+  which is why a big jump could still ride like a roller.
+- Landings are longer and gentler than the takeoffs that feed them, instead of a mirror image
+  of them.
+- Jumps are sized to the speed there is. A gap the lap cannot deliver you to at speed gets
+  shortened, and a big double goes where there is a run at it rather than straight out of a
+  hairpin.
+- Braking bumps form where you are actually braking, and for as long as you are — a long
+  approach to a hairpin builds a long braking zone, a flat kink builds almost none.
+- Corners grow a second line beside the first, so there is more than one way through after a
+  few motos.
+- The dark packed line you steer by and the groove you drop into are now the same line.
+- A jump's face carries a single line up it, and the lip stays swept.
+- Sand tracks ride like sand: deeper ruts further apart, far bigger berms, and long swells
+  under braking instead of a sharp washboard. Grass circuits barely wear at all.
+- Tracks can be built anywhere from freshly prepped to raced-in, and there is ground left for
+  a session to cut its own lines into either way.
 - Corners on a track you build now have ruts you can sit in. A groove is cut shallow and the
   dirt out of it stands as a low smooth bank on its outer side, with flat ground between one
   and the next — so a corner gives you something to lean on instead of a set of holes.

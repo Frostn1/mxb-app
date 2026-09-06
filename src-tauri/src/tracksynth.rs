@@ -772,7 +772,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     );
     let feat = feature_profile(&prog.features, lap, prog.blend.max(0.0));
     let berms = berm_profile(&prog.features, &turn, lap);
-    let ruts = rut_profile(&prog.features, &turn, lap, r.seed);
+    let feel = ride(prog.terrain.surface);
+    let ruts = rut_profile(&prog.features, &turn, lap, r.seed, &feel);
     let widths = width_profile(prog.width * 0.5, lap, r.seed);
     let speed = crate::trackspeed::of(prog);
     let chop = roughness_profile(&turn, &speed, lap);
@@ -849,7 +850,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         let k = turn.at(s);
         let auto = if k != 0.0 {
             let radius = 1.0 / k.abs();
-            CORNER_BERM_M
+            feel.berm
                 * smoothstep(
                     ((BERM_RADIUS_M.0 - radius) / (BERM_RADIUS_M.0 - BERM_RADIUS_M.1))
                         .clamp(0.0, 1.0),
@@ -921,7 +922,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         if depth > 0.0 {
             let spread = ruts.spread.at(s);
             let mid = ruts.centre.at(s) * half;
-            let reach = (half * spread).max(RUT_SPACING_M) + RUT_SPACING_M;
+            let reach = (half * spread).max(feel.rut_spacing) + feel.rut_spacing;
             let focus = ruts.focus.at(s);
             let on_line = line.at(s);
 
@@ -945,7 +946,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             };
             // The main line, where the paint says it is, wandering in depth down the lap so
             // it is a rut rather than a channel.
-            let main = trough(on_line, RUT_GROOVE_M)
+            let main = trough(on_line, feel.groove)
                 * (0.82 + 0.18 * fbm(s / 13.0, 21.0, r.seed ^ 0x11E5));
             // And the corner's other way through: outside the first, shallower, and only
             // where the turn has run long enough to have grown one. Its own variation, or it
@@ -953,7 +954,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             let other = ruts.second.at(s) * (1.0 - focus);
             let second = if other > 0.0 {
                 let side = if on_line >= 0.0 { -1.0 } else { 1.0 };
-                trough(on_line + side * RUT_SECOND_M, RUT_GROOVE_M * 0.9)
+                trough(on_line + side * RUT_SECOND_M, feel.groove * 0.9)
                     * RUT_SECOND_DEPTH
                     * other
                     * (0.55 + 0.45 * fbm(s / 17.0, 39.0, r.seed ^ 0x5EC0))
@@ -965,7 +966,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             let off = t - mid;
             if off.abs() <= reach || carved > 0.0 {
                 let fade = 1.0 - (off.abs() / reach).min(1.0).powi(2);
-                let field = |at: f32| fbm(at / RUT_SPACING_M, s / RUT_ALONG_M, r.seed ^ 0x2117);
+                let field =
+                    |at: f32| fbm(at / feel.rut_spacing, s / RUT_ALONG_M, r.seed ^ 0x2117);
                 // Ground, wall, floor — see `RUT_EDGE`. Saturating the field rather than
                 // scaling it is what gives a groove a bottom to sit on and leaves the ground
                 // between two of them flat.
@@ -984,7 +986,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let k = turn.at(s);
                 let bend = (k.abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
                 let outward = -k.signum() * bend
-                    + (off / RUT_SPACING_M).clamp(-1.0, 1.0) * (1.0 - bend);
+                    + (off / feel.rut_spacing).clamp(-1.0, 1.0) * (1.0 - bend);
                 let w = 0.5 * (1.0 + outward.clamp(-1.0, 1.0));
                 let lip = shape(field(off + RUT_LIP_OFFSET_M), RUT_LIP_EDGE) * (1.0 - w)
                     + shape(field(off - RUT_LIP_OFFSET_M), RUT_LIP_EDGE) * w;
@@ -1039,15 +1041,15 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             if brake > 0.0 && across > 0.0 {
                 let drift = 0.35 * fbm(s / 26.0, 7.0, r.seed ^ 0xB4AE);
                 let ripple =
-                    ((s / BRAKING_WAVELENGTH_M + drift) * std::f32::consts::TAU).sin();
-                heights[i] += ripple * BRAKING_HEIGHT_M * 0.5 * brake * across;
+                    ((s / feel.brake.0 + drift) * std::f32::consts::TAU).sin();
+                heights[i] += ripple * feel.brake.1 * 0.5 * brake * across;
             }
             // And the longer, lower chop everybody's rear wheel leaves on the way out.
             let out = chop.accel.at(s);
             if out > 0.0 && across > 0.0 {
                 let drift = 0.4 * fbm(s / 31.0, 13.0, r.seed ^ 0xACCE);
-                let ripple = ((s / ACCEL_WAVELENGTH_M + drift) * std::f32::consts::TAU).sin();
-                heights[i] += ripple * ACCEL_HEIGHT_M * 0.5 * out * across;
+                let ripple = ((s / feel.accel.0 + drift) * std::f32::consts::TAU).sin();
+                heights[i] += ripple * feel.accel.1 * 0.5 * out * across;
             }
         }
     }
@@ -1436,7 +1438,13 @@ const RUT_SECOND_DEPTH: f32 = 0.58;
 const RUT_SECOND_ENTRY_M: f32 = 6.0;
 const RUT_SECOND_EXIT_M: f32 = 48.0;
 
-fn rut_profile(features: &[Feature], turn: &Profile, lap: f32, seed: u32) -> Ruts {
+fn rut_profile(
+    features: &[Feature],
+    turn: &Profile,
+    lap: f32,
+    seed: u32,
+    feel: &Ride,
+) -> Ruts {
     let mut depth = Profile::blank(lap);
     let mut tight = Profile::blank(lap);
     let mut centre = Profile::blank(lap);
@@ -1451,7 +1459,7 @@ fn rut_profile(features: &[Feature], turn: &Profile, lap: f32, seed: u32) -> Rut
                 let t = smoothstep(((start_r - radius) / (start_r - full_r)).clamp(0.0, 1.0));
                 // Not evenly: a rut wanders in depth down the length of a corner.
                 let vary = 0.75 + 0.25 * fbm(s / 9.0, 3.5, seed ^ 0x2117);
-                depth.v[i] = RUT_DEPTH_M * t * vary;
+                depth.v[i] = feel.rut_depth * t * vary;
                 tight.v[i] = t;
                 // Positive curvature turns right, and the corner's inside is the rider's
                 // right — the same side `right_vector` points at, which is the sign every
@@ -1466,7 +1474,7 @@ fn rut_profile(features: &[Feature], turn: &Profile, lap: f32, seed: u32) -> Rut
         // straights too — a tenth of a metre against a corner's third — and a lap that is
         // glass between the turns reads as one from the first corner exit.
         let vary = 0.7 + 0.3 * fbm(s / 11.0, 8.5, seed ^ 0x2118);
-        let floor = RUT_DEPTH_STRAIGHT_M * vary;
+        let floor = feel.rut_straight * vary;
         if depth.v[i] < floor {
             depth.v[i] = floor;
             tight.v[i] = tight.v[i].max(0.12);
@@ -4481,6 +4489,81 @@ fn hmf(prog: &TrackProgram, syn: &Synth) -> String {
     s
 }
 
+/// How a surface rides, as distinct from how it looks.
+///
+/// [`ground_looks`] has always answered "what colour is this track" per surface, and
+/// [`dig`] now answers "how deep can it be cut". Nothing answered "how does it wear", so a
+/// sand national was a soil track with a sand palette: the same 0.38 m corner grooves two
+/// metres apart, the same half-metre berms, the same 2.2 m braking washboard, all tuned on
+/// worked loam.
+///
+/// A sand track is a different physical object. Its ruts are deeper and further apart because
+/// the material moves rather than packs; its berms are enormous and soft; the sharp washboard
+/// a hard surface builds under braking becomes long low swells, because sand cannot hold a
+/// ridge that steep. Grass is the other way in every respect — root-bound ground barely cuts
+/// up at all.
+///
+/// The face angles are deliberately not here. [`crate::trackprog::JUMP_FACE_DEG`] is read by
+/// `Feature::length`, which is asked how long a jump is in places that have no track to ask
+/// what it is made of, and the 30° figure is a ceiling measured across every published track
+/// rather than a soil-specific one.
+struct Ride {
+    /// The deepest groove in the tightest corner, and the floor a straight wears.
+    rut_depth: f32,
+    rut_straight: f32,
+    /// Metres between one groove of the field and the next.
+    rut_spacing: f32,
+    /// Half the width of a carved line.
+    groove: f32,
+    /// How tall a corner banks itself without being asked.
+    berm: f32,
+    /// The washboard under braking: metres between crests, and how tall it stands.
+    brake: (f32, f32),
+    /// And the longer, lower chop under power.
+    accel: (f32, f32),
+}
+
+fn ride(s: Surface) -> Ride {
+    match s {
+        // The measured case. Every figure here is the one the corpus was read into and the
+        // rest of this module's comments explain; the other two surfaces are stated against
+        // it rather than measured separately, because nothing in the survey is a sand
+        // national or a grasstrack.
+        Surface::Soil => Ride {
+            rut_depth: RUT_DEPTH_M,
+            rut_straight: RUT_DEPTH_STRAIGHT_M,
+            rut_spacing: RUT_SPACING_M,
+            groove: RUT_GROOVE_M,
+            berm: CORNER_BERM_M,
+            brake: (BRAKING_WAVELENGTH_M, BRAKING_HEIGHT_M),
+            accel: (ACCEL_WAVELENGTH_M, ACCEL_HEIGHT_M),
+        },
+        // Deeper, wider, softer, and smoother between the ruts. Sand does not hold a
+        // two-metre washboard — under braking it builds long swells instead, and that is most
+        // of why a sand national rides nothing like a hardpack one however it is painted.
+        Surface::Sand => Ride {
+            rut_depth: RUT_DEPTH_M * 1.55,
+            rut_straight: RUT_DEPTH_STRAIGHT_M * 1.7,
+            rut_spacing: RUT_SPACING_M * 1.35,
+            groove: RUT_GROOVE_M * 1.4,
+            berm: CORNER_BERM_M * 1.9,
+            brake: (BRAKING_WAVELENGTH_M * 2.1, BRAKING_HEIGHT_M * 0.7),
+            accel: (ACCEL_WAVELENGTH_M * 1.8, ACCEL_HEIGHT_M * 0.8),
+        },
+        // Root-bound: it takes a season to wear a line into a grasstrack and it never grows a
+        // berm worth leaning on.
+        Surface::Grass => Ride {
+            rut_depth: RUT_DEPTH_M * 0.45,
+            rut_straight: RUT_DEPTH_STRAIGHT_M * 0.35,
+            rut_spacing: RUT_SPACING_M * 0.9,
+            groove: RUT_GROOVE_M * 0.85,
+            berm: CORNER_BERM_M * 0.4,
+            brake: (BRAKING_WAVELENGTH_M * 0.9, BRAKING_HEIGHT_M * 0.55),
+            accel: (ACCEL_WAVELENGTH_M * 0.9, ACCEL_HEIGHT_M * 0.5),
+        },
+    }
+}
+
 /// The deformable stack a surface is made of: what the wheels dig through, and how far.
 ///
 /// This is where a track's *durability* lives, and it is the one part of the pipeline that
@@ -6940,6 +7023,57 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_sand_track_rides_like_sand_and_not_only_looks_like_it() {
+        // Surface reached three things: the colour palettes, the shoulder's id and width, and
+        // the base material name. Every constant that decides how a track *wears* was a
+        // module-level const tuned on worked loam, so a sand national was a soil track with a
+        // sand palette.
+        let deepest = |surface: crate::trackprog::Surface| {
+            let mut p = hairpins();
+            p.terrain.surface = surface;
+            let s = synthesise(&p).expect("synthesise");
+            // In the corner, where a surface's character shows most.
+            (130..=165)
+                .step_by(5)
+                .map(|at| {
+                    let g = groove_residual(&across(&s, at as f32));
+                    -g.iter().copied().fold(f32::MAX, f32::min)
+                })
+                .fold(0.0f32, f32::max)
+        };
+        let (soil, sand, grass) = (
+            deepest(crate::trackprog::Surface::Soil),
+            deepest(crate::trackprog::Surface::Sand),
+            deepest(crate::trackprog::Surface::Grass),
+        );
+        assert!(
+            sand > soil * 1.2,
+            "sand cuts no deeper than soil: {sand:.3} m against {soil:.3}"
+        );
+        assert!(
+            grass < soil * 0.8,
+            "a grasstrack cuts as deep as worked loam: {grass:.3} m against {soil:.3}"
+        );
+    }
+
+    #[test]
+    fn every_surface_states_a_whole_ride() {
+        // A surface added to the enum without a row here would fall through to soil's
+        // numbers, which is exactly the fault this replaced.
+        for s in [
+            crate::trackprog::Surface::Soil,
+            crate::trackprog::Surface::Sand,
+            crate::trackprog::Surface::Grass,
+        ] {
+            let r = ride(s);
+            assert!(r.rut_depth > 0.0 && r.rut_straight > 0.0, "{s:?} wears nothing");
+            assert!(r.rut_straight < r.rut_depth, "{s:?} wears its straights as hard as its corners");
+            assert!(r.rut_spacing > r.groove * 2.0, "{s:?} has grooves wider than the gap between them");
+            assert!(r.brake.0 < r.accel.0, "{s:?} brakes in longer waves than it drives in");
+            assert!(r.brake.1 > r.accel.1, "{s:?} builds taller bumps under power than under braking");
+        }
+    }
 }
 
 
