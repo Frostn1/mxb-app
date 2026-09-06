@@ -13,14 +13,20 @@ export const CHIP = "bg-foreground/[0.10] text-foreground hover:bg-foreground/[0
  * link stay upright: they sit inline with body text, where a lean reads as a
  * rendering bug rather than a style.
  */
-const SKEWED = new Set(["default", "outline", "destructive"]);
+const SKEWED = new Set(["default", "secondary", "outline", "destructive"]);
 
 const buttonVariants = cva(
   "inline-flex items-center justify-center whitespace-nowrap font-cond font-semibold uppercase tracking-[0.14em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 cursor-default select-none",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:brightness-110 active:brightness-95",
+        // The one action on the screen. If two buttons in a row are `default`, one of
+        // them is wrong.
+        default:
+          "bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-press",
+        // Supporting actions, which is most of them.
+        secondary:
+          "bg-secondary text-secondary-foreground hover:bg-foreground/[0.14] active:bg-foreground/[0.10]",
         outline: "border border-input text-foreground hover:bg-foreground/[0.06]",
         ghost:
           "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground tracking-[0.12em]",

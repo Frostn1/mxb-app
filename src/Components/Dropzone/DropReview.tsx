@@ -236,7 +236,7 @@ function Row({
           className={cn(
             "mt-0.5 flex size-4 flex-none cursor-default items-center justify-center rounded border transition-colors",
             row.keep
-              ? "border-primary bg-primary text-primary-foreground"
+              ? "u-selected border-transparent"
               : "border-white/20",
           )}
         >

@@ -1056,9 +1056,6 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
                 )}
               </p>
             )}
-            <p className="mt-1.5 text-[11px] text-faint">
-              {t("presets.shareWarning")}
-            </p>
             <Button
               variant="outline"
               size="sm"

@@ -1095,8 +1095,6 @@ export const it: Translation = {
   "presets.makeActiveBike": "Rendi questa la moto attiva",
   "presets.nameClash":
     "Esiste già un altro preset chiamato “{{name}}” — salvando sovrascriverai anche quello.",
-  "presets.shareWarning":
-    "Carica su un link pubblico e temporaneo — ridistribuisce file di mod fatti da altri, quindi condividi con criterio.",
   // ── Preset di feeling (la metà impostazioni di un profilo) ─────────────────
   "presets.tabLook": "Aspetto",
   "presets.tabFeel": "Feeling",
@@ -1253,8 +1251,7 @@ export const it: Translation = {
   "share.action": "Condividi…",
   "share.rightClickHint": "Clic destro per condividere",
   "share.title": "Condividi questi file",
-  "share.hint":
-    "Li impacchetta, li carica e ti dà un unico codice da incollare dove vuoi. Chi lo incolla ottiene i file nelle stesse cartelle.",
+  "share.hint": "Un codice da incollare ovunque. Chi lo incolla riceve i file nelle cartelle giuste.",
   "share.hintDone": "Invia questo codice: installa tutto quello che vedi sopra.",
   "share.nothingToShare":
     "Qui non c'è niente da condividere: in un codice possono finire solo i file dentro la tua cartella mods.",

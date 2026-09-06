@@ -163,12 +163,7 @@ export function ShareDialog({
             onFocus={(e) => e.currentTarget.select()}
             className="h-24 w-full resize-none rounded-lg border border-input bg-transparent p-2.5 font-mono text-[11px] leading-snug"
           />
-        ) : (
-          plan &&
-          count > 0 && (
-            <p className="text-[11px] text-faint">{t("presets.shareWarning")}</p>
-          )
-        )}
+        ) : null}
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={busy}>

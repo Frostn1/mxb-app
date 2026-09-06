@@ -183,7 +183,7 @@ export default function HubCatalog() {
           </SelectContent>
         </Select>
         <Button
-          variant={onSaleOnly ? "default" : "outline"}
+          variant={onSaleOnly ? "secondary" : "outline"}
           size="sm"
           onClick={() => setOnSaleOnly((v) => !v)}
         >

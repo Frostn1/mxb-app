@@ -1097,8 +1097,6 @@ export const es: Translation = {
   "presets.makeActiveBike": "Hacer que esta sea la moto activa",
   "presets.nameClash":
     "Ya hay otro preset llamado «{{name}}» — al guardar también lo sobrescribirás.",
-  "presets.shareWarning":
-    "Se sube a un enlace público y temporal — redistribuye archivos de mods hechos por otros, así que comparte con responsabilidad.",
   // ── Ajustes de pilotaje (la mitad de opciones de un perfil) ────────────────
   "presets.tabLook": "Aspecto",
   "presets.tabFeel": "Pilotaje",
@@ -1257,8 +1255,7 @@ export const es: Translation = {
   "share.action": "Compartir…",
   "share.rightClickHint": "Clic derecho para compartir",
   "share.title": "Comparte estos archivos",
-  "share.hint":
-    "Los empaqueta, los sube y te da un único código para pegar donde quieras. Quien lo pegue recibe los archivos en las mismas carpetas.",
+  "share.hint": "Un código para pegar donde quieras. Quien lo pegue recibe los archivos en las carpetas correctas.",
   "share.hintDone": "Envía este código: instala todo lo que aparece arriba.",
   "share.nothingToShare":
     "Aquí no hay nada que compartir: en un código solo caben archivos de tu carpeta mods.",

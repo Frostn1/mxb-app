@@ -108,7 +108,7 @@ function ModeToggle({
             className={cn(
               "flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors",
               mode === m
-                ? "bg-primary text-primary-foreground"
+                ? "u-selected"
                 : "text-muted-foreground hover:text-foreground",
               off && "cursor-not-allowed opacity-40 hover:text-muted-foreground",
             )}

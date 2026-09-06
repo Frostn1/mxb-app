@@ -1102,8 +1102,6 @@ export const fr: Translation = {
   "presets.makeActiveBike": "Faire de celle-ci la moto active",
   "presets.nameClash":
     "Un autre preset s'appelle déjà « {{name}} » — l'enregistrer l'écrasera aussi.",
-  "presets.shareWarning":
-    "Envoie vers un lien public et temporaire — cela redistribue des fichiers de mods créés par d'autres, alors partagez de façon responsable.",
   // ── Préréglages de feeling (la moitié réglages d'un profil) ────────────────
   "presets.tabLook": "Look",
   "presets.tabFeel": "Feeling",
@@ -1260,8 +1258,7 @@ export const fr: Translation = {
   "share.action": "Partager…",
   "share.rightClickHint": "Clic droit pour partager",
   "share.title": "Partager ces fichiers",
-  "share.hint":
-    "On les empaquette, on les envoie, et tu récupères un seul code à coller où tu veux. Celui qui le colle retrouve les fichiers dans les mêmes dossiers.",
+  "share.hint": "Un code à coller n'importe où. Qui le colle reçoit les fichiers dans les bons dossiers.",
   "share.hintDone": "Envoie ce code : il installe tout ce qui est listé au-dessus.",
   "share.nothingToShare":
     "Rien à partager ici : seuls les fichiers de ton dossier mods peuvent entrer dans un code.",

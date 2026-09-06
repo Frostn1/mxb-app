@@ -1082,8 +1082,6 @@ export const en = {
   "presets.makeActiveBike": "Make this the active bike",
   "presets.nameClash":
     "Another preset is already named “{{name}}” — saving will overwrite it too.",
-  "presets.shareWarning":
-    "Uploads to a public, temporary link — it redistributes mod files made by others, so share responsibly.",
   // ── Feel presets (the settings half of a profile) ──────────────────────────
   "presets.tabLook": "Look",
   "presets.tabFeel": "Feel",
@@ -1240,8 +1238,7 @@ export const en = {
   "share.action": "Share…",
   "share.rightClickHint": "Right-click to share",
   "share.title": "Share these files",
-  "share.hint":
-    "Packs them up, uploads them, and gives you one code to paste anywhere. Whoever pastes it back gets the files in the same folders.",
+  "share.hint": "One code, pasted anywhere. Whoever pastes it back gets the files in the right folders.",
   "share.hintDone": "Send this code — it installs everything listed above.",
   "share.nothingToShare":
     "Nothing here can be shared — only files inside your mods folder can go in a code.",

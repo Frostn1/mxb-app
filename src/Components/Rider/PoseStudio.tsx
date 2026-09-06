@@ -259,7 +259,7 @@ export default function PoseStudio() {
                 className={cn(
                   "rounded border px-2 py-1 text-[11px] leading-none transition-colors",
                   scene === s.id
-                    ? "border-primary bg-primary text-primary-foreground"
+                    ? "u-selected border-transparent"
                     : "border-border text-muted-foreground hover:text-foreground",
                 )}
               >

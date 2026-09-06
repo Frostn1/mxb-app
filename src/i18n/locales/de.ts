@@ -1104,8 +1104,6 @@ export const de: Translation = {
   "presets.makeActiveBike": "Dieses Motorrad aktiv setzen",
   "presets.nameClash":
     "Ein anderes Preset heißt bereits „{{name}}“ — beim Speichern wird es ebenfalls überschrieben.",
-  "presets.shareWarning":
-    "Lädt zu einem öffentlichen, temporären Link hoch — dabei werden Mod-Dateien anderer weiterverbreitet, also teile verantwortungsvoll.",
   // ── Fahrgefühl-Presets (die Einstellungshälfte eines Profils) ──────────────
   "presets.tabLook": "Optik",
   "presets.tabFeel": "Fahrgefühl",
@@ -1266,8 +1264,7 @@ export const de: Translation = {
   "share.action": "Teilen…",
   "share.rightClickHint": "Rechtsklick zum Teilen",
   "share.title": "Diese Dateien teilen",
-  "share.hint":
-    "Wir packen sie ein, laden sie hoch und geben dir einen einzigen Code zum Einfügen. Wer ihn einfügt, bekommt die Dateien in denselben Ordnern.",
+  "share.hint": "Ein Code, überall einfügbar. Wer ihn einfügt, bekommt die Dateien in den richtigen Ordnern.",
   "share.hintDone": "Schick diesen Code weiter — er installiert alles von oben.",
   "share.nothingToShare":
     "Hier gibt es nichts zu teilen — in einen Code passen nur Dateien aus deinem mods-Ordner.",

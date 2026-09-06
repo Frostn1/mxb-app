@@ -389,6 +389,34 @@ html[data-colorway="retro"]:not(.overlay-window) body::after {
   );
 }
 
+/* ------------------------------------------------------------------ *
+ * One brand colour, four weights, three roles.
+ *
+ * `--primary` was doing every job at one weight — PLAY, install, active
+ * tabs, switches, sliders, selected pills — and one colour used flat
+ * everywhere is what makes an interface look stamped out. These derive
+ * from it, on the same element the colorways set it on, so every
+ * colorway inherits the ladder without restating it.
+ *
+ *   primary        the one action on the screen. Used sparingly.
+ *   primary-tint   selected and active states. The accent role.
+ *   secondary      supporting actions, which are most of them.
+ * ------------------------------------------------------------------ */
+:root {
+  --primary-hover: color-mix(in oklab, var(--primary) 86%, #fff 14%);
+  --primary-press: color-mix(in oklab, var(--primary) 88%, #000 12%);
+  --primary-tint: color-mix(in srgb, var(--primary) 15%, transparent);
+  --primary-line: color-mix(in srgb, var(--primary) 50%, transparent);
+}
+
+/* Selected, without shouting. A solid brand fill on every active chip put the
+   loudest colour on the least important control. */
+.u-selected {
+  background: var(--primary-tint);
+  color: var(--accent-foreground);
+  box-shadow: inset 0 0 0 1px var(--primary-line);
+}
+
 @theme inline {
   /* Square by design — see the note at the top. These stay mapped so the
      shadcn primitives keep compiling; they simply resolve to nothing. */
@@ -406,6 +434,10 @@ html[data-colorway="retro"]:not(.overlay-window) body::after {
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-press: var(--primary-press);
+  --color-primary-tint: var(--primary-tint);
+  --color-primary-line: var(--primary-line);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);

@@ -994,7 +994,7 @@ export default function Library({
           </DropdownMenuContent>
         </DropdownMenu>
         <Button
-          variant={selectMode ? "default" : "outline"}
+          variant={selectMode ? "secondary" : "outline"}
           size="sm"
           onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
           disabled={loading}
