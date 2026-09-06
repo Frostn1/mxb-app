@@ -120,6 +120,12 @@ pub struct BundleRef {
     /// single-part codes stay byte-identical.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<String>,
+    /// What each slice should weigh, in the same order as `parts`. Lets a download say which
+    /// slice came back short rather than only that the total did — and re-fetch that one.
+    /// Absent on codes shared before this was recorded, which is why nothing may assume it
+    /// is present or the same length as `parts`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub part_sizes: Vec<u64>,
 }
 
 /// The content a preset needs on disk, beyond the cosmetics in its [`Loadout`].
