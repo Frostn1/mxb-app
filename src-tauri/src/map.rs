@@ -1772,4 +1772,149 @@ mod tests {
             );
         }
     }
+
+    /// Every record in a `.map`'s texture table, unfiltered — what the file carries, before
+    /// any judgement about which of them bind to geometry.
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn map_survey() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::Path::new(&var);
+        let names = crate::track::entry_names(path).unwrap();
+        let entry = names
+            .iter()
+            .find(|n| n.to_ascii_lowercase().ends_with(".map"))
+            .expect("a .map")
+            .clone();
+        let bytes = crate::track::read_entry(path, &entry).unwrap();
+        let all = survey(&bytes);
+        println!("{} — {} records in the texture table", entry, all.len());
+        for (n, w, h) in &all {
+            println!("    {n:<32} {w}x{h}");
+        }
+    }
+
+    /// How much of a track's ground is *mesh* rather than painted heightmap.
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn map_mesh_extent() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::Path::new(&var);
+        let names = crate::track::entry_names(path).unwrap();
+        let entry = names
+            .iter()
+            .find(|n| n.to_ascii_lowercase().ends_with(".map"))
+            .expect("a .map")
+            .clone();
+        let bytes = crate::track::read_entry(path, &entry).unwrap();
+        let Some(m) = parse(&bytes) else {
+            println!("no mesh");
+            return;
+        };
+        let n = m.positions.len() / 3;
+        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for v in m.positions.chunks_exact(3) {
+            for c in 0..3 {
+                lo[c] = lo[c].min(v[c]);
+                hi[c] = hi[c].max(v[c]);
+            }
+        }
+        // How flat it is: scenery stands up, ground lies down.
+        let mut low = 0usize;
+        for v in m.positions.chunks_exact(3) {
+            if v[1] - lo[1] < (hi[1] - lo[1]) * 0.15 {
+                low += 1;
+            }
+        }
+        println!(
+            "{}: {n} vertices, {} triangles, {} groups — spans {:.0} x {:.0} m, {:.0} m tall; \
+             {:.0}% of its vertices lie in the bottom sixth of that",
+            entry,
+            m.indices.len() / 3,
+            m.groups.len(),
+            hi[0] - lo[0],
+            hi[2] - lo[2],
+            hi[1] - lo[1],
+            low as f32 * 100.0 / n as f32,
+        );
+    }
+
+    /// Per-group extent and flatness — is any of a track's mesh a ground carpet, or is it all
+    /// scenery standing up beside the track?
+    ///
+    /// The question matters because "Indiana's map carries 665,000 triangles and ours 18,000"
+    /// admits two readings, and they call for completely different work: a textured ground
+    /// laid over the terrain is an architecture we do not have, while tents and trucks are
+    /// scenery we already place.
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK"]
+    fn map_groups() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::Path::new(&var);
+        let names = crate::track::entry_names(path).unwrap();
+        let entry =
+            names.iter().find(|n| n.to_ascii_lowercase().ends_with(".map")).unwrap().clone();
+        let bytes = crate::track::read_entry(path, &entry).unwrap();
+        let Some(m) = parse(&bytes) else {
+            println!("no mesh");
+            return;
+        };
+        let sheets = textures(&bytes, 64);
+        let mut rows: Vec<(f32, String, usize, f32, f32, f32)> = Vec::new();
+        for g in &m.groups {
+            let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+            let (mut up, mut tris) = (0usize, 0usize);
+            let from = g.tri_start as usize * 3;
+            let to = ((g.tri_start + g.tri_count) as usize * 3).min(m.indices.len());
+            if from >= to {
+                continue;
+            }
+            for t in m.indices[from..to].chunks_exact(3) {
+                tris += 1;
+                let p: Vec<[f32; 3]> = t
+                    .iter()
+                    .map(|&i| {
+                        let i = i as usize * 3;
+                        [m.positions[i], m.positions[i + 1], m.positions[i + 2]]
+                    })
+                    .collect();
+                for q in &p {
+                    for c in 0..3 {
+                        lo[c] = lo[c].min(q[c]);
+                        hi[c] = hi[c].max(q[c]);
+                    }
+                }
+                // A ground triangle faces up; a wall or a card does not.
+                let (a, b, c) = (p[0], p[1], p[2]);
+                let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                let n = [
+                    u[1] * v[2] - u[2] * v[1],
+                    u[2] * v[0] - u[0] * v[2],
+                    u[0] * v[1] - u[1] * v[0],
+                ];
+                let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-9);
+                if (n[1] / len).abs() > 0.85 {
+                    up += 1;
+                }
+            }
+            let name = sheets
+                .iter()
+                .find(|t| t.material == g.material)
+                .map(|t| t.name.clone())
+                .unwrap_or_else(|| format!("material {}", g.material));
+            let flat = up as f32 * 100.0 / tris as f32;
+            let area = (hi[0] - lo[0]) * (hi[2] - lo[2]);
+            rows.push((area * flat, name, tris, hi[0] - lo[0], hi[2] - lo[2], flat));
+        }
+        rows.sort_by(|a, b| b.0.total_cmp(&a.0));
+        println!("{entry}");
+        println!(
+            "  {:<28} {:>8} {:>9} {:>9} {:>8}",
+            "sheet", "tris", "span x", "span z", "flat %"
+        );
+        for (_, name, tris, sx, sz, flat) in rows.iter() {
+            println!("  {name:<28} {tris:>8} {sx:>8.0}m {sz:>8.0}m {flat:>7.0}%");
+        }
+    }
 }

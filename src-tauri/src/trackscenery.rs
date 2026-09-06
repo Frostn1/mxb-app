@@ -1052,7 +1052,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             continue;
         }
         let file = format!("{name}.edf");
-        let bytes = edfwrite::write(name, &[Part { name: name.into(), mesh, texture: 0 }], &[sheet]);
+        let bytes = edfwrite::write(name, &[Part { name: name.into(), mesh, texture: 0, normal: None }], &[sheet]);
         files.push((file.clone(), bytes));
         let at = Scene { file, pos: [0.0, 0.0, 0.0], rot: [0.0, 0.0, 0.0] };
         // Collision only for what should stop a bike. A stake snaps and the fence is behind

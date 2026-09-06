@@ -129,6 +129,14 @@ pub struct Part {
     pub mesh: Mesh,
     /// Index into the model's textures.
     pub texture: usize,
+    /// The companion sheet beside it — a normal map — as another index into the same list.
+    ///
+    /// The slot exists in every material record ever written and we left it zero, so nothing
+    /// generated has ever been normal-mapped. It matters more than it sounds: TerrainEd bakes
+    /// no normal for a *heightmap* layer — PiBoSo's own example proves that, and ours behaves
+    /// the same — so mesh materials are the only route to relief lighting on a track, and
+    /// they are how a published national gets `soil_white_n_s` and `gravel_n_s` into its map.
+    pub normal: Option<usize>,
 }
 
 fn put_u32(out: &mut Vec<u8>, v: u32) {
@@ -259,9 +267,12 @@ pub fn write(name: &str, parts: &[Part], textures: &[Texture]) -> Vec<u8> {
         for _ in 0..4 {
             put_u32(&mut out, 0);
         }
+        // w11: the colour sheet, one-based. w13: the companion beside it, likewise — the
+        // slot `edf::valid_material_record` calls "the companion", which a mod shipping `_n`
+        // sheets fills in and PiBoSo's own bikes leave zero.
         put_u32(&mut out, p.texture as u32 + 1);
         put_u32(&mut out, 0);
-        put_u32(&mut out, 0);
+        put_u32(&mut out, p.normal.map_or(0, |n| n as u32 + 1));
         debug_assert_eq!(out.len() - start, MAT_STRIDE);
     }
 
@@ -511,7 +522,7 @@ mod tests {
         let (vc, tc) = (mesh.vertex_count(), mesh.triangle_count());
         let bytes = write(
             "probe",
-            &[Part { name: "post".into(), mesh: mesh.clone(), texture: 0 }],
+            &[Part { name: "post".into(), mesh: mesh.clone(), texture: 0, normal: None }],
             &[sheet("post_c", 64, [200, 180, 60, 255])],
         );
 
@@ -538,7 +549,7 @@ mod tests {
         let mesh = moved(&cuboid(2.0, 3.0, 1.0), [5.0, 0.0, -4.0]);
         let bytes = write(
             "probe",
-            &[Part { name: "post".into(), mesh: mesh.clone(), texture: 0 }],
+            &[Part { name: "post".into(), mesh: mesh.clone(), texture: 0, normal: None }],
             &[sheet("post_c", 64, [1, 2, 3, 255])],
         );
         let (lo, hi) = crate::edf::header_aabb(&bytes).expect("header states bounds");
@@ -554,7 +565,7 @@ mod tests {
         let tex = sheet("bark_c_a", 64, [10, 120, 30, 255]);
         let bytes = write(
             "probe",
-            &[Part { name: "trunk".into(), mesh: card(1.0, 4.0), texture: 0 }],
+            &[Part { name: "trunk".into(), mesh: card(1.0, 4.0), texture: 0, normal: None }],
             &[tex.clone()],
         );
         let found = crate::edf::embedded_textures(&bytes);
@@ -570,8 +581,8 @@ mod tests {
         let bytes = write(
             "tree",
             &[
-                Part { name: "trunk".into(), mesh: cuboid(0.4, 4.0, 0.4), texture: 0 },
-                Part { name: "canopy".into(), mesh: crossed(5.0, 5.0, 2), texture: 1 },
+                Part { name: "trunk".into(), mesh: cuboid(0.4, 4.0, 0.4), texture: 0, normal: None },
+                Part { name: "canopy".into(), mesh: crossed(5.0, 5.0, 2), texture: 1, normal: None },
             ],
             &[sheet("bark_c", 64, [90, 60, 40, 255]), sheet("leaf_c_a", 64, [40, 110, 40, 128])],
         );
@@ -600,7 +611,7 @@ mod tests {
         // but a bare `card` node would vanish and it is better to have said so.
         let bytes = write(
             "lone",
-            &[Part { name: "lone".into(), mesh: card(1.0, 1.0), texture: 0 }],
+            &[Part { name: "lone".into(), mesh: card(1.0, 1.0), texture: 0, normal: None }],
             &[sheet("x_c", 64, [1, 1, 1, 255])],
         );
         assert!(crate::edf::parse_world(&bytes).is_empty());
@@ -658,6 +669,38 @@ mod tests {
         let (lo, hi) = m.bounds();
         assert!((lo[1] - 0.0).abs() < 1e-5 && (hi[1] - 2.0).abs() < 1e-5);
     }
+
+    #[test]
+    fn a_part_can_name_the_normal_map_beside_its_colour() {
+        // The slot the reader calls "the companion": w13 of the material record, one-based,
+        // zero for none. It was written zero unconditionally, so nothing this app has ever
+        // generated carried a normal map — and mesh materials are the only route to relief
+        // lighting on a track, because TerrainEd bakes none for a heightmap layer.
+        let mesh = cuboid(1.0, 1.0, 1.0);
+        let sheets = vec![sheet("ground_c", 4, [180, 140, 100, 255]), sheet("ground_n", 4, [128, 128, 255, 255])];
+        let with = write(
+            "m",
+            &[Part { name: "g".into(), mesh: mesh.clone(), texture: 0, normal: Some(1) }],
+            &sheets,
+        );
+        let without = write(
+            "m",
+            &[Part { name: "g".into(), mesh, texture: 0, normal: None }],
+            &sheets,
+        );
+        // The material table sits right after the bounds and the count.
+        let at = 4 + 24 + 4;
+        let w = |b: &[u8], k: usize| u32::from_le_bytes(b[at + k * 4..at + k * 4 + 4].try_into().unwrap());
+        assert_eq!(w(&with, 11), 1, "the colour sheet is still bound one-based");
+        assert_eq!(w(&with, 13), 2, "and the normal is the second sheet");
+        assert_eq!(w(&without, 13), 0, "with none, the slot stays empty");
+        // And the reader agrees it is a material table at all, which is what stops this being
+        // a number written into padding.
+        assert_eq!(
+            crate::edf::node_material_table(&with, 4 + 24 + 4 + MAT_STRIDE, sheets.len()).len(),
+            1
+        );
+    }
 }
 
 #[cfg(test)]
@@ -704,7 +747,7 @@ mod compiles {
         let (w, h) = (2.0f32, 4.0f32);
         let bytes = write(
             "probe",
-            &[Part { name: "probe".into(), mesh: cuboid(w, h, w), texture: 0 }],
+            &[Part { name: "probe".into(), mesh: cuboid(w, h, w), texture: 0, normal: None }],
             &[checks("probe_c", 64, [220, 40, 40, 255], [250, 250, 250, 255])],
         );
         std::fs::write(dir.join("probe.edf"), &bytes).unwrap();
@@ -768,9 +811,9 @@ mod compiles {
             .terrained;
 
         let parts = vec![
-            Part { name: "posts".into(), mesh: cuboid(1.0, 4.0, 1.0), texture: 0 },
-            Part { name: "boards".into(), mesh: moved(&crossed(3.0, 2.0, 2), [6.0, 0.0, 0.0]), texture: 1 },
-            Part { name: "canopy".into(), mesh: moved(&crossed(4.0, 5.0, 3), [-6.0, 0.0, 0.0]), texture: 2 },
+            Part { name: "posts".into(), mesh: cuboid(1.0, 4.0, 1.0), texture: 0, normal: None },
+            Part { name: "boards".into(), mesh: moved(&crossed(3.0, 2.0, 2), [6.0, 0.0, 0.0]), texture: 1, normal: None },
+            Part { name: "canopy".into(), mesh: moved(&crossed(4.0, 5.0, 3), [-6.0, 0.0, 0.0]), texture: 2, normal: None },
         ];
         let sheets = vec![
             checks("posts_c", 64, [200, 60, 60, 255], [240, 240, 240, 255]),
@@ -817,22 +860,22 @@ mod compiles {
 
         let cases: Vec<(&str, Vec<Part>, Vec<Texture>)> = vec![
             ("1 box, opaque (control)",
-             vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0 }],
+             vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0, normal: None }],
              vec![opaque("a_c")]),
             ("2 boxes, 2 sheets",
-             vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0 },
-                  Part { name: "b".into(), mesh: moved(&cuboid(2.0, 3.0, 2.0), [6.0, 0.0, 0.0]), texture: 1 }],
+             vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0, normal: None },
+                  Part { name: "b".into(), mesh: moved(&cuboid(2.0, 3.0, 2.0), [6.0, 0.0, 0.0]), texture: 1, normal: None }],
              vec![opaque("a_c"), opaque("b_c")]),
             ("1 box, cut-out sheet",
-             vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0 }],
+             vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0, normal: None }],
              vec![cutout("a_c_a")]),
             ("1 set of crossed cards",
-             vec![Part { name: "a".into(), mesh: crossed(4.0, 5.0, 3), texture: 0 }],
+             vec![Part { name: "a".into(), mesh: crossed(4.0, 5.0, 3), texture: 0, normal: None }],
              vec![cutout("a_c_a")]),
             ("3 parts, mixed",
-             vec![Part { name: "a".into(), mesh: cuboid(1.0, 4.0, 1.0), texture: 0 },
-                  Part { name: "b".into(), mesh: moved(&crossed(3.0, 2.0, 2), [6.0, 0.0, 0.0]), texture: 1 },
-                  Part { name: "c".into(), mesh: moved(&crossed(4.0, 5.0, 3), [-6.0, 0.0, 0.0]), texture: 2 }],
+             vec![Part { name: "a".into(), mesh: cuboid(1.0, 4.0, 1.0), texture: 0, normal: None },
+                  Part { name: "b".into(), mesh: moved(&crossed(3.0, 2.0, 2), [6.0, 0.0, 0.0]), texture: 1, normal: None },
+                  Part { name: "c".into(), mesh: moved(&crossed(4.0, 5.0, 3), [-6.0, 0.0, 0.0]), texture: 2, normal: None }],
              vec![opaque("a_c"), cutout("b_c_a"), cutout("c_c_a")]),
         ];
 
@@ -878,21 +921,21 @@ mod compiles {
         let cutout = |n: &str| checks(n, 64, [60, 150, 70, 255], [0, 0, 0, 0]);
         let (label, parts, sheets): (&str, Vec<Part>, Vec<Texture>) = match case {
             0 => ("1 box, opaque (control)",
-                  vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0 }],
+                  vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0, normal: None }],
                   vec![opaque("a_c")]),
             1 => ("2 boxes, 2 sheets",
-                  vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0 },
-                       Part { name: "b".into(), mesh: moved(&cuboid(2.0, 3.0, 2.0), [6.0, 0.0, 0.0]), texture: 1 }],
+                  vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0, normal: None },
+                       Part { name: "b".into(), mesh: moved(&cuboid(2.0, 3.0, 2.0), [6.0, 0.0, 0.0]), texture: 1, normal: None }],
                   vec![opaque("a_c"), opaque("b_c")]),
             2 => ("1 box, cut-out sheet",
-                  vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0 }],
+                  vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0, normal: None }],
                   vec![cutout("a_c_a")]),
             3 => ("1 set of crossed cards",
-                  vec![Part { name: "a".into(), mesh: crossed(4.0, 5.0, 3), texture: 0 }],
+                  vec![Part { name: "a".into(), mesh: crossed(4.0, 5.0, 3), texture: 0, normal: None }],
                   vec![cutout("a_c_a")]),
             4 => ("2 boxes, 1 shared sheet",
-                  vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0 },
-                       Part { name: "b".into(), mesh: moved(&cuboid(2.0, 3.0, 2.0), [6.0, 0.0, 0.0]), texture: 0 }],
+                  vec![Part { name: "a".into(), mesh: cuboid(2.0, 4.0, 2.0), texture: 0, normal: None },
+                       Part { name: "b".into(), mesh: moved(&cuboid(2.0, 3.0, 2.0), [6.0, 0.0, 0.0]), texture: 0, normal: None }],
                   vec![opaque("a_c")]),
             5 => ("1 box, 200 copies",
                   vec![Part { name: "a".into(), mesh: {
@@ -902,12 +945,12 @@ mod compiles {
                           m.append(&moved(&cuboid(1.0, 2.0, 1.0), [20.0 + x, 0.0, 20.0 + z]));
                       }
                       m
-                  }, texture: 0 }],
+                  }, texture: 0, normal: None }],
                   vec![opaque("a_c")]),
             _ => ("3 parts, mixed",
-                  vec![Part { name: "a".into(), mesh: cuboid(1.0, 4.0, 1.0), texture: 0 },
-                       Part { name: "b".into(), mesh: moved(&crossed(3.0, 2.0, 2), [6.0, 0.0, 0.0]), texture: 1 },
-                       Part { name: "c".into(), mesh: moved(&crossed(4.0, 5.0, 3), [-6.0, 0.0, 0.0]), texture: 2 }],
+                  vec![Part { name: "a".into(), mesh: cuboid(1.0, 4.0, 1.0), texture: 0, normal: None },
+                       Part { name: "b".into(), mesh: moved(&crossed(3.0, 2.0, 2), [6.0, 0.0, 0.0]), texture: 1, normal: None },
+                       Part { name: "c".into(), mesh: moved(&crossed(4.0, 5.0, 3), [-6.0, 0.0, 0.0]), texture: 2, normal: None }],
                   vec![opaque("a_c"), cutout("b_c_a"), cutout("c_c_a")]),
         };
         let bytes = write("probe", &parts, &sheets);
