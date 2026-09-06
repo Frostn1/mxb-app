@@ -31,7 +31,7 @@ const STAKE_OFF_M: f32 = 7.5;
 /// of a baked mesh rather than one object — so a banner made of four quads counted as four
 /// banners three metres apart. Read literally it put 1272 boards round a lap and the track
 /// looked fenced in by its own edge marking.
-const STAKE_GAP_M: f32 = 9.0;
+const STAKE_GAP_M: f32 = 15.0;
 const STAKE_H_M: f32 = 1.15;
 /// A stake is a stake: thin enough that what you see is a line of points, not a wall.
 const STAKE_W_M: f32 = 0.07;
@@ -55,7 +55,7 @@ const FENCE_PANEL_M: f32 = 4.0;
 
 /// Bales guard what a rider would otherwise hit. Corpus offset runs 10.9–34.6; the near end
 /// of that is where they do any good.
-const BALE_OFF_M: f32 = 11.0;
+const BALE_OFF_M: f32 = 7.5;
 const BALE_W_M: f32 = 1.2;
 const BALE_H_M: f32 = 1.0;
 const BALE_D_M: f32 = 0.8;
@@ -90,9 +90,9 @@ const SKY_TOP_DEG: f32 = 34.0;
 /// track that has run out of things to say.
 const JUMPMARK_FROM_M: f32 = 0.9;
 
-/// A jump board: wide enough to read from a hundred metres, low enough to clip harmlessly.
-const JUMPMARK_W_M: f32 = 1.1;
-const JUMPMARK_H_M: f32 = 0.75;
+/// A jump post: a stake's thickness, taller than the edge markers so it stands out of them.
+const JUMPMARK_W_M: f32 = 0.09;
+const JUMPMARK_H_M: f32 = 1.5;
 
 /// How far apart the poles and the parked vans go, from the per-kilometre counts above.
 const POLE_GAP_M: f32 = 50.0;
@@ -439,28 +439,32 @@ fn dome_sheet() -> Texture {
     })
 }
 
-/// The yellow board that stands beside a jump's takeoff.
+/// The same post with its texture read out of the sheet's wood: a stake with no painted tip.
 ///
-/// Every track marks its jumps — a rider coming over a blind crest is reading the boards, not
-/// the dirt — and they are yellow because that is the one colour nothing else on a motocross
-/// track is.
+/// Half of them, because a line of identical posts reads as a fence and what a track has is
+/// whatever was to hand.
+fn bare(m: &Mesh) -> Mesh {
+    let mut out = m.clone();
+    for uv in out.uvs.chunks_exact_mut(2) {
+        // The sheet paints its top third; anything below that is bare wood.
+        uv[1] = 0.42 + uv[1] * 0.55;
+    }
+    out
+}
+
+/// The yellow post that stands beside a jump's takeoff.
+///
+/// A post and not a board: every track marks its jumps, and what it marks them with is a
+/// stake — a rider coming at a blind crest reads the line of colour, not a sign.
 fn jumpmark_mesh() -> Mesh {
-    let mut m = edfwrite::double_sided(&edfwrite::moved(
-        &edfwrite::card(JUMPMARK_W_M, JUMPMARK_H_M),
-        [0.0, JUMPMARK_H_M * 0.5 + 0.35, 0.0],
-    ));
-    m.append(&edfwrite::moved(&edfwrite::cuboid(0.07, 0.5, 0.07), [0.0, 0.15, 0.0]));
-    m
+    edfwrite::cuboid(JUMPMARK_W_M, JUMPMARK_H_M, JUMPMARK_W_M)
 }
 
 fn jumpmark_sheet() -> Texture {
     sheet("jumpmark_c", 32, |u, v| {
-        let g = grain(u, v, 0x8B31, 22.0);
-        // A dark edge round it, so it reads as a board and not as a glow.
-        let edge = u < 0.08 || u > 0.92 || v < 0.08 || v > 0.92;
-        let base = if edge { [96.0, 78.0, 20.0] } else { [242.0, 206.0, 34.0] };
-        let k = 0.92 + 0.12 * g;
-        [(base[0] * k) as u8, (base[1] * k) as u8, (base[2] * k) as u8, 255]
+        let g = grain(u, v * 0.3, 0x8B31, 24.0);
+        let k = 0.90 + 0.16 * g;
+        [(242.0 * k) as u8, (198.0 * k) as u8, (28.0 * k) as u8, 255]
     })
 }
 
@@ -692,9 +696,13 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             }
             let key = (s / STAKE_GAP_M) as u32 * 2 + (side > 0.0) as u32;
             let h = STAKE_H_M * (0.92 + 0.16 * rnd(seed ^ 0x12, key));
+            // Some painted, some bare: a line of identical posts reads as a fence, and what a
+            // track has is whatever was to hand, half of it with a tip of white on it.
+            let painted = rnd(seed ^ 0x14, key) < 0.55;
             let lean = (rnd(seed ^ 0x13, key) - 0.5) * 16.0;
+            let post = edfwrite::cuboid(STAKE_W_M, h, STAKE_W_M);
             stakes.append(&edfwrite::moved(
-                &edfwrite::turned(&edfwrite::cuboid(STAKE_W_M, h, STAKE_W_M), lean),
+                &edfwrite::turned(&if painted { post } else { bare(&post) }, lean),
                 [x, ground(syn, x, z) - 0.03, z],
             ));
             n += 1;
@@ -703,10 +711,32 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     }
     tally.push(("stakes", n));
 
-    // 2. No banners. The printed panels — white with a red block and a blue one — read as
-    //    nothing in particular from a bike, and nobody could say what they were meant to be.
-    //    Out until there is something worth printing on them.
-    let _ = &mut banners;
+    // 2. Banners: few, big, and facing the rider.
+    let mut n = 0usize;
+    let mut s = BANNER_GAP_M * 0.5;
+    while s < lap {
+        let st = at(s);
+        let (rx, rz) = crate::trackprog::right_vector(st.heading);
+        let key = (s / BANNER_GAP_M) as u32;
+        let side = if rnd(seed ^ 0x51, key) < 0.5 { -1.0f32 } else { 1.0 };
+        let off = BANNER_OFF_M.max(half + 2.5);
+        let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
+        if inside(prog, x, z, 3.0)
+            && clearance(&coarse, x, z) > off - 1.0
+            && clear_of_the_start(x, z)
+        {
+            let (lo, hi) = ground_span(syn, x, z, along(st.heading), BANNER_W_M);
+            if hi - lo < 1.0 {
+                banners.append(&edfwrite::moved(
+                    &edfwrite::turned(&banner_mesh(), along(st.heading)),
+                    [x, (lo + hi) * 0.5 - 0.05, z],
+                ));
+                n += 1;
+            }
+        }
+        s += BANNER_GAP_M;
+    }
+    tally.push(("banners", n));
 
 
     // 3. No fence. It ran along the lap and closed the start straight off — the spur runs
@@ -730,8 +760,11 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             // somebody laid out.
             let off = BALE_OFF_M;
             let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
+            // Just off the edge of the track — which is where a block goes, and it is also
+            // why the clearance bar is low: at seven and a half metres from the line, a bar of
+            // "a track's width plus two" threw every one of them away.
             if inside(prog, x, z, 3.0)
-                && clearance(&coarse, x, z) > half + 2.0
+                && clearance(&coarse, x, z) > half + 0.5
                 && clear_of_the_start(x, z)
             {
                 let deg = along(st.heading);
@@ -740,20 +773,17 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
                     s += BALE_W_M + 0.35;
                     continue;
                 }
-                // Every other one. A solid wall of blocks round a corner is a barrier; what a
-                // track has is a run of them with the ground showing between.
-                if n % 2 == 0 {
-                    bales.append(&edfwrite::moved(
-                        &edfwrite::turned(&edfwrite::cuboid(BALE_W_M, BALE_H_M, BALE_D_M), deg),
-                        [x, (lo + hi) * 0.5, z],
-                    ));
-                }
+                bales.append(&edfwrite::moved(
+                    &edfwrite::turned(&edfwrite::cuboid(BALE_W_M, BALE_H_M, BALE_D_M), deg),
+                    [x, (lo + hi) * 0.5, z],
+                ));
                 n += 1;
             }
         }
         s += BALE_W_M + 0.35;
     }
-    tally.push(("bales", n / 2));
+    tally.push(("bales", n));
+
 
     // 4b. A yellow board either side of every jump, at the takeoff — which is where a rider
     //     needs to know one is coming. Nothing on the small stuff: a roller with a sign on it
@@ -761,16 +791,18 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let mut n = 0usize;
     for f in &prog.features {
         let takeoff = match f {
+            // The top of the takeoff face, which is where a rider needs it — a marker before
+            // the ramp is a marker for the ground in front of the jump.
             crate::trackprog::Feature::Tabletop { at, height, length, .. } => {
-                let (up, _, _) = crate::trackprog::tabletop_faces(*height, *length);
-                Some((at + up, *height))
+                let (up, top, _) = crate::trackprog::tabletop_faces(*height, *length);
+                Some((at + up + top * 0.15, *height))
             }
             crate::trackprog::Feature::Double { at, height, lip, .. } => {
                 let (lip, _) = crate::trackprog::double_faces(*height, *lip);
                 Some((at + lip, *height))
             }
             crate::trackprog::Feature::StepUp { at, length, height, .. } => {
-                Some((at + length * 0.5, *height))
+                Some((at + length * 0.8, *height))
             }
             _ => None,
         };
@@ -781,7 +813,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         let st = at(crest % lap);
         let (rx, rz) = crate::trackprog::right_vector(st.heading);
         for side in [-1.0f32, 1.0] {
-            let off = half + 1.4;
+            let off = half + 0.8;
             let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
             if !inside(prog, x, z, 2.0) || !clear_of_the_start(x, z) {
                 continue;
@@ -973,6 +1005,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     // built the same way, three `scene` blocks for three objects.
     let kinds: Vec<(&str, Mesh, Texture, bool)> = vec![
         ("stakes", stakes, stake_sheet(), false),
+        ("banners", banners, banner_sheet(), true),
         ("bales", bales, bale_sheet(), true),
         // Not solid: clipping a marker board should cost a rider nothing.
         ("jumpmarks", jumpmarks, jumpmark_sheet(), false),
@@ -1186,11 +1219,12 @@ mod tests {
         let drawn = named(&sc.drawn);
         let solid = named(&sc.solid);
         // No fence: it ran along the lap and closed the start straight off. See `build`.
-        for want in ["stakes.edf", "bales.edf", "trees.edf", "gate.edf"] {
+        // No blocks and no fence — see `build`.
+        for want in ["stakes.edf", "banners.edf", "trees.edf", "gate.edf"] {
             assert!(drawn.contains(&want.to_string()), "{want} not drawn: {drawn:?}");
         }
         // A tree, a bale and the gantry stop a bike.
-        for want in ["bales.edf", "trees.edf", "gate.edf"] {
+        for want in ["banners.edf", "trees.edf", "gate.edf"] {
             assert!(solid.contains(&want.to_string()), "{want} should be solid: {solid:?}");
         }
         // A stake snaps rather than stopping you, and the fence run has gaps where the ground

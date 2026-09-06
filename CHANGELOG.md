@@ -2,6 +2,16 @@
 
 ## 2026-09-06
 
+### Changed
+- The start straight keeps its distance from the lap until the two meet at turn one. There is
+  a strip of ground between them, so a rider on a flying lap has no way back onto it.
+- White blocks sit at the edge of the track rather than out in the field, the printed banners
+  are back, and there are fewer marker posts — some with a painted white tip, some bare.
+- Jumps are marked with a yellow post at the top of the takeoff face rather than a board
+  standing before it.
+
+## 2026-09-06
+
 ### Added
 - Yellow boards either side of every jump's takeoff, on the ones worth marking. A rider coming
   at a blind crest reads the boards, not the dirt.
