@@ -548,7 +548,15 @@ async fn download_parts(
         // download that matches its own `Content-Length` can still be the wrong file — the
         // host may only be holding part of it — and without this the shortfall does not
         // surface until the parts are joined, by which point nothing knows which one it was.
-        let expect = bundle.part_sizes.get(i).copied();
+        // What this slice should weigh. A code made before the app recorded part sizes has
+        // none, and then a part that came back short only surfaced when the joined file did
+        // not add up — by which point nothing knew which part it was and the only advice left
+        // was to ask for a fresh code. Falling back to what the host says it is holding puts
+        // those codes back inside the same retry.
+        let expect = match bundle.part_sizes.get(i).copied() {
+            Some(want) => Some(want),
+            None => crate::upload::hosted_len(client, &direct).await,
+        };
         let mut got = None;
         for attempt in 1..=PART_ATTEMPTS {
             let _ = std::fs::remove_dir_all(&into);

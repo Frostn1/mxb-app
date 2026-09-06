@@ -3342,20 +3342,36 @@ fn rdf(prog: &TrackProgram, spur: Option<&StartSpur>) -> String {
     // not subtle. Written along the start straight instead, the game read `long 5, lat -24`
     // as five metres round the lap and put forty riders across the middle of the track.
     let stations = prog.stations(0.5);
-    let onto_lap = |x: f32, z: f32, heading_deg: f32| -> (f32, f32, f32) {
-        let Some(q) = stations.iter().min_by(|a, b| {
+    let nearest = |x: f32, z: f32| -> Option<&Station> {
+        stations.iter().min_by(|a, b| {
             let da = (a.x - x).powi(2) + (a.z - z).powi(2);
             let db = (b.x - x).powi(2) + (b.z - z).powi(2);
             da.total_cmp(&db)
-        }) else {
-            return (0.0, 0.0, 0.0);
-        };
+        })
+    };
+    // A world position read as a position on the lap, in one station's frame.
+    //
+    // Projected onto that frame rather than taking the station's own distance round: stations
+    // are half a metre apart, so a row of forty gates written to the nearest one comes out as
+    // a staircase. The frame is passed in rather than looked up per point, which is the other
+    // half of it — forty gates spread across fifty metres each find a *different* nearest
+    // station, and on a lap that folds back on itself the nearest station to a gate at one end
+    // can be on another pass altogether. One frame for the row, and it is a row.
+    let project = |q: &Station, x: f32, z: f32, heading_deg: f32| -> (f32, f32, f32) {
+        let (fx, fz) = crate::trackprog::heading_vector(q.heading);
         let (rx, rz) = crate::trackprog::right_vector(q.heading);
+        let along = (x - q.x) * fx + (z - q.z) * fz;
         let lat = (x - q.x) * rx + (z - q.z) * rz;
         // And the angle relative to the lap's own direction there, which is how a published
         // stall states which way its bike faces.
         let angle = (heading_deg - q.heading.to_degrees()).rem_euclid(360.0);
-        (q.s, lat, angle)
+        (q.s + along, lat, angle)
+    };
+    let onto_lap = |x: f32, z: f32, heading_deg: f32| -> (f32, f32, f32) {
+        match nearest(x, z) {
+            Some(q) => project(q, x, z, heading_deg),
+            None => (0.0, 0.0, 0.0),
+        }
     };
 
     let mut s = String::new();
@@ -3432,12 +3448,17 @@ fn rdf(prog: &TrackProgram, spur: Option<&StartSpur>) -> String {
          \tdifflat = 0.000000\n\tlanewidth = {:.6}\n\tlatshift = 0.000000\n\tside = 1\n",
         gate.angle, -lane
     ));
+    // One frame for the whole row: the lap where the row's own middle meets it.
+    let row_frame = nearest(mid_x, mid_z);
     for i in 0..grid {
         // Where the gate actually is, in the world, and then that point read back as a
         // position on the lap.
         let t = -span * 0.5 + (i as f32 + 0.5) * lane;
         let (x, z) = (mid_x + rx * t, mid_z + rz * t);
-        let (long, lat, angle) = onto_lap(x, z, gate.angle);
+        let (long, lat, angle) = match row_frame {
+            Some(q) => project(q, x, z, gate.angle),
+            None => onto_lap(x, z, gate.angle),
+        };
         s.push_str(&format!(
             "\tstall{i}\n\t{{\n\t\tlong = {long:.6}\n\t\tlat = {lat:.6}\n\
              \t\tangle = {angle:.6}\n\t}}\n"
@@ -4109,6 +4130,7 @@ fn mask_across(syn: &Synth, mw: usize, mh: usize, f: impl Fn(Where) -> u8) -> Ve
             let (rx, rz) = crate::trackprog::right_vector(st.heading);
             let lat = (wx - st.x) * rx + (wz - st.z) * rz;
             out[y * mw + x] = f(Where {
+                i,
                 lat,
                 off: lat - syn.line_lat[at],
                 k: st.curvature,
@@ -4126,6 +4148,9 @@ fn mask_across(syn: &Synth, mw: usize, mh: usize, f: impl Fn(Where) -> u8) -> Ve
 
 /// One cell of the ground, as a mask sees it.
 struct Where {
+    /// Which cell it is, for anything that has to read the start straight as well as the lap.
+    i: usize,
+
     /// Metres off the centreline, signed, positive to the rider's right.
     lat: f32,
     /// Metres off the *racing* line, same sign.
@@ -4171,8 +4196,68 @@ enum BandMask {
 ///
 /// Shared by the exported masks and the preview map, so the studio cannot show a line in a
 /// different place from the one the game gets.
+/// How much of the start pad a cell is, and what its ground is doing there.
+///
+/// `None` where the cell is not on the start straight at all, so the lap's own rules run.
+fn on_start_pad(syn: &Synth, i: usize) -> Option<(f32, f32, f32)> {
+    let spur = syn.spur.as_ref()?;
+    let d = syn.spur_dist[i];
+    if !d.is_finite() {
+        return None;
+    }
+    let s = syn.spur_arc[i];
+    let wide = spur.at(s);
+    if d > wide {
+        return None;
+    }
+    // How far in from the edge, how far along from the gate row, and the comb itself.
+    let across = 1.0 - (d / wide.max(1e-3)).clamp(0.0, 1.0);
+    let from_gate = s - spur.gate_at();
+    Some((across, from_gate, d))
+}
+
+/// The comb of grooves the gate leaves, as coverage.
+fn start_rut(syn: &Synth, i: usize, seed: u32) -> Option<u8> {
+    let (_, from_gate, d) = on_start_pad(syn, i)?;
+    if !(-1.0..GATE_RUT_M).contains(&from_gate) {
+        return Some(0);
+    }
+    let row = GRID_STALLS as f32 * GRID_LANE_M * 0.5;
+    if d > row {
+        return Some(0);
+    }
+    let along = smoothstep(1.0 - (from_gate.max(0.0) / GATE_RUT_M));
+    // The same comb the ground is cut with, and the same phase — it is even in the offset, so
+    // it lines up either side of the line without needing to know which side it is.
+    let lane = (d / GRID_LANE_M) * std::f32::consts::TAU;
+    let groove = (0.5 - 0.5 * lane.cos()).powf(1.6);
+    let wobble = 0.85 + 0.3 * fbm(d * 0.4, from_gate * 0.12, seed ^ 0x71F3);
+    Some((255.0 * (groove * along * wobble).clamp(0.0, 1.0)) as u8)
+}
+
+/// Churned ground over the pad, thinner where the grooves packed it down.
+fn start_loose(syn: &Synth, i: usize, seed: u32) -> Option<u8> {
+    let (across, from_gate, d) = on_start_pad(syn, i)?;
+    let patchy = (0.45 + 0.55 * fbm(d * 0.05, from_gate * 0.05, seed ^ 0x2D19)).clamp(0.0, 1.0);
+    let packed = if (-1.0..GATE_RUT_M).contains(&from_gate) {
+        let lane = (d / GRID_LANE_M) * std::f32::consts::TAU;
+        1.0 - 0.55 * (0.5 - 0.5 * lane.cos())
+    } else {
+        1.0
+    };
+    // Fading out at the edges, where the pad meets ground nothing has driven on.
+    let edge = smoothstep((across * 3.0).clamp(0.0, 1.0));
+    Some((255.0 * (patchy * packed * edge * 0.8).clamp(0.0, 1.0)) as u8)
+}
+
 fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
     mask_across(syn, mw, mh, |c| {
+        // The start pad's own marks: forty bikes pulling out of forty stalls leave a comb of
+        // lines, and the ground has them cut into it — see the gate grooves in `synthesise`.
+        // Painted here so they are something a rider can see rather than only feel.
+        if let Some(v) = start_rut(syn, c.i, seed) {
+            return v;
+        }
         if c.lat.abs() > half + 0.5 {
             return 0;
         }
@@ -4219,6 +4304,12 @@ fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> 
 /// dry edges without the corner term inventing any.
 fn loose_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
     mask_across(syn, mw, mh, |c| {
+        // The pad is churned ground: forty bikes stand on it once and tear it up, and nothing
+        // rides it again. Patchy loose dirt over the whole of it, thinner where the grooves
+        // are because that is where the tyres packed it.
+        if let Some(v) = start_loose(syn, c.i, seed) {
+            return v;
+        }
         if c.lat.abs() > half + 0.2 {
             return 0;
         }
@@ -5847,6 +5938,65 @@ mod tests {
             narrowed < p.width,
             "it is still {narrowed:.1} m wide where it meets the lap"
         );
+    }
+
+    /// And they have to be in a row. Every position in a `.rdf` is stated on the lap, and if
+    /// each gate takes the distance-round of the *nearest station* rather than projecting onto
+    /// it, forty gates half a metre apart in the file come out as a staircase in the game.
+    #[test]
+    fn the_gate_row_is_a_row() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let spur = s.spur.as_ref().expect("a start straight");
+        let text = rdf(&p, Some(spur));
+
+        let st = p.stations(0.5);
+        let block = &text[text.find("starting_grid").expect("a grid")..];
+        let mut it = block.lines().map(|l| l.trim());
+        let mut placed = Vec::new();
+        while let Some(l) = it.next() {
+            if !l.starts_with("stall") {
+                continue;
+            }
+            let (mut long, mut lat) = (0.0f32, 0.0f32);
+            for _ in 0..5 {
+                match it.next() {
+                    Some(v) if v.starts_with("long = ") => long = v[7..].parse().unwrap(),
+                    Some(v) if v.starts_with("lat = ") => lat = v[6..].parse().unwrap(),
+                    Some("}") => break,
+                    _ => {}
+                }
+            }
+            let q = st
+                .iter()
+                .min_by(|a, b| (a.s - long).abs().total_cmp(&(b.s - long).abs()))
+                .unwrap();
+            let (fx, fz) = crate::trackprog::heading_vector(q.heading);
+            let (rx, rz) = crate::trackprog::right_vector(q.heading);
+            let along = long - q.s;
+            placed.push((q.x + fx * along + rx * lat, q.z + fz * along + rz * lat));
+        }
+        assert_eq!(placed.len(), GRID_STALLS);
+
+        // Every gate on one straight line: fit the row's own direction from its ends and check
+        // nothing wanders off it.
+        let (first, last) = (placed[0], placed[placed.len() - 1]);
+        let (dx, dz) = (last.0 - first.0, last.1 - first.1);
+        let len = (dx * dx + dz * dz).sqrt();
+        assert!(len > 40.0, "the row is only {len:.0} m across");
+        let (ux, uz) = (dx / len, dz / len);
+        for (i, (x, z)) in placed.iter().enumerate() {
+            let off = (x - first.0) * -uz + (z - first.1) * ux;
+            assert!(off.abs() < 0.1, "gate {i} stands {off:.2} m off the row");
+        }
+        // And evenly spaced along it.
+        for w in placed.windows(2) {
+            let step = ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt();
+            assert!(
+                (step - GRID_LANE_M).abs() < 0.15,
+                "gates {step:.2} m apart where the lane is {GRID_LANE_M}"
+            );
+        }
     }
 
     /// The gates the game reads have to be the gates we built. Every position in a `.rdf` is

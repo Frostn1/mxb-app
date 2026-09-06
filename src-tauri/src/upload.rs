@@ -114,7 +114,7 @@ fn endpoint() -> String {
 /// `None` means the question could not be answered — no `Content-Length`, or the request never
 /// got through — and an unanswered question is not evidence against an upload, so the caller
 /// treats it as a pass rather than failing a part that is probably fine.
-async fn hosted_len(client: &Client, url: &str) -> Option<u64> {
+pub(crate) async fn hosted_len(client: &Client, url: &str) -> Option<u64> {
     let resp = client.head(url).send().await.ok()?;
     resp.status().is_success().then(|| resp.content_length())?
 }
