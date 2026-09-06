@@ -12,6 +12,9 @@ pub struct Upload {
     pub host: String,
     /// Size of the original zip, not of any one part.
     pub size: u64,
+    /// What each part should weigh, in the same order. Carried into the share code so a
+    /// download can tell *which* slice came back short instead of only that the total did.
+    pub part_sizes: Vec<u64>,
 }
 
 const HOST: &str = "catbox";
@@ -59,6 +62,7 @@ pub async fn upload_file(
         .unwrap_or_else(|| "preset-bundle".to_string());
 
     let mut parts = Vec::with_capacity(plan.len());
+    let mut sizes = Vec::with_capacity(plan.len());
     for (i, &(offset, len)) in plan.iter().enumerate() {
         on_part(i + 1, plan.len());
         let bytes = read_slice(&mut handle, offset, len)
@@ -69,10 +73,11 @@ pub async fn upload_file(
         } else {
             format!("{stem}.part{}of{}.zip", i + 1, plan.len())
         };
-        parts.push(catbox_upload(client, endpoint(), &name, &bytes).await?);
+        parts.push(catbox_upload(client, endpoint(), &name, &bytes, len).await?);
+        sizes.push(len);
     }
 
-    Ok(Upload { parts, host: HOST.to_string(), size })
+    Ok(Upload { parts, host: HOST.to_string(), size, part_sizes: sizes })
 }
 
 /// Slice `size` bytes into `(offset, len)` spans no bigger than one part. A zero-byte file
@@ -104,20 +109,51 @@ fn endpoint() -> String {
     obfstr!("https://catbox.moe/user/api.php").to_string()
 }
 
+/// What the host says it is holding at `url`, if it will say.
+///
+/// `None` means the question could not be answered — no `Content-Length`, or the request never
+/// got through — and an unanswered question is not evidence against an upload, so the caller
+/// treats it as a pass rather than failing a part that is probably fine.
+async fn hosted_len(client: &Client, url: &str) -> Option<u64> {
+    let resp = client.head(url).send().await.ok()?;
+    resp.status().is_success().then(|| resp.content_length())?
+}
+
 /// Upload one part, retrying the drops. Refusals — anything catbox puts prose behind — are
 /// final: the request itself is what it objected to, so sending it again says nothing new.
+///
+/// A link coming back is not proof the part is *there*. catbox can take a large POST, answer
+/// with a perfectly good URL, and keep only some of the file behind it — which is a bundle
+/// that downloads without a single error and then does not add up. So the link is checked
+/// before it is trusted, and a short one is retried like any other drop.
 async fn catbox_upload(
     client: &Client,
     url: String,
     name: &str,
     bytes: &[u8],
+    expect: u64,
 ) -> anyhow::Result<String> {
     for attempt in 1..=ATTEMPTS {
         let (status, body) = catbox_post(client, &url, name, bytes.to_vec()).await?;
 
         // Failures come back as plain prose, sometimes under a 200, so the URL is the only tell.
         if body.starts_with("https://") {
-            return Ok(body);
+            match hosted_len(client, &body).await {
+                Some(got) if got != expect => {
+                    if attempt == ATTEMPTS {
+                        anyhow::bail!(
+                            "catbox stored {} of a {} part and kept answering with a link. \
+                             Try sharing again in a minute.",
+                            crate::bundle::human_size(got),
+                            crate::bundle::human_size(expect)
+                        )
+                    }
+                    tokio::time::sleep(RETRY_WAIT * attempt).await;
+                    continue;
+                }
+                // The right size, or the host would not say — nothing to act on either way.
+                _ => return Ok(body),
+            }
         }
 
         let dropped = body.is_empty() || status.is_server_error();
@@ -221,7 +257,7 @@ mod tests {
     async fn upload_against(replies: Vec<&'static str>) -> anyhow::Result<String> {
         let url = serve_replies(replies);
         let client = Client::builder().build().unwrap();
-        catbox_upload(&client, url, "part.zip", b"zip bytes").await
+        catbox_upload(&client, url, "part.zip", b"zip bytes", b"zip bytes".len() as u64).await
     }
 
     /// The reported failure: catbox answers 200 with nothing in it. That is a drop, not a
