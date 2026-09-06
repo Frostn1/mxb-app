@@ -448,8 +448,17 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     }
     tally.push(("trees", n));
 
-    // 5. The start structure, over the gate row.
-    let st = at(2.0);
+    // 5. The start structure, over the gate row — which is on the start straight, off to the
+    //    side of the lap, not on the lap itself. It spans the whole row, and the row is 54 m
+    //    wide where the gates stand.
+    let (st, gate_span) = match &syn.spur {
+        Some(spur) => {
+            let g = spur.gate_at();
+            let i = ((g / 0.5) as usize).min(spur.stations.len().saturating_sub(1));
+            (spur.stations[i], spur.at(g) + 3.0)
+        }
+        None => (at(2.0), half + 3.0),
+    };
     let (rx, rz) = crate::trackprog::right_vector(st.heading);
     let (fx, fz) = crate::trackprog::heading_vector(st.heading);
     // One foot for the whole structure: a gantry with a post at each end is level, and
@@ -458,12 +467,12 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     // other in the air — and the beam clears the higher of the two.
     let mut highest = f32::NEG_INFINITY;
     for side in [-1.0f32, 1.0] {
-        let (x, z) = (st.x + rx * (half + 3.0) * side, st.z + rz * (half + 3.0) * side);
+        let (x, z) = (st.x + rx * gate_span * side, st.z + rz * gate_span * side);
         let foot = ground(syn, x, z);
         highest = highest.max(foot);
         gate.append(&edfwrite::moved(&edfwrite::cuboid(0.5, 5.0, 0.5), [x, foot, z]));
     }
-    let span = (half + 3.0) * 2.0;
+    let span = gate_span * 2.0;
     let beam = edfwrite::turned(&edfwrite::cuboid(span, 1.2, 0.3), st.heading.to_degrees() + 90.0);
     gate.append(&edfwrite::moved(&beam, [st.x, highest + 4.6, st.z]));
     let _ = (fx, fz);
