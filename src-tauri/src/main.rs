@@ -13,6 +13,7 @@ mod cookie_session;
 mod downloads;
 mod dropzone;
 mod edf;
+mod edfwrite;
 mod feel;
 mod fileshare;
 mod firstpaint;

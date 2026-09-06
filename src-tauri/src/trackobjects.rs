@@ -102,6 +102,11 @@ pub fn classify(sheet: &str) -> Class {
     if any(&["haybale", "bale", "hay", "straw", "tuff", "tyre", "tire"]) {
         return Class::Bale;
     }
+    // Before the banner rule, because a `flagpost` is a pole that happens to fly a flag and
+    // the banner rule would take it on the word "flag" alone.
+    if any(&["pole", "post", "powerline", "pylon", "mast", "tower"]) {
+        return Class::Pole;
+    }
     if any(&[
         "inflate", "inflatable", "backdrop", "banner", "flag", "sign", "board", "advert",
         "sponsor", "logo", "arch",
@@ -116,9 +121,6 @@ pub fn classify(sheet: &str) -> Class {
         "ambulance", "quad",
     ]) {
         return Class::Vehicle;
-    }
-    if any(&["pole", "post", "powerline", "pylon", "mast", "tower"]) {
-        return Class::Pole;
     }
     if any(&[
         "tent", "building", "castle", "clubhouse", "roof", "wall", "shed", "hut", "cabin",

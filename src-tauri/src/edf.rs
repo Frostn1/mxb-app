@@ -891,9 +891,19 @@ pub fn embedded_textures(b: &[u8]) -> Vec<EmbeddedTexture> {
     const SIZES: [u32; 7] = [64, 128, 256, 512, 1024, 2048, 4096];
     let mut out = Vec::new();
     let mut o = 0usize;
+    // Where the last accepted record ended. The next one starts exactly there, and at that
+    // one offset the boundary rule below does not apply — see the comment on it.
+    let mut resume = usize::MAX;
     'scan: while o + TEX_W_FROM_NAME[1] + TEX_DATA_FROM_W <= b.len() {
-        // A name starts a record only at a word boundary (else `2021crf` also matches at `crf`).
-        if !b[o].is_ascii_alphanumeric() || (o > 0 && b[o - 1].is_ascii_alphanumeric()) {
+        // A name starts a record only at a word boundary (else `2021crf` also matches at
+        // `crf`) — except immediately after a record we have already accepted, where the
+        // preceding byte is the tail of a DEFLATE stream and says nothing. It is ASCII
+        // alphanumeric about a quarter of the time, and the record after it was being
+        // dropped: a two-sheet model came back with one sheet, and which one depended on
+        // how its pixels happened to compress.
+        if !b[o].is_ascii_alphanumeric()
+            || (o > 0 && o != resume && b[o - 1].is_ascii_alphanumeric())
+        {
             o += 1;
             continue;
         }
@@ -927,6 +937,7 @@ pub fn embedded_textures(b: &[u8]) -> Vec<EmbeddedTexture> {
                 data_len,
             });
             o = data_off + data_len; // records don't overlap — skip the payload
+            resume = o;
             continue 'scan;
         }
         o += 1;
