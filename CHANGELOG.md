@@ -3,6 +3,15 @@
 ## 2026-09-05
 
 ### Changed
+- Tracks you build now start where a start belongs. The lap begins on its longest straight,
+  with the gate row a few metres onto it, the finish line past that and the run at turn one
+  beyond — instead of the gates landing wherever the lap happened to be forty metres in.
+- The start opens out to hold the whole row. Forty gates are 48 m across, so the track fans
+  out to 54 m where they stand, graded flat as far as the ground beside it allows, and
+  funnels back down to riding width by turn one. The pit lane, the thirty-second board and
+  the timing line move out with it.
+
+### Changed
 - Tracks you build now read as tracks. The riding surface was one flat brown from edge to
   edge, with nothing to tell you where the line went or where the track stopped. It is now
   painted in five: a bright graded verge either side, dry loose dirt at the edges and round

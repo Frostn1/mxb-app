@@ -195,7 +195,69 @@ fn berm_on_a_corner(turn: &[crate::trackprog::Station], at: f32) -> bool {
 fn repair(prog: &mut TrackProgram) -> Vec<String> {
     let mut done = Vec::new();
 
-    // 1. Put the lap on the ground, and make the cells square, which is one problem and
+    // 1. Close the lap, with a turn no tighter than the tightest already on it — the same
+    //    rule the studio's own "Close the lap" button uses.
+    let closure = prog.closure_error();
+    if closure > corpus::CLOSURE_M {
+        let radius = prog
+            .segments
+            .iter()
+            .filter_map(|s| match s {
+                crate::trackprog::Segment::Arc { radius, .. } => Some(radius.abs()),
+                _ => None,
+            })
+            .fold(f32::MAX, f32::min);
+        let radius = if radius.is_finite() { radius } else { 25.0 };
+        if let Some(add) = prog.closing_segments(radius) {
+            let n = add.len();
+            prog.segments.extend(add);
+            done.push(format!(
+                "closed the lap: {closure:.0} m gap shut with {n} segment(s), now {:.2} m",
+                prog.closure_error()
+            ));
+        }
+    }
+
+    // 2. Start the lap on a straight, because that is where a start goes.
+    //
+    //    A closed lap has no natural beginning — the model picks one, and it picks the point
+    //    it started drawing from. That left the gate row wherever the lap happened to be a
+    //    few dozen metres in, which on a lap that opens on a corner is forty gates laid round
+    //    a bend, and the pit lane and the thirty-second board out in a field with them.
+    //
+    //    Nothing about the track changes: the same ground, ridden from a different point on
+    //    it. So this is repaired rather than sent back — where a lap starts is not a design
+    //    decision, it is bookkeeping, and the model has better things to spend an attempt on.
+    //
+    //    After the closing, because rotating a lap that doesn't meet itself moves the part
+    //    that comes after the seam by however far the gap is.
+    if prog.opening_straight() < crate::trackprog::START_STRAIGHT_M {
+        let features = prog.features.clone();
+        let on_a_feature = |at: f32| {
+            features
+                .iter()
+                .any(|f| at > f.at() + 0.01 && at < f.at() + f.length() - 0.01)
+        };
+        let runs = prog.straight_runs();
+        // The longest straight the lap has, preferring one whose beginning isn't under a jump
+        // — starting there would leave the jump straddling the finish.
+        let longest = |it: &mut dyn Iterator<Item = &(usize, f32, f32)>| {
+            it.max_by(|a, b| a.2.total_cmp(&b.2)).copied()
+        };
+        let best = longest(&mut runs.iter().filter(|(_, at, _)| !on_a_feature(*at)))
+            .or_else(|| longest(&mut runs.iter()));
+        if let Some((index, at, len)) = best {
+            if len > prog.opening_straight() + 5.0 {
+                prog.rotate_start(index);
+                done.push(format!(
+                    "the lap now starts on its longest straight — {len:.0} m, {at:.0} m round \
+                     from where it began — so the gate row stands on one"
+                ));
+            }
+        }
+    }
+
+    // 3. Put the lap on the ground, and make the cells square, which is one problem and
     //    not two.
     //
     //    They were two steps and they fought: fitting the plot to the lap and then squaring
@@ -213,7 +275,9 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
     {
         let st = prog.stations(2.0);
         if !st.is_empty() {
-            let margin = prog.width.max(1.0) * 1.5;
+            // Enough for the start fan, not just the riding line: the opening straight
+            // widens out to hold a 48 m gate row, and it needs to be on the plot.
+            let margin = (prog.width.max(1.0) * 1.5).max(tracksynth::START_FAN_HALF_M + 8.0);
             let (mut lo_x, mut hi_x) = (f32::MAX, f32::MIN);
             let (mut lo_z, mut hi_z) = (f32::MAX, f32::MIN);
             for s in &st {
@@ -280,21 +344,7 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
             // lies and which way round it faces.
             if let Some(p) = tracksynth::place_on_ground(prog) {
                 if p.was_cross_m - p.cross_m > 0.25 {
-                    let (c, s) = (p.turn_deg.to_radians().cos(), p.turn_deg.to_radians().sin());
-                    let st = prog.stations(4.0);
-                    let (mut lo_x, mut hi_x, mut lo_z, mut hi_z) =
-                        (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
-                    for q in &st {
-                        lo_x = lo_x.min(q.x);
-                        hi_x = hi_x.max(q.x);
-                        lo_z = lo_z.min(q.z);
-                        hi_z = hi_z.max(q.z);
-                    }
-                    let (cx, cz) = ((lo_x + hi_x) * 0.5, (lo_z + hi_z) * 0.5);
-                    let (rx, rz) = (prog.start.x - cx, prog.start.z - cz);
-                    prog.start.x = cx + rx * c - rz * s + p.dx;
-                    prog.start.z = cz + rx * s + rz * c + p.dz;
-                    prog.start.angle += p.turn_deg;
+                    tracksynth::place(prog, &p);
                     done.push(format!(
                         "lap turned {:.0}° to lie along the ground — the fall across it drops \
                          from {:.1} m to {:.1} m over thirty metres, climbing at {:.1}°",
@@ -305,30 +355,7 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
         }
     }
 
-    // 2. Close the lap, with a turn no tighter than the tightest already on it — the same
-    //    rule the studio's own "Close the lap" button uses.
-    let closure = prog.closure_error();
-    if closure > corpus::CLOSURE_M {
-        let radius = prog
-            .segments
-            .iter()
-            .filter_map(|s| match s {
-                crate::trackprog::Segment::Arc { radius, .. } => Some(radius.abs()),
-                _ => None,
-            })
-            .fold(f32::MAX, f32::min);
-        let radius = if radius.is_finite() { radius } else { 25.0 };
-        if let Some(add) = prog.closing_segments(radius) {
-            let n = add.len();
-            prog.segments.extend(add);
-            done.push(format!(
-                "closed the lap: {closure:.0} m gap shut with {n} segment(s), now {:.2} m",
-                prog.closure_error()
-            ));
-        }
-    }
-
-    // 3. Put berms on corners. A berm on a straight silently does nothing, and it is never
+    // 4. Put berms on corners. A berm on a straight silently does nothing, and it is never
     //    what was meant — a model that asks for one has decided the corner wants banking and
     //    then got the distance round the lap wrong. Where the corners are is not a matter of
     //    opinion, so slide it to the nearest one rather than sending the whole program back.
@@ -357,7 +384,7 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
         }
     }
 
-    // 4. Fit the height budget. It exists only because samples are quantised against it, and
+    // 5. Fit the height budget. It exists only because samples are quantised against it, and
     //    it is a number the synthesiser already knows — there was never a reason to make the
     //    model guess it and then be told off for guessing wrong.
     if let Ok(fitted) = crate::tracksynth::with_fitted_budget(prog) {
@@ -371,6 +398,12 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
     }
 
     done
+}
+
+/// `repair`, for tests in other modules.
+#[cfg(test)]
+pub fn repair_for_tests(prog: &mut TrackProgram) -> Vec<String> {
+    repair(prog)
 }
 
 /// Ask for a track, and keep asking until it measures like one.
@@ -503,6 +536,33 @@ pub fn review(prog: &TrackProgram) -> Review {
              to add up to a whole number of full circles — check that the signed angles sum to \
              ±360°."
         ));
+    }
+    // Where the race starts. Not structural — a lap with no straight on it builds and rides
+    // — but everything the `.rdf` puts at the start goes on the opening straight, and a gate
+    // row is forty gates in a line 48 m across. Round a bend it is forty gates in a hedge.
+    let opening = prog.opening_straight();
+    if opening < crate::trackprog::START_STRAIGHT_M {
+        let longest = prog
+            .straight_runs()
+            .into_iter()
+            .max_by(|a, b| a.2.total_cmp(&b.2));
+        let need = crate::trackprog::START_STRAIGHT_M;
+        notes.push(match longest {
+            Some((_, at, len)) if len >= need => format!(
+                "the lap opens with {opening:.0} m of straight and the start needs {need:.0} — \
+                 the gate row, the finish line and a run at turn one. There is a {len:.0} m \
+                 straight {at:.0} m round; start the lap from there."
+            ),
+            Some((_, _, len)) => format!(
+                "the lap's longest straight is {len:.0} m and a start needs {need:.0} — a gate \
+                 row is 48 m across and it has to stand in a line. Give the lap one straight \
+                 that long and begin it there."
+            ),
+            None => format!(
+                "the lap is all corners, and a start needs {need:.0} m of straight to put the \
+                 gate row, the finish line and the run at turn one on."
+            ),
+        });
     }
     if let Some((a, b, gap)) = self_crossing(prog) {
         // Named in the model's own terms. It wrote a list of segments, not a distance round
@@ -845,6 +905,24 @@ mod tests {
         // camelCase on the wire, so a step-up is `stepUp` and not `step_up`.
         assert!(kinds.contains(&"stepUp"), "{kinds:?}");
         assert!(kinds.contains(&"tabletop") && kinds.contains(&"berm"));
+    }
+
+    /// The example is what the model is shown, and `generate` puts every answer through
+    /// `repair` before it measures it. If repairing the example breaks it, every generated
+    /// track starts from a shape that has already been mangled.
+    #[test]
+    fn the_worked_example_survives_being_repaired() {
+        let mut p: TrackProgram = serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
+        let done = repair(&mut p);
+        let problems = validate(&p);
+        assert!(problems.is_empty(), "repaired {done:#?}\nbut {problems:#?}");
+        // It is drawn starting halfway round a corner, which is where the gate row used to
+        // end up. Repairing it has to have moved the start onto a straight.
+        assert!(
+            p.opening_straight() >= crate::trackprog::START_STRAIGHT_M,
+            "the lap opens with {:.0} m of straight",
+            p.opening_straight()
+        );
     }
 
     #[test]
