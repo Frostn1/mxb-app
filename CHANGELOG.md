@@ -28,6 +28,13 @@
 ## 2026-09-06
 
 ### Changed
+- The track is dirt again. The whole riding surface is dark worked ground with a darker line
+  ridden into it, instead of pale soil with a stripe down the middle and holes in it.
+- Straights no longer carry a single groove dug down the middle of them. That is a corner's
+  doing, and it stays in the corners.
+- Berms keep their shape: the ground beside the track no longer takes bites out of them.
+- Ground sheets stop tiling visibly. A sheet's slow variation is flattened, so laying it a
+  hundred times across a track no longer draws squares.
 - The step in the ground is gone. Where two legs of a lap graded into the same piece of
   field, the ground between them could stand a metre and a half proud in one sample — ground
   outside the track now slumps to a slope instead of standing as a wall.
