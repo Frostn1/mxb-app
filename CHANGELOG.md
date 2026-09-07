@@ -3,10 +3,24 @@
 ## 2026-09-06
 
 ### Changed
+- The track creator is laid out the way you work: the lap as a numbered list on the left, a
+  plan view of the circuit in the middle, and the numbers for whichever step you pick on the
+  right. Click a step in the list or on the map to shape it. The 3D ground is still a click
+  away, next to the plan.
 - Generated tracks carry a continuous printed banner down the lap as well as sponsor boards:
   one design repeated on pieces joined end to end, the way a real track runs one.
 
+### Added
+- You can add straights and turns to a lap, not just jumps. Add step offers the lap's own
+  shape first — a straight, a left turn, a right turn — and the new piece lands after
+  whichever step you have selected.
+
 ### Fixed
+- Starting a blank track works.
+- Giving a straight or a corner a rise now shapes a hill. The climb comes back down over the
+  rest of the lap, so the circuit meets itself at the start line.
+- The 3D preview says when it is rebuilding, and says so when it is showing an older build
+  than the numbers on screen.
 - Banners on a generated track read the right way round from either side of the board.
 - Banner artwork fills its board at the proportions it was drawn in.
 
@@ -1704,7 +1718,6 @@ out looking nothing like the track you ride, name it in the report.
 - Buy Me a Coffee donations post to the Discord for money-in events only, carrying a name and
   their note and nothing else — no amount, no email.
 - Audio comes from `cpal` pinned to 0.15; the Linux build and CI install `libasound2-dev`.
-
 
 ## Unannounced — server provisioning and paint publishing
 

@@ -226,17 +226,26 @@ what ten published circuits are made of:
                       then 18 m through 30° is ONE corner. Writing it as a single 165° arc of
                       constant radius is the clearest sign a lap was drawn rather than built.
   tightest radius     10.6-18.5 m at the median corner, down to 6.4 m at the hairpins.
-  straights           short. Indiana's run 21 m at the median and its longest is 62 m.
+  straights           short. Indiana's run 21 m at the median and its longest is 62 m. The
+                      main straight is the one exception: the start spur runs beside it and
+                      the finish jump stands on it.
   lap length          1800-2500 m.
 
 So: build each corner as a run of arcs, keep the straights short, and let the lap wander.
 Count the arcs before you send it — if straights outnumber corners you have written a shape.
 
 START THE LAP ON A STRAIGHT. A motocross start is forty gates in a line 48 m across, and the
-gate row, the finish line and the run at turn one all sit on the lap's opening straight — a lap
-that begins on a corner has its gates laid round a bend. So the FIRST segment is a straight of
-60-100 m, and the lap has to come back to it. That is the one long straight; the rest stay
-short. Leave it clear — no jumps in the first 40 m, riders are forty abreast there.
+gate row stands on its own spur beside the lap's opening straight, which is also where the
+finish line goes — a lap that begins on a corner has its gates laid round a bend. So the FIRST
+segment is a straight of 100-160 m, and the lap has to come back to it. That is the one long
+straight; the rest stay short.
+
+AND THAT STRAIGHT CARRIES THE FINISH JUMP. Every national ends the lap on one: the biggest
+tabletop on the track, 2.4-3.6 m tall, with the finish line painted past its landing. Put one
+there — leaving the first 18 m off the last corner clear so there is drive at it, and 10 m
+past the landing before the straight runs out. Leave it out and the app builds it anyway,
+taking the ground whatever you put there was standing on; what the app cannot do is lengthen
+the straight, so give it one long enough.
 
 THE LAP MUST STILL CLOSE, and a lap like this closes the same way: the signed angles sum to
 ±360° and the straights bring it home. A serpentine that turns 2400° in total and 360° net is

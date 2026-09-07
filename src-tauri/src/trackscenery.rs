@@ -1496,6 +1496,32 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     gate.append(&edfwrite::moved(&beam, [st.x, highest + 4.6, st.z]));
     tally.push(("gate", 1));
 
+    // And one over the finish line itself, which is where the finish jump lands. The same
+    // shape as the gate's, narrower — it spans the racing line rather than a row of forty
+    // gates — and taller, because what comes under it has just come off a three-metre
+    // tabletop.
+    {
+        let st = at(crate::tracksynth::finish_at(prog));
+        let (rx, rz) = crate::trackprog::right_vector(st.heading);
+        let span = half + 4.0;
+        let feet: Vec<(f32, f32)> = [-1.0f32, 1.0]
+            .iter()
+            .map(|side| (st.x + rx * span * side, st.z + rz * span * side))
+            .collect();
+        if feet.iter().all(|(x, z)| inside(prog, *x, *z, 2.0)) {
+            let mut highest = f32::NEG_INFINITY;
+            for (x, z) in &feet {
+                let foot = ground(syn, *x, *z);
+                highest = highest.max(foot);
+                gate.append(&edfwrite::moved(&edfwrite::cuboid(0.5, 6.0, 0.5), [*x, foot, *z]));
+            }
+            let beam =
+                edfwrite::turned(&edfwrite::cuboid(span * 2.0, 1.2, 0.3), across(st.heading));
+            gate.append(&edfwrite::moved(&beam, [st.x, highest + 5.6, st.z]));
+            tally.push(("finish gantry", 1));
+        }
+    }
+
     // One model a kind, each with its own single sheet. Not one model of several materials:
     // TerrainEd faults on the second material in a model whatever the geometry — see
     // `edfwrite`'s note and the case-by-case test behind it. PiBoSo's own example track is
@@ -1881,6 +1907,41 @@ mod tests {
         assert!(
             worst > half,
             "something stands {worst:.1} m from the centreline, inside a {half:.1} m half-width"
+        );
+    }
+
+    /// The finish line has a gantry over it, not only the gate row.
+    #[test]
+    fn a_gantry_stands_over_the_finish_line() {
+        let (p, s) = demo();
+        let sc = build(&p, &s);
+        assert_eq!(
+            sc.tally.iter().find(|(k, _)| *k == "finish gantry").map(|(_, v)| *v),
+            Some(1),
+            "no gantry over the finish line: {:?}",
+            sc.tally
+        );
+        let line = crate::tracksynth::finish_at(&p);
+        let st = p
+            .stations(0.5)
+            .into_iter()
+            .min_by(|a, b| (a.s - line).abs().total_cmp(&(b.s - line).abs()))
+            .expect("a station at the line");
+        let (fx, fz) = crate::trackprog::heading_vector(st.heading);
+        // A beam, over the line and over a rider's head. Measured along the lap rather than
+        // as a distance: the beam spans the track, so its nearest vertex is out at the post.
+        let clear = sc
+            .files
+            .iter()
+            .filter(|(f, _)| f == "gate.edf")
+            .flat_map(|(_, b)| crate::edf::parse_world(b))
+            .flat_map(|n| n.positions.chunks_exact(3).map(|v| [v[0], v[1], v[2]]).collect::<Vec<_>>())
+            .filter(|v| ((v[0] - st.x) * fx + (v[2] - st.z) * fz).abs() < 3.0)
+            .map(|v| v[1] - ground(&s, v[0], v[2]))
+            .fold(f32::MIN, f32::max);
+        assert!(
+            clear > 4.5,
+            "the highest thing over the finish line is {clear:.1} m up"
         );
     }
 

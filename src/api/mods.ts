@@ -2423,6 +2423,11 @@ export function setVoiceLevels(inputGain: number, outputVolume: number): Promise
   return invoke<void>("set_voice_levels", { inputGain, outputVolume });
 }
 
+/** Hear riders from where they are on the track, or flat. Applies to the next session. */
+export function setVoiceProximity(proximity: boolean): Promise<void> {
+  return invoke<void>("set_voice_proximity", { proximity });
+}
+
 /** Open the mic and start the level meter. Resolves to a warning when the saved device
  *  is gone and we fell back to the default — the unplugged-headset case. */
 export function voiceMeterStart(): Promise<string | null> {
@@ -2443,6 +2448,12 @@ export type VoiceLevel = { rms: number; peak: number };
 /** Live microphone level while the meter is running. */
 export function onVoiceInputLevel(cb: (level: VoiceLevel) => void): Promise<UnlistenFn> {
   return listen<VoiceLevel>("voice-input-level", (e) => cb(e.payload));
+}
+
+/** Fires when the microphone was opened and then sent no audio at all — which is what
+ *  "the mic test does nothing" actually is. The payload says what to check. */
+export function onVoiceInputDead(cb: (message: string) => void): Promise<UnlistenFn> {
+  return listen<string>("voice-input-dead", (e) => cb(e.payload));
 }
 
 /** Fires on both edges of the push-to-talk key: `true` on press, `false` on release. */
