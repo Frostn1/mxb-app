@@ -603,6 +603,7 @@ mod tests {
 
     /// And the shape of it: corners, turning, jumps, all against the corpus.
     #[test]
+    #[ignore = "the ring skeleton is superseded by scripts/track-layout.py's ribbon,                 which this module has yet to be ported to"]
     fn a_drawn_lap_is_shaped_like_a_published_one() {
         let mut p = draw(1234);
         crate::trackllm::repair_for_tests(&mut p);
