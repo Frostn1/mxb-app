@@ -9317,8 +9317,10 @@ mod tests {
         // LINE_KEEPS_OFF_EDGE_M` into the corner while the cut sat on the centreline, four
         // metres apart on a twelve-metre track. A rider steered by one and dropped into the
         // other.
+        // In a corner. The fixture's arc runs 120 to 170 m; past that it is a straight, and
+        // a straight is the one place this rule does not hold — see below.
         let s = synthesise(&hairpins()).unwrap();
-        for at in [130.0f32, 140.0, 150.0, 160.0, 170.0, 180.0, 190.0] {
+        for at in [130.0f32, 140.0, 150.0, 160.0, 168.0] {
             let k = s.stations.iter().position(|st| st.s >= at).unwrap();
             let off = deepest_at(&across(&s, at)) - s.line_lat[k];
             assert!(
@@ -9327,6 +9329,36 @@ mod tests {
                  strip is only {RUT_HALF_WIDTH_M:.2} m wide"
             );
         }
+    }
+
+    /// And on a straight it does not, because nobody rides one in single file.
+    ///
+    /// The rule above used to be asserted down the straight as well, and holding it there is
+    /// what put a groove down the middle of every straight on the track — reported from the
+    /// seat, in those words: one main rut dug into the ground in the middle, makes zero
+    /// sense. What a straight carries is the field's own grooves and the chop under braking,
+    /// and where the deepest of them lies has to wander.
+    #[test]
+    fn a_straight_has_no_single_groove_down_the_middle_of_it() {
+        let s = synthesise(&hairpins()).unwrap();
+        let offsets: Vec<f32> = [180.0f32, 195.0, 210.0, 225.0, 240.0, 255.0, 270.0]
+            .iter()
+            .map(|&at| {
+                let k = s.stations.iter().position(|st| st.s >= at).unwrap();
+                deepest_at(&across(&s, at)) - s.line_lat[k]
+            })
+            .collect();
+        // The claim is only that it is not the painted line: a straight's deepest groove is
+        // the field's doing and lands where the field put it, which on this fixture is a
+        // couple of metres to one side the whole way down. Whether it wanders is a separate
+        // question and not one this can answer — the field runs over tens of metres and a
+        // straight is only a hundred and twenty long.
+        let off_line = offsets.iter().map(|o| o.abs()).sum::<f32>() / offsets.len() as f32;
+        assert!(
+            off_line > 0.8,
+            "the deepest groove runs {off_line:.2} m from the paint down the whole straight, \
+             which is a channel dug down the middle of it: {offsets:?}"
+        );
     }
 
     #[test]
