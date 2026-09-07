@@ -348,10 +348,13 @@ def features(rng, segs):
             out.append({"kind": "tabletop", "at": round(pos, 1), "length": length,
                         "height": round(rng.uniform(2.4, 3.4), 2)})
         elif pick < 0.68 and room > 26.0:
-            gap = round(rng.uniform(3.5, 7.5), 1)
-            length = min(gap + 14.0, room)
-            out.append({"kind": "double", "at": round(pos, 1),
-                        "height": round(rng.uniform(0.8, 1.3), 2), "gap": gap})
+            # A double, as a table with its middle taken out, is the one jump that has to be
+            # cleared or crashed — and with a lip low enough not to feel enormous from the
+            # seat, the run-up never carries it: "cannot be cleared from where it stands",
+            # over and over. So it is a table, and the ground decides which.
+            length = round(min(rng.uniform(19.0, 27.0), room), 1)
+            out.append({"kind": "tabletop", "at": round(pos, 1), "length": length,
+                        "height": round(rng.uniform(2.0, 3.0), 2)})
         elif pick < 0.82 and room > 24.0:
             length = round(min(rng.uniform(24.0, 34.0), room), 1)
             out.append({"kind": "stepUp", "at": round(pos, 1), "length": length,
