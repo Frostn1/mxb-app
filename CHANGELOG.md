@@ -2,6 +2,14 @@
 
 ## 2026-09-06
 
+### Changed
+- Tracks in the 3D viewer are drawn with the ground the game draws: each layer's own sheet,
+  tiled the way the track states, through the track's own masks. Published tracks used to come
+  out one flat brown, because the colour was taken from the surface data a track uses for grip
+  rather than from what it is painted with.
+
+## 2026-09-06
+
 ### Added
 - The Servers tab lists every server on the master list, and measures the real ping to each
   one instead of leaving the column blank.

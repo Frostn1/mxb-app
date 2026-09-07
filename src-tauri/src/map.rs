@@ -934,7 +934,7 @@ fn name_words(name: &str) -> Vec<String> {
 
 /// Whether the name says this record is a normal map. Written every way going: `Dirt2_n`,
 /// `soil_white_n_s`, `sand-dark-normal`.
-fn is_normal_name(name: &str) -> bool {
+pub(crate) fn is_normal_name(name: &str) -> bool {
     name_words(name)
         .iter()
         .any(|w| matches!(w.as_str(), "n" | "nrm" | "norm" | "normal" | "nor"))
@@ -1289,12 +1289,511 @@ pub fn surfaces_blob(textures: &[MapTexture]) -> Vec<u8> {
     out
 }
 
+
+// ---------------------------------------------------------------------------
+// The ground the game draws
+// ---------------------------------------------------------------------------
+
+/// One painted layer of a track's ground.
+///
+/// This is what the game puts under the bike, and it is not what the `.trh` coverage masks
+/// describe — those are the *physics* surfaces, a friction table keyed by
+/// `asphalt/grass/sand/kerb/soil/concrete`, and on a published track they are all but unused:
+/// Indiana paints one 256×256 patch of `concrete` across a 2049² grid and nothing else. Drawn
+/// from those, a real track is a flat brown slab.
+///
+/// The paint lives here instead: a stack of layers, each a tiling sheet with its own mask,
+/// composited in order. The first covers everything and carries no mask; the rest cut into it.
+#[derive(Clone, Debug)]
+pub struct GroundLayer {
+    /// The sheet, reduced for tiling rather than for extent.
+    pub sheet: MapTexture,
+    /// How many times the sheet repeats across the ground, per axis. Read rather than
+    /// assumed: Indiana's base is 200 and its dark soil 180, which over 525 m is about
+    /// 2.6 and 2.9 metres a tile — close enough to the viewer's old hardcoded 4 m to look
+    /// plausible and far enough to read as the wrong ground.
+    pub tile_u: f32,
+    pub tile_v: f32,
+    /// Coverage, one byte a texel, laid across the whole ground. `None` on the base layer.
+    ///
+    /// Coarse on purpose — Indiana's are 256² against a 2049² heightfield — which is why the
+    /// whole stack is a few hundred kilobytes rather than the hundreds of megabytes the sheets
+    /// themselves come to.
+    pub mask: Option<GroundMask>,
+}
+
+#[derive(Clone, Debug)]
+pub struct GroundMask {
+    pub width: u32,
+    pub height: u32,
+    /// `width * height`, one byte a texel.
+    pub coverage: Vec<u8>,
+}
+
+/// How far a layer's sheet is reduced. It tiles, so it needs frequency rather than extent —
+/// the same reasoning as [`ground_sheet`], and it keeps a six-layer stack inside a few
+/// megabytes rather than the ninety a map's own 1024² sheets would cost.
+const LAYER_SHEET_DIM: u32 = 256;
+
+/// A sheet record, at either of the two widths the format uses.
+///
+/// A layer's colour sheet carries a zero word between its name and its width; the normal map
+/// hanging off it does not. Rather than tell them apart by which slot they sit in — the
+/// secondary's header is a variable run of words, and two samples were not enough to pin it —
+/// each offset is tried and the record has to prove itself: a NUL-padded ASCII name, power-of
+/// -two dimensions, a zero where the sub-record count goes, and a length that stays in the
+/// file.
+fn layer_sheet_at(b: &[u8], o: usize) -> Option<(String, u32, u32, usize, usize)> {
+    if o + 148 > b.len() {
+        return None;
+    }
+    let name = b.get(o..o + 100)?;
+    let end = name.iter().position(|c| *c == 0)?;
+    if end == 0 || !name[..end].iter().all(|c| c.is_ascii_graphic()) {
+        return None;
+    }
+    if !name[end..].iter().all(|c| *c == 0) {
+        return None;
+    }
+    let pow2 = |v: u32| (4..=8192).contains(&v) && v.is_power_of_two();
+    for w_off in [104usize, 100] {
+        if w_off == 104 && u32le(b, o + 100) != 0 {
+            continue;
+        }
+        let (w, h) = (u32le(b, o + w_off), u32le(b, o + w_off + 4));
+        if !pow2(w) || !pow2(h) {
+            continue;
+        }
+        // The 16-byte content hash, then a zero where sub-records would be counted.
+        let he = o + w_off + 8 + 16;
+        if he + 8 > b.len() || u32le(b, he) != 0 {
+            continue;
+        }
+        let len = u32le(b, he + 4) as usize;
+        // The length counts the eight bytes that follow it.
+        if len < 8 || he + 8 + len + 4 > b.len() {
+            continue;
+        }
+        let data = he + 16;
+        return Some((
+            String::from_utf8_lossy(&name[..end]).into_owned(),
+            w,
+            h,
+            data,
+            data + len - 8,
+        ));
+    }
+    None
+}
+
+/// A mask record: `u32 w, u32 h, u32 len`, eight bytes, then DEFLATE over one byte a texel.
+///
+/// Proved by inflating rather than by its header alone — it has to come out at exactly `w * h`
+/// bytes. Nothing else in a map does that, so this cannot pick up a sheet or a run of geometry.
+fn layer_mask_at(b: &[u8], o: usize) -> Option<(GroundMask, usize)> {
+    if o + 20 > b.len() {
+        return None;
+    }
+    let (w, h, len) = (u32le(b, o), u32le(b, o + 4), u32le(b, o + 8) as usize);
+    let ok = |v: u32| (16..=8192).contains(&v) && v.is_power_of_two();
+    if !ok(w) || !ok(h) || len < 16 {
+        return None;
+    }
+    let data = o + 20;
+    let take = len - 8;
+    if data + take > b.len() {
+        return None;
+    }
+    let want = w as usize * h as usize;
+    if take > want {
+        return None;
+    }
+    let mut out = Vec::with_capacity(want);
+    let mut dec = flate2::bufread::DeflateDecoder::new(&b[data..data + take]);
+    use std::io::Read;
+    let mut buf = [0u8; 1 << 16];
+    loop {
+        match dec.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                out.extend_from_slice(&buf[..n]);
+                if out.len() > want {
+                    return None;
+                }
+            }
+            Err(_) => return None,
+        }
+    }
+    if out.len() != want {
+        return None;
+    }
+    // Bottom-up, like every other sheet the compilers write — see the flip in [`ground_sheet`].
+    // Left as it lies, a mask puts the riding line on the wrong side of the track.
+    let row = w as usize;
+    for y in 0..(h as usize) / 2 {
+        let (top, bottom) = (y * row, (h as usize - 1 - y) * row);
+        for x in 0..row {
+            out.swap(top + x, bottom + x);
+        }
+    }
+    Some((
+        GroundMask {
+            width: w,
+            height: h,
+            coverage: out,
+        },
+        data + take,
+    ))
+}
+
+/// Whether a name marks a normal map rather than a colour sheet.
+///
+/// Wider than [`is_normal_name`], which splits on separators and so reads `dirtnorm` and
+/// `grassnorm` — Smokey Pines' two — as words of their own. A normal map drawn as ground is a
+/// lilac sheet, so the test errs toward calling one.
+fn is_layer_normal(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    is_normal_name(&n)
+        || n.ends_with("norm")
+        || n.ends_with("_n")
+        || n.ends_with("_n_s")
+        || n.ends_with("nrm")
+}
+
+/// How many bytes of material a layer states before its sheet: fourteen floats.
+const LAYER_MATERIAL: usize = 56;
+
+/// How far past a sheet the walk will look for the trailer that closes its layer.
+///
+/// Far enough to step over a normal map's payload — a 1024² sheet is a megabyte or two — and
+/// bounded so a walk that has lost the stack gives up rather than reading the rest of the file.
+const TRAILER_REACH: usize = 8 << 20;
+
+/// What closes a layer: how its sheet tiles, and the mask that cuts it into the one below.
+struct Trailer {
+    tile_u: f32,
+    tile_v: f32,
+    mask: Option<GroundMask>,
+    /// Where the next layer's material record begins.
+    next: usize,
+}
+
+/// Find the trailer that follows a layer's sheet.
+///
+/// Searched for rather than read at a fixed offset, because what sits between the sheet and
+/// the trailer is a normal map whose own header is a variable run of words — two samples were
+/// not enough to pin it, and a walk that assumes one is wrong on the tracks that carry the
+/// other. The trailer proves itself instead: two plausible tiling floats, a flag that is zero
+/// or one, and — where it is one — a mask that inflates to exactly its stated size.
+fn trailer_after(b: &[u8], from: usize, limit: usize) -> Option<Trailer> {
+    let sane = |v: f32| v.is_finite() && (0.01..=100_000.0).contains(&v);
+    let mut o = from;
+    while o + 20 < limit.min(b.len()) {
+        let (tu, tv) = (f32le(b, o), f32le(b, o + 4));
+        if sane(tu) && sane(tv) {
+            match u32le(b, o + 8) {
+                // A masked layer: the mask is proof enough on its own.
+                1 => {
+                    if let Some((mask, after)) = layer_mask_at(b, o + 12) {
+                        return Some(Trailer {
+                            tile_u: tu,
+                            tile_v: tv,
+                            mask: Some(mask),
+                            next: after + 4,
+                        });
+                    }
+                }
+                // The base layer carries no mask, so there is nothing to prove it by except
+                // what comes next: the following layer's material and sheet have to parse.
+                0 => {
+                    let next = o + 16;
+                    if next + 60 < b.len()
+                        && (1..=4).contains(&u32le(b, next + LAYER_MATERIAL))
+                        && layer_sheet_at(b, next + LAYER_MATERIAL + 4).is_some()
+                    {
+                        return Some(Trailer {
+                            tile_u: tu,
+                            tile_v: tv,
+                            mask: None,
+                            next,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        o += 4;
+    }
+    None
+}
+
+/// Walk the layer stack from `start`, which is a layer's material record.
+///
+/// `decode` is false while the stack's phase is still being searched for: the walk is the same
+/// but no sheet is inflated, because hundreds of candidate starts each decoding a megabyte of
+/// pixels to be thrown away is most of a minute of work.
+fn march_layers(b: &[u8], start: usize, decode: bool) -> Vec<GroundLayer> {
+    let mut out = Vec::new();
+    let mut o = start;
+    while out.len() < 64 && o + 60 < b.len() {
+        if !(1..=4).contains(&u32le(b, o + LAYER_MATERIAL)) {
+            break;
+        }
+        let Some((name, w, h, data, end)) = layer_sheet_at(b, o + LAYER_MATERIAL + 4) else {
+            break;
+        };
+        let Some(t) = trailer_after(b, end, end + TRAILER_REACH) else {
+            break;
+        };
+        // A normal map opens no layer of its own; it hangs off the colour sheet above it.
+        if !is_layer_normal(&name) {
+            let sheet = if decode {
+                match inflate(b, data, end - data, w, h) {
+                    Some(mut rgba) => {
+                        flip_rows(&mut rgba, w, h);
+                        let (rgba, rw, rh) = reduce(rgba, w, h, LAYER_SHEET_DIM);
+                        Some((rgba, rw, rh))
+                    }
+                    None => None,
+                }
+            } else {
+                Some((Vec::new(), w, h))
+            };
+            if let Some((rgba, rw, rh)) = sheet {
+                out.push(GroundLayer {
+                    sheet: MapTexture {
+                        material: out.len() as u32,
+                        name,
+                        width: rw,
+                        height: rh,
+                        alpha: false,
+                        rgba,
+                    },
+                    tile_u: t.tile_u,
+                    tile_v: t.tile_v,
+                    mask: t.mask,
+                });
+            }
+        }
+        o = t.next;
+    }
+    out
+}
+
+/// The ground a track is painted with, layer by layer.
+///
+/// This is what the game puts under the bike. It is a march through the records rather than a
+/// scan for them, because the stack only means anything in order — but a march has to start in
+/// phase, and nothing in the file announces where the stack begins. So the phase is *found*:
+/// every sheet record in the map is tried as the stack's first, and the one that walks furthest
+/// wins. A march that starts in the wrong place fails within a layer or two, because a layer
+/// only closes on a mask that inflates to exactly its stated size.
+///
+/// Sheets are not inflated while the phase is being searched for — only the winning march
+/// decodes anything. A map carries well over a hundred textures that are banners and foliage.
+pub fn ground_layers(b: &[u8]) -> Vec<GroundLayer> {
+    // Every sheet record is a candidate first layer; its material record sits 60 bytes back.
+    let mut starts: Vec<usize> = Vec::new();
+    let mut o = 0usize;
+    while o + 160 < b.len() {
+        if b[o].is_ascii_graphic()
+            && b[o + 99] == 0
+            && o >= LAYER_MATERIAL + 4
+            && (1..=4).contains(&u32le(b, o - 4))
+            && layer_sheet_at(b, o).is_some()
+        {
+            starts.push(o - LAYER_MATERIAL - 4);
+        }
+        o += 4;
+    }
+
+    // The march that reads the most layers is the stack. Ties go to the earliest, which is the
+    // one that starts at the base rather than part way down it.
+    let mut best: Option<(usize, usize)> = None; // (layers, start)
+    for s in starts {
+        let n = march_layers(b, s, false).len();
+        if n > best.map_or(0, |(m, _)| m) {
+            best = Some((n, s));
+        }
+    }
+    match best {
+        Some((_, s)) => march_layers(b, s, true),
+        None => Vec::new(),
+    }
+}
+
+/// The two tiling floats a layer keeps between the end of its sheet and the next record.
+///
+/// Scanned for rather than read at a fixed offset, because what sits between them and the
+/// sheet is a normal map of unknown length. They are the pair immediately before a flag word.
+fn tiling_before(b: &[u8], from: usize, to: usize) -> Option<(f32, f32)> {
+    let mut o = from;
+    let mut found = None;
+    while o + 12 <= to.min(b.len()) {
+        let flag = u32le(b, o + 8);
+        if flag <= 1 {
+            let (u, v) = (f32le(b, o), f32le(b, o + 4));
+            if (0.01..=100_000.0).contains(&u) && (0.01..=100_000.0).contains(&v) {
+                found = Some((u, v));
+            }
+        }
+        o += 4;
+    }
+    found
+}
+
+/// The ground stack, packed for the front end.
+///
+/// One table of fixed-width entries and then the pixels, so the whole stack crosses the bridge
+/// as one buffer rather than as a JSON object per layer with a megabyte of numbers in it.
+pub fn ground_layers_blob(layers: &[GroundLayer]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(
+        GROUND_LAYERS_HEADER
+            + layers.len() * GROUND_LAYER_ENTRY
+            + layers
+                .iter()
+                .map(|l| l.sheet.rgba.len() + l.mask.as_ref().map_or(0, |m| m.coverage.len()))
+                .sum::<usize>(),
+    );
+    out.extend_from_slice(b"FGLY");
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&(layers.len() as u32).to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    for l in layers {
+        out.extend_from_slice(&l.sheet.width.to_le_bytes());
+        out.extend_from_slice(&l.sheet.height.to_le_bytes());
+        out.extend_from_slice(&(l.sheet.rgba.len() as u32).to_le_bytes());
+        out.extend_from_slice(&l.tile_u.to_le_bytes());
+        out.extend_from_slice(&l.tile_v.to_le_bytes());
+        let (mw, mh, ml) = l
+            .mask
+            .as_ref()
+            .map_or((0, 0, 0), |m| (m.width, m.height, m.coverage.len() as u32));
+        out.extend_from_slice(&mw.to_le_bytes());
+        out.extend_from_slice(&mh.to_le_bytes());
+        out.extend_from_slice(&ml.to_le_bytes());
+    }
+    for l in layers {
+        out.extend_from_slice(&l.sheet.rgba);
+    }
+    for l in layers {
+        if let Some(m) = &l.mask {
+            out.extend_from_slice(&m.coverage);
+        }
+    }
+    out
+}
+
+/// Bytes before the layer table.
+pub const GROUND_LAYERS_HEADER: usize = 16;
+/// Bytes per layer in that table.
+pub const GROUND_LAYER_ENTRY: usize = 32;
+
 /// Bytes before the surface table. Four-byte aligned, same reasoning as [`SCENERY_HEADER`].
 pub const SURFACES_HEADER: usize = 16;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Build a layer stack the way a compiled map holds one, so the walk can be tested
+    /// without a three-hundred-megabyte track on disk.
+    fn synth_stack(layers: &[(&str, f32, Option<u32>)]) -> Vec<u8> {
+        use flate2::{write::DeflateEncoder, Compression};
+        use std::io::Write;
+        let mut b = vec![0u8; 64]; // something in front, so offset zero is never the answer
+        for (name, tile, mask) in layers {
+            b.extend_from_slice(&[0u8; LAYER_MATERIAL]);
+            b.extend_from_slice(&1u32.to_le_bytes()); // one sheet
+            let mut nm = vec![0u8; 100];
+            nm[..name.len()].copy_from_slice(name.as_bytes());
+            b.extend_from_slice(&nm);
+            b.extend_from_slice(&0u32.to_le_bytes());
+            b.extend_from_slice(&8u32.to_le_bytes()); // 8x8 sheet
+            b.extend_from_slice(&8u32.to_le_bytes());
+            b.extend_from_slice(&[0u8; 16]); // hash
+            b.extend_from_slice(&0u32.to_le_bytes()); // no sub-records
+            let px = vec![128u8; 8 * 8 * 4];
+            let mut e = DeflateEncoder::new(Vec::new(), Compression::fast());
+            e.write_all(&px).unwrap();
+            let z = e.finish().unwrap();
+            b.extend_from_slice(&((z.len() + 8) as u32).to_le_bytes());
+            b.extend_from_slice(&[0u8; 8]);
+            b.extend_from_slice(&z);
+            b.extend_from_slice(&0u32.to_le_bytes()); // no secondary map
+            b.extend_from_slice(&tile.to_le_bytes());
+            b.extend_from_slice(&tile.to_le_bytes());
+            match mask {
+                Some(d) => {
+                    b.extend_from_slice(&1u32.to_le_bytes());
+                    b.extend_from_slice(&d.to_le_bytes());
+                    b.extend_from_slice(&d.to_le_bytes());
+                    let cov = vec![200u8; (*d as usize) * (*d as usize)];
+                    let mut e = DeflateEncoder::new(Vec::new(), Compression::fast());
+                    e.write_all(&cov).unwrap();
+                    let z = e.finish().unwrap();
+                    b.extend_from_slice(&((z.len() + 8) as u32).to_le_bytes());
+                    b.extend_from_slice(&[0u8; 8]);
+                    b.extend_from_slice(&z);
+                }
+                None => b.extend_from_slice(&0u32.to_le_bytes()),
+            }
+            b.extend_from_slice(&0u32.to_le_bytes()); // the word that closes a layer
+        }
+        b.extend_from_slice(&[0u8; 256]);
+        b
+    }
+
+    #[test]
+    fn reads_a_layer_stack_in_order() {
+        let b = synth_stack(&[
+            ("base_c", 200.0, None),
+            ("line_c", 180.0, Some(64)),
+            ("grass_c", 150.0, Some(32)),
+        ]);
+        let ls = ground_layers(&b);
+        assert_eq!(
+            ls.iter().map(|l| l.sheet.name.as_str()).collect::<Vec<_>>(),
+            ["base_c", "line_c", "grass_c"],
+            "the stack has to come back in the order it is painted"
+        );
+        // The base covers everything, so it states no mask; the rest cut into it.
+        assert!(ls[0].mask.is_none());
+        assert_eq!(ls[1].mask.as_ref().unwrap().width, 64);
+        assert_eq!(ls[2].mask.as_ref().unwrap().width, 32);
+        // Tiling is read, not assumed — the viewer used to hardcode four metres for every one.
+        assert_eq!(ls[0].tile_u, 200.0);
+        assert_eq!(ls[1].tile_u, 180.0);
+        assert_eq!(ls[2].tile_u, 150.0);
+        assert_eq!(ls[1].mask.as_ref().unwrap().coverage.len(), 64 * 64);
+    }
+
+    /// A normal map hangs off the colour sheet above it and is not a layer of its own. Drawn
+    /// as ground it is a lilac sheet.
+    #[test]
+    fn a_normal_map_opens_no_layer() {
+        let b = synth_stack(&[
+            ("base_c", 200.0, None),
+            ("line_n_s", 180.0, Some(32)),
+            ("grassnorm", 150.0, Some(32)),
+        ]);
+        let names: Vec<_> = ground_layers(&b)
+            .iter()
+            .map(|l| l.sheet.name.clone())
+            .collect();
+        assert_eq!(names, ["base_c"], "only the colour sheet is ground");
+    }
+
+    /// Nothing in a map announces where the ground begins, so the walk finds its own phase.
+    /// A map with no stack in it at all must come back empty rather than reading its scenery
+    /// as ground — a banner tiled across the terrain is worse than no change at all.
+    #[test]
+    fn a_map_with_no_ground_reads_none() {
+        assert!(ground_layers(&[0u8; 4096]).is_empty());
+        let noise: Vec<u8> = (0..40_000u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8).collect();
+        assert!(ground_layers(&noise).is_empty());
+    }
 
     /// Ground words used to be looked for anywhere in a name, which is how Abydos's
     /// `logo-dirtmaster` came to be its dirt and I40's `banner_lucasoil` its soil. Both are
