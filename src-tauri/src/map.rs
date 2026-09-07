@@ -389,7 +389,32 @@ pub struct MapObject {
 ///
 /// Where the surfaces *do* bind, nothing is dropped — an alpha test draws them properly.
 pub fn without_cards(mesh: &MapMesh) -> MapMesh {
+    without_cards_where(mesh, |_| true)
+}
+
+/// The same, but only for materials the caller says have no sheet.
+///
+/// A map that binds most of its materials still leaves a few with nothing, and those are drawn
+/// in flat grey. On a solid — a wall, a trailer — grey is merely dull; on a card it is a
+/// standing sheet of paper the size of the thing it was meant to be. Indiana binds forty-seven
+/// of its forty-nine materials and the two left over are thirteen per cent of its triangles,
+/// which is where the grey slabs across the track came from.
+pub fn without_cards_for(mesh: &MapMesh, unbound: impl Fn(u32) -> bool) -> MapMesh {
+    without_cards_where(mesh, unbound)
+}
+
+fn without_cards_where(mesh: &MapMesh, drop_material: impl Fn(u32) -> bool) -> MapMesh {
     let tris = mesh.indices.len() / 3;
+    // Which material each triangle belongs to, so a card can be judged by whether its own
+    // material bound rather than by the mesh's average.
+    let mut owner = vec![u32::MAX; tris];
+    for g in &mesh.groups {
+        for t in g.tri_start..g.tri_start + g.tri_count {
+            if let Some(slot) = owner.get_mut(t as usize) {
+                *slot = g.material;
+            }
+        }
+    }
     let vert = |i: u32| {
         let o = i as usize * 3;
         [
@@ -416,7 +441,8 @@ pub fn without_cards(mesh: &MapMesh) -> MapMesh {
         let upright = if len > 1e-9 { (n[1] / len).abs() } else { 1.0 };
         let high = p[0][1].max(p[1][1]).max(p[2][1]);
         let low = p[0][1].min(p[1][1]).min(p[2][1]);
-        keep.push(!(upright < 0.35 && high - low > 0.8));
+        let card = upright < 0.35 && high - low > 0.8;
+        keep.push(!(card && drop_material(owner[t])));
     }
 
     // Triangles are already sorted by material, so filtering keeps that order and the groups
@@ -1120,6 +1146,112 @@ pub fn reduced_texture(name: &str, w: u32, h: u32, mut rgba: Vec<u8>) -> MapText
 /// something the file has yet been made to say. Guessing puts a blue tent on a boundary wall,
 /// which is worse than the honest grey: measured against the geometry, the obvious reading is
 /// off by two on that track and nothing in the format explains why.
+/// Push a cut-out's colour outwards into the texels its alpha throws away.
+///
+/// A foliage sheet stores black in every transparent texel — there is no reason for an artist
+/// to paint what will never be drawn. That is fine at full size, where an alpha test either
+/// keeps a texel or discards it, and wrong at every size below it: a mipmap averages colour
+/// and alpha separately, so a leaf texel next to three transparent ones comes out a quarter of
+/// its brightness. Indiana's `leafs_twigs_QP_c_a` averages to luma 26, and its trees read green
+/// close up and black across the paddock — which is exactly what the mip chain does to them.
+///
+/// So the colour is grown outwards before the sheet is ever reduced: a transparent texel takes
+/// the average of whatever opaque neighbours it has, and the next pass treats that as opaque in
+/// turn. Alpha is untouched, so the cut-out still cuts out — only the colour behind the cut
+/// changes, from black to more of the leaf.
+fn bleed_cutout(rgba: &mut [u8], w: u32, h: u32) {
+    let (w, h) = (w as usize, h as usize);
+    if w == 0 || h == 0 {
+        return;
+    }
+    // Which texels carry colour worth spreading. Only the ones the alpha test would actually
+    // keep: a half-transparent texel on the edge of a leaf is mostly the black behind it, and
+    // seeding from those spreads the very colour this is meant to get rid of — it left
+    // Indiana's foliage at luma 40 against leaves of 75. Grows by one texel a pass.
+    let mut solid: Vec<bool> = rgba.chunks(4).map(|c| c[3] >= 128).collect();
+    // Until the sheet is full. It runs on the *reduced* sheet — a few hundred texels a side —
+    // so filling it outright costs less than the eight passes this used to make on the
+    // original, which on a 4096-square foliage atlas moved the average by one level.
+    for _ in 0..w.max(h) {
+        let mut filled = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                let i = y * w + x;
+                if solid[i] {
+                    continue;
+                }
+                let (mut sum, mut n) = ([0u32; 3], 0u32);
+                for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                        continue;
+                    }
+                    let j = ny as usize * w + nx as usize;
+                    if !solid[j] {
+                        continue;
+                    }
+                    for k in 0..3 {
+                        sum[k] += rgba[j * 4 + k] as u32;
+                    }
+                    n += 1;
+                }
+                if n > 0 {
+                    filled.push((i, [(sum[0] / n) as u8, (sum[1] / n) as u8, (sum[2] / n) as u8]));
+                }
+            }
+        }
+        if filled.is_empty() {
+            break;
+        }
+        for (i, rgb) in filled {
+            rgba[i * 4..i * 4 + 3].copy_from_slice(&rgb);
+            solid[i] = true;
+        }
+    }
+}
+
+/// Whether a map's surfaces can be bound to its materials at all.
+///
+/// The same test [`textures`] makes, without inflating a pixel — a map carries hundreds of
+/// megabytes of sheets and this has to be answerable before deciding what to draw.
+///
+/// It matters because of what happens when the answer is no. A material with no sheet is drawn
+/// in flat grey, and a third of a map is cut-out cards — foliage, crowd, netting — so a track
+/// that binds nothing renders as a forest of grey slabs standing over the ground. Measured:
+/// Briarcliff names one sheet by the convention out of eighty-five materials and SFDR none at
+/// all, so every triangle of both is untextured.
+pub fn binds(b: &[u8]) -> bool {
+    let Some((from, count)) = texture_table(b) else {
+        return false;
+    };
+    if count == 0 {
+        return false;
+    }
+    let named = colour_records(b, from)
+        .iter()
+        .filter(|(n, ..)| is_colour_name(n))
+        .count();
+    named * 4 >= count * 3
+}
+
+/// How many materials a map will actually bind a sheet to.
+///
+/// [`textures`] hands back one entry per `_c`-named record, capped at the material count, so
+/// every material at or past this has no sheet and is drawn in flat grey.
+pub fn bound_count(b: &[u8]) -> usize {
+    let Some((from, count)) = texture_table(b) else {
+        return 0;
+    };
+    if !binds(b) {
+        return 0;
+    }
+    colour_records(b, from)
+        .iter()
+        .filter(|(n, ..)| is_colour_name(n))
+        .count()
+        .min(count)
+}
+
 pub fn textures(b: &[u8], max_dim: u32) -> Vec<MapTexture> {
     let Some((from, count)) = texture_table(b) else {
         return Vec::new();
@@ -1144,7 +1276,15 @@ pub fn textures(b: &[u8], max_dim: u32) -> Vec<MapTexture> {
             // it is called.
             let alpha = cutout_fraction(&rgba) > CUTOUT_FRACTION;
             flip_rows(&mut rgba, w, h);
-            let (rgba, w, h) = reduce(rgba, w, h, max_dim.max(1));
+            let (mut rgba, w, h) = reduce(rgba, w, h, max_dim.max(1));
+            // After the reduce, and so before the only mips left to make are the GPU's.
+            // `reduce` already weights colour by alpha, so an opaque texel keeps its leaf
+            // green all the way down; what it cannot do is invent a colour for a block that
+            // is transparent throughout, and those come out black. Filling them is what stops
+            // the GPU averaging a tree toward black as it shrinks.
+            if alpha {
+                bleed_cutout(&mut rgba, w, h);
+            }
             Some(MapTexture {
                 material: i as u32,
                 name,
@@ -1356,7 +1496,13 @@ fn layer_sheet_at(b: &[u8], o: usize) -> Option<(String, u32, u32, usize, usize)
     }
     let name = b.get(o..o + 100)?;
     let end = name.iter().position(|c| *c == 0)?;
-    if end == 0 || !name[..end].iter().all(|c| c.is_ascii_graphic()) {
+    // Printable rather than graphic: a sheet may be named `CK_KeLLz Tree ATLAS 2 8K`, and
+    // rejecting the space threw away SFDR's whole surface table at its very first record.
+    // The first character still has to be graphic, so a field of blanks is not a name.
+    if end == 0
+        || !name[0].is_ascii_graphic()
+        || !name[..end].iter().all(|c| (0x20..=0x7e).contains(c))
+    {
         return None;
     }
     if !name[end..].iter().all(|c| *c == 0) {
@@ -1852,6 +1998,85 @@ mod tests {
         assert!(is_layer_normal("env"));
         assert!(is_layer_normal("ENV"));
         assert!(!is_layer_normal("gravel_c"));
+    }
+
+    /// A card whose material bound keeps its place; one whose material did not is a standing
+    /// sheet of paper the size of the thing it was meant to be, and comes out.
+    #[test]
+    fn only_the_unbound_cards_come_out() {
+        // Two upright cards, one per material, plus a floor so the mesh is not all cards.
+        let mut mesh = MapMesh::default();
+        let mut push_card = |m: &mut MapMesh, x: f32| {
+            let base = m.vertex_count() as u32;
+            for (dx, y) in [(0.0, 0.0), (1.0, 0.0), (0.0, 2.0)] {
+                m.positions.extend_from_slice(&[x + dx, y, 0.0]);
+                m.normals.extend_from_slice(&[0.0, 0.0, 1.0]);
+                m.uvs.extend_from_slice(&[0.0, 0.0]);
+            }
+            m.indices.extend_from_slice(&[base, base + 1, base + 2]);
+        };
+        push_card(&mut mesh, 0.0);
+        push_card(&mut mesh, 10.0);
+        mesh.groups = vec![
+            Group { material: 0, tri_start: 0, tri_count: 1 },
+            Group { material: 7, tri_start: 1, tri_count: 1 },
+        ];
+
+        // Material 7 has no sheet; material 0 has one.
+        let kept = without_cards_for(&mesh, |m| m >= 1);
+        assert_eq!(
+            kept.indices.len() / 3,
+            1,
+            "the bound material's card stays and the unbound one goes"
+        );
+        assert_eq!(kept.groups.iter().map(|g| g.material).collect::<Vec<_>>(), [0]);
+
+        // And with everything bound, nothing is dropped at all.
+        let all = without_cards_for(&mesh, |_| false);
+        assert_eq!(all.indices.len() / 3, 2);
+    }
+
+    /// A foliage sheet is mostly transparent, and what is stored behind the cut is black. A
+    /// mipmap averages colour and alpha separately, so shrinking a tree blends its leaves with
+    /// that black and the tree goes dark as it recedes — which is what Indiana's did.
+    #[test]
+    fn a_cut_out_keeps_its_colour_when_it_shrinks() {
+        // A quarter of the texels are opaque green; the rest are transparent black.
+        let (w, h) = (16u32, 16u32);
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let i = (y * w as usize + x) * 4;
+                if (x + y) % 4 == 0 {
+                    rgba[i..i + 4].copy_from_slice(&[40, 160, 40, 255]);
+                }
+            }
+        }
+        let mean = |px: &[u8]| -> u32 {
+            let n = (px.len() / 4) as u32;
+            px.chunks(4)
+                .map(|c| (c[0] as u32 * 299 + c[1] as u32 * 587 + c[2] as u32 * 114) / 1000)
+                .sum::<u32>()
+                / n.max(1)
+        };
+        let before = mean(&rgba);
+        bleed_cutout(&mut rgba, w, h);
+        let after = mean(&rgba);
+
+        // The leaf colour itself, which is what every mip should converge on.
+        let leaf = (40 * 299 + 160 * 587 + 40 * 114) / 1000;
+        assert!(
+            before < leaf / 2,
+            "the sheet has to start dark for this to be testing anything ({before} vs {leaf})"
+        );
+        assert!(
+            after > leaf * 3 / 4,
+            "after bleeding, a mip should land near the leaf colour, not the black behind it \
+             ({after} against a leaf of {leaf})"
+        );
+        // The cut-out still cuts out: alpha is untouched.
+        assert!(rgba.chunks(4).any(|c| c[3] == 0), "alpha must not be filled in");
+        assert!(rgba.chunks(4).any(|c| c[3] == 255));
     }
 
     /// Nothing in a map announces where the ground begins, so the walk finds its own phase.

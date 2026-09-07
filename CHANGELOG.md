@@ -3,6 +3,13 @@
 ## 2026-09-07
 
 ### Fixed
+- Trackside scenery in the 3D viewer no longer stands in slabs of flat grey. A track whose
+  textures the viewer can't read now leaves its banners and foliage out rather than drawing
+  them blank.
+- Trees keep their colour when you pull the camera back, instead of going black across the
+  paddock.
+- The black shapes standing over some tracks are gone. They were shadows, drawn as if they
+  were solid.
 - More tracks show their real ground in the 3D viewer. A track's normal maps are stored a
   little differently from its colour sheets, and reading them the same way stopped the viewer
   part way through a track's ground.
