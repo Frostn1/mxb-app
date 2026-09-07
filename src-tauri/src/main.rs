@@ -128,6 +128,8 @@ mod presets;
 mod paintsync;
 mod reshade;
 mod scenery;
+mod serverbook;
+mod serverfilter;
 mod servers;
 mod sessionwatch;
 mod shop_catalog_session;
@@ -7736,7 +7738,7 @@ fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::Launc
 /// from the master-server list; a superset of [`paintsync::RegisteredServer`] so the tab's
 /// Join button reuses [`join_server`]. The struct carries no protocol detail — that all lives
 /// behind `cfg(worldnet)` — so it stays in the public tree and the command compiles either way.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorldServer {
     /// Display name the operator gave the server.
@@ -7777,6 +7779,181 @@ pub struct WorldServer {
     pub force_cockpit: bool,
     pub no_aids: bool,
     pub limited_tyre_sets: bool,
+    /// Why the spam filter would hide this row, or empty to show it. The row is sent either
+    /// way: the tab shows a count of what was hidden and can reveal it, and someone who thinks
+    /// a rule is wrong has to be able to see what it caught. See [`serverfilter`].
+    pub hidden: String,
+}
+
+/// Who the app can name on a server, and where the names came from.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerRiders {
+    pub riders: Vec<String>,
+    /// `"session"` when it is the game's own roster for the server you are on — every rider,
+    /// named by the server. `"app"` when it is the riders whose own apps reported themselves
+    /// there, which is a subset and has to be labelled as one.
+    pub source: String,
+}
+
+/// The riders on a server, as far as anything can honestly say.
+///
+/// MX Bikes will not tell a stranger who is on a server. `GETINFO` answers with a rider count
+/// and a seat count and nothing else, and the roster message is only ever built inside a live
+/// session — so a full list for a server you are not on does not exist to be fetched.
+///
+/// That leaves two real answers, and the panel says which one it is showing. If you are on the
+/// server, FrostMod is in the session and hands over the actual grid. Otherwise the control
+/// plane knows where each rider's *app* said it was, which names the players who run MXB App
+/// and nobody else.
+#[tauri::command]
+async fn server_riders(
+    app: tauri::AppHandle,
+    address: String,
+    name: String,
+) -> Result<ServerRiders, String> {
+    // The game's own roster, when this is the server under us. `room_key` folds both sides so
+    // capitalisation or a stray space can't make a server fail to match itself.
+    if let Some(session) = live_session() {
+        if session.on_a_server()
+            && voice::session::room_key(&session.server_name) == voice::session::room_key(&name)
+        {
+            let riders = session.riders.into_iter().map(|r| r.name).collect();
+            return Ok(ServerRiders { riders, source: "session".into() });
+        }
+    }
+
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let token = Some(cfg.cp_token.as_str()).filter(|t| !t.trim().is_empty());
+
+    // Both key forms, because presence is recorded under whichever one the reporting app had:
+    // the address for a rider who joined through the app, the folded server name for one whose
+    // session FrostMod detected. See `paintsync::who_is_on`.
+    let mut keys = Vec::new();
+    if !address.trim().is_empty() {
+        let registry = paintsync::registry(token).await.unwrap_or_default();
+        keys.push(paintsync::server_key_for(&registry, &address));
+    }
+    let named = voice::session::room_key(&name);
+    if !named.is_empty() && !keys.contains(&named) {
+        keys.push(named);
+    }
+    if keys.is_empty() {
+        return Ok(ServerRiders::default());
+    }
+
+    let riders = paintsync::who_is_on(token, &keys).await.map_err(|e| format!("{e:#}"))?;
+    Ok(ServerRiders { riders, source: "app".into() })
+}
+
+/// What track a server is running, matched against what the player has and what they could get.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackGuess {
+    /// The internal id the server published, e.g. `mmx_supercross`.
+    pub id: String,
+    /// The installed track's file or folder name, empty when it isn't installed.
+    pub installed: String,
+    /// The installed track's own preview image, as a data URL.
+    pub preview: String,
+    /// Where a copy could come from when it isn't installed: `"shop"`, `"hub"`, or empty.
+    pub source: String,
+    pub product_id: u64,
+    pub product_name: String,
+    pub product_url: String,
+    pub product_image: String,
+    /// False when the name only resembles the track rather than matching it. The panel says
+    /// "we think" for these, because an internal id is not a product title and a fold of one
+    /// onto the other is a guess however good it looks.
+    pub exact: bool,
+}
+
+/// Work out which track a server means.
+///
+/// The server publishes an internal id — `mmx_supercross` — and nothing else. That is not a
+/// product title, not a folder name, and not something a player can search for, which is why
+/// the tab has always shown it raw and left everyone to guess.
+///
+/// Three answers in order of how much they are worth: the track is installed and the panel can
+/// show its own preview; there is an exact catalogue match and the panel can offer it; the name
+/// merely resembles something, which is offered as a guess and labelled as one.
+#[tauri::command]
+async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<TrackGuess, String> {
+    let id = track.trim().to_string();
+    let mut guess = TrackGuess { id: id.clone(), ..Default::default() };
+    if id.is_empty() {
+        return Ok(guess);
+    }
+
+    // Installed wins outright: nothing to buy, and the track's own artwork beats a shop photo.
+    if let Ok(entries) = scan_library(app.clone(), "tracks".into()).await {
+        let want = fold_name(&id);
+        if let Some(hit) = entries.iter().find(|e| fold_name(&e.name) == want) {
+            guess.installed = hit.name.clone();
+            guess.exact = true;
+            guess.preview = pkz::read_preview(std::path::Path::new(&hit.path))
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            return Ok(guess);
+        }
+    }
+
+    // The shop's own matcher, which is the fold the Browse grid already trusts to decide
+    // whether something is installed — reused here rather than a second opinion about names.
+    if let Ok(hits) = mods::shop_catalog::match_products(&app, &[id.clone()]).await {
+        if let Some(hit) = hits.into_iter().flatten().next() {
+            return Ok(shop_guess(guess, hit, true));
+        }
+    }
+    // Nothing matched outright, so fall back to searching for it. The id is snake_case and a
+    // product title is not, so the underscores become spaces before either catalogue sees it.
+    let words = id.replace('_', " ");
+    if let Ok(page) =
+        mods::shop_catalog::search(&app, &words, None, 1, mods::shop_catalog::ShopSort::default(), false).await
+    {
+        if let Some(hit) = page.items.into_iter().next() {
+            return Ok(shop_guess(guess, hit, false));
+        }
+    }
+
+    // Nothing in the shop; the hub is the other half of where tracks come from. Asked directly
+    // rather than through `with_hub_clearance`: that answers the robot challenge by opening a
+    // browser, and this runs from opening a panel. A browser window appearing because someone
+    // clicked a server row would be an ambush, so a challenge here simply means no guess.
+    if let Ok(page) = mods::hub::search(&words, None, 1, mods::hub::HubSort::default(), false).await {
+        if let Some(hit) = page.items.into_iter().next() {
+            guess.source = "hub".into();
+            guess.product_id = hit.id;
+            guess.product_name = hit.title;
+            guess.product_url = hit.url.unwrap_or_default();
+            guess.product_image = hit.image.unwrap_or_default();
+        }
+    }
+    Ok(guess)
+}
+
+fn shop_guess(mut guess: TrackGuess, hit: mods::shop_catalog::ShopMod, exact: bool) -> TrackGuess {
+    guess.source = "shop".into();
+    guess.product_id = hit.id;
+    guess.product_name = hit.title;
+    guess.product_url = hit.url.unwrap_or_default();
+    guess.product_image = hit.image.unwrap_or_default();
+    guess.exact = exact;
+    guess
+}
+
+/// Lowercase and reduce everything that isn't alphanumeric to a single space, so an internal
+/// id (`mmx_supercross`) and a folder or product name ("MMX Supercross") fold together. The
+/// same rule the shop catalogue matches on, so the two agree about what counts as the same
+/// name.
+fn fold_name(raw: &str) -> String {
+    raw.chars()
+        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The live MX Bikes server list, as the game's WORLD browser sees it.
@@ -7794,6 +7971,24 @@ async fn list_master_servers(app: tauri::AppHandle) -> Result<Vec<WorldServer>, 
     #[cfg(not(worldnet))]
     {
         let _ = app;
+        Err("The server browser isn't included in this build.".into())
+    }
+}
+
+/// Ask one server about itself, right now.
+///
+/// The detail panel used to format whatever the list happened to hold, which on a busy evening
+/// is minutes old — the rider count, the session and the track are all things that move while
+/// somebody reads the row. `GETINFO` costs one datagram and no account, so the panel asks.
+#[tauri::command]
+async fn probe_server(address: String) -> Result<WorldServer, String> {
+    #[cfg(worldnet)]
+    {
+        worldnet::probe_server(address).await
+    }
+    #[cfg(not(worldnet))]
+    {
+        let _ = address;
         Err("The server browser isn't included in this build.".into())
     }
 }
@@ -10406,6 +10601,9 @@ fn main() {
             launch_game,
             join_server,
             list_master_servers,
+            probe_server,
+            server_riders,
+            guess_server_track,
             experimental_state,
             enroll_account,
             // Paid plugins: the catalogue, redeeming a key, and getting a bundle on disk.

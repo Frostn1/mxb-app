@@ -9,6 +9,7 @@ import {
   Copy,
   Plug,
   ServerOff,
+  EyeOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -43,6 +44,9 @@ const Servers = () => {
   const [joining, setJoining] = useState<string | null>(null);
   const [joinOpen, setJoinOpen] = useState(false);
   const [detail, setDetail] = useState<MasterServer | null>(null);
+  // Spam and cheat-advertising servers are marked by the backend, not dropped, so this can
+  // reveal them. Off by default: the whole point is not to have to read past them.
+  const [showHidden, setShowHidden] = useState(false);
 
   // One fetch at a time. Two overlapping ones each sign in to Steam, and the loser's
   // failure used to replace the winner's list with an error.
@@ -78,17 +82,24 @@ const Servers = () => {
     load();
   }, [load]);
 
+  /** How many rows the filter caught, whether or not they're being shown. */
+  const hiddenCount = useMemo(
+    () => (servers ?? []).filter((s) => s.hidden).length,
+    [servers],
+  );
+
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q || !servers) return servers ?? [];
-    return servers.filter(
+    const visible = (servers ?? []).filter((s) => showHidden || !s.hidden);
+    if (!q) return visible;
+    return visible.filter(
       (s) =>
         s.name.toLowerCase().includes(q) ||
         s.track.toLowerCase().includes(q) ||
         s.location.toLowerCase().includes(q) ||
         s.address.toLowerCase().includes(q),
     );
-  }, [servers, query]);
+  }, [servers, query, showHidden]);
 
   const join = useCallback(
     async (address: string) => {
@@ -125,8 +136,24 @@ const Servers = () => {
       <ContextBarRight>
         {servers && servers.length > 0 && (
           <span className="tabular-figures text-[12.5px] text-faint">
-            {t("serverBrowser.count", { count: servers.length })}
+            {t("serverBrowser.count", { count: servers.length - (showHidden ? 0 : hiddenCount) })}
           </span>
+        )}
+        {hiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowHidden((v) => !v)}
+            title={t("serverBrowser.hiddenHelp")}
+            className={cn(
+              "flex h-7 items-center gap-1.5 border border-input px-2.5 text-[12px]",
+              showHidden ? "bg-card text-muted-foreground" : "text-faint hover:text-muted-foreground",
+            )}
+          >
+            <EyeOff className="size-3.5" />
+            {showHidden
+              ? t("serverBrowser.hideFiltered")
+              : t("serverBrowser.hiddenCount", { count: hiddenCount })}
+          </button>
         )}
         <div className="flex h-7 w-[220px] items-center gap-2 border border-input bg-card px-2.5">
           <Search className="size-3.5 text-faint" />
@@ -206,7 +233,12 @@ const Servers = () => {
                   <tr
                     key={`${s.address}-${i}`}
                     onClick={() => setDetail(s)}
-                    className="cursor-pointer border-b border-input/60 last:border-0 hover:bg-foreground/[0.03]"
+                    className={cn(
+                      "cursor-pointer border-b border-input/60 last:border-0 hover:bg-foreground/[0.03]",
+                      // Revealed rows stay legible but visibly demoted, so nobody mistakes one
+                      // for an ordinary result they just hadn't scrolled to.
+                      s.hidden && "opacity-55",
+                    )}
                   >
                     <td className="px-3.5 py-2.5">
                       <div className="flex items-center gap-2">
@@ -219,6 +251,14 @@ const Servers = () => {
                         <span className="truncate font-medium" title={s.name}>
                           {s.name}
                         </span>
+                        {s.hidden && (
+                          <span
+                            className="shrink-0 border border-input px-1.5 py-px text-[10.5px] uppercase tracking-wide text-faint"
+                            title={t("serverBrowser.hiddenBecause", { reason: s.hidden })}
+                          >
+                            {t("serverBrowser.filtered")}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-2 py-2.5 tabular-nums text-muted-foreground">

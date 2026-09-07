@@ -1084,6 +1084,24 @@ export const en = {
   "serverBrowser.any": "Any",
   "serverBrowser.yes": "Yes",
   "serverBrowser.notJoinable": "MX Bikes can't be pointed at this server's address.",
+  "serverBrowser.filtered": "Filtered",
+  "serverBrowser.hiddenCount": "{{count}} hidden",
+  "serverBrowser.hideFiltered": "Hide them again",
+  "serverBrowser.hiddenBecause": "Hidden: {{reason}}",
+  "serverBrowser.hiddenHelp":
+    "Servers advertising cheats, and other spam, are hidden using FrostMod's own rules. Click to look at them anyway.",
+  "serverBrowser.ridersTitle": "Riders",
+  "serverBrowser.ridersCount": "{{players}} of {{maxPlayers}} riders",
+  "serverBrowser.ridersFromSession": "your session",
+  "serverBrowser.ridersFromApp": "{{count}} using paint sync",
+  "serverBrowser.ridersUnknown":
+    "MX Bikes only tells the app how many riders are on a server. Names come from the players who run MXB App.",
+  "serverBrowser.trackTitle": "Track",
+  "serverBrowser.trackChecking": "Working out which track this is…",
+  "serverBrowser.trackInstalled": "You have this track — {{name}}",
+  "serverBrowser.trackMaybe": "We think this is {{name}}",
+  "serverBrowser.trackGetShop": "Get it from the shop",
+  "serverBrowser.trackGetHub": "Get it from MXB Hub",
 
   "sync.autoNote":
     "Your look publishes itself — every bike, whenever you change it in the app or in the game's own garage. Everyone else's arrives when you press Play.",
