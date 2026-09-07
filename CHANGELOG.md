@@ -18,6 +18,12 @@
   name to it.
 
 ### Fixed
+- The Linux app starts on a Steam Deck. The backend the window runs on and the platform the
+  graphics stack is pointed at now name the same thing, which is what a Deck's own session
+  leaves disagreeing.
+- A launch that never paints comes back by itself in safe graphics, and returns to the fast
+  path as soon as one works. `MXB_SAFE_GRAPHICS=0` puts a machine back by hand.
+- The startup log records `EGL_PLATFORM` and which graphics settings the run started with.
 
 - The Servers tab lists the live MX Bikes servers again. The app now signs in to the master
   server exactly as the game does, so the master answers it.
