@@ -964,6 +964,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     feel.rut_straight *= worn;
     feel.brake.1 *= worn;
     feel.accel.1 *= worn;
+    let worked = worked_profile(lap, r.seed);
     let ruts = rut_profile(&prog.features, &turn, lap, r.seed, &feel);
     let widths = width_profile(prog.width * 0.5, lap, r.seed);
     // The start straight: its own line off to the side of the lap, cut to the height of the
@@ -1292,7 +1293,9 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         let polished = 1.0 - POLISHED * trough_at(t, line.at(s), feel.groove * 2.1);
         if r.texture > 0.0 && w > 0.0 {
             let (wx, wz) = ((i % gw) as f32 * mps_x, (i / gw) as f32 * mps_z);
-            let gain = chop.rough.at(s);
+            // The same signal the grooves read: ground that has not been worked is smooth
+            // as well as ungrooved, and ground that has is both.
+            let gain = chop.rough.at(s) * (WORKED_SMOOTH + (1.0 - WORKED_SMOOTH) * worked.at(s));
             heights[i] += fbm_of(
                 wx / TEXTURE_WAVELENGTH_M,
                 wz / TEXTURE_WAVELENGTH_M,
@@ -1939,6 +1942,38 @@ const RUT_SECOND_DEPTH: f32 = 0.66;
 const RUT_SECOND_ENTRY_M: f32 = 6.0;
 const RUT_SECOND_EXIT_M: f32 = 48.0;
 
+/// How worked the ground is at this point round the lap, 0 to 1.
+///
+/// A track is not one state of ground from gate to flag. Some of it is chewed to pieces and
+/// some of it was bladed on Friday and has barely been touched, and the mixture is most of
+/// what makes a lap worth learning — said from the seat: "not always flat, and not always
+/// bumpy, but if we do either, the texture, colour, mask and the ground need to show it".
+///
+/// So it is one signal, read by everything that shows wear: how deep the grooves cut, how
+/// much chop the surface carries, and — through the ground's own rut signal, which the masks
+/// key to — how much dark sheet and how many marks get painted over it. Change this and all
+/// four move together, which is the whole point of there being one of it.
+///
+/// Slow: [`WORKED_M`] is about the length of a straight, so a rider crosses two or three
+/// states of ground in a lap rather than a new one every corner.
+fn worked_profile(lap: f32, seed: u32) -> Profile {
+    let mut p = Profile::blank(lap);
+    for i in 0..p.v.len() {
+        let s = i as f32 * PROFILE_STEP;
+        let n = 0.62 * fbm(s / WORKED_M, 1.5, seed ^ 0x0DE5)
+            + 0.38 * fbm(s / (WORKED_M * 0.42), 9.0, seed ^ 0x0DE6);
+        p.v[i] = (WORKED_LEAST + (1.0 - WORKED_LEAST) * (n * 0.5 + 0.5)).clamp(0.0, 1.0);
+    }
+    p
+}
+
+/// How far apart two states of ground are, and how little wear the freshest stretch keeps.
+const WORKED_M: f32 = 140.0;
+const WORKED_LEAST: f32 = 0.22;
+
+/// How much of the surface's own chop survives on the freshest ground.
+const WORKED_SMOOTH: f32 = 0.35;
+
 fn rut_profile(
     features: &[Feature],
     turn: &Profile,
@@ -1946,6 +1981,7 @@ fn rut_profile(
     seed: u32,
     feel: &Ride,
 ) -> Ruts {
+    let worked = worked_profile(lap, seed);
     let mut depth = Profile::blank(lap);
     let mut tight = Profile::blank(lap);
     let mut centre = Profile::blank(lap);
@@ -1960,7 +1996,7 @@ fn rut_profile(
                 let t = smoothstep(((start_r - radius) / (start_r - full_r)).clamp(0.0, 1.0));
                 // Not evenly: a rut wanders in depth down the length of a corner.
                 let vary = 0.75 + 0.25 * fbm(s / 9.0, 3.5, seed ^ 0x2117);
-                depth.v[i] = feel.rut_depth * t * vary;
+                depth.v[i] = feel.rut_depth * t * vary * worked.at(s);
                 tight.v[i] = t;
                 // Positive curvature turns right, and the corner's inside is the rider's
                 // right — the same side `right_vector` points at, which is the sign every

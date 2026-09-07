@@ -44,9 +44,22 @@ def outline(rng, n):
     # they sit 154 m apart, which makes every hairpin between them a 240 m arc — half the lap
     # spent turning round. A real switchback is 35 to 45 m from the run beside it, and there
     # are five or six of them.
-    gap = rng.uniform(34.0, 46.0)
-    lanes = rng.randint(4, 6)
-    corridor = 42.0
+    # Lanes far enough apart to use the ground, joined by a tight turn and a link rather
+    # than by an arc that spans the whole gap.
+    #
+    # Those are the two ways this goes wrong. Space the lanes widely and make each hairpin a
+    # half circle across the gap, and half the lap is spent turning round — 240 m of arc. Pack
+    # them close so the hairpins are tight, and the track becomes a zigzag in one corner of
+    # the plot with an empty oval round it, which is the shape that got called a nascar. A
+    # tight turn and a diagonal run to the next lane gives both: corners a rider leans on, and
+    # a lap that covers its ground.
+    # And enough lanes that the block fills the ground. Three lanes over a 620 m plot leaves
+    # the whole bottom half to the way home, which is a long empty oval round nothing —
+    # the other half of the nascar. The gap follows from the count rather than being picked,
+    # so the runs always reach the top of the plot.
+    gap = rng.uniform(62.0, 88.0)
+    lanes = rng.randint(3, 5)
+    corridor = 46.0
     block = (lanes - 1) * gap
     # The block sits in the plot with the corridor below it, centred on what is left.
     run_z = lo + corridor + max(0.0, (hi - lo - corridor - block)) * 0.5
@@ -54,7 +67,7 @@ def outline(rng, n):
     # And the runs only as long as the lap can afford: everything else is fixed, so this is
     # what sets the distance.
     want = rng.uniform(1250.0, 1750.0)
-    hairpins = (lanes - 1) * math.pi * bulge
+    hairpins = (lanes - 1) * (math.pi * 16.0 + gap * 0.9)
     home = block + 120.0
     run = max(120.0, (want - hairpins - home) / (lanes + 1))
     x0 = lo + 12.0
@@ -64,10 +77,14 @@ def outline(rng, n):
     waves = [(rng.uniform(0.6, 2.0), rng.uniform(0, math.tau)) for _ in range(lanes)]
     pts = []
 
+    resume = None
     for lane in range(lanes):
         z = run_z + lane * gap
         east = lane % 2 == 0
         a, b = (x0, x1) if east else (x1, x0)
+        if resume is not None:
+            a = resume
+        resume = None
         steps = max(4, int(abs(b - a) / step))
         k_wave, phase = waves[lane]
         for k in range(steps + 1):
@@ -76,31 +93,70 @@ def outline(rng, n):
             pts.append((x, z + bow * math.sin(t * math.tau * k_wave + phase)))
         if lane == lanes - 1:
             break
-        cz, cx = z + gap * 0.5, b
-        for k in range(1, 9):
+        # The turn: tight, and only as far up the gap as its own diameter.
+        turn_r = rng.uniform(13.0, 19.0)
+        cz, cx = z + turn_r, b
+        for k in range(1, 10):
             th = math.pi * k / 9
-            pts.append((cx + bulge * math.sin(th) * (1.0 if east else -1.0),
-                        cz - bulge * math.cos(th)))
-
-    # The way home: out into the corridor, down the side, along the bottom, and back up to
-    # where the gate stands. The long straight along the bottom is what a start needs.
-    end_east = (lanes - 1) % 2 == 0
-    out_x = (hi - corridor * 0.4) if end_east else (lo + 12.0)
-    home_z = lo + corridor * 0.45
-    if end_east:
-        pts.append((out_x, run_z + (lanes - 1) * gap))
-        pts.append((out_x, home_z))
-        steps = max(4, int((out_x - x0) / step))
+            pts.append((cx + turn_r * math.sin(th) * (1.0 if east else -1.0),
+                        cz - turn_r * math.cos(th)))
+        # Then the link across what is left of the gap, taken on a slant so the two runs are
+        # not simply parallel lines with a U between them.
+        link_from = (b - turn_r * 2.0 * (1.0 if east else -1.0) * 0.0, z + turn_r * 2.0)
+        link_to_x = b - (0.22 + 0.16 * rng.random()) * abs(x1 - x0) * (1.0 if east else -1.0)
+        rise = (z + gap) - link_from[1]
+        steps = max(3, int(math.hypot(link_to_x - b, rise) / step))
         for k in range(1, steps + 1):
             t = k / steps
-            pts.append((out_x + (x0 - out_x) * t,
-                        home_z + 14.0 * math.sin(t * math.tau * 1.5)))
-    else:
-        pts.append((out_x, run_z + (lanes - 1) * gap))
-        pts.append((out_x, home_z))
-        steps = max(4, int((x1 - out_x) / step))
-        for k in range(1, steps + 1):
-            pts.append((out_x + (x1 - out_x) * k / steps, home_z))
+            # Eased, so it leaves the turn straight and arrives on the next run straight.
+            e = t * t * (3.0 - 2.0 * t)
+            pts.append((b + (link_to_x - b) * e, link_from[1] + rise * e))
+        resume = link_to_x
+
+    # The way home, and it is track like everything else.
+    #
+    # It used to be: out, ninety degrees, straight down the side, ninety degrees, straight
+    # along the bottom. From above that is an oval with a zigzag stuck on it — "what the fuck
+    # is this nascar", and quite right. A return leg is part of the lap: it sweeps, it bows,
+    # and it turns through big radii rather than corners.
+    end_east = (lanes - 1) % 2 == 0
+    z_end = run_z + (lanes - 1) * gap
+    far_x = (hi - corridor * 0.30) if end_east else (lo + corridor * 0.30)
+    home_z = lo + corridor * 0.42
+    gate_x = x0 if end_east else x1
+    side = 1.0 if end_east else -1.0
+    sweep = corridor * 0.78          # how broadly the two turns swing
+
+    # Out of the last run and round onto the way down: a quarter circle, not a corner.
+    for k in range(1, 10):
+        th = math.pi * 0.5 * k / 9
+        pts.append((far_x - side * sweep * (1.0 - math.sin(th)),
+                    z_end - sweep * (1.0 - math.cos(th))))
+    # Down the side, bowing.
+    run_down = (z_end - sweep) - (home_z + sweep)
+    steps = max(3, int(run_down / step))
+    for k in range(1, steps + 1):
+        t = k / steps
+        z = (z_end - sweep) - run_down * t
+        pts.append((far_x + side * 11.0 * math.sin(t * math.tau * 0.85 + 0.4), z))
+    # Round onto the bottom.
+    for k in range(1, 10):
+        th = math.pi * 0.5 * k / 9
+        pts.append((far_x - side * sweep * (1.0 - math.cos(th)),
+                    home_z + sweep * (1.0 - math.sin(th))))
+    # And along it, bowing again — this is the straight the gate row stands on, so the bows
+    # are gentle and the run is long.
+    steps = max(4, int(abs(gate_x - (far_x - side * sweep)) / step))
+    from_x = far_x - side * sweep
+    for k in range(1, steps + 1):
+        t = k / steps
+        pts.append((from_x + (gate_x - from_x) * t,
+                    home_z + 13.0 * math.sin(t * math.tau * 1.2)))
+    # Up to where the first run begins, on one more sweep.
+    for k in range(1, 8):
+        th = math.pi * 0.5 * k / 7
+        pts.append((gate_x - side * sweep * 0.55 * (1.0 - math.cos(th)),
+                    home_z + (run_z - home_z) * math.sin(th) * 0.55))
     return pts
 
 
