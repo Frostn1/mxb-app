@@ -50,6 +50,13 @@ const STAKE_W_M: f32 = 0.045;
 const BANNER_OFF_M: f32 = 10.5;
 const BANNER_W_M: f32 = 4.0;
 const BANNER_H_M: f32 = 1.35;
+/// How thick a board is.
+///
+/// A printed sheet on a frame, not a sheet on its own: 6 cm is the frame, and it is the
+/// smallest thickness that still shows an edge from a bike at ten metres. It is also what
+/// stops a board vanishing edge-on — a plane has no width when you look along it, so a run
+/// of them used to wink out one by one as you rode past.
+const BANNER_D_M: f32 = 0.06;
 /// How far off the ground the bottom rail sits. Low: a hoarding is a wall, not a sling.
 const BANNER_LIFT_M: f32 = 0.12;
 /// Boards in a run, and metres of clear ground between one run and the next. A hoarding that
@@ -1032,6 +1039,41 @@ impl Print {
     }
 }
 
+/// A printed board: a panel with a front, a back and four edges you can see the thickness of.
+///
+/// Not a card. A zero-thickness quad printed on both sides is what a *flag* is — hang it
+/// beside a track and it reads as a tarpaulin, which is what a rider's-eye render shows and
+/// what it was called. A trackside board is a rigid sheet on a frame, and the give-away that
+/// it is one is the sliver of edge you see wherever it is not square-on to you.
+///
+/// The two big faces print; the four edges take the plain band the uprights use. Their `u`
+/// runs opposite ways in world space — [`edfwrite::cuboid`] lays every face out from its own
+/// outward normal — which is exactly a double-sided print, and it is why this replaces
+/// [`edfwrite::printed_both_sides`] rather than wrapping it: that gave both copies the same
+/// world-space `u`, so whichever face pointed at the track from the far side of the lap
+/// showed the wordmark backwards. Half the boards on a track were unreadable.
+fn banner_slab(w: f32, h: f32, cell: (f32, f32), window: (f32, f32)) -> Mesh {
+    let box_ = edfwrite::moved(&edfwrite::cuboid(w, h, BANNER_D_M), [0.0, BANNER_LIFT_M, 0.0]);
+    // `cuboid` writes +z first and -z second, four vertices each: the printed faces are the
+    // first eight, and everything after them is edge.
+    const PRINTED: usize = 8;
+    let mut m = in_cell(&box_, cell, window);
+    let edges = in_band(&box_, banner_post_band());
+    for (i, uv) in m.uvs.chunks_exact_mut(2).enumerate() {
+        if i < PRINTED {
+            // Mirrored, both faces. A face laid out from its own outward normal runs `u`
+            // against the direction its viewer reads in — measured, not derived, and the same
+            // finding [`edfwrite::printed_both_sides`] recorded: the winding argues the
+            // opposite. Flipping one face and not the other is what makes half a lap
+            // unreadable, so both flip and the two stay opposite in world space.
+            uv[0] = window.0 + window.1 - uv[0];
+        } else {
+            uv.copy_from_slice(&edges.uvs[i * 2..i * 2 + 2]);
+        }
+    }
+    m
+}
+
 /// One piece of a printed line: the `cell`-th panel of the atlas, in the window this piece
 /// prints, with an upright at its leading end.
 ///
@@ -1039,11 +1081,12 @@ impl Print {
 /// post. `cap` closes the end left bare, which is behind the run's *first* piece.
 fn banner_piece(style: Print, cell: usize, piece: usize, cap: bool) -> Mesh {
     let (w, h) = style.size();
-    let mut m = edfwrite::printed_both_sides(&in_cell(
-        &edfwrite::moved(&edfwrite::card(w, h), [0.0, BANNER_LIFT_M, 0.0]),
+    let mut m = banner_slab(
+        w,
+        h,
         banner_cell(cell % BANNER_CELLS),
         style.window(piece),
-    ));
+    );
     let mut post = |x: f32, t: f32| {
         m.append(&in_band(
             &edfwrite::moved(
@@ -1660,38 +1703,55 @@ mod tests {
     }
 
     /// A board reads the right way round from both sides, which means its two faces run `u`
-    /// opposite ways. Indiana prints both faces; `double_sided` alone prints one backwards.
+    /// A board is a board: it has a front, a back, a thickness, and the wordmark reads the
+    /// right way round from either side of it.
+    ///
+    /// The mirroring is asserted by *position*, not by vertex index, because that is the
+    /// property that matters — walk the board in world +X and one printed face's `u` climbs
+    /// while the other's falls. Index-paired, the old card made the same claim and was still
+    /// showing every board on the far side of the lap backwards.
     #[test]
-    fn a_board_is_printed_on_both_faces() {
+    fn a_board_is_printed_on_both_faces_and_has_a_thickness() {
         let m = banner_piece(Print::Boards, 0, 0, false);
-        // The card only: four vertices of front, four of back, before any upright.
-        let (front, back) = (&m.uvs[..8], &m.uvs[8..16]);
-        let (fx, bx) = (&m.positions[..12], &m.positions[12..24]);
-        for k in 0..4 {
-            assert_eq!(
-                (fx[k * 3], fx[k * 3 + 1]),
-                (bx[k * 3], bx[k * 3 + 1]),
-                "the back copy is not the same surface"
-            );
-            // Same picture, mirrored across the piece: u and 1 - u. Which of the two is the
-            // mirrored one is [`edfwrite::printed_both_sides`]'s business and is measured.
-            assert!(
-                (front[k * 2] + back[k * 2] - 1.0).abs() < 1e-5,
-                "vertex {k}: u {} on the front and {} on the back — not a mirror",
-                front[k * 2],
-                back[k * 2]
-            );
-            assert_eq!(front[k * 2 + 1], back[k * 2 + 1], "the two faces sit in one band");
-        }
-        // And which of the two is the mirrored one, because getting that backwards puts
-        // *every* face wrong instead of half of them and looks identical in every dump. The
-        // authored copy runs `u` against its own +X; only the compiled `.map` says why.
+        // `cuboid` writes +z first and -z second, four vertices each.
+        let face = |k: usize| -> Vec<(f32, f32, f32)> {
+            (k * 4..k * 4 + 4)
+                .map(|i| (m.positions[i * 3], m.positions[i * 3 + 2], m.uvs[i * 2]))
+                .collect()
+        };
+        let (front, back) = (face(0), face(1));
         assert!(
-            front[0] > front[2] && back[0] < back[2],
-            "the wrong copy is mirrored: front {:?}, back {:?}",
-            &front[..4],
-            &back[..4]
+            front.iter().all(|v| v.1 > 0.0) && back.iter().all(|v| v.1 < 0.0),
+            "the two printed faces are not either side of the panel: {front:?} / {back:?}"
         );
+        let thickness = front[0].1 - back[0].1;
+        assert!(
+            (thickness - BANNER_D_M).abs() < 1e-5,
+            "the board is {thickness:.3} m thick, not {BANNER_D_M}"
+        );
+        // Same picture, read the same way round from both sides: sorted by world X, the two
+        // faces' u run opposite ways.
+        let run = |f: &[(f32, f32, f32)]| -> f32 {
+            let mut v: Vec<(f32, f32)> = f.iter().map(|p| (p.0, p.2)).collect();
+            v.sort_by(|a, b| a.0.total_cmp(&b.0));
+            v.last().unwrap().1 - v[0].1
+        };
+        let (fr, br) = (run(&front), run(&back));
+        assert!(
+            fr * br < 0.0,
+            "both faces grow u the same way across the board — one of them reads backwards \
+             ({fr:+.3} and {br:+.3})"
+        );
+        assert!(fr.abs() > 1e-3, "the print has no width across the board");
+        // And the edges are the plain band, not a smear of the wordmark round the rim.
+        let (top, bot) = banner_post_band();
+        for i in 8..m.vertex_count() {
+            let v = m.uvs[i * 2 + 1];
+            assert!(
+                v >= top.min(bot) - 1e-4 && v <= top.max(bot) + 1e-4,
+                "vertex {i} of the frame samples v {v:.3}, outside the post band"
+            );
+        }
     }
 
     /// Pieces land exactly a piece apart, so a run is joined up rather than a row of signs.
