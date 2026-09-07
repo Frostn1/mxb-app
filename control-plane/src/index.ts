@@ -300,6 +300,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
   if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
   if (method === "GET" && path === "/v1/roster") return roster(url, account, env);
+  if (method === "GET" && path === "/v1/presence") return whoIsOn(url, env);
 
   const openPaint = /^\/v1\/paints\/([0-9a-f]{64})$/.exec(path);
   if (openPaint) {
@@ -1889,6 +1890,54 @@ async function roster(url: URL, account: Account, env: Env): Promise<Response> {
     });
   }
   return json(200, { server: serverId, riders: [...riders.values()] });
+}
+
+/**
+ * Who the app can see on a server, by name alone.
+ *
+ * The server browser wants to put faces to a rider count, and `/v1/roster` cannot do it: it
+ * joins through `loadout_paints`, so a rider who has never published a paint is invisible to
+ * it, and it hauls back every paint row for everyone to answer a question about names. This
+ * reads `presence` and nothing else.
+ *
+ * **It takes more than one key on purpose.** The same server is recorded under two different
+ * keys depending on how the app found out where it was: a rider who joined through the app
+ * reports the address key (`server_key_for`), while a rider whose session was detected by
+ * FrostMod reports the folded server *name*, because a name is the only thing every rider in a
+ * session can compute. Asking under one key would show half a grid and look like the other
+ * half had left.
+ *
+ * Deliberately not a "who is on every server" endpoint. That would be one query returning the
+ * whole platform's whereabouts to anyone who asked, and the browser only ever needs the server
+ * whose panel is open.
+ */
+async function whoIsOn(url: URL, env: Env): Promise<Response> {
+  const keys = url.searchParams
+    .getAll("server")
+    .flatMap((v) => v.split(","))
+    .map((v) => v.trim())
+    .filter((v) => isServerKey(v));
+  // Bounded because it becomes an IN list; two is the real-world case and the rest is slack.
+  const wanted = [...new Set(keys)].slice(0, 8);
+  if (wanted.length === 0) return json(400, { error: "a server id is required" });
+
+  const placeholders = wanted.map(() => "?").join(", ");
+  const rows = await env.DB.prepare(
+    "SELECT a.rider_name, a.guid FROM accounts a" +
+      " JOIN presence pr ON pr.account_id = a.id" +
+      ` WHERE pr.server_id IN (${placeholders}) AND pr.updated_at > ?` +
+      " ORDER BY a.rider_name",
+  )
+    .bind(...wanted, Date.now() - PRESENCE_TTL_MS)
+    .all<{ rider_name: string; guid: string | null }>();
+
+  // One rider, one entry, however many of the keys they are recorded under.
+  const seen = new Map<string, { riderName: string; guid: string | null }>();
+  for (const r of rows.results) {
+    const key = r.guid ?? `name:${r.rider_name.toLowerCase()}`;
+    if (!seen.has(key)) seen.set(key, { riderName: r.rider_name, guid: r.guid });
+  }
+  return json(200, { riders: [...seen.values()] });
 }
 
 /** Read a column we wrote as JSON. A row that somehow isn't parseable is an empty list, not

@@ -3017,6 +3017,9 @@ export interface MasterServer {
   forceCockpit: boolean;
   noAids: boolean;
   limitedTyreSets: boolean;
+  /** Why the spam filter would hide this row, or `""` to show it. Rows arrive either way so
+   *  the tab can say how many it hid and let you look at them. */
+  hidden: string;
 }
 
 /**
@@ -3026,6 +3029,61 @@ export interface MasterServer {
  */
 export function listMasterServers(): Promise<MasterServer[]> {
   return invoke<MasterServer[]>("list_master_servers");
+}
+
+/**
+ * Ask one server about itself, right now.
+ *
+ * The list can be minutes old by the time somebody clicks a row, and the rider count, the
+ * session and the track all move in that time. This costs one datagram and no sign-in.
+ */
+export function probeServer(address: string): Promise<MasterServer> {
+  return invoke<MasterServer>("probe_server", { address });
+}
+
+/** Who the app can name on a server, and how it knows. */
+export interface ServerRiders {
+  riders: string[];
+  /** `"session"` is the game's own grid, for the server you're on — everyone.
+   *  `"app"` is the riders whose own apps reported being there, which is a subset. */
+  source: "session" | "app" | "";
+}
+
+/**
+ * The riders on a server, as far as anything can honestly say.
+ *
+ * MX Bikes never tells a stranger who is on a server, so a full list only exists for the
+ * server you are on. Everywhere else this names the players running MXB App and nobody else —
+ * which is why {@link ServerRiders.source} has to be shown beside it.
+ */
+export function serverRiders(address: string, name: string): Promise<ServerRiders> {
+  return invoke<ServerRiders>("server_riders", { address, name });
+}
+
+/** What track a server is running, matched against what you have and what you could get. */
+export interface TrackGuess {
+  /** The internal id the server published, e.g. `mmx_supercross`. */
+  id: string;
+  /** The installed track's file or folder name; `""` when it isn't installed. */
+  installed: string;
+  /** The installed track's own preview image, as a data URL. */
+  preview: string;
+  /** Where a copy could come from: `"shop"`, `"hub"`, or `""` when nothing matched. */
+  source: "shop" | "hub" | "";
+  productId: number;
+  productName: string;
+  productUrl: string;
+  productImage: string;
+  /** False when the name only resembles the track — show it as a guess. */
+  exact: boolean;
+}
+
+/**
+ * Work out which track a server means. The server publishes an internal id and nothing else,
+ * which is not a product title and not something anyone can search for.
+ */
+export function guessServerTrack(track: string): Promise<TrackGuess> {
+  return invoke<TrackGuess>("guess_server_track", { track });
 }
 
 export type ServerAction = "start" | "stop" | "restart";

@@ -1104,6 +1104,24 @@ export const fr: Translation = {
   "serverBrowser.any": "Toutes",
   "serverBrowser.yes": "Oui",
   "serverBrowser.notJoinable": "MX Bikes ne peut pas se connecter à l'adresse de ce serveur.",
+  "serverBrowser.filtered": "Filtré",
+  "serverBrowser.hiddenCount": "{{count}} masqués",
+  "serverBrowser.hideFiltered": "Masquer à nouveau",
+  "serverBrowser.hiddenBecause": "Masqué : {{reason}}",
+  "serverBrowser.hiddenHelp":
+    "Les serveurs qui font la publicité de triches, et les autres spams, sont masqués selon les règles de FrostMod. Cliquez pour les afficher quand même.",
+  "serverBrowser.ridersTitle": "Pilotes",
+  "serverBrowser.ridersCount": "{{players}} pilotes sur {{maxPlayers}}",
+  "serverBrowser.ridersFromSession": "votre session",
+  "serverBrowser.ridersFromApp": "{{count}} avec la synchro des peintures",
+  "serverBrowser.ridersUnknown":
+    "MX Bikes indique seulement à l'app combien de pilotes sont sur un serveur. Les noms viennent des joueurs qui utilisent MXB App.",
+  "serverBrowser.trackTitle": "Circuit",
+  "serverBrowser.trackChecking": "Identification du circuit…",
+  "serverBrowser.trackInstalled": "Vous avez ce circuit — {{name}}",
+  "serverBrowser.trackMaybe": "Nous pensons qu'il s'agit de {{name}}",
+  "serverBrowser.trackGetShop": "L'obtenir sur la boutique",
+  "serverBrowser.trackGetHub": "L'obtenir sur MXB Hub",
 
   "sync.autoNote":
     "Votre look se publie tout seul — chaque moto, dès que vous le changez dans l'app ou dans le garage du jeu. Celui des autres arrive quand vous appuyez sur Jouer.",
