@@ -25,21 +25,47 @@ R_MIN, R_MAX = 9.0, 28.0  # corner radii the corpus allows
 
 
 def outline(rng, n):
-    """`n` points round a centre, at a radius that wobbles with the angle."""
-    # Wobbled hard on purpose. A gentle loop turns 360 degrees in total and a published lap
-    # turns 1400 to 3600: the difference is corners that go the other way, and those only
-    # exist where the radius swings far enough in and out to bend the loop back on itself.
-    base = rng.uniform(185.0, 225.0)
-    waves = [(rng.randint(3, 6), rng.uniform(0.26, 0.40), rng.uniform(0, math.tau)),
-             (rng.randint(6, 10), rng.uniform(0.16, 0.28), rng.uniform(0, math.tau)),
+    """`n` points round a wandering centre, at a radius that wobbles with the angle.
+
+    The radius alone gives a flower: every lobe points out from one middle and the centre of
+    the plot is never used, which reads as anything but a track. So the centre wanders too —
+    slowly, over the whole lap — and the loop folds back and forth across the ground instead
+    of radiating from a point. That can cross itself, which the radius alone could not, and
+    `clearance` is what catches it.
+    """
+    base = rng.uniform(150.0, 185.0)
+    waves = [(rng.randint(3, 6), rng.uniform(0.24, 0.38), rng.uniform(0, math.tau)),
+             (rng.randint(6, 10), rng.uniform(0.14, 0.26), rng.uniform(0, math.tau)),
              (rng.randint(9, 13), rng.uniform(0.06, 0.14), rng.uniform(0, math.tau))]
+    # How far the middle of the loop drifts, and how many times round it does so.
+    drift = base * rng.uniform(0.30, 0.55)
+    dk = rng.randint(1, 2)
+    dphase = rng.uniform(0, math.tau)
+    step = math.tau / n
+    radii = []
+    for i in range(n):
+        th = step * i
+        r = base * (1.0 + sum(a * math.sin(k * th + p) for k, a, p in waves))
+        radii.append(max(55.0, r))
+    for _ in range(4):
+        for i in range(n):
+            j = (i + 1) % n
+            allow = SLEW * radii[i] * step
+            d = radii[j] - radii[i]
+            if abs(d) > allow:
+                half = (abs(d) - allow) * 0.5 * (1 if d > 0 else -1)
+                radii[i] += half
+                radii[j] -= half
     pts = []
     for i in range(n):
-        th = math.tau * i / n
-        r = base * (1.0 + sum(a * math.sin(k * th + p) for k, a, p in waves))
-        r = max(60.0, r)
-        pts.append((CENTRE + r * math.cos(th), CENTRE + r * math.sin(th)))
+        th = step * i
+        cx = CENTRE + drift * math.cos(dk * th + dphase)
+        cz = CENTRE + drift * math.sin(dk * th + dphase)
+        pts.append((cx + radii[i] * math.cos(th), cz + radii[i] * math.sin(th)))
     return pts
+
+
+SLEW = 0.85
 
 
 def fillet(pts, rng):
@@ -66,13 +92,13 @@ def fillet(pts, rng):
         # is seven metres long, and the forty metres either side of it are straight.
         deg = abs(math.degrees(delta))
         if deg >= 80.0:
-            lo, hi = 9.0, 19.0
+            lo, hi = 9.0, 17.0
         elif deg >= 45.0:
-            lo, hi = 15.0, 30.0
+            lo, hi = 12.0, 24.0
         elif deg >= 22.0:
-            lo, hi = 28.0, 60.0
+            lo, hi = 18.0, 34.0
         else:
-            lo, hi = 55.0, 130.0
+            lo, hi = 26.0, 45.0
         # As much of the edge as the fillet can take, within the band the corner allows.
         # Published laps are 61 to 91 per cent arc: the straight between two corners is
         # what is left over, not something to leave room for.
@@ -82,6 +108,28 @@ def fillet(pts, rng):
             r = min(cap, lo)
         r = max(r, 7.5)
         turns.append((delta, r, r * math.tan(half)))
+    # Make the roundings fit the edges they share.
+    #
+    # Two corners either side of a short edge can each want more of it than is there. The
+    # straight between them then comes out negative, both arcs are drawn anyway, and the path
+    # curls back through itself — a loop in the middle of the track, which is exactly what it
+    # built. Shrink both until they fit, a few times over, because shrinking a corner changes
+    # the fit of the edge on its other side too.
+    for _ in range(6):
+        for i in range(n):
+            a, b = pts[i], pts[(i + 1) % n]
+            edge = math.hypot(b[0] - a[0], b[1] - a[1])
+            t_here = turns[i][2] if turns[i] else 0.0
+            t_next = turns[(i + 1) % n][2] if turns[(i + 1) % n] else 0.0
+            want = t_here + t_next
+            if want <= edge * 0.94 or want <= 1e-6:
+                continue
+            k = edge * 0.94 / want
+            for j in (i, (i + 1) % n):
+                if turns[j]:
+                    delta, r, t = turns[j]
+                    turns[j] = (delta, r * k, t * k)
+
     segs = []
     for i in range(n):
         a, b = pts[i], pts[(i + 1) % n]
@@ -92,7 +140,7 @@ def fillet(pts, rng):
         if run > 1.0:
             segs.append({"kind": "straight", "length": round(run, 1), "rise": 0.0})
         t = turns[(i + 1) % n]
-        if t:
+        if t and t[1] >= 6.0:
             delta, r, _ = t
             # Positive radius turns right, and screen-space positive cross is a left turn.
             segs.append({"kind": "arc",
@@ -143,35 +191,64 @@ def features(rng, segs):
             pos += 12.0
             continue
         pick = rng.random()
-        if pick < 0.28 and room > 22.0:
-            length = round(min(rng.uniform(18.0, 32.0), room), 1)
+        if pick < 0.42 and room > 30.0:
+            length = round(min(rng.uniform(26.0, 44.0), room), 1)
             out.append({"kind": "tabletop", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(1.1, 2.7), 2)})
-        elif pick < 0.56 and room > 11.0:
-            length = round(min(rng.uniform(9.0, 15.0), room), 1)
-            out.append({"kind": "roller", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(0.45, 0.9), 2)})
-        elif pick < 0.74 and room > 24.0:
-            count = rng.randint(4, 8)
-            spacing = round(rng.uniform(3.6, 5.4), 1)
-            length = count * spacing
-            if length > room:
-                count = max(3, int(room / spacing))
-                length = count * spacing
-            out.append({"kind": "whoops", "at": round(pos, 1), "count": count,
-                        "spacing": spacing, "height": round(rng.uniform(0.4, 0.7), 2)})
-        elif pick < 0.9 and room > 22.0:
-            length = round(min(rng.uniform(15.0, 24.0), room), 1)
+                        "height": round(rng.uniform(2.0, 3.6), 2)})
+        elif pick < 0.62 and room > 26.0:
+            gap = round(rng.uniform(9.0, 16.0), 1)
+            length = min(gap + 14.0, room)
+            out.append({"kind": "double", "at": round(pos, 1),
+                        "height": round(rng.uniform(1.8, 3.0), 2), "gap": gap})
+        elif pick < 0.82 and room > 24.0:
+            length = round(min(rng.uniform(18.0, 28.0), room), 1)
             out.append({"kind": "stepUp", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(1.0, 2.2), 2)})
+                        "height": round(rng.uniform(1.4, 2.6), 2)})
         else:
-            length = round(min(rng.uniform(12.0, 18.0), room), 1)
+            length = round(min(rng.uniform(10.0, 16.0), room), 1)
             if length < 8.0:
                 break
             out.append({"kind": "roller", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(0.5, 0.8), 2)})
-        pos += length + rng.uniform(12.0, 34.0)
+                        "height": round(rng.uniform(0.55, 0.95), 2)})
+        pos += length + rng.uniform(8.0, 20.0)
     return out
+
+
+def clearance(prog):
+    """The closest two distant parts of the lap come to each other, in metres.
+
+    Star-shaped stops the outline crossing. It does not stop the *track* — ten metres of it
+    either side of a centreline — passing through its own ground where two lobes of the loop
+    lie close together, and it does not stop a rounding that overran its edge from curling
+    into a pigtail. So the lap is walked and measured, which is the only claim worth making.
+    """
+    x, z = prog["start"]["x"], prog["start"]["z"]
+    h = math.radians(prog["start"]["angle"])
+    pts = []
+    for s in prog["segments"]:
+        if s["kind"] == "straight":
+            n = max(1, int(s["length"] / 2))
+            for _ in range(n):
+                x += math.sin(h) * s["length"] / n
+                z += math.cos(h) * s["length"] / n
+                pts.append((x, z))
+        else:
+            r, a = s["radius"], math.radians(s["angle"])
+            n = max(1, int(abs(r) * a / 2))
+            for _ in range(n):
+                h += a / n * (1 if r > 0 else -1)
+                x += math.sin(h) * abs(r) * a / n
+                z += math.cos(h) * abs(r) * a / n
+                pts.append((x, z))
+    worst = 1e9
+    for i in range(len(pts)):
+        # Twelve samples apart is about 24 m round the lap: nearer than that and it is the
+        # track next to itself, which is what a corner is.
+        for j in range(i + 12, len(pts) - 1):
+            d = math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1])
+            if d < worst:
+                worst = d
+    return worst
 
 
 def main():
@@ -204,11 +281,16 @@ def main():
         "segments": segs,
         "features": feats,
     }
+    gap = clearance(prog)
+    if gap < prog["width"] + 4.0:
+        print(f"seed {seed}: REJECTED — the lap passes within {gap:.1f} m of itself, "
+              f"and it is {prog['width']:.0f} m wide", file=sys.stderr)
+        sys.exit(2)
     print(json.dumps(prog, indent=1))
     corners = sum(1 for s in segs if s["kind"] == "arc")
     total = sum(s["angle"] for s in segs if s["kind"] == "arc")
     print(f"seed {seed}: {prog['name']}, {length:.0f} m, {corners} corners, "
-          f"{total:.0f}° total turn, {len(feats)} features "
+          f"{total:.0f}° total turn, {len(feats)} features, {gap:.0f} m clear, "
           f"({len(feats)/max(length,1)*1000:.0f}/km)", file=sys.stderr)
 
 main()

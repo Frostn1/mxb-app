@@ -1013,7 +1013,14 @@ pub fn rut_shape(stations: &[(f32, f32, f32)], step_m: f32, g: &Grid) -> Option<
     }
 
     // Along: the same detrend down each lateral offset, over six metres of *track*.
-    let half_along = ((3.0 / step_m) as usize).max(1);
+    // A metre either side, not three.
+    //
+    // A rut is smooth along its own length at every scale a wheel feels; a jump is thirty
+    // metres long. Detrending the along-track series over six metres leaves the jumps in it,
+    // so a lap with a table every twenty metres measured *rougher along than across* —
+    // anisotropy 0.65 where ridden ground is 1.70 — and the number said nothing about the
+    // surface at all.
+    let half_along = ((1.0 / step_m) as usize).max(1);
     let half_chatter = ((0.5 / step_m) as usize).max(1);
     let mut along: Vec<f32> = Vec::new();
     let mut chatter: Vec<f32> = Vec::new();

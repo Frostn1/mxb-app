@@ -565,9 +565,11 @@ pub fn check_a_program_impl() {
     }
     if notes.is_empty() {
         println!("OK");
-        if let Ok(to) = std::env::var("FROST_SAVE") {
-            std::fs::write(to, serde_json::to_string_pretty(&prog).unwrap()).unwrap();
-        }
+    }
+    // Saved whether or not it passed. A lap with a note against it is still the lap that
+    // gets built, and measuring the ground of the one that ships is the whole point.
+    if let Ok(to) = std::env::var("FROST_SAVE") {
+        std::fs::write(to, serde_json::to_string_pretty(&prog).unwrap()).unwrap();
     }
 }
 

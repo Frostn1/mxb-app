@@ -736,8 +736,13 @@ pub fn dome_file(radius: f32) -> Vec<u8> {
             let a = std::f32::consts::TAU * k as f32 / SIDES as f32;
             let (x, z) = (a.sin() * r, a.cos() * r);
             mesh.positions.extend_from_slice(&[x, y, z]);
+            // Outward, and the mesh is doubled below so the inside still draws.
+            //
+            // Pointing them inwards is the obvious thing — that is the side a rider sees —
+            // and it renders the sky at ambient only: `clear`'s ambient is 0.4, so a day sky
+            // comes out at forty per cent of itself, which from the seat is night.
             let l = (x * x + y * y + z * z).sqrt().max(1e-4);
-            mesh.normals.extend_from_slice(&[-x / l, -y / l, -z / l]);
+            mesh.normals.extend_from_slice(&[x / l, y / l, z / l]);
             mesh.uvs.extend_from_slice(&[k as f32 / SIDES as f32 * 4.0, 1.0 - t]);
         }
         start
@@ -755,7 +760,7 @@ pub fn dome_file(radius: f32) -> Vec<u8> {
     }
     let part = Part {
         name: "sky".into(),
-        mesh: m,
+        mesh: crate::edfwrite::double_sided(&m),
         texture: 0,
         normal: None,
     };
@@ -766,10 +771,12 @@ fn dome_sheet() -> Texture {
     sheet("sky_c", 256, |u, v| {
         // v is 0 at the zenith and 1 at the horizon — see `dome_mesh`'s uvs.
         let up = 1.0 - v;
+        // A day. Bright enough that whatever light the track's own ambient puts on it, it
+        // still reads as sky rather than as dusk.
         let base = [
-            60.0 + 130.0 * (1.0 - up).powf(1.6),
-            110.0 + 120.0 * (1.0 - up).powf(1.4),
-            180.0 + 55.0 * (1.0 - up).powf(1.2),
+            105.0 + 120.0 * (1.0 - up).powf(1.6),
+            155.0 + 90.0 * (1.0 - up).powf(1.4),
+            215.0 + 35.0 * (1.0 - up).powf(1.2),
         ];
         // Cloud: two scales of noise, thresholded so it comes out as banks rather than fog,
         // and thinned towards the top where a flat sheet would read as a ceiling.

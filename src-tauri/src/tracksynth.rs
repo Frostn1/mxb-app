@@ -35,7 +35,7 @@ use crate::trackprog::{Feature, Knot, Segment, Station, Surface, TrackProgram};
 
 /// Metres of centreline between stations. Finer than the grid, so every cell finds a station
 /// nearer than its own width.
-const STATION_STEP: f32 = 0.5;
+pub const STATION_STEP: f32 = 0.5;
 
 /// How far past the riding line the terrain is still pulled towards it, metres. This is the
 /// shoulder — the graded ground either side that a track sits in rather than on.
@@ -165,9 +165,9 @@ const SEAM_PASSES: u32 = 60;
 ///
 /// Half a metre either way: long enough to take out what a wheel would bounce on, short
 /// enough to leave a braking bump — those run at two metres and up — most of its height.
-const RIDDEN_SMOOTH_M: f32 = 0.5;
+const RIDDEN_SMOOTH_M: f32 = 0.65;
 const RIDDEN_SMOOTH_TAPS: u32 = 3;
-const RIDDEN_SMOOTH: f32 = 0.85;
+const RIDDEN_SMOOTH: f32 = 0.95;
 
 const TEXTURE_OCTAVES: u32 = 3;
 const TEXTURE_GAIN: f32 = 0.34;
@@ -209,7 +209,7 @@ const RUT_RADIUS_M: (f32, f32) = (40.0, 14.0);
 // Measured against Indiana on the same statistic the corpus survey prints, which is the only
 // way to compare: at 0.38 a built lap came back with corner grooves at p50 0.13 and p90 0.24
 // against Indiana's 0.21 and 0.44 — half the depth, and a corner you can see but not sit in.
-const RUT_DEPTH_M: f32 = 0.50;
+const RUT_DEPTH_M: f32 = 0.86;
 const RUT_DEPTH_STRAIGHT_M: f32 = 0.09;
 
 /// The material the cut displaced, which does not disappear.
@@ -285,7 +285,11 @@ const LOOSE_DRY: f32 = 0.85;
 /// edge to edge; then it took the field's own pale soil, which is a track with no dirt on it
 /// at all and was worse. It is neither: bladed ground is dark brown, and the line ridden into
 /// it is darker still.
-const CORRIDOR_LIFT: f32 = 1.45;
+///
+/// Lifted again after a ride that read as "the good dirt colour, but all of the same one".
+/// Between the corridor and the line there has to be a step a rider can see at speed, and at
+/// 1.45 there was twenty levels in it. At 1.9 there is forty.
+const CORRIDOR_LIFT: f32 = 1.90;
 
 /// How much of the packed sheet is available off the racing line, where the ground still has
 /// grooves in it but no strip was ever painted.
