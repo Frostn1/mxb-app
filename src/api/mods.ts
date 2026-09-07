@@ -2988,13 +2988,35 @@ export interface MasterServer {
   name: string;
   /** `ip:port`, ready for {@link joinServer}. */
   address: string;
+  /** False when the game can't be pointed at that address — a server registered over IPv6
+   *  with no routable IPv4 interface. The row still shows; its Join doesn't. */
+  joinable: boolean;
+  /** The address the server reports for itself, usually on its own LAN. Detail only. */
+  lanAddress: string;
   players: number;
   maxPlayers: number;
-  /** Round-trip in ms, or `null` when it wasn't measured. */
+  /** Round-trip in ms, or `null` when the server didn't answer. */
   pingMs: number | null;
-  track: string;
   passworded: boolean;
-  region: string;
+  /** The operator's own label — "USA", "EU West". Not the track. */
+  location: string;
+  /** Licence class required to join: "D" | "C" | "B" | "A", or "" for none. */
+  rating: string;
+  /** What it's running. */
+  track: string;
+  trackLayout: string;
+  /** Allowed bike categories and models; empty means anything goes. */
+  categories: string[];
+  bikes: string[];
+  /** The session in progress and how long it runs. */
+  session: string;
+  raceLength: string;
+  /** "Sunny" | "Cloudy" | "Rainy", and whether it changes during the session. */
+  conditions: string;
+  realisticWeather: boolean;
+  forceCockpit: boolean;
+  noAids: boolean;
+  limitedTyreSets: boolean;
 }
 
 /**

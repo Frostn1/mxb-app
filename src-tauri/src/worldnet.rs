@@ -48,6 +48,11 @@ const NL: u8 = 0x0A;
 /// The exe's per-record struct is 0x1d8 bytes; the readable payload never approaches that, but
 /// the guard keeps a hostile reply from steering the parser.
 const MAX_REPLY: usize = 64 * 1024;
+/// The exe's buffer for a record's event blob (`0x1400abdac`), and the cap on what we read.
+const MAX_BLOB: usize = 300;
+/// How long the whole paged sweep gets. The exe gives its own browse 30 s (`0x1402a7538`);
+/// this is a tab the player is watching, so it ends sooner and shows what arrived.
+const BROWSE_BUDGET: Duration = Duration::from_secs(12);
 /// The client version the master gates on, written as `LOGIN`'s second field (`0x28` at
 /// `0x1402a72e0`). Verified live: 39 is answered `Auth NO Old Version: please update`, 40 gets
 /// past the gate. It tracks the game, so a build that bumps it breaks the list until we follow
@@ -181,21 +186,71 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// One decoded address, and whether we can hand it to the game's connect flag.
+///
+/// The game itself is dual-stack — every socket that matters is `AF_INET6` with `IPV6_V6ONLY`
+/// cleared (`0x14028502e`) — so it does try IPv6. We can't: the game takes one address on its
+/// command line and `gameproc::parse_server_address` refuses a bracketed literal. So an IPv6
+/// address is shown but not offered, and [`best_address`] looks for an IPv4 route first.
+struct Addr {
+    text: String,
+    joinable: bool,
+}
+
+impl Addr {
+    fn v4(ip: &[u8], port: u16) -> Self {
+        Addr {
+            text: format!("{}.{}.{}.{}:{}", ip[0], ip[1], ip[2], ip[3], port),
+            joinable: !is_private(ip) && ip[0] != 0,
+        }
+    }
+}
+
+/// Addresses nobody outside the server's own network can reach. The secondary address is
+/// whatever `getaddrinfo` gave the server for its own hostname (`0x140284cc0`), so on a
+/// home-hosted or containerised box it is an RFC1918 address.
+fn is_private(ip: &[u8]) -> bool {
+    matches!(ip, [10, ..] | [127, ..] | [169, 254, ..] | [192, 168, ..])
+        || matches!(ip, [172, b, ..] if (16..32).contains(b))
+}
+
+/// Which address to offer for Join.
+///
+/// The game sends its connection request to *both* the public and the server-reported address
+/// in the same pass and lets whichever answers win (`0x1402a342e`) — it never chooses. We only
+/// get one argument, so we choose: the public address when the game's connect flag can take it,
+/// otherwise a routable secondary. That is what makes an IPv6-registered server with an IPv4
+/// interface joinable rather than a dead row.
+fn best_address(public: Addr, secondary: Option<Addr>) -> (String, bool, String) {
+    let lan = secondary.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    // Don't repeat the public address back as though it were extra detail.
+    let lan = if lan == public.text { String::new() } else { lan };
+    match secondary {
+        Some(s) if !public.joinable && s.joinable => (s.text, true, String::new()),
+        _ => (public.text, public.joinable, lan),
+    }
+}
+
 /// Decode the exe's 19-byte packed address: `flag`, then the IP (network order), then the port
 /// big-endian. `flag` 0 is IPv4 (IP at 1..5, port at 5..7), 1 is IPv6 (IP at 1..17, port
 /// 17..19). Returns the `ip:port` string the game's connect flag takes.
-fn decode_addr(b: &[u8]) -> Option<String> {
+fn decode_addr(b: &[u8]) -> Option<Addr> {
     match b.first()? {
         0 => {
             let ip = b.get(1..5)?;
             let port = u16::from_be_bytes([*b.get(5)?, *b.get(6)?]);
-            Some(format!("{}.{}.{}.{}:{}", ip[0], ip[1], ip[2], ip[3], port))
+            Some(Addr::v4(ip, port))
         }
         1 => {
             let ip = b.get(1..17)?;
-            let seg: Vec<String> = ip.chunks(2).map(|c| format!("{:x}", u16::from_be_bytes([c[0], c[1]]))).collect();
             let port = u16::from_be_bytes([*b.get(17)?, *b.get(18)?]);
-            Some(format!("[{}]:{}", seg.join(":"), port))
+            // `::ffff:a.b.c.d` is an IPv4 server the master happened to see through a
+            // dual-stack socket. The address the game wants is the last four bytes.
+            if ip[..10].iter().all(|&c| c == 0) && ip[10] == 0xFF && ip[11] == 0xFF {
+                return Some(Addr::v4(&ip[12..16], port));
+            }
+            let seg: Vec<String> = ip.chunks(2).map(|c| format!("{:x}", u16::from_be_bytes([c[0], c[1]]))).collect();
+            Some(Addr { text: format!("[{}]:{}", seg.join(":"), port), joinable: false })
         }
         _ => None,
     }
@@ -249,8 +304,9 @@ fn fetch(masters: &[String], rider: &str, install: &Path) -> Result<Vec<WorldSer
         };
         match &ticket {
             Ok(steam) => match query(&sock, target, Some((rider, steam))) {
-                Ok(list) if !list.is_empty() => {
+                Ok(mut list) if !list.is_empty() => {
                     log::info!("[worldnet] {} server(s) from {master}", list.len());
+                    probe(&mut list);
                     return Ok(list);
                 }
                 Ok(_) => last_err = "The master server accepted the login but sent no servers.".into(),
@@ -263,7 +319,10 @@ fn fetch(masters: &[String], rider: &str, install: &Path) -> Result<Vec<WorldSer
             }
         }
         match query(&sock, target, None) {
-            Ok(list) if !list.is_empty() => return Ok(list),
+            Ok(mut list) if !list.is_empty() => {
+                probe(&mut list);
+                return Ok(list);
+            }
             Ok(_) => {}
             Err(e) => last_err = e,
         }
@@ -290,84 +349,362 @@ fn query(sock: &UdpSocket, target: SocketAddr, auth: Option<(&str, &SteamAuth)>)
         login(sock, target, rider, steam)?;
     }
 
-    // GETLIST carries the count-so-far + 1 (a 1-based "next index I want"); a fresh fetch is 1.
-    let msg = {
-        let mut w = Writer::default();
-        w.field("GETLIST").int(1);
-        w.finish()
-    };
-    sock.send_to(&encrypt(msg), target).map_err(|e| format!("send failed: {e}"))?;
-
     let debug = std::env::var("MXB_WORLDNET_DEBUG").is_ok();
     let mut servers = Vec::new();
     let mut buf = [0u8; 65535];
-    let deadline = Instant::now() + Duration::from_secs(4);
-    while Instant::now() < deadline {
-        let (n, from) = match sock.recv_from(&mut buf) {
-            Ok(v) => v,
-            Err(_) => break, // timeout: no more datagrams
+    let deadline = Instant::now() + BROWSE_BUDGET;
+
+    // The master answers a page at a time — its send buffer is 1400 bytes, so a busy list
+    // arrives in batches of roughly nine. Each `GETLIST` asks for the record after the last
+    // one we hold, and the reply's second field is `"0"` while more remain. Asking once and
+    // reading whatever turns up in the next few seconds is what capped the tab at one page.
+    'pages: while Instant::now() < deadline {
+        let want = servers.len() + 1;
+        let msg = {
+            let mut w = Writer::default();
+            w.field("GETLIST").int(want as i64);
+            w.finish()
         };
-        if from != target || n == 0 || n > MAX_REPLY {
-            continue;
-        }
-        let clear = decrypt(&buf[..n]);
-        if debug {
-            log::info!("[worldnet] {n}B reply from {from}: {}", hex(&clear));
-        }
-        let mut r = Reader::new(&clear);
-        match r.field().as_str() {
-            "LIST" | "LIST2" => parse_list(&mut r, &mut servers),
-            other => {
+        sock.send_to(&encrypt(msg), target).map_err(|e| format!("send failed: {e}"))?;
+
+        // One page per request: read until this batch lands, or the socket goes quiet.
+        loop {
+            if Instant::now() >= deadline {
+                break 'pages;
+            }
+            let (n, from) = match sock.recv_from(&mut buf) {
+                Ok(v) => v,
+                Err(_) => break 'pages, // timeout: the master has stopped talking
+            };
+            if from != target || n == 0 || n > MAX_REPLY {
+                continue;
+            }
+            let clear = decrypt(&buf[..n]);
+            if debug {
+                log::info!("[worldnet] {n}B reply from {from}: {}", hex(&clear));
+            }
+            let mut r = Reader::new(&clear);
+            let tag = r.field();
+            if tag != "LIST" && tag != "LIST2" {
                 if debug {
-                    log::info!("[worldnet] non-LIST reply tag {other:?}");
+                    log::info!("[worldnet] non-LIST reply tag {tag:?}");
                 }
+                continue;
+            }
+            match parse_list(&mut r, &mut servers, want) {
+                // `"0"` means the master has more to send; anything else ended the list.
+                Page::More => break,
+                Page::Last => break 'pages,
+                // A page that doesn't start where our list ends is dropped whole, exactly as
+                // the exe does (`0x1402a6aab`) — re-ask rather than splice it in at the wrong
+                // index and corrupt every row after it.
+                Page::OutOfOrder => continue,
             }
         }
     }
     Ok(servers)
 }
 
+/// What a `LIST` page said about whether more of them are coming.
+enum Page {
+    More,
+    Last,
+    OutOfOrder,
+}
+
 /// Parse the records out of a `LIST` reply. Layout, per the exe's read sequence
 /// (`0x1402a68d4`): an index field and a flag field, then repeating records terminated by an
 /// empty name — `name`, the public address (19 B), a secondary/LAN address (19 B), three `u8`
 /// counters, a `≤32`-byte string, an `i32`, and a `u16`-length blob.
-fn parse_list(r: &mut Reader, out: &mut Vec<WorldServer>) {
-    let _index = r.field();
-    let _flag = r.field();
+fn parse_list(r: &mut Reader, out: &mut Vec<WorldServer>, want: usize) -> Page {
+    // The index is 1-based and must name the record we asked for, or the exe throws the whole
+    // datagram away (`0x1402a6aab`: `atoi(index) - 1 == count`). A page arriving out of order
+    // would otherwise be spliced in at the wrong offset.
+    if r.field().trim().parse::<usize>() != Ok(want) {
+        return Page::OutOfOrder;
+    }
+    let more = r.field().trim() == "0";
     loop {
         let name = r.field();
         if name.is_empty() {
             break; // empty name terminates the batch
         }
         let public = r.raw(19).and_then(decode_addr);
-        let _secondary = r.raw(19); // LAN address, not shown
-        let a = r.u8();
-        let b = r.u8();
-        let c = r.u8();
-        let track = r.field();
-        let _extra_id = r.i32_le();
+        let secondary = r.raw(19).and_then(decode_addr);
+        let players = r.u8();
+        let max_players = r.u8();
+        let passworded = r.u8();
+        // Operator free text from `[connection] location` — "USA", "EU West". Never the track:
+        // the exe's own browser doesn't read this field at all.
+        let location = r.field();
+        let rating = r.i32_le();
         let blob_len = r.i16_le().unwrap_or(0).max(0) as usize;
-        let _blob = r.raw(blob_len.min(300));
+        // The cursor moves by the declared length even when the payload is longer than the
+        // exe's 300-byte buffer (`0x140283370`); capping the *read* instead would desync every
+        // record after it.
+        let blob = r.raw(blob_len).map(|b| &b[..b.len().min(MAX_BLOB)]).unwrap_or_default().to_vec();
 
-        let Some(address) = public else {
+        let Some(public) = public else {
             // No usable address means nothing to show or join; skip but keep parsing.
-            if a.is_none() {
+            if players.is_none() {
                 break;
             }
             continue;
         };
+        let event = Event::parse(&blob);
+        let (address, joinable, lan_address) = best_address(public, secondary);
         out.push(WorldServer {
             name: name.trim().to_string(),
             address,
-            // Byte meanings are inferred from the read order; confirmed via MXB_WORLDNET_DEBUG.
-            players: a.unwrap_or(0) as u32,
-            max_players: b.unwrap_or(0) as u32,
-            passworded: c.unwrap_or(0) != 0,
+            joinable,
+            lan_address,
+            players: players.unwrap_or(0) as u32,
+            max_players: max_players.unwrap_or(0) as u32,
+            passworded: passworded.unwrap_or(0) != 0,
             ping_ms: None,
-            track: track.trim().to_string(),
-            region: String::new(),
+            location: location.trim().to_string(),
+            rating: rating_class(rating.unwrap_or(0)).to_string(),
+            track: event.track,
+            track_layout: event.layout,
+            categories: event.categories,
+            bikes: event.bikes,
+            session: event.session,
+            race_length: event.race_length,
+            conditions: event.conditions,
+            realistic_weather: event.realistic_weather,
+            force_cockpit: event.force_cockpit,
+            no_aids: event.no_aids,
+            limited_tyre_sets: event.limited_tyre_sets,
         });
     }
+    if more {
+        Page::More
+    } else {
+        Page::Last
+    }
+}
+
+/// The server's rating gate, as the browser renders it (`0x1400abbf6`). 0 is "no requirement".
+fn rating_class(v: i32) -> &'static str {
+    match v {
+        1 => "D",
+        2 => "C",
+        3 => "B",
+        4 => "A",
+        _ => "",
+    }
+}
+
+/// What the server is actually running, decoded from the record's blob.
+///
+/// The blob is opaque to the master: the game builds it (`0x140073147`) and hands it over to be
+/// forwarded verbatim, and the browser parses it back at `0x1400abdac`. It is where the *real*
+/// track lives — the `location` field above is what we used to show instead. Strings inside it
+/// are NUL-terminated, unlike the master protocol's own `0x0A`-terminated fields.
+///
+/// Everything here is best-effort: a short or unfamiliar blob leaves the rest blank rather than
+/// failing the row, because one odd server must not empty the tab.
+#[derive(Default)]
+struct Event {
+    track: String,
+    layout: String,
+    categories: Vec<String>,
+    bikes: Vec<String>,
+    session: String,
+    race_length: String,
+    conditions: String,
+    realistic_weather: bool,
+    force_cockpit: bool,
+    no_aids: bool,
+    limited_tyre_sets: bool,
+}
+
+impl Event {
+    fn parse(blob: &[u8]) -> Event {
+        let mut e = Event::default();
+        if blob.is_empty() {
+            return e;
+        }
+        let mut r = Reader::new(blob);
+        let _flag = r.u8();
+        e.track = r.field().trim().to_string();
+        e.layout = r.field().trim().to_string();
+        e.categories = split_list(&r.field());
+        e.bikes = split_list(&r.field());
+
+        // The session block's shape depends on the event type, so an unknown type means we
+        // stop rather than read the rule flags from the wrong offset.
+        let kind = r.u8().unwrap_or(0);
+        let phase = match kind {
+            1 => {
+                let p = r.u8().unwrap_or(0);
+                if p == 0 { "Waiting" } else { "Open practice" }.to_string()
+            }
+            2 => {
+                let _ = r.raw(5); // five flags the browser doesn't surface
+                let value = r.u8().unwrap_or(0);
+                let unit = r.u8().unwrap_or(0);
+                let extra = r.u8().unwrap_or(0);
+                e.race_length = race_length(value, unit, extra);
+                RACE_PHASES.get(r.u8().unwrap_or(0) as usize).unwrap_or(&"").to_string()
+            }
+            4 => CUP_PHASES.get(r.u8().unwrap_or(0) as usize).unwrap_or(&"").to_string(),
+            0 | 3 => String::new(),
+            _ => return e,
+        };
+        e.session = phase;
+        e.realistic_weather = r.u8().unwrap_or(0) != 0;
+        e.conditions = match r.u8().unwrap_or(0) {
+            0 => "Sunny",
+            1 => "Cloudy",
+            2 => "Rainy",
+            _ => "",
+        }
+        .to_string();
+        e.force_cockpit = r.u8().unwrap_or(0) != 0;
+        e.no_aids = r.u8().unwrap_or(0) != 0;
+        e.limited_tyre_sets = r.u8().unwrap_or(0) != 0;
+        e
+    }
+}
+
+/// Race phases, in the order the exe's string table lists them (`CC_Waiting` then
+/// `CC_Practice` … `CC_Race2` at `0x108052`).
+const RACE_PHASES: [&str; 8] = [
+    "Waiting",
+    "Practice",
+    "Pre-qualify",
+    "Qualify practice",
+    "Qualify",
+    "Warmup",
+    "Race 1",
+    "Race 2",
+];
+/// The knockout format's phases (`CC_Round` … `CC_Final`).
+const CUP_PHASES: [&str; 6] = ["Waiting", "Practice", "Round", "Quarter-finals", "Semi-finals", "Final"];
+
+/// Race length, formatted as the browser does (`0x1400ac5cd`).
+fn race_length(value: u8, unit: u8, extra_laps: u8) -> String {
+    match unit {
+        1 => format!("{value}m + {extra_laps}"),
+        2 => format!("{value}L"),
+        _ => format!("{value}%"),
+    }
+}
+
+/// The blob's category and bike lists are `/`-separated; an empty one means "anything".
+fn split_list(s: &str) -> Vec<String> {
+    s.split('/').map(str::trim).filter(|p| !p.is_empty()).map(str::to_string).collect()
+}
+
+// --- Asking the servers themselves ---------------------------------------------------------
+
+/// `GETINFO`, the connectionless query id (`0x1402a0ca0` case 0).
+const GETINFO: i32 = 0;
+/// `SERVERINFO`, the reply's leading id. Note it carries no `-1` prefix of its own.
+const SERVERINFO: i32 = 1;
+/// Marks a datagram as connectionless; a server reads the first `i32` and anything else is
+/// taken for a live connection id (`0x1402a1441`).
+const CONNECTIONLESS: i32 = -1;
+/// How long the whole probe sweep waits for answers.
+const PROBE_BUDGET: Duration = Duration::from_secs(3);
+
+/// Ask every server about itself, and time the reply.
+///
+/// `GETINFO` needs no challenge, no password and no Steam ticket — the server answers whoever
+/// asks, provided the version matches and it has more than one slot (`0x1402a0cea`). The
+/// timestamp we send comes back untouched, which is exactly how the game measures ping
+/// (`0x1402a7f88`); the master never sends one.
+///
+/// Best-effort throughout: a server that stays quiet keeps the row the master gave it and
+/// simply shows no ping. Live answers win over the master's copy, which can be a minute stale.
+fn probe(servers: &mut [WorldServer]) {
+    let Ok(sock) = UdpSocket::bind("0.0.0.0:0") else {
+        return;
+    };
+    sock.set_read_timeout(Some(Duration::from_millis(250))).ok();
+
+    let mut waiting: std::collections::HashMap<SocketAddr, usize> = std::collections::HashMap::new();
+    for (i, s) in servers.iter().enumerate() {
+        // An unreachable address can't be asked, and asking costs a datagram each.
+        if !s.joinable {
+            continue;
+        }
+        if let Ok(addr) = s.address.parse::<SocketAddr>() {
+            waiting.insert(addr, i);
+        }
+    }
+
+    let start = Instant::now();
+    let stamp = || start.elapsed().as_millis() as i32;
+    for addr in waiting.keys() {
+        let mut w = Writer::default();
+        w.i32le(CONNECTIONLESS).i32le(GETINFO).i32le(client_version() as i32).i32le(stamp());
+        sock.send_to(&encrypt(w.finish()), addr).ok();
+    }
+
+    let deadline = start + PROBE_BUDGET;
+    let mut buf = [0u8; 4096];
+    while !waiting.is_empty() && Instant::now() < deadline {
+        let Ok((n, from)) = sock.recv_from(&mut buf) else {
+            continue; // a tick with nothing on it; keep waiting until the budget is out
+        };
+        let Some(i) = waiting.remove(&from) else {
+            continue;
+        };
+        if let Some(info) = parse_serverinfo(&decrypt(&buf[..n.min(MAX_REPLY)])) {
+            let s = &mut servers[i];
+            s.ping_ms = Some(stamp().saturating_sub(info.echo).max(0) as u32);
+            s.players = info.players as u32;
+            s.max_players = info.max_players as u32;
+            s.passworded = info.passworded;
+            // The server's own blob is fresher than the master's forwarded copy — a session
+            // that has rolled over to the next race shows the race, not the warmup.
+            if !info.event.track.is_empty() {
+                let e = info.event;
+                s.track = e.track;
+                s.track_layout = e.layout;
+                s.categories = e.categories;
+                s.bikes = e.bikes;
+                s.session = e.session;
+                s.race_length = e.race_length;
+                s.conditions = e.conditions;
+                s.realistic_weather = e.realistic_weather;
+                s.force_cockpit = e.force_cockpit;
+                s.no_aids = e.no_aids;
+                s.limited_tyre_sets = e.limited_tyre_sets;
+            }
+        }
+    }
+}
+
+/// A `SERVERINFO` reply, as the client reads it back (`0x1402a7ead`).
+struct ServerInfo {
+    echo: i32,
+    players: u8,
+    max_players: u8,
+    passworded: bool,
+    event: Event,
+}
+
+/// Parse `SERVERINFO`. The field order is *not* the master's: this message writes the seat cap
+/// before the rider count (`0x1402a0d6d`), where `LIST` writes them the other way round — so
+/// the two parsers stay apart however similar the records look.
+fn parse_serverinfo(clear: &[u8]) -> Option<ServerInfo> {
+    let mut r = Reader::new(clear);
+    if r.i32_le()? != SERVERINFO {
+        return None;
+    }
+    let echo = r.i32_le()?;
+    let _name = r.field();
+    let max_players = r.u8()?;
+    let players = r.u8()?;
+    let passworded = r.u8()? != 0;
+    let _announced_track = r.field(); // start-time copy of `location`; the blob is the truth
+    let _id = r.i32_le();
+    let blob_len = r.i16_le().unwrap_or(0).max(0) as usize;
+    let blob = r.raw(blob_len).map(|b| &b[..b.len().min(MAX_BLOB)]).unwrap_or_default();
+    Some(ServerInfo { echo, players, max_players, passworded, event: Event::parse(blob) })
 }
 
 /// The authenticated login the game uses before joining. Succeeds when the master replies
@@ -920,42 +1257,216 @@ mod tests {
         v[1..5].copy_from_slice(&[203, 0, 113, 10]);
         v[5] = 0xD3;
         v[6] = 0xC2;
-        assert_eq!(decode_addr(&v).as_deref(), Some("203.0.113.10:54210"));
+        let a = decode_addr(&v).unwrap();
+        assert_eq!(a.text, "203.0.113.10:54210");
+        assert!(a.joinable);
     }
 
+    /// An IPv4 server the master saw through a dual-stack socket comes back flagged as IPv6
+    /// with the real address in the last four bytes. Rendering that as `[::ffff:…]` produced a
+    /// row whose Join `gameproc::parse_server_address` refuses outright.
     #[test]
-    fn parses_a_synthetic_list_reply() {
-        // Build one the way the master does: index, flag, one record, empty-name terminator.
+    fn an_ipv4_mapped_address_unwraps_to_the_address_the_game_can_reach() {
+        let mut v = vec![0u8; 19];
+        v[0] = 1; // IPv6
+        v[11] = 0xFF;
+        v[12] = 0xFF;
+        v[13..17].copy_from_slice(&[203, 0, 113, 10]);
+        v[17] = 0xD3;
+        v[18] = 0xC2;
+        let a = decode_addr(&v).unwrap();
+        assert_eq!(a.text, "203.0.113.10:54210");
+        assert!(a.joinable);
+    }
+
+    /// A real IPv6 server is shown but not offered — the game takes one address on its command
+    /// line and the connect flag won't take a bracketed one.
+    #[test]
+    fn a_real_ipv6_server_is_not_joinable() {
+        let mut v = vec![0u8; 19];
+        v[0] = 1;
+        v[1..3].copy_from_slice(&[0x2a, 0x01]);
+        v[17] = 0xD3;
+        v[18] = 0xC2;
+        let a = decode_addr(&v).unwrap();
+        assert!(a.text.starts_with("[2a01:"), "{}", a.text);
+        assert!(!a.joinable);
+    }
+
+    fn addr(text: &str, joinable: bool) -> Addr {
+        Addr { text: text.to_string(), joinable }
+    }
+
+    /// A server that registered over IPv6 but has a routable IPv4 interface is joinable via
+    /// the second address — which is what the game does anyway, by asking both at once.
+    #[test]
+    fn an_ipv6_row_falls_back_to_its_routable_second_address() {
+        let (address, joinable, lan) =
+            best_address(addr("[2a01::1]:54210", false), Some(addr("203.0.113.10:54210", true)));
+        assert_eq!(address, "203.0.113.10:54210");
+        assert!(joinable);
+        assert!(lan.is_empty(), "the address we're joining isn't also side detail");
+    }
+
+    /// The server-reported address is whatever its own hostname resolved to, so it is often a
+    /// LAN address. That can't rescue an IPv6 row, and the row must stay honest about it.
+    #[test]
+    fn a_lan_second_address_cannot_rescue_an_ipv6_row() {
+        let (address, joinable, lan) =
+            best_address(addr("[2a01::1]:54210", false), Some(addr("192.168.1.20:54210", false)));
+        assert_eq!(address, "[2a01::1]:54210");
+        assert!(!joinable);
+        assert_eq!(lan, "192.168.1.20:54210", "still worth showing as detail");
+    }
+
+    /// A server whose two addresses agree shouldn't report the same thing twice.
+    #[test]
+    fn a_duplicate_second_address_is_not_shown() {
+        let (_, _, lan) = best_address(addr("203.0.113.10:54210", true), Some(addr("203.0.113.10:54210", true)));
+        assert!(lan.is_empty());
+    }
+
+    /// The event blob a server publishes about itself — where the real track lives.
+    fn race_blob() -> Vec<u8> {
+        let mut b = vec![0u8]; // leading flag
+        b.extend(b"mmx_supercross\0");
+        b.extend(b"Night\0");
+        b.extend(b"MX1/MX2\0");
+        b.extend(b"\0"); // no bike restriction
+        b.push(2); // event type 2: a race
+        b.extend([0, 0, 0, 0, 0]); // five flags the browser doesn't surface
+        b.extend([30, 1, 2]); // 30 minutes + 2 laps
+        b.push(6); // phase 6 = Race 1
+        b.extend([1, 2, 1, 1, 0]); // realistic weather, rainy, cockpit, no aids, tyres free
+        b
+    }
+
+    /// One record, built the way the master does.
+    fn list_page(index: i64, more: bool, name: &str, blob: &[u8]) -> Vec<u8> {
         let mut addr = vec![0u8; 19];
-        addr[1..5].copy_from_slice(&[10, 0, 0, 5]);
+        addr[1..5].copy_from_slice(&[203, 0, 113, 10]);
         addr[5] = 0xD3;
         addr[6] = 0xC2; // 54210
 
         let mut w = Writer::default();
-        w.field("LIST").int(1).int(0); // tag, index, flag
-        w.field("Frost's Server"); // name
+        w.field("LIST").int(index).field(if more { "0" } else { "1" });
+        w.field(name);
         w.raw(&addr); // public
         w.raw(&vec![0u8; 19]); // secondary
         w.raw(&[7, 20, 1]); // players=7, max=20, passworded=1
-        w.field("mmx_supercross"); // track
-        w.raw(&0i32.to_le_bytes()); // extra id
-        w.raw(&0i16.to_le_bytes()); // blob length 0
+        w.field("USA"); // location — the field we used to render as the track
+        w.raw(&3i32.to_le_bytes()); // rating class B
+        w.raw(&(blob.len() as i16).to_le_bytes());
+        w.raw(blob);
         w.field(""); // terminating empty name
-        let body = w.finish();
+        w.finish()
+    }
 
+    fn parse_page(body: Vec<u8>, out: &mut Vec<WorldServer>, want: usize) -> Page {
         let clear = decrypt(&encrypt(body));
         let mut r = Reader::new(&clear);
         assert_eq!(r.field(), "LIST");
+        parse_list(&mut r, out, want)
+    }
+
+    #[test]
+    fn parses_a_synthetic_list_reply() {
         let mut out = Vec::new();
-        parse_list(&mut r, &mut out);
+        parse_page(list_page(1, false, "Frost's Server", &race_blob()), &mut out, 1);
         assert_eq!(out.len(), 1);
         let s = &out[0];
         assert_eq!(s.name, "Frost's Server");
-        assert_eq!(s.address, "10.0.0.5:54210");
+        assert_eq!(s.address, "203.0.113.10:54210");
+        assert!(s.joinable);
         assert_eq!(s.players, 7);
         assert_eq!(s.max_players, 20);
         assert!(s.passworded);
+
+        // The two fields that were being conflated.
+        assert_eq!(s.location, "USA");
         assert_eq!(s.track, "mmx_supercross");
+        assert_eq!(s.track_layout, "Night");
+        assert_eq!(s.rating, "B");
+
+        assert_eq!(s.categories, ["MX1", "MX2"]);
+        assert!(s.bikes.is_empty(), "an empty list means any bike");
+        assert_eq!(s.session, "Race 1");
+        assert_eq!(s.race_length, "30m + 2");
+        assert_eq!(s.conditions, "Rainy");
+        assert!(s.realistic_weather && s.force_cockpit && s.no_aids);
+        assert!(!s.limited_tyre_sets);
+    }
+
+    /// The bug behind "only 9 servers worldwide": the master pages, and asking once got page
+    /// one. `"0"` in the second field means more are coming.
+    #[test]
+    fn a_page_says_whether_more_follow() {
+        let mut out = Vec::new();
+        assert!(matches!(parse_page(list_page(1, true, "One", &[]), &mut out, 1), Page::More));
+        assert!(matches!(parse_page(list_page(2, false, "Two", &[]), &mut out, 2), Page::Last));
+        assert_eq!(out.len(), 2);
+    }
+
+    /// A page that doesn't start where our list ends is thrown away whole, as the exe does —
+    /// splicing it in would put every following row at the wrong index.
+    #[test]
+    fn a_page_arriving_out_of_order_is_dropped() {
+        let mut out = Vec::new();
+        assert!(matches!(parse_page(list_page(7, true, "Late", &[]), &mut out, 1), Page::OutOfOrder));
+        assert!(out.is_empty());
+    }
+
+    /// A blob from a build we don't recognise must cost that server its detail, not its row.
+    #[test]
+    fn an_unknown_event_type_leaves_the_row_standing() {
+        let mut blob = vec![0u8];
+        blob.extend(b"someTrack\0\0\0\0");
+        blob.push(9); // an event type with no known shape
+        blob.extend([1, 1, 1, 1, 1]);
+
+        let mut out = Vec::new();
+        parse_page(list_page(1, false, "Odd", &blob), &mut out, 1);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].track, "someTrack");
+        assert_eq!(out[0].session, "", "an unreadable session is blank, not a guess");
+        assert!(!out[0].no_aids, "flags past an unknown block are never read");
+    }
+
+    /// `SERVERINFO` writes the seat cap before the rider count; `LIST` writes them the other
+    /// way round. Sharing one parser between them would swap the two on every row.
+    #[test]
+    fn serverinfo_puts_the_seat_cap_first() {
+        let mut w = Writer::default();
+        w.i32le(SERVERINFO).i32le(1234);
+        w.raw(b"Frost's Server\0");
+        w.raw(&[20, 7, 1]); // max=20, players=7, passworded
+        w.raw(b"USA\0");
+        w.raw(&0i32.to_le_bytes());
+        let blob = race_blob();
+        w.raw(&(blob.len() as i16).to_le_bytes()).raw(&blob);
+
+        let info = parse_serverinfo(&w.finish()).expect("a well-formed SERVERINFO");
+        assert_eq!(info.echo, 1234);
+        assert_eq!(info.max_players, 20);
+        assert_eq!(info.players, 7);
+        assert!(info.passworded);
+        assert_eq!(info.event.track, "mmx_supercross");
+    }
+
+    /// The 16-byte request is two whole Blowfish blocks, and the version gate is exact: a
+    /// server compares it to 40 and answers nothing otherwise.
+    #[test]
+    fn getinfo_is_sixteen_bytes_of_connectionless_request() {
+        let mut w = Writer::default();
+        w.i32le(CONNECTIONLESS).i32le(GETINFO).i32le(client_version() as i32).i32le(99);
+        let body = w.finish();
+        assert_eq!(body.len(), 16);
+        assert_eq!(encrypt(body.clone()).len(), 16, "no padding block is added");
+
+        let mut r = Reader::new(&body);
+        assert_eq!(r.i32_le(), Some(-1));
+        assert_eq!(r.i32_le(), Some(0));
+        assert_eq!(r.i32_le(), Some(40));
     }
 
     fn auth(id: u64) -> SteamAuth {
