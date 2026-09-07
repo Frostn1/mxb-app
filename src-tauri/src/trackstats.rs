@@ -913,6 +913,11 @@ pub struct RutShape {
     pub chatter_zones_m: [f32; 3],
 }
 
+/// How deep a dip has to be, and how wide, before it counts as a groove rather than as the
+/// grain of the ground. Six centimetres is about a third of a knobbly tyre's height.
+const GROOVE_MIN_M: f32 = 0.06;
+const GROOVE_MIN_WIDE_M: f32 = 0.25;
+
 /// Detrend a series against a running mean `half` samples either side, wrapping.
 fn detrend(v: &[f32], half: usize) -> Vec<f32> {
     let n = v.len();
@@ -969,17 +974,28 @@ pub fn rut_shape(stations: &[(f32, f32, f32)], step_m: f32, g: &Grid) -> Option<
     for row in &rows {
         let d = detrend(row, half_across);
         across.extend(d.iter().copied());
-        // Grooves: runs below a fifth of the section's own deepest cut.
+        // Grooves: runs cut at least `GROOVE_MIN_M` below the ground either side of them.
+        //
+        // It used to be "below a fifth of this section's own deepest cut", which is not a
+        // groove detector at all: a section with no ruts in it has a deepest dip too, and a
+        // fifth of that is grain. Proved by turning the rut field's own parameters up and
+        // down and watching the count sit at 3.7 either way — a statistic nothing in the
+        // generator could move, being tuned against.
         let deepest = -d.iter().copied().fold(f32::INFINITY, f32::min);
-        if deepest < 0.02 {
+        if deepest < GROOVE_MIN_M {
             continue;
         }
-        let cut = -0.2 * deepest;
+        let cut = -GROOVE_MIN_M;
         let (mut run, mut last_centre, mut found) = (0usize, None::<f32>, 0usize);
         for i in 0..d.len() {
             if d[i] <= cut {
                 run += 1;
             } else if run > 0 {
+                // And wide enough to put a wheel in.
+                if (run as f32 * lat) < GROOVE_MIN_WIDE_M {
+                    run = 0;
+                    continue;
+                }
                 found += 1;
                 floors.push(run as f32 * lat);
                 let centre = (i as f32 - run as f32 * 0.5) * lat - RIDDEN_HALF_M;

@@ -716,6 +716,52 @@ fn dome_mesh(radius: f32) -> Mesh {
 }
 
 /// The sky's own sheet: blue overhead, pale at the horizon, with cloud banded across it.
+/// The sky as a file of its own: `dome.edf`, named by the `.amb`.
+///
+/// The band in the map exists because TerrainEd bakes shadow volumes from every mesh in the
+/// scene, so a lid over the plot put the whole track in shadow. That reasoning does not apply
+/// here — a `.edf` the game loads at runtime never goes near the compiler — so this one is
+/// closed all the way over, which is what a published track ships and what a rider looking up
+/// expects to see.
+pub fn dome_file(radius: f32) -> Vec<u8> {
+    let mut m = Mesh::default();
+    const RINGS: usize = 8;
+    const SIDES: usize = 32;
+    // Ring by ring from the horizon to the pole, facing inwards.
+    let ring = |mesh: &mut Mesh, t: f32| -> u32 {
+        let start = mesh.vertex_count() as u32;
+        let phi = t * std::f32::consts::FRAC_PI_2;
+        let (y, r) = (radius * phi.sin(), radius * phi.cos());
+        for k in 0..=SIDES {
+            let a = std::f32::consts::TAU * k as f32 / SIDES as f32;
+            let (x, z) = (a.sin() * r, a.cos() * r);
+            mesh.positions.extend_from_slice(&[x, y, z]);
+            let l = (x * x + y * y + z * z).sqrt().max(1e-4);
+            mesh.normals.extend_from_slice(&[-x / l, -y / l, -z / l]);
+            mesh.uvs.extend_from_slice(&[k as f32 / SIDES as f32 * 4.0, 1.0 - t]);
+        }
+        start
+    };
+    let mut prev = ring(&mut m, 0.0);
+    for i in 1..=RINGS {
+        let t = i as f32 / RINGS as f32;
+        let next = ring(&mut m, t);
+        for k in 0..SIDES as u32 {
+            // Wound so the inside faces are the ones drawn.
+            m.indices.extend_from_slice(&[prev + k, next + k, prev + k + 1]);
+            m.indices.extend_from_slice(&[prev + k + 1, next + k, next + k + 1]);
+        }
+        prev = next;
+    }
+    let part = Part {
+        name: "sky".into(),
+        mesh: m,
+        texture: 0,
+        normal: None,
+    };
+    crate::edfwrite::write("dome", &[part], &[dome_sheet()])
+}
+
 fn dome_sheet() -> Texture {
     sheet("sky_c", 256, |u, v| {
         // v is 0 at the zenith and 1 at the horizon — see `dome_mesh`'s uvs.

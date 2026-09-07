@@ -28,6 +28,8 @@
 ## 2026-09-06
 
 ### Changed
+- Generated tracks have a sky of their own. They used to borrow the game's stock one, because
+  nothing ever shipped a dome or told the game to look for it.
 - The track is dirt again. The whole riding surface is dark worked ground with a darker line
   ridden into it, instead of pale soil with a stripe down the middle and holes in it.
 - Straights no longer carry a single groove dug down the middle of them. That is a corner's

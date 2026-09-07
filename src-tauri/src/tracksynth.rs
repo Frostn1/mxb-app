@@ -5653,7 +5653,7 @@ sun_position\n{\n\tx = 2\n\ty = 10\n\tz = -7\n}\n\
 clear\n{\n\tambient\n\t{\n\t\tred = 0.40\n\t\tgreen = 0.45\n\t\tblue = 0.55\n\t}\n\
 \tsun_color\n\t{\n\t\tred = 1.10\n\t\tgreen = 0.95\n\t\tblue = 0.7\n\t}\n\
 \tfog\n\t{\n\t\tdensity = 0.0008\n\t\tred = 0.7\n\t\tgreen = 0.7\n\t\tblue = 0.85\n\t}\n\
-\tsky = *clearsky.edf\n\tsky_rot = 0\n}\n\
+\tsky = dome.edf\n\tsky_rot = 0\n}\n\
 cloudy\n{\n\tambient\n\t{\n\t\tred = 0.65\n\t\tgreen = 0.65\n\t\tblue = 0.7\n\t}\n\
 \tsun_color\n\t{\n\t\tred = 0.255\n\t\tgreen = 0.255\n\t\tblue = 0.3\n\t}\n\
 \tfog\n\t{\n\t\tdensity = 0.0005\n\t\tred = 0.7\n\t\tgreen = 0.7\n\t\tblue = 0.85\n\t}\n\
