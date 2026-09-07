@@ -51,11 +51,15 @@ def sample_h(H, mps, x, z):
     return (a*(1-tx)+bb*tx)*(1-tz) + (c*(1-tx)+d*tx)*tz
 
 def look_at(eye, target, up=(0,1,0)):
+    """The camera basis in the game's frame, which is left-handed: right is `up x forward`.
+
+    The other way round mirrors every picture, which nothing symmetrical shows up and a banner
+    does."""
     f = np.array(target, np.float64) - np.array(eye, np.float64)
     f /= np.linalg.norm(f)
     u = np.array(up, np.float64)
-    s = np.cross(f, u); s /= np.linalg.norm(s)
-    u = np.cross(s, f)
+    s = np.cross(u, f); s /= np.linalg.norm(s)
+    u = np.cross(f, s)
     return np.stack([s, u, f])           # rows: right, up, forward
 
 def render(d, eye, target, W=1100, Hh=680, fov=58.0, sky=(150,178,205)):
@@ -163,8 +167,10 @@ def render(d, eye, target, W=1100, Hh=680, fov=58.0, sky=(150,178,205)):
             v = (w0*UV[a,1]/zc[a] + w1*UV[bq,1]/zc[bq] + w2*UV[c,1]/zc[c]) * depth
             tex = mats[M[tri] % len(mats)]
             dim = tex.shape[0]
+            # V grows upward and row 0 is the picture's bottom, the reading `trackobjects`
+            # takes off a published track. Straight through, every sheet drew upside down.
             ti = np.clip((np.mod(u, 1.0) * dim).astype(np.int32), 0, dim-1)
-            tj = np.clip((np.mod(v, 1.0) * dim).astype(np.int32), 0, dim-1)
+            tj = np.clip(((1.0 - np.mod(v, 1.0)) * dim).astype(np.int32), 0, dim-1)
             texel = tex[tj, ti]
             vis &= texel[..., 3] > 110
             if not vis.any():

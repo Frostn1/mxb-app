@@ -2,6 +2,16 @@
 
 ## 2026-09-06
 
+### Changed
+- Generated tracks carry a continuous printed banner down the lap as well as sponsor boards:
+  one design repeated on pieces joined end to end, the way a real track runs one.
+
+### Fixed
+- Banners on a generated track read the right way round from either side of the board.
+- Banner artwork fills its board at the proportions it was drawn in.
+
+## 2026-09-06
+
 ### Fixed
 - Sharing a track is quicker. The upload no longer waits on the host after the files are
   already up, and the app stays responsive while a share is being packed.
