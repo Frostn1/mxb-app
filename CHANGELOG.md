@@ -48,7 +48,8 @@
 - The startup log records `EGL_PLATFORM` and which graphics settings the run started with.
 
 - The Servers tab lists the live MX Bikes servers again. The app now signs in to the master
-  server exactly as the game does, so the master answers it.
+  server exactly the way the game does — the same fields, and the same kind of Steam ticket —
+  so the master answers it.
 
 - **Testing the microphone did nothing on macOS.** The app never told macOS what it wanted a
   microphone for, and macOS refuses one on those terms — silently. The permission prompt
