@@ -469,15 +469,24 @@ const BERM_REACH_M: f32 = 4.5;
 /// Four octaves over a hundred-metre wavelength put the smallest hummock twelve metres
 /// across, and a field of those reads as a blur rather than as ground. Real land has
 /// metre-scale texture everywhere, not only where it has been ridden.
-/// And the field is not ridden. Seven and a half centimetres of detail everywhere left the
-/// field nearly as rough as the racing line — 1.07 cm against 1.26 — where a published track's
-/// field is a quarter of its line.
+/// A published track's field is *not* a quarter of its line, which is what this was tuned to.
+/// Measured off Indiana by distance from the centreline, rms after a six-metre detrend:
+///
+/// ```text
+///            0-3 m   3-8 m   8-15 m   15-30 m   30-60 m   60 m+
+/// Indiana    10.9    17.1     13.2       8.1      12.0    12.5   cm
+/// ours       11.8    18.4     13.2       4.5       3.1     2.6   cm
+/// ```
+///
+/// The track itself already matches to a centimetre. Everything past fifteen metres was four
+/// times too smooth — a racing line laid on glass — because the field carried 4.5 cm of
+/// detail where Indiana carries about twelve.
 /// How many octaves the landscape carries and how fast they fall away. See [`fbm_of`].
 const LANDSCAPE_OCTAVES: u32 = 3;
 const LANDSCAPE_GAIN: f32 = 0.30;
 
 const FIELD_DETAIL_M: f32 = 4.5;
-const FIELD_DETAIL_HEIGHT_M: f32 = 0.045;
+const FIELD_DETAIL_HEIGHT_M: f32 = 0.15;
 
 /// The hollow a jump is dug out of, as a fraction of its height, and how far past its ends
 /// that hollow reaches.
@@ -2586,31 +2595,13 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
         // Two jumps with ground between them. The gap is at grade, which is what makes it a
         // double rather than a long tabletop — land short and you land on flat.
         //
-        // Each jump is a long face up and a short one back down. The short face matters: it
-        // is what a takeoff lip is, and writing the drop as a step instead put a wall the
-        // full height of the jump into the terrain, one sample wide.
+        // The whole shape is arcs: a crowned lip, a cut face, a valley at grade, and the same
+        // in reverse. Written as four faces meeting at points it came out as two triangles
+        // with a pan between them — the crest changed slope by sixty degrees between two
+        // samples, and the gap floor met its faces at a crease.
         Feature::Double {
             height, gap, lip, ..
-        } => {
-            // All four faces from one definition, shared with `Feature::length` so the two
-            // cannot disagree about where the shape ends.
-            let f = crate::trackprog::double_faces(height, lip);
-            let crest = f.ramp + f.back;
-            let land = crest + gap;
-            if u <= f.ramp {
-                height * arc_up(u / f.ramp, height, f.ramp)
-            } else if u <= crest {
-                // Dumped faces, so a smoothstep: rounded at the lip it leaves and at the
-                // ground it meets, which is how a tipped load settles.
-                height * smoothstep(1.0 - (u - f.ramp) / f.back)
-            } else if u <= land {
-                0.0
-            } else if u <= land + f.face {
-                height * smoothstep((u - land) / f.face)
-            } else {
-                height * arc_up(1.0 - (u - land - f.face) / f.run, height, f.run)
-            }
-        }
+        } => crate::trackprog::double_shape(height, gap, lip).height_at(u),
         Feature::Whoops {
             height, spacing, ..
         } => {

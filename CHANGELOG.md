@@ -3,6 +3,13 @@
 ## 2026-09-06
 
 ### Fixed
+- Doubles on a generated track are shaped the way a built one is. The take-off lip and the
+  landing crest turn over a radius, and the ground between them runs down through a rounded
+  valley into the flat.
+
+## 2026-09-06
+
+### Fixed
 - Sharing a track is quicker. The upload no longer waits on the host after the files are
   already up, and the app stays responsive while a share is being packed.
 
