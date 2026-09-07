@@ -996,3 +996,373 @@ mod edge_marking {
         println!("\nsheets written to {dump}");
     }
 }
+
+#[cfg(test)]
+mod banner_facing {
+    use super::*;
+
+    /// Which way a published track turns a printed banner, and how it repeats one.
+    ///
+    /// A hoarding is drawn from both sides, so nothing about culling says which way it faces.
+    /// What says it is the print: `u` runs one way along a board's own length, and the
+    /// question is whether that direction agrees with the lap's heading or opposes it on each
+    /// side of the track. Deriving it from the game's handedness gives two answers depending
+    /// on which convention you assume; Indiana settles it, because its sponsors read the
+    /// right way round.
+    ///
+    /// The same walk answers the other question a generated hoarding has to get right: how a
+    /// track *repeats* a banner. Indiana's is `inflate_tilable_c` — one design, printed on
+    /// piece after piece bolted together — so what to look at is how many pieces share a UV
+    /// box and how far apart they sit.
+    ///
+    /// ```text
+    /// FROST_TRACK=~/Projects/pkz/tracks/2024_ARLMX_RD11_INDIANA_PRO.pkz \
+    /// cargo test --bin mxb-app -- --ignored --nocapture which_way_a_banner_faces
+    /// ```
+    #[test]
+    #[ignore = "needs a real track — set FROST_TRACK"]
+    fn which_way_a_banner_faces() {
+        let track = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let path = std::path::PathBuf::from(&track);
+        let names = crate::track::entry_names(&path).unwrap();
+        let stem = path.file_stem().unwrap().to_string_lossy().to_ascii_lowercase();
+
+        let hf = crate::track::heightfield_entries(&names).into_iter().next().unwrap();
+        let hb = crate::track::read_entry(&path, &hf).unwrap();
+        let layout = crate::heightfield::probe(&hb, None).unwrap();
+        let block_at =
+            layout.offset + layout.width as usize * layout.height as usize * layout.sample.size();
+        let stations = crate::trackline::read(&hb[block_at..]).unwrap().stations(1.0);
+
+        let entry = names
+            .iter()
+            .find(|n| n.to_ascii_lowercase() == format!("{stem}/{stem}.map"))
+            .or_else(|| names.iter().find(|n| n.to_ascii_lowercase().ends_with(".map")))
+            .expect("a .map")
+            .clone();
+        let bytes = crate::track::read_entry(&path, &entry).unwrap();
+        let mesh = map::parse(&bytes).expect("parses");
+        let sheets = map::declared(&bytes);
+
+        // The nearest station, with its heading — `nearest` drops the heading and the whole
+        // question is asked against it.
+        let nearest_at = |x: f32, z: f32| -> (f32, f32, (f32, f32)) {
+            let mut best = (0.0f32, f32::INFINITY, 0.0f32, (0.0f32, 0.0f32));
+            for p in &stations {
+                let (dx, dz) = (x - p.x, z - p.z);
+                let d2 = dx * dx + dz * dz;
+                if d2 < best.1 {
+                    let (rx, rz) = crate::trackprog::right_vector(p.heading);
+                    best = (p.at, d2, dx * rx + dz * rz, crate::trackprog::heading_vector(p.heading));
+                }
+            }
+            (best.0, best.2, best.3)
+        };
+
+        struct Board {
+            along: f32,
+            off: f32,
+            /// `+1` when every readable face grows `u` toward its own viewer's right,
+            /// `-1` when they all grow it to the left. A board printed the same way on both
+            /// faces lands near `+1` or `-1`; one printed once and mirrored on the back
+            /// lands near zero.
+            with_lap: f32,
+            span: f32,
+            tall: f32,
+            /// The UV box the piece samples, rounded, so identical prints group.
+            box_key: (i32, i32, i32, i32),
+        }
+        let mut boards: Vec<Board> = Vec::new();
+        let mut skipped = 0usize;
+
+        for o in &mesh.objects {
+            let named = sheets
+                .get(o.material as usize)
+                .map(|(n, ..)| n.to_ascii_lowercase())
+                .unwrap_or_default();
+            if classify(&named) != Class::Banner {
+                continue;
+            }
+            let (w, h, d) = (o.max[0] - o.min[0], o.max[1] - o.min[1], o.max[2] - o.min[2]);
+            let span = w.max(d);
+            // A board: stands up, wider than it is tall, and not the start backdrop.
+            if !(0.5..4.0).contains(&h) || !(0.4..12.0).contains(&span) {
+                continue;
+            }
+            let (cx, cz) = ((o.min[0] + o.max[0]) * 0.5, (o.min[2] + o.max[2]) * 0.5);
+            let (along, off, _fwd) = nearest_at(cx, cz);
+            if off.abs() > 40.0 {
+                continue;
+            }
+
+            // Which way the print runs on each face of the piece.
+            //
+            // Asked of the island as a whole this averages to nothing, because a banner is
+            // drawn from both sides and a real one is *printed* on both: the two faces carry
+            // the same picture and their `u` runs opposite ways in the world. So ask it of
+            // each triangle. Its winding normal is the face a viewer would be looking at,
+            // and `up x n` is that viewer's right; `u` either grows that way or the other,
+            // and that — not the geometry — is what "facing the track" means for a board.
+            let (mut u0, mut u1, mut v0, mut v1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+            let (mut to_right, mut to_left) = (0usize, 0usize);
+            for t in o.tri_start as usize..(o.tri_start + o.tri_count) as usize {
+                let vi = |k: usize| mesh.indices[t * 3 + k] as usize;
+                let pos = |k: usize| {
+                    let i = vi(k);
+                    [mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]]
+                };
+                for k in 0..3 {
+                    let i = vi(k);
+                    let (u, v) = (mesh.uvs[i * 2], mesh.uvs[i * 2 + 1]);
+                    (u0, u1) = (u0.min(u), u1.max(u));
+                    (v0, v1) = (v0.min(v), v1.max(v));
+                }
+                let (a, b, c) = (pos(0), pos(1), pos(2));
+                let e1: [f32; 3] = std::array::from_fn(|k| b[k] - a[k]);
+                let e2: [f32; 3] = std::array::from_fn(|k| c[k] - a[k]);
+                let n = [
+                    e1[1] * e2[2] - e1[2] * e2[1],
+                    e1[2] * e2[0] - e1[0] * e2[2],
+                    e1[0] * e2[1] - e1[1] * e2[0],
+                ];
+                let flat = (n[0] * n[0] + n[2] * n[2]).sqrt();
+                // A face you can read: standing up, not the hem or a cap.
+                if flat < 1e-6 || n[1].abs() > flat {
+                    continue;
+                }
+                // The viewer's right, for someone this face is pointing at.
+                let r = [n[2] / flat, -n[0] / flat];
+                let along = |k: usize| pos(k)[0] * r[0] + pos(k)[2] * r[1];
+                let mut best = (0.0f32, 0.0f32);
+                for (i, j) in [(0, 1), (1, 2), (2, 0)] {
+                    let dt = along(j) - along(i);
+                    if dt.abs() > best.0.abs() {
+                        best = (dt, mesh.uvs[vi(j) * 2] - mesh.uvs[vi(i) * 2]);
+                    }
+                }
+                if best.0.abs() < 1e-4 || best.1.abs() < 1e-6 {
+                    continue;
+                }
+                if best.1 / best.0 > 0.0 {
+                    to_right += 1;
+                } else {
+                    to_left += 1;
+                }
+            }
+            if to_right + to_left == 0 {
+                skipped += 1;
+                continue;
+            }
+            let with_lap = (to_right as f32 - to_left as f32) / (to_right + to_left) as f32;
+            boards.push(Board {
+                along,
+                off,
+                with_lap,
+                span,
+                tall: h,
+                box_key: (
+                    (u0 * 20.0).round() as i32,
+                    (u1 * 20.0).round() as i32,
+                    (v0 * 20.0).round() as i32,
+                    (v1 * 20.0).round() as i32,
+                ),
+            });
+        }
+
+        println!(
+            "\n{}: {} banner boards, {skipped} too small to orient",
+            entry,
+            boards.len()
+        );
+        assert!(!boards.is_empty(), "no banner boards found — check the sheet vocabulary");
+
+        // 1. The facing. `u` running with the lap on one side and against it on the other is
+        //    a track that turns its print to face the riding line; the same sign on both is a
+        //    track that does not care.
+        println!("\n=== which way the print runs, per readable face ===");
+        for (name, left) in [("left  (off < 0)", true), ("right (off > 0)", false)] {
+            let mine: Vec<&Board> = boards.iter().filter(|b| (b.off < 0.0) == left).collect();
+            if mine.is_empty() {
+                continue;
+            }
+            let right = mine.iter().filter(|b| b.with_lap > 0.5).count();
+            let lefty = mine.iter().filter(|b| b.with_lap < -0.5).count();
+            let mixed = mine.len() - right - lefty;
+            println!(
+                "  {name}  n {:>4}   u to the viewer's right {right:>4}   to their left {lefty:>4}   \
+                 mixed {mixed:>4}",
+                mine.len(),
+            );
+        }
+
+        // 3. And the picture, because everything above is a sign and this is the thing itself.
+        //
+        // Rebuild the widest board the way the viewer its own face is turned towards sees it:
+        // across the image is that viewer's right, down the image is down the world. Run it on
+        // a published track and on a generated one and the two pictures answer the question
+        // outright — `scripts/track-render.py` cannot, because its camera and the game's
+        // disagree about which way round the world is and it took a mirrored lap of banners
+        // to notice.
+        if let Ok(dump) = std::env::var("FROST_DUMP") {
+            std::fs::create_dir_all(&dump).ok();
+            let tex = map::textures(&bytes, 1024);
+            let mut best: Option<(&map::MapObject, f32)> = None;
+            for o in &mesh.objects {
+                let named = sheets
+                    .get(o.material as usize)
+                    .map(|(n, ..)| n.to_ascii_lowercase())
+                    .unwrap_or_default();
+                let (w, h, d) = (o.max[0] - o.min[0], o.max[1] - o.min[1], o.max[2] - o.min[2]);
+                let span = w.max(d);
+                let (cx, cz) = ((o.min[0] + o.max[0]) * 0.5, (o.min[2] + o.max[2]) * 0.5);
+                if classify(&named) != Class::Banner
+                    || !(0.5..2.0).contains(&h)
+                    || span < 1.0
+                    || o.tri_count < 2
+                    || nearest_at(cx, cz).1.abs() > 20.0
+                {
+                    continue;
+                }
+                if best.map(|(_, s)| span > s).unwrap_or(true) {
+                    best = Some((o, span));
+                }
+            }
+            let (o, _) = best.expect("a board to draw");
+            // The face's own viewer stands where the winding normal points away from — that is
+            // the rule the game culls by — and looks back along `n`. Their right is `up x n`,
+            // which is the same relation the counts above are taken on.
+            let tris: Vec<usize> = (o.tri_start as usize..(o.tri_start + o.tri_count) as usize)
+                .collect();
+            let at = |t: usize, k: usize| {
+                let i = mesh.indices[t * 3 + k] as usize;
+                (
+                    [mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]],
+                    [mesh.uvs[i * 2], mesh.uvs[i * 2 + 1]],
+                )
+            };
+            let t0 = tris[0];
+            let (a, _) = at(t0, 0);
+            let (b, _) = at(t0, 1);
+            let (c, _) = at(t0, 2);
+            let e1: [f32; 3] = std::array::from_fn(|k| b[k] - a[k]);
+            let e2: [f32; 3] = std::array::from_fn(|k| c[k] - a[k]);
+            let n = [
+                e1[1] * e2[2] - e1[2] * e2[1],
+                e1[2] * e2[0] - e1[0] * e2[2],
+                e1[0] * e2[1] - e1[1] * e2[0],
+            ];
+            let flat = (n[0] * n[0] + n[2] * n[2]).sqrt();
+            let r = [n[2] / flat, -n[0] / flat];
+            // Only the triangles of that one face, so the copy behind it does not draw over it.
+            let face: Vec<usize> = tris
+                .iter()
+                .copied()
+                .filter(|t| {
+                    let (a, _) = at(*t, 0);
+                    let (b, _) = at(*t, 1);
+                    let (c, _) = at(*t, 2);
+                    let e1: [f32; 3] = std::array::from_fn(|k| b[k] - a[k]);
+                    let e2: [f32; 3] = std::array::from_fn(|k| c[k] - a[k]);
+                    let m = [
+                        e1[1] * e2[2] - e1[2] * e2[1],
+                        e1[2] * e2[0] - e1[0] * e2[2],
+                        e1[0] * e2[1] - e1[1] * e2[0],
+                    ];
+                    m[0] * n[0] + m[1] * n[1] + m[2] * n[2] > 0.0
+                })
+                .collect();
+            let across = |p: [f32; 3]| p[0] * r[0] + p[2] * r[1];
+            let (mut x0, mut x1) = (f32::MAX, f32::MIN);
+            for t in &face {
+                for k in 0..3 {
+                    let v = across(at(*t, k).0);
+                    (x0, x1) = (x0.min(v), x1.max(v));
+                }
+            }
+            let (out_w, out_h) = (720u32, 220u32);
+            let t = tex.iter().find(|t| t.material == o.material);
+            let mut img = image::RgbaImage::new(out_w, out_h);
+            for py in 0..out_h {
+                for px in 0..out_w {
+                    let wx = x0 + (x1 - x0) * px as f32 / (out_w - 1) as f32;
+                    let wy = o.min[1]
+                        + (o.max[1] - o.min[1]) * (1.0 - py as f32 / (out_h - 1) as f32);
+                    let mut buv = None;
+                    for tri in &face {
+                        let g = |k: usize| {
+                            let (p, uv) = at(*tri, k);
+                            ((across(p), p[1]), uv)
+                        };
+                        let (pa, ua) = g(0);
+                        let (pb, ub) = g(1);
+                        let (pc, uc) = g(2);
+                        let area =
+                            (pb.0 - pa.0) * (pc.1 - pa.1) - (pc.0 - pa.0) * (pb.1 - pa.1);
+                        if area.abs() < 1e-9 {
+                            continue;
+                        }
+                        let w0 = ((pb.0 - wx) * (pc.1 - wy) - (pc.0 - wx) * (pb.1 - wy)) / area;
+                        let w1 = ((pc.0 - wx) * (pa.1 - wy) - (pa.0 - wx) * (pc.1 - wy)) / area;
+                        let w2 = 1.0 - w0 - w1;
+                        if w0 < -1e-3 || w1 < -1e-3 || w2 < -1e-3 {
+                            continue;
+                        }
+                        buv = Some((
+                            ua[0] * w0 + ub[0] * w1 + uc[0] * w2,
+                            ua[1] * w0 + ub[1] * w1 + uc[1] * w2,
+                        ));
+                        break;
+                    }
+                    let col = match (buv, t) {
+                        (Some(uv), Some(t)) if t.width > 0 => {
+                            let sx = (uv.0.rem_euclid(1.0) * t.width as f32) as u32 % t.width;
+                            let sy =
+                                ((1.0 - uv.1.rem_euclid(1.0)) * t.height as f32) as u32 % t.height;
+                            let i = ((sy * t.width + sx) * 4) as usize;
+                            [t.rgba[i], t.rgba[i + 1], t.rgba[i + 2], 255]
+                        }
+                        _ => [90, 90, 96, 255],
+                    };
+                    img.put_pixel(px, py, image::Rgba(col));
+                }
+            }
+            let file = format!("{dump}/face-as-its-viewer-sees-it.png");
+            img.save(&file).unwrap();
+            println!("\nthe widest board, from the side its face is turned to: {file}");
+        }
+
+        // 2. The repeat. How many boards print the same UV box, and how far apart they are —
+        //    which is the difference between a run of sponsors and one banner tiled.
+        let mut by_box: std::collections::HashMap<(i32, i32, i32, i32), Vec<&Board>> =
+            Default::default();
+        for b in &boards {
+            by_box.entry(b.box_key).or_default().push(b);
+        }
+        let mut order: Vec<_> = by_box.into_iter().collect();
+        order.sort_by_key(|(_, v)| std::cmp::Reverse(v.len()));
+        println!("\n=== how a board repeats ({} distinct prints) ===", order.len());
+        for (key, mut group) in order.into_iter().take(6) {
+            group.sort_by(|a, b| a.along.partial_cmp(&b.along).unwrap());
+            let mut gaps: Vec<f32> = group
+                .windows(2)
+                .filter(|w| (w[0].off < 0.0) == (w[1].off < 0.0))
+                .map(|w| w[1].along - w[0].along)
+                .filter(|g| *g > 0.05 && *g < 30.0)
+                .collect();
+            let mut span: Vec<f32> = group.iter().map(|b| b.span).collect();
+            let mut tall: Vec<f32> = group.iter().map(|b| b.tall).collect();
+            let mut off: Vec<f32> = group.iter().map(|b| b.off.abs()).collect();
+            println!(
+                "  uv {:>5.2}-{:<5.2} x {:>5.2}-{:<5.2}  n {:>4}  wide {:>4.2} m  tall {:>4.2} m  \
+                 off {:>4.1} m  gap {:>4.2}/{:>4.2}/{:>4.2} m",
+                key.0 as f32 / 20.0, key.1 as f32 / 20.0,
+                key.2 as f32 / 20.0, key.3 as f32 / 20.0,
+                group.len(),
+                spread(&mut span).p50,
+                spread(&mut tall).p50,
+                spread(&mut off).p50,
+                spread(&mut gaps).p10, spread(&mut gaps).p50, spread(&mut gaps).p90,
+            );
+        }
+    }
+}

@@ -652,6 +652,45 @@ pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
     (up, top, down)
 }
 
+/// How tall the finish jump is built, metres.
+///
+/// The jump the lap ends and begins on, and on a national it is one of the biggest on the
+/// track — a long tabletop on the main straight with the line painted past its landing. The
+/// range is the top of the published spread rather than the middle of it: this is the one
+/// jump a track is photographed on.
+pub const FINISH_JUMP_M: (f32, f32) = (2.4, 3.6);
+
+/// The longest deck a finish jump gets, metres. Published tabletop decks run six to twelve,
+/// and the finish one is at the long end because it is the one everybody lands on.
+pub const FINISH_DECK_MAX_M: f32 = 12.0;
+
+/// Bare ground off the last corner before the finish jump's face, metres. A takeoff at the
+/// corner exit is a takeoff nobody has any drive at.
+pub const FINISH_RUNUP_M: f32 = 18.0;
+
+/// Ground past the landing before the straight runs out, metres — where the line is painted
+/// and where a rider gets back on the brakes for the next corner.
+pub const FINISH_RUNOUT_M: f32 = 10.0;
+
+/// How far past the landing the line itself goes, metres. A finish line marks the ground a
+/// rider comes down on, so it sits just off the end of the ramp rather than on it.
+pub const FINISH_LINE_PAST_M: f32 = 4.0;
+
+/// The whole footprint of a finish jump of this height with this deck, metres.
+///
+/// A tabletop's ramps are the longer of an angle and a fraction of the stated length, so the
+/// length and the faces define each other. Solved by iterating: the fraction is 0.44 at
+/// worst, so it converges geometrically and eight passes is far past the millimetre.
+pub fn finish_jump_length(height: f32, deck: f32) -> f32 {
+    let deck = deck.max(TABLETOP_DECK_M);
+    let mut len = height.abs() + deck;
+    for _ in 0..8 {
+        let (up, _, down) = tabletop_faces(height, len);
+        len = up + deck + down;
+    }
+    len
+}
+
 /// The shortest straight a start will fit beside, metres.
 ///
 /// A motocross start is a gate row and a sprint at the first turn, all of it in a line,
@@ -947,10 +986,15 @@ impl Feature {
 /// a corner puts forty gates round a bend. Turned round to start there rather than redrawn —
 /// see [`TrackProgram::rotate_start`], and the printer beside its tests.
 ///
+/// The finish jump stands on that straight: a 3.6 m tabletop 49 m across, fifty metres of
+/// drive off the last corner, with the line painted past its landing. See
+/// [`TrackProgram::finish_window`] — a lap that arrives without one has one built.
+///
 /// 1905 m, 137 segments of which 109 are arcs, seventeen corners at a median 12.6 m through
-/// their tightest point — Indiana's is 10.6 — and 2651° of turning. Forty features, seven of them over 2.2 m and the
-/// rest small ground, which is the ratio Indiana has. It climbs 22 m round the lap, which is
-/// Indiana's 21.3 — half the published corpus is a hillside and a flat plot rides like one.
+/// their tightest point — Indiana's is 10.6 — and 2651° of turning. Thirty-seven features,
+/// eight of them over 2.2 m and the rest small ground, which is the ratio Indiana has. It
+/// climbs 22 m round the lap, which is Indiana's 21.3 — half the published corpus is a
+/// hillside and a flat plot rides like one.
 ///
 /// This is the schema's own test. It is parsed by the test suite, synthesised, and measured
 /// against published tracks, so it cannot drift away from what the code accepts.
@@ -1105,8 +1149,7 @@ pub const EXAMPLE: &str = r#"{
       ],
       "features": [
         { "kind": "roller", "at": 31.3, "length": 11.3, "height": 0.8 },
-        { "kind": "tabletop", "at": 64.5, "length": 33.0, "height": 1.5 },
-        { "kind": "stepUp", "at": 97.8, "length": 20.9, "height": 2.0 },
+        { "kind": "tabletop", "at": 52.3, "length": 48.5, "height": 3.6 },
         { "kind": "roller", "at": 131.0, "length": 14.4, "height": 0.75 },
         { "kind": "berm", "at": 265.5, "length": 8.0, "height": 1.7 },
         { "kind": "tabletop", "at": 295.7, "length": 30.0, "height": 1.5 },
@@ -1143,6 +1186,33 @@ pub const EXAMPLE: &str = r#"{
         { "kind": "berm", "at": 1830.0, "length": 15.0, "height": 1.7 },
         { "kind": "tabletop", "at": 1874.0, "length": 27.0, "height": 1.1 }
       ]
+    }"#;
+
+/// A lap with nothing on it: somewhere to start from scratch.
+///
+/// Deliberately the plainest thing that is still a track — an oval on a small plot, 12 m
+/// wide, no jumps at all. It validates, it builds, and everything on it is yours.
+///
+/// Text like [`EXAMPLE`], and parsed the same way, so the two starting points cannot drift
+/// apart: whatever the type fills in for one, it fills in for the other.
+pub const BLANK: &str = r#"{
+      "name": "New Track",
+      "author": "",
+      "location": "",
+      "width": 12.0,
+      "terrain": {
+        "sizeX": 400.0, "sizeZ": 400.0, "samples": 2049, "scale": 20.0,
+        "relief": { "amplitude": 4.0, "wavelength": 130.0, "seed": 1, "texture": 0.06 },
+        "surface": "soil"
+      },
+      "start": { "x": 120.0, "z": 260.0, "angle": 90.0 },
+      "segments": [
+        { "kind": "straight", "length": 120.0, "rise": 0.0 },
+        { "kind": "arc", "radius": 45.0, "angle": 180.0, "rise": 0.0 },
+        { "kind": "straight", "length": 120.0, "rise": 0.0 },
+        { "kind": "arc", "radius": 45.0, "angle": 180.0, "rise": 0.0 }
+      ],
+      "features": []
     }"#;
 
 // ---------------------------------------------------------------------------
@@ -1648,6 +1718,39 @@ impl TrackProgram {
         Some(StartLine { start, segments, joins_at, side })
     }
 
+    /// The stretch of the main straight a finish jump may stand on: metres round the lap,
+    /// from the corner exit to where the ground runs out.
+    ///
+    /// `None` when the lap has no start — a track whose gates end up on the racing line has
+    /// forty riders coming through here off a standing start, and nothing big belongs in
+    /// front of them. Otherwise it ends at the shorter of the straight's own end and where
+    /// the start spur merges back in, for the same reason.
+    pub fn finish_window(&self) -> Option<(f32, f32)> {
+        let run = self.opening_straight();
+        let line = self.start_line()?;
+        let mut to = run - FINISH_RUNOUT_M;
+        if line.joins_at < to {
+            to = line.joins_at - 5.0;
+        }
+        let from = FINISH_RUNUP_M;
+        (to - from >= finish_jump_length(FINISH_JUMP_M.0, TABLETOP_DECK_M)).then_some((from, to))
+    }
+
+    /// The finish jump, if the lap has one: the tallest jump standing in that window.
+    ///
+    /// Found rather than recorded. A jump is the finish jump because of where it is and how
+    /// big it is, and asking the ground is what keeps the answer true after an edit moves
+    /// something — there is no flag to go stale.
+    pub fn finish_jump(&self) -> Option<&Feature> {
+        let (from, to) = self.finish_window()?;
+        self.features
+            .iter()
+            .filter(|f| matches!(f, Feature::Tabletop { .. } | Feature::Double { .. }))
+            .filter(|f| f.height() >= FINISH_JUMP_M.0 - 0.1)
+            .filter(|f| f.at() >= from - 1.0 && f.at() + f.length() <= to + 1.0)
+            .max_by(|a, b| a.height().total_cmp(&b.height()))
+    }
+
     /// Begin the lap at segment `index`: the same track, ridden from a different point on it.
     ///
     /// Where a lap starts is not part of its shape — it decides where the gate row stands and
@@ -2007,6 +2110,45 @@ mod tests {
             p.opening_straight()
         );
         assert!(p.closes(), "and it still meets itself");
+    }
+
+    /// The blank track is a track, and it arrives whole.
+    ///
+    /// Both halves matter. It has to validate — an unusable starting point is worse than
+    /// none — and what the studio is handed has to carry every field, including the ones the
+    /// source text leaves to a default. The studio types numbers into `blend`; an absent one
+    /// took the whole tab down the moment anyone clicked Blank.
+    #[test]
+    fn the_blank_track_is_a_track_and_arrives_whole() {
+        let p: TrackProgram = serde_json::from_str(BLANK).expect("the blank track parses");
+        p.check().expect("and it validates");
+        assert!(p.closes(), "and it meets itself");
+        assert!(
+            p.opening_straight() >= START_STRAIGHT_M,
+            "and it has room for a start: {:.0} m",
+            p.opening_straight()
+        );
+
+        // The source text leaves every defaulted field out — that is the whole hazard, so
+        // it is stated here rather than left for someone to rediscover.
+        let literal: serde_json::Value = serde_json::from_str(BLANK).unwrap();
+        assert!(
+            literal.get("blend").is_none(),
+            "the literal now states `blend`, so this test no longer proves anything"
+        );
+
+        // What the command actually answers with. Serialising the *type* is what fills the
+        // defaults in; handing back the source text does not, and an absent `blend` put an
+        // undefined into a number field and took the studio down.
+        let sent = tauri::async_runtime::block_on(crate::blank_track_program())
+            .expect("the command answers");
+        for key in ["blend", "elevation", "features", "segments", "width"] {
+            assert!(sent.get(key).is_some(), "the studio is handed no `{key}`");
+        }
+        assert!(
+            sent["terrain"].get("wear").is_some(),
+            "the studio is handed no ground `wear`"
+        );
     }
 
     #[test]
