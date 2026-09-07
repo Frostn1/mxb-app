@@ -1097,6 +1097,24 @@ export const it: Translation = {
   "serverBrowser.any": "Qualsiasi",
   "serverBrowser.yes": "Sì",
   "serverBrowser.notJoinable": "MX Bikes non può essere indirizzato a questo server.",
+  "serverBrowser.filtered": "Filtrato",
+  "serverBrowser.hiddenCount": "{{count}} nascosti",
+  "serverBrowser.hideFiltered": "Nascondili di nuovo",
+  "serverBrowser.hiddenBecause": "Nascosto: {{reason}}",
+  "serverBrowser.hiddenHelp":
+    "I server che pubblicizzano cheat, e altro spam, vengono nascosti con le regole di FrostMod. Fai clic per vederli comunque.",
+  "serverBrowser.ridersTitle": "Piloti",
+  "serverBrowser.ridersCount": "{{players}} di {{maxPlayers}} piloti",
+  "serverBrowser.ridersFromSession": "la tua sessione",
+  "serverBrowser.ridersFromApp": "{{count}} con la sincronizzazione delle livree",
+  "serverBrowser.ridersUnknown":
+    "MX Bikes dice all'app solo quanti piloti ci sono su un server. I nomi arrivano dai giocatori che usano MXB App.",
+  "serverBrowser.trackTitle": "Pista",
+  "serverBrowser.trackChecking": "Sto capendo di quale pista si tratta…",
+  "serverBrowser.trackInstalled": "Hai questa pista — {{name}}",
+  "serverBrowser.trackMaybe": "Pensiamo sia {{name}}",
+  "serverBrowser.trackGetShop": "Prendila dallo shop",
+  "serverBrowser.trackGetHub": "Prendila da MXB Hub",
 
   "sync.autoNote":
     "Il tuo look si pubblica da solo — ogni moto, ogni volta che lo cambi nell'app o nel garage del gioco. Quello degli altri arriva quando premi Gioca.",

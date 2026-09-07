@@ -1106,6 +1106,24 @@ export const de: Translation = {
   "serverBrowser.any": "Beliebig",
   "serverBrowser.yes": "Ja",
   "serverBrowser.notJoinable": "MX Bikes kann die Adresse dieses Servers nicht ansteuern.",
+  "serverBrowser.filtered": "Gefiltert",
+  "serverBrowser.hiddenCount": "{{count}} ausgeblendet",
+  "serverBrowser.hideFiltered": "Wieder ausblenden",
+  "serverBrowser.hiddenBecause": "Ausgeblendet: {{reason}}",
+  "serverBrowser.hiddenHelp":
+    "Server, die mit Cheats werben, und anderer Spam werden nach FrostMods eigenen Regeln ausgeblendet. Klicke, um sie trotzdem anzusehen.",
+  "serverBrowser.ridersTitle": "Fahrer",
+  "serverBrowser.ridersCount": "{{players}} von {{maxPlayers}} Fahrern",
+  "serverBrowser.ridersFromSession": "deine Session",
+  "serverBrowser.ridersFromApp": "{{count}} mit Paint-Sync",
+  "serverBrowser.ridersUnknown":
+    "MX Bikes verrät der App nur, wie viele Fahrer auf einem Server sind. Namen kommen von den Spielern, die MXB App nutzen.",
+  "serverBrowser.trackTitle": "Strecke",
+  "serverBrowser.trackChecking": "Ermittle, welche Strecke das ist…",
+  "serverBrowser.trackInstalled": "Du hast diese Strecke — {{name}}",
+  "serverBrowser.trackMaybe": "Wir vermuten, das ist {{name}}",
+  "serverBrowser.trackGetShop": "Im Shop holen",
+  "serverBrowser.trackGetHub": "Bei MXB Hub holen",
 
   "sync.autoNote":
     "Dein Look veröffentlicht sich selbst — jedes Bike, sobald du ihn in der App oder in der Garage des Spiels änderst. Der der anderen kommt, wenn du auf Spielen drückst.",

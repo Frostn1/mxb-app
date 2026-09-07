@@ -3,11 +3,23 @@
 ## 2026-09-07
 
 ### Added
+- The server list keeps working while MX Bikes is running. It asks each server directly rather
+  than the master list, so nothing competes with the game for your account.
+- Servers advertising cheats are hidden, by the same rules FrostMod uses in the game. The tab
+  says how many it hid and lets you look at them.
+- A server's details show who is on it: everyone in the session when it is the server you are
+  riding, and the riders using paint sync anywhere else.
+- A server's details name the track it is running, show its picture when you already have it,
+  and point you at the shop or MXB Hub when you don't.
 - Share codes that keep updating. Turn on "Keep it updated" when you share and you get a
   short code to send once. Publish a new version and everyone who pasted it gets it — no
   new link, no new code.
 - A Live share codes list under Import: what you publish, what you follow, and which ones
   have a new version waiting. Turn on Auto and they install themselves.
+
+### Changed
+- Opening a server asks it for fresh numbers, so the riders, the session and the track are what
+  they are now rather than what they were when the list loaded.
 
 ### Fixed
 - Trackside scenery in the 3D viewer no longer stands in slabs of flat grey. A track whose

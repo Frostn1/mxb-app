@@ -477,6 +477,38 @@ pub async fn report_presence(token: &str, server_id: &str) -> anyhow::Result<()>
     Ok(())
 }
 
+/// The riders the control plane can see on a server, by name.
+///
+/// The counterpart of [`report_presence`]: every rider's app says where it is, and this asks
+/// who said a given server. It is the only way the browser can name anybody — MX Bikes never
+/// tells a stranger who is on a server, so a rider the app can name is precisely a rider whose
+/// own app reported them.
+///
+/// **Both keys are sent**, because the same server is recorded under two of them: the address
+/// key for a rider who joined through the app, and the folded server name for one whose
+/// session FrostMod detected. Asking under one would show half a grid.
+///
+/// Best-effort: a control plane that can't be reached means a rider count with no names beside
+/// it, which is the honest answer anyway.
+pub async fn who_is_on(token: Option<&str>, keys: &[String]) -> anyhow::Result<Vec<String>> {
+    #[derive(Deserialize)]
+    struct Rider {
+        #[serde(rename = "riderName")]
+        rider_name: String,
+    }
+    #[derive(Deserialize)]
+    struct Resp {
+        riders: Vec<Rider>,
+    }
+    let query: Vec<(&str, &str)> = keys.iter().map(|k| ("server", k.as_str())).collect();
+    let mut req = client()?.get(format!("{}/v1/presence", control_plane())).query(&query);
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    let resp: Resp = req.send().await?.error_for_status()?.json().await?;
+    Ok(resp.riders.into_iter().map(|r| r.rider_name).collect())
+}
+
 /// A server in the control plane's registry, as `GET /v1/servers` returns it.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
