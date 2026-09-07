@@ -819,12 +819,13 @@ fn jumpmark_mesh(h: f32) -> Mesh {
 /// Alpha-cut, so what is not a knob is not drawn at all — the ground shows through between
 /// them, which is what makes it read as a print rather than as a stripe.
 fn tyre_sheet() -> Texture {
-    sheet("tyre_c_a", 128, |u, v| {
-        // Two prints side by side: a fresh one in the left half of the sheet and a faded one
-        // in the right. A ribbon takes whichever half it is given, so some passes read as
-        // this morning's and some as three motos ago without needing a second material.
-        let faded = u >= 0.5;
-        let u = if faded { (u - 0.5) * 2.0 } else { u * 2.0 };
+    sheet("tyre_c_a", 256, |u, v| {
+        // Four prints side by side, the same print at four ages. A ribbon takes whichever
+        // lane it is given and can change lane part way along, which is how a mark fades out
+        // in the middle of itself without a second material or a vertex colour to do it with.
+        let lane = (u * TYRE_FADES as f32) as usize;
+        let u = (u * TYRE_FADES as f32).fract();
+        let fade = [1.0f32, 0.68, 0.42, 0.22][lane.min(TYRE_FADES - 1)];
         let across = (u - 0.5) * 2.0; // -1 at one edge, +1 at the other
         // Two rows of knobs, offset half a step from each other, plus a centre block.
         let row = |lane: f32, phase: f32| -> f32 {
@@ -841,8 +842,8 @@ fn tyre_sheet() -> Texture {
         let knob = row(-0.52, 0.0).max(row(0.52, 0.5)).max(row(0.0, 0.25) * 0.85);
         // Ragged: a print in soil is never the shape of the block that made it.
         let torn = 0.72 + 0.5 * grain(u * 2.0, v * 2.0, 0x7A31, 40.0);
-        let a = (knob * torn).clamp(0.0, 1.0) * if faded { 0.45 } else { 1.0 };
-        if a < 0.16 {
+        let a = (knob * torn).clamp(0.0, 1.0) * fade;
+        if a < 0.10 {
             return [0, 0, 0, 0];
         }
         // Pressed dirt: darker than what it is printed on, and slightly wet-looking.
@@ -876,29 +877,50 @@ fn jumpmark_sheet() -> Texture {
 fn tyre_ribbon(
     syn: &Synth,
     stations: &[crate::trackprog::Station],
+    airborne: &dyn Fn(f32) -> bool,
     lat_at: impl Fn(usize) -> f32,
     width: f32,
-    lane: usize,
+    seed: u32,
 ) -> Mesh {
     let mut m = Mesh::default();
     let mut v_at = 0.0f32;
-    let mut prev: Option<(u32, f32)> = None;
+    let mut prev: Option<u32> = None;
     for (i, st) in stations.iter().enumerate() {
         let (rx, rz) = crate::trackprog::right_vector(st.heading);
         let lat = lat_at(i);
         let (cx, cz) = (st.x + rx * lat, st.z + rz * lat);
+        // Three reasons a pass is not printed here.
+        //
+        // Over a jump it is not printed because the rider is in the air: a table with tyre
+        // marks across its deck is a table nobody jumped. Off the corridor it is not printed
+        // because nobody rode there. And along its own length a mark comes and goes, which is
+        // what a pass laid on ground that was damp in places actually looks like.
+        let (gx, gz) = ((cx / syn.mps) as usize, (cz / syn.mps) as usize);
+        let cell = gz.min(syn.gh - 1) * syn.gw + gx.min(syn.gw - 1);
+        let groove = -syn.rut.get(cell).copied().unwrap_or(0.0);
+        let coming = crate::tracksynth::fbm(st.s / 34.0, seed as f32 * 0.37, seed ^ 0x5A11);
+        // A groove keeps a mark going: the deepest part of a line is where the prints pile
+        // up, which is the whole reason a rut reads as ridden rather than as a ditch.
+        let on = !airborne(st.s) && lat.abs() < width * 6.0 && (coming > -0.15 || groove > 0.25);
+        if !on {
+            prev = None;
+            v_at += 0.0;
+            continue;
+        }
+        // Which of the four ages this stretch of the pass is in. It moves along the ribbon,
+        // so one mark is crisp at the corner and gone by the exit.
+        let age = ((0.5 - 0.5 * coming) * 3.4 - groove * 1.6).clamp(0.0, 3.0) as usize;
+        let u0 = age.min(TYRE_FADES - 1) as f32 / TYRE_FADES as f32;
+        let du = 1.0 / TYRE_FADES as f32;
         let half = width * 0.5;
         let start = m.vertex_count() as u32;
         for side in [-1.0f32, 1.0] {
             let (x, z) = (cx + rx * half * side, cz + rz * half * side);
             m.positions.extend_from_slice(&[x, ground(syn, x, z) + TYRE_LIFT_M, z]);
             m.normals.extend_from_slice(&[0.0, 1.0, 0.0]);
-            // `lane` picks the fresh half of the sheet or the faded one.
-            let u0 = if lane == 0 { 0.0 } else { 0.5 };
-            m.uvs.extend_from_slice(&[u0 + if side < 0.0 { 0.0 } else { 0.5 }, v_at]);
+            m.uvs.extend_from_slice(&[u0 + if side < 0.0 { 0.0 } else { du }, v_at]);
         }
-        if let Some((prev_start, prev_v)) = prev {
-            let _ = prev_v;
+        if let Some(prev_start) = prev {
             m.indices.extend_from_slice(&[prev_start, prev_start + 1, start]);
             m.indices.extend_from_slice(&[start, prev_start + 1, start + 1]);
         }
@@ -907,11 +929,14 @@ fn tyre_ribbon(
         } else {
             0.0
         };
-        prev = Some((start, v_at));
+        prev = Some(start);
         v_at += step / TYRE_TREAD_M;
     }
     m
 }
+
+/// How many ages of print the sheet carries.
+const TYRE_FADES: usize = 4;
 
 /// How wide a print is, how far the tread repeats in, and how far the card floats over the
 /// ground so it draws in front of it without standing off it.
