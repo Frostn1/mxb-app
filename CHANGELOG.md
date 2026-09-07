@@ -3,6 +3,13 @@
 ## 2026-09-06
 
 ### Fixed
+- Trackside boards are boards. They have a thickness you can see the edge of instead of being
+  a flat sheet, and the sponsor's name reads the right way round from both sides of the track
+  rather than backwards on one of them.
+
+## 2026-09-06
+
+### Fixed
 - Generated tracks state their lap length, so the game and the app's track info show it
   instead of leaving the line blank.
 - Generating a track holds a full-length lap. A long circuit no longer runs out of room
