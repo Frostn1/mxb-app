@@ -3,6 +3,8 @@
 ## 2026-09-06
 
 ### Added
+- Generated tracks end the lap on a finish jump: a big tabletop on the main straight, with the
+  finish line past its landing and a gantry over it.
 
 - **You hear each rider from where they actually are.** A rider alongside you is loud and on
   that side; one two corners back is faint; one across the circuit isn't there at all. You

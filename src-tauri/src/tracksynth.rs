@@ -3271,8 +3271,16 @@ const GRID_LANE_M: f32 = 1.2;
 /// On the lap's opening straight, which is the main straight — riders cross it on every lap.
 /// The gate row is not here at all any more: it stands on the start straight, which is its
 /// own line beside the lap. See [`StartSpur`].
-fn finish_at(prog: &TrackProgram) -> f32 {
+///
+/// Past the finish jump's landing when the lap has one, because that is what a finish line
+/// marks: the ground a rider comes down on. Anywhere else and the line is painted up the face
+/// of the jump it belongs to.
+pub(crate) fn finish_at(prog: &TrackProgram) -> f32 {
     let run = prog.opening_straight();
+    if let Some(f) = prog.finish_jump() {
+        let past = f.at() + f.length() + crate::trackprog::FINISH_LINE_PAST_M;
+        return past.clamp(10.0, (run - 2.0).max(10.0));
+    }
     if run < 20.0 {
         return (prog.lap_length() * 0.06).clamp(10.0, 40.0);
     }
@@ -8861,6 +8869,54 @@ mod tests {
         }
     }
 
+    /// Look at the finish jump.
+    ///
+    /// ```text
+    /// FROST_SHOT=/tmp/shots cargo test -- --ignored --nocapture the_finish_jump_picture
+    /// ```
+    #[test]
+    #[ignore = "writes pictures to look at — set FROST_SHOT"]
+    fn the_finish_jump_picture() {
+        let dir = std::env::var("FROST_SHOT").expect("set FROST_SHOT");
+        let dir = Path::new(&dir);
+        std::fs::create_dir_all(dir).unwrap();
+        let p: TrackProgram = serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
+        let f = p.finish_jump().expect("a finish jump").clone();
+        let s = synthesise(&p).unwrap();
+        let mid = f.at() + f.length() * 0.5;
+        let k = s
+            .stations
+            .iter()
+            .enumerate()
+            .min_by(|a, b| (a.1.s - mid).abs().total_cmp(&(b.1.s - mid).abs()))
+            .unwrap()
+            .0;
+        let st = s.stations[k];
+        let look = Painted::of(&p, &s);
+        look.crop(&s, &dir.join("finishjump.ppm"), (st.x, st.z), 90.0, 900);
+        let span = (110.0 / s.mps) as usize;
+        preview_crop(
+            &s,
+            &dir.join("finishrelief.ppm"),
+            ((st.x / s.mps) as usize).saturating_sub(span / 2),
+            ((st.z / s.mps) as usize).saturating_sub(span / 2),
+            span,
+            span,
+        );
+        preview(&s, &dir.join("finishlap.ppm"));
+        println!("finish jump {:.1} m tall, {:.0}–{:.0} m round the lap, line at {:.0} m",
+            f.height(), f.at(), f.at() + f.length(), finish_at(&p));
+        // The main straight in elevation, a quarter-metre a sample: the one view a jump's
+        // shape can actually be read off.
+        let mut rows = String::new();
+        let mut u = 0.0f32;
+        while u <= p.opening_straight() {
+            rows.push_str(&format!("{u:.2} {:.3}\n", height_at_arc(&s, u)));
+            u += 0.25;
+        }
+        std::fs::write(dir.join("finishprofile.txt"), rows).unwrap();
+    }
+
     /// Our own 32-bit BGRA TGA, bottom-up, back into something a viewer opens.
     fn tga_to_ppm(tga: &[u8], dim: usize, out: &Path) {
         let px = &tga[18..18 + dim * dim * 4];
@@ -8907,6 +8963,58 @@ mod tests {
             }
         }
         let _ = std::fs::write(out, ppm);
+    }
+
+    /// The finish jump is on the ground, and the line is past it.
+    ///
+    /// The document is one thing and the terrain is another — a jump that exists only in the
+    /// feature list is a jump nobody rides. Measured against the two feet rather than against
+    /// a fixed height, because the worked example climbs 22 m round the lap and the ground
+    /// under a fifty-metre jump is not level.
+    #[test]
+    fn the_lap_ends_on_a_jump_that_is_really_there() {
+        let p: TrackProgram = serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
+        let f = p.finish_jump().expect("the worked example ends on a jump").clone();
+        let (at, len, height) = (f.at(), f.length(), f.height());
+        let s = synthesise(&p).unwrap();
+        let foot = (height_at_arc(&s, at - 3.0) + height_at_arc(&s, at + len + 3.0)) * 0.5;
+        let profile: Vec<f32> = (0..=(len as usize))
+            .map(|i| height_at_arc(&s, at + i as f32) - foot)
+            .collect();
+        let peak = profile.iter().copied().fold(f32::MIN, f32::max);
+        assert!(
+            peak > height * 0.8 && peak < height * 1.6,
+            "a {height:.1} m finish jump came out {peak:.2} m over its own feet: {:?}",
+            profile.iter().map(|h| (h * 10.0).round() / 10.0).collect::<Vec<_>>()
+        );
+        // And it has a top. A tabletop whose ramps meet at a point is a double, whatever the
+        // program calls it, and the finish jump is the one everybody has to land on. Judged as
+        // a grade against the ramp's own rather than against level: a jump is built on a pad
+        // that is cut roughly level and not perfectly, so a deck on a hillside slopes a little
+        // and should.
+        let (up, deck, _) = crate::trackprog::tabletop_faces(height, len);
+        assert!(deck >= crate::trackprog::TABLETOP_DECK_M, "the deck is {deck:.1} m");
+        let h = |u: f32| profile[(u.round() as usize).min(profile.len() - 1)];
+        let (a, b) = (up + deck * 0.2, up + deck * 0.8);
+        let flat = (h(b) - h(a)).abs() / (b - a);
+        let ramp = (h(up) - h(0.0)) / up;
+        assert!(
+            ramp > 0.2 && flat * 3.0 < ramp,
+            "the deck runs at {:.0}% and the ramp at {:.0}% — that is a point, not a top",
+            flat * 100.0,
+            ramp * 100.0
+        );
+        // The line is painted on the ground a rider comes down on, not up the face. Measured
+        // as how far below the deck it is: the lap climbs, so "level with the foot" is not a
+        // thing the ground does anywhere near a jump.
+        let line = finish_at(&p);
+        let below = (peak + foot) - height_at_arc(&s, line);
+        assert!(
+            line > at + len && below > height * 0.6,
+            "the finish line is at {line:.0} m, {below:.2} m under the deck of a {height:.1} m \
+             jump that ends at {:.0}",
+            at + len
+        );
     }
 
     fn height_at_arc(s: &Synth, at: f32) -> f32 {
