@@ -197,7 +197,13 @@ fn probe_dll(path: &Path) -> Option<Option<String>> {
     contains(&narrowed, RESHADE_MARKER).then(|| version_near_marker(&narrowed))
 }
 
-fn is_reshade_dll(path: &Path) -> bool {
+/// Is the file at `path` ReShade's own DLL?
+///
+/// ReShade installs under whatever name the game's loader preloads (`opengl32.dll` for an
+/// OpenGL title like MX Bikes), so the name alone proves nothing. This reads the file and
+/// looks for ReShade's own marks instead. Public because more than one caller needs to tell
+/// a real ReShade install apart from an unrelated DLL wearing the same name.
+pub fn is_reshade_dll(path: &Path) -> bool {
     probe_dll(path).is_some()
 }
 

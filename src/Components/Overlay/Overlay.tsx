@@ -14,6 +14,8 @@ import { setAmbientVars, type TKey } from "../../i18n/core";
 import { FrostmodProvider } from "../../Context/Frostmod";
 import { ConfigContext, MXB_FALLBACK } from "../../Context/Config";
 import { InstallProvider } from "../../Context/Install";
+import { DownloadsProvider } from "../../Context/Downloads";
+import { DropReviewProvider } from "../../Context/DropReview";
 import { useModBrowsing } from "../../lib/useModBrowsing";
 import {
   bikePreviewAvailable,
@@ -252,6 +254,13 @@ export default function Overlay() {
                         switchGame: async () => {},
                       }}
                     >
+                      {/* No Downloads page in here, but installs made mid-session still
+                          belong in the history the main window shows. */}
+                      <DownloadsProvider>
+                      {/* Above the installer, as in the Dashboard: a download that turns
+                          out to be a pack is handed to this sheet, so `InstallProvider`
+                          has to be able to reach it here too. */}
+                      <DropReviewProvider onInstalled={onInstalled}>
                       <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
                         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                           {tab === "presets" ? (
@@ -280,6 +289,8 @@ export default function Overlay() {
                           )}
                         </div>
                       </InstallProvider>
+                      </DropReviewProvider>
+                      </DownloadsProvider>
                     </ConfigContext.Provider>
                   ) : (
                     // No config means the player never finished first-run setup. That

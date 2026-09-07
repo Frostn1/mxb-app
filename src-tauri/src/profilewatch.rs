@@ -5,6 +5,10 @@
 //! MX Bikes writes the same `profile.ini` the app does, so the file itself is the signal —
 //! there just wasn't anything listening to it.
 //!
+//! It has a second reader now: the look watcher in `main` follows the paints the rider is
+//! wearing, and `profile.ini` is the file that says which those are. A change here re-points
+//! it — see `crate::look_changed`.
+//!
 //! `modwatch` deliberately stays out of `profiles/`, and its reasoning still holds: that
 //! folder churns all through a session with replays, telemetry and settings, and a watcher
 //! reacting to all of it would fire constantly mid-race. This one is not that watcher. It
@@ -80,7 +84,7 @@ pub fn start(app: &AppHandle, state: &ProfileWatcher, profiles_dir: &Path) {
         // Which profile changed is not passed on: a rider has one identity, and
         // `publish_paints_soon` resolves it the same way every other caller does.
         log::info!("profile watcher: a look changed on disk");
-        crate::publish_look_now(&app_handle);
+        crate::look_changed(&app_handle);
     }) {
         Ok(d) => d,
         Err(e) => {

@@ -9,7 +9,7 @@
 //! the sibling `profiles/` folder, which churns constantly during gameplay (replays,
 //! telemetry, settings) and would otherwise fire reloads mid-race.
 //!
-//! Two things keep the reload from being a blunt instrument:
+//! Three things keep the reload from being a blunt instrument:
 //!
 //! * **Settling.** Copying a folder of tracks writes files for as long as the copy
 //!   takes, and the debouncer keeps handing us batches throughout. Reloading on each
@@ -20,6 +20,9 @@
 //!   scoped to the new mods rather than the whole collection. The plain reload event is
 //!   still pulsed afterwards, so a FrostMod that doesn't know the verb behaves exactly
 //!   as it does today.
+//! * **Only what's really there.** A cloud sync tool evicting a file's bytes is a change
+//!   to the folder like any other, and reloading for it hands the game a content list it
+//!   then has to read off a disk the bytes have left. See [`split_evicted`].
 
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
@@ -44,6 +47,11 @@ const SETTLE: Duration = Duration::from_secs(3);
 /// Upper bound on settling. A download that trickles in for minutes shouldn't hold
 /// the reload forever — past this we act on what has landed so far.
 const MAX_SETTLE: Duration = Duration::from_secs(45);
+
+/// How far into a game session auto-reload stays quiet when the mods tree sits on a sync
+/// provider. Long enough to cover the game's own startup content walk, which is the window
+/// where a second walk turns into a black screen — see [`settle_then_reload`].
+const CLOUD_SESSION_GRACE: Duration = Duration::from_secs(120);
 
 /// Slug the folder watcher tags its `frostmod-reload` events with. In-app install
 /// handlers filter on their own slug, so this sentinel never collides with them.
@@ -225,6 +233,34 @@ fn is_partial(path: &Path) -> bool {
     lower.starts_with('~') || PARTIAL_SUFFIXES.iter().any(|s| lower.ends_with(s))
 }
 
+/// Split a batch into the paths worth reloading for and the ones whose bytes aren't here.
+///
+/// Half-written files were already dropped by [`is_partial`]; this drops the other kind of
+/// path that is present in name only. OneDrive, Dropbox and iCloud all evict a file's
+/// content and leave its entry behind, and evicting one *is a change to the folder* — so a
+/// sync tool tidying up behind the player looks exactly like a mod being installed, and the
+/// watcher would pulse FrostMod for it. FrostMod's reload then rebuilds the game's content
+/// lists, which means reading files that are no longer on the disk, on the game's own
+/// thread. That is the crash `cloudfiles` documents, reached by a route the player never
+/// asked for: they touched nothing.
+///
+/// So a placeholder is not a mod change. A *hydration* still is — once the bytes land the
+/// file stops being a placeholder and the next event carries it through — and so is a
+/// deletion, whose attributes read as unavailable rather than as a placeholder.
+///
+/// The predicate is a parameter so the split is testable without a sync tool to hand; in
+/// production it is always [`crate::cloudfiles::is_placeholder`], which reads attributes
+/// only and so cannot itself trigger the download it is looking for.
+fn split_evicted<'a>(
+    changed: &'a [PathBuf],
+    evicted: impl Fn(&Path) -> bool,
+) -> (Vec<&'a PathBuf>, Vec<&'a PathBuf>) {
+    changed
+        .iter()
+        .filter(|p| !is_partial(p))
+        .partition(|p| !evicted(p))
+}
+
 /// Reduce a changed path to the mod it belongs to: `<type>/<name>` relative to the
 /// watched root, e.g. `.../mods/tracks/Red Bud/Red Bud.pkz` -> `tracks/Red Bud`.
 ///
@@ -287,13 +323,28 @@ fn on_batch(
     if !live.load(Ordering::SeqCst) {
         return;
     }
-    let keys: Vec<String> = changed
-        .iter()
-        .filter(|p| !is_partial(p))
+    let (present, evicted) = split_evicted(&changed, crate::cloudfiles::is_placeholder);
+    if !evicted.is_empty() {
+        // Not silent: a player whose auto-reload has gone quiet deserves the reason in the
+        // log, and it is the same reason — and the same fix — `cloudfiles` already warns
+        // about when a session starts.
+        log::warn!(
+            "mods watcher: {} of {} changed path(s) are cloud placeholders, not real files — \
+             not treating them as mod changes, because a reload would send the game reading \
+             them. Fix: \"Always keep on this device\" on the mods folder, or move it off the \
+             sync tool. e.g. {}",
+            evicted.len(),
+            changed.len(),
+            evicted[0].display(),
+        );
+    }
+    let keys: Vec<String> = present
+        .into_iter()
         .flat_map(|p| mod_keys(root, links, p))
         .collect();
     if keys.is_empty() {
-        // Everything in the batch was scratch files, or churn directly in the root.
+        // Everything in the batch was scratch files, churn directly in the root, or bytes
+        // that aren't on this machine.
         return;
     }
 
@@ -312,10 +363,37 @@ fn on_batch(
 
 /// Wait for the mods folder to stop changing, then fire one reload for the whole batch.
 fn settle_then_reload(app: AppHandle, pending: Arc<Mutex<Pending>>, live: Arc<AtomicBool>) {
+    // Read once, not once a second: the provider is a property of the configured path.
+    let cloud = crate::config::load(&app).ok().and_then(|c| crate::cloudfiles::mods_provider(&c));
+    let mut held = false;
+
     let mods = loop {
         std::thread::sleep(SETTLE / 3);
         if !live.load(Ordering::SeqCst) {
             return;
+        }
+        // A reload makes the game walk the whole content tree again. On a sync-backed tree
+        // that walk is slow enough to matter — one player's took 5–6 *seconds per track
+        // folder* under OneDrive — and firing it while the game is still doing its own
+        // startup walk stacks a second one on top: the game stops at a black screen and
+        // never reaches the loading screen. So while a session is young, hold the batch.
+        //
+        // A mitigation, not a cure. The cure is the folder not being on a sync provider,
+        // which `cloudfiles` already tells the player at the top of every session.
+        if let (Some(provider), Some(age)) = (&cloud, crate::gameproc::session_age()) {
+            if age < CLOUD_SESSION_GRACE {
+                if !held {
+                    held = true;
+                    log::info!(
+                        "mods watcher: holding the reload — the game has only been up {:?} and \
+                         the mods tree is on {provider}, where a content reload during the load \
+                         screen can leave the game on a black screen. It will fire once the \
+                         session has settled.",
+                        age
+                    );
+                }
+                continue;
+            }
         }
         let settled = pending
             .lock()
@@ -329,6 +407,10 @@ fn settle_then_reload(app: AppHandle, pending: Arc<Mutex<Pending>>, live: Arc<At
     if mods.is_empty() {
         return;
     }
+    // The folder just changed and has gone quiet, so this is the cheapest honest moment to
+    // update the record of what the library holds — including anything deleted by hand,
+    // which no in-app action would have told us about.
+    crate::ledger_reconcile_detached(&app);
     reload(&app, mods);
 }
 
@@ -354,6 +436,45 @@ fn reload(app: &AppHandle, mods: Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sync tool evicting a file's bytes is a folder change like any other. Reloading
+    /// for it is what sends the game reading content that has left the disk.
+    #[test]
+    fn evicted_files_are_split_out_of_a_batch() {
+        let batch = vec![
+            PathBuf::from("/games/mxb/mods/tracks/Red Bud/Red Bud.pkz"),
+            PathBuf::from("/games/mxb/mods/tracks/Gone/Gone.pkz"),
+        ];
+        let (present, evicted) = split_evicted(&batch, |p| p.ends_with("Gone/Gone.pkz"));
+        assert_eq!(present, vec![&batch[0]]);
+        assert_eq!(evicted, vec![&batch[1]]);
+    }
+
+    /// The two filters compose, and neither swallows the other: a half-written file is
+    /// dropped whether or not it is a placeholder, and it is never reported as one.
+    #[test]
+    fn half_written_files_are_dropped_before_the_eviction_split() {
+        let batch = vec![
+            PathBuf::from("/games/mxb/mods/tracks/Red Bud/Red Bud.pkz.crdownload"),
+            PathBuf::from("/games/mxb/mods/tracks/Red Bud/Red Bud.pkz"),
+        ];
+        let (present, evicted) = split_evicted(&batch, |_| false);
+        assert_eq!(present, vec![&batch[1]]);
+        assert!(evicted.is_empty(), "a scratch file is not an evicted one");
+    }
+
+    /// Nothing is skipped on a folder no sync tool has touched — which is every folder,
+    /// off Windows and macOS, where `is_placeholder` is always false.
+    #[test]
+    fn an_ordinary_batch_passes_through_whole() {
+        let batch = vec![
+            PathBuf::from("/games/mxb/mods/tracks/Red Bud/Red Bud.pkz"),
+            PathBuf::from("/games/mxb/mods/bikes/KTM 450/paints/Frost.pnt"),
+        ];
+        let (present, evicted) = split_evicted(&batch, crate::cloudfiles::is_placeholder);
+        assert_eq!(present.len(), 2);
+        assert!(evicted.is_empty());
+    }
 
     #[test]
     fn watch_root_is_the_content_subfolder_not_the_root() {

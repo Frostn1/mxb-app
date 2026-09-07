@@ -120,6 +120,12 @@ pub struct BundleRef {
     /// single-part codes stay byte-identical.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<String>,
+    /// What each slice should weigh, in the same order as `parts`. Lets a download say which
+    /// slice came back short rather than only that the total did — and re-fetch that one.
+    /// Absent on codes shared before this was recorded, which is why nothing may assume it
+    /// is present or the same length as `parts`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub part_sizes: Vec<u64>,
 }
 
 /// The content a preset needs on disk, beyond the cosmetics in its [`Loadout`].
@@ -245,21 +251,40 @@ impl IniDoc {
         }
     }
 
+    /// Drop `key` from `section`, if it's there. Every other line is left as it was.
+    ///
+    /// Case-insensitive on the key: the game is not consistent about the case of a bike id
+    /// between `[info] bikeid` and the columns keyed by it.
+    pub(crate) fn remove(&mut self, section: &str, key: &str) -> bool {
+        let Some((h, end)) = self.section_span(section) else {
+            return false;
+        };
+        for idx in (h + 1)..end {
+            if let Some(eq) = self.lines[idx].find('=') {
+                if self.lines[idx][..eq].trim().eq_ignore_ascii_case(key) {
+                    self.lines.remove(idx);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Every section header in the file, in the order they appear.
     ///
     /// This is what lets the app read a `profile.ini` it has no hardcoded knowledge of.
     /// GP Bikes' slot set is not MX Bikes' — no `goggles_paint`, no `boots`, no
     /// `protection`, since it bakes those into the rider model — so rather than ship a
     /// guessed list per title, the file is asked what it has.
-    fn sections(&self) -> Vec<String> {
+    pub(crate) fn sections(&self) -> Vec<String> {
         self.lines.iter().filter_map(|l| Self::header_name(l).map(str::to_string)).collect()
     }
 
-    fn has_section(&self, section: &str) -> bool {
+    pub(crate) fn has_section(&self, section: &str) -> bool {
         self.section_span(section).is_some()
     }
 
-    fn section_keys(&self, section: &str) -> Vec<String> {
+    pub(crate) fn section_keys(&self, section: &str) -> Vec<String> {
         let mut out = Vec::new();
         if let Some((h, end)) = self.section_span(section) {
             for line in &self.lines[h + 1..end] {
@@ -283,7 +308,7 @@ fn profile_ini_path(profiles_dir: &Path, profile: &str) -> PathBuf {
 /// the bytes are not always valid UTF-8 (`read_to_string` fails on them). Returns
 /// the text plus whether it was valid UTF-8, so a write can round-trip the
 /// original single-byte encoding instead of silently converting it.
-fn decode_ini(bytes: &[u8]) -> (String, bool) {
+pub(crate) fn decode_ini(bytes: &[u8]) -> (String, bool) {
     match std::str::from_utf8(bytes) {
         Ok(s) => (s.to_string(), true),
         // Latin-1 is a lossless byte<->char map we reverse in `encode_ini`.
@@ -294,7 +319,7 @@ fn decode_ini(bytes: &[u8]) -> (String, bool) {
 /// Re-encode INI text for writing, reversing [`decode_ini`] so a Latin-1 file is
 /// written back byte-for-byte rather than upgraded to UTF-8. Edited values are
 /// ASCII, so every char is <= U+00FF when the source was Latin-1.
-fn encode_ini(text: &str, was_utf8: bool) -> Vec<u8> {
+pub(crate) fn encode_ini(text: &str, was_utf8: bool) -> Vec<u8> {
     if was_utf8 {
         text.as_bytes().to_vec()
     } else {
@@ -492,6 +517,45 @@ pub fn apply_loadout(
     Ok(())
 }
 
+/// Drop every trace of one bike from a profile.
+///
+/// The bike picker lists what `profile.ini` carries, not what's installed — the game adds a
+/// column for every bike the rider has ever sat on and never removes one, so bikes whose mod
+/// is long gone still fill the list and the Library, which only sees `mods/bikes`, has nothing
+/// to delete. This is the only place they can be removed from.
+///
+/// Sections come from the file rather than [`SLOT_SECTIONS`]: any section keyed by bike id
+/// counts, including ones only GP Bikes or a future patch writes. Miss one and the bike is
+/// still in the list afterwards, since [`bikes_in`] reads whichever section it finds.
+pub fn forget_bike(profiles_dir: &Path, profile: &str, bikeid: &str) -> anyhow::Result<()> {
+    let path = profile_ini_path(profiles_dir, profile);
+    let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+
+    // Same rolling backup as `apply_loadout` — raw bytes, so it stays byte-identical.
+    let bak = PathBuf::from(format!("{}.bak", path.display()));
+    let _ = fs::write(&bak, &bytes);
+
+    let (text, was_utf8) = decode_ini(&bytes);
+    let mut doc = IniDoc::parse(&text);
+    for section in doc.sections() {
+        if is_slot_section(&section) {
+            doc.remove(&section, bikeid);
+        }
+    }
+    // Never leave the game pointed at a column that no longer exists.
+    if doc
+        .get("info", "bikeid")
+        .is_some_and(|b| b.trim().eq_ignore_ascii_case(bikeid))
+    {
+        let next = bikes_in(&doc).first().cloned().unwrap_or_default();
+        doc.set("info", "bikeid", &next);
+    }
+
+    fs::write(&path, encode_ini(&doc.render(), was_utf8))
+        .with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
+
 fn store_path(dir: &Path) -> PathBuf {
     dir.join("presets.json")
 }
@@ -547,7 +611,78 @@ pub fn encode_code_public(preset: &Preset) -> String {
     encode_code(preset)
 }
 
+/// Reject a decoded preset that could reach outside the folders a preset is meant to touch.
+///
+/// A code is written by whoever hands it over, and its fields all end up somewhere real: the
+/// content paths are joined onto the mods root, `model_swap` names a folder under a bike,
+/// the slot values become `profile.ini` lines, and the bundle links get fetched. Checking
+/// here means every caller of [`decode_code`] gets the same guarantee from one place.
+fn check_code(preset: &Preset) -> anyhow::Result<()> {
+    let clean = |s: &str| !s.chars().any(|c| c.is_control());
+    if !clean(&preset.name) {
+        anyhow::bail!("share code has a malformed preset name");
+    }
+
+    // A slot value is written verbatim as `bikeid=value`. A newline in one would inject
+    // whatever lines the sender liked into the receiver's `profile.ini`.
+    for section in SLOT_SECTIONS {
+        if let Some(v) = preset.loadout.slot(section) {
+            if !clean(v) {
+                anyhow::bail!("share code has a malformed '{section}' value");
+            }
+        }
+    }
+    for (section, value) in &preset.loadout.extra {
+        // Keys become `[section]` headers, so brackets are as dangerous as newlines here.
+        if !clean(section) || !clean(value) || section.contains(['[', ']']) {
+            anyhow::bail!("share code has a malformed '{section}' slot");
+        }
+    }
+    if !clean(&preset.loadout.race_number) {
+        anyhow::bail!("share code has a malformed race number");
+    }
+
+    // The variant folder brought in under `<bike>/FrostMod Models/`. `apply_model_swap`
+    // checks this too — this rejects the code rather than letting it sit in the list until
+    // the day someone applies it.
+    let swap = preset.loadout.model_swap.trim();
+    if !swap.is_empty() && !crate::library::is_simple_name(swap) {
+        anyhow::bail!("share code names an unsafe model swap ('{swap}')");
+    }
+
+    if let Some(content) = preset.content.as_ref() {
+        for rel in content.tracks.iter().chain(content.keep.iter()) {
+            if !rel.trim().is_empty() && !crate::library::is_safe_rel(rel) {
+                anyhow::bail!("share code carries an unsafe path ('{rel}')");
+            }
+        }
+    }
+    if let Some(bundle) = preset.bundle.as_ref() {
+        check_bundle_ref(bundle)?;
+    }
+    Ok(())
+}
+
+/// Every link in a bundle has to be one the app would fetch over the network — never a
+/// `file://` URL or a local path dressed up as one.
+pub fn check_bundle_ref(bundle: &BundleRef) -> anyhow::Result<()> {
+    let http = |u: &str| {
+        let u = u.trim().to_ascii_lowercase();
+        u.starts_with("https://") || u.starts_with("http://")
+    };
+    if !http(&bundle.url) || bundle.parts.iter().any(|p| !http(p)) {
+        anyhow::bail!("share code points at something that isn't a download link");
+    }
+    Ok(())
+}
+
 pub fn decode_code(text: &str) -> anyhow::Result<Preset> {
+    let preset = parse_code(text)?;
+    check_code(&preset)?;
+    Ok(preset)
+}
+
+fn parse_code(text: &str) -> anyhow::Result<Preset> {
     let t = text.trim();
     if let Some(b64) = t.strip_prefix(CODE_PREFIX) {
         let bytes = STANDARD
@@ -865,6 +1000,65 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
     }
 
     #[test]
+    fn forgetting_a_bike_clears_its_columns_and_leaves_the_others() {
+        let root = tmp("forget");
+        let ini = write_sample(&root, "main");
+        let profiles = root.join("profiles");
+
+        forget_bike(&profiles, "main", "KTM250").unwrap();
+
+        assert_eq!(list_bikes(&profiles, "main").unwrap(), vec!["YZ450F"]);
+        let doc = IniDoc::parse(&fs::read_to_string(&ini).unwrap());
+        for section in ["paint", "helmet", "helmet_paint", "rider", "tyres"] {
+            assert_eq!(doc.get(section, "KTM250"), None, "[{section}] still has the bike");
+        }
+        // The bike that stays keeps every value it had.
+        let other = read_loadout(&profiles, "main", "YZ450F").unwrap();
+        assert_eq!(other.paint, "RedBud");
+        assert_eq!(other.helmet, "Fox");
+        assert_eq!(other.helmet_paint, "CLUTCH");
+        // And the pre-change file is recoverable.
+        assert!(root.join("profiles/main/profile.ini.bak").is_file());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Sections are read from the file, so one this app has no name for goes too — otherwise
+    /// `bikes_in` finds the bike again and forgetting it looks like it did nothing.
+    #[test]
+    fn forgetting_clears_sections_the_app_has_no_name_for() {
+        let root = tmp("forget-extra");
+        let ini = write_ini(
+            &root,
+            "main",
+            &format!("{GP_SAMPLE}\n[visor_tint]\nBSB23_Ducati_V4R=Smoke\n"),
+        );
+        let profiles = root.join("profiles");
+
+        forget_bike(&profiles, "main", "BSB23_Ducati_V4R").unwrap();
+
+        assert!(list_bikes(&profiles, "main").unwrap().is_empty());
+        let doc = IniDoc::parse(&fs::read_to_string(&ini).unwrap());
+        assert_eq!(doc.get("visor_tint", "BSB23_Ducati_V4R"), None);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn forgetting_the_active_bike_repoints_the_profile() {
+        let root = tmp("forget-active");
+        let profiles = root.join("profiles");
+        write_sample(&root, "main");
+
+        // YZ450F is the active one in the sample.
+        forget_bike(&profiles, "main", "YZ450F").unwrap();
+        assert_eq!(active_bike(&profiles, "main").as_deref(), Some("KTM250"));
+
+        // Forgetting the last bike leaves nothing to point at rather than a dangling id.
+        forget_bike(&profiles, "main", "KTM250").unwrap();
+        assert_eq!(active_bike(&profiles, "main"), None);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn reads_and_round_trips_latin1_profile() {
         let root = tmp("latin1");
         let p = root.join("profiles").join("main");
@@ -913,6 +1107,37 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         assert_eq!(back.loadout.helmet_paint, "CLUTCH Deeg F REDB");
         assert_eq!(back.content.unwrap().tracks, vec!["mods/tracks/RedBud.pkz"]);
         let _ = round_trip_raw_json(&preset);
+    }
+
+    /// A code is a string someone pastes in from Discord, so every path it carries is
+    /// hostile until checked. These are the shapes that reached a real file operation:
+    /// `content` paths join onto the mods root, `model_swap` names a folder under a bike,
+    /// and a slot value is written verbatim as a `profile.ini` line.
+    #[test]
+    fn a_code_that_climbs_out_is_refused() {
+        let hostile = [
+            r#"{"name":"x","loadout":{},"content":{"tracks":["../../mxbikes.exe"],"keep":[]}}"#,
+            r#"{"name":"x","loadout":{},"content":{"tracks":[],"keep":["/etc/passwd"]}}"#,
+            r#"{"name":"x","loadout":{},"content":{"tracks":["C:/Windows/System32"],"keep":[]}}"#,
+            r#"{"name":"x","loadout":{"modelSwap":"../../../Startup"}}"#,
+            r#"{"name":"x","loadout":{"paint":"a\n[info]\nbikeid=b"}}"#,
+            r#"{"name":"x","loadout":{"extra":{"[info]\nbikeid":"b"}}}"#,
+            r#"{"name":"x","loadout":{},"bundle":{"url":"file:///etc/passwd","host":"x","size":1}}"#,
+            r#"{"name":"x","loadout":{},"bundle":{"url":"https://x/a.zip","host":"x","size":1,"parts":["file:///etc/passwd"]}}"#,
+        ];
+        for json in hostile {
+            assert!(decode_code(json).is_err(), "should be refused: {json}");
+        }
+    }
+
+    /// And the ordinary shapes still decode — a relative content path, a plain model swap,
+    /// and slot values with the punctuation real paint names carry.
+    #[test]
+    fn an_ordinary_code_still_decodes() {
+        let json = r#"{"name":"RedBud #92","loadout":{"paint":"CLUTCH Deeg F REDB","modelSwap":"2024 Factory"},"content":{"tracks":["mods/tracks/EU/RedBud.pkz"],"keep":["mods/bikes/OEM Pack.pkz"]},"bundle":{"url":"https://files.catbox.moe/a.zip","host":"catbox","size":10}}"#;
+        let back = decode_code(json).unwrap();
+        assert_eq!(back.loadout.model_swap, "2024 Factory");
+        assert_eq!(back.content.unwrap().tracks, vec!["mods/tracks/EU/RedBud.pkz"]);
     }
 
     /// Presets saved before Manage existed have no `content` key at all. They have to keep

@@ -316,6 +316,30 @@ describe("bootstrap user data", () => {
     expect(offenders, `non-ASCII in the script: ${JSON.stringify(offenders)}`).toEqual([]);
   });
 
+  it("only reports stages the control plane will accept", () => {
+    // `Send-Stage` posts to an endpoint that validates with `isBootstrapStage`, and a stage it
+    // refuses is a 400 the script discards -- the progress line simply stops moving, which is
+    // the exact symptom a build that has hung produces.
+    //
+    // This sees the literal skeleton only: an illegal character written into the string, or one
+    // long enough to be rejected. It cannot judge what interpolation puts there at runtime, so
+    // it would not catch a bike name reaching a stage by way of `$($missed -join ', ')`. That
+    // one is avoided by design -- names go in the log, which has no charset -- not by this.
+    const script = bootstrapScript({
+      agentToken: "t", agentUrl: "https://cp/v1/agent.exe", gameUrl: "https://g/i.exe",
+      serverName: "Test", gamePort: 54210, agentPort: 8787,
+      serverId: "abc", controlPlaneUrl: "https://cp",
+    });
+    const stages = [...script.matchAll(/-Stage "([^"]*)"/g)].map((m) => m[1]);
+    expect(stages.length).toBeGreaterThan(5);
+    for (const stage of stages) {
+      // Whatever PowerShell would interpolate stands in as a number, which is what every one
+      // of them actually is at runtime: a count, an index or a total.
+      const rendered = stage.replace(/\$\([^)]*\)/g, "9").replace(/\$[A-Za-z_][\w.]*/g, "9");
+      expect(isBootstrapStage(rendered), `${stage} -> ${rendered}`).toBe(true);
+    }
+  });
+
   it("survives a server name outside Latin-1", () => {
     // The name is the operator's, and it is interpolated into the script. `btoa` threw on
     // anything above U+00FF, which failed the launch with nothing to go on.

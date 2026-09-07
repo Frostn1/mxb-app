@@ -9,7 +9,8 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { cancelDrop, commitDrop, repreviewDrop } from "../api/mods";
-import type { DropCommitItem, DropPlan } from "../types";
+import type { DropCommitItem, DropPlan, NewDownload } from "../types";
+import { useDownloads } from "./Downloads";
 import { useT } from "../i18n/context";
 import DropReview, { type RowState } from "../Components/Dropzone/DropReview";
 
@@ -26,7 +27,8 @@ import DropReview, { type RowState } from "../Components/Dropzone/DropReview";
  * warnings, the same destination override and the same commit. Hoisting the state was the
  * alternative to a second, parallel install path that would drift.
  *
- * One plan at a time: each holds a staging directory, so staging a second releases the first.
+ * One sheet at a time. A plan that arrives while another is up waits its turn rather than
+ * replacing it: each one holds a staging directory, and a download's plan can be gigabytes.
  */
 interface DropReviewContextValue {
   /**
@@ -57,29 +59,24 @@ export function DropReviewProvider({
   onInstalledRef.current = onInstalled;
   const tRef = useRef(t);
   tRef.current = t;
+  const { note } = useDownloads();
   // A plan holds a staging directory; if a second one arrives we must release the first.
   const planRef = useRef<DropPlan | null>(null);
   planRef.current = plan;
 
-  const reset = useCallback(() => {
-    setPlan(null);
-    setRows([]);
+  /**
+   * Plans that arrived while a sheet was already up, shown in turn.
+   *
+   * The sheet has always handled one plan at a time, and used to make room by releasing the
+   * previous one's staging. That was fair enough while every plan came from a gesture the
+   * user had just made — a drop, a purchase — but a *download* produces one now, from a
+   * background queue running two at a time, and throwing that away discards a transfer that
+   * may have been gigabytes. The OEM bike pack is 3.8 GB. So they wait their turn instead.
+   */
+  const waitingRef = useRef<DropPlan[]>([]);
+
+  const show = useCallback((next: DropPlan) => {
     setInstalling(false);
-  }, []);
-
-  const discard = useCallback(() => {
-    const current = planRef.current;
-    if (current) void cancelDrop(current.id).catch(() => {});
-    reset();
-  }, [reset]);
-
-  const reviewPlan = useCallback<DropReviewContextValue["reviewPlan"]>((next) => {
-    // Only one plan may be staged at a time — drop the previous one's temp files.
-    const previous = planRef.current;
-    if (previous && previous.id !== next.id) {
-      void cancelDrop(previous.id).catch(() => {});
-    }
-
     if (next.items.length === 0) {
       setPlan(null);
       setRows([]);
@@ -115,10 +112,46 @@ export function DropReviewProvider({
     );
   }, []);
 
+  /** Close the current sheet and open whatever was waiting behind it. */
+  const reset = useCallback(() => {
+    const next = waitingRef.current.shift();
+    if (next) {
+      show(next);
+      return;
+    }
+    setPlan(null);
+    setRows([]);
+    setInstalling(false);
+  }, [show]);
+
+  const discard = useCallback(() => {
+    const current = planRef.current;
+    if (current) void cancelDrop(current.id).catch(() => {});
+    reset();
+  }, [reset]);
+
+  const reviewPlan = useCallback<DropReviewContextValue["reviewPlan"]>(
+    (next) => {
+      const current = planRef.current;
+      if (current && current.id !== next.id) {
+        waitingRef.current.push(next);
+        return;
+      }
+      show(next);
+    },
+    [show],
+  );
+
   const toggle = useCallback((id: string) => {
     setRows((rs) =>
       rs.map((r) => (r.item.id === id ? { ...r, keep: !r.keep } : r)),
     );
+  }, []);
+
+  /** Check or uncheck every row at once. A split pack is 55 rows — the OEM bike pack is
+   *  exactly that — and "I want four of these" is thirty-one clicks without it. */
+  const toggleAll = useCallback((keep: boolean) => {
+    setRows((rs) => rs.map((r) => ({ ...r, keep })));
   }, []);
 
   /** Picking a destination re-costs the row on the backend — file count and collisions
@@ -204,6 +237,29 @@ export function DropReviewProvider({
     setInstalling(true);
     try {
       const outcome = await commitDrop(current.id, items);
+
+      // One history row per item, from the committed request rather than the receipt: the
+      // receipt shows a display path, and the page needs the real subpath to route back to
+      // the library. A dropped file has no mod page, hence the empty slug.
+      const asked = new Map(items.map((i) => [i.id, i]));
+      const forHistory = (id: string, name: string): NewDownload => ({
+        title: name,
+        slug: "",
+        subpath: asked.get(id)?.subpath ?? "",
+        destFolder: asked.get(id)?.destFolder ?? "",
+        categoryId: null,
+        source: "file",
+        host: null,
+        url: null,
+        bytes: rows.find((r) => r.item.id === id)?.item.bytes ?? null,
+        status: "installed",
+        error: null,
+      });
+      for (const i of outcome.installed) note(forHistory(i.id, i.name));
+      for (const f of outcome.failed) {
+        note({ ...forHistory(f.id, f.name), status: "failed", error: f.error });
+      }
+
       reset();
       if (outcome.installed.length > 0) {
         toast.success(
@@ -228,7 +284,7 @@ export function DropReviewProvider({
         description: String(e),
       });
     }
-  }, [rows, reset]);
+  }, [rows, reset, note]);
 
   const value = useMemo(
     () => ({ reviewPlan, reviewing: plan !== null }),
@@ -244,6 +300,7 @@ export function DropReviewProvider({
           rows={rows}
           installing={installing}
           onToggle={toggle}
+          onToggleAll={toggleAll}
           onPick={pick}
           onCancel={discard}
           onInstall={() => void install()}

@@ -120,6 +120,25 @@ pub fn is_simple_name(s: &str) -> bool {
         && !s.contains(':')
 }
 
+/// True when `rel` is a relative path that cannot leave the folder it is joined onto —
+/// no `..`, no absolute or UNC root, no drive letter, no control characters.
+///
+/// [`is_simple_name`] guards a single segment; this guards a whole `mods/`-relative path,
+/// which is the shape a share code carries (`tracks/EU/RedBud.pkz`). A code is written by
+/// whoever hands it to you, so every path out of one is checked with this before it reaches
+/// anything that joins it onto the mods root.
+pub fn is_safe_rel(rel: &str) -> bool {
+    // A trailing separator is just how some senders write a folder; a leading one is a path
+    // that means to start from the root, which this must never accept.
+    let rel = rel.trim().trim_end_matches(['/', '\\']);
+    if rel.is_empty() || rel.chars().any(|c| c.is_control()) {
+        return false;
+    }
+    // Split on both separators so a Windows-shaped path is judged the same way a POSIX one
+    // is: any empty segment left is a leading separator (absolute, or a UNC root).
+    rel.split(['/', '\\']).all(is_simple_name)
+}
+
 fn sanitize_seg(seg: &str) -> String {
     seg.chars()
         .map(|c| match c {
@@ -169,7 +188,112 @@ pub fn move_mod(
     Ok(())
 }
 
-pub fn uninstall_mod(mods_path: &str, from_path: &str, subpath: &str) -> anyhow::Result<()> {
+/// Where the Trash put something, when we can tell — so it can be put back.
+///
+/// macOS can answer with a path, because the folders are ordinary directories we can look
+/// in. Windows renames everything it recycles to `$R…`, so there is no path worth keeping and
+/// the answer is `None`; [`restore_from_trash`] asks the OS instead. Either way the ledger
+/// only has to record what it was given.
+pub type TrashedAt = Option<String>;
+
+/// Move `path` to the Trash, reporting where it went.
+///
+/// Not plain `trash::delete`: on macOS that drives Finder over AppleScript, and Finder refuses
+/// a file iCloud has evicted — *"the item needs to be downloaded"*, error -8013. A mods folder
+/// under `Documents` is exactly where eviction happens, and with most of a library dataless
+/// this made uninstalling fail on nearly every mod. `NSFileManager` has no such objection, and
+/// wants no automation permission either.
+///
+/// Calling it directly rather than through the crate, which passes `None` for the resulting
+/// URL and throws the answer away. That answer is the only reliable way to learn where the
+/// file went: the Trash cannot simply be listed afterwards, because macOS refuses `~/.Trash`
+/// to an app without Full Disk Access, and a mods folder in iCloud and one outside it land in
+/// different Trash folders anyway.
+#[cfg(target_os = "macos")]
+pub fn move_to_trash(path: &Path) -> anyhow::Result<TrashedAt> {
+    use objc2_foundation::{NSFileManager, NSString, NSURL};
+
+    let path_str = path.to_string_lossy();
+    // The same call the `trash` crate makes, asking for the one extra value it declines to
+    // request. `objc2` wraps it safely, so there is no unsafe block to justify.
+    let mgr = NSFileManager::defaultManager();
+    let url = NSURL::fileURLWithPath(&NSString::from_str(&path_str));
+    let mut out = None;
+    mgr.trashItemAtURL_resultingItemURL_error(&url, Some(&mut out))
+        .map_err(|e| anyhow::anyhow!("could not move to Trash: {e}"))?;
+    Ok(out.and_then(|u| u.path()).map(|p| p.to_string()))
+}
+
+/// Windows and Linux have no Finder problem, and their own Trash reports nothing useful
+/// about where an item landed — see [`TrashedAt`].
+#[cfg(not(target_os = "macos"))]
+pub fn move_to_trash(path: &Path) -> anyhow::Result<TrashedAt> {
+    trash::delete(path)?;
+    Ok(None)
+}
+
+/// Put a mod back where it came from.
+///
+/// `trashed_at` is whatever [`move_to_trash`] reported. When it names a path — macOS — the
+/// restore is a plain move. When it doesn't, the OS is asked to undo its own recycle, matching
+/// on the path the mod used to occupy.
+///
+/// Refuses to overwrite: if something is already sitting at `original`, the mod on disk wins
+/// and the caller is told, rather than a restore quietly replacing a newer copy.
+pub fn restore_from_trash(original: &Path, trashed_at: Option<&str>) -> anyhow::Result<()> {
+    if original.exists() {
+        anyhow::bail!("something is already installed there");
+    }
+    if let Some(parent) = original.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    if let Some(from) = trashed_at {
+        let from = Path::new(from);
+        if !from.exists() {
+            anyhow::bail!("it is no longer in the Trash");
+        }
+        fs::rename(from, original)?;
+        return Ok(());
+    }
+
+    restore_via_os(original)
+}
+
+/// Windows and Linux keep an index of what they recycled and where it came from, so the item
+/// can be found by the path it used to have.
+#[cfg(any(
+    target_os = "windows",
+    all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))
+))]
+fn restore_via_os(original: &Path) -> anyhow::Result<()> {
+    use trash::os_limited;
+
+    let name = original
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let parent = original.parent().unwrap_or(Path::new(""));
+
+    let item = os_limited::list()?
+        .into_iter()
+        .filter(|i| i.name.to_string_lossy() == name && Path::new(&i.original_parent) == parent)
+        .max_by_key(|i| i.time_deleted)
+        .ok_or_else(|| anyhow::anyhow!("it is no longer in the Recycle Bin"))?;
+
+    os_limited::restore_all([item])?;
+    Ok(())
+}
+
+#[cfg(not(any(
+    target_os = "windows",
+    all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))
+)))]
+fn restore_via_os(_original: &Path) -> anyhow::Result<()> {
+    anyhow::bail!("this system can't put files back from the Trash")
+}
+
+pub fn uninstall_mod(mods_path: &str, from_path: &str, subpath: &str) -> anyhow::Result<TrashedAt> {
     let from = PathBuf::from(from_path);
     if !from.exists() {
         anyhow::bail!("path not found: {from_path}");
@@ -178,8 +302,7 @@ pub fn uninstall_mod(mods_path: &str, from_path: &str, subpath: &str) -> anyhow:
     if !from.starts_with(&type_dir) {
         anyhow::bail!("refusing to uninstall a file outside the {subpath} folder");
     }
-    trash::delete(&from)?;
-    Ok(())
+    move_to_trash(&from)
 }
 
 pub fn reveal_in_explorer(path: &str) -> anyhow::Result<()> {
@@ -286,6 +409,18 @@ pub struct RiderTargets {
     pub profiles: Vec<String>,
 }
 
+/// The `<Model>.pkz` that sits beside a model's folder, whether or not either exists.
+///
+/// Not `with_extension("pkz")`: a mod named `Fox Instinct 2.0 by Aeffertz` has
+/// `0 by Aeffertz` for an extension, so replacing it asks for `Fox Instinct 2.pkz` — a file
+/// nobody has. A model's name is the whole name; the archive appends to it, which is also
+/// how `models_in` reads one back.
+pub fn sibling_pkz(model_dir: &Path) -> PathBuf {
+    let mut name = model_dir.file_name().unwrap_or_default().to_os_string();
+    name.push(".pkz");
+    model_dir.with_file_name(name)
+}
+
 /// Installable content sitting directly in `dir`, by the name you'd address it as: a
 /// sub-folder verbatim, a `.pkz` by its stem. Sorted, case-insensitively deduped.
 fn models_in(dir: &Path) -> Vec<String> {
@@ -365,6 +500,9 @@ pub struct LibraryEntry {
     pub path: String,
     pub folder: String,
     pub size: u64,
+    /// Unix milliseconds, so the library can be sorted by what arrived most recently — the only
+    /// answer available for mods installed before the download history existed.
+    pub modified: u64,
     pub kind: String,
     pub category: String,
     pub parent: Option<String>,
@@ -394,18 +532,33 @@ fn rel_folder(base: &Path, path: &Path) -> String {
         .unwrap_or_default()
 }
 
-fn dir_size(dir: &Path) -> u64 {
+/// Unix milliseconds, or 0 when the filesystem won't say — a mod with no time sorts last under
+/// "recently added" rather than jumping to the top of it.
+pub(crate) fn mtime_ms(m: &fs::Metadata) -> u64 {
+    m.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Total bytes and the newest mtime among a folder's immediate files, taking the folder's own
+/// mtime as the floor. The files matter as well as the folder because a copy can carry the
+/// original folder timestamp across while the files it wrote are stamped now.
+fn dir_size_and_mtime(dir: &Path) -> (u64, u64) {
     let mut total = 0;
+    let mut newest = fs::metadata(dir).map(|m| mtime_ms(&m)).unwrap_or(0);
     if let Ok(rd) = fs::read_dir(dir) {
         for e in rd.flatten() {
             if let Ok(m) = e.metadata() {
                 if m.is_file() {
                     total += m.len();
+                    newest = newest.max(mtime_ms(&m));
                 }
             }
         }
     }
-    total
+    (total, newest)
 }
 
 fn immediate_dirs(base: &Path) -> Vec<String> {
@@ -432,10 +585,12 @@ fn make_entry(base: &Path, p: &Path, category: &str, parent: Option<String>) -> 
     } else {
         "loose"
     };
-    let size = if is_dir {
-        dir_size(p)
+    let (size, modified) = if is_dir {
+        dir_size_and_mtime(p)
     } else {
-        fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+        fs::metadata(p)
+            .map(|m| (m.len(), mtime_ms(&m)))
+            .unwrap_or((0, 0))
     };
     LibraryEntry {
         name: p
@@ -445,6 +600,7 @@ fn make_entry(base: &Path, p: &Path, category: &str, parent: Option<String>) -> 
         path: p.to_string_lossy().into_owned(),
         folder: rel_folder(base, p),
         size,
+        modified,
         kind: kind.to_string(),
         category: category.to_string(),
         parent,
@@ -554,6 +710,40 @@ fn dir_has_sound_markers(dir: &Path) -> bool {
     found.iter().all(|&f| f)
 }
 
+/// Whether these folder segments name a bike livery, and which bike owns it — `Some(None)`
+/// for a livery loose at the bikes root, `None` when it isn't a livery at all.
+///
+/// Liveries normally live in `<Bike>/paints/`, but a model swap can own them, and then they
+/// sit under `FrostMod Models/` instead — on the shelf (`_paints/`) while that model is
+/// inactive, or in the variant's own `paints/` if a model pack shipped them there and
+/// nothing has adopted them yet. Both are still *the bike's* liveries: attributing them to
+/// the variant folder is what stopped `bundle`'s `Owner::Require` resolving a livery that
+/// came in with a model pack, so a share code shipped without it.
+fn paint_owner(segs: &[&str]) -> Option<Option<String>> {
+    let owner_at = |i: usize| segs.get(i).map(|s| s.to_string());
+    let is_lib =
+        |i: usize| segs.get(i).is_some_and(|s| s.eq_ignore_ascii_case(crate::modelswap::LIB_DIR));
+
+    if let Some(pos) = segs.iter().position(|s| s.eq_ignore_ascii_case("paints")) {
+        // `<Bike>/FrostMod Models/<Variant>/paints/…` — owner is the bike, three up.
+        if pos >= 2 && is_lib(pos - 2) {
+            return Some(pos.checked_sub(3).and_then(owner_at));
+        }
+        // `<Bike>/paints/…` — owner is the segment before `paints`.
+        return Some(pos.checked_sub(1).and_then(owner_at));
+    }
+
+    // `<Bike>/FrostMod Models/_paints/…` — shelved while its model is off the bike. Still
+    // listed, or assigning a livery would look like losing it.
+    let pos = segs
+        .iter()
+        .position(|s| s.eq_ignore_ascii_case(crate::modelswap::PAINT_SHELF))?;
+    if !is_lib(pos.checked_sub(1)?) {
+        return None;
+    }
+    Some(pos.checked_sub(2).and_then(owner_at))
+}
+
 fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
     let mut out = Vec::new();
 
@@ -576,12 +766,9 @@ fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
         }
         let folder = rel_folder(dir, p);
         let segs: Vec<&str> = folder.split('/').filter(|s| !s.is_empty()).collect();
-        let paints_pos = segs.iter().position(|s| s.eq_ignore_ascii_case("paints"));
 
-        if let Some(pos) = paints_pos {
-            // `<Bike>/paints/…` livery — owner is the segment before `paints`.
-            let parent = if pos > 0 { Some(segs[pos - 1].to_string()) } else { None };
-            out.push(make_entry(dir, p, "bikePaint", parent));
+        if let Some(owner) = paint_owner(&segs) {
+            out.push(make_entry(dir, p, "bikePaint", owner));
         } else if is_pkz {
             out.push(make_entry(dir, p, "bike", None));
         }
@@ -701,6 +888,58 @@ mod tests {
         d
     }
 
+    /// A mod with a version in its name — `Fox Instinct 2.0 by Aeffertz` — has an
+    /// "extension" as far as the path types are concerned, and replacing it asks for an
+    /// archive nobody has. The name is the whole name.
+    #[test]
+    fn a_packed_model_is_found_beside_a_dotted_name() {
+        let boots = Path::new("/mods/rider/boots");
+        assert_eq!(
+            sibling_pkz(&boots.join("Fox Instinct 2.0 by Aeffertz")),
+            boots.join("Fox Instinct 2.0 by Aeffertz.pkz"),
+        );
+        assert_eq!(
+            sibling_pkz(&boots.join("TLD SE4 - Oakley Airbrake")),
+            boots.join("TLD SE4 - Oakley Airbrake.pkz"),
+            "and an undotted one is unchanged",
+        );
+        // What `models_in` reads back out of the archive is the name we started from.
+        assert_eq!(
+            sibling_pkz(&boots.join("Fox Instinct 2.0 by Aeffertz"))
+                .file_stem()
+                .unwrap(),
+            "Fox Instinct 2.0 by Aeffertz",
+        );
+    }
+
+    /// The guard every share code is checked against. A rel that climbs, starts at a root,
+    /// or names a drive can never be joined onto the mods folder.
+    #[test]
+    fn safe_rels_are_the_ones_that_stay_put() {
+        for ok in [
+            "tracks/EU/RedBud.pkz",
+            "rider/helmets/AGV/paints/Blue.pnt",
+            "bikes\\KTM\\paints",
+            "tracks/EU/",
+            " tracks/RedBud.pkz ",
+        ] {
+            assert!(is_safe_rel(ok), "should be safe: {ok:?}");
+        }
+        for bad in [
+            "",
+            "..",
+            "../mxbikes.exe",
+            "tracks/../../evil",
+            "tracks\\..\\evil",
+            "/etc/passwd",
+            "\\\\server\\share",
+            "C:/Windows/System32",
+            "tracks/\nRedBud.pkz",
+        ] {
+            assert!(!is_safe_rel(bad), "should be refused: {bad:?}");
+        }
+    }
+
     #[test]
     fn moves_mod_between_folders() {
         let root = tmp("move");
@@ -786,6 +1025,56 @@ mod tests {
         assert_eq!(lt.category, "track");
         // The .pkz inside the extracted track must not double-count.
         assert!(cat(&v, "Loose.pkz").is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_livery_loose_at_the_bikes_root_has_no_owner() {
+        // `paints/` directly under `mods/bikes` — the no-owning-bike branch of the livery
+        // classifier, and the one a refactor is most likely to drop.
+        let root = tmp("lib-ownerless-paint");
+        touch(&root.join("mods/bikes/paints/Red.pnt"));
+
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[], &crate::game::MXB).unwrap();
+        let paint = cat(&v, "Red.pnt").unwrap();
+        assert_eq!(paint.category, "bikePaint");
+        assert_eq!(paint.parent, None);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_shelved_livery_is_still_the_bikes_livery() {
+        // Assigned to an inactive model swap, so parked out of `paints/` — the Library
+        // must still list it, or assigning a livery would look like losing it.
+        let root = tmp("lib-shelved-paint");
+        let base = root.join("mods/bikes");
+        touch(&base.join("KTM450/model.edf"));
+        touch(&base.join("KTM450/paints/Red.pnt"));
+        touch(&base.join("KTM450/FrostMod Models/_paints/Yami Redbud.pnt"));
+
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[], &crate::game::MXB).unwrap();
+        let shelved = cat(&v, "Yami Redbud.pnt").unwrap();
+        assert_eq!(shelved.category, "bikePaint");
+        assert_eq!(shelved.parent.as_deref(), Some("KTM450"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_livery_inside_a_model_swap_belongs_to_the_bike() {
+        // What a model pack that shipped its own `paints/` leaves behind. Attributing it to
+        // the variant folder put it in a bucket keyed by a name no `bikeid` ever matches,
+        // so `bundle`'s `Owner::Require` couldn't resolve it and a share code shipped
+        // without the livery.
+        let root = tmp("lib-swap-paint");
+        let base = root.join("mods/bikes");
+        touch(&base.join("KTM450/model.edf"));
+        touch(&base.join("KTM450/FrostMod Models/Yami/model.edf"));
+        touch(&base.join("KTM450/FrostMod Models/Yami/paints/Yami Redbud.pnt"));
+
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[], &crate::game::MXB).unwrap();
+        let paint = cat(&v, "Yami Redbud.pnt").unwrap();
+        assert_eq!(paint.category, "bikePaint");
+        assert_eq!(paint.parent.as_deref(), Some("KTM450"), "the bike, not the variant");
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1124,5 +1413,57 @@ mod path_case_tests {
         let got = mods_subdir(root.to_str().unwrap(), "mods/tracks");
         assert!(got.ends_with("tracks"), "nothing on disk yet, so use what we asked for");
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod library_swap_join_tests {
+    use std::fs;
+
+    /// The join the Library's model-swap badge relies on.
+    ///
+    /// A bike row in the library is a `<Bike>.pkz` **file**, so its `name` carries the archive
+    /// extension, while `modelswap::scan_model_swaps` keys by the bike **folder** beside it.
+    /// Matching the two raw finds nothing — which is exactly the bug that shipped: the badge
+    /// could never appear for any bike. The frontend has to strip the extension, and this
+    /// pins which side carries it so a rename on either can't quietly break the join again.
+    #[test]
+    fn a_bike_row_joins_its_swaps_only_once_the_extension_is_stripped() {
+        let root = std::env::temp_dir().join(format!("frost-join-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let mp = root.to_str().unwrap();
+        let bikes = super::mods_subdir(mp, "mods/bikes");
+        let bike = "MX1OEM_2023_KTM_450_SX-F";
+        fs::create_dir_all(&bikes).unwrap();
+        // The bike as the library sees it: a packed archive at the bikes root.
+        fs::write(bikes.join(format!("{bike}.pkz")), b"pkz").unwrap();
+        // And a registered model set beside it, as the Locker sees it.
+        let variant = bikes.join(bike).join(crate::modelswap::LIB_DIR).join("Factory");
+        fs::create_dir_all(&variant).unwrap();
+        fs::write(variant.join("model.edf"), b"mesh").unwrap();
+
+        let rows = super::scan_library(mp, "mods/bikes", &[], &crate::game::MXB).expect("scan");
+        let bike_rows: Vec<&super::LibraryEntry> =
+            rows.iter().filter(|e| e.category == "bike").collect();
+        assert!(!bike_rows.is_empty(), "the packed bike must be listed");
+        assert!(
+            bike_rows.iter().all(|e| e.name.ends_with(".pkz")),
+            "a bike row is the archive file, extension and all: {:?}",
+            bike_rows.iter().map(|e| &e.name).collect::<Vec<_>>(),
+        );
+
+        let swaps = crate::modelswap::scan_model_swaps(mp);
+        let key = &swaps.iter().find(|b| b.bike == bike).expect("the bike has swaps").bike;
+        assert!(!key.ends_with(".pkz"), "a swap is keyed by the folder, not the archive");
+
+        assert!(
+            !bike_rows.iter().any(|e| &e.name == key),
+            "raw names must not join — if they do, the frontend's strip is wrong",
+        );
+        assert!(
+            bike_rows.iter().any(|e| super::strip_ext(&e.name).eq_ignore_ascii_case(key)),
+            "stripped names must join, or the badge can never appear",
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 }

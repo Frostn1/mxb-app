@@ -50,8 +50,22 @@ export const PAINT_TOOLS: PaintTool[] = [
   "line",
 ];
 
-/** Tools whose result is defined by a press-drag-release, rather than by the path dragged. */
-const DRAG_TOOLS = new Set<PaintTool>(["gradient", "rect", "ellipse", "line"]);
+/**
+ * Tools whose result is defined by a press-drag-release, rather than by the path dragged.
+ *
+ * Only the gradient, now that the shapes are layers. A gradient is a wash across whatever it
+ * is dragged over, with no edge to take hold of afterwards, so there is nothing a handle could
+ * grab and nothing gained by keeping it as geometry.
+ */
+const DRAG_TOOLS = new Set<PaintTool>(["gradient"]);
+
+/**
+ * The drag tools that produce a *layer* rather than pixels — see `shapeLayer`.
+ *
+ * They never reach `Stroke` at all: the Designer makes the layer on the press and rewrites its
+ * box as the drag goes, so what is being dragged out is the finished object.
+ */
+export const SHAPE_TOOLS = new Set<PaintTool>(["rect", "ellipse", "line"]);
 
 /**
  * One key per tool, the way every editor of this kind does it.
@@ -241,61 +255,12 @@ function gradientFill(
   ctx.fillRect(0, 0, w, h);
 }
 
-function drawShape(
-  ctx: CanvasRenderingContext2D,
-  tool: PaintTool,
-  from: Point,
-  to: Point,
-  s: PaintSettings,
-) {
-  ctx.strokeStyle = withAlpha(s.colorA, 1);
-  ctx.fillStyle = withAlpha(s.colorA, 1);
-  ctx.lineWidth = Math.max(1, s.strokeWidth);
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-
-  if (tool === "line") {
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.stroke();
-    return;
-  }
-
-  const x = Math.min(from.x, to.x);
-  const y = Math.min(from.y, to.y);
-  const w = Math.abs(to.x - from.x);
-  const h = Math.abs(to.y - from.y);
-
-  ctx.beginPath();
-  if (tool === "ellipse") ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-  else ctx.rect(x, y, w, h);
-  if (s.shape === "fill") ctx.fill();
-  else ctx.stroke();
-}
-
-/**
- * Where a shape drawn between two points lands, with room for the pen that draws it.
- *
- * Padded by half the stroke width because a line is centred on its path, and by a couple of
- * pixels beyond that for the round cap and for the antialiasing at its edge — a region that
- * stopped at the geometry would leave the outer fringe of a thick outline unrestored.
- */
-function shapeRegion(from: Point, to: Point, s: PaintSettings): Region {
-  const pad = Math.max(1, s.strokeWidth) / 2 + 2;
-  return {
-    x: Math.min(from.x, to.x) - pad,
-    y: Math.min(from.y, to.y) - pad,
-    w: Math.abs(to.x - from.x) + pad * 2,
-    h: Math.abs(to.y - from.y) + pad * 2,
-  };
-}
-
 /**
  * Hold Shift: squares, circles, and axes that snap to 45°.
  *
- * Exported because the stage draws the guide you aim with and this draws what lands, and the
- * two have to agree — a dashed box in one place and a square in another is worse than no guide.
+ * Exported because the shape tools no longer land here — the Designer rewrites a shape layer's
+ * box as the drag goes and applies this to the corner first, so the square you are dragging out
+ * and the square you end up with are the same one.
  */
 export function constrained(from: Point, to: Point, tool: PaintTool): Point {
   const dx = to.x - from.x;
@@ -341,6 +306,16 @@ export class Stroke {
     private readonly target: HTMLCanvasElement,
     private readonly settings: PaintSettings,
     at: Point,
+    /**
+     * The piece of bodywork the fill is confined to, when there is one under the press.
+     *
+     * A bike sheet is a dozen panels side by side, and a flood of the whole layer is almost
+     * never what "fill" was reached for — it buries the eleven you weren't pointing at, and
+     * every one of them has to be painted back. Confined to the part, the bucket does what it
+     * looks like it does. Only the fill uses it: a brush stroke is already aimed by the hand,
+     * and clipping one would make it stop dead at a seam the hand can't see.
+     */
+    fillTo?: { path: Path2D; box: Region } | null,
   ) {
     this.before = cloneCanvas(target);
     this.scratch = scratchFor(target.width, target.height);
@@ -354,9 +329,12 @@ export class Stroke {
       const ctx = this.scratch.getContext("2d");
       if (ctx) {
         ctx.fillStyle = withAlpha(this.settings.colorA, 1);
-        ctx.fillRect(0, 0, this.scratch.width, this.scratch.height);
+        // Nonzero, so the triangles a part is made of stop being separate shapes and the seams
+        // between them don't come out unfilled.
+        if (fillTo) ctx.fill(fillTo.path, "nonzero");
+        else ctx.fillRect(0, 0, this.scratch.width, this.scratch.height);
       }
-      this.mark(this.whole());
+      this.mark(fillTo ? fillTo.box : this.whole());
       this.painted = true;
     } else if (!DRAG_TOOLS.has(this.settings.tool)) {
       this.dab(at, at);
@@ -423,15 +401,10 @@ export class Stroke {
       // Redrawn from scratch each time, not added to: dragging a gradient back and forth
       // should show the gradient it would leave, not every one it passed through.
       ctx.clearRect(0, 0, this.scratch.width, this.scratch.height);
-      if (tool === "gradient") {
-        gradientFill(ctx, this.scratch.width, this.scratch.height, this.start, to, this.settings);
-      } else {
-        drawShape(ctx, tool, this.start, to, this.settings);
-      }
-      // Both boxes, because the scratch was wiped: the new shape has to be laid down and the
-      // old one has to be taken back off. A gradient covers the sheet, so for that one they
-      // are the same box and it is the whole thing.
-      const next = tool === "gradient" ? this.whole() : shapeRegion(this.start, to, this.settings);
+      gradientFill(ctx, this.scratch.width, this.scratch.height, this.start, to, this.settings);
+      // The whole sheet, twice over: a gradient covers it, and the scratch was just wiped, so
+      // the new wash has to be laid down and the old one taken back off.
+      const next = this.whole();
       this.mark(next);
       if (this.shape) this.mark(this.shape);
       this.shape = next;
@@ -484,9 +457,46 @@ export class Stroke {
 /* ── Undo ───────────────────────────────────────────────────────────────────────────────── */
 
 export interface Snapshot {
+  kind: "pixels";
   sheetId: string;
   layerId: string;
   canvas: HTMLCanvasElement;
+}
+
+/**
+ * The document as it was before an edit that wasn't pixels — a layer added, moved, deleted, a
+ * sheet renamed or reordered.
+ *
+ * Generic over the document so this file keeps knowing nothing about sheets and layers. It
+ * stores whatever it was handed and hands the same thing back, which is all a snapshot of
+ * immutable state has to do.
+ */
+export interface DocStep<Doc> {
+  kind: "doc";
+  doc: Doc;
+  /**
+   * What kind of edit it was, or null for one that stands alone.
+   *
+   * Dragging a layer across the sheet is one edit to a person and two hundred to the state that
+   * records it. Consecutive edits sharing a key inside `COALESCE_MS` collapse into the first,
+   * so one undo takes back the whole drag rather than a pixel of it.
+   */
+  key: string | null;
+  at: number;
+}
+
+export type Step<Doc> = Snapshot | DocStep<Doc>;
+
+/** How long a run of same-key edits keeps counting as one gesture. */
+const COALESCE_MS = 700;
+
+/** Steps to keep, so a session of small edits can't grow the timeline without end. */
+const MAX_STEPS = 200;
+
+/** Reading and replacing the document, for the steps that are made of it rather than of pixels. */
+export interface DocAccess<Doc> {
+  read: () => Doc;
+  write: (doc: Doc) => void;
 }
 
 /**
@@ -499,15 +509,20 @@ export interface Snapshot {
 const MAX_PIXELS = 24_000_000;
 
 /**
- * Painting history, for the paint layers only.
+ * The editor's undo, over both of the things an edit can be.
  *
- * Deliberately not the whole editor's undo: adding, moving and deleting layers are React state
- * and would need their own mechanism. Undoing a brush stroke you can see is the thing you reach
- * for while painting, and it's the thing that has no other way back.
+ * A stroke changes pixels inside a canvas; adding, moving or deleting a layer changes the
+ * document those canvases hang off. Two stacks would be two timelines, and Ctrl+Z would take
+ * back whichever of them happened to be asked — so both kinds of step live in this one, in the
+ * order they were made.
+ *
+ * Pixels are remembered by copying them, which is why the budget below is counted in pixels.
+ * Document steps cost a reference each: every mutation replaces the state rather than editing
+ * it, so the previous version is still whole and still there to be pointed at.
  */
-export class PaintHistory {
-  private past: Snapshot[] = [];
-  private future: Snapshot[] = [];
+export class PaintHistory<Doc = unknown> {
+  private past: Step<Doc>[] = [];
+  private future: Step<Doc>[] = [];
 
   get canUndo() {
     return this.past.length > 0;
@@ -518,8 +533,30 @@ export class PaintHistory {
   }
 
   push(sheetId: string, layerId: string, before: HTMLCanvasElement) {
-    this.past.push({ sheetId, layerId, canvas: before });
+    this.past.push({ kind: "pixels", sheetId, layerId, canvas: before });
     // A new stroke is a new branch of the drawing; whatever was undone away is gone.
+    this.future = [];
+    this.trim();
+  }
+
+  /**
+   * Remember the document as it is *before* an edit is applied to it.
+   *
+   * Called by the edit rather than derived from watching the state, because only the edit knows
+   * that it is one: the state changes on every pointer sample of a stroke too, and a timeline
+   * built by watching would be a hundred steps of a single brush line.
+   */
+  pushDoc(doc: Doc, key: string | null = null) {
+    const top = this.past[this.past.length - 1];
+    const now = performance.now();
+    if (top?.kind === "doc" && key !== null && top.key === key && now - top.at < COALESCE_MS) {
+      // Still the same gesture. The state to go back to is the one already held, so this keeps
+      // that and only extends the window — a slow drag stays one step however long it takes.
+      top.at = now;
+      this.future = [];
+      return;
+    }
+    this.past.push({ kind: "doc", doc, key, at: now });
     this.future = [];
     this.trim();
   }
@@ -532,12 +569,21 @@ export class PaintHistory {
    * the visible layers were never in.
    */
   private step(
-    from: Snapshot[],
-    to: Snapshot[],
+    from: Step<Doc>[],
+    to: Step<Doc>[],
     resolve: (layerId: string) => HTMLCanvasElement | null,
-  ): Snapshot | null {
+    doc: DocAccess<Doc>,
+  ): Step<Doc> | null {
     while (from.length) {
       const entry = from[from.length - 1];
+      if (entry.kind === "doc") {
+        from.pop();
+        // What's on screen now becomes the way back, so undo and redo are the same move in
+        // opposite directions and neither has to know which way it is going.
+        to.push({ ...entry, doc: doc.read() });
+        doc.write(entry.doc);
+        return entry;
+      }
       const live = resolve(entry.layerId);
       if (!live) {
         from.pop();
@@ -560,17 +606,29 @@ export class PaintHistory {
   }
 
   /** Restore the previous state onto its layer, and hand back which one moved. */
-  undo(resolve: (layerId: string) => HTMLCanvasElement | null): Snapshot | null {
-    return this.step(this.past, this.future, resolve);
+  undo(
+    resolve: (layerId: string) => HTMLCanvasElement | null,
+    doc: DocAccess<Doc>,
+  ): Step<Doc> | null {
+    return this.step(this.past, this.future, resolve, doc);
   }
 
-  redo(resolve: (layerId: string) => HTMLCanvasElement | null): Snapshot | null {
-    return this.step(this.future, this.past, resolve);
+  redo(
+    resolve: (layerId: string) => HTMLCanvasElement | null,
+    doc: DocAccess<Doc>,
+  ): Step<Doc> | null {
+    return this.step(this.future, this.past, resolve, doc);
   }
 
-  /** Drop everything belonging to layers that are no longer there. True if any were. */
+  /**
+   * Drop the pixel steps belonging to layers that are no longer there. True if any were.
+   *
+   * Document steps are kept whatever happened to a layer — one of them is very likely the step
+   * that would *bring it back*, and dropping it because its subject is currently missing is
+   * exactly backwards.
+   */
   keepOnly(alive: (sheetId: string, layerId: string) => boolean): boolean {
-    const live = (s: Snapshot) => alive(s.sheetId, s.layerId);
+    const live = (s: Step<Doc>) => s.kind === "doc" || alive(s.sheetId, s.layerId);
     const before = this.past.length + this.future.length;
     this.past = this.past.filter(live);
     this.future = this.future.filter(live);
@@ -583,11 +641,16 @@ export class PaintHistory {
   }
 
   private trim() {
-    const cost = (s: Snapshot) => s.canvas.width * s.canvas.height;
+    // A document step holds no pixels, so it costs nothing against the pixel budget and is
+    // counted only against the step count below.
+    const cost = (s: Step<Doc>) => (s.kind === "doc" ? 0 : s.canvas.width * s.canvas.height);
     let total = [...this.past, ...this.future].reduce((n, s) => n + cost(s), 0);
     // Oldest first — the step you're least likely to reach for is the one furthest back.
     while (total > MAX_PIXELS && this.past.length > 1) {
-      total -= cost(this.past.shift() as Snapshot);
+      total -= cost(this.past.shift() as Step<Doc>);
+    }
+    while (this.past.length + this.future.length > MAX_STEPS && this.past.length > 1) {
+      this.past.shift();
     }
   }
 }

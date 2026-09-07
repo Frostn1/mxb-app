@@ -27,10 +27,6 @@ use std::path::{Path, PathBuf};
 const MIN_EDGE: u32 = 64;
 const MAX_EDGE: u32 = 4096;
 
-/// Extensions [`load`] will read. TGA leads because it's what the paint community trades
-/// templates in, but a PNG straight out of GIMP is the same pixels and works as well.
-pub const SOURCE_EXTS: [&str; 6] = ["tga", "png", "jpg", "jpeg", "bmp", "webp"];
-
 /// One source image, as the studio shows it before anything is written.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

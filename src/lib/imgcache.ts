@@ -33,7 +33,7 @@ export const DESCRIPTION_IMAGE_WIDTH = 1200;
  * Pass `width` for a downscaled copy, or omit it for the original (what the full-size
  * gallery wants). Each width is a separate cache entry.
  *
- * Only mxb-mods.com and mxbikes-shop.com URLs are served; anything else is refused by the
+ * Only the catalogs' and the two stores' URLs are served; anything else is refused by the
  * handler, which surfaces as a normal image error and falls back to the placeholder icon.
  */
 export function cachedImage(
@@ -58,6 +58,7 @@ const CACHEABLE_HOSTS = [
   "gpb-mods.com",
   "mxbikes-shop.com",
   "mxbikes-shop.b-cdn.net",
+  "mxb-hub.com",
 ];
 
 /** Whether [`cachedImage`] would resolve to something the handler is willing to serve. */
@@ -71,4 +72,43 @@ export function isCacheableImage(url: string): boolean {
     // A relative or malformed src — not something the cache can be handed.
     return false;
   }
+}
+
+/**
+ * Whether the `imgcache` scheme has proved unusable this session.
+ *
+ * A user's report: every picture in the app blank — Browse, Shop and Hub alike — while all
+ * the text around them loaded fine. Their log read `thumbnails 0 served (0 MB)` for the whole
+ * session, so nothing had reached the handler at all; three different origins failing at once
+ * is the scheme, not any one site. Whatever intercepts `http://imgcache.localhost` on that
+ * machine, the origin URL still loads in the same webview, so falling back to it is the
+ * difference between a grid of pictures and a grid of placeholders.
+ *
+ * Session-local and one-way. Losing the cache for a session costs re-fetching thumbnails;
+ * getting it wrong the other way costs the user every image, which is what they reported.
+ */
+let directRecoveries = 0;
+let schemeBroken = false;
+
+/**
+ * How many images must load direct after failing through the cache before the scheme itself
+ * is written off. More than one, because a single image can fail through the cache on its own
+ * merits — an origin that 404s only for us, a body past the fetch cap, a format the sniffer
+ * won't have — and one of those must not cost everyone else their cache.
+ */
+const RECOVERIES_BEFORE_GIVING_UP = 3;
+
+/** Whether [`cachedImage`] should be skipped in favour of the origin URL. */
+export function schemeIsBroken(): boolean {
+  return schemeBroken;
+}
+
+/**
+ * Report that `url` failed through the cache and then loaded directly.
+ *
+ * Only affects images mounted afterwards; the one that recovered is already showing.
+ */
+export function noteDirectRecovery(): void {
+  directRecoveries += 1;
+  if (directRecoveries >= RECOVERIES_BEFORE_GIVING_UP) schemeBroken = true;
 }

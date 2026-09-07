@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  SharePreview,
+  Attachment,
+  ModsDehydrated,
   BikeModels,
   BikeSounds,
   DropCommitItem,
@@ -12,10 +15,14 @@ import type {
   RegisterReport,
   Config,
   DownloadOption,
+  DownloadRecord,
+  LedgerRow,
+  NewDownload,
   FrostmodInstallReport,
   FrostmodReload,
   FrostmodStatus,
   RuntimeInstallOutcome,
+  RuntimeRepairReport,
   VcRuntime,
   InstalledMod,
   InstallProgress,
@@ -52,6 +59,9 @@ import type {
   FileShare,
   GameId,
   GameInfo,
+  LockItem,
+  LockOutcome,
+  LockProgress,
 } from "../types";
 import type { TKey } from "../i18n";
 
@@ -297,6 +307,107 @@ export function bikePreviewAvailable(): Promise<boolean> {
   return invoke<boolean>("bike_preview_available");
 }
 
+/* ── Content lock ──────────────────────────────────────────────────────────────────── */
+
+/** Whether this build can lock content. Same gate as the bike preview: without the
+ *  optional local module the Studio hides the tool rather than offering a dead one. */
+export function contentLockAvailable(): Promise<boolean> {
+  return invoke<boolean>("content_lock_available");
+}
+
+/** Whether this build can lock content with mxbsecure (the packer is a local-only module). */
+export function contentSecureAvailable(): Promise<boolean> {
+  return invoke<boolean>("content_secure_available");
+}
+
+/** Turn the experimental mxbsecure tab on or off. */
+export function setMxbsecureEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_mxbsecure_enabled", { enabled });
+}
+
+/** What locking a file produced: where the blob is, and the key to keep once. */
+export interface SecureLockOutcome {
+  blobPath: string;
+  assetId: string;
+  keyId: string;
+  key: string;
+  plainBytes: number;
+  blobBytes: number;
+}
+
+/** Lock a file into a `.mxbsecure` blob. The source is only read. */
+export function mxbsecureLock(src: string, outDir?: string): Promise<SecureLockOutcome> {
+  return invoke<SecureLockOutcome>("mxbsecure_lock", { src, outDir: outDir ?? null });
+}
+
+/** Decrypt the blob with the key and check it matches the original, byte for byte. */
+export function mxbsecureVerify(blobPath: string, key: string, original: string): Promise<boolean> {
+  return invoke<boolean>("mxbsecure_verify", { blobPath, key, original });
+}
+
+/** The Steam account signed in on this machine, or null if it can't be read. */
+export function secureSteamId(): Promise<string | null> {
+  return invoke<string | null>("secure_steam_id");
+}
+
+/** What provisioning a key produced: where the .mxbkey landed, and the Steam ID it's bound to. */
+export interface SecureProvisionOutcome {
+  mxbkeyPath: string;
+  steamId: string;
+}
+
+/** Bind a content key to the live Steam account and store it as a .mxbkey for offline play. */
+export function mxbsecureProvision(blobPath: string, key: string): Promise<SecureProvisionOutcome> {
+  return invoke<SecureProvisionOutcome>("mxbsecure_provision", { blobPath, key });
+}
+
+/** Open the blob offline from its .mxbkey (no server), and check it matches the original. */
+export function mxbsecureOpenOffline(blobPath: string, original: string): Promise<boolean> {
+  return invoke<boolean>("mxbsecure_open_offline", { blobPath, original });
+}
+
+/** The two files generating a protected copy produced. */
+export interface SecureGenerateOutcome {
+  gameName: string;
+  blobPath: string;
+  mxbkeyPath: string;
+  steamId: string;
+  plainBytes: number;
+}
+
+/** Generate a protected copy of a track for a specific Steam ID, leaving the original untouched.
+ *  Writes `<track>.mxbsecure` and `<track>.mxbsecure.mxbkey` beside it — the buyer needs both. */
+export function mxbsecureGenerate(trackPath: string, steamId: string): Promise<SecureGenerateOutcome> {
+  return invoke<SecureGenerateOutcome>("mxbsecure_generate", { trackPath, steamId });
+}
+
+/** What a run would touch — folders walked, files taken as themselves, skips flagged. */
+export function contentLockPlan(paths: string[]): Promise<LockItem[]> {
+  return invoke<LockItem[]>("content_lock_plan", { paths });
+}
+
+/** Write a copy of every file locked to each GUID, under `outDir/<GUID>/`. Reads only:
+ *  the creator's originals are never touched. */
+export function contentLockRun(
+  paths: string[],
+  guids: string[],
+  outDir: string,
+): Promise<LockOutcome> {
+  return invoke<LockOutcome>("content_lock_run", { paths, guids, outDir });
+}
+
+export function onContentLockProgress(
+  cb: (p: LockProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<LockProgress>("content-lock://progress", (e) => cb(e.payload));
+}
+
+/** This player's own MX Bikes GUID, read out of the running game. `null` when the game
+ *  isn't running or hasn't signed in to Steam yet — the ordinary case, not an error. */
+export function localGuid(): Promise<string | null> {
+  return invoke<string | null>("local_guid");
+}
+
 /** The order a browse listing comes back in. Mirrors `ModSort` on the Rust side. */
 export type ModSort =
   | "newest"
@@ -375,11 +486,16 @@ export function scanRiderTargets(): Promise<RiderTargets> {
   return invoke<RiderTargets>("scan_rider_targets");
 }
 
-/** A gear area whose model was installed loose in the area root instead of in a folder. */
+/** A gear model the game can't reach where it was installed.
+ *  `gather` — its files sit loose in the area root instead of in a folder of their own.
+ *  `unwrap` — its `.pkz` is buried in a folder, a level below where anything looks. */
 export interface GearRepair {
+  kind: "gather" | "unwrap";
+  /** What `repairGear` is asked for: the area, or `<area>/<folder>` for a buried package. */
+  id: string;
   /** The area folder under `mods/rider` — `helmets`, `boots`, … */
   area: string;
-  /** The folder the loose content will be gathered into. */
+  /** The model: the folder loose files gather into, or the name a raised package will show as. */
   model: string;
   dest: string;
   /** What moves, by name. */
@@ -390,9 +506,9 @@ export function scanGearRepairs(): Promise<GearRepair[]> {
   return invoke<GearRepair[]>("scan_gear_repairs");
 }
 
-/** Gather one area's loose content into its own folder; resolves with the entries moved. */
-export function repairGearArea(area: string): Promise<number> {
-  return invoke<number>("repair_gear_area", { area });
+/** Carry out one repair by its `id`; resolves with the entries moved. */
+export function repairGear(id: string): Promise<number> {
+  return invoke<number>("repair_gear", { id });
 }
 
 /** What a failed scan stands in for: nothing installed, which every picker handles. */
@@ -414,12 +530,81 @@ export function scanBikeTargets(): Promise<string[]> {
   return invoke<string[]>("scan_bike_targets");
 }
 
+/** The bike folders a model set could be moved to. */
+export function bikeFolders(): Promise<string[]> {
+  return invoke<string[]>("bike_folders");
+}
+
+/** The liveries a model owns outright — what a move offers to take with it. */
+export function modelSwapLiveries(bike: string, variant: string): Promise<string[]> {
+  return invoke<string[]>("model_swap_liveries", { bike, variant });
+}
+
+/**
+ * Move a model set to another bike, carrying the named liveries with it.
+ *
+ * Liveries are opt-in because a `.pnt` is cut for one bike's UV layout. Whatever isn't
+ * carried stays on the old bike and simply loses its claim — nothing is deleted.
+ */
+export function moveModelSwap(
+  bike: string,
+  variant: string,
+  toBike: string,
+  carry: string[],
+): Promise<void> {
+  return invoke<void>("move_model_swap", { bike, variant, toBike, carry });
+}
+
+/** Send a model set to the Trash. Its liveries stay on the bike, unclaimed. */
+export function deleteModelSwap(bike: string, variant: string): Promise<void> {
+  return invoke<void>("delete_model_swap", { bike, variant });
+}
+
 export function scanModelSwaps(): Promise<BikeModels[]> {
   return invoke<BikeModels[]>("scan_model_swaps");
 }
 
 export function applyModelSwap(bike: string, target: string): Promise<SwapApplyOutcome> {
   return invoke<SwapApplyOutcome>("apply_model_swap", { bike, target });
+}
+
+/**
+ * The bike as a model swap would leave it, without applying it — the swap's file set is
+ * assembled in memory, so nothing moves on disk and the game can stay open. "Stock" shows
+ * the packed model the loose files are hiding.
+ */
+export function previewModelSwap(
+  bike: string,
+  variant: string,
+  tyres?: string,
+): Promise<BikeModel> {
+  return invoke<BikeModel>("preview_model_swap", {
+    bike,
+    variant,
+    tyres: tyres || null,
+  }).then(reviveMesh);
+}
+
+/**
+ * Every livery the bike has, wherever it currently sits — including the ones shelved
+ * because the model that claims them isn't on the bike. The assignment picker needs all of
+ * them, or shelving a livery would look like losing it.
+ */
+export function listBikeLiveries(bike: string): Promise<string[]> {
+  return invoke<string[]>("list_bike_liveries", { bike });
+}
+
+/**
+ * Set which liveries a model swap owns. Liveries belonging to a model that isn't active
+ * are moved out of the bike's `paints/` folder, which is what filters MX Bikes' own paint
+ * list too — the game reads that one folder and knows nothing about model swaps.
+ */
+export function setModelPaints(
+  bike: string,
+  model: string,
+  paints: string[],
+): Promise<SwapApplyOutcome> {
+  return invoke<SwapApplyOutcome>("set_model_paints", { bike, model, paints });
 }
 
 export function scanSoundSwaps(): Promise<BikeSounds[]> {
@@ -516,6 +701,35 @@ export function unpackPaint(path: string): Promise<PaintTexture[]> {
   return invoke<PaintTexture[]>("unpack_paint", { path });
 }
 
+/**
+ * Serialises the calls below, because they overwrite each other.
+ *
+ * `watch_paint_files` replaces the whole watch set, so two of them racing decides what is
+ * watched by whichever lands second — and a switch between paints issues exactly that pair
+ * (the old effect's stop, then the new effect's start) with nothing ordering them. A viewer
+ * that quietly stopped watching is the one failure this feature can't announce.
+ */
+let watchTurn: Promise<unknown> = Promise.resolve();
+
+/**
+ * Watch these paint files for edits, replacing whatever was being watched. `[]` stops.
+ *
+ * Changes arrive through {@link onPaintChanged}, carrying back the same path strings passed
+ * in here — never the OS's own spelling of them.
+ */
+export function watchPaintFiles(paths: string[]): Promise<void> {
+  // `.catch` first: one refused watch must not wedge every later call behind a rejection.
+  watchTurn = watchTurn
+    .catch(() => {})
+    .then(() => invoke<void>("watch_paint_files", { paths }));
+  return watchTurn as Promise<void>;
+}
+
+/** Fires when a watched paint is rewritten on disk — a repack, or a save from the studio. */
+export function onPaintChanged(cb: (path: string) => void): Promise<UnlistenFn> {
+  return listen<{ path: string }>("paint-changed", (e) => cb(e.payload.path));
+}
+
 /* ── Paint studio ──────────────────────────────────────────────────────────────────── */
 
 /** Read image files as textures — non-power-of-two sizes come back resized, flagged. */
@@ -543,6 +757,37 @@ export function paintStudioPixels(path: string): Promise<PaintTexture> {
 export function paintStudioStage(name: string, png: ArrayBuffer): Promise<string> {
   return invoke<string>("paint_studio_stage", png, {
     headers: { "x-sheet-name": name },
+  });
+}
+
+/**
+ * Write a photo of the 3D preview to a path the user picked in a save dialog.
+ *
+ * Same shape as {@link paintStudioStage} and for the same reason: a 4K frame is megabytes, so
+ * the PNG is the request body and the destination rides in a header — percent-encoded, since
+ * a header is ASCII and a pictures folder is usually under somebody's name.
+ */
+export function photoSave(dest: string, png: ArrayBuffer): Promise<string> {
+  return invoke<string>("photo_save", png, {
+    headers: { "x-dest": encodeURIComponent(dest) },
+  });
+}
+
+/**
+ * The raw bytes of a `.psd`, for the Designer to take apart itself.
+ *
+ * The parsing lives in the webview because that is where the pixels have to end up — a PSD
+ * layer becomes a canvas — so the backend's whole part is handing the file over. Rejects
+ * anything that isn't a `.psd`/`.psb`.
+ */
+export function psdRead(path: string): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>("psd_read", { path });
+}
+
+/** Write a sheet's `.psd` to a path the user picked. Body and header, as {@link photoSave}. */
+export function psdSave(dest: string, psd: ArrayBuffer): Promise<string> {
+  return invoke<string>("psd_save", psd, {
+    headers: { "x-dest": encodeURIComponent(dest) },
   });
 }
 
@@ -590,16 +835,84 @@ export function unpackPkz(path: string, outDir: string): Promise<string[]> {
   return invoke<string[]>("unpack_pkz", { path, outDir });
 }
 
-export function loadBikeModel(source: string): Promise<BikeModel> {
-  return invoke<BikeModel>("load_bike_model", { source });
+/**
+ * A bike's geometry, its paints, and the wheels it wears.
+ *
+ * `tyres` substitutes the pack the bike's own `gfx.cfg` names — a bike names exactly one, so
+ * that substitution is the only way to see it on another. Nothing on disk is renamed, and a
+ * name that isn't installed falls back to the bike's own rather than losing the wheels.
+ * Omit it (or pass `""`) for whatever the bike itself asks for.
+ */
+/**
+ * Turn a mesh's base64 bulk arrays back into typed arrays, in place.
+ *
+ * The backend sends `positions`/`uvs`/`normals`/`indices` as base64 of their raw bytes
+ * rather than as JSON numbers — see `EdfNode` in `edf.rs` for why. Everything downstream
+ * reads them by index and by `.length`, which a typed array answers exactly as an array did,
+ * so this is the only place that knows the difference.
+ *
+ * Walks the payload rather than naming a path into it, because five commands return meshes
+ * under four different shapes, and a sixth would otherwise arrive silently broken.
+ */
+function reviveMesh<T>(value: T): T {
+  const seen = new Set<object>();
+  const walk = (v: unknown): void => {
+    if (v === null || typeof v !== "object") return;
+    if (seen.has(v as object)) return;
+    seen.add(v as object);
+    if (Array.isArray(v)) {
+      v.forEach(walk);
+      return;
+    }
+    const o = v as Record<string, unknown>;
+    if (typeof o.positions === "string") {
+      o.positions = f32(o.positions);
+      o.uvs = f32(o.uvs as string);
+      o.normals = f32(o.normals as string);
+      o.indices = u32(o.indices as string);
+      // `submeshes` and the rest still need walking — a node can hold further meshes.
+    }
+    Object.values(o).forEach(walk);
+  };
+  walk(value);
+  return value;
+}
+
+/** Base64 → bytes. `atob` is the fastest thing the webview offers for this. */
+function bytesOf(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** The buffer from `bytesOf` is freshly allocated, so it starts aligned and a view is free.
+ *  A length that isn't a whole number of values means a truncated payload — hand back an
+ *  empty array, which every consumer already handles, rather than throwing. */
+function f32(b64: string): Float32Array {
+  const b = bytesOf(b64);
+  if (b.byteLength % 4) return new Float32Array(0);
+  return new Float32Array(b.buffer, 0, b.byteLength / 4);
+}
+
+function u32(b64: string): Uint32Array {
+  const b = bytesOf(b64);
+  if (b.byteLength % 4) return new Uint32Array(0);
+  return new Uint32Array(b.buffer, 0, b.byteLength / 4);
+}
+
+export function loadBikeModel(source: string, tyres?: string): Promise<BikeModel> {
+  return invoke<BikeModel>("load_bike_model", { source, tyres: tyres || null }).then(
+    reviveMesh,
+  );
 }
 
 export function loadRiderModel(loadout: Loadout): Promise<RiderModel> {
-  return invoke<RiderModel>("load_rider_model", { loadout });
+  return invoke<RiderModel>("load_rider_model", { loadout }).then(reviveMesh);
 }
 
 export function loadRiderBodyModel(profile: string): Promise<EdfNode[]> {
-  return invoke<EdfNode[]>("load_rider_body_model", { profile });
+  return invoke<EdfNode[]>("load_rider_body_model", { profile }).then(reviveMesh);
 }
 
 export function loadGearModel(
@@ -618,7 +931,7 @@ export function loadGearModel(
     goggles,
     stock,
     stockGoggles,
-  });
+  }).then(reviveMesh);
 }
 
 export function listGearPaints(path: string): Promise<GearPaints> {
@@ -636,7 +949,7 @@ export function loadStockGearModel(
   part: RiderPart["part"],
   paintPath?: string,
 ): Promise<RiderPart> {
-  return invoke<RiderPart>("load_stock_gear_model", { part, paintPath });
+  return invoke<RiderPart>("load_stock_gear_model", { part, paintPath }).then(reviveMesh);
 }
 
 /** Move an installed mod file into a different folder (relative to the type dir). */
@@ -689,6 +1002,17 @@ export function logsInfo(): Promise<LogsInfo> {
   return invoke<LogsInfo>("logs_info");
 }
 
+/**
+ * Write a line into MXB App's own log file from here.
+ *
+ * The webview's console goes nowhere a player can send us — only what Rust logs reaches
+ * the file behind Settings → Logs. Anything the frontend alone can see has to come back
+ * through this to survive a bug report.
+ */
+export function logClient(level: "info" | "warn" | "error", message: string): Promise<void> {
+  return invoke<void>("log_client", { level, message });
+}
+
 /** Open the folder a log set lives in, newest file selected where the OS can. */
 export function openLogsFolder(which: LogsKind): Promise<void> {
   return invoke<void>("open_logs_folder", { which });
@@ -703,6 +1027,39 @@ export interface LogsExport {
 /** Zip every log set to `dest` — a path the user picked in a save dialog. */
 export function exportLogs(dest: string): Promise<LogsExport> {
   return invoke<LogsExport>("export_logs", { dest });
+}
+
+/** A shared log bundle: what went up, and the link that came back. */
+export interface LogsShare {
+  /** Direct download link — what gets pasted into a bug report. */
+  url: string;
+  /** Every slice's link, in order, when the zip was too big to go up in one piece.
+   *  Empty for the single-part upload a log bundle almost always is. */
+  parts: string[];
+  files: number;
+  /** Bytes of log collected, before compression. */
+  bytes: number;
+  /** Bytes uploaded — the zip, a fraction of `bytes` for plain text. */
+  size: number;
+}
+
+/** Zip every log set, upload it, and hand back the direct link. Same archive as
+ *  {@link exportLogs}, and the same upload the Library's file share goes out on. */
+export function shareLogs(): Promise<LogsShare> {
+  return invoke<LogsShare>("share_logs");
+}
+
+/** Subscribe to log-share pack/upload phase updates. Same payload as the file share's,
+ *  on its own event so Settings never hears the Library's upload. */
+export function onLogsShareProgress(
+  cb: (p: BundleProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<BundleProgress>("logs-share-progress", (event) => cb(event.payload));
+}
+
+/** Share anonymous usage counts. Off stops the app buffering them, not merely sending. */
+export function setAnalyticsEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_analytics_enabled", { enabled });
 }
 
 /** Hide-to-tray + keep-running toggle. */
@@ -781,15 +1138,34 @@ export function setLaunchAtStartup(enabled: boolean): Promise<void> {
   return invoke<void>("set_launch_at_startup", { enabled });
 }
 
-/** Kick off download → extract → place. Progress arrives via `onInstallProgress`. */
+/**
+ * Kick off download → extract → place. Progress arrives via `onInstallProgress`.
+ *
+ * Resolves to `null` when the mod is installed — the ordinary case. A download that turns
+ * out to hold *several* mods (the OEM bike pack is 54 bikes and a tyre set in one archive)
+ * resolves to a plan instead, with nothing yet written: put it up for review and finish it
+ * through `commitDrop`, or free the staged bytes with `cancelDrop`.
+ */
 export function addToLibrary(
   slug: string,
   url: string,
   host: string,
   subpath: string,
   destFolder: string,
-): Promise<void> {
-  return invoke<void>("add_to_library", { slug, url, host, subpath, destFolder });
+): Promise<DropPlan | null> {
+  return invoke<DropPlan | null>("add_to_library", {
+    slug,
+    url,
+    host,
+    subpath,
+    destFolder,
+  });
+}
+
+/** Stop the install in flight for `slug`. `false` when nothing is running under it — only the
+ *  transfer is interruptible, so this does nothing once extraction has begun. */
+export function cancelInstall(slug: string): Promise<boolean> {
+  return invoke<boolean>("cancel_install", { slug });
 }
 
 /** Import a file the user downloaded manually (extract + place into `subpath`). */
@@ -1298,11 +1674,17 @@ export function isBlockedDownload(opt: { url: string; host: string }): boolean {
   return BLOCKED_HOST_PATTERNS.some((p) => s.includes(p));
 }
 
+/**
+ * Every download a mod offers, best first.
+ *
+ * Dedicated-server builds are sorted last rather than dropped. Hiding them read as "this
+ * mod has one file" while the flag was a guess — a mislabelled block took the only download
+ * off the page, and a server build the parser missed was silently preselected instead.
+ * Ranked below even a browser-only mirror, since that at least installs something playable.
+ */
 export function sortMirrors(detail: ModDetail): DownloadOption[] {
-  const all = detail.downloads ?? [];
-  const playable = all.filter((d) => !d.isServer);
-  const pool = playable.length ? playable : all;
-  return [...pool].sort((a, b) => {
+  return [...(detail.downloads ?? [])].sort((a, b) => {
+    if (a.isServer !== b.isServer) return Number(a.isServer) - Number(b.isServer);
     const ab = isBlockedDownload(a) ? 1 : 0;
     const bb = isBlockedDownload(b) ? 1 : 0;
     if (ab !== bb) return ab - bb;
@@ -1310,17 +1692,159 @@ export function sortMirrors(detail: ModDetail): DownloadOption[] {
   });
 }
 
+/** The downloads that install something playable — everything but the server builds. */
+export function playableMirrors(mirrors: DownloadOption[]): DownloadOption[] {
+  return mirrors.filter((m) => !m.isServer);
+}
+
+/**
+ * Which of `mirrors` (in {@link sortMirrors} order) a picker should start on: the best
+ * playable file, never a server build while anything else is on offer.
+ */
+export function defaultMirrorIndex(mirrors: DownloadOption[]): number {
+  const i = mirrors.findIndex((m) => !m.isServer);
+  return i >= 0 ? i : 0;
+}
+
+/** A mod whose every download is a dedicated-server build — nothing here is playable. */
+export function isServerOnly(mirrors: DownloadOption[]): boolean {
+  return mirrors.length > 0 && mirrors.every((m) => m.isServer);
+}
+
+/**
+ * The displacement-shaped numbers a piece of text carries — two or three digits, so a year
+ * can never pass for a machine ("2026 CLUBMX Redbud" names no bike). Whole runs only: `250`
+ * is in `CR250`, and is not in `2023` or `1250`.
+ */
+const displacements = (s: string): Set<string> =>
+  new Set(digitRuns(s).filter((n) => n.length >= 2 && n.length <= 3));
+
+/** `MX1OEM_2023_KTM_250_SX-F/paints` → `MX1OEM_2023_KTM_250_SX-F`. */
+export function bikeOfDest(dest: string): string {
+  return dest.replace(/[/\\]paints$/i, "");
+}
+
+/** The bikes a destination list offers, taken from the `<bike>/paints` entry each one gets. */
+export function bikeNamesFromDest(destOptions: DestOption[]): string[] {
+  const out = new Set<string>();
+  for (const o of destOptions) {
+    const m = /^(.+)[/\\]paints$/i.exec(o.value);
+    if (m) out.add(m[1]);
+  }
+  return [...out];
+}
+
+export interface BikeVariants {
+  /** The bikes each download names, in `mirrors` order. Empty where it names none. */
+  bikes: Set<string>[];
+  /**
+   * Whether these are per-bike *files* rather than mirrors of one — i.e. whether the file
+   * to grab depends on which bike it's being installed for.
+   */
+  perBike: boolean;
+}
+
+/**
+ * Which bike each download on a page is for, where the page has one file per bike.
+ *
+ * Authors label those blocks with the displacement and nothing else — `pitfactory 250f pub`
+ * beside `pitfactory 125t pub`, or plain `250` beside `450` — while the site flags *both* as
+ * the default file. Nothing about that says "different file" to a picker built for mirrors,
+ * so the first block wins and the 250's paint lands in the 125's folder.
+ *
+ * A number in a label only counts when a bike actually installed carries that same run of
+ * digits, which is what keeps a rider number ("Gieck 18") or a pack's name ("288essentials")
+ * from reading as a machine. The page then only counts as per-bike when *every* playable
+ * download names one and at least two of them disagree: pages that mix one paint with a
+ * couple of model-swap links, or offer the same paint per rider, are mirrors as far as this
+ * is concerned and keep the behaviour they had. Measured over 240 livery posts this picks out
+ * the 7 real cases among the 64 with more than one download, and nothing else.
+ */
+export function bikeVariants(mirrors: DownloadOption[], bikes: string[]): BikeVariants {
+  const bikeNums = bikes.map((b) => new Set(digitRuns(b)));
+  const sets = mirrors.map((m) => {
+    const want = displacements(m.label);
+    const out = new Set<string>();
+    if (want.size === 0) return out;
+    bikes.forEach((b, i) => {
+      for (const n of want)
+        if (bikeNums[i].has(n)) {
+          out.add(b);
+          break;
+        }
+    });
+    return out;
+  });
+
+  // Server builds are named after the bike too, but nobody rides one — they say nothing
+  // about whether the *playable* files differ.
+  const idx = mirrors.map((_, i) => i).filter((i) => !mirrors[i].isServer);
+  const disjoint = (a: Set<string>, b: Set<string>) => ![...a].some((v) => b.has(v));
+  const perBike =
+    idx.length >= 2 &&
+    idx.every((i) => sets[i].size > 0) &&
+    idx.some((i, n) => idx.slice(n + 1).some((j) => disjoint(sets[i], sets[j])));
+
+  return { bikes: sets, perBike };
+}
+
+/**
+ * The download meant for `bike`, or `null` when no block names it.
+ *
+ * The narrowest match wins: a file labelled for one bike beats one labelled for several.
+ */
+export function variantForBike(
+  mirrors: DownloadOption[],
+  variants: BikeVariants,
+  bike: string,
+): DownloadOption | null {
+  let best: DownloadOption | null = null;
+  let bestSize = Infinity;
+  for (let i = 0; i < mirrors.length; i++) {
+    const set = variants.bikes[i];
+    if (mirrors[i].isServer || !set?.has(bike) || set.size >= bestSize) continue;
+    best = mirrors[i];
+    bestSize = set.size;
+  }
+  return best;
+}
+
+/**
+ * The destination a per-bike download is asking for, out of the ones the post itself names,
+ * or `null` where that's ambiguous.
+ *
+ * A label reading `250` fits every 250 in the library, so only the post's own bikes can say
+ * which one was meant — and only when exactly one of them is on offer.
+ */
+export function destForVariant(
+  variants: BikeVariants,
+  index: number,
+  suggestions: string[],
+): string | null {
+  const set = variants.bikes[index];
+  if (!set) return null;
+  const hits = suggestions.filter((v) => set.has(bikeOfDest(v)));
+  return hits.length === 1 ? hits[0] : null;
+}
+
 export function pickDownloadForBike(
   mirrors: DownloadOption[],
   bikeName: string,
 ): DownloadOption | null {
   if (mirrors.length === 0) return null;
-  const fallback = () => mirrors.find((m) => m.isDefault) ?? mirrors[0];
+  // A sound pack's server build is named after the same bike as the file to play with, so
+  // it matches just as well — pick among the playable ones while there are any.
+  const playable = playableMirrors(mirrors);
+  const pool = playable.length ? playable : mirrors;
+  const fallback = () => pool.find((m) => m.isDefault) ?? pool[0];
   const want = tokens(bikeName);
   if (want.size === 0) return fallback();
 
+  // Deliberately word-matching only, no displacement pass: sound packs are labelled by
+  // brand ("Just KTM 250SX-F") and a bare 250 would hand a Honda the KTM's sound. A livery's
+  // per-bike files are read by {@link bikeVariants} instead, which has the bikes to check against.
   let best: { m: DownloadOption; score: number } | null = null;
-  for (const m of mirrors) {
+  for (const m of pool) {
     const fname = m.url.split(/[/\\]/).pop() ?? "";
     const hay = tokens(`${m.label} ${m.host} ${fname}`);
     let score = 0;
@@ -1393,7 +1917,13 @@ export interface QuickInstallParams {
 
 export type QuickInstallResult =
   | { ok: true; params: QuickInstallParams }
-  | { ok: false; reason: "blocked" | "none"; title: string; host?: string };
+  | {
+      ok: false;
+      /** `serverOnly` — every file the page offers is a dedicated-server build. */
+      reason: "blocked" | "none" | "serverOnly";
+      title: string;
+      host?: string;
+    };
 
 /**
  * The folder a one-click install from the Browse grid uses — the same answer the install
@@ -1411,8 +1941,12 @@ export async function resolveQuickInstall(
 ): Promise<QuickInstallResult> {
   const detail = await getModDetail(slug);
   const mirrors = sortMirrors(detail);
-  const primary = mirrors[0];
+  const primary = mirrors[defaultMirrorIndex(mirrors)];
   if (!primary) return { ok: false, reason: "none", title: detail.title };
+  // One click can't ask which build was meant, and a dedicated-server file installed by
+  // mistake looks installed while the game shows nothing. Send them to the mod's page,
+  // where every download is spelled out.
+  if (primary.isServer) return { ok: false, reason: "serverOnly", title: detail.title };
   if (isBlockedDownload(primary))
     return { ok: false, reason: "blocked", title: detail.title, host: primary.host };
 
@@ -1465,6 +1999,19 @@ export async function resolveQuickInstall(
   );
   const destFolder = resolveInitialFolder(game, modType, options, guess, livery);
 
+  // A page with a file per bike has no single "the download": one click otherwise installs
+  // the 250's paint into the folder it just picked for the 125. The file follows the folder.
+  const variants =
+    modType.id === "bikes"
+      ? bikeVariants(mirrors, bikeNames(installed, bikeTargets))
+      : { bikes: [], perBike: false };
+  const match = variants.perBike
+    ? variantForBike(mirrors, variants, bikeOfDest(destFolder))
+    : null;
+  const file = match ?? primary;
+  if (isBlockedDownload(file))
+    return { ok: false, reason: "blocked", title: detail.title, host: file.host };
+
   return {
     ok: true,
     params: {
@@ -1472,8 +2019,8 @@ export async function resolveQuickInstall(
       title: detail.title,
       subpath: modType.installSubpath,
       destFolder,
-      url: primary.url,
-      host: primary.host,
+      url: file.url,
+      host: file.host,
     },
   };
 }
@@ -1549,6 +2096,76 @@ export function shopInstalledMap(): Promise<Record<string, string[]>> {
   return invoke<Record<string, string[]>>("shop_installed_map");
 }
 
+/**
+ * The download history — everything the app installed, newest first, failures included.
+ *
+ * Kept in Rust rather than derived from the library scan because a scan can only see what is
+ * on disk: it has no idea when a mod arrived, and a download that failed left nothing to find.
+ */
+export function downloadHistory(): Promise<DownloadRecord[]> {
+  return invoke<DownloadRecord[]>("download_history");
+}
+
+/** Note a finished download. Resolves to `null` if there was nothing worth recording. */
+export function recordDownload(entry: NewDownload): Promise<DownloadRecord | null> {
+  return invoke<DownloadRecord | null>("record_download", { entry });
+}
+
+export function forgetDownload(id: string): Promise<void> {
+  return invoke<void>("forget_download", { id });
+}
+
+export function clearDownloadHistory(): Promise<void> {
+  return invoke<void>("clear_download_history");
+}
+
+/**
+ * Mods under `subpath` the tree no longer holds — deleted, or parked by Manage.
+ *
+ * Only the missing ones: what is installed came back from {@link scanLibrary} already, and a
+ * thumbnail inflated for a mod the Library can see for itself is bytes over IPC for nothing.
+ *
+ * Distinct from {@link downloadHistory}, which knows only what the app itself fetched. This
+ * covers everything that was ever in the folder, however it got there — a track built in the
+ * editor and copied in by hand included.
+ */
+export function libraryLedger(subpath: string): Promise<LedgerRow[]> {
+  return invoke<LedgerRow[]>("library_ledger", { subpath });
+}
+
+/**
+ * Snapshot title, author, location and thumbnail for installed mods whose ledger row hasn't
+ * got one yet.
+ *
+ * Call after {@link primeMetaCache}: most of the work is then already done and reduces to a
+ * file read per mod. It is the only chance to capture any of it — once the files are deleted
+ * there is no way to learn what they were.
+ */
+export function ledgerCapture(): Promise<void> {
+  return invoke<void>("ledger_capture");
+}
+
+/**
+ * Put a mod the app deleted back where it came from.
+ *
+ * Only possible when the row carries a `trashedAt`, or on a platform whose Trash can be
+ * asked to undo its own recycle. Refuses rather than overwrites if something is already
+ * installed at that path.
+ */
+export function restoreLedgerEntry(key: string): Promise<void> {
+  return invoke<void>("restore_ledger_entry", { key });
+}
+
+/** Drop one row, and its thumbnail, from the ledger. */
+export function forgetLedgerEntry(key: string): Promise<void> {
+  return invoke<void>("forget_ledger_entry", { key });
+}
+
+/** Forget everything no longer installed. Rows still on disk stay. */
+export function clearLedger(): Promise<void> {
+  return invoke<void>("clear_ledger");
+}
+
 /** Fires after a WebView sign-in completes; payload is whether it succeeded. */
 export function onShopAuth(cb: (ok: boolean) => void): Promise<UnlistenFn> {
   return listen<boolean>("shop-auth", (event) => cb(event.payload));
@@ -1561,6 +2178,13 @@ export function reloadFrostmod(): Promise<ReloadOutcome> {
 /** Is FrostMod currently running on this PC? */
 export function isFrostmodRunning(): Promise<boolean> {
   return invoke<boolean>("frostmod_running");
+}
+
+/** Did FrostMod actually get into the running game, and if not, why not?
+ *
+ *  Distinct from {@link isFrostmodRunning}, which only reports that the launcher is up. */
+export function frostmodAttachment(): Promise<Attachment> {
+  return invoke<Attachment>("frostmod_attachment");
 }
 
 /** Start MX Bikes. Resolves to `already_running` when the game is already up. */
@@ -1579,12 +2203,33 @@ export function joinServer(address: string): Promise<LaunchOutcome> {
   return invoke<LaunchOutcome>("join_server", { address });
 }
 
-/** Is MX Bikes currently running? Always false off Windows — the probe is Win32-only. */
+/** Is MX Bikes currently running? Probes for real on all three platforms — under Wine and
+ *  Proton the game is an ordinary process whose argv still names the exe. */
 export function isGameRunning(): Promise<boolean> {
   return invoke<boolean>("game_running");
 }
 
 /** Install/version/running snapshot (hits GitHub for the latest tag). */
+/** One replay camera editor action and the key it is on, in FrostMod's own text form
+ *  (`F9`, `Ctrl+Numpad1`, `none`) — one spelling shared by both programs. */
+export type FrostmodKeybind = { id: string; key: string };
+
+/** The bindings FrostMod would read right now: its defaults, plus whatever its config says. */
+export function frostmodKeybinds(): Promise<FrostmodKeybind[]> {
+  return invoke<FrostmodKeybind[]>("frostmod_keybinds");
+}
+
+/** Rebind the editor. FrostMod re-reads its config each time the editor opens, so this
+ *  lands without restarting the game. Rejects a key FrostMod could not read back. */
+export function setFrostmodKeybinds(binds: FrostmodKeybind[]): Promise<void> {
+  return invoke<void>("frostmod_set_keybinds", { binds });
+}
+
+/** What FrostMod ships with, for the reset button. */
+export function frostmodDefaultKeybinds(): Promise<FrostmodKeybind[]> {
+  return invoke<FrostmodKeybind[]>("frostmod_default_keybinds");
+}
+
 export function frostmodStatus(): Promise<FrostmodStatus> {
   return invoke<FrostmodStatus>("frostmod_status");
 }
@@ -1606,13 +2251,51 @@ export function frostmodInstallRuntime(
   return invoke<RuntimeInstallOutcome>("frostmod_install_runtime", { runtime });
 }
 
+/** Install everything this PC is short of, and clear a stray `msvcr90.dll` beside the exe.
+ *
+ *  The repair the warning bar can't reach: it runs whatever detection said, because a
+ *  machine can report every runtime present and still fail to start the game. Raises UAC
+ *  once per installer, and never rejects — what it couldn't do comes back in
+ *  `stillMissing` for the caller to offer links for. */
+export function frostmodRepairRuntimes(): Promise<RuntimeRepairReport> {
+  return invoke<RuntimeRepairReport>("frostmod_repair_runtimes");
+}
+
+/** Move a loose `msvcr90.dll` beside the game exe out of the loader's way.
+ *
+ *  Renames it to `msvcr90.dll.disabled` rather than deleting: the loader matches the exact
+ *  filename, so the rename is what defuses it, and a file somebody else put there survives
+ *  the decision. Resolves to where it went; rejects with a message worth showing — a file
+ *  the running game holds open is the common one. */
+export function frostmodClearStrayMsvcr90(): Promise<string> {
+  return invoke<string>("frostmod_clear_stray_msvcr90");
+}
+
 /** Where to send someone whose UAC prompt we can't raise (or who declined it).
  *
  *  Microsoft's own direct downloads, the same ones the backend fetches — a download page
- *  would make them pick an architecture, and picking x86 here fixes nothing. */
+ *  would make them pick an architecture, and picking the wrong one fixes nothing. Both
+ *  2015–2022 builds are here because that is what Microsoft's "Latest Supported Visual C++
+ *  Downloads" page hands out, and a 32-bit plugin or the dedicated-server build needs the
+ *  x86 one no matter how many x64 packages are already installed. */
 export const RUNTIME_DOWNLOAD_URL: Record<VcRuntime, string> = {
   vc90: "https://download.microsoft.com/download/5/D/8/5D8C65CB-C849-4025-8E95-C3966CAFD8AE/vcredist_x64.exe",
   vc140: "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+  vc140_x86: "https://aka.ms/vs/17/release/vc_redist.x86.exe",
+};
+
+/** Microsoft's index page for the pair above, for a player who'd rather see the source. */
+export const RUNTIME_DOWNLOADS_PAGE =
+  "https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist";
+
+/** Translation key naming each runtime the way Microsoft's installer does.
+ *
+ *  The architecture is part of the name on purpose: someone told to install "Visual C++"
+ *  who already has the x64 package needs to see that it's the other one being asked for. */
+export const RUNTIME_NAME_KEY: Record<VcRuntime, TKey> = {
+  vc90: "runtime.componentVc90",
+  vc140: "runtime.componentVc140",
+  vc140_x86: "runtime.componentVc140X86",
 };
 
 /** Launch the managed FrostMod process if it isn't already running. */
@@ -1629,6 +2312,11 @@ export function frostmodStop(): Promise<boolean> {
 /** Toggle auto-running FrostMod when the app opens. */
 export function setAutoRunFrostmod(enabled: boolean): Promise<void> {
   return invoke<void>("set_auto_run_frostmod", { enabled });
+}
+
+/** Extra command-line flags handed to `frostmod.exe`, exactly as typed. */
+export function setFrostmodArgs(args: string): Promise<void> {
+  return invoke<void>("set_frostmod_args", { args });
 }
 
 export function setInstantRefresh(enabled: boolean): Promise<void> {
@@ -1701,6 +2389,16 @@ export function setVoiceEnabled(enabled: boolean): Promise<void> {
   return invoke<void>("set_voice_enabled", { enabled });
 }
 
+/** Share this rider's look with the grid, and install the grid's back. */
+export function setPaintSyncEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_paint_sync_enabled", { enabled });
+}
+
+/** Pick the tyre pack the 3D previews fit. `""` means "whatever the bike names". */
+export function setPreviewTyres(tyres: string): Promise<void> {
+  return invoke<void>("set_preview_tyres", { tyres });
+}
+
 /** Pick the microphone. `""` means "follow the system default". */
 export function setVoiceInputDevice(device: string): Promise<void> {
   return invoke<void>("set_voice_input_device", { device });
@@ -1714,6 +2412,11 @@ export function setVoiceOutputDevice(device: string): Promise<void> {
 /** Rebind push-to-talk. Rejects (leaving the old one live) if the combo is taken. */
 export function setVoicePttHotkey(hotkey: string): Promise<void> {
   return invoke<void>("set_voice_ptt_hotkey", { hotkey });
+}
+
+/** Switch between push-to-talk (hold) and toggle (latch). Rebinds the mic key. */
+export function setVoiceToggleToTalk(toggle: boolean): Promise<void> {
+  return invoke<void>("set_voice_toggle_to_talk", { toggle });
 }
 
 export function setVoiceLevels(inputGain: number, outputVolume: number): Promise<void> {
@@ -1747,12 +2450,69 @@ export function onVoicePtt(cb: (down: boolean) => void): Promise<UnlistenFn> {
   return listen<boolean>("voice-ptt", (e) => cb(e.payload));
 }
 
+/** One other rider in voice on this server. */
+export type VoicePeer = {
+  peerId: string;
+  /** What they call themselves in game. A label — never trusted as an identity. */
+  riderName: string;
+  /** Their race number, or 0 before they are on the grid. */
+  raceNum: number;
+  /** The direct connection to them is up. False while it is still being made, and for
+   *  anyone whose router we cannot get through to. */
+  connected: boolean;
+  talking: boolean;
+  muted: boolean;
+};
+
+export type VoiceStatus = {
+  joined: boolean;
+  /** The server this room belongs to. */
+  server: string;
+  peers: VoicePeer[];
+  /** Why voice isn't working, when it isn't. */
+  error: string | null;
+};
+
+/** Who is in voice right now. The panel also gets these pushed; this is the first paint. */
+export function voiceStatus(): Promise<VoiceStatus> {
+  return invoke<VoiceStatus>("voice_status");
+}
+
+/** Silence one rider for the rest of this session. */
+export function voiceMute(peerId: string, muted: boolean): Promise<void> {
+  return invoke<void>("voice_mute", { peerId, muted });
+}
+
+/** Fires whenever the room changes — someone joined, left, started or stopped talking. */
+export function onVoiceStatus(cb: (status: VoiceStatus) => void): Promise<UnlistenFn> {
+  return listen<VoiceStatus>("voice-status", (e) => cb(e.payload));
+}
+
+/**
+ * Fires at the start of each game session when the mods tree is on a cloud sync tool —
+ * either with bytes actually evicted, or merely sitting behind the sync driver.
+ */
+export function onModsDehydrated(
+  cb: (info: ModsDehydrated) => void,
+): Promise<UnlistenFn> {
+  return listen<ModsDehydrated>("mods-dehydrated", (e) => cb(e.payload));
+}
+
 /** Toggle watching the mods folder to reload the game on external changes. */
 export function setWatchModsReload(enabled: boolean): Promise<void> {
   return invoke<void>("set_watch_mods_reload", { enabled });
 }
 
-/** Sentinel slug the backend tags folder-watch reloads with (vs in-app installs). */
+/**
+ * Toggle injecting `mxbsecure.dll` into the running game for locked content.
+ *
+ * Takes effect on the next game session — the app decides once per run, so flipping this
+ * mid-session won't reach into a game that's already up.
+ */
+export function setSecureContentInject(enabled: boolean): Promise<void> {
+  return invoke<void>("set_secure_content_inject", { enabled });
+}
+
 export const MODS_WATCH_SLUG = "__mods_watch__";
 
 /** Fires after each install with whether FrostMod picked the new mod up live. */
@@ -1788,6 +2548,16 @@ export function presetsListProfiles(): Promise<ProfilesScan> {
 /** Bike ids present in a profile — the targets a loadout can be applied to. */
 export function presetsListBikes(profile: string): Promise<string[]> {
   return invoke<string[]>("presets_list_bikes", { profile });
+}
+
+/**
+ * Drop a bike from a profile and return what's left.
+ *
+ * The list above is `profile.ini`, not the mods folder, so bikes whose mod is gone linger
+ * there with nothing in the Library to uninstall. This is how they go.
+ */
+export function presetsForgetBike(profile: string, bikeid: string): Promise<string[]> {
+  return invoke<string[]>("presets_forget_bike", { profile, bikeid });
 }
 
 /** Read a bike's current cosmetic column (for "capture current look"). */
@@ -1840,6 +2610,77 @@ export function presetsDecode(text: string): Promise<Preset> {
 /** Import a share code: decode + save + return the stored preset. */
 export function presetsImport(text: string): Promise<Preset> {
   return invoke<Preset>("presets_import", { text });
+}
+
+/**
+ * A riding-feel preset: the settings half of a profile, saved by name.
+ *
+ * The game keeps these in two files — `profile.ini` (aids, view, input options, graphics
+ * quality) and `controls.txt` (per-control gain, deadzone, linearity, smoothing). A preset
+ * carries the settings from both and never the bindings, so a shared one can't rebind
+ * anyone's controller.
+ */
+export type Feel = {
+  name: string;
+  /** `profile.ini` values: section -> key -> value. */
+  ini: Record<string, Record<string, string>>;
+  /** `controls.txt` tuning, keyed by the control's own name (not its index). */
+  controls: Record<string, Record<string, string>>;
+};
+
+/** What applying a feel preset actually changed. */
+export type FeelApplyReport = {
+  /** `profile.ini` keys written. */
+  settings: number;
+  /** `controls.txt` tuning values written. */
+  tuning: number;
+  /** Controls the preset tunes that this profile hasn't bound. */
+  missingControls: string[];
+};
+
+/** All saved feel presets. */
+export function feelList(): Promise<Feel[]> {
+  return invoke<Feel[]>("feel_list");
+}
+
+/** Read the settings a profile is running right now, ready to be named and saved. */
+export function feelCapture(profile: string): Promise<Feel> {
+  return invoke<Feel>("feel_capture", { profile });
+}
+
+/** Save (or overwrite by name) a feel preset. */
+export function feelSave(feel: Feel): Promise<void> {
+  return invoke<void>("feel_save", { feel });
+}
+
+/** Delete a feel preset by name. */
+export function feelDelete(name: string): Promise<void> {
+  return invoke<void>("feel_delete", { name });
+}
+
+/**
+ * Write a saved feel back into a profile.
+ *
+ * Rejects while the game is running: MX Bikes holds both files for the session and writes
+ * them out on exit, so an apply mid-session would be silently overwritten.
+ */
+export function feelApply(profile: string, name: string): Promise<FeelApplyReport> {
+  return invoke<FeelApplyReport>("feel_apply", { profile, name });
+}
+
+/** Export a saved feel as a portable one-line share code (`MXBF1-…`). */
+export function feelExport(name: string): Promise<string> {
+  return invoke<string>("feel_export", { name });
+}
+
+/** Decode a feel code *without* saving — preview before importing. */
+export function feelDecode(text: string): Promise<Feel> {
+  return invoke<Feel>("feel_decode", { text });
+}
+
+/** Import a feel code: decode + save + return the stored preset. */
+export function feelImport(text: string): Promise<Feel> {
+  return invoke<Feel>("feel_import", { text });
 }
 
 /** Every mod the Manage tab can act on, enabled and disabled alike. */
@@ -1914,8 +2755,8 @@ export function fileShareCreate(paths: string[]): Promise<string> {
 }
 
 /** Read a share code *without* downloading — preview what it carries. */
-export function fileSharePreview(text: string): Promise<FileShare> {
-  return invoke<FileShare>("file_share_preview", { text });
+export function fileSharePreview(text: string): Promise<SharePreview> {
+  return invoke<SharePreview>("file_share_preview", { text });
 }
 
 /** Download a share code's files and install them where the sender had them. */
@@ -1942,15 +2783,18 @@ export function appPlatform(): Promise<string> {
 export interface ExperimentalState {
   /** The MX Bikes GUID this account has claimed, if any. */
   guid?: string;
-  /** Whether the unfinished multiplayer features should be shown at all. */
-  enabled: boolean;
-  /** On because `MXB_EXPERIMENTAL=1` was set, so the toggle can explain itself. */
-  forcedByEnv: boolean;
   version: string;
   /** A semver pre-release suffix (`0.8.0-beta.1`) — what makes this build a beta. */
   prerelease: boolean;
-  /** Whether this install has a control-plane account yet. */
+  /**
+   * Whether this install has a control-plane account yet.
+   *
+   * No longer "typed in an invite code": paint sync claims one on its own the first time it
+   * runs, so this is simply whether the control plane knows who this is.
+   */
   enrolled: boolean;
+  /** Whether paint sync is running at all. Off is a setting, not a missing account. */
+  paintSyncEnabled: boolean;
   riderName: string;
   /** What paint sync last achieved — present so a cold start can say so straight away. */
   sync: SyncState;
@@ -1961,6 +2805,8 @@ export interface ExperimentalState {
    * a publish that quietly does nothing.
    */
   profile: string | null;
+  /** Paints the sync has installed and can still take back out. */
+  syncedPaints: number;
 }
 
 export interface PublishOutcome {
@@ -2025,10 +2871,6 @@ export function experimentalState(): Promise<ExperimentalState> {
   return invoke<ExperimentalState>("experimental_state");
 }
 
-export function setExperimental(enabled: boolean): Promise<void> {
-  return invoke<void>("set_experimental", { enabled });
-}
-
 /** Trade an invite code for an account. The token is stored by the backend, never here. */
 export function enrollAccount(code: string, riderName: string): Promise<string> {
   return invoke<string>("enroll_account", { code, riderName });
@@ -2062,6 +2904,24 @@ export function publishPaints(force = false, profile?: string): Promise<PublishO
  */
 export function syncPaints(): Promise<PullOutcome> {
   return invoke<PullOutcome>("sync_paints");
+}
+
+export interface RemoveOutcome {
+  removed: number;
+  /** Paints left alone because their bytes have changed since the sync wrote them. */
+  keptYours: number;
+  /** Recorded paints whose file had already gone. */
+  missing: number;
+}
+
+/**
+ * Take every synced paint back out of the mods folder.
+ *
+ * Turning the sync off leaves what it already installed, so this is the way to actually get
+ * the folder back. Only files the sync wrote and nobody has edited since are touched.
+ */
+export function removeSyncedPaints(): Promise<RemoveOutcome> {
+  return invoke<RemoveOutcome>("remove_synced_paints");
 }
 
 // ── Dedicated servers ────────────────────────────────────────────────────────
@@ -2110,6 +2970,29 @@ export interface RegisteredServer {
  */
 export function cpServers(): Promise<RegisteredServer[]> {
   return invoke<RegisteredServer[]>("cp_servers");
+}
+
+/** One live server from the game's master list — what the Servers tab shows per row. */
+export interface MasterServer {
+  name: string;
+  /** `ip:port`, ready for {@link joinServer}. */
+  address: string;
+  players: number;
+  maxPlayers: number;
+  /** Round-trip in ms, or `null` when it wasn't measured. */
+  pingMs: number | null;
+  track: string;
+  passworded: boolean;
+  region: string;
+}
+
+/**
+ * Every live MX Bikes server, as the in-game WORLD browser sees it, read straight from
+ * PiBoSo's master server. Rejects with a human-readable message when the list can't be
+ * fetched (this build lacks the browser, or the master didn't answer) — the tab shows it.
+ */
+export function listMasterServers(): Promise<MasterServer[]> {
+  return invoke<MasterServer[]>("list_master_servers");
 }
 
 export type ServerAction = "start" | "stop" | "restart";

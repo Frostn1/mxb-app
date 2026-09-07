@@ -80,20 +80,36 @@ pub fn split_prefix(path: &Path) -> Option<(PathBuf, PathBuf)> {
     None
 }
 
-/// The exe as the bottle sees it — `C:\Program Files\...` — for wrappers that take a
-/// Windows path rather than a host one.
+/// A host path as the bottle sees it, for the wrappers and the Windows programs that take
+/// a Windows path rather than a host one.
+///
+/// Two shapes, and which applies is a fact about the path: anything under the prefix's own
+/// `drive_c` is on `C:`, everything else on the machine is on `Z:`, the drive Wine maps to
+/// `/`. Both matter here — the game is inside the bottle, FrostMod is installed beside our
+/// own data and reached from in there as `Z:`. Same rule as [`crate::proton::windows_path`].
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn windows_path(prefix: &Path, exe: &Path) -> Option<String> {
-    let (found, rel) = split_prefix(exe)?;
-    if found != prefix {
-        return None;
-    }
-    let joined = rel
+pub fn windows_path(prefix: &Path, path: &Path) -> String {
+    let drive_c = prefix.join(DRIVE_C);
+    let (drive, rest) = match path.strip_prefix(&drive_c) {
+        Ok(rest) => ("C:", rest),
+        Err(_) => ("Z:", path.strip_prefix("/").unwrap_or(path)),
+    };
+    let joined = rest
         .components()
         .map(|c| c.as_os_str().to_string_lossy().into_owned())
         .collect::<Vec<_>>()
         .join("\\");
-    Some(format!("C:\\{joined}"))
+    format!("{drive}\\{joined}")
+}
+
+/// Can a program inside `prefix` reach the rest of this Mac?
+///
+/// `Z:` is what makes FrostMod's folder addressable from in there, and a bottle whose drive
+/// mapping has been stripped fails *invisibly*: FrostMod injects, `F8` still reloads, and
+/// every button in this app writes a file nothing can see. Worth a check that names the fix.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn has_z_drive(prefix: &Path) -> bool {
+    prefix.join("dosdevices/z:").exists()
 }
 
 /// Every Wine prefix on this Mac, for the install detectors to search.
@@ -295,11 +311,10 @@ pub fn plan(runner: &Runner, prefix: &Path, exe: &Path, extra: &[String]) -> Lau
             args.push("--bottle".into());
             args.push(bottle.clone());
             args.push("--cx-app".into());
-            // A host path works too, but the bottle-relative Windows path is the form
-            // CodeWeavers documents, and the one `--cx-app` is built to resolve.
-            args.push(
-                windows_path(prefix, exe).unwrap_or_else(|| exe.to_string_lossy().into_owned()),
-            );
+            // A host path works too, but the Windows path is the form CodeWeavers
+            // documents, and the one `--cx-app` is built to resolve. `C:` for the game,
+            // which lives in the bottle; `Z:` for FrostMod, which doesn't.
+            args.push(windows_path(prefix, exe));
             env.push(("CX_ROOT".into(), root.to_string_lossy().into_owned()));
         }
         RunnerKind::Wine { .. } => {
@@ -318,13 +333,60 @@ pub fn plan(runner: &Runner, prefix: &Path, exe: &Path, extra: &[String]) -> Lau
 /// this app's argv can carry the path it is about to launch.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn running_exe(ps_output: &str, exe: &str, own_pid: u32) -> bool {
+    !pids_running(ps_output, exe, own_pid).is_empty()
+}
+
+/// Every pid in `ps_output` whose argv names `exe`, ours excluded.
+///
+/// More than one is normal and correct: the wrapper we spawned and the Wine process doing
+/// the work both carry the path, and stopping FrostMod means stopping both.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn pids_running(ps_output: &str, exe: &str, own_pid: u32) -> Vec<u32> {
     let needle = exe.to_ascii_lowercase();
-    ps_output.lines().any(|line| {
-        let Some((pid, args)) = line.trim_start().split_once(char::is_whitespace) else {
-            return false;
-        };
-        pid.parse::<u32>().is_ok_and(|p| p != own_pid) && args.to_ascii_lowercase().contains(&needle)
-    })
+    ps_output
+        .lines()
+        .filter_map(|line| {
+            let (pid, args) = line.trim_start().split_once(char::is_whitespace)?;
+            let pid = pid.parse::<u32>().ok()?;
+            (pid != own_pid && args.to_ascii_lowercase().contains(&needle)).then_some(pid)
+        })
+        .collect()
+}
+
+/// The process table, as `ps` reports it. Empty when we couldn't ask.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn process_table() -> String {
+    std::process::Command::new("ps")
+        .args(["-Ao", "pid=,args="])
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+/// Stop everything running `exe`. Best-effort, and TERM rather than KILL: FrostMod's
+/// launcher tidies up after itself when asked politely, and a Wine process killed outright
+/// can leave the prefix's server holding its handles.
+///
+/// Shells out because the app links no libc of its own for a single `kill(2)`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn kill_exe(exe: &str) {
+    let pids = pids_running(&process_table(), exe, std::process::id());
+    if pids.is_empty() {
+        return;
+    }
+    let mut cmd = std::process::Command::new("kill");
+    cmd.arg("-TERM");
+    for pid in &pids {
+        cmd.arg(pid.to_string());
+    }
+    match cmd.output() {
+        Ok(out) if !out.status.success() => log::warn!(
+            "asking {exe} ({pids:?}) to stop failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ),
+        Err(e) => log::warn!("couldn't run kill to stop {exe}: {e}"),
+        _ => {}
+    }
 }
 
 /// What the app found to launch with, for Settings to show. Reported rather than assumed:
@@ -392,9 +454,62 @@ mod tests {
         let prefix = Path::new("/b/MXB");
         let exe = Path::new("/b/MXB/drive_c/Program Files/MX Bikes/mxbikes.exe");
         assert_eq!(
-            windows_path(prefix, exe).unwrap(),
+            windows_path(prefix, exe),
             "C:\\Program Files\\MX Bikes\\mxbikes.exe"
         );
+    }
+
+    /// FrostMod is installed in our own data folder, which is nowhere near the bottle —
+    /// and a program inside the bottle reaches it as `Z:`, the drive Wine maps to `/`.
+    /// Without this the launcher is handed a path it can't open.
+    #[test]
+    fn a_path_outside_the_bottle_is_on_the_z_drive() {
+        let prefix = Path::new("/b/MXB");
+        assert_eq!(
+            windows_path(
+                prefix,
+                Path::new("/Users/x/Library/Application Support/MXB App/frostmod/frostmod.exe")
+            ),
+            "Z:\\Users\\x\\Library\\Application Support\\MXB App\\frostmod\\frostmod.exe"
+        );
+    }
+
+    /// A bottle with its `Z:` mapping stripped can't see FrostMod's folder, and nothing
+    /// about that failure is visible from in-game — so it is checked before starting.
+    ///
+    /// Unix only for the symlink `dosdevices/z:` actually is — and there are no bottles on
+    /// Windows to check anyway.
+    #[cfg(unix)]
+    #[test]
+    fn a_bottle_without_a_z_drive_is_spotted() {
+        let root = temp_dir("z-drive");
+        let with = root.join("with");
+        std::fs::create_dir_all(with.join("dosdevices")).unwrap();
+        std::os::unix::fs::symlink("/", with.join("dosdevices/z:")).unwrap();
+        let without = root.join("without");
+        std::fs::create_dir_all(without.join("dosdevices")).unwrap();
+
+        assert!(has_z_drive(&with));
+        assert!(!has_z_drive(&without));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Stopping FrostMod has to reach both processes that carry its name — the wrapper we
+    /// spawned and the Wine process under it — and never this app.
+    #[test]
+    fn every_process_carrying_the_name_is_listed_except_our_own() {
+        let ps = "\
+  501 /sbin/launchd
+ 8123 /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine --bottle MXB --cx-app Z:\\Users\\x\\frostmod.exe
+ 8124 /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wineserver
+ 8125 C:\\windows\\system32\\explorer.exe /desktop FrostMod.exe --game mxb
+ 9000 /Applications/MXB App.app/Contents/MacOS/mxb-app";
+        let mut pids = pids_running(ps, "frostmod.exe", 9000);
+        pids.sort();
+        assert_eq!(pids, [8123, 8125], "both the wrapper and the Wine process: {pids:?}");
+        assert!(pids_running(ps, "frostmod.exe", 8123).iter().all(|p| *p != 8123));
+        assert!(pids_running(ps, "gpbikes.exe", 9000).is_empty());
     }
 
     #[test]

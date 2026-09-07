@@ -87,10 +87,24 @@ fi
 
 if [ "$SUMMARY" -eq 1 ]; then
   body="$(printf '%s\n' "$body" | awk '
-    # A sub-bullet elaborates the item above it, so it goes with the detail.
-    /^[[:space:]]+[-*] /                { next }
+    # A sub-bullet elaborates the item above it, so it goes with the detail — and so does
+    # a continuation paragraph, which --fold leaves indented rather than joining to its
+    # bullet. Both are the explanation, which is exactly what a summary drops.
+    /^[[:space:]]+/                     { next }
     # Keep the bold headline the bullet opens with; drop the explanation after it.
     match($0, /^- \*\*[^*]+\*\*/)       { print substr($0, 1, RLENGTH); next }
+    # No bold headline. The changelog is written as plain bullets now, so there is no
+    # headline to cut to and this used to print the item whole — which made a summary the
+    # same length as the thing it was summarising, and left the caller nothing to do but
+    # trim the lot mid-sentence. The first sentence is the headline in that style.
+    #
+    # Cut at a full stop followed by a space and a capital: a decimal ("0.13.3") has no
+    # space, and "22 m round the lap" has no full stop, so neither is mistaken for the end
+    # of a sentence.
+    /^- / {
+      if (match($0, /\. [A-Z]/)) { print substr($0, 1, RSTART - 1) "…"; next }
+      print; next
+    }
                                         { print }
   ')"
 fi

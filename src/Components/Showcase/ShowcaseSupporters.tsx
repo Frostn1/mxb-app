@@ -27,8 +27,8 @@ export default function ShowcaseSupporters({ onOpen }: ShowcaseSupportersProps) 
   const { t } = useI18n();
   const { manifest } = useSupporters();
 
-  // Best tier first, longest-standing first within it — `groupByTier` already orders
-  // both, so flattening it keeps Settings and this strip naming the same people.
+  // Best tier first, manifest order within it — `groupByTier` already orders both, so
+  // flattening it keeps Settings and this strip naming the same people in the same order.
   const people = groupByTier(manifest).flatMap((g) => g.people);
   const count = people.length;
   // A fetch that legitimately returns nobody shouldn't leave "made possible by 0

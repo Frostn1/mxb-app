@@ -60,6 +60,7 @@ import {
 } from "@/Components/ui/alert-dialog";
 import ShopDetail from "./ShopDetail";
 import CategoryPill from "./CategoryPill";
+import { ContextBarRight } from "../Shell/ContextBar";
 import { Button } from "@/Components/ui/button";
 import { Skeleton } from "@/Components/ui/skeleton";
 import {
@@ -82,7 +83,7 @@ interface MyDownloadsProps {
 export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
   const t = useT();
   const { game } = useConfig();
-  const { active, startShopInstall } = useInstall();
+  const { activeFor, startShopInstall } = useInstall();
 
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [items, setItems] = useState<ShopItem[]>([]);
@@ -333,9 +334,26 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
     [game.id],
   );
 
-  /** Completion of the active install, when it reported a length. */
-  const activeProgress =
-    active && active.total ? (active.received ?? 0) / active.total : null;
+  /** The install running for one of a purchase's files, and how far along it is. Several
+   *  installs can be in flight now, so this is asked per purchase rather than once. */
+  const installOf = useCallback(
+    (files: ShopItem[]) => {
+      for (const f of files) {
+        const it = activeFor(f.slug);
+        if (it) return it;
+      }
+      return null;
+    },
+    [activeFor],
+  );
+
+  const progressOf = useCallback(
+    (files: ShopItem[]) => {
+      const it = installOf(files);
+      return it && it.total ? (it.received ?? 0) / it.total : null;
+    },
+    [installOf],
+  );
 
   /** The purchase waiting on the destination dialog, with everything the dialog needs. */
   const [pending, setPending] = useState<{
@@ -498,8 +516,8 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
         owned={{
           files: open.files,
           installed: open.installed,
-          busy: open.files.some((f) => f.slug === active?.slug),
-          progress: activeProgress,
+          busy: installOf(open.files) != null,
+          progress: progressOf(open.files),
           disabled: false,
           onInstall: (file) => install(open, file),
         }}
@@ -511,15 +529,17 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-none items-center gap-2 px-7 pb-3">
-        <span className="text-[12.5px] text-muted-foreground">
+      {/* Count and account controls ride in the shell's context bar beside the
+          Shop/Hub tabs, rather than opening a band of their own under them. */}
+      <ContextBarRight>
+        <span className="tabular-figures text-[12.5px] text-muted-foreground">
           {loggedIn && !loading
             ? t("purchases.count", { count: shown.length })
             : t("shop.myDownloads")}
         </span>
         {loggedIn && (
-          <div className="ml-auto flex items-center gap-2">
-            <div className="flex w-[240px] items-center gap-2 rounded-lg border border-input bg-card px-3 py-1.5">
+          <>
+            <div className="flex h-7 w-[220px] items-center gap-2 border border-input bg-card px-2.5">
               <Search className="size-3.5 text-faint" />
               <input
                 value={query}
@@ -539,9 +559,9 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
             <Button variant="outline" size="sm" onClick={() => void logout()}>
               <LogOut className="size-3.5" /> {t("shop.logOut")}
             </Button>
-          </div>
+          </>
         )}
-      </div>
+      </ContextBarRight>
 
       {/* Laid out like the catalog's, so the two tabs read as one screen. */}
       {loggedIn && !loading && purchases.length > 0 && (
@@ -630,8 +650,8 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
               <PurchaseCard
                 key={p.product}
                 purchase={p}
-                busy={p.files.some((f) => f.slug === active?.slug)}
-                progress={activeProgress}
+                busy={installOf(p.files) != null}
+                progress={progressOf(p.files)}
                 disabled={false}
                 onInstall={(file) => install(p, file)}
                 // Only a purchase the catalog lists has a detail page to open.

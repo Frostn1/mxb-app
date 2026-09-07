@@ -61,15 +61,36 @@ pub struct AppConfig {
     pub wine_runner: String,
     /// Hide to the tray on window close and keep running.
     pub run_in_background: bool,
-    /// Start MXB App automatically on login.
+    /// Start MXB App automatically on login. Off until the player asks for it: it is a mod
+    /// manager, not something that needs to be running before the game is.
     pub launch_at_startup: bool,
+    /// Which [`AUTOSTART_BINDING_REV`] the login item was last written for.
+    pub autostart_binding_rev: u32,
+    /// Which [`LAUNCH_AT_STARTUP_REV`] this config has been through — the one-shot that
+    /// turns the setting off once, described on [`LAUNCH_AT_STARTUP_REV`].
+    #[serde(default)]
+    pub launch_at_startup_rev: u32,
     /// Launch FrostMod automatically when the app opens.
     pub auto_run_frostmod: bool,
+    /// Extra command-line flags for `frostmod.exe`, exactly as they would be typed. Empty
+    /// for everyone who hasn't been asked for one: these are FrostMod's diagnostics, and
+    /// they carry their own warnings (`--force-overjump-off` is offline-only). Appended
+    /// after the flags we always send, so a flag typed here wins a repeat.
+    pub frostmod_args: String,
     /// Re-run the game's profile loader in place after applying a preset (Windows-only).
     pub instant_refresh: bool,
     /// Watch `<mods_path>/mods` and signal FrostMod to reload when tracks/bikes are
     /// added outside the app (e.g. a manual download dropped into the folder).
     pub watch_mods_reload: bool,
+    /// Inject `mxbsecure.dll` into the running game so locked content can be opened.
+    ///
+    /// **Off by default, deliberately.** This reaches into a process the app usually did not
+    /// create, and the DLL has never been proven on a real Windows run — a build that armed it
+    /// for everyone with locked content had the game dying on access violations 17–31s in, and
+    /// the only way out was quitting the app from the tray, because nothing else the app does
+    /// touches a Steam-started game. It stays opt-in until that run happens.
+    #[serde(default)]
+    pub secure_content_inject: bool,
     /// The intro slideshow has been dismissed. Kept here rather than in the webview's
     /// `localStorage` so it survives that storage being cleared (WebView2 resets it on
     /// an app-data wipe, and an OS shutdown can kill the tray-resident process before
@@ -83,9 +104,40 @@ pub struct AppConfig {
     /// The combo that toggles the overlay, in Tauri accelerator syntax
     /// (`"CommandOrControl+Shift+X"`). Blank falls back to [`DEFAULT_OVERLAY_HOTKEY`].
     pub overlay_hotkey: String,
+    /// Which tyre pack the 3D previews put a bike on. **Blank means "the one the bike's own
+    /// `gfx.cfg` names"**, which is what the game itself would fit.
+    ///
+    /// A bike names exactly one pack, so seeing it on another is only possible by
+    /// substituting the name we look up — nothing on disk is touched. Remembered rather than
+    /// asked each time: it's a way you like looking at bikes, not a per-bike decision.
+    pub preview_tyres: String,
     /// Voice chat is off until the player turns it on. A feature that opens a microphone
     /// is not something anyone should discover by accident.
     pub voice_enabled: bool,
+    /// Which paint-sync default this config has been through.
+    ///
+    /// v0.12.4 shipped paint sync on, and any config it saved carries
+    /// `paintSyncEnabled: true` written out explicitly — so simply changing the default
+    /// would not reach a single person who already has it. This is the one-shot: below
+    /// [`PAINT_SYNC_REV`], the setting is forced off once and the counter is caught up.
+    /// Anyone who then turns it back on keeps it, because the counter no longer moves.
+    #[serde(default)]
+    pub paint_sync_rev: u32,
+    /// Paint sync, off until the player turns it on.
+    ///
+    /// It shipped on by default and was turned off again the same day: keeping a running
+    /// session in step means reaching into the game — re-reading the mods folder, re-running
+    /// its customization loader — and that was freezing MX Bikes. Neither of those is a
+    /// thing to do to someone's race uninvited, however good the feature is when it works.
+    ///
+    /// The cost of off is real and understood: sync only pays off when the riders beside you
+    /// have it on too, so a default of off is a slower start. That is the right trade until
+    /// the freeze is understood on Windows — see `tasks/`.
+    pub paint_sync_enabled: bool,
+    /// Show the mxbsecure content-locking tab. Off by default and behind this flag because
+    /// it is experimental and only does anything in a full build (the packer is the
+    /// gitignored `mxbsecure` sidecar) — see [`crate::content_secure_available`].
+    pub mxbsecure_enabled: bool,
     /// Microphone to listen to. **Blank means "follow the system default"** — storing the
     /// resolved name instead would pin the player to whichever headset was plugged in the
     /// day they set it, and stop tracking the default they later change in Windows.
@@ -94,9 +146,16 @@ pub struct AppConfig {
     /// from game audio on purpose: voice on the headset with the game on speakers is a
     /// setup people actually run.
     pub voice_output_device: String,
-    /// Push-to-talk combo, Tauri accelerator syntax. Blank falls back to
+    /// Mic-key combo, Tauri accelerator syntax. Blank falls back to
     /// [`DEFAULT_PTT_HOTKEY`].
     pub voice_ptt_hotkey: String,
+    /// Latch the mic instead of holding it: press once to open, again to close.
+    ///
+    /// Off by default, and deliberately so. Push-to-talk cannot leave a microphone open
+    /// by accident; toggle can, and a rider who forgets is broadcasting their room to the
+    /// grid. It is offered because holding a key through a rough section is genuinely
+    /// awkward, but the safe mode is the one you get without choosing.
+    pub voice_toggle_to_talk: bool,
     /// Microphone gain, 1.0 = untouched. Clamped when applied.
     pub voice_input_gain: f32,
     /// Playback volume for other riders, 0..1.
@@ -110,16 +169,13 @@ pub struct AppConfig {
     /// token. Stored here in clear, like the rest of the config — worth knowing before
     /// adding a server whose token protects anything beyond the game process it runs.
     pub servers: Vec<crate::servers::ServerRef>,
-    /// Show the unfinished multiplayer features — the Servers tab and paint sync.
-    ///
-    /// Off by default even in a beta build: these talk to a live control plane and write
-    /// files other players uploaded, so they're opt-in rather than something a player finds
-    /// by accident. Also settable with `MXB_EXPERIMENTAL=1` for a run that doesn't touch
-    /// the saved config (see [`AppConfig::experimental_enabled`]).
-    pub experimental: bool,
     /// Bearer token for this player's control-plane account, from enrolling with an invite
     /// code. Empty until they enroll.
     pub cp_token: String,
+    /// Folder holding PiBoSo's track editing tools — `terrained.exe` and `tracked.exe`.
+    /// They are a separate download from the game and not ours to ship, so this is empty
+    /// until someone points at them, and the compile step is simply not offered until then.
+    pub track_tools_path: String,
     /// The in-game rider name this account enrolled with. Kept so the UI can show which
     /// identity the paints are published under.
     pub cp_rider_name: String,
@@ -129,6 +185,19 @@ pub struct AppConfig {
     /// What paint sync last did, so the UI can say so instead of the player having to guess
     /// from an empty grid. Written by the background tasks; never edited by hand.
     pub sync: SyncState,
+    /// Send anonymous usage counts — see [`crate::usage`].
+    ///
+    /// On by default, and off with one switch in Settings. What it sends is a random id,
+    /// a version, an OS and a set of counters; what it cannot send is anything about who
+    /// or where you are. Without it there is no way to tell a feature nobody uses from
+    /// one nobody has mentioned.
+    pub analytics_enabled: bool,
+    /// This install's id for those counts: a random UUID, minted on first run and tied to
+    /// nothing else. Blank until then, and blank forever if the setting is off.
+    ///
+    /// Deliberately not the account id or the GUID — an anonymous count that could be
+    /// joined back to a person is not one.
+    pub install_id: String,
 }
 
 /// The record of the last publish and the last pull.
@@ -155,29 +224,18 @@ pub struct SyncState {
     pub conflicted: usize,
 }
 
-/// Set to `1` to force the experimental features on for one run.
-pub const EXPERIMENTAL_ENV: &str = "MXB_EXPERIMENTAL";
-
-impl AppConfig {
-    /// Whether the experimental features should be visible.
-    ///
-    /// The environment variable wins so a build can be handed to a tester with a flag
-    /// rather than a settings walkthrough, and so turning it on for one run leaves no
-    /// trace in their saved config.
-    pub fn experimental_enabled(&self) -> bool {
-        if std::env::var(EXPERIMENTAL_ENV).map(|v| v == "1").unwrap_or(false) {
-            return true;
-        }
-        self.experimental
-    }
-}
-
 /// Toggle combo used until the player picks another one.
 ///
 /// Ctrl+Shift+X is free in MX Bikes — its bindings are single keys and gamepad inputs —
 /// and isn't claimed by Windows or by the apps that sit alongside a race: Discord,
 /// Steam (Shift+Tab) and GeForce Experience (Alt+Z, Alt+F*).
 pub const DEFAULT_OVERLAY_HOTKEY: &str = "CommandOrControl+Shift+X";
+
+/// Bumped whenever the executable's path changes, so a login item written for the old one is
+/// re-registered rather than left pointing at a file that no longer exists.
+///
+/// v1: the binary is `MXB App`, not `frost`.
+pub const AUTOSTART_BINDING_REV: u32 = 1;
 
 /// Push-to-talk combo used until the player picks another one.
 ///
@@ -207,49 +265,108 @@ impl Default for AppConfig {
             reshade_path: String::new(),
             wine_runner: String::new(),
             run_in_background: true,
-            launch_at_startup: true,
+            launch_at_startup: false,
+            // Zero, not the current rev: a config without the field predates the rename and
+            // its login item still names the old binary.
+            autostart_binding_rev: 0,
+            // The current rev, so a config created now is not immediately "migrated".
+            launch_at_startup_rev: LAUNCH_AT_STARTUP_REV,
             auto_run_frostmod: true,
+            frostmod_args: String::new(),
             instant_refresh: true,
             watch_mods_reload: true,
+            secure_content_inject: false,
             welcome_seen: false,
             tour_done: false,
             overlay_enabled: true,
             overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
+            preview_tyres: String::new(),
             voice_enabled: false,
+            paint_sync_rev: PAINT_SYNC_REV,
+            paint_sync_enabled: false,
+            mxbsecure_enabled: false,
             voice_input_device: String::new(),
             voice_output_device: String::new(),
             voice_ptt_hotkey: DEFAULT_PTT_HOTKEY.to_string(),
+            voice_toggle_to_talk: false,
             voice_input_gain: 1.0,
             voice_output_volume: 1.0,
             seen_version: String::new(),
             servers: Vec::new(),
-            experimental: false,
             cp_token: String::new(),
+            track_tools_path: String::new(),
             cp_rider_name: String::new(),
             cp_guid: String::new(),
             sync: SyncState::default(),
+            analytics_enabled: true,
+            install_id: String::new(),
         }
     }
 }
+
+/// Bumped to turn paint sync off for everyone once.
+///
+/// v1: v0.12.4 shipped it on and it froze the game.
+pub const PAINT_SYNC_REV: u32 = 1;
+
+/// Bumped to turn launch-at-startup off for everyone once.
+///
+/// Changing the default alone would reach nobody: it shipped on, so every config already
+/// written carries `launchAtStartup: true` spelled out. Nobody picked that — it is what the
+/// app chose for them — and turning it back off by hand didn't stick, which is what the
+/// reports were about. So it is switched off once here, the same one-shot as
+/// [`PAINT_SYNC_REV`]. Anyone who then turns it on keeps it, because the counter no longer
+/// moves.
+///
+/// v1: it shipped on by default and shouldn't have.
+pub const LAUNCH_AT_STARTUP_REV: u32 = 1;
 
 /// Bring a config written by an older build up to date.
 ///
 /// Applied on every read rather than in a one-shot upgrade step: the config is also
 /// written by hand and by older builds still on disk, so "has this already been
 /// migrated?" is only ever answerable from the values themselves.
-pub fn migrate(mut cfg: AppConfig) -> AppConfig {
+///
+/// Returns whether it changed anything, so the caller can write it down: a migration left
+/// in memory is decided — and logged — again on every read.
+pub fn migrate(cfg: &mut AppConfig) -> bool {
+    let mut changed = false;
+    // The one-shot described on `paint_sync_rev`. A config that never had the field is at
+    // rev 0 too, and forcing an already-off setting off is a no-op, so this needs no way to
+    // tell those two apart.
+    if cfg.paint_sync_rev < PAINT_SYNC_REV {
+        if cfg.paint_sync_enabled {
+            log::info!("turning paint sync off: it is off by default while the freeze is understood");
+        }
+        cfg.paint_sync_enabled = false;
+        cfg.paint_sync_rev = PAINT_SYNC_REV;
+        changed = true;
+    }
+    // The one-shot described on `LAUNCH_AT_STARTUP_REV`. The login item itself is left to
+    // the reconcile at startup, which takes the setting off a config this has already fixed.
+    if cfg.launch_at_startup_rev < LAUNCH_AT_STARTUP_REV {
+        if cfg.launch_at_startup {
+            log::info!("turning launch-at-startup off: it is off by default until it is asked for");
+        }
+        cfg.launch_at_startup = false;
+        cfg.launch_at_startup_rev = LAUNCH_AT_STARTUP_REV;
+        changed = true;
+    }
     if LEGACY_OVERLAY_HOTKEYS.contains(&cfg.overlay_hotkey.trim()) {
         log::info!(
             "moving the overlay hotkey off the retired default {} → {DEFAULT_OVERLAY_HOTKEY}",
             cfg.overlay_hotkey.trim(),
         );
         cfg.overlay_hotkey = DEFAULT_OVERLAY_HOTKEY.to_string();
+        changed = true;
     }
     // Pre-multi-game configs have folders but no `games` map. Seed the active game's
     // entry from them so switching away and back doesn't lose the folders someone has
     // been using — see `stash_active`, which is the same operation on the write side.
+    // Not counted as a change: every `save` does it anyway, so reporting it would turn
+    // each read of an old config into a write.
     cfg.stash_active();
-    cfg
+    changed
 }
 
 impl AppConfig {
@@ -390,7 +507,7 @@ fn resolve_profiles_dir(primary: PathBuf, fallback: impl FnOnce() -> Option<Path
 /// The game's user folder where it puts it when nothing has been moved: inside the Wine
 /// prefix wherever the game runs as a Windows process (Proton on Linux, a bottle on
 /// macOS), `Documents\PiBoSo\<game>` on Windows.
-fn default_user_dir(game: &GameProfile) -> Option<PathBuf> {
+pub fn default_user_dir(game: &GameProfile) -> Option<PathBuf> {
     if let Some(p) = detect_prefix_mods_path(game) {
         return Some(PathBuf::from(p));
     }
@@ -465,7 +582,13 @@ pub fn load(app: &AppHandle) -> anyhow::Result<AppConfig> {
         }
     }
 
-    let cfg = migrate(cfg);
+    // A migration only sticks once it is written down. `load` is on the FrostMod status
+    // poll and the game watcher, so an unsaved one runs, and logs, four times a minute.
+    if migrate(&mut cfg) {
+        if let Err(e) = save(app, &cfg) {
+            log::warn!("couldn't write the migrated config back: {e:#}");
+        }
+    }
     crate::game::set_active(cfg.active_game);
     Ok(cfg)
 }
@@ -734,6 +857,65 @@ fn parse_ini_mods_folder(bytes: &[u8]) -> Option<String> {
     fallback
 }
 
+/// The master server the client talks to when the `.ini` names none. Community-documented,
+/// not shipped in the binary (which reads the address from the `.ini` — see `parse_master_servers`).
+pub const DEFAULT_MASTER: &str = "master.mx-bikes.com:54200";
+
+/// Pull the `[master]` server addresses out of a PiBoSo `.ini`.
+///
+/// The game reads up to ten — `server`, `server2` … `server10` — and tries each in turn, so
+/// this returns them in that order. Same forgiving Windows-1252 `[section]`/`key = value`
+/// parse as [`parse_ini_mods_folder`]; empty when the file has no `[master]` section.
+pub fn parse_master_servers(bytes: &[u8]) -> Vec<String> {
+    let text: String = bytes.iter().map(|&b| b as char).collect();
+    let mut section = String::new();
+    // Keyed by index so `server`, `server2`, … come back in the order the game reads them,
+    // regardless of the order they appear in the file.
+    let mut found: Vec<(u32, String)> = Vec::new();
+    for line in text.lines() {
+        let line = line.split(';').next().unwrap_or("").trim();
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            section = name.trim().to_ascii_lowercase();
+            continue;
+        }
+        if section != "master" {
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else { continue };
+        let (k, v) = (k.trim().to_ascii_lowercase(), v.trim().trim_matches('"').trim());
+        if v.is_empty() {
+            continue;
+        }
+        // `server` is index 1; `serverN` is index N. Anything else in the section is ignored.
+        let idx = match k.strip_prefix("server") {
+            Some("") => Some(1),
+            Some(n) => n.parse::<u32>().ok(),
+            None => None,
+        };
+        if let Some(idx) = idx {
+            found.push((idx, v.to_string()));
+        }
+    }
+    found.sort_by_key(|(idx, _)| *idx);
+    found.into_iter().map(|(_, addr)| addr).collect()
+}
+
+/// The master addresses to query for this install: the `.ini`'s if it names any, else the
+/// documented default so a fresh install still reaches the public list.
+pub fn master_servers(cfg: &AppConfig) -> Vec<String> {
+    let name = game_ini_name(cfg.game());
+    let from_ini = [cfg.game_path.trim(), cfg.mods_path.trim()]
+        .into_iter()
+        .filter(|d| !d.is_empty())
+        .map(|d| crate::library::resolve_child(Path::new(d), &name))
+        .filter(|p| p.is_file())
+        .find_map(|ini| {
+            let servers = parse_master_servers(&std::fs::read(&ini).ok()?);
+            (!servers.is_empty()).then_some(servers)
+        });
+    from_ini.unwrap_or_else(|| vec![DEFAULT_MASTER.to_string()])
+}
+
 /// The game's user folder inside a Wine prefix.
 ///
 /// Wherever the game runs as a Windows process — Proton on Linux, CrossOver/Whisky on
@@ -802,9 +984,12 @@ pub fn detect_game_path(game: &GameProfile) -> Option<String> {
 
 /// Candidate Steam library roots: the default install locations plus any extra
 /// libraries registered in `steamapps/libraryfolders.vdf`.
-fn steam_libraries() -> Vec<PathBuf> {
+///
+/// Also used by [`crate::proton`] on Linux, where a game's Proton prefix sits under the
+/// same `steamapps` as the game itself — including on a second drive.
+pub(crate) fn steam_libraries() -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
-    let mut push = |roots: &mut Vec<PathBuf>, p: PathBuf| {
+    let push = |roots: &mut Vec<PathBuf>, p: PathBuf| {
         if !roots.contains(&p) {
             roots.push(p);
         }
@@ -898,7 +1083,8 @@ mod tests {
             "runInBackground": true,
             "overlayHotkey": "CommandOrControl+Shift+X"
         }"#;
-        let cfg = migrate(serde_json::from_str::<AppConfig>(json).unwrap());
+        let mut cfg = serde_json::from_str::<AppConfig>(json).unwrap();
+        migrate(&mut cfg);
 
         assert_eq!(cfg.active_game, Game::Mxb, "an old config is an MX Bikes one");
         assert_eq!(cfg.mods_path, "/games/MX Bikes", "folders are untouched");
@@ -908,6 +1094,109 @@ mod tests {
             cfg.games.get("mxb").map(|g| g.mods_path.as_str()),
             Some("/games/MX Bikes"),
         );
+    }
+
+    /// Paint sync is off for every install that predates the setting.
+    ///
+    /// It briefly shipped on by default and was turned off again the same day, because
+    /// keeping a live session in step was freezing the game. An absent field must therefore
+    /// read as off: a config written by the build that defaulted it on carries the field
+    /// explicitly, so nothing that has it on loses it, and nothing that never had it gains it.
+    #[test]
+    fn paint_sync_is_off_for_a_config_written_before_it_existed() {
+        let json = r#"{ "modsPath": "/games/MX Bikes", "voiceEnabled": false }"#;
+        let cfg = serde_json::from_str::<AppConfig>(json).unwrap();
+
+        assert!(!cfg.paint_sync_enabled, "an absent field means off");
+        assert!(!cfg.voice_enabled, "and a field that is there still means what it says");
+    }
+
+    /// The hotfix's whole job: a v0.12.4 config says `paintSyncEnabled: true` in so many
+    /// words, so changing the default alone would reach nobody who already has the freeze.
+    #[test]
+    fn a_v0124_config_gets_paint_sync_turned_off_once() {
+        let json = r#"{ "modsPath": "/games/MX Bikes", "paintSyncEnabled": true }"#;
+        let mut cfg = serde_json::from_str::<AppConfig>(json).unwrap();
+
+        assert!(migrate(&mut cfg), "and the caller is told to write it down");
+        assert!(!cfg.paint_sync_enabled, "the explicit true is overridden once");
+        assert_eq!(cfg.paint_sync_rev, PAINT_SYNC_REV, "and the config is caught up");
+    }
+
+    /// And it lands once, not on every read: before `load` wrote the result back, the flip
+    /// was re-decided — and "turning paint sync off" re-logged — on every poll, forever.
+    #[test]
+    fn a_written_back_migration_does_not_run_again() {
+        let json = r#"{ "modsPath": "/games/MX Bikes", "paintSyncEnabled": true }"#;
+        let mut cfg = serde_json::from_str::<AppConfig>(json).unwrap();
+        assert!(migrate(&mut cfg), "the first read has work to do");
+
+        // What `load` writes back, read again the way the next poll reads it.
+        let saved = serde_json::to_string(&cfg).unwrap();
+        let mut next = serde_json::from_str::<AppConfig>(&saved).unwrap();
+        assert!(!migrate(&mut next), "and the read after it has none");
+    }
+
+    /// The same one-shot for launch-at-startup, and the same reason it is needed: every
+    /// config already out there says `launchAtStartup: true` in so many words, because that
+    /// is what the app chose, so moving the default alone would reach nobody.
+    #[test]
+    fn an_existing_config_gets_launch_at_startup_turned_off_once() {
+        let json = r#"{ "modsPath": "/games/MX Bikes", "launchAtStartup": true }"#;
+        let mut cfg = serde_json::from_str::<AppConfig>(json).unwrap();
+
+        assert!(migrate(&mut cfg), "and the caller is told to write it down");
+        assert!(!cfg.launch_at_startup, "the explicit true is overridden once");
+        assert_eq!(cfg.launch_at_startup_rev, LAUNCH_AT_STARTUP_REV, "and it is caught up");
+
+        // Read back the way the next poll reads it: the flip lands once, not forever.
+        let saved = serde_json::to_string(&cfg).unwrap();
+        let mut next = serde_json::from_str::<AppConfig>(&saved).unwrap();
+        assert!(!migrate(&mut next), "the read after it has none");
+    }
+
+    /// Once. Whoever wants the app waiting for them at login says so and keeps it.
+    #[test]
+    fn turning_launch_at_startup_back_on_survives_the_next_launch() {
+        let mut cfg = AppConfig::default();
+        cfg.launch_at_startup = true;
+        assert!(!migrate(&mut cfg), "a caught-up config has nothing to migrate");
+        assert!(cfg.launch_at_startup, "and the setting is left where it was put");
+    }
+
+    /// Once. Someone who turns it back on afterwards keeps it — otherwise the setting is
+    /// not a setting, it is a switch that resets every launch.
+    #[test]
+    fn turning_paint_sync_back_on_survives_the_next_launch() {
+        let mut cfg = AppConfig::default();
+        migrate(&mut cfg);
+        cfg.paint_sync_enabled = true;
+
+        let saved = serde_json::to_string(&cfg).unwrap();
+        let mut reloaded = serde_json::from_str::<AppConfig>(&saved).unwrap();
+        assert!(!migrate(&mut reloaded), "a caught-up config needs no second write");
+        assert!(reloaded.paint_sync_enabled, "their choice stands");
+    }
+
+    /// The mxbsecure flag defaults off and is absent from every existing config.
+    #[test]
+    fn mxbsecure_is_off_by_default() {
+        let cfg = serde_json::from_str::<AppConfig>(r#"{ "modsPath": "/x" }"#).unwrap();
+        assert!(!cfg.mxbsecure_enabled, "an absent flag means off");
+        let on = serde_json::from_str::<AppConfig>(r#"{ "modsPath": "/x", "mxbsecureEnabled": true }"#).unwrap();
+        assert!(on.mxbsecure_enabled, "and it round-trips when set");
+    }
+
+    /// Turning it off has to survive a round trip, or the switch springs back on restart.
+    #[test]
+    fn paint_sync_stays_off_once_it_is_turned_off() {
+        let json = r#"{ "modsPath": "/games/MX Bikes", "paintSyncEnabled": false }"#;
+        let cfg = serde_json::from_str::<AppConfig>(json).unwrap();
+        assert!(!cfg.paint_sync_enabled);
+
+        let round_tripped =
+            serde_json::from_str::<AppConfig>(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert!(!round_tripped.paint_sync_enabled, "and it is written back out");
     }
 
     /// Switching parks the outgoing game's folders and restores the incoming one's, so a
@@ -1283,6 +1572,30 @@ mod tests {
         );
     }
 
+    /// The master list drives the server browser, so its order and its bounds matter: the
+    /// game reads `server`, `server2` … `server10` in that order and tries each in turn.
+    #[test]
+    fn parses_the_master_servers_out_of_a_piboso_ini() {
+        // One server, the stock file.
+        assert_eq!(
+            parse_master_servers(b"[master]\nserver = master.mx-bikes.com:54200\n\n[mods]\nfolder = C:\\mods\n"),
+            vec!["master.mx-bikes.com:54200".to_string()],
+        );
+
+        // Several, returned in game order even when the file lists them out of order.
+        assert_eq!(
+            parse_master_servers(b"[master]\nserver2 = b:2\nserver = a:1\nserver10 = j:10\n"),
+            vec!["a:1".to_string(), "b:2".to_string(), "j:10".to_string()],
+        );
+
+        // A `server` key outside `[master]`, an empty value, and a non-numbered stray are all
+        // ignored; nothing to read yields nothing (the caller falls back to the default).
+        assert_eq!(parse_master_servers(b"[net]\nserver = elsewhere:1\n"), Vec::<String>::new());
+        assert_eq!(parse_master_servers(b"[master]\nserver =\n"), Vec::<String>::new());
+        assert_eq!(parse_master_servers(b"[master]\nserverfoo = x:1\n"), Vec::<String>::new());
+        assert_eq!(parse_master_servers(b""), Vec::<String>::new());
+    }
+
     /// A value that doesn't resolve to a real mods tree is thrown away rather than
     /// adopted, so a misread key or a stale path costs nothing.
     #[test]
@@ -1353,7 +1666,7 @@ mod tests {
         assert_eq!(cfg.mods_path, "C:\\MXB");
         assert_eq!(cfg.game_path, "C:\\Steam\\MX Bikes");
         assert!(!cfg.run_in_background);
-        assert!(cfg.launch_at_startup, "unset fields fall back to the defaults");
+        assert!(!cfg.launch_at_startup, "unset fields fall back to the defaults");
         assert!(!cfg.welcome_seen);
         assert!(!cfg.tour_done);
         assert!(
@@ -1368,14 +1681,16 @@ mod tests {
     fn the_retired_default_hotkey_moves_to_the_current_one() {
         let mut cfg = AppConfig::default();
         cfg.overlay_hotkey = "CommandOrControl+Shift+M".into();
-        assert_eq!(migrate(cfg).overlay_hotkey, DEFAULT_OVERLAY_HOTKEY);
+        assert!(migrate(&mut cfg), "and the move is written down rather than redone");
+        assert_eq!(cfg.overlay_hotkey, DEFAULT_OVERLAY_HOTKEY);
     }
 
     #[test]
     fn a_hotkey_the_player_picked_survives_migration() {
         let mut cfg = AppConfig::default();
         cfg.overlay_hotkey = "Alt+F1".into();
-        assert_eq!(migrate(cfg).overlay_hotkey, "Alt+F1");
+        migrate(&mut cfg);
+        assert_eq!(cfg.overlay_hotkey, "Alt+F1");
     }
 
     /// Blank means "use the default" (see `overlay::hotkey_of`) — filling it in here
@@ -1384,7 +1699,8 @@ mod tests {
     fn a_blank_hotkey_is_left_blank() {
         let mut cfg = AppConfig::default();
         cfg.overlay_hotkey = String::new();
-        assert!(migrate(cfg).overlay_hotkey.is_empty());
+        migrate(&mut cfg);
+        assert!(cfg.overlay_hotkey.is_empty());
     }
 
     #[test]

@@ -37,6 +37,12 @@ interface ShopDetailProps {
   onBack: () => void;
   /** Turns this into the detail page for something already bought. */
   owned?: OwnedActions;
+  /**
+   * Where the detail comes from. Defaults to the mxbikes-shop catalog; MXB Hub passes its own
+   * so both stores share this page rather than growing a second copy of it. Everything below
+   * reads a `ShopModDetail` and does not care which store produced it.
+   */
+  load?: (id: number) => Promise<ShopModDetail>;
 }
 
 /**
@@ -51,7 +57,13 @@ interface ShopDetailProps {
  * Served entirely from the catalog already in memory, so this opens instantly and works with
  * the network down.
  */
-export default function ShopDetail({ id, currency, onBack, owned }: ShopDetailProps) {
+export default function ShopDetail({
+  id,
+  currency,
+  onBack,
+  owned,
+  load = shopCatalogDetail,
+}: ShopDetailProps) {
   const t = useT();
   const [detail, setDetail] = useState<ShopModDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -63,13 +75,13 @@ export default function ShopDetail({ id, currency, onBack, owned }: ShopDetailPr
     let cancelled = false;
     setDetail(null);
     setError(null);
-    shopCatalogDetail(id)
+    load(id)
       .then((d) => !cancelled && setDetail(d))
       .catch((e) => !cancelled && setError(String(e)));
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, load]);
 
   if (error) {
     return (

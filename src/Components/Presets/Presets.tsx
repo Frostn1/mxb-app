@@ -14,11 +14,13 @@ import {
   UploadCloud,
   User,
   Pencil,
+  CopyPlus,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button, CHIP } from "../ui/button";
+import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "../ui/help-hint";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
@@ -41,6 +43,7 @@ import {
   onModsChanged,
   presetsListProfiles,
   presetsListBikes,
+  presetsForgetBike,
   presetsReadLoadout,
   presetsSlots,
   presetsApply,
@@ -63,6 +66,7 @@ import type {
   PresetApplyOutcome,
 } from "../../types";
 import { SlotField } from "./SlotField";
+import FeelPresets from "./FeelPresets";
 import { Trans } from "../../i18n";
 import { useT, type TFunc, type TKey } from "../../i18n/context";
 import {
@@ -72,6 +76,7 @@ import {
   loadScans,
   missingSlots,
   loadoutSummary,
+  copyName,
   type Scans,
 } from "../../lib/presets";
 import { useGearPaints } from "../../lib/useGearPaints";
@@ -123,7 +128,7 @@ function applyNoteKey(outcome: PresetApplyOutcome): TKey {
 }
 
 interface PresetsProps {
-  onOpenInRider?: (loadout: Loadout) => void;
+  onOpenInRider?: (loadout: Loadout, bike: string) => void;
   /** Jump to the Locker — where model swaps have to be registered before they show here. */
   onOpenLocker?: () => void;
   /** Jump to Settings — the profiles folder picker lives there. */
@@ -143,6 +148,11 @@ export default function Presets({
   const [profile, setProfile] = useState<string>("");
   const [bikes, setBikes] = useState<string[]>([]);
   const [bike, setBike] = useState<string>("");
+  // Controlled so the trash on a row can shut the picker before its dialog opens —
+  // an open Select and an open Dialog fight over focus.
+  const [bikeMenuOpen, setBikeMenuOpen] = useState(false);
+  /** The bike the "forget this bike" dialog is about, if it's up. */
+  const [forgetBike, setForgetBike] = useState<string | null>(null);
   const [scans, setScans] = useState<Scans | null>(null);
   const [loadout, setLoadout] = useState<Loadout>(EMPTY_LOADOUT);
   const [saved, setSaved] = useState<Preset[]>([]);
@@ -158,6 +168,8 @@ export default function Presets({
 
   const [sharePreset, setSharePreset] = useState<Preset | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  /** Which half of a rider's setup this page is showing: the look, or the feel. */
+  const [mode, setMode] = useState<"look" | "feel">("look");
 
   // The paints the chosen helmet, boots and protection carry — packed inside the model or
   // shipped with the game — merged with the loose ones the library scan found.
@@ -215,6 +227,27 @@ export default function Presets({
       cancelled = true;
     };
   }, [profile]);
+
+  /** Drop a bike's column from `profile.ini` and re-point the picker at what's left. */
+  const doForgetBike = useCallback(
+    async (target: string) => {
+      setBusy(true);
+      try {
+        const left = await presetsForgetBike(profile, target);
+        setBikes(left);
+        setBike((b) => (b === target ? left[0] ?? "" : b));
+        setForgetBike(null);
+        toast.success(t("presets.bikeForgotten", { name: target }));
+      } catch (e) {
+        toast.error(t("presets.forgetFailed"), {
+          description: String(e).replace(/^Error:\s*/, ""),
+        });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [profile, t],
+  );
 
   const capture = useCallback(async () => {
     if (!profile || !bike) return;
@@ -325,6 +358,25 @@ export default function Presets({
     setSharePreset(preset);
   }, []);
 
+  /** Save a copy under a free name, so a rider can fork a preset and change one slot
+   *  without losing the one they already race. */
+  const onDuplicate = useCallback(
+    async (preset: Preset) => {
+      const name = copyName(
+        preset.name,
+        saved.map((p) => p.name),
+      );
+      try {
+        await presetsSave({ ...preset, name, bundle: null });
+        await refreshSaved();
+        toast.success(t("presets.duplicated", { name }));
+      } catch (e) {
+        toast.error(String(e).replace(/^Error:\s*/, ""));
+      }
+    },
+    [saved, refreshSaved, t],
+  );
+
   const onDelete = useCallback(
     async (preset: Preset) => {
       if (!window.confirm(`Delete preset “${preset.name}”?`)) return;
@@ -383,27 +435,29 @@ export default function Presets({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
-            {t("nav.presets")}
-          </h1>
-          <HelpHint
-            title={t("nav.presets")}
-            description={t("presets.help")}
-          />
-        </div>
-        <div className="ml-auto flex items-center gap-2">
+      <ContextBarLeft>
+        <ContextTab active={mode === "look"} onSelect={() => setMode("look")}>
+          {t("presets.tabLook")}
+        </ContextTab>
+        <ContextTab active={mode === "feel"} onSelect={() => setMode("feel")}>
+          {t("presets.tabFeel")}
+        </ContextTab>
+      </ContextBarLeft>
+
+      <ContextBarRight>
+        {mode === "look" && (
           <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
             <Download className="size-3.5" />
             Import
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => void load()}>
-            <RefreshCw className="size-3.5" />
-            Refresh
-          </Button>
-        </div>
-      </header>
+        )}
+        <Button variant="ghost" size="sm" onClick={() => void load()}>
+          <RefreshCw className="size-3.5" />
+          Refresh
+        </Button>
+        <HelpHint title={t("nav.presets")} description={t("presets.help")} />
+      </ContextBarRight>
+
 
       {error && (
         <div className="mx-7 mb-3 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12.5px] text-destructive">
@@ -442,6 +496,8 @@ export default function Presets({
             </Button>
           </div>
         </div>
+      ) : mode === "feel" ? (
+        <FeelPresets profiles={profiles} profile={profile} onProfile={setProfile} />
       ) : (
         <div className="flex min-h-0 flex-1 gap-5 overflow-hidden px-7 pb-6">
           {/* Builder */}
@@ -469,13 +525,43 @@ export default function Presets({
                 <span className="text-[11px] font-medium text-muted-foreground">
                   {t("slotGroup.bike")}
                 </span>
-                <Select value={bike} onValueChange={setBike}>
+                <Select
+                  value={bike}
+                  onValueChange={setBike}
+                  open={bikeMenuOpen}
+                  onOpenChange={setBikeMenuOpen}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder={t("slotGroup.bike")} />
                   </SelectTrigger>
                   <SelectContent>
                     {bikes.map((b) => (
-                      <SelectItem key={b} value={b}>
+                      <SelectItem
+                        key={b}
+                        value={b}
+                        trailing={
+                          <button
+                            type="button"
+                            title={t("presets.forgetBike")}
+                            aria-label={t("presets.forgetBikeOne", { name: b })}
+                            className="rounded p-1 text-faint opacity-60 transition-colors hover:bg-destructive/15 hover:text-destructive hover:opacity-100"
+                            // Radix selects a row on pointer-up (mouse) or click (keyboard),
+                            // both of which bubble from here — so neither may reach it.
+                            onPointerUp={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setBikeMenuOpen(false);
+                              // A tick later: a closing Select hands focus back to its
+                              // trigger, which would yank it straight out of a dialog
+                              // mounted in the same commit.
+                              setTimeout(() => setForgetBike(b), 0);
+                            }}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        }
+                      >
                         {b}
                       </SelectItem>
                     ))}
@@ -500,7 +586,7 @@ export default function Presets({
                       variant="ghost"
                       size="sm"
                       className="ml-auto h-7"
-                      onClick={() => onOpenInRider(loadout)}
+                      onClick={() => onOpenInRider(loadout, bike)}
                     >
                       <User className="size-3.5" />
                       {t("presets.viewInRider")}
@@ -646,10 +732,11 @@ export default function Presets({
                   onApply={() => void applyLoadout(p.loadout, p.name, p.name)}
                   onLoad={() => setLoadout(p.loadout)}
                   onEdit={() => onEdit(p)}
+                  onDuplicate={() => void onDuplicate(p)}
                   onShare={() => onShare(p)}
                   onDelete={() => void onDelete(p)}
                   onViewInRider={
-                    onOpenInRider ? () => onOpenInRider(p.loadout) : undefined
+                    onOpenInRider ? () => onOpenInRider(p.loadout, bike) : undefined
                   }
                 />
               ))
@@ -668,6 +755,30 @@ export default function Presets({
         onConfirm={() => void commitSave()}
         onCancel={() => setConfirmOpen(false)}
       />
+      <Dialog open={Boolean(forgetBike)} onOpenChange={(o) => !o && setForgetBike(null)}>
+        <DialogContent className="max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>{t("presets.forgetBikeQ")}</DialogTitle>
+            <DialogDescription>
+              {t("presets.forgetBikeBody", { name: forgetBike ?? "" })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setForgetBike(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={busy}
+              onClick={() => forgetBike && void doForgetBike(forgetBike)}
+            >
+              <Trash2 className="size-3.5" />
+              {t("presets.forgetBike")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <ShareDialog preset={sharePreset} onClose={() => setSharePreset(null)} />
       <ImportDialog
         open={importOpen}
@@ -691,6 +802,7 @@ function PresetCard({
   onApply,
   onLoad,
   onEdit,
+  onDuplicate,
   onShare,
   onDelete,
   onViewInRider,
@@ -702,6 +814,7 @@ function PresetCard({
   onApply: () => void;
   onLoad: () => void;
   onEdit: () => void;
+  onDuplicate: () => void;
   onShare: () => void;
   onDelete: () => void;
   onViewInRider?: () => void;
@@ -740,6 +853,9 @@ function PresetCard({
           )}
           <IconBtn title={t("presets.editNameOrOptions")} onClick={onEdit}>
             <Pencil className="size-3.5" />
+          </IconBtn>
+          <IconBtn title={t("presets.duplicate")} onClick={onDuplicate}>
+            <CopyPlus className="size-3.5" />
           </IconBtn>
           <IconBtn chip title={t("presets.share")} onClick={onShare}>
             <Share2 className="size-3.5" />
@@ -889,8 +1005,11 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
     try {
       const c = await presetBundleCreate(preset.name);
       setFullCode(c);
-      setCopied(false);
-      toast.success(t("presets.bundleUploaded"));
+      // Straight to the clipboard. The code exists to be pasted somewhere, and whoever
+      // waited out the upload shouldn't have to click again to collect it.
+      const onClipboard = await copyText(c);
+      setCopied(onClipboard);
+      toast.success(t(onClipboard ? "share.uploadedCopied" : "presets.bundleUploaded"));
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
     } finally {
@@ -940,9 +1059,6 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
                 )}
               </p>
             )}
-            <p className="mt-1.5 text-[11px] text-faint">
-              {t("presets.shareWarning")}
-            </p>
             <Button
               variant="outline"
               size="sm"

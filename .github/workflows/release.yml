@@ -59,6 +59,8 @@ jobs:
       # Tauri links against the GTK/WebKit stack on Linux; `patchelf` is what the
       # AppImage bundler uses to rewrite the runtime paths. Mirrors ci.yml —
       # including `libasound2-dev`, which cpal's alsa-sys needs to build at all.
+      # `squashfs-tools` is ours: scripts/appimage-drop-bundled-wayland.sh rebuilds the
+      # AppImage's filesystem after taking the bundled libwayland out of it.
       - name: Install Linux system dependencies
         if: startsWith(matrix.platform, 'ubuntu')
         run: |
@@ -70,7 +72,8 @@ jobs:
             librsvg2-dev \
             libsoup-3.0-dev \
             libasound2-dev \
-            patchelf
+            patchelf \
+            squashfs-tools
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
@@ -91,10 +94,32 @@ jobs:
           ssh-key: ${{ secrets.SIDECAR_DEPLOY_KEY }}
           path: .sidecar-src
 
+      # Build the injected secure-content DLL from the private crate on the Windows leg only —
+      # injection is Windows-only, so the other platforms bundle nothing. sync.sh (next step)
+      # copies this into src/mxbsecure.dll, from where build.rs stages it into resources/ for
+      # the bundler. MSVC target to match the game's runtime.
+      - name: Build secure-content DLL
+        if: ${{ github.repository == 'Frostn1/mxb-app' && startsWith(matrix.platform, 'windows') }}
+        shell: bash
+        run: cargo build --release --manifest-path .sidecar-src/secure/Cargo.toml --target x86_64-pc-windows-msvc
+
       - name: Apply sidecar module
         if: ${{ github.repository == 'Frostn1/mxb-app' }}
         shell: bash
         run: bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
+
+      # Ask the bundler for the DLL only on the leg that has one. Tauri's `resources` glob
+      # is a hard error when it matches nothing, so keeping it in the committed config
+      # broke every build without the private module — CI on both platforms, and the
+      # macOS and Linux release legs. The file must be there by now: sync.sh put it in
+      # src/, build.rs copies it into resources/ before the bundler looks.
+      - name: Bundle the secure-content DLL
+        if: ${{ github.repository == 'Frostn1/mxb-app' && startsWith(matrix.platform, 'windows') }}
+        shell: bash
+        run: |
+          test -f src-tauri/src/mxbsecure.dll || { echo "::error::mxbsecure.dll missing after sync.sh"; exit 1; }
+          jq '.bundle.resources = ["resources/*.dll"]' src-tauri/tauri.conf.json > tauri.conf.patched
+          mv tauri.conf.patched src-tauri/tauri.conf.json
 
       # The release page should say what shipped, not only which file to download — so
       # the body is composed from this tag's CHANGELOG section. Same section the Discord
@@ -133,6 +158,12 @@ jobs:
           # tags: a workflow_dispatch build's ref_name is a branch, not a version.
           MXB_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         with:
+          # Linux builds through our own wrapper: it runs the same `tauri build`, then takes
+          # the bundled libwayland out of the AppImage and signs it again before this step
+          # collects the bundles — so the image that gets uploaded is the one `latest.json`
+          # carries the signature for. Empty on Windows and macOS, which leaves the action
+          # to detect the package manager as it always has.
+          tauriScript: ${{ startsWith(matrix.platform, 'ubuntu') && 'bash scripts/tauri-build.sh' || '' }}
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.run_number) }}
           releaseName: "MXB App ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}"
           # What shipped, then which file to download — worded in scripts/release-notes.sh.

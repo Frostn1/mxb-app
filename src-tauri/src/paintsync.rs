@@ -52,6 +52,14 @@ pub fn control_plane() -> String {
 /// non-paint slots carry a file a receiver could use.
 const PAINT_EXT: &str = "pnt";
 
+/// Does this path name a paint? Extension only — the bytes are the decoder's business.
+pub fn is_paint(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case(PAINT_EXT))
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaintEntry {
@@ -93,6 +101,17 @@ pub struct PullOutcome {
     pub kept_yours: usize,
     /// Destinations two riders disagreed about, where neither was installed.
     pub conflicted: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveOutcome {
+    /// Paints deleted.
+    pub removed: usize,
+    /// Paints left where they are because the bytes are no longer the ones we wrote.
+    pub kept_yours: usize,
+    /// Recorded paints whose file had already gone.
+    pub missing: usize,
 }
 
 /// Resolve a control-plane-supplied destination against the local mods folder.
@@ -236,7 +255,7 @@ pub const MAX_BIKES: usize = 32;
 /// Read every bike in a profile and hash what each one is wearing.
 ///
 /// One `profile.ini` parse ([`presets::read_all_loadouts`]) and one library walk
-/// ([`bundle::plan_many`]) for the whole profile — doing either per bike turns publishing
+/// ([`bundle::plan_profile`]) for the whole profile — doing either per bike turns publishing
 /// into dozens of recursive scans of a folder holding every livery the player owns.
 pub fn local_look(cfg: &AppConfig, profile: &str) -> anyhow::Result<LocalLook> {
     let profiles_dir = cfg.profiles_dir();
@@ -251,7 +270,7 @@ pub fn local_look(cfg: &AppConfig, profile: &str) -> anyhow::Result<LocalLook> {
     let skipped = loadouts.len().saturating_sub(MAX_BIKES);
     loadouts.truncate(MAX_BIKES);
 
-    let plans = bundle::plan_many(cfg, &loadouts.iter().map(|(_, l)| l.clone()).collect::<Vec<_>>());
+    let plans = bundle::plan_profile(cfg, &loadouts);
 
     let mut sources = std::collections::HashMap::new();
     let mut oversized = 0usize;
@@ -304,12 +323,7 @@ fn paints_of(
             continue;
         }
         let path = Path::new(&asset.abs_path);
-        let is_paint = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.eq_ignore_ascii_case(PAINT_EXT))
-            .unwrap_or(false);
-        if !is_paint {
+        if !is_paint(path) {
             continue;
         }
         // A slot the control plane does not store is not worth failing a publish over.
@@ -548,7 +562,18 @@ fn rider_key(rider: &RosterRider) -> String {
 /// Rosters overlap heavily — the same rider is on more than one, and riders share paints —
 /// so everything is de-duplicated *before* any work happens. Without that, two servers means
 /// hashing every local file twice and a report that double-counts what it did.
-pub async fn pull(cfg: &AppConfig, token: &str, server_ids: &[String]) -> anyhow::Result<PullOutcome> {
+/// Pull every rider's paints for the given servers.
+///
+/// `here` names the server this rider is actually on, if any. That key's roster request also
+/// reports the presence the roster is scoped by, so a rider in a session does the whole loop
+/// in one request rather than a write followed by a read — see the endpoint's own note. The
+/// other keys get no presence at all, which is the truth: the rider is not on them.
+pub async fn pull(
+    cfg: &AppConfig,
+    token: &str,
+    server_ids: &[String],
+    here: Option<&str>,
+) -> anyhow::Result<PullOutcome> {
     let http = client()?;
 
     let mut seen_riders: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -560,9 +585,13 @@ pub async fn pull(cfg: &AppConfig, token: &str, server_ids: &[String]) -> anyhow
     let mut reached = 0usize;
 
     for server_id in server_ids {
+        let mut query: Vec<(&str, &str)> = vec![("server", server_id.as_str())];
+        if here == Some(server_id.as_str()) {
+            query.push(("here", "1"));
+        }
         let roster: Roster = match http
             .get(format!("{}/v1/roster", control_plane()))
-            .query(&[("server", server_id.as_str())])
+            .query(&query)
             .bearer_auth(token)
             .send()
             .await
@@ -661,6 +690,100 @@ pub async fn pull(cfg: &AppConfig, token: &str, server_ids: &[String]) -> anyhow
     Ok(out)
 }
 
+/// How many paints the sync currently claims — what a removal would look at.
+pub fn installed_count(cfg: &AppConfig) -> usize {
+    Manifest::read(&crate::library::mods_root(&cfg.mods_path)).installed.len()
+}
+
+/// Delete the paints the sync installed, leaving everything else alone.
+///
+/// The counterpart to the switch that stops it: turning the sync off keeps a grid's worth of
+/// other people's liveries in the mods folder, and until now nothing could tell those from
+/// the player's own to take them out again. The manifest can, so this is the only safe way to
+/// do it — a file whose bytes have changed since we wrote it is the player's now and stays.
+pub fn remove_installed(cfg: &AppConfig) -> RemoveOutcome {
+    let mods_dir = crate::library::mods_root(&cfg.mods_path);
+    let mut manifest = Manifest::read(&mods_dir);
+    let mut out = RemoveOutcome::default();
+
+    for (rel_dest, sha) in std::mem::take(&mut manifest.installed) {
+        let Some(dest) = safe_dest(&mods_dir, &rel_dest) else {
+            // Nothing we can act on, so nothing worth remembering either.
+            out.missing += 1;
+            manifest.dirty = true;
+            continue;
+        };
+        // The manifest lowercases its keys, and on a case-sensitive filesystem that is not
+        // the name the file was written under. Windows doesn't care; Linux would leave every
+        // paint with a capital letter in its path behind.
+        let Some(dest) = dest.is_file().then_some(dest).or_else(|| resolve_ignoring_case(&mods_dir, &rel_dest))
+        else {
+            out.missing += 1;
+            manifest.dirty = true;
+            continue;
+        };
+        if sha256_file(&dest).ok().as_deref() != Some(sha.as_str()) {
+            out.kept_yours += 1;
+            // Keep the record: it is what a later pull reads to know this file is not ours.
+            manifest.installed.insert(rel_dest, sha);
+            continue;
+        }
+        match std::fs::remove_file(&dest) {
+            Ok(()) => {
+                out.removed += 1;
+                manifest.dirty = true;
+                prune_empty(&mods_dir, dest.parent());
+            }
+            Err(e) => {
+                log::warn!("[sync] couldn't remove {}: {e}", dest.display());
+                manifest.installed.insert(rel_dest, sha);
+            }
+        }
+    }
+
+    manifest.write(&mods_dir);
+    out
+}
+
+/// Find `rel_dest` under `mods_dir` when the recorded spelling only matches case-insensitively.
+///
+/// Every segment is checked against what is actually on disk, so this can only ever return a
+/// path inside `mods_dir` that already passed [`safe_dest`].
+fn resolve_ignoring_case(mods_dir: &Path, rel_dest: &str) -> Option<PathBuf> {
+    let mut cur = mods_dir.to_path_buf();
+    for segment in rel_dest.split('/') {
+        let direct = cur.join(segment);
+        if direct.exists() {
+            cur = direct;
+            continue;
+        }
+        let found = std::fs::read_dir(&cur).ok()?.flatten().find(|e| {
+            e.file_name().to_string_lossy().eq_ignore_ascii_case(segment)
+        })?;
+        cur = found.path();
+    }
+    cur.is_file().then_some(cur)
+}
+
+/// Drop the folders a removal emptied. Stops two levels below the mods root, so `mods/bikes`
+/// and its siblings stay even when the last thing in them was a synced paint.
+fn prune_empty(mods_dir: &Path, from: Option<&Path>) {
+    let mut cur = from.map(Path::to_path_buf);
+    while let Some(dir) = cur {
+        let Ok(rel) = dir.strip_prefix(mods_dir) else { return };
+        if rel.components().count() < 2 {
+            return;
+        }
+        if std::fs::read_dir(&dir).map(|mut rd| rd.next().is_some()).unwrap_or(true) {
+            return;
+        }
+        if std::fs::remove_dir(&dir).is_err() {
+            return;
+        }
+        cur = dir.parent().map(Path::to_path_buf);
+    }
+}
+
 /// Destinations more than one digest wants, lowercased for comparison.
 ///
 /// MX Bikes picks a remote rider's paint by the file name they chose, so two riders using
@@ -733,6 +856,11 @@ impl Manifest {
             return;
         }
         let path = mods_dir.join(MANIFEST_NAME);
+        // Nothing left to describe: the file itself is one of ours to clean up.
+        if self.installed.is_empty() {
+            let _ = std::fs::remove_file(&path);
+            return;
+        }
         let Ok(text) = serde_json::to_string_pretty(&self.installed) else { return };
         if let Err(e) = std::fs::write(&path, text) {
             // Not fatal: the paints are on disk and correct. The cost of losing this is
@@ -1018,6 +1146,83 @@ mod tests {
         assert_eq!(oversized, 1, "the outsized paint must be counted, not silently dropped");
     }
 
+    /// A mods tree in a temp folder, with `paints` already written into it.
+    fn machine(name: &str, paints: &[(&str, &[u8])]) -> AppConfig {
+        let root = std::env::temp_dir().join(format!("mxb-rm-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mods_dir = root.join("mods");
+        let mut manifest = Manifest::default();
+        for (rel, bytes) in paints {
+            let dest = safe_dest(&mods_dir, rel).unwrap();
+            std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+            std::fs::write(&dest, bytes).unwrap();
+            manifest.claim(rel, &sha256_bytes(bytes));
+        }
+        manifest.write(&mods_dir);
+        AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() }
+    }
+
+    // What a player who turns the sync off is left with today: a grid's worth of other
+    // people's liveries and nothing that can tell them from their own.
+    #[test]
+    fn removing_takes_back_what_the_sync_installed() {
+        let cfg = machine(
+            "installed",
+            &[
+                ("bikes/KTM450/paints/Rider1.pnt", b"one"),
+                ("bikes/YZ250/paints/Rider2.pnt", b"two"),
+            ],
+        );
+        let mods_dir = crate::library::mods_root(&cfg.mods_path);
+        assert_eq!(installed_count(&cfg), 2);
+
+        let out = remove_installed(&cfg);
+        assert_eq!((out.removed, out.kept_yours, out.missing), (2, 0, 0));
+        assert!(!mods_dir.join("bikes/KTM450/paints/Rider1.pnt").exists());
+        assert!(!mods_dir.join("bikes/YZ250").exists(), "the emptied folders go too");
+        assert!(mods_dir.join("bikes").is_dir(), "but not the tree's own folders");
+        assert!(!mods_dir.join(MANIFEST_NAME).exists(), "nothing left to describe");
+        assert_eq!(installed_count(&cfg), 0);
+    }
+
+    #[test]
+    fn a_paint_the_player_has_edited_since_is_theirs_and_stays() {
+        let cfg = machine("edited", &[("bikes/KTM450/paints/Mine.pnt", b"as installed")]);
+        let mods_dir = crate::library::mods_root(&cfg.mods_path);
+        let dest = mods_dir.join("bikes/KTM450/paints/Mine.pnt");
+        std::fs::write(&dest, b"repainted by hand").unwrap();
+
+        let out = remove_installed(&cfg);
+        assert_eq!((out.removed, out.kept_yours), (0, 1));
+        assert!(dest.is_file(), "their work is not ours to delete");
+        // And the record survives, because it is what a later pull reads to leave it alone.
+        assert_eq!(installed_count(&cfg), 1);
+    }
+
+    #[test]
+    fn a_paint_that_is_already_gone_is_simply_forgotten() {
+        let cfg = machine("gone", &[("bikes/KTM450/paints/Deleted.pnt", b"one")]);
+        let mods_dir = crate::library::mods_root(&cfg.mods_path);
+        std::fs::remove_file(mods_dir.join("bikes/KTM450/paints/Deleted.pnt")).unwrap();
+
+        let out = remove_installed(&cfg);
+        assert_eq!((out.removed, out.missing), (0, 1));
+        assert_eq!(installed_count(&cfg), 0);
+    }
+
+    // The manifest lowercases its keys, so on Linux the recorded path is not the one on
+    // disk. Matching only exactly would leave every capitalised paint behind.
+    #[test]
+    fn a_destination_recorded_in_another_case_is_still_found() {
+        let cfg = machine("case", &[("Bikes/KTM450/Paints/Red.pnt", b"one")]);
+        let mods_dir = crate::library::mods_root(&cfg.mods_path);
+        assert!(resolve_ignoring_case(&mods_dir, "bikes/ktm450/paints/red.pnt").is_some());
+
+        let out = remove_installed(&cfg);
+        assert_eq!((out.removed, out.missing), (1, 0));
+        assert!(!mods_dir.join("Bikes/KTM450/Paints/Red.pnt").exists());
+    }
+
     #[test]
     fn hashes_match_the_reference_digest() {
         // Anchored to a known vector so a future change to the hashing can't silently
@@ -1056,6 +1261,229 @@ mod live_sync {
         std::env::var("MXB_TEST_TOKEN").expect("MXB_TEST_TOKEN must name an enrolled account")
     }
 
+    /// A rider: a fresh self-serve account, with a GUID of its own.
+    ///
+    /// Self-serve rather than invited on purpose. Two strangers on a public server is the
+    /// case the whole feature is for, and neither of them has an invite code — so if this
+    /// signs up and publishes, the control plane is open on exactly the terms it needs to be.
+    struct Rider {
+        token: String,
+        guid: String,
+        name: String,
+    }
+
+    /// A GUID nobody has claimed yet.
+    ///
+    /// The column is UNIQUE, so a hardcoded one can be claimed exactly once per database and
+    /// every later run gets a 409. `n` keeps two riders in the same run apart; the clock
+    /// keeps this run apart from the last one.
+    fn fresh_guid(n: u8) -> String {
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        format!("{:08x}-0000-0000-{:04x}-{:012x}", t as u32, n as u16, (t >> 32) as u64 & 0xffff_ffff_ffff)
+    }
+
+    async fn sign_up(name: &str, guid: &str) -> Rider {
+        #[derive(Deserialize)]
+        struct Claimed {
+            token: String,
+        }
+        let http = client().unwrap();
+        let claimed: Claimed = http
+            .post(format!("{}/v1/account", control_plane()))
+            .json(&serde_json::json!({ "riderName": name }))
+            .send()
+            .await
+            .expect("the control plane must be reachable")
+            .error_for_status()
+            .expect("a self-serve sign-up must be accepted")
+            .json()
+            .await
+            .unwrap();
+
+        // The GUID is what tells two riders apart in a roster; without it they are told
+        // apart by name, which two people can share.
+        http.put(format!("{}/v1/me/guid", control_plane()))
+            .bearer_auth(&claimed.token)
+            .json(&serde_json::json!({ "guid": guid }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .expect("claiming a GUID must be open to a self-serve account");
+
+        Rider { token: claimed.token, guid: guid.to_string(), name: name.to_string() }
+    }
+
+    /// Wear one paint, and publish it. Returns the bytes, so the receiver can be checked
+    /// against them rather than against the fact that *a* file arrived.
+    async fn publish_one(rider: &Rider, bike: &str, rel_dest: &str, bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let sha = format!("{:x}", Sha256::digest(bytes));
+        let file_name = rel_dest.rsplit('/').next().unwrap().to_string();
+        let http = client().unwrap();
+
+        http.put(format!("{}/v1/paints/{sha}", control_plane()))
+            .bearer_auth(&rider.token)
+            .body(bytes.to_vec())
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .expect("a self-serve account must be able to store a paint");
+
+        http.put(format!("{}/v1/loadouts", control_plane()))
+            .bearer_auth(&rider.token)
+            .json(&serde_json::json!({
+                "bikes": [{
+                    "bikeId": bike,
+                    "paints": [{
+                        "slot": "paint",
+                        "fileName": file_name,
+                        "sha256": sha,
+                        "size": bytes.len(),
+                        "relDest": rel_dest,
+                    }],
+                }],
+            }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .expect("a self-serve account must be able to publish a loadout");
+        sha
+    }
+
+    /// A mods tree to pull into, and the config that points at it.
+    fn rider_machine(name: &str) -> (PathBuf, AppConfig) {
+        let root = scratch(name);
+        let cfg =
+            AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
+        (root, cfg)
+    }
+
+    /// The whole point of the feature, on a server nobody registered.
+    ///
+    /// Two riders sign themselves up, both say they are on the same server — keyed by its
+    /// *name*, exactly as `voice::session::room_key` derives it from what FrostMod reads out
+    /// of the running game — and each ends up with the other's paint on disk. Nothing here
+    /// touches the server registry, and no agent is involved: the key is an arbitrary string
+    /// two strangers happened to compute the same way.
+    #[tokio::test]
+    #[ignore = "needs a running control plane"]
+    async fn two_riders_on_one_server_install_each_others_paints() {
+        // A name with the punctuation and capitals a real server has, folded the way the app
+        // folds it. If this key were mishandled anywhere, the two riders would sit in
+        // different rosters and each would install nothing.
+        let server = crate::voice::session::room_key("  Frost's  Test Server #2  ");
+        assert_eq!(server, "frost's test server #2", "the key is folded, not hashed");
+
+        let alice = sign_up("Alice", &fresh_guid(1)).await;
+        let bob = sign_up("Bob", &fresh_guid(2)).await;
+
+        let alice_paint = b"alice's artwork, not bob's".to_vec();
+        let bob_paint = b"bob's artwork, not alice's".to_vec();
+        publish_one(&alice, "YZ450F", "bikes/YZ450F/paints/Alice.pnt", &alice_paint).await;
+        publish_one(&bob, "YZ450F", "bikes/YZ450F/paints/Bob.pnt", &bob_paint).await;
+
+        report_presence(&alice.token, &server).await.unwrap();
+        report_presence(&bob.token, &server).await.unwrap();
+
+        // Bob rides onto the server and pulls.
+        let (bob_root, bob_cfg) = rider_machine("bob");
+        let out = pull(&bob_cfg, &bob.token, &[server.clone()], Some(server.as_str())).await.unwrap();
+        println!("bob: {out:?}");
+
+        let landed = bob_root.join("mods/bikes/YZ450F/paints/Alice.pnt");
+        assert_eq!(
+            std::fs::read(&landed).ok(),
+            Some(alice_paint.clone()),
+            "Alice's paint must be on Bob's disk, byte for byte: {out:?}"
+        );
+        // Two riders on the grid, told apart by GUID — the roster carries both, and Bob's
+        // own row is one of them.
+        assert_eq!(out.riders, 2, "the roster is two distinct riders: {out:?}");
+        assert!(out.installed >= 1, "something must have been installed: {out:?}");
+
+        // And the other direction, which is the half a one-sided test would miss.
+        let (alice_root, alice_cfg) = rider_machine("alice");
+        let out = pull(&alice_cfg, &alice.token, &[server.clone()], Some(server.as_str())).await.unwrap();
+        assert_eq!(
+            std::fs::read(alice_root.join("mods/bikes/YZ450F/paints/Bob.pnt")).ok(),
+            Some(bob_paint),
+            "Bob's paint must reach Alice too: {out:?}"
+        );
+
+        // A second pass installs nothing: the manifest recognises what it wrote.
+        let again = pull(&bob_cfg, &bob.token, &[server.clone()], Some(server.as_str())).await.unwrap();
+        assert_eq!(again.installed, 0, "a repeat sync installs nothing: {again:?}");
+        assert!(again.already_had >= 1, "and recognises what it already has: {again:?}");
+
+        // The scoping has to be real, or "keyed on the server" is decoration: a rider on a
+        // different server sees an empty grid, not Alice and Bob.
+        let carol = sign_up("Carol", &fresh_guid(3)).await;
+        let elsewhere = crate::voice::session::room_key("Someone Else's Server");
+        // No separate presence call: the pull below reports it, which is the whole point of
+        // `here` — one request where there used to be two.
+        let (carol_root, carol_cfg) = rider_machine("carol");
+        let out = pull(&carol_cfg, &carol.token, &[elsewhere.clone()], Some(elsewhere.as_str())).await.unwrap();
+        assert_eq!(out.installed, 0, "another server is another grid: {out:?}");
+        assert!(
+            !carol_root.join("mods/bikes/YZ450F/paints/Alice.pnt").exists(),
+            "a rider elsewhere must not receive this server's paints"
+        );
+
+        assert_ne!(alice.guid, bob.guid);
+        assert_ne!(alice.name, bob.name);
+        for root in [alice_root, bob_root, carol_root] {
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    /// The GUID is what tells riders apart, and this is the only test that can prove it.
+    ///
+    /// Two riders with *the same name* and different GUIDs are two people. If the GUID were
+    /// not reaching the roster — never claimed, not selected, dropped in transit — the
+    /// receiver would fall back to keying on the name, both rows would collapse into one,
+    /// and the count would say 1. So the count is the proof; a test with two different names
+    /// passes either way and proves nothing about the GUID at all.
+    ///
+    /// Their *paints* are not routed by GUID, and are not meant to be: MX Bikes matches a
+    /// remote rider's livery by file name, so a pull installs files and the GUID's only job
+    /// is to stop one rider being counted twice.
+    #[tokio::test]
+    #[ignore = "needs a running control plane"]
+    async fn two_riders_sharing_a_name_are_told_apart_by_guid() {
+        let server = crate::voice::session::room_key("Name Clash Test");
+
+        let first = sign_up("Frost", &fresh_guid(4)).await;
+        let second = sign_up("Frost", &fresh_guid(5)).await;
+        assert_eq!(first.name, second.name, "the same name on purpose");
+        assert_ne!(first.token, second.token, "but two separate accounts");
+
+        publish_one(&first, "YZ450F", "bikes/YZ450F/paints/First.pnt", b"the first Frost").await;
+        publish_one(&second, "YZ450F", "bikes/YZ450F/paints/Second.pnt", b"the other Frost").await;
+        report_presence(&first.token, &server).await.unwrap();
+        report_presence(&second.token, &server).await.unwrap();
+
+        let (root, cfg) = rider_machine("clash");
+        let out = pull(&cfg, &first.token, &[server.clone()], Some(server.as_str())).await.unwrap();
+        println!("name clash: {out:?}");
+
+        assert_eq!(
+            out.riders, 2,
+            "a shared name must not merge two riders — the GUID has to be doing the work: {out:?}"
+        );
+        // And both liveries land, because the destinations differ. A name collision on the
+        // *file* is the other problem entirely, and `kept_yours` is where that shows up.
+        assert!(root.join("mods/bikes/YZ450F/paints/First.pnt").exists());
+        assert!(root.join("mods/bikes/YZ450F/paints/Second.pnt").exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// The failure this whole manifest exists to prevent: a rider publishing a different
     /// paint under a name you already use, and the sync quietly replacing your artwork.
     #[tokio::test]
@@ -1069,7 +1497,7 @@ mod live_sync {
         let before = std::fs::read(&mine).unwrap();
 
         let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
-        let out = pull(&cfg, &token(), &["local".to_string()]).await.unwrap();
+        let out = pull(&cfg, &token(), &["local".to_string()], None).await.unwrap();
         println!("{out:?}");
 
         assert_eq!(std::fs::read(&mine).unwrap(), before, "our own paint must be untouched");
@@ -1085,7 +1513,7 @@ mod live_sync {
         );
 
         // Second run: nothing new, and still no damage.
-        let again = pull(&cfg, &token(), &["local".to_string()]).await.unwrap();
+        let again = pull(&cfg, &token(), &["local".to_string()], None).await.unwrap();
         assert_eq!(again.installed, 0, "a repeat sync installs nothing: {again:?}");
         assert!(again.already_had >= 1, "what we installed is recognised: {again:?}");
         assert_eq!(std::fs::read(&mine).unwrap(), before);

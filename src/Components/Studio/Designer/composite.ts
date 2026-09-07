@@ -4,6 +4,8 @@ import {
   clampRegion,
   fontSpec,
   layerExtent,
+  mirrored,
+  sheetRotation,
   type Layer,
   type Region,
   type Sheet,
@@ -29,14 +31,44 @@ function drawLayer(ctx: CanvasRenderingContext2D, layer: Layer) {
   // translate would carry the part around with the layer, which is the opposite of pinning it.
   if (layer.clip) ctx.clip(layer.clip.path, "nonzero");
   ctx.translate(layer.x, layer.y);
-  ctx.rotate(layer.rotation);
-  ctx.scale(layer.scale, layer.scale);
+  // Mirrored, because the stage is — see `mirrored`. The sheet keeps the file's row order and
+  // the view turns it over, so upright content has to go in upside down to come out upright.
+  ctx.rotate(sheetRotation(layer));
+  // Two flips multiplied, not one chosen: the stage's, which every layer of a mirrored kind
+  // gets whether or not anyone asked, and the layer's own. Turning a logo over by hand has to
+  // work the same on a kind that was already going in upside down.
+  ctx.scale(
+    layer.scale * (layer.flipX ? -1 : 1),
+    (mirrored(layer) ? -layer.scale : layer.scale) * (layer.flipY ? -1 : 1),
+  );
 
   if (layer.kind === "image" || layer.kind === "paint") {
     // A paint layer's raster is sheet-sized and its transform is the identity, so this puts it
     // back exactly where it was painted — the same call, from the same centre, as an image.
     const src = layer.kind === "image" ? layer.image : layer.canvas;
     ctx.drawImage(src, -src.width / 2, -src.height / 2);
+  } else if (layer.kind === "shape") {
+    // Drawn about the centre, because that is the fixed point every other layer scales and
+    // turns around — a shape anchored at a corner would walk across the sheet as it grew.
+    const hw = layer.w / 2;
+    const hh = layer.h / 2;
+    ctx.strokeStyle = layer.color;
+    ctx.fillStyle = layer.color;
+    ctx.lineWidth = Math.max(1, layer.strokeWidth);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    if (layer.shape === "line") {
+      // Corner to corner of the signed box, which is what makes `h`'s sign worth carrying.
+      ctx.moveTo(-hw, -hh);
+      ctx.lineTo(hw, hh);
+      ctx.stroke();
+    } else {
+      if (layer.shape === "ellipse") ctx.ellipse(0, 0, Math.abs(hw), Math.abs(hh), 0, 0, Math.PI * 2);
+      else ctx.rect(-Math.abs(hw), -Math.abs(hh), Math.abs(layer.w), Math.abs(layer.h));
+      if (layer.style === "fill") ctx.fill();
+      else ctx.stroke();
+    }
   } else {
     ctx.font = fontSpec(layer);
     ctx.textAlign = "center";
@@ -109,8 +141,8 @@ export function layerCorners(layer: Layer): [number, number][] {
   const { w, h } = layerExtent(layer);
   const hw = (w * layer.scale) / 2;
   const hh = (h * layer.scale) / 2;
-  const cos = Math.cos(layer.rotation);
-  const sin = Math.sin(layer.rotation);
+  const cos = Math.cos(sheetRotation(layer));
+  const sin = Math.sin(sheetRotation(layer));
   return (
     [
       [-hw, -hh],
@@ -122,15 +154,62 @@ export function layerCorners(layer: Layer): [number, number][] {
 }
 
 /**
+ * The axis-aligned box around several layers in sheet space, or null for none.
+ *
+ * What a multi-layer selection is drawn and dragged as. Built from the rotated corners rather
+ * than from centres and extents, so a box around a layer turned 45° actually contains it.
+ */
+export function selectionBounds(layers: Layer[]): Region | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const layer of layers) {
+    for (const [x, y] of layerCorners(layer)) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (!Number.isFinite(minX)) return null;
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+/**
  * The sheet as PNG bytes, for staging before a save.
  *
- * The rows leave exactly as they were drawn, which is exactly as they were read — the editor
- * takes no view on which way up a sheet is, because the format doesn't either.
+ * The rows leave exactly as they were drawn, which is exactly as they were read. The stage
+ * shows the sheet the other way up, but that is a view transform and stops at the screen —
+ * nothing on the way to the file knows about it.
  *
  * PNG because it's lossless and what a canvas encodes natively — the sheet is decoded again
  * on the Rust side on its way into the `.pnt`, so the intermediate format only has to not
  * lose anything.
  */
+/**
+ * Whether a composited sheet has a single pixel on it.
+ *
+ * A `.pnt` replaces the model's textures *by name*, so an untouched sheet is not a harmless
+ * blank — saved, it wipes whatever the bike already had under that name. That bites hardest
+ * on the companion maps: a transparent `plastics_n` replaces the real normal map and flattens
+ * the lighting on the part.
+ *
+ * The pixels rather than the sheet's layer list, because picking up the brush *creates* a
+ * paint layer whether or not a stroke follows, so "has layers" and "has anything on it" are
+ * different questions. Reads the alpha channel and stops at the first mark, which is the
+ * common case; a genuinely empty 2048² sheet is the one that scans in full.
+ */
+export function hasInk(canvas: HTMLCanvasElement): boolean {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return true; // can't tell — saving too much beats silently dropping work
+  const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] !== 0) return true;
+  }
+  return false;
+}
+
 export function toPng(canvas: HTMLCanvasElement): Promise<ArrayBuffer> {
   return new Promise<ArrayBuffer>((resolve, reject) => {
     canvas.toBlob((blob) => {

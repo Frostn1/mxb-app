@@ -6,13 +6,14 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Share2,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/Components/ui/button";
+import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "@/Components/ui/help-hint";
-import { Segmented } from "@/Components/ui/segmented";
 import { Switch } from "@/Components/ui/switch";
 import {
   Select,
@@ -54,6 +55,7 @@ import type {
 import { useT } from "../../i18n/context";
 import { displayName, formatBytes } from "../../lib/mods";
 import { CATEGORY_LABEL, categoryIcon } from "../Library/categories";
+import { useShare } from "../../Context/Share";
 import { ContentDialog } from "./ContentDialog";
 
 type Tab = "race" | "mods";
@@ -230,49 +232,41 @@ export default function Manage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">{t("nav.manage")}</h1>
-          <HelpHint title={t("nav.manage")} description={t("manage.help")} />
-        </div>
-        <Segmented
-          value={tab}
-          onChange={(v) => setTab(v as Tab)}
-          options={[
-            { value: "race", label: t("manage.tabRace") },
-            {
-              value: "mods",
-              label: (
-                <span className="flex items-center gap-1.5">
-                  {t("manage.tabMods")}
-                  <span className="text-muted-foreground">{mods.length}</span>
-                </span>
-              ),
-            },
-          ]}
-        />
-        <div className="ml-auto flex items-center gap-2">
-          {disabledCount > 0 && (
-            <>
-              <span className="text-[12px] text-muted-foreground">
-                {t("manage.disabledCount", { count: disabledCount })}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy}
-                onClick={() => setRestoreOpen(true)}
-              >
-                <RotateCcw className="size-3.5" /> {t("manage.restoreAll")}
-              </Button>
-            </>
-          )}
-          <Button variant="outline" size="sm" onClick={load} disabled={loading || busy}>
-            <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />{" "}
-            {t("locker.rescan")}
-          </Button>
-        </div>
-      </header>
+      <ContextBarLeft>
+        <ContextTab active={tab === "race"} onSelect={() => setTab("race")}>
+          {t("manage.tabRace")}
+        </ContextTab>
+        <ContextTab active={tab === "mods"} onSelect={() => setTab("mods")}>
+          <span className="flex items-center gap-1.5">
+            {t("manage.tabMods")}
+            <span className="tabular-figures text-faint">{mods.length}</span>
+          </span>
+        </ContextTab>
+      </ContextBarLeft>
+
+      <ContextBarRight>
+        {disabledCount > 0 && (
+          <>
+            <span className="text-[12px] text-muted-foreground">
+              {t("manage.disabledCount", { count: disabledCount })}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => setRestoreOpen(true)}
+            >
+              <RotateCcw className="size-3.5" /> {t("manage.restoreAll")}
+            </Button>
+          </>
+        )}
+        <Button variant="outline" size="sm" onClick={load} disabled={loading || busy}>
+          <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />{" "}
+          {t("locker.rescan")}
+        </Button>
+        <HelpHint title={t("nav.manage")} description={t("manage.help")} />
+      </ContextBarRight>
+
 
       {error ? (
         <p className="select-text px-7 py-16 text-center text-[13px] text-destructive">
@@ -573,6 +567,9 @@ function ModsPanel({
   onBulk: (rels: string[], enabled: boolean) => void;
 }) {
   const t = useT();
+  // A mod is named here by its rel, which is what a share code carries anyway — and it
+  // reaches a mod switched *off* too, parked outside the content folder.
+  const { shareFiles } = useShare();
   const [search, setSearch] = useState("");
   const [type, setType] = useState<TypeFilter>("all");
 
@@ -585,19 +582,19 @@ function ModsPanel({
     );
   }, [mods, search, type]);
 
+  const mounted = mods.filter((m) => m.enabled);
+  const parked = mods.length - mounted.length;
   const shownEnabled = shown.filter((m) => m.enabled);
   const shownDisabled = shown.filter((m) => !m.enabled);
 
   return (
     <>
-      <div className="flex flex-none items-center gap-3 px-7 pb-3">
-        <Segmented
-          size="sm"
-          value={type}
-          onChange={(v) => setType(v as TypeFilter)}
-          options={TYPE_FILTERS.map((f) => ({
-            value: f,
-            label: t(
+      {/* The filters join the Race presets / Mods tabs in the bar, and the bulk actions go
+          to its right — this row was a third band under the chrome. */}
+      <ContextBarLeft>
+        {TYPE_FILTERS.map((f) => (
+          <ContextTab key={f} active={type === f} onSelect={() => setType(f as TypeFilter)}>
+            {t(
               f === "all"
                 ? "browseCat.all"
                 : f === "tracks"
@@ -605,10 +602,13 @@ function ModsPanel({
                   : f === "bikes"
                     ? "modType.bikes"
                     : "modType.rider",
-            ),
-          }))}
-        />
-        <div className="flex w-[240px] items-center gap-2 rounded-lg border border-input bg-card px-3 py-2">
+            )}
+          </ContextTab>
+        ))}
+      </ContextBarLeft>
+
+      <ContextBarRight>
+        <div className="flex h-7 w-[210px] items-center gap-2 border border-input bg-card px-2.5">
           <Search className="size-3.5 text-faint" />
           <input
             value={search}
@@ -617,24 +617,55 @@ function ModsPanel({
             className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
           />
         </div>
-        <div className="ml-auto flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy || shownEnabled.length === 0}
-            onClick={() => onBulk(shownEnabled.map((m) => m.rel), false)}
-          >
-            {t("manage.disableShown", { count: shownEnabled.length })}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy || shownDisabled.length === 0}
-            onClick={() => onBulk(shownDisabled.map((m) => m.rel), true)}
-          >
-            {t("manage.enableShown", { count: shownDisabled.length })}
-          </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || shownEnabled.length === 0}
+          onClick={() => onBulk(shownEnabled.map((m) => m.rel), false)}
+        >
+          {t("manage.disableShown", { count: shownEnabled.length })}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || shownDisabled.length === 0}
+          onClick={() => onBulk(shownDisabled.map((m) => m.rel), true)}
+        >
+          {t("manage.enableShown", { count: shownDisabled.length })}
+        </Button>
+      </ContextBarRight>
+
+      {/* What the game actually pays at startup. It mounts every archive under mods/, so
+          "how many, and how much" is the reason this screen exists — and it was nowhere on
+          it. */}
+      <div className="flex flex-none items-end gap-8 border-b border-border px-7 pb-3 pt-1">
+        <div>
+          <div className="font-cond text-[22px] font-bold leading-none tabular-nums text-foreground">
+            {mounted.length}
+            <span className="text-[14px] text-muted-foreground"> / {mods.length}</span>
+          </div>
+          <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.2em] text-faint">
+            {t("manage.tabMods")}
+          </div>
         </div>
+        <div>
+          <div className="font-cond text-[22px] font-bold leading-none tabular-nums text-foreground">
+            {formatBytes(mounted.reduce((n, m) => n + (m.size ?? 0), 0))}
+          </div>
+          <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.2em] text-faint">
+            {t("manage.loadCostLabel")}
+          </div>
+        </div>
+        {parked > 0 && (
+          <div>
+            <div className="font-cond text-[22px] font-bold leading-none tabular-nums text-warning">
+              {parked}
+            </div>
+            <div className="mt-1.5 font-cond text-[10px] font-semibold uppercase tracking-[0.2em] text-faint">
+              {t("manage.parkedLabel")}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
@@ -671,10 +702,19 @@ function ModsPanel({
                   </span>
                   <button
                     disabled={busy}
+                    onClick={() => shareFiles([m.rel])}
+                    title={t("share.action")}
+                    aria-label={t("share.action")}
+                    className="ml-auto flex-none cursor-default rounded-md p-1 text-faint transition-colors hover:bg-foreground/[0.06] hover:text-primary disabled:opacity-40"
+                  >
+                    <Share2 className="size-3.5" />
+                  </button>
+                  <button
+                    disabled={busy}
                     onClick={() => onDelete(m)}
                     title={t("library.uninstallAction")}
                     aria-label={t("library.uninstallAction")}
-                    className="ml-auto flex-none cursor-default rounded-md p-1 text-faint transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-40"
+                    className="flex-none cursor-default rounded-md p-1 text-faint transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-40"
                   >
                     <Trash2 className="size-3.5" />
                   </button>

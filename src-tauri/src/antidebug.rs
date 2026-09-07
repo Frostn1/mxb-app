@@ -21,7 +21,7 @@
 ///
 /// In release builds this checks for a debugger now and, if none is attached yet, leaves a
 /// low-frequency watcher running so a debugger attached *after* launch — the usual way, by
-/// attaching to `frost.exe` once it is up — is caught too. In debug builds it does nothing.
+/// attaching to `MXB App.exe` once it is up — is caught too. In debug builds it does nothing.
 pub fn guard() {
     #[cfg(not(debug_assertions))]
     {
@@ -29,7 +29,7 @@ pub fn guard() {
             bail();
         }
         // Attaching to a process that is already running is the common case (open x64dbg,
-        // pick `frost.exe`), so a one-shot check at startup would miss the very attack it
+        // pick `MXB App.exe`), so a one-shot check at startup would miss the very attack it
         // is meant to stop. A slow poll costs nothing measurable and closes that window.
         std::thread::spawn(|| loop {
             std::thread::sleep(std::time::Duration::from_secs(2));

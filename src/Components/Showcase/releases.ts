@@ -9,6 +9,11 @@
  * else knows about versions.
  */
 import {
+  Crosshair,
+  Scissors,
+  Route,
+  ListVideo,
+  EyeOff,
   Mountain,
   Sun,
   Ruler,
@@ -38,6 +43,18 @@ import {
   Wrench,
   RefreshCw,
   Package,
+  Download,
+  Share2,
+  History,
+  Undo2,
+  ShieldAlert,
+  SwatchBook,
+  Shirt,
+  Globe,
+  Zap,
+  Users,
+  SlidersHorizontal,
+  BarChart3,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { TKey } from "../../i18n/context";
@@ -64,6 +81,148 @@ export interface Release {
 }
 
 export const RELEASES: Release[] = [
+  {
+    version: "0.12.4",
+    hero: {
+      icon: Shirt,
+      title: "showcase.v0124.hero.title",
+      body: "showcase.v0124.hero.body",
+    },
+    highlights: [
+      { icon: Globe, text: "showcase.v0124.anyserver" },
+      { icon: Zap, text: "showcase.v0124.nosetup" },
+      { icon: Users, text: "showcase.v0124.everyone" },
+      { icon: SlidersHorizontal, text: "showcase.v0124.settings" },
+      { icon: Mountain, text: "showcase.v0124.shape" },
+      // Said here because it is the kind of change people would rather be told about than
+      // find: the switch is one click from this modal.
+      { icon: BarChart3, text: "showcase.v0124.stats" },
+    ],
+  },
+  {
+    version: "0.12.2",
+    hero: {
+      icon: Crosshair,
+      title: "showcase.v0122.hero.title",
+      body: "showcase.v0122.hero.body",
+    },
+    highlights: [
+      { icon: Crosshair, text: "showcase.v0122.aim" },
+      { icon: Scissors, text: "showcase.v0122.shots" },
+      { icon: Route, text: "showcase.v0122.preview" },
+      { icon: ListVideo, text: "showcase.v0122.paths" },
+    ],
+  },
+  {
+    version: "0.12.1",
+    hero: {
+      icon: Keyboard,
+      title: "showcase.v0121.hero.title",
+      body: "showcase.v0121.hero.body",
+    },
+    highlights: [
+      { icon: Keyboard, text: "showcase.v0121.rebind" },
+      { icon: Gamepad2, text: "showcase.v0121.clash" },
+      { icon: EyeOff, text: "showcase.v0121.clean" },
+    ],
+  },
+  {
+    version: "0.11.3",
+    hero: {
+      icon: Mountain,
+      title: "showcase.v0113.hero.title",
+      body: "showcase.v0113.hero.body",
+    },
+    highlights: [
+      { icon: Sun, text: "showcase.v0113.sky" },
+      { icon: Grid3x3, text: "showcase.v0113.ground" },
+      { icon: Sparkles, text: "showcase.v0113.pick" },
+      { icon: Gauge, text: "showcase.v0113.speed" },
+    ],
+  },
+  {
+    version: "0.11.2",
+    hero: {
+      icon: Package,
+      title: "showcase.v0112.hero.title",
+      body: "showcase.v0112.hero.body",
+    },
+    highlights: [
+      { icon: Maximize2, text: "showcase.v0112.fullscreen" },
+      { icon: Download, text: "showcase.v0112.review" },
+      { icon: Palette, text: "showcase.v0112.paint" },
+      { icon: Gauge, text: "showcase.v0112.speed" },
+      { icon: Monitor, text: "showcase.v0112.window" },
+    ],
+  },
+  {
+    version: "0.11.1",
+    hero: {
+      icon: Package,
+      title: "showcase.v0111.hero.title",
+      body: "showcase.v0111.hero.body",
+    },
+    highlights: [{ icon: Wrench, text: "showcase.v0111.messages" }],
+  },
+  {
+    version: "0.11.0",
+    hero: {
+      icon: PersonStanding,
+      title: "showcase.v0110.hero.title",
+      body: "showcase.v0110.hero.body",
+    },
+    highlights: [
+      { icon: Layers, text: "showcase.v0110.designer" },
+      { icon: Bike, text: "showcase.v0110.wheels" },
+      { icon: Gauge, text: "showcase.v0110.speed" },
+      { icon: Package, text: "showcase.v0110.swaps" },
+    ],
+  },
+  {
+    version: "0.10.2",
+    hero: {
+      icon: SwatchBook,
+      title: "showcase.v0102.hero.title",
+      body: "showcase.v0102.hero.body",
+    },
+    highlights: [
+      { icon: FolderInput, text: "showcase.v0102.packs" },
+      { icon: Layers, text: "showcase.v0102.presets" },
+      { icon: Download, text: "showcase.v0102.vcredist" },
+      { icon: ShieldAlert, text: "showcase.v0102.msvcr90" },
+      { icon: Palette, text: "showcase.v0102.paintsync" },
+    ],
+  },
+  {
+    version: "0.10.1",
+    hero: {
+      icon: History,
+      title: "showcase.v0101.hero.title",
+      body: "showcase.v0101.hero.body",
+    },
+    highlights: [
+      { icon: Undo2, text: "showcase.v0101.restore" },
+      { icon: Palette, text: "showcase.v0101.paints" },
+      { icon: ShieldAlert, text: "showcase.v0101.r6034" },
+      { icon: Share2, text: "showcase.v0101.logs" },
+      { icon: Bike, text: "showcase.v0101.bikes" },
+    ],
+  },
+  {
+    version: "0.10.0",
+    hero: {
+      icon: Wand2,
+      title: "showcase.v0100.hero.title",
+      body: "showcase.v0100.hero.body",
+    },
+    highlights: [
+      { icon: Grid3x3, text: "showcase.v0100.location" },
+      { icon: Download, text: "showcase.v0100.downloads" },
+      { icon: Mountain, text: "showcase.v0100.terrain" },
+      { icon: Share2, text: "showcase.v0100.sharing" },
+      { icon: Wrench, text: "showcase.v0100.linux" },
+    ],
+  },
   {
     version: "0.9.2",
     hero: {

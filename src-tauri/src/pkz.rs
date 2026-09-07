@@ -639,6 +639,8 @@ pub fn entry_names(path: &Path) -> Result<Vec<String>> {
     Ok(names.into_inner())
 }
 
+// Kept beside the other archive readers; no caller today.
+#[allow(dead_code)]
 pub fn read_entry(path: &Path, file_name: &str) -> Result<Option<Vec<u8>>> {
     if is_plain_zip(path) {
         let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;

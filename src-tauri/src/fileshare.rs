@@ -19,7 +19,7 @@ use crate::upload;
 use anyhow::Context;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
 /// Phase updates ride their own event, so the Library's dialog and the Presets one never
@@ -73,70 +73,154 @@ pub struct FileShare {
     pub bundle: BundleRef,
 }
 
-/// Resolve picked absolute paths into `mods/`-relative items, saying what was left out.
+/// A decoded code, and what importing it would land on top of.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharePreview {
+    #[serde(flatten)]
+    pub share: FileShare,
+    /// The rels the importer already has. [`import`] places with
+    /// [`install::OnConflict::Overwrite`], so these are replaced without being asked —
+    /// which is worth saying before the download, not after.
+    pub existing: Vec<String>,
+}
+
+/// Read a code and check what it carries against the mods tree.
+pub fn preview(cfg: &AppConfig, text: &str) -> anyhow::Result<SharePreview> {
+    let share = decode(text)?;
+    let existing = share
+        .items
+        .iter()
+        // Through `mods_subdir` rather than a plain join: it resolves each segment against
+        // what is really on disk, so a sender whose folder is `Tracks` still matches ours.
+        .filter(|i| library::mods_subdir(&cfg.mods_path, &format!("mods/{}", i.rel)).exists())
+        .map(|i| i.rel.clone())
+        .collect();
+    Ok(SharePreview { share, existing })
+}
+
+/// Turn one pick into the file it names and the rel a code would carry, or the reason it
+/// can't be shared.
 ///
-/// Everything shared has to live under the mods root: the rel path is what the code carries,
-/// and a file from anywhere else has no rel path to give. That check doubles as the guard on
-/// paths arriving from the frontend — nothing outside the mods tree can be packed up and
-/// uploaded, whatever the caller asks for.
-pub fn plan(cfg: &AppConfig, paths: &[String]) -> SharePlan {
+/// Two callers, two ways of naming a thing. The Library holds absolute paths from its scan;
+/// Manage and the Locker name content the way the rest of the app does, by its
+/// `mods/`-relative rel (`mods/tracks/EU/RedBud.pkz`, or bare `tracks/…`). Both land here.
+///
+/// This is also the guard on input from the frontend, and it has exactly two ways to say
+/// yes: the mods tree, and the shadow tree a disabled mod is parked in. A `..` is refused
+/// outright — `starts_with` compares components, so `mods/../../secrets` would otherwise
+/// pass a prefix check while naming a file well outside.
+fn resolve_pick(
+    cfg: &AppConfig,
+    root: &Path,
+    raw: &str,
+) -> Result<(PathBuf, String), &'static str> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("empty path");
+    }
+    let given = Path::new(raw);
+    if given.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err("path steps outside the mods folder");
+    }
+
+    let abs = if given.is_absolute() {
+        given.to_path_buf()
+    } else {
+        // A rel names a place in the mods tree whether or not it says `mods/` first.
+        let first_is_mods = raw
+            .split(['/', '\\'])
+            .find(|s| !s.is_empty())
+            .is_some_and(|s| s.eq_ignore_ascii_case("mods"));
+        let rel = if first_is_mods { raw.to_string() } else { format!("mods/{raw}") };
+        let enabled = library::mods_subdir(&cfg.mods_path, &rel);
+        // Manage lists mods it has switched *off* too, and those are parked outside the
+        // content folder. Sharing one is still sharing the file — and the rel a code
+        // carries is where it goes when enabled, which is the same either way.
+        if enabled.exists() { enabled } else { crate::modstate::disabled_path(&cfg.mods_path, &rel) }
+    };
+
+    if !abs.exists() {
+        return Err("no longer on disk");
+    }
+
+    let shadow = crate::modstate::shadow_root(&cfg.mods_path);
+    let rel = abs
+        .strip_prefix(root)
+        .or_else(|_| abs.strip_prefix(&shadow))
+        .map_err(|_| "outside the mods folder")?
+        .to_string_lossy()
+        .replace('\\', "/");
+    let rel = rel.trim_matches('/').to_string();
+    if rel.is_empty() {
+        return Err("that's the mods folder itself");
+    }
+    Ok((abs, rel))
+}
+
+/// A resolved pick: what a code will say about it, and where it's actually read from.
+///
+/// The two are not the same file for a mod Manage has switched off — it says
+/// `mods/tracks/RedBud.pkz`, because that is where it goes on the far end, while `src`
+/// points into the shadow tree it's parked in today.
+struct Pick {
+    item: ShareItem,
+    src: PathBuf,
+}
+
+/// Resolve picks, saying what was left out and why. Deduped and ordered by rel.
+///
+/// The rel path is the whole portability story — see [`ShareItem::rel`] — so anything that
+/// can't be given one can't be shared. See [`resolve_pick`] for what counts.
+fn picks(cfg: &AppConfig, paths: &[String]) -> (Vec<Pick>, Vec<Skipped>) {
     let root = library::mods_root(&cfg.mods_path);
-    let mut items: Vec<ShareItem> = Vec::new();
+    let mut picks: Vec<Pick> = Vec::new();
     let mut skipped: Vec<Skipped> = Vec::new();
 
     for raw in paths {
-        let p = PathBuf::from(raw.trim());
-        let reason = if !p.exists() {
-            Some("no longer on disk")
-        } else if !p.starts_with(&root) {
-            Some("outside the mods folder")
-        } else {
-            None
+        let (src, rel) = match resolve_pick(cfg, &root, raw) {
+            Ok(resolved) => resolved,
+            Err(reason) => {
+                skipped.push(Skipped { path: raw.clone(), reason: reason.to_string() });
+                continue;
+            }
         };
-        if let Some(reason) = reason {
-            skipped.push(Skipped { path: raw.clone(), reason: reason.to_string() });
-            continue;
-        }
 
-        let rel = p
-            .strip_prefix(&root)
-            .map(|r| r.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
-        let rel = rel.trim_matches('/').to_string();
-        if rel.is_empty() {
-            skipped.push(Skipped {
-                path: raw.clone(),
-                reason: "that's the mods folder itself".to_string(),
-            });
-            continue;
-        }
-
-        let is_dir = p.is_dir();
-        items.push(ShareItem {
-            name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-            rel,
-            size: if is_dir { bundle::dir_size_deep(&p) } else { bundle::file_size(&p) },
-            is_dir,
+        let is_dir = src.is_dir();
+        picks.push(Pick {
+            item: ShareItem {
+                name: src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                rel,
+                size: if is_dir { bundle::dir_size_deep(&src) } else { bundle::file_size(&src) },
+                is_dir,
+            },
+            src,
         });
     }
 
-    dedup(&mut items);
-    items.sort_by(|a, b| a.rel.to_lowercase().cmp(&b.rel.to_lowercase()));
+    dedup(&mut picks);
+    picks.sort_by(|a, b| a.item.rel.to_lowercase().cmp(&b.item.rel.to_lowercase()));
+    (picks, skipped)
+}
+
+pub fn plan(cfg: &AppConfig, paths: &[String]) -> SharePlan {
+    let (picks, skipped) = picks(cfg, paths);
+    let items: Vec<ShareItem> = picks.into_iter().map(|p| p.item).collect();
     let total_size = items.iter().map(|i| i.size).sum();
     SharePlan { items, skipped, total_size }
 }
 
 /// Drop repeats, and anything already carried by a folder that's also in the list — picking
 /// a track folder *and* a file inside it must not pack that file twice.
-fn dedup(items: &mut Vec<ShareItem>) {
-    let dirs: Vec<String> = items
+fn dedup(picks: &mut Vec<Pick>) {
+    let dirs: Vec<String> = picks
         .iter()
-        .filter(|i| i.is_dir)
-        .map(|i| i.rel.trim_end_matches('/').to_lowercase())
+        .filter(|p| p.item.is_dir)
+        .map(|p| p.item.rel.trim_end_matches('/').to_lowercase())
         .collect();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    items.retain(|i| {
-        let key = i.rel.to_lowercase();
+    picks.retain(|p| {
+        let key = p.item.rel.to_lowercase();
         if !seen.insert(key.clone()) {
             return false;
         }
@@ -167,44 +251,53 @@ pub async fn create(
     cfg: &AppConfig,
     paths: &[String],
 ) -> anyhow::Result<String> {
-    let plan = plan(cfg, paths);
-    if plan.items.is_empty() {
+    let (picks, _) = picks(cfg, paths);
+    if picks.is_empty() {
         anyhow::bail!(
             "Nothing here can be shared — pick installed files from your mods folder."
         );
     }
 
     bundle::emit(app, EVENT, "bundling", None);
-    let root_dir = library::mods_root(&cfg.mods_path);
     let work = std::env::temp_dir().join(format!("mxb-share-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&work);
-    let root = work.join("share");
-    std::fs::create_dir_all(&root)?;
+    std::fs::create_dir_all(&work)?;
 
-    for item in &plan.items {
-        let src = root_dir.join(bundle::rel_to_native(&item.rel));
-        let dest = root.join("mods").join(bundle::rel_to_native(&item.rel));
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        if item.is_dir {
-            // Resolved, not linked: a junction into the sender's tree means nothing on the
-            // machine this is headed for. Same reason the preset bundle resolves its folders.
-            bundle::copy_tree(&src, &dest)?;
-        } else {
-            std::fs::copy(&src, &dest)
-                .with_context(|| format!("copying {}", src.display()))?;
-        }
+    // Named, not copied. Sharing a track used to write the whole `.pkz` into a staging tree
+    // and then read it straight back out to build the zip; the zip stores its payload
+    // uncompressed, so that first pass only ever cost time. Folders are still resolved
+    // rather than linked — a junction into the sender's tree means nothing on the machine
+    // this is headed for — which is what `entries_under` walks for.
+    let mut entries: Vec<bundle::ZipEntry> = Vec::new();
+    for Pick { item, src } in &picks {
+        entries.extend(bundle::entries_under(&format!("mods/{}", item.rel), src));
     }
+
+    let items: Vec<ShareItem> = picks.into_iter().map(|p| p.item).collect();
 
     // A manifest for anyone who unzips the archive by hand rather than pasting the code.
     // `place_mod` routes on the `mods/` child alone, so this sits beside it harmlessly.
-    std::fs::write(root.join("share.json"), serde_json::to_vec_pretty(&plan.items)?)?;
+    let manifest = work.join("share.json");
+    std::fs::write(&manifest, serde_json::to_vec_pretty(&items)?)?;
+    entries.push(bundle::ZipEntry { rel: "share.json".to_string(), src: manifest });
 
-    let zip_path = work.join(format!("{}.zip", archive_stem(&plan.items)));
-    bundle::zip_dir(&root, &zip_path)?;
+    let zip_path = work.join(format!("{}.zip", archive_stem(&items)));
+    // Off the runtime: packing a track copies eighty-odd megabytes through a blocking read
+    // and write, and doing that on a runtime thread freezes every other async task in the
+    // app — the upload that follows included. `file_share_plan` beside it already does this.
+    let packed = std::time::Instant::now();
+    let zp = zip_path.clone();
+    tauri::async_runtime::spawn_blocking(move || bundle::zip_entries(&entries, &zp))
+        .await
+        .map_err(|e| anyhow::anyhow!("packing the share failed: {e}"))??;
 
     let size = bundle::file_size(&zip_path);
+    log::info!(
+        "share: packed {} into {} in {:.1}s",
+        bundle::human_size(size),
+        zip_path.display(),
+        packed.elapsed().as_secs_f32()
+    );
     let total = bundle::human_size(size);
     bundle::emit(app, EVENT, "uploading", Some(format!("Uploading {total}…")));
     let client = install::build_client()?;
@@ -227,11 +320,13 @@ pub async fn create(
         .ok_or_else(|| anyhow::anyhow!("the upload returned no link"))?;
     // As in the preset bundle: `url` is the first slice, and `parts` is only carried when
     // there's more than one to stitch back together.
-    let parts = if up.parts.len() > 1 { up.parts } else { Vec::new() };
+    let multi = up.parts.len() > 1;
+    let parts = if multi { up.parts } else { Vec::new() };
+    let part_sizes = if multi { up.part_sizes } else { Vec::new() };
     let share = FileShare {
-        items: plan.items,
+        items,
         total_size: up.size,
-        bundle: BundleRef { url: first, host: up.host, size: up.size, parts },
+        bundle: BundleRef { url: first, host: up.host, size: up.size, parts, part_sizes },
     };
     bundle::emit(app, EVENT, "done", None);
     Ok(encode(&share))
@@ -261,6 +356,17 @@ pub fn decode(text: &str) -> anyhow::Result<FileShare> {
     if share.items.is_empty() {
         anyhow::bail!("this share code carries no files");
     }
+    // Every `rel` is joined onto the receiver's mods root on import, and the first segment
+    // of the first one picks the type folder outright — so a code written by hand with
+    // `../` in it would install into the game folder itself. Nothing this app produces
+    // looks like that: `plan` derives every rel from a real path under the mods root.
+    if let Some(bad) = share.items.iter().find(|i| !library::is_safe_rel(&i.rel)) {
+        anyhow::bail!(
+            "this share code points outside the mods folder ('{}') — don't import it",
+            bad.rel
+        );
+    }
+    crate::presets::check_bundle_ref(&share.bundle)?;
     Ok(share)
 }
 
@@ -271,20 +377,29 @@ pub async fn import(
 ) -> anyhow::Result<FileShare> {
     let share = decode(text)?;
 
-    let work = std::env::temp_dir().join(format!("mxb-share-import-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&work);
-    std::fs::create_dir_all(&work)?;
+    // Beside the mods tree, not in `%TEMP%`: what lands here is renamed into place a moment
+    // later, and a rename only costs nothing when both ends are on one drive.
+    let work = bundle::scratch_dir(cfg, "share-import");
 
-    let archive = bundle::fetch(app, EVENT, SLUG, &share.bundle, &work).await?;
+    let fetched = bundle::fetch(app, EVENT, SLUG, &share.bundle, &work).await?;
 
     bundle::emit(app, EVENT, "installing", None);
     let extracted = work.join("extracted");
     std::fs::create_dir_all(&extracted)?;
-    install::extract_archive(&archive, &extracted)?;
+    fetched.extract(&extracted)?;
     let mods_dir = library::mods_subdir(&cfg.mods_path, "mods");
     // The archive is a `mods/` tree, which routes as a merge — the type folder is only a
     // fallback for shapes this never produces, but naming the real one keeps the log honest.
-    install::place_mod(&extracted, &mods_dir, &type_folder(&share.items), "", SLUG)?;
+    // Staged under our own `work`, deleted on the next line — nothing else reads it.
+    install::place_mod_with(
+        &extracted,
+        &mods_dir,
+        &type_folder(&share.items),
+        "",
+        SLUG,
+        install::OnConflict::Overwrite,
+        install::Staging::Consume,
+    )?;
 
     let _ = std::fs::remove_dir_all(&work);
     install::notify_frostmod(app, SLUG);
@@ -306,7 +421,6 @@ fn type_folder(items: &[ShareItem]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     fn touch(p: &Path) {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -344,6 +458,45 @@ mod tests {
         assert_eq!(rels, ["rider/helmets/AGV/paints/Blue.pnt", "tracks/EU/RedBud.pkz"]);
         assert!(p.skipped.is_empty(), "{:?}", p.skipped);
         assert_eq!(p.total_size, 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The one thing an importer can't see for themselves: the code is about to land on
+    /// top of a track they already ride. `import` overwrites without asking, so the preview
+    /// has to name what it replaces — and match the folder whatever case it was written in.
+    #[test]
+    fn a_preview_names_what_it_would_replace() {
+        let root = tmp("preview");
+        touch(&root.join("mods/tracks/EU/RedBud.pkz"));
+
+        let code = encode(&FileShare {
+            items: vec![
+                ShareItem {
+                    name: "RedBud.pkz".into(),
+                    rel: "Tracks/EU/RedBud.pkz".into(),
+                    size: 1,
+                    is_dir: false,
+                },
+                ShareItem {
+                    name: "Hangtown.pkz".into(),
+                    rel: "tracks/EU/Hangtown.pkz".into(),
+                    size: 1,
+                    is_dir: false,
+                },
+            ],
+            total_size: 2,
+            bundle: BundleRef {
+                url: "https://example.invalid/x.zip".into(),
+                host: "example".into(),
+                size: 2,
+                parts: vec![],
+                part_sizes: vec![],
+            },
+        });
+
+        let p = preview(&cfg_at(&root), &code).unwrap();
+        assert_eq!(p.existing, ["Tracks/EU/RedBud.pkz"], "only the one already there");
+        assert_eq!(p.share.items.len(), 2, "and the code still carries both");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -391,6 +544,98 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Manage and the Locker name content by rel, not by absolute path — that's how the rest
+    /// of the app talks about a mod. Both spellings have to resolve to the same item.
+    #[test]
+    fn planning_takes_a_rel_as_readily_as_a_path() {
+        let root = tmp("rels");
+        touch(&root.join("mods/tracks/EU/RedBud.pkz"));
+        touch(&root.join("mods/bikes/KTM450/FrostMod Models/Factory OEM/model.edf"));
+        let cfg = cfg_at(&root);
+
+        let p = plan(
+            &cfg,
+            &[
+                "mods/tracks/EU/RedBud.pkz".to_string(),
+                "bikes/KTM450/FrostMod Models/Factory OEM".to_string(),
+            ],
+        );
+
+        let rels: Vec<&str> = p.items.iter().map(|i| i.rel.as_str()).collect();
+        assert_eq!(rels, ["bikes/KTM450/FrostMod Models/Factory OEM", "tracks/EU/RedBud.pkz"]);
+        assert!(p.items[0].is_dir, "a swap variant is a folder");
+        assert!(p.skipped.is_empty(), "{:?}", p.skipped);
+
+        // And the absolute spelling of the same track answers identically.
+        let abs = plan(&cfg, &[root.join("mods/tracks/EU/RedBud.pkz").to_string_lossy().into_owned()]);
+        assert_eq!(abs.items[0], p.items[1]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Manage lists mods it has switched off, and those are parked outside the content
+    /// folder. Sharing one has to reach it — and still say where it goes, not where it sits.
+    #[test]
+    fn planning_reaches_a_mod_manage_switched_off() {
+        let root = tmp("parked");
+        touch(&root.join("mxbapp_disabled/tracks/Old.pkz"));
+
+        let p = plan(&cfg_at(&root), &["mods/tracks/Old.pkz".to_string()]);
+
+        assert_eq!(p.items.len(), 1, "skipped: {:?}", p.skipped);
+        assert_eq!(p.items[0].rel, "tracks/Old.pkz", "the rel is where it lands when enabled");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `starts_with` compares components, so a rel with `..` in it would sail through a
+    /// prefix check while naming a file well outside the tree. It never gets that far.
+    #[test]
+    fn planning_refuses_a_rel_that_climbs_out() {
+        let root = tmp("climb");
+        touch(&root.join("mods/tracks/RedBud.pkz"));
+        touch(&root.join("secrets.txt"));
+
+        let p = plan(&cfg_at(&root), &["mods/../secrets.txt".to_string()]);
+
+        assert!(p.items.is_empty(), "{:?}", p.items);
+        assert!(p.skipped[0].reason.contains("steps outside"), "{:?}", p.skipped);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The import target is picked from the first segment of the first item's `rel`, so a
+    /// hand-written code with `../` in it would install into the game folder itself.
+    #[test]
+    fn a_code_that_points_outside_the_mods_folder_is_refused() {
+        let item = |rel: &str| ShareItem {
+            name: "x.pkz".into(),
+            rel: rel.into(),
+            size: 1,
+            is_dir: false,
+        };
+        let share = |items: Vec<ShareItem>, url: &str| FileShare {
+            items,
+            total_size: 1,
+            bundle: BundleRef {
+                url: url.into(),
+                host: "catbox".into(),
+                size: 1,
+                parts: Vec::new(),
+                part_sizes: Vec::new(),
+            },
+        };
+        let good = "https://files.catbox.moe/a.zip";
+        for hostile in [
+            share(vec![item("../evil.dll")], good),
+            share(vec![item("tracks/../../evil.dll")], good),
+            share(vec![item("/etc/passwd")], good),
+            // The first item routes the install; a climb hiding behind a good one still lands.
+            share(vec![item("tracks/EU/RedBud.pkz"), item("../evil.dll")], good),
+            share(vec![item("tracks/EU/RedBud.pkz")], "file:///etc/passwd"),
+        ] {
+            let code = encode(&hostile);
+            assert!(decode(&code).is_err(), "should be refused: {:?}", hostile.items);
+        }
+    }
+
     #[test]
     fn code_round_trips() {
         let share = FileShare {
@@ -406,6 +651,7 @@ mod tests {
                 host: "catbox".into(),
                 size: 40,
                 parts: Vec::new(),
+                part_sizes: Vec::new(),
             },
         };
 
@@ -426,18 +672,41 @@ mod tests {
         assert!(err.contains("Presets tab"), "{err}");
     }
 
-    /// End to end minus the network: what `create` stages has to be what `import` lays down,
+    /// End to end minus the network: what `create` packs has to be what `import` lays down,
     /// in the same folders, on a machine that has none of it.
+    ///
+    /// Packed the way `create` packs — straight off the sender's mods tree, with no staging
+    /// copy in between — so the paths inside the archive are the ones a real share carries.
     #[test]
-    fn a_staged_share_lands_back_in_the_same_folders() {
+    fn a_share_lands_back_in_the_same_folders() {
         let root = tmp("roundtrip");
-        let staged = root.join("share");
-        touch(&staged.join("mods/tracks/EU/RedBud.pkz"));
-        touch(&staged.join("mods/rider/helmets/AGV/paints/Blue.pnt"));
-        touch(&staged.join("share.json"));
+        let sender = root.join("sender/mods");
+        touch(&sender.join("tracks/EU/RedBud.pkz"));
+        touch(&sender.join("rider/helmets/AGV/paints/Blue.pnt"));
+        // A picked folder, to prove its interior travels too.
+        touch(&sender.join("tracks/Loose/track.pkz"));
+        touch(&sender.join("tracks/Loose/maps/ground.tga"));
+
+        let cfg = AppConfig {
+            mods_path: root.join("sender").to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let (picks, skipped) = picks(
+            &cfg,
+            &[
+                "tracks/EU/RedBud.pkz".to_string(),
+                "rider/helmets/AGV/paints/Blue.pnt".to_string(),
+                "tracks/Loose".to_string(),
+            ],
+        );
+        assert!(skipped.is_empty(), "{skipped:?}");
+        let entries: Vec<bundle::ZipEntry> = picks
+            .iter()
+            .flat_map(|p| bundle::entries_under(&format!("mods/{}", p.item.rel), &p.src))
+            .collect();
 
         let zip_path = root.join("share.zip");
-        bundle::zip_dir(&staged, &zip_path).unwrap();
+        bundle::zip_entries(&entries, &zip_path).unwrap();
 
         let extracted = root.join("extracted");
         std::fs::create_dir_all(&extracted).unwrap();
@@ -447,6 +716,8 @@ mod tests {
 
         assert!(mods.join("tracks/EU/RedBud.pkz").exists());
         assert!(mods.join("rider/helmets/AGV/paints/Blue.pnt").exists());
+        assert!(mods.join("tracks/Loose/track.pkz").exists());
+        assert!(mods.join("tracks/Loose/maps/ground.tga").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

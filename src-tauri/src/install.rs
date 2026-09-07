@@ -8,7 +8,7 @@ use scraper::{Html, Selector};
 use serde::Serialize;
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -42,6 +42,47 @@ pub(crate) fn emit_progress(
     total: Option<u64>,
 ) {
     emit(app, slug, stage, received, total);
+}
+
+/// Bytes received by each of several downloads sharing one bar.
+///
+/// A multi-part bundle used to fetch its slices one after another and each filled the bar
+/// from nothing — three parts, three bars, three times the wait. They run together now, so
+/// each reports into its own slot and what the player sees is the sum against the whole
+/// download.
+pub(crate) struct SharedProgress {
+    slots: Vec<std::sync::atomic::AtomicU64>,
+    total: Option<u64>,
+}
+
+impl SharedProgress {
+    pub(crate) fn new(parts: usize, total: Option<u64>) -> Self {
+        Self {
+            slots: (0..parts).map(|_| std::sync::atomic::AtomicU64::new(0)).collect(),
+            total,
+        }
+    }
+
+    fn record(&self, slot: usize, received: u64) -> (u64, Option<u64>) {
+        use std::sync::atomic::Ordering::Relaxed;
+        if let Some(s) = self.slots.get(slot) {
+            s.store(received, Relaxed);
+        }
+        (self.slots.iter().map(|s| s.load(Relaxed)).sum(), self.total)
+    }
+}
+
+/// Which bar a download reports into: its own, or one slot of a shared one.
+pub(crate) type Slot<'a> = Option<(&'a SharedProgress, usize)>;
+
+fn report(app: &AppHandle, slug: &str, progress: Slot<'_>, received: u64, total: Option<u64>) {
+    match progress {
+        Some((shared, slot)) => {
+            let (sum, whole) = shared.record(slot, received);
+            emit(app, slug, "downloading", Some(sum), whole);
+        }
+        None => emit(app, slug, "downloading", Some(received), total),
+    }
 }
 
 fn emit(app: &AppHandle, slug: &str, stage: &'static str, received: Option<u64>, total: Option<u64>) {
@@ -93,12 +134,37 @@ pub(crate) fn staging_dir(tag: &str) -> PathBuf {
     ))
 }
 
-pub(crate) fn build_client() -> anyhow::Result<Client> {
-    Ok(Client::builder()
+fn client_builder() -> reqwest::ClientBuilder {
+    Client::builder()
         .user_agent(UA)
         .connect_timeout(Duration::from_secs(15))
         .cookie_store(true)
-        .build()?)
+}
+
+pub(crate) fn build_client() -> anyhow::Result<Client> {
+    Ok(client_builder().build()?)
+}
+
+/// How long a transfer may go silent before we call it dead. Resets on every read, so a
+/// slow host trickling bytes is never touched.
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// [`build_client`] with a read timeout, for fetching mod archives.
+///
+/// [`download`]'s resume loop only wakes when the stream *errors*, and a silent socket never
+/// does — so without this a host that stops sending hangs forever. Not on [`build_client`]
+/// itself: an upload sees no response until its last byte is sent, which looks identical.
+/// Tell the queue this install is working out where the file actually is.
+///
+/// The same stage Browse emits before resolving a host link, exposed because the MXB Hub
+/// install does the same thing for a purchase whose file lives on MediaFire — without it the
+/// card sits at 0% through a folder lookup with nothing to say why.
+pub(crate) fn emit_resolving(app: &AppHandle, slug: &str) {
+    emit(app, slug, "resolving", None, None);
+}
+
+pub(crate) fn build_download_client() -> anyhow::Result<Client> {
+    Ok(client_builder().read_timeout(READ_TIMEOUT).build()?)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -110,8 +176,8 @@ pub async fn add_to_library(
     host: &str,
     subpath: &str,
     dest_folder: &str,
-) -> anyhow::Result<()> {
-    let client = build_client()?;
+) -> anyhow::Result<Placed> {
+    let client = build_download_client()?;
 
     // MEGA is end-to-end encrypted — no direct URL; use the fetch-and-decrypt path.
     let h = host.to_lowercase();
@@ -121,9 +187,15 @@ pub async fn add_to_library(
     }
 
     emit(app, slug, "resolving", None, None);
-    let direct = resolve_direct_url(&client, url, host).await?;
-
-    download_and_place(app, cfg, &client, slug, &direct, subpath, dest_folder).await
+    match resolve_share(&client, url, host).await? {
+        Resolved::File(direct) => {
+            download_and_place(app, cfg, &client, slug, &direct, subpath, dest_folder).await
+        }
+        Resolved::Folder { name, files } => {
+            download_folder_and_place(app, cfg, &client, slug, &name, &files, subpath, dest_folder)
+                .await
+        }
+    }
 }
 
 /// Download one mod and install it.
@@ -140,16 +212,152 @@ pub async fn download_and_place(
     direct_url: &str,
     subpath: &str,
     dest_folder: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Placed> {
     let work = staging_dir("dl");
     std::fs::create_dir_all(&work)?;
 
-    let archive = download(app, client, slug, direct_url, &work).await?;
-    extract_and_place(app, cfg, slug, &archive, &work, subpath, dest_folder)
+    // A failed or cancelled download used to leave its staging directory behind — every
+    // abandoned attempt at a 400 MB track sat in the temp dir until the OS got around to it.
+    let archive = match download(app, client, slug, direct_url, &work).await {
+        Ok(path) => path,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&work);
+            return Err(e);
+        }
+    };
+    extract_and_place_blocking(app, cfg, slug, archive, work, subpath, dest_folder, Packs::Offer).await
+}
+
+/// Download a whole folder share and install what it held.
+///
+/// A folder share that holds no archive is the mod itself, uploaded loose — a sound set's
+/// `engine.scl` beside its samples, an unpacked bike, six liveries. Picking one file out of
+/// it and calling that the mod is what "installed" a single `.pnt` of six, so recreate the
+/// folder instead and let the same planner that reads an extracted archive read this.
+#[allow(clippy::too_many_arguments)]
+async fn download_folder_and_place(
+    app: &AppHandle,
+    cfg: &AppConfig,
+    client: &Client,
+    slug: &str,
+    name: &str,
+    files: &[RemoteFile],
+    subpath: &str,
+    dest_folder: &str,
+) -> anyhow::Result<Placed> {
+    let work = staging_dir("dl");
+    let root = work.join(STAGED_DIR).join(sanitize(name));
+    std::fs::create_dir_all(&root)?;
+
+    if let Err(e) = download_folder(app, client, slug, files, &root).await {
+        let _ = std::fs::remove_dir_all(&work);
+        return Err(e);
+    }
+    place_staged_named(app, cfg, slug, work, subpath, dest_folder, Packs::OfferFolder, name).await
+}
+
+/// [`extract_and_place`] on a blocking thread.
+///
+/// Unpacking a track is minutes of synchronous disk work, and inline on an `async` command it
+/// pins a runtime worker for all of it. The shop and import commands already spawn it; the
+/// site download was the one that didn't.
+#[allow(clippy::too_many_arguments)]
+async fn extract_and_place_blocking(
+    app: &AppHandle,
+    cfg: &AppConfig,
+    slug: &str,
+    archive: PathBuf,
+    work: PathBuf,
+    subpath: &str,
+    dest_folder: &str,
+    packs: Packs,
+) -> anyhow::Result<Placed> {
+    let app = app.clone();
+    let cfg = cfg.clone();
+    let slug = slug.to_string();
+    let subpath = subpath.to_string();
+    let dest_folder = dest_folder.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        extract_and_place(&app, &cfg, &slug, &archive, &work, &subpath, &dest_folder, packs)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("install task failed: {e}"))?
+}
+
+/// [`place_staged_as`] on a blocking thread, for a folder share that is already on disk.
+#[allow(clippy::too_many_arguments)]
+async fn place_staged_named(
+    app: &AppHandle,
+    cfg: &AppConfig,
+    slug: &str,
+    work: PathBuf,
+    subpath: &str,
+    dest_folder: &str,
+    packs: Packs,
+    source_name: &str,
+) -> anyhow::Result<Placed> {
+    let app = app.clone();
+    let cfg = cfg.clone();
+    let slug = slug.to_string();
+    let subpath = subpath.to_string();
+    let dest_folder = dest_folder.to_string();
+    let source_name = source_name.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        place_staged_as(
+            &app,
+            &cfg,
+            &slug,
+            &work,
+            &subpath,
+            &dest_folder,
+            packs,
+            &source_name,
+        )
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("install task failed: {e}"))?
+}
+
+/// Whether a download that turns out to hold several mods should be offered for review.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Packs {
+    /// Offer it, and let the user pick which of them to install.
+    Offer,
+    /// The download was a folder share, not an archive. Always reviewed: it is the author's
+    /// loose files as they sat on their drive, and where each piece goes is a judgement the
+    /// layout does not state.
+    OfferFolder,
+    /// Place it whole. The shop takes this: a purchase is one product rather than a
+    /// community pack of fifty, and that path deletes its own staging directory the moment
+    /// this call returns — which a review, still pointing into it, would need kept.
+    PlaceWhole,
+}
+
+/// What an install did once the archive was open.
+#[derive(Debug, Clone)]
+pub(crate) enum Placed {
+    /// Installed, the ordinary outcome.
+    Done,
+    /// The archive turned out to hold several mods, and the user is being asked which of
+    /// them they want. Nothing has been written; the plan owns the staging directory from
+    /// here and frees it on commit or cancel.
+    Review { plan: crate::dropzone::DropPlan },
+}
+
+impl Placed {
+    /// The plan the caller has to put up for review, if any. `None` is an ordinary install
+    /// that is already finished.
+    pub(crate) fn review(self) -> Option<crate::dropzone::DropPlan> {
+        match self {
+            Placed::Done => None,
+            Placed::Review { plan } => Some(plan),
+        }
+    }
 }
 
 /// Extract a downloaded archive and place it. `pub(crate)` for the shop, whose bytes come
 /// through a WebView rather than `reqwest` but which finishes exactly the same way.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn extract_and_place(
     app: &AppHandle,
     cfg: &AppConfig,
@@ -158,11 +366,75 @@ pub(crate) fn extract_and_place(
     work: &Path,
     subpath: &str,
     dest_folder: &str,
-) -> anyhow::Result<()> {
+    packs: Packs,
+) -> anyhow::Result<Placed> {
     emit(app, slug, "extracting", None, None);
-    let extracted = work.join("extracted");
+    let extracted = work.join(STAGED_DIR);
     std::fs::create_dir_all(&extracted)?;
-    extract_archive(archive, &extracted)?;
+    stage_download(archive, &extracted, subpath)?;
+
+    let name = archive
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| slug.to_string());
+    place_staged_as(app, cfg, slug, work, subpath, dest_folder, packs, &name)
+}
+
+/// Stage a downloaded file for placement.
+///
+/// Almost always an archive. A ReShade preset is the exception and a common one: roughly
+/// half the presets on the site are shared as the bare `.ini`, which [`extract_archive`]
+/// rejects outright — so carry it through, exactly as the "choose file" import does.
+fn stage_download(downloaded: &Path, extracted: &Path, subpath: &str) -> anyhow::Result<()> {
+    if crate::reshade::is_reshade_subpath(subpath)
+        && detect_ext(downloaded).is_err()
+        && crate::reshade::is_preset_file(downloaded)
+    {
+        let name = downloaded.file_name().unwrap_or_default();
+        std::fs::copy(downloaded, extracted.join(name))?;
+        return Ok(());
+    }
+    extract_archive(downloaded, extracted)
+}
+
+/// Install what is already staged under `work/extracted`.
+///
+/// `source_name` is what the review sheet calls the download — an archive's file name, or
+/// the slug when the download had no single file to be named after.
+#[allow(clippy::too_many_arguments)]
+fn place_staged_as(
+    app: &AppHandle,
+    cfg: &AppConfig,
+    slug: &str,
+    work: &Path,
+    subpath: &str,
+    dest_folder: &str,
+    packs: Packs,
+    source_name: &str,
+) -> anyhow::Result<Placed> {
+    let extracted = work.join(STAGED_DIR);
+
+    // A pack is several mods in one download, and only now — with the archive open — can it
+    // be seen to be one. Hand it to the review sheet rather than placing 3.8 GB of bikes the
+    // user was never shown. An ordinary single-mod download answers `None` and carries on.
+    if packs != Packs::PlaceWhole && !crate::reshade::is_reshade_subpath(subpath) {
+        let name = source_name.to_string();
+        let plan = if packs == Packs::OfferFolder {
+            crate::dropzone::plan_folder(&cfg.mods_path, &extracted, work.to_path_buf(), &name)
+                .map(Some)
+        } else {
+            crate::dropzone::plan_extracted(&cfg.mods_path, &extracted, work.to_path_buf(), &name)
+        };
+        match plan {
+            Ok(Some(plan)) => {
+                emit(app, slug, "review", None, None);
+                return Ok(Placed::Review { plan });
+            }
+            Ok(None) => {}
+            // Never fail an install over the offer to split it — place it whole instead.
+            Err(e) => log::warn!("could not offer {slug} as a pack: {e:#}"),
+        }
+    }
 
     emit(app, slug, "placing", None, None);
 
@@ -172,20 +444,34 @@ pub(crate) fn extract_and_place(
         crate::reshade::install_extracted(&extracted, &cfg.reshade_dir())?;
         let _ = std::fs::remove_dir_all(work);
         emit(app, slug, "done", None, None);
-        return Ok(());
+        return Ok(Placed::Done);
     }
 
     let mods_dir = crate::library::mods_subdir(&cfg.mods_path, "mods");
     let type_folder = subpath.rsplit(['/', '\\']).next().unwrap_or("tracks");
-    place_mod(&extracted, &mods_dir, type_folder, dest_folder, slug)?;
 
-    // Record which bikes got a sound so the Library can tell them from stock (best-effort).
-    if type_folder.eq_ignore_ascii_case("bikes") {
-        let bikes = sound_bikes_in(&extracted);
-        if !bikes.is_empty() {
-            if let Ok(dir) = app.path().app_local_data_dir() {
-                let _ = crate::soundmods::record(&dir, &bikes, slug);
-            }
+    // Read before the placement, because it walks the staged tree and `Consume` empties it.
+    // Still recorded after, so a failed install badges nothing (best-effort either way).
+    let bikes = if type_folder.eq_ignore_ascii_case("bikes") {
+        sound_bikes_in(&extracted)
+    } else {
+        Vec::new()
+    };
+
+    place_mod_with(
+        &extracted,
+        &mods_dir,
+        type_folder,
+        dest_folder,
+        slug,
+        OnConflict::Overwrite,
+        // Everything under `work` is ours and is deleted a few lines down.
+        Staging::Consume,
+    )?;
+
+    if !bikes.is_empty() {
+        if let Ok(dir) = app.path().app_local_data_dir() {
+            let _ = crate::soundmods::record(&dir, &bikes, slug);
         }
     }
 
@@ -193,7 +479,7 @@ pub(crate) fn extract_and_place(
     emit(app, slug, "done", None, None);
 
     notify_frostmod(app, slug);
-    Ok(())
+    Ok(Placed::Done)
 }
 
 async fn download_mega_and_place(
@@ -204,12 +490,18 @@ async fn download_mega_and_place(
     url: &str,
     subpath: &str,
     dest_folder: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Placed> {
     let work = staging_dir("dl");
     std::fs::create_dir_all(&work)?;
 
-    let archive = download_mega(app, client, slug, url, &work).await?;
-    extract_and_place(app, cfg, slug, &archive, &work, subpath, dest_folder)
+    let archive = match download_mega(app, client, slug, url, &work).await {
+        Ok(path) => path,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&work);
+            return Err(e);
+        }
+    };
+    extract_and_place_blocking(app, cfg, slug, archive, work, subpath, dest_folder, Packs::Offer).await
 }
 
 pub(crate) async fn download_mega(
@@ -242,6 +534,7 @@ pub(crate) async fn download_mega(
     let file = File::create(&path)?;
 
     emit(app, slug, "downloading", Some(0), total);
+    let cancel = crate::cancel::token(slug);
     let writer = MegaProgressWriter {
         file,
         app,
@@ -249,10 +542,15 @@ pub(crate) async fn download_mega(
         total,
         received: 0,
         last_emit: 0,
+        cancel: cancel.clone(),
     };
-    mega.download_node(node, writer)
-        .await
-        .map_err(|e| anyhow::anyhow!("MEGA download failed: {e}"))?;
+    if let Err(e) = mega.download_node(node, writer).await {
+        // The writer refuses the next buffer to stop the transfer, so the crate reports this
+        // as a write failure. Asking the flag first keeps "cancelled" from being dressed up
+        // as "MEGA download failed".
+        cancel.check()?;
+        return Err(anyhow::anyhow!("MEGA download failed: {e}"));
+    }
     emit(app, slug, "downloading", total, total);
 
     Ok(path)
@@ -265,6 +563,7 @@ struct MegaProgressWriter<'a> {
     total: Option<u64>,
     received: u64,
     last_emit: u64,
+    cancel: crate::cancel::Token,
 }
 
 impl futures_util::io::AsyncWrite for MegaProgressWriter<'_> {
@@ -274,6 +573,14 @@ impl futures_util::io::AsyncWrite for MegaProgressWriter<'_> {
         buf: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
         let this = self.get_mut();
+        // The `mega` crate drives the transfer itself; refusing the write is the only way in
+        // to stop it.
+        if this.cancel.cancelled() {
+            return std::task::Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "cancelled",
+            )));
+        }
         let n = this.file.write(buf)?;
         this.received += n as u64;
         if this.received - this.last_emit >= EMIT_EVERY_BYTES {
@@ -312,7 +619,7 @@ pub fn import_file(
 
     let work = staging_dir("import");
     let _ = std::fs::remove_dir_all(&work);
-    let extracted = work.join("extracted");
+    let extracted = work.join(STAGED_DIR);
     std::fs::create_dir_all(&extracted)?;
 
     // A bare `.ini` isn't an archive — `extract_archive` would reject it — but it is the most
@@ -335,7 +642,17 @@ pub fn import_file(
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "import".to_string());
-    place_mod(&extracted, &mods_dir, type_folder, dest_folder, &slug)?;
+    // `extracted` sits under `work`, which is deleted below — the picked file itself is never
+    // touched, only the copy `extract_archive` just made of it.
+    place_mod_with(
+        &extracted,
+        &mods_dir,
+        type_folder,
+        dest_folder,
+        &slug,
+        OnConflict::Overwrite,
+        Staging::Consume,
+    )?;
 
     let _ = std::fs::remove_dir_all(&work);
 
@@ -343,11 +660,63 @@ pub fn import_file(
     Ok(())
 }
 
+/// One file inside a folder share.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RemoteFile {
+    /// Where it sits under the folder root, `/`-separated. Recreated on disk verbatim.
+    rel: String,
+    /// This one file's share link, resolved to a direct URL when it is fetched.
+    url: String,
+    /// Its size, where the host said — MediaFire's listing does, Drive's does not. Only
+    /// used to give the progress bar a total.
+    bytes: Option<u64>,
+}
+
+/// What a share link turned out to point at.
+pub(crate) enum Resolved {
+    /// One file to stream.
+    File(String),
+    /// A folder to recreate as the author uploaded it, under a folder of its own name.
+    ///
+    /// The name matters: an unpacked bike is identified by `<Folder>.cfg` matching the folder
+    /// around it, and staging the files bare would throw away the only thing that says which
+    /// bike this is.
+    Folder { name: String, files: Vec<RemoteFile> },
+}
+
+/// The folder a download is unpacked into, under its own staging directory. Named rather
+/// than repeated: the review sheet has to know it isn't a folder the mod author chose.
+pub(crate) const STAGED_DIR: &str = "extracted";
+
+/// How far a folder share is walked. It is somebody's mod, not a drive — these exist so a
+/// mis-parse can't start a thousand downloads, not to turn real mods away.
+const FOLDER_MAX_DEPTH: usize = 4;
+const FOLDER_MAX_FILES: usize = 500;
+
+/// Resolve a share link to a single file, as every caller outside the install queue needs.
+///
+/// A folder share that holds no archive has no single file to be, and says so — the same
+/// message it has always given, because for a bundle or a purchase there is nothing else to
+/// do with one.
 pub(crate) async fn resolve_direct_url(
     client: &Client,
     url: &str,
     host: &str,
 ) -> anyhow::Result<String> {
+    match resolve_share(client, url, host).await? {
+        Resolved::File(u) => Ok(u),
+        Resolved::Folder { .. } => anyhow::bail!(
+            "Couldn't tell which file in this folder is the mod — open the mod page to \
+             download it manually."
+        ),
+    }
+}
+
+pub(crate) async fn resolve_share(
+    client: &Client,
+    url: &str,
+    host: &str,
+) -> anyhow::Result<Resolved> {
     let h = host.to_lowercase();
     let u = url.to_lowercase();
     if h.contains("proton") || u.contains("drive.proton.me") {
@@ -362,35 +731,366 @@ pub(crate) async fn resolve_direct_url(
              download the file from Proton Drive, then use \"Choose file\" to install it."
         )
     } else if h.contains("mediafire") || u.contains("mediafire.com") {
-        resolve_mediafire(client, url).await
+        if let Some(folder) = mediafire_folder_key(url) {
+            return resolve_mediafire_folder(client, &folder, url).await;
+        }
+        Ok(Resolved::File(resolve_mediafire(client, url).await?))
     } else if h.contains("drive.google") || u.contains("drive.google") {
-        // A folder link (…/drive/folders/ID) has no single file to fetch — look
-        // inside it, find the mod archive, and download that file directly.
+        // A folder link (…/drive/folders/ID) has no single file to fetch — look inside it.
         if is_gdrive_folder(url) {
             resolve_gdrive_folder(client, url).await
         } else {
-            Ok(resolve_gdrive(url))
+            Ok(Resolved::File(resolve_gdrive(url)))
         }
     } else {
         // Assume a direct file link.
-        Ok(url.to_string())
+        Ok(Resolved::File(url.to_string()))
     }
 }
 
+/// What a folder listing turned out to be.
+///
+/// The archive fast path is kept for its own sake: a track shared as `Track.zip` beside a
+/// readme is one download, and fetching the readme too would be work for nothing. It is only
+/// when there is no archive to pick that the folder *is* the mod.
+fn fold_share(name: String, files: Vec<RemoteFile>) -> Resolved {
+    let top: Vec<&RemoteFile> = files.iter().filter(|f| !f.rel.contains('/')).collect();
+    let names: Vec<&str> = top.iter().map(|f| f.rel.as_str()).collect();
+    if let Some(i) = pick_archive(&names) {
+        return Resolved::File(top[i].url.clone());
+    }
+    Resolved::Folder { name, files }
+}
+
+/// MediaFire's versioned API. Reached from the share's quick key, so it doesn't care what
+/// the file page looks like this month.
+fn mediafire_api(path: &str, query: &str) -> String {
+    format!(
+        "{}/{path}?{query}&response_format=json",
+        obfstr!("https://www.mediafire.com/api/1.5")
+    )
+}
+
+/// Resolve a MediaFire share to something [`download`] can stream.
+///
+/// Both routes are kept, because each has been the working one: the API doesn't care what the
+/// file page looks like this month, and the page doesn't care what MediaFire has decided
+/// anonymous callers may have.
+///
+/// The page goes first because the API is currently the one that doesn't answer. Measured
+/// across eight real tracks, `file/get_links.php` refused every one with "Insufficient
+/// Permissions" and the scrape rescued all eight — so asking the API first was ~320 ms of
+/// guaranteed-useless round trip on every install. It stays as the fallback: it costs nothing
+/// while the page keeps parsing, and it is still the route that survives a reshape.
 async fn resolve_mediafire(client: &Client, url: &str) -> anyhow::Result<String> {
+    // Already a CDN link — mod pages do occasionally list one. Nothing to resolve.
+    if is_mediafire_direct(url) {
+        return Ok(url.to_string());
+    }
+
     let html = client
         .get(url)
+        // MediaFire varies what it serves by how browser-like the request looks, and a
+        // bare `reqwest` GET is on the wrong side of that line.
+        .header(
+            reqwest::header::ACCEPT,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
+        .header(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.9")
         .send()
         .await?
         .error_for_status()?
         .text()
         .await?;
 
-    parse_mediafire_link(&html).ok_or_else(|| {
-        anyhow::anyhow!(
-            "Couldn't find the MediaFire download link — open the mod page to download it manually."
-        )
-    })
+    if let Some(direct) = parse_mediafire_link(&html) {
+        return Ok(direct);
+    }
+
+    // The page didn't parse. Ask the API before giving up — and let its refusal speak, since
+    // "this file is password protected" beats "couldn't find the download link".
+    if let Some(key) = mediafire_quick_key(url) {
+        if let Some(direct) = mediafire_api_link(client, &key).await? {
+            return Ok(direct);
+        }
+    }
+
+    // The refusal check runs only once both have come up empty, never ahead of them: it
+    // matches on the page's raw source, and an error string sitting in a *working* page's
+    // JavaScript would otherwise condemn a file that was about to download fine.
+    Err(anyhow::anyhow!(mediafire_page_error(&html).unwrap_or_else(
+        || {
+            "Couldn't find the MediaFire download link — open the mod page to download it \
+             manually."
+                .to_string()
+        }
+    )))
+}
+
+/// Ask the API for a share's direct link.
+///
+/// `Ok(None)` means the API didn't answer usefully — unreachable, unparseable, or an error
+/// we have no advice for — and the caller should fall back to the page. `Err` is a refusal
+/// the user needs to read: the file is gone, or locked, and no amount of scraping will
+/// turn it into bytes.
+async fn mediafire_api_link(client: &Client, quick_key: &str) -> anyhow::Result<Option<String>> {
+    let url = mediafire_api(
+        "file/get_links.php",
+        &format!("quick_key={quick_key}&link_type=direct_download"),
+    );
+    let Some(response) = mediafire_api_get(client, &url).await else {
+        return Ok(None);
+    };
+    if let Some(msg) = mediafire_api_error(&response) {
+        anyhow::bail!(msg);
+    }
+
+    Ok(response["links"]
+        .as_array()
+        .and_then(|links| links.first())
+        .and_then(|link| link["direct_download"].as_str())
+        .and_then(usable_link)
+        // Guard against the API handing back the share page instead of a CDN link — that
+        // would just walk us back into the scraping we came here to avoid.
+        .filter(|u| is_mediafire_direct(u)))
+}
+
+/// GET one API call and hand back its `response` object. `None` for anything that didn't
+/// come back as JSON — the callers all treat that as "ask the page instead".
+async fn mediafire_api_get(client: &Client, url: &str) -> Option<serde_json::Value> {
+    let body = client.get(url).send().await.ok()?.text().await.ok()?;
+    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    Some(json.get("response")?.clone())
+}
+
+/// List a MediaFire *folder* share, sub-folders and all.
+///
+/// Mod folders come in two shapes and both are common. One holds the archive alongside
+/// extras (server files, a readme) — [`fold_share`] picks the archive out of that. The other
+/// *is* the mod, uploaded loose or split into a folder per bike, and the old resolver had
+/// nothing to say about it: a folder of folders read as "no files in it", and a folder of
+/// twelve `.wav`s beside an `engine.scl` as "couldn't tell which one is the mod".
+async fn resolve_mediafire_folder(
+    client: &Client,
+    folder_key: &str,
+    url: &str,
+) -> anyhow::Result<Resolved> {
+    let mut files = Vec::new();
+    mediafire_walk(client, folder_key, "", &mut files, 0).await?;
+    if files.is_empty() {
+        anyhow::bail!(
+            "This MediaFire folder has no files in it — open the mod page to download it manually."
+        );
+    }
+    Ok(fold_share(mediafire_folder_name(url), files))
+}
+
+/// The share's own name, which MediaFire puts in the link after the key
+/// (`…/folder/<key>/<Name>`). Falls back to the key, which names nothing but is never empty.
+fn mediafire_folder_name(url: &str) -> String {
+    Regex::new(r"(?i)/folder/[a-z0-9]+/([^/?#]+)")
+        .unwrap()
+        .captures(url)
+        .and_then(|c| percent_decode(&c[1]))
+        .map(|n| n.replace(['_', '+'], " "))
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| "mod".to_string())
+}
+
+/// `%20` and friends, enough for a file or folder name off a share link.
+fn percent_decode(s: &str) -> Option<String> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok()?;
+            if let Ok(b) = u8::from_str_radix(hex, 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).ok()
+}
+
+/// One level of a MediaFire folder, then the folders below it.
+async fn mediafire_walk(
+    client: &Client,
+    folder_key: &str,
+    prefix: &str,
+    out: &mut Vec<RemoteFile>,
+    depth: usize,
+) -> anyhow::Result<()> {
+    if depth > FOLDER_MAX_DEPTH || out.len() >= FOLDER_MAX_FILES {
+        return Ok(());
+    }
+
+    let listing = mediafire_content(client, folder_key, "files").await?;
+    for f in listing {
+        if out.len() >= FOLDER_MAX_FILES {
+            break;
+        }
+        let Some(name) = f["filename"].as_str().filter(|n| is_usable_filename(n)) else {
+            continue;
+        };
+        // The listing carries each file's own share page, which is the one route that
+        // reliably yields a CDN link — so take it rather than rebuilding the URL.
+        let Some(url) = f["links"]["normal_download"].as_str() else {
+            continue;
+        };
+        out.push(RemoteFile {
+            rel: format!("{prefix}{name}"),
+            url: url.to_string(),
+            bytes: f["size"].as_str().and_then(|s| s.parse().ok()),
+        });
+    }
+
+    let subs = mediafire_content(client, folder_key, "folders").await?;
+    for d in subs {
+        let (Some(key), Some(name)) = (
+            d["folderkey"].as_str(),
+            d["name"].as_str().filter(|n| is_usable_filename(n)),
+        ) else {
+            continue;
+        };
+        Box::pin(mediafire_walk(
+            client,
+            key,
+            &format!("{prefix}{}/", sanitize(name)),
+            out,
+            depth + 1,
+        ))
+        .await?;
+    }
+    Ok(())
+}
+
+/// The `files` or `folders` a MediaFire folder holds, over as many chunks as it takes.
+async fn mediafire_content(
+    client: &Client,
+    folder_key: &str,
+    content_type: &str,
+) -> anyhow::Result<Vec<serde_json::Value>> {
+    let mut out = Vec::new();
+    for chunk in 1..=MAX_FOLDER_CHUNKS {
+        let url = mediafire_api(
+            "folder/get_content.php",
+            &format!(
+                "folder_key={folder_key}&content_type={content_type}&chunk={chunk}&chunk_size=100"
+            ),
+        );
+        let response = mediafire_api_get(client, &url).await.ok_or_else(|| {
+            anyhow::anyhow!(
+                "Couldn't read this MediaFire folder — open the mod page to download it manually."
+            )
+        })?;
+        if let Some(msg) = mediafire_api_error(&response) {
+            anyhow::bail!(msg);
+        }
+        let content = &response["folder_content"];
+        if let Some(items) = content[content_type].as_array() {
+            out.extend(items.iter().cloned());
+        }
+        if content["more_chunks"].as_str() != Some("yes") {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// 100 entries a chunk, so this is 1,000 files or folders in one listing — far past any real
+/// mod, and a stop for a `more_chunks` that never says no.
+const MAX_FOLDER_CHUNKS: u32 = 10;
+
+/// Pull the quick key out of a MediaFire share link. Keys are 11 or 15 characters, and
+/// every shape MediaFire has shipped puts them in the same two places.
+fn mediafire_quick_key(url: &str) -> Option<String> {
+    // …/file/<key>/<name>/file, plus the /file_premium, /download and /view variants.
+    let by_path =
+        Regex::new(r"(?i)/(?:file|file_premium|download|view)/([a-z0-9]{11}(?:[a-z0-9]{4})?)")
+            .unwrap();
+    // The legacy bare forms: …/?<key> and …/download.php?<key>.
+    let by_query = Regex::new(r"(?i)[?&]([a-z0-9]{11}(?:[a-z0-9]{4})?)(?:[&#]|$)").unwrap();
+    by_path
+        .captures(url)
+        .or_else(|| by_query.captures(url))
+        .map(|c| c[1].to_string())
+}
+
+/// The folder equivalent: …/folder/<key>/<name>, or the `?sharekey=` form.
+fn mediafire_folder_key(url: &str) -> Option<String> {
+    let by_path = Regex::new(r"(?i)/folder/([a-z0-9]+)").unwrap();
+    let by_query = Regex::new(r"(?i)[?&]sharekey=([a-z0-9]+)").unwrap();
+    by_path
+        .captures(url)
+        .or_else(|| by_query.captures(url))
+        .map(|c| c[1].to_string())
+}
+
+/// True for a CDN link that already serves bytes, as opposed to a share page.
+fn is_mediafire_direct(url: &str) -> bool {
+    Regex::new(r"(?i)^https?://download[0-9]*\.mediafire\.com/")
+        .unwrap()
+        .is_match(url)
+}
+
+/// Translate the API's refusals into advice. These are the cases where a browser hits the
+/// same wall, so the catch-all "open the mod page and download it manually" is wrong.
+fn mediafire_api_error(response: &serde_json::Value) -> Option<String> {
+    if !response["result"]
+        .as_str()
+        .is_some_and(|r| r.eq_ignore_ascii_case("error"))
+    {
+        return None;
+    }
+    let message = response["message"].as_str().unwrap_or_default();
+    // An error we have no advice for still has to reach the user *as* an error, carrying
+    // whatever MediaFire said. Falling through to the scraper instead would bury it under
+    // "couldn't find the download link" — which is how these went unexplained before.
+    Some(mediafire_refusal(&message.to_lowercase()).unwrap_or_else(|| match message {
+        "" => "MediaFire refused this download — open the mod page to download it manually."
+            .to_string(),
+        m => format!(
+            "MediaFire refused this download ({m}) — open the mod page to download it manually."
+        ),
+    }))
+}
+
+/// MediaFire serves its refusals as ordinary 200 pages too, so the scraping path has to
+/// recognise the same conditions from prose rather than from a `result` field.
+fn mediafire_page_error(html: &str) -> Option<String> {
+    mediafire_refusal(&html.to_lowercase())
+}
+
+/// The shared vocabulary: phrases that mean this file is never going to download, whether
+/// they arrive in an API `message` or in the page's own copy.
+fn mediafire_refusal(text: &str) -> Option<String> {
+    let msg = if text.contains("invalid or deleted file")
+        || text.contains("has been removed")
+        || text.contains("has been deleted")
+        || text.contains("unknown or invalid quickkey")
+        || text.contains("file not found")
+    {
+        "This MediaFire file no longer exists — the uploader probably removed it. Check the mod \
+         page for an updated link."
+    } else if text.contains("enter password") || text.contains("password to access") {
+        "This MediaFire file is password-protected, so it can't be downloaded automatically — \
+         open the mod page, get the file from MediaFire with its password, then use \"Choose \
+         file\" to install it."
+    } else if text.contains("violation of our terms") || text.contains("dangerous file") {
+        "MediaFire has blocked this file, so nobody can download it — the uploader needs to \
+         re-upload it. Check the mod page for an updated link."
+    } else if text.contains("bandwidth limit") || text.contains("daily download limit") {
+        "This MediaFire file has hit its download limit — too many people grabbed it recently. \
+         A browser will fail the same way; try again later."
+    } else {
+        return None;
+    };
+    Some(msg.to_string())
 }
 
 /// Pull the direct CDN link out of a MediaFire file page.
@@ -414,6 +1114,15 @@ fn parse_mediafire_link(html: &str) -> Option<String> {
         }
     }
 
+    // 1b. The same base64, but assigned in a script rather than hung on an element. Same
+    //     payload, different hiding place — and the hiding place is what keeps moving.
+    let scrambled_js = Regex::new(r#"(?i)scrambled[_-]?url["'\s:=]+([A-Za-z0-9+/=]{24,})"#).unwrap();
+    for c in scrambled_js.captures_iter(html) {
+        if let Some(u) = decode_scrambled(&c[1]) {
+            return Some(u);
+        }
+    }
+
     // 2. The download button's own href. Matched through the parser rather than a regex
     //    so attribute order can't hide it — `href` before `aria-label` used to.
     for css in ["a#downloadButton[href]", "a[aria-label='Download file'][href]"] {
@@ -429,8 +1138,9 @@ fn parse_mediafire_link(html: &str) -> Option<String> {
     // 3. Anywhere in the page source, including inside scripts: the CDN host is
     //    distinctive enough to match on its own. Un-escape the JSON slashes the scripts
     //    write (`https:\/\/download7…\/file.zip`) first, so one pattern covers both forms.
+    //    The digits are optional — the numbered hosts are the common case, not the rule.
     let flat = html.replace("\\/", "/");
-    let direct = Regex::new(r#"(?:https?:)?//download[0-9]+\.mediafire\.com/[^"'<>\\ ]+"#).unwrap();
+    let direct = Regex::new(r#"(?:https?:)?//download[0-9]*\.mediafire\.com/[^"'<>\\ ]+"#).unwrap();
     direct.find(&flat).and_then(|m| usable_link(m.as_str()))
 }
 
@@ -490,40 +1200,93 @@ fn gdrive_folder_id(url: &str) -> Option<String> {
         .map(|c| c[1].to_string())
 }
 
-/// Resolve a Drive *folder* link to a single downloadable file URL. Mod folders
-/// bundle the track archive alongside sub-folders (server files, unpacked track);
-/// we scrape the folder listing and pick the archive.
-async fn resolve_gdrive_folder(client: &Client, url: &str) -> anyhow::Result<String> {
+/// List a Drive *folder* share, sub-folders and all.
+///
+/// The same two shapes as MediaFire: an archive beside its extras, which [`fold_share`]
+/// reduces to one download, or the mod itself uploaded loose.
+async fn resolve_gdrive_folder(client: &Client, url: &str) -> anyhow::Result<Resolved> {
     let folder_id = gdrive_folder_id(url).ok_or_else(|| {
         anyhow::anyhow!(
             "Couldn't read the Google Drive folder id — open the mod page to download it manually."
         )
     })?;
+    let mut files = Vec::new();
+    let name = gdrive_walk(client, &folder_id, "", &mut files, 0).await?;
+    if files.is_empty() {
+        // Drive serves a folder that isn't public as its sign-in page, which lists nothing.
+        // Saying "no downloadable file" of it sends the user looking for a broken link.
+        if name.contains("Sign-in") {
+            anyhow::bail!(
+                "This Google Drive folder isn't shared publicly — open the mod page and \
+                 download it while signed in to Google."
+            );
+        }
+        anyhow::bail!(
+            "This Google Drive folder has no downloadable file — open the mod page to download it manually."
+        );
+    }
+    Ok(fold_share(name, files))
+}
+
+/// One level of a Drive folder, then the folders below it.
+async fn gdrive_walk(
+    client: &Client,
+    folder_id: &str,
+    prefix: &str,
+    out: &mut Vec<RemoteFile>,
+    depth: usize,
+) -> anyhow::Result<String> {
+    if depth > FOLDER_MAX_DEPTH || out.len() >= FOLDER_MAX_FILES {
+        return Ok(String::new());
+    }
+    let url = format!(
+        "{}/drive/folders/{folder_id}",
+        obfstr!("https://drive.google.com")
+    );
     let html = client
-        .get(url)
+        .get(&url)
         .send()
         .await?
         .error_for_status()?
         .text()
         .await?;
 
-    let files = parse_gdrive_folder(&html, &folder_id);
-    if files.is_empty() {
-        anyhow::bail!(
-            "This Google Drive folder has no downloadable file — open the mod page to download it manually."
-        );
+    for f in parse_gdrive_folder(&html, folder_id) {
+        if f.mime == GDRIVE_FOLDER_MIME {
+            Box::pin(gdrive_walk(
+                client,
+                &f.id,
+                &format!("{prefix}{}/", sanitize(&f.name)),
+                out,
+                depth + 1,
+            ))
+            .await?;
+            continue;
+        }
+        if out.len() >= FOLDER_MAX_FILES {
+            break;
+        }
+        if !is_usable_filename(&f.name) {
+            continue;
+        }
+        out.push(RemoteFile {
+            rel: format!("{prefix}{}", f.name),
+            url: resolve_gdrive(&format!(
+                "{}/file/d/{}/view",
+                obfstr!("https://drive.google.com"),
+                f.id
+            )),
+            bytes: None,
+        });
     }
-    let chosen = pick_folder_archive(&files).ok_or_else(|| {
-        anyhow::anyhow!(
-            "Couldn't tell which file in the Google Drive folder is the mod — open the mod page to download it manually."
-        )
-    })?;
-    Ok(resolve_gdrive(&format!(
-        "{}/file/d/{}/view",
-        obfstr!("https://drive.google.com"),
-        chosen.id
-    )))
+    // "<Name> - Google Drive", the only place the page states what the folder is called.
+    Ok(page_title(&html)
+        .map(|t| t.trim_end_matches(" - Google Drive").trim().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "mod".to_string()))
 }
+
+const GDRIVE_FOLDER_MIME: &str = "application/vnd.google-apps.folder";
 
 /// A file entry scraped from a Drive folder listing.
 struct GDriveFile {
@@ -562,23 +1325,22 @@ fn parse_gdrive_folder(html: &str, folder_id: &str) -> Vec<GDriveFile> {
     out
 }
 
-/// Choose the mod archive from a folder's files: skip sub-folders, prefer a known
-/// archive extension, and fall back to the sole remaining file when unambiguous.
-fn pick_folder_archive(files: &[GDriveFile]) -> Option<&GDriveFile> {
-    const ARCHIVE_EXT: [&str; 5] = [".pkz", ".zip", ".rar", ".7z", ".pnt"];
-    let candidates: Vec<&GDriveFile> = files
-        .iter()
-        .filter(|f| f.mime != "application/vnd.google-apps.folder")
-        .collect();
-    let is_archive = |f: &GDriveFile| {
-        let n = f.name.to_lowercase();
+/// Choose the one download out of a folder's top level: a packaged mod, or the sole entry
+/// when there is nothing to choose between. `None` means the folder is the mod.
+///
+/// `.pnt` is deliberately not in the list. A paint is content, not a package, and folders of
+/// them are how a designer ships a kit — six liveries for one bike, of which "pick the
+/// archive" installed the first and reported success.
+fn pick_archive(names: &[&str]) -> Option<usize> {
+    const ARCHIVE_EXT: [&str; 4] = [".pkz", ".zip", ".rar", ".7z"];
+    let is_archive = |n: &&str| {
+        let n = n.to_lowercase();
         ARCHIVE_EXT.iter().any(|ext| n.ends_with(ext))
     };
-    candidates
+    names
         .iter()
-        .find(|f| is_archive(f))
-        .or_else(|| (candidates.len() == 1).then(|| &candidates[0]))
-        .copied()
+        .position(is_archive)
+        .or_else(|| (names.len() == 1).then_some(0))
 }
 
 async fn get_with_retry(client: &Client, url: &str) -> anyhow::Result<reqwest::Response> {
@@ -599,13 +1361,12 @@ async fn get_with_retry(client: &Client, url: &str) -> anyhow::Result<reqwest::R
         .context("could not reach the download host after 3 attempts"))
 }
 
-pub(crate) async fn download(
-    app: &AppHandle,
-    client: &Client,
-    slug: &str,
-    url: &str,
-    dir: &Path,
-) -> anyhow::Result<PathBuf> {
+/// GET a file URL and hand back a response that really is the file.
+///
+/// Drive answers a large file with a virus-scan form, and both hosts answer their refusals
+/// with an ordinary 200 HTML page — so "bytes, or a web page?" is one question with one
+/// answer wherever it is asked from, the folder downloader included.
+async fn open_body(client: &Client, url: &str) -> anyhow::Result<reqwest::Response> {
     let mut resp = get_with_retry(client, url).await?;
     let is_gdrive = url.contains("google");
 
@@ -635,11 +1396,48 @@ pub(crate) async fn download(
             if let Some(msg) = gdrive_page_error(&html) {
                 anyhow::bail!(msg);
             }
+        } else if url.contains("mediafire") {
+            // A CDN link that has expired, or a file pulled since we resolved it, bounces
+            // back to a share page whose copy says which of the two happened.
+            let html = resp.text().await.unwrap_or_default();
+            if let Some(msg) = mediafire_page_error(&html) {
+                anyhow::bail!(msg);
+            }
         }
         anyhow::bail!(
             "The host returned a web page instead of a file — open the mod page to download it manually."
         );
     }
+    Ok(resp)
+}
+
+pub(crate) async fn download(
+    app: &AppHandle,
+    client: &Client,
+    slug: &str,
+    url: &str,
+    dir: &Path,
+) -> anyhow::Result<PathBuf> {
+    download_into(app, client, slug, url, dir, None).await
+}
+
+/// How much of a body is held before it reaches the disk. reqwest hands back chunks of a few
+/// kilobytes, and writing each one straight through was a syscall per chunk for the whole
+/// length of a track.
+const DOWNLOAD_BUF: usize = 1024 * 1024;
+
+pub(crate) async fn download_into(
+    app: &AppHandle,
+    client: &Client,
+    slug: &str,
+    url: &str,
+    dir: &Path,
+    progress: Slot<'_>,
+) -> anyhow::Result<PathBuf> {
+    // Grabbed once: the chunk loop below polls this per chunk, and that has to be an atomic
+    // load rather than a lock on the registry.
+    let cancel = crate::cancel::token(slug);
+    let resp = open_body(client, url).await?;
 
     let total = resp.content_length();
     let filename = filename_from(&resp, url);
@@ -649,7 +1447,7 @@ pub(crate) async fn download(
     // redirect chain landed. Re-asking the original would start the dance over.
     let source = resp.url().clone();
 
-    let mut file = File::create(&path)?;
+    let mut file = std::io::BufWriter::with_capacity(DOWNLOAD_BUF, File::create(&path)?);
     let mut received: u64 = 0;
     let mut last_emit: u64 = 0;
     let mut next = Some(resp);
@@ -658,6 +1456,7 @@ pub(crate) async fn download(
     let mut last_err: Option<String>;
 
     loop {
+        cancel.check()?;
         let resp = match next.take() {
             Some(r) => r,
             // Without a `Content-Length` there is nothing to resume *against*: reqwest
@@ -669,7 +1468,7 @@ pub(crate) async fn download(
                     // The host ignored `Range` and started the file over, so we have to
                     // as well — appending its second copy onto our first would corrupt
                     // the archive in a way only the extractor would notice.
-                    file = File::create(&path)?;
+                    file = std::io::BufWriter::with_capacity(DOWNLOAD_BUF, File::create(&path)?);
                     received = 0;
                     last_emit = 0;
                     r
@@ -688,8 +1487,10 @@ pub(crate) async fn download(
             },
         };
 
-        let end = stream_to_file(app, slug, resp, &mut file, &mut received, &mut last_emit, total)
-            .await?;
+        let end = stream_to_file(
+            app, slug, &cancel, resp, &mut file, &mut received, &mut last_emit, total, progress,
+        )
+        .await?;
         // A body can come up short without erroring — some hosts just close the socket
         // cleanly mid-file. Content-Length is what says whether we actually have it all.
         let short = total.is_some_and(|t| received < t);
@@ -709,13 +1510,118 @@ pub(crate) async fn download(
             return Err(stalled(received, total, breaks, last_err));
         }
         // Hold the last reported byte count on screen; the bar picks up where it stalled.
-        emit(app, slug, "downloading", Some(received), total);
+        report(app, slug, progress, received, total);
         tokio::time::sleep(Duration::from_millis(600 * breaks as u64)).await;
     }
 
     file.flush()?;
-    emit(app, slug, "downloading", Some(received), total);
+    report(app, slug, progress, received, total);
     Ok(path)
+}
+
+/// Recreate a folder share on disk under `into`, then unpack anything it held.
+///
+/// Progress is reported over the whole folder rather than per file, so the bar fills once for
+/// the download the user started. MediaFire states each file's size, Drive does not; without
+/// a total the stage still reports bytes received, which is what a `Content-Length`-less
+/// single-file download shows too.
+async fn download_folder(
+    app: &AppHandle,
+    client: &Client,
+    slug: &str,
+    files: &[RemoteFile],
+    into: &Path,
+) -> anyhow::Result<()> {
+    let cancel = crate::cancel::token(slug);
+    let total: Option<u64> = files
+        .iter()
+        .map(|f| f.bytes)
+        .try_fold(0u64, |acc, b| Some(acc + b?));
+
+    let mut received: u64 = 0;
+    for f in files {
+        cancel.check()?;
+        let dest = into.join(&f.rel);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        // Each entry is still a share link, not a CDN one — MediaFire's listing hands back
+        // file pages, and only the resolver knows how to turn one into bytes. Reported as
+        // part of the download rather than as its own stage: the label would otherwise flip
+        // between "resolving" and "downloading" once per file, a hundred times over.
+        emit(app, slug, "downloading", Some(received), total);
+        let direct = resolve_direct_url(client, &f.url, "").await?;
+        received += fetch_file(app, client, slug, &cancel, &direct, &dest, received, total)
+            .await
+            .with_context(|| format!("downloading {}", f.rel))?;
+    }
+
+    emit(app, slug, "extracting", None, None);
+    let into = into.to_path_buf();
+    tauri::async_runtime::spawn_blocking(move || extract_nested(&into))
+        .await
+        .map_err(|e| anyhow::anyhow!("install task failed: {e}"))?
+}
+
+/// Stream one file of a folder share, reporting progress against the folder's running total.
+///
+/// No resume loop: these are the pieces of a mod, not the 400 MB track [`download`] is built
+/// around, and a break here fails the install for the user to retry rather than leaving a
+/// half-written file in a tree we are about to call complete.
+#[allow(clippy::too_many_arguments)]
+async fn fetch_file(
+    app: &AppHandle,
+    client: &Client,
+    slug: &str,
+    cancel: &crate::cancel::Token,
+    url: &str,
+    dest: &Path,
+    already: u64,
+    total: Option<u64>,
+) -> anyhow::Result<u64> {
+    let mut resp = open_body(client, url).await?;
+    let mut file = File::create(dest)?;
+    let mut written: u64 = 0;
+    let mut last_emit: u64 = 0;
+    while let Some(chunk) = resp.chunk().await? {
+        cancel.check()?;
+        file.write_all(&chunk)?;
+        written += chunk.len() as u64;
+        if written - last_emit >= EMIT_EVERY_BYTES {
+            last_emit = written;
+            emit(app, slug, "downloading", Some(already + written), total);
+        }
+    }
+    file.flush()?;
+    emit(app, slug, "downloading", Some(already + written), total);
+    Ok(written)
+}
+
+/// Unpack, in place, any archive a folder share held.
+///
+/// A folder share is the author's "put these where they go" bundle, and a `ktm/250.rar`
+/// inside one is not a file to install — it is the mod, one level down. Extracted beside
+/// itself under its own name, so the tree ends up the shape the author laid out. One pass:
+/// what an archive unpacks to is its own business, not another layer to open.
+fn extract_nested(root: &Path) -> anyhow::Result<()> {
+    let archives: Vec<PathBuf> = walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.path().to_path_buf())
+        .filter(|p| ["zip", "rar", "7z"].iter().any(|e| has_ext(p, e)))
+        .collect();
+
+    for archive in archives {
+        let (Some(parent), Some(stem)) = (archive.parent(), archive.file_stem()) else {
+            continue;
+        };
+        let dest = parent.join(sanitize(&stem.to_string_lossy()));
+        std::fs::create_dir_all(&dest)?;
+        extract_archive(&archive, &dest)?;
+        let _ = std::fs::remove_file(&archive);
+    }
+    Ok(())
 }
 
 /// How a response body ended.
@@ -734,24 +1640,30 @@ enum BodyEnd {
 /// waited for, so this is deliberately more patient than [`get_with_retry`].
 const RESUME_ATTEMPTS: u32 = 5;
 
+#[allow(clippy::too_many_arguments)]
 async fn stream_to_file(
     app: &AppHandle,
     slug: &str,
+    cancel: &crate::cancel::Token,
     resp: reqwest::Response,
-    file: &mut File,
+    file: &mut std::io::BufWriter<File>,
     received: &mut u64,
     last_emit: &mut u64,
     total: Option<u64>,
+    progress: Slot<'_>,
 ) -> anyhow::Result<BodyEnd> {
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
+        // Per chunk, so cancelling a stalled 400 MB track stops within a buffer rather than
+        // at the end of the file.
+        cancel.check()?;
         match chunk {
             Ok(chunk) => {
                 file.write_all(&chunk)?;
                 *received += chunk.len() as u64;
                 if *received - *last_emit >= EMIT_EVERY_BYTES {
                     *last_emit = *received;
-                    emit(app, slug, "downloading", Some(*received), total);
+                    report(app, slug, progress, *received, total);
                 }
             }
             // Not fatal by itself — the caller asks for the rest with a `Range` request.
@@ -910,7 +1822,7 @@ fn filename_from(resp: &reqwest::Response, url: &str) -> String {
             .captures(cd)
         {
             let name = c[1].trim().trim_matches('"');
-            if !name.is_empty() {
+            if is_usable_filename(name) {
                 return sanitize(name);
             }
         }
@@ -923,19 +1835,26 @@ fn filename_from(resp: &reqwest::Response, url: &str) -> String {
         .next()
         .unwrap_or("")
         .to_string();
-    if from_url.is_empty() {
-        "download.bin".to_string()
-    } else {
+    if is_usable_filename(&from_url) {
         sanitize(&from_url)
+    } else {
+        "download.bin".to_string()
     }
+}
+
+/// Whether a name a server handed us can be used as a file name at all.
+///
+/// `sanitize` strips separators but leaves dots alone, so `..` would survive it and name the
+/// staging folder's parent. Both sources here are remote — a `Content-Disposition` header and
+/// the URL — and a share code chooses the URL.
+fn is_usable_filename(name: &str) -> bool {
+    let name = name.trim();
+    !name.is_empty() && name != "." && name != ".."
 }
 
 pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()> {
     match detect_ext(archive)?.as_str() {
-        "zip" => {
-            let file = File::open(archive)?;
-            zip::ZipArchive::new(file)?.extract(dest)?;
-        }
+        "zip" => extract_zip_from(File::open(archive)?, dest, archive)?,
         "7z" => {
             sevenz_rust::decompress_file(archive, dest)
                 .map_err(|e| anyhow::anyhow!("7z extraction failed: {e}"))?;
@@ -956,6 +1875,23 @@ pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()>
         other => anyhow::bail!("Unsupported archive type: .{other}"),
     }
     Ok(())
+}
+
+/// Unpack a zip from anything that reads like one.
+///
+/// Taking a reader rather than a path is what lets a multi-part bundle be unpacked from its
+/// slices where they lie, instead of joining them into one file first and reading that.
+/// `label` only names the archive in an error.
+pub(crate) fn extract_zip_from<R: Read + std::io::Seek>(
+    reader: R,
+    dest: &Path,
+    label: &Path,
+) -> anyhow::Result<()> {
+    zip::ZipArchive::new(reader)?.extract(dest)?;
+    // `zip` filters `..` out of entry names, but a symlink entry is the escape a name filter
+    // can't see: the link lands inside `dest` and points anywhere, and the entries after it
+    // are written straight through it. Sweep it like the rest.
+    purge_escapees(label, dest)
 }
 
 /// What a dropped path turned out to be once staged.
@@ -1211,7 +2147,7 @@ pub(crate) fn plan_placement(
                 },
             );
         }
-        if dir_has_sound_markers(base) {
+        if is_sound_set(base) {
             // Loose `engine.scl`+`sfx.cfg` — drop into the chosen bike's root.
             let mut dir = mods_dir.join("bikes");
             for seg in dest_folder.split(['/', '\\']).filter(|s| !s.is_empty()) {
@@ -1279,10 +2215,15 @@ pub(crate) fn plan_placement(
 /// Named as the mod named itself, because that name is what the pickers will show. A mod
 /// that ships its files bare has only the slug to go on.
 ///
-/// Two placements are deliberately left alone. A paint drop names the model it belongs to
-/// (`helmets/<Model>/paints`), so it is more than one segment and merges as before. And an
+/// Three placements are deliberately left alone. A paint drop names the model it belongs to
+/// (`helmets/<Model>/paints`), so it is more than one segment and merges as before. An
 /// archive packed area-first — a `helmets/` folder holding the models — is already in the
-/// shape the destination expects; wrapping it would bury the models a level down.
+/// shape the destination expects; wrapping it would bury the models a level down. And a
+/// packaged model is a single `.pkz` that belongs *directly* in the area, under its own file
+/// name: [`walk_plain`] already places it that way, and a folder around it puts the package
+/// one level below where the game and every picker look — `helmets/shop-44/<Helmet>.pkz`,
+/// which loads nowhere. A shop download is exactly that shape, and having no folder of its
+/// own it was named for the slug.
 fn gear_model_folder(
     type_folder: &str,
     segs: &[&str],
@@ -1295,6 +2236,10 @@ fn gear_model_folder(
     }
     let [area] = segs else { return None };
     if !crate::game::is_rider_model_area(area) {
+        return None;
+    }
+    // The same base and the same test `walk_plain` will apply, so the two can't drift.
+    if has_root_pkz(unwrapped) {
         return None;
     }
     let own = (unwrapped != extracted)
@@ -1316,6 +2261,21 @@ pub(crate) enum OnConflict {
     Keep,
 }
 
+/// Whether a placement may take the source files away with it.
+///
+/// A downloaded mod is already on disk twice — the archive and the unpacked copy, both in a
+/// staging directory we delete moments later. Copying a third time is the slowest part of an
+/// install once the bytes are down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Staging {
+    /// The source is ours and about to be deleted, so a file may be *moved* into place — on
+    /// one volume that's a rename, and no bytes move.
+    Consume,
+    /// The source has to survive. The dropzone is why this is the default: it installs a
+    /// folder straight from wherever the user keeps it.
+    Preserve,
+}
+
 pub(crate) fn place_mod(
     extracted: &Path,
     mods_dir: &Path,
@@ -1323,9 +2283,18 @@ pub(crate) fn place_mod(
     dest_folder: &str,
     slug: &str,
 ) -> anyhow::Result<usize> {
-    place_mod_with(extracted, mods_dir, type_folder, dest_folder, slug, OnConflict::Overwrite)
+    place_mod_with(
+        extracted,
+        mods_dir,
+        type_folder,
+        dest_folder,
+        slug,
+        OnConflict::Overwrite,
+        Staging::Preserve,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn place_mod_with(
     extracted: &Path,
     mods_dir: &Path,
@@ -1333,9 +2302,11 @@ pub(crate) fn place_mod_with(
     dest_folder: &str,
     slug: &str,
     on_conflict: OnConflict,
+    staging: Staging,
 ) -> anyhow::Result<usize> {
     let route = plan_placement(extracted, mods_dir, type_folder, dest_folder, slug);
-    apply(&route.placement, on_conflict).inspect_err(|e| {
+    guard_placement(mods_dir, &route.placement)?;
+    apply(&route.placement, on_conflict, staging).inspect_err(|e| {
         // The one place every install — download, import, drop — funnels through, so one
         // log line here covers all three. Without it a failed install left no trace at all
         // beyond a toast the player had already dismissed by the time they reported it.
@@ -1389,7 +2360,38 @@ fn roots_for(placement: &Placement) -> Vec<PathBuf> {
 /// or even whether it was the source or the destination. Every step says what it was doing
 /// to what, and a failure is logged as well as returned — the toast is transient, the log
 /// is what a player can send back.
-fn apply(placement: &Placement, on_conflict: OnConflict) -> anyhow::Result<usize> {
+/// Refuse a placement that would write outside the mods folder.
+///
+/// `type_folder` and `dest_folder` are joined onto `mods_dir`, and `Path::join` is happy to
+/// accept `..` in either — a file-share code picks its type folder from a path the sender
+/// wrote, and the dropzone's destination comes back from the frontend. Every install funnels
+/// through [`place_mod_with`], so the check belongs here rather than at each of its doors.
+fn guard_placement(mods_dir: &Path, placement: &Placement) -> anyhow::Result<()> {
+    let dsts = roots_for(placement)
+        .into_iter()
+        .chain(writes_for(placement).into_iter().map(|(_, dst)| dst));
+    for dst in dsts {
+        // `starts_with` alone would pass `<mods>/..`: joining never normalises, so the
+        // climb is still sitting there as a component.
+        let inside = dst
+            .strip_prefix(mods_dir)
+            .map(|rel| !rel.components().any(|c| c == Component::ParentDir))
+            .unwrap_or(false);
+        if !inside {
+            anyhow::bail!(
+                "refusing to install to {} — that's outside the mods folder",
+                dst.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn apply(
+    placement: &Placement,
+    on_conflict: OnConflict,
+    staging: Staging,
+) -> anyhow::Result<usize> {
     for root in roots_for(placement) {
         std::fs::create_dir_all(&root)
             .with_context(|| format!("creating {}", root.display()))?;
@@ -1408,6 +2410,12 @@ fn apply(placement: &Placement, on_conflict: OnConflict) -> anyhow::Result<usize
         if let Some(parent) = dst.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        // Only ever a shortcut: a cross-drive move fails, so does a held file, and both fall
+        // through to `copy_staged` — which is where the wait-out-the-scanner retry lives.
+        if staging == Staging::Consume && std::fs::rename(src, dst).is_ok() {
+            written += 1;
+            continue;
         }
         copy_staged(src, dst)?;
         written += 1;
@@ -1484,23 +2492,34 @@ fn worth_retrying(dst: &Path, e: &std::io::Error) -> bool {
 
 /// Turn a failed copy into something a player can act on.
 ///
-/// A staged file that has gone missing is the one case where the raw error actively
+/// A staged file the copy can no longer read is the one case where the raw error actively
 /// misleads: it reads as if the *mod* were broken, when the bytes downloaded fine and
 /// something on the machine took them away afterwards. Name the culprit and the folder to
 /// exclude, because "os error 2" leaves a player with nowhere to go.
+///
+/// The probe is a real read, not [`Path::exists`]: `exists` opens for no access at all, so a
+/// scanner blocking a file's *contents* waves it through while `fs::copy`, which asks for
+/// `GENERIC_READ`, is told "os error 2". Gating on `exists` meant this never fired.
 fn copy_failure(src: &Path, dst: &Path, e: std::io::Error) -> anyhow::Error {
-    if e.kind() == std::io::ErrorKind::NotFound && !src.exists() {
+    if let Err(probe) = File::open(src) {
         let name = src.file_name().unwrap_or_default().to_string_lossy().into_owned();
         let folder = src
             .parent()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| src.display().to_string());
+        // The copy says what it hit, the probe says why the file won't open; a report needs both.
+        log::error!("staged {name} could not be reopened: copy said {e}, opening said {probe}");
+        let fate = if probe.kind() == std::io::ErrorKind::NotFound {
+            "deleted or quarantined"
+        } else {
+            "locked against being read"
+        };
         return anyhow::anyhow!(
-            "{name} vanished from the staging folder part-way through the install. The \
-             download itself worked — something deleted or quarantined the file before it \
-             could be copied into place, which is almost always antivirus (mod .pkz files \
-             are a common false positive) or a temp-folder cleaner. Add an exclusion for \
-             {folder} and install it again."
+            "{name} could not be read back from the staging folder part-way through the \
+             install — it was {fate} after the download finished. The download itself \
+             worked, so this is almost always antivirus (mod .pkz files are a common false \
+             positive) or a temp-folder cleaner. Add an exclusion for {folder} and install \
+             it again."
         );
     }
     anyhow::Error::new(e).context(format!("copying {} to {}", src.display(), dst.display()))
@@ -1538,6 +2557,16 @@ fn walk_plain(
     wrap_loose: bool,
     out: &mut Vec<(PathBuf, PathBuf)>,
 ) {
+    // A single file is a unit in its own right. Every other caller hands this a directory —
+    // a staged archive, a dropped folder — but the dropzone splits a pack into the mods it
+    // holds (`dropzone::split_tree`), and one of those is a lone `.pkz` sitting among its
+    // fifty siblings. There is no folder to point at, and copying it into one to make a
+    // directory would mean 3.8 GB of staging for a pack this size.
+    if base.is_file() {
+        let name = base.file_name().unwrap_or_default();
+        out.push((base.to_path_buf(), type_dir.join(name)));
+        return;
+    }
     let Ok(rd) = std::fs::read_dir(base) else {
         return;
     };
@@ -1630,25 +2659,34 @@ pub(crate) fn child_dir(parent: &Path, name: &str) -> Option<PathBuf> {
         .map(|e| e.path())
 }
 
-/// Both present in a folder = a sound mod.
-const SOUND_MARKERS: [&str; 2] = ["engine.scl", "sfx.cfg"];
-
+/// Both present in a folder = a sound mod: the `sfx.cfg` that wires the engine up, and the
+/// sample list it points at.
+///
+/// Any `.scl`, not `engine.scl` by name — `sfx.cfg` states which file it means
+/// (`scl = engineYZ250F.scl`), and authors do rename it. Requiring the conventional name read
+/// a real sound mod as content of no recognisable kind.
 pub(crate) fn dir_has_sound_markers(dir: &Path) -> bool {
-    let mut found = [false; SOUND_MARKERS.len()];
+    let (mut scl, mut sfx) = (false, false);
     if let Ok(rd) = std::fs::read_dir(dir) {
         for e in rd.filter_map(|e| e.ok()) {
-            if e.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                let name = e.file_name();
-                let name = name.to_string_lossy();
-                for (i, m) in SOUND_MARKERS.iter().enumerate() {
-                    if name.eq_ignore_ascii_case(m) {
-                        found[i] = true;
-                    }
-                }
+            if !e.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
             }
+            let path = e.path();
+            scl |= has_ext(&path, "scl");
+            sfx |= e.file_name().to_string_lossy().eq_ignore_ascii_case("sfx.cfg");
         }
     }
-    found.iter().all(|&f| f)
+    scl && sfx
+}
+
+/// A sound set: `engine.scl` + `sfx.cfg`, and nothing saying it is a bike.
+///
+/// Every bike folder carries those two files as well, so the markers alone do not tell the
+/// two apart — the `<Bike>.ini` beside `<Bike>.cfg` does. Without this an unpacked bike read
+/// as a sound set, to be emptied into some other bike's folder.
+pub(crate) fn is_sound_set(dir: &Path) -> bool {
+    dir_has_sound_markers(dir) && crate::bikeswap::read_identity(dir).is_none()
 }
 
 pub(crate) fn contains_sound_bundle(base: &Path) -> bool {
@@ -1656,7 +2694,7 @@ pub(crate) fn contains_sound_bundle(base: &Path) -> bool {
         .map(|rd| {
             rd.filter_map(|e| e.ok())
                 .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-                .any(|d| dir_has_sound_markers(&d.path()))
+                .any(|d| is_sound_set(&d.path()))
         })
         .unwrap_or(false)
 }
@@ -1722,6 +2760,22 @@ pub(crate) fn has_ext(p: &Path, ext: &str) -> bool {
     p.extension()
         .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case(ext))
+        .unwrap_or(false)
+}
+
+/// Whether a `.pkz` sits at the top of `dir` — i.e. whether this placement is installing a
+/// finished package rather than a mod's loose files.
+///
+/// The planner's copy of the test [`walk_plain`] makes on the same base from the entries it
+/// has already read. Both must answer alike: one decides the package goes in under its own
+/// name, the other that no model folder is wrapped around it.
+fn has_root_pkz(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                .any(|e| has_ext(&e.path(), "pkz"))
+        })
         .unwrap_or(false)
 }
 
@@ -1796,6 +2850,118 @@ mod tests {
     fn mediafire_placeholder_href_is_not_a_link() {
         let html = r##"<a id="downloadButton" href="#">Download</a>"##;
         assert!(parse_mediafire_link(html).is_none());
+    }
+
+    /// The scramble moved off the element and into a script variable; same payload.
+    #[test]
+    fn mediafire_link_from_scrambled_script_variable() {
+        let html = r#"<script>var scrambledUrl = "aHR0cHM6Ly9kb3dubG9hZDIyMDIubWVkaWFmaXJlLmNvbS9hYmMvdHJhY2sucGt6";</script>"#;
+        assert_eq!(
+            parse_mediafire_link(html).as_deref(),
+            Some("https://download2202.mediafire.com/abc/track.pkz")
+        );
+    }
+
+    /// The CDN host isn't always numbered — the pattern used to require digits.
+    #[test]
+    fn mediafire_link_from_unnumbered_cdn_host() {
+        let html = r#"<script>u="https://download.mediafire.com/ab/cd/bike.zip"</script>"#;
+        assert_eq!(
+            parse_mediafire_link(html).as_deref(),
+            Some("https://download.mediafire.com/ab/cd/bike.zip")
+        );
+    }
+
+    /// Every share shape MediaFire has shipped has to yield the same key, because the API
+    /// lookup that replaced page-scraping is reached by key and nothing else.
+    #[test]
+    fn mediafire_quick_key_from_every_share_shape() {
+        for url in [
+            "https://www.mediafire.com/file/bqmw1tdd7yq3qzr/I40_MX.pkz/file",
+            "https://www.mediafire.com/file/bqmw1tdd7yq3qzr/I40_MX.pkz",
+            "https://www.mediafire.com/file_premium/bqmw1tdd7yq3qzr/I40_MX.pkz/file",
+            "https://www.mediafire.com/download/bqmw1tdd7yq3qzr/I40_MX.pkz",
+            "https://www.mediafire.com/view/bqmw1tdd7yq3qzr/I40_MX.pkz/file",
+            "http://www.mediafire.com/?bqmw1tdd7yq3qzr",
+        ] {
+            assert_eq!(
+                mediafire_quick_key(url).as_deref(),
+                Some("bqmw1tdd7yq3qzr"),
+                "{url}"
+            );
+        }
+        // The older 11-character keys are still in circulation on old mod posts.
+        assert_eq!(
+            mediafire_quick_key("https://www.mediafire.com/file/a1b2c3d4e5f/track.rar").as_deref(),
+            Some("a1b2c3d4e5f")
+        );
+    }
+
+    /// A folder share has no download button, so it must route to the folder resolver
+    /// rather than being scraped for one that was never there.
+    #[test]
+    fn mediafire_folder_links_are_recognised() {
+        assert_eq!(
+            mediafire_folder_key("https://www.mediafire.com/folder/9dhrz4bkzcnzo/I40").as_deref(),
+            Some("9dhrz4bkzcnzo")
+        );
+        assert!(
+            mediafire_folder_key("https://www.mediafire.com/file/bqmw1tdd7yq3qzr/I40.pkz/file")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn mediafire_direct_links_need_no_resolving() {
+        assert!(is_mediafire_direct(
+            "https://download2202.mediafire.com/abc/track.pkz"
+        ));
+        assert!(is_mediafire_direct(
+            "https://download.mediafire.com/abc/track.pkz"
+        ));
+        assert!(!is_mediafire_direct(
+            "https://www.mediafire.com/file/bqmw1tdd7yq3qzr/I40.pkz/file"
+        ));
+    }
+
+    /// A removed file gets advice that is actually true. "Download it manually" isn't:
+    /// a browser finds the same empty page.
+    #[test]
+    fn mediafire_refusals_become_advice() {
+        let gone = serde_json::json!({
+            "result": "Error",
+            "message": "Unknown or Invalid QuickKey",
+        });
+        assert!(mediafire_api_error(&gone)
+            .expect("a removed file should be recognised")
+            .contains("no longer exists"));
+
+        let ok = serde_json::json!({ "result": "Success", "links": [] });
+        assert!(mediafire_api_error(&ok).is_none());
+
+        // An error we have no specific advice for still has to surface as an error,
+        // carrying whatever MediaFire said, rather than looking like a parse failure.
+        let odd = serde_json::json!({ "result": "Error", "message": "Rate limit exceeded" });
+        assert!(mediafire_api_error(&odd)
+            .expect("an unknown error is still an error")
+            .contains("Rate limit exceeded"));
+
+        assert!(
+            mediafire_page_error("<html><body><p>Invalid or Deleted File.</p></body></html>")
+                .expect("the deleted-file page should be recognised")
+                .contains("no longer exists")
+        );
+        assert!(mediafire_page_error("<html><body>Download this file</body></html>").is_none());
+    }
+
+    /// The folder picker is shared with Drive; it has to choose on name alone.
+    #[test]
+    fn picks_the_archive_out_of_a_folder_listing() {
+        assert_eq!(pick_archive(&["readme.txt", "I40 MX.pkz"]), Some(1));
+        // Nothing archive-shaped, but only one candidate — take it.
+        assert_eq!(pick_archive(&["I40 MX.pnt.part"]), Some(0));
+        assert_eq!(pick_archive(&["a.txt", "b.txt"]), None);
+        assert_eq!(pick_archive(&[]), None);
     }
 
     /// Answer one request with a canned response, then drop the connection.
@@ -1964,9 +3130,288 @@ mod tests {
         );
         let files = parse_gdrive_folder(&html, folder);
         assert_eq!(files.len(), 2);
-        let chosen = pick_folder_archive(&files).expect("should pick the archive");
-        assert_eq!(chosen.name, "I40 MX.pkz");
-        assert_eq!(chosen.id, "1pymPFNcJ3h6iegZZhz2GBGQ4JBMxm2OY");
+        // The sub-folder is walked, not picked; the archive beside it is the one download.
+        let archive = files
+            .iter()
+            .find(|f| f.mime != GDRIVE_FOLDER_MIME)
+            .expect("should see the archive");
+        assert_eq!(archive.name, "I40 MX.pkz");
+        assert_eq!(archive.id, "1pymPFNcJ3h6iegZZhz2GBGQ4JBMxm2OY");
+        assert_eq!(pick_archive(&["I40 MX server", "I40 MX.pkz"]), Some(1));
+    }
+
+    /// What the folder resolvers make of real share links, printed rather than asserted.
+    ///
+    /// The listings are somebody else's website and API, so this can only ever be a
+    /// diagnostic — but it is the one that settles whether a shape is handled, and every
+    /// link below is a mod that could not be installed before:
+    ///
+    /// `MXB_SHARES=1 cargo test resolves_real_shares -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "hits mxb-mods' download hosts"]
+    async fn resolves_real_shares() {
+        let client = build_download_client().unwrap();
+        let cases = [
+            // A folder of folders, one per bike — "no files in it" before.
+            ("sound pack", "https://www.mediafire.com/folder/o52zol9izk707/PACK"),
+            // A folder of loose sound files — "couldn't tell which one is the mod" before.
+            ("sound files", "https://www.mediafire.com/folder/vkx7f9y8lgyve/YZ250F"),
+            // Six liveries in a folder; the first was installed and the rest dropped.
+            ("livery kit", "https://www.mediafire.com/folder/89t5bmqfmn55n/RedBud"),
+            // A folder holding one preset.
+            ("preset folder", "https://www.mediafire.com/folder/13mp0mqrv11x3/drizz__preset2"),
+            // A bare preset .ini — "could not determine the archive type" before.
+            ("bare preset", "https://www.mediafire.com/file/aphaokw97gc5yx8/Jax.ini/file"),
+            // The same two shapes on Drive.
+            ("drive preset", "https://drive.google.com/drive/folders/1aEJMfGs3rBnfg4sZ27xNwyJU7r08NGe6"),
+            ("drive bike", "https://drive.google.com/drive/folders/1VBhJnjFkM4gPd2aYT_2Wf1L_kOnH_Z9N"),
+        ];
+        for (what, url) in cases {
+            match resolve_share(&client, url, "").await {
+                Ok(Resolved::File(u)) => println!("{what}: one file -> {}", &u[..u.len().min(80)]),
+                Ok(Resolved::Folder { name, files }) => {
+                    println!("{what}: folder \"{name}\", {} files", files.len());
+                    for f in files.iter().take(6) {
+                        println!("    {}", f.rel);
+                    }
+                }
+                Err(e) => println!("{what}: FAILED {e:#}"),
+            }
+        }
+    }
+
+    /// Half the ReShade presets on the site are shared as the bare `.ini`, which is not an
+    /// archive and was rejected as "could not determine the archive type of the downloaded
+    /// file" — with a Retry button that could only fail the same way.
+    #[test]
+    fn a_bare_preset_download_stages_instead_of_failing() {
+        let dir = std::env::temp_dir().join(format!("frost-test-preset-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let src = dir.join("Jaxs Everyday ride reshade.ini");
+        let staged = dir.join(STAGED_DIR);
+        std::fs::create_dir_all(&staged).unwrap();
+        std::fs::write(&src, "Techniques=DPX@DPX.fx\nTechniqueSorting=DPX@DPX.fx\n").unwrap();
+
+        assert!(
+            extract_archive(&src, &staged).is_err(),
+            "it really isn't an archive"
+        );
+        stage_download(&src, &staged, crate::reshade::SUBPATH).expect("a preset stages as itself");
+        assert!(staged.join("Jaxs Everyday ride reshade.ini").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A designer's kit is six liveries for one bike. Treating `.pnt` as a package to pick
+    /// installed the first and reported success.
+    #[test]
+    fn a_folder_of_paints_is_the_mod_not_a_file_to_pick() {
+        let paints = [
+            "2026 HRC RedBud 250PUB.pnt",
+            "2026 HRC RedBud 450PUB.pnt",
+            "2026 HRC RedBud Jett 1.pnt",
+        ];
+        assert_eq!(pick_archive(&paints), None);
+
+        let files: Vec<RemoteFile> = paints
+            .iter()
+            .map(|n| RemoteFile {
+                rel: (*n).to_string(),
+                url: format!("https://example.invalid/{n}"),
+                bytes: None,
+            })
+            .collect();
+        match fold_share("RedBud".into(), files) {
+            Resolved::Folder { name, files } => {
+                assert_eq!(name, "RedBud");
+                assert_eq!(files.len(), 3);
+            }
+            Resolved::File(_) => panic!("all six paints are the mod"),
+        }
+    }
+
+    /// The other half of that rule: a packaged mod beside its extras is still one download.
+    #[test]
+    fn a_folder_holding_an_archive_downloads_only_the_archive() {
+        let files = vec![
+            RemoteFile {
+                rel: "readme.txt".into(),
+                url: "https://example.invalid/readme".into(),
+                bytes: None,
+            },
+            RemoteFile {
+                rel: "I40 MX.pkz".into(),
+                url: "https://example.invalid/pkz".into(),
+                bytes: None,
+            },
+        ];
+        match fold_share("I40".into(), files) {
+            Resolved::File(u) => assert_eq!(u, "https://example.invalid/pkz"),
+            Resolved::Folder { .. } => panic!("the package is the download"),
+        }
+    }
+
+    /// A folder share of one archive per bike. Left packed, the tree the planner reads is
+    /// three `.rar` files and nothing it can name.
+    #[test]
+    fn a_folder_share_unpacks_the_archives_it_held() {
+        let dir = std::env::temp_dir().join(format!("frost-test-nested-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let inner = dir.join("build");
+        std::fs::create_dir_all(inner.join("ktm")).unwrap();
+        std::fs::write(inner.join("engine.scl"), "e").unwrap();
+
+        let zip_path = dir.join("root/ktm/250.zip");
+        std::fs::create_dir_all(zip_path.parent().unwrap()).unwrap();
+        let mut zip = zip::ZipWriter::new(File::create(&zip_path).unwrap());
+        zip.start_file::<_, ()>("engine.scl", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        std::io::Write::write_all(&mut zip, b"engine").unwrap();
+        zip.finish().unwrap();
+
+        extract_nested(&dir.join("root")).unwrap();
+        assert!(!zip_path.exists(), "the archive is consumed");
+        assert!(dir.join("root/ktm/250/engine.scl").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Every bike folder holds `engine.scl` + `sfx.cfg`. Read as a loose sound drop, an
+    /// unpacked bike gets emptied into whatever bike the user had selected.
+    #[test]
+    fn an_unpacked_bike_is_not_a_loose_sound_drop() {
+        let dir = std::env::temp_dir().join(format!("frost-test-bikesnd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let bike = dir.join("staged/Modded Surron");
+        std::fs::create_dir_all(&bike).unwrap();
+        for (n, b) in [
+            ("Modded Surron.ini", "name = Modded Surron"),
+            ("Modded Surron.cfg", "id { surron }"),
+            ("engine.scl", "e"),
+            ("sfx.cfg", "s"),
+        ] {
+            std::fs::write(bike.join(n), b).unwrap();
+        }
+
+        let mods = dir.join("mods");
+        let route = plan_placement(&dir.join("staged"), &mods, "bikes", "KX450", "surron");
+        assert_ne!(route.rule, RouteRule::LooseSound);
+        assert_ne!(route.rule, RouteRule::SoundBundle);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Install a real folder share as far as the review sheet, and report the rows.
+    ///
+    /// The whole point of downloading a folder is what the planner then makes of it, and no
+    /// fixture can stand in for a real one — these are the exact downloads that used to end
+    /// in "open the mod page and install it manually".
+    ///
+    /// `cargo test real_folder_shares_plan -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "downloads real mods from mxb-mods' hosts"]
+    async fn real_folder_shares_plan() {
+        let client = build_download_client().unwrap();
+        let root = std::env::temp_dir().join(format!("frost-shares-{}", std::process::id()));
+
+        for (what, url) in [
+            ("sound pack", "https://www.mediafire.com/folder/o52zol9izk707/PACK"),
+            ("sound files", "https://www.mediafire.com/folder/vkx7f9y8lgyve/YZ250F"),
+            ("livery kit", "https://www.mediafire.com/folder/89t5bmqfmn55n/RedBud"),
+        ] {
+            let Ok(Resolved::Folder { name, files }) = resolve_share(&client, url, "").await else {
+                println!("{what}: did not resolve to a folder");
+                continue;
+            };
+            let work = root.join(sanitize(what));
+            let staged = work.join(STAGED_DIR).join(sanitize(&name));
+            std::fs::create_dir_all(&staged).unwrap();
+            for f in &files {
+                let dest = staged.join(&f.rel);
+                std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+                let direct = resolve_direct_url(&client, &f.url, "").await.unwrap();
+                let body = open_body(&client, &direct).await.unwrap().bytes().await.unwrap();
+                std::fs::write(&dest, &body).unwrap();
+            }
+            extract_nested(&staged).unwrap();
+
+            let mods = root.join("game");
+            let plan = crate::dropzone::plan_folder(
+                &mods.to_string_lossy(),
+                &work.join(STAGED_DIR),
+                work.clone(),
+                &name,
+            )
+            .unwrap();
+            println!("{what}: {} row(s)", plan.items.len());
+            for it in &plan.items {
+                println!(
+                    "    {} — {:?}, {} file(s) -> {}",
+                    it.name,
+                    it.kind,
+                    it.file_count,
+                    if it.needs_choice {
+                        "asks which bike".to_string()
+                    } else {
+                        format!("{}/{}", it.subpath, it.dest_folder)
+                    }
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Extract real downloads and report what the installer would do with each.
+    ///
+    /// `MXB_REAL_ARCHIVES=<dir> cargo test real_archives_plan -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs a folder of real mod archives"]
+    fn real_archives_plan() {
+        let Ok(dir) = std::env::var("MXB_REAL_ARCHIVES") else {
+            panic!("set MXB_REAL_ARCHIVES to a folder of downloaded mods");
+        };
+        let root = std::env::temp_dir().join(format!("frost-archives-{}", std::process::id()));
+
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.is_file())
+            .collect();
+        entries.sort();
+
+        for archive in entries {
+            let name = archive.file_name().unwrap().to_string_lossy().into_owned();
+            let staged = root.join(sanitize(&name)).join(STAGED_DIR);
+            std::fs::create_dir_all(&staged).unwrap();
+            if let Err(e) = extract_archive(&archive, &staged) {
+                println!("{name}: not an archive ({e:#})");
+                continue;
+            }
+            let mods = root.join("game");
+            let mods_dir = crate::library::mods_subdir(&mods.to_string_lossy(), "mods");
+            let route = plan_placement(&staged, &mods_dir, "bikes", "", "mod");
+            let writes = writes_for(&route.placement).len();
+            println!("{name}: {:?}, {writes} file(s) placed", route.rule);
+
+            match crate::dropzone::plan_extracted(
+                &mods.to_string_lossy(),
+                &staged,
+                root.join(sanitize(&name)),
+                &name,
+            ) {
+                Ok(Some(plan)) => {
+                    for it in &plan.items {
+                        println!(
+                            "    row: {} — {:?} -> {}",
+                            it.name,
+                            it.kind,
+                            if it.needs_choice { "asks" } else { &it.subpath }
+                        );
+                    }
+                }
+                Ok(None) => println!("    placed whole"),
+                Err(e) => println!("    plan failed: {e:#}"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -1979,7 +3424,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("frost-test-pnt-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let src = dir.join("Cool Livery.pnt");
-        let dest = dir.join("extracted");
+        let dest = dir.join(STAGED_DIR);
         std::fs::create_dir_all(&dest).unwrap();
         // Real .pnt files start with the "PNT\0" magic — anything but a known archive.
         std::fs::write(&src, b"PNT\0some paint bytes").unwrap();
@@ -2186,7 +3631,7 @@ mod tests {
             std::io::Write::write_all(&mut w, b"hello")?;
             w.finish()?;
         }
-        let extracted = base.join("extracted");
+        let extracted = base.join(STAGED_DIR);
         std::fs::create_dir_all(&extracted)?;
         extract_archive(&zip_path, &extracted)?;
 
@@ -2214,6 +3659,83 @@ mod tests {
         std::fs::write(mods.join("tracks/track.pkz"), b"old").unwrap();
 
         let placed = place_mod(&ex, &mods, "tracks", "", "slug").unwrap();
+
+        assert_eq!(placed, 1);
+        assert_eq!(std::fs::read(mods.join("tracks/track.pkz")).unwrap(), b"new");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The saving itself: the file lands without its bytes being written again, so the
+    /// staged copy is gone rather than duplicated.
+    #[test]
+    fn consuming_a_staged_tree_moves_the_files() {
+        let root = place_tmp("consume");
+        let ex = root.join("ex");
+        std::fs::create_dir_all(&ex).unwrap();
+        std::fs::write(ex.join("track.pkz"), b"bytes").unwrap();
+
+        let mods = root.join("mods");
+        let placed = place_mod_with(
+            &ex,
+            &mods,
+            "tracks",
+            "",
+            "slug",
+            OnConflict::Overwrite,
+            Staging::Consume,
+        )
+        .unwrap();
+
+        assert_eq!(placed, 1);
+        assert_eq!(std::fs::read(mods.join("tracks/track.pkz")).unwrap(), b"bytes");
+        assert!(!ex.join("track.pkz").exists(), "the staged copy was moved, not copied");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The dropzone installs from the user's own folder, so the default must not touch it.
+    #[test]
+    fn preserving_leaves_the_source_alone() {
+        let root = place_tmp("preserve");
+        let ex = root.join("ex");
+        std::fs::create_dir_all(&ex).unwrap();
+        std::fs::write(ex.join("track.pkz"), b"bytes").unwrap();
+
+        let mods = root.join("mods");
+        let placed = place_mod(&ex, &mods, "tracks", "", "slug").unwrap();
+
+        assert_eq!(placed, 1);
+        assert_eq!(std::fs::read(mods.join("tracks/track.pkz")).unwrap(), b"bytes");
+        assert_eq!(
+            std::fs::read(ex.join("track.pkz")).unwrap(),
+            b"bytes",
+            "the user's own copy is still theirs"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Re-installing is how a player updates a mod, so the rename has to replace the
+    /// destination rather than fail on it.
+    #[test]
+    fn consuming_overwrites_an_existing_file() {
+        let root = place_tmp("consume-overwrite");
+        let ex = root.join("ex");
+        std::fs::create_dir_all(&ex).unwrap();
+        std::fs::write(ex.join("track.pkz"), b"new").unwrap();
+
+        let mods = root.join("mods");
+        std::fs::create_dir_all(mods.join("tracks")).unwrap();
+        std::fs::write(mods.join("tracks/track.pkz"), b"old").unwrap();
+
+        let placed = place_mod_with(
+            &ex,
+            &mods,
+            "tracks",
+            "",
+            "slug",
+            OnConflict::Overwrite,
+            Staging::Consume,
+        )
+        .unwrap();
 
         assert_eq!(placed, 1);
         assert_eq!(std::fs::read(mods.join("tracks/track.pkz")).unwrap(), b"new");
@@ -2276,6 +3798,26 @@ mod tests {
             .join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/cool.pnt")
             .exists());
         assert!(!mods.join("tracks/MX1OEM_2023_KTM_450_SX-F").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The type folder is not always ours to trust — a file-share code picks it from a path
+    /// the sender wrote. `mods_dir.join("..")` is the MX Bikes folder itself, next to the
+    /// executable, so the placement has to be refused rather than merely misrouted.
+    #[test]
+    fn refuses_a_destination_outside_the_mods_folder() {
+        let root = place_tmp("escape-place");
+        let ex = root.join("ex");
+        touch(&ex.join("evil.dll"));
+        let mods = root.join("game/mods");
+        std::fs::create_dir_all(&mods).unwrap();
+
+        for (type_folder, dest_folder) in [("..", ""), ("tracks", "../.."), ("../..", "x")] {
+            let err = place_mod(&ex, &mods, type_folder, dest_folder, "slug").unwrap_err();
+            assert!(err.to_string().contains("outside the mods folder"), "{err}");
+        }
+        assert!(!root.join("game/evil.dll").exists(), "a placement escaped the mods folder");
+        assert!(!root.join("evil.dll").exists(), "a placement escaped the mods folder");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2366,6 +3908,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// The shop's shape: the download *is* the model, so `extract_archive` carries the `.pkz`
+    /// through and there is no folder to take a name from. Wrapping it named the folder for
+    /// the slug and put the package a level below where anything looks — `helmets/shop-44/`,
+    /// which the game can't load and the rider viewer answers with "no gear mesh found".
+    #[test]
+    fn a_packaged_gear_model_goes_straight_into_its_area() {
+        let root = place_tmp("gear-packaged");
+        let ex = root.join("ex");
+        touch(&ex.join("B Helmet 100 Goggles.pkz"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "rider", "helmets", "shop-44").unwrap();
+        assert!(
+            mods.join("rider/helmets/B Helmet 100 Goggles.pkz").exists(),
+            "the package sits in the area under its own name"
+        );
+        assert!(!mods.join("rider/helmets/shop-44").exists(), "no slug folder around it");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Same for a packaged rider profile, which `riders/` takes as a `.pkz` too.
+    #[test]
+    fn a_packaged_rider_profile_goes_straight_into_riders() {
+        let root = place_tmp("rider-packaged");
+        let ex = root.join("ex");
+        touch(&ex.join("Suit 1.pkz"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "rider", "riders", "shop-91").unwrap();
+        assert!(mods.join("rider/riders/Suit 1.pkz").exists());
+        assert!(!mods.join("rider/riders/shop-91").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn helmet_paint_bundle_stays_in_rider() {
         let root = place_tmp("helmet-paint");
@@ -2388,6 +3962,28 @@ mod tests {
         place_mod(&ex, &mods, "tracks", "", "slug").unwrap();
         assert!(mods.join("bikes/KTM.pkz").exists());
         assert!(mods.join("tracks/T.pkz").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A lone file is a placement in its own right — what the dropzone hands over when it
+    /// splits a pack into the mods inside it and one of those is a single `.pkz` among
+    /// fifty siblings. Its neighbours must not come with it.
+    #[test]
+    fn places_a_single_file_without_its_siblings() {
+        let root = place_tmp("onefile");
+        let ex = root.join("ex");
+        touch(&ex.join("MX1OEM_KTM.pkz"));
+        touch(&ex.join("MX2OEM_KTM.pkz"));
+        let mods = root.join("mods");
+
+        let wrote = place_mod(&ex.join("MX1OEM_KTM.pkz"), &mods, "bikes", "", "slug").unwrap();
+
+        assert_eq!(wrote, 1);
+        assert!(mods.join("bikes/MX1OEM_KTM.pkz").exists());
+        assert!(
+            !mods.join("bikes/MX2OEM_KTM.pkz").exists(),
+            "the sibling was not asked for"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2564,6 +4160,39 @@ mod tests {
         assert!(msg.contains("Scottsdale.pkz"), "{msg}");
         assert!(msg.contains(&staging.display().to_string()), "{msg}");
         assert!(msg.to_lowercase().contains("antivirus"), "{msg}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The other half of the same trap, and the one that got past us: the staged file is
+    /// still listed, only its contents are out of reach. `Path::exists` answers yes — it
+    /// opens for no access at all — so gating the advice on it handed the player a bare
+    /// "os error 2" for a scanner hold. Unreadable has to count as gone.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_staged_file_blames_the_right_thing() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = place_tmp("unreadable");
+        let staging = root.join("ex");
+        let mods = root.join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+        let src = staging.join("Scottsdale.pkz");
+        touch(&src);
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if File::open(&src).is_ok() {
+            // Running as root, where the mode is advisory and there is nothing to stand in
+            // for the scanner.
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+        assert!(src.exists(), "the entry is still there — that is the whole trap");
+
+        let err = copy_staged(&src, &mods.join("Scottsdale.pkz")).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("Scottsdale.pkz"), "{msg}");
+        assert!(msg.contains(&staging.display().to_string()), "{msg}");
+        assert!(msg.to_lowercase().contains("antivirus"), "{msg}");
+
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o644)).unwrap();
         let _ = std::fs::remove_dir_all(&root);
     }
 
