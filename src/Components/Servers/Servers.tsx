@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   RefreshCw,
@@ -22,6 +22,7 @@ import {
 } from "../../api/mods";
 import { useT } from "../../i18n/context";
 import JoinServerDialog from "../Shell/JoinServerDialog";
+import ServerDetail from "./ServerDetail";
 
 /**
  * The live MX Bikes server list, read straight from PiBoSo's master server — the same
@@ -41,21 +42,36 @@ const Servers = () => {
   const [query, setQuery] = useState("");
   const [joining, setJoining] = useState<string | null>(null);
   const [joinOpen, setJoinOpen] = useState(false);
+  const [detail, setDetail] = useState<MasterServer | null>(null);
 
+  // One fetch at a time. Two overlapping ones each sign in to Steam, and the loser's
+  // failure used to replace the winner's list with an error.
+  const inFlight = useRef(false);
+  // What the tab is showing, for the failure path — `load` holds no state of its own.
+  const onScreen = useRef<MasterServer[] | null>(null);
   const load = useCallback(() => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setLoading(true);
     setError(null);
     listMasterServers()
       .then((list) => {
         // Busiest first — an empty server is the last thing anyone's looking for.
         list.sort((a, b) => b.players - a.players);
+        onScreen.current = list;
         setServers(list);
       })
       .catch((e: unknown) => {
-        setServers([]);
-        setError(typeof e === "string" ? e : String(e));
+        const message = typeof e === "string" ? e : String(e);
+        setError(message);
+        // A failed refresh is not an empty list: keep what's on screen and say so instead.
+        if (onScreen.current?.length) toast.error(message);
+        else setServers([]);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        inFlight.current = false;
+        setLoading(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -69,6 +85,7 @@ const Servers = () => {
       (s) =>
         s.name.toLowerCase().includes(q) ||
         s.track.toLowerCase().includes(q) ||
+        s.location.toLowerCase().includes(q) ||
         s.address.toLowerCase().includes(q),
     );
   }, [servers, query]);
@@ -141,9 +158,12 @@ const Servers = () => {
       </ContextBarRight>
 
       <JoinServerDialog open={joinOpen} onOpenChange={setJoinOpen} onJoined={load} />
-
-
-      <JoinServerDialog open={joinOpen} onOpenChange={setJoinOpen} onJoined={load} />
+      <ServerDetail
+        server={detail}
+        onOpenChange={(open) => !open && setDetail(null)}
+        onJoin={join}
+        joining={joining}
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
         {servers === null ? (
@@ -151,7 +171,7 @@ const Servers = () => {
             <Loader2 className="size-5 animate-spin text-faint" />
             <p className="text-[13px] text-faint">{t("serverBrowser.loading")}</p>
           </Centered>
-        ) : error ? (
+        ) : error && servers.length === 0 ? (
           <Centered>
             <ServerOff className="size-6 text-faint" />
             <p className="max-w-[420px] text-center text-[13px] text-muted-foreground">
@@ -175,6 +195,7 @@ const Servers = () => {
                   <th className="px-3.5 py-2.5 font-semibold">{t("serverBrowser.name")}</th>
                   <th className="w-[92px] px-2 py-2.5 font-semibold">{t("serverBrowser.players")}</th>
                   <th className="px-2 py-2.5 font-semibold">{t("servers.track")}</th>
+                  <th className="px-2 py-2.5 font-semibold">{t("serverBrowser.location")}</th>
                   <th className="w-[72px] px-2 py-2.5 font-semibold">{t("serverBrowser.ping")}</th>
                   <th className="px-2 py-2.5 font-semibold">{t("serverBrowser.address")}</th>
                   <th className="w-[110px] px-3.5 py-2.5" />
@@ -184,7 +205,8 @@ const Servers = () => {
                 {shown.map((s, i) => (
                   <tr
                     key={`${s.address}-${i}`}
-                    className="border-b border-input/60 last:border-0 hover:bg-foreground/[0.03]"
+                    onClick={() => setDetail(s)}
+                    className="cursor-pointer border-b border-input/60 last:border-0 hover:bg-foreground/[0.03]"
                   >
                     <td className="px-3.5 py-2.5">
                       <div className="flex items-center gap-2">
@@ -206,8 +228,19 @@ const Servers = () => {
                       </span>
                     </td>
                     <td className="px-2 py-2.5 text-muted-foreground">
-                      <span className="block max-w-[220px] truncate" title={s.track}>
+                      <span
+                        className="block max-w-[220px] truncate"
+                        title={[s.track, s.trackLayout].filter(Boolean).join(" — ")}
+                      >
                         {s.track || "—"}
+                        {s.trackLayout && (
+                          <span className="text-faint"> · {s.trackLayout}</span>
+                        )}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2.5 text-muted-foreground">
+                      <span className="block max-w-[140px] truncate" title={s.location}>
+                        {s.location || "—"}
                       </span>
                     </td>
                     <td className="px-2 py-2.5 tabular-nums text-muted-foreground">
@@ -222,7 +255,10 @@ const Servers = () => {
                     </td>
                     <td className="px-2 py-2.5">
                       <button
-                        onClick={() => copy(s.address)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          copy(s.address);
+                        }}
                         title={t("serverBrowser.copyAddress")}
                         className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 font-mono text-[12px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
                       >
@@ -233,8 +269,12 @@ const Servers = () => {
                     <td className="px-3.5 py-2.5 text-right">
                       <Button
                         size="sm"
-                        onClick={() => join(s.address)}
-                        disabled={joining !== null}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          join(s.address);
+                        }}
+                        disabled={joining !== null || !s.joinable}
+                        title={s.joinable ? undefined : t("serverBrowser.notJoinable")}
                       >
                         {joining === s.address ? (
                           <Loader2 className="size-3.5 animate-spin" />

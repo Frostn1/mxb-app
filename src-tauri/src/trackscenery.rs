@@ -50,15 +50,43 @@ const STAKE_W_M: f32 = 0.045;
 const BANNER_OFF_M: f32 = 10.5;
 const BANNER_W_M: f32 = 4.0;
 const BANNER_H_M: f32 = 1.35;
+/// How thick a board is.
+///
+/// A printed sheet on a frame, not a sheet on its own: 6 cm is the frame, and it is the
+/// smallest thickness that still shows an edge from a bike at ten metres. It is also what
+/// stops a board vanishing edge-on — a plane has no width when you look along it, so a run
+/// of them used to wink out one by one as you rode past.
+const BANNER_D_M: f32 = 0.06;
 /// How far off the ground the bottom rail sits. Low: a hoarding is a wall, not a sling.
 const BANNER_LIFT_M: f32 = 0.12;
-/// Panels in a run, and metres of clear ground between one run and the next. A hoarding that
+/// Boards in a run, and metres of clear ground between one run and the next. A hoarding that
 /// never breaks is a fence; what a track has is runs with the gate, the crossings and the
-/// marshal posts between them.
+/// marshal posts between them. A run of tiled banner is the same *length* in metres, which is
+/// more pieces because a piece is narrower.
 const BANNER_RUN_MIN: usize = 5;
 const BANNER_RUN_MAX: usize = 14;
 const BANNER_BREAK_MIN_M: f32 = 22.0;
 const BANNER_BREAK_MAX_M: f32 = 70.0;
+
+/// The other thing a track lines its lap with: one design printed over and over on piece after
+/// piece of the same plastic, strung along stakes rather than bolted to uprights.
+///
+/// Indiana's is `inflate_tilable_c` and its pieces measure 0.9–1.9 m wide, butted at 1.0–2.1 m,
+/// 0.9–1.4 m tall, every one printing the *same* window of the sheet — `trackobjects`'
+/// `which_way_a_banner_faces`.
+const TILE_H_M: f32 = 1.05;
+/// Pieces to a print. Indiana cuts its into 5 and into 20; a whole number puts the seam on a
+/// piece's edge, and two is the fewest that still follows ground a board would bridge.
+const TILE_PER_PRINT: usize = 2;
+/// How far along a run the design comes round again — the cell's own proportions, so a lockup
+/// drawn for a 4 m board is not squashed onto a narrower piece.
+const TILE_PRINT_M: f32 = BANNER_W_M * TILE_H_M / BANNER_H_M;
+const TILE_W_M: f32 = TILE_PRINT_M / TILE_PER_PRINT as f32;
+/// Pieces between uprights. A hoarding has one at every join; a strung banner does not, and
+/// putting one there is what made this read as a fence the first time.
+const TILE_POST_EVERY: usize = 3;
+/// How much of a lap's printed line is tiled banner rather than sponsors' boards.
+const TILED_SHARE: f32 = 0.5;
 
 /// One printed board: a wordmark on a coloured ground, and whether it carries the app's mark.
 ///
@@ -197,6 +225,26 @@ fn along(heading_rad: f32) -> f32 {
 
 fn across(heading_rad: f32) -> f32 {
     heading_rad.to_degrees()
+}
+
+/// A point `s` metres along a polyline, and which way to turn a piece standing on it.
+///
+/// `cursor` is carried between calls because `s` only ever moves forwards; without it this is
+/// a scan of the whole lap for every board.
+fn along_line(
+    line: &[(f32, f32)],
+    acc: &[f32],
+    cursor: &mut usize,
+    s: f32,
+) -> (f32, f32, f32) {
+    while *cursor + 2 < line.len() && acc[*cursor + 1] < s {
+        *cursor += 1;
+    }
+    let (a, b) = (line[*cursor], line[*cursor + 1]);
+    let seg = (acc[*cursor + 1] - acc[*cursor]).max(1e-6);
+    let t = ((s - acc[*cursor]) / seg).clamp(0.0, 1.0);
+    let deg = (b.0 - a.0).atan2(b.1 - a.1).to_degrees() + 90.0;
+    (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, deg)
 }
 
 /// Deterministic noise, so a track built twice is the same track.
@@ -509,9 +557,12 @@ fn banner_post_band() -> (f32, f32) {
 /// which is what every one of Indiana's fourteen is.
 fn banner_sheet() -> Texture {
     let (band_top, _) = banner_post_band();
-    // The cell's height over its width. Everything laid out below is in cell coordinates, and
-    // artwork has to be told the difference or it comes out stretched.
+    // The cell's height over its width, which is how far down the sheet a cell reaches.
     let aspect = BANNER_CELL_PX as f32 / BANNER_ATLAS_PX as f32;
+    // And the *board's*, which is the one artwork is fitted against: a cell is 1024 by 180 and
+    // the board is 4 m by 1.35, so measuring the lockup against the pixels draws it half as
+    // wide as it should be, in the left third of the board.
+    let board = BANNER_H_M / BANNER_W_M;
     // Decode once up front rather than inside the pixel loop's first call.
     let _ = mark_mask();
     for p in &BANNER_PANELS {
@@ -541,8 +592,10 @@ fn banner_sheet() -> Texture {
         // Everything sits to the right of the mark, where there is one.
         let left = if p.mark { 0.225 } else { 0.05 };
         if p.mark {
-            let (mw, mh) = (0.15f32, 0.78f32);
-            let a = mark_at((u - 0.045) / mw, (cv - 0.11) / mh);
+            // Square on the board, so square here means as many metres across as down.
+            let mw = 0.15f32;
+            let mh = mw / board;
+            let a = mark_at((u - 0.045) / mw, (cv - (1.0 - mh) * 0.5) / mh);
             // The mark takes the wordmark's own ink, which every lockup shares with it.
             let ink = mark_ink(p.art);
             for k in 0..3 {
@@ -555,8 +608,8 @@ fn banner_sheet() -> Texture {
             let (aw, ah) = (art.0 as f32, art.1 as f32);
             let (bu0, bu1) = (left, 0.965);
             let (box_w, box_h) = (bu1 - bu0, 0.74f32);
-            let scale = (box_w / aw).min(box_h * aspect / ah);
-            let (fw, fh) = (aw * scale, ah * scale / aspect);
+            let scale = (box_w / aw).min(box_h * board / ah);
+            let (fw, fh) = (aw * scale, ah * scale / board);
             let (au, av) = (
                 (u - (bu0 + bu1) * 0.5 + fw * 0.5) / fw,
                 (cv - 0.5 + fh * 0.5) / fh,
@@ -1109,42 +1162,128 @@ fn tree_mesh(h: f32, seed: u32, i: u32) -> Mesh {
     m
 }
 
-/// A banner: a printed panel slung between two stakes.
 /// Squeeze a mesh's `v` into one band of the atlas, leaving `u` alone.
 fn in_band(mesh: &Mesh, (top, bot): (f32, f32)) -> Mesh {
+    in_cell(mesh, (top, bot), (0.0, 1.0))
+}
+
+/// Squeeze a mesh into one band of the atlas and one window across it.
+///
+/// The window is what makes a tiled banner tile: a piece two metres into a run samples the
+/// two metres of print that belong there, and `u` past 1 wraps — which is not a guess, it is
+/// what Indiana's own pieces do, at `v` up to 2.0.
+fn in_cell(mesh: &Mesh, (top, bot): (f32, f32), (u0, u1): (f32, f32)) -> Mesh {
     let mut m = mesh.clone();
     for uv in m.uvs.chunks_exact_mut(2) {
+        uv[0] = u0 + uv[0].clamp(0.0, 1.0) * (u1 - u0);
         uv[1] = top + uv[1].clamp(0.0, 1.0) * (bot - top);
     }
     m
 }
 
-/// One board of a hoarding: the `cell`-th printed panel, with an upright at its left end.
+/// The two ways a track carries a printed line, and the difference is the repeat.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Print {
+    /// Sponsors' boards, bolted edge to edge, a different name on each.
+    Boards,
+    /// One design, printed over and over on piece after piece of the same plastic.
+    Tiled,
+}
+
+impl Print {
+    fn size(self) -> (f32, f32) {
+        match self {
+            Print::Boards => (BANNER_W_M, BANNER_H_M),
+            Print::Tiled => (TILE_W_M, TILE_H_M),
+        }
+    }
+
+    /// The upright that holds a piece up at its leading end, and how thick it is. A hoarding
+    /// shares one at every join; a strung banner is held every few pieces.
+    fn post_at(self, piece: usize) -> Option<f32> {
+        match self {
+            Print::Boards => Some(0.09),
+            Print::Tiled if piece % TILE_POST_EVERY == 0 => Some(0.06),
+            Print::Tiled => None,
+        }
+    }
+
+    /// Which window of the sheet the `piece`-th piece of a run prints. A board prints the
+    /// whole cell; a tiled piece prints the slice that belongs where it stands.
+    fn window(self, piece: usize) -> (f32, f32) {
+        match self {
+            Print::Boards => (0.0, 1.0),
+            Print::Tiled => {
+                let du = 1.0 / TILE_PER_PRINT as f32;
+                let u0 = (piece % TILE_PER_PRINT) as f32 * du;
+                (u0, u0 + du)
+            }
+        }
+    }
+}
+
+/// A printed board: a panel with a front, a back and four edges you can see the thickness of.
 ///
-/// Left only, because the panels are bolted edge to edge and the next one's upright is this
-/// one's right-hand post. `end_post` adds the one that closes a run. Doubling them up at every
-/// join is the obvious way to build it and it puts two posts in the same 8 cm of ground, which
-/// z-fights and reads as a smear.
-fn banner_mesh(cell: usize, end_post: bool) -> Mesh {
-    let mut m = in_band(
-        &edfwrite::double_sided(&edfwrite::moved(
-            &edfwrite::card(BANNER_W_M, BANNER_H_M),
-            [0.0, BANNER_LIFT_M, 0.0],
-        )),
+/// Not a card. A zero-thickness quad printed on both sides is what a *flag* is — hang it
+/// beside a track and it reads as a tarpaulin, which is what a rider's-eye render shows and
+/// what it was called. A trackside board is a rigid sheet on a frame, and the give-away that
+/// it is one is the sliver of edge you see wherever it is not square-on to you.
+///
+/// The two big faces print; the four edges take the plain band the uprights use. Their `u`
+/// runs opposite ways in world space — [`edfwrite::cuboid`] lays every face out from its own
+/// outward normal — which is exactly a double-sided print, and it is why this replaces
+/// [`edfwrite::printed_both_sides`] rather than wrapping it: that gave both copies the same
+/// world-space `u`, so whichever face pointed at the track from the far side of the lap
+/// showed the wordmark backwards. Half the boards on a track were unreadable.
+fn banner_slab(w: f32, h: f32, cell: (f32, f32), window: (f32, f32)) -> Mesh {
+    let box_ = edfwrite::moved(&edfwrite::cuboid(w, h, BANNER_D_M), [0.0, BANNER_LIFT_M, 0.0]);
+    // `cuboid` writes +z first and -z second, four vertices each: the printed faces are the
+    // first eight, and everything after them is edge.
+    const PRINTED: usize = 8;
+    let mut m = in_cell(&box_, cell, window);
+    let edges = in_band(&box_, banner_post_band());
+    for (i, uv) in m.uvs.chunks_exact_mut(2).enumerate() {
+        if i < PRINTED {
+            // Mirrored, both faces. A face laid out from its own outward normal runs `u`
+            // against the direction its viewer reads in — measured, not derived, and the same
+            // finding [`edfwrite::printed_both_sides`] recorded: the winding argues the
+            // opposite. Flipping one face and not the other is what makes half a lap
+            // unreadable, so both flip and the two stay opposite in world space.
+            uv[0] = window.0 + window.1 - uv[0];
+        } else {
+            uv.copy_from_slice(&edges.uvs[i * 2..i * 2 + 2]);
+        }
+    }
+    m
+}
+
+/// One piece of a printed line: the `cell`-th panel of the atlas, in the window this piece
+/// prints, with an upright at its leading end.
+///
+/// The leading end only — the pieces are butted and the next one's upright is this one's far
+/// post. `cap` closes the end left bare, which is behind the run's *first* piece.
+fn banner_piece(style: Print, cell: usize, piece: usize, cap: bool) -> Mesh {
+    let (w, h) = style.size();
+    let mut m = banner_slab(
+        w,
+        h,
         banner_cell(cell % BANNER_CELLS),
+        style.window(piece),
     );
-    let mut post = |x: f32| {
+    let mut post = |x: f32, t: f32| {
         m.append(&in_band(
             &edfwrite::moved(
-                &edfwrite::cuboid(0.09, BANNER_LIFT_M + BANNER_H_M + 0.06, 0.09),
+                &edfwrite::cuboid(t, BANNER_LIFT_M + h + 0.06, t),
                 [x, 0.0, 0.0],
             ),
             banner_post_band(),
         ));
     };
-    post(-BANNER_W_M * 0.5);
-    if end_post {
-        post(BANNER_W_M * 0.5);
+    if let Some(t) = style.post_at(piece) {
+        post(-w * 0.5, t);
+    }
+    if cap {
+        post(w * 0.5, style.post_at(0).unwrap_or(0.06));
     }
     m
 }
@@ -1215,16 +1354,21 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     }
     tally.push(("stakes", n));
 
-    // 2. The hoarding: printed plastic boards bolted edge to edge, in runs down both sides.
+    // 2. The printed line down both sides, in runs, of the two kinds a track carries: a
+    //    hoarding of sponsors' boards bolted edge to edge, and a tiled banner — see [`Print`].
     //
     //    Walked along its *own* offset line rather than along the centreline, for the reason
     //    the fence below spells out: stepping the centreline and offsetting each step spaces
-    //    panels by the centreline's arc length, and the offset line's is longer round the
+    //    pieces by the centreline's arc length, and the offset line's is longer round the
     //    outside of a corner and shorter round the inside — so a run gaps through every turn
-    //    one way and piles up the other. A hoarding is the shape that shows that up worst,
-    //    because its panels touch.
+    //    one way and piles up the other. A printed line is the shape that shows that up worst,
+    //    because its pieces touch.
+    //
+    //    And by arc length, not by adding stations up until they pass a piece's width: on
+    //    half-metre stations that leaves daylight at every join.
     let mut n = 0usize;
     let mut runs = 0usize;
+    let mut tiled = 0usize;
     let banner_off = BANNER_OFF_M.max(half + 2.5);
     for side in [-1.0f32, 1.0] {
         let line: Vec<(f32, f32)> = stations
@@ -1234,74 +1378,96 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
                 (st.x + rx * banner_off * side, st.z + rz * banner_off * side)
             })
             .collect();
+        let mut acc = Vec::with_capacity(line.len());
+        acc.push(0.0f32);
+        for w in line.windows(2) {
+            let d = ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt();
+            acc.push(acc.last().unwrap() + d);
+        }
+        let total = *acc.last().unwrap();
+
         // Where this side's first run starts, so the two sides don't break in the same places.
-        let mut carried = BANNER_BREAK_MIN_M * (0.5 + 0.5 * rnd(seed ^ 0x61, side as u32));
+        let mut s = BANNER_BREAK_MIN_M * (0.5 + 0.5 * rnd(seed ^ 0x61, side as u32));
+        let mut cursor = 0usize;
         let mut left_in_run = 0usize;
         let mut run_key = side as u32;
         let mut placed: Option<(f32, f32)> = None;
-        let mut run = 0.0f32;
-        let mut last = line[0];
-        for w in line.windows(2) {
-            run += ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt();
-            if carried > 0.0 {
-                // Still in the gap between runs.
-                carried -= ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt();
-                last = w[1];
-                run = 0.0;
-                continue;
-            }
-            if run < BANNER_W_M {
-                continue;
-            }
-            run = 0.0;
-            let (x, z) = ((last.0 + w[1].0) * 0.5, (last.1 + w[1].1) * 0.5);
-            let deg = (w[1].0 - last.0).atan2(w[1].1 - last.1).to_degrees() + 90.0;
-            last = w[1];
+        let mut style = Print::Boards;
+        let mut cell = 0usize;
+        let mut piece = 0usize;
 
+        while s < total {
+            // What this run is, decided before the first piece of it is measured out, because
+            // how far to step depends on how wide a piece is.
             if left_in_run == 0 {
                 run_key = run_key.wrapping_mul(2_654_435_761).wrapping_add(1);
-                left_in_run = BANNER_RUN_MIN
+                style = if rnd(seed ^ 0x64, run_key) < TILED_SHARE {
+                    Print::Tiled
+                } else {
+                    Print::Boards
+                };
+                // A tiled run is one sponsor's, so it picks its panel once.
+                cell = (rnd(seed ^ 0x65, run_key) * BANNER_CELLS as f32) as usize % BANNER_CELLS;
+                let boards = BANNER_RUN_MIN
                     + ((rnd(seed ^ 0x62, run_key) * (BANNER_RUN_MAX - BANNER_RUN_MIN) as f32)
                         as usize);
+                // The run is that many metres long whichever kind it is.
+                left_in_run =
+                    ((boards as f32 * BANNER_W_M / style.size().0).round() as usize).max(2);
+                piece = 0;
             }
+            let (pw, _) = style.size();
+            if s + pw > total {
+                break;
+            }
+            let (x, z, deg) = along_line(&line, &acc, &mut cursor, s + pw * 0.5);
 
-            // A board needs level ground under its whole width and room to stand clear.
+            // A piece needs level ground under its whole width and room to stand clear.
             let ok = inside(prog, x, z, 3.0)
                 && clearance(&coarse, x, z) > banner_off - 1.5
                 && clear_of_the_start(x, z);
-            let (lo, hi) = ground_span(syn, x, z, deg, BANNER_W_M);
+            let (lo, hi) = ground_span(syn, x, z, deg, pw);
             if !ok || hi - lo > 0.9 {
-                // Break the run here rather than leaving a board hanging in the air.
+                // Break the run here rather than leaving a piece hanging in the air.
                 left_in_run = 0;
-                carried = BANNER_BREAK_MIN_M;
                 placed = None;
+                s += BANNER_BREAK_MIN_M;
                 continue;
             }
             // Where the two sides fold back on each other, one side's run can land inside the
             // other's. Spacing along a run does not catch it — the runs are walked separately.
             if let Some((px, pz)) = placed {
-                if (px - x).powi(2) + (pz - z).powi(2) < (BANNER_W_M * 0.55).powi(2) {
+                if (px - x).powi(2) + (pz - z).powi(2) < (pw * 0.55).powi(2) {
+                    s += pw;
                     continue;
                 }
             }
             placed = Some((x, z));
-            left_in_run -= 1;
-            // The upright that closes the run: only the last board of one carries it.
+            // A hoarding cycles its sponsors; a tiled run prints the one it picked.
+            let printed = match style {
+                Print::Boards => n,
+                Print::Tiled => cell,
+            };
             banners.append(&edfwrite::moved(
-                &edfwrite::turned(&banner_mesh(n, left_in_run == 0), deg),
+                &edfwrite::turned(&banner_piece(style, printed, piece, piece == 0), deg),
                 [x, (lo + hi) * 0.5 - 0.04, z],
             ));
             n += 1;
+            piece += 1;
+            left_in_run -= 1;
+            s += pw;
             if left_in_run == 0 {
                 runs += 1;
+                tiled += (style == Print::Tiled) as usize;
                 let t = rnd(seed ^ 0x63, run_key ^ 0x9E37);
-                carried = BANNER_BREAK_MIN_M + t * (BANNER_BREAK_MAX_M - BANNER_BREAK_MIN_M);
+                s += BANNER_BREAK_MIN_M + t * (BANNER_BREAK_MAX_M - BANNER_BREAK_MIN_M);
                 placed = None;
             }
         }
     }
     tally.push(("banner boards", n));
     tally.push(("banner runs", runs));
+    tally.push(("tiled runs", tiled));
 
 
 
@@ -1598,6 +1764,32 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     gate.append(&edfwrite::moved(&beam, [st.x, highest + 4.6, st.z]));
     tally.push(("gate", 1));
 
+    // And one over the finish line itself, which is where the finish jump lands. The same
+    // shape as the gate's, narrower — it spans the racing line rather than a row of forty
+    // gates — and taller, because what comes under it has just come off a three-metre
+    // tabletop.
+    {
+        let st = at(crate::tracksynth::finish_at(prog));
+        let (rx, rz) = crate::trackprog::right_vector(st.heading);
+        let span = half + 4.0;
+        let feet: Vec<(f32, f32)> = [-1.0f32, 1.0]
+            .iter()
+            .map(|side| (st.x + rx * span * side, st.z + rz * span * side))
+            .collect();
+        if feet.iter().all(|(x, z)| inside(prog, *x, *z, 2.0)) {
+            let mut highest = f32::NEG_INFINITY;
+            for (x, z) in &feet {
+                let foot = ground(syn, *x, *z);
+                highest = highest.max(foot);
+                gate.append(&edfwrite::moved(&edfwrite::cuboid(0.5, 6.0, 0.5), [*x, foot, *z]));
+            }
+            let beam =
+                edfwrite::turned(&edfwrite::cuboid(span * 2.0, 1.2, 0.3), across(st.heading));
+            gate.append(&edfwrite::moved(&beam, [st.x, highest + 5.6, st.z]));
+            tally.push(("finish gantry", 1));
+        }
+    }
+
     // One model a kind, each with its own single sheet. Not one model of several materials:
     // TerrainEd faults on the second material in a model whatever the geometry — see
     // `edfwrite`'s note and the case-by-case test behind it. PiBoSo's own example track is
@@ -1729,12 +1921,146 @@ mod tests {
 
         // And the posts wear the plain band, not a slice of somebody's name.
         let (band, _) = banner_post_band();
-        let m = banner_mesh(0, true);
+        let m = banner_piece(Print::Boards, 0, 0, true);
         let post_vs: Vec<f32> = m.uvs.chunks_exact(2).skip(8).map(|uv| uv[1]).collect();
         assert!(
             !post_vs.is_empty() && post_vs.iter().all(|v| *v >= band - 1e-4),
             "the uprights sample the printed cells"
         );
+    }
+
+    /// A board reads the right way round from both sides, which means its two faces run `u`
+    /// A board is a board: it has a front, a back, a thickness, and the wordmark reads the
+    /// right way round from either side of it.
+    ///
+    /// The mirroring is asserted by *position*, not by vertex index, because that is the
+    /// property that matters — walk the board in world +X and one printed face's `u` climbs
+    /// while the other's falls. Index-paired, the old card made the same claim and was still
+    /// showing every board on the far side of the lap backwards.
+    #[test]
+    fn a_board_is_printed_on_both_faces_and_has_a_thickness() {
+        let m = banner_piece(Print::Boards, 0, 0, false);
+        // `cuboid` writes +z first and -z second, four vertices each.
+        let face = |k: usize| -> Vec<(f32, f32, f32)> {
+            (k * 4..k * 4 + 4)
+                .map(|i| (m.positions[i * 3], m.positions[i * 3 + 2], m.uvs[i * 2]))
+                .collect()
+        };
+        let (front, back) = (face(0), face(1));
+        assert!(
+            front.iter().all(|v| v.1 > 0.0) && back.iter().all(|v| v.1 < 0.0),
+            "the two printed faces are not either side of the panel: {front:?} / {back:?}"
+        );
+        let thickness = front[0].1 - back[0].1;
+        assert!(
+            (thickness - BANNER_D_M).abs() < 1e-5,
+            "the board is {thickness:.3} m thick, not {BANNER_D_M}"
+        );
+        // Same picture, read the same way round from both sides: sorted by world X, the two
+        // faces' u run opposite ways.
+        let run = |f: &[(f32, f32, f32)]| -> f32 {
+            let mut v: Vec<(f32, f32)> = f.iter().map(|p| (p.0, p.2)).collect();
+            v.sort_by(|a, b| a.0.total_cmp(&b.0));
+            v.last().unwrap().1 - v[0].1
+        };
+        let (fr, br) = (run(&front), run(&back));
+        assert!(
+            fr * br < 0.0,
+            "both faces grow u the same way across the board — one of them reads backwards \
+             ({fr:+.3} and {br:+.3})"
+        );
+        assert!(fr.abs() > 1e-3, "the print has no width across the board");
+        // And the edges are the plain band, not a smear of the wordmark round the rim.
+        let (top, bot) = banner_post_band();
+        for i in 8..m.vertex_count() {
+            let v = m.uvs[i * 2 + 1];
+            assert!(
+                v >= top.min(bot) - 1e-4 && v <= top.max(bot) + 1e-4,
+                "vertex {i} of the frame samples v {v:.3}, outside the post band"
+            );
+        }
+    }
+
+    /// Pieces land exactly a piece apart, so a run is joined up rather than a row of signs.
+    #[test]
+    fn pieces_land_a_piece_apart() {
+        // A 30 m radius corner, sampled the way `stations` samples one.
+        let (r, step) = (30.0f32, 0.5f32);
+        let line: Vec<(f32, f32)> = (0..400)
+            .map(|i| {
+                let a = i as f32 * step / r;
+                (r * a.sin(), r * a.cos())
+            })
+            .collect();
+        let mut acc = vec![0.0f32];
+        for w in line.windows(2) {
+            let d = ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt();
+            acc.push(acc.last().unwrap() + d);
+        }
+        for style in [Print::Boards, Print::Tiled] {
+            let w = style.size().0;
+            let mut cursor = 0usize;
+            let mut last: Option<(f32, f32)> = None;
+            for k in 0..12 {
+                let (x, z, _) = along_line(&line, &acc, &mut cursor, k as f32 * w + w * 0.5);
+                if let Some((px, pz)) = last {
+                    let d = ((x - px).powi(2) + (z - pz).powi(2)).sqrt();
+                    assert!(
+                        (d - w).abs() < w * 0.02,
+                        "{style:?}: piece {k} sits {d:.3} m from the last, not {w:.3} m"
+                    );
+                }
+                last = Some((x, z));
+            }
+        }
+    }
+
+    /// A lap carries both kinds of printed line, not one of them everywhere.
+    #[test]
+    fn a_lap_gets_both_hoardings_and_tiled_banner() {
+        let (p, s) = demo();
+        let sc = build(&p, &s);
+        let count = |k: &str| sc.tally.iter().find(|(n, _)| *n == k).map(|(_, v)| *v).unwrap_or(0);
+        let (runs, tiled) = (count("banner runs"), count("tiled runs"));
+        assert!(runs >= 6, "{runs} printed runs on a lap");
+        assert!(
+            tiled > 0 && tiled < runs,
+            "{tiled} of {runs} runs are tiled — a lap wants some of each"
+        );
+    }
+
+    /// A tiled run prints one design over and over, and the print does not stretch — pieces
+    /// each printing the whole cell would squash a 4 m lockup onto a 1.5 m piece.
+    #[test]
+    fn a_tiled_run_repeats_one_print_without_squashing_it() {
+        let (w, h) = Print::Tiled.size();
+        // The piece prints as many metres of the design as it is wide, at the design's own
+        // proportions — which is the whole reason `TILE_W_M` is derived and not picked.
+        assert!(
+            ((w / TILE_PRINT_M) - (w * BANNER_H_M / (BANNER_W_M * h))).abs() < 1e-5,
+            "a {w:.2} m by {h} m piece does not print at the cell's proportions"
+        );
+        let mut seen = Vec::new();
+        for piece in 0..12 {
+            let (u0, u1) = Print::Tiled.window(piece);
+            assert!(
+                (u1 - u0 - w / TILE_PRINT_M).abs() < 1e-5,
+                "piece {piece} prints {:.3} of the cell for {w:.2} m of run — it stretches",
+                u1 - u0
+            );
+            seen.push(u0);
+        }
+        // It comes round: the window walks the cell and wraps, rather than sitting still.
+        assert!(
+            (seen[0] - seen[TILE_PER_PRINT]).abs() < 1e-4,
+            "the print does not repeat after {TILE_PER_PRINT} pieces: {seen:?}"
+        );
+        assert!(seen[1] > seen[0], "every piece prints the same slice — nothing moves");
+
+        // A board is the whole cell, and it is the piece that carries an upright at all.
+        assert_eq!(Print::Boards.window(3), (0.0, 1.0));
+        assert!(Print::Boards.post_at(1).is_some(), "a hoarding posts every join");
+        assert!(Print::Tiled.post_at(1).is_none(), "a strung banner does not");
     }
 
     /// Write the sheets out as PNGs, which is the only way to judge whether a banner reads.
@@ -1868,6 +2194,41 @@ mod tests {
         assert!(
             worst > half,
             "something stands {worst:.1} m from the centreline, inside a {half:.1} m half-width"
+        );
+    }
+
+    /// The finish line has a gantry over it, not only the gate row.
+    #[test]
+    fn a_gantry_stands_over_the_finish_line() {
+        let (p, s) = demo();
+        let sc = build(&p, &s);
+        assert_eq!(
+            sc.tally.iter().find(|(k, _)| *k == "finish gantry").map(|(_, v)| *v),
+            Some(1),
+            "no gantry over the finish line: {:?}",
+            sc.tally
+        );
+        let line = crate::tracksynth::finish_at(&p);
+        let st = p
+            .stations(0.5)
+            .into_iter()
+            .min_by(|a, b| (a.s - line).abs().total_cmp(&(b.s - line).abs()))
+            .expect("a station at the line");
+        let (fx, fz) = crate::trackprog::heading_vector(st.heading);
+        // A beam, over the line and over a rider's head. Measured along the lap rather than
+        // as a distance: the beam spans the track, so its nearest vertex is out at the post.
+        let clear = sc
+            .files
+            .iter()
+            .filter(|(f, _)| f == "gate.edf")
+            .flat_map(|(_, b)| crate::edf::parse_world(b))
+            .flat_map(|n| n.positions.chunks_exact(3).map(|v| [v[0], v[1], v[2]]).collect::<Vec<_>>())
+            .filter(|v| ((v[0] - st.x) * fx + (v[2] - st.z) * fz).abs() < 3.0)
+            .map(|v| v[1] - ground(&s, v[0], v[2]))
+            .fold(f32::MIN, f32::max);
+        assert!(
+            clear > 4.5,
+            "the highest thing over the finish line is {clear:.1} m up"
         );
     }
 
@@ -2087,8 +2448,9 @@ mod built {
             w(&[*c as u8]);
         }
 
-        // Sheets, reduced so the dump stays small — enough to tell a leaf from a fence.
-        const DIM: u32 = 64;
+        // Sheets, reduced so the dump stays small. Not to 64: at that size a wordmark averages
+        // into a grey wash, which is how a lap of backwards banners went unnoticed.
+        const DIM: u32 = 256;
         let textures = crate::map::textures(map_bytes, 256);
         let count = mesh.materials.max(1) as usize;
         w(&u32b(count));

@@ -516,7 +516,68 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
         }
     }
 
-    // 6. Fit the height budget. It exists only because samples are quantised against it, and
+    // 6. Build the finish jump: the one on the main straight, where the lap ends and begins.
+    //
+    //    Every national has one and no model has ever written one, because it is not a thing
+    //    the brief asks for — it is a place on the lap. And where it goes is arithmetic: what
+    //    is left of the opening straight once the corner exit and the run-off are taken out,
+    //    and what the drive down it carries over the deck. So it is built here, at the biggest
+    //    size the straight will hold, and left alone when the lap already has one.
+    if let (Some((from, to)), None) = (prog.finish_window(), prog.finish_jump()) {
+        let speed = crate::trackspeed::of(prog);
+        let room = to - from;
+        // The speed halfway down the window, which is about where the lip ends up.
+        let lip_at = from + room * 0.5;
+        let mut built = None;
+        let mut height = crate::trackprog::FINISH_JUMP_M.1;
+        while height >= crate::trackprog::FINISH_JUMP_M.0 - 1e-3 {
+            let ramp = crate::trackprog::face_run(
+                height,
+                crate::trackprog::JUMP_FACE_DEG,
+                crate::trackprog::JUMP_FACE_MIN_M,
+            );
+            let deg = crate::trackprog::face_sweep(height, ramp).to_degrees();
+            // A deck no longer than the run at it carries: a tabletop nobody can get over the
+            // top of is a hill with a flat bit on it, and this is the one everybody lands on.
+            let deck = speed.carry(lip_at, deg).clamp(
+                crate::trackprog::TABLETOP_DECK_M,
+                crate::trackprog::FINISH_DECK_MAX_M,
+            );
+            let length = crate::trackprog::finish_jump_length(height, deck);
+            if length <= room {
+                built = Some((height, deck, length, from + (room - length) * 0.5));
+                break;
+            }
+            height -= 0.1;
+        }
+        if let Some((height, deck, length, at)) = built {
+            // Whatever stood on that ground goes. Two jumps blended into each other are one
+            // shape with a dip in it, and the finish jump is the one that stands.
+            let taken = prog
+                .features
+                .iter()
+                .filter(|f| f.at() + f.length() > at && f.at() < at + length)
+                .map(|f| f.name())
+                .collect::<Vec<_>>()
+                .join(", ");
+            prog.features
+                .retain(|f| f.at() + f.length() <= at || f.at() >= at + length);
+            prog.features.push(Feature::Tabletop { at, length, height });
+            prog.features.sort_by(|a, b| a.at().total_cmp(&b.at()));
+            done.push(format!(
+                "built the finish jump at {at:.0} m: a {height:.1} m tabletop {length:.0} m \
+                 across a {deck:.0} m deck, taken at {:.0} km/h{}",
+                speed.at(lip_at) * 3.6,
+                if taken.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — it takes the ground the {taken} stood on")
+                }
+            ));
+        }
+    }
+
+    // 7. Fit the height budget. It exists only because samples are quantised against it, and
     //    it is a number the synthesiser already knows — there was never a reason to make the
     //    model guess it and then be told off for guessing wrong.
     if let Ok(fitted) = crate::tracksynth::with_fitted_budget(prog) {
@@ -748,6 +809,23 @@ pub fn review(prog: &TrackProgram) -> Review {
                 tracksynth::START_FAN_HALF_M * 2.0,
             ));
         }
+    }
+    // And whether the lap ends on a jump. `repair` builds one wherever there is room for it,
+    // so reaching here without one means there was none — which is the layout's business and
+    // not a number anything can fix.
+    if prog.finish_jump().is_none() {
+        let need = crate::trackprog::FINISH_RUNUP_M
+            + crate::trackprog::finish_jump_length(
+                crate::trackprog::FINISH_JUMP_M.0,
+                crate::trackprog::TABLETOP_DECK_M,
+            )
+            + crate::trackprog::FINISH_RUNOUT_M;
+        notes.push(format!(
+            "the lap has no finish jump: the main straight runs {opening:.0} m and one needs \
+             about {need:.0} m — the corner exit, the jump itself, and somewhere to land \
+             before the next corner. Make the opening straight that long and the finish jump \
+             gets built on it."
+        ));
     }
     if let Some((a, b, gap)) = self_crossing(prog) {
         // Named in the model's own terms. It wrote a list of segments, not a distance round
@@ -1001,12 +1079,14 @@ impl Ask for ControlPlane {
             problems: attempt.problems.clone(),
         };
         // Generously long: the model thinks before it writes, and a lap is a few thousand
-        // tokens of output.
+        // tokens of output. Ten minutes rather than five because the answer's own ceiling was
+        // raised — a full-length lap plus the thinking that lays it out is most of 32k tokens,
+        // and a client that gives up at five minutes throws away attempts that were working.
         let res = reqwest::Client::new()
             .post(format!("{}/v1/track/generate", self.base.trim_end_matches('/')))
             .bearer_auth(&self.token)
             .json(&body)
-            .timeout(std::time::Duration::from_secs(300))
+            .timeout(std::time::Duration::from_secs(600))
             .send()
             .await
             .context("couldn't reach the track service")?;
@@ -1451,11 +1531,116 @@ mod tests {
         p.features = vec![Feature::Double { at: hairpin_exit, height: 2.5, gap: 24.0, lip: 10.0 }];
         let done = repair(&mut p);
         assert!(done.iter().any(|d| d.contains("shrank")), "{done:?}");
-        let Feature::Double { gap, .. } = p.features[0] else { panic!("still a double") };
+        // By kind rather than by index: the lap gains a finish jump on its main straight, and
+        // the features are kept in the order they are ridden.
+        let Some(Feature::Double { gap, .. }) =
+            p.features.iter().find(|f| matches!(f, Feature::Double { .. }))
+        else {
+            panic!("still a double")
+        };
+        let gap = *gap;
         assert!(gap < 24.0, "the gap was not shrunk: {gap:.1} m");
         assert!(
             !review(&p).problems.iter().any(|c| c.contains("cannot be cleared")),
             "shrinking it did not settle the complaint"
+        );
+    }
+
+    /// A lap arrives with nothing on its main straight and leaves with the jump the finish
+    /// line is painted past.
+    #[test]
+    fn a_lap_is_given_the_jump_it_ends_on() {
+        let mut p = tweaked(|p| p.features.retain(|f| f.at() > 200.0));
+        assert!(p.finish_jump().is_none(), "the straight was cleared");
+        let done = repair(&mut p);
+        let f = p.finish_jump().expect("a lap ends on a jump").clone();
+        assert!(
+            matches!(f, Feature::Tabletop { .. }),
+            "the finish jump is a tabletop, not a {}: everybody lands on it",
+            f.name()
+        );
+        let (lo, hi) = crate::trackprog::FINISH_JUMP_M;
+        assert!(
+            f.height() >= lo && f.height() <= hi,
+            "it stands {:.1} m against {lo:.1}–{hi:.1}",
+            f.height()
+        );
+        // On the main straight, with drive at it and ground after it.
+        let (from, to) = p.finish_window().expect("the example has room for one");
+        assert!(
+            f.at() >= from && f.at() + f.length() <= to,
+            "it runs {:.0}–{:.0} m and the window is {from:.0}–{to:.0}",
+            f.at(),
+            f.at() + f.length()
+        );
+        // And in front of nobody who has just left the gate: the pack rides the spur and
+        // merges into turn one, which is past the far end of this.
+        let joins = p.start_line().expect("a start").joins_at;
+        assert!(
+            f.at() + f.length() <= joins,
+            "it ends at {:.0} m and the start merges in at {joins:.0}",
+            f.at() + f.length()
+        );
+        assert!(
+            done.iter().any(|l| l.contains("finish jump")),
+            "the repair said nothing about it: {done:?}"
+        );
+    }
+
+    /// The line goes where the rider comes down, not up the face of the jump.
+    #[test]
+    fn the_finish_line_is_painted_past_the_landing() {
+        let p = tweaked(|_| {});
+        let f = p.finish_jump().expect("the worked example ends on a jump");
+        let line = crate::tracksynth::finish_at(&p);
+        assert!(
+            line > f.at() + f.length(),
+            "the line is at {line:.0} m and the jump ends at {:.0}",
+            f.at() + f.length()
+        );
+        assert!(
+            line < p.opening_straight(),
+            "the line is at {line:.0} m and the main straight is {:.0} m long",
+            p.opening_straight()
+        );
+    }
+
+    /// Built once. `repair` runs on every attempt and on every edit in the studio, and a
+    /// finish jump that is rebuilt each time is a straight that loses a feature each time.
+    #[test]
+    fn the_finish_jump_is_built_once() {
+        let mut p = tweaked(|p| p.features.retain(|f| f.at() > 200.0));
+        repair(&mut p);
+        let (was, n) = (p.finish_jump().cloned(), p.features.len());
+        repair(&mut p);
+        assert_eq!(p.features.len(), n, "the second repair changed the features");
+        assert_eq!(
+            format!("{:?}", p.finish_jump()),
+            format!("{was:?}"),
+            "the second repair moved the finish jump"
+        );
+    }
+
+    /// A lap with no room for one says so rather than getting a jump squeezed onto a corner.
+    #[test]
+    fn a_lap_with_no_room_is_told_rather_than_given_one() {
+        // A paperclip: two hairpins fifty metres apart. Nothing on it is long enough to hold
+        // a corner exit, a jump and somewhere to land, and there is no longer straight for
+        // the repair to move the start onto either.
+        let mut p = hairpin_then_straight();
+        p.segments = vec![
+            Segment::Straight { length: 50.0, rise: 0.0 },
+            Segment::Arc { radius: 10.0, angle: 180.0, rise: 0.0 },
+            Segment::Straight { length: 50.0, rise: 0.0 },
+            Segment::Arc { radius: 10.0, angle: 180.0, rise: 0.0 },
+        ];
+        assert!(p.finish_window().is_none(), "there should be no room");
+        repair(&mut p);
+        assert!(p.finish_jump().is_none(), "a jump was built where there was no room");
+        assert!(
+            review(&p).notes.iter().any(|n| n.contains("no finish jump")),
+            "nothing was said about it: {:?}",
+            review(&p).notes
         );
     }
 }

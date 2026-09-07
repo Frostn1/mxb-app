@@ -60,6 +60,7 @@ import {
   voiceDevices,
   voiceMute,
   voiceStatus,
+  setVoiceProximity,
   setVoiceEnabled,
   setPaintSyncEnabled,
   setMxbsecureEnabled,
@@ -70,6 +71,7 @@ import {
   setVoiceLevels,
   voiceMeterStart,
   voiceMeterStop,
+  onVoiceInputDead,
   voiceTestOutput,
   onVoiceStatus,
   onVoiceInputLevel,
@@ -493,6 +495,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const voiceGain = config.voiceInputGain ?? 1;
   const voiceToggle = config.voiceToggleToTalk ?? false;
   const voiceVolume = config.voiceOutputVolume ?? 1;
+  const voiceProximity = config.voiceProximity ?? true;
 
   // What the overlay is doing right now: is the game up, does something else own the
   // screen, and did the hotkey actually bind. A shortcut that never registered has
@@ -580,12 +583,20 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   useEffect(() => {
     if (!micTesting) return;
     let un: (() => void) | undefined;
+    let unDead: (() => void) | undefined;
     void onVoiceInputLevel(({ rms }) => setMicLevel(rms)).then((f) => (un = f));
+    // A bar that never moves is the same picture whether the mic is muted or the OS is
+    // refusing us. This is the engine telling us which, so the page can say it.
+    void onVoiceInputDead((message) => {
+      toast.error(t("voice.micFailed"), { description: message, duration: 12000 });
+      setMicTesting(false);
+    }).then((f) => (unDead = f));
     return () => {
       un?.();
+      unDead?.();
       void voiceMeterStop();
     };
-  }, [micTesting]);
+  }, [micTesting, t]);
 
   useEffect(() => {
     return () => {
@@ -629,6 +640,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     try {
       await setVoiceEnabled(v);
       if (!v) setMicTesting(false);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("voice.registerFailed"), { description: String(e) });
+      await reloadConfig();
+    }
+  };
+
+  const toggleProximity = async (v: boolean) => {
+    try {
+      await setVoiceProximity(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("voice.registerFailed"), { description: String(e) });
@@ -1396,6 +1417,17 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               label={t("voice.enable")}
               checked={voiceEnabled}
               onChange={toggleVoice}
+            />
+
+            {/* The reason to use this over a call with your mates. Off is a real choice —
+                a race director wants everyone equally loud — so it is a switch, not a
+                property of the feature. */}
+            <ToggleRow
+              label={t("voice.proximity")}
+              desc={t("voice.proximityDesc")}
+              checked={voiceProximity}
+              onChange={toggleProximity}
+              disabled={!voiceEnabled}
             />
 
             {devices?.error && (

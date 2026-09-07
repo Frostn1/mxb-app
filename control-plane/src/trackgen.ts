@@ -226,17 +226,26 @@ what ten published circuits are made of:
                       then 18 m through 30° is ONE corner. Writing it as a single 165° arc of
                       constant radius is the clearest sign a lap was drawn rather than built.
   tightest radius     10.6-18.5 m at the median corner, down to 6.4 m at the hairpins.
-  straights           short. Indiana's run 21 m at the median and its longest is 62 m.
+  straights           short. Indiana's run 21 m at the median and its longest is 62 m. The
+                      main straight is the one exception: the start spur runs beside it and
+                      the finish jump stands on it.
   lap length          1800-2500 m.
 
 So: build each corner as a run of arcs, keep the straights short, and let the lap wander.
 Count the arcs before you send it — if straights outnumber corners you have written a shape.
 
 START THE LAP ON A STRAIGHT. A motocross start is forty gates in a line 48 m across, and the
-gate row, the finish line and the run at turn one all sit on the lap's opening straight — a lap
-that begins on a corner has its gates laid round a bend. So the FIRST segment is a straight of
-60-100 m, and the lap has to come back to it. That is the one long straight; the rest stay
-short. Leave it clear — no jumps in the first 40 m, riders are forty abreast there.
+gate row stands on its own spur beside the lap's opening straight, which is also where the
+finish line goes — a lap that begins on a corner has its gates laid round a bend. So the FIRST
+segment is a straight of 100-160 m, and the lap has to come back to it. That is the one long
+straight; the rest stay short.
+
+AND THAT STRAIGHT CARRIES THE FINISH JUMP. Every national ends the lap on one: the biggest
+tabletop on the track, 2.4-3.6 m tall, with the finish line painted past its landing. Put one
+there — leaving the first 18 m off the last corner clear so there is drive at it, and 10 m
+past the landing before the straight runs out. Leave it out and the app builds it anyway,
+taking the ground whatever you put there was standing on; what the app cannot do is lengthen
+the straight, so give it one long enough.
 
 THE LAP MUST STILL CLOSE, and a lap like this closes the same way: the signed angles sum to
 ±360° and the straights bring it home. A serpentine that turns 2400° in total and 360° net is
@@ -369,6 +378,20 @@ function ask(model: string) {
   };
 }
 
+/**
+ * How long the answer may be, in tokens.
+ *
+ * A published-length lap is 130 segments and forty features, and the thinking that lays it
+ * out is counted against the same ceiling. At 16000 the two together ran off the end: the
+ * program came back a truncated string and every attempt was spent on "that didn't parse",
+ * which reads as a model that cannot write JSON rather than one that was cut off.
+ *
+ * Raising it is what forces the streamed call above — the SDK will not take a non-streaming
+ * request whose ceiling could run past ten minutes. Not raised further than this because the
+ * app waits on one response and gives up at ten minutes.
+ */
+const MAX_ANSWER_TOKENS = 32000;
+
 /** Briefs longer than this are not briefs. */
 const MAX_BRIEF = 2000;
 
@@ -421,9 +444,12 @@ export async function generateTrack(request: Request, env: Env): Promise<Respons
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   try {
     const chosen = ask(env.TRACK_MODEL?.trim() || MODEL);
-    const response = await client.messages.parse({
+    // Streamed, and not for the progress: the SDK refuses a non-streaming request whose
+    // ceiling could take it past ten minutes, so `max_tokens` cannot be raised without this.
+    // The answer is still assembled here and returned whole — the app waits for one JSON body.
+    const stream = client.messages.stream({
       model: chosen.model,
-      max_tokens: 16000,
+      max_tokens: MAX_ANSWER_TOKENS,
       system: SYSTEM,
       messages,
       // Laying out a lap is arithmetic the model would have to do — except most of it is
@@ -434,6 +460,7 @@ export async function generateTrack(request: Request, env: Env): Promise<Respons
         ...(chosen.effort ? { effort: chosen.effort } : {}),
       },
     });
+    const response = await stream.finalMessage();
 
     if (response.stop_reason === "refusal") {
       return json(422, { error: "the model declined that brief" });

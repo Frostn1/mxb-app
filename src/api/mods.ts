@@ -2423,6 +2423,11 @@ export function setVoiceLevels(inputGain: number, outputVolume: number): Promise
   return invoke<void>("set_voice_levels", { inputGain, outputVolume });
 }
 
+/** Hear riders from where they are on the track, or flat. Applies to the next session. */
+export function setVoiceProximity(proximity: boolean): Promise<void> {
+  return invoke<void>("set_voice_proximity", { proximity });
+}
+
 /** Open the mic and start the level meter. Resolves to a warning when the saved device
  *  is gone and we fell back to the default — the unplugged-headset case. */
 export function voiceMeterStart(): Promise<string | null> {
@@ -2443,6 +2448,12 @@ export type VoiceLevel = { rms: number; peak: number };
 /** Live microphone level while the meter is running. */
 export function onVoiceInputLevel(cb: (level: VoiceLevel) => void): Promise<UnlistenFn> {
   return listen<VoiceLevel>("voice-input-level", (e) => cb(e.payload));
+}
+
+/** Fires when the microphone was opened and then sent no audio at all — which is what
+ *  "the mic test does nothing" actually is. The payload says what to check. */
+export function onVoiceInputDead(cb: (message: string) => void): Promise<UnlistenFn> {
+  return listen<string>("voice-input-dead", (e) => cb(e.payload));
 }
 
 /** Fires on both edges of the push-to-talk key: `true` on press, `false` on release. */
@@ -2977,13 +2988,35 @@ export interface MasterServer {
   name: string;
   /** `ip:port`, ready for {@link joinServer}. */
   address: string;
+  /** False when the game can't be pointed at that address — a server registered over IPv6
+   *  with no routable IPv4 interface. The row still shows; its Join doesn't. */
+  joinable: boolean;
+  /** The address the server reports for itself, usually on its own LAN. Detail only. */
+  lanAddress: string;
   players: number;
   maxPlayers: number;
-  /** Round-trip in ms, or `null` when it wasn't measured. */
+  /** Round-trip in ms, or `null` when the server didn't answer. */
   pingMs: number | null;
-  track: string;
   passworded: boolean;
-  region: string;
+  /** The operator's own label — "USA", "EU West". Not the track. */
+  location: string;
+  /** Licence class required to join: "D" | "C" | "B" | "A", or "" for none. */
+  rating: string;
+  /** What it's running. */
+  track: string;
+  trackLayout: string;
+  /** Allowed bike categories and models; empty means anything goes. */
+  categories: string[];
+  bikes: string[];
+  /** The session in progress and how long it runs. */
+  session: string;
+  raceLength: string;
+  /** "Sunny" | "Cloudy" | "Rainy", and whether it changes during the session. */
+  conditions: string;
+  realisticWeather: boolean;
+  forceCockpit: boolean;
+  noAids: boolean;
+  limitedTyreSets: boolean;
 }
 
 /**
