@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   RefreshCw,
@@ -42,20 +42,34 @@ const Servers = () => {
   const [joining, setJoining] = useState<string | null>(null);
   const [joinOpen, setJoinOpen] = useState(false);
 
+  // One fetch at a time. Two overlapping ones each sign in to Steam, and the loser's
+  // failure used to replace the winner's list with an error.
+  const inFlight = useRef(false);
+  // What the tab is showing, for the failure path — `load` holds no state of its own.
+  const onScreen = useRef<MasterServer[] | null>(null);
   const load = useCallback(() => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setLoading(true);
     setError(null);
     listMasterServers()
       .then((list) => {
         // Busiest first — an empty server is the last thing anyone's looking for.
         list.sort((a, b) => b.players - a.players);
+        onScreen.current = list;
         setServers(list);
       })
       .catch((e: unknown) => {
-        setServers([]);
-        setError(typeof e === "string" ? e : String(e));
+        const message = typeof e === "string" ? e : String(e);
+        setError(message);
+        // A failed refresh is not an empty list: keep what's on screen and say so instead.
+        if (onScreen.current?.length) toast.error(message);
+        else setServers([]);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        inFlight.current = false;
+        setLoading(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -142,16 +156,13 @@ const Servers = () => {
 
       <JoinServerDialog open={joinOpen} onOpenChange={setJoinOpen} onJoined={load} />
 
-
-      <JoinServerDialog open={joinOpen} onOpenChange={setJoinOpen} onJoined={load} />
-
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
         {servers === null ? (
           <Centered>
             <Loader2 className="size-5 animate-spin text-faint" />
             <p className="text-[13px] text-faint">{t("serverBrowser.loading")}</p>
           </Centered>
-        ) : error ? (
+        ) : error && servers.length === 0 ? (
           <Centered>
             <ServerOff className="size-6 text-faint" />
             <p className="max-w-[420px] text-center text-[13px] text-muted-foreground">

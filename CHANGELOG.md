@@ -22,6 +22,8 @@
   whichever step you have selected.
 
 ### Fixed
+- The Servers tab holds its Steam sign-in for the session, so refreshing the list keeps
+  working. A refresh that doesn't get through leaves the servers you already had on screen.
 - Starting a blank track works.
 - Giving a straight or a corner a rise now shapes a hill. The climb comes back down over the
   rest of the lap, so the circuit meets itself at the start line.

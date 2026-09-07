@@ -38,6 +38,7 @@ use cipher::generic_array::GenericArray;
 use cipher::{BlockDecrypt, BlockEncrypt, KeyInit};
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// The 32-byte ASCII key the exe builds on the stack and hands to the Blowfish schedule.
@@ -232,7 +233,7 @@ fn fetch(masters: &[String], rider: &str, install: &Path) -> Result<Vec<WorldSer
     sock.set_read_timeout(Some(Duration::from_secs(3))).ok();
 
     // One ticket for the whole sweep — each one costs a Steam init and a callback pump.
-    let ticket = steam_ticket(install);
+    let ticket = signed_in(install);
     match &ticket {
         Ok(t) => log::info!("[worldnet] Steam ticket: {} bytes for {}", t.ticket.len(), t.steam_id),
         Err(e) => log::info!("[worldnet] no Steam ticket, browsing instead: {e}"),
@@ -436,9 +437,55 @@ fn hex(b: &[u8]) -> String {
 // unverifiable off Windows, so elsewhere it's a clear error and the browse path is what runs.
 
 /// What a Steam sign-in needs: the account, and the ticket that proves it.
+#[derive(Clone)]
 struct SteamAuth {
     steam_id: u64,
     ticket: Vec<u8>,
+}
+
+/// How long one sign-in is reused before Steam is asked for another. Steam mints at most one
+/// ticket a minute and hands the same one back in between, so asking more often buys nothing.
+const TICKET_TTL: Duration = Duration::from_secs(10 * 60);
+
+/// The sign-in this run is using.
+static SIGN_IN: Mutex<Option<(Instant, SteamAuth)>> = Mutex::new(None);
+
+/// The ticket to sign in with — this run's, until it ages out.
+///
+/// Asking Steam twice in one process does not work: `SteamAPI_Init` after a `SteamAPI_Shutdown`
+/// comes back with no `ISteamUser`, so the second refresh of a session used to fail with
+/// "Steam user interface unavailable." and empty the tab. The ticket is a sealed blob that
+/// outlives the API that issued it, so keep it rather than ask again.
+fn signed_in(install: &Path) -> Result<SteamAuth, String> {
+    let mut held = SIGN_IN.lock().unwrap_or_else(|p| p.into_inner());
+    reuse_or_fetch(&mut held, Instant::now(), || steam_ticket(install))
+}
+
+/// Reuse a ticket younger than [`TICKET_TTL`]; otherwise ask for a fresh one, and fall back to
+/// the one in hand when Steam won't issue another.
+fn reuse_or_fetch(
+    held: &mut Option<(Instant, SteamAuth)>,
+    now: Instant,
+    fresh: impl FnOnce() -> Result<SteamAuth, String>,
+) -> Result<SteamAuth, String> {
+    if let Some((issued, auth)) = held.as_ref() {
+        if now.saturating_duration_since(*issued) < TICKET_TTL {
+            return Ok(auth.clone());
+        }
+    }
+    match fresh() {
+        Ok(auth) => {
+            *held = Some((now, auth.clone()));
+            Ok(auth)
+        }
+        Err(e) => match held.as_ref() {
+            Some((_, auth)) => {
+                log::info!("[worldnet] Steam wouldn't issue another ticket ({e}); reusing this run's");
+                Ok(auth.clone())
+            }
+            None => Err(e),
+        },
+    }
 }
 
 #[cfg(windows)]
@@ -909,5 +956,54 @@ mod tests {
         assert_eq!(s.max_players, 20);
         assert!(s.passworded);
         assert_eq!(s.track, "mmx_supercross");
+    }
+
+    fn auth(id: u64) -> SteamAuth {
+        SteamAuth { steam_id: id, ticket: vec![1, 2, 3] }
+    }
+
+    /// The second refresh of a session must not ask Steam again — asking is what failed:
+    /// `SteamAPI_Init` after a shutdown has no `ISteamUser`, and the tab went empty.
+    #[test]
+    fn a_second_refresh_reuses_this_run_s_sign_in() {
+        let t0 = Instant::now();
+        let mut held = None;
+        reuse_or_fetch(&mut held, t0, || Ok(auth(7))).unwrap();
+
+        let mut asked = false;
+        let again = reuse_or_fetch(&mut held, t0 + Duration::from_secs(30), || {
+            asked = true;
+            Err("Steam user interface unavailable.".into())
+        })
+        .unwrap();
+        assert!(!asked, "Steam was asked a second time");
+        assert_eq!(again.steam_id, 7);
+    }
+
+    /// Past the TTL it asks again — and a refusal still leaves a working list, not an error.
+    #[test]
+    fn a_refusal_falls_back_to_the_ticket_in_hand() {
+        let t0 = Instant::now();
+        let mut held = None;
+        reuse_or_fetch(&mut held, t0, || Ok(auth(7))).unwrap();
+
+        let stale = t0 + TICKET_TTL + Duration::from_secs(1);
+        let out = reuse_or_fetch(&mut held, stale, || Err("Steam user interface unavailable.".into())).unwrap();
+        assert_eq!(out.steam_id, 7);
+
+        // A fresh one, when Steam does answer, replaces it.
+        let out = reuse_or_fetch(&mut held, stale, || Ok(auth(9))).unwrap();
+        assert_eq!(out.steam_id, 9);
+    }
+
+    /// With nothing in hand there is nothing to fall back to, and the Steam reason is what
+    /// the tab should say.
+    #[test]
+    fn the_first_failure_still_speaks() {
+        let mut held = None;
+        let e = reuse_or_fetch(&mut held, Instant::now(), || Err("Steam isn't running.".into()))
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(e, "Steam isn't running.");
     }
 }
