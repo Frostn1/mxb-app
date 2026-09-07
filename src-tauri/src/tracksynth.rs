@@ -2722,7 +2722,7 @@ fn value_noise(x: f32, y: f32, seed: u32) -> f32 {
 
 /// Four octaves, each half the amplitude and twice the frequency. Normalised so the result
 /// stays inside ±1 and `amplitude` means what it says.
-fn fbm(x: f32, y: f32, seed: u32) -> f32 {
+pub(crate) fn fbm(x: f32, y: f32, seed: u32) -> f32 {
     fbm_of(x, y, seed, 4, 0.5)
 }
 

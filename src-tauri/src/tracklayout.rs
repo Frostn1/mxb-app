@@ -89,9 +89,9 @@ impl Rng {
 
 /// One turn of the outline, once it has been rounded off.
 struct Corner {
-    /// Signed: positive turns right, matching [`Segment::Arc`].
-    turn_deg: f32,
-    radius: f32,
+    /// The arcs the turn is made of, widest at each end and tightest in the middle.
+    /// `(signed radius, degrees)`, positive turning right, matching [`Segment::Arc`].
+    arcs: Vec<(f32, f32)>,
     /// How much of each edge beside it the rounding eats.
     tangent: f32,
 }
@@ -148,6 +148,62 @@ fn outline(rng: &mut Rng, n: usize) -> Vec<(f32, f32)> {
 /// it travels round in the same step. Above about 1.2 the lap starts folding onto itself.
 const SLEW: f32 = 0.85;
 
+/// How much of an edge the two corners on it may take between them. The remainder is the
+/// straight, and a published lap has almost none: Indiana's whole lap carries one, of 62 m.
+const EDGE_FILL: f32 = 0.985;
+
+/// How many arcs a corner of `deg` is made of, and how much wider than the apex each one runs.
+///
+/// A published corner is not one arc. Indiana's are three to nineteen, and the radius *inside
+/// a single corner* spans an order of magnitude — 6.4 m at the apex of its first hairpin and
+/// 72 m on the way in. That is what a rider feels as a corner that tightens and releases, and
+/// one arc cannot have it: filleting each vertex with a single radius is what left our lap
+/// reading as straights joined by corners, at 0.49 arcs to Indiana's 0.99.
+///
+/// Every arc is the same *length*, not the same turn. That is the part of the signature that
+/// matters: Indiana's arcs run 9.5 to 27 m almost regardless of radius (p50 15.8 m), so the
+/// wide ones on the way in are long sweeps that turn only a degree or two, and nearly all of
+/// the corner's heading change happens on the short tight arc at the apex. Turning each arc
+/// equally instead makes the entry arcs enormous and the apex no tighter than the rest.
+///
+/// Equal length means turn share goes as `1/radius`, which is all this has to say.
+fn chain_shape(deg: f32, rng: &mut Rng) -> Vec<(f32, f32)> {
+    let k = ((deg / rng.range(13.0, 19.0)).round() as i32).clamp(1, 9) as usize;
+    if k <= 1 {
+        return vec![(1.0, 1.0)];
+    }
+    // Indiana's radius spans 56x inside the median corner — apex 11 m, entry 70 to 200.
+    let spread = rng.range(8.0, 28.0);
+    let bias = rng.range(1.6, 2.6);
+    let mid = (k - 1) as f32 / 2.0;
+    let mults: Vec<f32> = (0..k)
+        .map(|i| {
+            let u = (i as f32 - mid).abs() / mid.max(1e-3);
+            1.0 + spread * u.powf(bias)
+        })
+        .collect();
+    let total: f32 = mults.iter().map(|m| 1.0 / m).sum();
+    mults.iter().map(|m| (*m, (1.0 / m) / total)).collect()
+}
+
+/// The tangent length a chain of unit apex radius needs, for a corner turning `deg`.
+///
+/// The chain is symmetric, so it leaves the corner tangent to both edges the same distance
+/// from the vertex and drops into the single fillet's place exactly — the polygon still
+/// closes, and so does the lap. Walk it once and measure: for one arc this is `tan(deg/2)`,
+/// which is what the fillet used before.
+fn chain_tangent(shape: &[(f32, f32)], deg: f32) -> f32 {
+    let total = deg.to_radians();
+    let (mut x, mut z, mut th) = (0.0f32, 0.0f32, 0.0f32);
+    for (m, frac) in shape {
+        let d = frac * total;
+        x += m * ((th + d).sin() - th.sin());
+        z += m * (th.cos() - (th + d).cos());
+        th += d;
+    }
+    x.hypot(z) / (2.0 * (total / 2.0).cos()).abs().max(1e-3)
+}
+
 /// Round every corner of the outline, and keep what is left of each edge as a straight.
 ///
 /// The radius is chosen by how hard the corner is — a hairpin is 9 to 19 m and a sweeper is a
@@ -184,17 +240,61 @@ fn fillet(pts: &[(f32, f32)], rng: &mut Rng) -> (Vec<Segment>, Start) {
             } else {
                 (26.0, 45.0)
             };
-            let cap = 0.49 * l1.min(l2) / half.tan().max(1e-3);
-            let mut r = cap.min(hi * rng.range(0.88, 1.0));
+            // The band is the *apex* radius now; the arcs either side of it open out from
+            // there, so a corner is tight where it is ridden and wide on the way in.
+            let _ = (l1, l2, half);
+            let shape = chain_shape(deg, rng);
+            let unit = chain_tangent(&shape, deg);
+            let mut r = hi * rng.range(0.88, 1.0);
             if r < lo {
-                r = cap.min(lo);
+                r = lo;
             }
+            // Screen-space positive cross is a left turn, and a left turn is a negative
+            // radius.
+            let sign = if delta > 0.0 { -1.0 } else { 1.0 };
             Some(Corner {
-                // Screen-space positive cross is a left turn, and a left turn is a negative
-                // radius.
-                turn_deg: if delta > 0.0 { -deg } else { deg },
-                radius: r,
-                tangent: r * half.tan(),
+                arcs: shape.iter().map(|(m, f)| (r * m * sign, deg * f)).collect(),
+                tangent: r * unit,
+            })
+        })
+        .collect();
+
+    // Fit the corners to the edges they actually share.
+    //
+    // Capping each corner at `0.49 * min(both its edges)` is what left twenty-metre straights
+    // all round the lap: it is the *same* budget whatever shape the corner is, and where one
+    // edge is twice its neighbour the short one's allowance is spent on the long one too. The
+    // real constraint is per edge — the two corners on it may not want more of it than it has
+    // — so ask for what the band wants and relax until that holds. Whatever is left over is
+    // the straight, and there is very little of it.
+    let mut want: Vec<f32> = corners.iter().map(|c| c.as_ref().map_or(0.0, |c| c.tangent)).collect();
+    for _ in 0..24 {
+        let mut moved = false;
+        for i in 0..n {
+            let edge = (pts[(i + 1) % n].0 - pts[i].0).hypot(pts[(i + 1) % n].1 - pts[i].1);
+            let j = (i + 1) % n;
+            let sum = want[i] + want[j];
+            if sum > EDGE_FILL * edge {
+                let f = EDGE_FILL * edge / sum.max(1e-6);
+                want[i] *= f;
+                want[j] *= f;
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    let corners: Vec<Option<Corner>> = corners
+        .into_iter()
+        .zip(&want)
+        .map(|(c, t)| {
+            c.map(|c| {
+                let f = t / c.tangent.max(1e-6);
+                Corner {
+                    arcs: c.arcs.iter().map(|(r, a)| (r * f, *a)).collect(),
+                    tangent: *t,
+                }
             })
         })
         .collect();
@@ -206,18 +306,16 @@ fn fillet(pts: &[(f32, f32)], rng: &mut Rng) -> (Vec<Segment>, Start) {
         let here = corners[i].as_ref().map_or(0.0, |c| c.tangent);
         let next = corners[(i + 1) % n].as_ref().map_or(0.0, |c| c.tangent);
         let run = edge - here - next;
-        if run > 1.0 {
+        if run > 0.25 {
             segs.push(Segment::Straight { length: run, rise: 0.0 });
         }
         if let Some(c) = &corners[(i + 1) % n] {
             // Not rounded. Fifty corners rounded to a tenth of a degree is a couple of
-              // degrees of heading by the end of the lap, and a couple of degrees over two
-              // kilometres is a lap that misses itself by forty metres.
-            segs.push(Segment::Arc {
-                radius: c.radius * c.turn_deg.signum(),
-                angle: c.turn_deg.abs(),
-                rise: 0.0,
-            });
+            // degrees of heading by the end of the lap, and a couple of degrees over two
+            // kilometres is a lap that misses itself by forty metres.
+            for (radius, angle) in &c.arcs {
+                segs.push(Segment::Arc { radius: *radius, angle: *angle, rise: 0.0 });
+            }
         }
     }
 
@@ -280,19 +378,19 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
         // thing on a track that has to be built right or not at all, and ours are not.
         let pick = rng.range(0.0, 1.0);
         let length;
-        if pick < 0.42 && room > 30.0 {
+        if pick < 0.55 && room > 30.0 {
             // A table a rider can actually jump. The first ones out of here were 18 m long
             // and a metre high, which from the seat is a speed bump.
             length = rng.range(26.0, 44.0).min(room);
             out.push(Feature::Tabletop {
                 at: pos,
                 length,
-                height: rng.range(2.0, 3.6),
+                height: rng.range(2.2, 3.8),
             });
-        } else if pick < 0.62 && room > 26.0 {
+        } else if pick < 0.68 && room > 26.0 {
             let gap = rng.range(9.0, 16.0);
             length = (gap + 14.0).min(room);
-            out.push(Feature::Double { at: pos, height: rng.range(1.8, 3.0), gap, lip: 4.0 });
+            out.push(Feature::Double { at: pos, height: rng.range(1.1, 1.8), gap, lip: 4.0 });
         } else if pick < 0.82 && room > 24.0 {
             length = rng.range(18.0, 28.0).min(room);
             out.push(Feature::StepUp { at: pos, length, height: rng.range(1.4, 2.6) });
@@ -579,5 +677,109 @@ mod tests {
                 panic!("no lap out of {} passed", tried.len());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod corner_shape_tests {
+    use super::*;
+
+    /// What a drawn lap measures against Indiana, seed by seed. Printing, not asserting —
+    /// `cargo test -- --ignored --nocapture drawn_layout_numbers`.
+    #[test]
+    #[ignore]
+    fn drawn_layout_numbers() {
+        println!("[chain v2 equal-length]");
+        println!("seed  segs  arc%  corners  arcs/corner  turning  straights p50  closure");
+        for seed in [1u64, 16, 31, 7, 42, 1234] {
+            let mut p = draw(seed);
+            crate::trackllm::repair_for_tests(&mut p);
+            let n = p.segments.len();
+            let straights: Vec<f32> = p
+                .segments
+                .iter()
+                .filter_map(|s| match s {
+                    Segment::Straight { length, .. } => Some(*length),
+                    _ => None,
+                })
+                .collect();
+            let turning: f32 = p
+                .segments
+                .iter()
+                .map(|s| match s {
+                    Segment::Arc { angle, .. } => *angle,
+                    _ => 0.0,
+                })
+                .sum();
+            // Corners: runs of consecutive same-sign arcs turning 25 deg or more.
+            let mut runs: Vec<(f32, usize)> = Vec::new();
+            let (mut deg, mut cnt, mut sign) = (0.0f32, 0usize, 0.0f32);
+            for s in &p.segments {
+                match s {
+                    Segment::Arc { radius, angle, .. } if radius.signum() == sign || cnt == 0 => {
+                        sign = radius.signum();
+                        deg += angle;
+                        cnt += 1;
+                    }
+                    Segment::Arc { radius, angle, .. } => {
+                        if deg >= 25.0 {
+                            runs.push((deg, cnt));
+                        }
+                        sign = radius.signum();
+                        deg = *angle;
+                        cnt = 1;
+                    }
+                    _ => {
+                        if deg >= 25.0 {
+                            runs.push((deg, cnt));
+                        }
+                        deg = 0.0;
+                        cnt = 0;
+                        sign = 0.0;
+                    }
+                }
+            }
+            if deg >= 25.0 {
+                runs.push((deg, cnt));
+            }
+            let mut per: Vec<usize> = runs.iter().map(|r| r.1).collect();
+            per.sort_unstable();
+            let mut st = straights.clone();
+            st.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            println!(
+                "{seed:5} {n:5} {:5.2} {:8} {:12} {:8.0} {:14.0} {:8.1}",
+                1.0 - straights.len() as f32 / n as f32,
+                runs.len(),
+                per.get(per.len() / 2).copied().unwrap_or(0),
+                turning,
+                st.get(st.len() / 2).copied().unwrap_or(0.0),
+                p.closure_error(),
+            );
+            let arc_len: f32 = p.segments.iter().filter_map(|s| match s {
+                Segment::Arc { radius, angle, .. } => Some(radius.abs() * angle.to_radians()),
+                _ => None,
+            }).sum();
+            println!("        arc share by length {:.2}", arc_len / p.lap_length());
+        }
+        println!("Indiana: 120 segs, arc% 0.99, 14 corners, 6 arcs/corner, 2407 deg, 1 straight");
+    }
+
+    /// Write a seed's `.trh` where the comparison scripts can read it.
+    /// `TRH_OUT=/path/dir cargo test -- --ignored --nocapture dump_trh`
+    #[test]
+    #[ignore]
+    fn dump_trh() {
+        let Ok(dir) = std::env::var("TRH_OUT") else {
+            println!("set TRH_OUT");
+            return;
+        };
+        let seed: u64 = std::env::var("TRH_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(16);
+        let mut p = draw(seed);
+        crate::trackllm::repair_for_tests(&mut p);
+        let syn = crate::tracksynth::synthesise(&p).expect("synthesise");
+        let bytes = crate::tracksynth::trh(&p, &syn, true);
+        let out = std::path::Path::new(&dir).join(format!("seed{seed}.trh"));
+        std::fs::write(&out, &bytes).expect("write");
+        println!("wrote {} ({} bytes) name={} lap={:.0} m", out.display(), bytes.len(), p.name, p.lap_length());
     }
 }

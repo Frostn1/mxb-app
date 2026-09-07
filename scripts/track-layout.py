@@ -25,85 +25,111 @@ R_MIN, R_MAX = 9.0, 28.0  # corner radii the corpus allows
 
 
 def outline(rng, n):
-    """`n` points round a wandering centre, at a radius that wobbles with the angle.
+    """The skeleton of a motocross track: a ribbon folded back and forth across the plot.
 
-    The radius alone gives a flower: every lobe points out from one middle and the centre of
-    the plot is never used, which reads as anything but a track. So the centre wanders too —
-    slowly, over the whole lap — and the loop folds back and forth across the ground instead
-    of radiating from a point. That can cross itself, which the radius alone could not, and
-    `clearance` is what catches it.
+    A radius that wobbles round a centre can only draw a ring, and a ring is not what a track
+    looks like. What a real one is, from above, is a set of runs across the ground joined by
+    hairpins at the ends, with a way back to the gate down one side. The infield gets used and
+    the shape has a top and a bottom.
+
+    Every distance here is budgeted rather than hoped for. The runs, the bulge each hairpin
+    makes past the end of them, the corridor the way home needs and the margin round the whole
+    thing are laid out first, and what is left over is the length of a run. Lanes sit `gap`
+    apart and bow by less than half of what is between them, so two runs cannot meet.
     """
-    base = rng.uniform(150.0, 185.0)
-    waves = [(rng.randint(3, 5), rng.uniform(0.22, 0.34), rng.uniform(0, math.tau)),
-             (rng.randint(5, 8), rng.uniform(0.12, 0.22), rng.uniform(0, math.tau)),
-             (rng.randint(9, 12), rng.uniform(0.03, 0.07), rng.uniform(0, math.tau))]
-    # How far the middle of the loop drifts, and how many times round it does so.
-    drift = base * rng.uniform(0.16, 0.34)
-    dk = rng.randint(1, 2)
-    dphase = rng.uniform(0, math.tau)
-    step = math.tau / n
-    radii = []
-    for i in range(n):
-        th = step * i
-        r = base * (1.0 + sum(a * math.sin(k * th + p) for k, a, p in waves))
-        radii.append(max(55.0, r))
-    for _ in range(4):
-        for i in range(n):
-            j = (i + 1) % n
-            allow = SLEW * radii[i] * step
-            d = radii[j] - radii[i]
-            if abs(d) > allow:
-                half = (abs(d) - allow) * 0.5 * (1 if d > 0 else -1)
-                radii[i] += half
-                radii[j] -= half
+    _ = n
+    margin = 58.0
+    lo, hi = margin, PLOT - margin
+    # Lanes close together, and enough of them. Spread three lanes over the whole plot and
+    # they sit 154 m apart, which makes every hairpin between them a 240 m arc — half the lap
+    # spent turning round. A real switchback is 35 to 45 m from the run beside it, and there
+    # are five or six of them.
+    gap = rng.uniform(34.0, 46.0)
+    lanes = rng.randint(4, 6)
+    corridor = 42.0
+    block = (lanes - 1) * gap
+    # The block sits in the plot with the corridor below it, centred on what is left.
+    run_z = lo + corridor + max(0.0, (hi - lo - corridor - block)) * 0.5
+    bulge = gap * 0.5                      # how far a hairpin reaches past a run's end
+    # And the runs only as long as the lap can afford: everything else is fixed, so this is
+    # what sets the distance.
+    want = rng.uniform(1250.0, 1750.0)
+    hairpins = (lanes - 1) * math.pi * bulge
+    home = block + 120.0
+    run = max(120.0, (want - hairpins - home) / (lanes + 1))
+    x0 = lo + 12.0
+    x1 = min(hi - corridor - bulge, x0 + run)
+    step = 9.0
+    bow = min(gap * 0.30, (gap - 26.0) * 0.5)
+    waves = [(rng.uniform(0.6, 2.0), rng.uniform(0, math.tau)) for _ in range(lanes)]
     pts = []
-    for i in range(n):
-        th = step * i
-        cx = CENTRE + drift * math.cos(dk * th + dphase)
-        cz = CENTRE + drift * math.sin(dk * th + dphase)
-        pts.append((cx + radii[i] * math.cos(th), cz + radii[i] * math.sin(th)))
-    # Take the spikes out.
-    #
-    # A vertex the loop turns 175 degrees at cannot be rounded: the tangent runs away as the
-    # angle approaches a half turn, so the radius the edges allow collapses to a couple of
-    # metres — and a 175 degree turn at two metres of radius is not a corner, it is a loop in
-    # the middle of the track. Relax any vertex sharper than `MAX_TURN` towards its
-    # neighbours until it is one a machine could cut.
-    for _ in range(24):
-        worst = 0.0
-        for i in range(n):
-            a, b, c = pts[i - 1], pts[i], pts[(i + 1) % n]
-            v1 = (b[0] - a[0], b[1] - a[1])
-            v2 = (c[0] - b[0], c[1] - b[1])
-            cross = v1[0] * v2[1] - v1[1] * v2[0]
-            dot = v1[0] * v2[0] + v1[1] * v2[1]
-            turn = abs(math.degrees(math.atan2(cross, dot)))
-            worst = max(worst, turn)
-            if turn > MAX_TURN:
-                mid = ((a[0] + c[0]) * 0.5, (a[1] + c[1]) * 0.5)
-                pts[i] = (b[0] + (mid[0] - b[0]) * 0.45, b[1] + (mid[1] - b[1]) * 0.45)
-        if worst <= MAX_TURN:
+
+    for lane in range(lanes):
+        z = run_z + lane * gap
+        east = lane % 2 == 0
+        a, b = (x0, x1) if east else (x1, x0)
+        steps = max(4, int(abs(b - a) / step))
+        k_wave, phase = waves[lane]
+        for k in range(steps + 1):
+            t = k / steps
+            x = a + (b - a) * t
+            pts.append((x, z + bow * math.sin(t * math.tau * k_wave + phase)))
+        if lane == lanes - 1:
             break
-    # One side left straight, for the gate row.
-    #
-    # Forty riders leave abreast and need about sixty metres of straight beside the lap to do
-    # it. Every edge here is twenty to forty metres and the fillets eat most of that, so
-    # without this a lap has no straight long enough and ships with no start at all — which is
-    # what the reviewer said about the first one built from it: "there is nowhere to put a
-    # start". Four vertices are laid on one line, which merges their edges into one long run.
-    i0 = rng.randrange(n)
-    a = pts[(i0 - 1) % n]
-    b = pts[(i0 + 4) % n]
-    for k in range(4):
-        t = (k + 1) / 5.0
-        pts[(i0 + k) % n] = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+        cz, cx = z + gap * 0.5, b
+        for k in range(1, 9):
+            th = math.pi * k / 9
+            pts.append((cx + bulge * math.sin(th) * (1.0 if east else -1.0),
+                        cz - bulge * math.cos(th)))
+
+    # The way home: out into the corridor, down the side, along the bottom, and back up to
+    # where the gate stands. The long straight along the bottom is what a start needs.
+    end_east = (lanes - 1) % 2 == 0
+    out_x = (hi - corridor * 0.4) if end_east else (lo + 12.0)
+    home_z = lo + corridor * 0.45
+    if end_east:
+        pts.append((out_x, run_z + (lanes - 1) * gap))
+        pts.append((out_x, home_z))
+        steps = max(4, int((out_x - x0) / step))
+        for k in range(1, steps + 1):
+            t = k / steps
+            pts.append((out_x + (x0 - out_x) * t,
+                        home_z + 14.0 * math.sin(t * math.tau * 1.5)))
+    else:
+        pts.append((out_x, run_z + (lanes - 1) * gap))
+        pts.append((out_x, home_z))
+        steps = max(4, int((x1 - out_x) / step))
+        for k in range(1, steps + 1):
+            pts.append((out_x + (x1 - out_x) * k / steps, home_z))
     return pts
 
 
-MAX_TURN = 150.0
+PLOT = 620.0
 
 
-SLEW = 0.85
+def simplify(pts, tol):
+    """Drop points that lie on the line between their neighbours.
+
+    The skeleton is drawn every nine metres, so most of its points sit on a straight run and
+    turn a fraction of a degree. Filleting those is pointless — and skipping them, which is
+    what the code did, loses their angle and leaves the lap short of itself. Take them out
+    instead, so every vertex that survives is a corner worth cutting.
+    """
+    keep = [pts[0]]
+    for p in pts[1:]:
+        a = keep[-1]
+        if math.hypot(p[0] - a[0], p[1] - a[1]) >= tol:
+            keep.append(p)
+    # Then collinear runs, by the area of the triangle three neighbours make.
+    out = [keep[0]]
+    for i in range(1, len(keep) - 1):
+        a, b, c = out[-1], keep[i], keep[i + 1]
+        area = abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+        base = math.hypot(c[0] - a[0], c[1] - a[1]) or 1.0
+        if area / base > 0.85:      # more than 45 cm off the chord: a real corner
+            out.append(b)
+    out.append(keep[-1])
+    return out
 
 
 def fillet(pts, rng, width):
@@ -261,15 +287,15 @@ def features(rng, segs):
             pos += 12.0
             continue
         pick = rng.random()
-        if pick < 0.42 and room > 30.0:
+        if pick < 0.55 and room > 30.0:
             length = round(min(rng.uniform(26.0, 44.0), room), 1)
             out.append({"kind": "tabletop", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(2.0, 3.6), 2)})
-        elif pick < 0.62 and room > 26.0:
+                        "height": round(rng.uniform(2.2, 3.8), 2)})
+        elif pick < 0.68 and room > 26.0:
             gap = round(rng.uniform(9.0, 16.0), 1)
             length = min(gap + 14.0, room)
             out.append({"kind": "double", "at": round(pos, 1),
-                        "height": round(rng.uniform(1.8, 3.0), 2), "gap": gap})
+                        "height": round(rng.uniform(1.1, 1.8), 2), "gap": gap})
         elif pick < 0.82 and room > 24.0:
             length = round(min(rng.uniform(18.0, 28.0), room), 1)
             out.append({"kind": "stepUp", "at": round(pos, 1), "length": length,
@@ -348,7 +374,7 @@ def main():
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else random.randrange(1 << 30)
     rng = random.Random(seed)
     width = round(rng.uniform(10.0, 13.5), 1)
-    segs, (sx, sz, heading) = fillet(outline(rng, rng.randint(44, 58)), rng, width)
+    segs, (sx, sz, heading) = fillet(simplify(outline(rng, 0), 9.0), rng, width)
     length = sum(s["length"] if s["kind"] == "straight"
                  else abs(s["radius"]) * math.radians(s["angle"]) for s in segs)
     feats = features(rng, segs)
@@ -395,6 +421,20 @@ def main():
     if miss > 6.0:
         print(f"seed {seed}: REJECTED — the lap misses itself by {miss:.0f} m",
               file=sys.stderr)
+        sys.exit(2)
+
+    # Measured, not predicted: what the hairpins and the way home actually add is more than
+    # the budget the runs were cut to.
+    lap_m = sum(seg["length"] if seg["kind"] == "straight"
+                else abs(seg["radius"]) * math.radians(seg["angle"])
+                for seg in prog["segments"])
+    if not 900.0 <= lap_m <= 2450.0:
+        print(f"seed {seed}: REJECTED — the lap is {lap_m:.0f} m; published tracks run "
+              f"500–2600 and this wants headroom for what repair adds", file=sys.stderr)
+        sys.exit(2)
+    if len(prog["segments"]) > 190:
+        print(f"seed {seed}: REJECTED — {len(prog['segments'])} segments, and 200 is the most "
+              f"a published track carries", file=sys.stderr)
         sys.exit(2)
 
     longest = max((seg["length"] for seg in prog["segments"]
