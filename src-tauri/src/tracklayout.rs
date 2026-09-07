@@ -381,19 +381,19 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
         if pick < 0.55 && room > 30.0 {
             // A table a rider can actually jump. The first ones out of here were 18 m long
             // and a metre high, which from the seat is a speed bump.
-            length = rng.range(26.0, 44.0).min(room);
+            length = rng.range(19.0, 27.0).min(room);
             out.push(Feature::Tabletop {
                 at: pos,
                 length,
-                height: rng.range(2.2, 3.8),
+                height: rng.range(2.4, 3.4),
             });
         } else if pick < 0.68 && room > 26.0 {
-            let gap = rng.range(9.0, 16.0);
+            let gap = rng.range(3.5, 7.5);
             length = (gap + 14.0).min(room);
-            out.push(Feature::Double { at: pos, height: rng.range(1.1, 1.8), gap, lip: 4.0 });
+            out.push(Feature::Double { at: pos, height: rng.range(0.8, 1.3), gap, lip: 4.0 });
         } else if pick < 0.82 && room > 24.0 {
-            length = rng.range(18.0, 28.0).min(room);
-            out.push(Feature::StepUp { at: pos, length, height: rng.range(1.4, 2.6) });
+            length = rng.range(24.0, 34.0).min(room);
+            out.push(Feature::StepUp { at: pos, length, height: rng.range(1.0, 1.7) });
         } else {
             length = rng.range(10.0, 16.0).min(room);
             if length < 8.0 {

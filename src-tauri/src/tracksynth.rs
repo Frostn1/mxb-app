@@ -276,7 +276,7 @@ const RUT_PAINT_WALL: f32 = 1.55;
 /// than the dark soil of the line, so a rut read paler than its own line and disappeared, and
 /// the loose band was toned darker than a corridor that had become the field's own soil, so
 /// it read as blotches rather than as dust.
-const RUT_FLOOR_DARKEN: f32 = 0.78;
+const RUT_FLOOR_DARKEN: f32 = 0.92;
 const LOOSE_DRY: f32 = 0.85;
 
 /// How much lighter the worked corridor is than the line worn down the middle of it.
@@ -289,7 +289,7 @@ const LOOSE_DRY: f32 = 0.85;
 /// Lifted again after a ride that read as "the good dirt colour, but all of the same one".
 /// Between the corridor and the line there has to be a step a rider can see at speed, and at
 /// 1.45 there was twenty levels in it. At 1.9 there is forty.
-const CORRIDOR_LIFT: f32 = 1.90;
+const CORRIDOR_LIFT: f32 = 2.60;
 
 /// How much of the packed sheet is available off the racing line, where the ground still has
 /// grooves in it but no strip was ever painted.
@@ -6598,6 +6598,76 @@ mod tests {
                 s.dist[*i], s.dist[j]
             );
             let _ = y1;
+        }
+    }
+
+    /// What each kind of jump actually builds to, as opposed to what it was asked for.
+    ///
+    /// "Tables too small, doubles huge, step up huge" — said from the seat three times, and
+    /// every time the numbers in the program said otherwise. So this measures the ground:
+    /// the height a feature stands above the line either side of it, by kind.
+    ///
+    /// ```text
+    /// FROST_PROGRAM=lap.json cargo test --bin mxb-app -- --ignored --nocapture jump_heights
+    /// ```
+    #[test]
+    #[ignore = "synthesises a lap"]
+    fn jump_heights() {
+        let p: TrackProgram = match std::env::var("FROST_PROGRAM") {
+            Ok(path) => serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(),
+            Err(_) => serde_json::from_str(DEMO).unwrap(),
+        };
+        let s = synthesise(&p).unwrap();
+        // The height of the line at a given distance round the lap.
+        let at = |dist: f32| -> f32 {
+            let k = s
+                .stations
+                .iter()
+                .position(|st| st.s >= dist)
+                .unwrap_or(s.stations.len() - 1);
+            let st = s.stations[k];
+            let (gx, gy) = ((st.x / s.mps) as usize, (st.z / s.mps) as usize);
+            s.heights[gy.min(s.gh - 1) * s.gw + gx.min(s.gw - 1)]
+        };
+        let mut by_kind: std::collections::BTreeMap<&str, Vec<(f32, f32)>> = Default::default();
+        for f in &p.features {
+            let (kind, from, len, asked) = match f {
+                crate::trackprog::Feature::Tabletop { at, length, height } => {
+                    ("tabletop", *at, *length, *height)
+                }
+                crate::trackprog::Feature::Double { at, height, gap, .. } => {
+                    ("double", *at, *gap + 14.0, *height)
+                }
+                crate::trackprog::Feature::StepUp { at, length, height } => {
+                    ("stepUp", *at, *length, *height)
+                }
+                crate::trackprog::Feature::Roller { at, length, height } => {
+                    ("roller", *at, *length, *height)
+                }
+                _ => continue,
+            };
+            // Against the ground a little way before and after it, which is what a rider
+            // arrives on.
+            let before = at(from - 6.0);
+            let after = at(from + len + 6.0);
+            let mut top = f32::NEG_INFINITY;
+            let mut d = from;
+            while d <= from + len {
+                top = top.max(at(d));
+                d += 1.0;
+            }
+            by_kind.entry(kind).or_default().push((asked, top - (before + after) * 0.5));
+        }
+        println!("  {}: {} features", p.name, p.features.len());
+        for (kind, rows) in by_kind {
+            let n = rows.len() as f32;
+            let asked = rows.iter().map(|r| r.0).sum::<f32>() / n;
+            let built = rows.iter().map(|r| r.1).sum::<f32>() / n;
+            let most = rows.iter().map(|r| r.1).fold(f32::MIN, f32::max);
+            println!(
+                "  {kind:<9} {:>2} of them: asked {asked:.2} m, built {built:.2} m (tallest {most:.2})",
+                rows.len()
+            );
         }
     }
 
