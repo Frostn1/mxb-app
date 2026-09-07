@@ -432,6 +432,27 @@ pub fn double_sided(mesh: &Mesh) -> Mesh {
     out
 }
 
+/// The same printed surface drawn from both sides, and readable from both.
+///
+/// [`double_sided`] gives the back copy the same UVs, so it shows the picture mirrored — right
+/// for a leaf, wrong for a word. A real banner is printed twice, so one copy takes `u` the
+/// other way, within the window the piece samples rather than the whole sheet.
+///
+/// Which copy is the mirrored one is measured, not derived: the winding argues the opposite
+/// and is wrong. `trackobjects`' `which_way_a_banner_faces` reads it off a compiled `.map`.
+pub fn printed_both_sides(mesh: &Mesh) -> Mesh {
+    let mut out = double_sided(mesh);
+    let (lo, hi) = mesh
+        .uvs
+        .chunks_exact(2)
+        .fold((f32::MAX, f32::MIN), |(a, b), uv| (a.min(uv[0]), b.max(uv[0])));
+    let front = mesh.vertex_count() * 2;
+    for uv in out.uvs[..front].chunks_exact_mut(2) {
+        uv[0] = lo + hi - uv[0];
+    }
+    out
+}
+
 /// Rotate a mesh about Y, degrees.
 pub fn turned(mesh: &Mesh, deg: f32) -> Mesh {
     let (s, c) = deg.to_radians().sin_cos();

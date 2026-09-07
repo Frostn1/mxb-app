@@ -13,6 +13,8 @@
   plan view of the circuit in the middle, and the numbers for whichever step you pick on the
   right. Click a step in the list or on the map to shape it. The 3D ground is still a click
   away, next to the plan.
+- Generated tracks carry a continuous printed banner down the lap as well as sponsor boards:
+  one design repeated on pieces joined end to end, the way a real track runs one.
 
 ### Added
 - You can add straights and turns to a lap, not just jumps. Add step offers the lap's own
@@ -25,53 +27,8 @@
   rest of the lap, so the circuit meets itself at the start line.
 - The 3D preview says when it is rebuilding, and says so when it is showing an older build
   than the numbers on screen.
-
-## 2026-09-06
-
-### Added
-- Generated tracks end the lap on a finish jump: a big tabletop on the main straight, with the
-  finish line past its landing and a gantry over it.
-
-- **You hear each rider from where they actually are.** A rider alongside you is loud and on
-  that side; one two corners back is faint; one across the circuit isn't there at all. You
-  end up knowing where people are without looking, which is the thing a Discord call can
-  never do — it has no idea who is on the track. Volume falls off the way sound does rather
-  than in a straight line, and the image follows your heading, so a rider on your left stays
-  on your left through a corner. Turn it off in Settings to hear everyone flat and equally
-  loud, and it falls back to flat by itself whenever the game isn't reporting positions.
-
-- **You only hear people your own game says are on the grid.** Voice is open to anyone with
-  the app, so someone could tell our servers they are on yours. Your copy of the race entry
-  list is the thing that decides who is audible, and nothing said over the network can add a
-  name to it.
-
-### Fixed
-- The Linux app starts on a Steam Deck. The backend the window runs on and the platform the
-  graphics stack is pointed at now name the same thing, which is what a Deck's own session
-  leaves disagreeing.
-- A launch that never paints comes back by itself in safe graphics, and returns to the fast
-  path as soon as one works. `MXB_SAFE_GRAPHICS=0` puts a machine back by hand.
-- The startup log records `EGL_PLATFORM` and which graphics settings the run started with.
-
-- The Servers tab lists the live MX Bikes servers again. The app now signs in to the master
-  server exactly the way the game does — the same fields, and the same kind of Steam ticket —
-  so the master answers it.
-
-- **Testing the microphone did nothing on macOS.** The app never told macOS what it wanted a
-  microphone for, and macOS refuses one on those terms — silently. The permission prompt
-  never appeared, the stream opened, and not a single sample was ever delivered, so the
-  level bar sat at zero looking like a bug in the app. It now says what it wants the
-  microphone for, so macOS asks you. If the microphone is opened and still sends nothing,
-  the mic test says so and tells you where to look, instead of leaving you watching a bar
-  that will never move.
-
-- **Opening a bike in 3D was doing half its work for nothing.** Every texture packed inside a
-  model was run through a resize on the way in — including the ones that were already the
-  size the viewer wants, which is how bike sheets are almost always authored. Resampling a
-  1024×1024 sheet to 1024×1024 is pure cost, eight times over on a typical bike. Skipped now,
-  the same way loose paints have always skipped it: **opening a bike goes from 201 ms to
-  127 ms**, and the sheets are a touch sharper for never having been resampled. Rider gear,
-  helmets and model swaps read their textures the same way and all get the same back.
+- Banners on a generated track read the right way round from either side of the board.
+- Banner artwork fills its board at the proportions it was drawn in.
 
 ## 2026-09-06
 
