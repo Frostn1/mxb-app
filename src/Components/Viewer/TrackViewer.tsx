@@ -1131,8 +1131,24 @@ function SceneryMesh({
   // covers — the `.scr` props, whose own sheets aren't read.
   const { materials, slotOf } = useMemo(() => {
     const slots = new Map<number, number>();
+    // A cut-out with no colour in it is a shadow, not a surface. The game multiplies one onto
+    // what it falls across; drawn here as geometry with an alpha test it is a solid black
+    // silhouette standing up out of the ground. Indiana ships 24,465 triangles of
+    // `tunnel_shadow_c_a`, forty metres tall, and they are the black trees.
+    const shadow = (t: TrackSceneryTexture): boolean => {
+      if (!t.alpha) return false;
+      let sum = 0;
+      let n = 0;
+      for (let i = 0; i < t.pixels.length; i += 4) {
+        // Only what the alpha test would keep — the rest is the black behind the cut.
+        if (t.pixels[i + 3] < 128) continue;
+        sum += t.pixels[i] * 0.299 + t.pixels[i + 1] * 0.587 + t.pixels[i + 2] * 0.114;
+        n += 1;
+      }
+      return n > 0 && sum / n < 4;
+    };
     const list: THREE.Material[] = surfaces.map((t, i) => {
-      slots.set(t.material, i);
+      if (!shadow(t)) slots.set(t.material, i);
       const map = new THREE.DataTexture(t.pixels, t.width, t.height, THREE.RGBAFormat);
       map.colorSpace = THREE.SRGBColorSpace;
       // The surfaces tile — a fence sheet repeats along its run — so anything but repeat
@@ -1165,8 +1181,13 @@ function SceneryMesh({
     });
     const fallback = list.length;
     list.push(plain);
+    // Materials the map never bound get the plain slot — but a shadow keeps none, so its
+    // triangles are left out of the geometry entirely rather than drawn in grey instead.
+    const shadows = new Set(
+      surfaces.filter((t) => shadow(t)).map((t) => t.material),
+    );
     for (const g of scenery.groups) {
-      if (!slots.has(g.material)) slots.set(g.material, fallback);
+      if (!slots.has(g.material) && !shadows.has(g.material)) slots.set(g.material, fallback);
     }
     return { materials: list, slotOf: slots };
   }, [scenery, surfaces]);

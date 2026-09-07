@@ -25,8 +25,8 @@ use crate::map::{self, Group, MapMesh, MapTexture};
 // v2: the mesh gained UVs and material groups, and the surfaces travel with it.
 // v3: the mesh and the surfaces are cached apart, so the first can be served without the
 // second having been decoded at all.
-const MESH_CACHE: &str = "track-scenery-v4";
-const SURFACE_CACHE: &str = "track-surfaces-v4";
+const MESH_CACHE: &str = "track-scenery-v5";
+const SURFACE_CACHE: &str = "track-surfaces-v5";
 /// The ground sheet and its normal map, cached apart again — two 512×512 sheets against the
 /// surfaces' hundreds of megabytes, and finding them means reading the archive a third time.
 const GROUND_CACHE: &str = "track-ground-v2";
@@ -969,8 +969,21 @@ fn decode_with_key(path: &Path, want_surfaces: bool, key: Option<&str>) -> Resul
                 // A map whose surfaces can't be bound can't draw its cut-outs, and a foliage
                 // card without its alpha is a standing sheet of paper. Thousands of them hide
                 // the track. Drop them rather than show them wrong.
-                let bindable = !map::declared(&bytes).is_empty();
-                mesh = if bindable { m } else { map::without_cards(&m) };
+                //
+                // Asked of the binding, not of the names. This used to ask whether the map
+                // declared any sheet at all, which is true of every map ever built — so the
+                // cards were never dropped, and the tracks that bind nothing drew every one of
+                // them in flat grey. Briarcliff and SFDR are entirely untextured, and both
+                // rendered as a forest of grey slabs standing over the ground.
+                let bindable = map::binds(&bytes);
+                mesh = if bindable {
+                    // Bound, but rarely all of it. The materials past the end of the surface
+                    // list have no sheet, so their cards come out too.
+                    let bound = map::bound_count(&bytes) as u32;
+                    map::without_cards_for(&m, |mat| mat >= bound)
+                } else {
+                    map::without_cards(&m)
+                };
                 info.cards_dropped = !bindable;
                 if want_surfaces {
                     textures = map::textures(&bytes, map::MAX_TEXTURE_DIM);
