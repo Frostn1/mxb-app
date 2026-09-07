@@ -29,11 +29,16 @@ pub const SCHEME: &str = "imgcache";
 /// Bumped when the on-disk layout changes, so old entries are dropped rather than misread.
 const CACHE_DIR: &str = "img-v1";
 
-/// The store's hosts. `mxbikes-shop.b-cdn.net` is its own Bunny pull zone, named in full
-/// rather than as `b-cdn.net` — that suffix is shared by every Bunny customer, and matching
-/// it would open the proxy to all of them. A few dozen product descriptions embed images
-/// from it.
-const SHOP_HOSTS: [&str; 2] = ["mxbikes-shop.com", "mxbikes-shop.b-cdn.net"];
+/// The stores' hosts. `mxbikes-shop.b-cdn.net` is that store's own Bunny pull zone, named in
+/// full rather than as `b-cdn.net` — that suffix is shared by every Bunny customer, and
+/// matching it would open the proxy to all of them. A few dozen product descriptions embed
+/// images from it.
+///
+/// MXB Hub serves everything from its own origin: a sweep of 40 listings, thumbnails, srcsets
+/// and description markup included, found no host but `shop.mxb-hub.com`. It is listed as the
+/// registrable domain anyway, which covers the subdomain it actually uses and any sibling the
+/// store adds later.
+const SHOP_HOSTS: [&str; 3] = ["mxbikes-shop.com", "mxbikes-shop.b-cdn.net", "mxb-hub.com"];
 
 /// Is `host` one we're willing to fetch from?
 ///
@@ -60,6 +65,10 @@ const PRUNE_TO: f64 = 0.8;
 /// Concurrent origin fetches. A fast scroll through the grid must not open a hundred
 /// sockets — the same reasoning as `mods::mxb`'s rating concurrency.
 const MAX_CONCURRENT_FETCHES: usize = 8;
+
+/// …and how many of those may be MXB Hub's at once. See the gate in [`handle`] for why this
+/// store gets its own, far smaller, number.
+const MAX_CONCURRENT_HUB_FETCHES: usize = 2;
 
 /// Ceiling on a single download.
 ///
@@ -235,6 +244,17 @@ async fn load(app: &AppHandle, url: &str, width: Option<u32>) -> Option<(Vec<u8>
 
     let bytes = {
         let _permit = fetch_semaphore().acquire().await.ok()?;
+        // A second, much tighter gate for the store that counts requests. Everything else here
+        // is fetched eight at a time, which is what a grid of twenty-four thumbnails wants;
+        // MXB Hub answers that burst by deciding we are a robot and refusing the whole site,
+        // images and API alike, for everyone on this address. Two at a time costs a moment on
+        // the first paint of a page and nothing at all afterwards, because the entry is then
+        // on disk — and it is the difference between a grid that loads and one that cannot.
+        let _polite = if is_hub(url) {
+            Some(hub_semaphore().acquire().await.ok()?)
+        } else {
+            None
+        };
         fetch(url).await
     };
 
@@ -385,6 +405,18 @@ fn touch(path: &Path) {
 /// keep separate jars precisely because a clearance is scoped to the host that minted it, so
 /// serving a gpb-mods.com thumbnail through mxb-mods.com's session — or, as it did before,
 /// through the store's — sends a cookie that can only fail.
+fn is_hub(url: &str) -> bool {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()))
+        .is_some_and(|h| h == "mxb-hub.com" || h.ends_with(".mxb-hub.com"))
+}
+
+fn hub_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_HUB_FETCHES))
+}
+
 fn client_for(url: &str) -> Option<&'static reqwest::Client> {
     static MXB: OnceLock<Option<reqwest::Client>> = OnceLock::new();
     static GPB: OnceLock<Option<reqwest::Client>> = OnceLock::new();
@@ -401,6 +433,12 @@ fn client_for(url: &str) -> Option<&'static reqwest::Client> {
         catalog(&MXB, &crate::mxb_session::MXB_SITE)
     } else if under(crate::mxb_session::GPB_SITE.domain) {
         catalog(&GPB, &crate::mxb_session::GPB_SITE)
+    } else if under("mxb-hub.com") {
+        // MXB Hub's images are behind the same rate-based robot challenge as its API, so they
+        // have to be fetched with the client that holds the clearance. Sending them through
+        // the store client below is what left the grid full of placeholder icons: every
+        // thumbnail came back as a 202 of challenge HTML.
+        crate::mods::hub::client().ok()
     } else {
         SHOP.get_or_init(|| crate::shop_catalog_session::client_builder().build().ok())
             .as_ref()
@@ -416,6 +454,15 @@ async fn fetch(url: &str) -> Option<Vec<u8>> {
         .send()
         .await
         .ok()?;
+    // A robot challenge is a `202` full of HTML, which `is_success` waves through — so
+    // without this the cache would happily store a web page under an image's name and keep
+    // serving it long after the challenge was cleared. Refused rather than retried: the
+    // catalog request alongside it is what triggers the handshake, and a page of thumbnails
+    // all trying to solve the same challenge is the request storm that caused it.
+    if crate::mods::hub::challenged(&resp) {
+        log::debug!("imgcache: {url} came back as a robot challenge — not caching it");
+        return None;
+    }
     if !resp.status().is_success() {
         return None;
     }
@@ -634,8 +681,24 @@ mod tests {
             "https://cdn.mxbikes-shop.com/img/1.png",
             // The store's Bunny pull zone — where some product descriptions embed from.
             "https://mxbikes-shop.b-cdn.net/wp-content/uploads/2024/05/a.jpg",
+            // MXB Hub serves its product images from its own origin.
+            "https://shop.mxb-hub.com/wp-content/uploads/2026/08/a.png",
+            "https://mxb-hub.com/wp-content/uploads/2026/08/a.png",
         ] {
             assert_eq!(source_url(&encoded(url)).as_deref(), Some(url), "{url}");
+        }
+    }
+
+    /// A lookalike host must not ride in on a store's name — the handler fetches whatever it
+    /// is handed, and product descriptions are markup written by other people.
+    #[test]
+    fn a_lookalike_store_host_is_refused() {
+        for url in [
+            "https://mxb-hub.com.evil.com/x.png",
+            "https://evil-mxb-hub.com/x.png",
+            "https://mxb-hub.co/x.png",
+        ] {
+            assert!(source_url(&encoded(url)).is_none(), "{url} must be refused");
         }
     }
 

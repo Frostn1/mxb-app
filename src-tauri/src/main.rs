@@ -13,13 +13,21 @@ mod cookie_session;
 mod downloads;
 mod dropzone;
 mod edf;
+mod edfwrite;
+mod feel;
 mod fileshare;
+mod firstpaint;
 mod frostmod;
 mod frostmod_manage;
 mod game;
+mod fileinfo;
 mod gameproc;
+mod gate;
 mod gearrepair;
 mod heightfield;
+mod hub_clearance;
+mod hub_session;
+mod identity;
 mod imgcache;
 mod install;
 mod ledger;
@@ -27,6 +35,7 @@ mod library;
 mod linkwalk;
 mod logs;
 mod lru;
+mod map;
 mod memwatch;
 mod modelswap;
 mod mods;
@@ -39,15 +48,86 @@ mod overlay;
 mod paint;
 mod paintstudio;
 mod paintwatch;
+mod peident;
 mod pkz;
+/// Paid plugins: what this install may run, and how it proves it offline.
+mod plugins;
+/// What the running game has loaded, reported for diagnostics.
+mod procmods;
 /// Linux only: the Proton prefix the game runs in, and how to put a Windows program in it.
 #[cfg(target_os = "linux")]
 mod proton;
 #[cfg(sidecar)]
 mod sidecar;
+#[cfg(sidecar)]
+mod sidecar_lock;
+/// The world-server browser: speaks the master-server protocol to list live servers.
+/// Local-only, like [`sidecar`] — the public tree neither has the file nor the feature.
+#[cfg(worldnet)]
+mod worldnet;
+#[cfg(mxbsecure)]
+mod mxbsecure;
+mod steamid;
+mod secure_launch;
+
+#[cfg(all(test, mxbsecure))]
+mod offline_flow_test {
+    // The whole offline story on a real file: lock, provision (seal to a Steam ID), then
+    // open offline with that identity — and prove a different Steam account gets nothing.
+    #[test]
+    fn provision_then_open_offline_binds_to_the_steam_id() {
+        let dir = std::env::temp_dir().join(format!("mxb-offline-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // A fake Steam loginusers.vdf, pointed at by the env override the reader honours.
+        let vdf = dir.join("loginusers.vdf");
+        let write_vdf = |id: &str| {
+            std::fs::write(
+                &vdf,
+                format!("\"users\"\n{{\n\t\"{id}\"\n\t{{\n\t\t\"MostRecent\" \"1\"\n\t}}\n}}\n"),
+            )
+            .unwrap();
+        };
+        std::env::set_var("MXB_STEAM_LOGINUSERS", &vdf);
+
+        // Lock a real file.
+        let plaintext = vec![9u8; 130_000];
+        let src = dir.join("track.pkz");
+        std::fs::write(&src, &plaintext).unwrap();
+        let locked = crate::mxbsecure::lock(&plaintext, "trk_x", "k1");
+        let blob_path = dir.join("track.pkz.mxbsecure");
+        std::fs::write(&blob_path, &locked.blob).unwrap();
+
+        // Provision: seal the key to the (fake) live Steam ID, store the .mxbkey.
+        write_vdf("76561198000000001");
+        let steam = crate::steamid::current_steam_id64().expect("steam id");
+        assert_eq!(steam, "76561198000000001");
+        let sealed = crate::mxbsecure::seal_key_to_identity(&locked.content_key, &steam, "");
+        std::fs::write(dir.join("track.pkz.mxbsecure.mxbkey"), &sealed).unwrap();
+
+        // Open offline as the same account: unseal, decrypt, compare.
+        let key = crate::mxbsecure::unseal_key(&sealed, &crate::steamid::current_steam_id64().unwrap(), "")
+            .expect("unseals for the same account");
+        let opened = crate::mxbsecure::open(&locked.blob, &key).unwrap();
+        assert_eq!(opened, plaintext, "offline open matches the original");
+
+        // A different Steam account (a copy on a friend's machine) gets nothing.
+        write_vdf("76561198000000999");
+        let other = crate::steamid::current_steam_id64().unwrap();
+        assert_eq!(other, "76561198000000999");
+        assert!(
+            crate::mxbsecure::unseal_key(&sealed, &other, "").is_none(),
+            "another account must not unseal it"
+        );
+
+        std::env::remove_var("MXB_STEAM_LOGINUSERS");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
 mod presets;
 mod paintsync;
 mod reshade;
+mod scenery;
 mod servers;
 mod sessionwatch;
 mod shop_catalog_session;
@@ -58,7 +138,18 @@ mod shop_session;
 mod soundmods;
 mod texstore;
 mod track;
+mod trackbuild;
+mod trackline;
+mod trackllm;
+mod trackobjects;
+mod trackprog;
+mod trackscenery;
+mod trackshot;
+mod trackspeed;
+mod trackstats;
+mod tracksynth;
 mod upload;
+mod usage;
 mod vcruntime;
 mod voice;
 mod winehost;
@@ -85,10 +176,13 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 /// The app window, as opposed to the transient ones the app opens alongside it (the
 /// overlay, the mxb-mods.com clearance check, the shop login). `tauri.conf.json` declares
 /// it without an explicit label, which is Tauri's default of `main`.
-const MAIN_WINDOW: &str = "main";
+pub(crate) const MAIN_WINDOW: &str = "main";
 
 /// The shop login WebView, opened on demand and closed once the session is captured.
 const SHOP_LOGIN_WINDOW: &str = "shop-login";
+/// The MXB Hub sign-in window. Transient like the shop's: it is the user typing a password
+/// into the store's own page, and it closes the moment the cookie appears.
+const HUB_LOGIN_WINDOW: &str = "hub-login";
 
 /// Whether closing this window should park it in the tray rather than destroy it.
 ///
@@ -100,6 +194,21 @@ const SHOP_LOGIN_WINDOW: &str = "shop-login";
 /// silently did nothing.
 fn parks_in_tray(label: &str) -> bool {
     label == MAIN_WINDOW
+}
+
+/// Whether closing the main window should park it in the tray instead of ending the app.
+///
+/// `painted` is the one that isn't a preference: a window that never painted has no close
+/// button in it, so parking it leaves the player nothing — the process stays alive holding
+/// the single-instance guard, and the next launch hands the same dead window straight back.
+///
+/// Never parks on Linux: the tray runs through libayatana-appindicator, which doesn't
+/// deliver click events to Tauri and isn't present at all on a stock GNOME desktop, so
+/// hiding there can strand the window with no way back. Never in a dev build either, or a
+/// `tauri dev` run would linger in the tray and block the next one.
+fn parks_on_close(painted: bool, run_in_background: bool) -> bool {
+    let tray_can_restore = cfg!(not(target_os = "linux"));
+    painted && run_in_background && tray_can_restore && !cfg!(debug_assertions)
 }
 
 /// Whether a window may make this IPC call.
@@ -459,9 +568,9 @@ struct SwapApplyOutcome {
     content_reload: ReloadOutcome,
     game_running: bool,
     live_refresh: gameproc::LiveRefresh,
-    /// Model swaps only (`None` for sound). `live_refresh` re-runs the *customization*
-    /// loader, which reloads paints/gear but never the mesh — the model needs FrostMod
-    /// to re-apply the bike. See `frostmod::signal_refresh_model`.
+    /// Model swaps only (`None` for sound). Nothing here makes the mesh appear live —
+    /// `live_refresh` re-runs the *customization* loader (paints/gear, never the mesh)
+    /// and the verb below is only a notice. See `frostmod::signal_refresh_model`.
     model_refresh: Option<frostmod::CommandOutcome>,
     /// Liveries the swap couldn't move into or out of `paints/`, because MX Bikes holds
     /// bike files open while it runs. Zero on every other path. See
@@ -606,9 +715,14 @@ fn watch_worn_paints(app: &tauri::AppHandle) {
     );
 }
 
-/// Ask FrostMod to re-apply `bike` so a just-swapped model shows live. `None` when
+/// Tell FrostMod that `bike`'s model changed, so it can say so in-game. `None` when
 /// instant refresh is off — the same switch that gates `live_refresh`, since both
 /// reach into the running game.
+///
+/// It does not make the model appear: FrostMod v0.9.11 removed the live re-apply (it
+/// crashed the game), so the player still switches bike category away and back — that
+/// is what re-reads the model; reselecting the same bike does not. All this buys is
+/// the in-game notice.
 ///
 /// The tag our installer recorded decides whether the command goes out at all. It used
 /// to be sent unconditionally and only the *wording* adjusted afterwards, because the
@@ -718,9 +832,7 @@ fn apply_model_swap_blocking(
         eprintln!("sound reconcile after model swap failed: {e:#}");
     }
     let content_reload = frostmod::signal_reload();
-    // Ask FrostMod to re-apply the bike so the new model shows in the garage without a
-    // class switch away-and-back. Only acts if `bike` is the selected one (decided
-    // inside FrostMod, which is the only side that knows). Gated on the same
+    // Tell FrostMod the model changed so it prompts the player in-game. Gated on the same
     // instant-refresh setting as the look refresh — both poke the live game.
     let model_refresh = model_refresh_cmd(&app, cfg.instant_refresh, &bike);
     // A different model can resolve a slot to a different file, so the look watcher has to
@@ -1051,6 +1163,599 @@ async fn load_track_overview(
     .map_err(|e| format!("load_track_overview task failed: {e}"))
 }
 
+/// Where a track pins the things it ships no mesh for — marshal posts, TV cameras, crowd
+/// sound — plus the props its `.scr` places.
+///
+/// Split from the scenery mesh because it costs nothing: these files are kilobytes, so the
+/// viewer can mark them while the `.map` is still being read out of the archive.
+#[tauri::command]
+async fn read_track_placements(path: String) -> Result<Vec<scenery::Placement>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scenery::read_placements(&path).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("read_track_placements task failed: {e}"))?
+}
+
+/// A track's scenery mesh — what stands on the ground the terrain grid describes.
+///
+/// Raw bytes for the same reason the terrain is: this is a few hundred thousand triangles,
+/// and as JSON numbers it would cost more to parse than the archive read that produced it.
+/// Empty rather than an error when a track carries no scenery, which is ordinary — the OEM
+/// drag strip declares none at all.
+#[tauri::command]
+async fn load_track_scenery(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::load(&app, &path) {
+        Ok(s) => tauri::ipc::Response::new(scenery::blob(&s)),
+        Err(e) => {
+            log::debug!("[scenery] {path}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_scenery task failed: {e}"))
+}
+
+
+// ---------------------------------------------------------------------------
+// Generating a track
+// ---------------------------------------------------------------------------
+
+/// What a generated track measures, so the studio can show it rather than assert it.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrackPreview {
+    /// The `.pkz` written for the viewer. Terrain and surfaces only — no graphics, no
+    /// scenery — so it previews and does not play.
+    path: String,
+    name: String,
+    lap_m: f32,
+    width_m: f32,
+    features: usize,
+    closure_m: f32,
+    /// Height used against the budget it was given. A track using a tenth of its budget is
+    /// quantising ten times coarser than it needs to.
+    used_m: f32,
+    budget_m: f32,
+    /// The same measurements `trackstats` takes of published tracks.
+    measured_width_m: f32,
+    measured_length_m: f32,
+    lips: usize,
+    lips_per_km: f32,
+    slope_p99_deg: f32,
+    relief_p90_m: f32,
+}
+
+fn track_program(value: serde_json::Value) -> Result<trackprog::TrackProgram, String> {
+    serde_json::from_value(value).map_err(|e| format!("that isn't a track program: {e}"))
+}
+
+/// Ask the control plane for a track program, and keep asking until it measures like a track.
+///
+/// The key lives there, not here. Everything that comes back is synthesised and measured
+/// before this returns — see `trackllm` — so a program reaching the studio has already been
+/// built once.
+#[tauri::command]
+async fn generate_track(app: tauri::AppHandle, brief: String) -> Result<serde_json::Value, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let base = paintsync::control_plane();
+    // A debug build pointed at a local control plane is someone testing this, and a local
+    // `wrangler dev` has no accounts to enroll with. Anywhere else, the token is what says
+    // whose Anthropic spend this is.
+    let local = cfg!(debug_assertions) && !base.starts_with("https://");
+    if cfg.cp_token.trim().is_empty() && !local {
+        return Err(
+            "Track generation goes through your MXB account — enroll with an invite code in \
+             Settings first. To test against a local control plane, run `wrangler dev` in \
+             control-plane/ with ANTHROPIC_API_KEY in .dev.vars and start the app with \
+             MXB_CONTROL_PLANE=http://localhost:8787."
+                .into(),
+        );
+    }
+    let ask = trackllm::ControlPlane {
+        base,
+        token: cfg.cp_token.clone(),
+    };
+    // Four attempts: one to write it, one to fix the numbers, one for the thing the fix
+    // broke, and one more because they are cheap now. Three was set when this called Opus at
+    // $5/$25 per MTok; it calls Haiku at $1/$5, most of what used to come back wrong is
+    // repaired without asking, and an attempt costs a fraction of a cent and twenty seconds.
+    let prog = trackllm::generate(brief.trim(), &ask, 4)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    usage::track("track.generate");
+    serde_json::to_value(&prog).map_err(|e| e.to_string())
+}
+
+/// A track to start from, without asking anyone for one.
+///
+/// The studio's first screen used to be a prompt and nothing else, which is a bad place to
+/// start from when the model isn't configured — and a worse one when you just want to change
+/// two jumps on something that already works.
+#[tauri::command]
+async fn base_track_program() -> Result<serde_json::Value, String> {
+    serde_json::from_str::<trackprog::TrackProgram>(trackprog::EXAMPLE)
+        .and_then(|p| serde_json::to_value(&p))
+        .map_err(|e| format!("the built-in track didn't load: {e}"))
+}
+
+/// A lap with nothing on it: somewhere to start from scratch.
+///
+/// Deliberately the plainest thing that is still a track — an oval on a small plot, 12 m
+/// wide, no jumps at all. It validates, it builds, and everything on it is yours.
+#[tauri::command]
+async fn blank_track_program() -> Result<serde_json::Value, String> {
+    let json = serde_json::json!({
+        "name": "New Track",
+        "author": "",
+        "location": "",
+        "width": 12.0,
+        "terrain": {
+            "sizeX": 400.0, "sizeZ": 400.0, "samples": 2049, "scale": 20.0,
+            "relief": { "amplitude": 4.0, "wavelength": 130.0, "seed": 1, "texture": 0.06 },
+            "surface": "soil"
+        },
+        "start": { "x": 120.0, "z": 260.0, "angle": 90.0 },
+        "segments": [
+            { "kind": "straight", "length": 120.0, "rise": 0.0 },
+            { "kind": "arc", "radius": 45.0, "angle": 180.0, "rise": 0.0 },
+            { "kind": "straight", "length": 120.0, "rise": 0.0 },
+            { "kind": "arc", "radius": 45.0, "angle": 180.0, "rise": 0.0 }
+        ],
+        "features": []
+    });
+    // Through the type, so a blank track can never be one the rest of this refuses.
+    serde_json::from_value::<trackprog::TrackProgram>(json.clone())
+        .map_err(|e| format!("the blank track didn't load: {e}"))?;
+    Ok(json)
+}
+
+/// Give a programme a height budget that fits it.
+///
+/// The budget only exists because samples are quantised against it, and there is no reason a
+/// person should be told to guess a number the synthesiser already knows.
+#[tauri::command]
+async fn fit_track_budget(program: serde_json::Value) -> Result<serde_json::Value, String> {
+    let prog = track_program(program)?;
+    let fitted = tauri::async_runtime::spawn_blocking(move || {
+        tracksynth::with_fitted_budget(&prog).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("fit_track_budget task failed: {e}"))??;
+    serde_json::to_value(&fitted).map_err(|e| e.to_string())
+}
+
+/// Bring an open lap back to its start.
+#[tauri::command]
+async fn close_track_lap(program: serde_json::Value) -> Result<serde_json::Value, String> {
+    let mut prog = track_program(program)?;
+    // A turn no tighter than the lap's own tightest, so the join doesn't need a corner
+    // sharper than anything already on the track.
+    let radius = prog
+        .segments
+        .iter()
+        .filter_map(|s| match s {
+            trackprog::Segment::Arc { radius, .. } => Some(radius.abs()),
+            _ => None,
+        })
+        .fold(f32::MAX, f32::min);
+    let radius = if radius.is_finite() { radius } else { 25.0 };
+    match prog.closing_segments(radius) {
+        Some(add) => prog.segments.extend(add),
+        None => return Err("The lap already meets itself.".into()),
+    }
+    serde_json::to_value(&prog).map_err(|e| e.to_string())
+}
+
+/// Everything wrong with a program, without asking anyone. The studio calls this as edits are
+/// made, so a hand-edited track is held to the same corpus a generated one is.
+#[tauri::command]
+async fn check_track(program: serde_json::Value) -> Result<trackllm::Review, String> {
+    let prog = track_program(program)?;
+    tauri::async_runtime::spawn_blocking(move || trackllm::review(&prog))
+        .await
+        .map_err(|e| format!("check_track task failed: {e}"))
+}
+
+/// Build a program into terrain and write it where the track viewer can open it.
+#[tauri::command]
+async fn preview_track(
+    app: tauri::AppHandle,
+    program: serde_json::Value,
+) -> Result<TrackPreview, String> {
+    let prog = track_program(program)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let syn = tracksynth::synthesise(&prog).map_err(|e| format!("{e:#}"))?;
+        let dir = app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| format!("no cache directory: {e}"))?
+            .join("track-preview");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{e}"))?;
+        // One file, overwritten. A studio session generates many tracks and none of them are
+        // worth keeping until someone installs one.
+        let path = dir.join("preview.pkz");
+        tracksynth::write_pkz(&prog, &syn, &path, true).map_err(|e| format!("{e:#}"))?;
+
+        let c = trackstats::measure("synth", &syn.corridor, &syn.heights, syn.gw, syn.gh, syn.mps);
+        Ok(TrackPreview {
+            path: path.to_string_lossy().into_owned(),
+            name: prog.name.clone(),
+            lap_m: prog.lap_length(),
+            width_m: prog.width,
+            features: prog.features.len(),
+            closure_m: prog.closure_error(),
+            used_m: syn.used_m,
+            budget_m: syn.budget_m,
+            measured_width_m: c.width_from_mean_m,
+            measured_length_m: c.length_m,
+            lips: c.lips,
+            lips_per_km: c.lips_per_km,
+            slope_p99_deg: c.slope_deg.p99,
+            relief_p90_m: c.feature_relief_m.p90,
+        })
+    })
+    .await
+    .map_err(|e| format!("preview_track task failed: {e}"))?
+}
+
+/// Where an installed track goes: the mods tree's `tracks` folder.
+///
+/// Not `game_path` — that is the folder with the executable in it, which the game never
+/// reads content from, and which is empty on a machine that only has the mods folder
+/// configured. And `mods` is resolved rather than joined on: a player who relocated the
+/// tree with `mxbikes.ini` has `mods_path` already pointing at it.
+fn track_install_dir(cfg: &AppConfig) -> Result<std::path::PathBuf, String> {
+    if cfg.mods_path.trim().is_empty() {
+        return Err(format!(
+            "No {} folder is configured yet — set it in Settings.",
+            cfg.game().display
+        ));
+    }
+    Ok(library::mods_subdir(&cfg.mods_path, "mods/tracks"))
+}
+
+/// Write the folder TerrainEd compiles: the heightmap, the masks, and every config file.
+#[tauri::command]
+async fn export_track_source(
+    program: serde_json::Value,
+    dir: String,
+) -> Result<Vec<String>, String> {
+    let prog = track_program(program)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let syn = tracksynth::synthesise(&prog).map_err(|e| format!("{e:#}"))?;
+        tracksynth::write_source(&prog, &syn, std::path::Path::new(&dir))
+            .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("export_track_source task failed: {e}"))?
+}
+
+
+/// Whether the app can compile a track here, and what with.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrackToolsStatus {
+    /// The folder someone pointed at, if they have.
+    path: String,
+    /// Whether `terrained.exe` was actually found in it.
+    found: bool,
+    /// Whether `tracked.exe` was too — without it the terrain still builds, it just has no
+    /// centreline yet.
+    has_tracked: bool,
+}
+
+#[tauri::command]
+async fn track_tools_status(app: tauri::AppHandle) -> Result<TrackToolsStatus, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let path = cfg.track_tools_path.clone();
+    let tools = (!path.trim().is_empty())
+        .then(|| trackbuild::find(std::path::Path::new(&path)))
+        .flatten();
+    Ok(TrackToolsStatus {
+        path,
+        found: tools.is_some(),
+        has_tracked: tools.map(|t| t.tracked.is_some()).unwrap_or(false),
+    })
+}
+
+/// Remember where PiBoSo's track editing tools live.
+#[tauri::command]
+async fn set_track_tools(app: tauri::AppHandle, dir: String) -> Result<TrackToolsStatus, String> {
+    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    cfg.track_tools_path = dir.trim().to_string();
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    track_tools_status(app).await
+}
+
+/// Where PiBoSo's track tools live once the app has fetched them.
+fn track_tools_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("no data directory: {e}"))?
+        .join("track-tools"))
+}
+
+/// Fetch PiBoSo's track tools, so nobody has to leave the app to find them.
+///
+/// They are a public download and not ours to ship, so the app gets them on request rather
+/// than carrying them. This was the last step of building a track that needed a browser.
+#[tauri::command]
+async fn download_track_tools(app: tauri::AppHandle) -> Result<TrackToolsStatus, String> {
+    const URL: &str = "https://www.kartracing-pro.com/downloads/tt.zip";
+    let dir = track_tools_dir(&app)?;
+
+    let bytes = reqwest::Client::new()
+        .get(URL)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("couldn't reach {URL}: {e}"))?
+        .bytes()
+        .await
+        .map_err(|e| format!("the download stopped early: {e}"))?;
+
+    let extracted = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+            .map_err(|e| format!("that download isn't a zip: {e}"))?;
+        // Flat: the archive nests each tool in its own folder, and `find` looks one level
+        // down anyway — but the fonts `tracked.exe` reads sit beside it, so keep the shape.
+        zip.extract(&dir).map_err(|e| format!("{e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("download_track_tools task failed: {e}"))?;
+    extracted?;
+
+    let dir = track_tools_dir(&app)?;
+    if trackbuild::find(&dir).is_none() {
+        return Err("the download arrived but there's no terrained.exe in it".into());
+    }
+    set_track_tools(app, dir.to_string_lossy().into_owned()).await
+}
+
+/// The compilers, fetched if this machine hasn't got them yet.
+///
+/// A track is only a track once `terrained.exe` has been over it — there is no second way to
+/// produce a `.map` the game will ride. So the download belongs to the build rather than to a
+/// step someone has to know to take first.
+async fn ensure_track_tools(app: &tauri::AppHandle) -> Result<String, String> {
+    let at = config::load_or_detect(app)
+        .unwrap_or_default()
+        .track_tools_path;
+    if !at.trim().is_empty() && trackbuild::find(std::path::Path::new(&at)).is_some() {
+        return Ok(at);
+    }
+    let got = download_track_tools(app.clone()).await?;
+    if !got.found {
+        return Err("PiBoSo's track tools downloaded but there's no terrained.exe in them".into());
+    }
+    Ok(got.path)
+}
+
+/// How far a track build has got.
+///
+/// A build is minutes of work with nothing to look at, so it reports where it is rather than
+/// only what it produced. Keyed by slug: the studio's bar belongs to one track, and a second
+/// build must not drive the first one's.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildProgress {
+    slug: String,
+    #[serde(flatten)]
+    at: trackbuild::Progress,
+}
+
+/// The event a build reports itself on.
+const BUILD_EVENT: &str = "track-build-progress";
+
+/// Everything a build produced, and where it ended up.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildResult {
+    /// Each compiler run, in order.
+    steps: Vec<trackbuild::Step>,
+    /// The folder the source and the compiled files are in.
+    dir: String,
+    /// The archive, once every step has succeeded.
+    pkz: Option<String>,
+    /// Where it was installed, when it was asked for and worked.
+    installed: Option<String>,
+}
+
+/// Export a track, run the compilers over it, and put the result where the game reads it.
+///
+/// The whole way, because a folder of source is homework and a compiled folder is still
+/// homework — a track you can ride is a `.pkz` in the mods tree. The compilers are PiBoSo's
+/// and Windows-only; on macOS they run through the same Wine prefix the game does.
+#[tauri::command]
+async fn build_track(
+    app: tauri::AppHandle,
+    program: serde_json::Value,
+    dir: Option<String>,
+    install: bool,
+) -> Result<BuildResult, String> {
+    let prog = track_program(program)?;
+    let tools_at = ensure_track_tools(&app).await?;
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let slug = tracksynth::slug(&prog.name);
+    // Somewhere of its own when nobody picked a folder, so building is one press.
+    let root = match dir {
+        Some(d) if !d.trim().is_empty() => std::path::PathBuf::from(d),
+        _ => app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("no data directory: {e}"))?
+            .join("track-builds")
+            .join(&slug),
+    };
+    let tracks = install.then(|| track_install_dir(&cfg)).transpose()?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let tools = trackbuild::find(std::path::Path::new(&tools_at))
+            .ok_or("There's no terrained.exe in that folder.".to_string())?;
+        let mut plan = trackbuild::Plan::new(
+            prog.terrain.samples,
+            tools.tracked.is_some(),
+            tracks.is_some(),
+        );
+        let slug_for_events = slug.clone();
+        let say = |at: trackbuild::Progress| {
+            let _ = app.emit(
+                BUILD_EVENT,
+                BuildProgress { slug: slug_for_events.clone(), at },
+            );
+        };
+
+        say(plan.start("synthesising"));
+        let syn = tracksynth::synthesise(&prog).map_err(|e| format!("{e:#}"))?;
+
+        say(plan.start("writing"));
+        std::fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
+        tracksynth::write_source(&prog, &syn, &root).map_err(|e| format!("{e:#}"))?;
+
+        let steps = trackbuild::compile(&tools, &root, &slug, &cfg.game_path, &mut |phase| {
+            say(plan.start(phase))
+        })
+        .map_err(|e| format!("{e:#}"))?;
+
+        let mut out = BuildResult {
+            dir: root.to_string_lossy().into_owned(),
+            pkz: None,
+            installed: None,
+            steps,
+        };
+        // Only a build that got all the way through is worth packaging: a `.pkz` missing its
+        // `.map` is a track the game lists and then refuses to load.
+        if out.steps.iter().all(|s| s.ok) {
+            say(plan.start("packaging"));
+            let pkz = root.join(format!("{slug}.pkz"));
+            trackbuild::package(&root, &slug, &pkz).map_err(|e| format!("{e:#}"))?;
+            out.pkz = Some(pkz.to_string_lossy().into_owned());
+            if let Some(tracks) = tracks {
+                say(plan.start("installing"));
+                let at = trackbuild::install(&pkz, &tracks).map_err(|e| format!("{e:#}"))?;
+                usage::track("track.build.install");
+                out.installed = Some(at.to_string_lossy().into_owned());
+            }
+        }
+        // Closes the last phase, so what it cost is remembered and the next build is paced
+        // by this machine rather than by the one the defaults were measured on.
+        plan.finish();
+        Ok(out)
+    })
+    .await
+    .map_err(|e| format!("build_track task failed: {e}"))?
+}
+
+/// A track's surfaces, fetched after its mesh is already on screen.
+///
+/// The second half of a two-stage load: the mesh parses in milliseconds, while inflating a
+/// map's sheets is hundreds of megabytes of work. Splitting them is the difference between a
+/// track appearing at once and a second of empty canvas.
+#[tauri::command]
+async fn load_track_surfaces(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::load_surfaces(&app, &path) {
+        Ok(t) => tauri::ipc::Response::new(scenery::surfaces_blob(&t)),
+        Err(e) => {
+            log::debug!("[scenery] surfaces for {path}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_surfaces task failed: {e}"))
+}
+
+/// What a track wraps itself in — its sky, its backdrop, and the light it sits under.
+///
+/// A dome is a few hundred triangles carrying one very large picture, so this is cheap next
+/// to the scenery and is what stops a track ending at a hard edge with nothing beyond it.
+#[tauri::command]
+async fn load_track_backdrop(
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::backdrop(&path) {
+        Ok((amb, sky, back)) => tauri::ipc::Response::new(scenery::backdrop_blob(&amb, &sky, &back)),
+        Err(e) => {
+            log::debug!("[scenery] backdrop for {path}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_backdrop task failed: {e}"))
+}
+
+/// A tiling sheet of a track's own ground, for detail finer than its data carries.
+///
+/// A track states its surface at about a third of a metre per sample, and a viewer that lets
+/// you get close magnifies that into a blur. This puts the grain back.
+#[tauri::command]
+async fn load_track_ground(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let sheets = scenery::load_ground(&app, &path).unwrap_or_default();
+        tauri::ipc::Response::new(map::surfaces_blob(&sheets))
+    })
+    .await
+    .map_err(|e| format!("load_track_ground task failed: {e}"))
+}
+
+/// The models a track ships that a prop can be placed by name.
+#[tauri::command]
+async fn read_track_placeable(path: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scenery::placeable(&path).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("read_track_placeable task failed: {e}"))?
+}
+
+/// One prop's mesh, so it can be drawn where it is about to go.
+#[tauri::command]
+async fn load_track_prop(
+    path: String,
+    name: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::prop_mesh(&path, &name) {
+        Ok(m) => tauri::ipc::Response::new(map::scenery_blob(&m, &[])),
+        Err(e) => {
+            log::debug!("[scenery] prop {name}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_prop task failed: {e}"))
+}
+
+/// Save a track's props to a `.scr` the game will load.
+///
+/// The `.scr` is the one part of a track that states where a thing goes in plain text, so it
+/// is where anything placed in the app has to end up. Writes only where it is told, never
+/// inside an archive, and refuses to replace a file unless asked — a track's own `.scr` is
+/// the record of however long someone spent placing things.
+#[tauri::command]
+async fn save_track_props(
+    target: String,
+    props: Vec<scenery::Placement>,
+    overwrite: bool,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scenery::save_scr(&target, &props, overwrite).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("save_track_props task failed: {e}"))?
+}
+
 #[tauri::command]
 async fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, String> {
     tauri::async_runtime::spawn_blocking(move || unpack_paint_blocking(path))
@@ -1071,12 +1776,22 @@ fn paint_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>
     CACHE.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(PAINT_CACHE_CAP)))
 }
 
+/// As [`cached_bike`], for the paints: looked up and released without holding the lock.
+fn cached_paint(key: &str) -> Option<Vec<paint::PaintTexture>> {
+    paint_cache().lock().ok().and_then(|mut c| c.get(key).cloned())
+}
+
 fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, String> {
     let t0 = std::time::Instant::now();
     // Path *and* mtime, as the bike cache does, so a paint re-saved under the same name misses.
     let key = bike_cache_key(&path);
-    if let Some(t) = paint_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+    if let Some(t) = cached_paint(&key) {
         log::info!("unpack_paint {path}: cache hit ({:?})", t0.elapsed());
+        return Ok(t);
+    }
+    let _gate = gate::enter(&key);
+    if let Some(t) = cached_paint(&key) {
+        log::info!("unpack_paint {path}: cache hit, waited ({:?})", t0.elapsed());
         return Ok(t);
     }
 
@@ -1089,7 +1804,7 @@ fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, Strin
     );
     if let Ok(mut c) = paint_cache().lock() {
         // Cloning an entry copies names, sizes and tokens — never pixels, which stay in the
-        // texture store. The evicted paint's go with it; nothing else holds those tokens.
+        // texture store. The displaced paint's go with it; nothing else holds those tokens.
         if let Some(dropped) = c.insert(key, textures.clone()) {
             let tokens: Vec<String> = dropped.iter().map(|t| t.token.clone()).collect();
             texstore::release(&tokens);
@@ -1238,6 +1953,80 @@ async fn photo_save(request: tauri::ipc::Request<'_>) -> Result<String, String> 
     .map_err(|e| format!("photo_save task failed: {e}"))?
 }
 
+/// How big a `.psd` this will open. A 4096² sheet with a couple of dozen layers is well
+/// inside this; the cap exists so a mistyped path at a 4 GB video doesn't try to cross the
+/// IPC channel as one allocation.
+const PSD_LIMIT: u64 = 512 * 1024 * 1024;
+
+/// The bytes of a `.psd`, for the Designer to take apart in the webview.
+///
+/// Parsing happens up there rather than here, because that is where the pixels have to end
+/// up: a layer becomes an `ImageBitmap` on a canvas, and a Rust-side decode would only mean
+/// re-encoding every layer to cross back. So this is the whole of the backend's part —
+/// hand over the file.
+///
+/// Restricted to the two Photoshop extensions on purpose. Nothing else has any business
+/// being read wholesale into the webview, and a command that would do it for any path is a
+/// wider door than this feature needs.
+#[tauri::command]
+async fn psd_read(path: String) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = std::path::PathBuf::from(&path);
+        let ok = path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("psd") || e.eq_ignore_ascii_case("psb"));
+        if !ok {
+            return Err(format!("{path:?} is not a .psd"));
+        }
+        let len = std::fs::metadata(&path).map_err(|e| format!("{path:?}: {e}"))?.len();
+        if len > PSD_LIMIT {
+            return Err(format!("{path:?} is {} MB — too large to open", len / (1024 * 1024)));
+        }
+        let bytes = std::fs::read(&path).map_err(|e| format!("{path:?}: {e}"))?;
+        Ok(tauri::ipc::Response::new(bytes))
+    })
+    .await
+    .map_err(|e| format!("psd_read task failed: {e}"))?
+}
+
+/// Write one sheet's `.psd` to a path the user picked.
+///
+/// Same shape as [`photo_save`], and for the same reason: a 4096² document with its layers
+/// still separate runs to tens of megabytes, so the file is the request body and the
+/// destination rides in a percent-encoded header.
+///
+/// Nothing is resolved or relocated — the dialog already asked. The extension is enforced so
+/// a typed name can't leave PSD bytes in a file Photoshop won't offer to open.
+#[tauri::command]
+async fn psd_save(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(psd) = request.body() else {
+        return Err("psd_save expects the PSD bytes as the request body".into());
+    };
+    let raw = request
+        .headers()
+        .get("x-dest")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let dest = percent_encoding::percent_decode_str(raw).decode_utf8_lossy().into_owned();
+    if dest.is_empty() {
+        return Err("psd_save needs a destination".into());
+    }
+    let psd = psd.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut path = std::path::PathBuf::from(&dest);
+        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("psd")) {
+            path.set_extension("psd");
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{dir:?}: {e}"))?;
+        }
+        std::fs::write(&path, &psd).map_err(|e| format!("{path:?}: {e}"))?;
+        Ok(path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("psd_save task failed: {e}"))?
+}
+
 /// The file a save would write, resolved but not written — so the UI can ask before
 /// replacing a paint that's already there.
 #[tauri::command]
@@ -1328,6 +2117,7 @@ async fn paint_studio_save(
             bytes.len(),
             names.join(", ")
         );
+        usage::track("paint.save");
         Ok(SavedPaint {
             path: target.to_string_lossy().into_owned(),
             textures: names,
@@ -1488,8 +2278,29 @@ fn paint_hints(dir: &std::path::Path) -> Vec<String> {
     // the only thing that says that (see `on_goggle_side`) — and offering a helmet's shell
     // sheet to somebody painting its goggles would put the shell in the wrong file.
     let main_paints = dir.file_name().is_some_and(|s| s.eq_ignore_ascii_case("paints"));
-    if let (true, Some(model_dir)) = (main_paints, dir.parent()) {
-        add(&mut names, mesh_texture_names(model_dir));
+    let mesh = match (main_paints, dir.parent()) {
+        (true, Some(model_dir)) => mesh_texture_names(model_dir),
+        _ => Vec::new(),
+    };
+    add(&mut names, mesh.clone());
+
+    // Drop a name that is another paint's misspelling of one the model actually binds.
+    //
+    // A `.pnt` supplies textures by name, so a sheet the model never asks for changes
+    // nothing — and these names come from paints as much as from the mesh, misspellings and
+    // all. The KTM 250 SX-F binds `plastics_n`; a paint installed beside it calls its own
+    // sheet `plastics-n`, and the two sat next to each other in the list, one character
+    // apart, with the dead one first. Painting it is work that cannot reach the bike.
+    //
+    // Only a name that collides with a bound one is dropped, and only by separator or case.
+    // A paint is free to ship sheets the mesh never mentions — `tyres` and `wheel` come off
+    // the wheels rather than the bike — and those are left alone.
+    if !mesh.is_empty() {
+        let key = |s: &str| s.to_ascii_lowercase().replace('-', "_");
+        let bound: std::collections::HashSet<String> = mesh.iter().map(|n| key(n)).collect();
+        names.retain(|n| {
+            mesh.iter().any(|m| m.eq_ignore_ascii_case(n)) || !bound.contains(&key(n))
+        });
     }
     names.sort_by_key(|n| n.to_lowercase());
     names
@@ -1641,6 +2452,12 @@ fn bike_cache() -> &'static std::sync::Mutex<lru::Lru<BikeModel>> {
     CACHE.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(BIKE_CACHE_CAP)))
 }
 
+/// The cached bike under `key`, if it's still resident. Taken and released in one step so
+/// no caller holds the cache lock while it waits on [`gate::enter`].
+fn cached_bike(key: &str) -> Option<BikeModel> {
+    bike_cache().lock().ok().and_then(|mut c| c.get(key).cloned())
+}
+
 fn mtime_nanos(path: &std::path::Path) -> u128 {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
@@ -1740,8 +2557,15 @@ fn preview_model_swap_blocking(
         tyres_stamp(&tyres),
         pick.as_deref().unwrap_or(""),
     );
-    if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+    if let Some(m) = cached_bike(&key) {
         log::info!("preview_model_swap {label}: cache hit ({:?})", t0.elapsed());
+        return Ok(m);
+    }
+    // Somebody may already be building this exact preview — the panel and a dialog can both
+    // be drawing it. Wait for them and take their answer instead of paying a second time.
+    let _gate = gate::enter(&key);
+    if let Some(m) = cached_bike(&key) {
+        log::info!("preview_model_swap {label}: cache hit, waited ({:?})", t0.elapsed());
         return Ok(m);
     }
 
@@ -1833,14 +2657,39 @@ fn load_bike_model_blocking(
         tyres.as_deref().map(tyres_stamp).unwrap_or(0),
         pick.as_deref().unwrap_or(""),
     );
-    if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+    if let Some(m) = cached_bike(&key) {
         log::info!("load_bike_model {source}: cache hit ({:?})", t0.elapsed());
+        return Ok(m);
+    }
+    let _gate = gate::enter(&key);
+    if let Some(m) = cached_bike(&key) {
+        log::info!("load_bike_model {source}: cache hit, waited ({:?})", t0.elapsed());
         return Ok(m);
     }
 
     let files = gather_bike_files(std::path::Path::new(&source)).map_err(|e| format!("{e:#}"))?;
     let installed = installed_paints(std::path::Path::new(&source));
     build_bike_model(&source, key, files, installed, tyres, pick, t0)
+}
+
+/// Why a bike came back with nothing to draw, in words the player can act on.
+///
+/// Three unrelated faults land here and they want three different answers: a mesh that never
+/// arrived, a mesh whose bytes aren't a mesh, and a mesh that read but wouldn't come apart.
+/// Blaming cloud sync for all three sent a player hunting through their OneDrive settings for
+/// what turned out to be a protected model the viewer wasn't unwrapping.
+fn no_mesh_reason(label: &str, meshes: &[(&str, &[u8])]) -> String {
+    if meshes.iter().all(|(_, b)| b.is_empty()) {
+        return format!(
+            "{label} holds no readable mesh — if the file is cloud-synced, it may not be fully downloaded yet"
+        );
+    }
+    if !meshes.iter().any(|(_, b)| edf::is_edf(b)) {
+        return format!(
+            "{label}'s mesh didn't decode — the file may be damaged, or protected in a way this version can't open"
+        );
+    }
+    format!("{label}'s mesh read but no parts came out of it — the model may be built in a way the viewer doesn't handle yet")
 }
 
 /// Turn a bike's files into the viewer's model: resolve each part's mesh through the
@@ -1995,12 +2844,21 @@ fn build_bike_model(
     }
     // Nothing to draw. Returning a model with no nodes is worse than failing: the viewer reads
     // it as a successful load and puts its stand-in bike on screen, which reads as "this is your
-    // bike" rather than "none of this bike arrived". A cloud-synced archive that hasn't been
-    // downloaded lands here — every entry reads short, so the `.edf` never appears.
+    // bike" rather than "none of this bike arrived".
     if nodes.is_empty() {
-        return Err(format!(
-            "{label} holds no readable mesh — if the file is cloud-synced, it may not be fully downloaded yet"
-        ));
+        let mut meshes: Vec<(&str, &[u8])> =
+            edfs.iter().map(|(n, d)| (n.as_str(), d.as_slice())).collect();
+        meshes.sort_unstable_by_key(|(n, _)| *n);
+        // What the bytes were is the whole question, and until now this path said nothing at
+        // all — a report of it could only be guessed at.
+        for (name, bytes) in &meshes {
+            log::warn!(
+                "[viewer] {label}: {name} read as {} byte(s), header {}",
+                bytes.len(),
+                if edf::is_edf(bytes) { "ok — but nothing parsed out of it" } else { "not a mesh" }
+            );
+        }
+        return Err(no_mesh_reason(label, &meshes));
     }
     let t_parse = t0.elapsed();
 
@@ -2014,6 +2872,22 @@ fn build_bike_model(
         base.iter().map(|t| t.name.to_ascii_lowercase()).collect();
     for data in &used {
         for tex in paint::extract_edf_textures(data) {
+            if seen.insert(tex.name.to_ascii_lowercase()) {
+                base.push(tex);
+            }
+        }
+    }
+    // ...and the normal map belonging to each of them, which is what gives a shroud its
+    // curve and a seat its grip in the preview. Only for sheets something actually draws:
+    // a bike embeds normals for parts it no longer uses, and each one is a megabyte of the
+    // texture store spent on pixels nothing hangs off.
+    let drawn: std::collections::HashSet<String> = nodes
+        .iter()
+        .flat_map(|n| n.texture.iter().chain(n.submeshes.iter().filter_map(|s| s.texture.as_ref())))
+        .map(|t| t.to_ascii_lowercase())
+        .collect();
+    for data in &used {
+        for tex in paint::extract_edf_normal_maps(data, |base_name| drawn.contains(base_name)) {
             if seen.insert(tex.name.to_ascii_lowercase()) {
                 base.push(tex);
             }
@@ -2038,15 +2912,7 @@ fn build_bike_model(
     let base_count = base.len();
     let t_textures = t0.elapsed();
 
-    let bound: std::collections::HashSet<String> = nodes
-        .iter()
-        .flat_map(|n| {
-            n.texture
-                .iter()
-                .chain(n.submeshes.iter().filter_map(|s| s.texture.as_ref()))
-        })
-        .map(|t| t.to_ascii_lowercase())
-        .collect();
+    let bound = &drawn;
     for (p, shipped) in &mut paints {
         p.changes_preview = *shipped
             || (!bound.is_empty()
@@ -2136,7 +3002,8 @@ fn build_bike_model(
 
     let model = BikeModel { nodes, paints, base: model_base, tyres, assembled, rig };
     if let Ok(mut c) = bike_cache().lock() {
-        // The evicted bike's pixels go with it — nothing else references them.
+        // The pixels of whatever this displaced go with it — evicted or replaced in place,
+        // nothing else references them; tokens are minted per build.
         if let Some(dropped) = c.insert(key, model.clone()) {
             texstore::release(&dropped.tokens());
         }
@@ -2512,10 +3379,22 @@ fn compact_to_submeshes(n: &mut edf::EdfNode) {
     n.indices = indices;
 }
 
+/// One of a bike's loose files, unwrapped if it arrived sealed.
+///
+/// A protected model installed loose ships its `.edf` sealed, the same way a locked archive
+/// is. Read plainly the bytes reach the parser as an opaque blob, fail its header check, and
+/// a bike that runs perfectly in game reads here as having no mesh at all. Gear and paints
+/// have always been read this way; bikes hadn't been.
+fn read_bike_file(path: &std::path::Path) -> Option<Vec<u8>> {
+    let bytes = std::fs::read(path).ok()?;
+    Some(pkz::read_sidecar_blob(&bytes).unwrap_or(bytes))
+}
+
 fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
     use anyhow::{bail, Context};
     if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("edf")) {
         let bytes = std::fs::read(p).with_context(|| format!("read {p:?}"))?;
+        let bytes = pkz::read_sidecar_blob(&bytes).unwrap_or(bytes);
         return Ok(vec![("model.edf".to_string(), bytes)]);
     }
     if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pkz")) {
@@ -2527,7 +3406,7 @@ fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>
             let path = entry?.path();
             let name = path.file_name().and_then(|n| n.to_str()).map(str::to_string);
             if path.is_file() && name.as_deref().is_some_and(wanted_bike_file) {
-                if let (Some(name), Ok(bytes)) = (name, std::fs::read(&path)) {
+                if let (Some(name), Some(bytes)) = (name, read_bike_file(&path)) {
                     loose.push((name, bytes));
                 }
             }
@@ -2539,6 +3418,9 @@ fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>
         overlay_files(&mut out, loose);
         // A mesh of any name will do — `model.edf` is the convention, not a rule.
         if !out.iter().any(|(n, _)| bikefiles::is_mesh(n)) {
+            if awaiting_download(&[p]) {
+                bail!("this bike's files are still in the cloud — download them and try again");
+            }
             bail!("no .edf mesh for bike folder {p:?}");
         }
         return Ok(out);
@@ -2567,7 +3449,7 @@ fn read_named(dir: &std::path::Path, names: &[String]) -> Vec<(String, Vec<u8>)>
     names
         .iter()
         .filter(|n| wanted_bike_file(n))
-        .filter_map(|n| std::fs::read(dir.join(n)).ok().map(|b| (n.clone(), b)))
+        .filter_map(|n| read_bike_file(&dir.join(n)).map(|b| (n.clone(), b)))
         .collect()
 }
 
@@ -2594,12 +3476,39 @@ fn packed_bike(bike_dir: &std::path::Path) -> Option<std::path::PathBuf> {
 fn packed_layer(bike_dir: &std::path::Path) -> Vec<(String, Vec<u8>)> {
     let Some(pkz) = packed_bike(bike_dir) else { return Vec::new() };
     match pkz::read_selected(&pkz, wanted_bike_file) {
-        Ok(files) => files,
+        // An archive can hold sealed entries of its own — unwrap them the same way a loose
+        // file is unwrapped, so where a mod ships its mesh can't decide whether it draws.
+        Ok(files) => files
+            .into_iter()
+            .map(|(n, d)| {
+                let d = pkz::read_sidecar_blob(&d).unwrap_or(d);
+                (n, d)
+            })
+            .collect(),
         Err(e) => {
             log::warn!("[viewer] couldn't read {pkz:?} ({e:#}) — drawing the loose files alone");
             Vec::new()
         }
     }
+}
+
+/// Whether a bike's files are still waiting on the cloud to hand them over.
+///
+/// A placeholder OneDrive or iCloud hasn't fetched is indistinguishable from a mod with
+/// nothing in it, so "there's no mesh here" is the wrong thing to tell someone whose mesh is
+/// simply still in the cloud. Asked of the metadata only — `stat` never triggers a download.
+fn awaiting_download(dirs: &[&std::path::Path]) -> bool {
+    dirs.iter().any(|dir| {
+        if packed_bike(dir).is_some_and(|p| cloudfiles::is_placeholder(&p)) {
+            return true;
+        }
+        std::fs::read_dir(dir).into_iter().flatten().flatten().any(|e| {
+            let p = e.path();
+            p.is_file()
+                && e.file_name().to_str().is_some_and(wanted_bike_file)
+                && cloudfiles::is_placeholder(&p)
+        })
+    })
 }
 
 /// The bytes behind a `PreviewSet`: the packed bike, with the loose files that stay laid
@@ -2616,6 +3525,9 @@ fn gather_preview_files(
     overlay_files(&mut out, read_named(&set.bike_dir, &set.root_keep));
     overlay_files(&mut out, read_named(&set.variant_dir, &set.variant_files));
     if !out.iter().any(|(n, _)| bikefiles::is_mesh(n)) {
+        if awaiting_download(&[&set.bike_dir, &set.variant_dir]) {
+            bail!("this model's files are still in the cloud — download them and try again");
+        }
         bail!("this model has no mesh to show — the bike would have no model at all");
     }
     Ok(out)
@@ -2820,32 +3732,189 @@ fn body_is_z_up(ext: [f32; 3]) -> bool {
     ext[2] > ext[1] && ext[2] > ext[0]
 }
 
-fn stand_body_upright(nodes: &mut [edf::EdfNode]) {
+/// A half turn about X. Up and front both invert; left and right are kept, so it turns the
+/// body rather than mirroring it.
+const BODY_FLIP_UPRIGHT: [[f32; 3]; 3] =
+    [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
+
+/// A half turn about Y. Front and left invert, up is kept — the turn that faces a body the
+/// other way without disturbing which end is the head.
+const BODY_TURN_AROUND: [[f32; 3]; 3] =
+    [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
+
+/// The extent of a body, or of one slot of it.
+fn body_bounds(nodes: &[edf::EdfNode], slot: Option<&str>) -> ([f32; 3], [f32; 3]) {
     let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
-    for n in nodes.iter() {
-        for v in n.positions.chunks_exact(3) {
-            for a in 0..3 {
-                lo[a] = lo[a].min(v[a]);
-                hi[a] = hi[a].max(v[a]);
+    for n in nodes {
+        for sm in &n.submeshes {
+            if slot.is_some() && sm.texture.as_deref() != slot {
+                continue;
+            }
+            let range =
+                sm.tri_start as usize * 3..(sm.tri_start + sm.tri_count) as usize * 3;
+            for i in n.indices.get(range).unwrap_or(&[]) {
+                let Some(v) = n.positions.get(*i as usize * 3..*i as usize * 3 + 3) else {
+                    continue;
+                };
+                for a in 0..3 {
+                    lo[a] = lo[a].min(v[a]);
+                    hi[a] = hi[a].max(v[a]);
+                }
             }
         }
     }
-    let ext = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
-    if !body_is_z_up(ext) {
-        return;
+    (lo, hi)
+}
+
+/// Where one slot sits front-to-back, relative to the body's own centre. `None` when the
+/// model has no such slot.
+fn slot_depth(nodes: &[edf::EdfNode], slot: &str, centre_z: f32) -> Option<f64> {
+    let (mut sum, mut count) = (0f64, 0usize);
+    for n in nodes {
+        for sm in &n.submeshes {
+            if sm.texture.as_deref() != Some(slot) {
+                continue;
+            }
+            let range =
+                sm.tri_start as usize * 3..(sm.tri_start + sm.tri_count) as usize * 3;
+            for i in n.indices.get(range).unwrap_or(&[]) {
+                if let Some(v) = n.positions.get(*i as usize * 3..*i as usize * 3 + 3) {
+                    sum += (v[2] - centre_z) as f64;
+                    count += 1;
+                }
+            }
+        }
     }
+    (count > 0).then(|| sum / count as f64)
+}
+
+fn turn_body(nodes: &mut [edf::EdfNode], r: [[f32; 3]; 3]) {
     for n in nodes.iter_mut() {
         for v in n.positions.chunks_exact_mut(3).chain(n.normals.chunks_exact_mut(3)) {
             let (x, y, z) = (v[0], v[1], v[2]);
-            let r = BODY_STAND_UP;
-            // Negated, not taken as-is: these meshes lie head-away, with the head at the
-            // most negative Z, so this is what puts it at the top.
             v[0] = r[0][0] * x + r[0][1] * y + r[0][2] * z;
             v[1] = r[1][0] * x + r[1][1] * y + r[1][2] * z;
             v[2] = r[2][0] * x + r[2][1] * y + r[2][2] * z;
         }
     }
-    log::info!("[rider] body was authored Z-up ({ext:?}); stood it upright");
+}
+
+/// `b` applied after `a`, as one matrix. The rig has to take exactly what the mesh took,
+/// and it takes it in one go rather than replaying the steps.
+fn compose(b: [[f32; 3]; 3], a: [[f32; 3]; 3]) -> [[f32; 3]; 3] {
+    let mut m = [[0.0f32; 3]; 3];
+    for r in 0..3 {
+        for c in 0..3 {
+            m[r][c] = (0..3).map(|k| b[r][k] * a[k][c]).sum();
+        }
+    }
+    m
+}
+
+const BODY_KEEP: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+/// Stand the body up, then check the result and fix it if the guess was wrong.
+///
+/// Returns the whole turn, so [`body_rig`] can put the skeleton through the same one instead
+/// of deciding for itself. It used to decide from the rig's own extents, which agreed with
+/// the mesh only for as long as the mesh's answer was a fixed rotation — the moment the mesh
+/// can be corrected and the rig can't, a corrected body gets a skeleton lying across it.
+fn stand_body_upright(nodes: &mut [edf::EdfNode]) -> [[f32; 3]; 3] {
+    let (lo, hi) = body_bounds(nodes, None);
+    let ext = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
+    let mut applied = BODY_KEEP;
+    if body_is_z_up(ext) {
+        // The quarter turn assumes the head lies at the most negative Z, which is where the
+        // stock Z-up bodies put it. `check_body_orientation` is what catches a model that
+        // doesn't — the assumption is now a starting guess rather than the answer.
+        turn_body(nodes, BODY_STAND_UP);
+        applied = BODY_STAND_UP;
+        log::info!("[rider] body was authored Z-up ({ext:?}); stood it upright");
+    }
+    compose(check_body_orientation(nodes), applied)
+}
+
+/// Confirm the body ended up the right way up and the right way round, and turn it if not.
+///
+/// The turn above is one fixed rotation for one authoring convention, and a custom model is
+/// under no obligation to share it: a Z-up body with its head at *positive* Z takes that
+/// rotation and lands upside down and facing backwards, which is exactly what a hoodie-and-
+/// baggies rider model was reported doing while the stock ones were fine.
+///
+/// So measure the result instead of trusting the guess. Both signals are the ones the
+/// viewer's own real-model test has always asserted — they just used to be checked in a test
+/// nobody runs on a player's machine, against models that happened to pass:
+///
+///   * **Which end is the head.** Bare skin. The head is the highest thing on a rider, so
+///     skin sitting in the bottom half means the body is upside down.
+///   * **Which way it faces.** The name and number planes go on a rider's back. Where a model
+///     has none, the head leans forward over the bars — a weaker signal, so it only decides
+///     when the strong one is absent.
+///
+/// A model showing no skin at all — every inch covered by kit, helmet and gloves — leaves the
+/// first question unanswerable, and it keeps whatever the guess gave it. Better an unturned
+/// body than one turned on no evidence.
+fn check_body_orientation(nodes: &mut [edf::EdfNode]) -> [[f32; 3]; 3] {
+    let mut applied = BODY_KEEP;
+    let (lo, hi) = body_bounds(nodes, None);
+    let height = hi[1] - lo[1];
+    if height <= 0.0 {
+        return applied;
+    }
+    let (skin_lo, skin_hi) = body_bounds(nodes, Some("face"));
+    // `>=`, not `>`: the question is whether the model shows any skin at all, and an
+    // unfound slot leaves the sentinels crossed (`hi` below `lo`). Asking for vertical
+    // extent instead would call a model with skin no taller than a point "no skin".
+    let has_skin = skin_hi[1] >= skin_lo[1];
+    if has_skin && skin_hi[1] < lo[1] + 0.5 * height {
+        log::info!(
+            "[rider] body is upside down (skin tops out at {:.3} of {:.3}..{:.3}); turning it              the right way up",
+            skin_hi[1],
+            lo[1],
+            hi[1],
+        );
+        turn_body(nodes, BODY_FLIP_UPRIGHT);
+        applied = BODY_FLIP_UPRIGHT;
+    }
+
+    // Re-measured: the flip above moves everything it is about to judge.
+    let (lo, hi) = body_bounds(nodes, None);
+    let centre_z = (lo[2] + hi[2]) / 2.0;
+    let backwards = match slot_depth(nodes, "hide", centre_z) {
+        // The planes are on the back, so they belong behind the centre.
+        Some(back) => back > 0.0,
+        None => {
+            // No planes. The head leans forward over the bars — but only the head, since on
+            // the rolled-sleeve models the skin texture also covers bare wrists that reach
+            // well down the body and would drag the answer with them.
+            let head_floor = hi[1] - 0.125 * (hi[1] - lo[1]);
+            let (mut sum, mut count) = (0f64, 0usize);
+            for n in nodes.iter() {
+                for sm in &n.submeshes {
+                    if sm.texture.as_deref() != Some("face") {
+                        continue;
+                    }
+                    let range =
+                        sm.tri_start as usize * 3..(sm.tri_start + sm.tri_count) as usize * 3;
+                    for i in n.indices.get(range).unwrap_or(&[]) {
+                        if let Some(v) = n.positions.get(*i as usize * 3..*i as usize * 3 + 3) {
+                            if v[1] > head_floor {
+                                sum += (v[2] - centre_z) as f64;
+                                count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            count > 0 && (sum / count as f64) < 0.0
+        }
+    };
+    if backwards {
+        log::info!("[rider] body was facing backwards; turned it around");
+        turn_body(nodes, BODY_TURN_AROUND);
+        applied = compose(BODY_TURN_AROUND, applied);
+    }
+    applied
 }
 
 /// Bind each body submesh to the texture the mesh itself says it wears.
@@ -2941,6 +4010,14 @@ fn rig_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<edf::Bone>>> {
     C.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(MESH_CACHE_CAP * 2)))
 }
 
+/// The turn each body mesh took, so its rig can take the same one. Keyed exactly as the
+/// mesh cache is, and written on the parse that fills it.
+fn body_turn_cache() -> &'static std::sync::Mutex<lru::Lru<[[f32; 3]; 3]>> {
+    static C: std::sync::OnceLock<std::sync::Mutex<lru::Lru<[[f32; 3]; 3]>>> =
+        std::sync::OnceLock::new();
+    C.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(MESH_CACHE_CAP * 2)))
+}
+
 /// A rider body's rig, in the same frame the viewer gets its mesh in, memoised.
 ///
 /// The mesh takes two turns on the way out of the file — [`edf::to_right_handed`] mirrors X,
@@ -2957,16 +4034,30 @@ fn body_rig(src: &BodySource, profile: &str) -> Vec<edf::Bone> {
     let mut rig = src.read(profile).map(|b| edf::parse_skeleton(&b)).unwrap_or_default();
     if !rig.is_empty() {
         edf::transform_skeleton(&mut rig, [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
-        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
-        for b in rig.iter() {
-            let o = b.origin();
-            for a in 0..3 {
-                lo[a] = lo[a].min(o[a]);
-                hi[a] = hi[a].max(o[a]);
+        // What the mesh actually took, where the mesh has been read — which is every path
+        // that reaches here, since a rig is only wanted alongside the body it bends.
+        let mesh_turn = body_turn_cache()
+            .lock()
+            .ok()
+            .and_then(|mut c| c.get(&src.cache_key(profile)).copied());
+        match mesh_turn {
+            Some(turn) => edf::transform_skeleton(&mut rig, turn),
+            None => {
+                // No mesh read this session. Fall back to the rig's own extents, which is
+                // the old answer and right for every body whose head is where the stock ones
+                // put it — the models this ever differed for are the ones the mesh corrects.
+                let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                for b in rig.iter() {
+                    let o = b.origin();
+                    for a in 0..3 {
+                        lo[a] = lo[a].min(o[a]);
+                        hi[a] = hi[a].max(o[a]);
+                    }
+                }
+                if body_is_z_up([hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]) {
+                    edf::transform_skeleton(&mut rig, BODY_STAND_UP);
+                }
             }
-        }
-        if body_is_z_up([hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]) {
-            edf::transform_skeleton(&mut rig, BODY_STAND_UP);
         }
         log::info!("[rider] body '{profile}' rig: {} bones", rig.len());
     }
@@ -3114,9 +4205,13 @@ fn rider_body_nodes(src: &BodySource, profile: &str) -> Option<Vec<edf::EdfNode>
     if let Some(n) = cached_mesh(&key) {
         return Some(n);
     }
-    mesh_from_bytes(key, &src.read(profile)?, false, |nodes, data| {
+    let turn_key = key.clone();
+    mesh_from_bytes(key, &src.read(profile)?, false, move |nodes, data| {
         bind_body_submeshes(nodes, data);
-        stand_body_upright(nodes);
+        let turn = stand_body_upright(nodes);
+        if let Ok(mut c) = body_turn_cache().lock() {
+            c.insert(turn_key, turn);
+        }
     })
 }
 
@@ -4382,6 +5477,14 @@ fn read_paint_file(dir: &std::path::Path, paint: &str) -> Option<Vec<u8>> {
     std::fs::read(first).ok()
 }
 
+/// Download a mod and install it.
+///
+/// Answers `null` for the ordinary case — one mod, downloaded and placed. A download that
+/// turns out to be a *pack* (several mods in one self-describing tree, like the OEM bike
+/// pack's 54 bikes and its tyre set) answers with a plan instead, and nothing has been
+/// written yet: the caller puts it up for review and commits it through `commit_drop`,
+/// exactly as it would a dropped file. Until then the plan owns the staged bytes, and
+/// `cancel_drop` is what frees them.
 #[tauri::command]
 async fn add_to_library(
     app: tauri::AppHandle,
@@ -4390,12 +5493,15 @@ async fn add_to_library(
     host: String,
     subpath: String,
     dest_folder: String,
-) -> Result<(), String> {
+) -> Result<Option<dropzone::DropPlan>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     let _cancel = cancel::begin(&slug);
-    install::add_to_library(&app, &cfg, &slug, &url, &host, &subpath, &dest_folder)
+    let placed = install::add_to_library(&app, &cfg, &slug, &url, &host, &subpath, &dest_folder)
         .await
-        .map_err(|e| format!("{e:#}"))
+        .map(install::Placed::review)
+        .map_err(|e| format!("{e:#}"))?;
+    usage::track("mod.install");
+    Ok(placed)
 }
 
 /// Stop the install running under `slug`. `false` when nothing is running under it — the
@@ -4509,6 +5615,7 @@ fn commit_plan(
     // which every library scanner listens to — firing it per item would re-run them all
     // N times for a single user action.
     if !outcome.installed.is_empty() {
+        usage::track("drop.import");
         install::notify_frostmod(app, "drop");
     }
     Ok(outcome)
@@ -4556,6 +5663,24 @@ async fn uninstall_mod(app: tauri::AppHandle, from_path: String, subpath: String
 #[tauri::command]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     library::reveal_in_explorer(&path).map_err(|e| format!("{e:#}"))
+}
+
+/// Put a line from the webview into the app's own log file.
+///
+/// `tauri_plugin_log` writes what Rust logs; nothing the frontend prints to its console
+/// reaches the file a player sends us. Facts only the webview knows — which GPU its WebGL
+/// context landed on, say — would otherwise be invisible in exactly the report that needs
+/// them.
+#[tauri::command]
+fn log_client(level: String, message: String) {
+    // A log line is not a transport for arbitrary payloads. Trim rather than reject: a
+    // truncated fact still reads, and a dropped one is a support thread that goes nowhere.
+    let msg: String = message.chars().take(2000).collect();
+    match level.as_str() {
+        "error" => log::error!("[webview] {msg}"),
+        "warn" => log::warn!("[webview] {msg}"),
+        _ => log::info!("[webview] {msg}"),
+    }
 }
 
 /// Where MXB App's own logs are, where the game's are, and what's currently in each.
@@ -4830,6 +5955,367 @@ fn bike_preview_available() -> bool {
     cfg!(sidecar)
 }
 
+/// Whether this build can produce protected copies of a creator's files. Same shape as
+/// [`bike_preview_available`]: the optional local module carries the format, so a build
+/// without it hides the tool rather than offering one that can't do anything.
+#[tauri::command]
+fn content_lock_available() -> bool {
+    cfg!(sidecar)
+}
+
+/// Whether this build can lock content with mxbsecure — the packer is the gitignored
+/// `mxbsecure` sidecar, so a public build reports false and the Secure tab stays hidden.
+#[tauri::command]
+fn content_secure_available() -> bool {
+    cfg!(mxbsecure)
+}
+
+/// Turn the experimental mxbsecure tab on or off.
+#[tauri::command]
+fn set_mxbsecure_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.mxbsecure_enabled = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// The result of locking a file: where the blob landed, and the content key to keep. The key
+/// is returned once, for the operator to store server-side; it is never written into the blob.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SecureLockOutcome {
+    blob_path: String,
+    asset_id: String,
+    key_id: String,
+    key: String,
+    plain_bytes: u64,
+    blob_bytes: u64,
+}
+
+/// Lock a file into a `.mxbsecure` blob under a fresh content key.
+///
+/// `src` is read and never modified. The blob is written beside it (or into `out_dir` when
+/// given) as `<name>.mxbsecure`. Reads the whole file into memory — a creator's asset, not a
+/// stream — which is fine for the sizes involved and keeps the packer simple.
+#[tauri::command]
+async fn mxbsecure_lock(
+    src: String,
+    out_dir: Option<String>,
+) -> Result<SecureLockOutcome, String> {
+    #[cfg(mxbsecure)]
+    {
+        use std::path::PathBuf;
+        let src_path = PathBuf::from(&src);
+        let name = src_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .ok_or_else(|| "not a file".to_string())?;
+        let out = match out_dir {
+            Some(d) => PathBuf::from(d).join(format!("{name}.mxbsecure")),
+            None => src_path.with_file_name(format!("{name}.mxbsecure")),
+        };
+        // A stable-ish asset id from the file name plus a random suffix, so two locks of two
+        // files don't collide. A real registration mints this; here it just labels the blob.
+        let mut rnd = [0u8; 6];
+        getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
+        let suffix: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
+        let asset_id = format!("{}-{suffix}", sanitize_asset_id(&name));
+
+        let plaintext = tokio::fs::read(&src_path).await.map_err(|e| format!("read {src}: {e}"))?;
+        let locked = mxbsecure::lock(&plaintext, &asset_id, "k1");
+        tokio::fs::write(&out, &locked.blob).await.map_err(|e| format!("write blob: {e}"))?;
+
+        Ok(SecureLockOutcome {
+            blob_path: out.to_string_lossy().to_string(),
+            asset_id: locked.asset_id,
+            key_id: locked.key_id,
+            key: mxbsecure::hex_key(&locked.content_key),
+            plain_bytes: plaintext.len() as u64,
+            blob_bytes: locked.blob.len() as u64,
+        })
+    }
+    #[cfg(not(mxbsecure))]
+    {
+        let _ = (src, out_dir);
+        Err("this build can't lock content with mxbsecure".into())
+    }
+}
+
+/// Verify a locked blob opens back to a plaintext identical to `original`.
+///
+/// This is the "can it unlock it" check the Secure tab runs after a lock: decrypt the blob
+/// with the key and compare byte-for-byte to the source. Proves the format round-trips on
+/// this machine, independently of the in-game DLL.
+#[tauri::command]
+async fn mxbsecure_verify(
+    blob_path: String,
+    key: String,
+    original: String,
+) -> Result<bool, String> {
+    #[cfg(mxbsecure)]
+    {
+        let content_key = mxbsecure::key_from_hex(&key).ok_or("the key isn't 32 bytes of hex")?;
+        let blob = tokio::fs::read(&blob_path).await.map_err(|e| format!("read blob: {e}"))?;
+        let opened = mxbsecure::open(&blob, &content_key).map_err(|e| format!("{e}"))?;
+        let original = tokio::fs::read(&original).await.map_err(|e| format!("read original: {e}"))?;
+        Ok(opened == original)
+    }
+    #[cfg(not(mxbsecure))]
+    {
+        let _ = (blob_path, key, original);
+        Err("this build can't open mxbsecure content".into())
+    }
+}
+
+/// The Steam account currently signed in on this machine, for binding a key to.
+#[tauri::command]
+fn secure_steam_id() -> Option<String> {
+    steamid::current_steam_id64()
+}
+
+/// What generating a protected copy produced. The two files a buyer needs, side by side.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SecureGenerateOutcome {
+    /// The name the game will list and open (the original file's name, e.g. `FarmSX.pkz`).
+    game_name: String,
+    /// The encrypted blob: `<original>.mxbsecure`.
+    blob_path: String,
+    /// The key sealed to the buyer's Steam ID: `<original>.mxbsecure.mxbkey`.
+    mxbkey_path: String,
+    /// The Steam ID it was sealed to.
+    steam_id: String,
+    plain_bytes: u64,
+}
+
+/// Generate a protected copy of a track for a **specific Steam ID**, leaving the original
+/// untouched.
+///
+/// This is the creator's action. Given a track and the buyer's 17-digit Steam ID, it writes two
+/// files beside the original:
+///
+/// - `<track>.mxbsecure` — the encrypted blob.
+/// - `<track>.mxbsecure.mxbkey` — the content key sealed to that Steam ID.
+///
+/// Both are needed, next to each other, to load; the key opens only on the machine signed into
+/// that Steam account. The original `.pkz` is never modified — the creator keeps their master,
+/// and hands the buyer only the two generated files.
+#[tauri::command]
+async fn mxbsecure_generate(
+    track_path: String,
+    steam_id: String,
+) -> Result<SecureGenerateOutcome, String> {
+    #[cfg(mxbsecure)]
+    {
+        use std::path::Path;
+        let steam_id = steam_id.trim().to_string();
+        if steam_id.len() != 17 || !steam_id.bytes().all(|b| b.is_ascii_digit()) {
+            return Err("that isn't a Steam ID — it should be 17 digits (a SteamID64)".into());
+        }
+
+        let plaintext = tokio::fs::read(&track_path)
+            .await
+            .map_err(|e| format!("read {track_path}: {e}"))?;
+        // Refuse a file that is already one of ours, so a double-encrypt can't seal ciphertext.
+        if plaintext.starts_with(b"MXBSEC") {
+            return Err("that file is already protected".into());
+        }
+        let name = Path::new(&track_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .ok_or("not a file")?;
+
+        let mut rnd = [0u8; 6];
+        getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
+        let suffix: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
+        let asset_id = format!("{}-{suffix}", sanitize_asset_id(&name));
+
+        let locked = mxbsecure::lock(&plaintext, &asset_id, "k1");
+        let sealed = mxbsecure::seal_key_to_identity(&locked.content_key, &steam_id, "");
+
+        // `<track>.mxbsecure` and `<track>.mxbsecure.mxbkey`, beside the original.
+        let blob_path = format!("{track_path}.mxbsecure");
+        let mxbkey_path = format!("{blob_path}.mxbkey");
+        // Blob is written to a temp and renamed, so a crash mid-write leaves no half file.
+        let tmp = format!("{blob_path}.writing");
+        tokio::fs::write(&tmp, &locked.blob).await.map_err(|e| format!("write blob: {e}"))?;
+        tokio::fs::rename(&tmp, &blob_path).await.map_err(|e| format!("finish blob: {e}"))?;
+        tokio::fs::write(&mxbkey_path, &sealed).await.map_err(|e| format!("write .mxbkey: {e}"))?;
+
+        Ok(SecureGenerateOutcome {
+            game_name: name,
+            blob_path,
+            mxbkey_path,
+            steam_id,
+            plain_bytes: plaintext.len() as u64,
+        })
+    }
+    #[cfg(not(mxbsecure))]
+    {
+        let _ = (track_path, steam_id);
+        Err("this build can't generate protected content".into())
+    }
+}
+
+/// What provisioning a key produced.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SecureProvisionOutcome {
+    mxbkey_path: String,
+    steam_id: String,
+}
+
+/// Provision a content key for offline play: seal it to the live Steam ID and store it as a
+/// `.mxbkey` beside the blob. Called once, after the server has released the key (here the
+/// Lock tab supplies it). From then on the key opens offline for this account only.
+#[tauri::command]
+async fn mxbsecure_provision(
+    app: tauri::AppHandle,
+    blob_path: String,
+    key: String,
+) -> Result<SecureProvisionOutcome, String> {
+    #[cfg(mxbsecure)]
+    {
+        let steam_id = steamid::current_steam_id64()
+            .ok_or("couldn't read your Steam ID — is Steam installed and signed in?")?;
+        let content_key = mxbsecure::key_from_hex(&key).ok_or("the key isn't 32 bytes of hex")?;
+        let sealed = mxbsecure::seal_key_to_identity(&content_key, &steam_id, "");
+        let out = std::path::PathBuf::from(format!("{blob_path}.mxbkey"));
+        tokio::fs::write(&out, &sealed).await.map_err(|e| format!("write .mxbkey: {e}"))?;
+
+        // Remember the mapping so the app can arm this asset — write the manifest and inject
+        // the DLL — the next time the game starts. The game name is the blob's own name with
+        // the `.mxbsecure` suffix removed: the file the engine will ask for.
+        let game_name = std::path::Path::new(&blob_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .map(|n| n.strip_suffix(".mxbsecure").unwrap_or(&n).to_string())
+            .unwrap_or_default();
+        if let Err(e) = secure_launch::record_asset(
+            &app,
+            secure_launch::SecureAsset {
+                game_name,
+                blob_path: blob_path.clone(),
+                mxbkey_path: out.to_string_lossy().to_string(),
+            },
+        ) {
+            log::warn!("[secure] couldn't record the provisioned asset: {e}");
+        }
+
+        Ok(SecureProvisionOutcome {
+            mxbkey_path: out.to_string_lossy().to_string(),
+            steam_id,
+        })
+    }
+    #[cfg(not(mxbsecure))]
+    {
+        let _ = (app, blob_path, key);
+        Err("this build can't provision mxbsecure content".into())
+    }
+}
+
+/// Open a blob offline using its provisioned `.mxbkey`: read the live Steam ID, unseal the
+/// key, decrypt, and confirm it matches `original`. This is the offline "does it still
+/// unlock for me, with no server" proof — a different account gets nothing.
+#[tauri::command]
+async fn mxbsecure_open_offline(
+    blob_path: String,
+    original: String,
+) -> Result<bool, String> {
+    #[cfg(mxbsecure)]
+    {
+        let steam_id = steamid::current_steam_id64()
+            .ok_or("couldn't read your Steam ID — is Steam installed and signed in?")?;
+        let mxbkey_path = format!("{blob_path}.mxbkey");
+        let sealed = tokio::fs::read(&mxbkey_path).await.map_err(|e| format!("read .mxbkey: {e}"))?;
+        let key = mxbsecure::unseal_key(&sealed, &steam_id, "")
+            .ok_or("this key isn't sealed to your Steam account")?;
+        let blob = tokio::fs::read(&blob_path).await.map_err(|e| format!("read blob: {e}"))?;
+        let opened = mxbsecure::open(&blob, &key).map_err(|e| format!("{e}"))?;
+        let original = tokio::fs::read(&original).await.map_err(|e| format!("read original: {e}"))?;
+        Ok(opened == original)
+    }
+    #[cfg(not(mxbsecure))]
+    {
+        let _ = (blob_path, original);
+        Err("this build can't open mxbsecure content".into())
+    }
+}
+
+/// Keep an asset id to the characters a header and a URL are both happy with.
+#[cfg(mxbsecure)]
+fn sanitize_asset_id(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .collect();
+    let trimmed = cleaned.trim_matches('_');
+    if trimmed.is_empty() { "asset".to_string() } else { trimmed.to_string() }
+}
+
+/// What a run over `paths` would touch — every file under the selection, with the ones it
+/// would leave alone flagged and why. Folders are walked; a file is taken as itself.
+#[tauri::command]
+async fn content_lock_plan(paths: Vec<String>) -> Result<serde_json::Value, String> {
+    #[cfg(sidecar)]
+    {
+        let roots: Vec<std::path::PathBuf> =
+            paths.into_iter().map(std::path::PathBuf::from).collect();
+        let items = tauri::async_runtime::spawn_blocking(move || sidecar_lock::plan(&roots))
+            .await
+            .map_err(|e| format!("content_lock_plan task failed: {e}"))?
+            .map_err(|e| format!("{e:#}"))?;
+        return serde_json::to_value(items).map_err(|e| e.to_string());
+    }
+    #[cfg(not(sidecar))]
+    {
+        let _ = paths;
+        Err("this build can't lock content".into())
+    }
+}
+
+/// Write a copy of every file in `paths`, locked to each GUID in `guids`, under
+/// `out_dir/<GUID>/`. Reports progress on `content-lock://progress`.
+///
+/// The sources are only ever read. A creator's plaintext is the one thing they can't get
+/// back, so the tool that hands out locked copies is not also the tool that could eat the
+/// original.
+#[tauri::command]
+async fn content_lock_run(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+    guids: Vec<String>,
+    out_dir: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(sidecar)]
+    {
+        let roots: Vec<std::path::PathBuf> =
+            paths.into_iter().map(std::path::PathBuf::from).collect();
+        let out = std::path::PathBuf::from(out_dir);
+        let outcome = tauri::async_runtime::spawn_blocking(move || {
+            sidecar_lock::run(&app, &roots, &guids, &out)
+        })
+        .await
+        .map_err(|e| format!("content_lock_run task failed: {e}"))?
+        .map_err(|e| format!("{e:#}"))?;
+        usage::track("content.protect");
+        return serde_json::to_value(outcome).map_err(|e| e.to_string());
+    }
+    #[cfg(not(sidecar))]
+    {
+        let _ = (app, paths, guids, out_dir);
+        Err("this build can't lock content".into())
+    }
+}
+
+/// This player's own MX Bikes GUID, read out of the running game.
+///
+/// `None` is the ordinary answer — the game isn't running, or hasn't reached Steam sign-in
+/// yet. See [`gameproc::local_guid`] for why it is never a guess.
+#[tauri::command]
+fn local_guid() -> Option<String> {
+    gameproc::local_guid()
+}
+
 /// The OS we're running on — `"windows"`, `"macos"`, `"linux"`.
 ///
 /// The frontend used to infer this from `navigator.userAgent`, which can tell a Mac from
@@ -4846,6 +6332,29 @@ fn set_run_in_background(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.run_in_background = enabled;
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Count something the UI did.
+///
+/// The webview is where pages and most features are, so it needs a way in — but not a way
+/// to invent the payload: it sends a name and nothing else, and a name that isn't one is
+/// dropped by [`usage::track`] rather than stored.
+#[tauri::command]
+fn track_event(name: String) {
+    usage::track(&name);
+}
+
+/// The one switch that stops anonymous usage counts.
+///
+/// Saves first and only then tells [`usage`], so a save that failed can never leave the app
+/// counting things the player has said no to.
+#[tauri::command]
+fn set_analytics_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.analytics_enabled = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    usage::set_enabled(&app, enabled, &cfg);
+    Ok(())
 }
 
 #[tauri::command]
@@ -4870,6 +6379,9 @@ enum Autostart {
     /// It is there, but it was written for a binary this build no longer has.
     Rebind,
     Disable,
+    /// Windows' own Startup list has the app switched off. Take that as the answer and
+    /// turn the setting off to match, instead of writing over it.
+    Adopt,
 }
 
 /// Reconcile the login item with the setting.
@@ -4878,8 +6390,11 @@ enum Autostart {
 /// renaming the binary leaves every existing one pointing at a file that is gone — while
 /// `is_enabled` still answers yes, because all it looks for is the entry. Left alone, the app
 /// simply stops starting at login and nothing ever says why.
-fn autostart_action(wanted: bool, enabled: bool, stale: bool) -> Autostart {
+///
+/// `vetoed` is the other one, and it outranks everything: see [`startup_vetoed`].
+fn autostart_action(wanted: bool, enabled: bool, vetoed: bool, stale: bool) -> Autostart {
     match (wanted, enabled) {
+        (true, _) if vetoed => Autostart::Adopt,
         (true, false) => Autostart::Enable,
         (true, true) if stale => Autostart::Rebind,
         (false, true) => Autostart::Disable,
@@ -4887,8 +6402,90 @@ fn autostart_action(wanted: bool, enabled: bool, stale: bool) -> Autostart {
     }
 }
 
-fn show_main(app: &tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
+/// Has the player switched the app off in Windows' own list of startup apps?
+///
+/// Task Manager → Startup apps (and Settings → Apps → Startup) does not remove the `Run`
+/// entry. It leaves it where it is and stamps a flag beside it under `StartupApproved\Run`:
+/// twelve bytes whose tail is all zeros for on, and carries the time it was switched off for
+/// off. `auto-launch` folds that flag into `is_enabled()`, so a veto there reads back exactly
+/// like "there is no entry" — and the reconcile above answered that by calling `enable()`,
+/// which rewrites both the entry *and* the flag. Every launch quietly undid the choice, and
+/// an update, which restarts the app, is where people noticed.
+///
+/// The value name is the app's own name, which is what `tauri-plugin-autostart` passes
+/// `auto-launch` as the entry name.
+#[cfg(windows)]
+fn startup_vetoed(app_name: &str) -> bool {
+    use std::os::raw::c_void;
+
+    const HKEY_CURRENT_USER: isize = -2147483647; // 0x80000001
+    const RRF_RT_REG_BINARY: u32 = 0x0000_0008;
+
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn RegGetValueW(
+            hkey: isize,
+            subkey: *const u16,
+            value: *const u16,
+            flags: u32,
+            typ: *mut u32,
+            data: *mut c_void,
+            data_len: *mut u32,
+        ) -> i32;
+    }
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    let subkey =
+        wide("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run");
+    let value = wide(app_name);
+    let mut buf = [0u8; 32];
+    let mut len = buf.len() as u32;
+    // SAFETY: a read-only registry query into a fixed stack buffer, length passed in bytes.
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_BINARY,
+            std::ptr::null_mut(),
+            buf.as_mut_ptr() as *mut c_void,
+            &mut len,
+        )
+    };
+    // No flag at all is the normal case — nobody has been through that screen.
+    if rc != 0 {
+        return false;
+    }
+    startup_flag_is_veto(&buf[..(len as usize).min(buf.len())])
+}
+
+#[cfg(not(windows))]
+fn startup_vetoed(_app_name: &str) -> bool {
+    false
+}
+
+/// Read one `StartupApproved\Run` flag: enabled carries a zero tail, disabled carries the
+/// FILETIME it was switched off. Anything too short to hold one is not a veto.
+#[cfg_attr(not(windows), allow(dead_code))] // read only on Windows; the tests run anywhere
+fn startup_flag_is_veto(bytes: &[u8]) -> bool {
+    bytes.len() >= 8 && !bytes.iter().rev().take(8).all(|b| *b == 0)
+}
+
+/// The frontend has drawn its first frame — see [`firstpaint`].
+#[tauri::command]
+fn window_painted(app: tauri::AppHandle) {
+    firstpaint::mark(&app);
+}
+
+pub(crate) fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
+        // Every path in — the tray, a second launch, the watchdog — can land here before
+        // the webview has painted, and an undecorated window with no frontend in it has
+        // nothing to close it by.
+        firstpaint::decorate_unpainted(&w);
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
@@ -4923,13 +6520,12 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     let outcome = gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
+        usage::track("game.launch");
         // Both directions, because Play is the last moment before either one matters: the
-        // grid needs everyone else's paints on disk, and everyone else needs ours.
-        publish_paints_soon(&app, &cfg, None);
-        live_sync_session(&app, None);
-        // No address to aim at — they'll pick from the in-game browser — so this covers
-        // the whole registry.
-        sync_paints_soon(&app, None);
+        // grid needs everyone else's paints on disk, and everyone else needs ours. No
+        // address to aim at — they'll pick from the in-game browser — so the pre-pull
+        // covers the whole registry until the game says which server it really landed on.
+        sync_on_game_started(&app, &cfg);
     }
     Ok(outcome)
 }
@@ -4960,23 +6556,27 @@ fn pick_release_version(tag: Option<&str>, packaged: String) -> String {
         .unwrap_or(packaged)
 }
 
-/// Whether the unfinished multiplayer features should be shown, and whether this build is
-/// a pre-release. The frontend gates the Servers tab and the paint-sync UI on the first and
-/// badges the version with the second.
+/// Paint sync's state, and whether this build is a pre-release.
+///
+/// Named for a toggle that no longer exists: it used to answer "should the unfinished
+/// multiplayer surface be shown". Server creation is out of the app for now, so what is
+/// left is what paint sync has published and pulled, plus the version the About page
+/// badges. Kept under the old name because six call sites read it and none of them cares
+/// what it is called.
 #[tauri::command]
 fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     let version = release_version(app.package_info().version.to_string());
     serde_json::json!({
-        "enabled": cfg.experimental_enabled(),
-        // Set by the env var rather than the setting, so the UI can explain why the toggle
-        // looks stuck on.
-        "forcedByEnv": std::env::var(config::EXPERIMENTAL_ENV).map(|v| v == "1").unwrap_or(false),
         "version": version,
         // A semver pre-release suffix (`0.8.0-beta.1`) is what the release workflow uses to
         // mark a build as a pre-release, so it is also what makes this build a beta.
         "prerelease": version.contains('-'),
+        // An account, however it was come by. Since paint sync claims one on its own the
+        // first time it runs, this stopped meaning "typed in an invite code" and now means
+        // "the control plane knows who this is" — which is what every caller wanted.
         "enrolled": !cfg.cp_token.trim().is_empty(),
+        "paintSyncEnabled": cfg.paint_sync_enabled,
         "riderName": cfg.cp_rider_name,
         "guid": cfg.cp_guid,
         // What paint sync last managed, so the panel can say so on a cold start rather than
@@ -4985,32 +6585,10 @@ fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
         // Whether there is a profile to publish at all. A rider name that matches no profile
         // on disk publishes nothing, silently, and that is worth saying out loud.
         "profile": sync_profile(&cfg),
+        // Other people's paints currently sitting in the mods folder. The sync writes them
+        // and, until it was given something to press, nothing ever took them out again.
+        "syncedPaints": paintsync::installed_count(&cfg),
     })
-}
-
-/// Turn the experimental features on or off.
-#[tauri::command]
-fn set_experimental(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
-    cfg.experimental = enabled;
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
-
-    // Bring paint sync up — or take it down — with the switch that owns it.
-    //
-    // Both of these are otherwise only decided in `.setup`, so turning the feature on left
-    // the profile watcher stopped until the next restart: the app would keep publishing on
-    // an apply or a launch, but a look changed in the game's garage went unnoticed for the
-    // whole session. That is the session a player has just enrolled in, which makes it the
-    // worst one to be quietly missing.
-    let watcher = app.state::<ProfileWatcher>();
-    if watches_looks(&cfg) {
-        profilewatch::start(&app, &watcher, &cfg.profiles_dir());
-        // And publish once now, since nothing has been watching until this moment.
-        publish_paints_soon(&app, &cfg, None);
-    } else {
-        profilewatch::stop(&watcher);
-    }
-    Ok(())
 }
 
 /// Trade an invite code for a control-plane account, and remember the token.
@@ -5068,35 +6646,9 @@ async fn set_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
     claim_guid(&app, &guid).await
 }
 
-/// Register `guid` against this account and remember it locally.
-///
-/// Shared by the manual field and the automatic claim off a server roster, so both go
-/// through the same validation and land in the same place.
+/// Register `guid` against this account and remember it locally. See [`identity`].
 async fn claim_guid(app: &tauri::AppHandle, guid: &str) -> Result<(), String> {
-    let cfg = config::load_or_detect(app).unwrap_or_default();
-    if cfg.cp_token.trim().is_empty() {
-        return Err("Enroll with an invite code first.".into());
-    }
-    let resp = reqwest::Client::new()
-        .put(format!("{}/v1/me/guid", paintsync::control_plane()))
-        .bearer_auth(&cfg.cp_token)
-        .json(&serde_json::json!({ "guid": guid.trim() }))
-        .send()
-        .await
-        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
-    if !resp.status().is_success() {
-        let detail = resp.text().await.unwrap_or_default();
-        return Err(serde_json::from_str::<serde_json::Value>(&detail)
-            .ok()
-            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
-            .unwrap_or(detail));
-    }
-
-    // Re-read rather than reusing the config above: the round trip is long enough for
-    // something else to have written it.
-    let mut cfg = config::load_or_detect(app).unwrap_or_default();
-    cfg.cp_guid = guid.trim().to_string();
-    config::save(app, &cfg).map_err(|e| format!("{e:#}"))
+    identity::claim_guid(app, guid).await
 }
 
 /// Publish this rider's paints so everyone else on the server can see them.
@@ -5273,7 +6825,7 @@ pub fn publish_look_now(app: &tauri::AppHandle) {
 /// Is a look change worth noticing? Paint sync publishes them, and the look watcher rebuilds
 /// on them — either one is reason enough to watch `profile.ini`.
 fn watches_looks(cfg: &AppConfig) -> bool {
-    cfg.experimental_enabled() || can_refresh_live_look()
+    cfg.paint_sync_enabled || can_refresh_live_look()
 }
 
 /// The rider is wearing something different: re-point the look watcher at the new files, and
@@ -5305,7 +6857,7 @@ fn emit_sync(app: &tauri::AppHandle, event: SyncEvent) {
 /// succeeded on disk, so a failure here logs and is dropped rather than surfacing as an
 /// error on the apply the player actually asked for.
 fn publish_paints_soon(app: &tauri::AppHandle, cfg: &AppConfig, profile: Option<&str>) {
-    if !cfg.experimental_enabled() || cfg.cp_token.trim().is_empty() {
+    if !cfg.paint_sync_enabled {
         return;
     }
     let generation = PUBLISH_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
@@ -5320,15 +6872,24 @@ fn publish_paints_soon(app: &tauri::AppHandle, cfg: &AppConfig, profile: Option<
         // Re-read rather than reusing the captured config: the debounce is long enough for
         // the player to have enrolled, or re-enrolled, since the change that queued this.
         let cfg = config::load_or_detect(&app).unwrap_or_default();
-        if !cfg.experimental_enabled() || cfg.cp_token.trim().is_empty() {
+        if !cfg.paint_sync_enabled {
             return;
         }
         let Some(profile) = profile.or_else(|| sync_profile(&cfg)) else {
             return;
         };
+        // Claimed here rather than required: a rider with no invite still has to be able to
+        // publish, or the grid beside them stays default no matter what they wear.
+        let token = match voice::signal::account(&app, &cfg).await {
+            Ok(token) => token,
+            Err(e) => {
+                log::warn!("[sync] no account to publish with: {e}");
+                return;
+            }
+        };
         let known = cfg.sync.published_digest.clone();
         emit_sync(&app, SyncEvent::phase("publishing"));
-        match paintsync::publish_all(&cfg, &cfg.cp_token, &profile, Some(known.as_str())).await {
+        match paintsync::publish_all(&cfg, &token, &profile, Some(known.as_str())).await {
             Ok(o) => {
                 if o.unchanged {
                     log::debug!("[sync] {profile} is already published as {}", o.digest);
@@ -5340,6 +6901,7 @@ fn publish_paints_soon(app: &tauri::AppHandle, cfg: &AppConfig, profile: Option<
                         o.uploaded
                     );
                     remember_publish(&app, &o);
+                    usage::track("paint.publish");
                 }
                 emit_sync(&app, SyncEvent::published(&o));
             }
@@ -5365,11 +6927,13 @@ fn sync_paints_soon(app: &tauri::AppHandle, address: Option<String>) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let cfg = config::load_or_detect(&app).unwrap_or_default();
-        if !cfg.experimental_enabled() {
+        if !cfg.paint_sync_enabled {
             return;
         }
         emit_sync(&app, SyncEvent::phase("pulling"));
-        match pull_rosters(&app, address).await {
+        // Nobody asked for this one — it fires when the game starts, before the rider has
+        // joined anything. With no server to aim at there is nothing worth reading.
+        match pull_rosters(&app, address, Sweep::Never).await {
             Ok(o) => {
                 log::info!(
                     "[sync] {} riders, {} paints installed, {} already held, {} kept as yours, \
@@ -5391,12 +6955,27 @@ fn sync_paints_soon(app: &tauri::AppHandle, address: Option<String>) {
     });
 }
 
-/// How often to re-check the grid while a session is running.
+/// The fallback heartbeat while a session is running.
 ///
-/// A rider who joins after you did is invisible until the next pull, so this is the gap
-/// between someone arriving and their paint appearing. Short enough not to matter in a race,
-/// long enough that an unchanged roster — the overwhelmingly common answer — costs nothing.
-const LIVE_SYNC_EVERY: std::time::Duration = std::time::Duration::from_secs(45);
+/// Not the gap between a rider arriving and their paint appearing — `GRID_POLL` below
+/// watches the entry list and pulls within seconds of a new name, which is the case that
+/// matters in a race. This only covers what the grid cannot announce: a rider who was
+/// already there and has since changed their look, and keeping our own presence inside the
+/// endpoint's ten-minute window.
+///
+/// Three minutes rather than the 45 seconds it ran at. At 45s every player in a session was
+/// a request a minute and a half, and with paint sync on by default that was most of what
+/// took the worker past its daily ceiling on 2026-08-31. Nothing was bought for it: an
+/// unchanged roster is the overwhelmingly common answer, and the arrival path already
+/// covers the change anyone would notice.
+const LIVE_SYNC_EVERY: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// How often to read the grid out of FrostMod.
+///
+/// A shared-memory read and a set lookup, so this is close to free — it is the *pull* that
+/// costs, and that still only happens when the grid changed or the heartbeat came due. Five
+/// seconds is the gap between a rider appearing on track and their paint being fetched.
+const GRID_POLL: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// How long to wait for the game to show up before giving up on a session.
 ///
@@ -5404,6 +6983,34 @@ const LIVE_SYNC_EVERY: std::time::Duration = std::time::Duration::from_secs(45);
 /// see processes at all it never will. Either way, stopping is right: the launch pull has
 /// already run.
 const LIVE_SYNC_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Paint sync for a session that has just begun, whoever started it.
+///
+/// The Play button knows the moment it launches the game, but Steam and the desktop
+/// shortcut don't tell us anything — and a rider who starts the game the way they always
+/// have is exactly the rider this feature is for. So the session watcher calls this too,
+/// and the pieces are written to be asked twice: publishing is deduplicated by digest, the
+/// pull installs only what is missing, and the live loop refuses to start a second copy of
+/// itself.
+pub(crate) fn sync_on_game_started(app: &tauri::AppHandle, cfg: &AppConfig) {
+    publish_paints_soon(app, cfg, None);
+    live_sync_session(app, None);
+    sync_paints_soon(app, None);
+}
+
+/// Whether a live sync loop is already running, so the paths that all want one — the Play
+/// button, a join by address, and the watcher that notices a game started from Steam — get
+/// exactly one between them rather than one each.
+static LIVE_SYNC_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Clears [`LIVE_SYNC_RUNNING`] when dropped, however the loop it guards ended.
+struct LiveSyncGuard;
+
+impl Drop for LiveSyncGuard {
+    fn drop(&mut self) {
+        LIVE_SYNC_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
 
 /// A session's worth of syncing, so a rider who arrives after you do still renders.
 ///
@@ -5414,15 +7021,23 @@ const LIVE_SYNC_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_s
 /// Runs until the game exits. Each pass also re-reports presence, which is what keeps this
 /// rider in other people's rosters; the control plane forgets anyone who goes quiet.
 fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
+    if LIVE_SYNC_RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        // Cleared however the loop ends, or the first session would be the last one this
+        // run of the app ever syncs.
+        let _running = LiveSyncGuard;
         let started = std::time::Instant::now();
         let mut seen_running = false;
+        let mut grid = GridWatch::default();
+        let mut last_pull = std::time::Instant::now();
         loop {
-            tokio::time::sleep(LIVE_SYNC_EVERY).await;
+            tokio::time::sleep(GRID_POLL).await;
 
             let cfg = config::load_or_detect(&app).unwrap_or_default();
-            if !cfg.experimental_enabled() || cfg.cp_token.trim().is_empty() {
+            if !cfg.paint_sync_enabled {
                 return;
             }
             // The game is the session. Once it has been seen and then gone, so are we.
@@ -5433,7 +7048,27 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
                 return;
             }
 
-            match pull_rosters(&app, address.clone()).await {
+            // Someone new on the grid is the reason to pull; the heartbeat is the fallback
+            // for everything the grid can't tell us — a rider who was already there when we
+            // joined and has since changed their look, and keeping our own presence fresh so
+            // we stay in everyone else's roster.
+            let arrivals = match live_session().filter(|s| s.on_a_server()) {
+                Some(session) => {
+                    let key = voice::session::room_key(&session.server_name);
+                    grid.arrivals(&key, session.riders.iter().map(|r| r.name.as_str()))
+                }
+                None => 0,
+            };
+            let due = last_pull.elapsed() >= LIVE_SYNC_EVERY;
+            if arrivals == 0 && !due {
+                continue;
+            }
+            if arrivals > 0 {
+                log::info!("[sync] {arrivals} rider(s) joined the grid; pulling now");
+            }
+            last_pull = std::time::Instant::now();
+
+            match pull_rosters(&app, address.clone(), Sweep::Never).await {
                 // Only say so when something actually arrived: an unchanged grid is the
                 // common case and does not need announcing every 45 seconds.
                 Ok(o) if o.installed > 0 => {
@@ -5452,46 +7087,168 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
     });
 }
 
+/// The server the game is on right now, as the key every rider on it computes.
+///
+/// The roster has to be scoped to one grid, and for most of the game's life we had no way to
+/// name that grid: an address only reaches the riders whose app launched the game with
+/// `-directconnect`, and anyone who picked the server from the in-game browser never has
+/// one. So paint sync fell back to the registry — our own servers — and a rider on a
+/// community server synced with nobody.
+///
+/// FrostMod is inside the process and `EventInit` hands it the server *name*, which every
+/// rider on that server sees identically. Voice already rooms on it. Sharing the key is what
+/// makes both features work on servers whose operator has installed nothing and knows
+/// nothing about us.
+///
+/// `None` when FrostMod isn't running, the game isn't up, or the rider is in the menus, in a
+/// replay, or testing alone — none of which is a grid to sync with.
+fn live_server_key() -> Option<String> {
+    let session = live_session()?;
+    session
+        .on_a_server()
+        .then(|| voice::session::room_key(&session.server_name))
+}
+
+/// The session FrostMod is publishing, if any.
+///
+/// One reader for the whole app, held open across calls: opening the mapping is the
+/// expensive part and the block is read every few seconds.
+fn live_session() -> Option<voice::gamesession::GameSession> {
+    static GAME: std::sync::OnceLock<voice::gamesession::Reader> = std::sync::OnceLock::new();
+    GAME.get_or_init(voice::gamesession::Reader::default).read()
+}
+
+/// What the running game says this player is called, for [`identity::claim_from_game`].
+///
+/// `None` when there is no session to read — no FrostMod, or one that has not reached
+/// `EventInit` yet — which is not the same as a session that reports empty fields.
+pub fn seen_identity() -> Option<identity::SeenIdentity> {
+    live_session().map(|s| identity::SeenIdentity {
+        guid: s.guid,
+        rider_name: s.rider_name,
+    })
+}
+
+/// Who is on the grid, and who has turned up since we last looked.
+///
+/// A rider who joins after you is the case paint sync is worst at: they were not on the
+/// roster when you pulled, so they render in default livery until something pulls again.
+/// Waiting out the heartbeat means up to [`LIVE_SYNC_EVERY`] of a wrong-looking grid, and
+/// the rider who joined is the one person guaranteed to be looking at it.
+///
+/// So the grid itself is the trigger. The game knows the entry list, FrostMod publishes it,
+/// and a name that wasn't there last time is a reason to pull now.
+#[derive(Default)]
+struct GridWatch {
+    /// The server these names belong to. A different one is a different grid, so the names
+    /// carried over from the last server mean nothing and are dropped.
+    server: String,
+    seen: std::collections::HashSet<String>,
+}
+
+impl GridWatch {
+    /// How many riders on `grid` we hadn't seen on `server` before.
+    ///
+    /// Folded like a room key, because the entry list is what the game reports and one
+    /// rider must not read as two because their name arrived spaced differently.
+    fn arrivals<'a>(&mut self, server: &str, grid: impl Iterator<Item = &'a str>) -> usize {
+        if self.server != server {
+            self.server = server.to_string();
+            self.seen.clear();
+        }
+        grid.map(|name| name.trim().to_lowercase())
+            .filter(|name| !name.is_empty())
+            .filter(|name| self.seen.insert(name.clone()))
+            .count()
+    }
+}
+
 /// Pull the rosters for wherever the player is, or could be, riding.
 ///
-/// `address` narrows this to a single server when we know where they're headed. Without
-/// one it covers the whole registry, which is the best available answer when the server is
-/// chosen from the in-game browser and never passes through us.
+/// Once the game is on a server, that server is the answer and `address` is ignored — see
+/// [`live_server_key`]. Before then there is nothing to read, so `address` narrows this to
+/// where they're headed when we launched them at one, and to the whole registry when they
+/// pressed Play and will pick from the game's own browser.
+/// Whether a pull with nowhere to aim may fall back to every server on the registry.
+///
+/// It is a whole-platform sweep — one roster read per registered server, each one returning
+/// the paints of everybody on it — so it is only ever right when a person asked for it. On
+/// 2026-09-01 the automatic paths doing this took the account past D1's daily row ceiling and
+/// every endpoint that reads the database answered 500 for the rest of the day.
+///
+/// The same reasoning already applies to the write half: reporting presence for every key was
+/// removed from this function for being untrue. Reading every roster is the other half of the
+/// same mistake, and it is the expensive half.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Sweep {
+    /// A person pressed something. One sweep, now.
+    Allowed,
+    /// Nobody asked. With no server and no address there is nothing to sync *for* — the
+    /// grid this feature exists to render does not exist yet.
+    Never,
+}
+
+/// Which servers to ask about, once it is settled that the rider is not on one.
+///
+/// An address is a server, whoever gave it to us. Without one, the registry is every server
+/// there is, and asking all of them is a thing only a person may set off.
+fn sync_targets(address_key: Option<String>, registry_ids: &[String], sweep: Sweep) -> Vec<String> {
+    match address_key {
+        Some(key) => vec![key],
+        None => match sweep {
+            Sweep::Allowed => registry_ids.to_vec(),
+            Sweep::Never => Vec::new(),
+        },
+    }
+}
+
 async fn pull_rosters(
     app: &tauri::AppHandle,
     address: Option<String>,
+    sweep: Sweep,
 ) -> Result<paintsync::PullOutcome, String> {
     let cfg = config::load_or_detect(app).unwrap_or_default();
-    if cfg.cp_token.trim().is_empty() {
-        return Err("Enroll with an invite code first.".into());
-    }
-    // An unreachable registry doesn't have to sink a targeted sync — the address is a
-    // usable key on its own — but with no address there's nothing left to aim at.
-    let registry = match paintsync::registry(Some(&cfg.cp_token)).await {
-        Ok(list) => list,
-        Err(e) => {
-            log::warn!("[sync] couldn't read the server registry: {e:#}");
-            Vec::new()
-        }
-    };
+    let token = voice::signal::account(app, &cfg).await?;
 
-    let keys: Vec<String> = match &address {
-        Some(addr) => vec![paintsync::server_key_for(&registry, addr)],
-        None => registry.iter().map(|s| s.id.clone()).collect(),
+    // Where the rider actually is beats everything else we could guess. The name FrostMod
+    // reads out of the running game is the one key every rider on that server can compute,
+    // so it is the only one that works on a server we have nothing to do with — which is
+    // most of them.
+    let live = live_server_key();
+    // Nothing to aim at and no sweep allowed: stop before the registry is even fetched. That
+    // read is not free either — it was 20,869 calls the day the database hit its ceiling, and
+    // every one of them was a prelude to reading a roster we had no business reading.
+    if live.is_none() && address.is_none() && sweep == Sweep::Never {
+        return Err("No servers to sync with yet.".into());
+    }
+    let keys: Vec<String> = if let Some(key) = live {
+        vec![key]
+    } else {
+        // Not on a server yet. An unreachable registry doesn't have to sink a targeted sync
+        // — the address is a usable key on its own — but with no address there's nothing
+        // left to aim at.
+        let registry = match paintsync::registry(Some(&token)).await {
+            Ok(list) => list,
+            Err(e) => {
+                log::warn!("[sync] couldn't read the server registry: {e:#}");
+                Vec::new()
+            }
+        };
+        let ids: Vec<String> = registry.iter().map(|s| s.id.clone()).collect();
+        sync_targets(address.as_deref().map(|a| paintsync::server_key_for(&registry, a)), &ids, sweep)
     };
     if keys.is_empty() {
         return Err("No servers to sync with yet.".into());
     }
 
-    // Say where we are before asking who else is here: the roster is scoped by presence, so
-    // reporting first is what puts this rider into everyone else's grid too.
-    for key in &keys {
-        if let Err(e) = paintsync::report_presence(&cfg.cp_token, key).await {
-            log::debug!("[sync] couldn't report presence on {key}: {e:#}");
-        }
-    }
-
-    let outcome = paintsync::pull(&cfg, &cfg.cp_token, &keys)
+    // Where we are rides along with the request that asks who else is here — the roster
+    // records it and then scopes itself by it, so this is one request rather than two.
+    //
+    // Only the server the rider is actually on. Reporting presence for every key used to
+    // happen here, which on a registry sweep meant claiming to be on every server at once:
+    // untrue, and one write per server for the privilege.
+    let here = live_server_key();
+    let outcome = paintsync::pull(&cfg, &token, &keys, here.as_deref())
         .await
         .map_err(|e| format!("{e:#}"))?;
     // Re-read immediately before writing: the pull took a round trip, and `config::save`
@@ -5505,8 +7262,14 @@ async fn pull_rosters(
         log::warn!("[sync] couldn't record the pull: {e:#}");
     }
     // Anything newly on disk is invisible to a running game until the loader re-reads the
-    // mods folder.
-    let _ = frostmod::signal_reload();
+    // mods folder — but only *newly*. This used to fire on every pull, and a pull that
+    // installed nothing is the overwhelmingly common one: the grid is unchanged, everyone's
+    // paints are already here, and there is nothing for the game to re-read. Asking it to
+    // rescan the mods folder anyway, every time a rider joined, is work done to a process
+    // that is mid-race.
+    if outcome.installed > 0 {
+        let _ = frostmod::signal_reload();
+    }
     Ok(outcome)
 }
 
@@ -5517,7 +7280,9 @@ async fn pull_rosters(
 #[tauri::command]
 async fn sync_paints(app: tauri::AppHandle) -> Result<paintsync::PullOutcome, String> {
     emit_sync(&app, SyncEvent::phase("pulling"));
-    match pull_rosters(&app, None).await {
+    // The one place a sweep is right: a person pressed Sync, and if they are not on a server
+    // the whole registry is the only answer to "whose paints do you mean".
+    match pull_rosters(&app, None, Sweep::Allowed).await {
         Ok(o) => {
             emit_sync(&app, SyncEvent::pulled(&o));
             Ok(o)
@@ -5954,12 +7719,56 @@ fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::Launc
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     let outcome = gameproc::join(&cfg, &address).map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
+        usage::track("server.join");
         publish_paints_soon(&app, &cfg, None);
         live_sync_session(&app, Some(address.clone()));
         // We know exactly where they're going, so this syncs that server alone.
         sync_paints_soon(&app, Some(address));
     }
     Ok(outcome)
+}
+
+/// One live server as the Servers tab shows it. Filled by the local-only `worldnet` module
+/// from the master-server list; a superset of [`paintsync::RegisteredServer`] so the tab's
+/// Join button reuses [`join_server`]. The struct carries no protocol detail — that all lives
+/// behind `cfg(worldnet)` — so it stays in the public tree and the command compiles either way.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorldServer {
+    /// Display name the operator gave the server.
+    pub name: String,
+    /// `ip:port`, the form the game's connect flag and [`join_server`] take.
+    pub address: String,
+    /// Riders currently connected, and the seat cap.
+    pub players: u32,
+    pub max_players: u32,
+    /// Round-trip to the server in milliseconds, or `None` if it wasn't measured.
+    pub ping_ms: Option<u32>,
+    /// The track the server is running, when the master reports it.
+    pub track: String,
+    /// Whether a password is required to join.
+    pub passworded: bool,
+    /// Free-text region/label, empty when unknown.
+    pub region: String,
+}
+
+/// The live MX Bikes server list, as the game's WORLD browser sees it.
+///
+/// All the work — the master-server protocol, the Steam auth ticket, the parsing — lives in
+/// the local-only `worldnet` module. Without it (the public tree, or a build that never had
+/// the file) the tab still exists but says the browser isn't included, rather than failing
+/// opaquely.
+#[tauri::command]
+async fn list_master_servers(app: tauri::AppHandle) -> Result<Vec<WorldServer>, String> {
+    #[cfg(worldnet)]
+    {
+        worldnet::list_servers(app).await
+    }
+    #[cfg(not(worldnet))]
+    {
+        let _ = app;
+        Err("The server browser isn't included in this build.".into())
+    }
 }
 
 /// Is MX Bikes running? Polled by the sidebar so Play can show the live state.
@@ -6006,6 +7815,7 @@ async fn frostmod_install(
         .await
         .map_err(|e| format!("{e:#}"))?;
 
+    usage::track("frostmod.install");
     if was_running || !was_installed {
         let _ = frostmod_manage::start(&app, &state);
     }
@@ -6101,6 +7911,16 @@ fn set_auto_run_frostmod(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Extra flags for `frostmod.exe`, stored as typed. Not validated here: FrostMod ignores a
+/// flag it doesn't know, so an unknown one costs nothing, while checking against a list this
+/// app carries would reject flags a newer FrostMod does understand.
+#[tauri::command]
+fn set_frostmod_args(app: tauri::AppHandle, args: String) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.frostmod_args = args.trim().to_string();
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 fn set_instant_refresh(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
@@ -6175,6 +7995,42 @@ fn set_voice_enabled(
         session.leave();
     }
     overlay::register(&app, &cfg)
+}
+
+/// Turn paint sync on or off.
+///
+/// Off stops both halves at once — nothing of this rider's look goes up, and nothing anyone
+/// else published comes down. Paints already installed stay installed: they are files the
+/// player now owns, and deleting a grid's worth of liveries because a switch moved would be
+/// a worse surprise than leaving them.
+#[tauri::command]
+fn set_paint_sync_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.paint_sync_enabled = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    // Turning it back on shouldn't wait for the next thing that happens to change a look.
+    if enabled {
+        publish_paints_soon(&app, &cfg, None);
+    }
+    Ok(())
+}
+
+/// Take back the paints the sync installed.
+///
+/// Turning the sync off deliberately leaves them: they are files the player now has, and a
+/// switch that wipes a grid's worth of liveries is a worse surprise than one that doesn't.
+/// This is the other half of that — the way to actually get the folder back — and it only
+/// touches what the manifest says we wrote and nobody has edited since.
+#[tauri::command]
+fn remove_synced_paints(app: tauri::AppHandle) -> Result<paintsync::RemoveOutcome, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let out = paintsync::remove_installed(&cfg);
+    // A running game is holding paints that are no longer there; a rescan is what makes it
+    // fall back to the default liveries rather than keep drawing them.
+    if out.removed > 0 {
+        let _ = frostmod::signal_reload();
+    }
+    Ok(out)
 }
 
 /// Pick the tyre pack the 3D previews fit. A blank name means "whatever the bike names".
@@ -6329,6 +8185,17 @@ fn set_watch_mods_reload(
         modwatch::stop(&state);
     }
     Ok(())
+}
+
+/// Turn injecting `mxbsecure.dll` into the running game on or off.
+///
+/// Takes effect on the next game session: the watcher decides once per run, so a change made
+/// mid-session doesn't reach into a game that is already up.
+#[tauri::command]
+fn set_secure_content_inject(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.secure_content_inject = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -6525,8 +8392,17 @@ async fn shop_install(
         let cfg = cfg.clone();
         let slug = item.slug.clone();
         let work = work.clone();
-        move || install::extract_and_place(&app, &cfg, &slug, &archive, &work, &subpath, &dest_folder)
-            .map(|()| dest_folder)
+        move || install::extract_and_place(
+            &app,
+            &cfg,
+            &slug,
+            &archive,
+            &work,
+            &subpath,
+            &dest_folder,
+            install::Packs::PlaceWhole,
+        )
+        .map(|_| dest_folder)
     })
     .await
     .map_err(|e| format!("shop_install task failed: {e}"))?;
@@ -6536,6 +8412,331 @@ async fn shop_install(
 
     // One place records what a purchase installed, so the badge is written on every path.
     let _ = dest_folder;
+    if let Ok(dir) = app.path().app_local_data_dir() {
+        if let Err(e) = shop_installed::record(&dir, &item.product, &names) {
+            log::warn!("could not record what {} installed: {e:#}", item.product);
+        }
+    }
+    Ok(())
+}
+
+// ─────────────────────────────────── MXB Hub ───────────────────────────────────
+//
+// shop.mxb-hub.com — the community marketplace `mxbhub.com` redirects to. Two halves, like
+// the shop: a public catalog anyone can browse, and the files this account owns.
+//
+// It is markedly simpler than the shop's equivalent because the store is not behind
+// Cloudflare (measured 2026-08-30: `server: nginx`, no `cf-ray`, no interstitial on
+// `/my-account/`). So there is no clearance to earn, no parked WebView reading pages out of
+// the DOM, and no `with_clearance` wrapper: `reqwest` talks to it directly, browsing needs no
+// credential at all, and the only window ever opened is the sign-in one.
+
+/// Run a hub read, and if the store answers with its robot challenge, solve it and try again.
+///
+/// The sibling of [`with_clearance`] above, and the difference is where the browser comes in.
+/// mxb-mods.com's fix is to move the *request* into a WebView and keep it there for the
+/// session, because Cloudflare judges the client. SiteGround judges the request rate and hands
+/// out a cookie once its script has run — so the browser is needed exactly once, and every
+/// request after it is an ordinary one again.
+async fn with_hub_clearance<T, F, Fut>(
+    app: &tauri::AppHandle,
+    what: &str,
+    op: F,
+) -> Result<T, String>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let err = match op().await {
+        Ok(value) => return Ok(value),
+        Err(err) => err,
+    };
+    if err.downcast_ref::<mods::Blocked>().is_none() {
+        log::warn!("{what} failed and a browser wouldn't help: {err:#}");
+        return Err(format!("{err:#}"));
+    }
+    log::info!("{what} hit the MXB Hub robot challenge — answering it in a browser");
+    if let Err(e) = hub_clearance::earn(app).await {
+        return Err(format!("{e:#}"));
+    }
+    op().await.map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn hub_search(
+    app: tauri::AppHandle,
+    query: String,
+    category_id: Option<u64>,
+    page: u32,
+    sort: mods::hub::HubSort,
+    on_sale_only: bool,
+) -> Result<mods::hub::HubPage, String> {
+    with_hub_clearance(&app, "hub search", || {
+        mods::hub::search(&query, category_id, page, sort, on_sale_only)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn hub_categories(
+    app: tauri::AppHandle,
+) -> Result<Vec<mods::hub::HubCategory>, String> {
+    with_hub_clearance(&app, "hub categories", mods::hub::categories).await
+}
+
+#[tauri::command]
+async fn hub_detail(
+    app: tauri::AppHandle,
+    id: u64,
+) -> Result<mods::hub::HubModDetail, String> {
+    with_hub_clearance(&app, "hub detail", || mods::hub::detail(id)).await
+}
+
+#[tauri::command]
+fn hub_status(state: State<hub_session::HubSession>) -> bool {
+    state.logged_in()
+}
+
+#[tauri::command]
+async fn hub_logout(app: tauri::AppHandle) {
+    hub_session::clear_session(&app).await;
+}
+
+/// Open the store's own sign-in page and wait for the login cookie to appear.
+///
+/// The password is typed into WooCommerce's page, in a window of its own — the app never sees
+/// it, and never asks for it. What we take is the cookie the store sets afterwards.
+///
+/// Two things the shop's version has to do are deliberately absent. It clears the whole
+/// WebView's cookies first, because a stale `cf_clearance` there is worse than none; there is
+/// no Cloudflare here, and clearing is app-wide, so doing it would sign the user out of the
+/// *other* store on their way into this one. And it lands on `/robots.txt` to dodge a second
+/// challenge; this one can land on the account page, which is also the page that proves the
+/// sign-in worked.
+#[tauri::command]
+async fn hub_login(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(HUB_LOGIN_WINDOW) {
+        let _ = w.set_focus();
+        return Ok(());
+    }
+
+    // The account page, plainly. It is both the login form when signed out and the proof of a
+    // sign-in when not, so there is nothing to redirect to and no parameter worth inventing.
+    let target = format!("{base}/my-account/", base = hub_session::HUB_BASE);
+    let url = tauri::WebviewUrl::External(target.parse().map_err(|e| format!("{e}"))?);
+    let window = tauri::WebviewWindowBuilder::new(&app, HUB_LOGIN_WINDOW, url)
+        .title("Sign in to MXB Hub")
+        .inner_size(520.0, 760.0)
+        .build()
+        .map_err(|e| format!("{e:#}"))?;
+    let _ = window;
+
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        // ~5 minutes at 500 ms. Long enough for a password reset mid-flow; the user can retry.
+        let mut last_seen = Vec::new();
+        for _ in 0..600u32 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let Some(win) = app.get_webview_window(HUB_LOGIN_WINDOW) else {
+                // Closed by hand — a cancel, not a failure. Logged all the same, because "the
+                // user gave up" and "the app stopped watching" are indistinguishable later.
+                log::info!(
+                    "the MXB Hub login window was closed before sign-in finished (cookies: {})",
+                    hub_session::cookie_names(&last_seen)
+                );
+                return;
+            };
+            let cookies = hub_session::cookies_from_window(&win);
+            if !hub_session::is_authenticated(&cookies) {
+                last_seen = cookies;
+                continue;
+            }
+            let ok = match hub_session::set_session(&app, cookies) {
+                Ok(()) => {
+                    log::info!("captured MXB Hub session");
+                    true
+                }
+                Err(e) => {
+                    log::error!("failed to save the MXB Hub session: {e:#}");
+                    false
+                }
+            };
+            let _ = app.emit("hub-auth", ok);
+            let _ = win.close();
+            return;
+        }
+
+        log::warn!(
+            "MXB Hub sign-in did not complete within 5 minutes (cookies: {})",
+            hub_session::cookie_names(&last_seen)
+        );
+        let _ = app.emit("hub-auth", false);
+        // Closed rather than left up: nothing is watching it any more, so a sign-in finished
+        // afterwards would go unnoticed. Retry reopens it.
+        if let Some(win) = app.get_webview_window(HUB_LOGIN_WINDOW) {
+            let _ = win.close();
+        }
+    });
+    Ok(())
+}
+
+/// What this account owns, with its catalog entries alongside.
+///
+/// One command rather than the shop's two. A Hub download row links to its product page, so
+/// the catalog lookup is a single request keyed on exact slugs — where the shop has to fold
+/// product *names* together and match approximately, which is why its match is a separate
+/// call the grid makes after the fact. Doing both here means the grid renders once, complete,
+/// instead of popping in twice.
+///
+/// The listings are positional: `listings[i]` is `items[i]`'s catalog entry, or `null` where
+/// the product has since been unlisted. Best-effort — a catalog that won't answer costs the
+/// cards their artwork, not the list.
+#[tauri::command]
+async fn hub_my_downloads(
+    app: tauri::AppHandle,
+    state: State<'_, hub_session::HubSession>,
+) -> Result<HubDownloads, String> {
+    if !state.logged_in() {
+        return Err("Not signed in to MXB Hub.".to_string());
+    }
+    let mut items = with_hub_clearance(&app, "hub purchases", || {
+        // Re-read the client each attempt: answering the challenge rebuilds the signed-in one
+        // with the clearance folded in, and the stale handle would just be challenged again.
+        let client = state.client();
+        async {
+            let client = client.ok_or_else(|| anyhow::anyhow!("Not signed in to MXB Hub."))?;
+            mods::hubaccount::fetch_my_downloads(&app, &client).await
+        }
+    })
+    .await?;
+
+    let listings = match mods::hubaccount::match_products(&items).await {
+        Ok(found) => found,
+        Err(e) => {
+            log::warn!("could not match MXB Hub purchases to the catalog: {e:#}");
+            vec![None; items.len()]
+        }
+    };
+    // Mirrored onto the rows themselves as well, because a purchase is handed to the install
+    // queue on its own and has to still know what it is once the listing is out of scope.
+    for (item, found) in items.iter_mut().zip(&listings) {
+        let Some(found) = found else { continue };
+        item.image = found.image.clone();
+        item.author = found.author.clone();
+        item.category_id = found.category_ids.first().copied().unwrap_or(0) as u32;
+    }
+
+    Ok(HubDownloads { items, listings })
+}
+
+/// The purchases page and the catalog, joined, in one answer.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HubDownloads {
+    items: Vec<mods::hubaccount::HubItem>,
+    /// Positional against `items`.
+    listings: Vec<Option<mods::hub::HubMod>>,
+}
+
+/// Download a file this account owns and install it, to a destination the caller already chose.
+///
+/// The whole body after the client lookup is [`install`]'s — `download` streams with progress,
+/// resume and cancellation, and `extract_and_place` does what every other install does. That
+/// reuse is the point of the store having no Cloudflare in front of it: the shop needed a
+/// WebView download path ([`shop_fetch::download`]) precisely because its file URLs are
+/// challenged, and none of that is needed here.
+#[tauri::command]
+async fn hub_install(
+    app: tauri::AppHandle,
+    state: State<'_, hub_session::HubSession>,
+    item: mods::hubaccount::HubItem,
+    subpath: String,
+    dest_folder: String,
+) -> Result<(), String> {
+    let Some(session) = state.client() else {
+        return Err("Not signed in to MXB Hub.".to_string());
+    };
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    // Asked before the download: a track archive is several hundred megabytes to waste.
+    if cfg.mods_path.trim().is_empty() {
+        return Err("No MX Bikes folder is configured yet.".to_string());
+    }
+
+    let work = install::staging_dir("hub");
+    std::fs::create_dir_all(&work).map_err(|e| format!("{e:#}"))?;
+
+    let _cancel = cancel::begin(&item.slug);
+
+    // Where the bytes come from decides both the client and whether the link needs resolving.
+    //
+    // A store-issued `?download_file=` URL is authorised by the user's session, so it is
+    // fetched with it and is already a file. A handed-off link — MediaFire and friends, which
+    // WooCommerce allows for any product and MXB Hub uses for a number of its free mods — is
+    // fetched with the ordinary download client instead: sending the user's store cookies to a
+    // third party would be wrong whichever way it turned out. It also has to be resolved
+    // first, because a MediaFire *folder* is a web page listing files, not a file.
+    let fetch = async {
+        if item.external {
+            let client = install::build_download_client()?;
+            install::emit_resolving(&app, &item.slug);
+            let direct = install::resolve_direct_url(&client, &item.download_url, &item.host)
+                .await?;
+            install::download(&app, &client, &item.slug, &direct, &work).await
+        } else {
+            // A dead cookie doesn't 401 here — WooCommerce answers a link it won't honour with
+            // an HTML page, which `install::download` reports as "a web page instead of a
+            // file". Left as it is rather than translated: guessing "session expired" from a
+            // content type would sign the user out on a server hiccup.
+            install::download(&app, &session, &item.slug, &item.download_url, &work).await
+        }
+    };
+    let archive = match fetch.await {
+        Ok(path) => path,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&work);
+            return Err(format!("{e:#}"));
+        }
+    };
+
+    // What identifies this purchase on disk afterwards. Both forms, because a `.pkz` is placed
+    // under its own file name while an archive that extracts lands in a folder named for its
+    // stem.
+    let names: Vec<String> = [archive.file_name(), archive.file_stem()]
+        .into_iter()
+        .flatten()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect();
+
+    let placed = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        let cfg = cfg.clone();
+        let slug = item.slug.clone();
+        let work = work.clone();
+        let subpath = subpath.clone();
+        let dest_folder = dest_folder.clone();
+        move || {
+            install::extract_and_place(
+                &app,
+                &cfg,
+                &slug,
+                &archive,
+                &work,
+                &subpath,
+                &dest_folder,
+                install::Packs::PlaceWhole,
+            )
+            .map(|_| ())
+        }
+    })
+    .await
+    .map_err(|e| format!("hub_install task failed: {e}"))?;
+
+    let _ = std::fs::remove_dir_all(&work);
+    placed.map_err(|e| format!("{e:#}"))?;
+
+    // Same record the shop's installs write, so both stores' grids get their badge from one
+    // place — it is a claim about a product name and the folders it put on disk, and nothing
+    // in it is specific to which store sold the thing.
     if let Ok(dir) = app.path().app_local_data_dir() {
         if let Err(e) = shop_installed::record(&dir, &item.product, &names) {
             log::warn!("could not record what {} installed: {e:#}", item.product);
@@ -6565,6 +8766,7 @@ fn record_download(
     entry: downloads::NewDownload,
 ) -> Result<Option<downloads::DownloadRecord>, String> {
     let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+    usage::track("mod.download");
     downloads::record(&dir, entry).map_err(|e| format!("{e:#}"))
 }
 
@@ -6929,6 +9131,7 @@ fn apply_loadout_now(
         model_refresh = model_refresh_cmd(app, cfg.instant_refresh, bikeid);
     }
     let content_reload = frostmod::signal_reload();
+    usage::track("preset.apply");
     // The look on disk just changed, so what the control plane holds for this rider is now
     // stale. Queued rather than awaited — this function is the synchronous apply path.
     publish_paints_soon(app, cfg, Some(profile));
@@ -6947,7 +9150,9 @@ fn presets_list(app: tauri::AppHandle) -> Result<Vec<presets::Preset>, String> {
 
 #[tauri::command]
 fn presets_save(app: tauri::AppHandle, preset: presets::Preset) -> Result<(), String> {
-    presets::save_preset(&presets_dir(&app)?, preset).map_err(|e| format!("{e:#}"))
+    presets::save_preset(&presets_dir(&app)?, preset).map_err(|e| format!("{e:#}"))?;
+    usage::track("preset.save");
+    Ok(())
 }
 
 #[tauri::command]
@@ -6968,6 +9173,70 @@ fn presets_decode(text: String) -> Result<presets::Preset, String> {
 #[tauri::command]
 fn presets_import(app: tauri::AppHandle, text: String) -> Result<presets::Preset, String> {
     presets::import_code(&presets_dir(&app)?, &text).map_err(|e| format!("{e:#}"))
+}
+
+// ---------------------------------------------------------------------------
+// Feel presets — the settings half of a profile.
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn feel_list(app: tauri::AppHandle) -> Result<Vec<feel::Feel>, String> {
+    Ok(feel::load_feels(&presets_dir(&app)?))
+}
+
+/// Read what the profile is set to right now, ready to be named and saved.
+#[tauri::command]
+fn feel_capture(app: tauri::AppHandle, profile: String) -> Result<feel::Feel, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    feel::capture(&cfg.profiles_dir(), &profile).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_save(app: tauri::AppHandle, feel: feel::Feel) -> Result<(), String> {
+    feel::save_feel(&presets_dir(&app)?, feel).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_delete(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    feel::delete_feel(&presets_dir(&app)?, &name).map_err(|e| format!("{e:#}"))
+}
+
+/// Write a saved feel back into a profile.
+///
+/// Refused while the game is up. MX Bikes reads both files once at startup and writes them
+/// back when the Options screen closes, so an apply mid-session is invisible until the game
+/// overwrites it — the rider would see nothing change and then lose the preset.
+#[tauri::command]
+fn feel_apply(
+    app: tauri::AppHandle,
+    profile: String,
+    name: String,
+) -> Result<feel::ApplyReport, String> {
+    if gameproc::is_game_running() {
+        return Err("Close MX Bikes first — it rewrites your settings when it exits.".into());
+    }
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let saved = feel::find_feel(&presets_dir(&app)?, &name)
+        .ok_or_else(|| format!("no feel preset named '{name}'"))?;
+    if saved.is_empty() {
+        return Err(format!("'{name}' has no settings saved in it."));
+    }
+    feel::apply(&cfg.profiles_dir(), &profile, &saved).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_export(app: tauri::AppHandle, name: String) -> Result<String, String> {
+    feel::export_code(&presets_dir(&app)?, &name).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_decode(text: String) -> Result<feel::Feel, String> {
+    feel::decode_code(&text).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn feel_import(app: tauri::AppHandle, text: String) -> Result<feel::Feel, String> {
+    feel::import_code(&presets_dir(&app)?, &text).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -7029,10 +9298,15 @@ async fn file_share_create(
         .map_err(|e| format!("{e:#}"))
 }
 
-/// Read a share code without downloading anything — the import dialog's preview.
+/// Read a share code without downloading anything — the import dialog's preview. Says
+/// which of its files the importer already has, since an import overwrites them.
 #[tauri::command]
-fn file_share_preview(text: String) -> Result<fileshare::FileShare, String> {
-    fileshare::decode(&text).map_err(|e| format!("{e:#}"))
+fn file_share_preview(
+    app: tauri::AppHandle,
+    text: String,
+) -> Result<fileshare::SharePreview, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    fileshare::preview(&cfg, &text).map_err(|e| format!("{e:#}"))
 }
 
 /// Download a share code's files and install them where they came from.
@@ -7291,14 +9565,31 @@ fn webview_env_defaults(env: GraphicsEnv) -> Vec<(&'static str, &'static str)> {
 /// web process, and before any other thread exists — being `main`'s first statement gives
 /// both.
 fn prepare_webview_env() {
-    if !cfg!(target_os = "linux") {
-        return;
-    }
-    for (key, value) in webview_env_defaults(GraphicsEnv::read()) {
+    let env = GraphicsEnv::read();
+    let vars = if cfg!(target_os = "linux") {
+        webview_env_defaults(env)
+    } else if cfg!(windows) {
+        webview2_env_defaults(env)
+    } else {
+        Vec::new()
+    };
+    for (key, value) in vars {
         if std::env::var_os(key).is_none() {
             std::env::set_var(key, value);
         }
     }
+}
+
+/// The environment WebView2 should start under.
+///
+/// Nothing by default — WebView2 paints on virtually every Windows machine. `MXB_SAFE_GRAPHICS=1`
+/// takes the GPU out of it, which is the lever to pull for a window that came up black and
+/// stayed that way: a first frame that never arrives is the GPU path failing.
+fn webview2_env_defaults(env: GraphicsEnv) -> Vec<(&'static str, &'static str)> {
+    if !env.safe_mode {
+        return Vec::new();
+    }
+    vec![("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-gpu")]
 }
 
 /// Whether this process is running under Wine — CrossOver, Whisky, Kegworks or plain Wine.
@@ -7415,6 +9706,10 @@ fn main() {
         // a code to transcribe. See `handle_deep_link`.
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
+        // Copying happens minutes after the click that started it — a share code is
+        // born when the upload lands — so the web clipboard's focus and gesture rules
+        // rule it out. This writes from the process instead.
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(
@@ -7430,6 +9725,7 @@ fn main() {
         .manage(LookWatcher::default())
         .manage(CloudServers::default())
         .manage(shop_session::ShopSession::default())
+        .manage(hub_session::HubSession::default())
         .manage(voice::Monitor::default())
         .manage(voice::session::Session::default())
         .setup(|app| {
@@ -7452,12 +9748,24 @@ fn main() {
                 .filter(|w| w.label == MAIN_WINDOW)
             {
                 let mut builder =
-                    tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?;
+                    tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?
+                        // Also what puts the window on screen: it is hidden until the
+                        // document is there to show, and a hidden webview never composites
+                        // — so waiting for a painted frame here would wait forever.
+                        .on_page_load(|window, payload| {
+                            log::info!("[startup] main window {:?}", payload.event());
+                            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                                firstpaint::loaded(window.app_handle());
+                            }
+                        });
                 if !drag_drop {
                     builder = builder.disable_drag_drop_handler();
                 }
                 builder.build()?;
             }
+            // The window is built hidden and revealed by `window_painted`; this is what
+            // rescues it when that never arrives.
+            firstpaint::arm(app.handle());
             // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
             // to the UA that earned it — a log about a block should say which one was used.
             log::info!("{} user-agent: {}", mxb_session::site().domain, mxb_session::UA);
@@ -7475,6 +9783,12 @@ fn main() {
                     on("WEBKIT_DISABLE_DMABUF_RENDERER"),
                     on("WEBKIT_DISABLE_COMPOSITING_MODE"),
                     on("LIBGL_ALWAYS_SOFTWARE"),
+                );
+            }
+            if cfg!(windows) {
+                log::info!(
+                    "webview env: webview2_args={:?}",
+                    std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default(),
                 );
             }
             if let Ok(dir) = app.path().app_local_data_dir() {
@@ -7520,6 +9834,7 @@ fn main() {
                     "show" => show_main(app),
                     "quit" => {
                         frostmod_manage::stop(&app.state::<FrostmodProcess>());
+                        usage::flush_on_exit(app);
                         app.exit(0);
                     }
                     _ => {}
@@ -7558,9 +9873,11 @@ fn main() {
                 }
                 let manager = handle.autolaunch();
                 let stale = cfg.autostart_binding_rev < config::AUTOSTART_BINDING_REV;
+                let mut cfg_dirty = false;
                 match autostart_action(
                     cfg.launch_at_startup,
                     manager.is_enabled().unwrap_or(false),
+                    startup_vetoed(&handle.package_info().name),
                     stale,
                 ) {
                     Autostart::Enable => {
@@ -7574,10 +9891,21 @@ fn main() {
                     Autostart::Disable => {
                         let _ = manager.disable();
                     }
+                    Autostart::Adopt => {
+                        log::info!(
+                            "Windows' startup list has the app switched off — turning \
+                             Launch at startup off to match"
+                        );
+                        cfg.launch_at_startup = false;
+                        cfg_dirty = true;
+                    }
                     Autostart::Leave => {}
                 }
                 if stale {
                     cfg.autostart_binding_rev = config::AUTOSTART_BINDING_REV;
+                    cfg_dirty = true;
+                }
+                if cfg_dirty {
                     let _ = config::save(handle, &cfg);
                 }
                 if cfg.auto_run_frostmod && frostmod_manage::is_installed(handle) {
@@ -7602,12 +9930,10 @@ fn main() {
                 //  * publish, because the look may have changed in the game's garage while
                 //    the app was shut, and nothing would ever have noticed;
                 //  * watch, so the same change during this session is noticed as it happens.
-                // The publish no-ops unless the experimental features are on and an account
-                // exists; the watching is also what keeps the look watcher pointed at the
-                // right files, which has nothing to do with sync.
-                if cfg.experimental_enabled() {
-                    publish_paints_soon(handle, &cfg, None);
-                }
+                // The publish no-ops when paint sync is turned off; the watching is also
+                // what keeps the look watcher pointed at the right files, which has nothing
+                // to do with sync.
+                publish_paints_soon(handle, &cfg, None);
                 if watches_looks(&cfg) {
                     let profiles = handle.state::<ProfileWatcher>();
                     profilewatch::start(handle, &profiles, &cfg.profiles_dir());
@@ -7626,14 +9952,19 @@ fn main() {
             // Notice the game starting (Steam or Play button) to re-arm FrostMod for the
             // session and check the mods folder is really on disk.
             sessionwatch::start(handle);
+            secure_launch::watch(handle);
             // Voice follows the rider onto whatever server they join, and off it again.
             // There is nothing to press: the supervisor is the whole of "joining a room".
             voice::session::start(handle);
             shop_session::load_session(handle);
+            hub_session::load_session(handle);
             shop_catalog_session::load(handle);
             mxb_session::load(handle);
             imgcache::start_maintenance(handle);
             memwatch::start();
+            // Anonymous counters. Started last of the startup tasks and after the config
+            // work above, because the install id it mints is saved into that same config.
+            usage::start(handle);
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);
@@ -7665,14 +9996,21 @@ fn main() {
                     return;
                 }
                 let cfg = config::load(window.app_handle()).unwrap_or_default();
-                // Never on Linux: the tray runs through libayatana-appindicator, which
-                // doesn't deliver click events to Tauri and isn't present at all on a
-                // stock GNOME desktop. Hiding there can strand the window with no way
-                // back, so closing closes.
-                let tray_can_restore = cfg!(not(target_os = "linux"));
-                if cfg.run_in_background && tray_can_restore && !cfg!(debug_assertions) {
+                let painted = firstpaint::painted();
+                if parks_on_close(painted, cfg.run_in_background) {
                     api.prevent_close();
                     let _ = window.hide();
+                    return;
+                }
+                // Closing for real: this is the last chance to report the session, and a
+                // short one would otherwise never be counted at all.
+                usage::flush_on_exit(window.app_handle());
+                if !painted {
+                    log::warn!(
+                        "[startup] closing a main window that never painted — quitting \
+                         rather than parking it in the tray"
+                    );
+                    frostmod_manage::stop(&window.app_handle().state::<FrostmodProcess>());
                 }
             }
         })
@@ -7682,6 +10020,7 @@ fn main() {
             // The macro is generic over the runtime; naming `Wry` here is what lets the
             // wrapper below infer what it is wrapping.
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+            window_painted,
             is_configured,
             get_config,
             create_config,
@@ -7697,12 +10036,44 @@ fn main() {
             get_pkz_preview,
             read_track_info,
             load_track_terrain,
+            generate_track,
+            check_track,
+            base_track_program,
+            blank_track_program,
+            close_track_lap,
+            fit_track_budget,
+            preview_track,
+            export_track_source,
+            track_tools_status,
+            set_track_tools,
+            download_track_tools,
+            build_track,
             load_track_overview,
+            load_track_scenery,
+            load_track_surfaces,
+            read_track_placements,
+            save_track_props,
+            read_track_placeable,
+            load_track_prop,
+            load_track_backdrop,
+            load_track_ground,
             diagnose_track,
             unpack_paint,
             texture_bytes,
             watch_paint_files,
             unpack_pkz,
+            content_lock_available,
+            content_lock_plan,
+            content_lock_run,
+            content_secure_available,
+            set_mxbsecure_enabled,
+            mxbsecure_lock,
+            mxbsecure_verify,
+            secure_steam_id,
+            mxbsecure_provision,
+            mxbsecure_open_offline,
+            mxbsecure_generate,
+            local_guid,
             load_bike_model,
             preview_model_swap,
             load_rider_model,
@@ -7715,6 +10086,8 @@ fn main() {
             paint_studio_pixels,
             paint_studio_stage,
             photo_save,
+            psd_read,
+            psd_save,
             paint_studio_target,
             paint_studio_save,
             paint_studio_extract,
@@ -7753,6 +10126,7 @@ fn main() {
             move_mod,
             uninstall_mod,
             reveal_in_explorer,
+            log_client,
             logs_info,
             share_logs,
             open_logs_folder,
@@ -7768,8 +10142,11 @@ fn main() {
             count_profiles_in,
             get_mods_root,
             set_run_in_background,
+            set_analytics_enabled,
+            track_event,
             set_launch_at_startup,
             set_auto_run_frostmod,
+            set_frostmod_args,
             set_instant_refresh,
             overlay_toggle,
             overlay_hide,
@@ -7782,6 +10159,8 @@ fn main() {
             voice_mute,
             set_voice_proximity,
             set_voice_enabled,
+            set_paint_sync_enabled,
+            remove_synced_paints,
             set_preview_tyres,
             set_voice_input_device,
             set_voice_output_device,
@@ -7792,6 +10171,7 @@ fn main() {
             voice_meter_stop,
             voice_test_output,
             set_watch_mods_reload,
+            set_secure_content_inject,
             frostmod_reload,
             frostmod_running,
             frostmod_attachment,
@@ -7807,9 +10187,20 @@ fn main() {
             frostmod_stop,
             launch_game,
             join_server,
+            list_master_servers,
             experimental_state,
-            set_experimental,
             enroll_account,
+            // Paid plugins: the catalogue, redeeming a key, and getting a bundle on disk.
+            plugins::plugin_list,
+            plugins::plugin_redeem,
+            plugins::plugin_install,
+            plugins::plugin_remove,
+            plugins::plugin_runtime,
+            plugins::plugin_read_file,
+            plugins::plugin_write_file,
+            plugins::plugin_list_dir,
+            plugins::plugin_delete_file,
+            plugins::plugin_install_payload,
             set_guid,
             publish_paints,
             sync_paints,
@@ -7836,6 +10227,14 @@ fn main() {
             shop_match_catalog,
             shop_install,
             shop_installed_map,
+            hub_search,
+            hub_categories,
+            hub_detail,
+            hub_login,
+            hub_status,
+            hub_logout,
+            hub_my_downloads,
+            hub_install,
             record_download,
             download_history,
             forget_download,
@@ -7865,6 +10264,14 @@ fn main() {
             presets_export,
             presets_decode,
             presets_import,
+            feel_list,
+            feel_capture,
+            feel_save,
+            feel_delete,
+            feel_apply,
+            feel_export,
+            feel_decode,
+            feel_import,
             preset_bundle_stats,
             preset_bundle_create,
             preset_bundle_import,
@@ -7894,6 +10301,31 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod build_progress_tests {
+    use super::*;
+
+    /// The studio reads these five names off the event. `#[serde(flatten)]` is the only thing
+    /// holding the phase's own fields at the top level, and nothing about that is checked by
+    /// the compiler — get it wrong and the bar simply never moves.
+    #[test]
+    fn a_build_reports_one_flat_object() {
+        let at = trackbuild::Plan::new(2049, true, true).start("map");
+        let json = serde_json::to_value(BuildProgress {
+            slug: "corpus_national".into(),
+            at,
+        })
+        .unwrap();
+        let obj = json.as_object().expect("an object");
+        let mut names: Vec<&str> = obj.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["expect", "from", "phase", "slug", "to"]);
+        assert_eq!(obj["phase"], "map");
+        assert_eq!(obj["slug"], "corpus_national");
+        assert!(obj["to"].as_f64().unwrap() > obj["from"].as_f64().unwrap());
+    }
 }
 
 #[cfg(test)]
@@ -7978,6 +10410,55 @@ mod webview_env_tests {
         assert_eq!(vars.len(), 1);
         assert!(vars.contains_key("WEBKIT_DISABLE_DMABUF_RENDERER"));
     }
+
+    /// WebView2 paints on virtually every Windows machine, and forcing software rendering
+    /// on all of them to cure the few would be a bad trade.
+    #[test]
+    fn windows_is_left_alone_unless_safe_graphics_is_asked_for() {
+        assert!(webview2_env_defaults(GraphicsEnv::default()).is_empty());
+    }
+
+    /// The lever support has to pull for a window that came up black and stayed black.
+    #[test]
+    fn safe_graphics_takes_the_gpu_out_of_webview2() {
+        let vars: HashMap<_, _> = webview2_env_defaults(GraphicsEnv {
+            safe_mode: true,
+            ..GraphicsEnv::default()
+        })
+        .into_iter()
+        .collect();
+        assert_eq!(
+            vars.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"),
+            Some(&"--disable-gpu"),
+        );
+    }
+}
+
+/// The window that never painted is the one these are for: it has no close button drawn
+/// in it, so whatever the player does next has to actually get rid of it.
+#[cfg(test)]
+mod close_behaviour_tests {
+    use super::*;
+
+    /// The whole bug: Alt+F4 on a black window parked it in the tray, the process stayed
+    /// alive holding the single-instance guard, and reopening the app called `show_main`
+    /// and handed the same dead window back. Task Manager was the only way out.
+    #[test]
+    fn a_window_that_never_painted_never_parks_in_the_tray() {
+        assert!(!parks_on_close(false, true));
+        assert!(!parks_on_close(false, false));
+    }
+
+    /// And the setting still means what it says for a window that works.
+    #[test]
+    fn a_painted_window_still_honours_run_in_background() {
+        // Release builds on Windows and macOS park; this test binary is neither, so the
+        // assertion is on the platform-and-build gate agreeing with itself rather than on
+        // a fixed answer.
+        let parks = cfg!(not(target_os = "linux")) && !cfg!(debug_assertions);
+        assert_eq!(parks_on_close(true, true), parks);
+        assert!(!parks_on_close(true, false), "turning it off always closes for real");
+    }
 }
 
 #[cfg(test)]
@@ -8023,30 +10504,100 @@ mod release_version_tests {
 }
 
 #[cfg(test)]
+mod sync_target_tests {
+    use super::*;
+
+    fn registry() -> Vec<String> {
+        vec!["alpha".to_string(), "bravo".to_string(), "charlie".to_string()]
+    }
+
+    /// The bug that emptied the database: every automatic pull that ran before the rider had
+    /// joined anything asked every server on the platform for its full roster — and each of
+    /// those answers is the paints of everyone on that server.
+    #[test]
+    fn an_automatic_pull_with_nowhere_to_aim_asks_nobody() {
+        assert!(sync_targets(None, &registry(), Sweep::Never).is_empty());
+    }
+
+    /// The manual button still works the way it reads: a person asked whose paints they are
+    /// missing, and with no server of their own the registry is the only answer there is.
+    #[test]
+    fn a_person_pressing_sync_may_still_ask_everyone() {
+        assert_eq!(sync_targets(None, &registry(), Sweep::Allowed), registry());
+    }
+
+    /// An address is a server. Whoever supplied it, and whatever the sweep rule says, that is
+    /// the one to ask — a targeted sync is never the expensive case.
+    #[test]
+    fn an_address_is_asked_about_whatever_the_sweep_rule_says() {
+        let one = vec!["bravo".to_string()];
+        assert_eq!(sync_targets(Some("bravo".into()), &registry(), Sweep::Never), one);
+        assert_eq!(sync_targets(Some("bravo".into()), &registry(), Sweep::Allowed), one);
+    }
+
+    /// An empty registry is not a reason to sweep something else — it is simply nothing.
+    #[test]
+    fn an_empty_registry_asks_nobody_either_way() {
+        assert!(sync_targets(None, &[], Sweep::Allowed).is_empty());
+        assert!(sync_targets(None, &[], Sweep::Never).is_empty());
+    }
+}
+
+#[cfg(test)]
 mod autostart_tests {
     use super::*;
 
     #[test]
     fn the_setting_is_honoured_when_the_binding_is_current() {
-        assert_eq!(autostart_action(true, false, false), Autostart::Enable);
-        assert_eq!(autostart_action(true, true, false), Autostart::Leave);
-        assert_eq!(autostart_action(false, true, false), Autostart::Disable);
-        assert_eq!(autostart_action(false, false, false), Autostart::Leave);
+        assert_eq!(autostart_action(true, false, false, false), Autostart::Enable);
+        assert_eq!(autostart_action(true, true, false, false), Autostart::Leave);
+        assert_eq!(autostart_action(false, true, false, false), Autostart::Disable);
+        assert_eq!(autostart_action(false, false, false, false), Autostart::Leave);
     }
 
     /// The rename bug: the entry exists, so nothing looks wrong, but it names a binary that
     /// is gone. Without this the app quietly stops starting at login for everyone upgrading.
     #[test]
     fn an_entry_written_for_the_old_binary_is_rewritten() {
-        assert_eq!(autostart_action(true, true, true), Autostart::Rebind);
+        assert_eq!(autostart_action(true, true, false, true), Autostart::Rebind);
     }
 
     /// Whoever turned it off gets it off, however old their entry is — a stale binding is a
     /// reason to rewrite the entry, never to bring one back.
     #[test]
     fn a_stale_binding_never_revives_a_disabled_login_item() {
-        assert_eq!(autostart_action(false, true, true), Autostart::Disable);
-        assert_eq!(autostart_action(false, false, true), Autostart::Leave);
+        assert_eq!(autostart_action(false, true, false, true), Autostart::Disable);
+        assert_eq!(autostart_action(false, false, false, true), Autostart::Leave);
+    }
+
+    /// The report: turned off in Task Manager, back on after the next update. A veto there
+    /// reads as "not enabled", so every one of these used to come out `Enable` — and
+    /// `enable()` rewrites the very flag that was the player saying no.
+    #[test]
+    fn windows_own_startup_list_wins_over_the_setting() {
+        assert_eq!(autostart_action(true, false, true, false), Autostart::Adopt);
+        assert_eq!(autostart_action(true, false, true, true), Autostart::Adopt);
+        // Belt and braces: a veto standing next to an entry that still reads as enabled.
+        assert_eq!(autostart_action(true, true, true, false), Autostart::Adopt);
+    }
+
+    /// A veto is a reason to stop turning it on, never a reason to turn it on. With the
+    /// setting already off there is nothing left to reconcile.
+    #[test]
+    fn a_veto_leaves_an_already_off_setting_alone() {
+        assert_eq!(autostart_action(false, false, true, false), Autostart::Leave);
+        assert_eq!(autostart_action(false, false, true, true), Autostart::Leave);
+    }
+
+    /// The twelve bytes Windows writes: `02 00…` while the app is allowed to start, `03 00`
+    /// plus the FILETIME it was switched off once it isn't.
+    #[test]
+    fn the_startup_flag_is_read_off_its_tail() {
+        assert!(!startup_flag_is_veto(&[2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+        assert!(startup_flag_is_veto(&[3, 0, 0, 0, 0x1e, 0x2b, 0x9c, 0x5f, 0x7a, 0x0d, 0xdc, 0x01]));
+        // Too short to carry a timestamp, so there is nothing there that says "off".
+        assert!(!startup_flag_is_veto(&[]));
+        assert!(!startup_flag_is_veto(&[3, 0, 0, 0]));
     }
 }
 
@@ -8067,6 +10618,8 @@ mod window_tests {
             mxb_fetch::WINDOW,
             shop_fetch::WINDOW,
             SHOP_LOGIN_WINDOW,
+            HUB_LOGIN_WINDOW,
+            hub_clearance::WINDOW,
             overlay::LABEL, // handled earlier by its own branch, but never by this one
         ] {
             assert!(
@@ -8117,7 +10670,7 @@ mod window_tests {
     /// their capability files grant.
     #[test]
     fn the_apps_own_windows_are_unaffected_by_the_guard() {
-        for label in [MAIN_WINDOW, overlay::LABEL, SHOP_LOGIN_WINDOW] {
+        for label in [MAIN_WINDOW, overlay::LABEL, SHOP_LOGIN_WINDOW, HUB_LOGIN_WINDOW] {
             for command in ["create_config", "install_mod", "plugin:event|emit"] {
                 assert!(ipc_allowed(label, command), "{label} / {command}");
             }
@@ -8301,6 +10854,50 @@ mod mesh_texture_tests {
 
         std::fs::create_dir_all(root.join("Bare")).unwrap();
         assert!(mesh_texture_names(&root.join("Bare")).is_empty(), "no mesh, nothing to say");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A sheet name that only exists because another paint misspelt one the model binds is
+    /// not offered. The KTM 250 SX-F binds `plastics_n`; a paint beside it ships
+    /// `plastics-n`, which the game asks for on no part of the bike, so painting it is work
+    /// that cannot show up. Names the mesh never mentions at all are somebody else's sheet
+    /// and are left alone.
+    #[test]
+    fn a_paints_misspelling_of_a_bound_sheet_is_not_offered() {
+        let root = std::env::temp_dir().join(format!("frost-dead-sheet-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let bike = root.join("Bike");
+        std::fs::create_dir_all(bike.join("paints")).unwrap();
+        let mut mesh = mesh_naming("plastics");
+        mesh.extend_from_slice(&mesh_naming("plastics_n"));
+        std::fs::write(bike.join("model.edf"), mesh).unwrap();
+        std::fs::write(
+            bike.join("paints").join("Someone.pnt"),
+            super::paint::encode(
+                "Someone",
+                &[
+                    super::paint::PntTexture {
+                        name: "plastics-n".into(),
+                        width: 2,
+                        height: 2,
+                        rgba: vec![0; 16],
+                    },
+                    super::paint::PntTexture {
+                        name: "tyres".into(),
+                        width: 2,
+                        height: 2,
+                        rgba: vec![0; 16],
+                    },
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let names = paint_hints(&bike.join("paints"));
+        assert!(names.iter().any(|n| n == "plastics_n"), "the bound spelling stays: {names:?}");
+        assert!(!names.iter().any(|n| n == "plastics-n"), "the dead one goes: {names:?}");
+        assert!(names.iter().any(|n| n == "tyres"), "a sheet of its own is not ours to drop: {names:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -8654,6 +11251,180 @@ mod deep_link_tests {
     fn refuses_an_absurdly_long_code() {
         let long = format!("mxb://enroll?code={}", "a".repeat(200));
         assert!(enroll_code_from_link(&long).is_none());
+    }
+}
+
+#[cfg(test)]
+mod grid_watch_tests {
+    use super::GridWatch;
+
+    /// The whole point: a rider who wasn't there a moment ago is a reason to pull.
+    #[test]
+    fn a_rider_who_joins_later_is_an_arrival() {
+        let mut w = GridWatch::default();
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate"].into_iter()), 2, "the first look is all arrivals");
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate"].into_iter()), 0, "an unchanged grid pulls nothing");
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate", "Alice"].into_iter()), 1, "the newcomer is the trigger");
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate", "Alice"].into_iter()), 0);
+    }
+
+    /// A rider who leaves and comes back must not pull again — their paint is already here,
+    /// and a grid where someone is rejoining repeatedly would pull on a loop.
+    #[test]
+    fn someone_returning_is_not_a_new_arrival() {
+        let mut w = GridWatch::default();
+        w.arrivals("silver mx", ["Frost", "Nate"].into_iter());
+        assert_eq!(w.arrivals("silver mx", ["Frost"].into_iter()), 0, "Nate left");
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate"].into_iter()), 0, "and came back");
+    }
+
+    /// One rider must not read as two because the game spaced or capitalised their name
+    /// differently between two reads of the block.
+    #[test]
+    fn a_name_is_folded_before_it_counts() {
+        let mut w = GridWatch::default();
+        assert_eq!(w.arrivals("silver mx", ["Frost"].into_iter()), 1);
+        assert_eq!(w.arrivals("silver mx", ["  frost  ", "FROST"].into_iter()), 0);
+    }
+
+    /// An empty slot in the entry list is not a rider.
+    #[test]
+    fn blank_names_are_not_riders() {
+        let mut w = GridWatch::default();
+        assert_eq!(w.arrivals("silver mx", ["", "   ", "Frost"].into_iter()), 1);
+    }
+
+    /// Changing server is a new grid. Carrying the last one's names over would mean the
+    /// riders on the new server were silently treated as already pulled for.
+    #[test]
+    fn another_server_starts_the_grid_again() {
+        let mut w = GridWatch::default();
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate"].into_iter()), 2);
+        assert_eq!(w.arrivals("other server", ["Frost", "Nate"].into_iter()), 2, "same names, new grid");
+        assert_eq!(w.arrivals("other server", ["Frost", "Nate"].into_iter()), 0);
+    }
+}
+
+#[cfg(test)]
+mod body_orientation_tests {
+    use super::*;
+
+    /// A body as three marked points: the head's skin, the name planes on its back, and the
+    /// boots. Enough to answer both questions the orientation asks and nothing more.
+    fn body(skin: [f32; 3], back: [f32; 3], feet: [f32; 3]) -> Vec<edf::EdfNode> {
+        let mut positions = Vec::new();
+        let mut indices = Vec::new();
+        let mut submeshes = Vec::new();
+        for (i, (p, slot)) in
+            [(skin, "face"), (back, "hide"), (feet, "rider")].into_iter().enumerate()
+        {
+            // A triangle per part, all three corners on the same point: the orientation only
+            // ever reads positions, so a degenerate triangle carries everything it needs.
+            for _ in 0..3 {
+                positions.extend_from_slice(&p);
+                indices.push((i * 3 + indices.len() % 3) as u32);
+            }
+            let base = i * 3;
+            indices.truncate(base);
+            indices.extend_from_slice(&[base as u32, base as u32 + 1, base as u32 + 2]);
+            submeshes.push(edf::Submesh {
+                name: slot.into(),
+                tri_start: i as u32,
+                tri_count: 1,
+                texture: Some(slot.into()),
+                uv_tile: None,
+                mat: None,
+            });
+        }
+        vec![edf::EdfNode {
+            name: "body".into(),
+            positions,
+            uvs: Vec::new(),
+            normals: Vec::new(),
+            indices,
+            submeshes,
+            texture: None,
+            placed: true,
+            materials: Vec::new(),
+        }]
+    }
+
+    fn skin_top(nodes: &[edf::EdfNode]) -> f32 {
+        body_bounds(nodes, Some("face")).1[1]
+    }
+
+    fn back_depth(nodes: &[edf::EdfNode]) -> f64 {
+        let (lo, hi) = body_bounds(nodes, None);
+        slot_depth(nodes, "hide", (lo[2] + hi[2]) / 2.0).expect("the planes are there")
+    }
+
+    /// The report: a custom body came out upside down and facing backwards while the stock
+    /// ones were fine. A Z-up mesh with its head at *positive* Z takes the one fixed quarter
+    /// turn and lands exactly like that, because that turn is written for the other end.
+    #[test]
+    fn a_body_that_lands_upside_down_is_turned_back() {
+        // Already stood up, and wrong: skin at the bottom, name planes in front.
+        let mut nodes = body([0.0, 0.05, 0.10], [0.0, 0.9, 0.10], [0.0, 1.7, 0.0]);
+        check_body_orientation(&mut nodes);
+
+        let (lo, hi) = body_bounds(&nodes, None);
+        assert!(
+            skin_top(&nodes) > lo[1] + 0.5 * (hi[1] - lo[1]),
+            "the head ends up at the top ({:.3} of {:.3}..{:.3})",
+            skin_top(&nodes),
+            lo[1],
+            hi[1],
+        );
+        assert!(back_depth(&nodes) < 0.0, "and the name planes end up on the back");
+    }
+
+    /// The half turn that rights a body also swings it front-to-back, so a body that is only
+    /// upside down must not be left facing the wrong way by the fix for the first fault.
+    #[test]
+    fn righting_a_body_leaves_it_facing_forward() {
+        // Upside down, but its planes are already behind it.
+        let mut nodes = body([0.0, 0.05, -0.10], [0.0, 0.9, -0.10], [0.0, 1.7, 0.0]);
+        check_body_orientation(&mut nodes);
+        assert!(back_depth(&nodes) < 0.0, "the planes are still on the back");
+    }
+
+    /// A body that only faces the wrong way is turned about its height, which must not put
+    /// its head back at the bottom.
+    #[test]
+    fn a_backwards_body_is_turned_without_upending_it() {
+        let mut nodes = body([0.0, 1.7, 0.10], [0.0, 0.9, 0.10], [0.0, 0.05, 0.0]);
+        check_body_orientation(&mut nodes);
+
+        let (lo, hi) = body_bounds(&nodes, None);
+        assert!(skin_top(&nodes) > lo[1] + 0.5 * (hi[1] - lo[1]), "the head stays at the top");
+        assert!(back_depth(&nodes) < 0.0, "and it now faces forward");
+    }
+
+    /// The one that matters most: the stock bodies already arrive correct, and a check that
+    /// "corrects" them is worse than no check at all.
+    #[test]
+    fn a_body_that_is_already_right_is_left_alone() {
+        let before = body([0.0, 1.7, -0.10], [0.0, 0.9, -0.10], [0.0, 0.05, 0.0]);
+        let mut after = before.clone();
+        check_body_orientation(&mut after);
+        assert_eq!(after[0].positions, before[0].positions, "not a vertex moves");
+    }
+
+    /// Every inch covered — kit, helmet, gloves, no skin anywhere — leaves the question
+    /// unanswerable. An unturned body beats one turned on no evidence.
+    #[test]
+    fn a_body_showing_no_skin_is_not_guessed_at() {
+        let mut nodes = body([0.0, 1.7, -0.10], [0.0, 0.9, -0.10], [0.0, 0.05, 0.0]);
+        for n in nodes.iter_mut() {
+            for sm in n.submeshes.iter_mut() {
+                if sm.texture.as_deref() == Some("face") {
+                    sm.texture = Some("rider".into());
+                }
+            }
+        }
+        let before = nodes.clone();
+        check_body_orientation(&mut nodes);
+        assert_eq!(nodes[0].positions, before[0].positions, "nothing is assumed");
     }
 }
 
@@ -10503,6 +13274,62 @@ mod viewer_tests {
 }
 
 #[cfg(test)]
+mod no_mesh_tests {
+    use super::no_mesh_reason;
+
+    /// An `.edf` long enough to clear the header check — the shape of a mesh that read fine.
+    fn a_mesh() -> Vec<u8> {
+        let mut b = b"EDF\0".to_vec();
+        b.resize(128, 0);
+        b
+    }
+
+    // A cloud placeholder that was never fetched: the entry is there and empty. This is the
+    // only case the old wording was right about, and it keeps it.
+    #[test]
+    fn a_mesh_that_never_arrived_points_at_cloud_sync() {
+        let msg = no_mesh_reason("Bike · Stock", &[("model.edf", b"")]);
+        assert!(msg.contains("cloud-synced"), "{msg}");
+    }
+
+    // The report this came from: a protected model that runs perfectly in game, on a machine
+    // with no cloud sync anywhere near it. Bytes arrived, they just weren't a mesh — sending
+    // that player to their OneDrive settings is the one thing the message must not do.
+    #[test]
+    fn a_mesh_that_isnt_a_mesh_is_not_blamed_on_cloud_sync() {
+        let msg = no_mesh_reason("Bike · MySwap", &[("model.edf", &[0xfe, 0x9c, 0xa5, 0x6a])]);
+        assert!(!msg.contains("cloud"), "{msg}");
+        assert!(msg.contains("didn't decode"), "{msg}");
+    }
+
+    // A real `.edf` the parser walked and found nothing in. Nothing the player can fix, so
+    // the message says where the fault is rather than sending them looking.
+    #[test]
+    fn a_real_mesh_that_parsed_to_nothing_says_so() {
+        let mesh = a_mesh();
+        let msg = no_mesh_reason("Bike · MySwap", &[("model.edf", &mesh)]);
+        assert!(msg.contains("no parts came out of it"), "{msg}");
+    }
+
+    // One good mesh among several is still a bike that should have drawn — the parser gap is
+    // the fault worth naming, not the empty sibling beside it.
+    #[test]
+    fn one_readable_mesh_decides_the_answer() {
+        let mesh = a_mesh();
+        let msg = no_mesh_reason("Bike · MySwap", &[("fwheel.edf", b""), ("model.edf", &mesh)]);
+        assert!(msg.contains("no parts came out of it"), "{msg}");
+    }
+
+    // The header check itself: sealed bytes and a truncated file both fail it, a mesh doesn't.
+    #[test]
+    fn only_a_real_header_reads_as_a_mesh() {
+        assert!(crate::edf::is_edf(&a_mesh()));
+        assert!(!crate::edf::is_edf(b"EDF\0"), "long enough to match, too short to parse");
+        assert!(!crate::edf::is_edf(&[0xfe, 0x9c, 0xa5, 0x6a, 0, 0, 0, 0]));
+    }
+}
+
+#[cfg(test)]
 mod live_look_tests {
     use super::*;
     use std::path::{Path, PathBuf};
@@ -10603,3 +13430,57 @@ mod live_look_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod track_install_tests {
+    use super::*;
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("frost-trackdest-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    #[test]
+    fn a_track_installs_into_the_mods_tree_not_the_install_dir() {
+        let user = tmp("user");
+        std::fs::create_dir_all(user.join("mods").join("tracks")).unwrap();
+        let cfg = AppConfig {
+            mods_path: user.to_string_lossy().into_owned(),
+            // Deliberately set, and deliberately not where the track goes.
+            game_path: "/somewhere/else/MX Bikes".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            track_install_dir(&cfg).unwrap(),
+            user.join("mods").join("tracks")
+        );
+        let _ = std::fs::remove_dir_all(&user);
+    }
+
+    /// `mxbikes.ini` lets a player point the game at `C:\mods`, and then `mods_path` *is*
+    /// the tree — joining `mods` on by hand would write to `C:\mods\mods\tracks`.
+    #[test]
+    fn a_relocated_tree_is_the_mods_folder_itself() {
+        let tree = tmp("tree");
+        for d in ["bikes", "tracks", "rider"] {
+            std::fs::create_dir_all(tree.join(d)).unwrap();
+        }
+        let cfg = AppConfig {
+            mods_path: tree.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        assert_eq!(track_install_dir(&cfg).unwrap(), tree.join("tracks"));
+        let _ = std::fs::remove_dir_all(&tree);
+    }
+
+    /// With no folder configured the old code joined onto an empty `game_path` and wrote
+    /// `mods/tracks` relative to the working directory — a track installed into thin air.
+    #[test]
+    fn no_configured_folder_is_an_error_not_a_relative_path() {
+        let cfg = AppConfig { mods_path: String::new(), ..Default::default() };
+        let err = track_install_dir(&cfg).unwrap_err();
+        assert!(err.contains("configured"), "{err}");
+    }
+}
+

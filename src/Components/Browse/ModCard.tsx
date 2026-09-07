@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import type { ModRating, ModSummary } from "../../types";
 import RatingStars from "./RatingStars";
-import { Badge } from "@/Components/ui/badge";
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -20,7 +19,8 @@ import {
 } from "@/Components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { formatDateShort } from "../../lib/mods";
-import { cachedImage, GRID_THUMB_WIDTH } from "../../lib/imgcache";
+import { GRID_THUMB_WIDTH } from "../../lib/imgcache";
+import CachedImg from "@/Components/ui/cached-img";
 import { useT } from "../../i18n/context";
 
 interface ModCardProps {
@@ -58,79 +58,85 @@ export default function ModCard({
         <button
           onClick={onOpen}
           className={cn(
-            "group relative flex cursor-default flex-col overflow-hidden rounded-xl border bg-card text-left transition-colors",
-            selected
-              ? "border-primary ring-1 ring-primary"
-              : "border-white/[0.07] hover:border-white/15",
+            "group u-notch relative flex h-[178px] cursor-default flex-col overflow-hidden bg-card text-left transition-all",
+            selected && "outline outline-2 -outline-offset-2 outline-primary",
           )}
         >
-          <div className="relative aspect-video overflow-hidden bg-gradient-to-br from-[#3a3f45] to-[#20242a]">
+          <div className="absolute inset-0 bg-gradient-to-br from-[#2a2a30] to-[#131316]">
             {mod.image && !broken ? (
-              <img
+              <CachedImg
                 // Through the on-disk cache, so scrolling the grid twice doesn't re-fetch
-                // every thumbnail. A cache miss 404s, which lands on `onError` below exactly
-                // as a dead remote URL would.
-                src={cachedImage(mod.image, GRID_THUMB_WIDTH)}
+                // every thumbnail; a miss falls back to the origin URL, and only then to the
+                // placeholder below.
+                src={mod.image}
+                width={GRID_THUMB_WIDTH}
                 alt={mod.title}
                 loading="lazy"
-                onError={() => setBroken(true)}
-                className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                onUnavailable={() => setBroken(true)}
+                className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
               />
             ) : (
-              <div className="grid size-full place-items-center text-foreground/20">
-                <Icon className="size-8" strokeWidth={1.5} />
+              <div className="grid size-full place-items-center text-foreground/15">
+                <Icon className="size-9" strokeWidth={1.2} />
               </div>
             )}
-            <span
-              role="checkbox"
-              aria-checked={selected}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleSelect();
-              }}
-              className={cn(
-                "absolute left-2 top-2 grid size-5 cursor-default place-items-center rounded-[6px] border shadow-sm transition-opacity",
-                selected
-                  ? "border-primary bg-primary text-primary-foreground opacity-100"
-                  : "border-white/50 bg-black/40 text-transparent hover:text-white/70",
-                selected || selectionActive
-                  ? "opacity-100"
-                  : "opacity-0 group-hover:opacity-100",
-              )}
-            >
-              <Check className="size-3.5" strokeWidth={3} />
+          </div>
+
+          {/* The art carries the title, so it needs a floor dark enough to read on. */}
+          <div className="absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-[rgba(6,6,7,0.95)] via-[rgba(6,6,7,0.55)] to-transparent" />
+
+          <span
+            role="checkbox"
+            aria-checked={selected}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSelect();
+            }}
+            className={cn(
+              "absolute left-2 top-2 grid size-5 cursor-default place-items-center border transition-opacity",
+              selected
+                ? "border-primary bg-primary text-primary-foreground opacity-100"
+                : "border-white/50 bg-black/45 text-transparent hover:text-white/70",
+              selected || selectionActive ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+            )}
+          >
+            <Check className="size-3.5" strokeWidth={3} />
+          </span>
+
+          {installed && (
+            <span className="u-skew absolute right-2 top-2 flex items-center gap-1 bg-[rgba(8,8,10,0.82)] px-1.5 py-[3px]">
+              <span className="u-unskew flex items-center gap-1 text-success">
+                <Check className="size-3" strokeWidth={3} />
+                <span className="font-cond text-[9px] font-bold uppercase tracking-[0.16em]">
+                  {t("common.installed")}
+                </span>
+              </span>
             </span>
+          )}
+
+          <div className="absolute inset-x-0 bottom-0 flex flex-col gap-1 px-2.5 pb-2.5">
             {/* Unrated mods get nothing at all — five empty stars would read as a bad
                 score rather than as "nobody has voted yet". */}
             {rating && rating.count > 0 && (
-              <span className="absolute bottom-1.5 left-1.5 rounded-md bg-black/65 px-1.5 py-[3px] shadow-sm backdrop-blur-[2px]">
+              <span className="mb-0.5 w-fit bg-black/55 px-1.5 py-[2px]">
                 <RatingStars rating={rating} />
               </span>
             )}
-          </div>
-          <div className="flex flex-col gap-1 px-3 py-2.5">
-            <div className="flex items-center gap-1.5">
-              <span
-                className="flex-1 truncate text-[13.5px] font-semibold"
-                title={mod.title}
-              >
-                {mod.title}
-              </span>
-              {installed && (
-                <Badge variant="success" className="flex-none">
-                  <Check className="size-3" strokeWidth={3} />
-                  {t("common.installed")}
-                </Badge>
-              )}
-            </div>
-            {/* Date and byline share the line, the way a shop card carries its author. A
-                mod the catalog named nobody for just keeps the date. */}
-            <div className="flex items-baseline justify-between gap-2 text-[11.5px] text-muted-foreground">
-              <span className="flex-none">{formatDateShort(mod.date)}</span>
+            <span
+              className="truncate font-cond text-[15px] font-bold uppercase leading-[1.1] tracking-[0.05em] text-white"
+              title={mod.title}
+            >
+              {mod.title}
+            </span>
+            <div className="flex items-baseline gap-1.5 text-[11px] text-white/65">
+              <span className="flex-none tabular-figures">{formatDateShort(mod.date)}</span>
               {mod.author && (
-                <span className="truncate" title={mod.author}>
-                  {t("browse.byAuthor", { author: mod.author })}
-                </span>
+                <>
+                  <span className="text-white/30">/</span>
+                  <span className="truncate" title={mod.author}>
+                    {mod.author}
+                  </span>
+                </>
               )}
             </div>
           </div>

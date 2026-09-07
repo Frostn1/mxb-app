@@ -1,29 +1,9 @@
 # Changelog
 
-## 2026-08-28
-
-### Changed
-- **Models reach the 3D view without being spelled out as text.** A mesh's vertices used to
-  cross to the viewer as JSON numbers — 5.9 MB of digits for a small bike, and every one of
-  them parsed back into a number on arrival. They travel as their own bytes now: **the app
-  spends 12.4 ms preparing a bike's mesh instead of 2.2 ms**, and the viewer unpacks it
-  **6.8x faster** (31 ms → 4.6 ms), which grows with the model — a detailed bike or a gear
-  mesh is several times the size of the one measured. Bikes, rider gear, helmets, the rider
-  body and model-swap previews all arrive the same way.
-
-## 2026-08-27
-
-### Fixed
-- **Testing the microphone did nothing on macOS.** The app never told macOS what it wanted a
-  microphone for, and macOS refuses one on those terms — silently. The permission prompt
-  never appeared, the stream opened, and not a single sample was ever delivered, so the
-  level bar sat at zero looking like a bug in the app. It now says what it wants the
-  microphone for, so macOS asks you. If the microphone is opened and still sends nothing,
-  the mic test says so and tells you where to look, instead of leaving you watching a bar
-  that will never move.
-
+## 2026-09-06
 
 ### Added
+
 - **You hear each rider from where they actually are.** A rider alongside you is loud and on
   that side; one two corners back is faint; one across the circuit isn't there at all. You
   end up knowing where people are without looking, which is the thing a Discord call can
@@ -37,8 +17,19 @@
   list is the thing that decides who is audible, and nothing said over the network can add a
   name to it.
 
-
 ### Fixed
+
+- The Servers tab lists the live MX Bikes servers again. The app now signs in to the master
+  server exactly as the game does, so the master answers it.
+
+- **Testing the microphone did nothing on macOS.** The app never told macOS what it wanted a
+  microphone for, and macOS refuses one on those terms — silently. The permission prompt
+  never appeared, the stream opened, and not a single sample was ever delivered, so the
+  level bar sat at zero looking like a bug in the app. It now says what it wants the
+  microphone for, so macOS asks you. If the microphone is opened and still sends nothing,
+  the mic test says so and tells you where to look, instead of leaving you watching a bar
+  that will never move.
+
 - **Opening a bike in 3D was doing half its work for nothing.** Every texture packed inside a
   model was run through a resize on the way in — including the ones that were already the
   size the viewer wants, which is how bike sheets are almost always authored. Resampling a
@@ -47,35 +38,764 @@
   127 ms**, and the sheets are a touch sharper for never having been resampled. Rider gear,
   helmets and model swaps read their textures the same way and all get the same back.
 
-### Changed
-- **A track's 3D view appears about seven times faster.** The fine terrain is a 2048×2048
-  grid — four million vertices — and three.js worked out its lighting the general way, by
-  walking all 8.4 million triangles and accumulating a normal onto each corner. A height grid
-  doesn't need the general way: the ground is a function of x and y, so its slope comes
-  straight from the neighbouring samples. Measured on the same mesh, that took building the
-  view from 622 ms to 84 ms, with the two agreeing to within 0.02° — the same picture, drawn
-  without the wait. Nothing about the terrain's detail changed.
+## 2026-09-06
 
-- **Four mods install two at a time instead of one after another.** Downloading was never
-  what made a batch slow: a single MediaFire connection measured at 25–34 MB/s, more than a
-  typical home line carries, and splitting one file across eight parallel connections was
-  worth exactly nothing. What cost time was the line sitting idle between mods, while one
-  resolved its link or unpacked. Two now overlap, and the next few links are looked up ahead
-  of their turn rather than when their turn arrives.
+### Fixed
+- Sharing a track is quicker. The upload no longer waits on the host after the files are
+  already up, and the app stays responsive while a share is being packed.
 
-- **MediaFire links resolve about a third of a second quicker.** The app asked MediaFire's
-  API for a download link first and scraped the page only if that failed. Across eight real
-  tracks the API refused every one, and the scrape rescued all eight — so the first request
-  was pure delay. The page is asked first now; the API stays behind it, still the route that
-  survives the page being redesigned.
+## 2026-09-06
 
-- **Preset bundles, shared files and picked files place the same cheap way downloads do.**
-  They all unpack to a folder that is deleted moments later, so their files are moved into
-  place rather than copied a second time.
+### Fixed
+- The Servers tab lists the live MX Bikes servers. The app signs in to the master server the
+  same way the game does, through your Steam copy of MX Bikes.
 
-## 2026-08-26
+## 2026-09-06
 
 ### Changed
+- A mod's screenshots are shown whole on its page. Clicking one opens it full screen, where the
+  arrow keys move through the set and Escape closes it.
+
+## 2026-09-06
+
+### Added
+- A progress bar while a track compiles, saying what it is working on and how far along it is.
+- A compiling track shows in the top bar from anywhere in the app, and keeps building if you
+  leave the Track Studio — the bar is still there when you come back.
+
+## 2026-09-06
+
+### Changed
+- The step in the ground is gone. Where two legs of a lap graded into the same piece of
+  field, the ground between them could stand a metre and a half proud in one sample — ground
+  outside the track now slumps to a slope instead of standing as a wall.
+- Ruts read as ruts again: the floor of a groove is darker than the line it is worn into, and
+  the dry dirt thrown off the line is paler than the ground around it rather than darker.
+- Band edges no longer come out as teeth. An edge was wandering at three quarters of a metre
+  where the ground is drawn at four tenths, which no mask can hold.
+- Ruts are shaped the way a ridden track's are: fewer grooves, further apart, with flatter
+  bottoms, and smooth along their length instead of chopped up at every scale. A lap holds
+  a line rather than shaking the bike over it.
+- Sharing a track is quicker. The app packs it straight out of your mods folder instead of
+  making a copy of it first.
+- A share code sends and fetches its parts three at a time instead of one after another, and a
+  download fills one progress bar for the whole thing rather than restarting it per part.
+- Importing a share unpacks beside your mods folder, so the files are moved into place rather
+  than copied across drives.
+- A generated track has a riding line in it. The corridor is worked dirt with a darker line
+  worn through it and tyre marks in the ruts, instead of one dark ribbon from edge to edge.
+- Generated tracks are painted with real ground. The soil, the riding line, the packed bottom
+  of a rut and the grass outside the track are photographs of ground rather than drawn dirt,
+  so a lap reads like somewhere that has been ridden.
+- The trackside advertising is a hoarding: printed plastic boards bolted edge to edge into
+  runs down both sides of the lap, sharing an upright at every join, with clear ground between
+  one run and the next. They used to be single banners slung every fifty metres.
+
+### Fixed
+- Generated laps no longer run over their own ground. A lap is checked for crossing itself
+  before it is built, and how much it turns in total is held to what published tracks measure.
+
+## 2026-09-06
+
+### Changed
+- Jumps are shaped the way built ones are. A takeoff now stands at the angle a published one
+  measures rather than at the steepest in the whole corpus, and a small jump is a long low rise
+  instead of carrying the same lip as a big one — so a lap has a range of jumps in it rather
+  than thirty of the same abrupt shape.
+- Every tabletop has a top. A tall one used to have its deck eaten by its own two ramps and
+  came out as a peak, which rides as a double however it was written.
+- The worked example carries the mix a published lap does: a handful of big jumps, and the
+  rest ground under a metre.
+- Ground edges wander. Where the riding line meets the shoulder, and the shoulder the grass,
+  the paint fades across the boundary and the boundary itself wanders, so the track reads as
+  ground somebody dug rather than as a stripe with a stepped edge.
+- Generated tracks are marked the way a real one is: a line of little white plastic stakes
+  down each edge of the riding line, at the track edge and every six and a half metres. They
+  are half the size they were, which is what lets them stand that close without the edge
+  reading as a fence.
+- The trackside banners are printed. Five panels — MXB App, Frost, FrostMod and Creste — each
+  set in its own brand's typeface and colours with the app's snowflake beside it, and a lap
+  cycles through them instead of showing the same blank panel every fifty metres.
+
+## 2026-09-06
+
+### Fixed
+- Sharing a large preset or track works again. The host stores files by their contents, so once
+  it had kept only part of an upload it handed back that same broken copy every time the same
+  file was shared — no amount of retrying could shift it. A share that comes back short is now
+  cut into different pieces and sent again, which is bytes the host has to store afresh.
+
+## 2026-09-06
+
+### Changed
+- The gates are in one row. They were stated against whichever bit of lap was nearest to each
+  one, which put a stagger through the row.
+- The start pad is ridden ground: the comb of grooves the gate leaves is painted as well as
+  cut, and the pad is churned dirt rather than bare fill.
+
+### Fixed
+- Sharing a bundle made by an older build no longer gives up on a short part. It asks the host
+  what it is holding and retries that part, instead of only noticing when the joined file does
+  not add up.
+
+## 2026-09-06
+
+### Changed
+- The parked vans are gone. They stood close enough to the riding line to be something a rider
+  runs into.
+- The banners are back.
+- Jump posts stand at the top of the takeoff face rather than at its foot: the post grows with
+  the jump, so the flag sits at the crest.
+- No gap between the start straight and the lap. The tracks this is measured against are flat
+  ground from the gate row right up to the racing line, and the two are one surface.
+
+## 2026-09-06
+
+### Changed
+- The printed banners are gone.
+- A third as many blocks round a corner, and each one now has a dark foot under its white body
+  so it reads as a block rather than a paper cube.
+- Jumps are flagged rather than posted: a yellow pennant on top of the marker, and only on the
+  jumps big enough to need warning of.
+
+## 2026-09-06
+
+### Changed
+- The start straight keeps its distance from the lap until the two meet at turn one. There is
+  a strip of ground between them, so a rider on a flying lap has no way back onto it.
+- White blocks sit at the edge of the track rather than out in the field, the printed banners
+  are back, and there are fewer marker posts — some with a painted white tip, some bare.
+- Jumps are marked with a yellow post at the top of the takeoff face rather than a board
+  standing before it.
+
+## 2026-09-06
+
+### Added
+- Yellow boards either side of every jump's takeoff, on the ones worth marking. A rider coming
+  at a blind crest reads the boards, not the dirt.
+
+### Changed
+- Half as many white blocks round a corner — a run of them with ground showing between, rather
+  than a wall.
+- The printed banners are gone.
+
+## 2026-09-06
+
+### Changed
+- The start straight ends in turn one. It runs down the outside of the first corner and joins
+  the lap inside it, so the gate drop delivers you into the turn instead of onto a piece of
+  track with no clue which way it goes.
+- The riding line is lighter. Under the track's own sky a line at the colour a soil sheet
+  measures on its own was one you could not find; the gap to the field that makes a line
+  visible is still there, and the line now reads at speed.
+- The sky is a band round the horizon rather than a lid. A closed dome put the whole track in
+  its own shadow, which is what made the ground so dark.
+- Marker boards are thinner on the ground, blocks are plain white and laid in a line along the
+  outside of a corner rather than scattered, and a few trees stand in the infield.
+
+## 2026-09-06
+
+### Added
+- A wood behind the track. The tracks people rate carry thousands of trees past 60 m and only
+  a handful trackside, so that is what a built track gets now — a backdrop of mixed pine and
+  broadleaf out to the edge of the ground, with a few standing closer in.
+- Poles and parked vans down both sides, at the spacing the same tracks use, and a sky of the
+  track's own instead of the game's default one.
+- The start pad is ridden ground: the same surface texture the rest of the track has, and the
+  comb of grooves forty bikes leave pulling out of forty stalls.
+
+### Changed
+- The ground round a track is grass in patches over bare worked dirt rather than one flat
+  green field.
+- Marker blocks are white.
+- Nothing is planted on the start straight any more, and the fence is gone for now — it ran
+  along the lap and closed the start off.
+
+### Fixed
+- The start straight ends where the gates are. Its surface ran on behind the row for as far
+  as the ground went.
+- The picture a track is listed by shows the colours it will actually have. It was mixing
+  each band's base colour rather than the sheet made from it, which turned a green field into
+  a desert.
+
+## 2026-09-06
+
+### Changed
+- Jumps stand up on the ground they are built on. A track cut into a hillside had its ground
+  falling three metres across a jump's own footprint, so a metre-and-a-quarter tabletop rose a
+  handspan above its own foot and a lap read as having no jumps on it at all. Every jump now
+  gets a pad cut level under it, the way a builder does it.
+- Ruts are rounded, with a bank of material beside each one to lean on, instead of a
+  square-edged slot cut into the ground. There are fewer of them and they sit further apart.
+- Jumps are sized for a 250, not a 450. A gap only the fastest bike on the gate can clear is
+  one most riders single.
+- Jumps are sized to the speed a bike actually carries. Acceleration used to hold flat all the
+  way to the top, so a lap left a hairpin at 33 km/h and was doing 100 sixty metres later, and
+  gaps got built for a speed nobody arrives at. A two-kilometre lap now runs where one runs.
+- No two jumps on a lap are the same size any more, and a lap carries a handful of doubles
+  rather than one every hundred metres.
+- Corners wear three or four lines rather than one groove and a spread, so there is a choice
+  of ways through after a few motos.
+- Ruts read much harder against the ground beside them: the packed floor is darker, the bank
+  beside it drier, and the shape shows at speed instead of only being felt. They are deeper,
+  too — matched against a published national's own ground rather than estimated.
+- Tyre marks up the face of a jump are cut into the ground as well as painted on it, fanned
+  towards the side the last corner sends you in from.
+- The racing line is smooth where the wheels run. Braking chop, acceleration chop and the
+  ground's own grain used to cover the whole width, which took away most of what the bike
+  makes down a straight.
+- The start on a track you build is its own straight beside the circuit now, the way a real
+  one is: the gate row stands 40 m off the lap, sprints 85 m, and turns in to join the track
+  at turn one. A flying lap never crosses the gates.
+- The gates stand on a start pad 54 m across — wide enough for all forty of them. It holds
+  that width the whole way down the sprint and comes down through the turn into the track,
+  rather than tapering along the straight. The pit lane sits on the other side of the main
+  straight, out of the way.
+
+### Fixed
+- Riders start on the gate row. Every position in a track's race data is stated against the
+  lap, wherever it physically stands, and the gates were being written against the start
+  straight instead — so the game put the field across the middle of the track.
+
+### Added
+- A track you build now has things standing beside it. Stakes with painted tops mark the edge
+  of the riding line the whole way round, the way they do on a real track, with fencing behind
+  them, banners at intervals, hay bales on the outside of the corners, trees back in the field
+  and a gantry over the start.
+- A tree, a bale, a banner and the gantry stop a bike. A stake does not, so clipping one on
+  the way past costs you nothing.
+
+## 2026-09-05
+
+### Changed
+- A new look. Navigation moved out of the sidebar into a bar across the top, so mod
+  artwork gets the full width of the window — seven mods to a row instead of five.
+- Locker and Presets sit together under Garage, and Race mode has its own place in the
+  top bar.
+- Text is set in Barlow, which ships inside the app so it reads the same offline.
+- Browse opens on a full-width banner for the newest mod, so you can see what you are
+  installing before you click it.
+- Every page puts its filters, categories and search in one bar under the navigation,
+  so there are two rows of controls above your mods instead of four.
+- Race mode opens with what the game is set to load: how many mods are on, and how much
+  they weigh. Its filters, search and the enable/disable buttons moved up into the bar.
+- The page you get when something goes wrong offers one way out — Reload app.
+- A share code goes on your clipboard the moment the upload finishes, even if you left
+  the app to wait. Nothing to click before you paste it — tracks, mods and presets alike.
+- Coming back to the Library is instant. It no longer re-measures every mod folder each
+  time you leave the page and return, or switch between its tabs.
+- A share code says which of its files you already have before you import it. The ones it
+  would replace are marked in the list.
+- Jump faces are shaped the way a machine leaves them: curving up from flat ground and
+  steepest right at the lip. They used to flatten off over the last metre before the edge,
+  which is why a big jump could still ride like a roller.
+- Landings are longer and gentler than the takeoffs that feed them, instead of a mirror image
+  of them.
+- Jumps are sized to the speed there is. A gap the lap cannot deliver you to at speed gets
+  shortened, and a big double goes where there is a run at it rather than straight out of a
+  hairpin.
+- Braking bumps form where you are actually braking, and for as long as you are — a long
+  approach to a hairpin builds a long braking zone, a flat kink builds almost none.
+- Corners grow a second line beside the first, so there is more than one way through after a
+  few motos.
+- The dark packed line you steer by and the groove you drop into are now the same line.
+- A jump's face carries a single line up it, and the lip stays swept.
+- Sand tracks ride like sand: deeper ruts further apart, far bigger berms, and long swells
+  under braking instead of a sharp washboard. Grass circuits barely wear at all.
+- Tracks can be built anywhere from freshly prepped to raced-in, and there is ground left for
+  a session to cut its own lines into either way.
+- The picture the game lists a built track by is now a view of the place rather than a
+  diagram of it: the ground rendered from above and off to one side, lit by the track's own
+  sun, with the lap cut into it and the country running out to the haze.
+- Tracks you build now start where a start belongs. The lap begins on its longest straight,
+  with the gate row a few metres onto it, the finish line past that and the run at turn one
+  beyond — instead of the gates landing wherever the lap happened to be forty metres in.
+- The start opens out to hold the whole row. Forty gates are 48 m across, so the track fans
+  out to 54 m where they stand, graded flat as far as the ground beside it allows, and
+  funnels back down to riding width by turn one. The pit lane, the thirty-second board and
+  the timing line move out with it.
+- Corners on a track you build now have ruts you can sit in. A groove is cut shallow and the
+  dirt out of it stands as a low smooth bank on its outer side, with flat ground between one
+  and the next — so a corner gives you something to lean on instead of a set of holes.
+- You can see the ruts. The packed dark line follows the floor of each groove and the dry
+  light dirt sits on the bank beside it, so the shape reads at speed instead of only being
+  felt.
+- Tyre marks up the face of every jump, fanned towards the side the last corner sends you —
+  so the face tells you where the riders ahead came from.
+- The riding line varies along its length instead of running as one flat stripe.
+- Ground textures are finer. The soil sheets carried a patch big enough to repeat with the
+  tile, which printed a faint chequerboard over the whole track.
+
+### Fixed
+- Sharing a big preset or file no longer produces a code that downloads without complaint and
+  then does not open. Each slice is checked against the size it should be, on the way up and
+  on the way down, and a short one is retried instead of passed on.
+
+### Changed
+- Tracks you build now read as tracks. The riding surface was one flat brown from edge to
+  edge, with nothing to tell you where the line went or where the track stopped. It is now
+  painted in five: a bright graded verge either side, dry loose dirt at the edges and round
+  the outside of a bend, the worked soil between, and the packed racing line running through
+  it — leaning into each corner and drifting back out on the way to the next.
+
+### Fixed
+- Tracks you build match their own map. The ground was being handed to the compiler upside
+  down, so the jumps and ruts sat mirrored against the paint, the mini-map and the racing
+  line — at the start gate the ground was 4 m out and further round the lap 15 m. It now
+  lines up exactly.
+
+### Changed
+- Building a track now runs MX Bikes' own track compilers over it. The Track Studio
+  fetches PiBoSo's tools the first time you build and does the whole job in one press —
+  export, compile, package, install — so what lands in your tracks folder is a track the
+  game built, not one the app guessed at.
+
+### Added
+- Seven colorways in Settings. Frost is still the default; Ember, Moss, Violet, Rose and
+  Slate move the whole window, not just the buttons. Each works in light and dark.
+- Retro, a colorway that goes further: amber phosphor, monospaced type, square corners and
+  a scanline over the window. The overlay follows whatever you pick, straight away.
+- A Servers tab that lists every live MX Bikes server the way the in-game browser does —
+  who's on each one, the track it's running, and its address. Press Join to launch straight
+  into any of them.
+- The overlay reviews an install the way the main window does. A pack you download without
+  leaving the game comes up in the same sheet, listing what it found and where each piece
+  goes before anything is written.
+
+### Fixed
+- Corners on a generated track wear a bundle of ruts rather than a single deep gouge. The
+  deepest groove now cuts about 0.45 m where it used to cut a metre.
+- Braking bumps appear on the approach to every corner, not just the handful that follow a
+  dead-straight section, and there is acceleration chop on the way out.
+- The cloud-storage warning names OneDrive instead of guessing at "a cloud sync tool", says
+  the app itself is fine, and takes up one thin line instead of a block.
+- Sharing a track goes through. Big shares upload in smaller pieces and a piece the host
+  drops is sent again, so a share code comes back instead of an upload error.
+- Tracks you build in the app have a riding line. The ground is painted in four bands —
+  field, worked shoulder, the line itself and the grass over the top — and you can see all
+  four: nothing is laid over the top of them any more.
+- Every band takes the light: each one carries its own relief map, so soil reads as soil
+  instead of a painted surface.
+- Sound mods install. The ones that come as a folder per bike, the ones that hand you an
+  `engine.scl` to drop in yourself, and the ones whose sample list isn't called
+  `engine.scl` — all of them download and land where the game reads them.
+- ReShade presets shared as a bare `.ini` install. That is about half the presets on the
+  site, and they used to stop with nothing to try but the same button again.
+- Downloads that point at a whole folder — a folder per bike, a designer's six liveries,
+  an unpacked bike — bring the folder down instead of guessing at one file inside it.
+- Anything a download holds beside its `mods` folder is installed too, and a download
+  holding several mods asks which bike each one is for rather than choosing for you.
+- Pictures load on machines where the app's image cache can't be reached. Browse, Shop and
+  MXB Hub fall back to loading a thumbnail straight from the site, so the grids show what
+  you are downloading instead of placeholder icons.
+
+## 2026-09-04
+
+### Added
+- Build a track and ride it without leaving the app. Press Build & install and the app
+  fetches PiBoSo's track tools, compiles the track and puts it in your mods folder, ready
+  to pick in MX Bikes.
+- Tracks you generate build with a normal map and shader for every ground layer, so the
+  soil, the riding line and the grass each take the light and show their grain.
+- Rain changes the ground. Every soil layer ships a wet sheet with its own reflection, so a
+  rainy race runs on dark, shining dirt.
+- The pit lane counts as pit lane, so sitting in it isn't scored as leaving the track.
+- Grass varies in colour across a track instead of being one flat green.
+
+### Changed
+- Ground textures tile to each axis, so the soil keeps its scale on a track that is wider
+  than it is deep.
+- Races start on the line the track draws: the start line is built and merged with the
+  racing line.
+
+## 2026-09-04 — v0.13.6 — Paint sync, in beta
+
+### Added
+- Paint sync is in beta. The app knows which server you are on, so the paints you see are
+  the ones the riders around you are actually wearing. Ride a few sessions with it on and
+  tell us how it went — what worked, what didn't, and what you want it to do next.
+- Presets has a Feel tab. Save your throttle, lean, rider aids, camera and graphics quality
+  under a name, and switch between them with one click — a soft Supercross setup and a
+  snappy outdoor one, without walking the Options screens again.
+- Feel presets share like look presets do. The code carries the settings only, so it never
+  touches the receiver's bindings, controller or screen mode.
+- Open a saved feel to see every setting inside it, grouped and named, and change any of
+  them without going back into the game.
+- Duplicate any preset, look or feel, so you can fork one you already race and change a
+  single thing.
+
+## 2026-09-02 — v0.13.5
+
+### Added
+- Your rider name now comes from the game itself, so the name other riders see is the name
+  your paints are matched on. Nothing to type, and nothing to set up.
+
+### Fixed
+- The track creator's left column scrolls, so the install and export buttons stay reachable
+  on a short window.
+
+## 2026-09-01 — v0.13.4 — Ground under the track
+
+### Added
+- Generated tracks carry their ground. An installed track has graphics instead of a black
+  surface, and no longer needs TerrainEd to be rideable.
+- Settings shows how many paints other riders' syncs have put in your mods folder, with a
+  button that takes them back out. Paints you have edited since are kept.
+- The diagnostics dashboard searches: riders by name, GUID, Steam id or account id; files by
+  name, hash, signer, or anything the file claims about itself.
+- Every rider has a page — their identity, last report, the servers they have been seen on,
+  and every file their game has loaded.
+- Every file has a page listing everyone who has loaded it, per build.
+- Diagnostics lists are paged, with a page count and numbered links.
+
+### Changed
+- Locked content is something you switch on in Settings, and applies only to games started
+  with Play.
+- Mods folders on a sync tool are read once per game session rather than every two seconds.
+- The diagnostics dashboard is four views behind a nav instead of one long page, and the
+  tables carry the information the prose used to explain.
+- Rule notes show on the rules page, and a Flag or Clear button returns to the page it was
+  pressed on with its filters intact.
+- The map-loader tracer reads a whole track graphics file, and stops where it can no longer
+  be sure instead of guessing past it.
+
+### Fixed
+- The game opens again after being closed once, without having to quit MXB App from the tray
+  first.
+- A generated track's ground lights and renders: every layer ships a normal map, writes its
+  blend mask the way the game reads it, carries a material record, and names each texture the
+  way the game caches it.
+- The starting gates sit across the track rather than off to one side, and there are forty of
+  them at the spacing every published track uses.
+- A FrostMod plugin installed into the game's own folder is kept up to date with the FrostMod
+  the app manages, instead of staying on whatever version it was installed at. One that can't
+  be updated is renamed so the game stops loading it, and can be renamed back.
+- A warning when your mods folder is inside OneDrive or another sync tool, which is what makes
+  the game sit on a black screen while it loads.
+- Auto-reload waits for the game to finish loading when the mods folder is on a sync tool, so
+  a folder change during startup no longer leaves the game on a black screen.
+- A custom rider model no longer turns up upside down and facing backwards in the 3D preview.
+  The viewer now checks the result — skin at the top, name and number on the back — and turns
+  the body again if the first guess was wrong.
+
+## 2026-09-01 — v0.13.3 — Nothing you didn't ask for
+
+### Added
+- A tool that traces exactly which bytes MX Bikes reads out of a track's graphics file, by
+  emulating the game's own loader. Groundwork for generating tracks the game can ride without
+  running TerrainEd.
+- Track generation reads a published track's own centreline out of its height file, so a real
+  lap's corners, their radii and its straights can be measured directly rather than guessed at.
+- A generated track carries its centreline too, and is measured by the same code as a
+  published one.
+
+### Changed
+- MXB App stays off at login unless you ask for it. Launch at startup is off by default, and
+  the toggle is in Settings for anyone who wants the app waiting for them.
+- Paint sync only asks about the server you are actually on. Starting the game no longer
+  fetches every rider's paints from every server on the registry — the paints for your grid
+  arrive when you join it. The Sync button still checks everywhere if you ask it to.
+- Instant refresh looks before it leaps. Applying a look to a running game re-runs one of the
+  game's own routines, at an address that is only right for the build it was read from. The
+  app now asks the game what is actually mapped there and does nothing if it isn't the game's
+  own executable code — and writes the running game's build to the log either way, so a game
+  update that moves the address can be noticed rather than crashed into.
+- Diagnostics say more about each file loaded in your game: its size, when it was built,
+  whether Windows trusts its signature and who signed it, and the company and product it
+  claims to be. A file can be read the first time it is seen instead of only recognised.
+- Generated laps are laid out the way published tracks are built: corners made of several arcs
+  that tighten into the apex and release out of it, far more corners than straights, and a lap
+  that wanders instead of running round a rounded rectangle.
+- Jumps come in a mix — a handful of big ones and a lot of small ground — instead of one size
+  repeated down the lap.
+- Ruts, berms and banking are built to numbers measured off ten published tracks.
+- Straights carry worn ground rather than being smooth between the corners.
+- The starting track is built on a hillside. It climbs 22 m round the lap, which is what
+  Indiana does — half of the published tracks climb more than 20 m, and a flat plot rides
+  like a car park.
+- The racing line is chopped up at the scale of a wheel rather than a jump, and the field
+  around it is smooth. It used to be nearly as rough out in the grass as it was on the line.
+- A track's edge is crisp against the field rather than fading out over a wide shelf.
+- The lap is routed to its ground rather than dropped on it — turned and shifted to the
+  placement that lies along the hills instead of across them.
+- The track runs over the hills instead of past them — it climbs and drops the way a hillside
+  track does, rather than sitting flat with scenery in the distance.
+- A venue has banks and spoil hills around it, the way a real one does — the thing that makes
+  a plot look built rather than generated.
+- A track can be built on a hillside. The ground falls across the plot the way a real one
+  does, instead of being a bumpy plain — which is most of why the land around a generated
+  track never looked like the land around a real one.
+- The starting track's corners are as tight as a published track's: a median 12.6 m through
+  their tightest point, where Indiana's is 10.6 and ours used to be 18.2.
+- Jumps are built rather than dropped on. A takeoff ramps up over ten metres instead of five,
+  the ground either side dips where the dirt for it came from, and no face is steeper than
+  dirt will stand — a big double's lip was a 65° wall and is now a 30° face.
+
+### Fixed
+- Cloud sync tidying up behind you no longer asks the game to reload its mods. OneDrive,
+  Dropbox and iCloud all take back the contents of files they think you have stopped using,
+  and to the folder watcher that looked exactly like a mod being installed — so the game was
+  sent to re-read a track that had left the machine, at a moment nobody chose. Those changes
+  are now ignored, and the log says which files and how to keep them on the device.
+- Switching MXB App off in Windows' list of startup apps sticks, and Launch at startup in
+  Settings follows it.
+- Installing a generated track no longer crashes the game. It ships without graphics rather
+  than with graphics the game cannot read, and the Studio says so.
+- More of the crash at track graphics: the ground sheets in a track's graphics file were
+  written in a shape the game cannot read past.
+- The map-loader tracer stops at the end of the file instead of reading zeros past it.
+- Two of the four values every vertex of a track's graphics file carries were left at zero.
+- The terrain in a track's graphics file is cut into tiles, so no single piece of it is too
+  large for the game to build a buffer for.
+- A corner banks the outside of the turn.
+- Ruts read as ridden ground rather than as a set of parallel lines running the whole lap.
+- The ground either side of the track no longer carries fine streaks fanning off every corner.
+- The starting track is a lap that folds through its own middle instead of a regular star.
+- A step-up no longer leaves a cliff across the track at the start line. A lap that steps up
+  somewhere now falls the same amount over the rest of it.
+
+## 2026-09-01 — v0.13.2 — Tracks that load
+
+### Added
+- Share from wherever you're already looking. Manage shares any mod in its list, switched on
+  or off — a mod it has parked is still a file, and the code says where it goes rather than
+  where it currently sits. The Locker shares a model or sound set: right-click the one you
+  want, including the one you're riding.
+- Paste a share code anywhere in the window. Ctrl+V over any screen opens the import with the
+  code filled in. A paste into a box you're typing in is left alone.
+- Designer: a normal or roughness sheet opens on the parts its base sheet covers, and starts
+  from the model's own map — the vents and the seat weave already in it — rather than a blank
+  canvas. A normal map with none to copy starts flat rather than black.
+
+### Changed
+- Bikes wear their normal maps in the 3D preview, so a shroud has its curve and a seat its
+  grip instead of drawing as a flat colour. A paint can supply its own.
+- Protecting content is faster. A mod is locked for several buyers at once instead of one
+  after another, and each file is sealed in a single pass, so four buyers now cost barely
+  more than one and a folder of paints finishes in a fraction of the time.
+- Track diagnostics keep protected tracks protected: for a sealed track the report gives
+  the layout probe's findings without listing the files inside it or their contents.
+- Paint Studio and the Designer open on the KTM 250 SX-F when it is installed, rather than on
+  whichever bike sorts first alphabetically.
+- Which model writes the track is a setting (`TRACK_MODEL`) rather than a code change.
+
+### Fixed
+- Installed tracks load and ride. The track's graphics file carries its ground and its
+  material records in the shape the game reads, the sound config says something, and the lap
+  length sits in the field published tracks use it for.
+- The track's picture in the game menu faces the same way as the route drawn over it.
+- A generated lap comes back as a clean loop that never runs over its own ground. Five of six
+  briefs now come back clean where none did before.
+- Designer: a sheet whose parts are tiled — the number plates, a tiled exhaust — shows those
+  parts where the game reads them, instead of off the edge of the sheet.
+- Designer: the sheet list no longer offers a name that another paint misspelt — the KTM
+  250 SX-F's normal map is `plastics_n`, and a paint beside it calls its own `plastics-n`,
+  which the bike asks for on no part of itself.
+- The 3D preview shows the livery on a bike's side and front number plates, instead of the
+  blank plate the model carries there.
+- Settings carried over from an older build are written down the first time they are read,
+  so the app settles them once at startup instead of re-deciding them on every check.
+
+## 2026-08-31 — v0.13.1 — Tracks that look ridden
+
+### Added
+- A FrostMod flags box in Settings. What you type there is handed to FrostMod the next time
+  it starts, after the flags the app already sends.
+- Installed tracks carry the ground they are painted with, and a gfx.cfg so roost is the
+  colour of the dirt.
+
+### Changed
+- Track Studio installs a track into your MX Bikes mods folder, where the game reads its
+  tracks from. If no folder is set yet, it says so instead of installing.
+- A track installed from Track Studio is packed the way the game reads tracks, so it turns up
+  in the in-game list.
+- The track file names the artwork it ships and states its lap length in metres.
+- Generated tracks come with real ground textures — soil with clods, grit and straw in it, at
+  the size and resolution published tracks use.
+- Corners wear a bundle of ruts across the track and carry them out onto the straight, the way
+  a ridden corner does.
+- Braking bumps on the way into a corner and chop on the way out.
+- The edge of the riding line wanders, with a ridge of spoil along it.
+- Four painted bands instead of three — field, graded shoulder, riding line, grass — and every
+  boundary between them is torn rather than drawn.
+- The ground away from the track has metre-scale relief in it.
+- Ground sheets tile at a fixed size on the ground, so a long track and a short one get soil of
+  the same grain.
+- Generated laps have more corners, and more variety in them.
+- Track generation works. It had never actually run against the model — the schema compiled
+  to a grammar the API rejects, on every model — and the lap, the plot and the height budget
+  are now worked out rather than asked for.
+- Generating a track costs about a fifth of what it was going to.
+- The 3D preview has a full-screen button.
+
+## 2026-08-31 — v0.13.0 — Secure tracks
+
+### Added
+- Secure tab: pick one or more tracks and type a buyer's Steam ID, and the app writes an
+  encrypted copy plus a key locked to that account beside each track. Your original is left
+  untouched — you send the buyer the two generated files.
+
+### Changed
+- A protected track now appears in the in-game track browser from its secure files alone: the
+  injected client feeds it into the folder scan and decrypts it on load, on the machine signed
+  into the account it was made for. No original and no plaintext left on disk.
+- The app builds what it loads from the secure files present in your tracks folder, so a buyer
+  only has to drop the two files in.
+
+## 2026-08-31 — v0.12.6
+
+### Changed
+- Paint sync makes one request where it used to make two: saying where you are rides along
+  with asking who else is here.
+- The sync heartbeat runs every 3 minutes. A rider joining still pulls within seconds — the
+  heartbeat covers someone already there changing their look.
+- Sync only says you are on a server when you are on one.
+- Usage counts are sent every half hour, and stop for the run if the server has had enough.
+
+## 2026-08-31 — v0.12.5
+
+### Changed
+- Paint sync is off by default. Turn it on in Settings → General.
+- A sync only reaches into the running game when it has actually installed something.
+
+## 2026-08-31 — v0.12.4 — Paint sync, on every server
+
+### Added
+- Paint sync works on any server, not just ours. The app reads the server name out of the
+  running game, so a public server syncs the same as a private one and the host installs
+  nothing.
+- No invite code. The app signs itself up the first time sync runs, the same way voice does.
+- Paint sync is on by default, with a switch in Settings → General to turn it off.
+- Starting the game from Steam or a shortcut now syncs too. Only the Play button did before.
+- A rider joining after you triggers a sync straight away. The app watches the entry list
+  and pulls within a few seconds of a new name appearing, instead of waiting out the
+  45-second heartbeat.
+- A feature's ground height is set on its own row in the track editor, and features can be
+  dragged along the height strip.
+- A Height/Shape pill on that strip. Height shapes the ground the track runs on; Shape
+  shapes the thing built on it. A straight only gets Height — it has ground, not a shape.
+- In Shape mode a jump's outline is the jump: drag the top of a tabletop to set its height,
+  its far end to set its length, the far side of a double's gap to set the gap, a whoop's
+  first crest for spacing and height, its far corner for how many crests. Corners with
+  nothing behind them sit there as anchors rather than pretending to be adjustable.
+- Handles ride the height curve, so a jump on a hill is grabbed on the hill rather than at
+  zero.
+- Jumps can be drawn point by point: click to add a point, drag to move it, double-click to
+  take it away. A jump drawn this way keeps its points; nothing turns a tabletop into one
+  behind your back.
+- Anonymous usage counts, so which pages and features actually get used is knowable. The
+  app sends a random install id, its version, the OS, the title, a session count and
+  counters for named pages and features — never your name, your files or your address.
+- A switch in Settings → General turns those off, and the welcome slideshow says it is
+  there.
+
+### Changed
+- The sync line in the sidebar is no longer behind the experimental toggle.
+- The Manage tab is called Race mode, which is what its own help text has always called it.
+- Join server only appears when there are servers to list. Until the app can read the
+  game's own browser, an empty list behind a button is worse than no button.
+- Paint sync has its own Settings page — what it published, what it pulled, your GUID, and
+  any paint it declined to overwrite. It used to live on the Servers tab.
+
+### Removed
+- The Servers tab, and the experimental toggle that revealed it. Creating and hosting
+  servers is out of the app for now. Joining one by address is unaffected and no longer
+  hidden.
+
+## 2026-08-31 — v0.12.3
+
+### Added
+- The lap list groups by segment: each corner and straight heads a section holding the
+  jumps on it, collapsible, with a count when it's shut.
+- Adding a feature scrolls to it and flashes the row. It lands in the emptiest stretch of
+  lap, which is rarely where you were looking.
+- Name, author and location are proper fields rather than headings, and all three end up
+  in the track's `.ini`.
+- Install writes the `.trh`, a `.map`, the `.ini`, the `.amb` and both UI images. It used
+  to write two files. Still missing is the `.rdf` — start gate, pits and cameras — which
+  only TrackEd writes.
+- Each feature row carries its kind's colour, and hovering a row lights that feature up in
+  the 3D view.
+
+### Fixed
+- A berm stranded on a straight by a segment edit is moved onto the nearest corner and
+  fitted to it. It used to be dropped without saying so.
+- Applying a model swap no longer says the bike changes in the running game. FrostMod
+  dropped the live re-apply in v0.9.11 because it crashed the game, so the app now tells
+  you what actually has to happen: switch bike category away and back in the garage.
+  Reselecting the same bike doesn't load the new model.
+- FrostMod's own in-game note said to re-select the bike, which doesn't work either. It
+  says the same thing as the app now, in FrostMod 0.15.4 — which the app installs for you.
+
+## 2026-08-31 — v0.12.2
+
+### Added
+- Settings → FrostMod lists the nine replay camera slots. Open one to see where its keys
+  fall, drag a key to move it, change what a key does, and set how the path flies.
+- Camera paths can be exported and imported, so one can be passed to someone else.
+- Respace by distance, for a constant-speed dolly. A cut keeps the length it was given.
+- The panel says when the replay camera can't run on your game build, and why. That reason
+  only existed in a log file next to a DLL before.
+- FrostMod's eleven new replay camera actions are in the key list.
+- The camera itself learned to aim at a rider, cut between shots and fly with a handheld or
+  drone rig, in FrostMod 0.15.3 — which the app installs and updates for you.
+- The track editor shows the 3D preview beside the lap instead of over it, and paints every
+  feature kind its own colour so a row in the list and a lump on the ground match up.
+- Features can be added and removed in the editor, and a track's name and author edited.
+
+## 2026-08-31 — v0.12.1
+
+### Added
+- Settings → FrostMod now lets you rebind the replay camera editor's keys. The game reads
+  the same key at the same moment, so `S` for save also moved the camera for anyone with
+  `S` bound to move-backwards; now you can put the action on a key the game doesn't use.
+- The hide-overlay key (`F7` by default), which hides everything FrostMod draws for
+  recording a replay, is rebindable there too.
+- Keys are written into FrostMod's own config, including a plugin-folder install, and take
+  effect the next time the editor opens.
+
+## 2026-08-30 — v0.12.0 — MXB Hub, and PSD support in the Designer
+
+### Added
+
+- MXB Hub tab. Browse the shop.mxb-hub.com catalogue and install anything your account owns,
+  free mods included. Mods hosted on MediaFire and similar install from here too.
+- Protect tab in Studio. Lock your files to specific riders by GUID, one folder per rider.
+- The app reads your GUID from the running game, so you no longer have to wait for a server
+  to see you connect.
+- The Designer opens and exports Photoshop files with layers intact.
+- "Stock as base" paints a bike's stock texture into your sheet, so you can add a number and
+  save it as-is.
+- Mod pages show who made it, with a link to their page on the catalogue.
+
+### Changed
+
+- Picking a model fills in the sheets it needs, instead of opening empty.
+
+### Fixed
+
+- Mirror works on one-piece bodywork like seats and tanks. It used to fail on most of a bike.
+- A decal mirrored onto a narrow panel comes out the right size.
+
+## Unannounced — voice chat
+
+Kept out of the release notes on purpose: voice is off by default and has not yet been
+tried on a live server with a real grid on it. Both entries fold into the notes of
+whichever release turns it on.
+
+### Added
+
+- **Voice chat, on any server, with nothing to set up.** Turn it on, pick a microphone, and
+  that is the whole of it: joining a server puts you in voice with everyone else there who
+  has the app. There is no second program to install, no account to create, no code to share
+  and nothing for the server owner to run — it works the same on a server we host and on one
+  that appeared this morning. Your voice goes straight to the other riders rather than
+  through us, so it costs nothing to provide and nobody is relaying what you say. Push to
+  talk by default, with the mic key you already set. Settings shows who is in the room, who
+  is talking, and a mute button for anyone you would rather not hear.
+
+### Changed
+
 - **Voice now works whichever way you joined a server.** It used to start only when the app
   itself launched the game at a server, which left out everyone who picks one from the game's
   own browser — and quietly kept you in the old room if you moved servers without quitting.
@@ -86,188 +806,282 @@
   half a grid in one room and half in another is the failure that looks like nothing is
   wrong.
 
+## 2026-08-29 — v0.11.3 — A track viewer that draws the whole track
 
 ### Added
-- **Voice chat, on any server, with nothing to set up.** Turn it on, pick a microphone, and
-  that is the whole of it: joining a server puts you in voice with everyone else there who
-  has the app. There is no second program to install, no account to create, no code to share
-  and nothing for the server owner to run — it works the same on a server we host and on one
-  that appeared this morning. Your voice goes straight to the other riders rather than
-  through us, so it costs nothing to provide and nobody is relaying what you say. Push to
-  talk by default, with the mic key you already set. Settings shows who is in the room, who
-  is talking, and a mute button for anyone you would rather not hear.
+
+- **The track viewer draws what stands on the track, not just the shape of it.** Until now a
+  track opened as bare ground: the right ruts, berms and jump faces, but nothing standing on
+  them, so a supercross floor and a national circuit read much the same. The viewer now draws
+  the track's scenery too — the tents and awnings, the hay bales and tyre walls, the banner
+  lines and fencing, the trailers in the paddock, and the landscape beyond the track's own
+  square — all in the places the track itself puts them. **Objects** in the header turns it
+  off again.
+
+  It also marks what a track places but ships no model for: every marshal post, every TV
+  camera and every crowd sound source, each as a pin standing on the ground where the track
+  states it. That the pins land on the ground rather than near it is the check that the
+  scenery is in the right place at all — a track states its marshals' heights, its terrain
+  states the ground's, and nothing makes the two agree except reading both correctly.
+
+  It is drawn in the track's own colours, not a flat grey: the `.map`'s surfaces come out
+  with it, so the tents are the tents and the dirt is the dirt. Foliage, crowd and fencing
+  are cut-outs rather than the solid slabs they would otherwise be — a track's own naming
+  says which surfaces carry a cut-out, and drawing those without one turns a treeline into a
+  wall and buries the track behind it.
+
+  It arrives in stages rather than all at once. The terrain draws first, then the scenery's
+  shape, then the colours on top of it — because pulling a track's map out of its archive is
+  nearly all of what a look at one costs, and the shape of the place is worth having on
+  screen while the hundreds of megabytes behind its colours are still being read. The header
+  says which stage is still running. Both halves are cached, so opening the same track again
+  skips the archive entirely.
+
+  Click anything standing on the track and it lights up on its own. The scenery arrives as one
+  mesh, but the things in it are separable — an exporter welds a tent to itself and to nothing
+  else — so the viewer recovers the pieces a track was built from and names the one you point
+  at: how many triangles it is and how big it is in metres. A published track comes apart into
+  ten thousand of them, the largest five metres across.
+
+  The ground keeps its own colour while it does. The grain is measured against the sheet's own
+  average brightness, so it varies the surface without dragging it darker — tiling a dirt or
+  grass sheet raw turned a dry circuit muddy — and only the sheet's luminance is used, never
+  its hue. A track with no dirt sheet of its own is left alone rather than tinted with
+  whatever else it had.
+
+  The ground keeps its detail when you get close to it. A track states its surface at about a
+  third of a metre per sample, height grid and surface picture alike, so anything nearer than
+  that was interpolation — a soft brown smear. The track's own ground sheet is now tiled over
+  the terrain and multiplied into it, which puts the grain back at whatever distance you care
+  to look from. It says what the ground is made of, not what is where.
+
+  And where a track ships one, that grain has relief rather than being a picture of relief.
+  Half the tracks measured carry a normal map beside their ground sheet — the sheet that says
+  which way the surface faces rather than what colour it is — and it is now tiled with the
+  colour it belongs to and lit by the track's own sun, so a rut catches the light on the side
+  facing it. Gently: one sheet is standing in for every surface a track has.
+
+  Which sheet gets picked is read as words rather than letters. A track's ground was chosen by
+  looking for `dirt` or `sand` anywhere in a name, which on one track picked `logo-dirtmaster`
+  — a logo — and on another a sponsor's banner, and a near-flat sheet tiled over a track does
+  nothing at all. Names now split into their words however they were written, capitals
+  included, a word only counts whole, and a name carrying `logo`, `banner`, `sign`, `marker`
+  or the like is not ground however grounded the rest of it sounds. A track may also name its
+  riding surface after itself — SandPoint calls it `track-dark` — which is now read as ground
+  where nothing better is offered. All sixteen installed tracks find their ground, against
+  thirteen before, three of which were finding the wrong thing; nine find its relief, against
+  three.
+
+  A track that places props of its own draws its scenery again. The props a `.scr` puts down
+  are added to the same mesh as the rest, but they were not being numbered as pieces — and the
+  viewer works out where the surfaces begin from the piece count, so a mesh short of ids reads
+  past its own end and is thrown away whole. Abydos was sixteen thousand prop triangles short
+  and drew nothing at all. Each placed prop is now a piece like any other, which is also what
+  makes it something you can point at.
+
+  A track that states no surfaces of its own draws its terrain again. Tiling the ground sheet
+  over it read the coordinates three.js sets up for a surface picture — which a track without
+  one never has, so the shader failed to build and the terrain drew nothing while its scenery,
+  sky and markers all drew fine. The grain now carries its own coordinates and works with or
+  without a picture under it.
+
+  A track that states no surfaces at all is drawn in the colour of its ground rather than by
+  height. Two of the installed tracks ship no coverage data, so the viewer fell back to an
+  elevation ramp — green in the hollows through to white on the high ground, which on a sand
+  circuit is not a legend anybody asked for. Where the track's own ground sheet is known, its
+  average colour is used instead and the shape reads by its shading alone.
+
+  The ground sheet is cached with the rest. Finding it means inflating candidate sheets to
+  check a normal map really is one, and that was happening on every open.
+
+  A track is lit and hazed the way it says it should be. Its ambience file states a sun
+  colour, an ambient, and a fog — the viewer used one fixed rig for every track and ignored
+  all of it. The haze is thinned to something a whole track can still be seen through: a
+  track's own figure is written for a rider looking down a straight, not for a view of the
+  entire place at once, so the colour and the relative thickness are the track's while the
+  depth it acts over is the view's.
+
+  A track now sits under its own sky. Every one ships a dome and a backdrop and names them in
+  its ambience file, and the viewer was throwing both away — a track ended at a hard edge with
+  black beyond it. They draw with the track's own picture on them, lit from where the track
+  says its sun is.
+
+  What stands on the track is lit from above rather than from below. Every piece of scenery
+  was being drawn back to front — the game's meshes are wound the other way round, and the
+  view already mirrors them, so reversing them again put every face the wrong way out. Drawn
+  double-sided that shows up not as holes but as light: the sun landed on the underside of
+  everything. Small props got away with it; a track that surrounds itself with landscape did
+  not, and Abydos's dunes drew as a black apron around the circuit. They are dunes now.
+
+  Where a track's surfaces can't be read, its cut-outs are left out rather than drawn wrong. A
+  quarter of a map is foliage, crowd and netting — flat cards that are a tree only once an
+  alpha channel has cut the tree out of them, and drawn plain they are thousands of standing
+  sheets of paper hiding the track behind them. Tracks whose surfaces do read keep every one
+  of them.
+
+  Ground colours are drier. A surface id names what the physics does, not what a track looks
+  like, and a lawn green on a dry circuit was the loudest wrong thing on the screen — the same
+  hues now sit closer to earth, so a surface a track named loosely reads as ground.
+
+  Props can be written back out. A track's `.scr` is the one part of it that states where a
+  thing goes in plain text, and the game reads it at load — so it is where anything placed in
+  the app ends up. What goes out reads back as what went in, and an existing file is left alone
+  unless replacing it is asked for.
+
+  A track carrying no scenery is left alone rather than reported as a failure; some ship none
+  at all.
+
+### Changed
+
+- **The log now records which GPU the 3D views are drawing on.** Both viewers draw through
+  the graphics card, but a Windows machine with a driver Windows doesn't trust drops them to
+  a software renderer instead — same picture, a fraction of the speed — and nothing said so.
+  Opening a 3D view now writes the adapter it got into the app log, flagged as a warning when
+  it turns out to be software, so "the viewer is slow" can be answered from the log a player
+  already sends.
+
+## 2026-08-29 — v0.11.2 — Install a pack one bike at a time, and a preview that fills the window
+
+### Added
+
+- **A bike pack installs as the bikes inside it.** The OEM bike pack is 54 machines and a
+  tyre set in one 3.8 GB archive, and until now it arrived as a single row reading "Mods
+  folder" — all of it or none of it, with no way to see what was in there. It is now listed
+  the way it is built: every bike by its real name and class (*KTM 450 SX-F 2023 · MX1 OEM*),
+  its size, and a checkbox. Take the four you race and leave the other fifty. **Select all**
+  and **Select none** sit in the header, because a fifty-five-row list is not a list you tick
+  by hand.
+
+  Where each piece goes is read from the pack itself rather than guessed at, which matters
+  more than it sounds: the tyre set that carries every one of those bikes' wheels is
+  described inside its own file exactly like a bike, and filing it under `mods/bikes` on that
+  evidence would take the wheels off all 54. A pack the app can't read confidently is left
+  exactly as it was — one row, installed whole — rather than split into pieces it would have
+  to guess destinations for.
+
+- **A pack you download is shown to you before it installs.** Downloads used to go straight
+  to disk, which for a pack meant 3.8 GB of bikes landing without anyone being asked. One
+  that turns out to hold several mods now stops and opens the same review sheet a dropped
+  file gets. An ordinary single-mod download is untouched — it installs exactly as before,
+  with nothing extra to click.
+
+- **The Designer's 3D preview opens fullscreen.** The model sits in a column beside the
+  canvas — the right size while you are drawing on it, and far too small when you want to look
+  at what you have drawn. The button in its corner fills the window with it, with the same
+  tyre, gear and hide toggles it has in the panel; the button again or Escape puts it back.
+  The editor is untouched behind it — same sheets, same layers, nothing saved or reloaded to
+  take a proper look. Asked for by GalpinMX.
+
+- **Sly** credited on Settings → Supporters.
+
+### Changed
+
+- **`MXB_SAFE_GRAPHICS=1` now works on Windows too.** It takes the GPU out of the app's
+  browser, the same lever it already pulled on Linux — the thing to try when a window comes
+  up black and stays that way. The app also records how far the page got loading, and which
+  graphics settings were in force, so the next report of a blank window can be read straight
+  from the log instead of guessed at.
+
+### Fixed
+
+- **A paint that ships a separate file per bike now installs the right one.** Some pages offer
+  one download per machine the paint fits — *pitfactory 250f pub* beside *pitfactory 125t pub* —
+  and mark **both** as the recommended file. Nothing about that says "different file" to a picker
+  built for mirrors, so it took the first one and put the 250's paint in the 125's folder. Those
+  pages are now read for what they are: every file is listed rather than folded away, the one for
+  the bike you picked is the one flagged, and choosing a different file moves the destination to
+  the bike that file is for. One-click installs from Browse follow the same match, so they stop
+  quietly grabbing the wrong machine's paint.
+- **The review sheet took twenty seconds to open, for anyone with the OEM bikes installed.**
+  Every drop reads the bikes already in your folder so it can offer them as destinations, and
+  each bike was opened twice over to get its name — 310 ms a bike where 14 ms would do. With
+  53 OEM bikes installed that was 18.9 seconds of nothing happening before the sheet drew, on
+  every single drop. It is 1.2 seconds now. The same read backs the bike pickers throughout
+  the app, so they all get quicker.
+
+- **The 3D viewer no longer hoards a bike's textures each time it redraws one.** Two things
+  asking for the same bike at the same moment — a preview panel and a dialog drawing it
+  together, or a picker that re-asks before the first answer lands — read and decoded it from
+  scratch twice over, and the copy that lost the race left its textures behind with nothing
+  able to free them. Three passes over one bike put 200 MB in the texture store and none of
+  it came back. Far enough down that road the store starts dropping its oldest textures to
+  stay under its ceiling, and the oldest can be the bike you are looking at — which is how
+  parts of a bike turn grey for no reason. Two callers that want the same bike now share one
+  read: the second waits for the first and takes its answer, so it arrives in milliseconds
+  instead of seconds. Found in a player's log.
+
+- **A black window on startup can no longer trap you.** On a cold boot WebView2 sometimes
+  takes a long time to draw its first frame — and occasionally never draws one at all. The
+  app window appeared anyway, empty and black, and because our title bar is drawn by the
+  page there was no close button in it and no title bar to close it from. Alt+F4 only parked
+  it in the tray, where the process stayed alive and handed the same dead window back the
+  next time you opened the app; Task Manager was the only way out. The window now stays
+  hidden until it has actually drawn something, anything that shows it early gets a real
+  Windows title bar to close it by, and a window that never drew closes for good rather than
+  hiding in the tray. Reported by a player who found it after booting their PC.
+
+## 2026-08-28 — v0.11.1 — Protected model swaps open in 3D
+
+### Fixed
+
+- **Protected model swaps wouldn't open in the 3D viewer.** A model bought from a creator ships
+  its mesh sealed, and the viewer handed those bytes straight to the parser — which found no
+  mesh header and reported the bike as empty. The result was *"holds no readable mesh"* on a
+  model that runs perfectly in game. Bike files are now unwrapped the way gear and paints
+  always have been, loose files and packed entries alike.
+- **One failure message was blaming cloud sync for everything.** Three unrelated faults reached
+  it — a file that never finished downloading, a mesh that didn't decode, and a mesh that read
+  but held no parts — and all three sent players hunting through their OneDrive settings. Each
+  now says what actually happened, and the failure writes the mesh names, sizes and headers it
+  saw to the log, which it never did before.
+
+## 2026-08-27 — v0.11.0 — Pose the rider, and a Designer that handles layers
+
+### Added
+
+- **Pose the rider.** A new **Pose** view in the Studio opens on a preset as it stands — bike,
+  model swap, rider, gear and paints — and lets you move the rider's limbs: where the hands sit,
+  how far the legs are spread, one leg forward, elbows up, lean in. Quick moves stack, and every
+  joint has bend/twist/splay sliders under Torso, Arms, Hands and Legs. Hips, knees, shoulders
+  and elbows reach 135°, wrists and collars 70°, the neck and head 45° — enough to fold a leg
+  under a bike. The kit on show is the one the Rider tab has, so a look composed next door is the
+  look being posed. The pose is remembered per rider profile on this machine, and **Reset**
+  returns the model exactly as it was authored.
+
+  **On bike** puts the rider on the machine rather than beside it, worked out rather than
+  eyeballed: he settles up the seat towards the tank, leans into the bars, puts both hands on the
+  grips — read off the bike's own handlebar, so they land on the bars of whatever is under him —
+  and folds his knees round the machine with his boots on the pegs. **Riding position** is
+  applied for you the first time a bike appears under an unposed rider, and a bike whose setup
+  file names no seat says so on the button rather than guessing a height.
+
+  This reads the skeleton `rider.edf` has carried all along and nobody was using: 98 named bones,
+  of which 64 bind the mesh. The file stores no vertex weights — the game rebuilds the binding at
+  load — so the app rebuilds it too, from the per-bone boxes the file *does* carry plus the
+  distance to the limb each bone actually swings. Helmet, boots and body armour ride along on the
+  bones their own `gfx.cfg` names, so the kit follows the pose.
+
+  Preview only, deliberately: MX Bikes takes a rider's posture from its riding style, an
+  animation set in `mods/rider/animations`, and nothing here writes to the game.
+
+- **Take hold of the rider and move him.** The Pose view puts a dot on each of the rider's joints
+  in the 3D preview — head, back, shoulders, elbows, hands, hips and feet. Grab one and the limb
+  swings to follow the cursor the way it does in Pivot: the joint above the dot you are holding is
+  the one that turns, so pulling a hand bends the forearm about the elbow and pulling a foot bends
+  the shin about the knee. A drag turns in the plane you are looking at, so orbit the camera to
+  reach the other way. Push a joint past its stop and it comes to rest on the way to the cursor
+  rather than snapping somewhere else, and dragging back to where you started returns the model
+  exactly as it was authored. A drag moves at half the cursor's pace, and finer with Shift held.
+
+  A drag writes the same pose the sliders do, so the two mix freely and quick moves still stack on
+  top. The sliders are still there for the two things a drag can't say — twist about a bone's own
+  length, and an exact number — but the groups start closed now, since the dots are the way in.
 
 - **The Pose tab can take a photograph.** Five backdrops to stand a rider against — studio,
   white, daylight, sunset and dusk, each with its own light and ground — a clean frame that
   hides the grab dots and the on-canvas panels, and a Save photo button that writes a PNG at
   twice the size of the panel it was framed in. Open the preview full screen first for a
   bigger one. Nothing is downloaded for any of it.
-
-- **The rider can sit on the bike.** A new "On bike" view in the Pose tab puts the two
-  together instead of side by side, worked out rather than eyeballed: the bike's own setup
-  file names where its seat is, the rider's up and forward are read off its rig, and the two
-  are brought into one frame. The placement sliders still nudge either half from there. A bike
-  whose setup file names no seat says so on the button rather than guessing a height. There's
-  a new "Sit on bike" ready-made move to fold the legs round it.
-
-### Changed
-- **The Pose tab shows the kit the Rider tab has.** The two used to keep separate copies and
-  only ever agreed when Presets handed them the same thing at the same moment, so a look
-  composed next door was not the look being posed. One kit now sits above both tabs: every
-  pick, paint and show-on-model toggle is on screen in both.
-
-- **Dragging a limb is half as fast, and finer with Shift held.** One-to-one with the cursor
-  meant a joint near its pivot swung the whole 60° in a couple of centimetres of mouse. A drag
-  still reaches anywhere — it solves again from wherever the dot now is — it just stops
-  snapping away.
-
-- **Installing a downloaded mod is faster, and the app stays responsive while it happens.**
-  Every byte used to be written to disk three times — the archive, the unpacked copy, then a
-  third copy into the mods folder — for files that were deleted moments later. The last of
-  those is now a move, so on one drive it costs nothing; a mods folder on a different drive
-  falls back to the copy, retries and all. Unpacking also no longer runs on the app's async
-  runtime, where a big track pinned a worker for the whole of it. Everything that installs
-  from somewhere we don't own — a folder you dropped in — still copies, untouched.
-
-- **A download that goes silent now resumes instead of hanging.** Only the connection was
-  given a timeout, so a host that accepted the socket and then stopped sending sat there
-  forever: the resume machinery only wakes on an error, and silence never was one. Thirty
-  seconds of nothing is now treated as a broken transfer and picked back up where it stalled.
-  Uploads are deliberately exempt — their response doesn't arrive until the last byte is sent.
-
-### Fixed
-- **The ready-made poses did the opposite of what they said.** Each was a fixed turn in
-  degrees on a bone's own axes, and a bone's axes are whatever its author left them as — so
-  "Legs wider" pulled the game's main rider's knees from 28 cm apart to 13, while widening
-  another model's, and "Left leg forward" moved neither knee forward at all. A move is now a
-  place to send a joint — "the knee, 9 cm to the rider's own left" — solved with the same
-  machinery a drag uses, against axes read off the model itself. Checked against both riders
-  the game ships (`scripts/pose-moves-check.mjs`). A move a model can't make — leaning, on a
-  rig that binds no spine — isn't offered rather than doing nothing when clicked.
-
-- **Boots stayed behind when the legs moved.** A boots mod shipping both feet as one mesh was
-  never carried by the pose at all; it now travels with the knees. And which foot went on
-  which leg assumed the rider's left was always the same way along X, which is false on half
-  the models installed — including one of the game's own — so a boot sat on one leg and
-  followed the other's. Read off the rig now.
-
-- **One hip dragged the whole body on riders that bind only their limbs.** The game's
-  `default_mx_c` rider carries the arms and legs and no spine, and every chain whose parent was
-  missing was hung off whatever bone happened to precede it in the file — the right leg off the
-  left leg's twist, both arms off the right leg. Turning one hip swung all of it. Those chains
-  now stand on their own.
-
-- **The rider came apart in every 3D preview.** The rig `rider.edf` carries is stored once per
-  level of detail — the game's own riders hold three copies of the same 64 bones — and the app
-  read all of them. Every bone then had two namesakes to hang off, the skeleton closed into a
-  cycle, and the bones caught inside one never got placed at all: the body folded into a heap
-  and its gear went with it, in the plain Rider view as much as in Pose. Only the first copy is
-  read now, the one that goes with the mesh being drawn, and a bone may only hang off one the
-  file has already listed, so a rig can never close on itself. The viewer also draws the skinned
-  body **only** while something is actually posed — at rest it is the same rigid mesh it was
-  before posing existed, so the rest of the app can't be spoiled by a rig it reads wrongly.
-
-- **A model swap rendered as a plain white bike.** A mesh that ships companion sheets
-  (`_n`/`_s`/`_r`) writes a second texture index into each material record, in a field the app
-  required to be zero — so every material table was thrown out and every part fell through to
-  bare grey. Read back, those indices count a list the app wasn't building either: one that
-  includes the companion maps *and* the sheets a mesh declares but never embeds. Both are fixed,
-  and a bike whose materials don't use that second slot — every stock bike — is read exactly as
-  it was before. The KTM 450's swap goes from nothing bound to all 31 parts on their right
-  sheets: the Pro Taper bars, the ARC levers and calipers, the ODI grips, the Hammerhead pedal
-  and shifter, and the Polar mount, which is painted by a sheet the mesh never embeds at all.
-
-- **The model-swap badge squeezed a bike's name off its card.** Sitting in the row beside the
-  name, it competed with it for width — and the name is what gave, collapsing to nothing on
-  the one bike that had swaps. It now sits under the name instead, where nothing else is
-  fighting for the space.
-
-- **The Library's model-swap badge never appeared.** A bike is listed in the Library as its
-  `<Bike>.pkz` archive, so the row's name carries the extension, while a model swap is keyed by
-  the bike folder beside it — the two never matched, and the badge was invisible on every bike.
-
-### Added
-- **Take hold of the rider and move him.** The Pose view now puts a dot on each of the rider's
-  joints in the 3D preview — head, back, shoulders, elbows, hands, hips and feet. Grab one and
-  the limb swings to follow the cursor the way it does in Pivot: the joint above the dot you
-  are holding is the one that turns, so pulling a hand bends the forearm about the elbow and
-  pulling a foot bends the shin about the knee. A drag turns in the plane you are looking at,
-  so orbit the camera to reach the other way. Push a joint past its stop and it comes to rest
-  on the way to the cursor rather than snapping somewhere else, and dragging back to where you
-  started returns the model exactly as it was authored.
-
-  A drag writes the same pose the sliders do, so the two mix freely and quick moves still
-  stack on top. The sliders are still there for the two things a drag can't say — twist about
-  a bone's own length, and an exact number — but the groups start closed now, since the dots
-  are the way in.
-
-- **Move a model swap to another bike, or delete it.** Every model set now carries its own
-  menu, in the Locker and on the Library's bike cards alike. **Move** asks which bike to send it
-  to and, when the model owns liveries, which of those travel with it — off by default, because
-  a paint is drawn for one bike's layout and rarely fits another; anything left behind stays put
-  rather than being thrown away. **Delete** sends the set to the Trash, so a model you can't
-  download again is recoverable, and leaves the bike's liveries alone. Neither is offered for
-  the model currently on the bike: its files are loose at the bike root, so moving them would
-  take the bike's live model out from under it — switch to another model first.
-
-- **View a model swap in 3D straight from the Library.** Each variant in a bike card's model
-  list now carries its own **View 3D**, drawing the bike as that swap would leave it — the
-  same preview the Locker offers, without having to go there to find it. Nothing on disk
-  moves. Sets with no mesh have nothing to draw and don't offer it.
-
-- **Pose the rider.** A new **Pose** view in the Studio opens on a preset as it stands — bike,
-  model swap, rider, gear and paints, all read-only — and lets you move the rider's limbs:
-  where the hands sit, how far the legs are spread, one leg forward, elbows up, lean in. Quick
-  moves stack, and every joint has bend/twist/splay sliders under Torso, Arms, Hands and Legs.
-  The pose is remembered per rider profile on this machine, and **Reset** returns the model
-  exactly as it was authored.
-
-  This reads the skeleton `rider.edf` has carried all along and nobody was using: 98 named
-  bones, of which 64 bind the mesh. The file stores no vertex weights — the game rebuilds the
-  binding at load — so the app rebuilds it too, from the per-bone boxes the file *does* carry
-  plus the distance to the limb each bone actually swings. Helmet, boots and body armour ride
-  along on the bones their own `gfx.cfg` names, so the kit follows the pose.
-
-  Preview only, deliberately: MX Bikes takes a rider's posture from its riding style, an
-  animation set in `mods/rider/animations`, and nothing here writes to the game.
-
-- **A bike with no wheels to solve against now stands on its suspension.** "Level wheels"
-  needs wheel meshes and axles to measure against; a model that ships neither fell back to the
-  authored frame, which carries no suspension travel at all — so the bike stood with its shock
-  apparently collapsed. The rear now defaults to 140 mm of drop instead. Bikes the solve *can*
-  answer for are unaffected, and **Reset** still puts a bike back exactly as authored.
-
-- **See a bike's model swaps without leaving the Library.** A bike card now carries a
-  **models** badge when there is more than one model set installed, and opening it lists them
-  in place — the active one ticked, an incomplete set flagged, a "no model" set marked, and a
-  file count for the rest. It reads the same vocabulary as the Locker, so a variant looks the
-  same wherever you meet it. Deliberately read-only: the Locker stays the one place that moves
-  files, so two views can never disagree about which model is live.
-- **Move the bike and the rider around in the Rider tab.** The pair stood where the viewer put
-  them — shoulder to shoulder, a fixed gap apart — which is the one arrangement nobody was
-  composing for. A **Placement** panel now moves either model: side, up, forward and turn, in
-  metres and degrees, so the rider can stand at the bike's shoulder, sit on it, or face the
-  camera with the bike behind them. **Reset** puts the pair back the way it opened.
-- **The bike's pose panel, in the Rider tab.** Rear, Front, Steering and Level wheels were in
-  the library's viewer and the expanded preview only; the tab where a look is actually built
-  now carries them too, in the panel beside the pickers.
-- **A 3D preview you can drag wider.** The Rider tab's preview was a fixed 420px onto a bike
-  and a rider side by side. Drag the handle on its left edge to give it as much of the tab as
-  you want — double-click to put it back — and the width is remembered per machine.
-
-- **Stand a bike the way you want to see it.** The 3D preview drew every bike in the frame it
-  was *authored* in, which is not a stance it ever holds on the ground — a `.geom` carries no
-  suspension travel at all, and ride height falls out of physics the viewer doesn't run. So
-  bikes stood with the shock apparently collapsed and the rear wheel riding high. The preview
-  now knows the bike's own joints and lets you move them: **Rear** swings the swingarm about
-  its pivot, **Front** slides the fork up its own raked axis, **Steering** turns the bars and
-  the front wheel with them, all in millimetres and degrees of the real thing.
-  - **Level wheels** solves the rear for you — both tyres touching the same ground, measured
-    at the contact patches rather than the axles, since a 21" front and a 19" rear aren't level
-    when their axles are. A bike wearing wheels is drawn that way to begin with, so it stands
-    right without anyone touching a slider; **Reset** puts it back as authored.
-  - The panel is in the expanded preview and the full-screen viewer. A bike whose `.geom`
-    names no mounts has no joints to move and renders exactly as it did before.
 
 - **Mirror a layer to the other side of the bike.** Place a decal on the right shroud, hit
   Mirror, and a copy lands at the same spot on the left one. The place is worked out from the
@@ -280,37 +1094,23 @@
     part of the model with nothing at its reflection, or no model loaded at all.
   - Where the far side isn't unwrapped as a true reflection, the placement is still made and
     flagged as close rather than exact.
+
 - **The layer handling that was missing.** Duplicate (⌘D), copy and paste (⌘C/⌘V, across
   sheets too), Delete, and arrow-key nudging — one pixel, or ten with Shift.
+
 - **Several layers at once.** Shift-click to add, drag over empty canvas to lasso, ⌘A for the
   lot. Group them with ⌘G and they move, scale and clip as one; Alt-click reaches inside a
   group for a single layer.
+
 - **Snapping while dragging.** Layers catch on the sheet's centre lines and edges, on the box
   of whatever part they're clipped to, and on each other's edges and middles, with a line drawn
   to show what was caught. Hold Alt to place freely.
+
 - **Flip a layer** left-to-right or top-to-bottom, from the inspector or the new right-click
   menu on the canvas.
+
 - **Type a position and size.** X, Y, size and angle now have boxes as well as sliders, and
   they track the drag — placing a plate number no longer means nudging it by eye.
-
-- **The bike now stands next to the rider in the Studio preview.** The 3D panel in Studio →
-  Rider only ever drew the rider, so the bike half of a look — its livery and its model swap —
-  was invisible until you were in-game. The panel now draws both in one scene, at their real
-  sizes, and the Rider tab gains a bike picker with the livery and model-swap slots beside it.
-  A preset opened with "View in Rider" brings its bike along, so it arrives fully dressed.
-  The Bike / Rider / Both toggle picks what's on screen; either half stays up while the other
-  one re-reads, and a bike that won't resolve says so instead of quietly leaving the rider alone.
-
-
-- **Pick which tyres a bike is previewed on.** A bike's `gfx.cfg` names exactly one tyre
-  pack, so seeing it on another was impossible — the preview fitted what the file said and
-  that was that. A **Tyres** picker now sits beside the livery one in all three previews (the
-  Viewer, the Rider tab and the Designer), listing what's installed under `mods/tyres`. It
-  substitutes the name the wheels are looked up under and nothing else: no file is renamed,
-  no mod is touched, and the bike's own `gfx.cfg` still reads exactly as the game reads it.
-  The choice is remembered, and it's one choice — pick it in the Viewer and the Designer
-  agrees. Picking a pack that isn't installed leaves the bike on its own rather than taking
-  its wheels off.
 
 - **Bikes render with their wheels on.** The 3D preview drew the frame, the forks, the
   swingarm and the bars, then stopped — every bike stood on bare fork tips and a swingarm
@@ -329,19 +1129,157 @@
   - A bike whose tyres mod isn't installed — or whose `.geom` names no axles — renders
     exactly as it did before.
 
+- **Pick which tyres a bike is previewed on.** A bike's `gfx.cfg` names exactly one tyre
+  pack, so seeing it on another was impossible — the preview fitted what the file said and
+  that was that. A **Tyres** picker now sits beside the livery one in all three previews (the
+  Viewer, the Rider tab and the Designer), listing what's installed under `mods/tyres`. It
+  substitutes the name the wheels are looked up under and nothing else: no file is renamed,
+  no mod is touched, and the bike's own `gfx.cfg` still reads exactly as the game reads it.
+  The choice is remembered, and it's one choice — pick it in the Viewer and the Designer
+  agrees. Picking a pack that isn't installed leaves the bike on its own rather than taking
+  its wheels off.
+
+- **Stand a bike the way you want to see it.** The 3D preview drew every bike in the frame it
+  was *authored* in, which is not a stance it ever holds on the ground — a `.geom` carries no
+  suspension travel at all, and ride height falls out of physics the viewer doesn't run. So
+  bikes stood with the shock apparently collapsed and the rear wheel riding high. The preview
+  now knows the bike's own joints and lets you move them: **Rear** swings the swingarm about
+  its pivot, **Front** slides the fork up its own raked axis, **Steering** turns the bars and
+  the front wheel with them, all in millimetres and degrees of the real thing.
+  - **Level wheels** solves the rear for you — both tyres touching the same ground, measured
+    at the contact patches rather than the axles, since a 21" front and a 19" rear aren't level
+    when their axles are. A bike wearing wheels is drawn that way to begin with, so it stands
+    right without anyone touching a slider; **Reset** puts it back as authored.
+  - The panel is in the expanded preview and the full-screen viewer. A bike whose `.geom`
+    names no mounts has no joints to move and renders exactly as it did before.
+
+- **The bike's pose panel, in the Rider tab.** Rear, Front, Steering and Level wheels were in
+  the library's viewer and the expanded preview only; the tab where a look is actually built
+  now carries them too, in the panel beside the pickers.
+
+- **The bike now stands next to the rider in the Studio preview.** The 3D panel in Studio →
+  Rider only ever drew the rider, so the bike half of a look — its livery and its model swap —
+  was invisible until you were in-game. The panel now draws both in one scene, at their real
+  sizes, and the Rider tab gains a bike picker with the livery and model-swap slots beside it.
+  A preset opened with "View in Rider" brings its bike along, so it arrives fully dressed.
+  The Bike / Rider / Both toggle picks what's on screen; either half stays up while the other
+  one re-reads, and a bike that won't resolve says so instead of quietly leaving the rider alone.
+
+- **Move the bike and the rider around in the Rider tab.** The pair stood where the viewer put
+  them — shoulder to shoulder, a fixed gap apart — which is the one arrangement nobody was
+  composing for. A **Placement** panel now moves either model: side, up, forward and turn, in
+  metres and degrees, so the rider can stand at the bike's shoulder, sit on it, or face the
+  camera with the bike behind them. **Reset** puts the pair back the way it opened.
+
+- **A 3D preview you can drag wider.** The Rider tab's preview was a fixed 420px onto a bike
+  and a rider side by side. Drag the handle on its left edge to give it as much of the tab as
+  you want — double-click to put it back — and the width is remembered per machine.
+
+- **A bike with no wheels to solve against now stands on its suspension.** "Level wheels"
+  needs wheel meshes and axles to measure against; a model that ships neither fell back to the
+  authored frame, which carries no suspension travel at all — so the bike stood with its shock
+  apparently collapsed. The rear now defaults to 140 mm of drop instead. Bikes the solve *can*
+  answer for are unaffected, and **Reset** still puts a bike back exactly as authored.
+
+- **Move a model swap to another bike, or delete it.** Every model set now carries its own
+  menu, in the Locker and on the Library's bike cards alike. **Move** asks which bike to send it
+  to and, when the model owns liveries, which of those travel with it — off by default, because
+  a paint is drawn for one bike's layout and rarely fits another; anything left behind stays put
+  rather than being thrown away. **Delete** sends the set to the Trash, so a model you can't
+  download again is recoverable, and leaves the bike's liveries alone. Neither is offered for
+  the model currently on the bike: its files are loose at the bike root, so moving them would
+  take the bike's live model out from under it — switch to another model first.
+
+- **View a model swap in 3D straight from the Library.** Each variant in a bike card's model
+  list now carries its own **View 3D**, drawing the bike as that swap would leave it — the
+  same preview the Locker offers, without having to go there to find it. Nothing on disk
+  moves. Sets with no mesh have nothing to draw and don't offer it.
+
+- **See a bike's model swaps without leaving the Library.** A bike card now carries a
+  **models** badge when there is more than one model set installed, and opening it lists them
+  in place — the active one ticked, an incomplete set flagged, a "no model" set marked, and a
+  file count for the rest. It reads the same vocabulary as the Locker, so a variant looks the
+  same wherever you meet it. Deliberately read-only: the Locker stays the one place that moves
+  files, so two views can never disagree about which model is live.
+
 ### Changed
-- Settings → Supporters lists **Bøddi** in place of **Thomas**.
+
+- **Models reach the 3D view without being spelled out as text.** A mesh's vertices used to
+  cross to the viewer as JSON numbers — 5.9 MB of digits for a small bike, and every one of
+  them parsed back into a number on arrival. They travel as their own bytes now: **the app
+  spends 12.4 ms preparing a bike's mesh instead of 2.2 ms**, and the viewer unpacks it
+  **6.8x faster** (31 ms → 4.6 ms), which grows with the model — a detailed bike or a gear
+  mesh is several times the size of the one measured. Bikes, rider gear, helmets, the rider
+  body and model-swap previews all arrive the same way.
+
+- **A track's 3D view appears about seven times faster.** The fine terrain is a 2048×2048
+  grid — four million vertices — and three.js worked out its lighting the general way, by
+  walking all 8.4 million triangles and accumulating a normal onto each corner. A height grid
+  doesn't need the general way: the ground is a function of x and y, so its slope comes
+  straight from the neighbouring samples. Measured on the same mesh, that took building the
+  view from 622 ms to 84 ms, with the two agreeing to within 0.02° — the same picture, drawn
+  without the wait. Nothing about the terrain's detail changed.
+
+- **Four mods install two at a time instead of one after another.** Downloading was never
+  what made a batch slow: a single MediaFire connection measured at 25–34 MB/s, more than a
+  typical home line carries, and splitting one file across eight parallel connections was
+  worth exactly nothing. What cost time was the line sitting idle between mods, while one
+  resolved its link or unpacked. Two now overlap, and the next few links are looked up ahead
+  of their turn rather than when their turn arrives.
+
+- **Installing a downloaded mod is faster, and the app stays responsive while it happens.**
+  Every byte used to be written to disk three times — the archive, the unpacked copy, then a
+  third copy into the mods folder — for files that were deleted moments later. The last of
+  those is now a move, so on one drive it costs nothing; a mods folder on a different drive
+  falls back to the copy, retries and all. Unpacking also no longer runs on the app's async
+  runtime, where a big track pinned a worker for the whole of it. Everything that installs
+  from somewhere we don't own — a folder you dropped in — still copies, untouched.
+
+- **MediaFire links resolve about a third of a second quicker.** The app asked MediaFire's
+  API for a download link first and scraped the page only if that failed. Across eight real
+  tracks the API refused every one, and the scrape rescued all eight — so the first request
+  was pure delay. The page is asked first now; the API stays behind it, still the route that
+  survives the page being redesigned.
+
+- **Preset bundles, shared files and picked files place the same cheap way downloads do.**
+  They all unpack to a folder that is deleted moments later, so their files are moved into
+  place rather than copied a second time.
+
+- **A download that goes silent now resumes instead of hanging.** Only the connection was
+  given a timeout, so a host that accepted the socket and then stopped sending sat there
+  forever: the resume machinery only wakes on an error, and silence never was one. Thirty
+  seconds of nothing is now treated as a broken transfer and picked back up where it stalled.
+  Uploads are deliberately exempt — their response doesn't arrive until the last byte is sent.
 
 - **The Rider tab's bike picker is searchable.** It was a plain dropdown, which is a long
   scroll past dozens of bikes for a name you already know. It's now the same searchable
   field as the Paint and Model swap slots beside it — type to filter. Unlike those, it
   won't take a name you made up or an empty value, because neither is a bike.
+
 - **The Rider preview starts from the stock model.** With no model swap picked it drew
   whatever swap happened to be on the bike, so the same look rendered differently on
   everyone's machine. It now draws the game's own model unless you pick one — for a bike
   whose files are all packed that was already what you were seeing, so nothing changes there.
 
 ### Fixed
+
+- **Opening a bike in 3D was doing half its work for nothing.** Every texture packed inside a
+  model was run through a resize on the way in — including the ones that were already the
+  size the viewer wants, which is how bike sheets are almost always authored. Resampling a
+  1024×1024 sheet to 1024×1024 is pure cost, eight times over on a typical bike. Skipped now,
+  the same way loose paints have always skipped it: **opening a bike goes from 201 ms to
+  127 ms**, and the sheets are a touch sharper for never having been resampled. Rider gear,
+  helmets and model swaps read their textures the same way and all get the same back.
+
+- **A model swap rendered as a plain white bike.** A mesh that ships companion sheets
+  (`_n`/`_s`/`_r`) writes a second texture index into each material record, in a field the app
+  required to be zero — so every material table was thrown out and every part fell through to
+  bare grey. Read back, those indices count a list the app wasn't building either: one that
+  includes the companion maps *and* the sheets a mesh declares but never embeds. Both are fixed,
+  and a bike whose materials don't use that second slot — every stock bike — is read exactly as
+  it was before. The KTM 450's swap goes from nothing bound to all 31 parts on their right
+  sheets: the Pro Taper bars, the ARC levers and calipers, the ODI grips, the Hammerhead pedal
+  and shifter, and the Polar mount, which is painted by a sheet the mesh never embeds at all.
 
 - **A model swap previewed as a white bike in pieces.** A model set is a mesh and little
   else — the `.geom` that mounts the parts to each other, the `gfx.cfg` and `.hrc`s that say
@@ -352,6 +1290,7 @@
   with the loose files over it and the swap's over those — the order the game itself reads a
   bike in. The same skip was on the ordinary load path, so an extracted bike whose `.geom`
   stayed behind in its archive rendered unassembled too, swap or no swap.
+
 - **A model swap could carry off the bike's own setup files.** A variant folder holding copies
   of the `.hrc`s, `.cfg` or `.geom` — with no mesh of its own — made the swapper treat those
   files as the model's, so they were parked along with it and the bike was left a mesh with
@@ -369,6 +1308,7 @@
   paints nothing, which is only discovered in game. That boots mod now offers `fox` and
   `fox_n`, as it always should have. The same lookup answers whether a bike exists at all when
   it's installed as a bare `.pkz`, so a model-swap preview for one resolves too.
+
 - **A rider kit or a pair of gloves had no sheet names to start from.** `Rider+` and
   `Rider+RolledUp` ship their `paints/` and `gloves/` folders empty on purpose — the kits
   installed under the stock rider are the ones meant to be worn on them, which is already how
@@ -376,6 +1316,7 @@
   with an empty expected-names line and nothing to create sheets from, and gloves had no source
   of names at all. Both now read the stock profile's paints: `rider`, `rider_n`, `rider_r` for
   a kit, `gloves`, `gloves_n`, `gloves_r` for gloves.
+
 - **Picking a rider profile could hang the Designer for a minute and a half.** With no paints
   of its own to read, the app fell back to walking the profile's mesh for texture names — and
   those two files are 67 MB each. Where iCloud or OneDrive had evicted them, asking what a
@@ -383,14 +1324,6 @@
   names are a convenience; an evicted mesh is now left alone and the paints answer instead, in
   about a tenth of a second. The preview still fetches the model when it draws it, where the
   wait buys a picture.
-
-
-- **A square where each brake disc should be.** A wheel's front disc, rear disc and sprocket
-  are drawn as a masked square on a flat quad — two thirds of `fdisc` is fully transparent —
-  and the bike preview had never needed to cut a mask out before, so each one arrived as the
-  square. The mask is honoured now, but only where a sheet's alpha actually varies: a bike's
-  `w_plate` carries an alpha channel nobody filled in, transparent on every pixel, and
-  treating that as a mask would have erased the number plates instead.
 
 ### Removed
 
@@ -799,7 +1732,6 @@ out looking nothing like the track you ride, name it in the report.
 - Buy Me a Coffee donations post to the Discord for money-in events only, carrying a name and
   their note and nothing else — no amount, no email.
 - Audio comes from `cpal` pinned to 0.15; the Linux build and CI install `libasound2-dev`.
-
 
 ## Unannounced — server provisioning and paint publishing
 

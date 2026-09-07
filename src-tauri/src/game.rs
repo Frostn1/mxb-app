@@ -67,6 +67,7 @@ impl Game {
     /// Parse a stored/incoming id. Anything unrecognized falls back to MX Bikes rather
     /// than erroring: a config written by a *newer* build naming a game this one doesn't
     /// have should leave the app usable, not refuse to start.
+    #[allow(dead_code)]
     pub fn from_id(id: &str) -> Game {
         match id.trim().to_ascii_lowercase().as_str() {
             "gpb" => Game::Gpb,

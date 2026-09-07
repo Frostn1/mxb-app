@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { ArrowUpDown, RefreshCw, Search, Tag } from "lucide-react";
+import { RefreshCw, Search, Tag } from "lucide-react";
 import type { ShopCategory, ShopMod, ShopSort, ShopStatus } from "../../types";
 import {
   SHOP_CATALOG_UPDATED,
@@ -13,6 +13,7 @@ import {
 import ShopCard from "./ShopCard";
 import ShopDetail from "./ShopDetail";
 import CategoryPill from "./CategoryPill";
+import { ContextBarRight } from "../Shell/ContextBar";
 import { Button } from "@/Components/ui/button";
 import { Skeleton } from "@/Components/ui/skeleton";
 import {
@@ -168,75 +169,61 @@ export default function ShopCatalog() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* No title of its own — `Shop` owns the heading and the tab strip above this. */}
-      <header className="flex flex-none flex-col gap-4 px-7 pb-3.5">
-        <div className="flex items-center gap-3.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void refresh()}
-            disabled={refreshing}
-            className="flex-none"
-          >
-            <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-            {refreshing ? t("shopCatalog.refreshing") : t("shopCatalog.refresh")}
-          </Button>
-          <div className="ml-auto flex w-[280px] items-center gap-2 rounded-lg border border-input bg-card px-3 py-2">
-            <Search className="size-3.5 text-faint" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t("shopCatalog.searchPlaceholder")}
-              className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <CategoryPill
-            label={t("shopCatalog.allCategories")}
-            on={categoryId === null}
-            onClick={() => setCategoryId(null)}
+      {/* No title of its own — `Shop` owns the heading and the tab strip above this. */}
+      <ContextBarRight>
+        <div className="flex h-7 w-[220px] items-center gap-2 border border-input bg-card px-2.5">
+          <Search className="size-3.5 text-faint" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("shopCatalog.searchPlaceholder")}
+            className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
           />
-          {roots.map((c) => (
-            <CategoryPill
-              key={c.id}
-              label={c.name}
-              count={c.count}
-              on={categoryId === c.id || selected?.parent === c.id}
-              onClick={() => setCategoryId(c.id)}
-            />
-          ))}
-          <div className="ml-auto flex items-center gap-2 self-center">
-            <button
-              onClick={() => setOnSaleOnly((v) => !v)}
-              className={cn(
-                "flex cursor-default items-center gap-1.5 rounded-full px-3 py-[5px] text-[12px] font-medium transition-colors",
-                onSaleOnly
-                  ? "bg-emerald-500 font-semibold text-black"
-                  : "border border-input text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Tag className="size-3" />
-              {t("shopCatalog.onSaleOnly")}
-            </button>
-            <ArrowUpDown className="size-3.5 text-faint" />
-            <Select value={sort} onValueChange={(v) => setSort(v as ShopSort)}>
-              <SelectTrigger className="h-8 w-[210px] bg-card">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SHOP_SORTS.map((s) => (
-                  <SelectItem key={s.value} value={s.value}>
-                    {t(s.label)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
         </div>
+        <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={refreshing}>
+          <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+          {refreshing ? t("shopCatalog.refreshing") : t("shopCatalog.refresh")}
+        </Button>
+        <Select
+          value={categoryId === null ? "all" : String(categoryId)}
+          onValueChange={(v) => setCategoryId(v === "all" ? null : Number(v))}
+        >
+          <SelectTrigger className="h-7 w-[170px] bg-card text-[12px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("shopCatalog.allCategories")}</SelectItem>
+            {roots.map((c) => (
+              <SelectItem key={c.id} value={String(c.id)}>
+                {c.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={sort} onValueChange={(v) => setSort(v as ShopSort)}>
+          <SelectTrigger className="h-7 w-[190px] bg-card text-[12px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SHOP_SORTS.map((s) => (
+              <SelectItem key={s.value} value={s.value}>
+                {t(s.label)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          variant={onSaleOnly ? "secondary" : "outline"}
+          size="sm"
+          onClick={() => setOnSaleOnly((v) => !v)}
+        >
+          <Tag className="size-3" />
+          {t("shopCatalog.onSaleOnly")}
+        </Button>
+      </ContextBarRight>
 
         {children.length > 0 && (
-          <div className="-mt-1 flex flex-wrap items-center gap-2">
+          <div className="flex flex-none flex-wrap items-center gap-2 px-7 pb-3 pt-3">
             {children.map((c) => (
               <CategoryPill
                 key={c.id}
@@ -279,7 +266,6 @@ export default function ShopCatalog() {
             )}
           </div>
         )}
-      </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
         {error ? (

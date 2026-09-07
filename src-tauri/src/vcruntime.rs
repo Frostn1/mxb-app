@@ -123,6 +123,7 @@ pub enum Stray {
 
 impl Stray {
     /// Is there still a file there that will kill the game? The question the banner asks.
+    #[cfg_attr(windows, allow(dead_code))]
     pub fn needs_the_player(self) -> bool {
         matches!(self, Stray::Foreign | Stray::Locked)
     }

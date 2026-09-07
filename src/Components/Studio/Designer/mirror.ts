@@ -10,8 +10,15 @@ import { partPath, sideAt, type UvPart } from "./uv";
  * is not a reflection of each other about the middle of the texture. The model is the only
  * thing that knows where the far side of a shroud actually is, so the question is asked of it —
  * a point on the sheet becomes a point on a triangle, that point is reflected about the bike's
- * mirror plane, and whichever triangle wears the reflected point says where it lands back on
- * the sheet.
+ * mirror plane, and whatever surface lies under the reflected point says where it lands back
+ * on the sheet.
+ *
+ * *Whatever surface lies under it*, not "the triangle whose corners are the mirrored corners".
+ * A bike is only approximately symmetric: a seat, a tank or a fender is modelled once as one
+ * piece, so its two halves are near-copies rather than vertex-exact mirrors — 2mm apart on a
+ * stock CRF450R's seat — and the corner-matching version of this refused two thirds of that
+ * bike's sheet. The far side is a surface, and the nearest point on it is the answer whether
+ * or not a vertex happens to sit there.
  *
  * Everything here works in the frame `uvParts` does: assembled, with the mirror plane at x = 0.
  */
@@ -28,19 +35,47 @@ const WELD = 1e-5;
  */
 const GRID = 48;
 
+/**
+ * How far off a reflected point a surface may lie and still be its far side, as a fraction of
+ * the sheet's own diagonal — about 8mm on a 450. Doubles as the model-space cell size.
+ *
+ * A panel's far half is a continuous surface, so a reflection that belongs on it lands within
+ * a hair of it however roughly the two halves were modelled. The band is here for the other
+ * case: a part with no twin at all — a one-off bracket, an exhaust — whose reflection comes
+ * out in mid-air.
+ *
+ * The diagonal rather than the half-width, which is what the weld goes by: a sheet can hold a
+ * narrow thing — a pair of wheels is 120mm across and two metres long — and sizing the band
+ * off the narrow axis would shrink it to a millimetre and the grid to a quarter-million cells.
+ */
+const REACH = 0.0035;
+
+/**
+ * How closely a candidate has to face the way the reflection does, as a dot product.
+ *
+ * Distance alone would answer an exhaust's reflection with the frame tube running behind it.
+ * A panel's mirror image faces the mirrored way; whatever is stacked behind it does not.
+ */
+const FACING = 0.25;
+
+/** A triangle reaching more model-space cells than this is checked on every lookup instead. */
+const SPRAWL = 256;
+
 export interface MirrorIndex {
-  /** Welded corner positions, three numbers each. */
+  /** Nine numbers per triangle — its three corners in model space. */
   points: Float64Array;
-  /** Corner id → the corner at its reflection, or -1 where the model isn't symmetric there. */
-  mirrorOf: Int32Array;
-  /** Three corner ids per triangle. */
-  tris: Int32Array;
-  /** Six numbers per triangle — u0,v0,u1,v1,u2,v2 — in the same corner order as `tris`. */
+  /** Six numbers per triangle — u0,v0,u1,v1,u2,v2 — in the same corner order as `points`. */
   uvs: Float32Array;
-  /** A triangle's three corner ids, sorted and joined → its index. */
-  byCorners: Map<string, number>;
+  /** Three numbers per triangle — the unit face normal, for the `FACING` test. */
+  normals: Float64Array;
   /** uv cell → the triangles whose bounds reach it. */
   cells: Map<number, number[]>;
+  /** Model-space cell → the triangles whose bounds reach it. */
+  solid: Map<string, number[]>;
+  /** Triangles too spread out to bucket, checked on every reflection instead. */
+  sprawl: number[];
+  /** `REACH` in the model's own units — the cell size, and the radius a far side is sought in. */
+  reach: number;
 }
 
 /** What a mirror was asked for and couldn't give. Each reads as its own sentence to the user. */
@@ -62,61 +97,6 @@ export interface MirrorPlacement {
 
 export type MirrorResult = ({ ok: true } & MirrorPlacement) | { ok: false; why: MirrorRefusal };
 
-/** A hash grid over positions, for welding corners and for finding a reflection's twin. */
-class PointGrid {
-  private cells = new Map<string, number[]>();
-  private xs: number[] = [];
-
-  constructor(private eps: number) {}
-
-  /**
-   * The id of a corner within `eps` of this position, or -1.
-   *
-   * Probes the neighbouring cells as well as the point's own: two positions a hair apart can
-   * still land either side of a cell boundary, and a weld that missed those would leave a
-   * panel's shared edge as two edges that never find each other.
-   */
-  find(x: number, y: number, z: number): number {
-    const c = this.eps;
-    let best = -1;
-    let bestDist = this.eps * this.eps;
-    const i = Math.floor(x / c);
-    const j = Math.floor(y / c);
-    const k = Math.floor(z / c);
-    for (let di = -1; di <= 1; di += 1) {
-      for (let dj = -1; dj <= 1; dj += 1) {
-        for (let dk = -1; dk <= 1; dk += 1) {
-          for (const id of this.cells.get(`${i + di},${j + dj},${k + dk}`) ?? []) {
-            const dx = this.xs[id * 3] - x;
-            const dy = this.xs[id * 3 + 1] - y;
-            const dz = this.xs[id * 3 + 2] - z;
-            const d = dx * dx + dy * dy + dz * dz;
-            if (d <= bestDist) {
-              bestDist = d;
-              best = id;
-            }
-          }
-        }
-      }
-    }
-    return best;
-  }
-
-  add(x: number, y: number, z: number): number {
-    const id = this.xs.length / 3;
-    this.xs.push(x, y, z);
-    const key = `${Math.floor(x / this.eps)},${Math.floor(y / this.eps)},${Math.floor(z / this.eps)}`;
-    const cell = this.cells.get(key);
-    if (cell) cell.push(id);
-    else this.cells.set(key, [id]);
-    return id;
-  }
-
-  positions(): Float64Array {
-    return Float64Array.from(this.xs);
-  }
-}
-
 /** Which uv cell a point is in. Clamped, because uvs outside the square are legal and wrap. */
 function cell(u: number, v: number): number {
   const i = Math.min(GRID - 1, Math.max(0, Math.floor(u * GRID)));
@@ -128,65 +108,93 @@ function cell(u: number, v: number): number {
  * Build the reflection index for one sheet.
  *
  * Over the sheet's own triangles rather than the whole model: the far side of a shroud wears
- * the same texture by definition, so anything the mirror could land on is already in `parts`,
- * and a bike's other hundred thousand vertices are not worth welding to find that out.
+ * the same texture by definition, so anything the mirror could land on is already in `parts`.
  *
- * Corners are welded by position rather than trusted as vertex indices, because a panel split
- * across two mesh nodes holds its own copy of the shared edge and the two need not be
- * bit-identical — and the reflected corner is almost always in a different node from the one
- * it came from.
+ * Two lookups come out of the same walk — uv → triangle for the question, and model space →
+ * triangle for the answer.
  */
 export function buildMirror(parts: UvPart[], nodes: EdfNode[]): MirrorIndex | null {
   if (!parts.length || !nodes.length) return null;
 
   // A tolerance in the model's own units, taken from its size — a 65 and a 450 are one shape
-  // at two sizes, and a fixed figure would weld one of them and not the other. Junk vertices
+  // at two sizes, and a fixed figure would suit one of them and not the other. Junk vertices
   // are excluded the way `lateralTolerance` excludes them: a motorcycle is not 1e37 wide.
   let span = 0;
+  const lo = [Infinity, Infinity, Infinity];
+  const hi = [-Infinity, -Infinity, -Infinity];
   for (const part of parts) {
     for (let i = 0; i < part.src.length; i += 2) {
       const node = nodes[part.src[i]];
       if (!node) continue;
       for (let c = 0; c < 3; c += 1) {
         const v = node.indices[part.src[i + 1] * 3 + c];
-        const x = Math.abs(node.positions[v * 3]);
-        if (Number.isFinite(x) && x > span && x < 1e3) span = x;
+        for (let k = 0; k < 3; k += 1) {
+          const n = node.positions[v * 3 + k];
+          if (!Number.isFinite(n) || Math.abs(n) >= 1e3) continue;
+          if (n < lo[k]) lo[k] = n;
+          if (n > hi[k]) hi[k] = n;
+          if (!k && Math.abs(n) > span) span = Math.abs(n);
+        }
       }
     }
   }
-  if (!span) return null;
+  const diagonal = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+  if (!span || !diagonal) return null;
 
-  const grid = new PointGrid(Math.max(span * WELD, 1e-9));
-  const tris: number[] = [];
+  const reach = diagonal * REACH;
+  const eps = Math.max(span * WELD, 1e-9);
+  const points: number[] = [];
   const uvs: number[] = [];
-  const byCorners = new Map<string, number>();
+  const normals: number[] = [];
   const cells = new Map<number, number[]>();
+  const solid = new Map<string, number[]>();
+  const sprawl: number[] = [];
+  // A triangle's three corners, quantised and sorted — the same surface reached through
+  // another label answers identically, so the second copy is only work.
+  const seen = new Set<string>();
 
   for (const part of parts) {
     for (let n = 0; n < part.src.length / 2; n += 1) {
       const node = nodes[part.src[n * 2]];
       if (!node) continue;
       const t = part.src[n * 2 + 1];
-      const corners: number[] = [];
+      const p: number[] = [];
       for (let c = 0; c < 3; c += 1) {
         const v = node.indices[t * 3 + c];
         const x = node.positions[v * 3];
         const y = node.positions[v * 3 + 1];
         const z = node.positions[v * 3 + 2];
         if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) break;
-        const found = grid.find(x, y, z);
-        corners.push(found >= 0 ? found : grid.add(x, y, z));
+        p.push(x, y, z);
       }
-      if (corners.length < 3) continue;
+      if (p.length < 9) continue;
 
-      const key = [...corners].sort((a, b) => a - b).join(",");
-      // Already carrying these three corners: the same surface reached through another label.
-      // Keeping the first is enough — a second copy would answer identically.
-      if (byCorners.has(key)) continue;
+      const key = [0, 1, 2]
+        .map((c) => `${Math.round(p[c * 3] / eps)},${Math.round(p[c * 3 + 1] / eps)},${Math.round(p[c * 3 + 2] / eps)}`)
+        .sort()
+        .join("|");
+      if (seen.has(key)) continue;
+      seen.add(key);
 
-      const index = tris.length / 3;
-      byCorners.set(key, index);
-      tris.push(corners[0], corners[1], corners[2]);
+      const ax = p[3] - p[0];
+      const ay = p[4] - p[1];
+      const az = p[5] - p[2];
+      const bx = p[6] - p[0];
+      const by = p[7] - p[1];
+      const bz = p[8] - p[2];
+      let nx = ay * bz - az * by;
+      let ny = az * bx - ax * bz;
+      let nz = ax * by - ay * bx;
+      const len = Math.hypot(nx, ny, nz);
+      // A triangle with no area faces nowhere, and nothing can usefully land on it.
+      if (!len) continue;
+      nx /= len;
+      ny /= len;
+      nz /= len;
+
+      const index = normals.length / 3;
+      points.push(...p);
+      normals.push(nx, ny, nz);
 
       let minU = Infinity;
       let minV = Infinity;
@@ -213,17 +221,40 @@ export function buildMirror(parts: UvPart[], nodes: EdfNode[]): MirrorIndex | nu
           else cells.set(at, [index]);
         }
       }
+
+      const gi0 = Math.floor(Math.min(p[0], p[3], p[6]) / reach);
+      const gi1 = Math.floor(Math.max(p[0], p[3], p[6]) / reach);
+      const gj0 = Math.floor(Math.min(p[1], p[4], p[7]) / reach);
+      const gj1 = Math.floor(Math.max(p[1], p[4], p[7]) / reach);
+      const gk0 = Math.floor(Math.min(p[2], p[5], p[8]) / reach);
+      const gk1 = Math.floor(Math.max(p[2], p[5], p[8]) / reach);
+      if ((gi1 - gi0 + 1) * (gj1 - gj0 + 1) * (gk1 - gk0 + 1) > SPRAWL) {
+        sprawl.push(index);
+        continue;
+      }
+      for (let i = gi0; i <= gi1; i += 1) {
+        for (let j = gj0; j <= gj1; j += 1) {
+          for (let k = gk0; k <= gk1; k += 1) {
+            const at = `${i},${j},${k}`;
+            const run = solid.get(at);
+            if (run) run.push(index);
+            else solid.set(at, [index]);
+          }
+        }
+      }
     }
   }
-  if (!tris.length) return null;
+  if (!normals.length) return null;
 
-  const points = grid.positions();
-  const mirrorOf = new Int32Array(points.length / 3).fill(-1);
-  for (let id = 0; id < mirrorOf.length; id += 1) {
-    mirrorOf[id] = grid.find(-points[id * 3], points[id * 3 + 1], points[id * 3 + 2]);
-  }
-
-  return { points, mirrorOf, tris: Int32Array.from(tris), uvs: Float32Array.from(uvs), byCorners, cells };
+  return {
+    points: Float64Array.from(points),
+    uvs: Float32Array.from(uvs),
+    normals: Float64Array.from(normals),
+    cells,
+    solid,
+    sprawl,
+    reach,
+  };
 }
 
 /** Barycentric coordinates of a point in a uv triangle, or null when it falls outside. */
@@ -249,43 +280,151 @@ function barycentric(
 }
 
 /**
+ * The closest point on a triangle to `p`, as its barycentric weights and a squared distance.
+ *
+ * Ericson's routine: the three corners' regions, then the three edges', and the face when none
+ * of them claims the point.
+ */
+function closestOnTri(
+  px: number,
+  py: number,
+  pz: number,
+  ax: number,
+  ay: number,
+  az: number,
+  bx: number,
+  by: number,
+  bz: number,
+  cx: number,
+  cy: number,
+  cz: number,
+): [number, number, number, number] {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const abz = bz - az;
+  const acx = cx - ax;
+  const acy = cy - ay;
+  const acz = cz - az;
+  const d1 = abx * (px - ax) + aby * (py - ay) + abz * (pz - az);
+  const d2 = acx * (px - ax) + acy * (py - ay) + acz * (pz - az);
+  let w0 = 1;
+  let w1 = 0;
+  let w2 = 0;
+  if (d1 > 0 || d2 > 0) {
+    const d3 = abx * (px - bx) + aby * (py - by) + abz * (pz - bz);
+    const d4 = acx * (px - bx) + acy * (py - by) + acz * (pz - bz);
+    const d5 = abx * (px - cx) + aby * (py - cy) + abz * (pz - cz);
+    const d6 = acx * (px - cx) + acy * (py - cy) + acz * (pz - cz);
+    const va = d3 * d6 - d5 * d4;
+    const vb = d5 * d2 - d1 * d6;
+    const vc = d1 * d4 - d3 * d2;
+    if (d3 >= 0 && d4 <= d3) {
+      w0 = 0;
+      w1 = 1;
+    } else if (d6 >= 0 && d5 <= d6) {
+      w0 = 0;
+      w2 = 1;
+    } else if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+      const s = d1 / (d1 - d3);
+      w0 = 1 - s;
+      w1 = s;
+    } else if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+      const s = d2 / (d2 - d6);
+      w0 = 1 - s;
+      w2 = s;
+    } else if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
+      const s = (d4 - d3) / (d4 - d3 + (d5 - d6));
+      w0 = 0;
+      w1 = 1 - s;
+      w2 = s;
+    } else {
+      const den = 1 / (va + vb + vc);
+      w1 = vb * den;
+      w2 = vc * den;
+      w0 = 1 - w1 - w2;
+    }
+  }
+  const dx = px - (ax * w0 + bx * w1 + cx * w2);
+  const dy = py - (ay * w0 + by * w1 + cy * w2);
+  const dz = pz - (az * w0 + bz * w1 + cz * w2);
+  return [dx * dx + dy * dy + dz * dz, w0, w1, w2];
+}
+
+/**
+ * Where the sheet's own surface lies nearest a point in model space, read back as a uv.
+ *
+ * `nx,ny,nz` is the way the surface being looked for should face — see `FACING`.
+ */
+function surfaceAt(
+  index: MirrorIndex,
+  px: number,
+  py: number,
+  pz: number,
+  nx: number,
+  ny: number,
+  nz: number,
+): { u: number; v: number } | null {
+  const { points, uvs, normals, reach } = index;
+  let best = reach * reach;
+  let out: { u: number; v: number } | null = null;
+
+  const consider = (t: number) => {
+    if (normals[t * 3] * nx + normals[t * 3 + 1] * ny + normals[t * 3 + 2] * nz < FACING) return;
+    const i = t * 9;
+    const hit = closestOnTri(
+      px, py, pz,
+      points[i], points[i + 1], points[i + 2],
+      points[i + 3], points[i + 4], points[i + 5],
+      points[i + 6], points[i + 7], points[i + 8],
+    );
+    if (hit[0] >= best) return;
+    // On the same side of the bike as the point being asked about. Without this, a decal near
+    // the centre line answers with the surface it is already on.
+    if ((points[i] * hit[1] + points[i + 3] * hit[2] + points[i + 6] * hit[3]) * px < 0) return;
+    best = hit[0];
+    const j = t * 6;
+    out = {
+      u: uvs[j] * hit[1] + uvs[j + 2] * hit[2] + uvs[j + 4] * hit[3],
+      v: uvs[j + 1] * hit[1] + uvs[j + 3] * hit[2] + uvs[j + 5] * hit[3],
+    };
+  };
+
+  const gi = Math.floor(px / reach);
+  const gj = Math.floor(py / reach);
+  const gk = Math.floor(pz / reach);
+  for (let di = -1; di <= 1; di += 1) {
+    for (let dj = -1; dj <= 1; dj += 1) {
+      for (let dk = -1; dk <= 1; dk += 1) {
+        for (const t of index.solid.get(`${gi + di},${gj + dj},${gk + dk}`) ?? []) consider(t);
+      }
+    }
+  }
+  for (const t of index.sprawl) consider(t);
+  return out;
+}
+
+/**
  * Where a point on the sheet comes out when reflected through the bike, or null.
  *
- * Null when the point is on no triangle at all, or when the reflected place is on a part with
- * no twin — a one-off bracket, an exhaust that only exists on one side.
+ * Null when the point is on no triangle at all, or when the reflected place has no surface
+ * under it — a one-off bracket, an exhaust that only exists on one side.
  */
 export function mirrorPoint(
   index: MirrorIndex,
   u: number,
   v: number,
 ): { u: number; v: number } | null {
-  const { tris, uvs, mirrorOf, byCorners } = index;
+  const { points, uvs, normals } = index;
   for (const t of index.cells.get(cell(u, v)) ?? []) {
-    const i = t * 6;
-    const bary = barycentric(u, v, uvs[i], uvs[i + 1], uvs[i + 2], uvs[i + 3], uvs[i + 4], uvs[i + 5]);
+    const j = t * 6;
+    const bary = barycentric(u, v, uvs[j], uvs[j + 1], uvs[j + 2], uvs[j + 3], uvs[j + 4], uvs[j + 5]);
     if (!bary) continue;
-
-    const twins = [mirrorOf[tris[t * 3]], mirrorOf[tris[t * 3 + 1]], mirrorOf[tris[t * 3 + 2]]];
-    if (twins[0] < 0 || twins[1] < 0 || twins[2] < 0) continue;
-    const far = byCorners.get([...twins].sort((a, b) => a - b).join(","));
-    if (far === undefined) continue;
-
-    // Matched by corner id rather than by position in the list: the far triangle holds the same
-    // three corners in whatever order its own winding gave them, and reading its uvs off in the
-    // wrong order is how a decal arrives on the right panel inside out.
-    let outU = 0;
-    let outV = 0;
-    let matched = true;
-    for (let c = 0; c < 3; c += 1) {
-      const at = [0, 1, 2].find((k) => tris[far * 3 + k] === twins[c]);
-      if (at === undefined) {
-        matched = false;
-        break;
-      }
-      outU += bary[c] * uvs[far * 6 + at * 2];
-      outV += bary[c] * uvs[far * 6 + at * 2 + 1];
-    }
-    if (matched) return { u: outU, v: outV };
+    const i = t * 9;
+    const x = points[i] * bary[0] + points[i + 3] * bary[1] + points[i + 6] * bary[2];
+    const y = points[i + 1] * bary[0] + points[i + 4] * bary[1] + points[i + 7] * bary[2];
+    const z = points[i + 2] * bary[0] + points[i + 5] * bary[1] + points[i + 8] * bary[2];
+    const far = surfaceAt(index, -x, y, z, -normals[t * 3], normals[t * 3 + 1], normals[t * 3 + 2]);
+    if (far) return far;
   }
   return null;
 }
@@ -412,6 +551,8 @@ export function mirrorLayer(
   const ux = Math.cos(rot);
   const uy = Math.sin(rot);
 
+  // The steadiest reading of the far island, over the steps tried below.
+  let best: { fit: [number, number, number, number]; residual: number } | null = null;
   for (const probe of PROBES) {
     const d = Math.min(sheet.width, sheet.height) * probe;
     const along = mirrorPoint(
@@ -440,12 +581,21 @@ export function mirrorLayer(
     // is not an answer, it is a shorter step's turn.
     if (!fit.every(Number.isFinite) || fit.every((n) => n === 0)) continue;
 
+    if (!best || residual < best.residual) best = { fit, residual };
+    // A long step is the steadiest reading, so the first one that comes back a reflection wins
+    // and the rest go untried. A shorter one is only reached for once this one has clearly run
+    // off the island — which is what a seat does, its two flanks a strip apiece and neither of
+    // them 3% of the sheet tall.
+    if (residual <= RESIDUAL_LIMIT) break;
+  }
+
+  if (best) {
     return {
       ok: true,
       x: centre.u * sheet.width,
       y: centre.v * sheet.height,
-      ...fieldsFrom(mul(fit, frameOf(layer)), mirrored(layer)),
-      approximate: residual > RESIDUAL_LIMIT,
+      ...fieldsFrom(mul(best.fit, frameOf(layer)), mirrored(layer)),
+      approximate: best.residual > RESIDUAL_LIMIT,
     };
   }
 

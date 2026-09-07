@@ -16,7 +16,7 @@ import { Dialog, DialogContent } from "../ui/dialog";
 import { ModelViewer, type CaptureFn, type ViewerMode } from "./ModelViewer";
 import { loadRiderModel, previewModelSwap } from "../../api/mods";
 import type { BikeModel, Loadout, PaintTexture, RiderPart } from "../../types";
-import { riderFrame, type PosableRig, type RiderPose } from "../../lib/riderPose";
+import { riderFrame, riderMount, type PosableRig, type RiderPose } from "../../lib/riderPose";
 import type { SceneId } from "../../lib/viewerScene";
 import { useT } from "../../i18n/context";
 import { TyresPicker } from "./TyresPicker";
@@ -108,7 +108,7 @@ function ModeToggle({
             className={cn(
               "flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors",
               mode === m
-                ? "bg-primary text-primary-foreground"
+                ? "u-selected"
                 : "text-muted-foreground hover:text-foreground",
               off && "cursor-not-allowed opacity-40 hover:text-muted-foreground",
             )}
@@ -275,15 +275,19 @@ export function ViewerPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [withBike, bikeId, bikeVariant, tyresPick.tyres]);
 
-  // The rig the ready-made moves are stated against. Read here because this is where the
-  // rider model is: the studio next door only ever sees a loadout.
+  // The rig the ready-made moves are stated against, and the bike they reach for. Read here
+  // because this is where both models are: the studio next door only ever sees a loadout.
   useEffect(() => {
     if (!onRiderRig) return;
     const body = riderParts?.find((p) => p.part === "body" && p.nodes.length);
     const bones = body?.skeleton;
-    const frame = bones?.length ? riderFrame(bones, body?.nodes) : null;
-    onRiderRig(bones?.length && frame ? { bones, frame } : null);
-  }, [riderParts, onRiderRig]);
+    const frame = bones?.length ? riderFrame(bones) : null;
+    const mount =
+      riderParts && bikeModel && mode === "onBike"
+        ? riderMount(riderParts, bikeModel.nodes, bikeModel.rig)
+        : null;
+    onRiderRig(bones?.length && frame ? { bones, frame, mount } : null);
+  }, [riderParts, bikeModel, mode, onRiderRig]);
 
   // One way to take a photo, whichever canvas is up. The expanded dialog wins when it is
   // open — it is the bigger frame, and the one somebody opened to compose a shot in.
@@ -401,12 +405,15 @@ export function ViewerPanel({
           className,
         )}
       >
-        <div className="flex items-center justify-between border-b border-border px-3 py-2">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <Box className="h-4 w-4 text-muted-foreground" />
+        {/* Wraps rather than clips: this header carries a title plus up to four pickers,
+            and the Rider tab's preview column is narrow enough that the last one used to
+            sit half outside the panel. The title itself never breaks. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b border-border px-3 py-2">
+          <div className="flex flex-none items-center gap-2 whitespace-nowrap text-sm font-medium">
+            <Box className="h-4 w-4 flex-none text-muted-foreground" />
             {t("viewer.preview3d")}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {withBike && <TyresPicker pick={tyresPick} />}
             {!riderOnly && (
               <ModeToggle

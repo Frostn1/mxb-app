@@ -52,6 +52,45 @@ pub struct FrostmodStatus {
     /// next time something plain-imports the CRT, and only the player can authorise the
     /// fix — see `crate::vcruntime::disable_stray_msvcr90`.
     pub stray_msvcr90: crate::vcruntime::Stray,
+    /// What became of a hand-installed `frostmod.dlo` in the game's own `plugins` folder.
+    /// [`PluginCopy::Absent`] is the normal case — see [`refresh_game_plugin`].
+    pub game_plugin: PluginCopy,
+    /// What became of *our* `frostmod_session.dlo` in that same folder. Unlike the one
+    /// above this is a copy the app installs, and [`PluginCopy::Current`] is the state we
+    /// want everyone in — see [`ensure_session_plugin`].
+    pub session_plugin: PluginCopy,
+}
+
+/// The state of a FrostMod plugin copy sitting in the game's `plugins` folder.
+///
+/// `frostmod.exe --install-plugin` drops `frostmod.dlo` there so the game loads FrostMod at
+/// startup with no injector. Nothing has ever updated that copy afterwards — not the app,
+/// which manages only `frostmod.exe` and `frostmod.dll` in its own folder, and not FrostMod,
+/// which prints "re-run --install-plugin to refresh the installed .dlo" and leaves it at that.
+/// So it outlives every update, silently, and the game goes on loading it: one player was
+/// running a **v0.12** plugin against a v0.16.2 install, and it hung the game at a black
+/// screen before the loading screen — with `frostmod.exe` not even running, because a plugin
+/// doesn't need it.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PluginCopy {
+    /// No plugin installed in the game folder. The normal case, and nothing to do.
+    #[default]
+    Absent,
+    /// Present and already the build we manage.
+    Current,
+    /// Was stale and has been brought up to date.
+    Refreshed,
+    /// Was stale, couldn't be updated, and has been renamed so the game stops loading it.
+    /// Nothing is destroyed — see [`disable_game_plugin`].
+    Disabled,
+    /// Stale, couldn't be updated, and couldn't be moved aside either. The game is still
+    /// loading it; another poll will try again.
+    Locked,
+    /// A plugin is installed but the app doesn't manage a FrostMod to judge it against, so
+    /// there is nothing to compare and nothing to copy from. Left strictly alone: it may be
+    /// perfectly current, and it isn't ours to touch on a machine we aren't managing.
+    Unmanaged,
 }
 
 /// The folder we install FrostMod into and run it from — so also where anything it
@@ -251,6 +290,23 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
         .map(crate::vcruntime::remove_stray_msvcr90)
         .unwrap_or_default();
 
+    // Keep a hand-installed plugin copy from going stale. Like the sweep above, this rides
+    // on the status poll because that is the only thing that reaches a player who never
+    // opens Settings — and unlike an update, it has to run even when we are already on the
+    // latest tag, which is exactly the state a stale `.dlo` survives in.
+    let game_plugin = game_dir
+        .as_deref()
+        .map(|game| refresh_game_plugin(&frostmod_dir(app), game))
+        .unwrap_or_default();
+
+    // And put our own plugin there, for the same reason it rides on the status poll: it has
+    // to reach the player who never opens Settings, and it has to run when we are already
+    // on the latest tag — a plugin copy is not something an update touches.
+    let session_plugin = game_dir
+        .as_deref()
+        .map(|game| ensure_session_plugin(&frostmod_dir(app), game, version.as_deref()))
+        .unwrap_or_default();
+
     FrostmodStatus {
         installed,
         version,
@@ -260,6 +316,209 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
         supported_for_game,
         missing_runtimes: crate::vcruntime::missing(game_dir.as_deref()),
         stray_msvcr90,
+        game_plugin,
+        session_plugin,
+    }
+}
+
+/// `<game>\plugins\frostmod.dlo` — where `--install-plugin` puts the plugin copy.
+fn game_plugin_path(game_dir: &Path) -> PathBuf {
+    game_dir.join("plugins").join("frostmod.dlo")
+}
+
+/// Bring a hand-installed `frostmod.dlo` up to the build we manage, if one is there.
+///
+/// **Only ever refreshes a file that already exists — it never installs one.** The app drives
+/// FrostMod by injection and has no use for plugin mode; the whole job here is to stop a copy
+/// somebody else installed from rotting in the game folder. Creating one would change how
+/// FrostMod loads on machines that never asked for it, and would double-load it besides.
+///
+/// The `.dlo` is a byte-identical copy of the `.dll` (FrostMod's own CMake makes it one), so
+/// this is a plain copy — there is no separate asset to fetch.
+///
+/// Staleness is judged on size and mtime rather than by reading a quarter-megabyte twice on
+/// every status poll: a copy we made is the same size and newer, and that pair converges.
+fn refresh_game_plugin(dir: &Path, game_dir: &Path) -> PluginCopy {
+    let dlo = game_plugin_path(game_dir);
+    let Ok(dlo_meta) = std::fs::metadata(&dlo) else {
+        return PluginCopy::Absent; // no plugin installed — the normal case
+    };
+    let Ok(dll_meta) = std::fs::metadata(dir.join("frostmod.dll")) else {
+        // A plugin we have no way to judge: nothing to compare against and nothing to copy
+        // from. Leaving it is the only honest move — it may well be current, and a machine
+        // whose FrostMod we don't manage isn't one to start renaming files on.
+        return PluginCopy::Unmanaged;
+    };
+    let fresh = dlo_meta.len() == dll_meta.len()
+        && match (dlo_meta.modified(), dll_meta.modified()) {
+            (Ok(a), Ok(b)) => a >= b,
+            // No mtimes to compare: same size is all we have, and re-copying every poll
+            // would be worse than trusting it.
+            _ => true,
+        };
+    if fresh {
+        return PluginCopy::Current;
+    }
+
+    // Same rename-then-replace the binaries use: the game maps this file while it runs, and
+    // Windows won't open a mapped image for writing, but it will let it be renamed away.
+    let staged = dlo.with_extension("dlo.staging");
+    if std::fs::copy(dir.join("frostmod.dll"), &staged).is_err() {
+        return disable_game_plugin(&dlo);
+    }
+    match swap_in(&dlo, &staged) {
+        Ok(retired) => {
+            if let Some(retired) = retired {
+                let _ = std::fs::remove_file(retired);
+            }
+            log::info!(
+                "[frostmod] refreshed the stale plugin copy at {} — it was older than the \
+                 FrostMod we manage, and the game loads it at startup",
+                dlo.display()
+            );
+            PluginCopy::Refreshed
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&staged);
+            log::warn!("[frostmod] couldn't refresh {}: {e}", dlo.display());
+            disable_game_plugin(&dlo)
+        }
+    }
+}
+
+/// `<game>\plugins\frostmod_session.dlo` — the copy we install, and the name that puts
+/// FrostMod in session-only mode. Must match `frostmod::session::kSessionPluginFileName`.
+fn session_plugin_path(game_dir: &Path) -> PathBuf {
+    game_dir.join("plugins").join("frostmod_session.dlo")
+}
+
+/// Put the session plugin in the game's plugins folder, and keep it current.
+///
+/// **Why the app installs a plugin at all.** The server name only ever arrives through
+/// `EventInit`, and the game only calls that on a plugin it loaded itself from
+/// `plugins\*.dlo`. FrostMod injected as a `.dll` is never asked. So for every player the
+/// app drives, the block's `serverName` stayed empty forever — and with it, paint sync had
+/// no roster to scope itself to and voice chat had no room to join. In the seven days to
+/// 2026-09-04, 172 riders had the injected `frostmod.dll` in their game and 2 had a
+/// plugin; presence was reported for a real server exactly once.
+///
+/// This is a byte-identical copy of the `frostmod.dll` we already manage — the same trick
+/// `frostmod.dlo` uses — under a name FrostMod recognises as "publish the session and do
+/// nothing else": no hooks, no overlay, no offsets, its own shared block. That is the whole
+/// reason it is safe to load beside the injected copy.
+///
+/// It is only ever installed from a build that knows the name. An older one under it would
+/// run as a full plugin next to the injected copy, and two FrostMods hooking the same
+/// functions is what hangs the game at a black screen — see
+/// [`crate::frostmod::SESSION_PLUGIN_MIN_VERSION`]. A copy already there from a build that
+/// has since been rolled back is parked rather than left loading.
+fn ensure_session_plugin(dir: &Path, game_dir: &Path, tag: Option<&str>) -> PluginCopy {
+    let dlo = session_plugin_path(game_dir);
+    let installed = std::fs::metadata(&dlo);
+
+    if !crate::frostmod::session_plugin_is_safe(tag) {
+        // Not a build we may install from. If one of ours is already there it came from a
+        // build that was, and this one would load it as a full plugin: park it.
+        return match installed {
+            Ok(_) => disable_game_plugin(&dlo),
+            Err(_) => PluginCopy::Absent,
+        };
+    }
+
+    let Ok(dll_meta) = std::fs::metadata(dir.join("frostmod.dll")) else {
+        // Nothing to copy from. An existing copy is left exactly where it is — it may be
+        // perfectly current, and we can't tell.
+        return if installed.is_ok() { PluginCopy::Unmanaged } else { PluginCopy::Absent };
+    };
+
+    // Same staleness test as the hand-installed copy: a copy we made is the same size and
+    // no older, and that pair converges without reading a quarter-megabyte twice a poll.
+    if let Ok(dlo_meta) = &installed {
+        let fresh = dlo_meta.len() == dll_meta.len()
+            && match (dlo_meta.modified(), dll_meta.modified()) {
+                (Ok(a), Ok(b)) => a >= b,
+                _ => true,
+            };
+        if fresh {
+            return PluginCopy::Current;
+        }
+    }
+
+    let Some(plugins) = dlo.parent() else {
+        return PluginCopy::Absent;
+    };
+    if std::fs::create_dir_all(plugins).is_err() {
+        return PluginCopy::Locked;
+    }
+
+    // Rename-then-replace, as the binaries do: the game maps this file while it runs, and
+    // Windows won't open a mapped image for writing — but it will let it be renamed away.
+    let staged = dlo.with_extension("dlo.staging");
+    if std::fs::copy(dir.join("frostmod.dll"), &staged).is_err() {
+        let _ = std::fs::remove_file(&staged);
+        return if installed.is_ok() { PluginCopy::Locked } else { PluginCopy::Absent };
+    }
+    match swap_in(&dlo, &staged) {
+        Ok(retired) => {
+            if let Some(retired) = retired {
+                let _ = std::fs::remove_file(retired);
+            }
+            log::info!(
+                "[frostmod] session plugin in place at {} — the game hands it the server \
+                 name, which nothing injected is ever told",
+                dlo.display()
+            );
+            if installed.is_ok() { PluginCopy::Refreshed } else { PluginCopy::Current }
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&staged);
+            log::warn!("[frostmod] couldn't install the session plugin at {}: {e}", dlo.display());
+            if installed.is_ok() { PluginCopy::Locked } else { PluginCopy::Absent }
+        }
+    }
+}
+
+/// Move a stale plugin out of the way, when it can't be brought up to date.
+///
+/// A stale plugin is not a neutral thing to leave lying there: the game loads it at startup
+/// on its own, and a stale enough one hangs the game before the loading screen — which is a
+/// rider who cannot play at all, with nothing on screen to say why. So if we can't fix it,
+/// we stop it loading.
+///
+/// Renamed, never deleted. Two reasons: the app didn't install this file, so destroying it
+/// isn't ours to do; and a rename works even while MX Bikes has the plugin mapped (the
+/// loader opens images with `FILE_SHARE_DELETE`), so the fix lands on the *next* launch
+/// without waiting for the player to close the game. The new name deliberately does not end
+/// in `.dlo` — anything that does, in this folder, gets loaded as a plugin.
+fn disable_game_plugin(dlo: &Path) -> PluginCopy {
+    // A rider who has been through this twice shouldn't have the first parked copy silently
+    // replaced by the second — on Windows the rename would simply fail, and on Unix it would
+    // overwrite. Number them instead.
+    let first = dlo.with_extension("dlo.disabled");
+    let parked = if first.exists() {
+        (1..)
+            .map(|n| dlo.with_extension(format!("dlo.disabled-{n}")))
+            .find(|p| !p.exists())
+            .expect("the range is unbounded")
+    } else {
+        first
+    };
+    match rename_with_retry(dlo, &parked) {
+        Ok(()) => {
+            log::warn!(
+                "[frostmod] the plugin at {} is older than the FrostMod we manage and couldn't \
+                 be updated, so it has been renamed to {} — the game loads a plugin at startup \
+                 whether or not frostmod.exe is running, and a stale one can stop it opening. \
+                 Rename it back to re-enable plugin mode.",
+                dlo.display(),
+                parked.display()
+            );
+            PluginCopy::Disabled
+        }
+        Err(e) => {
+            log::warn!("[frostmod] couldn't move {} aside: {e}", dlo.display());
+            PluginCopy::Locked
+        }
     }
 }
 
@@ -484,6 +743,34 @@ struct StartPlan {
     /// The mods *tree*, when the player has a folder set. Still a host path: anything
     /// running inside a prefix has to rewrite it as the prefix sees it before handing over.
     mods_root: Option<PathBuf>,
+    /// Whatever the player typed into the FrostMod flags box, split into arguments. Passed
+    /// through untouched and unvalidated: FrostMod ignores a flag it doesn't know, which is
+    /// what lets a diagnostic ship in a FrostMod build before the app knows about it.
+    extra: Vec<String>,
+}
+
+/// Split a typed flag line into arguments, keeping double-quoted runs together so a path
+/// with spaces survives (`--mods "C:\My Mods"`). Everything else is whitespace-separated.
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+fn split_args(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quoted = false;
+    for c in line.chars() {
+        match c {
+            '"' => quoted = !quoted,
+            c if c.is_whitespace() && !quoted => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
 }
 
 /// Check what has to be true before starting, and work out what to tell FrostMod.
@@ -534,7 +821,8 @@ fn plan_start(app: &AppHandle) -> anyhow::Result<Option<StartPlan>> {
     // exist — silently, since neither reports an empty root as an error.
     let mods_root = (!cfg.mods_path.trim().is_empty())
         .then(|| crate::library::mods_root(&cfg.mods_path));
-    Ok(Some(StartPlan { exe, game: cfg.active_game.id(), mods_root }))
+    let extra = split_args(&cfg.frostmod_args);
+    Ok(Some(StartPlan { exe, game: cfg.active_game.id(), mods_root, extra }))
 }
 
 /// Launch `frostmod.exe` hidden as a managed child.
@@ -549,6 +837,7 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     if let Some(mods) = &plan.mods_root {
         args.extend(["--mods".into(), mods.to_string_lossy().into_owned()]);
     }
+    args.extend(plan.extra.iter().cloned());
     // Logged on both sides, as Linux and macOS already are. FrostMod not working is the
     // single most reported thing about this app, and until now the Windows path — the one
     // nearly every report comes from — said nothing at all in the log, whether it worked
@@ -634,6 +923,7 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
         // side of the wall calls the same folder.
         args.extend(["--mods".into(), crate::proton::windows_path(&runner.prefix(), mods)]);
     }
+    args.extend(plan.extra.iter().cloned());
 
     log::info!(
         "starting FrostMod via {}: {} run {} {:?} (prefix {})",
@@ -691,6 +981,9 @@ fn mac_launch(
     exe: &Path,
     game: &str,
     mods_root: Option<&Path>,
+    // The player's own flags, already split. Appended last, so one of them can override a
+    // flag we sent — which is the point of being able to type them.
+    extra: &[String],
 ) -> anyhow::Result<(crate::winehost::Launch, String)> {
     let (prefix, runner) = crate::gameproc::game_prefix_and_runner(cfg)?;
     // Without a Z: drive nothing inside the bottle can see FrostMod's folder — not the
@@ -709,6 +1002,7 @@ fn mac_launch(
         // the mods folder — inside the bottle — is `C:\users\…`.
         args.extend(["--mods".into(), crate::winehost::windows_path(&prefix, mods)]);
     }
+    args.extend(extra.iter().cloned());
     Ok((
         crate::winehost::plan(&runner, &prefix, exe, &args),
         runner.via().to_string(),
@@ -732,7 +1026,7 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     needs_the_file_channel(app, "macOS", "Inside a Wine bottle")?;
 
     let cfg = crate::config::load(app).unwrap_or_default();
-    let (launch, via) = mac_launch(&cfg, &plan.exe, plan.game, plan.mods_root.as_deref())?;
+    let (launch, via) = mac_launch(&cfg, &plan.exe, plan.game, plan.mods_root.as_deref(), &plan.extra)?;
     log::info!(
         "starting FrostMod via {via}: {} {:?}",
         launch.program.display(),
@@ -920,7 +1214,7 @@ mod tests {
         cfg.wine_runner = runner.to_string_lossy().into_owned();
 
         let (launch, _) =
-            mac_launch(&cfg, &exe, "mxb", Some(&mods)).expect("a stub runner is enough");
+            mac_launch(&cfg, &exe, "mxb", Some(&mods), &[]).expect("a stub runner is enough");
         let mut cmd = std::process::Command::new(&launch.program);
         cmd.args(&launch.args).current_dir(&frostmod);
         for (key, value) in &launch.env {
@@ -955,6 +1249,77 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// The flags box is a line of text, and a path in it has spaces. Quoted runs stay one
+    /// argument; everything else splits on whitespace.
+    #[test]
+    fn typed_flags_split_the_way_a_shell_would() {
+        assert_eq!(split_args(""), Vec::<String>::new());
+        assert_eq!(split_args("   "), Vec::<String>::new());
+        assert_eq!(
+            split_args("--probe-overjump  --force-overjump-off"),
+            ["--probe-overjump", "--force-overjump-off"]
+        );
+        assert_eq!(
+            split_args("--mods \"C:\\My Mods\" --wait 2000"),
+            ["--mods", "C:\\My Mods", "--wait", "2000"]
+        );
+    }
+
+    /// What the box is for: a flag typed there reaches FrostMod's argv, after the ones we
+    /// always send. Same stub-runner spawn as the start test, so it is the real argv.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn typed_flags_reach_frostmods_argv() {
+        let root = temp_dir("mac-extra-args");
+        let prefix = root.join("Bottles/MXB");
+        let game_dir = prefix.join("drive_c/Program Files/MX Bikes");
+        std::fs::create_dir_all(&game_dir).unwrap();
+        std::fs::create_dir_all(prefix.join("dosdevices")).unwrap();
+        std::os::unix::fs::symlink("/", prefix.join("dosdevices/z:")).unwrap();
+        std::fs::write(game_dir.join(crate::game::MXB.exe), b"stub").unwrap();
+
+        let frostmod = root.join("data/frostmod");
+        std::fs::create_dir_all(&frostmod).unwrap();
+        let exe = frostmod.join("frostmod.exe");
+        std::fs::write(&exe, b"stub").unwrap();
+
+        let record = root.join("argv.txt");
+        let runner = root.join("fake-wine");
+        std::fs::write(
+            &runner,
+            format!(
+                "#!/bin/sh\n{{ for a in \"$@\"; do printf '%s\\n' \"$a\"; done; }} > {}\n",
+                record.display()
+            ),
+        )
+        .unwrap();
+        std::process::Command::new("chmod").arg("+x").arg(&runner).status().unwrap();
+
+        let mut cfg = crate::config::AppConfig::default();
+        cfg.game_path = game_dir.to_string_lossy().into_owned();
+        cfg.wine_runner = runner.to_string_lossy().into_owned();
+        cfg.frostmod_args = "--probe-overjump --wait 2000".into();
+
+        let (launch, _) = mac_launch(&cfg, &exe, "mxb", None, &split_args(&cfg.frostmod_args))
+            .expect("a stub runner is enough");
+        let mut cmd = std::process::Command::new(&launch.program);
+        cmd.args(&launch.args).current_dir(&frostmod);
+        for (key, value) in &launch.env {
+            cmd.env(key, value);
+        }
+        cmd.spawn().unwrap().wait().unwrap();
+
+        let written = std::fs::read_to_string(&record).unwrap();
+        let lines: Vec<&str> = written.lines().collect();
+        assert_eq!(
+            &lines[..],
+            [exe.to_string_lossy().as_ref(), "--game", "mxb", "--probe-overjump", "--wait", "2000"],
+            "typed flags follow the ones we always send: {written:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A bottle with no `Z:` can't see FrostMod's folder, and every button in the app would
     /// write a command file nothing ever reads. Refused, with the fix named.
     #[cfg(target_os = "macos")]
@@ -972,7 +1337,7 @@ mod tests {
         cfg.game_path = game_dir.to_string_lossy().into_owned();
         cfg.wine_runner = runner.to_string_lossy().into_owned();
 
-        let err = mac_launch(&cfg, &root.join("frostmod.exe"), "mxb", None)
+        let err = mac_launch(&cfg, &root.join("frostmod.exe"), "mxb", None, &[])
             .expect_err("no Z: drive, no way in");
         let msg = format!("{err:#}");
         assert!(msg.contains("Z:"), "names what's missing: {msg}");
@@ -1195,5 +1560,179 @@ mod tests {
         assert!(filter_eq(&format!("{STOCK_SERVERFILTER}\n\n"), STOCK_SERVERFILTER));
         // A real edit (curated vs stock) must NOT compare equal.
         assert!(!filter_eq(CURATED_SERVERFILTER, STOCK_SERVERFILTER));
+    }
+}
+
+#[cfg(test)]
+mod plugin_copy_tests {
+    use super::*;
+
+    fn dirs(tag: &str) -> (PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("frostmod-dlo-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let managed = root.join("managed");
+        let game = root.join("game");
+        std::fs::create_dir_all(&managed).unwrap();
+        std::fs::create_dir_all(game.join("plugins")).unwrap();
+        (managed, game)
+    }
+
+    /// A tag new enough to install the session plugin from, and one that isn't.
+    const NEW: &str = "v0.17.0";
+    const OLD: &str = "v0.16.3";
+
+    #[test]
+    fn the_session_plugin_is_installed_and_then_left_alone() {
+        let (managed, game) = dirs("session-install");
+        std::fs::write(managed.join("frostmod.dll"), b"v0.17.0-bytes").unwrap();
+
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(NEW)), PluginCopy::Current);
+        assert_eq!(
+            std::fs::read(session_plugin_path(&game)).unwrap(),
+            b"v0.17.0-bytes",
+            "the plugin is a byte-identical copy of the dll we inject"
+        );
+        // Every status poll runs this. It must settle, not re-copy a quarter-megabyte.
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(NEW)), PluginCopy::Current);
+    }
+
+    /// The rule that keeps this from being the thing that hangs the game: a build that
+    /// doesn't know the name would run as a *full* plugin beside the injected copy.
+    #[test]
+    fn a_build_that_predates_session_mode_never_installs_one() {
+        let (managed, game) = dirs("session-old");
+        std::fs::write(managed.join("frostmod.dll"), b"v0.16.3-bytes").unwrap();
+
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(OLD)), PluginCopy::Absent);
+        assert!(!session_plugin_path(&game).exists());
+        // An unreadable tag is the same answer, for the same reason.
+        assert_eq!(ensure_session_plugin(&managed, &game, None), PluginCopy::Absent);
+        assert!(!session_plugin_path(&game).exists());
+    }
+
+    /// A downgrade leaves ours behind, and the older build would load it as a full plugin.
+    #[test]
+    fn a_rollback_parks_the_session_plugin_it_left_behind() {
+        let (managed, game) = dirs("session-rollback");
+        std::fs::write(managed.join("frostmod.dll"), b"v0.17.0-bytes").unwrap();
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(NEW)), PluginCopy::Current);
+
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(OLD)), PluginCopy::Disabled);
+        assert!(
+            !session_plugin_path(&game).exists(),
+            "a plugin an older build would misread must stop being a .dlo"
+        );
+    }
+
+    #[test]
+    fn a_new_frostmod_refreshes_the_session_plugin() {
+        let (managed, game) = dirs("session-stale");
+        std::fs::write(managed.join("frostmod.dll"), b"old-bytes").unwrap();
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(NEW)), PluginCopy::Current);
+
+        // A longer file with a newer mtime: an update landed.
+        std::fs::write(managed.join("frostmod.dll"), b"much-newer-bytes").unwrap();
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(NEW)), PluginCopy::Refreshed);
+        assert_eq!(std::fs::read(session_plugin_path(&game)).unwrap(), b"much-newer-bytes");
+    }
+
+    /// A hand-installed `frostmod.dlo` is a different file with a different job, and this
+    /// must not touch it — it is somebody's deliberate full plugin-mode install.
+    #[test]
+    fn the_hand_installed_plugin_is_left_where_it_is() {
+        let (managed, game) = dirs("session-beside");
+        std::fs::write(managed.join("frostmod.dll"), b"v0.17.0-bytes").unwrap();
+        std::fs::write(game_plugin_path(&game), b"hand-installed").unwrap();
+
+        assert_eq!(ensure_session_plugin(&managed, &game, Some(NEW)), PluginCopy::Current);
+        assert_eq!(std::fs::read(game_plugin_path(&game)).unwrap(), b"hand-installed");
+        assert!(session_plugin_path(&game).exists());
+    }
+
+    /// The case that cost a player their game: a plugin installed by hand months ago, which
+    /// nothing has ever updated, still loaded by the game at every startup.
+    #[test]
+    fn a_stale_plugin_is_brought_up_to_date() {
+        let (managed, game) = dirs("stale");
+        std::fs::write(managed.join("frostmod.dll"), b"v0.16.2-bytes").unwrap();
+        std::fs::write(game_plugin_path(&game), b"v0.12").unwrap();
+
+        assert_eq!(refresh_game_plugin(&managed, &game), PluginCopy::Refreshed);
+        assert_eq!(std::fs::read(game_plugin_path(&game)).unwrap(), b"v0.16.2-bytes");
+    }
+
+    /// Never install one. The app drives FrostMod by injection; creating a plugin would
+    /// change how it loads on a machine that never asked for plugin mode.
+    #[test]
+    fn no_plugin_means_nothing_to_do() {
+        let (managed, game) = dirs("absent");
+        std::fs::write(managed.join("frostmod.dll"), b"whatever").unwrap();
+
+        assert_eq!(refresh_game_plugin(&managed, &game), PluginCopy::Absent);
+        assert!(!game_plugin_path(&game).exists(), "a plugin must never be created");
+    }
+
+    /// A plugin that already matches is left alone — and, because staleness is judged on
+    /// size and mtime, re-checking it does not rewrite it on every status poll.
+    #[test]
+    fn a_current_plugin_is_left_alone_and_stays_current() {
+        let (managed, game) = dirs("current");
+        std::fs::write(managed.join("frostmod.dll"), b"same-bytes").unwrap();
+        std::fs::write(game_plugin_path(&game), b"same-bytes").unwrap();
+
+        // First pass may refresh (the fixture's mtimes are whatever the FS gave them);
+        // what matters is that it converges and then stays put.
+        let _ = refresh_game_plugin(&managed, &game);
+        assert_eq!(refresh_game_plugin(&managed, &game), PluginCopy::Current);
+        assert_eq!(refresh_game_plugin(&managed, &game), PluginCopy::Current);
+    }
+
+    /// Nothing to compare against and nothing to copy from is not a licence to start
+    /// renaming files in somebody's game folder.
+    #[test]
+    fn no_managed_dll_leaves_the_plugin_untouched() {
+        let (managed, game) = dirs("nodll");
+        std::fs::write(game_plugin_path(&game), b"v0.12").unwrap();
+
+        assert_eq!(refresh_game_plugin(&managed, &game), PluginCopy::Unmanaged);
+        assert_eq!(std::fs::read(game_plugin_path(&game)).unwrap(), b"v0.12");
+    }
+
+    /// The force: a stale plugin that can't be updated stops loading rather than being left
+    /// to hang the game. Renamed, not deleted — and to a name that isn't `.dlo`, or the game
+    /// would just load it again.
+    #[test]
+    fn a_stale_plugin_that_cannot_be_updated_is_moved_aside() {
+        let (managed, game) = dirs("disable");
+        let dlo = game_plugin_path(&game);
+        std::fs::write(&dlo, b"v0.12").unwrap();
+
+        let parked = disable_game_plugin(&dlo);
+
+        assert_eq!(parked, PluginCopy::Disabled);
+        assert!(!dlo.exists(), "the game must stop loading it");
+        let kept = dlo.with_extension("dlo.disabled");
+        assert_eq!(std::fs::read(&kept).unwrap(), b"v0.12", "nothing is destroyed");
+        assert_ne!(
+            kept.extension().and_then(|e| e.to_str()),
+            Some("dlo"),
+            "a parked copy still ending in .dlo would be loaded as a plugin"
+        );
+    }
+
+    /// Twice through the same fix must not overwrite the first parked copy.
+    #[test]
+    fn a_second_disable_does_not_clobber_the_first() {
+        let (managed, game) = dirs("disable-twice");
+        let dlo = game_plugin_path(&game);
+
+        std::fs::write(&dlo, b"first").unwrap();
+        assert_eq!(disable_game_plugin(&dlo), PluginCopy::Disabled);
+        std::fs::write(&dlo, b"second").unwrap();
+        assert_eq!(disable_game_plugin(&dlo), PluginCopy::Disabled);
+
+        assert_eq!(std::fs::read(dlo.with_extension("dlo.disabled")).unwrap(), b"first");
+        assert_eq!(std::fs::read(dlo.with_extension("dlo.disabled-1")).unwrap(), b"second");
+        let _ = managed;
     }
 }

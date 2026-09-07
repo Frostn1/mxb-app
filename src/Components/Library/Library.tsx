@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
   Search,
@@ -14,7 +14,6 @@ import {
   ListChecks,
   CheckCircle2,
   Circle,
-  PackagePlus,
   FileArchive,
   Folder,
   Loader2,
@@ -78,15 +77,20 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import LibraryDetail from "./LibraryDetail";
 import { ModelSwapActions } from "../Locker/ModelSwapActions";
-import { ShareDialog, ImportShareDialog } from "./ShareDialogs";
 import FindAgainDialog from "./FindAgainDialog";
 import { ViewerDialog } from "../Viewer/ViewerDialog";
 import { entryViewerProps } from "../Viewer/entryViewer";
 import { useConfig } from "../../Context/Config";
 import { useImport } from "../Dropzone/useImport";
+import { useShare } from "../../Context/Share";
+import { cachedScan, dropScans, putScan } from "./scanCache";
+
+/** Where the model-swap scan is remembered. Not a mods subpath, so it can't collide
+ *  with one. */
+const SWAPS_KEY = "\u0000model-swaps";
 import { useInstall } from "../../Context/Install";
-import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
+import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "@/Components/ui/help-hint";
 import {
   DropdownMenu,
@@ -517,6 +521,7 @@ export default function Library({
 }: LibraryProps) {
   const t = useT();
   const { pickAndImport, staging } = useImport();
+  const { shareFiles, importShare } = useShare();
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -540,9 +545,6 @@ export default function Library({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   const [bulkUninstallOpen, setBulkUninstallOpen] = useState(false);
-  // Non-null while the share dialog is up: the absolute paths it's about to pack.
-  const [sharePaths, setSharePaths] = useState<string[] | null>(null);
-  const [importShareOpen, setImportShareOpen] = useState(false);
   // What the tree used to hold. Off by default: the common visit is about what is installed.
   const [showRemoved, setShowRemoved] = useState(false);
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
@@ -550,14 +552,17 @@ export default function Library({
   // Joined to ledger rows so a mod the app installed can be fetched again from the row.
   const [history, setHistory] = useState<DownloadRecord[]>([]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  /** Scan the folder. `quiet` refreshes behind a list already on screen, so a cached
+   *  library isn't replaced by a spinner to be redrawn identically. */
+  const load = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const scanned = await scanLibrary(modType.installSubpath);
       // Pull everything already known in one round trip, so a library that's been
       // opened before renders complete without touching a single archive.
       await primeMetaCache(scanned);
+      putScan(modType.installSubpath, scanned);
       setEntries(scanned);
       // With the cache warm, snapshotting the installed mods costs a file read each — and it
       // has to happen now, while they still exist. Never blocks the scan being shown.
@@ -586,9 +591,23 @@ export default function Library({
     };
   }, [showRemoved, modType, refreshKey]);
 
+  // What `refreshKey` was last time. A bump means something installed, moved or was
+  // removed, so every remembered scan is stale — including the other tabs'.
+  const seenRefresh = useRef(refreshKey);
+
   useEffect(() => {
-    load();
-  }, [load, refreshKey]);
+    const changed = seenRefresh.current !== refreshKey;
+    seenRefresh.current = refreshKey;
+    if (changed) dropScans();
+    const hit = changed ? null : cachedScan<LibraryEntry[]>(modType.installSubpath);
+    if (!hit) {
+      void load();
+      return;
+    }
+    setEntries(hit.value);
+    setLoading(false);
+    if (!hit.fresh) void load({ quiet: true });
+  }, [load, refreshKey, modType]);
 
   // Model swaps, for the bikes tab only — one scan of the whole tree, indexed by bike
   // folder. Installing a mod or editing the folder changes what's swappable, so it rides
@@ -599,9 +618,13 @@ export default function Library({
       setSwaps(new Map());
       return;
     }
+    const hit = cachedScan<BikeModels[]>(SWAPS_KEY);
+    if (hit) setSwaps(new Map(hit.value.map((r) => [r.bike.toLowerCase(), r])));
+    if (hit?.fresh) return;
     let alive = true;
     void scanModelSwaps()
       .then((rows) => {
+        putScan(SWAPS_KEY, rows);
         if (alive) setSwaps(new Map(rows.map((r) => [r.bike.toLowerCase(), r])));
       })
       .catch(() => {});
@@ -614,6 +637,7 @@ export default function Library({
   useEffect(() => setOpenSwaps(new Set()), [modType]);
 
   useEffect(() => setDetail(null), [modType]);
+
   // Arriving from a download row: search for that mod so the jump lands on it, not just on
   // the right tab. Consumed on arrival — a later visit is not still about that one mod.
   useEffect(() => {
@@ -642,6 +666,7 @@ export default function Library({
   // has no file to act on.
   const visibleItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
   const visibleCount = visibleItems.length;
+
 
   const ghosts = useMemo(
     () => (showRemoved ? ghostsFor(ledger, modType, search) : []),
@@ -790,7 +815,7 @@ export default function Library({
       key: "share",
       icon: Share2,
       label: t("share.action"),
-      onSelect: () => setSharePaths([item.path]),
+      onSelect: () => shareFiles([item.path]),
     },
     {
       key: "reveal",
@@ -944,37 +969,32 @@ export default function Library({
           onReveal={reveal}
           onUninstall={setUninstallTarget}
           onMove={setMoveTarget}
-          onShare={(e) => setSharePaths([e.path])}
+          onShare={(e) => shareFiles([e.path])}
           onOpenEntry={setDetail}
         />
       ) : (
         <>
-      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
-            {t("nav.library")}
-          </h1>
-          <HelpHint title={t("nav.library")} description={t("library.help")} />
-        </div>
-        <Segmented
-          value={modType.id}
-          onChange={(id) => {
-            const next = modTypes.find((mt) => mt.id === id);
-            if (next) onChangeType(next);
-          }}
-          options={modTypes.map((mt) => ({
-            value: mt.id,
-            label: (
-              <span className="flex items-center gap-1.5">
-                {t(mt.label)}
-                {mt.id === modType.id && (
-                  <span className="text-muted-foreground">{visibleCount}</span>
-                )}
-              </span>
-            ),
-          }))}
-        />
-        <div className="ml-auto flex w-[240px] items-center gap-2 rounded-lg border border-input bg-card px-3 py-2">
+      {/* Type tabs and the search/sort filters belong to the chrome; the buttons that
+          change what is on disk stay with the list they act on. */}
+      <ContextBarLeft>
+        {modTypes.map((mt) => (
+          <ContextTab
+            key={mt.id}
+            active={mt.id === modType.id}
+            onSelect={() => onChangeType(mt)}
+          >
+            <span className="flex items-center gap-1.5">
+              {t(mt.label)}
+              {mt.id === modType.id && (
+                <span className="tabular-figures text-faint">{visibleCount}</span>
+              )}
+            </span>
+          </ContextTab>
+        ))}
+      </ContextBarLeft>
+
+      <ContextBarRight>
+        <div className="flex h-7 w-[220px] items-center gap-2 border border-input bg-card px-2.5">
           <Search className="size-3.5 text-faint" />
           <input
             value={search}
@@ -1001,36 +1021,25 @@ export default function Library({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        {/* The library only ever showed what is on disk. This is the rest of the story —
-            what used to be there, which is the only way to name a mod you already deleted. */}
         <Button
-          variant={showRemoved ? "default" : "outline"}
-          size="sm"
-          onClick={() => setShowRemoved((v) => !v)}
-          title={t("library.showRemovedHint")}
-        >
-          <History className="size-3.5" /> {t("library.showRemoved")}
-        </Button>
-        <Button
-          variant={selectMode ? "default" : "outline"}
+          variant={selectMode ? "secondary" : "outline"}
           size="sm"
           onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
           disabled={loading}
         >
-          <ListChecks className="size-3.5" />{" "}
+          <ListChecks className="size-3.5" />
           {selectMode ? t("common.done") : t("common.select")}
         </Button>
-        {/* The same install flow as dropping, for anyone the OS drop event never reaches —
-            and a discoverable one for anyone who never thought to drag a file here. */}
+        {/* Everything that changes what is on disk, behind one control. These were a row
+            of their own, which put three bands of chrome above the first mod. */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" disabled={staging}>
+            <Button variant="outline" size="icon" className="h-8 w-8" title={t("import.action")}>
               {staging ? (
                 <Loader2 className="size-3.5 animate-spin" />
               ) : (
-                <PackagePlus className="size-3.5" />
-              )}{" "}
-              {staging ? t("import.staging") : t("import.action")}
+                <MoreHorizontal className="size-4" />
+              )}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -1042,19 +1051,23 @@ export default function Library({
               <Folder className="size-3.5" />
               {t("import.pickFolder")}
             </DropdownMenuItem>
-            {/* The other end of the Share action below — someone pasted you a code. */}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => setImportShareOpen(true)}>
+            <DropdownMenuItem onSelect={() => importShare()}>
               <ClipboardPaste className="size-3.5" />
               {t("share.importAction")}
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => setShowRemoved((v) => !v)}>
+              <History className="size-3.5" />
+              {t("library.showRemoved")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void load()} disabled={loading || busy}>
+              <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+              {t("locker.rescan")}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="outline" size="sm" onClick={load} disabled={loading || busy}>
-          <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />{" "}
-          {t("locker.rescan")}
-        </Button>
-      </header>
+        <HelpHint title={t("nav.library")} description={t("library.help")} />
+      </ContextBarRight>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
         {error ? (
@@ -1267,7 +1280,7 @@ export default function Library({
               variant="outline"
               size="sm"
               disabled={selected.size === 0 || busy}
-              onClick={() => setSharePaths(selectedEntries.map((e) => e.path))}
+              onClick={() => shareFiles(selectedEntries.map((e) => e.path))}
             >
               <Share2 className="size-3.5" /> {t("share.share")}
             </Button>
@@ -1314,8 +1327,6 @@ export default function Library({
         initialGoggles={view3dProps?.initialGoggles}
       />
 
-      <ShareDialog paths={sharePaths} onClose={() => setSharePaths(null)} />
-
       {findAgain && (
         <FindAgainDialog
           row={findAgain}
@@ -1323,16 +1334,6 @@ export default function Library({
           onClose={() => setFindAgain(null)}
         />
       )}
-
-      <ImportShareDialog
-        open={importShareOpen}
-        onClose={() => setImportShareOpen(false)}
-        onImported={() => {
-          setImportShareOpen(false);
-          void load();
-          onChanged();
-        }}
-      />
 
       <MoveDialog
         open={Boolean(moveTarget)}

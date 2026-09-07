@@ -1,0 +1,12 @@
+-- Where a secured asset's content key lives, wrapped.
+--
+-- The packer seals a blob under a content key (a CEK) and hands that key to us; the DLL
+-- needs exactly that key to open the blob. So the server has to hold it — but never in the
+-- clear. It is stored wrapped under a master key that lives only in a Worker secret
+-- (`MXB_ASSET_MASTER_KEY`), so a database leak yields wrapped keys that are useless without
+-- the secret, and the secret never touches the database.
+--
+-- On the `assets` row rather than a new table: one asset has one current content key, the
+-- same way it has one title. `key_id` (already on `assets`) names which master-key version
+-- wrapped it, so the master key can rotate without re-packing every asset.
+ALTER TABLE assets ADD COLUMN wrapped_key TEXT;

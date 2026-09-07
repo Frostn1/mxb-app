@@ -19,16 +19,24 @@ import {
   shopInstall,
   type ShopItem,
 } from "../api/mods";
+import { hubInstall, type HubItem } from "../api/hub";
 import type { DownloadSource, InstallStage, ReloadOutcome } from "../types";
 import { useDownloads } from "./Downloads";
+import { useDropReview } from "./DropReview";
 import { useT } from "../i18n/context";
 
-/** Where the bytes come from — a resolvable host, a file the user picked, or a shop purchase
- *  (whose download goes through a WebView, because Cloudflare refuses our HTTP client). */
+/** Where the bytes come from — a resolvable host, a file the user picked, or something already
+ *  bought on one of the two stores.
+ *
+ *  The two stores are separate kinds rather than one with a flag because they are downloaded by
+ *  entirely different means: a shop purchase goes through a WebView (Cloudflare refuses our
+ *  HTTP client on that store), while an MXB Hub purchase streams over the same client every
+ *  other download uses. Nothing above this line has to know that, but the branch below does. */
 export type InstallSource =
   | { kind: "download"; url: string; host: string }
   | { kind: "import"; path: string }
-  | { kind: "shop"; item: ShopItem };
+  | { kind: "shop"; item: ShopItem }
+  | { kind: "hub"; item: HubItem };
 
 interface StartParams {
   slug: string;
@@ -81,6 +89,7 @@ export interface PendingInstall {
 /** How the download history names this source. */
 function historySource(source: InstallSource): DownloadSource {
   if (source.kind === "shop") return "shop";
+  if (source.kind === "hub") return "hub";
   return source.kind === "download" ? "site" : "file";
 }
 
@@ -166,6 +175,7 @@ interface InstallContextValue {
   startPendingInstall: (p: PendingInstall) => void;
   /** A purchase from the shop, queued exactly like any other install. */
   startShopInstall: (p: Omit<StartParams, "source"> & { item: ShopItem }) => void;
+  startHubInstall: (p: Omit<StartParams, "source"> & { item: HubItem }) => void;
   /** Clear a finished (done/error) install card. */
   clear: () => void;
 }
@@ -198,6 +208,11 @@ export function InstallProvider({
   tRef.current = t;
   // Same reason: the history is written from inside `run`, which must not be rebuilt.
   const { note } = useDownloads();
+  // A download that turns out to be a pack is handed over rather than installed. Held in a
+  // ref for the same reason as the rest: `run` keeps its empty dep list.
+  const { reviewPlan } = useDropReview();
+  const reviewRef = useRef(reviewPlan);
+  reviewRef.current = reviewPlan;
   const noteRef = useRef(note);
   noteRef.current = note;
   const clearTimers = useRef<Map<string, number>>(new Map());
@@ -303,9 +318,20 @@ export function InstallProvider({
 
     try {
       if (source.kind === "download") {
-        await addToLibrary(slug, source.url, source.host, subpath, destFolder);
+        const pack = await addToLibrary(slug, source.url, source.host, subpath, destFolder);
+        if (pack) {
+          // Not one mod but several — a pack, and nothing has been written. The review sheet
+          // owns the staged bytes from here, and records its own history rows when the user
+          // commits, so this run is finished: the lane frees and the queue moves on. The card
+          // stays up saying what is waiting, because the sheet may be behind another one.
+          patch(key, (cur) => ({ ...cur, stage: "review" }));
+          reviewRef.current(pack);
+          return;
+        }
       } else if (source.kind === "shop") {
         await shopInstall(source.item, subpath, destFolder);
+      } else if (source.kind === "hub") {
+        await hubInstall(source.item, subpath, destFolder);
       } else {
         await importFile(source.path, subpath, destFolder);
       }
@@ -562,6 +588,11 @@ export function InstallProvider({
     [enqueue],
   );
 
+  const startHubInstall: InstallContextValue["startHubInstall"] = useCallback(
+    ({ item, ...rest }) => enqueue({ ...rest, source: { kind: "hub", item } }),
+    [enqueue],
+  );
+
   /** Retire the finished cards, leaving anything still transferring alone. */
   const clear = useCallback(
     () => setActive((cur) => cur.filter((it) => it.stage !== "done" && it.stage !== "error")),
@@ -582,6 +613,7 @@ export function InstallProvider({
       cancel,
       startInstall,
       startImport,
+      startHubInstall,
       startPendingInstall,
       startShopInstall,
       clear,
@@ -593,6 +625,7 @@ export function InstallProvider({
       cancel,
       startInstall,
       startImport,
+      startHubInstall,
       startPendingInstall,
       startShopInstall,
       clear,

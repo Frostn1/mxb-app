@@ -1,27 +1,38 @@
-import { useCallback, useEffect, useState } from "react";
-import Sidebar, { type DashboardView } from "../Shell/Sidebar";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import TopRail from "../Shell/TopRail";
+import { ContextSlots } from "../Shell/ContextBar";
+import { type DashboardView } from "../Shell/nav";
+import { parsePluginView, usePlugins } from "@/lib/usePlugins";
 import Library from "../Library/Library";
 import Downloads from "../Downloads/Downloads";
 import Locker from "../Locker/Locker";
 import Presets from "../Presets/Presets";
 import Manage from "../Manage/Manage";
-import Servers from "../Servers/Servers";
+import Secure from "../Secure/Secure";
 import Studio, { type StudioTab } from "../Studio/Studio";
 import Browse from "../Browse/Browse";
+import Servers from "../Servers/Servers";
 import Shop from "../Shop/Shop";
+import Hub from "../Hub/Hub";
 import ModDetail from "../ModDetail/ModDetail";
 import DropZone from "../Dropzone/DropZone";
+import RuntimeBanner from "../RuntimeBanner/RuntimeBanner";
+import UpdateBanner from "../UpdateBanner/UpdateBanner";
 import Settings, { type SectionId } from "../Settings/Settings";
 import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import ReleaseShowcase from "../Showcase/ReleaseShowcase";
 import { useReleaseShowcase } from "../Showcase/useReleaseShowcase";
 import { InstallProvider } from "../../Context/Install";
+import { TrackBuildProvider } from "../../Context/TrackBuild";
 import { DownloadsProvider } from "../../Context/Downloads";
 import { DropReviewProvider } from "../../Context/DropReview";
+import { ShareProvider } from "../../Context/Share";
 import { useConfig } from "../../Context/Config";
 import { modTypesFor, setIntroSeen } from "../../api/mods";
 import { useModBrowsing } from "../../lib/useModBrowsing";
 import { displayName } from "../../lib/mods";
+import { track } from "../../lib/analytics";
 import type { DownloadRecord, Loadout } from "../../types";
 
 interface DashboardProps {
@@ -63,6 +74,41 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // Which Settings section to land on, when something sent us there on purpose.
   // Cleared on the way out so a later visit opens where Settings normally opens.
   const [settingsSection, setSettingsSection] = useState<SectionId | undefined>();
+
+  // Paid plugins running this session. A plugin that fails to mount says so once and is
+  // then dropped: the app is a mod manager first, and a broken add-on must not take it down.
+  const plugins = usePlugins((id, message) =>
+    toast.error(`${id}: ${message}`),
+  );
+  // The panel on screen, when the current view addresses one. A view naming a plugin that
+  // is no longer mounted — a licence that lapsed mid-session — falls through to the
+  // built-in pages rather than rendering a blank frame.
+  const pluginPanel = (() => {
+    const ref = parsePluginView(view);
+    if (!ref) return null;
+    const p = plugins.find((x) => x.manifest.id === ref.plugin);
+    return p?.panels.find((panel) => panel.id === ref.panel) ?? null;
+  })();
+  // Which page is open, as the usage counters name it.
+  //
+  // Derived and counted by an effect rather than inside `navigate`, because plenty of
+  // things move the view without going through it — the tour, the release showcase, a
+  // download row jumping to the Library — and a page nobody counted is worse than one
+  // counted twice. Studio's sub-views are pages in their own right; everything else is
+  // one name, so a tab added to the sidebar is counted without touching this.
+  const page = view.startsWith("plugin:")
+    ? "view.plugin"   // one bucket: naming each panel would be unbounded cardinality
+    : view === "studio"
+      ? `view.studio.${studioTab}`
+      : `view.${view}`;
+  useEffect(() => {
+    track(page);
+  }, [page]);
+
+  // Opening a mod's page is a use of the browser, not a page of its own.
+  useEffect(() => {
+    if (selectedSlug) track("mod.detail");
+  }, [selectedSlug]);
 
   const navigate = useCallback(
     (v: DashboardView, studio?: StudioTab) => {
@@ -139,6 +185,10 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     [openMod, modType.categoryId, navigate],
   );
 
+  const [ctxLeft, setCtxLeft] = useState<HTMLDivElement | null>(null);
+  const [ctxRight, setCtxRight] = useState<HTMLDivElement | null>(null);
+  const ctxSlots = useMemo(() => ({ left: ctxLeft, right: ctxRight }), [ctxLeft, ctxRight]);
+
   // Jump from Presets into the Rider tab with a preset loaded, to view it on the model.
   const openInRider = useCallback((lo: Loadout, bike: string) => {
     setRiderPreset(lo);
@@ -153,18 +203,39 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     <TourContext.Provider value={{ startTour }}>
     {/* Outside the installers: both of them write to the history, and the sidebar reads it. */}
     <DownloadsProvider>
+    {/* Above the installer, not below it: a *download* stages a plan too now — a pack like
+        the OEM bikes arrives as fifty-five mods in one archive — so `InstallProvider` has to
+        be able to hand one over. It wraps the views for the same reason it always did: a drop
+        anywhere in the window and the Shop's purchases grid both finish in this one sheet. */}
+    <DropReviewProvider onInstalled={onInstalled}>
     <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
-      {/* Wraps the views because two of them stage plans: a drop anywhere in the window, and
-          the Shop's purchases grid. Both finish in the one review sheet this renders. */}
-      <DropReviewProvider onInstalled={onInstalled}>
+    {/* Above the views, because the Studio is unmounted the moment you look at another one
+        and compiling a track is a minute of work — held here it keeps going, keeps its bar,
+        and is still there when you come back. */}
+    <TrackBuildProvider onInstalled={onInstalled}>
+      {/* Owns the share/import dialogs for every screen that lists installed content, and
+          watches for a share code pasted into the window. */}
+      <ShareProvider onImported={onInstalled}>
       {/* Mounted here rather than in `App` so a drop only works once the app is set up —
           there is nowhere to install to before the MX Bikes folder is known. The overlay
           window renders its own tree and deliberately gets no drop target. */}
       <DropZone />
+      <TopRail
+        view={view}
+        studioTab={studioTab}
+        plugins={plugins}
+        onNavigate={navigate}
+        leftRef={setCtxLeft}
+        rightRef={setCtxRight}
+      />
+      <RuntimeBanner />
+      <UpdateBanner />
       <div className="flex min-h-0 flex-1">
-        <Sidebar view={view} onNavigate={navigate} />
-        <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-          {view === "browse" && selectedSlug ? (
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden pt-3">
+          <ContextSlots.Provider value={ctxSlots}>
+          {pluginPanel ? (
+            <pluginPanel.component />
+          ) : view === "browse" && selectedSlug ? (
             <ModDetail
               slug={selectedSlug}
               modType={modType}
@@ -181,8 +252,12 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onOpenMod={openMod}
               onChangeType={changeType}
             />
+          ) : view === "servers" ? (
+            <Servers />
           ) : view === "shop" ? (
             <Shop refreshKey={libraryVersion} />
+          ) : view === "hub" ? (
+            <Hub refreshKey={libraryVersion} />
           ) : view === "library" ? (
             <Library
               modType={modType}
@@ -198,6 +273,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onOpenMod={openModTarget}
               onShowInLibrary={showInLibrary}
               onOpenShop={() => navigate("shop")}
+              onOpenHub={() => navigate("hub")}
             />
           ) : view === "locker" ? (
             <Locker />
@@ -215,16 +291,17 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               riderBike={riderBike}
               onRiderPresetLoaded={clearRiderPreset}
             />
-          ) : view === "servers" ? (
-            <Servers />
           ) : view === "manage" ? (
             <Manage />
+          ) : view === "secure" ? (
+            <Secure />
           ) : (
             <Settings
               initialSection={settingsSection}
               onShowWhatsNew={replayShowcase}
             />
           )}
+          </ContextSlots.Provider>
         </div>
       </div>
       {tourRun && <Tour navigate={navigate} onDone={endTour} />}
@@ -237,8 +314,10 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           onOpenSettings={openSettingsSection}
         />
       )}
-      </DropReviewProvider>
-    </InstallProvider>
+      </ShareProvider>
+    </TrackBuildProvider>
+      </InstallProvider>
+    </DropReviewProvider>
     </DownloadsProvider>
     </TourContext.Provider>
   );

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { Bone } from "../types";
+import type { BikeRig, Bone, EdfNode, Vec3 } from "../types";
 
 /**
  * Posing a rider.
@@ -269,7 +269,11 @@ export function turnToward(
   const turned = new THREE.Quaternion();
   local.decompose(new THREE.Vector3(), turned, new THREE.Vector3());
   // `applyPose` composes the turn after the rest, so this is what it has to be handed.
-  return withTurn(pose, turns, shortenToLimit(rest.clone().invert().multiply(turned)));
+  return withTurn(
+    pose,
+    turns,
+    shortenToLimit(rest.clone().invert().multiply(turned), turnLimit(turns)),
+  );
 }
 
 /**
@@ -280,7 +284,7 @@ export function turnToward(
  * than fly off. Bisection because the three Euler angles don't grow evenly along the arc, so
  * there is no closed form to scale by.
  */
-function shortenToLimit(turn: THREE.Quaternion): [number, number, number] {
+function shortenToLimit(turn: THREE.Quaternion, limit: number): [number, number, number] {
   const scratch = new THREE.Euler();
   const q = new THREE.Quaternion();
   const worst = (t: number) => {
@@ -288,17 +292,21 @@ function shortenToLimit(turn: THREE.Quaternion): [number, number, number] {
     return Math.max(Math.abs(scratch.x), Math.abs(scratch.y), Math.abs(scratch.z)) / DEG;
   };
   let far = 1;
-  if (worst(1) > TURN_LIMIT) {
+  if (worst(1) > limit) {
     let near = 0;
     for (let i = 0; i < 16; i++) {
       const mid = (near + far) / 2;
-      if (worst(mid) > TURN_LIMIT) far = mid;
+      if (worst(mid) > limit) far = mid;
       else near = mid;
     }
     far = near;
   }
   worst(far);
-  return [clampTurn(scratch.x / DEG), clampTurn(scratch.y / DEG), clampTurn(scratch.z / DEG)];
+  return [
+    clampTurn(scratch.x / DEG, limit),
+    clampTurn(scratch.y / DEG, limit),
+    clampTurn(scratch.z / DEG, limit),
+  ];
 }
 
 // ── Which bones a person would want to move ──────────────────────────────────
@@ -385,6 +393,12 @@ export interface RiderFrame {
 export interface PosableRig {
   bones: Bone[];
   frame: RiderFrame;
+  /**
+   * The bike under him — where its grips and pegs are, in his own frame. Null whenever he
+   * isn't sitting on one, which is what makes the riding position offered only when it means
+   * something.
+   */
+  mount?: RiderMount | null;
 }
 
 /** A bone's rest position in model space, or null if the model doesn't bind it. */
@@ -405,50 +419,62 @@ function firstOrigin(bones: Bone[], names: string[]): THREE.Vector3 | null {
 /**
  * Which way the rider faces, as ±1 along `f`, or 0 when the body doesn't say.
  *
- * A foot is the one part of a standing body that is plainly asymmetric about its joint —
- * around 20 cm of it in front of the ankle and 6 cm behind — so the lowest slice of the mesh
- * settles the question on its own.
+ * From the hand: an arm hanging at rest has its palm to the thigh, which puts the index
+ * knuckle at the front of the body and the little finger at the back — 8 cm apart, and the
+ * same 8 cm on `default_mx`, `default_sm` and Rider+, because the rig is the game's own.
+ *
+ * The body mesh is not asked, and can't be: it has no feet. The ankles and toes are dropped
+ * from the rig — they belong to the boots, not the body — and the mesh stops at the sock, so
+ * a toe-and-heel reading of its lowest slice measures the bottom of a shin and answers
+ * "forward" whichever way the rider is really pointing. That reading used to be taken first,
+ * and it is why the rider sat on the bike backwards.
  */
-function facingFromFeet(
-  nodes: { positions: ArrayLike<number> }[],
-  f: THREE.Vector3,
-  up: THREE.Vector3,
-  ankle: THREE.Vector3,
-): number {
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (const n of nodes) {
-    for (let i = 0; i < n.positions.length; i += 3) {
-      const t = n.positions[i] * up.x + n.positions[i + 1] * up.y + n.positions[i + 2] * up.z;
-      if (t < lo) lo = t;
-      if (t > hi) hi = t;
-    }
+function facingFromKnuckles(bones: Bone[], f: THREE.Vector3, up: THREE.Vector3): number {
+  for (const side of SIDES) {
+    const index = originOf(bones, `riderRIG_${side}Index1`);
+    const pink = firstOrigin(bones, [`riderRIG_${side}Pink1`, `riderRIG_${side}Pinky1`]);
+    if (!index || !pink) continue;
+    const d = index.clone().sub(pink);
+    d.addScaledVector(up, -d.dot(up));
+    const len = d.length();
+    if (len < 1e-4) continue;
+    const along = d.dot(f) / len;
+    if (Math.abs(along) > 0.4) return Math.sign(along);
   }
-  if (!(hi > lo)) return 0;
-  const cut = lo + (hi - lo) * 0.06;
-  const at = ankle.dot(f);
-  let toe = 0;
-  let heel = 0;
-  for (const n of nodes) {
-    for (let i = 0; i < n.positions.length; i += 3) {
-      const t = n.positions[i] * up.x + n.positions[i + 1] * up.y + n.positions[i + 2] * up.z;
-      if (t > cut) continue;
-      const d = n.positions[i] * f.x + n.positions[i + 1] * f.y + n.positions[i + 2] * f.z - at;
-      if (d > toe) toe = d;
-      if (-d > heel) heel = -d;
-    }
-  }
-  if (toe > heel * 1.35) return 1;
-  if (heel > toe * 1.35) return -1;
   return 0;
 }
 
 /**
- * The same question from the rig alone: a thumb points the way its owner does.
+ * The last resort: a body carries more of itself behind its hip joints than in front.
  *
- * Only asked when the mesh didn't answer — a rider authored already sitting on a bike has its
- * feet under it, and then the hands are the better witness.
+ * The pelvis bone's box covers the seat of the rider, which runs back from the joints it
+ * hangs off; the front of the hip barely does. Coarser than the hand, and only asked of a rig
+ * that binds no fingers at all.
  */
+function facingFromSeat(bones: Bone[], f: THREE.Vector3): number {
+  const at = bones.findIndex((b) => b.name === "riderRIG_Pelvis");
+  if (at < 0) return 0;
+  const bone = bones[at];
+  const bind = toMatrix(bone.bind);
+  const origin = new THREE.Vector3().setFromMatrixPosition(bind);
+  const corner = new THREE.Vector3();
+  let along = 0;
+  let against = 0;
+  for (const x of [bone.aabbLo[0], bone.aabbHi[0]]) {
+    for (const y of [bone.aabbLo[1], bone.aabbHi[1]]) {
+      for (const z of [bone.aabbLo[2], bone.aabbHi[2]]) {
+        const d = corner.set(x, y, z).applyMatrix4(bind).sub(origin).dot(f);
+        along = Math.max(along, d);
+        against = Math.max(against, -d);
+      }
+    }
+  }
+  if (against > along * 1.2) return 1;
+  if (along > against * 1.2) return -1;
+  return 0;
+}
+
+/** The same question, from the thumb: it points the way its owner does. */
 function facingFromThumb(bones: Bone[], f: THREE.Vector3, up: THREE.Vector3): number {
   const wrist = originOf(bones, "riderRIG_LeftWrist");
   const thumb = firstOrigin(bones, [
@@ -466,16 +492,13 @@ function facingFromThumb(bones: Bone[], f: THREE.Vector3, up: THREE.Vector3): nu
 }
 
 /**
- * Read {@link RiderFrame} off a rig, with the body mesh to settle which way it faces.
+ * Read {@link RiderFrame} off a rig.
  *
  * Null when the model binds too little to say — a rig with no hips or no spine is one the
  * ready-made moves can't be stated in, and offering them anyway would move something at
  * random.
  */
-export function riderFrame(
-  bones: Bone[],
-  body?: { positions: ArrayLike<number> }[] | null,
-): RiderFrame | null {
+export function riderFrame(bones: Bone[]): RiderFrame | null {
   if (!bones.length) return null;
   const leftHip = originOf(bones, "riderRIG_LeftHip");
   const rightHip = originOf(bones, "riderRIG_RightHip");
@@ -496,7 +519,9 @@ export function riderFrame(
   left.addScaledVector(up, -left.dot(up));
   if (left.lengthSq() < 1e-8) return null;
   left.normalize();
-  const forward = new THREE.Vector3().crossVectors(up, left).normalize();
+  // left × up, so this already points the way the rider does on a rig read the way round
+  // the game writes them; the witnesses below only ever have to confirm it.
+  const forward = new THREE.Vector3().crossVectors(left, up).normalize();
 
   const leftKnee = originOf(bones, "riderRIG_LeftKnee");
   const rightKnee = originOf(bones, "riderRIG_RightKnee");
@@ -506,14 +531,206 @@ export function riderFrame(
       ? rightKnee.distanceTo(rightHip)
       : head.distanceTo(pelvis) * 0.6;
 
-  // The knee stands over the ankle on a standing rider, which is the reference the foot test
-  // measures its toe and heel from.
-  const ankle = leftKnee ?? rightKnee ?? hips;
   const sign =
-    (body?.length ? facingFromFeet(body, forward, up, ankle) : 0) ||
-    facingFromThumb(bones, forward, up);
+    facingFromKnuckles(bones, forward, up) ||
+    facingFromThumb(bones, forward, up) ||
+    facingFromSeat(bones, forward);
   if (sign < 0) forward.negate();
   return { up, left, forward, leg: thigh || 0.36 };
+}
+
+// ── Sitting the rider on the bike ────────────────────────────────────────────
+
+/**
+ * Where the rider's weight goes: the underside of the pelvis, in the rider's own frame.
+ *
+ * The pelvis bone carries a box covering the slice of body it moves, so the bottom of that
+ * box is where a seat would touch. Read off the model, because a rider is whatever height its
+ * author made it.
+ */
+function seatContact(bones: Bone[], up: THREE.Vector3): THREE.Vector3 | null {
+  const pelvis =
+    bones.find((b) => b.name === "riderRIG_Pelvis") ??
+    bones.find((b) => b.name === "riderRIG_LeftHip");
+  if (!pelvis) return null;
+  const bind = toMatrix(pelvis.bind);
+  const at = new THREE.Vector3(pelvis.bind[3], pelvis.bind[7], pelvis.bind[11]);
+  const { aabbLo: lo, aabbHi: hi } = pelvis;
+  let drop = 0;
+  const corner = new THREE.Vector3();
+  for (const x of [lo[0], hi[0]]) {
+    for (const y of [lo[1], hi[1]]) {
+      for (const z of [lo[2], hi[2]]) {
+        const d = corner.set(x, y, z).applyMatrix4(bind).sub(at).dot(up);
+        if (d < drop) drop = d;
+      }
+    }
+  }
+  return at.addScaledVector(up, drop);
+}
+
+/** How far into the seat the rider settles, in metres. */
+const SEAT_SINK = -0.02;
+
+/**
+ * How far up the seat the rider sits, as a share of the way from the seat to the steering
+ * head.
+ *
+ * `seat_height_ref` is a setup reference in the middle of the seat, and nobody rides there:
+ * from that point the bars are about 0.56 m away and an arm is 0.46 m long, so a rider left
+ * on the reference cannot reach his own handlebars. Sitting up the seat — with the hunch that
+ * goes with it — is what closes the gap.
+ */
+const SEAT_FORWARD = 0.25;
+
+/**
+ * The rider sat on the bike's seat, facing the way it does.
+ *
+ * Worked out rather than eyeballed: the bike's `.geom` names `seat_height_ref`, and the
+ * rider's own up and forward come off its rig, so the two only have to be brought into one
+ * frame. Null when either half won't say — a bike whose `.geom` names no seat, or a rig with
+ * no hips — and then the pair falls back to standing side by side, which is honest about not
+ * knowing.
+ */
+export function seatTransform(
+  parts: { part: string; nodes: unknown[]; skeleton?: Bone[] | null }[],
+  seat: Vec3,
+  rig: BikeRig | null,
+): THREE.Matrix4 | null {
+  const bones = parts.find((p) => p.part === "body" && p.nodes.length)?.skeleton;
+  if (!bones?.length) return null;
+  const rf = riderFrame(bones);
+  if (!rf) return null;
+  const contact = seatContact(bones, rf.up);
+  if (!contact) return null;
+  // The rider's (forward, up) onto the bike's (+Z, +Y). Both triples are built by a cross
+  // product, so both turn the same way round and what comes out is a rotation, not a mirror.
+  const b3 = new THREE.Vector3().crossVectors(rf.forward, rf.up);
+  const from = new THREE.Matrix4().makeBasis(rf.forward, rf.up, b3);
+  const to = new THREE.Matrix4().makeBasis(
+    new THREE.Vector3(0, 0, 1),
+    new THREE.Vector3(0, 1, 0),
+    new THREE.Vector3(0, 0, 1).cross(new THREE.Vector3(0, 1, 0)),
+  );
+  const turn = to.multiply(from.transpose());
+  // Sit *on* the seat rather than with the hip joint in it — the reference is the top of the
+  // seat, and a rider's weight is carried a little way into it — and up the seat towards the
+  // bars, which is where a rider actually sits.
+  const at = new THREE.Vector3(seat[0], seat[1] + SEAT_SINK, seat[2] + seatShift(seat, rig));
+  return new THREE.Matrix4()
+    .makeTranslation(at.x, at.y, at.z)
+    .multiply(turn)
+    .multiply(new THREE.Matrix4().makeTranslation(-contact.x, -contact.y, -contact.z));
+}
+
+/** How far forward of `seat_height_ref` the rider sits, in metres. */
+function seatShift(seat: Vec3, rig: BikeRig | null): number {
+  if (!rig) return 0;
+  return (rig.steerHead[2] - seat[2]) * SEAT_FORWARD;
+}
+
+/**
+ * Where the rider's hands and feet go on this bike: a grip and a peg per side.
+ *
+ * Stated in the rider's own rest frame rather than the bike's, so a move can send a wrist to
+ * a grip with the same solver that sends a knee 22 cm to the left, and nothing downstream has
+ * to know a bike is involved.
+ */
+export interface RiderMount {
+  /** Left, right — the rider's own, matching the bone names. */
+  grips: [THREE.Vector3, THREE.Vector3];
+  pegs: [THREE.Vector3, THREE.Vector3];
+}
+
+/**
+ * The grips, off the bike's own mesh.
+ *
+ * The `.geom` names no handlebar, but the assembled `steer` part is the bars: the widest
+ * thing on it by a distance, so its outermost vertices on each side are the bar ends and the
+ * levers. A hand goes a little inboard of that, where the grip is.
+ *
+ * `null` for a bike whose parts didn't come back named — the same `steer` prefix the
+ * assembler keys on, so if this can't find them neither could that, and the bike is
+ * unassembled anyway.
+ */
+function barGrips(nodes: EdfNode[]): [THREE.Vector3, THREE.Vector3] | null {
+  const steer = nodes.filter((n) => n.name.toLowerCase().startsWith("steer"));
+  if (!steer.length) return null;
+  let wide = 0;
+  for (const n of steer) {
+    for (let i = 0; i < n.positions.length; i += 3) wide = Math.max(wide, Math.abs(n.positions[i]));
+  }
+  // A bar half-narrower than a rider's shoulders is not a bar; something else was named steer.
+  if (wide < 0.2) return null;
+  const band = wide - 0.1;
+  const ends = [new THREE.Vector3(), new THREE.Vector3()];
+  const seen = [0, 0];
+  for (const n of steer) {
+    for (let i = 0; i < n.positions.length; i += 3) {
+      const x = n.positions[i];
+      if (Math.abs(x) < band) continue;
+      // The rider's left is +x, and so is the bar end his left hand takes.
+      const side = x > 0 ? 0 : 1;
+      ends[side].add(new THREE.Vector3(x, n.positions[i + 1], n.positions[i + 2]));
+      seen[side]++;
+    }
+  }
+  if (!seen[0] || !seen[1]) return null;
+  ends[0].divideScalar(seen[0]);
+  ends[1].divideScalar(seen[1]);
+  // Inboard of the bar end by half a grip, so a hand lands on the rubber rather than the plug.
+  ends[0].x = wide - GRIP_INSET;
+  ends[1].x = -(wide - GRIP_INSET);
+  return [ends[0], ends[1]];
+}
+
+/** How far inboard of the widest point on the bars a hand sits, in metres. */
+const GRIP_INSET = 0.05;
+
+/**
+ * Where the footpegs are — an estimate, and the only one here.
+ *
+ * Unlike the seat and the bars, nothing in the bike says: the `.geom` names no footrest and
+ * the mesh hides them among the frame rails. What is true of every motocross bike ever built
+ * is that the pegs sit at about rear-axle height and a little way up the frame from the seat
+ * reference, about 27 cm either side of the centreline — which is what this is.
+ */
+function footPegs(rig: BikeRig, seat: Vec3): [THREE.Vector3, THREE.Vector3] {
+  // Peg height is rear-axle height, near enough to the centimetre on every bike; and a peg
+  // sits just ahead of the swingarm pivot, which is the one point down there the .geom does
+  // name.
+  const y = rig.rearAxle ? rig.rearAxle[1] : seat[1] - 0.5;
+  const z = rig.pivot[2] + PEG_AHEAD_OF_PIVOT;
+  return [new THREE.Vector3(PEG_WIDTH, y, z), new THREE.Vector3(-PEG_WIDTH, y, z)];
+}
+
+/** How far the pegs sit either side of the centreline, and ahead of the swingarm pivot. */
+const PEG_WIDTH = 0.27;
+const PEG_AHEAD_OF_PIVOT = 0.09;
+
+/**
+ * The grips and pegs of `rig`, brought into the rider's own rest frame.
+ *
+ * Null when the rider can't be sat on the bike in the first place — there is nowhere to
+ * measure from then, and a move that reached for a bar the rider isn't sitting behind would
+ * pull him inside out.
+ */
+export function riderMount(
+  parts: { part: string; nodes: unknown[]; skeleton?: Bone[] | null }[],
+  bike: EdfNode[],
+  rig: BikeRig | null,
+): RiderMount | null {
+  if (!rig?.seat) return null;
+  const seated = seatTransform(parts, rig.seat, rig);
+  if (!seated) return null;
+  const grips = barGrips(bike);
+  if (!grips) return null;
+  const intoRider = seated.clone().invert();
+  const pegs = footPegs(rig, rig.seat);
+  return {
+    grips: [grips[0].applyMatrix4(intoRider), grips[1].applyMatrix4(intoRider)],
+    pegs: [pegs[0].applyMatrix4(intoRider), pegs[1].applyMatrix4(intoRider)],
+  };
 }
 
 // ── Ready-made moves ─────────────────────────────────────────────────────────
@@ -524,7 +741,7 @@ export type QuickMoveId =
   | "leftLegForward"
   | "elbowsUp"
   | "leanIn"
-  | "sitOnBike";
+  | "ride";
 
 /** One joint sent somewhere, and the bone whose turn takes it there. */
 export interface QuickStep {
@@ -541,6 +758,11 @@ export interface QuickStep {
 export interface QuickMove {
   id: QuickMoveId;
   steps: QuickStep[];
+  /**
+   * Also put his hands on the bars and his boots on the pegs — which needs the bike under
+   * him, so a move with this set is offered only once {@link riderMount} has answered.
+   */
+  mounted?: boolean;
 }
 
 /**
@@ -597,36 +819,210 @@ export const QUICK_MOVES: QuickMove[] = [
     ],
   },
   {
-    // Thighs forward and apart, shins folded back under: a straddle, which is what makes the
-    // on-bike view worth looking at before anyone touches a slider.
-    id: "sitOnBike",
+    // Sat on the machine: weight forward over the tank, hands on the bars, knees round it and
+    // boots on the pegs. The hunch is written here; the limbs are solved against the bike,
+    // because where a grip and a peg are is the bike's business, not the rider's.
+    id: "ride",
+    mounted: true,
     steps: [
-      {
-        turns: "riderRIG_LeftHip",
-        moves: "riderRIG_LeftKnee",
-        by: { forward: 0.6, left: 0.3, up: 0.12 },
-      },
-      {
-        turns: "riderRIG_RightHip",
-        moves: "riderRIG_RightKnee",
-        by: { forward: 0.6, left: -0.3, up: 0.12 },
-      },
-      {
-        turns: "riderRIG_LeftKnee",
-        moves: "riderRIG_LeftKnee",
-        tip: true,
-        by: { forward: -0.6, left: 0.12 },
-      },
-      {
-        turns: "riderRIG_RightKnee",
-        moves: "riderRIG_RightKnee",
-        tip: true,
-        by: { forward: -0.6, left: -0.12 },
-      },
-      { turns: "riderRIG_Spine2", moves: "riderRIG_Neck1", by: { forward: 0.16 } },
+      { turns: "riderRIG_Spine1", moves: "riderRIG_Spine3", by: { forward: 0.1 } },
+      { turns: "riderRIG_Spine2", moves: "riderRIG_Neck1", by: { forward: 0.3 } },
+      // Back the other way, so leaning in doesn't take the rider's eyes off the track.
+      { turns: "riderRIG_Neck1", moves: "riderRIG_Head", by: { forward: -0.1, up: 0.05 } },
     ],
   },
 ];
+
+// ── Reaching for the bike ────────────────────────────────────────────────────
+
+/**
+ * How long a shin is, as a share of the thigh above it.
+ *
+ * An estimate, and it has to be: the rig carries no ankle — the ankles and toes belong to the
+ * boots, so the body binds neither — and the body mesh stops at the sock. Measured off the
+ * riders the game ships, where the knee stands 0.50 m up and the ankle 0.09 m.
+ */
+const SHIN_OVER_THIGH = 1.12;
+
+/** How far behind the grip the wrist sits: the width of a hand. */
+function handLength(bones: Bone[], side: string): number {
+  const wrist = originOf(bones, `riderRIG_${side}Wrist`);
+  const knuckle = originOf(bones, `riderRIG_${side}Index1`);
+  return wrist && knuckle ? wrist.distanceTo(knuckle) : 0.09;
+}
+
+/**
+ * Where the middle joint of a two-bone limb lands when its end is put on `target`.
+ *
+ * The triangle root–middle–end has all three sides known, so the middle sits on a circle
+ * about the root-to-target line and `pole` picks the point on it — which way the joint bends.
+ * A target further off than the limb is long is drawn in until it is reachable, so a limb
+ * asked for too much straightens towards it instead of tearing off.
+ */
+function midJoint(
+  root: THREE.Vector3,
+  target: THREE.Vector3,
+  near: number,
+  far: number,
+  pole: THREE.Vector3,
+): THREE.Vector3 {
+  const axis = target.clone().sub(root);
+  let d = axis.length();
+  if (d < 1e-6) return root.clone().addScaledVector(pole.clone().normalize(), near);
+  d = Math.min(Math.max(d, Math.abs(near - far) + 1e-4), near + far - 1e-4);
+  axis.normalize();
+  const along = (near * near - far * far + d * d) / (2 * d);
+  const out = Math.sqrt(Math.max(0, near * near - along * along));
+  const bend = pole.clone();
+  bend.addScaledVector(axis, -bend.dot(axis));
+  if (bend.lengthSq() < 1e-8) return root.clone().addScaledVector(axis, along);
+  bend.normalize();
+  return root.clone().addScaledVector(axis, along).addScaledVector(bend, out);
+}
+
+/** A two-bone limb, and where it is being sent. */
+interface Reach {
+  /** The joint the whole limb swings about, and the bone that turn is written on. */
+  root: string;
+  /** The joint between the two bones — and the bone the second turn is written on. */
+  mid: string;
+  /** The joint at the end, the one put on the target. */
+  end: string;
+  /**
+   * Aim the far end of `mid`'s own box instead of `end`'s joint. For a shin, whose ankle the
+   * rig doesn't carry: only the direction to the target is used, which is all it takes to
+   * point a boot at a peg.
+   */
+  tip?: boolean;
+  /** The length of the second bone, when `tip` means it can't be read off the rig. */
+  far?: number;
+}
+
+/**
+ * Swing a two-bone limb so its end lands on `to`, bending the way `pole` points.
+ *
+ * Solved rather than nudged towards it: the middle joint is placed by triangle, then each
+ * bone is turned to point at where it now has to with {@link turnToward} — the same solver a
+ * drag uses, so an arm put on a handlebar and an arm dragged there by the wrist come out
+ * saying the same thing.
+ */
+function reach(
+  order: THREE.Bone[],
+  bones: Bone[],
+  pose: RiderPose,
+  limb: Reach,
+  to: THREE.Vector3,
+  pole: THREE.Vector3,
+): RiderPose {
+  const at = (name: string) => bones.findIndex((b) => b.name === name);
+  const [r, m, e] = [at(limb.root), at(limb.mid), at(limb.end)];
+  if (r < 0 || m < 0 || (e < 0 && !limb.tip)) return pose;
+  const rest = (i: number) => new THREE.Vector3().setFromMatrixPosition(toMatrix(bones[i].bind));
+  const near = rest(r).distanceTo(rest(m));
+  const far = limb.far ?? rest(m).distanceTo(rest(e));
+  if (near < 1e-4 || far < 1e-4) return pose;
+
+  let out = pose;
+  const world = (i: number) => {
+    order[i].updateWorldMatrix(true, false);
+    return new THREE.Vector3().setFromMatrixPosition(order[i].matrixWorld);
+  };
+  // Swing the whole limb so its middle joint lands where the triangle puts it.
+  const mid = midJoint(world(r), to, near, far, pole);
+  out = turnToward(order, bones, out, limb.root, world(m), mid);
+  applyPose(order, out);
+  // Then fold it, so the end lands on the target.
+  const tail = limb.tip
+    ? new THREE.Vector3(...boneTip(bones, m)).applyMatrix4(
+        (order[m].updateWorldMatrix(true, false), order[m].matrixWorld),
+      )
+    : world(e);
+  out = turnToward(order, bones, out, limb.mid, tail, to);
+  applyPose(order, out);
+  return out;
+}
+
+/**
+ * Hands on the bars, boots on the pegs.
+ *
+ * Run after the hunch, not before: leaning the torso carries the shoulders forward, and where
+ * the shoulder is decides how much elbow the reach leaves.
+ */
+function reachTheBike(
+  order: THREE.Bone[],
+  bones: Bone[],
+  pose: RiderPose,
+  frame: RiderFrame,
+  mount: RiderMount,
+): RiderPose {
+  let out = pose;
+  SIDES.forEach((side, i) => {
+    // Which way is out for this side: +1 on his left, -1 on his right.
+    const away = i === 0 ? 1 : -1;
+    // Elbows out and up, the way a rider carries them.
+    const elbow = frame.left
+      .clone()
+      .multiplyScalar(away)
+      .addScaledVector(frame.up, 0.5)
+      .addScaledVector(frame.forward, -0.4);
+    const shoulderAt = bones.findIndex((b) => b.name === `riderRIG_${side}Shoulder`);
+    const grip = mount.grips[i];
+    if (shoulderAt >= 0) {
+      order[shoulderAt].updateWorldMatrix(true, false);
+      const shoulder = new THREE.Vector3().setFromMatrixPosition(order[shoulderAt].matrixWorld);
+      // The hand grips the bar, so the wrist stops a hand's width short of it.
+      const wristAt = grip
+        .clone()
+        .addScaledVector(
+          grip.clone().sub(shoulder).normalize(),
+          -handLength(bones, side),
+        );
+      out = reach(
+        order,
+        bones,
+        out,
+        {
+          root: `riderRIG_${side}Shoulder`,
+          mid: `riderRIG_${side}Elbow`,
+          end: `riderRIG_${side}Wrist`,
+        },
+        wristAt,
+        elbow,
+      );
+      // The forearm puts the wrist a hand's width off the bar; this closes the hand on it.
+      // A hand hangs off the arm at its own angle, so where the knuckles ended up is not
+      // where the reach was aimed.
+      const knuckle = bones.findIndex((b) => b.name === `riderRIG_${side}Index1`);
+      if (knuckle >= 0) {
+        order[knuckle].updateWorldMatrix(true, false);
+        const held = new THREE.Vector3().setFromMatrixPosition(order[knuckle].matrixWorld);
+        out = turnToward(order, bones, out, `riderRIG_${side}Wrist`, held, grip);
+        applyPose(order, out);
+      }
+    }
+    // Knees forward and out around the tank — but inside the pegs, so the shin tapers back
+    // in towards the machine rather than the rider riding bow-legged.
+    const knee = frame.forward
+      .clone()
+      .addScaledVector(frame.left, 0.34 * away)
+      .addScaledVector(frame.up, 0.15);
+    out = reach(
+      order,
+      bones,
+      out,
+      {
+        root: `riderRIG_${side}Hip`,
+        mid: `riderRIG_${side}Knee`,
+        end: `riderRIG_${side}Knee`,
+        tip: true,
+        far: frame.leg * SHIN_OVER_THIGH,
+      },
+      mount.pegs[i],
+      knee,
+    );
+  });
+  return out;
+}
 
 /**
  * Can this model make this move?
@@ -634,8 +1030,12 @@ export const QUICK_MOVES: QuickMove[] = [
  * A rig that binds no spine — `default_mx_c` is one — has nothing to lean, and a button that
  * silently does nothing is worse than one that isn't offered.
  */
-export function canMove(move: QuickMove, bones: Bone[]): boolean {
+export function canMove(move: QuickMove, bones: Bone[], mount?: RiderMount | null): boolean {
   const has = (name: string) => bones.some((b) => b.name === name);
+  // A move that reaches for the bike needs the bike, and a limb to reach with.
+  if (move.mounted) {
+    return !!mount && bones.some((b) => /(?:Hip|Shoulder)$/.test(b.name));
+  }
   return move.steps.some((s) => has(s.turns) && has(s.moves));
 }
 
@@ -651,6 +1051,7 @@ export function applyQuickMove(
   move: QuickMove,
   bones: Bone[],
   frame: RiderFrame,
+  mount?: RiderMount | null,
 ): RiderPose {
   const { order } = buildSkeleton(bones);
   let out = pose;
@@ -671,12 +1072,35 @@ export function applyQuickMove(
     out = turnToward(order, bones, out, step.turns, from, to);
     applyPose(order, out);
   }
+  if (move.mounted && mount) out = reachTheBike(order, bones, out, frame, mount);
   return out;
 }
 
-/** How far one bone may be turned. Past this a rider stops looking like one. */
+/**
+ * How far a bone nothing below names may be turned. Past this a rider stops looking like one.
+ */
 export const TURN_LIMIT = 60;
 
-export function clampTurn(deg: number): number {
-  return Math.max(-TURN_LIMIT, Math.min(TURN_LIMIT, Math.round(deg)));
+/**
+ * How far each joint may be turned, in degrees.
+ *
+ * One number can't do it. A rider sitting on a bike folds a knee past 90° and swings a hip
+ * around 65°, while a neck that went either way would be a broken one — and a single 60° stop
+ * was quietly cutting every seated pose back: {@link shortenToLimit} shortens the whole turn
+ * until its worst axis fits, so a leg meant to fold under the machine came out half folded.
+ */
+const JOINT_LIMIT: { at: RegExp; deg: number }[] = [
+  // The joints a riding position is made of.
+  { at: /(Hip|Knee|Shoulder|Elbow)$/, deg: 135 },
+  { at: /(Wrist|Collar)$/, deg: 70 },
+  { at: /(Neck\d*|Head)$/, deg: 45 },
+];
+
+/** How far `bone` may be turned. */
+export function turnLimit(bone: string): number {
+  return JOINT_LIMIT.find((r) => r.at.test(bone))?.deg ?? TURN_LIMIT;
+}
+
+export function clampTurn(deg: number, limit: number = TURN_LIMIT): number {
+  return Math.max(-limit, Math.min(limit, Math.round(deg)));
 }

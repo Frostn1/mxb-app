@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle,
+  ChevronLeft,
   ArrowLeft,
   ExternalLink,
   Check,
   Copy,
   Snowflake,
   FileDown,
+  Maximize2,
+  ChevronRight,
+  X,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
@@ -36,13 +41,13 @@ import type {
   InstallStage,
   ModDetail as Detail,
 } from "../../types";
-import Gallery from "./Gallery";
+import { ContextBarLeft } from "../Shell/ContextBar";
+import CachedImg from "@/Components/ui/cached-img";
 import RichDescription from "./RichDescription";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
 import { useInstall } from "../../Context/Install";
 import type { InstalledIndex } from "../../lib/installedMatch";
 import { fileFormat, formatDate } from "../../lib/mods";
-import { Badge } from "@/Components/ui/badge";
 import { Button } from "@/Components/ui/button";
 import {
   AlertDialog,
@@ -84,6 +89,9 @@ function stageIndex(stage: InstallStage): number {
       return 2;
     case "placing":
       return 3;
+    // The bytes are down and classified; what is left is the user's decision, not ours.
+    case "review":
+      return 3;
     case "done":
       return 4;
     default:
@@ -109,6 +117,11 @@ export default function ModDetail({
     [game, modType, categoryId],
   );
   const [derivedDest, setDerivedDest] = useState(false);
+  /** Which screenshot the hero is showing. Declared with the other hooks: it used to
+   *  sit below the loading and error returns, which is a rules-of-hooks violation. */
+  const [heroIdx, setHeroIdx] = useState(0);
+  /** Whether the screenshot is open full-window. */
+  const [zoom, setZoom] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // The raw file list — only for destination folders and their counts. The badge uses
@@ -313,24 +326,128 @@ export default function ModDetail({
       : undefined;
   const idx = myActive ? stageIndex(myActive.stage) : -1;
 
-  return (
-    <div className="flex h-full flex-col overflow-hidden px-7 py-5">
-      <Breadcrumb
-        modType={modType}
-        title={detail.title}
-        onBack={onBack}
-        link={detail.link}
-      />
+  // Clamped once: opening a mod with fewer screenshots than the last one leaves the index
+  // past the end, and the thumbnail strip and the viewer have to agree with the hero on
+  // which picture that is.
+  const shotIdx = Math.min(heroIdx, Math.max(0, detail.images.length - 1));
+  const shot = detail.images[shotIdx];
 
-      <div className="mt-4 flex min-h-0 flex-1 gap-6">
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Browse's type tabs go with Browse, so the bar above would otherwise be an empty
+          44px band. It carries where you are instead. */}
+      <ContextBarLeft>
+        <span className="flex items-center gap-2 font-cond text-[12.5px] font-semibold uppercase tracking-[0.16em]">
+          <button
+            onClick={onBack}
+            className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {t(modType.label)}
+          </button>
+          <span className="text-faint">/</span>
+          <span className="max-w-[420px] truncate text-foreground">{detail.title}</span>
+        </span>
+      </ContextBarLeft>
+
+      {/* The artwork carries the name. A breadcrumb over a text column was the same page
+          every catalog has; this is the one the mockup drew. */}
+      <div className="relative h-[330px] flex-none overflow-hidden bg-card">
+        {shot && (
+          <>
+            {/* A blurred copy fills the band; the screenshot itself is shown whole beside it.
+                `object-cover` here cropped a 16:9 shot into a 4:1 slot — most of the picture
+                was off-screen, and cycling the thumbnails just swapped one sliver for another.
+                The 42% column is exactly the width a 16:9 image fills at this height, so the
+                two gradients below stop where the picture starts and never wash over it. */}
+            <CachedImg
+              src={shot}
+              width={640}
+              alt=""
+              aria-hidden
+              className="absolute inset-0 size-full scale-125 object-cover opacity-60 blur-[22px]"
+            />
+            <button
+              onClick={() => setZoom(true)}
+              aria-label={detail.title}
+              className="group absolute inset-y-0 right-0 w-[42%] cursor-default"
+            >
+              <CachedImg
+                src={shot}
+                width={1280}
+                alt={detail.title}
+                // `drop-shadow`, not `shadow`: with `object-contain` the element is the whole
+                // 42% column, so a box shadow would draw an edge where the picture isn't. A
+                // filter follows the pixels, which is what has to lift off the blur behind it.
+                className="size-full object-contain object-right drop-shadow-[-16px_0_26px_rgba(0,0,0,0.45)]"
+              />
+              <span className="absolute right-3 top-3 grid size-7 place-items-center border border-white/25 bg-black/45 text-white/85 opacity-0 transition-opacity group-hover:opacity-100">
+                <Maximize2 className="size-3.5" />
+              </span>
+            </button>
+          </>
+        )}
+        {/* Both scrims stop at 58% — the picture's edge — so the title stays readable over a
+            bright screenshot without any of it washing across the picture itself. */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[rgba(6,6,7,0.92)] via-[rgba(6,6,7,0.6)] via-35% to-transparent to-58%" />
+        <div className="pointer-events-none absolute bottom-0 left-0 h-[200px] w-[58%] bg-gradient-to-t from-[rgba(6,6,7,0.9)] via-[rgba(6,6,7,0.45)] via-50% to-transparent" />
+
+        <button
+          onClick={onBack}
+          className="u-skew absolute left-7 top-5 flex h-8 cursor-default items-center border border-white/25 bg-black/40 px-3 text-white/85 transition-colors hover:text-white"
+        >
+          <span className="u-unskew flex items-center gap-1.5">
+            <ChevronLeft className="size-3.5" />
+            <span className="font-cond text-[12px] font-semibold uppercase tracking-[0.14em]">
+              {t(modType.label)}
+            </span>
+          </span>
+        </button>
+
+        <div className="absolute inset-x-0 bottom-0 max-w-[58%] px-7 pb-5">
+          <h1 className="font-cond text-[42px] font-bold uppercase leading-[0.94] tracking-[0.005em] text-white">
+            {detail.title}
+          </h1>
+          <div className="mt-2.5 flex flex-wrap items-center gap-2.5 text-[12.5px] text-white/65">
+            {detail.author && <span className="text-white/85">{detail.author}</span>}
+            {detail.author && <span className="text-white/30">/</span>}
+            <span className="tabular-figures">{formatDate(detail.date)}</span>
+            {detail.version && (
+              <>
+                <span className="text-white/30">/</span>
+                <span className="font-mono text-[11.5px]">{detail.version}</span>
+              </>
+            )}
+            {isInstalled && (
+              <>
+                <span className="text-white/30">/</span>
+                <span className="flex items-center gap-1 text-success">
+                  <Check className="size-3" strokeWidth={3} /> In library
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1 gap-6 px-7 pb-5 pt-4">
         {/* left: gallery + description */}
         <div className="flex min-w-0 flex-1 flex-col gap-3.5 overflow-y-auto pr-1">
-          <Gallery
-            images={detail.images}
-            title={detail.title}
-            emptyLabel="No screenshots"
-          />
-
+          {detail.images.length > 1 && (
+            <div className="flex flex-none gap-2 overflow-x-auto pb-1">
+              {detail.images.map((img, i) => (
+                <button
+                  key={img}
+                  onClick={() => setHeroIdx(i)}
+                  className={cn(
+                    "u-notch relative h-[62px] w-[104px] flex-none overflow-hidden bg-card transition-opacity",
+                    i === shotIdx ? "outline outline-2 -outline-offset-2 outline-primary" : "opacity-60 hover:opacity-100",
+                  )}
+                >
+                  <CachedImg src={img} width={240} alt="" className="size-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="flex flex-col gap-2 pt-1">
             <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
@@ -343,28 +460,6 @@ export default function ModDetail({
 
         {/* right rail */}
         <div className="flex w-[340px] flex-none flex-col gap-3 overflow-y-auto">
-          <div className="flex flex-col gap-1.5">
-            <h1 className="text-[24px] font-bold leading-tight tracking-[-0.3px]">
-              {detail.title}
-            </h1>
-            <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
-              <span>{formatDate(detail.date)}</span>
-              {detail.version && (
-                <>
-                  <span className="text-faint">·</span>
-                  <span className="rounded-[5px] bg-foreground/[0.07] px-1.5 py-px font-mono text-[11px]">
-                    {detail.version}
-                  </span>
-                </>
-              )}
-              {isInstalled && (
-                <Badge variant="success" className="ml-0.5">
-                  <Check className="size-3" strokeWidth={3} /> In library
-                </Badge>
-              )}
-            </div>
-          </div>
-
           {/* install panel */}
           <div className="flex flex-col gap-3 rounded-xl border border-input bg-card p-4">
             {myActive && idx >= 0 ? (
@@ -409,7 +504,7 @@ export default function ModDetail({
                     button, not after the install: it lands in the library either way and
                     then does nothing in-game, which reads as a broken mod. */}
                 {serverOnly && (
-                  <div className="flex items-start gap-2.5 rounded-[10px] border border-warning/30 bg-warning/[0.07] px-3 py-2.5">
+                  <div className="flex items-start gap-2.5 border border-warning/30 bg-warning/[0.07] px-3 py-2.5">
                     <AlertTriangle className="mt-px size-3.5 flex-none text-warning" />
                     <span className="text-[12px] text-warning/90">
                       {t("modDetail.serverOnlyNotice")}
@@ -436,7 +531,7 @@ export default function ModDetail({
           {/* What happens once the install finishes. FrostMod hot-reloads the game, but
               it's an MX Bikes plugin — promising a reload for a title that has none is
               worse than saying nothing, so that case gets the honest instruction. */}
-          <div className="flex items-center gap-2.5 rounded-[10px] border border-success/25 bg-success/[0.06] px-3 py-2.5">
+          <div className="flex items-center gap-2.5 border border-success/25 bg-success/[0.06] px-3 py-2.5">
             <span className="size-[7px] flex-none rounded-full bg-success" />
             <span className="text-[12px] text-success/90">
               {t(game.caps.frostmod ? "modDetail.frostmodHint" : "modDetail.restartHint", {
@@ -501,7 +596,108 @@ export default function ModDetail({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {zoom && shot && (
+        <Lightbox
+          images={detail.images}
+          index={shotIdx}
+          onIndex={setHeroIdx}
+          onClose={() => setZoom(false)}
+          title={detail.title}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * One screenshot at the size the window allows.
+ *
+ * The hero band shows the whole picture but it is still a strip across the top of the page;
+ * this is the look-at-it-properly view. Arrow keys walk the set, Escape and a click anywhere
+ * off the picture leave.
+ */
+function Lightbox({
+  images,
+  index,
+  onIndex,
+  onClose,
+  title,
+}: {
+  images: string[];
+  index: number;
+  onIndex: (i: number) => void;
+  onClose: () => void;
+  title: string;
+}) {
+  const t = useT();
+  const step = useCallback(
+    (d: number) => onIndex((index + d + images.length) % images.length),
+    [index, images.length, onIndex],
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowRight") step(1);
+      else if (e.key === "ArrowLeft") step(-1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, step]);
+
+  // Portalled: the detail page sits inside a clipped column, and a viewer that covers the
+  // window has to be a child of the window.
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/92 px-16 py-12"
+      onClick={onClose}
+    >
+      <CachedImg
+        src={images[index]}
+        alt={title}
+        className="max-h-full max-w-full object-contain"
+        onClick={(e) => e.stopPropagation()}
+      />
+
+      <button
+        onClick={onClose}
+        aria-label={t("common.close")}
+        title={t("common.close")}
+        className="absolute right-5 top-5 grid size-9 cursor-default place-items-center border border-white/20 bg-black/50 text-white/75 transition-colors hover:text-white"
+      >
+        <X className="size-4" />
+      </button>
+
+      {images.length > 1 && (
+        <>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              step(-1);
+            }}
+            aria-label={t("common.back")}
+            className="absolute left-4 top-1/2 grid size-10 -translate-y-1/2 cursor-default place-items-center border border-white/20 bg-black/50 text-white/75 transition-colors hover:text-white"
+          >
+            <ChevronLeft className="size-5" />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              step(1);
+            }}
+            aria-label={t("common.next")}
+            className="absolute right-4 top-1/2 grid size-10 -translate-y-1/2 cursor-default place-items-center border border-white/20 bg-black/50 text-white/75 transition-colors hover:text-white"
+          >
+            <ChevronRight className="size-5" />
+          </button>
+          <span className="absolute inset-x-0 bottom-5 text-center font-mono text-[12px] tabular-figures text-white/55">
+            {index + 1} / {images.length}
+          </span>
+        </>
+      )}
+    </div>,
+    document.body,
   );
 }
 
@@ -589,9 +785,11 @@ function InstallProgress({
         ? t("update.downloading")
         : stage === "extracting"
           ? t("modDetail.extracting")
-          : stage === "placing"
-            ? t("modDetail.addingToLibrary")
-            : t("modDetail.resolving");
+          : stage === "review"
+            ? t("modDetail.chooseWhatToInstall")
+            : stage === "placing"
+              ? t("modDetail.addingToLibrary")
+              : t("modDetail.resolving");
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between">

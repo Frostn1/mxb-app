@@ -8,6 +8,13 @@
  * else), so the app reports it here and every other app on the server reads it back.
  */
 
+import { unwrapContentKey } from "./assetkey";
+import {
+  isVerified,
+  loginUrl,
+  verifyAssertion,
+  LOGIN_TTL_MS,
+} from "./steam";
 import {
   awsEnv,
   createImage,
@@ -18,7 +25,28 @@ import {
   runInstance,
   terminateInstance,
 } from "./aws";
+import { adminSearch } from "./adminsearch";
 import { bmacWebhook } from "./bmac";
+import { pruneReports, putReport } from "./diagnostics";
+import {
+  diagnosticsDashboard,
+  diagnosticsFile,
+  diagnosticsFiles,
+  diagnosticsRider,
+  diagnosticsRiders,
+  diagnosticsRules,
+  diagnosticsRulesPage,
+} from "./diagnosticspage";
+import {
+  paintFiles,
+  paintOne,
+  paintRider,
+  paintRiders,
+  paintThumbnail,
+} from "./paintspage";
+import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
+import { pluginKeysPage, pluginLicensesPage, pluginsAction } from "./pluginspage";
+import { generateTrack } from "./trackgen";
 import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
 import { bearer, hashToken, newToken, tokenMatches } from "./auth";
 import {
@@ -42,6 +70,8 @@ import {
   PRESENCE_TTL_MS,
 } from "./validate";
 import { claimDeviceAccount, iceServers, voiceRoom } from "./voice";
+import { pruneUsage, reportUsage, usageStats } from "./usage";
+import { usageDashboard } from "./usagepage";
 import { VoiceRoom } from "./voiceroom";
 
 interface Account {
@@ -80,7 +110,13 @@ export default {
    */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
-      Promise.all([reapIdleServers(env), advanceImageBuild(env), pruneDeviceClaims(env)]).then(
+      Promise.all([
+        reapIdleServers(env),
+        advanceImageBuild(env),
+        pruneDeviceClaims(env),
+        pruneUsage(env),
+        pruneReports(env),
+      ]).then(
         () => undefined,
       ),
     );
@@ -117,7 +153,17 @@ async function route(request: Request, env: Env): Promise<Response> {
 
   // Enrollment is the one unauthenticated write: it trades an invite code for a token.
   // Steam sign-in will replace the invite code without changing anything downstream.
+  // Above the account gate on purpose. The endpoint spends our Anthropic budget, so it is
+  // capped hard by its own shape — one call, 16k output tokens, a schema that can only be a
+  // motocross track — rather than by who is asking. That also makes it usable against a local
+  // `wrangler dev`, which has no accounts to enroll with.
+  if (method === "POST" && path === "/v1/track/generate") return generateTrack(request, env);
   if (method === "POST" && path === "/v1/enroll") return enroll(request, env);
+
+  // Steam comes back to the browser, which carries no bearer token — the login id in the
+  // return URL is what identifies the sign-in, and it is single-use. Above the account
+  // gate for that reason, not because it is unprotected.
+  if (method === "GET" && path === "/v1/steam/return") return steamReturn(request, url, env);
 
   // Self-serve signup, no invite. Voice is the reason this exists: a rider on a community
   // server has nobody to talk to unless the people beside them can sign up too. The account
@@ -144,6 +190,79 @@ async function route(request: Request, env: Env): Promise<Response> {
   // credential is the HMAC signature over the body, checked before the body is parsed.
   if (method === "POST" && path === "/v1/bmac/webhook") return bmacWebhook(request, env);
 
+  // The plugin catalogue, before there is anyone to authenticate. What is on offer is not a
+  // secret and the app lists it on a first run, with no account and nothing enrolled.
+  if (method === "GET" && path === "/v1/plugins") return listPlugins(env);
+  // Anonymous usage counters, from every install rather than every account. Unauthenticated
+  // for the reason the feature exists: most people who run the app never claim an invite, so
+  // a report that required a token would only ever describe the few who did. Nothing here
+  // identifies anyone — see `usage.ts` — and everything about it is bounded by size, by
+  // count and by a per-address daily cap.
+  if (method === "POST" && path === "/v1/usage") return reportUsage(request, env);
+
+  // Reading the numbers back. Behind `ADMIN_KEY`, above the account gate because it is not a
+  // player's endpoint at all: the key belongs to whoever runs the deployment, and an account
+  // token must never be enough to read what everybody else is doing.
+  if (method === "GET" && path === "/v1/usage/stats") return usageStats(request, url, env);
+
+  // The three dashboards are one tool, so they have one front door: `/admin` is the URL to
+  // bookmark, and every page it leads to carries the same tabs and the same search box. It
+  // opens on usage — the widest of the three — rather than redirecting, so what stays in the
+  // address bar is the URL that was typed.
+  if (method === "GET" && (path === "/admin" || path === "/admin/usage")) {
+    return usageDashboard(request, url, env);
+  }
+
+  // One question asked of all three at once. Same key, same gate, no new facts — it runs the
+  // searches the section pages already run and links into them.
+  if (method === "GET" && path === "/admin/search") return adminSearch(request, url, env);
+
+  // What the app sees loaded inside people's running games, and the rules that say how to
+  // read it. Behind `ADMIN_KEY` on the same terms as the usage page, and above the account
+  // gate for the same reason: the key belongs to whoever runs the deployment, and no
+  // player's token should ever be enough to read this about anybody else.
+  if (method === "GET" && path === "/admin/diagnostics") {
+    return diagnosticsDashboard(request, url, env);
+  }
+  if (method === "GET" && path === "/admin/diagnostics/riders") {
+    return diagnosticsRiders(request, url, env);
+  }
+  if (method === "GET" && path === "/admin/diagnostics/rider") {
+    return diagnosticsRider(request, url, env);
+  }
+  if (method === "GET" && path === "/admin/diagnostics/files") {
+    return diagnosticsFiles(request, url, env);
+  }
+  if (method === "GET" && path === "/admin/diagnostics/file") {
+    return diagnosticsFile(request, url, env);
+  }
+  if (method === "GET" && path === "/admin/diagnostics/rules") {
+    return diagnosticsRulesPage(request, url, env);
+  }
+  if (method === "POST" && path === "/admin/diagnostics/rules") {
+    return diagnosticsRules(request, url, env);
+  }
+
+  // Who has published a look, and what we are shipping to a grid. Behind `ADMIN_KEY` and
+  // above the account gate on exactly the same terms as the two pages before it: it names
+  // riders, their GUIDs and their Steam ids, and no player's token should be enough to read
+  // any of that about anybody else.
+  if (method === "GET" && path === "/admin/paints") return paintRiders(request, url, env);
+  if (method === "GET" && path === "/admin/paints/rider") return paintRider(request, url, env);
+  if (method === "GET" && path === "/admin/paints/files") return paintFiles(request, url, env);
+  if (method === "GET" && path === "/admin/paints/paint") return paintOne(request, url, env);
+  if (method === "GET" && path === "/admin/paints/thumb") return paintThumbnail(request, url, env);
+
+  // Minting and revoking plugin keys. Behind `ADMIN_KEY` with the rest of `/admin`, and above
+  // the account gate for a sharper reason than the pages before it: these routes hand out and
+  // take away paid access, and an account token is exactly the credential a person who wants
+  // free access already holds.
+  if (method === "GET" && path === "/admin/plugins") return pluginKeysPage(request, url, env);
+  if (method === "GET" && path === "/admin/plugins/licenses") {
+    return pluginLicensesPage(request, url, env);
+  }
+  if (method === "POST" && path === "/admin/plugins") return pluginsAction(request, url, env);
+
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
 
@@ -151,19 +270,50 @@ async function route(request: Request, env: Env): Promise<Response> {
   // voice room for the server you said you are on.
   if (method === "GET" && path === "/v1/me") return me(account, env);
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
+  if (method === "PUT" && path === "/v1/me/name") return putName(request, account, env);
   if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
+  if (method === "PUT" && path === "/v1/diagnostics") return putReport(request, account, env);
   if (method === "GET" && path === "/v1/voice/ice") return iceServers();
+
+  // Paid plugins. Open to every account on the same terms as voice and paint sync: holding
+  // a license is what gates the bundle, not holding an invite.
+  if (method === "GET" && path === "/v1/me/plugins") return myPlugins(account, env);
+  if (method === "POST" && path === "/v1/plugins/redeem") return redeemKey(request, account, env);
+  const bundle = /^\/v1\/plugins\/([a-z0-9-]{1,32})\/bundle$/.exec(path);
+  if (bundle && method === "GET") return pluginBundle(bundle[1], account, env);
+  // Linking a Steam account, and asking what it may use. Open to every account: identity
+  // is the point of the flow, and entitlement is checked per asset when it is asked for.
+  if (method === "POST" && path === "/v1/steam/login") return steamLogin(request, account, env);
+  if (method === "GET" && path === "/v1/entitlements") return listEntitlements(account, env);
+  if (method === "POST" && path === "/v1/entitlements/check") {
+    return checkEntitlement(request, account, env);
+  }
+  if (method === "POST" && path === "/v1/keys/grant") return grantKey(request, account, env);
   if (method === "GET" && path === "/v1/voice/room") return voiceRoom(request, url, account, env);
+
+  // Paint sync, open on the same terms as voice, and for the same reason: a rider only sees
+  // the grid correctly if the riders beside them are publishing too, and an invite code is
+  // exactly the thing the people beside them do not have. Publishing is bounded by the
+  // account itself — a loadout is a fixed set of slots, a paint is size-capped and
+  // content-addressed — so an uninvited publisher costs one more row and no more objects
+  // than the paints they actually wear.
+  if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
+  if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
+  if (method === "GET" && path === "/v1/roster") return roster(url, account, env);
+
+  const openPaint = /^\/v1\/paints\/([0-9a-f]{64})$/.exec(path);
+  if (openPaint) {
+    if (method === "PUT") return putPaint(request, openPaint[1], env);
+    if (method === "GET") return getPaint(openPaint[1], env);
+  }
 
   // Everything past here needs an invite. The gate is the *position* rather than a check
   // repeated on each route, so a route added below inherits it and one added above is a
-  // deliberate decision to open it up.
+  // deliberate decision to open it up. What is left below is the estate: registering a
+  // server, provisioning one, and the fleet it bills for.
   const gate = invitedOnly(account);
   if (gate) return gate;
 
-  if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
-  if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
-  if (method === "GET" && path === "/v1/roster") return roster(url, env);
   if (method === "POST" && path === "/v1/servers") return registerServer(request, account, env);
   if (method === "GET" && path === "/v1/servers/mine") return myServers(account, env);
   if (method === "GET" && path === "/v1/fleet") return fleetState(account, env);
@@ -173,12 +323,6 @@ async function route(request: Request, env: Env): Promise<Response> {
 
   const owned = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})$/.exec(path);
   if (owned && method === "DELETE") return deleteServer(owned[1], account, env);
-
-  const paint = /^\/v1\/paints\/([0-9a-f]{64})$/.exec(path);
-  if (paint) {
-    if (method === "PUT") return putPaint(request, paint[1], env);
-    if (method === "GET") return getPaint(paint[1], env);
-  }
 
   return json(404, { error: "no such endpoint" });
 }
@@ -261,11 +405,263 @@ async function enroll(request: Request, env: Env): Promise<Response> {
 }
 
 /**
+ * Begin a Steam sign-in.
+ *
+ * Returns a URL rather than redirecting: the caller is the app, which opens it in the
+ * player's browser and waits. The login row is what ties the browser's eventual return to
+ * the account that started it — the browser itself carries no credential of ours.
+ */
+async function steamLogin(request: Request, account: Account, env: Env): Promise<Response> {
+  const id = crypto.randomUUID();
+  await env.DB.prepare(
+    "INSERT INTO steam_logins (id, account_id, created_at) VALUES (?, ?, ?)",
+  )
+    .bind(id, account.id, Date.now())
+    .run();
+
+  const origin = new URL(request.url).origin;
+  const returnTo = `${origin}/v1/steam/return?login=${id}`;
+  return json(200, { url: loginUrl(returnTo, `${origin}/`), loginId: id });
+}
+
+/**
+ * Steam sending the player back.
+ *
+ * Everything in the query string is attacker-controlled until Valve confirms it, so the
+ * order here is deliberate: find the pending login, check it is still open, then ask Steam
+ * whether it really signed this. The row is consumed before anything is written, so a
+ * replayed return finds nothing to complete.
+ *
+ * The response is a page, not JSON — a person is looking at it.
+ */
+async function steamReturn(request: Request, url: URL, env: Env): Promise<Response> {
+  const loginId = url.searchParams.get("login");
+  if (!loginId) return page(400, "That sign-in link is incomplete.");
+
+  const login = await env.DB.prepare(
+    "SELECT account_id, created_at, consumed_at FROM steam_logins WHERE id = ?",
+  )
+    .bind(loginId)
+    .first<{ account_id: string; created_at: number; consumed_at: number | null }>();
+
+  if (!login) return page(404, "That sign-in has expired or already been used.");
+  if (login.consumed_at !== null) return page(409, "That sign-in has already been used.");
+  if (Date.now() - login.created_at > LOGIN_TTL_MS) {
+    return page(410, "That sign-in took too long. Start it again from the app.");
+  }
+
+  const expectedReturnTo = `${url.origin}${url.pathname}`;
+  const result = await verifyAssertion(url.searchParams, expectedReturnTo);
+  if (!isVerified(result)) {
+    return page(403, `Steam couldn't confirm that sign-in: ${result.error}.`);
+  }
+
+  // Consumed whatever happens next, so a failed link cannot be retried against a row that
+  // has already been through Valve.
+  await env.DB.prepare("UPDATE steam_logins SET consumed_at = ? WHERE id = ?")
+    .bind(Date.now(), loginId)
+    .run();
+
+  // `accounts.steam_id` is UNIQUE: one Steam account is one identity here, and a second
+  // community account cannot quietly claim an identity that is already spoken for.
+  try {
+    await env.DB.prepare("UPDATE accounts SET steam_id = ? WHERE id = ?")
+      .bind(result.steamId, login.account_id)
+      .run();
+  } catch (err) {
+    if (String(err).includes("UNIQUE")) {
+      return page(409, "That Steam account is already linked to another profile.");
+    }
+    throw err;
+  }
+
+  return page(200, "Steam account linked. You can close this tab and go back to the app.");
+}
+
+/** A one-line page for the browser half of the sign-in. */
+function page(status: number, message: string): Response {
+  const body = `<!doctype html><meta charset="utf-8"><title>MXB App</title>` +
+    `<body style="font:16px/1.5 system-ui;margin:4rem auto;max-width:30rem;padding:0 1rem">` +
+    `<p>${message.replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"))}</p>`;
+  return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
+}
+
+/**
+ * What this player may use.
+ *
+ * Empty for an account with no Steam link — not an error. Entitlement is keyed on the
+ * Steam identity, so an unlinked account simply owns nothing yet, and saying so plainly is
+ * more useful than a failure the app has to interpret.
+ */
+async function listEntitlements(account: Account, env: Env): Promise<Response> {
+  if (!account.steam_id) return json(200, { steamId: null, assets: [] });
+
+  const rows = await env.DB.prepare(
+    "SELECT e.asset_id, a.title, e.source, e.granted_at" +
+      " FROM entitlements e JOIN assets a ON a.id = e.asset_id" +
+      " WHERE e.steam_id = ? AND e.revoked_at IS NULL AND a.withdrawn_at IS NULL" +
+      " ORDER BY e.granted_at DESC",
+  )
+    .bind(account.steam_id)
+    .all<{ asset_id: string; title: string; source: string; granted_at: number }>();
+
+  return json(200, {
+    steamId: account.steam_id,
+    assets: (rows.results ?? []).map((r) => ({
+      assetId: r.asset_id,
+      title: r.title,
+      source: r.source,
+      grantedAt: r.granted_at,
+    })),
+  });
+}
+
+/**
+ * May this player use this asset, right now?
+ *
+ * The question the whole system exists to answer. No key is minted here and no crypto
+ * happens — this is the decision, proved end to end before there is anything to decrypt.
+ *
+ * Every call is written to the audit log, refusals included: one identity walking the
+ * catalogue is only visible if the "no"s are recorded too.
+ */
+/**
+ * The single entitlement decision, and the single audit write.
+ *
+ * Extracted so the check and the key grant cannot drift: a key is released on exactly the
+ * condition the check reports, because they are the same function. Both the withdrawn-asset
+ * and the revoked-entitlement branches matter to the grant especially — a key must stop
+ * being issued the instant either flips, which is what makes revocation real.
+ *
+ * Every call is logged, refusals included: one identity walking the catalogue is only
+ * visible if the "no"s are written down too.
+ */
+async function decideEntitlement(
+  account: Account,
+  assetId: string,
+  session: string,
+  env: Env,
+): Promise<{ allowed: boolean; reason: string }> {
+  const decide = async (): Promise<{ allowed: boolean; reason: string }> => {
+    if (!account.steam_id) return { allowed: false, reason: "no Steam account linked" };
+    const asset = await env.DB.prepare("SELECT withdrawn_at FROM assets WHERE id = ?")
+      .bind(assetId)
+      .first<{ withdrawn_at: number | null }>();
+    if (!asset) return { allowed: false, reason: "no such asset" };
+    if (asset.withdrawn_at !== null) return { allowed: false, reason: "withdrawn" };
+
+    const row = await env.DB.prepare(
+      "SELECT revoked_at FROM entitlements WHERE steam_id = ? AND asset_id = ?",
+    )
+      .bind(account.steam_id, assetId)
+      .first<{ revoked_at: number | null }>();
+    if (!row) return { allowed: false, reason: "not entitled" };
+    if (row.revoked_at !== null) return { allowed: false, reason: "revoked" };
+    return { allowed: true, reason: "entitled" };
+  };
+
+  const result = await decide();
+  await env.DB.prepare(
+    "INSERT INTO entitlement_grants (steam_id, asset_id, session_id, decision, reason, issued_at)" +
+      " VALUES (?, ?, ?, ?, ?, ?)",
+  )
+    .bind(
+      account.steam_id ?? "unlinked",
+      assetId,
+      session,
+      result.allowed ? "allow" : "deny",
+      result.reason,
+      Date.now(),
+    )
+    .run();
+  return result;
+}
+
+/** Pull and validate `{ assetId, sessionId }` from a request body. */
+async function assetRequest(
+  request: Request,
+): Promise<{ assetId: string; session: string } | Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const { assetId, sessionId } = body as { assetId?: unknown; sessionId?: unknown };
+  if (typeof assetId !== "string" || !assetId.trim()) {
+    return json(400, { error: "an asset id is required" });
+  }
+  const session = typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : "none";
+  return { assetId: assetId.trim(), session };
+}
+
+async function checkEntitlement(request: Request, account: Account, env: Env): Promise<Response> {
+  const parsed = await assetRequest(request);
+  if (parsed instanceof Response) return parsed;
+  const { allowed, reason } = await decideEntitlement(account, parsed.assetId, parsed.session, env);
+  return json(allowed ? 200 : 403, { allowed, reason });
+}
+
+/**
+ * Release the content key for a secured asset to an entitled session.
+ *
+ * The step the DLL cannot proceed without: it has the ciphertext blob and needs the key to
+ * open it. The key is released on exactly the entitlement check above — same function, so a
+ * withdrawal or revocation stops key issuance immediately — and only after the master-key
+ * secret unwraps the stored key. The raw content key leaves the server only here, only to a
+ * caller Valve's identity and our entitlement both vouch for, and the grant is audited like
+ * any other.
+ *
+ * `ttlSeconds` tells the DLL how briefly to hold it before asking again, which is what keeps
+ * revocation to one TTL rather than one session.
+ */
+async function grantKey(request: Request, account: Account, env: Env): Promise<Response> {
+  const parsed = await assetRequest(request);
+  if (parsed instanceof Response) return parsed;
+  const { assetId, session } = parsed;
+
+  const { allowed, reason } = await decideEntitlement(account, assetId, session, env);
+  if (!allowed) return json(403, { error: reason });
+
+  const asset = await env.DB.prepare("SELECT wrapped_key, key_id FROM assets WHERE id = ?")
+    .bind(assetId)
+    .first<{ wrapped_key: string | null; key_id: string | null }>();
+  if (!asset?.wrapped_key) {
+    // Entitled, but the asset has no stored key — it was never packed, or was registered
+    // before key custody existed. Not the caller's fault and not a 403: there is simply
+    // nothing to hand back.
+    return json(409, { error: "asset has no content key" });
+  }
+
+  const key = await unwrapContentKey(asset.wrapped_key, env.MXB_ASSET_MASTER_KEY);
+  if (!key) {
+    // No master key configured, or the stored key doesn't unwrap. Either way this
+    // deployment cannot serve secured content right now; say so rather than 200 with
+    // nothing usable.
+    return json(503, { error: "content keys are unavailable" });
+  }
+
+  return json(200, {
+    assetId,
+    keyId: asset.key_id ?? null,
+    contentKey: b64(key),
+    ttlSeconds: KEY_GRANT_TTL_SECONDS,
+  });
+}
+
+/** How briefly the DLL should cache a released key before re-checking entitlement. */
+const KEY_GRANT_TTL_SECONDS = 300;
+
+/** Base64 of raw bytes, for handing the key back over JSON. */
+function b64(bytes: Uint8Array): string {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s);
+}
+
+/**
  * Refuse anything a self-serve account has no business doing.
  *
- * Voice is open to everyone with the app; publishing paints, registering a server and
- * provisioning one are not, and none of them was ever written with an anonymous caller in
- * mind. Called once, at the point in the route table where the open endpoints end.
+ * Voice and paint sync are open to everyone with the app — both are worthless unless the
+ * riders beside you can use them too. Registering a server and provisioning one are not:
+ * they spend real money and are tied to a person we have vouched for. Called once, at the
+ * point in the route table where the open endpoints end.
  */
 function invitedOnly(account: Account): Response | null {
   if (account.kind === "invited") return null;
@@ -330,6 +726,41 @@ async function me(account: Account, env: Env): Promise<Response> {
  * account trying to take one already held, which is the whole point — otherwise anyone could
  * assert someone else's identity and have their paints served under it.
  */
+/**
+ * Take the rider name the game itself uses.
+ *
+ * The name an account enrolled under was whatever the app could find on disk, which is the
+ * *profile folder*'s name — and a player who never renamed their profile is called
+ * `unnamedProfile`, along with two hundred others. That name is not what the server shows:
+ * `EventInit` hands the plugin `m_szRiderName`, the name every other rider on the grid sees,
+ * and that is what arrives here.
+ *
+ * Idempotent, because it is sent from a poll: the same name twice is a no-op rather than an
+ * error. Uniqueness is only enforced for invited accounts (see 0012), so a clash is a real
+ * answer for those and impossible for the rest.
+ */
+async function putName(request: Request, account: Account, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const { riderName } = body as { riderName?: unknown };
+  if (!isRiderName(riderName)) return json(400, { error: "that isn't a usable rider name" });
+
+  const name = (riderName as string).trim();
+  if (name === account.rider_name) return json(200, { ok: true, riderName: name });
+
+  try {
+    await env.DB.prepare("UPDATE accounts SET rider_name = ? WHERE id = ?")
+      .bind(name, account.id)
+      .run();
+  } catch (err) {
+    if (String(err).includes("UNIQUE")) {
+      return json(409, { error: "another account already uses that rider name" });
+    }
+    throw err;
+  }
+  return json(200, { ok: true, riderName: name });
+}
+
 async function putGuid(request: Request, account: Account, env: Env): Promise<Response> {
   const body = await readJson(request);
   if (!body) return json(400, { error: "expected a JSON body" });
@@ -1358,14 +1789,19 @@ async function putPresence(request: Request, account: Account, env: Env): Promis
   const { serverId } = body as { serverId?: unknown };
   if (!isServerKey(serverId)) return json(400, { error: "that isn't a server" });
 
+  await markPresent(account.id, (serverId as string).trim(), env);
+  return json(200, { ok: true });
+}
+
+/** Record that an account is on a server. One writer, so the two callers cannot drift. */
+async function markPresent(accountId: string, serverId: string, env: Env): Promise<void> {
   await env.DB.prepare(
     "INSERT INTO presence (account_id, server_id, updated_at) VALUES (?, ?, ?)" +
       " ON CONFLICT(account_id) DO UPDATE SET server_id = excluded.server_id," +
       " updated_at = excluded.updated_at",
   )
-    .bind(account.id, (serverId as string).trim(), Date.now())
+    .bind(accountId, serverId, Date.now())
     .run();
-  return json(200, { ok: true });
 }
 
 /**
@@ -1380,9 +1816,32 @@ async function putPresence(request: Request, account: Account, env: Env): Promis
  * who is genuinely there — the next heartbeat brings them back within a minute — than to
  * accumulate a grid of people who left hours ago.
  */
-async function roster(url: URL, env: Env): Promise<Response> {
+/**
+ * Who is on a server, and what they are wearing.
+ *
+ * `?here=1` also records that the caller is on that server, which is what lets a client in a
+ * session do the whole loop in one request instead of a presence write followed by this
+ * read. That halving is not a micro-optimisation: every app in a session ran both every 45
+ * seconds, and on 2026-08-31 the pair took the worker past its daily request ceiling within
+ * hours of paint sync being turned on for everyone.
+ *
+ * Absent, nothing is written — a client sweeping the registry is asking about servers it is
+ * *not* on, and claiming presence on all of them would be both untrue and the thing that
+ * made every rider download every other rider's paints.
+ */
+async function roster(url: URL, account: Account, env: Env): Promise<Response> {
   const serverId = url.searchParams.get("server");
   if (!serverId) return json(400, { error: "a server id is required" });
+
+  if (url.searchParams.get("here") === "1") {
+    // Held to the same rule as the standalone report: this one writes a row other clients
+    // read, so it cannot be looser about what a server key is just because it arrived in a
+    // query string.
+    if (!isServerKey(serverId)) return json(400, { error: "that isn't a server" });
+    // Before the read, not after: the roster is scoped by presence, and a rider should
+    // appear in the same answer they are asking for.
+    await markPresent(account.id, serverId.trim(), env);
+  }
 
   // DISTINCT on the destination: loadouts are per bike, and gear repeats across every bike a
   // rider owns, so the raw join returns the same helmet paint many times over. The receiver

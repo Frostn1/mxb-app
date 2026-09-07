@@ -16,7 +16,10 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Share2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/Components/ui/button";
+import { ContextBarRight } from "../Shell/ContextBar";
 import HelpHint from "@/Components/ui/help-hint";
 import {
   scanModelSwaps,
@@ -46,6 +49,13 @@ import { ViewerDialog } from "../Viewer/ViewerDialog";
 import { useConfig } from "../../Context/Config";
 import { Trans } from "../../i18n";
 import { useT, type TFunc } from "../../i18n/context";
+import { useShare } from "../../Context/Share";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+} from "@/Components/ui/context-menu";
 
 /**
  * Locker — the app-side bike **model & sound swap** manager, twinned with FrostMod's
@@ -95,8 +105,10 @@ function pruneHiddenOrphans(live: OrphanedSetup[]): Set<string> {
  * Models and sounds get different notes because they refresh by different routes.
  * `live_refresh` re-runs the game's *customization* loader — that reloads paints and
  * gear but never the bike mesh, so it says nothing about whether a swapped model is
- * visible. A model only appears live if FrostMod re-applies the bike (`model_refresh`),
- * which it does solely for the bike you currently have selected.
+ * visible. Nothing reloads the mesh: FrostMod v0.9.11 removed the live re-apply because
+ * it crashed the game, so every model outcome ends in the same instruction — switch bike
+ * category away and back, which is what actually re-reads the model. Reselecting the same
+ * bike does not. `model_refresh` only decides who says it.
  */
 function swapNote(
   kind: "model" | "sound",
@@ -108,11 +120,10 @@ function swapNote(
   if (kind === "model") {
     switch (outcome.model_refresh) {
       case "signaled":
-        return t("locker.modelRefreshing");
+      case "withheld":
+        return t("locker.modelSwitchCategory");
       case "not_running":
         return t("locker.modelFrostmodNotRunning");
-      case "withheld":
-        return t("locker.modelReselectBike");
       case "write_failed":
         return t("locker.modelFrostmodUnreachable");
       case "unsupported":
@@ -130,6 +141,15 @@ function swapNote(
     default:
       return t("locker.reselectProfile");
   }
+}
+
+/** Where each kind of swap set is filed inside its bike — `modelswap::LIB_DIR` and
+ *  `soundmods::SOUND_LIB_DIR` on the Rust side. */
+const SWAP_DIR = { model: "FrostMod Models", sound: "FrostMod Sounds" } as const;
+
+/** A variant's path as the rest of the app names content: relative to the MX Bikes root. */
+function variantRel(bike: string, kind: "model" | "sound", name: string): string {
+  return `mods/bikes/${bike}/${SWAP_DIR[kind]}/${name}`;
 }
 
 /** The row standing for the game's own model/sound, which is never a folder in the library. */
@@ -176,6 +196,9 @@ export default function Locker() {
   // The swap being previewed in 3D, if any. Nothing on disk moves to show it.
   const [preview, setPreview] = useState<{ bike: string; variant: string } | null>(null);
   const [rows, setRows] = useState<Row[] | null>(null);
+  /** Which bike the detail pane is showing. A stacked accordion of every bike meant
+   *  scrolling past nine of them to reach the tenth; this is a list and one bike. */
+  const [picked, setPicked] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Bike name currently being mutated (disables its rows + spins the target).
   const [busy, setBusy] = useState<string | null>(null);
@@ -281,21 +304,14 @@ export default function Locker() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
-            {t("nav.locker")}
-          </h1>
-          <HelpHint title={t("nav.locker")} description={t("locker.help")} />
-        </div>
-        <button
-          onClick={() => void load()}
-          className="ml-auto flex items-center gap-1.5 rounded-lg border border-input bg-card px-3 py-2 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground"
-        >
+      <ContextBarRight>
+        <Button variant="outline" size="sm" onClick={() => void load()}>
           <RefreshCw className={cn("size-3.5", rows === null && "animate-spin")} />
           {t("locker.rescan")}
-        </button>
-      </header>
+        </Button>
+        <HelpHint title={t("nav.locker")} description={t("locker.help")} />
+      </ContextBarRight>
+
 
       {orphaned
         .filter((o) => !hiddenOrphans.has(orphanKey(o)))
@@ -364,7 +380,7 @@ export default function Locker() {
         </button>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {error ? (
           <p className="select-text py-16 text-center text-[13px] text-destructive">{error}</p>
         ) : rows === null ? (
@@ -419,26 +435,65 @@ export default function Locker() {
             </button>
           </div>
         ) : (
-          <div className="flex flex-col gap-4">
-            {rows.map((r) => (
-              <BikeCard
-                key={r.bike}
-                row={r}
-                busy={busy === r.bike}
-                disabled={busy !== null}
-                onModelSwap={onModelSwap}
-                onSoundSwap={onSoundSwap}
-                onAssignPaints={(models, model) => setAssigning({ models, model })}
-                onPreview={
-                  bikePreview
-                    ? (bike, variant) => setPreview({ bike, variant })
-                    : undefined
-                }
-                onBind={onBind}
-                onUnbind={onUnbind}
-                onChanged={() => void load()}
-              />
-            ))}
+          <div className="flex min-h-0 flex-1">
+            {/* The bikes, as a list */}
+            <aside className="flex w-[288px] flex-none flex-col border-r border-border">
+              <div className="flex flex-none items-center gap-2.5 px-4 pb-2.5 pt-1">
+                <span className="u-skew h-3 w-1 bg-primary" />
+                <span className="font-cond text-[12px] font-bold uppercase tracking-[0.2em] text-foreground">
+                  {t("nav.locker")}
+                </span>
+                <span className="ml-auto tabular-figures text-[11.5px] text-faint">
+                  {rows.length}
+                </span>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {rows.map((r) => {
+                  const on = (picked ?? rows[0]?.bike) === r.bike;
+                  return (
+                    <button
+                      key={r.bike}
+                      onClick={() => setPicked(r.bike)}
+                      className={cn(
+                        "relative flex w-full cursor-default items-center gap-2 border-b border-border/60 px-4 py-2.5 text-left transition-colors",
+                        on ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {on && <span className="u-skew absolute inset-y-2 left-0 w-[3px] bg-primary" />}
+                      <span className="truncate font-cond text-[13px] font-semibold uppercase tracking-[0.06em]">
+                        {r.bike}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </aside>
+
+            {/* …and the one you picked */}
+            <div className="min-w-0 flex-1 overflow-y-auto px-6 py-1">
+              {(() => {
+                const r = rows.find((x) => x.bike === picked) ?? rows[0];
+                return r ? (
+                  <BikeCard
+                    key={r.bike}
+                    row={r}
+                    busy={busy === r.bike}
+                    disabled={busy !== null}
+                    onModelSwap={onModelSwap}
+                    onSoundSwap={onSoundSwap}
+                    onAssignPaints={(models, model) => setAssigning({ models, model })}
+                    onPreview={
+                      bikePreview
+                        ? (bike, variant) => setPreview({ bike, variant })
+                        : undefined
+                    }
+                    onBind={onBind}
+                    onUnbind={onUnbind}
+                    onChanged={() => void load()}
+                  />
+                ) : null;
+              })()}
+            </div>
           </div>
         )}
       </div>
@@ -533,6 +588,7 @@ function BikeCard({
           {models.variants.map((v) => (
             <VariantButton
               key={v.name}
+              bike={bike}
               variant={v}
               kind="model"
               busy={busy}
@@ -566,6 +622,7 @@ function BikeCard({
           return (
             <VariantButton
               key={v.name}
+              bike={bike}
               variant={v}
               kind="sound"
               busy={busy}
@@ -619,6 +676,7 @@ function SwapSection({
 }
 
 function VariantButton({
+  bike,
   variant: v,
   kind,
   busy,
@@ -630,6 +688,7 @@ function VariantButton({
   onAssignPaints,
   manage,
 }: {
+  bike: string;
   variant: ModelVariant | SoundVariant;
   kind: "model" | "sound";
   busy: boolean;
@@ -646,6 +705,10 @@ function VariantButton({
   manage?: { bike: string; onChanged: () => void };
 }) {
   const t = useT();
+  const { shareFiles } = useShare();
+  // An empty set is a state, not a folder — "no model", the game's own model, or the built-in
+  // engine sound. There is nothing on disk to hand anyone.
+  const shareable = !v.empty;
   // A model row named "Stock" is the game's own model, packed in the bike's `.pkz` —
   // reached by clearing the loose set, so it's empty like a "no model" row but means the
   // opposite. Only the wording differs.
@@ -664,7 +727,19 @@ function VariantButton({
   // missing its required file is incomplete and stays disabled.
   const applicable = v.valid || v.empty;
   const selectable = !v.active && applicable && !disabled;
-  return (
+  const what = v.active
+    ? kind === "model"
+      ? t("locker.activeModel")
+      : t("locker.activeSound")
+    : v.empty
+      ? emptyTitle
+      : !v.valid
+        ? kind === "model"
+          ? t("locker.missingModelEdf")
+          : t("locker.missingSoundFiles")
+        : t("locker.switchTo", { name: v.name });
+
+  const button = (
     <div
       className={cn(
         "flex items-center gap-1 rounded-lg border pr-1.5 transition-colors",
@@ -679,19 +754,8 @@ function VariantButton({
       <button
         disabled={!selectable}
         onClick={onClick}
-        title={
-          v.active
-            ? kind === "model"
-              ? t("locker.activeModel")
-              : t("locker.activeSound")
-            : v.empty
-              ? emptyTitle
-              : !v.valid
-                ? kind === "model"
-                  ? t("locker.missingModelEdf")
-                  : t("locker.missingSoundFiles")
-                : t("locker.switchTo", { name: v.name })
-        }
+        // The share lives on a right-click, so the hover is where it gets announced.
+        title={shareable ? `${what} · ${t("share.rightClickHint")}` : what}
         className={cn(
           "flex min-w-0 flex-1 items-center gap-2 rounded-l-lg px-3 py-2.5 text-left",
           selectable && "cursor-pointer",
@@ -783,6 +847,27 @@ function VariantButton({
         />
       )}
     </div>
+  );
+
+  // A right-click shares the set, the way the Library shares anything else it lists. It
+  // rides a context menu rather than a second control because the tile is itself a button,
+  // and the grid has no room for another one.
+  //
+  // The trigger is the wrapper, not the button: the *active* variant's button is disabled —
+  // and a disabled button fires no mouse events at all — which would have left the one set
+  // most people want to hand over as the one that couldn't be right-clicked.
+  if (!shareable) return button;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="min-w-0">{button}</div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => shareFiles([variantRel(bike, kind, v.name)])}>
+          <Share2 className="size-4" /> {t("share.action")}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

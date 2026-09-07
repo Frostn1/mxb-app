@@ -44,7 +44,9 @@ export const en = {
   // ── Sidebar navigation ─────────────────────────────────────────────────────
   "nav.browse": "Browse",
   "nav.shop": "Shop",
+  "nav.hub": "MXB Hub",
   "nav.library": "Library",
+  "nav.garage": "Garage",
   "nav.downloads": "Downloads",
   "nav.locker": "Locker",
   "nav.presets": "Presets",
@@ -54,7 +56,8 @@ export const en = {
   "nav.paints": "Paints",
   "nav.studio": "Studio",
   "nav.servers": "Servers",
-  "nav.manage": "Manage",
+  "nav.manage": "Race mode",
+  "nav.secure": "Secure",
   "nav.settings": "Settings",
 
   "sidebar.installing": "Installing “{{name}}”",
@@ -122,6 +125,8 @@ export const en = {
   "welcome.intro.body":
     "Your mod manager for MX Bikes. Keep your tracks, bikes and paints organized in one place — no more zip files scattered across your desktop. We'll show you around in a few seconds.",
   "welcome.getStarted": "Get started",
+  "welcome.analyticsNote":
+    "MXB App counts which pages get used, anonymously. No names, no files — you can turn it off in Settings.",
 
   // ── Presets ────────────────────────────────────────────────────────────────
   "presets.missing": "missing",
@@ -236,7 +241,7 @@ export const en = {
   "pose.move.leftLegForward": "Left leg forward",
   "pose.move.elbowsUp": "Elbows up",
   "pose.move.leanIn": "Lean in",
-  "pose.move.sitOnBike": "Sit on bike",
+  "pose.move.ride": "Riding position",
   "pose.axis.bend": "Bend",
   "pose.axis.twist": "Twist",
   "pose.axis.splay": "Splay",
@@ -327,6 +332,16 @@ export const en = {
   "runtime.fixIt": "Install it",
   "runtime.installing": "Installing…",
   "runtime.dismiss": "Dismiss this warning",
+  "cloud.genericProvider":
+    "a cloud sync tool",
+  "cloud.evictedBody":
+    "Some of your mods aren’t really on this PC — {{what}} has moved them to the cloud.",
+  "cloud.evictedPitch":
+    "Nothing is wrong with the app — it's the game that can crash reading them. Right-click your mods folder and pick “Always keep on this device”.",
+  "cloud.slowBody":
+    "Your mods folder is inside {{what}}.",
+  "cloud.slowPitch":
+    "Nothing is wrong with the app — the game just loads slowly reading through {{what}}. Moving the folder out fixes it.",
   "runtime.installed": "Component installed",
   "runtime.installedDesc":
     "FrostMod should reach the game now. Restart MX Bikes if it's already open.",
@@ -370,6 +385,8 @@ export const en = {
   // ── 3D viewer ──────────────────────────────────────────────────────────────
   "viewer.preview3d": "3D Preview",
   "viewer.expand": "Expand",
+  "viewer.fullscreen": "Fullscreen",
+  "viewer.exitFullscreen": "Exit fullscreen",
   "viewer.paint": "Paint",
   "viewer.tyres": "Tyres",
   "viewer.tyresOwn": "Bike's own",
@@ -442,6 +459,7 @@ export const en = {
   "browseSort.popularWeek": "Popular this week",
   "browse.loadFailed": "Couldn't load mods",
   "browse.empty": "No {{type}} found.",
+  "browse.featured": "Featured",
   "browse.loadMore": "Load more",
   "browse.selectedCount": "{{count}} selected",
   "browse.quickInstallCount": "Quick install {{count}}",
@@ -486,6 +504,26 @@ export const en = {
   "shop.sessionFailed": "Couldn't capture your MX Bikes Shop session",
   "shop.loadFailed": "Couldn't load your purchases: {{error}}",
   "shop.empty": "No purchased downloads found on your account yet.",
+
+  // ── MXB Hub (shop.mxb-hub.com — the marketplace mxbhub.com redirects to) ──
+  "hub.help":
+    "Browse the MXB Hub marketplace at shop.mxb-hub.com, and install what you already own. Buying still happens on the store's own site; sign in under My purchases to install your orders from here.",
+  "hub.count_one": "{{count}} item",
+  "hub.count_other": "{{count}} items",
+  "hub.searchPlaceholder": "Search MXB Hub…",
+  "hub.myDownloads": "My purchases",
+  "hub.signInTitle": "Sign in to MXB Hub",
+  "hub.signInBody":
+    "Log in to shop.mxb-hub.com to see and install everything you own, free mods included. We open the real site — your password never touches this app.",
+  "hub.signIn": "Sign in",
+  "hub.signedIn": "Signed in to MXB Hub",
+  "hub.sessionFailed": "Couldn't capture your MXB Hub session",
+  "hub.empty": "No downloads found on your MXB Hub account yet.",
+  "hubSort.newest": "Newest",
+  "hubSort.popular": "Most popular",
+  "hubSort.priceAsc": "Price: low to high",
+  "hubSort.priceDesc": "Price: high to low",
+  "hubSort.nameAsc": "Name (A–Z)",
   "purchases.count_one": "{{count}} purchase",
   "purchases.count_other": "{{count}} purchases",
   "purchases.fileCount_one": "{{count}} file",
@@ -567,6 +605,7 @@ export const en = {
   "installDialog.directFastest": "Direct · fastest",
   "installDialog.direct": "Direct",
   "installDialog.recommendedBadge": "Recommended",
+  "installDialog.matchedBadge": "Your bike",
   "installDialog.browserBadge": "Browser",
   "installDialog.serverBadge": "Server",
   "installDialog.serverBuildNote": "Dedicated server build — not for playing",
@@ -627,6 +666,7 @@ export const en = {
   "modDetail.addedToLibrary": "Added to your library",
   "modDetail.extracting": "Extracting…",
   "modDetail.addingToLibrary": "Adding to library…",
+  "modDetail.chooseWhatToInstall": "Choose what to install",
   "modDetail.resolving": "Resolving download…",
   "modDetail.finishInBrowser": "Finish in your browser",
   "modDetail.viewOnSite": "View on {{site}}",
@@ -657,8 +697,19 @@ export const en = {
   "settings.themeLight": "Light",
   "settings.themeDark": "Dark",
   "settings.themeSystem": "System",
+  "settings.colorway": "Colorway",
+  "settings.colorwayFrost": "Frost",
+  "settings.colorwayEmber": "Ember",
+  "settings.colorwayMoss": "Moss",
+  "settings.colorwayViolet": "Violet",
+  "settings.colorwayRose": "Rose",
+  "settings.colorwaySlate": "Slate",
+  "settings.colorwayRetro": "Retro",
   "settings.language": "Language",
   "settings.languageSystem": "System",
+  "settings.analytics": "Share anonymous usage stats",
+  "settings.analyticsDesc":
+    "Sends a random ID, the app version and counts of which pages and features you use, so I can tell what's worth building. Never your name, your files or your address.",
   "settings.runInBackground": "Keep running in the background",
   "settings.runInBackgroundDesc":
     "Closing the window hides MXB App to the tray so FrostMod stays connected. Quit from the tray icon.",
@@ -668,14 +719,90 @@ export const en = {
   "settings.instantRefresh": "Instant preset refresh",
   "settings.instantRefreshDesc":
     "When you apply a preset while {{game}} is running, refresh the look in-game instantly — no restart or profile reselect. If it can't, you'll be told to reselect your profile.",
+  "settings.mxbsecure": "Content locking (mxbsecure)",
+  "settings.mxbsecureDesc":
+    "Experimental. Adds a Secure tab that locks a file so owning it isn't enough to use it. Only creators packing paid content need this.",
+  "secure.help":
+    "Lock a file into a .mxbsecure blob. The plaintext never ships — only the encrypted blob does, and it's useless without a key the server releases to entitled players.",
+  "secure.genTitle": "Protect tracks for a buyer",
+  "secure.genDesc": "Pick one or more tracks and the buyer's Steam ID. The app writes an encrypted copy and a key locked to that account beside each track — your original is left untouched.",
+  "secure.steamIdLabel": "Buyer's Steam ID",
+  "secure.steamIdPlaceholder": "76561198…",
+  "secure.steamIdHint": "The 17-digit SteamID64 — find your friend's from their Steam profile.",
+  "secure.pickTracks": "Select tracks",
+  "secure.selected": "{{count}} selected",
+  "secure.generate": "Generate",
+  "secure.genOk": "Protected {{ok}} of {{total}} — bound to {{id}}.",
+  "secure.genFail": "Couldn't protect {{name}}",
+  "secure.badSteamId": "Enter the buyer's 17-digit Steam ID first.",
+  "secure.buyerNote": "Send the buyer both files. They drop them into their tracks folder — the track lists and rides, bound to their Steam account, offline.",
+  "secure.genResult": "Generated",
+  "secure.experimental": "Experimental",
+  "secure.intro":
+    "Pick a file, lock it, then verify it unlocks. Verifying decrypts the blob right here and checks it matches the original, byte for byte — the proof it round-trips on this machine.",
+  "secure.protectTitle": "Protect a track",
+  "secure.protectDesc":
+    "Encrypts a track file in place — it keeps its name so the game still lists it, but only you can ride it, offline. Overwrites the file, so keep your own master copy. Then just start the game.",
+  "secure.protectAction": "Choose a track & protect",
+  "secure.protectedOk": "Protected, bound to {{id}}.",
+  "secure.protectedInPlace": "Protected — encrypted in place",
+  "secure.protectFailed": "Couldn't protect that file",
+  "secure.testHeading": "Test the format (optional)",
+  "secure.step3": "Bind to your Steam account & play offline",
+  "secure.step3Desc":
+    "Seal the key to your Steam account and store it locally. From then on it opens with no server — offline, on a LAN, anywhere — but only on your account. A copy on someone else's account gets nothing.",
+  "secure.steamAccount": "Your Steam account:",
+  "secure.noSteam": "Couldn't read your Steam account. Is Steam installed and signed in?",
+  "secure.provision": "Bind to my account",
+  "secure.provisioned": "Bound to {{id}}.",
+  "secure.provisionedOk": "Bound — key stored locally",
+  "secure.provisionFailed": "Couldn't bind the key",
+  "secure.openOffline": "Open offline",
+  "secure.offlineOk": "Opened offline and matches.",
+  "secure.offlineBad": "Opened offline, but it doesn't match.",
+  "secure.offlineFailed": "Couldn't open offline",
+  "secure.offlineMatches": "Opened offline — matches, no server",
+  "secure.offlineMismatch": "Doesn't match",
+  "secure.step1": "Lock a file",
+  "secure.pick": "Choose file",
+  "secure.lock": "Lock",
+  "secure.locked": "Locked.",
+  "secure.lockFailed": "Couldn't lock that file",
+  "secure.result": "Locked",
+  "secure.blob": "Blob",
+  "secure.size": "Size",
+  "secure.sizeValue": "{{plain}} plaintext → {{blob}} locked",
+  "secure.assetId": "Asset ID",
+  "secure.key": "Key",
+  "secure.copyKey": "Copy key",
+  "secure.keyNote":
+    "Keep this key — it's shown once and isn't in the blob. In production the server holds it and releases it only to entitled players.",
+  "secure.step2": "Check it unlocks",
+  "secure.step2Desc":
+    "Decrypt the blob with the key and compare it to the file you locked.",
+  "secure.verify": "Verify unlock",
+  "secure.verifiedOk": "Unlocked and matches the original.",
+  "secure.verifiedBad": "Unlocked, but it doesn't match.",
+  "secure.verifyFailed": "Couldn't verify",
+  "secure.unlockedMatches": "Unlocked — matches the original",
+  "secure.unlockedMismatch": "Doesn't match",
+  "settings.paintSync": "Paint sync",
+  "settings.paintSyncDesc":
+    "Share the paints you're wearing with the other riders on your server, and install theirs, so the grid looks the way everyone meant it to. Runs by itself on any server — nothing for you or the host to set up.",
   "settings.instantRefreshWindowsOnly":
     "Refreshing the look in-game without a restart means reaching into the running game, which only the Windows build can do — you'll be told to reselect your profile instead.",
   "settings.autoRunFrostmod": "Run FrostMod automatically",
   "settings.autoRunFrostmodDesc":
     "Start FrostMod in the background whenever MXB App opens.",
+  "settings.frostmodArgs": "FrostMod flags",
+  "settings.frostmodArgsDesc":
+    "Extra command line for FrostMod, typed as you would in a terminal. Applies the next time FrostMod starts. Leave it empty unless you've been given a flag to try.",
   "settings.watchModsReload": "Auto-reload on folder changes",
   "settings.watchModsReloadDesc":
     "Reload the game automatically when tracks or bikes are added to your mods folder — even downloaded manually outside MXB App.",
+  "settings.secureContentInject": "Use locked content in game",
+  "settings.secureContentInjectDesc":
+    "Lets purchased locked tracks open by adding a small helper to the running game. Off by default. With it on, start the game with Play — a session MXB App didn't launch is left alone.",
   "settings.checking": "Checking…",
   "settings.runningConnected": "Running · game connected",
   "settings.notRunning": "Not running",
@@ -884,6 +1011,9 @@ export const en = {
   "sync.lastPulled": "Last checked {{ago}}. It runs again by itself when you press Play.",
   "sync.neverPulled": "You haven't fetched anyone else's paints yet",
   "sync.neverPulledWhy": "Until you do, other riders show up on default bikes even if they've published theirs.",
+  "sync.notStartedTitle": "Not started yet",
+  "sync.notStartedWhy":
+    "Paint sync sets itself up the first time you ride online — there's nothing to fill in. Start MX Bikes and join a server, and this fills in on its own.",
   "sync.oversized_one": "{{count}} paint is too large to share, so other riders won't see it.",
   "sync.oversized_other": "{{count}} paints are too large to share, so other riders won't see them.",
   "sync.skippedBikes_one": "{{count}} bike wasn't published — you have more than we can hold.",
@@ -893,6 +1023,15 @@ export const en = {
   "sync.keptYours_one": "{{count}} paint was left alone",
   "sync.keptYours_other": "{{count}} paints were left alone",
   "sync.keptYoursWhy": "Another rider uses the same file name for a different paint. Yours was kept — the app never overwrites a livery it didn't install. You'll see that rider in your version of it.",
+  "sync.installedState_one": "{{count}} paint from another rider is in your mods folder",
+  "sync.installedState_other": "{{count}} paints from other riders are in your mods folder",
+  "sync.installedWhy": "They're written into your mods folder so the game can draw them. Remove them to put it back — anything you've edited since is kept.",
+  "sync.remove": "Remove them",
+  "sync.removed_one": "Removed {{count}} synced paint",
+  "sync.removed_other": "Removed {{count}} synced paints",
+  "sync.removeKeptYours_one": "{{count}} was kept — you've edited it since it was installed.",
+  "sync.removeKeptYours_other": "{{count}} were kept — you've edited them since they were installed.",
+  "sync.removeFailed": "Couldn't remove the synced paints",
   "servers.booting": "Starting up…",
   "servers.bootingStage": "{{stage}}…",
   "servers.bootFailed": "This server couldn't finish setting itself up, so it shut down. Here's what it reported:",
@@ -907,6 +1046,25 @@ export const en = {
   "servers.runningOfCap": "{{count}} of {{cap}} running",
   "servers.atCap": "{{cap}} servers are already running, which is the limit. Shut one down to start another.",
   "servers.help": "Share your liveries with everyone else on a server, and run a dedicated server of your own.",
+
+  // ── Server browser (the live world list) ───────────────────────────────────
+  "serverBrowser.help":
+    "Every live MX Bikes server, straight from the game's master server — with the address you need to join. Pick one and press Join to launch straight into it.",
+  "serverBrowser.searchPlaceholder": "Search servers…",
+  "serverBrowser.count": "{{count}} online",
+  "serverBrowser.refresh": "Refresh",
+  "serverBrowser.retry": "Try again",
+  "serverBrowser.loading": "Reading the server list…",
+  "serverBrowser.empty": "No servers are online right now.",
+  "serverBrowser.name": "Server",
+  "serverBrowser.players": "Players",
+  "serverBrowser.ping": "Ping",
+  "serverBrowser.address": "Address",
+  "serverBrowser.passworded": "Password required",
+  "serverBrowser.join": "Join",
+  "serverBrowser.joinFailed": "Couldn't join that server",
+  "serverBrowser.copyAddress": "Copy the address",
+  "serverBrowser.copied": "Address copied",
 
   "sync.autoNote":
     "Your look publishes itself — every bike, whenever you change it in the app or in the game's own garage. Everyone else's arrives when you press Play.",
@@ -924,8 +1082,56 @@ export const en = {
   "presets.makeActiveBike": "Make this the active bike",
   "presets.nameClash":
     "Another preset is already named “{{name}}” — saving will overwrite it too.",
-  "presets.shareWarning":
-    "Uploads to a public, temporary link — it redistributes mod files made by others, so share responsibly.",
+  // ── Feel presets (the settings half of a profile) ──────────────────────────
+  "presets.tabLook": "Look",
+  "presets.tabFeel": "Feel",
+  "feel.profile": "Profile",
+  "feel.saveCurrent": "Save current settings as",
+  "feel.namePlaceholder": "Supercross",
+  "feel.save": "Save",
+  "feel.savedTitle": "Saved feels",
+  "feel.noneHint":
+    "No feels saved yet. Set the game up how you like it for one discipline, then save it here — and again for the other.",
+  "feel.summary": "{{settings}} settings · {{controls}} controls tuned",
+  "feel.apply": "Apply",
+  "feel.applied": "Applied {{name}}.",
+  "feel.restartHint": "Start the game to ride it.",
+  "feel.missingControls": "Not bound in this profile: {{names}}",
+  "feel.applyFailed": "Couldn't apply that feel",
+  "feel.saved": "Saved {{name}}.",
+  "feel.saveFailed": "Couldn't save that feel",
+  "feel.nameFirst": "Give the feel a name first.",
+  "feel.pickProfile": "Pick a profile first.",
+  "feel.nothingToSave": "That profile has no settings to save yet.",
+  "feel.deleted": "Deleted {{name}}.",
+  "feel.share": "Share",
+  "feel.shareTitle": "Share {{name}}",
+  "feel.shareBody":
+    "Send this code to anyone — it carries the settings only, never your bindings, controller or screen mode.",
+  "feel.shareFailed": "Couldn't make a share code",
+  "feel.import": "Import",
+  "feel.importTitle": "Import a feel",
+  "feel.importBody": "Paste a feel code to add it to your list.",
+  "feel.importPlaceholder": "MXBF1-…",
+  "feel.imported": "Imported {{name}}.",
+  "feel.importFailed": "Couldn't import that code",
+  "presets.duplicate": "Duplicate",
+  "presets.duplicated": "Duplicated as {{name}}.",
+  "feel.edit": "See and change what's in it",
+  "feel.editTitle": "{{name}}",
+  "feel.editName": "Name",
+  "feel.editNameClash": "Another feel is already called “{{name}}”.",
+  "feel.editSave": "Save changes",
+  "feel.updated": "Updated {{name}}.",
+  "feel.groupControls": "Control feel",
+  "feel.groupInput": "Input",
+  "feel.groupAids": "Rider aids",
+  "feel.groupView": "Camera",
+  "feel.groupExtView": "Chase camera",
+  "feel.groupGfx": "Graphics quality",
+  "feel.filter": "Find a setting",
+  "feel.filterPlaceholder": "throttle, lean, camera…",
+  "feel.noMatches": "Nothing matches “{{text}}”.",
   "settings.profilesDesc":
     "Presets read your profiles from here — the path below is where the app is looking right now. It's the {{profiles}} folder inside your {{game}} folder, or your {{documents}} one if you moved your mods folder. Set it only if yours is somewhere else.",
   "settings.resetToDefault": "Reset to default",
@@ -1030,9 +1236,9 @@ export const en = {
   // ── Sharing installed files (any track or paint, not just presets) ─────────
   "share.share": "Share",
   "share.action": "Share…",
+  "share.rightClickHint": "Right-click to share",
   "share.title": "Share these files",
-  "share.hint":
-    "Packs them up, uploads them, and gives you one code to paste anywhere. Whoever pastes it back gets the files in the same folders.",
+  "share.hint": "One code, pasted anywhere. Whoever pastes it back gets the files in the right folders.",
   "share.hintDone": "Send this code — it installs everything listed above.",
   "share.nothingToShare":
     "Nothing here can be shared — only files inside your mods folder can go in a code.",
@@ -1049,6 +1255,9 @@ export const en = {
   "share.importBody":
     "Paste a share code someone sent you. The files install where they had them.",
   "share.downloadNotice": "Downloads {{size}} from {{host}}.",
+  "share.replacesTag": "Replaces yours",
+  "share.willReplace_one": "1 of these replaces something you already have — importing overwrites it.",
+  "share.willReplace_other": "{{count}} of these replace things you already have — importing overwrites them.",
   "share.install": "Download & install",
   "share.installed_one": "Installed 1 file.",
   "share.installed_other": "Installed {{count}} files.",
@@ -1145,18 +1354,16 @@ export const en = {
     "Instant refresh failed — reselect your profile in-game to load it.",
   "locker.reselectProfile": "Reselect your profile in MX Bikes to load the swap.",
   "locker.loadsNextTime": "Loads next time the game opens.",
-  "locker.modelRefreshing":
-    "Refreshing in-game — if it's your selected bike, it changes now.",
   "locker.modelFrostmodNotRunning":
-    "Run FrostMod to see model swaps live — for now, reselect the bike in-game.",
-  "locker.modelReselectBike":
-    "Model swapped — reselect the bike in MX Bikes to see it.",
+    "FrostMod isn't running — switch bike category away and back in MX Bikes to see the model.",
+  "locker.modelSwitchCategory":
+    "Model swapped — switch bike category away and back in MX Bikes to see it.",
   "locker.modelFrostmodUnreachable":
-    "Couldn't reach FrostMod — reselect the bike in-game to load it.",
+    "Couldn't reach FrostMod — switch bike category away and back in-game to load the model.",
   "locker.modelRefreshWindowsOnly":
-    "Live model refresh is Windows-only — reselect the bike in-game.",
+    "Model swapped — switch bike category away and back in-game to see it.",
   "locker.modelInstantRefreshOff":
-    "Reselect the bike in MX Bikes to load it (instant refresh is off).",
+    "Switch bike category away and back in MX Bikes to load the model.",
 
   // ── Loose model/sound swap registration ────────────────────────────────────
   "swaps.model": "model",
@@ -1204,6 +1411,7 @@ export const en = {
   "downloads.stageDownloading": "Downloading",
   "downloads.stageExtracting": "Extracting",
   "downloads.stagePlacing": "Installing",
+  "downloads.stageReview": "Waiting for you",
 
   // ── Downloads (history) ────────────────────────────────────────────────────
   "downloads.help":
@@ -1221,6 +1429,7 @@ export const en = {
   "downloads.yesterday": "Yesterday",
   "downloads.sourceSite": "Download",
   "downloads.sourceShop": "Shop",
+  "downloads.sourceHub": "MXB Hub",
   "downloads.sourceFile": "Imported file",
   "downloads.showInLibrary": "Show in library",
   "downloads.openModPage": "Open the mod's page",
@@ -1359,6 +1568,88 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0124.hero.title":
+    "Everyone on the grid, in the paint they actually chose",
+  "showcase.v0124.hero.body":
+    "MX Bikes sends no custom content, so a lobby of strangers has always been a lobby of default liveries. MXB App now shares what you're wearing with the riders around you and installs theirs — on any server, with nothing for the host to do and no code to enter.",
+  "showcase.v0124.anyserver":
+    "Any server, not just ours. The app reads the server from the running game, so a public lobby works exactly like a private one.",
+  "showcase.v0124.nosetup":
+    "Nothing to set up. No invite code, no sign-up, no server-side install — switch it on in Settings and it runs by itself.",
+  "showcase.v0124.everyone":
+    "You'll see any rider who also has MXB App. The more of your lobby that does, the more of the grid looks right.",
+  "showcase.v0124.settings":
+    "Settings → Paint sync shows what went out, what came back, and any paint it refused to overwrite. The switch to turn it off is in General.",
+  "showcase.v0124.shape":
+    "Jumps are shaped by dragging their outline. Grab the top of a tabletop for its height, the far end for its length, the far side of a double for its gap — or draw one point by point.",
+  "showcase.v0124.stats":
+    "MXB App now counts which pages and features get used, anonymously — a random ID and nothing about you. Settings → General turns it off.",
+  "showcase.v0122.hero.title":
+    "The replay camera can follow the rider",
+  "showcase.v0122.hero.body":
+    "Aim a key at a rider and FrostMod's replay camera points at them frame by frame, instead of at the angles you flew. Cut between shots, hold on one, and watch the whole path in the world while you build it.",
+  "showcase.v0122.aim":
+    "Press T on a key to aim it at a rider. The camera tracks them, and two riders across one stretch eases from one to the other.",
+  "showcase.v0122.shots":
+    "E decides what a key does: run through it, settle on it, or cut hard to the next shot. One path can be a whole edit.",
+  "showcase.v0122.preview":
+    "V draws the path in the world while you build it, and U undoes the last edit — twenty-four deep.",
+  "showcase.v0122.paths":
+    "Settings → FrostMod lists every saved path: where its keys fall, how it flies, and a way to hand one to someone.",
+  "showcase.v0121.hero.title":
+    "Your replay camera keys, your keyboard",
+  "showcase.v0121.hero.body":
+    "FrostMod's replay camera reads the keyboard directly, and so does the game — at the same moment. If S moves your camera backwards, pressing S to save a path moved the camera too. Every key the editor uses can now be moved somewhere the game leaves alone.",
+  "showcase.v0121.rebind":
+    "Rebind any of the editor's keys in Settings → FrostMod: click an action, press the key.",
+  "showcase.v0121.clash":
+    "Pick a key your camera controls don't use. Function keys and the numpad are usually free; a modifier won't help, because the game still sees the key underneath.",
+  "showcase.v0121.clean":
+    "F7 hides everything FrostMod draws — panel, radar, outlines — so a recorded pass is clean.",
+  "showcase.v0113.hero.title":
+    "Every track opens as the place it is",
+  "showcase.v0113.hero.body":
+    "A track used to open as bare ground \u2014 the right ruts, berms and jump faces, but nothing standing on them, so a supercross floor and a national circuit read much the same. The viewer now draws what a track puts on itself: the tents and awnings, the hay bales and tyre walls, the banner lines and fencing, the trailers in the paddock, and the landscape beyond the track\u2019s own square.",
+  "showcase.v0113.sky":
+    "A track sits under its own sky, lit and hazed the way its own ambience file says it should be.",
+  "showcase.v0113.ground":
+    "The ground keeps its detail up close \u2014 the track\u2019s own dirt, with real relief where it ships a normal map for it.",
+  "showcase.v0113.pick":
+    "Click anything standing on the track and it lights up on its own, named and measured.",
+  "showcase.v0113.speed":
+    "It arrives in stages \u2014 the terrain first, then the shape of the scenery, then its colours \u2014 and opening the same track again skips the archive entirely.",
+  "showcase.v0112.hero.title":
+    "A bike pack installs as the bikes inside it",
+  "showcase.v0112.hero.body":
+    "The OEM pack is 54 machines in one 3.8 GB archive, and it used to arrive as a single row reading \u201cMods folder\u201d \u2014 all of it or none of it. It is now listed the way it is built: every bike by its real name and class, with a checkbox. Take the four you race and leave the other fifty.",
+  "showcase.v0112.fullscreen":
+    "The Designer's 3D preview opens fullscreen \u2014 one button fills the window with the model you are painting.",
+  "showcase.v0112.review":
+    "A download that turns out to hold several mods stops and shows you what is in it before anything reaches your mods folder.",
+  "showcase.v0112.paint":
+    "A paint that offers one file per machine now installs the one for the bike you picked, not the first on the page.",
+  "showcase.v0112.speed":
+    "The review sheet opens in about a second with the OEM bikes installed, where it used to take nearly twenty.",
+  "showcase.v0112.window":
+    "A black window on startup can no longer trap you: it stays hidden until it has drawn, and always has a way to close it.",
+  "showcase.v0111.hero.title":
+    "Protected model swaps open in 3D",
+  "showcase.v0111.hero.body":
+    "A model bought from a creator ships its mesh sealed, and the viewer couldn't read it — View 3D said the swap held no readable mesh, on a model that runs perfectly in game. It opens now, like any other bike.",
+  "showcase.v0111.messages":
+    "When a bike still won't open, the app names the fault it actually hit instead of blaming cloud sync for everything.",
+  "showcase.v0110.hero.title":
+    "Take hold of the rider and pose him",
+  "showcase.v0110.hero.body":
+    "Grab the rider's joints in the 3D preview and move him — hands, elbows, hips, feet. Quick moves stack, sliders fine-tune, and Riding position sits him on the bike. Preview only: nothing is written to the game.",
+  "showcase.v0110.designer":
+    "Mirror a layer through the bike, select several at once, snap while dragging, flip, and type exact positions.",
+  "showcase.v0110.wheels":
+    "Bikes render with their wheels on, and you choose which tyres they stand on.",
+  "showcase.v0110.speed":
+    "Tracks draw seven times faster, bikes open in 127 ms instead of 201, and mods install two at a time.",
+  "showcase.v0110.swaps":
+    "Move a model set to another bike or delete it, and view any swap in 3D from the Library.",
   "showcase.v0102.hero.title":
     "Liveries that belong to the model wearing them",
   "showcase.v0102.hero.body":
@@ -1469,6 +1760,8 @@ export const en = {
     "MX Bikes loads every mod in your folder at startup. Give a preset the track it races on, hit Race mode, and everything else steps aside — nothing is deleted, it just moves to a holding folder until you bring it back.",
   "manage.tabRace": "Race presets",
   "manage.tabMods": "Mods",
+  "manage.loadCostLabel": "Load cost",
+  "manage.parkedLabel": "Parked",
   "manage.disabledCount_one": "{{count}} mod disabled",
   "manage.disabledCount_other": "{{count}} mods disabled",
   "manage.restoreAll": "Enable everything",
@@ -1559,6 +1852,8 @@ export const en = {
   "drop.scanning": "Working out what this is…",
   "drop.found_one": "Found {{count}} item",
   "drop.found_other": "Found {{count}} items",
+  "drop.selectAll": "Select all",
+  "drop.selectNone": "Select none",
   "drop.reviewHint": "Check the destinations, then install.",
   "drop.install_one": "Install {{count}}",
   "drop.install_other": "Install {{count}}",
@@ -1593,6 +1888,7 @@ export const en = {
   "drop.kind.bikePaint": "Paint",
   "drop.kind.soundSet": "Sound",
   "drop.kind.riderGear": "Rider gear",
+  "drop.kind.tyres": "Tyres",
   "drop.kind.reshadePreset": "ReShade preset",
   "drop.kind.unknown": "Unknown",
   "drop.reason.modsTree": "Contains a full mods folder",
@@ -1607,6 +1903,7 @@ export const en = {
   "drop.reason.riderTexture": "Paints the rider body — an outfit",
   "drop.reason.gearTexture": "Paints a piece of rider gear",
   "drop.reason.reshadePreset": "Lists ReShade techniques",
+  "drop.reason.packLayout": "Filed here by the pack it came in",
   "drop.reason.unrecognised": "Not recognised — you'll need to place it",
 
   // ── Import (the same install flow, reached by picking instead of dropping) ──
@@ -1763,10 +2060,21 @@ export const en = {
 
   // ── Designer (the layer editor) ───────────────────────────────────────────────
   "designer.help":
-    "Draw a paint on the sheets the game actually reads, and watch it on the model as you go. Start from an installed paint to get the sheet names right, paint on it with a brush, a gradient or a shape, stack images and text on top, then save — what comes out is a .pnt the game loads, not an export to convert.",
+    "Draw a paint on the sheets the game actually reads, and watch it on the model as you go. Pick a model and its sheets are already there under the names it binds — or start from an installed paint or a Photoshop file to bring artwork with you. Paint with a brush, a gradient or a shape, stack images and text on top, then save: what comes out is a .pnt the game loads, not an export to convert.",
   "designer.empty":
-    "Nothing to draw on yet. Start from a paint installed for this model to get its real sheets and their names, or add a blank one.",
+    "Nothing to draw on yet. Start from a paint installed for this model, open a Photoshop file to keep its layers, or add a blank sheet.",
   "designer.startFromPaint": "Start from a paint…",
+  "designer.startFromPsd": "Start from a PSD…",
+  "designer.exportPsd": "Export PSD",
+  "designer.hideModel": "Hide model",
+  "designer.showModel": "Show model",
+  "designer.exportPsdHint": "Write every sheet out as a layered .psd, into a folder you pick.",
+  "designer.exportedPsd_one": "Wrote 1 sheet to {{dir}}",
+  "designer.exportedPsd_other": "Wrote {{count}} sheets to {{dir}}",
+  "designer.sheetsSwitched": "Switched to the sheets {{dest}} uses.",
+  "designer.switchSheetsTitle": "These sheets are for another model",
+  "designer.switchSheetsBody": "{{dest}} uses {{names}}. Switching replaces every sheet you have open.",
+  "designer.switchSheets": "Switch sheets",
   "designer.blankSheet": "Blank sheet",
   "designer.addSheet": "Add a sheet",
   "designer.nothingToSave": "Every sheet is empty — draw something before saving.",
@@ -1902,6 +2210,12 @@ export const en = {
     "Only bikes can say which textures are their own. A helmet wears whichever paint it shipped with, and that isn't a stock look to trace.",
   "designer.stockNoMatch":
     "This model carries no texture of its own called “{{name}}”, so there's nothing of the bike's to show under this sheet.",
+  "designer.stockAsBase": "Stock as base",
+  "designer.stockAsBaseHint":
+    "Paint the bike's own texture into this sheet at full strength — the stock look as your starting point, a number away from being a paint. Unlike the reference above, this one is part of what you save.",
+  "designer.stockAsBaseDone":
+    "“{{name}}” now holds the bike's own texture — put your number on it and save.",
+  "designer.stockReadFailed": "Couldn't read the model's own “{{name}}” texture.",
   "designer.uvMap": "UV map",
   "designer.uvHint":
     "Show where the model's bodywork lands on this sheet, each piece in its own colour.",
@@ -1957,6 +2271,18 @@ export const en = {
   "trackViewer.surface": "Surface",
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Elevation range",
+  "trackViewer.objects": "Objects",
+  "trackViewer.painting": "Painting…",
+  "trackViewer.scenery": "Scenery",
+  "trackViewer.sceneryTris": "{{count}} triangles",
+  "trackViewer.fixtures": "Marked fixtures",
+  "trackViewer.pieces": "Separable pieces",
+  "trackViewer.selected": "Selected piece",
+  "trackViewer.place": "Place a model",
+  "trackViewer.placePick": "Pick a model, then click the ground.",
+  "trackViewer.placeHint": "Click the ground to put it down.",
+  "trackViewer.placedCount": "{{count}} placed",
+  "trackViewer.saveProps": "Save .scr",
   "trackViewer.noTerrain": "No terrain to show",
   "trackViewer.noTerrainHint":
     "This track's height data isn't in a layout the viewer can read yet.",
@@ -1967,4 +2293,174 @@ export const en = {
   "trackViewer.whyDetails": "Why?",
   "trackViewer.copyDetails": "Copy details",
   "trackViewer.copied": "Copied",
+  /* ── Protect: lock content to a GUID ─────────────────────────────────── */
+  "nav.protect": "Protect",
+  "protect.help": "Lock the files you've made to the GUIDs of the people allowed to load them. A locked file only opens on the install whose GUID it carries, so one buyer means one copy: pick the files once, paste the GUIDs, and you get a folder per buyer. Your originals are only ever read.",
+  "protect.ownTitle": "Your GUID",
+  "protect.ownDesc": "The identity MX Bikes knows you by. It isn't in any file — Steam hands it over when you sign in — so the app reads it out of the running game.",
+  "protect.ownUnknown": "Not known yet",
+  "protect.readOwn": "Read from game",
+  "protect.copy": "Copy",
+  "protect.copied": "Copied",
+  "protect.useMine": "Add to the list",
+  "protect.ownFound": "Your GUID is {{guid}}",
+  "protect.ownNotFound": "Couldn't read your GUID",
+  "protect.ownNotFoundWhy": "Start MX Bikes and sign in to Steam, then try again.",
+  "protect.ownFailed": "Reading your GUID failed",
+  "protect.filesTitle": "Files to lock",
+  "protect.filesDesc": "Add single files, or a folder to take everything inside it. A .pkz is locked as an archive; anything else is locked on its own.",
+  "protect.addFiles": "Add files",
+  "protect.addFolder": "Add folder",
+  "protect.clear": "Clear",
+  "protect.summary": "{{files}} files · {{size}}",
+  "protect.summarySkipped": "{{count}} skipped",
+  "protect.planFailed": "Couldn't read that selection",
+  "protect.skipJunk": "Skipped",
+  "protect.skipEmpty": "Empty",
+  "protect.skipProtected": "Already protected",
+  "protect.guidsTitle": "Lock to",
+  "protect.guidsDesc": "One GUID per line — one folder comes out per GUID. Every copy gets its own key, so two buyers can't tell they hold the same file.",
+  "protect.guidsPlaceholder": "FF0110000108D7CFE3",
+  "protect.guidBad": "Not a GUID — 18 hex characters",
+  "protect.outTitle": "Where to put them",
+  "protect.outDesc": "A folder per GUID is created here, holding the files at the paths they already had. Your originals aren't touched.",
+  "protect.outPlaceholder": "Choose a folder",
+  "protect.browse": "Browse",
+  "protect.lock": "Lock {{files}} files for {{guids}} GUIDs",
+  "protect.done": "Locked {{files}} files for {{guids}} GUIDs",
+  "protect.failed": "Locking failed",
+  "protect.showFolder": "Show folder",
+
+  // ── Track Studio ───────────────────────────────────────────────────────────
+  "nav.track": "Track",
+  "track.help": "Describe a track and Claude writes the lap — the corners, the straights and every jump on them. The app builds it, measures it against real published tracks, and asks again for anything that doesn't measure up. Preview it in 3D, edit any jump, then build and install it without leaving the app.",
+  "track.briefPlaceholder": "A long straight into a left hairpin, then a double and a rhythm section",
+  "track.generate": "Generate",
+  "track.generating": "Writing…",
+  "track.generatingHint": "Laying out a lap that closes, then building and measuring it. A minute or two, and longer if the first attempt needs fixing.",
+  "track.generated": "Wrote “{{name}}”",
+  "track.generateFailed": "Couldn't write a track",
+  "track.empty": "Describe the track you want. Claude writes the lap and every jump on it; the app builds it and checks it measures like a real one before you see it.",
+  "track.lap": "Lap",
+  "track.width": "Width",
+  "track.ground": "Ground",
+  "track.features": "Features",
+  "track.corners": "Corners",
+  "track.measured": "Measured",
+  "track.lips": "Jumps",
+  "track.steepest": "Steepest",
+  "track.relief": "Relief",
+  "track.budget": "Height used",
+  "track.problems": "Needs fixing",
+  "track.preview": "Preview in 3D",
+  "track.fullscreen": "Full screen",
+  "track.exitFullscreen": "Exit full screen",
+  "track.building": "Building…",
+  "track.install": "Install",
+  "track.export": "Export source",
+  "track.installed": "Installed the preview",
+  "track.installFailed": "Couldn't install it",
+  "track.buildFailed": "Couldn't build it",
+  "track.exported": "Wrote {{count}} files",
+  "track.exportFailed": "Couldn't export it",
+  "track.previewOnly": "An installed track carries terrain, surfaces and race data — it has no graphics, so the game will not ride it. Build with TerrainEd over the exported folder for a track you can ride.",
+  "track.at": "At",
+  "track.kind": "Kind",
+  "track.height": "Height",
+  "track.length": "Length",
+  "track.kind.tabletop": "Tabletop",
+  "track.kind.double": "Double",
+  "track.kind.roller": "Roller",
+  "track.kind.whoops": "Whoops",
+  "track.kind.stepUp": "Step-up",
+  "track.kind.berm": "Berm",
+  "track.straight": "Straight",
+  "track.turnLeft": "Left turn",
+  "track.turnRight": "Right turn",
+  "track.radius": "radius",
+  "track.gap": "gap",
+  "track.deep": "deep",
+  "track.over": "over",
+  "track.kind.rut": "Rut",
+  "track.sequenceHint": "You can describe the lap in order — “a long straight, a left hairpin, then a double and a rhythm section” — and it will be built that way.",
+  "track.compile": "Build & install",
+  "track.compiling": "Compiling…",
+  "track.compileHint": "It keeps going if you leave this tab.",
+  "track.openStudio": "Open the Track Studio",
+  "track.phase.synthesising": "Shaping the ground",
+  "track.phase.writing": "Writing the source",
+  "track.phase.map": "Building the graphics",
+  "track.phase.trh": "Building the collision",
+  "track.phase.centerline": "Merging the racing line",
+  "track.phase.packaging": "Packing the track",
+  "track.phase.installing": "Installing",
+  "track.phase.done": "Built and installed",
+  "track.phase.failed": "Build failed",
+  "track.buildingTitle": "Building “{{name}}”",
+  "track.compiled": "Compiled",
+  "track.compileFailed": "Couldn't compile it",
+  "track.buildStepFailed": "The {{step}} step failed",
+  "track.pointAtTools": "Point at the track tools…",
+  "track.toolsNotFound": "No terrained.exe in that folder",
+  "track.getTools": "Get the track tools",
+  "track.gettingTools": "Fetching…",
+  "track.toolsReady": "Track tools ready",
+  "track.toolsFailed": "Couldn't fetch the track tools",
+  "track.rideIt": "Installed — pick it in MX Bikes",
+  "track.stillNeeded": "Build compiles it with TerrainEd and installs it — then pick it in MX Bikes. Open it in TrackEd afterwards if you want to move the cameras.",
+  "track.base": "Base track",
+  "track.baseLoaded": "Loaded “{{name}}”",
+  "track.name": "Track name",
+  "track.author": "Author",
+  "track.previewHint": "Press Preview to build it and look at it here.",
+  "track.location": "Location",
+  "track.blank": "Blank",
+  "track.closeLap": "Close the lap",
+  "track.lapClosed": "The lap meets itself now",
+  "track.closeFailed": "Couldn't close it",
+  "track.notes": "Unlike a published track",
+  "track.replaceTitle": "Replace this track?",
+  "track.replaceBody": "You've made changes that haven't been exported or installed. Loading another track discards them.",
+  "track.replaceConfirm": "Discard and load",
+  "track.across": "across",
+  "track.hills": "hills",
+  "track.surface": "ground",
+  "track.soil": "Soil",
+  "track.sand": "Sand",
+  "track.grass": "Grass",
+  "track.smoothing": "blend",
+  "track.live": "Live",
+  "track.rebuild": "Rebuild the preview",
+  "track.wholeLap": "whole lap",
+  "track.kind.custom": "Shape",
+  "track.mode.height": "Height",
+  "track.mode.shape": "Shape",
+
+  // --- paid plugins ---
+  "plugins.section": "Plugins",
+  "plugins.sectionDesc": "Paid add-ons for MXB App. A license is a monthly subscription tied to your account, and it keeps working offline for a week between checks.",
+  "plugins.keyLabel": "Redeem a key",
+  "plugins.keyHelp": "Paste the key you were sent. Renewing is another key — it adds to whatever time you have left.",
+  "plugins.redeem": "Redeem",
+  "plugins.redeemed": "{{name}} is licensed on this account.",
+  "plugins.available": "Available",
+  "plugins.refresh": "Refresh",
+  "plugins.loading": "Checking your licenses…",
+  "plugins.none": "Nothing on offer yet.",
+  "plugins.install": "Install",
+  "plugins.update": "Update",
+  "plugins.installed": "{{name}} is installed and running.",
+  "plugins.active": "Active",
+  "plugins.activeDetail": "licensed until {{date}}.",
+  "plugins.licensed": "Licensed",
+  "plugins.readyToInstall": "version {{version}} is ready to install.",
+  "plugins.noBuildYet": "there's no build to install yet.",
+  "plugins.updateAvailable": "Update available",
+  "plugins.updateDetail": "you have {{installed}}, {{latest}} is out.",
+  "plugins.needsCheck": "Needs a check-in",
+  "plugins.needsCheckDetail": "it's been a week since we could reach the control plane. Go online and refresh.",
+  "plugins.lapsed": "Lapsed",
+  "plugins.lapsedDetail": "your license ran out on {{date}}. Redeem a key to carry on.",
+  "plugins.notLicensed": "Not licensed",
+  "plugins.notLicensedDetail": "redeem a key above to unlock it.",
 } as const;

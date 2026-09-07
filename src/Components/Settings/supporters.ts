@@ -62,6 +62,7 @@ export const BUNDLED_SUPPORTERS: SupportersManifest = {
     { name: "OHTEA - MXB HUB" },
     { name: "HottPie" },
     { name: "Mouk" },
+    { name: "Sly" },
     { name: "SoggySwisher" },
     { name: "LupaHo" },
     { name: "Qwest" },

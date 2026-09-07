@@ -14,11 +14,13 @@ import {
   UploadCloud,
   User,
   Pencil,
+  CopyPlus,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button, CHIP } from "../ui/button";
+import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "../ui/help-hint";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
@@ -64,6 +66,7 @@ import type {
   PresetApplyOutcome,
 } from "../../types";
 import { SlotField } from "./SlotField";
+import FeelPresets from "./FeelPresets";
 import { Trans } from "../../i18n";
 import { useT, type TFunc, type TKey } from "../../i18n/context";
 import {
@@ -73,6 +76,7 @@ import {
   loadScans,
   missingSlots,
   loadoutSummary,
+  copyName,
   type Scans,
 } from "../../lib/presets";
 import { useGearPaints } from "../../lib/useGearPaints";
@@ -164,6 +168,8 @@ export default function Presets({
 
   const [sharePreset, setSharePreset] = useState<Preset | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  /** Which half of a rider's setup this page is showing: the look, or the feel. */
+  const [mode, setMode] = useState<"look" | "feel">("look");
 
   // The paints the chosen helmet, boots and protection carry — packed inside the model or
   // shipped with the game — merged with the loose ones the library scan found.
@@ -352,6 +358,25 @@ export default function Presets({
     setSharePreset(preset);
   }, []);
 
+  /** Save a copy under a free name, so a rider can fork a preset and change one slot
+   *  without losing the one they already race. */
+  const onDuplicate = useCallback(
+    async (preset: Preset) => {
+      const name = copyName(
+        preset.name,
+        saved.map((p) => p.name),
+      );
+      try {
+        await presetsSave({ ...preset, name, bundle: null });
+        await refreshSaved();
+        toast.success(t("presets.duplicated", { name }));
+      } catch (e) {
+        toast.error(String(e).replace(/^Error:\s*/, ""));
+      }
+    },
+    [saved, refreshSaved, t],
+  );
+
   const onDelete = useCallback(
     async (preset: Preset) => {
       if (!window.confirm(`Delete preset “${preset.name}”?`)) return;
@@ -410,27 +435,29 @@ export default function Presets({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
-            {t("nav.presets")}
-          </h1>
-          <HelpHint
-            title={t("nav.presets")}
-            description={t("presets.help")}
-          />
-        </div>
-        <div className="ml-auto flex items-center gap-2">
+      <ContextBarLeft>
+        <ContextTab active={mode === "look"} onSelect={() => setMode("look")}>
+          {t("presets.tabLook")}
+        </ContextTab>
+        <ContextTab active={mode === "feel"} onSelect={() => setMode("feel")}>
+          {t("presets.tabFeel")}
+        </ContextTab>
+      </ContextBarLeft>
+
+      <ContextBarRight>
+        {mode === "look" && (
           <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
             <Download className="size-3.5" />
             Import
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => void load()}>
-            <RefreshCw className="size-3.5" />
-            Refresh
-          </Button>
-        </div>
-      </header>
+        )}
+        <Button variant="ghost" size="sm" onClick={() => void load()}>
+          <RefreshCw className="size-3.5" />
+          Refresh
+        </Button>
+        <HelpHint title={t("nav.presets")} description={t("presets.help")} />
+      </ContextBarRight>
+
 
       {error && (
         <div className="mx-7 mb-3 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12.5px] text-destructive">
@@ -469,6 +496,8 @@ export default function Presets({
             </Button>
           </div>
         </div>
+      ) : mode === "feel" ? (
+        <FeelPresets profiles={profiles} profile={profile} onProfile={setProfile} />
       ) : (
         <div className="flex min-h-0 flex-1 gap-5 overflow-hidden px-7 pb-6">
           {/* Builder */}
@@ -703,6 +732,7 @@ export default function Presets({
                   onApply={() => void applyLoadout(p.loadout, p.name, p.name)}
                   onLoad={() => setLoadout(p.loadout)}
                   onEdit={() => onEdit(p)}
+                  onDuplicate={() => void onDuplicate(p)}
                   onShare={() => onShare(p)}
                   onDelete={() => void onDelete(p)}
                   onViewInRider={
@@ -772,6 +802,7 @@ function PresetCard({
   onApply,
   onLoad,
   onEdit,
+  onDuplicate,
   onShare,
   onDelete,
   onViewInRider,
@@ -783,6 +814,7 @@ function PresetCard({
   onApply: () => void;
   onLoad: () => void;
   onEdit: () => void;
+  onDuplicate: () => void;
   onShare: () => void;
   onDelete: () => void;
   onViewInRider?: () => void;
@@ -821,6 +853,9 @@ function PresetCard({
           )}
           <IconBtn title={t("presets.editNameOrOptions")} onClick={onEdit}>
             <Pencil className="size-3.5" />
+          </IconBtn>
+          <IconBtn title={t("presets.duplicate")} onClick={onDuplicate}>
+            <CopyPlus className="size-3.5" />
           </IconBtn>
           <IconBtn chip title={t("presets.share")} onClick={onShare}>
             <Share2 className="size-3.5" />
@@ -970,8 +1005,11 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
     try {
       const c = await presetBundleCreate(preset.name);
       setFullCode(c);
-      setCopied(false);
-      toast.success(t("presets.bundleUploaded"));
+      // Straight to the clipboard. The code exists to be pasted somewhere, and whoever
+      // waited out the upload shouldn't have to click again to collect it.
+      const onClipboard = await copyText(c);
+      setCopied(onClipboard);
+      toast.success(t(onClipboard ? "share.uploadedCopied" : "presets.bundleUploaded"));
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
     } finally {
@@ -1021,9 +1059,6 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
                 )}
               </p>
             )}
-            <p className="mt-1.5 text-[11px] text-faint">
-              {t("presets.shareWarning")}
-            </p>
             <Button
               variant="outline"
               size="sm"

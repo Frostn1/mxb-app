@@ -12,8 +12,7 @@ import {
   buildSkeleton,
   isRestPose,
   NO_POSE,
-  riderFrame,
-  toMatrix,
+  seatTransform,
   type RiderPose,
 } from "../../lib/riderPose";
 import { PoseHandles } from "./PoseHandles";
@@ -21,6 +20,7 @@ import { textureBytes } from "../../api/mods";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { useT } from "../../i18n/context";
 import { sceneOf, skyTexture, type SceneId } from "../../lib/viewerScene";
+import { reportRenderer } from "../../lib/glInfo";
 
 /**
  * `both` draws the bike and the rider in one scene, side by side — see {@link SideBySide};
@@ -56,7 +56,9 @@ async function loadTexture(t: PaintTexture): Promise<THREE.DataTexture | null> {
   const rgba = new Uint8Array(buf);
   const tex = new THREE.DataTexture(rgba, t.width, t.height, THREE.RGBAFormat);
   tex.userData.maskedAlpha = hasMaskedAlpha(rgba);
-  tex.colorSpace = THREE.SRGBColorSpace;
+  // A normal map is three numbers per texel, not a colour — decoding it as sRGB bends every
+  // one of them toward the surface and flattens the relief it exists to describe.
+  tex.colorSpace = isNormalMap(t.name) ? THREE.NoColorSpace : THREE.SRGBColorSpace;
   // MX Bikes paints use a top-left UV origin, which is `DataTexture`'s own default.
   tex.flipY = false;
   // Wrap (not clamp): some islands run outside 0–1 (plates, tiled exhaust) and need it.
@@ -70,14 +72,21 @@ async function loadTexture(t: PaintTexture): Promise<THREE.DataTexture | null> {
   return tex;
 }
 
+/** The `_n` companion of a colour sheet — `plastics_n` beside `plastics`. */
+function isNormalMap(name: string): boolean {
+  return name.toLowerCase().endsWith("_n");
+}
+
 /**
  * Whether a sheet's alpha channel is a cut-out mask, or just a channel nobody filled in.
  *
  * A wheel's brake discs and its sprocket are flat quads wearing a masked square — two thirds
  * of `fdisc` is fully transparent — so drawn without a mask each one is a square sitting on
- * the wheel. A naive "does it have alpha" test can't be used, though: a bike's `w_plate` is
- * alpha-0 on *every* pixel, an unused channel, and masking on that erases the number plates
- * outright. So the channel only counts as a mask when it varies.
+ * the wheel. A naive "does it have alpha" test can't be used, though: plenty of sheets are
+ * alpha-0 on *every* pixel simply because nobody filled the channel in — a mod's `airbox` or
+ * `lens`, and most `_n`/`_r`/`_s` maps — and cutting those out erases the part. So the
+ * channel only counts as a mask when it varies. The decal planes, which are alpha-0 for a
+ * reason rather than by neglect, are hidden by name instead — see {@link isDecalPlane}.
  *
  * Sampled, not scanned: a 4096² sheet is 16M pixels and this runs per texture per load,
  * while a real mask covers a third of the image or more and turns up in the first few
@@ -656,11 +665,36 @@ function useNodeGeometries(nodes: EdfNode[], skin?: Skin | null) {
   return geoms;
 }
 
+/**
+ * Whether a texture name belongs to one of the planes the game writes on itself.
+ *
+ * `w_plate`, `w_number` and `w_name` are flat quads the game composites the rider's number
+ * and name onto at run time — on a bike they are the side and front number plates, declared
+ * by its `gfx.cfg` as `plate { texture = w_plate }`. Nothing is meant to be visible there
+ * until the game draws on it, and the sheet behind them says so: every bike ships it alpha-0
+ * on every pixel, with whatever RGB the modeller happened to leave — half white and half
+ * black, or all white, or all black, or 512x256. That is only consistent if the plane is
+ * meant to be invisible, and drawn it puts that placeholder over the number plates instead
+ * of the livery.
+ *
+ * By name rather than by alpha, because the alpha channel can't tell this apart from a sheet
+ * nobody filled in (see {@link hasMaskedAlpha}). The rider's side has always read these by
+ * name too — `body_slot` maps any `w_` texture to the `hide` slot.
+ */
+function isDecalPlane(name: string | null | undefined): boolean {
+  return !!name && name.toLowerCase().startsWith("w_");
+}
+
+/** Renders nothing and occludes nothing — for a plane that is not ours to draw. */
+function makeHiddenMaterial() {
+  return new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+}
+
 function makeBodyMaterial(name: string | null | undefined, tex: Map<string, THREE.Texture>) {
   const key = name?.toLowerCase();
   // Decal planes: render nothing rather than smear the suit over a flat quad.
   if (key === "hide") {
-    return new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+    return makeHiddenMaterial();
   }
   // Head/neck: bare skin so the kit doesn't wrap onto it.
   if (key === "face") {
@@ -1095,9 +1129,27 @@ function RiderComposite({
   );
 }
 
-function makeEdfMaterial(t: THREE.Texture | null) {
+function makeEdfMaterial(
+  name: string | null | undefined,
+  t: THREE.Texture | null,
+  tex: Map<string, THREE.Texture>,
+) {
+  // The number-plate planes are the game's to draw on, not ours — see `isDecalPlane`.
+  if (isDecalPlane(name)) {
+    return makeHiddenMaterial();
+  }
+  // The sheet's own normal map, if it has one: `plastics_n` beside `plastics`. Bikes carry
+  // them the same way riders do, and until now only the rider read them — so a bike's
+  // bodywork drew as a flat colour, with the mesh weave on a seat and the vents in a shroud
+  // in the sheet nobody looked at. A paint may supply its own, which then replaces the
+  // model's by name like any other sheet.
+  const normalMap = (name && tex.get(`${name.toLowerCase()}_n`)) || null;
   return new THREE.MeshStandardMaterial({
     map: t ?? undefined,
+    normalMap,
+    // Gentle: these sheets are authored for the game's own lighting, and at full strength
+    // the relief reads as noise under the viewer's.
+    normalScale: new THREE.Vector2(0.5, 0.5),
     color: t ? 0xffffff : 0xb7bcc4,
     metalness: 0.2,
     roughness: 0.55,
@@ -1124,9 +1176,11 @@ function useEdfMeshes(
     () =>
       list.map((n) =>
         n.submeshes.length
-          ? n.submeshes.map((sm) => makeEdfMaterial(submeshTexture(sm.texture, tex)))
+          ? n.submeshes.map((sm) =>
+              makeEdfMaterial(sm.texture, submeshTexture(sm.texture, tex), tex),
+            )
           : // No submesh table → whole-node binding (the model's primary body texture).
-            [makeEdfMaterial(submeshTexture(n.texture, tex))],
+            [makeEdfMaterial(n.texture, submeshTexture(n.texture, tex), tex)],
       ),
     [list, tex],
   );
@@ -1585,76 +1639,6 @@ function SideBySide({
 }
 
 /**
- * Where the rider's weight goes: the underside of the pelvis, in the rider's own frame.
- *
- * The pelvis bone carries a box covering the slice of body it moves, so the bottom of that box
- * is where a seat would touch. Read off the model, because a rider is whatever height its
- * author made it.
- */
-function seatContact(bones: Bone[], up: THREE.Vector3): THREE.Vector3 | null {
-  const pelvis =
-    bones.find((b) => b.name === "riderRIG_Pelvis") ??
-    bones.find((b) => b.name === "riderRIG_LeftHip");
-  if (!pelvis) return null;
-  const bind = toMatrix(pelvis.bind);
-  const at = new THREE.Vector3(pelvis.bind[3], pelvis.bind[7], pelvis.bind[11]);
-  const { aabbLo: lo, aabbHi: hi } = pelvis;
-  let drop = 0;
-  const corner = new THREE.Vector3();
-  for (const x of [lo[0], hi[0]]) {
-    for (const y of [lo[1], hi[1]]) {
-      for (const z of [lo[2], hi[2]]) {
-        const d = corner.set(x, y, z).applyMatrix4(bind).sub(at).dot(up);
-        if (d < drop) drop = d;
-      }
-    }
-  }
-  return at.addScaledVector(up, drop);
-}
-
-/**
- * The rider stood upright, facing the way the bike does, with their seat on the bike's.
- *
- * Worked out rather than eyeballed: the bike's `.geom` names `seat_height_ref`, and the rider's
- * own up and forward come off its rig, so the two only have to be brought into one frame. Null
- * when either half won't say — a bike whose `.geom` names no seat, or a rig with no hips — and
- * then the pair falls back to standing side by side, which is honest about not knowing.
- */
-function seatTransform(
-  parts: RiderPart[],
-  seat: Vec3,
-  drop: number,
-): THREE.Matrix4 | null {
-  const body = parts.find((p) => p.part === "body" && p.nodes.length);
-  const bones = body?.skeleton;
-  if (!bones?.length) return null;
-  const rf = riderFrame(bones, body?.nodes);
-  if (!rf) return null;
-  const contact = seatContact(bones, rf.up);
-  if (!contact) return null;
-  // The rider's (forward, up) onto the bike's (+Z, +Y). Both triples are built by a cross
-  // product, so both turn the same way round and what comes out is a rotation, not a mirror.
-  const b3 = new THREE.Vector3().crossVectors(rf.forward, rf.up);
-  const from = new THREE.Matrix4().makeBasis(rf.forward, rf.up, b3);
-  const to = new THREE.Matrix4().makeBasis(
-    new THREE.Vector3(0, 0, 1),
-    new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3(0, 0, 1).cross(new THREE.Vector3(0, 1, 0)),
-  );
-  const turn = to.multiply(from.transpose());
-  // Sit *on* the seat rather than with the hip joint in it — the reference is the top of the
-  // seat, and a rider's weight is carried a little way into it.
-  const at = new THREE.Vector3(seat[0], seat[1] + drop, seat[2]);
-  return new THREE.Matrix4()
-    .makeTranslation(at.x, at.y, at.z)
-    .multiply(turn)
-    .multiply(new THREE.Matrix4().makeTranslation(-contact.x, -contact.y, -contact.z));
-}
-
-/** How far into the seat the rider settles, in metres. */
-const SEAT_SINK = -0.02;
-
-/**
  * Bike and rider in one scene, the rider sitting on it.
  *
  * The bike stands on the ground exactly as it does beside the rider; only the rider moves, on
@@ -1696,9 +1680,9 @@ function OnBike({
     const bike = partBounds(nodes);
     // Dropped onto y = 0, like every other arrangement, so the ground shadow means something.
     const lift: Vec3 = [0, -bike.lo[1], 0];
-    const seated = seatTransform(parts, seat, SEAT_SINK);
+    const seated = seatTransform(parts, seat, rig ?? null);
     return { lift, seated, bikePivot: spinPivot(bike) };
-  }, [nodes, parts, seat]);
+  }, [nodes, parts, seat, rig]);
 
   return (
     <group position={at.lift}>
@@ -1994,16 +1978,16 @@ function ControlsHint({ tight }: { tight?: boolean }) {
   return (
     <div
       className={cn(
-        "pointer-events-none absolute bottom-2 left-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45",
-        // Panels on the other corner: wrap onto more lines rather than run under them. A
-        // 320px-wide preview has room for one or the other, not both side by side.
-        tight && "max-w-[calc(100%-248px)]",
+        "pointer-events-none absolute bottom-2 left-2 flex items-center gap-x-3 bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45",
+        // In a narrow preview the labels wrapped one word to a line, which read as broken
+        // rather than as a hint. There the icons carry it and the label is the tooltip.
+        tight && "gap-x-2",
       )}
     >
       {items.map(({ Icon, label }) => (
-        <span key={label} className="flex items-center gap-1">
-          <Icon className="h-3.5 w-3.5" />
-          {label}
+        <span key={label} className="flex items-center gap-1 whitespace-nowrap" title={label}>
+          <Icon className="h-3.5 w-3.5 flex-none" />
+          {!tight && label}
         </span>
       ))}
     </div>
@@ -2156,6 +2140,8 @@ export interface ModelViewerProps {
   onCaptureReady?: (capture: CaptureFn | null) => void;
   /** Offer the pose panel. Off by default: a preview nobody is posing shouldn't grow chrome. */
   poseControls?: boolean;
+  /** No room for them — the docked preview in the Designer is 240px tall. */
+  hideHints?: boolean;
   /**
    * Offer the placement panel — moving each model about the scene.
    *
@@ -2185,6 +2171,7 @@ export function ModelViewer({
   photo = false,
   onCaptureReady,
   poseControls = false,
+  hideHints = false,
   placeControls = false,
   loading = false,
   noStandIn = false,
@@ -2265,6 +2252,7 @@ export function ModelViewer({
           // nothing next to having no way to save what's on screen.
           gl={{ preserveDrawingBuffer: true }}
           onCreated={({ gl, invalidate }) => {
+            reportRenderer(gl, "model-viewer");
             // A lost GPU context otherwise leaves a black canvas; preventDefault lets the browser restore it.
             gl.domElement.addEventListener(
               "webglcontextlost",
@@ -2378,7 +2366,7 @@ export function ModelViewer({
           />
         </Canvas>
       </ErrorBoundary>
-      {!loading && !photo && <ControlsHint tight={placeControls || poseControls} />}
+      {!loading && !photo && !hideHints && <ControlsHint tight={placeControls || poseControls} />}
       {/* One stack, so the two panels line up on the same edge whether both are offered or
           only one — placement above, because moving a model comes before fussing its joints. */}
       {!loading && !photo && (placeControls || poseControls) && (

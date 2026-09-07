@@ -18,12 +18,15 @@ import { displayName, formatBytes } from "../../lib/mods";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { cn } from "@/lib/utils";
 
-/** Stages that mean an install is still moving — anything else is done, failed, or idle. */
+/** Stages that mean an install is still moving — anything else is done, failed, or idle.
+ *  `review` counts: the bytes are down but nothing is installed, and dropping the card would
+ *  leave a staged pack with nothing on screen pointing at it. */
 const IN_PROGRESS = new Set<InstallStage>([
   "resolving",
   "downloading",
   "extracting",
   "placing",
+  "review",
 ]);
 
 /** Only the transfer can be stopped. Once the bytes are down, extraction and placement are
@@ -44,6 +47,7 @@ const STAGE_LABEL: Record<string, TKey> = {
   downloading: "downloads.stageDownloading",
   extracting: "downloads.stageExtracting",
   placing: "downloads.stagePlacing",
+  review: "downloads.stageReview",
 };
 
 export default function DownloadQueue({ collapsed }: { collapsed: boolean }) {
@@ -81,7 +85,7 @@ export default function DownloadQueue({ collapsed }: { collapsed: boolean }) {
         ) : (
           <button
             title={t("downloads.open")}
-            className="flex cursor-default flex-col gap-[7px] rounded-[10px] border border-white/[0.07] bg-[color-mix(in_srgb,var(--card)_60%,var(--window))] px-3 py-2.5 text-left transition-colors hover:border-white/[0.12]"
+            className="flex cursor-default flex-col gap-[7px] border border-white/[0.07] bg-[color-mix(in_srgb,var(--card)_60%,var(--window))] px-3 py-2.5 text-left transition-colors hover:border-white/[0.12]"
           >
             <div className="flex items-baseline justify-between gap-2">
               <span className="truncate text-[11.5px] font-semibold text-foreground/85">

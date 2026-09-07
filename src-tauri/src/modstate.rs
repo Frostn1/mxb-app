@@ -89,7 +89,7 @@ impl StateOutcome {
     }
 }
 
-fn shadow_root(mods_path: &str) -> PathBuf {
+pub(crate) fn shadow_root(mods_path: &str) -> PathBuf {
     library::resolve_child(Path::new(mods_path.trim()), SHADOW_DIR)
 }
 
@@ -102,7 +102,7 @@ fn enabled_path(mods_path: &str, rel: &str) -> PathBuf {
 ///
 /// The leading `mods/` is dropped so the shadow tree reads like the content folder itself,
 /// which matters the one time someone opens it in Explorer.
-fn disabled_path(mods_path: &str, rel: &str) -> PathBuf {
+pub(crate) fn disabled_path(mods_path: &str, rel: &str) -> PathBuf {
     let mut p = shadow_root(mods_path);
     for seg in rel_segments(rel).skip(1) {
         p = library::resolve_child(&p, seg);

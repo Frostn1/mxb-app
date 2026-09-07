@@ -29,8 +29,8 @@ import { useDownloads } from "../../Context/Downloads";
 import { useInstall, type ModTarget } from "../../Context/Install";
 import { useT, type TFunc } from "../../i18n/context";
 import { dayStart, displayName, formatBytes, formatDay, formatTime } from "../../lib/mods";
-import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
+import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "@/Components/ui/help-hint";
 import {
   DropdownMenu,
@@ -61,6 +61,7 @@ interface DownloadsProps {
   /** Send a failed shop purchase back to the Shop, which is the only place it can be
    *  re-downloaded from — a purchase link is signed in, so there's nothing to retry here. */
   onOpenShop: () => void;
+  onOpenHub: () => void;
 }
 
 /** Records for one calendar day, newest day first. */
@@ -83,7 +84,8 @@ function groupByDay(records: DownloadRecord[]): DayGroup[] {
 
 function sourceLabel(record: DownloadRecord, t: TFunc): string {
   if (record.source === "site") return record.host || t("downloads.sourceSite");
-  return record.source === "shop" ? t("downloads.sourceShop") : t("downloads.sourceFile");
+  if (record.source === "shop") return t("downloads.sourceShop");
+  return record.source === "hub" ? t("downloads.sourceHub") : t("downloads.sourceFile");
 }
 
 /** Where it landed, as `tracks/MX2` — the answer to "so where did that one go". */
@@ -97,6 +99,7 @@ export default function Downloads({
   onOpenMod,
   onShowInLibrary,
   onOpenShop,
+  onOpenHub,
 }: DownloadsProps) {
   const t = useT();
   const { records, loading, forget, clear, markSeen } = useDownloads();
@@ -134,7 +137,11 @@ export default function Downloads({
 
   /** Straight back through the install queue, with the same destination as last time. */
   const retry = (r: DownloadRecord) => {
+    // Neither store's download URL survives a restart — the shop's is read out of a WebView and
+    // the Hub's is signed per session — so retrying one means going back to where it can be
+    // asked for again, not replaying a link.
     if (r.source === "shop") return onOpenShop();
+    if (r.source === "hub") return onOpenHub();
     if (!r.url) return;
     startInstall({
       slug: r.slug,
@@ -148,44 +155,38 @@ export default function Downloads({
   };
 
   const canRetry = (r: DownloadRecord) =>
-    r.status === "failed" && (r.source === "shop" || !!r.url);
+    r.status === "failed" && (r.source === "shop" || r.source === "hub" || !!r.url);
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
-            {t("nav.downloads")}
-          </h1>
-          <HelpHint title={t("nav.downloads")} description={t("downloads.help")} />
-        </div>
-        <Segmented
-          value={filter}
-          onChange={(v) => setFilter(v as Filter)}
-          options={(["all", "installed", "failed"] as const).map((v) => ({
-            value: v,
-            label: (
-              <span className="flex items-center gap-1.5">
-                {t(
-                  v === "all"
-                    ? "downloads.filterAll"
-                    : v === "installed"
-                      ? "common.installed"
-                      : "downloads.filterFailed",
+      {/* Filters left, search and clear right, both in the shell's context bar — the
+          rail already names the page, so there is no heading to repeat here. */}
+      <ContextBarLeft>
+        {(["all", "installed", "failed"] as const).map((v) => (
+          <ContextTab key={v} active={filter === v} onSelect={() => setFilter(v)}>
+            <span className="flex items-center gap-1.5">
+              {t(
+                v === "all"
+                  ? "downloads.filterAll"
+                  : v === "installed"
+                    ? "common.installed"
+                    : "downloads.filterFailed",
+              )}
+              <span
+                className={cn(
+                  "tabular-figures text-faint",
+                  v === "failed" && counts.failed > 0 && "text-destructive",
                 )}
-                <span
-                  className={cn(
-                    "text-muted-foreground",
-                    v === "failed" && counts.failed > 0 && "text-destructive",
-                  )}
-                >
-                  {counts[v]}
-                </span>
+              >
+                {counts[v]}
               </span>
-            ),
-          }))}
-        />
-        <div className="ml-auto flex w-[240px] items-center gap-2 rounded-lg border border-input bg-card px-3 py-2">
+            </span>
+          </ContextTab>
+        ))}
+      </ContextBarLeft>
+
+      <ContextBarRight>
+        <div className="flex h-7 w-[220px] items-center gap-2 border border-input bg-card px-2.5">
           <Search className="size-3.5 text-faint" />
           <input
             value={search}
@@ -202,7 +203,9 @@ export default function Downloads({
         >
           <Trash2 className="size-3.5" /> {t("downloads.clearAction")}
         </Button>
-      </header>
+        <HelpHint title={t("nav.downloads")} description={t("downloads.help")} />
+      </ContextBarRight>
+
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
         {loading ? (
@@ -291,7 +294,11 @@ function DownloadRow({
   const t = useT();
   const failed = record.status === "failed";
   const SourceIcon =
-    record.source === "shop" ? Store : record.source === "file" ? FileArchive : Download;
+    record.source === "shop" || record.source === "hub"
+      ? Store
+      : record.source === "file"
+        ? FileArchive
+        : Download;
   const dest = destLabel(record);
 
   return (

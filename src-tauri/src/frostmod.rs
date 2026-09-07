@@ -130,9 +130,10 @@ pub fn is_running() -> bool {
 // Must match `HandleFrostModCommand` in frostmod.cpp, verb names included.
 //
 // Verbs:
-//   `refresh_bike_model` — re-apply the named bike so a just-swapped model shows
-//       in the garage without the class-switch away-and-back. FrostMod no-ops
-//       unless that bike is the one currently selected.
+//   `refresh_bike_model` — the named bike's model changed on disk. FrostMod logs it and
+//       puts a notice on screen; it does NOT re-apply the bike (v0.9.11 removed that —
+//       the replay crashed the game). The player has to switch bike category away and
+//       back; reselecting the same bike does not re-read the model.
 //   `swap_bike` — switch the active bike outright. NOT implemented in FrostMod
 //       yet (Stage B); it logs and ignores.
 //
@@ -283,8 +284,9 @@ pub fn signal_swap_bike(bike_id: &str) -> CommandOutcome {
     send_command(command_json("swap_bike", bike_id))
 }
 
-/// Ask FrostMod to re-apply `bike_id` so a just-swapped model shows in the garage
-/// straight away. A no-op inside FrostMod unless that bike is the selected one.
+/// Tell FrostMod that `bike_id`'s model changed on disk. It answers with an in-game
+/// notice; the mesh does not reload on its own, and only a bike-category switch away
+/// and back re-reads it (see the verb table above).
 ///
 /// NOT safe to fire at every FrostMod — see `model_refresh_is_safe`, which every
 /// caller must clear first.
@@ -346,14 +348,40 @@ pub fn model_refresh_is_safe(tag: Option<&str>) -> bool {
 /// or in a bottle would take every write and never look. It would inject fine and reload on
 /// `F8`, and every button in this app would quietly do nothing. v0.13.0 is the release that
 /// polls the file, so off Windows it is the floor for starting FrostMod at all.
+// Off-Windows question: on Windows the event channel is used instead.
+#[cfg_attr(windows, allow(dead_code))]
 pub const FILE_CHANNEL_MIN_VERSION: &str = "v0.13.0";
 
 /// Does the installed FrostMod, tagged `tag`, read commands from a file?
 ///
 /// An unreadable tag counts as no — same reasoning as the floors around it, with a milder
 /// cost: the player is told to update rather than left with buttons that do nothing.
+#[cfg_attr(windows, allow(dead_code))]
 pub fn reads_command_files(tag: Option<&str>) -> bool {
     match (tag.and_then(version_parts), version_parts(FILE_CHANNEL_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => false,
+    }
+}
+
+/// The oldest FrostMod that may be installed as the session plugin.
+///
+/// A safety floor, and the sharpest one here. The session plugin is a copy of
+/// `frostmod.dll` under the name `frostmod_session.dlo`, and FrostMod decides from that
+/// name to install no hooks, draw nothing and only publish the server name. A build that
+/// predates the name doesn't know it: dropped into the game's `plugins` folder it runs as a
+/// *full* plugin, alongside the copy we inject, and two FrostMods hooking the same
+/// functions in one process is how the game hangs at a black screen before the loading
+/// screen. That has happened to a player once already, from a stale hand-installed plugin.
+///
+/// So an unreadable tag is a no, and so is anything below this: we would rather not know
+/// which server a rider is on than take their game down finding out.
+pub const SESSION_PLUGIN_MIN_VERSION: &str = "v0.17.0";
+
+/// May we install the session plugin from the FrostMod tagged `tag`?
+#[cfg_attr(not(any(windows, target_os = "linux", target_os = "macos")), allow(dead_code))]
+pub fn session_plugin_is_safe(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(SESSION_PLUGIN_MIN_VERSION)) {
         (Some(have), Some(min)) => have >= min,
         _ => false,
     }

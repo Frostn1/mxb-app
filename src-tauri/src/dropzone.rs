@@ -31,6 +31,12 @@ const PROBE_TYPE: &str = "misc";
 /// asset tree into fifty rows.
 const MAX_SPLIT_DEPTH: usize = 1;
 
+/// …and how far into a folder *share*, which is nobody's tidy archive. A sound pack shared as
+/// `PACK/ktm/250.rar` puts its sound sets three levels down once the archives are unpacked,
+/// and a search that stops at one finds a folder it can't name where there are two mods.
+/// Going deeper is safe because a split is only accepted when it identified something.
+const FOLDER_SPLIT_DEPTH: usize = 3;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ContentKind {
@@ -41,6 +47,11 @@ pub enum ContentKind {
     BikePaint,
     SoundSet,
     RiderGear,
+    /// A tyre set — `mods/tyres`. Only ever produced by [`split_tree`]: read on its own a
+    /// tyre `.pkz` looks like nothing in particular, and it is the tree it arrived in that
+    /// says what it is. The OEM bike pack ships one (`oem_mx`), and the wheel meshes of
+    /// every bike in it live there rather than in the bikes.
+    Tyres,
     /// A ReShade preset `.ini`. The one kind that doesn't live in the mods tree at all —
     /// see [`crate::reshade`].
     ReshadePreset,
@@ -60,6 +71,7 @@ impl ContentKind {
             ContentKind::Bike | ContentKind::BikePaint | ContentKind::SoundSet => {
                 Some("mods/bikes")
             }
+            ContentKind::Tyres => Some("mods/tyres"),
             ContentKind::RiderGear => Some("mods/rider"),
             ContentKind::ReshadePreset => Some(crate::reshade::SUBPATH),
             ContentKind::Unknown => None,
@@ -99,6 +111,11 @@ pub enum DetectReason {
     GearTexture,
     /// An `.ini` listing ReShade techniques.
     ReshadePreset,
+    /// The pack it came in filed it here. Used for a row inside a split `mods/` tree that
+    /// the classifier had no confident opinion about on its own — the destination is still a
+    /// fact, because the tree stated it, and saying "not recognised" about a row we are
+    /// about to install correctly would be a lie.
+    PackLayout,
     /// Nothing identified it.
     Unrecognised,
 }
@@ -252,6 +269,14 @@ struct Verdict {
     keep_folder: String,
     /// The content named its category but not its destination — the user must finish it.
     needs_choice: bool,
+    /// The category this unit came out of, when the tree it arrived in said so outright.
+    ///
+    /// A `mods/` tree is self-describing, and [`split_tree`] must not throw that away:
+    /// `mods/tyres/oem_mx.pkz` belongs in `mods/tyres` because of where it sits, not because
+    /// of what [`classify_pkz`] makes of it — read on its own that file says very little.
+    /// Set only by the split, and it overrides both the kind's own subpath and any request
+    /// for a choice: there is nothing left to ask.
+    fixed_subpath: Option<String>,
 }
 
 impl Verdict {
@@ -263,6 +288,7 @@ impl Verdict {
             dest_folder: String::new(),
             keep_folder: String::new(),
             needs_choice: false,
+            fixed_subpath: None,
         }
     }
     fn detail(mut self, d: Option<String>) -> Self {
@@ -282,6 +308,18 @@ impl Verdict {
         self.needs_choice = true;
         self
     }
+    /// Route this unit by the tree it came out of rather than by its kind, and stop asking
+    /// where it goes — the pack already answered. A classifier that came back unsure keeps
+    /// its kind (there is nothing better to show) but trades `Unrecognised` for
+    /// [`DetectReason::PackLayout`], which is what actually decided the destination.
+    fn in_pack(mut self, subpath: impl Into<String>) -> Self {
+        if self.needs_choice || self.reason == DetectReason::Unrecognised {
+            self.reason = DetectReason::PackLayout;
+        }
+        self.needs_choice = false;
+        self.fixed_subpath = Some(subpath.into());
+        self
+    }
 }
 
 /// A unit found inside a staged root, before destinations are resolved.
@@ -294,15 +332,44 @@ struct Unit {
 ///
 /// Mirrors `plan_placement`'s self-describing rules so the two agree on what counts as
 /// "obvious"; anything it declines falls through to [`classify_typed`].
-fn from_route_rule(rule: RouteRule) -> Option<Verdict> {
+fn from_route_rule(rule: RouteRule, dir: &Path, ctx: Ctx) -> Option<Verdict> {
     match rule {
         RouteRule::ModsTree => Some(Verdict::new(ContentKind::ModsTree, DetectReason::ModsTree)),
         RouteRule::CategoryDirs => Some(Verdict::new(ContentKind::ModsTree, DetectReason::CategoryDirs)),
         RouteRule::PaintsBundle => Some(Verdict::new(ContentKind::BikePaint, DetectReason::PaintsBundle)),
-        RouteRule::SoundBundle | RouteRule::LooseSound => {
-            Some(Verdict::new(ContentKind::SoundSet, DetectReason::SoundMarkers))
-        }
+        RouteRule::SoundBundle => Some(Verdict::new(ContentKind::SoundSet, DetectReason::SoundMarkers)),
+        RouteRule::LooseSound => Some(sound_verdict(&install::unwrap_wrapper(dir), ctx)),
         RouteRule::Typed => None,
+    }
+}
+
+/// The bike a folder names, if that bike is installed. The comparison is against the folder
+/// on disk, because that — not the bike's display name — is what a destination is written as.
+fn installed_bike(dir: &Path, ctx: Ctx) -> Option<String> {
+    let own = dir.file_name()?.to_string_lossy().into_owned();
+    ctx.scans
+        .bikes
+        .iter()
+        .filter_map(|b| {
+            Path::new(&b.path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+        })
+        .find(|folder| folder.eq_ignore_ascii_case(&own))
+}
+
+/// A sound set's verdict.
+///
+/// `engine.scl` + `sfx.cfg` say what it is but not what it is *for*, and the folder around
+/// them almost never names a bike: `250/`, `YZ450/`, `INSTALL_INTO_YOUR_BIKE_FOLDER/` are all
+/// real. Routing those into `mods/bikes` creates a folder the game never opens — an install
+/// that reports success and changes nothing. So the name is taken when it is a bike that
+/// exists, and asked for when it isn't.
+fn sound_verdict(dir: &Path, ctx: Ctx) -> Verdict {
+    let v = Verdict::new(ContentKind::SoundSet, DetectReason::SoundMarkers);
+    match installed_bike(dir, ctx) {
+        Some(bike) => v.keep(bike),
+        None => v.ask(),
     }
 }
 
@@ -418,6 +485,21 @@ fn classify_typed(dir: &Path, ctx: Ctx) -> Option<Verdict> {
                 .detail(detail.or(Some(id.name)))
                 .keep(folder),
         );
+    }
+
+    // A sound set. `is_sound_set` is what keeps an unpacked bike out of this arm: it carries
+    // `engine.scl` + `sfx.cfg` too, and only its own `.ini`/`.cfg` say otherwise.
+    if install::is_sound_set(dir) {
+        return Some(sound_verdict(dir, ctx));
+    }
+
+    // A sample list on its own. Plenty of sound mods ship exactly one file — an `engine.scl`
+    // in a folder called INSTALL_INTO_YOUR_BIKE_FOLDER — to drop beside the `sfx.cfg` the
+    // bike already has. It still needs a bike, so it is a sound set that asks for one.
+    if dirs_in(dir).is_empty()
+        && files_in(dir).iter().any(|p| install::has_ext(p, "scl"))
+    {
+        return Some(Verdict::new(ContentKind::SoundSet, DetectReason::SoundMarkers).ask());
     }
 
     // Rider gear ships as `helmets/`, `riders/`, … — one level below the `rider` category
@@ -606,6 +688,214 @@ fn profile_dest(profile: &str, sub: &str) -> String {
     format!("{}/{profile}/{sub}", crate::game::RIDERS_DIR)
 }
 
+/// The most rows a split may produce.
+///
+/// The OEM bike pack — the archive this exists for — is 55. A `mods/` tree far past that is
+/// somebody's whole game folder, and a review sheet with hundreds of checkboxes is worse than
+/// the one row it replaced, so over the cap the tree stays whole. That row still says exactly
+/// what it is ("Mods folder — contains a full mods folder") and installs everything, which is
+/// the behaviour every version before this had: nothing is hidden, only ungrouped.
+const MAX_SPLIT_UNITS: usize = 120;
+
+/// Whether anything under `dir` would actually be written.
+///
+/// An empty folder is not content. The OEM pack ships 54 of them — a `paints/` beside every
+/// bike, waiting for liveries that aren't there yet — and `walk_merge` carries files only, so
+/// installing the pack whole has never created them either. Skipping them here is what lets
+/// the split see `mods/bikes` as 54 packaged bikes rather than 54 bikes plus 54 folders it
+/// can't identify.
+fn holds_no_files(dir: &Path) -> bool {
+    files_in(dir).is_empty() && dirs_in(dir).iter().all(|d| holds_no_files(d))
+}
+
+/// Split a self-describing `mods/` tree into the mods it holds.
+///
+/// A pack arrives as one row otherwise: all of it or none of it, no way to see what is in it
+/// and no way to leave a bike out. The OEM bike pack is 3.8 GB of exactly that — 54 bikes and
+/// a tyre set, which is 55 decisions presented as one.
+///
+/// **The category a child sits under is its destination.** A `mods/` tree states where its
+/// contents go, and splitting it must not throw that away in favour of re-deriving it:
+/// `mods/tyres/oem_mx.pkz` is a tyre set because of where it sits, and read on its own it
+/// looks like nothing much. So the classifier is asked only for the *label* — the kind, and
+/// the bike's real name and class — while the route comes from the tree. That is the whole
+/// of what `a_mods_tree_keeps_its_own_layout` has always claimed; only the row count changes.
+///
+/// Returns `None`, leaving the tree as the single row it has always been, unless every child
+/// is either a unit that can be named or an empty folder. Anything else and a split would have
+/// to either drop content or invent a destination for it, and one honest row beats both.
+fn split_tree(rule: RouteRule, placement: &install::Placement, ctx: Ctx) -> Option<Vec<Unit>> {
+    // A folder per sound set, where nothing above them said which bikes they are for.
+    //
+    // `bikes/<Bike>/engine.scl` is the author stating the layout — a soundpack covering
+    // forty-five OEM bikes is one decision, not forty-five — so a bundle sitting under the
+    // category folder is left whole. A bundle at the root of the download is not: `250/` and
+    // `450/` name engine sizes, and merged into `mods/bikes` they become two folders the game
+    // never opens.
+    if let (RouteRule::SoundBundle, install::Placement::Merge { src, .. }) = (rule, placement) {
+        if src
+            .file_name()
+            .is_some_and(|n| install::CATEGORY_DIRS.iter().any(|c| n.eq_ignore_ascii_case(c)))
+        {
+            return None;
+        }
+        let sets: Vec<PathBuf> = dirs_in(src)
+            .into_iter()
+            .filter(|d| install::is_sound_set(d))
+            .collect();
+        if sets.iter().all(|d| installed_bike(d, ctx).is_some()) {
+            return None;
+        }
+        return Some(
+            sets.into_iter()
+                .map(|d| Unit {
+                    verdict: sound_verdict(&d, ctx),
+                    path: d,
+                })
+                .collect(),
+        );
+    }
+
+    // Both self-describing rules resolved their own paths already — the `mods` folder for a
+    // whole tree, the category folders for the looser shape — so take them rather than
+    // walking to them again and risking a different answer.
+    let cats: Vec<(String, PathBuf)> = match (rule, placement) {
+        (RouteRule::ModsTree, install::Placement::Merge { src, .. }) => {
+            // A child of `mods/` that isn't a category is content with nowhere to go. Bail
+            // rather than drop it: `walk_merge` would have copied it as part of the tree.
+            for d in dirs_in(src) {
+                let name = d.file_name()?.to_string_lossy().into_owned();
+                if !install::CATEGORY_DIRS
+                    .iter()
+                    .any(|c| c.eq_ignore_ascii_case(&name))
+                    && !holds_no_files(&d)
+                {
+                    return None;
+                }
+            }
+            if files_in(src).iter().any(|f| {
+                !install::is_junk(&f.file_name().unwrap_or_default().to_string_lossy())
+            }) {
+                return None;
+            }
+            install::CATEGORY_DIRS
+                .iter()
+                .filter_map(|c| install::child_dir(src, c).map(|p| ((*c).to_string(), p)))
+                .collect()
+        }
+        (RouteRule::CategoryDirs, install::Placement::MergeEach { pairs }) => pairs
+            .iter()
+            .filter_map(|(src, _)| {
+                let name = src.file_name()?.to_string_lossy().to_ascii_lowercase();
+                Some((name, src.clone()))
+            })
+            .collect(),
+        _ => return None,
+    };
+
+    let mut units = Vec::new();
+    for (cat, dir) in cats {
+        let subpath = format!("mods/{cat}");
+        for child in dirs_in(&dir) {
+            if holds_no_files(&child) {
+                continue;
+            }
+            // A folder the classifier can't name is one we'd have to guess about — and a
+            // category of them (a rider tree's `helmets/`, a track pack's `EU/`) is a
+            // container, not a row. Keep the tree whole instead.
+            let verdict = classify_typed(&child, ctx)?;
+            units.push(Unit {
+                path: child,
+                verdict: verdict.in_pack(subpath.as_str()),
+            });
+        }
+        for child in files_in(&dir) {
+            let name = child.file_name()?.to_string_lossy().into_owned();
+            // Readmes and the like. Splitting drops these where installing the tree whole
+            // would have copied them, which is the one behaviour this changes — and it
+            // changes it towards what every other placement in the installer already does
+            // (`walk_plain`), rather than leaving a `README.txt` loose in `mods/bikes`.
+            if install::is_junk(&name) {
+                continue;
+            }
+            // Only a package stands alone. A loose file in a category root is part of some
+            // larger arrangement we haven't understood, and splitting around it would leave
+            // it homeless.
+            if !install::has_ext(&child, "pkz") {
+                return None;
+            }
+            // `classify_pkz` knows tracks and bikes, and reads a bike's real name out of it.
+            // Where the category has a kind of its own it wins outright, exactly as it does
+            // for the destination: a tyre set carries a bike-shaped `<stem>.cfg`, so asking
+            // the classifier gets back "Bike" — a true statement about the file's shape and
+            // the wrong answer about what it is.
+            let verdict = match cat.as_str() {
+                "tyres" => Verdict::new(ContentKind::Tyres, DetectReason::PackLayout),
+                _ => classify_pkz(&child),
+            };
+            units.push(Unit {
+                path: child,
+                verdict: verdict.in_pack(subpath.as_str()),
+            });
+        }
+    }
+
+    // One unit is the tree itself by another name, and zero means an empty tree — in both
+    // cases the row it replaces is the better one.
+    (units.len() > 1 && units.len() <= MAX_SPLIT_UNITS).then_some(units)
+}
+
+/// Content sitting beside a `mods/` tree, which the tree's own route would drop.
+///
+/// Sound mods ship this shape constantly: `mods/bikes/<samples>/` next to an
+/// `INSTALL_INTO_YOUR_BIKE_FOLDER/` holding the `engine.scl` that actually switches the sound
+/// on. `walk_merge` copies the tree and nothing else, so the install placed the half that
+/// does nothing on its own and reported success.
+fn beside_tree(rule: RouteRule, placement: &install::Placement) -> Vec<PathBuf> {
+    let (RouteRule::ModsTree, install::Placement::Merge { src, .. }) = (rule, placement) else {
+        return Vec::new();
+    };
+    let Some(base) = src.parent() else {
+        return Vec::new();
+    };
+    dirs_in(base)
+        .into_iter()
+        .filter(|d| d != src && !holds_no_files(d))
+        .collect()
+}
+
+/// The rows a self-describing tree is worth breaking into, or `None` to keep it whole.
+///
+/// Two reasons to split, and they compose: the tree holds several mods, and the download
+/// holds more than the tree.
+fn packs_split(
+    dir: &Path,
+    route: &install::Route,
+    mods_dir: &Path,
+    ctx: Ctx,
+    slug: &str,
+    max_depth: usize,
+) -> Option<Vec<Unit>> {
+    let verdict = from_route_rule(route.rule, dir, ctx)?;
+    let beside = beside_tree(route.rule, &route.placement);
+    let split = split_tree(route.rule, &route.placement, ctx);
+    if beside.is_empty() {
+        return split;
+    }
+    let mut units = split.unwrap_or_else(|| vec![Unit {
+        path: dir.to_path_buf(),
+        verdict,
+    }]);
+    for d in beside {
+        let name = d
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| slug.to_string());
+        units.extend(units_in(&d, mods_dir, ctx, &name, 1, max_depth));
+    }
+    Some(units)
+}
+
 /// Split a staged root into the units the user will see as rows.
 fn units_in(
     dir: &Path,
@@ -613,9 +903,13 @@ fn units_in(
     ctx: Ctx,
     slug: &str,
     depth: usize,
+    max_depth: usize,
 ) -> Vec<Unit> {
     let route = install::plan_placement(dir, mods_dir, PROBE_TYPE, "", slug);
-    if let Some(verdict) = from_route_rule(route.rule) {
+    if let Some(verdict) = from_route_rule(route.rule, dir, ctx) {
+        if let Some(units) = packs_split(dir, &route, mods_dir, ctx, slug, max_depth) {
+            return units;
+        }
         return vec![Unit {
             path: dir.to_path_buf(),
             verdict,
@@ -633,7 +927,7 @@ fn units_in(
         }];
     }
 
-    if depth < MAX_SPLIT_DEPTH {
+    if depth < max_depth {
         let children = dirs_in(&base);
         if !children.is_empty() {
             let found: Vec<Unit> = children
@@ -643,7 +937,7 @@ fn units_in(
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_else(|| slug.to_string());
-                    units_in(c, mods_dir, ctx, &child_slug, depth + 1)
+                    units_in(c, mods_dir, ctx, &child_slug, depth + 1, max_depth)
                 })
                 .collect();
             // Only accept the split if it actually identified something; otherwise a folder
@@ -814,6 +1108,30 @@ fn all_choices(ctx: Ctx, paints: bool) -> Vec<DestChoice> {
 }
 
 /// Resolve a unit into the row the user reviews.
+/// What to call a row.
+///
+/// Its own folder, unless that says nothing — the numbered staging root, or a `250/` named
+/// for an engine size — in which case the folder the content actually sits in does. A sound
+/// pack shared as `PACK/ktm/250.rar` would otherwise list two rows both called "PACK";
+/// unwrapped, they name the bikes they are for.
+fn row_name(path: &Path, source_name: &str) -> String {
+    let own = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if !own.is_empty()
+        && own != install::STAGED_DIR
+        && !own.chars().all(|c| c.is_ascii_digit())
+    {
+        return own;
+    }
+    install::unwrap_wrapper(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .filter(|n| !n.is_empty() && *n != own)
+        .unwrap_or_else(|| source_name.to_string())
+}
+
 fn to_item(
     unit: Unit,
     ctx: Ctx,
@@ -823,23 +1141,18 @@ fn to_item(
 ) -> (DropItem, StagedItem) {
     let Unit { path, verdict } = unit;
 
-    // The staged root of an archive or a loose file is a numbered scratch directory, whose
-    // name ("0") means nothing to anyone. Fall back to what the user actually dropped.
-    let own = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let name = if own.is_empty() || own.chars().all(|c| c.is_ascii_digit()) {
-        source_name.to_string()
-    } else {
-        own
-    };
+    let name = row_name(&path, source_name);
 
     let needs_choice = verdict.needs_choice;
 
     // Every row gets a picker: identifying content correctly is not the same as knowing
     // which folder the user files it under.
-    let choices = if matches!(
+    let choices = if verdict.fixed_subpath.is_some() {
+        // A row split out of a `mods/` tree. The pack laid its own contents out and the row
+        // is being installed back into that layout, so there is no folder left to choose —
+        // the only decision still open is whether to take it at all.
+        Vec::new()
+    } else if matches!(
         verdict.kind,
         ContentKind::ModsTree | ContentKind::ReshadePreset
     ) {
@@ -869,6 +1182,8 @@ fn to_item(
 
     let subpath = if needs_choice {
         String::new()
+    } else if let Some(fixed) = &verdict.fixed_subpath {
+        fixed.clone()
     } else {
         verdict.kind.subpath().unwrap_or("mods/misc").to_string()
     };
@@ -1002,7 +1317,7 @@ pub fn plan(mods_path: &str, paths: &[String]) -> anyhow::Result<DropPlan> {
             }
         };
 
-        for unit in units_in(&root, &mods_dir, ctx, &slug, 0) {
+        for unit in units_in(&root, &mods_dir, ctx, &slug, 0, MAX_SPLIT_DEPTH) {
             let (item, st) = to_item(unit, ctx, &mods_dir, &slug, &name);
             staged.insert(item.id.clone(), st);
             items.push(item);
@@ -1027,6 +1342,108 @@ pub fn plan(mods_path: &str, paths: &[String]) -> anyhow::Result<DropPlan> {
         skipped,
         total_bytes,
     })
+}
+
+/// Put an already-extracted **pack** up for review, or say it isn't one.
+///
+/// The download path can't ask "which of these do you want?" before it has the bytes: an
+/// archive only says what it holds once it is open. So by the time the question can be put,
+/// the staging is done — and re-staging through [`plan`] would extract the OEM pack's 3.8 GB
+/// a second time. This registers the tree exactly where it already sits and takes ownership
+/// of `work`, which [`commit`] and [`cancel`] then clean up as they do for any drop.
+///
+/// `Ok(None)` means this is an ordinary single-mod download and the caller should place it
+/// the way it always has. The test is deliberately narrow: only a tree that [`split_tree`]
+/// takes apart becomes a review. A three-livery zip still installs without interrupting
+/// anyone, because nothing about it was ever ambiguous.
+pub fn plan_extracted(
+    mods_path: &str,
+    root: &Path,
+    work: PathBuf,
+    source_name: &str,
+) -> anyhow::Result<Option<DropPlan>> {
+    if mods_path.trim().is_empty() {
+        anyhow::bail!("no MX Bikes folder configured");
+    }
+    let mods_dir = library::mods_subdir(mods_path, "mods");
+    let scans = Scans::new(mods_path);
+    let ctx = Ctx::new(mods_path, &scans);
+    let slug = Path::new(source_name)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| source_name.to_string());
+
+    let route = install::plan_placement(root, &mods_dir, PROBE_TYPE, "", &slug);
+    let Some(units) = packs_split(root, &route, &mods_dir, ctx, &slug, MAX_SPLIT_DEPTH) else {
+        return Ok(None);
+    };
+
+    Ok(Some(stage_plan(units, ctx, &mods_dir, &slug, source_name, work)))
+}
+
+/// Plan a download that arrived as a *folder* rather than an archive.
+///
+/// It is somebody's mod as they laid it out on their drive — loose files, or a folder per
+/// bike — and that is exactly a drop. So it is classified like one and always reviewed: the
+/// destination is a judgement the layout doesn't state, and guessing it is what put six
+/// liveries and a sound mod somewhere the game never reads.
+pub fn plan_folder(
+    mods_path: &str,
+    root: &Path,
+    work: PathBuf,
+    source_name: &str,
+) -> anyhow::Result<DropPlan> {
+    if mods_path.trim().is_empty() {
+        anyhow::bail!("no MX Bikes folder configured");
+    }
+    let mods_dir = library::mods_subdir(mods_path, "mods");
+    let scans = Scans::new(mods_path);
+    let ctx = Ctx::new(mods_path, &scans);
+    let slug = Path::new(source_name)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| source_name.to_string());
+
+    let units = units_in(root, &mods_dir, ctx, &slug, 0, FOLDER_SPLIT_DEPTH);
+    Ok(stage_plan(units, ctx, &mods_dir, &slug, source_name, work))
+}
+
+/// Turn classified units into a plan the review sheet can drive, and remember where their
+/// files are staged so `commit` can find them.
+fn stage_plan(
+    units: Vec<Unit>,
+    ctx: Ctx,
+    mods_dir: &Path,
+    slug: &str,
+    source_name: &str,
+    work: PathBuf,
+) -> DropPlan {
+    let plan_id = next_id("pack");
+    let mut items = Vec::new();
+    let mut staged = HashMap::new();
+    for unit in units {
+        let (item, st) = to_item(unit, ctx, mods_dir, slug, source_name);
+        staged.insert(item.id.clone(), st);
+        items.push(item);
+    }
+    let total_bytes = items.iter().map(|i| i.bytes).sum();
+
+    with_plans(|m| {
+        m.insert(
+            plan_id.clone(),
+            StagedPlan {
+                work: Some(work),
+                items: staged,
+            },
+        )
+    });
+
+    DropPlan {
+        id: plan_id,
+        items,
+        skipped: Vec::new(),
+        total_bytes,
+    }
 }
 
 /// Re-price one row after the user changed its destination.
@@ -1342,7 +1759,7 @@ mod tests {
         );
         write(&root.join("drop/MX1OEM_2023/MX1OEM_2023.cfg"), "ID = X\n");
 
-        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0);
+        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0, MAX_SPLIT_DEPTH);
         let kinds: Vec<ContentKind> = units.iter().map(|u| u.verdict.kind).collect();
         assert!(kinds.contains(&ContentKind::Track), "{kinds:?}");
         assert!(kinds.contains(&ContentKind::Bike), "{kinds:?}");
@@ -1356,7 +1773,7 @@ mod tests {
         write(&root.join("drop/Hangtown v2/Hangtown.map"), "m");
         write(&root.join("drop/Hangtown v2/readme.txt"), "hi");
 
-        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0);
+        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0, MAX_SPLIT_DEPTH);
         assert_eq!(units.len(), 1);
         assert_eq!(units[0].verdict.kind, ContentKind::Track);
     }
@@ -1367,10 +1784,252 @@ mod tests {
         let mods = root.join("mods");
         write(&root.join("drop/mods/tracks/Hangtown/Hangtown.map"), "m");
 
-        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0);
+        // One thing in the tree is still one row: splitting would only rename it.
+        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0, MAX_SPLIT_DEPTH);
         assert_eq!(units.len(), 1);
         assert_eq!(units[0].verdict.kind, ContentKind::ModsTree);
         assert_eq!(units[0].verdict.reason, DetectReason::ModsTree);
+    }
+
+    /// Split a real pack and report what came out.
+    ///
+    /// Synthetic `.pkz` files are plain zips holding two tiny config entries; the real ones
+    /// are 21–184 MB in a format of PiBoSo's own, some of them sealed. Whether the classifier
+    /// can name 54 of those, and what it costs to do it once per row, is not a thing the
+    /// fixtures above can answer.
+    ///
+    /// `MXB_REAL_PACK=<dir> cargo test real_pack_splits -- --ignored --nocapture`, where the
+    /// directory holds a `mods/` tree.
+    #[test]
+    #[ignore]
+    fn real_pack_splits() {
+        let Ok(dir) = std::env::var("MXB_REAL_PACK") else {
+            eprintln!("set MXB_REAL_PACK to a folder holding a mods/ tree");
+            return;
+        };
+        let root = PathBuf::from(dir);
+        // Where the time goes, one layer at a time.
+        let t0 = std::time::Instant::now();
+        let installed = crate::bikeswap::scan_installed_bikes(&root.to_string_lossy());
+        println!(
+            "scan_installed_bikes: {} bike(s) in {:?}  (what `Scans::new` costs every drop)",
+            installed.len(),
+            t0.elapsed()
+        );
+
+        let bikes = root.join("mods/bikes");
+        let one = files_in(&bikes).into_iter().find(|p| install::has_ext(p, "pkz"));
+        if let Some(p) = &one {
+            let t = std::time::Instant::now();
+            let n = crate::pkz::entry_names(p).map(|v| v.len()).unwrap_or(0);
+            println!("  entry_names on one .pkz: {n} entries in {:?}", t.elapsed());
+            let t = std::time::Instant::now();
+            let _ = crate::bikeswap::read_identity(p);
+            println!("  read_identity on one .pkz: {:?}", t.elapsed());
+        }
+
+        let started = std::time::Instant::now();
+        let units = units_in(&root, &root.join("__nowhere__"), mx(""), "pack", 0, MAX_SPLIT_DEPTH);
+        let elapsed = started.elapsed();
+
+        println!("{} row(s) in {elapsed:?}", units.len());
+        let mut by_kind: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        for u in &units {
+            *by_kind.entry(format!("{:?}", u.verdict.kind)).or_default() += 1;
+        }
+        println!("by kind: {by_kind:?}");
+        for u in units.iter().take(60) {
+            println!(
+                "  {:>8} -> {:<12} {}{}",
+                format!("{:?}", u.verdict.kind),
+                u.verdict.fixed_subpath.as_deref().unwrap_or("(by kind)"),
+                u.path.file_name().unwrap_or_default().to_string_lossy(),
+                u.verdict
+                    .detail
+                    .as_deref()
+                    .map(|d| format!("  — {d}"))
+                    .unwrap_or_default(),
+            );
+        }
+    }
+
+    /// A packaged bike, as a `.pkz` holding the two config files that name it.
+    fn write_bike_pkz(path: &Path, stem: &str, name: &str, class: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        make_zip(
+            path,
+            &[
+                (
+                    Box::leak(format!("{stem}.ini").into_boxed_str()),
+                    Box::leak(format!("[info]\nname = {name}\n[data]\ncat = {class}\n").into_boxed_str()),
+                ),
+                (
+                    Box::leak(format!("{stem}.cfg").into_boxed_str()),
+                    Box::leak(format!("ID = {stem}\n").into_boxed_str()),
+                ),
+            ],
+        );
+    }
+
+    /// The shape of the OEM bike pack, in miniature: a `mods/` tree carrying several packaged
+    /// bikes, an empty `paints/` folder beside each one, and the tyre set the bikes' wheels
+    /// actually live in. The whole point of the split — 3.8 GB and 55 mods arrived as one
+    /// take-it-or-leave-it row.
+    fn write_oem_pack(drop: &Path, bikes: &[&str]) {
+        for b in bikes {
+            write_bike_pkz(
+                &drop.join(format!("mods/bikes/{b}.pkz")),
+                b,
+                &format!("{b} display"),
+                "MX1 OEM",
+            );
+            // Ships empty, waiting for liveries. Nothing to install, and never was.
+            fs::create_dir_all(drop.join(format!("mods/bikes/{b}/paints"))).unwrap();
+        }
+        // Shaped like a bike on purpose. The real `oem_mx.pkz` carries `oem_mx.ini` and
+        // `oem_mx.cfg`, so `classify_pkz` reads it as a bike — and landing it in `mods/bikes`
+        // would take the wheels off all 54 of them. Only the tree knows better.
+        make_zip(
+            &drop.join("mods/tyres/oem_mx.pkz"),
+            &[
+                ("oem_mx.ini", "[info]\nname = OEM MX Tyres\n"),
+                ("oem_mx.cfg", "ID = oem_mx\n"),
+            ],
+        );
+    }
+
+    #[test]
+    fn a_bike_pack_splits_into_the_bikes_it_holds() {
+        let root = tmp("packsplit");
+        let mods = root.join("mods");
+        let drop = root.join("drop");
+        fs::create_dir_all(drop.join("mods/tyres")).unwrap();
+        write_oem_pack(&drop, &["MX1OEM_2023_KTM_450", "MX2OEM_2023_KTM_250"]);
+
+        let units = units_in(&drop, &mods, mx(""), "drop", 0, MAX_SPLIT_DEPTH);
+
+        // Two bikes and the tyre set — not one "mods folder", and not five rows either: the
+        // empty `paints/` folders are not content.
+        assert_eq!(units.len(), 3, "two bikes and a tyre set");
+
+        let bikes: Vec<&Unit> = units
+            .iter()
+            .filter(|u| u.verdict.kind == ContentKind::Bike)
+            .collect();
+        assert_eq!(bikes.len(), 2);
+        for b in &bikes {
+            assert_eq!(b.verdict.fixed_subpath.as_deref(), Some("mods/bikes"));
+            assert!(!b.verdict.needs_choice, "the pack already said where it goes");
+            // The row is named by the bike, not by the file.
+            assert!(
+                b.verdict.detail.as_deref().unwrap_or("").contains("display"),
+                "expected the bike's own name, got {:?}",
+                b.verdict.detail
+            );
+        }
+
+        let tyres = units
+            .iter()
+            .find(|u| u.verdict.kind == ContentKind::Tyres)
+            .expect("the tyre set is a row of its own");
+        // The whole reason the tree routes rather than the classifier: read on its own this
+        // file says nothing, and landing it in `mods/bikes` would break every wheel in the pack.
+        assert_eq!(tyres.verdict.fixed_subpath.as_deref(), Some("mods/tyres"));
+        assert_eq!(tyres.verdict.reason, DetectReason::PackLayout);
+        assert!(!tyres.verdict.needs_choice);
+    }
+
+    #[test]
+    fn a_split_row_offers_no_destination_and_installs_where_the_pack_said() {
+        let root = tmp("packrow");
+        let mods = root.join("mods");
+        let drop = root.join("drop");
+        fs::create_dir_all(drop.join("mods/tyres")).unwrap();
+        write_oem_pack(&drop, &["MX1OEM_2023_KTM_450", "MX2OEM_2023_KTM_250"]);
+
+        let units = units_in(&drop, &mods, mx(""), "drop", 0, MAX_SPLIT_DEPTH);
+        let tyres = units
+            .into_iter()
+            .find(|u| u.verdict.kind == ContentKind::Tyres)
+            .unwrap();
+        let (item, staged) = to_item(tyres, mx(""), &mods, "drop", "MX_OEM.zip");
+
+        assert_eq!(item.subpath, "mods/tyres");
+        assert!(item.choices.is_empty(), "nothing left to choose");
+        assert!(!item.needs_choice);
+        assert_eq!(item.file_count, 1, "one package, previewed as one write");
+        assert!(item.bytes > 0, "a single-file unit still reports its size");
+
+        let wrote = install_one(&mods, &root.to_string_lossy(), &staged.path, &item.subpath, &item.dest_folder, "drop")
+            .unwrap();
+        assert_eq!(wrote, 1);
+        assert!(
+            mods.join("tyres/oem_mx.pkz").is_file(),
+            "the tyre set lands in mods/tyres"
+        );
+        assert!(!mods.join("bikes/oem_mx.pkz").exists());
+    }
+
+    #[test]
+    fn a_tree_holding_something_it_cannot_name_stays_one_row() {
+        let root = tmp("packunknown");
+        let mods = root.join("mods");
+        let drop = root.join("drop");
+        fs::create_dir_all(drop.join("mods/tyres")).unwrap();
+        write_oem_pack(&drop, &["MX1OEM_2023_KTM_450", "MX2OEM_2023_KTM_250"]);
+        // A loose file in a category root belongs to some arrangement we haven't understood.
+        write(&drop.join("mods/bikes/spare_model.edf"), "e");
+
+        let units = units_in(&drop, &mods, mx(""), "drop", 0, MAX_SPLIT_DEPTH);
+        assert_eq!(units.len(), 1, "one honest row beats a split that drops content");
+        assert_eq!(units[0].verdict.kind, ContentKind::ModsTree);
+    }
+
+    /// A readme is not what stops a split. Every other placement in the installer drops these
+    /// (`install::is_junk`), and a pack that ships one beside its bikes — most of them do — is
+    /// the ordinary case, not the ambiguous one.
+    #[test]
+    fn a_readme_beside_the_bikes_does_not_stop_the_split() {
+        let root = tmp("packreadme");
+        let mods = root.join("mods");
+        let drop = root.join("drop");
+        fs::create_dir_all(drop.join("mods/tyres")).unwrap();
+        write_oem_pack(&drop, &["MX1OEM_2023_KTM_450", "MX2OEM_2023_KTM_250"]);
+        write(&drop.join("mods/bikes/README.txt"), "install me");
+
+        let units = units_in(&drop, &mods, mx(""), "drop", 0, MAX_SPLIT_DEPTH);
+        assert_eq!(units.len(), 3);
+    }
+
+    #[test]
+    fn a_tree_with_a_folder_outside_the_categories_stays_one_row() {
+        let root = tmp("packstray");
+        let mods = root.join("mods");
+        let drop = root.join("drop");
+        fs::create_dir_all(drop.join("mods/tyres")).unwrap();
+        write_oem_pack(&drop, &["MX1OEM_2023_KTM_450", "MX2OEM_2023_KTM_250"]);
+        write(&drop.join("mods/documentation/changelog.txt"), "v1");
+
+        let units = units_in(&drop, &mods, mx(""), "drop", 0, MAX_SPLIT_DEPTH);
+        assert_eq!(units.len(), 1);
+        assert_eq!(units[0].verdict.kind, ContentKind::ModsTree);
+    }
+
+    #[test]
+    fn a_tree_past_the_cap_stays_one_row() {
+        let root = tmp("packcap");
+        let mods = root.join("mods");
+        let drop = root.join("drop");
+        fs::create_dir_all(drop.join("mods/bikes")).unwrap();
+        for i in 0..=MAX_SPLIT_UNITS {
+            let stem = format!("Bike{i:04}");
+            write_bike_pkz(&drop.join(format!("mods/bikes/{stem}.pkz")), &stem, &stem, "MX1");
+        }
+
+        let units = units_in(&drop, &mods, mx(""), "drop", 0, MAX_SPLIT_DEPTH);
+        assert_eq!(units.len(), 1, "hundreds of checkboxes is worse than one row");
+        assert_eq!(units[0].verdict.kind, ContentKind::ModsTree);
     }
 
     /// A dropped preset is staged as `<slug>/<slug>.ini`, which is exactly the shape
@@ -1385,7 +2044,7 @@ mod tests {
             "Techniques=Clarity@Clarity.fx\n[Clarity.fx]\nAmount=1.0\n",
         );
 
-        let units = units_in(&root.join("drop"), &mods, mx(""), "Realistic MXB", 0);
+        let units = units_in(&root.join("drop"), &mods, mx(""), "Realistic MXB", 0, MAX_SPLIT_DEPTH);
         assert_eq!(units.len(), 1);
         assert_eq!(units[0].verdict.kind, ContentKind::ReshadePreset);
         assert_eq!(units[0].verdict.reason, DetectReason::ReshadePreset);
@@ -1413,8 +2072,95 @@ mod tests {
         write(&root.join("drop/KX450/KX450.ini"), "name = KX450\n");
         write(&root.join("drop/KX450/KX450.cfg"), "id { KX450 }\n");
 
-        let units = units_in(&root.join("drop"), &mods, mx(""), "KX450", 0);
+        let units = units_in(&root.join("drop"), &mods, mx(""), "KX450", 0, MAX_SPLIT_DEPTH);
         assert_eq!(units[0].verdict.kind, ContentKind::Bike);
+    }
+
+    /// The shape every "it said it worked and it didn't" sound-mod report has in common: a
+    /// `mods/` tree carrying the samples, and the `engine.scl` that switches them on sitting
+    /// in a folder beside it. Routing the tree and dropping the rest installed the half that
+    /// does nothing.
+    #[test]
+    fn content_beside_a_mods_tree_is_not_dropped() {
+        let root = tmp("beside-tree");
+        let mods = root.join("mods");
+        write(&root.join("drop/mods/bikes/soundmods/samples/idle.wav"), "w");
+        write(&root.join("drop/INSTALL_INTO_YOUR_BIKE_FOLDER/engine.scl"), "e");
+        write(&root.join("drop/INSTALL_INTO_YOUR_BIKE_FOLDER/sfx.cfg"), "s");
+        write(&root.join("drop/READ ME.txt"), "put these in your bike folder");
+
+        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0, MAX_SPLIT_DEPTH);
+        assert_eq!(units.len(), 2, "the tree and the folder beside it");
+        assert_eq!(units[0].verdict.kind, ContentKind::ModsTree);
+        assert_eq!(units[1].verdict.kind, ContentKind::SoundSet);
+        assert!(
+            units[1].verdict.needs_choice,
+            "INSTALL_INTO_YOUR_BIKE_FOLDER names no bike — ask which one"
+        );
+    }
+
+    /// Two sound sets in one download, named for engine sizes rather than for bikes. Merged
+    /// into `mods/bikes` they become `mods/bikes/250` and `mods/bikes/450`, which the game
+    /// never opens.
+    #[test]
+    fn each_sound_set_gets_its_own_row() {
+        let root = tmp("sound-sets");
+        let mods = root.join("mods");
+        for set in ["250", "450"] {
+            write(&root.join(format!("drop/{set}/engine.scl")), "e");
+            write(&root.join(format!("drop/{set}/sfx.cfg")), "s");
+        }
+
+        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0, MAX_SPLIT_DEPTH);
+        assert_eq!(units.len(), 2);
+        for u in &units {
+            assert_eq!(u.verdict.kind, ContentKind::SoundSet);
+            assert!(u.verdict.needs_choice, "only the user knows which bike");
+        }
+    }
+
+    /// The other half of that rule: a folder that names a bike the player has installed is
+    /// already saying where it goes, and asking would be a question with one answer.
+    #[test]
+    fn a_sound_set_named_for_an_installed_bike_routes_itself() {
+        let root = tmp("sound-known-bike");
+        let mods_path = root.join("game");
+        let mods = library::mods_subdir(&mods_path.to_string_lossy(), "mods");
+        write(&mods.join("bikes/KX450/KX450.ini"), "name = KX450\n");
+        write(&mods.join("bikes/KX450/KX450.cfg"), "id { KX450 }\n");
+        write(&root.join("drop/KX450/engine.scl"), "e");
+        write(&root.join("drop/KX450/sfx.cfg"), "s");
+
+        let ctx = mx(Box::leak(
+            mods_path.to_string_lossy().into_owned().into_boxed_str(),
+        ));
+        let units = units_in(&root.join("drop"), &mods, ctx, "drop", 0, MAX_SPLIT_DEPTH);
+        assert_eq!(units.len(), 1);
+        assert_eq!(units[0].verdict.kind, ContentKind::SoundSet);
+        assert!(!units[0].verdict.needs_choice);
+
+        let route = install::plan_placement(&units[0].path, &mods, "bikes", "", "drop");
+        assert!(install::writes_for(&route.placement)
+            .iter()
+            .all(|(_, dst)| dst.starts_with(mods.join("bikes/KX450"))));
+    }
+
+    /// An unpacked bike carries `engine.scl` + `sfx.cfg` like every bike does. Read as a
+    /// sound set it would be emptied into some other bike's folder.
+    #[test]
+    fn an_unpacked_bike_is_not_a_sound_set() {
+        let root = tmp("unpacked-bike");
+        let mods = root.join("mods");
+        let bike = root.join("drop/Modded Surron");
+        write(&bike.join("Modded Surron.ini"), "name = Modded Surron\n");
+        write(&bike.join("Modded Surron.cfg"), "id { surron }\n");
+        write(&bike.join("engine.scl"), "e");
+        write(&bike.join("sfx.cfg"), "s");
+
+        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0, MAX_SPLIT_DEPTH);
+        assert_eq!(units.len(), 1);
+        assert_eq!(units[0].verdict.kind, ContentKind::Bike);
+        assert_eq!(units[0].verdict.dest_folder, "Modded Surron");
     }
 
     #[test]
@@ -1423,7 +2169,7 @@ mod tests {
         write(&root.join("drop/frame.edf"), "\0\0\0");
 
         let mods = root.join("mods");
-        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0);
+        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0, MAX_SPLIT_DEPTH);
         assert_eq!(units.len(), 1);
         assert_eq!(units[0].verdict.kind, ContentKind::Unknown);
 
@@ -1711,7 +2457,7 @@ mod tests {
         }
         write_pnt(&pack.join("Livery/Livery.pnt"), &["framecompletemap", "wheels"]);
 
-        let units = units_in(&pack, &mods, mx(""), "Pack", 0);
+        let units = units_in(&pack, &mods, mx(""), "Pack", 0, MAX_SPLIT_DEPTH);
         assert_eq!(units.len(), 9, "one row per paint, none skipped");
         assert_eq!(
             units.iter().filter(|u| u.verdict.reason == DetectReason::RiderTexture).count(),
@@ -1900,7 +2646,7 @@ mod tests {
         let src = root.join("Hangtown");
         write(&src.join("Hangtown.map"), "m");
 
-        let units = units_in(&src, &mods, mx(""), "Hangtown", 0);
+        let units = units_in(&src, &mods, mx(""), "Hangtown", 0, MAX_SPLIT_DEPTH);
         let (item, _) = to_item(
             units.into_iter().next().unwrap(),
             mx(""),

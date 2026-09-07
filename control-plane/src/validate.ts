@@ -308,3 +308,68 @@ export function isServerKey(value: unknown): value is string {
  * waiting for the day the numbers drifted apart.
  */
 export const PRESENCE_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * An install id, as the app mints it: a random UUID in its own config.
+ *
+ * Not an account, not a machine fingerprint, and not derived from anything about the player
+ * — the only thing it proves is that two reports came from the same install. Held to the
+ * UUID shape so a client that decided to send something identifying (a rider name, a path,
+ * a GUID) is rejected rather than quietly stored.
+ */
+export function isInstallId(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+/**
+ * An app version, as `package.json` carries it: semver, optionally with a pre-release tag.
+ *
+ * Bounded and closed rather than free text, because it becomes a column people group by —
+ * one client sending something odd would otherwise show up as a version of its own.
+ */
+export function isAppVersion(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  if (value.length > 32) return false;
+  return /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(value);
+}
+
+/** The platforms the app builds for. A closed list: it is a grouping key, not a detail. */
+export const PLATFORMS = ["windows", "macos", "linux"] as const;
+
+export function isPlatform(value: unknown): value is (typeof PLATFORMS)[number] {
+  return typeof value === "string" && (PLATFORMS as readonly string[]).includes(value);
+}
+
+/** The titles the app can drive. Same reasoning as `isPlatform`. */
+export function isGameId(value: unknown): value is string {
+  return value === "mxb" || value === "gpb";
+}
+
+/**
+ * A usage event name — `area.thing`, up to four segments.
+ *
+ * Lower-case and punctuation-free by construction, so a name can never carry a rider name, a
+ * path or anything else identifying even if a future call site is careless about what it
+ * passes. The shape is also what makes the dashboard's grouping possible: everything before
+ * the first dot is the area.
+ */
+export function isEventName(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  if (value.length > 48) return false;
+  return /^[a-z][a-z0-9]*(\.[a-z0-9-]+){1,3}$/.test(value);
+}
+
+/** Events per report. A session touching more than this many distinct things is a client bug. */
+export const MAX_EVENTS_PER_REPORT = 64;
+
+/** Per-event count. Absurdly high for a real session, which is the point of a backstop. */
+export const MAX_EVENT_COUNT = 100_000;
+
+/** Minutes claimed in one report. A day is the most that can honestly be reported at once. */
+export const MAX_REPORT_MINUTES = 1440;
+
+/** A count of something, as reported. Whole, positive, and inside the cap. */
+export function isCount(value: unknown, max: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= max;
+}

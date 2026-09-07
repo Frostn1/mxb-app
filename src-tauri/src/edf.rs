@@ -186,10 +186,22 @@ fn f32le(b: &[u8], o: usize) -> f32 {
     f32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
 }
 
-fn finite_pos(b: &[u8], o: usize) -> bool {
+/// How far from the origin a vertex may sit and still look like one.
+///
+/// A bike is two metres and a rider less, so a tight bound is most of what tells a real
+/// vertex block from a run of bytes that happens to parse as floats.
+const MODEL_EXTENT: f32 = 200.0;
+
+/// The same, for models built at track scale.
+///
+/// A track's sky dome reaches 1.5 km from its centre and its backdrop 750 m — every vertex in
+/// them fails the model bound, so under it a whole sky reads as no geometry at all.
+const WORLD_EXTENT: f32 = 100_000.0;
+
+fn finite_pos(b: &[u8], o: usize, extent: f32) -> bool {
     (0..3).all(|k| {
         let v = f32le(b, o + 4 * k);
-        v.is_finite() && v.abs() < 200.0
+        v.is_finite() && v.abs() < extent
     })
 }
 
@@ -197,6 +209,7 @@ fn finite_pos(b: &[u8], o: usize) -> bool {
 /// magic. Written by the exporter over the *placed* mesh, so it is the one statement in the
 /// file about where the geometry ends up, and the way to tell a placement that ran twice
 /// from one that ran once. Covers every node and LOD in the file.
+#[allow(dead_code)]
 pub fn header_aabb(b: &[u8]) -> Option<([f32; 3], [f32; 3])> {
     if b.len() < HEADER_START || &b[0..4] != b"EDF\0" {
         return None;
@@ -208,9 +221,24 @@ pub fn header_aabb(b: &[u8]) -> Option<([f32; 3], [f32; 3])> {
         .then_some((lo, hi))
 }
 
+/// Whether these bytes are an `.edf` at all. A file that arrives sealed, damaged or half
+/// downloaded fails here, before any of the parse below is worth attempting.
+pub fn is_edf(b: &[u8]) -> bool {
+    b.len() >= HEADER_START + 8 && &b[0..4] == b"EDF\0"
+}
+
 // Parse an .edf into its renderable mesh nodes (highest-detail LOD of each part).
 pub fn parse(b: &[u8]) -> Vec<EdfNode> {
-    parse_impl(b, &[], false)
+    parse_impl(b, &[], false, MODEL_EXTENT)
+}
+
+/// Parse a model built at track scale — a sky dome, a backdrop, a grandstand.
+///
+/// Identical to [`parse`] but for the bound a vertex has to sit inside. Everything a track
+/// ships is placed in world metres, so the tight bound that protects a bike parse throws the
+/// whole model away.
+pub fn parse_world(b: &[u8]) -> Vec<EdfNode> {
+    parse_impl(b, &[], false, WORLD_EXTENT)
 }
 
 /// Parse a gear mesh: as [`parse`], but a node whose geometry is a single group takes its
@@ -222,18 +250,18 @@ pub fn parse(b: &[u8]) -> Vec<EdfNode> {
 /// fork and swingarm too, and re-checking a whole bike's assembly against these bounds is
 /// its own piece of work.
 pub fn parse_gear(b: &[u8]) -> Vec<EdfNode> {
-    parse_impl(b, &[], true)
+    parse_impl(b, &[], true, MODEL_EXTENT)
 }
 
 // Parse keeping exactly the nodes the bike's .hrc declares as level0; empty slice
 // falls back to level0_only's name heuristic.
 pub fn parse_with_levels(b: &[u8], level0: &[String]) -> Vec<EdfNode> {
-    parse_impl(b, level0, false)
+    parse_impl(b, level0, false, MODEL_EXTENT)
 }
 
-fn parse_impl(b: &[u8], level0: &[String], node_matrix_once: bool) -> Vec<EdfNode> {
+fn parse_impl(b: &[u8], level0: &[String], node_matrix_once: bool, extent: f32) -> Vec<EdfNode> {
     let n = b.len();
-    if n < HEADER_START + 8 || &b[0..4] != b"EDF\0" {
+    if !is_edf(b) {
         return Vec::new();
     }
     let mut nodes = Vec::new();
@@ -247,7 +275,7 @@ fn parse_impl(b: &[u8], level0: &[String], node_matrix_once: bool) -> Vec<EdfNod
         if (8..=MAX_COUNT).contains(&vc) && o + 4 + vc * STRIDE + 8 <= n {
             let vs = o + 4;
             let samples = [0usize, 1, 2, vc / 2, vc - 1];
-            if samples.iter().all(|&i| finite_pos(b, vs + i * 12)) {
+            if samples.iter().all(|&i| finite_pos(b, vs + i * 12, extent)) {
                 let ic = vs + vc * STRIDE;
                 let tc = u32le(b, ic) as usize;
                 if (1..=MAX_COUNT).contains(&tc) && ic + 8 + tc * 12 <= n {
@@ -270,7 +298,16 @@ fn parse_impl(b: &[u8], level0: &[String], node_matrix_once: bool) -> Vec<EdfNod
                         // `o` is the node's vertex-count word — its material table ends there.
                         let mats = node_material_table(b, o, textures);
                         nodes.push(read_node(
-                            b, &cands, vs, vc, raw, iend, tc, name, mats, node_matrix_once,
+                            b,
+                            &cands,
+                            vs,
+                            vc,
+                            raw,
+                            iend,
+                            tc,
+                            name,
+                            mats,
+                            node_matrix_once,
                         ));
                         o = iend; // jump past this block
                         continue;
@@ -286,7 +323,10 @@ fn parse_impl(b: &[u8], level0: &[String], node_matrix_once: bool) -> Vec<EdfNod
     }
     let want: std::collections::HashSet<String> =
         level0.iter().map(|n| n.to_ascii_lowercase()).collect();
-    if !nodes.iter().any(|n| want.contains(&n.name.to_ascii_lowercase())) {
+    if !nodes
+        .iter()
+        .any(|n| want.contains(&n.name.to_ascii_lowercase()))
+    {
         log::warn!("edf: .hrc level0 {level0:?} matched no node — using the name heuristic");
         return level0_only(nodes);
     }
@@ -334,7 +374,14 @@ fn mounts(
     let front_upper = *g.get("front_upper")?;
     let rake = -sc.get("rakeangle_min").copied().unwrap_or(0.0);
     let fork_origin = v_add(rot_x(v_sub(front_upper, steer_joint), rake), head);
-    Some(Mounts { rake, head, pivot, steer_joint, rsusp_joint, fork_origin })
+    Some(Mounts {
+        rake,
+        head,
+        pivot,
+        steer_joint,
+        rsusp_joint,
+        fork_origin,
+    })
 }
 
 impl Mounts {
@@ -344,11 +391,18 @@ impl Mounts {
     /// taken at the midpoint of the chain-adjuster range the .geom gives as `rwheel_min`/
     /// `rwheel_max`. `None` when the .geom names neither — a bike we can still assemble but
     /// can't say where the wheels ride on.
-    fn axles(&self, g: &std::collections::HashMap<String, [f32; 3]>) -> Option<([f32; 3], [f32; 3])> {
+    fn axles(
+        &self,
+        g: &std::collections::HashMap<String, [f32; 3]>,
+    ) -> Option<([f32; 3], [f32; 3])> {
         let fwheel = *g.get("fwheel")?;
         let lo = *g.get("rwheel_min")?;
         let hi = g.get("rwheel_max").copied().unwrap_or(lo);
-        let rear = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5];
+        let rear = [
+            (lo[0] + hi[0]) * 0.5,
+            (lo[1] + hi[1]) * 0.5,
+            (lo[2] + hi[2]) * 0.5,
+        ];
         Some((
             v_add(rot_x(fwheel, self.rake), self.fork_origin),
             v_add(rear, v_sub(self.pivot, self.rsusp_joint)),
@@ -531,7 +585,9 @@ fn plausible_name(b: &[u8], o: usize) -> Option<String> {
         if c == 0 {
             break;
         }
-        if !(c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-')) {
+        // A colon is a namespace prefix an exporter left on — a track's sky dome comes out of
+        // Maya as `tmp1:dome`, and rejecting the name threw the whole sky away.
+        if !(c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-' | b':')) {
             return None;
         }
         e += 1;
@@ -824,7 +880,9 @@ fn tex_name(b: &[u8], o: usize) -> Option<String> {
         e += 1;
     }
     let len = e - o;
-    (1..=39).contains(&len).then(|| String::from_utf8_lossy(&b[o..e]).into_owned())
+    (1..=39)
+        .contains(&len)
+        .then(|| String::from_utf8_lossy(&b[o..e]).into_owned())
 }
 
 // Enumerate every texture in a model.edf, in file order. Anchored on the name, then
@@ -833,9 +891,19 @@ pub fn embedded_textures(b: &[u8]) -> Vec<EmbeddedTexture> {
     const SIZES: [u32; 7] = [64, 128, 256, 512, 1024, 2048, 4096];
     let mut out = Vec::new();
     let mut o = 0usize;
+    // Where the last accepted record ended. The next one starts exactly there, and at that
+    // one offset the boundary rule below does not apply — see the comment on it.
+    let mut resume = usize::MAX;
     'scan: while o + TEX_W_FROM_NAME[1] + TEX_DATA_FROM_W <= b.len() {
-        // A name starts a record only at a word boundary (else `2021crf` also matches at `crf`).
-        if !b[o].is_ascii_alphanumeric() || (o > 0 && b[o - 1].is_ascii_alphanumeric()) {
+        // A name starts a record only at a word boundary (else `2021crf` also matches at
+        // `crf`) — except immediately after a record we have already accepted, where the
+        // preceding byte is the tail of a DEFLATE stream and says nothing. It is ASCII
+        // alphanumeric about a quarter of the time, and the record after it was being
+        // dropped: a two-sheet model came back with one sheet, and which one depended on
+        // how its pixels happened to compress.
+        if !b[o].is_ascii_alphanumeric()
+            || (o > 0 && o != resume && b[o - 1].is_ascii_alphanumeric())
+        {
             o += 1;
             continue;
         }
@@ -869,6 +937,7 @@ pub fn embedded_textures(b: &[u8]) -> Vec<EmbeddedTexture> {
                 data_len,
             });
             o = data_off + data_len; // records don't overlap — skip the payload
+            resume = o;
             continue 'scan;
         }
         o += 1;
@@ -938,8 +1007,8 @@ fn read_node(
     let raw_subs: Vec<RawSub> = detect_submeshes(b, cands, iend, raw_tris, vc)
         .into_iter()
         .flat_map(|s| {
-            let ranges = read_sub_group_ranges(b, s.block_off, raw_tris, vc)
-                .filter(|r| r.len() > 1);
+            let ranges =
+                read_sub_group_ranges(b, s.block_off, raw_tris, vc).filter(|r| r.len() > 1);
             let Some(ranges) = ranges else { return vec![s] };
             // Each range names its own material in the word just BEFORE its 24-byte entry:
             // range 0 takes the word at `block_off - 4`, and every later range takes the
@@ -962,7 +1031,8 @@ fn read_node(
         })
         .collect();
     // Covers the node when the submesh triangle counts sum to the raw total.
-    let covers = !raw_subs.is_empty() && raw_subs.iter().map(|s| s.tri_count).sum::<usize>() == raw_tris;
+    let covers =
+        !raw_subs.is_empty() && raw_subs.iter().map(|s| s.tri_count).sum::<usize>() == raw_tris;
 
     // Place the geometry: each submesh's own transform composed with the node
     // orientation matrix (at iend, the name offset) yields its .geom LOCAL frame.
@@ -1047,7 +1117,9 @@ fn read_node(
                     texture: None,
                     uv_tile: uv_tile(&uvs, s.vert_start, s.vert_count),
                     // Split skinned range carries its own mat; else read u32 at block_off - 4.
-                    mat: s.mat.or_else(|| s.block_off.checked_sub(4).map(|o| u32le(b, o))),
+                    mat: s
+                        .mat
+                        .or_else(|| s.block_off.checked_sub(4).map(|o| u32le(b, o))),
                 });
                 kept_start += kept;
             }
@@ -1101,7 +1173,12 @@ fn read_cname(b: &[u8], o: usize) -> String {
 // (tri_start, tri_count, vert_start, vert_count) and pair is 2 u32. The pair ends
 // the group when it reads (cumulative vert_count, group's FIRST vert_start); anything
 // else (in practice (0,1)) means another range follows. Name sits at block - 252.
-fn read_sub_group(b: &[u8], o: usize, tot_tris: usize, tot_verts: usize) -> Option<(usize, usize, usize, usize)> {
+fn read_sub_group(
+    b: &[u8],
+    o: usize,
+    tot_tris: usize,
+    tot_verts: usize,
+) -> Option<(usize, usize, usize, usize)> {
     let tri_start = u32le(b, o) as usize;
     let first_vs = u32le(b, o + 8) as usize;
     let (mut tri_total, mut vc_total) = (0usize, 0usize);
@@ -1242,8 +1319,9 @@ fn chain_submeshes(
     tot_tris: usize,
     tot_verts: usize,
 ) -> Option<Vec<RawSub>> {
-    let in_bounds =
-        |c: &SubCand| c.tri_start + c.tri_count <= tot_tris && c.vert_start + c.vert_count <= tot_verts;
+    let in_bounds = |c: &SubCand| {
+        c.tri_start + c.tri_count <= tot_tris && c.vert_start + c.vert_count <= tot_verts
+    };
     let start = cands
         .iter()
         .filter(|c| c.tri_start == 0 && c.vert_start == 0 && c.block_off >= iend && in_bounds(c))
@@ -1280,7 +1358,12 @@ fn chain_submeshes(
 
 // Fallback for detect_submeshes: scan a fixed ~200 KB window from the node's name for
 // matrix-anchored records and chain them by contiguity.
-fn detect_submeshes_window(b: &[u8], iend: usize, tot_tris: usize, tot_verts: usize) -> Vec<RawSub> {
+fn detect_submeshes_window(
+    b: &[u8],
+    iend: usize,
+    tot_tris: usize,
+    tot_verts: usize,
+) -> Vec<RawSub> {
     use std::collections::HashMap;
     let window = 200_000usize.min(b.len().saturating_sub(iend));
     // Candidate blocks, indexed by tri_start.
@@ -1306,8 +1389,14 @@ fn detect_submeshes_window(b: &[u8], iend: usize, tot_tris: usize, tot_verts: us
             .iter()
             .find(|(_, _, vstart, _)| *vstart == run_v)
             .or_else(|| opts.first());
-        let Some(&(o, cnt, vstart, vcnt)) = pick else { break };
-        let name = if o >= 252 { read_cname(b, o - 252) } else { String::new() };
+        let Some(&(o, cnt, vstart, vcnt)) = pick else {
+            break;
+        };
+        let name = if o >= 252 {
+            read_cname(b, o - 252)
+        } else {
+            String::new()
+        };
         out.push(RawSub {
             name,
             tri_start: run_t,
@@ -1504,7 +1593,11 @@ fn read_block(b: &[u8], o: usize) -> Option<BoneBlock> {
     if !affine_at(b, first) {
         return None;
     }
-    let inv_bind = if two { Some(read_mat4(b, first + 64)?) } else { None };
+    let inv_bind = if two {
+        Some(read_mat4(b, first + 64)?)
+    } else {
+        None
+    };
     let fields = first + if two { 128 } else { 64 };
     // Step over the index words: the name is the first thing that reads as one with three zero
     // words and a finite AABB in front of it.
@@ -1582,7 +1675,9 @@ fn bone_name(b: &[u8], o: usize) -> Option<String> {
         }
         e += 1;
     }
-    (2..=63).contains(&(e - o)).then(|| String::from_utf8_lossy(&b[o..e]).into_owned())
+    (2..=63)
+        .contains(&(e - o))
+        .then(|| String::from_utf8_lossy(&b[o..e]).into_owned())
 }
 
 /// Rebuild the bone tree from the names.
@@ -1597,9 +1692,15 @@ fn bone_name(b: &[u8], o: usize) -> Option<String> {
 /// so that holds of every real one, and insisting on it is what keeps the result a tree: a bone
 /// inside a cycle hangs off no root, and nothing ever works out where it is.
 fn rig_parents(names: &[String]) -> Vec<Option<usize>> {
-    let stems: Vec<String> = names.iter().map(|n| bone_stem(n).to_ascii_lowercase()).collect();
-    let index: std::collections::HashMap<&str, usize> =
-        stems.iter().enumerate().map(|(i, s)| (s.as_str(), i)).collect();
+    let stems: Vec<String> = names
+        .iter()
+        .map(|n| bone_stem(n).to_ascii_lowercase())
+        .collect();
+    let index: std::collections::HashMap<&str, usize> = stems
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.as_str(), i))
+        .collect();
     (0..names.len())
         .map(|i| {
             if i == 0 {
@@ -1684,8 +1785,11 @@ fn named_parent(stem: &str) -> Option<String> {
     let digit = joint.chars().last().filter(char::is_ascii_digit)?;
     let base = &joint[..joint.len() - 1];
     if digit == '1' {
-        return matches!(base, "thumb" | "index" | "middle" | "ring" | "pink" | "pinky")
-            .then(|| format!("{side}wrist"));
+        return matches!(
+            base,
+            "thumb" | "index" | "middle" | "ring" | "pink" | "pinky"
+        )
+        .then(|| format!("{side}wrist"));
     }
     let prev = (digit as u8 - 1) as char;
     Some(format!("{side}{base}{prev}"))
@@ -1835,7 +1939,8 @@ fn claims(bone: &Bone, point: &[f32; 3]) -> bool {
     }
     let m = &bone.inv_bind;
     (0..3).all(|a| {
-        let p = m[a * 4] * point[0] + m[a * 4 + 1] * point[1] + m[a * 4 + 2] * point[2] + m[a * 4 + 3];
+        let p =
+            m[a * 4] * point[0] + m[a * 4 + 1] * point[1] + m[a * 4 + 2] * point[2] + m[a * 4 + 3];
         p >= bone.aabb_lo[a] && p <= bone.aabb_hi[a]
     })
 }
@@ -1893,8 +1998,8 @@ mod tests {
             materials: Vec::new(),
         };
 
-        let v: serde_json::Value = serde_json::from_str(&serde_json::to_string(&node).unwrap())
-            .unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&node).unwrap()).unwrap();
 
         let floats = |key: &str| -> Vec<f32> {
             let b = STANDARD.decode(v[key].as_str().unwrap()).unwrap();
@@ -1927,7 +2032,10 @@ mod tests {
         let mut enc = DeflateEncoder::new(Vec::new(), flate2::Compression::default());
         enc.write_all(&vec![0u8; 64 * 1024 * 1024]).unwrap();
         let payload = enc.finish().unwrap();
-        assert!(payload.len() < 1024 * 1024, "the point is that it compresses hard");
+        assert!(
+            payload.len() < 1024 * 1024,
+            "the point is that it compresses hard"
+        );
 
         let tex = EmbeddedTexture {
             name: "bomb".into(),
@@ -1937,18 +2045,34 @@ mod tests {
             data_len: payload.len(),
         };
         let out = inflate_texture(&payload, &tex).expect("still decodes");
-        assert_eq!(out.len(), 64 * 64 * 4, "bounded by what the record claims to be");
+        assert_eq!(
+            out.len(),
+            64 * 64 * 4,
+            "bounded by what the record claims to be"
+        );
     }
 
     // Material indices count the colour textures, so a map counted among them slides every
     // later texture onto the wrong mesh — the Tactical Vest wore its pouch's normal map.
     #[test]
     fn exporter_named_maps_are_companions_not_colour() {
-        for name in ["Vest_Normal", "chest_Roughness", "brace_AO", "pouch_metallic", "shell_n"] {
+        for name in [
+            "Vest_Normal",
+            "chest_Roughness",
+            "brace_AO",
+            "pouch_metallic",
+            "shell_n",
+        ] {
             assert!(is_companion_texture(name), "'{name}' is a map");
         }
         // The look itself, however it's spelled.
-        for name in ["Vest_BaseColor", "chest_diffuse", "CK_A1", "bake1", "aphair"] {
+        for name in [
+            "Vest_BaseColor",
+            "chest_diffuse",
+            "CK_A1",
+            "bake1",
+            "aphair",
+        ] {
             assert!(!is_companion_texture(name), "'{name}' is the look");
         }
     }
@@ -1973,7 +2097,10 @@ mod tests {
     fn a_nodes_material_table_is_read_back_off_its_vertex_count() {
         let b = material_table_bytes(&[3, 1, 0], 512);
         // One-based into the declared colours, and 0 means the material carries no texture.
-        assert_eq!(node_material_table(&b, 512, 3), vec![Some(2), Some(0), None]);
+        assert_eq!(
+            node_material_table(&b, 512, 3),
+            vec![Some(2), Some(0), None]
+        );
     }
 
     /// A model declares more texture slots than it embeds — the Bell Moto 10 leaves its
@@ -2022,11 +2149,22 @@ mod tests {
             }
         }
         eprintln!("nodes: {}", nodes.len());
-        eprintln!("overall bbox lo={lo:?} hi={hi:?}  size={:?}", [hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]]);
+        eprintln!(
+            "overall bbox lo={lo:?} hi={hi:?}  size={:?}",
+            [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]
+        );
         for n in &nodes {
-            eprintln!("  node '{}'  verts={}  submeshes={}", n.name, n.positions.len() / 3, n.submeshes.len());
+            eprintln!(
+                "  node '{}'  verts={}  submeshes={}",
+                n.name,
+                n.positions.len() / 3,
+                n.submeshes.len()
+            );
             for sm in &n.submeshes {
-                eprintln!("      submesh '{}'  tris={}  tex={:?}", sm.name, sm.tri_count, sm.texture);
+                eprintln!(
+                    "      submesh '{}'  tris={}  tex={:?}",
+                    sm.name, sm.tri_count, sm.texture
+                );
             }
         }
     }
@@ -2046,7 +2184,10 @@ mod tests {
     fn reads_single_range_submesh_group() {
         // The real Honda chassis' first group: tris 0..31846, verts 0..24904.
         let b = group_bytes(&[(0, 31846, 0, 24904)], &[(24904, 0)]);
-        assert_eq!(read_sub_group(&b, 0, 46184, 35689), Some((0, 31846, 0, 24904)));
+        assert_eq!(
+            read_sub_group(&b, 0, 46184, 35689),
+            Some((0, 31846, 0, 24904))
+        );
     }
 
     // Real bytes of the Yamaha YZ450F's `fsusp` first group (a multi-range group).
@@ -2088,24 +2229,51 @@ mod tests {
     fn chains_records_split_across_a_gap() {
         let b = [0u8; 8]; // block_off < 252 → names skipped, buffer unused
         let cands = vec![
-            SubCand { block_off: 100, tri_start: 0, tri_count: 9096, vert_start: 0, vert_count: 6816 },
-            SubCand { block_off: 200, tri_start: 9096, tri_count: 39214, vert_start: 6816, vert_count: 28502 },
+            SubCand {
+                block_off: 100,
+                tri_start: 0,
+                tri_count: 9096,
+                vert_start: 0,
+                vert_count: 6816,
+            },
+            SubCand {
+                block_off: 200,
+                tri_start: 9096,
+                tri_count: 39214,
+                vert_start: 6816,
+                vert_count: 28502,
+            },
         ];
         let subs = chain_submeshes(&b, &cands, 0, 48310, 35318).expect("chain reconciles");
         assert_eq!(subs.len(), 2);
         assert_eq!(subs[0].tri_start, 0);
         assert_eq!(subs[1].tri_start, 9096);
         assert_eq!(subs.iter().map(|s| s.tri_count).sum::<usize>(), 48310);
-        assert_eq!(subs.last().unwrap().vert_start + subs.last().unwrap().vert_count, 35318);
+        assert_eq!(
+            subs.last().unwrap().vert_start + subs.last().unwrap().vert_count,
+            35318
+        );
     }
 
     #[test]
     fn rejects_unreconcilable_chain() {
         let b = [0u8; 8];
         let cands = vec![
-            SubCand { block_off: 100, tri_start: 0, tri_count: 9096, vert_start: 0, vert_count: 6816 },
+            SubCand {
+                block_off: 100,
+                tri_start: 0,
+                tri_count: 9096,
+                vert_start: 0,
+                vert_count: 6816,
+            },
             // vert_start doesn't continue 6816 → the chain can't reach it.
-            SubCand { block_off: 200, tri_start: 9096, tri_count: 39214, vert_start: 9999, vert_count: 28502 },
+            SubCand {
+                block_off: 200,
+                tri_start: 9096,
+                tri_count: 39214,
+                vert_start: 9999,
+                vert_count: 28502,
+            },
         ];
         assert!(chain_submeshes(&b, &cands, 0, 48310, 35318).is_none());
     }
@@ -2135,7 +2303,10 @@ mod tests {
             ch.submeshes.len()
         );
         assert!(ch.placed, "chassis must be placed");
-        assert!(!ch.submeshes.is_empty(), "chassis must have a submesh table");
+        assert!(
+            !ch.submeshes.is_empty(),
+            "chassis must have a submesh table"
+        );
         assert_eq!(
             covered as usize,
             ch.indices.len() / 3,
@@ -2185,7 +2356,11 @@ seat_height_ref = 0, 0.9115, -0.1674\n";
     }
 
     fn vertex(n: &EdfNode, i: usize) -> [f32; 3] {
-        [n.positions[i * 3], n.positions[i * 3 + 1], n.positions[i * 3 + 2]]
+        [
+            n.positions[i * 3],
+            n.positions[i * 3 + 1],
+            n.positions[i * 3 + 2],
+        ]
     }
 
     fn close(a: [f32; 3], b: [f32; 3], tol: f32) -> bool {
@@ -2208,7 +2383,10 @@ seat_height_ref = 0, 0.9115, -0.1674\n";
         // Both axles on the bike's centreline, and within a wheel's worth of the same height —
         // a rig that had the rear swung out would pass the wheelbase check and nothing else.
         assert!(front[0].abs() < 1e-4 && rear[0].abs() < 1e-4);
-        assert!((front[1] - rear[1]).abs() < 0.05, "axles {front:?} {rear:?}");
+        assert!(
+            (front[1] - rear[1]).abs() < 0.05,
+            "axles {front:?} {rear:?}"
+        );
     }
 
     /// The rig names points *on the mesh*, so it has to survive the centring the mesh gets:
@@ -2240,14 +2418,26 @@ seat_height_ref = 0, 0.9115, -0.1674\n";
     fn the_seat_lands_where_the_geom_puts_it() {
         let g = parse_geom(CR250_GEOM);
         let seat = g["seat_height_ref"];
-        let mut nodes = [mount_node("chassis", &[[0.0, 0.0, 0.0], [0.0, 1.2, 0.9], seat])];
+        let mut nodes = [mount_node(
+            "chassis",
+            &[[0.0, 0.0, 0.0], [0.0, 1.2, 0.9], seat],
+        )];
         let rig = assemble_bike(&mut nodes, CR250_GEOM).expect("assembled");
         let at = rig.seat.expect("the .geom names a seat");
-        assert!(close(vertex(&nodes[0], 2), at, 1e-4), "seat {at:?} left the mesh");
+        assert!(
+            close(vertex(&nodes[0], 2), at, 1e-4),
+            "seat {at:?} left the mesh"
+        );
         // And it is a seat: above both axles, and between them rather than out past a wheel.
         let (front, rear) = (rig.front_axle.expect("front"), rig.rear_axle.expect("rear"));
-        assert!(at[1] > front[1] + 0.3 && at[1] > rear[1] + 0.3, "seat {at:?} is not above the axles");
-        assert!(at[2] < front[2] && at[2] > rear[2], "seat {at:?} is not between the wheels");
+        assert!(
+            at[1] > front[1] + 0.3 && at[1] > rear[1] + 0.3,
+            "seat {at:?} is not above the axles"
+        );
+        assert!(
+            at[2] < front[2] && at[2] > rear[2],
+            "seat {at:?} is not between the wheels"
+        );
     }
 
     /// A .geom with no seat line leaves it unset rather than dropping a rider on the origin.
@@ -2259,7 +2449,10 @@ seat_height_ref = 0, 0.9115, -0.1674\n";
             .flat_map(|l| l.iter().copied().chain(std::iter::once(b'\n')))
             .collect();
         let mut nodes = [mount_node("chassis", &[[0.0, 0.0, 0.0], [0.0, 1.2, 0.9]])];
-        assert_eq!(assemble_bike(&mut nodes, &trimmed).expect("assembled").seat, None);
+        assert_eq!(
+            assemble_bike(&mut nodes, &trimmed).expect("assembled").seat,
+            None
+        );
     }
 
     /// …and the same again through the mirror into three.js' frame.
@@ -2276,11 +2469,17 @@ seat_height_ref = 0, 0.9115, -0.1674\n";
         let before = rig.pivot;
         to_right_handed(&mut nodes);
         rig.to_right_handed();
-        assert!((rig.pivot[0] + before[0]).abs() < 1e-6, "x should have flipped");
+        assert!(
+            (rig.pivot[0] + before[0]).abs() < 1e-6,
+            "x should have flipped"
+        );
         assert_eq!(rig.pivot[1], before[1]);
         // The swingarm vertex sits 0.25 m off the pivot either side of the mirror.
         let d = vertex(&nodes[1], 0)[0] - rig.pivot[0];
-        assert!((d + 0.25).abs() < 1e-4, "mesh and rig disagree after mirroring: {d}");
+        assert!(
+            (d + 0.25).abs() < 1e-4,
+            "mesh and rig disagree after mirroring: {d}"
+        );
     }
 
     /// The mount points of a real bike (MX1OEM_2023_Honda_CRF450R), trimmed to the lines
@@ -2317,9 +2516,18 @@ rwheel_max = 0, -0.001, -0.5683\n";
     #[test]
     fn wheel_axles_land_a_real_wheelbase_apart() {
         let (front, rear) = wheel_axles(CRF450R_GEOM).expect("the mounts are all there");
-        assert!((front[1] - 0.4086).abs() < 5e-3, "front axle height: {front:?}");
-        assert!((front[2] - 0.6761).abs() < 5e-3, "front axle reach: {front:?}");
-        assert!((rear[1] - 0.4631).abs() < 5e-3, "rear axle height: {rear:?}");
+        assert!(
+            (front[1] - 0.4086).abs() < 5e-3,
+            "front axle height: {front:?}"
+        );
+        assert!(
+            (front[2] - 0.6761).abs() < 5e-3,
+            "front axle reach: {front:?}"
+        );
+        assert!(
+            (rear[1] - 0.4631).abs() < 5e-3,
+            "rear axle height: {rear:?}"
+        );
         assert!((rear[2] + 0.7999).abs() < 5e-3, "rear axle reach: {rear:?}");
         let wheelbase = front[2] - rear[2];
         assert!(
@@ -2348,10 +2556,20 @@ rwheel_max = 0, -0.001, -0.5683\n";
         let (front, rear) = wheel_axles(CRF450R_GEOM).unwrap();
         // A chassis vertex at the origin, so the centring pass has a third point to work
         // with and the two wheels keep their real separation.
-        let mut nodes = vec![wheel_node("chassis"), wheel_node("fwheel"), wheel_node("rwheela")];
+        let mut nodes = vec![
+            wheel_node("chassis"),
+            wheel_node("fwheel"),
+            wheel_node("rwheela"),
+        ];
         assert!(assemble_bike(&mut nodes, CRF450R_GEOM).is_some());
         // Everything is shifted by the same centring offset, so compare the gap.
-        let at = |i: usize| [nodes[i].positions[0], nodes[i].positions[1], nodes[i].positions[2]];
+        let at = |i: usize| {
+            [
+                nodes[i].positions[0],
+                nodes[i].positions[1],
+                nodes[i].positions[2],
+            ]
+        };
         let (f, r) = (at(1), at(2));
         for k in 0..3 {
             assert!(
@@ -2374,8 +2592,15 @@ rwheel_max = 0, -0.001, -0.5683\n";
             .collect::<Vec<_>>()
             .concat();
         assert!(wheel_axles(&geom).is_none());
-        let mut nodes = vec![wheel_node("chassis"), wheel_node("steer"), wheel_node("fwheel")];
-        assert!(assemble_bike(&mut nodes, &geom).is_some(), "the bike still assembles");
+        let mut nodes = vec![
+            wheel_node("chassis"),
+            wheel_node("steer"),
+            wheel_node("fwheel"),
+        ];
+        assert!(
+            assemble_bike(&mut nodes, &geom).is_some(),
+            "the bike still assembles"
+        );
         // The steering head moved; the wheel, having no mount, did not.
         assert_ne!(nodes[1].positions, nodes[0].positions, "steer was placed");
     }
@@ -2418,7 +2643,7 @@ rwheel_max = 0, -0.001, -0.5683\n";
             }
         }
         b.extend_from_slice(&1u32.to_le_bytes()); // submesh_count
-        // The parser anchors on a node name right after the index buffer.
+                                                  // The parser anchors on a node name right after the index buffer.
         b.extend_from_slice(b"testnode\0");
         b
     }
@@ -2432,7 +2657,7 @@ rwheel_max = 0, -0.001, -0.5683\n";
         assert_eq!(node.positions.len(), 24); // 8 verts * 3
         assert_eq!(node.uvs.len(), 16); // 8 verts * 2
         assert_eq!(node.normals.len(), 24); // 8 verts * 3
-        // Indices decode exactly as authored (plain triangle list read from ic+4).
+                                            // Indices decode exactly as authored (plain triangle list read from ic+4).
         assert_eq!(node.indices, vec![0, 1, 2, 3, 4, 5]);
     }
 
@@ -2485,14 +2710,20 @@ rwheel_max = 0, -0.001, -0.5683\n";
             );
         }
         // Swingarm must run rearward (-Z) from its pivot, not forward.
-        if let Some(rs) = nodes.iter().find(|n| n.name.to_ascii_lowercase().starts_with("rsusp")) {
+        if let Some(rs) = nodes
+            .iter()
+            .find(|n| n.name.to_ascii_lowercase().starts_with("rsusp"))
+        {
             let (mut zlo, mut zhi) = (f32::MAX, f32::MIN);
             for p in rs.positions.chunks_exact(3) {
                 zlo = zlo.min(p[2]);
                 zhi = zhi.max(p[2]);
             }
             eprintln!("rsusp local z [{zlo}, {zhi}]");
-            assert!(zlo < -0.4, "swingarm should reach ~-0.57 rearward, got {zlo}");
+            assert!(
+                zlo < -0.4,
+                "swingarm should reach ~-0.57 rearward, got {zlo}"
+            );
             assert!(zhi < 0.2, "swingarm should not extend forward, got {zhi}");
         }
     }
@@ -2509,13 +2740,15 @@ rwheel_max = 0, -0.001, -0.5683\n";
         let bytes = std::fs::read(&path).expect("read real edf");
         let texs = embedded_textures(&bytes);
         for t in &texs {
-            eprintln!("tex '{}' {}x{} data@{} len={}", t.name, t.width, t.height, t.data_off, t.data_len);
+            eprintln!(
+                "tex '{}' {}x{} data@{} len={}",
+                t.name, t.width, t.height, t.data_off, t.data_len
+            );
         }
         assert!(!texs.is_empty(), "found the model's textures");
         // Every record must inflate to width*height*4 RGBA bytes (_r maps exempt).
         for t in texs.iter().filter(|t| !t.name.ends_with("_r")) {
-            let rgba = inflate_texture(&bytes, t)
-                .unwrap_or_else(|| panic!("inflate '{}'", t.name));
+            let rgba = inflate_texture(&bytes, t).unwrap_or_else(|| panic!("inflate '{}'", t.name));
             assert_eq!(rgba.len(), (t.width as usize) * (t.height as usize) * 4);
         }
         // Names must come through whole (a mis-set field offset truncates them).
@@ -2579,14 +2812,16 @@ rwheel_max = 0, -0.001, -0.5683\n";
                 lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]
             );
             for s in &n.submeshes {
-                eprintln!("    submesh '{}' tri[{}..{})", s.name, s.tri_start, s.tri_start + s.tri_count);
+                eprintln!(
+                    "    submesh '{}' tri[{}..{})",
+                    s.name,
+                    s.tri_start,
+                    s.tri_start + s.tri_count
+                );
             }
             assert!(verts >= 8 && tris >= 1);
         }
     }
-
-
-
 
     // ── The rig ───────────────────────────────────────────────────────────────
 
@@ -2600,7 +2835,14 @@ rwheel_max = 0, -0.001, -0.5683\n";
         hi: [f32; 3],
     ) -> Vec<u8> {
         let mut v = Vec::new();
-        v.extend_from_slice(&(if inv_bind.is_some() { 0x1800u32 } else { 0x1000 }).to_le_bytes());
+        v.extend_from_slice(
+            &(if inv_bind.is_some() {
+                0x1800u32
+            } else {
+                0x1000
+            })
+            .to_le_bytes(),
+        );
         let local = placed(0.0, 0.0, 0.0);
         for m in std::iter::once(local).chain(inv_bind) {
             for f in m {
@@ -2619,7 +2861,9 @@ rwheel_max = 0, -0.001, -0.5683\n";
     }
 
     fn placed(x: f32, y: f32, z: f32) -> [f32; 16] {
-        [1.0, 0.0, 0.0, x, 0.0, 1.0, 0.0, y, 0.0, 0.0, 1.0, z, 0.0, 0.0, 0.0, 1.0]
+        [
+            1.0, 0.0, 0.0, x, 0.0, 1.0, 0.0, y, 0.0, 0.0, 1.0, z, 0.0, 0.0, 0.0, 1.0,
+        ]
     }
 
     /// A bone at `(x, y, z)` stores the transform that takes the model *into* its frame.
@@ -2642,7 +2886,13 @@ rwheel_max = 0, -0.001, -0.5683\n";
         // record belongs to the mesh node, so it carries no bind of its own.
         let bytes = rig_file(&[
             bone_block("riderRIG_Root", None, &[0, 1, 1], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_Pelvis", Some(bind_at(0.0, 0.0, 0.0)), &[1, 1, 2], [0.0; 3], [0.0; 3]),
+            bone_block(
+                "riderRIG_Pelvis",
+                Some(bind_at(0.0, 0.0, 0.0)),
+                &[1, 1, 2],
+                [0.0; 3],
+                [0.0; 3],
+            ),
             bone_block(
                 "riderRIG_LeftHip",
                 Some(bind_at(0.0, 0.0, -0.887)),
@@ -2660,13 +2910,19 @@ rwheel_max = 0, -0.001, -0.5683\n";
         ]);
         let rig = parse_skeleton(&bytes);
         let names: Vec<&str> = rig.iter().map(|b| b.name.as_str()).collect();
-        assert_eq!(names, ["riderRIG_Root", "riderRIG_Pelvis", "riderRIG_LeftHip"]);
+        assert_eq!(
+            names,
+            ["riderRIG_Root", "riderRIG_Pelvis", "riderRIG_LeftHip"]
+        );
         assert_eq!(rig[0].parent, None, "only the root is parentless");
         assert_eq!(rig[1].parent, Some(0), "the pelvis hangs off the root");
         assert_eq!(rig[2].parent, Some(1), "and the hip off the pelvis");
         // The bind is derived from the stored inverse, so a bone reports where it really is.
         let hip = rig[2].origin();
-        assert!((hip[2] + 0.864).abs() < 1e-5 && (hip[0] - 0.085).abs() < 1e-5, "{hip:?}");
+        assert!(
+            (hip[2] + 0.864).abs() < 1e-5 && (hip[0] - 0.085).abs() < 1e-5,
+            "{hip:?}"
+        );
         assert_eq!(rig[1].origin(), [0.0, 0.0, -0.887]);
     }
 
@@ -2679,9 +2935,27 @@ rwheel_max = 0, -0.001, -0.5683\n";
         let copy = |lo: [f32; 3], hi: [f32; 3]| {
             vec![
                 bone_block("riderRIG_Pelvis", None, &[0], [0.0; 3], [0.0; 3]),
-                bone_block("riderRIG_LeftHip", Some(bind_at(0.0, 0.9, 0.0)), &[1], lo, hi),
-                bone_block("riderRIG_LeftKnee", Some(bind_at(0.1, 0.5, 0.0)), &[2], lo, hi),
-                bone_block("riderRIG_Spine1", Some(bind_at(0.1, 0.2, 0.0)), &[3], lo, hi),
+                bone_block(
+                    "riderRIG_LeftHip",
+                    Some(bind_at(0.0, 0.9, 0.0)),
+                    &[1],
+                    lo,
+                    hi,
+                ),
+                bone_block(
+                    "riderRIG_LeftKnee",
+                    Some(bind_at(0.1, 0.5, 0.0)),
+                    &[2],
+                    lo,
+                    hi,
+                ),
+                bone_block(
+                    "riderRIG_Spine1",
+                    Some(bind_at(0.1, 0.2, 0.0)),
+                    &[3],
+                    lo,
+                    hi,
+                ),
             ]
         };
         let mut blocks = copy([-0.1, -0.1, -0.1], [0.1, 0.1, 0.1]);
@@ -2702,14 +2976,36 @@ rwheel_max = 0, -0.001, -0.5683\n";
         // that comes later is a misread — and taking it would be a cycle.
         let bytes = rig_file(&[
             bone_block("riderRIG_Pelvis", None, &[0], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_LeftKnee", Some(bind_at(0.0, 0.9, 0.0)), &[1], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_LeftHip", Some(bind_at(0.1, 0.5, 0.0)), &[2], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_Head", Some(bind_at(0.1, 0.2, 0.0)), &[3], [0.0; 3], [0.0; 3]),
+            bone_block(
+                "riderRIG_LeftKnee",
+                Some(bind_at(0.0, 0.9, 0.0)),
+                &[1],
+                [0.0; 3],
+                [0.0; 3],
+            ),
+            bone_block(
+                "riderRIG_LeftHip",
+                Some(bind_at(0.1, 0.5, 0.0)),
+                &[2],
+                [0.0; 3],
+                [0.0; 3],
+            ),
+            bone_block(
+                "riderRIG_Head",
+                Some(bind_at(0.1, 0.2, 0.0)),
+                &[3],
+                [0.0; 3],
+                [0.0; 3],
+            ),
         ]);
         let rig = parse_skeleton(&bytes);
         assert_eq!(rig[0].parent, None, "only the first bone is parentless");
         for (i, b) in rig.iter().enumerate() {
-            assert!(b.parent.is_none_or(|p| p < i), "{} hangs off a later bone", b.name);
+            assert!(
+                b.parent.is_none_or(|p| p < i),
+                "{} hangs off a later bone",
+                b.name
+            );
         }
     }
 
@@ -2722,23 +3018,78 @@ rwheel_max = 0, -0.001, -0.5683\n";
         let at = |x: f32, z: f32| Some(bind_at(x, 0.0, z));
         let bytes = rig_file(&[
             bone_block("riderRIG_LeftHip", None, &[0], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_LeftKnee", at(0.085, -0.864), &[1], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_LeftHipTwist2", at(0.138, -0.503), &[2], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_RightHip", at(0.113, -0.678), &[3], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_RightKnee", at(-0.085, -0.864), &[4], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_LeftCollar", at(-0.138, -0.503), &[5], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_LeftShoulder", at(-0.019, -1.368), &[6], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_Spare", at(-0.183, -1.311), &[7], [0.0; 3], [0.0; 3]),
+            bone_block(
+                "riderRIG_LeftKnee",
+                at(0.085, -0.864),
+                &[1],
+                [0.0; 3],
+                [0.0; 3],
+            ),
+            bone_block(
+                "riderRIG_LeftHipTwist2",
+                at(0.138, -0.503),
+                &[2],
+                [0.0; 3],
+                [0.0; 3],
+            ),
+            bone_block(
+                "riderRIG_RightHip",
+                at(0.113, -0.678),
+                &[3],
+                [0.0; 3],
+                [0.0; 3],
+            ),
+            bone_block(
+                "riderRIG_RightKnee",
+                at(-0.085, -0.864),
+                &[4],
+                [0.0; 3],
+                [0.0; 3],
+            ),
+            bone_block(
+                "riderRIG_LeftCollar",
+                at(-0.138, -0.503),
+                &[5],
+                [0.0; 3],
+                [0.0; 3],
+            ),
+            bone_block(
+                "riderRIG_LeftShoulder",
+                at(-0.019, -1.368),
+                &[6],
+                [0.0; 3],
+                [0.0; 3],
+            ),
+            bone_block(
+                "riderRIG_Spare",
+                at(-0.183, -1.311),
+                &[7],
+                [0.0; 3],
+                [0.0; 3],
+            ),
         ]);
         let rig = parse_skeleton(&bytes);
         let at_name = |n: &str| rig.iter().position(|b| b.name == n).expect(n);
         let parent = |n: &str| rig[at_name(n)].parent.map(|p| rig[p].name.clone());
-        assert_eq!(parent("riderRIG_LeftKnee").as_deref(), Some("riderRIG_LeftHip"));
-        assert_eq!(parent("riderRIG_RightKnee").as_deref(), Some("riderRIG_RightHip"));
-        assert_eq!(parent("riderRIG_LeftShoulder").as_deref(), Some("riderRIG_LeftCollar"));
+        assert_eq!(
+            parent("riderRIG_LeftKnee").as_deref(),
+            Some("riderRIG_LeftHip")
+        );
+        assert_eq!(
+            parent("riderRIG_RightKnee").as_deref(),
+            Some("riderRIG_RightHip")
+        );
+        assert_eq!(
+            parent("riderRIG_LeftShoulder").as_deref(),
+            Some("riderRIG_LeftCollar")
+        );
         // The three the model gives no ancestor for stand on their own.
         assert_eq!(parent("riderRIG_LeftHip"), None);
-        assert_eq!(parent("riderRIG_RightHip"), None, "a leg does not hang off the other leg");
+        assert_eq!(
+            parent("riderRIG_RightHip"),
+            None,
+            "a leg does not hang off the other leg"
+        );
         assert_eq!(parent("riderRIG_LeftCollar"), None, "nor an arm off a leg");
     }
 
@@ -2748,8 +3099,20 @@ rwheel_max = 0, -0.001, -0.5683\n";
         // before it is the best guess there is, and that is still what it gets.
         let bytes = rig_file(&[
             bone_block("riderRIG_Pelvis", None, &[0], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_Cape", Some(bind_at(0.0, 0.0, -0.887)), &[1], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_Spare", Some(bind_at(0.0, 0.1, -1.2)), &[2], [0.0; 3], [0.0; 3]),
+            bone_block(
+                "riderRIG_Cape",
+                Some(bind_at(0.0, 0.0, -0.887)),
+                &[1],
+                [0.0; 3],
+                [0.0; 3],
+            ),
+            bone_block(
+                "riderRIG_Spare",
+                Some(bind_at(0.0, 0.1, -1.2)),
+                &[2],
+                [0.0; 3],
+                [0.0; 3],
+            ),
         ]);
         let rig = parse_skeleton(&bytes);
         assert_eq!(rig[1].name, "riderRIG_Cape");
@@ -2762,7 +3125,13 @@ rwheel_max = 0, -0.001, -0.5683\n";
         // belong to the boots, not to this mesh, so they are not bones the body can be posed by.
         let bytes = rig_file(&[
             bone_block("riderRIG_Pelvis", None, &[0], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_LeftAnkle", Some(bind_at(0.0, 0.0, -0.887)), &[1], [0.0; 3], [0.0; 3]),
+            bone_block(
+                "riderRIG_LeftAnkle",
+                Some(bind_at(0.0, 0.0, -0.887)),
+                &[1],
+                [0.0; 3],
+                [0.0; 3],
+            ),
             bone_block("riderRIG_LeftToe", None, &[2], [0.0; 3], [0.0; 3]),
             bone_block("riderRIG_Head", None, &[3], [0.0; 3], [0.0; 3]),
         ]);
@@ -2823,16 +3192,38 @@ rwheel_max = 0, -0.001, -0.5683\n";
         let r = [[-1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, -1.0, 0.0]];
         let mut rig = parse_skeleton(&rig_file(&[
             bone_block("riderRIG_Root", None, &[0], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_Pelvis", Some(bind_at(0.0, 0.0, 0.0)), &[1], [0.0; 3], [0.0; 3]),
-            bone_block("riderRIG_Head", Some(bind_at(0.0, 0.0, -0.9)), &[2], [0.0; 3], [0.0; 3]),
+            bone_block(
+                "riderRIG_Pelvis",
+                Some(bind_at(0.0, 0.0, 0.0)),
+                &[1],
+                [0.0; 3],
+                [0.0; 3],
+            ),
+            bone_block(
+                "riderRIG_Head",
+                Some(bind_at(0.0, 0.0, -0.9)),
+                &[2],
+                [0.0; 3],
+                [0.0; 3],
+            ),
         ]));
         transform_skeleton(&mut rig, r);
         let o = rig[1].origin();
-        assert!((o[1] - 0.9).abs() < 1e-5, "the pelvis stands up at y=0.9, got {o:?}");
-        assert!(o[0].abs() < 1e-5 && o[2].abs() < 1e-5, "and nowhere else: {o:?}");
+        assert!(
+            (o[1] - 0.9).abs() < 1e-5,
+            "the pelvis stands up at y=0.9, got {o:?}"
+        );
+        assert!(
+            o[0].abs() < 1e-5 && o[2].abs() < 1e-5,
+            "and nowhere else: {o:?}"
+        );
         // The inverse was rebuilt from the turned bind, not carried over.
         let back = super::rigid_inverse(&rig[1].bind);
-        assert!(rig[1].inv_bind.iter().zip(back).all(|(a, b)| (a - b).abs() < 1e-5));
+        assert!(rig[1]
+            .inv_bind
+            .iter()
+            .zip(back)
+            .all(|(a, b)| (a - b).abs() < 1e-5));
     }
 
     /// Investigation aid: print a rider's rig.
@@ -2847,7 +3238,10 @@ rwheel_max = 0, -0.001, -0.5683\n";
         for (i, b) in rig.iter().enumerate() {
             let p = b.parent.map(|p| rig[p].name.as_str()).unwrap_or("—");
             let o = b.origin();
-            eprintln!("{i:3} {:32} parent={:28} at ({:7.3},{:7.3},{:7.3})", b.name, p, o[0], o[1], o[2]);
+            eprintln!(
+                "{i:3} {:32} parent={:28} at ({:7.3},{:7.3},{:7.3})",
+                b.name, p, o[0], o[1], o[2]
+            );
         }
     }
 
@@ -2867,12 +3261,23 @@ rwheel_max = 0, -0.001, -0.5683\n";
         let rig = parse_skeleton(&bytes);
         let nodes = parse(&bytes);
         eprintln!("{}: {} bones bind of the rig's 98", path, rig.len());
-        assert!(rig.len() >= 40, "a rider binds most of its rig, got {}", rig.len());
+        assert!(
+            rig.len() >= 40,
+            "a rider binds most of its rig, got {}",
+            rig.len()
+        );
         assert_eq!(rig[0].name, "riderRIG_Root");
         assert_eq!(rig[0].parent, None);
-        assert!(rig[1..].iter().all(|b| b.parent.is_some()), "only the root is parentless");
+        assert!(
+            rig[1..].iter().all(|b| b.parent.is_some()),
+            "only the root is parentless"
+        );
 
-        let at = |n: &str| rig.iter().position(|b| b.name == n).unwrap_or_else(|| panic!("no {n}"));
+        let at = |n: &str| {
+            rig.iter()
+                .position(|b| b.name == n)
+                .unwrap_or_else(|| panic!("no {n}"))
+        };
         let ancestors = |n: &str| {
             let (mut out, mut k) = (Vec::new(), rig[at(n)].parent);
             while let Some(i) = k {
@@ -2885,10 +3290,18 @@ rwheel_max = 0, -0.001, -0.5683\n";
         // `lefthand { refobj = LeftWrist; endeffector = LeftElbow; root = LeftShoulder }`.
         let arm = ancestors("riderRIG_LeftWrist");
         assert!(arm.contains(&"riderRIG_LeftElbow".to_string()), "{arm:?}");
-        assert!(arm.contains(&"riderRIG_LeftShoulder".to_string()), "{arm:?}");
+        assert!(
+            arm.contains(&"riderRIG_LeftShoulder".to_string()),
+            "{arm:?}"
+        );
         for b in &rig[1..] {
             let up = ancestors(&b.name);
-            assert_eq!(up.last().map(String::as_str), Some("riderRIG_Root"), "{} → {up:?}", b.name);
+            assert_eq!(
+                up.last().map(String::as_str),
+                Some("riderRIG_Root"),
+                "{} → {up:?}",
+                b.name
+            );
         }
 
         // Limbs the length a person's are.
@@ -2905,9 +3318,15 @@ rwheel_max = 0, -0.001, -0.5683\n";
             assert!((lo..hi).contains(&d), "{a} → {c} is {d:.3} m");
         }
         // Left and right are mirrors of each other.
-        for (l, r) in [("riderRIG_LeftHip", "riderRIG_RightHip"), ("riderRIG_LeftElbow", "riderRIG_RightElbow")] {
+        for (l, r) in [
+            ("riderRIG_LeftHip", "riderRIG_RightHip"),
+            ("riderRIG_LeftElbow", "riderRIG_RightElbow"),
+        ] {
             let (a, b) = (rig[at(l)].origin(), rig[at(r)].origin());
-            assert!((a[0] + b[0]).abs() < 1e-3, "{l}/{r} are not mirrored: {a:?} {b:?}");
+            assert!(
+                (a[0] + b[0]).abs() < 1e-3,
+                "{l}/{r} are not mirrored: {a:?} {b:?}"
+            );
         }
 
         // Every joint inside the body it moves.
@@ -2931,7 +3350,6 @@ rwheel_max = 0, -0.001, -0.5683\n";
             }
         }
     }
-
 
     // ── Skinning ──────────────────────────────────────────────────────────────
 
@@ -2970,7 +3388,11 @@ rwheel_max = 0, -0.001, -0.5683\n";
         ]));
         assert_eq!(
             rig.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(),
-            ["riderRIG_LeftShoulder", "riderRIG_LeftElbow", "riderRIG_LeftWrist"]
+            [
+                "riderRIG_LeftShoulder",
+                "riderRIG_LeftElbow",
+                "riderRIG_LeftWrist"
+            ]
         );
         assert_eq!(rig[0].origin(), [0.0, 0.0, 0.0]);
         assert_eq!(rig[1].origin(), [1.0, 0.0, 0.0]);
@@ -2980,11 +3402,18 @@ rwheel_max = 0, -0.001, -0.5683\n";
     #[test]
     fn every_vertex_is_bound_and_its_weights_add_up() {
         let rig = arm_rig();
-        let nodes = [node_of(&[[0.2, 0.0, 0.0], [0.9, 0.1, 0.0], [1.5, 0.0, 0.0], [40.0, 40.0, 40.0]])];
+        let nodes = [node_of(&[
+            [0.2, 0.0, 0.0],
+            [0.9, 0.1, 0.0],
+            [1.5, 0.0, 0.0],
+            [40.0, 40.0, 40.0],
+        ])];
         let skin = skin_mesh(&nodes, &rig);
         assert_eq!(skin.indices.len(), 4 * SKIN_BONES_PER_VERTEX);
         for v in 0..4 {
-            let w: f32 = skin.weights[v * SKIN_BONES_PER_VERTEX..][..SKIN_BONES_PER_VERTEX].iter().sum();
+            let w: f32 = skin.weights[v * SKIN_BONES_PER_VERTEX..][..SKIN_BONES_PER_VERTEX]
+                .iter()
+                .sum();
             assert!((w - 1.0).abs() < 1e-5, "vertex {v} weights sum to {w}");
             assert!(
                 skin.indices[v * SKIN_BONES_PER_VERTEX..][..SKIN_BONES_PER_VERTEX]
@@ -2998,21 +3427,40 @@ rwheel_max = 0, -0.001, -0.5683\n";
     #[test]
     fn a_vertex_follows_the_limb_it_sits_on() {
         let rig = arm_rig();
-        let shoulder = rig.iter().position(|b| b.name.ends_with("Shoulder")).unwrap();
+        let shoulder = rig
+            .iter()
+            .position(|b| b.name.ends_with("Shoulder"))
+            .unwrap();
         let elbow = rig.iter().position(|b| b.name.ends_with("Elbow")).unwrap();
         // Upper arm, forearm, and a point right on the elbow.
-        let nodes = [node_of(&[[0.5, 0.0, 0.0], [1.5, 0.0, 0.0], [1.0, 0.0, 0.0]])];
+        let nodes = [node_of(&[
+            [0.5, 0.0, 0.0],
+            [1.5, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+        ])];
         let skin = skin_mesh(&nodes, &rig);
         let heaviest = |v: usize| {
             let s = &skin.weights[v * SKIN_BONES_PER_VERTEX..][..SKIN_BONES_PER_VERTEX];
-            let at = s.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).unwrap().0;
+            let at = s
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.total_cmp(b.1))
+                .unwrap()
+                .0;
             skin.indices[v * SKIN_BONES_PER_VERTEX + at] as usize
         };
-        assert_eq!(heaviest(0), shoulder, "the upper arm swings from the shoulder");
+        assert_eq!(
+            heaviest(0),
+            shoulder,
+            "the upper arm swings from the shoulder"
+        );
         assert_eq!(heaviest(1), elbow, "the forearm swings from the elbow");
         // At the joint the vertex is shared rather than snapped to one side.
         let at_joint = &skin.weights[2 * SKIN_BONES_PER_VERTEX..][..SKIN_BONES_PER_VERTEX];
-        assert!(at_joint.iter().filter(|w| **w > 0.05).count() >= 2, "{at_joint:?}");
+        assert!(
+            at_joint.iter().filter(|w| **w > 0.05).count() >= 2,
+            "{at_joint:?}"
+        );
     }
 
     #[test]
@@ -3023,7 +3471,9 @@ rwheel_max = 0, -0.001, -0.5683\n";
         let nodes = [node_of(&[[9.0, 9.0, 0.0]])];
         let skin = skin_mesh(&nodes, &rig);
         assert_eq!(skin.weights[0], 1.0);
-        assert!(skin.weights[1..SKIN_BONES_PER_VERTEX].iter().all(|w| *w == 0.0));
+        assert!(skin.weights[1..SKIN_BONES_PER_VERTEX]
+            .iter()
+            .all(|w| *w == 0.0));
         assert!((skin.indices[0] as usize) < rig.len());
     }
 
@@ -3061,7 +3511,11 @@ rwheel_max = 0, -0.001, -0.5683\n";
         // either way is that every bone reaches a root without going round.
         assert!(rig.iter().any(|b| b.parent.is_none()), "at least one root");
         for (i, b) in rig.iter().enumerate() {
-            assert!(b.parent.is_none_or(|p| p < i), "{} hangs off a later bone", b.name);
+            assert!(
+                b.parent.is_none_or(|p| p < i),
+                "{} hangs off a later bone",
+                b.name
+            );
         }
 
         let mut used = std::collections::HashSet::new();
@@ -3079,23 +3533,37 @@ rwheel_max = 0, -0.001, -0.5683\n";
                 }
             }
         }
-        eprintln!("{verts} vertices, {} of the {} bones used, {shared} shared between bones", used.len(), rig.len());
+        eprintln!(
+            "{verts} vertices, {} of the {} bones used, {shared} shared between bones",
+            used.len(),
+            rig.len()
+        );
         // A skin that puts everything on one bone, or leaves limbs unbound, is not a skin.
-        assert!(used.len() > rig.len() / 2, "only {} bones move anything", used.len());
-        assert!(shared * 4 > verts, "hardly any vertex is shared — the seams will tear");
+        assert!(
+            used.len() > rig.len() / 2,
+            "only {} bones move anything",
+            used.len()
+        );
+        assert!(
+            shared * 4 > verts,
+            "hardly any vertex is shared — the seams will tear"
+        );
 
         // Left stays left: no vertex on one side of the body may be pulled by the other's arm.
         // One run of x across every node, in the order the skin was built in.
-        let xs: Vec<f32> =
-            nodes.iter().flat_map(|n| n.positions.chunks_exact(3).map(|v| v[0])).collect();
+        let xs: Vec<f32> = nodes
+            .iter()
+            .flat_map(|n| n.positions.chunks_exact(3).map(|v| v[0]))
+            .collect();
         let at = |n: &str| rig.iter().position(|b| b.name == n);
         if let (Some(l), Some(r)) = (at("riderRIG_LeftWrist"), at("riderRIG_RightWrist")) {
             for (side, other) in [(l, r), (r, l)] {
                 let reach: Vec<f32> = (0..verts)
                     .filter(|v| {
-                        (0..SKIN_BONES_PER_VERTEX)
-                            .any(|s| skin.indices[v * SKIN_BONES_PER_VERTEX + s] as usize == side
-                                && skin.weights[v * SKIN_BONES_PER_VERTEX + s] > 0.2)
+                        (0..SKIN_BONES_PER_VERTEX).any(|s| {
+                            skin.indices[v * SKIN_BONES_PER_VERTEX + s] as usize == side
+                                && skin.weights[v * SKIN_BONES_PER_VERTEX + s] > 0.2
+                        })
                     })
                     .map(|v| xs[v])
                     .collect();
@@ -3114,7 +3582,6 @@ rwheel_max = 0, -0.001, -0.5683\n";
             }
         }
     }
-
 }
 
 /// Does this mesh's material tables use the second texture slot?
@@ -3127,7 +3594,9 @@ pub fn uses_companion_slots(b: &[u8]) -> bool {
     let textures = embedded_textures(b).len();
     for (_, start) in node_starts(b) {
         for count in 1..=MAX_MATERIALS {
-            let Some(o) = start.checked_sub(4 + MAT_STRIDE * count) else { break };
+            let Some(o) = start.checked_sub(4 + MAT_STRIDE * count) else {
+                break;
+            };
             if u32le(b, o) as usize != count {
                 continue;
             }
@@ -3155,7 +3624,10 @@ fn node_starts(b: &[u8]) -> Vec<(String, usize)> {
         let vc = u32le(b, o) as usize;
         if (8..=MAX_COUNT).contains(&vc) && o + 4 + vc * STRIDE + 8 <= n {
             let vs = o + 4;
-            if [0usize, 1, 2, vc / 2, vc - 1].iter().all(|&i| finite_pos(b, vs + i * 12)) {
+            if [0usize, 1, 2, vc / 2, vc - 1]
+                .iter()
+                .all(|&i| finite_pos(b, vs + i * 12, MODEL_EXTENT))
+            {
                 let ic = vs + vc * STRIDE;
                 let tc = u32le(b, ic) as usize;
                 if (1..=MAX_COUNT).contains(&tc) && ic + 8 + tc * 12 <= n {
@@ -3199,8 +3671,9 @@ pub fn bike_material_slots(b: &[u8]) -> Vec<String> {
         if !with_colour.contains(&family_stem(name)) {
             continue;
         }
-        let takes_a_slot =
-            name.to_ascii_lowercase() == family_stem(name) || family_stem(name) != name.to_ascii_lowercase() && name.to_ascii_lowercase().ends_with("_r");
+        let takes_a_slot = name.to_ascii_lowercase() == family_stem(name)
+            || family_stem(name) != name.to_ascii_lowercase()
+                && name.to_ascii_lowercase().ends_with("_r");
         if takes_a_slot && !out.iter().any(|n| n.eq_ignore_ascii_case(name)) {
             out.push(name.clone());
         }
@@ -3248,7 +3721,9 @@ fn declared_names(b: &[u8]) -> Vec<String> {
             continue;
         }
         let name = String::from_utf8_lossy(&b[i..j]).to_string();
-        let in_pixels = embedded.iter().any(|t| i >= t.data_off && i < t.data_off + t.data_len);
+        let in_pixels = embedded
+            .iter()
+            .any(|t| i >= t.data_off && i < t.data_off + t.data_len);
         if !in_pixels && name.chars().any(|c| c.is_ascii_alphabetic()) && !is_part_name(&name) {
             hits.push((i, name));
         }

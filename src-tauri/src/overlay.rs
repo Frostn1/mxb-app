@@ -147,6 +147,7 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     center_over_game(&window);
     window.show().map_err(|e| format!("{e:#}"))?;
     SHOWINGS.fetch_add(1, Ordering::SeqCst);
+    crate::usage::track("overlay.open");
     let _ = window.set_focus();
     Ok(())
 }

@@ -20,6 +20,8 @@ import { open as pickFolder, save as pickSavePath } from "@tauri-apps/plugin-dia
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
+import PaintSync from "./PaintSync";
+import Plugins from "./Plugins";
 import {
   countProfilesIn,
   detectGamePath,
@@ -37,6 +39,7 @@ import {
   overlayToggle,
   presetsListProfiles,
   setAutoRunFrostmod,
+  setFrostmodArgs,
   setGamePath,
   setInstantRefresh,
   setLaunchAtStartup,
@@ -44,20 +47,24 @@ import {
   setOverlayEnabled,
   setOverlayHotkey,
   setProfilesPath,
+  setAnalyticsEnabled,
   setRunInBackground,
   setWatchModsReload,
+  setSecureContentInject,
   setWineRunner,
   wineHostInfo,
   type WineHostInfo,
   type OverlayState,
   experimentalState as experimentalStateApi,
-  setExperimental,
   type ExperimentalState,
   voiceDevices,
   voiceMute,
   voiceStatus,
   setVoiceProximity,
   setVoiceEnabled,
+  setPaintSyncEnabled,
+  setMxbsecureEnabled,
+  contentSecureAvailable,
   setVoiceInputDevice,
   setVoiceOutputDevice,
   setVoicePttHotkey,
@@ -77,9 +84,16 @@ import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "../../lib/usePlatform";
 import { useConfig } from "../../Context/Config";
 import GameSwitcher from "../Shell/GameSwitcher";
+import { ContextBarLeft, ContextBarRight } from "../Shell/ContextBar";
 import ReshadeCard from "./ReshadeCard";
 import SupportersCard from "./SupportersCard";
-import { useTheme, type ThemeMode } from "../../Context/Theme";
+import {
+  COLORWAYS,
+  COLORWAY_SWATCH,
+  useTheme,
+  type Colorway,
+  type ThemeMode,
+} from "../../Context/Theme";
 import { Trans } from "../../i18n";
 import { useI18n, type LocalePref, type TKey } from "../../i18n/context";
 import { getLocale, LOCALE_OPTIONS } from "../../i18n/core";
@@ -116,7 +130,8 @@ export type SectionId =
   | "frostmod"
   | "reshade"
   | "logs"
-  | "experimental"
+  | "paintsync"
+  | "plugins"
   | "supporters"
   | "about";
 
@@ -148,6 +163,8 @@ const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
       { id: "appearance", label: "settings.appearance" },
       { id: "overlay", label: "overlay.section" },
       { id: "voice", label: "voice.section" },
+      { id: "paintsync", label: "settings.paintSync" },
+      { id: "plugins", label: "plugins.section" },
     ],
   },
   {
@@ -156,7 +173,6 @@ const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
       { id: "logs", label: "settings.logs" },
       // Had no nav entry at all before this, and rendered in the middle of the scroll
       // with nothing pointing at it.
-      { id: "experimental", label: "settings.experimental" },
     ],
   },
   {
@@ -284,7 +300,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // everywhere it runs: natively on Windows, under Proton on Linux, in a CrossOver/Whisky
   // bottle on macOS. The app starts FrostMod in whichever prefix holds the game.
   const hasFrostmod = isWindows || platform === "linux" || isMac;
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, colorway, setColorway } = useTheme();
   const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes, strayMsvcr90, clearingStray, clearStrayMsvcr90 } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
@@ -453,16 +469,26 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       : t("settings.insideModsFolder"));
 
   const runInBackground = config.runInBackground ?? true;
-  const launchAtStartup = config.launchAtStartup ?? true;
+  const analyticsEnabled = config.analyticsEnabled ?? true;
+  const launchAtStartup = config.launchAtStartup ?? false;
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
+  // Typed flags are edited freely and saved on blur, so the field holds a draft until then —
+  // saving per keystroke would write the config on every letter and fight the cursor.
+  const [frostmodArgsDraft, setFrostmodArgsDraft] = useState<string | null>(null);
+  const frostmodArgs = frostmodArgsDraft ?? config.frostmodArgs ?? "";
   const instantRefresh = config.instantRefresh ?? true;
   const watchModsReload = config.watchModsReload ?? true;
+  const secureContentInject = config.secureContentInject ?? false;
 
   const overlayEnabled = config.overlayEnabled ?? true;
   const overlayHotkey = config.overlayHotkey || FALLBACK_HOTKEY;
   // Same shape as the overlay pair above: the config's fields are optional (an install
   // predating voice has none), so every read is defaulted here rather than at each use.
   const voiceEnabled = config.voiceEnabled ?? false;
+  // Off unless it was turned on, matching the backend's default.
+  const paintSyncEnabled = config.paintSyncEnabled ?? false;
+  const mxbsecureEnabled = config.mxbsecureEnabled ?? false;
+  const [secureAvailable, setSecureAvailable] = useState(false);
   const voiceInput = config.voiceInputDevice ?? "";
   const voiceOutput = config.voiceOutputDevice ?? "";
   const voicePtt = config.voicePttHotkey || FALLBACK_PTT_HOTKEY;
@@ -709,6 +735,26 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     }
   };
 
+  const togglePaintSync = async (v: boolean) => {
+    try {
+      await setPaintSyncEnabled(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+      await reloadConfig();
+    }
+  };
+
+  const toggleMxbsecure = async (v: boolean) => {
+    try {
+      await setMxbsecureEnabled(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+      await reloadConfig();
+    }
+  };
+
   const toggleInstantRefresh = async (v: boolean) => {
     try {
       await setInstantRefresh(v);
@@ -727,6 +773,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     }
   };
 
+  const toggleSecureContentInject = async (v: boolean) => {
+    try {
+      await setSecureContentInject(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
   const toggleAutoRun = async (v: boolean) => {
     try {
       await setAutoRunFrostmod(v);
@@ -736,9 +791,31 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     }
   };
 
+  const saveFrostmodArgs = async () => {
+    if (frostmodArgsDraft === null) return;
+    try {
+      await setFrostmodArgs(frostmodArgsDraft);
+      await reloadConfig();
+      // Back to reading the config: it is the one that survives a restart, and it has the
+      // trimmed form of what was typed.
+      setFrostmodArgsDraft(null);
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
   const toggleBackground = async (v: boolean) => {
     try {
       await setRunInBackground(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const toggleAnalytics = async (v: boolean) => {
+    try {
+      await setAnalyticsEnabled(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
@@ -757,6 +834,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion(""));
     experimentalStateApi().then(setExperimentalState).catch(() => {});
+    contentSecureAvailable().then(setSecureAvailable).catch(() => {});
     // Re-check FrostMod against GitHub whenever Settings opens — the provider
     // only fetches once at launch, so this catches releases cut since then.
     void refreshStatus();
@@ -945,7 +1023,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
 
   return (
     <div className="flex h-full">
-      <nav className="flex w-[170px] flex-none flex-col gap-4 overflow-y-auto px-4 pb-5 pt-[70px]">
+      <ContextBarLeft>
+      <span className="flex items-center font-cond text-[12.5px] font-semibold uppercase tracking-[0.16em] text-foreground">
+        {t("nav.settings")}
+      </span>
+    </ContextBarLeft>
+    <ContextBarRight>
+      <HelpHint title={t("nav.settings")} description={t("settings.help")} />
+    </ContextBarRight>
+
+    <nav className="flex w-[170px] flex-none flex-col gap-4 overflow-y-auto px-4 pb-5 pt-[70px]">
         {groups.map((g) => (
           <div key={g.label} className="flex flex-col gap-0.5">
             <span className="px-3 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-faint">
@@ -971,16 +1058,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
 
       <div ref={pane} className="min-h-0 flex-1 overflow-y-auto px-2 py-5">
         <div className="flex max-w-[640px] flex-col gap-[18px]">
-          <div className="flex items-center gap-1.5">
-            <h1 className="text-[21px] font-bold tracking-[-0.2px]">
-              {t("nav.settings")}
-            </h1>
-            <HelpHint
-              title={t("nav.settings")}
-              description={t("settings.help")}
-            />
-          </div>
-
           {/* game — which title the app is driving. Its own card, above the folders it
               scopes: everything below belongs to whatever is picked here, so it isn't a
               property of the folder setting it used to sit inside. */}
@@ -1202,6 +1279,46 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               disabled={!caps.instantRefresh}
               onChange={toggleInstantRefresh}
             />
+            <div className="h-px bg-border" />
+            {/* Paint sync. In General rather than behind the experimental toggle because it
+                is on by default and runs by itself — the one thing a player needs is the
+                switch that stops it. */}
+            <ToggleRow
+              label={t("settings.paintSync")}
+              desc={t("settings.paintSyncDesc")}
+              checked={paintSyncEnabled}
+              onChange={togglePaintSync}
+            />
+            <div className="h-px bg-border" />
+            <ToggleRow
+              label={t("settings.analytics")}
+              desc={t("settings.analyticsDesc")}
+              checked={analyticsEnabled}
+              onChange={toggleAnalytics}
+            />
+            {secureAvailable && (
+              <>
+                <div className="h-px bg-border" />
+                {/* Experimental content locking. Only shown when the local packer module is
+                    present, since without it the tab it reveals could do nothing. */}
+                <ToggleRow
+                  label={t("settings.mxbsecure")}
+                  desc={t("settings.mxbsecureDesc")}
+                  checked={mxbsecureEnabled}
+                  onChange={toggleMxbsecure}
+                />
+              </>
+            )}
+          </Section>
+          )}
+
+          {/* Paint sync's own state. The General toggle turns it on and off; this says what
+              it has actually managed — both halves run in the background off things the
+              player didn't ask for, so without this the only record was a log file. */}
+          {active === "plugins" && <Plugins />}
+          {active === "paintsync" && (
+          <Section title={t("settings.paintSync")} desc={t("settings.paintSyncDesc")}>
+            <PaintSync />
           </Section>
           )}
 
@@ -1574,6 +1691,45 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               />
             </div>
 
+            {/* Swatches rather than a Select: a palette is the one setting whose
+                value you can just look at. Each is two-tone — accent over that
+                colorway's own chrome — because the chrome moves too. */}
+            <div className="mt-3 flex items-start justify-between gap-4">
+              <span className="text-[12.5px] text-foreground/85">
+                {t("settings.colorway")}
+              </span>
+              <div className="flex flex-col items-end gap-1.5">
+                <div className="flex gap-1.5">
+                  {COLORWAYS.map((c) => {
+                    const [tint, chrome] = COLORWAY_SWATCH[c];
+                    const label = t(COLORWAY_LABEL[c]);
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        title={label}
+                        aria-label={label}
+                        aria-pressed={colorway === c}
+                        onClick={() => setColorway(c)}
+                        className={cn(
+                          "size-6 cursor-default rounded-full border transition-shadow",
+                          colorway === c
+                            ? "border-primary ring-2 ring-primary/40"
+                            : "border-input hover:border-foreground/30",
+                        )}
+                        style={{
+                          background: `linear-gradient(135deg, ${tint} 0 50%, ${chrome} 50% 100%)`,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+                <span className="text-[11px] text-muted-foreground">
+                  {t(COLORWAY_LABEL[colorway])}
+                </span>
+              </div>
+            </div>
+
             {/* A Select, not a Segmented control — seven options don't fit the
                 segmented track, and each is named in its own language so someone
                 who lands in a script they can't read can still get back out. */}
@@ -1798,6 +1954,43 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               onChange={toggleWatchModsReload}
             />
 
+            {/* Off unless asked for: this puts a DLL into the running game, and the game is
+                usually Steam's process, not ours. With it on, launch from Play — a session
+                the app didn't start is left alone. */}
+            <ToggleRow
+              label={t("settings.secureContentInject")}
+              desc={t("settings.secureContentInjectDesc")}
+              checked={secureContentInject}
+              onChange={toggleSecureContentInject}
+            />
+
+            {/* FrostMod's own flags, typed. A plain field rather than a toggle each: these
+                are diagnostics that come and go with FrostMod's releases, and the app would
+                otherwise have to ship a new build to offer one. `--game` and `--mods` are
+                still sent by the app; anything typed here follows them. */}
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[12.5px] text-foreground/85">
+                {t("settings.frostmodArgs")}
+              </span>
+              <input
+                value={frostmodArgs}
+                spellCheck={false}
+                placeholder="--probe-overjump"
+                onChange={(e) => setFrostmodArgsDraft(e.currentTarget.value)}
+                onBlur={saveFrostmodArgs}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
+                className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px] text-muted-foreground"
+              />
+              <span className="text-[11.5px] text-muted-foreground">
+                {t("settings.frostmodArgsDesc")}
+              </span>
+            </div>
+
+            {/* Only once FrostMod is on disk: without an install there is no config to
+                edit, and the keys would be an offer that quietly does nothing. */}
+
             <div className="flex gap-2">
               {/* Stop is offered whenever FrostMod is running, installed by us or not —
                   `frostmod_stop` kills a hand-launched `frostmod.exe` too, and gating it
@@ -1827,33 +2020,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           {active === "reshade" && (
           <Section title={t("settings.reshade")} desc={t("settings.reshadeDesc")}>
             <ReshadeCard />
-          </Section>
-          )}
-
-          {/* experimental */}
-          {active === "experimental" && (
-          <Section title={t("settings.experimental")}>
-            <ToggleRow
-              label={t("settings.experimentalServers")}
-              desc={
-                experimental?.forcedByEnv
-                  ? t("settings.experimentalForced")
-                  : t("settings.experimentalServersDesc")
-              }
-              checked={experimental?.enabled ?? false}
-              onChange={(v) => {
-                // The env override wins in the backend, so flipping the switch would look
-                // like it did nothing. Say so instead of pretending.
-                if (experimental?.forcedByEnv) {
-                  toast.info(t("settings.experimentalForced"));
-                  return;
-                }
-                setExperimental(v)
-                  .then(() => experimentalStateApi())
-                  .then(setExperimentalState)
-                  .catch((e) => toast.error(String(e)));
-              }}
-            />
           </Section>
           )}
 
@@ -2260,6 +2426,17 @@ function Callout({
     </div>
   );
 }
+
+/** Each colorway's name, so the picker stays type-checked against the dictionary. */
+const COLORWAY_LABEL: Record<Colorway, TKey> = {
+  frost: "settings.colorwayFrost",
+  ember: "settings.colorwayEmber",
+  moss: "settings.colorwayMoss",
+  violet: "settings.colorwayViolet",
+  rose: "settings.colorwayRose",
+  slate: "settings.colorwaySlate",
+  retro: "settings.colorwayRetro",
+};
 
 function Section({
   title,

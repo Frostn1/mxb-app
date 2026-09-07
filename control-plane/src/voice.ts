@@ -172,7 +172,7 @@ export async function claimDeviceAccount(request: Request, env: Env): Promise<Re
   const digest = await ipDigest(request.headers.get("CF-Connecting-IP"), day, env);
 
   const seen = await env.DB.prepare(
-    "SELECT claims FROM device_claims WHERE ip_digest = ? AND day = ?",
+    "SELECT claims FROM device_claims WHERE ip_digest = ? AND day = ? AND kind = 'signup'",
   )
     .bind(digest, day)
     .first<{ claims: number }>();
@@ -190,8 +190,8 @@ export async function claimDeviceAccount(request: Request, env: Env): Promise<Re
         " VALUES (?, ?, ?, ?, 'device')",
     ).bind(id, (riderName as string).trim(), hash, now),
     env.DB.prepare(
-      "INSERT INTO device_claims (ip_digest, day, claims, updated_at) VALUES (?, ?, 1, ?)" +
-        " ON CONFLICT(ip_digest, day) DO UPDATE SET claims = claims + 1, updated_at = excluded.updated_at",
+      "INSERT INTO device_claims (ip_digest, day, kind, claims, updated_at) VALUES (?, ?, 'signup', 1, ?)" +
+        " ON CONFLICT(ip_digest, day, kind) DO UPDATE SET claims = claims + 1, updated_at = excluded.updated_at",
     ).bind(digest, day, now),
   ]);
 
@@ -205,7 +205,7 @@ export async function claimDeviceAccount(request: Request, env: Env): Promise<Re
  * today's signups. Keyed with a secret where one is configured, because a bare hash of an
  * IPv4 address is reversible by anyone willing to hash four billion strings.
  */
-async function ipDigest(ip: string | null, day: string, env: Env): Promise<string> {
+export async function ipDigest(ip: string | null, day: string, env: Env): Promise<string> {
   const material = `${day}:${ip ?? "unknown"}`;
   const secret = env.IP_HASH_SECRET;
   if (secret) {

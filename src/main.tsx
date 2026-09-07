@@ -1,4 +1,5 @@
 import React from "react";
+import { invoke } from "@tauri-apps/api/core";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import Overlay from "./Components/Overlay/Overlay";
@@ -21,3 +22,15 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     </I18nProvider>
   </React.StrictMode>,
 );
+
+/* The main window is built hidden and shown by this call — see
+   `src-tauri/src/firstpaint.rs`. Two frames deep because the first fires before the
+   browser has composited anything, so only the second proves the webview really painted.
+   The overlay window loads this same bundle and owns its own visibility. */
+if (!isOverlay) {
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      void invoke("window_painted").catch(() => {});
+    }),
+  );
+}
