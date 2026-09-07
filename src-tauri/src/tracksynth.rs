@@ -6204,23 +6204,19 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
 
 /// The track's own description, in the shape published tracks write it.
 ///
-/// Two details are load-bearing and were wrong: `length` is a plain number of metres — a
-/// `pic`/`pic_info` have to name files the archive actually carries, which are the two the
-/// writer puts beside this one.
-///
-/// `length` and `altitude` are **not** measurements, whatever they sound like. Millville,
-/// Flanders and Indiana all state `1`, Lambretta Lynds states `999`, and not one published
-/// track puts a plausible number of metres there — so a lap length in the field is a value
-/// the game has never been shown.
+/// `length` is the lap in whole metres, and published tracks really do state it — SFDR 1813,
+/// MX191 1350, FarmSX 1107. `altitude` is metres above sea level, which a made-up track has
+/// no honest answer for. `pic`/`pic_info` name the two files the writer puts beside this one.
 fn track_ini(prog: &TrackProgram) -> String {
     let slug = slug(&prog.name);
     format!(
-        "[info]\nname = {}\nshort_name = {}\nlength = 1\naltitude = 1\n\n\
+        "[info]\nname = {}\nshort_name = {}\nlength = {:.0}\naltitude = 1\n\n\
          [race]\ndefaulteventlaps = 15\nreflaptime = {:.0}\n\n\
          [ui]\npic = {slug}.tga\npic_info = {slug}_map.tga\nauthor = {}\nlocation = {}\n\n\
          [weather]\ncloud_prob = 0.4\nrainy_prob = 0.1\n",
         prog.name,
         prog.name.chars().take(12).collect::<String>(),
+        prog.lap_length(),
         // A minute and a half for a mile is roughly national pace, and it only seeds the UI.
         prog.lap_length() / 11.0,
         if prog.author.is_empty() {
@@ -6633,6 +6629,26 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The `.ini` is the only place the lap length is read from, and the info panel hides
+    /// anything under 50 m as an unfilled placeholder — which is what we used to write.
+    #[test]
+    fn the_ini_states_the_lap_length() {
+        let p = oval();
+        let ini = track_ini(&p);
+        let stated: f32 = ini
+            .lines()
+            .find_map(|l| l.strip_prefix("length = "))
+            .expect("[info] length")
+            .parse()
+            .expect("a plain number of metres");
+        assert!(
+            (stated - p.lap_length()).abs() < 1.0,
+            "ini states {stated} m for a {} m lap",
+            p.lap_length()
+        );
+        assert!(stated >= 50.0, "under the info panel's floor: {stated} m");
     }
 
     /// A lap that closes: two straights joined by two half-circle turns.
