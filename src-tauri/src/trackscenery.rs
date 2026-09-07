@@ -988,8 +988,11 @@ fn tyre_ribbon(
     m
 }
 
-/// How many ages of print the sheet carries.
+/// How many ages of print the sheet carries, how many passes are laid, and how far the
+/// outermost of them sits off the line.
 const TYRE_FADES: usize = 4;
+const TYRE_PASSES: usize = 27;
+const TYRE_SPREAD_M: f32 = 2.4;
 
 /// How wide a print is, how far the tread repeats in, and how far the card floats over the
 /// ground so it draws in front of it without standing off it.
@@ -1687,44 +1690,56 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
 
     // 6b. Tyre marks: the print of a knobbly down the lines riders take.
     //
-    // Three passes, not one — a line is a handful of them side by side, and one ribbon down
-    // the middle reads as a stripe. Where the ground says it has been worked hardest is where
-    // they are laid, so the marks agree with the shape: `syn.rut` is the same signal the
-    // paint keys to.
+    // Twenty-seven passes, not nine, and laid where a rider would have laid them. They bunch
+    // on the racing line and thin out towards the edges — a line is where everybody rides, so
+    // that is where the prints pile up — and each one comes and goes along its own length,
+    // at one of four ages. Over a jump they stop: a table with prints across its deck is a
+    // table nobody jumped.
     let mut tyre = Mesh::default();
     if !syn.stations.is_empty() {
-        // Nine passes, overlapping. Three ribbons a third of a metre apart is three stripes;
-        // what a line actually carries is pass on top of pass, some fresh and some old.
-        for (pass, lean) in [
-            (0usize, -1.15f32),
-            (1, -0.85),
-            (2, -0.5),
-            (3, -0.2),
-            (4, 0.1),
-            (5, 0.4),
-            (6, 0.72),
-            (7, 1.05),
-            (8, 1.35),
-        ] {
+        // Where a rider is off the ground, by distance round the lap. The middle half of a
+        // jump is air; the ramp and the landing are not.
+        let airborne_spans: Vec<(f32, f32)> = prog
+            .features
+            .iter()
+            .filter_map(|f| {
+                let (at, len) = (f.at(), f.length());
+                matches!(
+                    f,
+                    crate::trackprog::Feature::Tabletop { .. }
+                        | crate::trackprog::Feature::Double { .. }
+                        | crate::trackprog::Feature::Custom { .. }
+                        | crate::trackprog::Feature::StepUp { .. }
+                )
+                .then_some((at + len * 0.28, at + len * 0.82))
+            })
+            .collect();
+        let airborne = move |s: f32| airborne_spans.iter().any(|(a, b)| s >= *a && s <= *b);
+        let seed = prog.terrain.relief.seed;
+        for pass in 0..TYRE_PASSES {
+            // Bunched on the line: a triangular spread rather than an even one, so the middle
+            // carries three or four passes on top of each other and the edges one.
+            let t = pass as f32 / (TYRE_PASSES - 1) as f32 * 2.0 - 1.0;
+            let lean = t.abs().powf(1.7) * t.signum() * TYRE_SPREAD_M;
             let ribbon = tyre_ribbon(
                 syn,
                 &syn.stations,
+                &airborne,
                 |i| {
-                    let wander = 0.35
+                    let wander = 0.30
                         * crate::tracksynth::fbm(
                             syn.stations[i].s / 26.0,
                             pass as f32 * 7.0,
-                            prog.terrain.relief.seed ^ 0x7A33,
+                            seed ^ 0x7A33,
                         );
                     syn.line_lat[i] + lean + wander
                 },
                 TYRE_W_M,
-                // Every other pass is an old one.
-                pass % 2,
+                seed ^ (pass as u32 * 0x9E37),
             );
             tyre.append(&ribbon);
         }
-        tally.push(("tyre marks", 9));
+        tally.push(("tyre marks", TYRE_PASSES));
     }
 
     // 7. The sky over all of it.

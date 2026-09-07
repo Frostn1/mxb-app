@@ -158,6 +158,11 @@ class Ground:
         return min(self.nearest(x, z, ignore_after), edge)
 
 
+# How much of a lap has to be tight enough to wear a rut. A hand-written track that measures
+# like Indiana carries about this much under a 14 m radius.
+TIGHT_SHARE = 0.10
+
+
 def grow(rng, plot, width, want_m):
     """Walk a lap out of the ground and dock it back onto its own start.
 
@@ -170,11 +175,14 @@ def grow(rng, plot, width, want_m):
     clear = width + 8.0          # how near the lap may come to itself
     margin = 40.0
     gate_room = 78.0        # the start spur stands beside the lap and needs ground
-    # Three tightnesses, and the loose one is a sweeper rather than a motorway: with a band
-    # running to 60 m the median corner came out at 43 m, where a published track's is 7 to
-    # 30. Two of the three are inside that band and the walk prefers turns to runs, so the
-    # median lands there.
-    turn_r = [rng.uniform(9.0, 14.0), rng.uniform(15.0, 24.0), rng.uniform(26.0, 38.0)]
+    # Three tightnesses, and the tightest is a hairpin.
+    #
+    # Ruts reach full depth at a 14 m radius and start forming at 40 — which is measured, and
+    # is the whole reason a corner wears and a sweeper does not. The first laps out of this
+    # walk put one per cent of their length under 14 m against a hand-written track's eight,
+    # and rode, in one word, with no ruts. Not even in the turns: at 20 to 30 m the ground
+    # barely digs.
+    turn_r = [rng.uniform(8.5, 12.5), rng.uniform(14.0, 20.0), rng.uniform(24.0, 34.0)]
     start = (plot * 0.5, margin + gate_room, 0.0)   # facing +z, up the plot
     pose = start
     ground = Ground(plot)
@@ -182,6 +190,7 @@ def grow(rng, plot, width, want_m):
     laid = 0.0
     # The first stretch is the start straight, and nothing may be built on it.
     opening = {"kind": "straight", "length": rng.uniform(90.0, 130.0), "rise": 0.0}
+    tight_m = 0.0
     segs.append(opening)
     ground.add(samples(pose, opening), 0.0)
     pose = advance(pose, opening)
@@ -203,8 +212,13 @@ def grow(rng, plot, width, want_m):
         moves = [{"kind": "straight", "length": rng.uniform(45.0, 115.0), "rise": 0.0}]
         for r in turn_r:
             for side in (1.0, -1.0):
+                # A hairpin turns most of the way round. Getting the tight ground a lap needs
+                # out of many small tight corners costs a corner apiece — forty of them,
+                # where a published track carries ten to thirty — while three real hairpins
+                # carry the same metres and read as corners a rider remembers.
+                ang = rng.uniform(105.0, 178.0) if r < 14.0 else rng.uniform(35.0, 115.0)
                 moves.append({"kind": "arc", "radius": r * side,
-                              "angle": rng.uniform(35.0, 120.0), "rise": 0.0})
+                              "angle": ang, "rise": 0.0})
         rng.shuffle(moves)
         best, best_score = None, -1e9
         for m in moves:
@@ -218,7 +232,12 @@ def grow(rng, plot, width, want_m):
             score = (ground.room(end[0], end[1], laid - 34.0)
                      + 0.8 * ground.room(ahead[0], ahead[1], laid - 34.0))
             if m["kind"] == "arc":
-                score += 2.0            # corners are the point, but ten to thirty of them
+                score += 8.0            # corners are the point, but ten to thirty of them
+                # And a lap needs its share of ground tight enough to wear. Until it has
+                # that, a hairpin outscores anything the open ground can offer.
+                if abs(m["radius"]) < 14.0:
+                    # In metres, like the room term it competes with: at four it was noise.
+                    score += 45.0 if tight_m < laid * TIGHT_SHARE else 1.0
             if score > best_score:
                 best, best_score = m, score
         if best is None:
@@ -226,8 +245,11 @@ def grow(rng, plot, width, want_m):
 
         ground.add(samples(pose, best), laid)
         pose = advance(pose, best)
-        laid += (best["length"] if best["kind"] == "straight"
-                 else abs(best["radius"]) * math.radians(best["angle"]))
+        run = (best["length"] if best["kind"] == "straight"
+               else abs(best["radius"]) * math.radians(best["angle"]))
+        if best["kind"] == "arc" and abs(best["radius"]) < 14.0:
+            tight_m += run
+        laid += run
         segs.append(best)
         # Once past the budget, try to close on every step until one is clear.
         if laid > want_m * 0.72:
@@ -273,7 +295,8 @@ def main():
     grown = None
     for _ in range(6):
         # And longer: 1451 m rode as "overall small". Indiana is 2138.
-        grown = grow(rng, plot, width, rng.uniform(1950.0, 2400.0))
+        # Pulled back: 2400 m rode 'a bit too big'.
+        grown = grow(rng, plot, width, rng.uniform(1650.0, 2050.0))
         if grown:
             break
     if not grown:
