@@ -3,6 +3,8 @@
 ## 2026-09-06
 
 ### Fixed
+- Generated tracks state their lap length, so the game and the app's track info show it
+  instead of leaving the line blank.
 - Generating a track holds a full-length lap. A long circuit no longer runs out of room
   part-way through being written, which is what turned a good design into "that didn't parse".
 
