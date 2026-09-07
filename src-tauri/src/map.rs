@@ -1335,14 +1335,21 @@ pub struct GroundMask {
 /// megabytes rather than the ninety a map's own 1024² sheets would cost.
 const LAYER_SHEET_DIM: u32 = 256;
 
-/// A sheet record, at either of the two widths the format uses.
+/// A sheet record, in either of the two shapes the format uses.
 ///
-/// A layer's colour sheet carries a zero word between its name and its width; the normal map
-/// hanging off it does not. Rather than tell them apart by which slot they sit in — the
-/// secondary's header is a variable run of words, and two samples were not enough to pin it —
-/// each offset is tried and the record has to prove itself: a NUL-padded ASCII name, power-of
-/// -two dimensions, a zero where the sub-record count goes, and a length that stays in the
-/// file.
+/// A material's colour sheet and the normal map hanging off it are the same record with two
+/// words' difference — the normal carries neither the zero before its width nor the zero
+/// before its length:
+///
+/// ```text
+/// colour  name(100)  u32 0  w  h  hash(16)  u32 0  len  8 B  data
+/// normal  name(100)         w  h  hash(16)         len  8 B  data
+/// ```
+///
+/// Both are tried and the record has to prove itself: a NUL-padded ASCII name, power-of-two
+/// dimensions, and a length that stays inside the file. Reading the normal's length field
+/// where the colour's sits finds a zero that is not there, which is what made every normal map
+/// unreadable — and with it, every material after the first in a map's surface table.
 fn layer_sheet_at(b: &[u8], o: usize) -> Option<(String, u32, u32, usize, usize)> {
     if o + 148 > b.len() {
         return None;
@@ -1356,25 +1363,31 @@ fn layer_sheet_at(b: &[u8], o: usize) -> Option<(String, u32, u32, usize, usize)
         return None;
     }
     let pow2 = |v: u32| (4..=8192).contains(&v) && v.is_power_of_two();
-    for w_off in [104usize, 100] {
-        if w_off == 104 && u32le(b, o + 100) != 0 {
-            continue;
+    // `(where the width sits, where the length sits)`, colour first.
+    for (w_off, len_off) in [(104usize, 132usize), (100, 124)] {
+        if w_off == 104 {
+            // The colour's two spacer words: one before the width, one where sub-records
+            // would be counted. The normal has neither, which is how they are told apart.
+            if u32le(b, o + 100) != 0 || o + 132 > b.len() || u32le(b, o + 128) != 0 {
+                continue;
+            }
         }
         let (w, h) = (u32le(b, o + w_off), u32le(b, o + w_off + 4));
         if !pow2(w) || !pow2(h) {
             continue;
         }
-        // The 16-byte content hash, then a zero where sub-records would be counted.
-        let he = o + w_off + 8 + 16;
-        if he + 8 > b.len() || u32le(b, he) != 0 {
+        if o + len_off + 12 > b.len() {
             continue;
         }
-        let len = u32le(b, he + 4) as usize;
         // The length counts the eight bytes that follow it.
-        if len < 8 || he + 8 + len + 4 > b.len() {
+        let len = u32le(b, o + len_off) as usize;
+        if len < 8 {
             continue;
         }
-        let data = he + 16;
+        let data = o + len_off + 12;
+        if data + len - 8 > b.len() {
+            continue;
+        }
         return Some((
             String::from_utf8_lossy(&name[..end]).into_owned(),
             w,
@@ -1453,7 +1466,10 @@ fn layer_mask_at(b: &[u8], o: usize) -> Option<(GroundMask, usize)> {
 /// lilac sheet, so the test errs toward calling one.
 fn is_layer_normal(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
-    is_normal_name(&n)
+    // The environment cube every layer carries beside its sheets. Drawn as ground it is a
+    // sky reflection tiled across the dirt.
+    n == "env"
+        || is_normal_name(&n)
         || n.ends_with("norm")
         || n.ends_with("_n")
         || n.ends_with("_n_s")
@@ -1783,6 +1799,59 @@ mod tests {
             .map(|l| l.sheet.name.clone())
             .collect();
         assert_eq!(names, ["base_c"], "only the colour sheet is ground");
+    }
+
+    /// A normal map is the colour record minus two words — no zero before its width, none
+    /// before its length. Reading it at the colour's offsets finds a zero that is not there,
+    /// which made every normal map in a map unreadable and stopped the walk at the first
+    /// layer that carried one.
+    #[test]
+    fn a_normal_map_record_is_read_at_its_own_offsets() {
+        use flate2::{write::DeflateEncoder, Compression};
+        use std::io::Write;
+        let px = vec![7u8; 8 * 8 * 4];
+        let mut e = DeflateEncoder::new(Vec::new(), Compression::fast());
+        e.write_all(&px).unwrap();
+        let z = e.finish().unwrap();
+
+        let build = |colour: bool| {
+            let mut b = vec![0u8; 100];
+            b[..6].copy_from_slice(b"sand_n");
+            if colour {
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }
+            b.extend_from_slice(&8u32.to_le_bytes());
+            b.extend_from_slice(&8u32.to_le_bytes());
+            b.extend_from_slice(&[0u8; 16]);
+            if colour {
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }
+            b.extend_from_slice(&((z.len() + 8) as u32).to_le_bytes());
+            b.extend_from_slice(&[0u8; 8]);
+            b.extend_from_slice(&z);
+            b.extend_from_slice(&[0u8; 32]);
+            b
+        };
+
+        for colour in [true, false] {
+            let b = build(colour);
+            let got = layer_sheet_at(&b, 0);
+            let (name, w, h, data, end) = got.unwrap_or_else(|| {
+                panic!("the {} shape did not parse", if colour { "colour" } else { "normal" })
+            });
+            assert_eq!(name, "sand_n");
+            assert_eq!((w, h), (8, 8));
+            assert_eq!(end - data, z.len(), "the payload has to end where the stream does");
+        }
+    }
+
+    /// The environment cube sits beside a layer's sheets. Drawn as ground it is a sky
+    /// reflection tiled across the dirt.
+    #[test]
+    fn an_env_cube_opens_no_layer() {
+        assert!(is_layer_normal("env"));
+        assert!(is_layer_normal("ENV"));
+        assert!(!is_layer_normal("gravel_c"));
     }
 
     /// Nothing in a map announces where the ground begins, so the walk finds its own phase.

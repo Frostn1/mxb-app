@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-07
+
+### Fixed
+- More tracks show their real ground in the 3D viewer. A track's normal maps are stored a
+  little differently from its colour sheets, and reading them the same way stopped the viewer
+  part way through a track's ground.
+
 ## 2026-09-06
 
 ### Changed
