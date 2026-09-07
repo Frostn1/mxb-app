@@ -7721,17 +7721,40 @@ pub struct WorldServer {
     pub name: String,
     /// `ip:port`, the form the game's connect flag and [`join_server`] take.
     pub address: String,
+    /// Whether the game can reach that address at all. False for a genuine IPv6 server: the
+    /// client's own socket is `AF_INET`, so the row is worth showing but its Join is not.
+    pub joinable: bool,
+    /// The address the server reports for itself, which the master forwards untouched. Usually
+    /// its LAN address, so it is shown as detail rather than offered as somewhere to connect.
+    pub lan_address: String,
     /// Riders currently connected, and the seat cap.
     pub players: u32,
     pub max_players: u32,
-    /// Round-trip to the server in milliseconds, or `None` if it wasn't measured.
+    /// Round-trip to the server in milliseconds, or `None` if it wasn't measured. The master
+    /// never sends this — it is timed against the server's own `GETINFO` reply.
     pub ping_ms: Option<u32>,
-    /// The track the server is running, when the master reports it.
-    pub track: String,
     /// Whether a password is required to join.
     pub passworded: bool,
-    /// Free-text region/label, empty when unknown.
-    pub region: String,
+    /// The operator's free-text `[connection] location` — "USA", "EU West". Not the track.
+    pub location: String,
+    /// The licence class the server requires: "D", "C", "B", "A", or empty for none.
+    pub rating: String,
+    /// What the server is running, from the event blob the game publishes about itself.
+    pub track: String,
+    pub track_layout: String,
+    /// Bike categories and models the server allows; empty means anything.
+    pub categories: Vec<String>,
+    pub bikes: Vec<String>,
+    /// The session in progress — "Practice", "Race 1", "Waiting" — and its length.
+    pub session: String,
+    pub race_length: String,
+    /// "Sunny", "Cloudy", "Rainy", and whether weather evolves during the session.
+    pub conditions: String,
+    pub realistic_weather: bool,
+    /// The three rules a rider notices before joining.
+    pub force_cockpit: bool,
+    pub no_aids: bool,
+    pub limited_tyre_sets: bool,
 }
 
 /// The live MX Bikes server list, as the game's WORLD browser sees it.

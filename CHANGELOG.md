@@ -2,6 +2,20 @@
 
 ## 2026-09-06
 
+### Added
+- The Servers tab lists every server on the master list, and measures the real ping to each
+  one instead of leaving the column blank.
+- Server rows show the track actually being ridden and the operator's own location label.
+- Clicking a server opens its details: the session in progress and how long it runs, the
+  weather and conditions, which bike categories and models are allowed, the licence class it
+  requires, whether it forces cockpit view, bans aids or limits tyre sets, and its addresses.
+
+### Fixed
+- Servers whose address the master reports in IPv6 form can be joined, and a server the game
+  genuinely can't be pointed at says so instead of offering a Join that goes nowhere.
+
+## 2026-09-06
+
 ### Fixed
 - Trackside boards are boards. They have a thickness you can see the edge of instead of being
   a flat sheet, and the sponsor's name reads the right way round from both sides of the track
