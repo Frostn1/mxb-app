@@ -28,6 +28,9 @@
 ## 2026-09-06
 
 ### Changed
+- A track can be laid out without the model. A seeded layout generator draws a closed lap
+  that never crosses itself, with the corner count, turning and jump density published tracks
+  carry — so a new track is a new seed rather than a wait.
 - Generated tracks have a sky of their own. They used to borrow the game's stock one, because
   nothing ever shipped a dome or told the game to look for it.
 - The track is dirt again. The whole riding surface is dark worked ground with a darker line
