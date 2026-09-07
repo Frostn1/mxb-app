@@ -2,6 +2,12 @@
 
 ## 2026-09-06
 
+### Added
+- Generated tracks end the lap on a finish jump: a big tabletop on the main straight, with the
+  finish line past its landing and a gantry over it.
+
+## 2026-09-06
+
 ### Fixed
 - Sharing a track is quicker. The upload no longer waits on the host after the files are
   already up, and the app stays responsive while a share is being packed.
