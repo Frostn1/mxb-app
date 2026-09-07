@@ -32,6 +32,7 @@ mod imgcache;
 mod install;
 mod ledger;
 mod library;
+mod liveshare;
 mod linkwalk;
 mod logs;
 mod lru;
@@ -9348,6 +9349,112 @@ async fn file_share_import(
         .map_err(|e| format!("{e:#}"))
 }
 
+/// Publish picked files under a live code, or push a new version to one already published.
+///
+/// `code` names an existing share to update and `None` mints a new one. Unauthenticated all
+/// the way down — there is no account, no enrollment and nothing to sign into; the update
+/// key that comes back from a first publish is written into the config and never shown.
+#[tauri::command]
+async fn live_share_publish(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+    name: Option<String>,
+    code: Option<String>,
+) -> Result<liveshare::LiveShareInfo, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    liveshare::publish(
+        &app,
+        &cfg,
+        &paths,
+        name.as_deref().unwrap_or_default(),
+        code.as_deref(),
+    )
+    .await
+    .map_err(|e| format!("{e:#}"))
+}
+
+/// Follow a live code and install what it points at now.
+#[tauri::command]
+async fn live_share_subscribe(
+    app: tauri::AppHandle,
+    text: String,
+) -> Result<fileshare::FileShare, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    liveshare::subscribe(&app, &cfg, &text)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Install the version a followed code points at now.
+#[tauri::command]
+async fn live_share_sync(
+    app: tauri::AppHandle,
+    text: String,
+) -> Result<fileshare::FileShare, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    liveshare::sync(&app, &cfg, &text)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Ask the control plane what version every followed code is on, and hand back the list.
+#[tauri::command]
+async fn live_share_check(
+    app: tauri::AppHandle,
+) -> Result<Vec<liveshare::LiveShareInfo>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    liveshare::check(&app, &cfg).await.map_err(|e| format!("{e:#}"))
+}
+
+/// Every live code this machine publishes or follows. Local only — no request is made.
+#[tauri::command]
+fn live_share_list(app: tauri::AppHandle) -> Result<Vec<liveshare::LiveShareInfo>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    liveshare::list(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Stop following a code. The files it installed stay where they are.
+#[tauri::command]
+fn live_share_forget(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    liveshare::forget(&app, &cfg, &text).map_err(|e| format!("{e:#}"))
+}
+
+/// Install new versions of a followed code as soon as they appear, or stop doing that.
+#[tauri::command]
+fn live_share_set_auto(app: tauri::AppHandle, text: String, auto: bool) -> Result<(), String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    liveshare::set_auto(&app, &cfg, &text, auto).map_err(|e| format!("{e:#}"))
+}
+
+/// The code plus its update key, for moving a published share to another machine.
+///
+/// Deliberately its own command rather than a field on `live_share_list`: this string lets
+/// whoever holds it replace the track for everyone following the code, so it is fetched
+/// when the player asks for it and never rendered beside the code they hand out.
+#[tauri::command]
+fn live_share_owner_code(app: tauri::AppHandle, code: String) -> Result<String, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let want = liveshare::normalise(&code).ok_or("that isn't a live share code")?;
+    cfg.published_shares
+        .iter()
+        .find(|s| liveshare::normalise(&s.code).as_deref() == Some(want.as_str()))
+        .map(liveshare::owner_code)
+        .ok_or_else(|| "this machine didn't publish that code".to_string())
+}
+
+/// Take over a share published on another machine, from its owner code.
+#[tauri::command]
+async fn live_share_adopt(
+    app: tauri::AppHandle,
+    text: String,
+) -> Result<liveshare::LiveShareInfo, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    liveshare::adopt(&app, &cfg, &text)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 /// Every mod Manage can act on, enabled and disabled alike.
 #[tauri::command]
 async fn mods_state_scan(app: tauri::AppHandle) -> Result<Vec<modstate::ModEntry>, String> {
@@ -10497,6 +10604,15 @@ fn main() {
             file_share_create,
             file_share_preview,
             file_share_import,
+            live_share_publish,
+            live_share_subscribe,
+            live_share_sync,
+            live_share_check,
+            live_share_list,
+            live_share_forget,
+            live_share_set_auto,
+            live_share_owner_code,
+            live_share_adopt,
             mods_state_scan,
             mods_state_plan,
             mods_state_set,
