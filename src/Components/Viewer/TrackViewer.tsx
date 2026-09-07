@@ -672,6 +672,19 @@ const GROUND_TILE_METRES = 4;
 /** How far the grain is allowed to swing the ground's brightness. */
 const GROUND_STRENGTH = 0.5;
 
+/**
+ * What the ground stack's average is lifted to, as linear albedo.
+ *
+ * A track's sheets are not albedo maps. They are photographs of dirt taken under their own
+ * light, and several are very dark on purpose — Indiana's base is luma 47 and the dark soil
+ * over it 35, which is 0.02 linear. Handed to a lit material raw, the whole track renders
+ * black. So the stack is scaled to put its *average* here and its layers keep their distances
+ * from each other, which is where the picture is: what the eye reads at any distance is the
+ * masks, not the grain. The same reasoning as `groundMean` on the single-sheet path below,
+ * which divides by the sheet's mean for exactly this reason.
+ */
+const STACK_TARGET_ALBEDO = 0.19;
+
 function TerrainMesh({
   terrain,
   overview,
@@ -794,6 +807,37 @@ function TerrainMesh({
     });
   }, [layers]);
 
+  // The stack's own average, weighted by how much of the ground each layer actually covers —
+  // a layer masked to a tenth of the map should not pull the whole track's brightness to it.
+  const stackGamma = useMemo(() => {
+    if (layers.length === 0) return 1;
+    let total = 0;
+    let weight = 0;
+    for (const l of layers) {
+      const px = l.sheet.pixels;
+      let lum = 0;
+      let n = 0;
+      for (let i = 0; i < px.length; i += 64) {
+        // Linearised before averaging: the mean of a sheet's sRGB bytes is not the mean of
+        // the light it stands for, and it is the light the material is handed.
+        for (let k = 0; k < 3; k += 1) lum += ((px[i + k] / 255) ** 2.2) * [0.299, 0.587, 0.114][k];
+        n += 1;
+      }
+      if (n === 0) continue;
+      const cover = l.mask
+        ? l.mask.coverage.reduce((a, v, i) => (i % 16 === 0 ? a + v / 255 : a), 0) /
+          Math.ceil(l.mask.coverage.length / 16)
+        : 1;
+      total += (lum / n) * cover;
+      weight += cover;
+    }
+    const mean = total / weight;
+    if (weight === 0 || !(mean > 0) || mean >= 1) return 1;
+    // The exponent that puts the stack's mean on the target. Clamped so a stack that is
+    // already about right is left alone and one sheet read wrong cannot flatten the rest.
+    return Math.min(Math.max(Math.log(STACK_TARGET_ALBEDO) / Math.log(mean), 0.3), 1);
+  }, [layers]);
+
   useEffect(
     () => () =>
       stack.forEach((l) => {
@@ -872,7 +916,7 @@ function TerrainMesh({
       <meshStandardMaterial
         key={`${texture ? "textured" : "plain"}-${detail ? "grain" : "flat"}-${
           relief ? "relief" : "smooth"
-        }-${repeat}-stack${stack.length}`}
+        }-${repeat}-stack${stack.length}-${stackGamma.toFixed(2)}`}
         color={stacked ? "#ffffff" : tint}
         map={stacked ? undefined : (texture ?? undefined)}
         normalMap={relief ?? undefined}
@@ -890,6 +934,7 @@ function TerrainMesh({
             // *physics* surfaces, and published tracks barely paint them. Indiana states one
             // 256x256 patch of concrete over a 2049-square grid, so drawn that way it is a
             // flat brown slab.
+            shader.uniforms.stackGamma = { value: stackGamma };
             stack.forEach((l, i) => {
               shader.uniforms[`stackSheet${i}`] = { value: l.sheet };
               shader.uniforms[`stackTile${i}`] = {
@@ -935,6 +980,7 @@ function TerrainMesh({
                 "#include <common>",
                 `#include <common>
                  varying vec2 vGroundUv;
+                 uniform float stackGamma;
                  ${decls}`,
               )
               .replace(
@@ -946,7 +992,7 @@ function TerrainMesh({
                    // Multiplied rather than assigned: what is already in diffuseColor is the
                    // cavity shading the relief is read by, and dropping it flattens every
                    // rut and berm the track has.
-                   diffuseColor.rgb *= ground;
+                   diffuseColor.rgb *= pow(ground, vec3(stackGamma));
                  }`,
               );
             return;
