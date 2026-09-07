@@ -84,6 +84,10 @@ pub struct LiveShareInfo {
     pub mine: bool,
     /// How many files the code carries, for a published row. Zero for a subscription.
     pub items: usize,
+    /// The mods-relative paths an owned code carries, so "publish an update" can repack
+    /// exactly what was shared last time without the player picking the files again.
+    /// Empty for a subscription — a follower has no business republishing.
+    pub rels: Vec<String>,
 }
 
 /// Normalise a code the way it might be typed rather than the way it was printed.
@@ -246,6 +250,7 @@ pub async fn publish(
         auto: false,
         mine: true,
         items: share.items.len(),
+        rels: row.rels.clone(),
     })
 }
 
@@ -261,6 +266,16 @@ async fn fetch(code: &str) -> anyhow::Result<ShareBody> {
         anyhow::bail!("no share with that code — check it was typed correctly");
     }
     read_json(resp).await
+}
+
+/// What a code carries, without installing it — the import dialog's preview.
+///
+/// Runs the manifest back through [`crate::fileshare::preview`], so the answer includes the
+/// files this machine would have overwritten, on exactly the same terms as a pasted code.
+pub async fn preview(cfg: &AppConfig, text: &str) -> anyhow::Result<fileshare::SharePreview> {
+    let code = normalise(text).context("that isn't a live share code")?;
+    let body = fetch(&code).await?;
+    fileshare::preview(cfg, &fileshare::encode(&body.manifest))
 }
 
 /// Follow a code and install what it currently points at.
@@ -373,6 +388,7 @@ pub fn list(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<Vec<LiveShareInf
             auto: false,
             mine: true,
             items: s.rels.len(),
+            rels: s.rels.clone(),
         })
         .collect();
     out.extend(cfg.live_subscriptions.iter().map(|s| LiveShareInfo {
@@ -386,6 +402,7 @@ pub fn list(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<Vec<LiveShareInf
         auto: s.auto,
         mine: false,
         items: 0,
+        rels: Vec::new(),
     }));
     Ok(out)
 }
@@ -433,6 +450,7 @@ pub async fn adopt(app: &AppHandle, cfg: &AppConfig, text: &str) -> anyhow::Resu
         auto: false,
         mine: true,
         items: row.rels.len(),
+        rels: row.rels.clone(),
     })
 }
 
@@ -616,6 +634,49 @@ mod tests {
             "RedBud +1"
         );
         assert_eq!(display_name("  My Track  ", &share(&[("x.pkz", "tracks/x.pkz")])), "My Track");
+    }
+
+    /// The wire contract, against bytes the control plane actually returned.
+    ///
+    /// Two independent camelCase mappings have to agree for this feature to work at all —
+    /// `updateKey` on the way out of a publish, and the whole `FileShare` nested under
+    /// `manifest` on the way back — and a mismatch in either is a runtime parse failure
+    /// with nothing at compile time to catch it. These are the real responses, copied from
+    /// a local worker run.
+    #[test]
+    fn the_control_plane_answers_in_the_shape_this_module_reads() {
+        let publish: PublishBody = serde_json::from_str(
+            r#"{"code":"MXBL1-PJ753X5P","updateKey":"AqBVeX4vCus8p8uScHvgQIj4gxOcl6Yav-AWYEnaTKY",
+                "name":"RedBud 2026","version":1,"size":68000000,"updatedAt":1788824813}"#,
+        )
+        .expect("a publish response parses");
+        assert_eq!(publish.code, "MXBL1-PJ753X5P");
+        assert_eq!(publish.version, 1);
+        assert!(!publish.update_key.is_empty(), "the key is read, not dropped");
+
+        let read: ShareBody = serde_json::from_str(
+            r#"{"code":"MXBL1-PJ753X5P","name":"RedBud 2026","version":2,"size":71500000,
+                "updatedAt":1788824813,
+                "manifest":{"items":[{"name":"RedBud.pkz","rel":"tracks/EU/RedBud.pkz",
+                "size":71500000,"isDir":false}],"totalSize":71500000,
+                "bundle":{"url":"https://files.catbox.moe/def456.zip","host":"catbox",
+                "size":71500000}}}"#,
+        )
+        .expect("a read response parses");
+        assert_eq!(read.version, 2);
+        assert_eq!(read.size, 71_500_000);
+        assert_eq!(read.manifest.items[0].rel, "tracks/EU/RedBud.pkz");
+        assert_eq!(read.manifest.bundle.url, "https://files.catbox.moe/def456.zip");
+        assert!(read.manifest.bundle.parts.is_empty(), "a single-part bundle omits them");
+
+        // And a publish with no key on it — an update rather than a mint — still parses, so
+        // `publish` can fall back to the key it already holds.
+        let update: PublishBody = serde_json::from_str(
+            r#"{"code":"MXBL1-PJ753X5P","name":"RedBud 2026","version":2,"size":71500000,
+                "updatedAt":1788824813}"#,
+        )
+        .expect("an update response parses");
+        assert!(update.update_key.is_empty());
     }
 
     /// The author of a code holds the files already. A row on both lists would offer them

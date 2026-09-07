@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { ShareDialog, ImportShareDialog } from "../Components/Share/ShareDialogs";
+import { LiveSharesDialog } from "../Components/Share/LiveShares";
 
 /**
  * Sharing installed files, and the one place that owns its two dialogs.
@@ -22,12 +23,18 @@ import { ShareDialog, ImportShareDialog } from "../Components/Share/ShareDialogs
  * Both entrances take whatever names a file: an absolute path (what the Library holds) or a
  * `mods/`-relative rel (what everything else uses). The backend resolves either — see
  * `src-tauri/src/fileshare.rs`.
+ *
+ * The live-share list lives here for the same reason: a code that updates itself is not the
+ * Library's either, and the paste handler below has to be able to route one wherever the
+ * player happens to be standing.
  */
 interface ShareContextValue {
   /** Open the share dialog for these paths or rels. */
   shareFiles: (paths: string[]) => void;
   /** Open the import dialog, optionally prefilled with a code. */
   importShare: (code?: string) => void;
+  /** Open the list of live codes this machine publishes and follows. */
+  liveShares: () => void;
 }
 
 const ShareContext = createContext<ShareContextValue | null>(null);
@@ -39,7 +46,7 @@ const ShareContext = createContext<ShareContextValue | null>(null);
  * surrounded by whatever it was posted with — "here you go: MXBS1-… enjoy". The payload is
  * base64, so it ends at the first character that isn't.
  */
-const CODE_PATTERN = /\bMXBS1-[A-Za-z0-9+/=]+/;
+const CODE_PATTERN = /\b(?:MXBS1-[A-Za-z0-9+/=]+|MXBL1-[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{8})/;
 
 /** Whether a paste is going somewhere that wants the text itself. */
 function isEditable(target: EventTarget | null): boolean {
@@ -60,12 +67,15 @@ export function ShareProvider({
   const [sharePaths, setSharePaths] = useState<string[] | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importCode, setImportCode] = useState("");
+  const [liveOpen, setLiveOpen] = useState(false);
 
   const shareFiles = useCallback((paths: string[]) => setSharePaths(paths), []);
   const importShare = useCallback((code = "") => {
     setImportCode(code);
     setImportOpen(true);
   }, []);
+
+  const liveShares = useCallback(() => setLiveOpen(true), []);
 
   const importRef = useRef(importShare);
   importRef.current = importShare;
@@ -91,7 +101,10 @@ export function ShareProvider({
   const onImportedRef = useRef(onImported);
   onImportedRef.current = onImported;
 
-  const value = useMemo(() => ({ shareFiles, importShare }), [shareFiles, importShare]);
+  const value = useMemo(
+    () => ({ shareFiles, importShare, liveShares }),
+    [shareFiles, importShare, liveShares],
+  );
 
   return (
     <ShareContext.Provider value={value}>
@@ -105,6 +118,11 @@ export function ShareProvider({
           setImportOpen(false);
           onImportedRef.current?.();
         }}
+      />
+      <LiveSharesDialog
+        open={liveOpen}
+        onClose={() => setLiveOpen(false)}
+        onChanged={() => onImportedRef.current?.()}
       />
     </ShareContext.Provider>
   );

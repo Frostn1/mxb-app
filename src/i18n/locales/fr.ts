@@ -1305,6 +1305,58 @@ export const fr: Translation = {
   "share.phaseDownloading": "Téléchargement…",
   "share.phaseInstalling": "Installation…",
 
+  // ── Codes de partage vivants ───────────────────────────────────────────────
+  "share.keepUpdated": "Le garder à jour",
+  "share.keepUpdatedHint":
+    "Un seul code court à envoyer. Publie une nouvelle version et tous ceux qui l'ont collé la reçoivent — pas de nouveau lien.",
+  "share.hintDoneLive":
+    "Envoie ce code une fois. Chaque version que tu publies parvient à ceux qui l'ont.",
+  "share.liveNotice": "Ce code reste à jour — chaque nouvelle version te sera proposée.",
+  "share.follow": "Suivre et installer",
+  "share.subscribed_one": "1 fichier installé. Tu recevras les nouvelles versions de ce partage.",
+  "share.subscribed_other":
+    "{{count}} fichiers installés. Tu recevras les nouvelles versions de ce partage.",
+  "live.action": "Codes vivants…",
+  "live.title": "Codes de partage vivants",
+  "live.help":
+    "Des codes qui pointent toujours vers la dernière version — ceux que tu publies et ceux que tu suis.",
+  "live.empty":
+    "Aucun code vivant. Partage quelque chose avec \"Le garder à jour\" activé, ou colle un code qu'on t'a envoyé.",
+  "live.yours": "À toi",
+  "live.updateReady": "Mise à jour prête",
+  "live.versionAt": "v{{version}}",
+  "live.versionBehind": "v{{have}} installée · v{{latest}} disponible",
+  "live.publishedAgo": "publié {{when}}",
+  "live.checkedAgo": "vérifié {{when}}",
+  "live.copyCode": "Copier le code",
+  "live.codeCopied": "Code copié.",
+  "live.publishUpdate": "Publier la mise à jour",
+  "live.published": "v{{version}} publiée.",
+  "live.ownerCode": "Clé propriétaire",
+  "live.ownerCopied":
+    "Clé propriétaire copiée — elle permet à une autre machine de publier des mises à jour sur ce code. Garde-la pour toi.",
+  "live.update": "Mettre à jour",
+  "live.upToDate": "À jour",
+  "live.auto": "Auto",
+  "live.unfollow": "Ne plus suivre",
+  "live.forgetMine": "Retirer",
+  "live.check": "Vérifier les mises à jour",
+  "live.checking": "Vérification…",
+  "live.foundUpdates_one": "1 mise à jour disponible.",
+  "live.foundUpdates_other": "{{count}} mises à jour disponibles.",
+  "live.allCurrent": "Tout est à jour.",
+  "live.adopt": "Reprendre",
+  "live.adoptPlaceholder": "Colle une clé propriétaire pour publier depuis cette machine",
+  "live.adopted": "Tu peux maintenant publier des mises à jour pour {{name}}.",
+  "live.never": "jamais",
+  "live.justNow": "à l'instant",
+  "live.minsAgo_one": "il y a 1 min",
+  "live.minsAgo_other": "il y a {{count}} min",
+  "live.hoursAgo_one": "il y a 1 heure",
+  "live.hoursAgo_other": "il y a {{count}} heures",
+  "live.daysAgo_one": "il y a 1 jour",
+  "live.daysAgo_other": "il y a {{count}} jours",
+
   // ── Casier ─────────────────────────────────────────────────────────────────
   "locker.help":
     "Changez le modèle et le son moteur de chaque moto parmi les sets que vous avez installés.",

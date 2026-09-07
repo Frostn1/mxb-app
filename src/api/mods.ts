@@ -57,6 +57,7 @@ import type {
   BundleProgress,
   SharePlan,
   FileShare,
+  LiveShareInfo,
   GameId,
   GameInfo,
   LockItem,
@@ -2773,6 +2774,73 @@ export function fileSharePreview(text: string): Promise<SharePreview> {
 /** Download a share code's files and install them where the sender had them. */
 export function fileShareImport(text: string): Promise<FileShare> {
   return invoke<FileShare>("file_share_import", { text });
+}
+
+// ── Live share codes (one code, every version) ───────────────────────────────
+
+/**
+ * Publish the picked paths under a live code, or push a new version to one already
+ * published. `code` names an existing share; omit it to mint a new one.
+ *
+ * Nothing here signs in: publishing needs no account, and the update key that owns the
+ * code is written into the config by the backend and never shown.
+ */
+export function liveSharePublish(
+  paths: string[],
+  name?: string,
+  code?: string,
+): Promise<LiveShareInfo> {
+  return invoke<LiveShareInfo>("live_share_publish", { paths, name, code });
+}
+
+/** Read a live code *without* installing — same preview a `MXBS1-` code gets. */
+export function liveSharePreview(text: string): Promise<SharePreview> {
+  return invoke<SharePreview>("live_share_preview", { text });
+}
+
+/** Follow a live code and install what it points at now. */
+export function liveShareSubscribe(text: string): Promise<FileShare> {
+  return invoke<FileShare>("live_share_subscribe", { text });
+}
+
+/** Install the version a followed code points at now. */
+export function liveShareSync(text: string): Promise<FileShare> {
+  return invoke<FileShare>("live_share_sync", { text });
+}
+
+/** Ask the control plane what version every followed code is on. */
+export function liveShareCheck(): Promise<LiveShareInfo[]> {
+  return invoke<LiveShareInfo[]>("live_share_check");
+}
+
+/** Every live code this machine publishes or follows. Local — makes no request. */
+export function liveShareList(): Promise<LiveShareInfo[]> {
+  return invoke<LiveShareInfo[]>("live_share_list");
+}
+
+/** Stop following a code. Files it installed stay where they are. */
+export function liveShareForget(text: string): Promise<void> {
+  return invoke<void>("live_share_forget", { text });
+}
+
+/** Install new versions of a followed code as soon as they appear. */
+export function liveShareSetAuto(text: string, auto: boolean): Promise<void> {
+  return invoke<void>("live_share_set_auto", { text, auto });
+}
+
+/**
+ * The code plus its update key, for moving a published share to another machine.
+ *
+ * Fetched only when asked for: whoever holds this string can replace the track for
+ * everyone following the code, so it is never rendered beside the code you hand out.
+ */
+export function liveShareOwnerCode(code: string): Promise<string> {
+  return invoke<string>("live_share_owner_code", { code });
+}
+
+/** Take over a share published on another machine, from its owner code. */
+export function liveShareAdopt(text: string): Promise<LiveShareInfo> {
+  return invoke<LiveShareInfo>("live_share_adopt", { text });
 }
 
 /** Subscribe to file-share create/import phase updates. Same payload as the preset

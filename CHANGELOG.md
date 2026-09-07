@@ -2,6 +2,13 @@
 
 ## 2026-09-07
 
+### Added
+- Share codes that keep updating. Turn on "Keep it updated" when you share and you get a
+  short code to send once. Publish a new version and everyone who pasted it gets it — no
+  new link, no new code.
+- A Live share codes list under Import: what you publish, what you follow, and which ones
+  have a new version waiting. Turn on Auto and they install themselves.
+
 ### Fixed
 - Trackside scenery in the 3D viewer no longer stands in slabs of flat grey. A track whose
   textures the viewer can't read now leaves its banners and foliage out rather than drawing

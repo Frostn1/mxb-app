@@ -6,16 +6,31 @@
  * sender had them. Same upload, same slicing past one part; see `src-tauri/src/fileshare.rs`.
  */
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Check, Copy, Download, Loader2, Share2, UploadCloud } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Cloud,
+  Copy,
+  Download,
+  Loader2,
+  Share2,
+  UploadCloud,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   fileShareCreate,
   fileShareImport,
   fileSharePlan,
   fileSharePreview,
+  liveSharePreview,
+  liveSharePublish,
+  liveShareSubscribe,
   onFileShareProgress,
 } from "../../api/mods";
 import type { BundlePhase, SharePlan, SharePreview } from "../../types";
+import { isLiveCode } from "../../lib/liveshare";
+import { Switch } from "@/Components/ui/switch";
+import { cn } from "@/lib/utils";
 import { formatBytes } from "../../lib/mods";
 import { copyText } from "../../lib/clipboard";
 import { useT, type TFunc } from "../../i18n/context";
@@ -98,6 +113,9 @@ export function ShareDialog({
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<BundlePhase | null>(null);
+  // Off by default: a plain code needs no server and keeps working if ours is down, so it
+  // stays the thing that happens when nobody asked for anything else.
+  const [live, setLive] = useState(false);
 
   useEffect(() => {
     if (!paths) return;
@@ -120,7 +138,7 @@ export function ShareDialog({
     setPhase("bundling");
     const unlisten = await onFileShareProgress((p) => setPhase(p.phase));
     try {
-      const c = await fileShareCreate(paths);
+      const c = live ? (await liveSharePublish(paths)).code : await fileShareCreate(paths);
       setCode(c);
       setCopied(false);
       // Straight to the clipboard: the code exists to be pasted somewhere, and a player
@@ -138,7 +156,7 @@ export function ShareDialog({
       setBusy(false);
       setPhase(null);
     }
-  }, [paths, t]);
+  }, [paths, live, t]);
 
   const count = plan?.items.length ?? 0;
 
@@ -148,7 +166,7 @@ export function ShareDialog({
         <DialogHeader>
           <DialogTitle>{t("share.title")}</DialogTitle>
           <DialogDescription>
-            {code ? t("share.hintDone") : t("share.hint")}
+            {code ? (live ? t("share.hintDoneLive") : t("share.hintDone")) : t("share.hint")}
           </DialogDescription>
         </DialogHeader>
 
@@ -178,9 +196,27 @@ export function ShareDialog({
             readOnly
             value={code}
             onFocus={(e) => e.currentTarget.select()}
-            className="h-24 w-full resize-none rounded-lg border border-input bg-transparent p-2.5 font-mono text-[11px] leading-snug"
+            className={cn(
+              "w-full resize-none rounded-lg border border-input bg-transparent p-2.5 font-mono leading-snug",
+              // A live code is eight characters. Giving it the same wall of textarea a
+              // base64 blob needs makes it look like something to scroll through.
+              live ? "h-9 text-center text-[15px] tracking-[0.2em]" : "h-24 text-[11px]",
+            )}
           />
-        ) : null}
+        ) : (
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-white/[0.07] bg-card/40 p-2.5">
+            <Switch checked={live} onCheckedChange={setLive} disabled={busy} className="mt-px" />
+            <span className="min-w-0">
+              <span className="flex items-center gap-1.5 text-[12.5px] font-semibold">
+                <Cloud className="size-3.5 flex-none" />
+                {t("share.keepUpdated")}
+              </span>
+              <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
+                {t("share.keepUpdatedHint")}
+              </span>
+            </span>
+          </label>
+        )}
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
@@ -221,7 +257,14 @@ export function ShareDialog({
   );
 }
 
-/** Paste a `MXBS1-` code and install what it carries. */
+/**
+ * Paste a share code and install what it carries.
+ *
+ * Two kinds arrive in the same box. A `MXBS1-` code is decoded on the spot; a `MXBL1-` one
+ * has to be fetched, because what it points at lives on the control plane and changes. The
+ * preview and the install differ only in which of those two the code is routed to — every
+ * other guard, and the whole download, is shared.
+ */
 export function ImportShareDialog({
   open,
   initialCode = "",
@@ -241,6 +284,7 @@ export function ImportShareDialog({
   const [previewErr, setPreviewErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<BundlePhase | null>(null);
+  const live = isLiveCode(text);
 
   // Each opening starts from whatever it was opened with — a pasted code, or nothing.
   useEffect(() => {
@@ -258,7 +302,12 @@ export function ImportShareDialog({
       return;
     }
     let cancelled = false;
-    fileSharePreview(code)
+    // A live code costs a round trip to preview, so this is debounced — the box is typed
+    // into character by character and a request per keystroke is a request per keystroke.
+    const run = isLiveCode(code) ? liveSharePreview : fileSharePreview;
+    const delay = isLiveCode(code) ? 350 : 0;
+    const timer = setTimeout(() => {
+    run(code)
       .then((s) => {
         if (cancelled) return;
         setPreview(s);
@@ -269,8 +318,10 @@ export function ImportShareDialog({
         setPreview(null);
         setPreviewErr(String(e).replace(/^Error:\s*/, ""));
       });
+    }, delay);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [text]);
 
@@ -280,8 +331,13 @@ export function ImportShareDialog({
     setPhase("downloading");
     const unlisten = await onFileShareProgress((p) => setPhase(p.phase));
     try {
-      const done = await fileShareImport(text.trim());
-      toast.success(t("share.installed", { count: done.items.length }));
+      const code = text.trim();
+      const done = live ? await liveShareSubscribe(code) : await fileShareImport(code);
+      toast.success(
+        live
+          ? t("share.subscribed", { count: done.items.length })
+          : t("share.installed", { count: done.items.length }),
+      );
       onImported();
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
@@ -290,7 +346,7 @@ export function ImportShareDialog({
       setBusy(false);
       setPhase(null);
     }
-  }, [preview, text, onImported, t]);
+  }, [preview, text, live, onImported, t]);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -303,7 +359,7 @@ export function ImportShareDialog({
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="MXBS1-…"
+          placeholder="MXBS1-… / MXBL1-…"
           className="h-24 w-full resize-none rounded-lg border border-input bg-transparent p-2.5 font-mono text-[11px] leading-snug placeholder:text-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         />
 
@@ -334,6 +390,12 @@ export function ImportShareDialog({
                 })}
               </span>
             </p>
+            {live && (
+              <p className="flex items-start gap-1.5 text-[11.5px] text-sky-400">
+                <Cloud className="mt-px size-3.5 flex-none" />
+                {t("share.liveNotice")}
+              </p>
+            )}
           </>
         )}
 
@@ -347,7 +409,7 @@ export function ImportShareDialog({
             ) : (
               <Download className="size-4" />
             )}
-            {busy && phase ? phaseLabel(phase, t) : t("share.install")}
+            {busy && phase ? phaseLabel(phase, t) : live ? t("share.follow") : t("share.install")}
           </Button>
         </DialogFooter>
       </DialogContent>

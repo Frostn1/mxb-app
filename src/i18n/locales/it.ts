@@ -1298,6 +1298,58 @@ export const it: Translation = {
   "share.phaseDownloading": "Download…",
   "share.phaseInstalling": "Installazione…",
 
+  // ── Codici di condivisione live ────────────────────────────────────────────
+  "share.keepUpdated": "Mantienilo aggiornato",
+  "share.keepUpdatedHint":
+    "Mandi un solo codice breve. Pubblichi una nuova versione e la riceve chi l'ha incollato — nessun link nuovo.",
+  "share.hintDoneLive":
+    "Manda questo codice una volta sola. Ogni versione che pubblichi arriva a chi ce l'ha.",
+  "share.liveNotice": "Questo codice resta aggiornato — ti verrà proposta ogni nuova versione.",
+  "share.follow": "Segui e installa",
+  "share.subscribed_one": "1 file installato. Riceverai le nuove versioni di questa condivisione.",
+  "share.subscribed_other":
+    "{{count}} file installati. Riceverai le nuove versioni di questa condivisione.",
+  "live.action": "Codici live…",
+  "live.title": "Codici di condivisione live",
+  "live.help":
+    "Codici che puntano sempre alla versione più recente — quelli che pubblichi e quelli che segui.",
+  "live.empty":
+    "Nessun codice live. Condividi qualcosa con \"Mantienilo aggiornato\" attivo, oppure incolla un codice che ti hanno mandato.",
+  "live.yours": "Tuo",
+  "live.updateReady": "Aggiornamento pronto",
+  "live.versionAt": "v{{version}}",
+  "live.versionBehind": "v{{have}} installata · v{{latest}} disponibile",
+  "live.publishedAgo": "pubblicato {{when}}",
+  "live.checkedAgo": "controllato {{when}}",
+  "live.copyCode": "Copia codice",
+  "live.codeCopied": "Codice copiato.",
+  "live.publishUpdate": "Pubblica aggiornamento",
+  "live.published": "Pubblicata la v{{version}}.",
+  "live.ownerCode": "Chiave proprietario",
+  "live.ownerCopied":
+    "Chiave proprietario copiata — permette a un altro computer di pubblicare aggiornamenti su questo codice. Tienila per te.",
+  "live.update": "Aggiorna",
+  "live.upToDate": "Aggiornato",
+  "live.auto": "Auto",
+  "live.unfollow": "Smetti di seguire",
+  "live.forgetMine": "Rimuovi",
+  "live.check": "Controlla aggiornamenti",
+  "live.checking": "Controllo…",
+  "live.foundUpdates_one": "1 aggiornamento disponibile.",
+  "live.foundUpdates_other": "{{count}} aggiornamenti disponibili.",
+  "live.allCurrent": "È tutto aggiornato.",
+  "live.adopt": "Prendi il controllo",
+  "live.adoptPlaceholder": "Incolla una chiave proprietario per pubblicare da questo computer",
+  "live.adopted": "Ora puoi pubblicare aggiornamenti per {{name}}.",
+  "live.never": "mai",
+  "live.justNow": "adesso",
+  "live.minsAgo_one": "1 min fa",
+  "live.minsAgo_other": "{{count}} min fa",
+  "live.hoursAgo_one": "1 ora fa",
+  "live.hoursAgo_other": "{{count}} ore fa",
+  "live.daysAgo_one": "1 giorno fa",
+  "live.daysAgo_other": "{{count}} giorni fa",
+
   // ── Armadietto ─────────────────────────────────────────────────────────────
   "locker.help":
     "Cambia il modello e il suono del motore di ogni moto tra i set che hai installato.",

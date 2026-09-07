@@ -9373,6 +9373,18 @@ async fn live_share_publish(
     .map_err(|e| format!("{e:#}"))
 }
 
+/// Read a live code without installing anything — the import dialog's preview.
+#[tauri::command]
+async fn live_share_preview(
+    app: tauri::AppHandle,
+    text: String,
+) -> Result<fileshare::SharePreview, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    liveshare::preview(&cfg, &text)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 /// Follow a live code and install what it points at now.
 #[tauri::command]
 async fn live_share_subscribe(
@@ -10605,6 +10617,7 @@ fn main() {
             file_share_preview,
             file_share_import,
             live_share_publish,
+            live_share_preview,
             live_share_subscribe,
             live_share_sync,
             live_share_check,
