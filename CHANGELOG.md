@@ -6,8 +6,8 @@
 - Doubles on a generated track are shaped the way a built one is. The take-off lip and the
   landing crest turn over a radius, and the ground between them runs down through a rounded
   valley into the flat.
-- A tight double rides over a saddle rather than through a slot: the valley drops to the
-  ground where there is room for it, and sits higher where the two jumps are close together.
+- The gap between the two halves of a double no longer digs down to the ground. The pair
+  stands on the ground and the gap is a dip in it, the way a rhythm section is cut.
 
 ## 2026-09-06
 
