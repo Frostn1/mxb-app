@@ -111,6 +111,43 @@ def dubins(start, goal, r):
     return out
 
 
+class Cover:
+    """Which parts of the plot the lap has been near, on a coarse grid.
+
+    The walk used to be scored by how much open ground lay ahead of it, and the most open
+    ground is always the perimeter — so it followed the boundary round and left the middle
+    empty, which from above is a giant ring. Rewarding *new ground covered* instead makes it
+    fill the plot, because a move into the middle scores and a move along the edge it has
+    already been down does not.
+    """
+
+    def __init__(self, plot, cell=26.0):
+        self.cell = cell
+        self.n = int(plot / cell) + 1
+        self.seen = [False] * (self.n * self.n)
+
+    def index(self, x, z):
+        c, r = int(x / self.cell), int(z / self.cell)
+        if 0 <= c < self.n and 0 <= r < self.n:
+            return r * self.n + c
+        return None
+
+    def fresh(self, pts):
+        """How many cells this piece would visit that nothing has visited yet."""
+        hit = set()
+        for x, z, _ in pts:
+            i = self.index(x, z)
+            if i is not None and not self.seen[i]:
+                hit.add(i)
+        return len(hit)
+
+    def add(self, pts):
+        for x, z, _ in pts:
+            i = self.index(x, z)
+            if i is not None:
+                self.seen[i] = True
+
+
 class Ground:
     """What the lap has used, on a coarse grid, so "is this clear" is cheap."""
 
@@ -172,8 +209,8 @@ def grow(rng, plot, width, want_m):
     to the start pose that is also clear closes the lap exactly, which is why there is no
     return leg to route round anything.
     """
-    clear = width + 8.0          # how near the lap may come to itself
-    margin = 40.0
+    clear = width + 5.0          # how near the lap may come to itself
+    margin = 26.0
     gate_room = 78.0        # the start spur stands beside the lap and needs ground
     # Three tightnesses, and the tightest is a hairpin.
     #
@@ -186,6 +223,7 @@ def grow(rng, plot, width, want_m):
     start = (plot * 0.5, margin + gate_room, 0.0)   # facing +z, up the plot
     pose = start
     ground = Ground(plot)
+    cover = Cover(plot)
     segs = []
     laid = 0.0
     # The first stretch is the start straight, and nothing may be built on it.
@@ -193,14 +231,23 @@ def grow(rng, plot, width, want_m):
     tight_m = 0.0
     segs.append(opening)
     ground.add(samples(pose, opening), 0.0)
+    cover.add(samples(pose, opening))
     pose = advance(pose, opening)
     laid += opening["length"]
 
-    def legal(from_pose, seg, age_cut, skip_start=-1.0):
+    def legal(from_pose, seg, age_cut, near_gate=0.0):
         for x, z, _ in samples(from_pose, seg, 2.5):
             if not (margin <= x <= plot - margin and margin <= z <= plot - margin):
                 return False
-            if ground.nearest(x, z, age_cut, ignore_before=skip_start) < clear:
+            # Arriving at the gate is allowed to be close to the gate, and to nothing else.
+            #
+            # Exempting the first stretch of the *lap* instead let the way home drive
+            # straight through the first corner — "segment 1 runs within 0 m of segment 44" —
+            # because that corner is early, not because it is near the finish. The exemption
+            # has to be about where a piece is, not when it was laid.
+            if near_gate > 0.0 and math.hypot(x - start[0], z - start[1]) < near_gate:
+                continue
+            if ground.nearest(x, z, age_cut) < clear:
                 return False
         return True
 
@@ -209,7 +256,7 @@ def grow(rng, plot, width, want_m):
         # What a rider could be given next: a run, or a turn of one of three tightnesses
         # either way. Runs are what carry the lap across the ground; turns are what keep it
         # inside the plot.
-        moves = [{"kind": "straight", "length": rng.uniform(45.0, 115.0), "rise": 0.0}]
+        moves = [{"kind": "straight", "length": rng.uniform(55.0, 135.0), "rise": 0.0}]
         for r in turn_r:
             for side in (1.0, -1.0):
                 # A hairpin turns most of the way round. Getting the tight ground a lap needs
@@ -227,12 +274,19 @@ def grow(rng, plot, width, want_m):
             if not legal(pose, m, laid - 34.0):
                 continue
             end = advance(pose, m)
-            # Look a little further on, so the walk does not paint itself into a corner.
+            # Ground it would be the first to visit, which is what makes a lap fill its plot
+            # rather than circle it.
+            # Per metre travelled, not per move: rewarding raw coverage buys it with long
+            # straights, because a hundred metres of run touches more ground than a corner
+            # ever will, and a lap of long runs with angles between them is not a track.
+            run_m = (m["length"] if m["kind"] == "straight"
+                     else abs(m["radius"]) * math.radians(m["angle"]))
+            score = 190.0 * cover.fresh(samples(pose, m, 6.0)) / max(run_m, 1.0)
+            # Room still counts, but only enough to keep the walk from painting itself in.
             ahead = (end[0] + math.sin(end[2]) * 26.0, end[1] + math.cos(end[2]) * 26.0)
-            score = (ground.room(end[0], end[1], laid - 34.0)
-                     + 0.8 * ground.room(ahead[0], ahead[1], laid - 34.0))
+            score += 0.35 * ground.room(ahead[0], ahead[1], laid - 34.0)
             if m["kind"] == "arc":
-                score += 8.0            # corners are the point, but ten to thirty of them
+                score += 3.0            # corners are the point, but ten to thirty of them
                 # And a lap needs its share of ground tight enough to wear. Until it has
                 # that, a hairpin outscores anything the open ground can offer.
                 if abs(m["radius"]) < 14.0:
@@ -244,6 +298,7 @@ def grow(rng, plot, width, want_m):
             return None                 # painted in; the caller tries another seed
 
         ground.add(samples(pose, best), laid)
+        cover.add(samples(pose, best))
         pose = advance(pose, best)
         run = (best["length"] if best["kind"] == "straight"
                else abs(best["radius"]) * math.radians(best["angle"]))
@@ -269,7 +324,7 @@ def grow(rng, plot, width, want_m):
                 for seg in home:
                     # The way home may run up beside the start straight — that is where it is
                     # going — so the first stretch of the lap is not an obstacle to it.
-                    if not legal(p, seg, laid - 34.0, skip_start=opening["length"] + 25.0):
+                    if not legal(p, seg, laid - 34.0, near_gate=opening["length"] * 0.8):
                         ok = False
                         break
                     p = advance(p, seg)
@@ -288,7 +343,14 @@ def closes_to(segs, start):
 def main():
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else random.randrange(1 << 30)
     rng = random.Random(seed)
-    plot = 620.0
+    # Smaller ground on purpose.
+    #
+    # A 1700 m lap inside a 620 m plot is shorter than the plot's own perimeter — 2160 m
+    # round the inside of the margin — so a ring fits comfortably and the walk has no reason
+    # to fold inwards. It came out "a fucking giant ring" every time. Indiana is 525 m across
+    # with a 2138 m lap: its lap is *longer* than its perimeter, so it has to double back
+    # through its own middle, and that is what a track looks like.
+    plot = 470.0
     # Ridden and called "little skinny": ten to thirteen and a half metres is the bottom of
     # what the corpus allows (8 to 20), and a national is wider than that.
     width = round(rng.uniform(14.5, 18.0), 1)
