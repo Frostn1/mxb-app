@@ -56,6 +56,11 @@
 - Banner artwork fills its board at the proportions it was drawn in.
 
 ## 2026-09-06
+### Changed
+- Corners on a generated track tighten into the apex and open out again, instead of holding
+  one radius the whole way round.
+- Generated laps carry real hairpins. A turn can double back on itself, and the run into a
+  corner curves in rather than stepping towards it through a series of short straights.
 
 ### Fixed
 - Doubles on a generated track are shaped the way a built one is. The take-off lip and the
