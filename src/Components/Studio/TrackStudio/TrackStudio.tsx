@@ -17,7 +17,6 @@ import {
   Maximize2,
   Minimize2,
   PenLine,
-  Plus,
   RefreshCw,
   Waves,
   type LucideIcon,
@@ -38,6 +37,7 @@ import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { TrackViewer } from "../../Viewer/TrackViewer";
 import BuildCard from "./BuildCard";
+import LapPlan from "./LapPlan";
 import ElevationCurve from "./ElevationCurve";
 import { Switch } from "../../ui/switch";
 import { Segmented } from "../../ui/segmented";
@@ -110,6 +110,13 @@ export default function TrackStudio() {
   const [touched, setTouched] = useState(false);
   const [confirming, setConfirming] = useState<(() => Promise<void>) | null>(null);
   const [terrain, setTerrain] = useState<TrackTerrain | null>(null);
+  // Building a 2049-square terrain is seconds of work with nothing on screen to say so, and
+  // with Live on it happened silently — you moved a number, the picture didn't change, and
+  // the studio looked broken until it caught up.
+  const [rebuilding, setRebuilding] = useState(false);
+  // The program the terrain on screen was built from. A 3D view of an older lap is the same
+  // picture as a 3D view that has not updated, and only this can tell them apart.
+  const [built, setBuilt] = useState<string | null>(null);
   const [overview, setOverview] = useState<TrackOverview | null>(null);
   const [focus, setFocus] = useState<{ x: number; z: number } | null>(null);
   // The viewer, filling the window. It is the same element either way — only the wrapper's
@@ -120,6 +127,9 @@ export default function TrackStudio() {
     path: { x: number; z: number }[];
     width: number;
   } | null>(null);
+  // The same gesture in the form the plan wants. The 3D viewer highlights a path of world
+  // points; the plan re-walks the lap itself, so it only needs to be told which stretch.
+  const [hoverSpan, setHoverSpan] = useState<{ at: number; length: number } | null>(null);
   // Reordering is done with pointer events, not HTML5 drag-and-drop. Tauri's
   // `dragDropEnabled` hands drags to the OS so the webview never sees a dragstart — which is
   // also why the whole-window file dropzone was catching every attempt.
@@ -135,6 +145,13 @@ export default function TrackStudio() {
   // 1500 m lap a 40 m berm is three pixels wide and every point lands on the last one.
   const [scope, setScope] = useState<number | null>(null);
   const [stripMode, setStripMode] = useState<"height" | "shape">("height");
+  // Which picture the stage is showing. The plan is drawn from the program and costs
+  // nothing, so it is what you get until you ask for the ground itself.
+  const [stage, setStage] = useState<"plan" | "solid">("plan");
+  // The two things the left column's footer can open, one at a time — a row of feature
+  // kinds, or the brief. Both are one line and neither is worth a dialog.
+  const [adding, setAdding] = useState(false);
+  const [asking, setAsking] = useState(false);
   // Rebuilding a two-thousand-square terrain on every drag is real work, so this is a choice
   // rather than the default. With it on, an edit settles and then the view catches up.
   const [live, setLive] = useState(false);
@@ -191,6 +208,7 @@ export default function TrackStudio() {
     try {
       const next = await generateTrack(brief.trim());
       await settle(next);
+      setAsking(false);
       toast.success(t("track.generated", { name: next.name }));
     } catch (e) {
       toast.error(t("track.generateFailed"), { description: String(e) });
@@ -258,30 +276,28 @@ export default function TrackStudio() {
   }
 
   async function showIn3d(prog: TrackProgram) {
-    const p = await previewTrack(prog);
-    setPreview(p);
-    const t3 = await loadTrackTerrain(p.path, 1024);
-    setTerrain(t3);
-    // 1024, not 2048: the surface picture is a texture on a preview, and at the
-    // larger size it is seventeen megabytes over the bridge every time the track is
-    // rebuilt — which with Live on is every edit.
-    setOverview(await loadTrackOverview(p.path, 1024).catch(() => null));
+    setRebuilding(true);
+    try {
+      const p = await previewTrack(prog);
+      setPreview(p);
+      const t3 = await loadTrackTerrain(p.path, 1024);
+      setTerrain(t3);
+      // 1024, not 2048: the surface picture is a texture on a preview, and at the
+      // larger size it is seventeen megabytes over the bridge every time the track is
+      // rebuilt — which with Live on is every edit.
+      setOverview(await loadTrackOverview(p.path, 1024).catch(() => null));
+      setBuilt(JSON.stringify(prog));
+    } finally {
+      setRebuilding(false);
+    }
   }
 
   async function onPreview() {
     if (!program || busy) return;
     setWorking("preview");
+    setStage("solid");
     try {
-      const p = await previewTrack(program);
-      setPreview(p);
-      // Terrain first so something is on screen, then the surfaces that colour the features
-      // — the second is the slower half and the view is useful before it lands.
-      const t3 = await loadTrackTerrain(p.path, 1024);
-      setTerrain(t3);
-      // 1024, not 2048: the surface picture is a texture on a preview, and at the
-    // larger size it is seventeen megabytes over the bridge every time the track is
-    // rebuilt — which with Live on is every edit.
-    setOverview(await loadTrackOverview(p.path, 1024).catch(() => null));
+      await showIn3d(program);
     } catch (e) {
       toast.error(t("track.buildFailed"), { description: String(e) });
     } finally {
@@ -334,9 +350,72 @@ export default function TrackStudio() {
   function removeSegment(index: number) {
     if (!program || program.segments.length <= 2) return;
     setTouched(true);
-    void settle(
-      fitFeatures({ ...program, segments: program.segments.filter((_, i) => i !== index) }),
+    // Everything past it comes back with it. A jump is placed by how far round the lap it
+    // is, so taking a 120 m corner out from under one and leaving its number alone moves it
+    // 120 m further round — off the straight it was built for and into the next corner.
+    const at = segmentStart(program.segments, index);
+    const gone = segLength(program.segments[index]);
+    const features = program.features.map((f) =>
+      f.at >= at + gone ? { ...f, at: Math.max(0, f.at - gone) } : f,
     );
+    void settle(
+      fitFeatures({
+        ...program,
+        segments: program.segments.filter((_, i) => i !== index),
+        features,
+      }),
+    );
+  }
+
+  /**
+   * Put a new piece of lap in, after the one you are looking at.
+   *
+   * A lap is built by carrying on from where you are, not by always appending to the end —
+   * so a new corner lands after the selected step, and the selection follows it there. It
+   * will open the lap up, which the checks say in metres with a button to close it again;
+   * that is the same conversation as any other edit that moves the finish.
+   */
+  function addSegment(kind: "straight" | "left" | "right") {
+    if (!program) return;
+    setTouched(true);
+    const on = scope !== null ? steps[scope] : undefined;
+    // A feature belongs to the segment it sits on, so adding from a jump's row adds after
+    // that jump's piece of track.
+    let index = program.segments.length;
+    if (on) {
+      if (on.kind !== "feature") index = on.index + 1;
+      else
+        for (let i = scope ?? 0; i >= 0; i--)
+          if (steps[i].kind !== "feature") {
+            index = steps[i].index + 1;
+            break;
+          }
+    }
+    const seg: TrackSegment =
+      kind === "straight"
+        ? { kind: "straight", length: NEW_STRAIGHT_M, rise: 0 }
+        : {
+            kind: "arc",
+            // Signed radius: negative turns left. Sized inside what published tracks run.
+            radius: kind === "left" ? -NEW_RADIUS_M : NEW_RADIUS_M,
+            angle: NEW_ARC_DEG,
+            rise: 0,
+          };
+    const segments = [...program.segments];
+    segments.splice(index, 0, seg);
+    const at = segmentStart(program.segments, index);
+    const grew = segLength(seg);
+    const features = program.features.map((f) => (f.at >= at ? { ...f, at: f.at + grew } : f));
+    const next = fitFeatures({ ...program, segments, features });
+    void settle(next);
+    // Select it and put it on screen, or a new row appears somewhere off the bottom of a
+    // thirty-step list and reads as nothing having happened.
+    const row = lapSteps(next).findIndex((x) => x.kind !== "feature" && x.index === index);
+    if (row >= 0) {
+      setScope(row);
+      setFocus(positionAt(next, at));
+    }
+    setFlash(at);
   }
 
   /**
@@ -473,281 +552,93 @@ export default function TrackStudio() {
   }, [buildState]);
 
   const blocked = problems.length > 0;
+  // The 3D view is a build, so it is only ever as new as the last one. Comparing the whole
+  // program is cheap next to synthesising it, and nothing smaller is honest — every field
+  // here changes the ground.
+  const stale = program !== null && built !== null && built !== JSON.stringify(program);
+
+  const steps = program ? lapSteps(program) : [];
+  const selected = scope !== null ? steps[scope] : undefined;
+  const lap = program ? lapLength(program) : 0;
+
+  /** Which step covers a distance round the lap — how a click on the map becomes a row. */
+  function pickAt(at: number) {
+    let row = 0;
+    for (let i = 0; i < steps.length; i++) if (steps[i].kind !== "feature" && steps[i].at <= at) row = i;
+    setScope(row);
+    setFocus(positionAt(program!, at));
+  }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 px-7 pb-6">
-      {/* The brief. One line, because a track is described in a sentence and the schema does
-          the rest of the work. */}
-      <div className="flex flex-none items-center gap-2">
-        <Input
-          value={brief}
-          onChange={(e) => setBrief(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && void onGenerate()}
-          placeholder={t("track.briefPlaceholder")}
-          className="h-10"
-          disabled={busy !== null}
-        />
-        <Button
-          onClick={() => void onGenerate()}
-          disabled={!brief.trim() || busy !== null}
-          className="h-10 flex-none"
-        >
-          {busy === "generate" ? t("track.generating") : t("track.generate")}
-        </Button>
-        <label className="flex flex-none cursor-default items-center gap-2 pl-1 text-[12.5px] text-muted-foreground">
-          <Switch checked={live} onCheckedChange={setLive} />
-          {t("track.live")}
-          <button
-            onClick={() => void onPreview()}
-            disabled={blocked || busy !== null}
-            title={t("track.rebuild")}
-            aria-label={t("track.rebuild")}
-            className="cursor-default rounded p-1 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-40"
-          >
-            <RefreshCw className={cn("size-3.5", busy === "preview" && "animate-spin")} />
-          </button>
-        </label>
-        {/* Always here, not just when the model is unreachable: starting from a track that
-            already works and changing two jumps is a better first move than describing one
-            from nothing. */}
-        <Button
-          variant="outline"
-          onClick={() => void onLoad(baseTrackProgram)}
-          disabled={busy !== null}
-          className="h-10 flex-none"
-        >
-          {t("track.base")}
-        </Button>
-        <Button
-          variant="ghost"
-          onClick={() => void onLoad(blankTrackProgram)}
-          disabled={busy !== null}
-          className="h-10 flex-none"
-        >
-          {t("track.blank")}
-        </Button>
-      </div>
-
-      {!program && busy === null && (
-        <p className="flex-none text-[12.5px] leading-snug text-muted-foreground">
-          {t("track.sequenceHint")}
-        </p>
-      )}
-
-      {busy === "generate" && (
-        <p className="flex-none text-[12.5px] text-muted-foreground">{t("track.generatingHint")}</p>
-      )}
-
-      {!program && busy !== "generate" && (
-        <div className="flex flex-1 items-center justify-center">
-          <p className="max-w-md text-center text-[13px] leading-relaxed text-muted-foreground">
-            {t("track.empty")}
-          </p>
-        </div>
-      )}
-
-      {program && (
-        <div className="flex min-h-0 flex-1 gap-4">
-          {/* Left: what the lap is, and what it measures. */}
-          <div className="flex min-h-0 w-[300px] flex-none flex-col gap-3 overflow-y-auto">
-            <div className="rounded-xl border border-input p-3.5">
-              {/* The name is the folder, the .pkz and what the game lists it as, so it is
-                  worth being able to change before any of those are written. */}
-              {/* Bordered, because a field that looks like a heading doesn't get typed in.
-                  All three end up in the track's `.ini` and in what the game lists. */}
-              <input
-                value={program.name}
-                onChange={(e) => void settle({ ...program, name: e.target.value })}
-                className="w-full rounded-md border border-input bg-transparent px-2 py-1 text-[14px] font-bold tracking-[-0.2px] outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                aria-label={t("track.name")}
-                placeholder={t("track.name")}
+    <div className="flex h-full min-h-0 flex-col">
+      {!program ? (
+        /* Nothing loaded yet. One line describes a track and the schema does the rest, and
+           two starting points sit beside it for when the model isn't the answer. */
+        <div className="flex min-h-0 flex-1 items-center justify-center px-7">
+          <div className="w-full max-w-[560px]">
+            <div className="flex items-center gap-2.5">
+              <span className="u-skew h-3 w-1 bg-primary" />
+              <h2 className="font-cond text-[13px] font-bold uppercase tracking-[0.2em] text-foreground">
+                {t("track.briefTitle")}
+              </h2>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <Input
+                value={brief}
+                onChange={(e) => setBrief(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void onGenerate()}
+                placeholder={t("track.briefPlaceholder")}
+                className="h-10"
+                disabled={busy !== null}
               />
-              <div className="mt-1.5 flex gap-1.5">
-                <input
-                  value={program.author}
-                  onChange={(e) => void settle({ ...program, author: e.target.value })}
-                  placeholder={t("track.author")}
-                  className="min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 py-1 text-[12px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                  aria-label={t("track.author")}
-                />
-                <input
-                  value={program.location}
-                  onChange={(e) => void settle({ ...program, location: e.target.value })}
-                  placeholder={t("track.location")}
-                  className="min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 py-1 text-[12px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                  aria-label={t("track.location")}
-                />
-              </div>
-              <dl className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[12.5px]">
-                <Row label={t("track.lap")} value={`${lapLength(program).toFixed(0)} m`} />
-                <Row label={t("track.width")} value={`${program.width.toFixed(1)} m`} />
-                <Row label={t("track.ground")} value={`${program.terrain.sizeX} × ${program.terrain.sizeZ} m`} />
-                <Row label={t("track.features")} value={String(program.features.length)} />
-                <Row label={t("track.corners")} value={String(program.segments.filter((s) => s.kind === "arc").length)} />
-              </dl>
-            </div>
-
-            <div className="rounded-xl border border-input p-3.5">
-              <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {t("track.ground")}
-              </h3>
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                <Field
-                  label={t("track.across")}
-                  value={program.terrain.sizeX}
-                  step={20}
-                  onChange={(v) =>
-                    void settleTerrain({ sizeX: Math.max(100, v), sizeZ: Math.max(100, v) })
-                  }
-                />
-                <Field
-                  label={t("track.hills")}
-                  value={program.terrain.relief.amplitude}
-                  step={1}
-                  onChange={(v) =>
-                    void settle({
-                      ...program,
-                      terrain: {
-                        ...program.terrain,
-                        relief: { ...program.terrain.relief, amplitude: Math.max(0, v) },
-                      },
-                    })
-                  }
-                />
-                <Field
-                  label={t("track.smoothing")}
-                  value={program.blend}
-                  step={0.5}
-                  onChange={(v) => {
-                    setTouched(true);
-                    void settle({ ...program, blend: Math.max(0, v) });
-                  }}
-                />
-                <label className="flex items-center gap-1">
-                  <span className="text-[11px] text-muted-foreground">{t("track.surface")}</span>
-                  <select
-                    value={program.terrain.surface}
-                    onChange={(e) =>
-                      void settleTerrain({
-                        surface: e.target.value as TrackProgram["terrain"]["surface"],
-                      })
-                    }
-                    className="rounded-md border border-input bg-transparent px-1 py-0.5 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                  >
-                    <option value="soil">{t("track.soil")}</option>
-                    <option value="sand">{t("track.sand")}</option>
-                    <option value="grass">{t("track.grass")}</option>
-                  </select>
-                </label>
-              </div>
-            </div>
-
-            {/* Measured, not claimed — the same figures taken of published tracks. */}
-            {preview && (
-              <div className="rounded-xl border border-input p-3.5">
-                <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {t("track.measured")}
-                </h3>
-                <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[12.5px]">
-                  <Row label={t("track.lap")} value={`${preview.measuredLengthM.toFixed(0)} m`} />
-                  <Row label={t("track.width")} value={`${preview.measuredWidthM.toFixed(1)} m`} />
-                  <Row label={t("track.lips")} value={`${preview.lips} · ${preview.lipsPerKm.toFixed(0)}/km`} />
-                  <Row label={t("track.steepest")} value={`${preview.slopeP99Deg.toFixed(0)}°`} />
-                  <Row label={t("track.relief")} value={`${preview.reliefP90M.toFixed(2)} m`} />
-                  <Row
-                    label={t("track.budget")}
-                    value={`${preview.usedM.toFixed(1)} / ${preview.budgetM.toFixed(0)} m`}
-                  />
-                </dl>
-              </div>
-            )}
-
-            {problems.length > 0 && (
-              <div className="rounded-xl border border-destructive/40 bg-destructive/[0.06] p-3.5">
-                <h3 className="text-[12px] font-semibold uppercase tracking-wide text-destructive">
-                  {t("track.problems")}
-                </h3>
-                <ul className="mt-2 space-y-1.5 text-[12.5px] leading-snug text-foreground/90">
-                  {problems.map((p, i) => (
-                    <li key={i}>{p}</li>
-                  ))}
-                </ul>
-                {problems.some((p) => p.includes("doesn't close")) && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mt-2.5 w-full"
-                    onClick={() => void onClose()}
-                  >
-                    {t("track.closeLap")}
-                  </Button>
-                )}
-              </div>
-            )}
-
-            {notes.length > 0 && problems.length === 0 && (
-              <div className="rounded-xl border border-input p-3.5">
-                <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {t("track.notes")}
-                </h3>
-                <ul className="mt-2 space-y-1.5 text-[12.5px] leading-snug text-muted-foreground">
-                  {notes.map((n, i) => (
-                    <li key={i}>{n}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* One way out of the studio. Building runs PiBoSo's own compilers over the
-                exported source, fetching them first if this machine hasn't got them — there
-                is no second path that produces a track the game will ride. */}
-            <div className="mt-auto flex flex-col gap-2">
-              <Button onClick={onBuild} disabled={blocked || busy !== null}>
-                {building ? t("track.compiling") : t("track.compile")}
+              <Button
+                onClick={() => void onGenerate()}
+                disabled={!brief.trim() || busy !== null}
+                className="h-10 flex-none"
+              >
+                {busy === "generate" ? t("track.generating") : t("track.generate")}
               </Button>
+            </div>
+            <p className="mt-3 text-[12.5px] leading-relaxed text-muted-foreground">
+              {busy === "generate" ? t("track.generatingHint") : t("track.empty")}
+            </p>
+            <div className="mt-4 flex items-center gap-2">
               <Button
                 variant="outline"
-                onClick={() => void onExport()}
-                disabled={blocked || busy !== null}
+                onClick={() => void onLoad(baseTrackProgram)}
+                disabled={busy !== null}
               >
-                {t("track.export")}
+                {t("track.base")}
               </Button>
-              {!tools?.found && (
-                <button
-                  className="text-[11.5px] text-muted-foreground underline-offset-2 hover:underline"
-                  onClick={() => void onPointAtTools()}
-                  disabled={busy !== null}
-                >
-                  {t("track.pointAtTools")}
-                </button>
-              )}
-              {build && <BuildCard />}
+              <Button
+                variant="ghost"
+                onClick={() => void onLoad(blankTrackProgram)}
+                disabled={busy !== null}
+              >
+                {t("track.blank")}
+              </Button>
             </div>
           </div>
-
-          {/* Middle: the lap in the order you ride it — a straight, a left turn, a double.
-              Corners and jumps live in different lists in the program, but nobody rides them
-              that way, so here they are one sequence. */}
-          <div className="flex min-h-0 w-[420px] flex-none flex-col rounded-xl border border-input">
-            {/* Adding one is picking what it is; where it goes is the emptiest stretch of
-                lap, because dropping it at the finish usually lands it on something. */}
-            <div className="flex flex-none flex-wrap items-center gap-1 border-b border-input px-2 py-1.5">
-              <Plus className="size-3.5 flex-none text-muted-foreground" />
-              {(Object.keys(FEATURE_ICON) as TrackFeatureKind[]).map((kind) => (
-                <button
-                  key={kind}
-                  onClick={() => addFeature(kind)}
-                  disabled={busy !== null}
-                  className="cursor-default rounded px-1.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-40"
-                >
-                  {t(KIND_KEY[kind])}
-                </button>
-              ))}
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          {/* ── The program: the lap in the order you ride it ──────────────────
+              Corners and jumps live in different lists in the program, but nobody rides
+              them that way, so here they are one numbered sequence. */}
+          <aside className="flex w-[268px] flex-none flex-col border-r border-border">
+            <div className="flex flex-none items-center gap-2.5 px-4 pb-2.5 pt-4">
+              <span className="u-skew h-3 w-1 bg-primary" />
+              <h2 className="flex-1 font-cond text-[13px] font-bold uppercase tracking-[0.2em] text-foreground">
+                {t("track.program")}
+              </h2>
+              <span className="tabular-figures font-cond text-[11px] text-faint">
+                {steps.length}
+              </span>
             </div>
-            <ol ref={listRef} className="min-h-0 flex-1 divide-y divide-input/60 overflow-y-auto">
-              {lapSteps(program).map((step, row) => {
+
+            <ol ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
+              {steps.map((step, row) => {
                 const Icon = stepIcon(step);
-                const steps = lapSteps(program);
                 // Which section this row belongs to: the last segment at or before it.
                 let section = -1;
                 for (let i = row; i >= 0; i--) {
@@ -776,41 +667,71 @@ export default function TrackStudio() {
                       setScope(row);
                       setFocus(positionAt(program, step.at));
                     }}
-                    onPointerEnter={() =>
+                    onPointerEnter={() => {
+                      // The whole of it, not where it starts: a straight is two hundred
+                      // metres long and its first metre says nothing about which one it is.
+                      const length = stepLength(step);
+                      setHoverSpan({ at: step.at, length });
                       setHover({
-                        // The whole of it, not where it starts: a straight is two hundred
-                        // metres long and its first metre says nothing about which one it is.
-                        path: pathAlong(
-                          program,
-                          step.at,
-                          step.kind === "feature"
-                            ? featureSpan(step.feature).length
-                            : stepLength(step),
-                        ),
+                        path: pathAlong(program, step.at, length),
                         width: program.width * 1.6,
-                      })
-                    }
-                    onPointerLeave={() => setHover(null)}
+                      });
+                    }}
+                    onPointerLeave={() => {
+                      setHover(null);
+                      setHoverSpan(null);
+                    }}
                     className={cn(
-                      "relative flex items-center gap-1.5 px-2 py-1.5 text-[12.5px] transition-colors",
-                      terrain && "cursor-default hover:bg-foreground/[0.04]",
+                      "relative flex h-[42px] cursor-default items-center gap-2 border-b border-border/50 px-3 transition-colors",
+                      "hover:bg-foreground/[0.04]",
                       dragging === row && "opacity-40",
-                      // The line lands above this row when it is the drop target, and below
-                      // the last one when the drop is past the end.
-                      scope === row && "bg-foreground/[0.06]",
-                      dropAt === row && "before:absolute before:inset-x-2 before:top-0 before:h-0.5 before:bg-primary",
+                      scope === row && "bg-card",
+                      dropAt === row &&
+                        "before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:bg-primary",
                       dropAt === steps.length &&
                         row === steps.length - 1 &&
-                        "after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:bg-primary",
-                      flash !== null && step.at === flash && "bg-primary/15",
+                        "after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-primary",
+                      flash !== null && step.at === flash && "bg-primary-tint",
                     )}
-                    style={
-                      step.kind === "feature"
-                        ? { boxShadow: `inset 3px 0 0 ${FEATURE_COLOUR[step.feature.kind]}` }
-                        : undefined
-                    }
                   >
-                    {step.kind !== "feature" ? (
+                    {scope === row && (
+                      <span className="u-skew absolute left-0 top-2 h-[26px] w-[3px] bg-primary" />
+                    )}
+                    <span className="w-[22px] flex-none tabular-figures text-right font-cond text-[11px] font-bold text-faint">
+                      {String(row + 1).padStart(2, "0")}
+                    </span>
+                    <Icon
+                      className={cn(
+                        "size-3.5 flex-none",
+                        step.kind !== "feature" && "text-muted-foreground",
+                      )}
+                      style={
+                        step.kind === "feature"
+                          ? { color: FEATURE_COLOUR[step.feature.kind] }
+                          : undefined
+                      }
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div
+                        className={cn(
+                          "truncate font-cond text-[12.5px] font-semibold uppercase tracking-[0.12em]",
+                          scope === row ? "text-primary" : "text-muted-foreground",
+                        )}
+                        style={
+                          step.kind === "feature" && scope !== row
+                            ? { color: FEATURE_COLOUR[step.feature.kind] }
+                            : undefined
+                        }
+                      >
+                        {stepName(step, t)}
+                      </div>
+                      {/* The numbers, read not typed. Typing them is the right-hand panel's
+                          job, and thirty rows of input boxes is a form, not a lap. */}
+                      <div className="truncate font-mono text-[10.5px] tabular-figures text-faint">
+                        {summarise(step, t)}
+                      </div>
+                    </div>
+                    {step.kind !== "feature" && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -820,18 +741,21 @@ export default function TrackStudio() {
                             return next;
                           });
                         }}
-                        className="flex-none rounded text-muted-foreground hover:text-foreground"
+                        className="flex-none cursor-default text-faint hover:text-foreground"
                         aria-expanded={!collapsed}
                         aria-label={stepName(step, t)}
                       >
                         {collapsed ? (
-                          <ChevronRight className="size-3.5" />
+                          <span className="flex items-center gap-1">
+                            {inSection > 0 && (
+                              <span className="tabular-figures text-[10.5px]">{inSection}</span>
+                            )}
+                            <ChevronRight className="size-3.5" />
+                          </span>
                         ) : (
                           <ChevronDown className="size-3.5" />
                         )}
                       </button>
-                    ) : (
-                      <span className="w-3.5 flex-none" />
                     )}
                     <GripVertical
                       onPointerDown={(e) => onGripDown(e, row)}
@@ -839,93 +763,249 @@ export default function TrackStudio() {
                       onPointerUp={() => onGripUp(steps)}
                       className="size-3.5 flex-none cursor-default text-faint hover:text-foreground"
                     />
-                    <span className="w-11 flex-none tabular-nums text-right text-muted-foreground">
-                      {step.at.toFixed(0)}
-                    </span>
-                    <Icon
-                      className={cn(
-                        "size-4 flex-none",
-                        step.kind !== "feature" && "text-muted-foreground",
-                      )}
-                      style={
-                        step.kind === "feature"
-                          ? { color: FEATURE_COLOUR[step.feature.kind] }
-                          : undefined
-                      }
-                    />
-                    <span className="w-[96px] flex-none truncate">{stepName(step, t)}</span>
-                    {step.kind !== "feature" && collapsed && inSection > 0 && (
-                      <span className="flex-none rounded bg-foreground/[0.08] px-1.5 text-[11px] text-muted-foreground">
-                        {inSection}
-                      </span>
-                    )}
-
-                    <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-                      {fieldsOf(
-                        step,
-                        step.kind === "feature"
-                          ? elevationAt(program, featureMiddle(step.feature))
-                          : undefined,
-                      ).map((f) => (
-                        <Field
-                          key={f.label}
-                          label={f.label}
-                          value={f.value}
-                          step={f.step}
-                          onChange={(v) =>
-                            f.ground && step.kind === "feature"
-                              ? liftFeature(step.feature, v)
-                              : step.kind === "feature"
-                              ? editFeature(step.index, { [f.key]: v } as Partial<TrackFeature>)
-                              : editSegment(step.index, {
-                                  [f.key]:
-                                    f.key === "radius" ? (step.kind === "left" ? -v : v) : v,
-                                } as Partial<TrackSegment>)
-                          }
-                        />
-                      ))}
-                    </div>
-
-                    <button
-                      onClick={() =>
-                        step.kind === "feature"
-                          ? removeFeature(step.index)
-                          : removeSegment(step.index)
-                      }
-                      className="rounded px-1.5 text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
-                      aria-label={t("common.delete")}
-                    >
-                      ×
-                    </button>
                   </li>
                 );
               })}
             </ol>
+
+            {/* Adding one is picking what it is; where it goes is the emptiest stretch of
+                lap, because dropping it at the finish usually lands it on something. */}
+            {adding && (
+              <div className="flex-none border-t border-border px-3 py-2">
+                {/* Two groups, because they are two different things. The first changes the
+                    shape of the lap; the second lays something on the shape it already has. */}
+                <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+                  {t("track.groupLap")}
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {(
+                    [
+                      ["straight", "track.straight", MoveRight],
+                      ["left", "track.turnLeft", CornerUpLeft],
+                      ["right", "track.turnRight", CornerUpRight],
+                    ] as const
+                  ).map(([kind, key, Icon]) => (
+                    <button
+                      key={kind}
+                      onClick={() => {
+                        addSegment(kind);
+                        setAdding(false);
+                      }}
+                      disabled={busy !== null}
+                      className="flex cursor-default items-center gap-1.5 border border-border px-2 py-1 font-cond text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:border-primary hover:text-foreground disabled:opacity-40"
+                    >
+                      <Icon className="size-3" />
+                      {t(key)}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2.5 font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+                  {t("track.groupOnIt")}
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {(Object.keys(FEATURE_ICON) as TrackFeatureKind[]).map((kind) => (
+                    <button
+                      key={kind}
+                      onClick={() => {
+                        addFeature(kind);
+                        setAdding(false);
+                      }}
+                      disabled={busy !== null}
+                      className="cursor-default border border-border px-2 py-1 font-cond text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:border-primary hover:text-foreground disabled:opacity-40"
+                      style={{ color: FEATURE_COLOUR[kind] }}
+                    >
+                      {t(KIND_KEY[kind])}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {asking && (
+              <div className="flex flex-none items-center gap-2 border-t border-border px-3 py-2">
+                <Input
+                  autoFocus
+                  value={brief}
+                  onChange={(e) => setBrief(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void onGenerate();
+                    if (e.key === "Escape") setAsking(false);
+                  }}
+                  placeholder={t("track.briefPlaceholder")}
+                  className="h-8 text-[12px]"
+                  disabled={busy !== null}
+                />
+              </div>
+            )}
+            <div className="flex flex-none items-center gap-3 border-t border-border px-3 py-2.5">
+              <button
+                onClick={() => {
+                  setAdding((v) => !v);
+                  setAsking(false);
+                }}
+                disabled={busy !== null}
+                className={cn(
+                  "flex-1 cursor-default text-left font-cond text-[11px] font-semibold uppercase tracking-[0.16em] transition-colors disabled:opacity-40",
+                  adding ? "text-foreground" : "text-primary hover:text-foreground",
+                )}
+              >
+                {t("track.addStep")}
+              </button>
+              <button
+                onClick={() => {
+                  setAsking((v) => !v);
+                  setAdding(false);
+                }}
+                disabled={busy !== null}
+                className={cn(
+                  "cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.16em] transition-colors disabled:opacity-40",
+                  asking ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {busy === "generate" ? t("track.generating") : t("track.generate")}
+              </button>
+            </div>
+          </aside>
+
+          {/* ── The lap itself, and its height ────────────────────────────────
+              The plan is drawn from the program, so it is always current; the 3D view is a
+              build, so it is a thing you ask for. */}
+          <section className="flex min-w-0 flex-1 flex-col">
+            <div
+              className={cn(
+                "relative min-h-0 flex-1 overflow-hidden bg-window",
+                full && "fixed inset-0 z-50 bg-black",
+              )}
+            >
+              {stage === "plan" && !full ? (
+                <LapPlan
+                  program={program}
+                  scope={
+                    selected
+                      ? { at: selected.at, length: stepLength(selected) }
+                      : null
+                  }
+                  hover={hoverSpan}
+                  onPick={pickAt}
+                  className="absolute inset-0"
+                />
+              ) : terrain ? (
+                <TrackViewer
+                  terrain={terrain}
+                  overview={overview}
+                  scenery={null}
+                  surfaces={[]}
+                  backdrop={null}
+                  ground={null}
+                  placements={[]}
+                  showObjects={false}
+                  focus={focus}
+                  highlight={hover}
+                  className="absolute inset-0"
+                />
+              ) : (
+                <div className="absolute inset-0 grid place-items-center px-6 text-center text-[12.5px] text-muted-foreground">
+                  {busy === "preview" ? t("track.building") : t("track.previewHint")}
+                </div>
+              )}
+
+              {/* Why the ground is not what the numbers say. Two different answers — one is
+                  "wait", the other is "press the button" — and telling them apart is the
+                  whole difference between a slow studio and a broken one. */}
+              {stage === "solid" && !full && terrain && (
+                <div className="absolute left-4 top-4 flex items-center gap-2">
+                  {rebuilding ? (
+                    <span className="flex items-center gap-2 bg-black/55 px-2.5 py-1 backdrop-blur">
+                      <RefreshCw className="size-3 animate-spin text-white/90" />
+                      <span className="font-cond text-[10.5px] font-semibold uppercase tracking-[0.16em] text-white/90">
+                        {t("track.building")}
+                      </span>
+                    </span>
+                  ) : (
+                    stale && (
+                      <button
+                        onClick={() => void onPreview()}
+                        disabled={blocked || busy !== null}
+                        className="flex cursor-default items-center gap-2 border-l-2 border-warning bg-black/55 px-2.5 py-1 backdrop-blur disabled:opacity-50"
+                      >
+                        <span className="font-cond text-[10.5px] font-semibold uppercase tracking-[0.16em] text-warning">
+                          {t("track.stale")}
+                        </span>
+                      </button>
+                    )
+                  )}
+                </div>
+              )}
+
+              {/* What the colours on the map mean. */}
+              {stage === "plan" && !full && (
+                <div className="pointer-events-none absolute left-4 top-4 flex items-center gap-4">
+                  <Legend className="bg-primary" label={t("track.legendSelected")} />
+                  <Legend className="bg-warning" label={t("track.legendJump")} />
+                  <Legend className="bg-primary/30" label={t("track.legendLap")} />
+                </div>
+              )}
+
+              {/* Measured off the program, not claimed. */}
+              {!full && (
+                <div className="pointer-events-none absolute right-4 top-4 flex items-start gap-4">
+                  <Stat value={(lap / 1000).toFixed(2)} unit="km" label={t("track.lap")} />
+                  <Stat value={String(steps.length)} label={t("track.steps")} />
+                  <Stat value={climbOf(program).toFixed(0)} unit="m" label={t("track.climb")} />
+                </div>
+              )}
+
+              <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                {!full && (
+                  <Segmented
+                    size="sm"
+                    value={stage}
+                    onChange={(v) => setStage(v as "plan" | "solid")}
+                    options={[
+                      { value: "plan", label: t("track.plan") },
+                      { value: "solid", label: t("track.in3d") },
+                    ]}
+                  />
+                )}
+                {(stage === "solid" || full) && terrain && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setFull((v) => !v)}
+                    title={t(full ? "track.exitFullscreen" : "track.fullscreen")}
+                    aria-label={t(full ? "track.exitFullscreen" : "track.fullscreen")}
+                    className="size-8 bg-black/45 text-white/90 backdrop-blur hover:bg-black/65"
+                  >
+                    {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                  </Button>
+                )}
+              </div>
+            </div>
+
             {/* The lap's own height, as a line you can pull about — the same shape the
                 segment rises describe, in the form you can take hold of. */}
-            <div className="flex-none border-t border-input px-2 pb-1 pt-1.5">
-              <div className="flex items-center gap-2 px-1 text-[10.5px] uppercase tracking-wide text-muted-foreground">
-                <span>{t("track.height")}</span>
-                {(() => {
-                  const steps = lapSteps(program);
-                  const on = scope !== null ? steps[scope] : undefined;
-                  return on ? (
-                    <button
-                      onClick={() => setScope(null)}
-                      className="cursor-default rounded px-1 normal-case tracking-normal text-foreground hover:bg-foreground/[0.06]"
-                      title={t("track.wholeLap")}
-                    >
-                      {stepName(on, t)} · {on.at.toFixed(0)}–
-                      {(on.at + stepLength(on)).toFixed(0)} m ×
-                    </button>
-                  ) : (
-                    <span className="normal-case tracking-normal">{t("track.wholeLap")}</span>
-                  );
-                })()}
+            <div className="flex-none border-t border-border bg-card/40 px-4 pb-2 pt-2.5">
+              <div className="flex items-center gap-2.5">
+                <span className="u-skew h-2.5 w-1 bg-primary" />
+                <span className="font-cond text-[11px] font-bold uppercase tracking-[0.2em] text-foreground">
+                  {t("track.elevation")}
+                </span>
+                {selected ? (
+                  <button
+                    onClick={() => setScope(null)}
+                    className="cursor-default font-mono text-[10.5px] text-faint hover:text-foreground"
+                    title={t("track.wholeLap")}
+                  >
+                    {stepName(selected, t)} · {selected.at.toFixed(0)}–
+                    {(selected.at + stepLength(selected)).toFixed(0)} m ×
+                  </button>
+                ) : (
+                  <span className="font-mono text-[10.5px] text-faint">{t("track.wholeLap")}</span>
+                )}
                 {/* Only where there is a shape to edit: a straight has ground, not a shape. */}
-                {scope !== null && lapSteps(program)[scope]?.kind === "feature" && (
+                {selected?.kind === "feature" && (
                   <div className="ml-auto">
                     <Segmented
+                      size="sm"
                       value={stripMode}
                       onChange={(v) => setStripMode(v as "height" | "shape")}
                       options={[
@@ -937,15 +1017,16 @@ export default function TrackStudio() {
                 )}
               </div>
               <ElevationCurve
-                lap={lapLength(program)}
+                lap={lap}
                 {...(() => {
-                  const steps = lapSteps(program);
-                  const on = scope !== null ? steps[scope] : undefined;
-                  if (!on) return {};
+                  if (!selected) return {};
                   // A little either side, so the ends of the stretch can be shaped against
                   // what they run into rather than against the edge of the picture.
-                  const pad = Math.max(stepLength(on) * 0.15, 5);
-                  return { from: Math.max(0, on.at - pad), to: on.at + stepLength(on) + pad };
+                  const pad = Math.max(stepLength(selected) * 0.15, 5);
+                  return {
+                    from: Math.max(0, selected.at - pad),
+                    to: selected.at + stepLength(selected) + pad,
+                  };
                 })()}
                 knots={program.elevation ?? []}
                 features={program.features}
@@ -955,8 +1036,7 @@ export default function TrackStudio() {
                 }}
                 onFeature={editFeature}
                 {...(() => {
-                  const steps = lapSteps(program);
-                  const on = scope !== null ? steps[scope] : undefined;
+                  const on = selected;
                   if (!on) return {};
                   return {
                     scoped:
@@ -982,67 +1062,349 @@ export default function TrackStudio() {
                     },
                   };
                 })()}
-                onHover={(i) =>
-                  setHover(
-                    i === null
-                      ? null
-                      : {
-                          path: pathAlong(
-                            program,
-                            program.features[i].at,
-                            featureSpan(program.features[i]).length,
-                          ),
-                          width: program.width * 1.6,
-                        },
-                  )
-                }
-                className="h-[104px]"
+                onHover={(i) => {
+                  if (i === null) {
+                    setHover(null);
+                    setHoverSpan(null);
+                    return;
+                  }
+                  const span = featureSpan(program.features[i]);
+                  setHoverSpan(span);
+                  setHover({
+                    path: pathAlong(program, span.at, span.length),
+                    width: program.width * 1.6,
+                  });
+                }}
+                className="h-[96px]"
               />
             </div>
-          </div>
+          </section>
 
-          {/* Right: the track itself. Features are painted with a colour each, so a row in
-              the list and a lump on the ground can be matched up by eye. */}
-          <div
-            className={cn(
-              "relative overflow-hidden",
-              full
-                ? "fixed inset-0 z-50 bg-black"
-                : "min-h-0 min-w-0 flex-1 rounded-xl border border-input bg-black/20",
-            )}
-          >
-            {terrain ? (
-              <TrackViewer
-                terrain={terrain}
-                overview={overview}
-                scenery={null}
-                surfaces={[]}
-                backdrop={null}
-                ground={null}
-                placements={[]}
-                showObjects={false}
-                focus={focus}
-                highlight={hover}
-                className="absolute inset-0"
-              />
+          {/* ── What the selected step is, and what is wrong with the track ──── */}
+          <aside className="flex w-[300px] flex-none flex-col overflow-y-auto border-l border-border">
+            {selected ? (
+              <div className="flex-none px-4 pb-4 pt-4">
+                <div className="font-cond text-[13px] font-bold uppercase tracking-[0.2em] text-foreground">
+                  {t("track.stepNumber", { n: String((scope ?? 0) + 1).padStart(2, "0") })} —{" "}
+                  {stepName(selected, t)}
+                </div>
+                <div className="mt-1 font-mono text-[10.5px] text-faint">
+                  {t("track.stepWrites")}
+                </div>
+                <div className="mt-4 space-y-3.5">
+                  {fieldsOf(
+                    selected,
+                    selected.kind === "feature"
+                      ? elevationAt(program, featureMiddle(selected.feature))
+                      : undefined,
+                  ).map((f) => (
+                    <PropRow
+                      key={f.key}
+                      label={f.label}
+                      value={f.value}
+                      step={f.step}
+                      min={f.min}
+                      max={f.max}
+                      unit={f.unit}
+                      onChange={(v) =>
+                        f.ground && selected.kind === "feature"
+                          ? liftFeature(selected.feature, v)
+                          : selected.kind === "feature"
+                          ? editFeature(selected.index, { [f.key]: v } as Partial<TrackFeature>)
+                          : editSegment(selected.index, {
+                              [f.key]:
+                                f.key === "radius" ? (selected.kind === "left" ? -v : v) : v,
+                            } as Partial<TrackSegment>)
+                      }
+                    />
+                  ))}
+                </div>
+                <button
+                  onClick={() => {
+                    if (selected.kind === "feature") removeFeature(selected.index);
+                    else removeSegment(selected.index);
+                    setScope(null);
+                  }}
+                  className="mt-5 cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-destructive"
+                >
+                  {t("track.removeStep")}
+                </button>
+              </div>
             ) : (
-              <div className="absolute inset-0 grid place-items-center px-6 text-center text-[12.5px] text-muted-foreground">
-                {busy === "preview" ? t("track.building") : t("track.previewHint")}
+              /* Nothing picked: the track's own settings, which are the other half of what
+                 this panel is for and have to live somewhere. */
+              <div className="flex-none px-4 pb-4 pt-4">
+                <div className="font-cond text-[13px] font-bold uppercase tracking-[0.2em] text-foreground">
+                  {t("track.trackSettings")}
+                </div>
+                <div className="mt-1 font-mono text-[10.5px] leading-snug text-faint">
+                  {t("track.pickAStep")}
+                </div>
+                {/* The name is the folder, the .pkz and what the game lists it as, so it is
+                    worth being able to change before any of those are written. */}
+                <div className="mt-4 space-y-2">
+                  <input
+                    value={program.name}
+                    onChange={(e) => void settle({ ...program, name: e.target.value })}
+                    className="w-full border border-input bg-card px-2.5 py-1.5 text-[13.5px] font-bold outline-none focus:border-ring"
+                    aria-label={t("track.name")}
+                    placeholder={t("track.name")}
+                  />
+                  <div className="flex gap-2">
+                    <input
+                      value={program.author}
+                      onChange={(e) => void settle({ ...program, author: e.target.value })}
+                      placeholder={t("track.author")}
+                      className="min-w-0 flex-1 border border-input bg-card px-2.5 py-1.5 text-[12px] text-muted-foreground outline-none focus:border-ring"
+                      aria-label={t("track.author")}
+                    />
+                    <input
+                      value={program.location}
+                      onChange={(e) => void settle({ ...program, location: e.target.value })}
+                      placeholder={t("track.location")}
+                      className="min-w-0 flex-1 border border-input bg-card px-2.5 py-1.5 text-[12px] text-muted-foreground outline-none focus:border-ring"
+                      aria-label={t("track.location")}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-3.5">
+                  <PropRow
+                    label={t("track.across")}
+                    value={program.terrain.sizeX}
+                    step={20}
+                    min={100}
+                    max={2000}
+                    unit="m"
+                    onChange={(v) =>
+                      void settleTerrain({ sizeX: Math.max(100, v), sizeZ: Math.max(100, v) })
+                    }
+                  />
+                  <PropRow
+                    label={t("track.width")}
+                    value={program.width}
+                    step={0.5}
+                    min={6}
+                    max={24}
+                    unit="m"
+                    onChange={(v) => {
+                      setTouched(true);
+                      void settle({ ...program, width: Math.max(1, v) });
+                    }}
+                  />
+                  <PropRow
+                    label={t("track.hills")}
+                    value={program.terrain.relief.amplitude}
+                    step={1}
+                    min={0}
+                    max={40}
+                    unit="m"
+                    onChange={(v) =>
+                      void settle({
+                        ...program,
+                        terrain: {
+                          ...program.terrain,
+                          relief: { ...program.terrain.relief, amplitude: Math.max(0, v) },
+                        },
+                      })
+                    }
+                  />
+                  <PropRow
+                    label={t("track.smoothing")}
+                    value={program.blend}
+                    step={0.5}
+                    min={0}
+                    max={8}
+                    unit="m"
+                    onChange={(v) => {
+                      setTouched(true);
+                      void settle({ ...program, blend: Math.max(0, v) });
+                    }}
+                  />
+                  <div>
+                    <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+                      {t("track.surface")}
+                    </div>
+                    <div className="mt-2 flex border border-border">
+                      {(["soil", "sand", "grass"] as const).map((s, i) => (
+                        <button
+                          key={s}
+                          onClick={() => void settleTerrain({ surface: s })}
+                          className={cn(
+                            "h-7 flex-1 cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] transition-colors",
+                            i > 0 && "border-l border-border",
+                            program.terrain.surface === s
+                              ? "bg-primary text-primary-foreground"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          {t(`track.${s}` as "track.soil")}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Measured, not claimed — the same figures taken of published tracks. */}
+                {preview && (
+                  <dl className="mt-5 grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-border pt-3.5 text-[12px]">
+                    <Row label={t("track.measured")} value={`${preview.measuredLengthM.toFixed(0)} m`} />
+                    <Row label={t("track.width")} value={`${preview.measuredWidthM.toFixed(1)} m`} />
+                    <Row label={t("track.lips")} value={`${preview.lips} · ${preview.lipsPerKm.toFixed(0)}/km`} />
+                    <Row label={t("track.steepest")} value={`${preview.slopeP99Deg.toFixed(0)}°`} />
+                    <Row label={t("track.relief")} value={`${preview.reliefP90M.toFixed(2)} m`} />
+                    <Row
+                      label={t("track.budget")}
+                      value={`${preview.usedM.toFixed(1)} / ${preview.budgetM.toFixed(0)} m`}
+                    />
+                  </dl>
+                )}
+
+                <div className="mt-5 flex items-center gap-3 border-t border-border pt-3.5">
+                  <span className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+                    {t("track.startOver")}
+                  </span>
+                  <button
+                    onClick={() => void onLoad(baseTrackProgram)}
+                    disabled={busy !== null}
+                    className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                  >
+                    {t("track.base")}
+                  </button>
+                  <button
+                    onClick={() => void onLoad(blankTrackProgram)}
+                    disabled={busy !== null}
+                    className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                  >
+                    {t("track.blank")}
+                  </button>
+                </div>
               </div>
             )}
-            {terrain && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setFull((v) => !v)}
-                title={t(full ? "track.exitFullscreen" : "track.fullscreen")}
-                aria-label={t(full ? "track.exitFullscreen" : "track.fullscreen")}
-                className="absolute right-2 top-2 size-8 bg-black/45 text-white/90 backdrop-blur hover:bg-black/65"
-              >
-                {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-              </Button>
+
+            {/* ── Checks ──────────────────────────────────────────────────────
+                Problems block the build; notes only say the track is unlike a published
+                one, which a blank lap always is. */}
+            <div className="mt-auto flex-none border-t border-border px-4 pb-4 pt-3.5">
+              <div className="flex items-center gap-2.5">
+                <span
+                  className={cn(
+                    "u-skew h-3 w-1",
+                    problems.length > 0 ? "bg-destructive" : notes.length > 0 ? "bg-warning" : "bg-success",
+                  )}
+                />
+                <h3 className="flex-1 font-cond text-[11.5px] font-bold uppercase tracking-[0.2em] text-foreground">
+                  {t("track.checks")}
+                </h3>
+                <span
+                  className={cn(
+                    "tabular-figures font-cond text-[10.5px]",
+                    problems.length > 0 ? "text-destructive" : "text-faint",
+                  )}
+                >
+                  {problems.length > 0
+                    ? t("track.problemCount", { count: problems.length })
+                    : notes.length > 0
+                    ? t("track.noteCount", { count: notes.length })
+                    : t("track.checksOk")}
+                </span>
+              </div>
+
+              <div className="mt-2.5 space-y-1.5">
+                {problems.map((p, i) => (
+                  <p
+                    key={`p${i}`}
+                    className="border-l-2 border-destructive bg-destructive/[0.07] px-2.5 py-2 text-[11.5px] leading-snug text-foreground/90"
+                  >
+                    {p}
+                  </p>
+                ))}
+                {problems.length === 0 &&
+                  notes.map((n, i) => (
+                    <p
+                      key={`n${i}`}
+                      className="border-l-2 border-warning bg-warning/[0.06] px-2.5 py-2 text-[11.5px] leading-snug text-muted-foreground"
+                    >
+                      {n}
+                    </p>
+                  ))}
+              </div>
+
+              {problems.some((p) => p.includes("doesn't close")) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2.5 w-full"
+                  onClick={() => void onClose()}
+                >
+                  {t("track.closeLap")}
+                </Button>
+              )}
+
+              {build && (
+                <div className="mt-3">
+                  <BuildCard />
+                </div>
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* ── Where the track goes ─────────────────────────────────────────────
+          Building runs PiBoSo's own compilers over the exported source, fetching them first
+          if this machine hasn't got them — there is no second path that produces a track the
+          game will ride. */}
+      {program && (
+        <div className="flex h-[52px] flex-none items-center gap-3 border-t border-border bg-window px-5">
+          <span
+            className={cn(
+              "font-cond text-[11px] font-semibold uppercase tracking-[0.18em]",
+              blocked ? "text-destructive" : "text-success",
             )}
-          </div>
+          >
+            {blocked ? t("track.problemCount", { count: problems.length }) : t("track.valid")}
+          </span>
+          {!blocked && notes.length > 0 && (
+            <>
+              <span className="text-faint">/</span>
+              <span className="font-cond text-[11px] font-semibold uppercase tracking-[0.18em] text-warning">
+                {t("track.noteCount", { count: notes.length })}
+              </span>
+            </>
+          )}
+          {!tools?.found && (
+            <button
+              className="cursor-default text-[11.5px] text-muted-foreground underline-offset-2 hover:underline"
+              onClick={() => void onPointAtTools()}
+              disabled={busy !== null}
+            >
+              {t("track.pointAtTools")}
+            </button>
+          )}
+          <div className="flex-1" />
+          <label className="flex cursor-default items-center gap-2 text-[11.5px] text-muted-foreground">
+            <Switch checked={live} onCheckedChange={setLive} />
+            {t("track.live")}
+          </label>
+          <Button
+            variant="ghost"
+            onClick={() => void onExport()}
+            disabled={blocked || busy !== null}
+          >
+            {t("track.export")}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void onPreview()}
+            disabled={blocked || busy !== null}
+          >
+            <RefreshCw className={cn("size-3.5", busy === "preview" && "animate-spin")} />
+            {t("track.preview")}
+          </Button>
+          <Button onClick={onBuild} disabled={blocked || busy !== null}>
+            {building ? t("track.compiling") : t("track.compile")}
+          </Button>
         </div>
       )}
 
@@ -1103,6 +1465,31 @@ function stepIcon(step: LapStep): LucideIcon {
   return FEATURE_ICON[step.feature.kind];
 }
 
+/**
+ * What a new piece of lap starts as.
+ *
+ * Inside what published tracks measure, and small enough that adding one doesn't throw the
+ * lap across the plot: the corpus runs corners of 7–30 m radius, and a 45° arc is a quarter
+ * of the way round a bend rather than a whole one.
+ */
+const NEW_STRAIGHT_M = 60;
+const NEW_RADIUS_M = 25;
+const NEW_ARC_DEG = 45;
+
+/** How long one segment is. The arc's length falls out of its radius and angle. */
+function segLength(seg: TrackSegment): number {
+  return seg.kind === "straight"
+    ? seg.length
+    : (Math.abs(seg.radius) * Math.abs(seg.angle) * Math.PI) / 180;
+}
+
+/** How far round the lap a segment begins. */
+function segmentStart(segments: TrackSegment[], index: number): number {
+  let at = 0;
+  for (let i = 0; i < Math.min(index, segments.length); i++) at += segLength(segments[i]);
+  return at;
+}
+
 /** How much lap a step covers. */
 function stepLength(step: LapStep): number {
   if (step.kind === "feature") return featureSpan(step.feature).length;
@@ -1127,12 +1514,23 @@ function stepName(step: LapStep, t: ReturnType<typeof useT>): string {
  * kind. `rise` is on every segment because "does this bit go up or down" is a question you
  * ask of a straight as often as of a corner.
  */
-function fieldsOf(
-  step: LapStep,
-  ground?: number,
-): { key: string; label: string; value: number; step: number; ground?: boolean }[] {
-  const len = (v: number) => ({ key: "length", label: "m", value: v, step: 1 });
-  const rise = (v: number) => ({ key: "rise", label: "↕", value: v, step: 0.5 });
+interface StepField {
+  key: string;
+  label: string;
+  value: number;
+  step: number;
+  /** Where the slider's ends sit. Typing is never clamped to them — they are a shape, not a rule. */
+  min: number;
+  max: number;
+  unit?: string;
+  ground?: boolean;
+}
+
+function fieldsOf(step: LapStep, ground?: number): StepField[] {
+  const len = (v: number, max = 400) =>
+    ({ key: "length", label: "length", value: v, step: 1, min: 2, max, unit: "m" }) as StepField;
+  const rise = (v: number) =>
+    ({ key: "rise", label: "rise", value: v, step: 0.5, min: -20, max: 20, unit: "m" }) as StepField;
   if (step.kind === "straight") {
     const seg = step.segment as { length: number; rise: number };
     return [len(seg.length), rise(seg.rise ?? 0)];
@@ -1142,8 +1540,8 @@ function fieldsOf(
     return [
       // Signed on the wire — positive turns right — but shown as the radius you would
       // measure, because the arrow already says which way it goes.
-      { key: "radius", label: "r", value: Math.abs(seg.radius), step: 1 },
-      { key: "angle", label: "°", value: seg.angle, step: 5 },
+      { key: "radius", label: "radius", value: Math.abs(seg.radius), step: 1, min: 5, max: 200, unit: "m" },
+      { key: "angle", label: "angle", value: seg.angle, step: 5, min: 0, max: 180, unit: "°" },
       rise(seg.rise ?? 0),
     ];
   }
@@ -1151,53 +1549,201 @@ function fieldsOf(
   // Where the ground is under this feature, as opposed to how tall the feature is. Every
   // kind gets one: "this jump is three metres up" is a different question from "this jump is
   // two metres tall", and both are worth asking of the same row.
-  const up = { key: "ground", label: "↑", value: ground ?? 0, step: 0.5, ground: true };
+  const up: StepField = {
+    key: "ground",
+    label: "ground",
+    value: ground ?? 0,
+    step: 0.5,
+    min: -20,
+    max: 40,
+    unit: "m",
+    ground: true,
+  };
   switch (f.kind) {
     case "double":
       return [
-        { key: "height", label: "h", value: f.height, step: 0.1 },
-        { key: "gap", label: "gap", value: f.gap, step: 1 },
-        { key: "lip", label: "lip", value: f.lip, step: 0.5 },
+        { key: "height", label: "height", value: f.height, step: 0.1, min: 0, max: 6, unit: "m" },
+        { key: "gap", label: "gap", value: f.gap, step: 1, min: 0, max: 40, unit: "m" },
+        { key: "lip", label: "lip", value: f.lip, step: 0.5, min: 1, max: 15, unit: "m" },
         up,
       ];
     case "whoops":
       return [
-        { key: "height", label: "h", value: f.height, step: 0.05 },
-        { key: "count", label: "×", value: f.count, step: 1 },
-        { key: "spacing", label: "gap", value: f.spacing, step: 0.5 },
+        { key: "height", label: "height", value: f.height, step: 0.05, min: 0, max: 2, unit: "m" },
+        { key: "count", label: "count", value: f.count, step: 1, min: 2, max: 20, unit: "×" },
+        { key: "spacing", label: "spacing", value: f.spacing, step: 0.5, min: 1, max: 10, unit: "m" },
         up,
       ];
     case "rut":
-      return [{ key: "depth", label: "deep", value: f.depth, step: 0.05 }, len(f.length), up];
+      return [
+        { key: "depth", label: "depth", value: f.depth, step: 0.05, min: 0, max: 1, unit: "m" },
+        len(f.length, 120),
+        up,
+      ];
     case "custom":
       // A shape has no height or length to type at — it has points, and they are dragged.
-      return [len(f.length), up];
+      return [len(f.length, 120), up];
+    case "stepUp":
+      return [
+        { key: "height", label: "height", value: f.height, step: 0.1, min: -6, max: 6, unit: "m" },
+        len(f.length, 120),
+        up,
+      ];
     default:
       return [
-        { key: "height", label: "h", value: f.height, step: 0.1 },
-        len(f.length),
+        { key: "height", label: "height", value: f.height, step: 0.1, min: 0, max: 6, unit: "m" },
+        len(f.length, 120),
         up,
       ];
   }
 }
 
-/** A labelled number, small enough that several fit on a row. */
-function Field({
+/**
+ * What a row says about itself in one line of figures.
+ *
+ * The list is scanned, not read: thirty rows of input boxes is a form, and a lap is not a
+ * form. The numbers are typed in the panel on the right, one step at a time.
+ */
+function summarise(step: LapStep, t: ReturnType<typeof useT>): string {
+  const m = (v: number) => `${v.toFixed(v < 10 ? 1 : 0)} m`;
+  if (step.kind === "straight") {
+    const seg = step.segment as { length: number; rise: number };
+    return m(seg.length) + (seg.rise ? ` · ${seg.rise > 0 ? "+" : ""}${seg.rise.toFixed(1)} m` : "");
+  }
+  if (step.kind === "left" || step.kind === "right") {
+    const seg = step.segment as { radius: number; angle: number; rise: number };
+    return `r ${Math.abs(seg.radius).toFixed(0)} m · ${Math.abs(seg.angle).toFixed(0)}°`;
+  }
+  const f = step.feature;
+  switch (f.kind) {
+    case "double":
+      return `${t("track.gap")} ${m(f.gap)} · h ${f.height.toFixed(1)} m`;
+    case "whoops":
+      return `${f.count} × ${m(f.spacing)} · h ${f.height.toFixed(2)} m`;
+    case "rut":
+      return `${m(f.length)} · ${f.depth.toFixed(2)} m ${t("track.deep")}`;
+    case "custom":
+      return m(f.length);
+    default:
+      return `${m(f.length)} · h ${f.height.toFixed(1)} m`;
+  }
+}
+
+/**
+ * How much the lap climbs, end to end.
+ *
+ * The two halves of a track's height are stated separately — a `rise` per segment, and the
+ * elevation curve laid over it — so neither on its own is the number a rider would give.
+ */
+function climbOf(program: TrackProgram): number {
+  const lap = lapLength(program);
+  if (lap <= 0) return 0;
+  let lo = Infinity;
+  let hi = -Infinity;
+  let carried = 0;
+  let at = 0;
+  const seen: { at: number; h: number }[] = [{ at: 0, h: 0 }];
+  for (const seg of program.segments) {
+    const len =
+      seg.kind === "straight"
+        ? seg.length
+        : (Math.abs(seg.radius) * Math.abs(seg.angle) * Math.PI) / 180;
+    carried += seg.rise ?? 0;
+    at += len;
+    seen.push({ at, h: carried });
+  }
+  for (const k of seen) {
+    const h = k.h + elevationAt(program, k.at);
+    lo = Math.min(lo, h);
+    hi = Math.max(hi, h);
+  }
+  for (const k of program.elevation ?? []) {
+    // The knots sit between segment ends, and a peak halfway down a straight is still a peak.
+    const before = seen.filter((q) => q.at <= k.at).pop();
+    const h = (before?.h ?? 0) + k.height;
+    lo = Math.min(lo, h);
+    hi = Math.max(hi, h);
+  }
+  return Number.isFinite(hi - lo) ? hi - lo : 0;
+}
+
+/** One key of the plan's colour code. */
+function Legend({ className, label }: { className: string; label: string }) {
+  return (
+    <span className="flex items-center gap-2">
+      <span className={cn("h-[3px] w-2.5", className)} />
+      <span className="font-cond text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">
+        {label}
+      </span>
+    </span>
+  );
+}
+
+/** A measurement of the lap, over the picture of it. */
+function Stat({ value, unit, label }: { value: string; unit?: string; label: string }) {
+  return (
+    <div className="min-w-[76px] border-t border-foreground/20 pt-[7px]">
+      <div className="tabular-figures font-cond text-[25px] font-bold leading-none text-foreground">
+        {value}
+        {unit && <span className="text-[13px]"> {unit}</span>}
+      </div>
+      <div className="mt-[5px] font-cond text-[10px] font-semibold uppercase tracking-[0.2em] text-faint">
+        {label}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One number of the selected step: named, pulled, and typed.
+ *
+ * The slider is for finding a value and the box is for stating one, and neither is enough on
+ * its own — a radius is dragged until the corner looks right, and a lip is 5.5 m because
+ * that is what the track it came from measured.
+ */
+function PropRow({
   label,
   value,
   step,
+  min,
+  max,
+  unit,
   onChange,
 }: {
   label: string;
   value: number;
   step: number;
+  min: number;
+  max: number;
+  unit?: string;
   onChange: (v: number) => void;
 }) {
+  // The track's own value wins over the slider's ends: a 300 m plot with the slider stopping
+  // at 200 would drag itself smaller the moment it was touched.
+  const lo = Math.min(min, value);
+  const hi = Math.max(max, value);
+  const fill = hi > lo ? ((value - lo) / (hi - lo)) * 100 : 0;
   return (
-    <label className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-      <span className="text-[11px] text-muted-foreground">{label}</span>
-      <Num value={value} step={step} onChange={onChange} />
-    </label>
+    <div>
+      <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+        {label}
+      </div>
+      <div className="mt-1.5 flex items-center gap-2.5">
+        <input
+          type="range"
+          min={lo}
+          max={hi}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          style={{ ["--fill" as string]: `${fill}%` }}
+          className="min-w-0 flex-1"
+          aria-label={label}
+        />
+        <Num value={value} step={step} onChange={onChange} className="w-[64px]" />
+        {unit && <span className="w-3 flex-none text-[11px] text-faint">{unit}</span>}
+      </div>
+    </div>
   );
 }
 
@@ -1215,10 +1761,12 @@ function Num({
   value,
   step,
   onChange,
+  className,
 }: {
   value: number;
   step: number;
   onChange: (v: number) => void;
+  className?: string;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   return (
@@ -1238,9 +1786,10 @@ function Num({
         // 58px minus the native spinner left about thirty for the digits, so every radius
         // and length in the program was clipped mid-number. The spinner goes; a track
         // program is typed, not nudged one step at a time.
-        "w-[76px] border border-input bg-transparent px-1.5 py-0.5 tabular-nums",
+        "w-[76px] border border-input bg-card px-1.5 py-0.5 text-[12px] tabular-nums",
         "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+        "outline-none focus:border-ring",
+        className,
       )}
     />
   );

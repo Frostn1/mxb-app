@@ -1284,33 +1284,15 @@ async fn base_track_program() -> Result<serde_json::Value, String> {
 
 /// A lap with nothing on it: somewhere to start from scratch.
 ///
-/// Deliberately the plainest thing that is still a track — an oval on a small plot, 12 m
-/// wide, no jumps at all. It validates, it builds, and everything on it is yours.
+/// Answered from the type, not from the source text, exactly as the base track is. The
+/// literal leaves out every field that has a default — `blend`, `elevation`, the ground's
+/// `wear` — and handing those absences to the studio put an undefined into a number field
+/// the moment a blank track loaded.
 #[tauri::command]
 async fn blank_track_program() -> Result<serde_json::Value, String> {
-    let json = serde_json::json!({
-        "name": "New Track",
-        "author": "",
-        "location": "",
-        "width": 12.0,
-        "terrain": {
-            "sizeX": 400.0, "sizeZ": 400.0, "samples": 2049, "scale": 20.0,
-            "relief": { "amplitude": 4.0, "wavelength": 130.0, "seed": 1, "texture": 0.06 },
-            "surface": "soil"
-        },
-        "start": { "x": 120.0, "z": 260.0, "angle": 90.0 },
-        "segments": [
-            { "kind": "straight", "length": 120.0, "rise": 0.0 },
-            { "kind": "arc", "radius": 45.0, "angle": 180.0, "rise": 0.0 },
-            { "kind": "straight", "length": 120.0, "rise": 0.0 },
-            { "kind": "arc", "radius": 45.0, "angle": 180.0, "rise": 0.0 }
-        ],
-        "features": []
-    });
-    // Through the type, so a blank track can never be one the rest of this refuses.
-    serde_json::from_value::<trackprog::TrackProgram>(json.clone())
-        .map_err(|e| format!("the blank track didn't load: {e}"))?;
-    Ok(json)
+    serde_json::from_str::<trackprog::TrackProgram>(trackprog::BLANK)
+        .and_then(|p| serde_json::to_value(&p))
+        .map_err(|e| format!("the blank track didn't load: {e}"))
 }
 
 /// Give a programme a height budget that fits it.

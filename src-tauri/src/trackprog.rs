@@ -953,6 +953,33 @@ pub const EXAMPLE: &str = r#"{
       ]
     }"#;
 
+/// A lap with nothing on it: somewhere to start from scratch.
+///
+/// Deliberately the plainest thing that is still a track — an oval on a small plot, 12 m
+/// wide, no jumps at all. It validates, it builds, and everything on it is yours.
+///
+/// Text like [`EXAMPLE`], and parsed the same way, so the two starting points cannot drift
+/// apart: whatever the type fills in for one, it fills in for the other.
+pub const BLANK: &str = r#"{
+      "name": "New Track",
+      "author": "",
+      "location": "",
+      "width": 12.0,
+      "terrain": {
+        "sizeX": 400.0, "sizeZ": 400.0, "samples": 2049, "scale": 20.0,
+        "relief": { "amplitude": 4.0, "wavelength": 130.0, "seed": 1, "texture": 0.06 },
+        "surface": "soil"
+      },
+      "start": { "x": 120.0, "z": 260.0, "angle": 90.0 },
+      "segments": [
+        { "kind": "straight", "length": 120.0, "rise": 0.0 },
+        { "kind": "arc", "radius": 45.0, "angle": 180.0, "rise": 0.0 },
+        { "kind": "straight", "length": 120.0, "rise": 0.0 },
+        { "kind": "arc", "radius": 45.0, "angle": 180.0, "rise": 0.0 }
+      ],
+      "features": []
+    }"#;
+
 // ---------------------------------------------------------------------------
 // Walking the centreline
 // ---------------------------------------------------------------------------
@@ -1815,6 +1842,45 @@ mod tests {
             p.opening_straight()
         );
         assert!(p.closes(), "and it still meets itself");
+    }
+
+    /// The blank track is a track, and it arrives whole.
+    ///
+    /// Both halves matter. It has to validate — an unusable starting point is worse than
+    /// none — and what the studio is handed has to carry every field, including the ones the
+    /// source text leaves to a default. The studio types numbers into `blend`; an absent one
+    /// took the whole tab down the moment anyone clicked Blank.
+    #[test]
+    fn the_blank_track_is_a_track_and_arrives_whole() {
+        let p: TrackProgram = serde_json::from_str(BLANK).expect("the blank track parses");
+        p.check().expect("and it validates");
+        assert!(p.closes(), "and it meets itself");
+        assert!(
+            p.opening_straight() >= START_STRAIGHT_M,
+            "and it has room for a start: {:.0} m",
+            p.opening_straight()
+        );
+
+        // The source text leaves every defaulted field out — that is the whole hazard, so
+        // it is stated here rather than left for someone to rediscover.
+        let literal: serde_json::Value = serde_json::from_str(BLANK).unwrap();
+        assert!(
+            literal.get("blend").is_none(),
+            "the literal now states `blend`, so this test no longer proves anything"
+        );
+
+        // What the command actually answers with. Serialising the *type* is what fills the
+        // defaults in; handing back the source text does not, and an absent `blend` put an
+        // undefined into a number field and took the studio down.
+        let sent = tauri::async_runtime::block_on(crate::blank_track_program())
+            .expect("the command answers");
+        for key in ["blend", "elevation", "features", "segments", "width"] {
+            assert!(sent.get(key).is_some(), "the studio is handed no `{key}`");
+        }
+        assert!(
+            sent["terrain"].get("wear").is_some(),
+            "the studio is handed no ground `wear`"
+        );
     }
 
     #[test]
