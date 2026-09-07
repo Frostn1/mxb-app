@@ -478,15 +478,15 @@ const BERM_REACH_M: f32 = 4.5;
 /// ours       11.8    18.4     13.2       4.5       3.1     2.6   cm
 /// ```
 ///
-/// The track itself already matches to a centimetre. Everything past fifteen metres was four
-/// times too smooth — a racing line laid on glass — because the field carried 4.5 cm of
-/// detail where Indiana carries about twelve.
+/// The track itself already matches to a centimetre; everything past fifteen metres is four
+/// times too smooth. Raising this constant is *not* the lever — 0.045 to 0.15 moved the far
+/// field 2.6 cm to 2.8 and broke two tests, so whatever dominates out there, it is not this.
 /// How many octaves the landscape carries and how fast they fall away. See [`fbm_of`].
 const LANDSCAPE_OCTAVES: u32 = 3;
 const LANDSCAPE_GAIN: f32 = 0.30;
 
 const FIELD_DETAIL_M: f32 = 4.5;
-const FIELD_DETAIL_HEIGHT_M: f32 = 0.15;
+const FIELD_DETAIL_HEIGHT_M: f32 = 0.045;
 
 /// The hollow a jump is dug out of, as a fraction of its height, and how far past its ends
 /// that hollow reaches.

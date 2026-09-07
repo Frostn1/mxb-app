@@ -152,6 +152,97 @@ const SLEW: f32 = 0.85;
 /// straight, and a published lap has almost none: Indiana's whole lap carries one, of 62 m.
 const EDGE_FILL: f32 = 0.985;
 
+/// The most a merged run of same-way vertices may turn before it is left as two corners.
+/// Past about this the two edges either side run nearly parallel and their crossing point —
+/// the virtual apex the run is filleted about — shoots off to infinity.
+const MERGE_LIMIT_DEG: f32 = 172.0;
+
+/// Collapse runs of consecutive same-way vertices into one.
+///
+/// The outline turns a little at every vertex and leaves a straight on every edge, so a lap
+/// approaches a corner *polygonally* — `arc R44, straight 31 m, arc R44, straight 29 m, arc
+/// R22` was one real approach, all of it turning the same way. Curvature snapping between
+/// zero and 1/44 every twenty metres is what made the racing line visibly weave, and capping
+/// each corner at one vertex is why nothing we drew turned more than 89° when Indiana's
+/// corners run to 313°.
+///
+/// A run of same-way vertices is one corner. Its two outer edges, extended, cross at a
+/// virtual apex; putting that point in place of the whole run gives a polygon that is still
+/// closed — the edges either side are the ones it already had — and filleting *it* gives one
+/// long chain where there were three corners and two straights.
+fn merge_runs(pts: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    let n = pts.len();
+    if n < 6 {
+        return pts.to_vec();
+    }
+    let turn = |i: usize| -> f32 {
+        let (a, b, c) = (pts[(i + n - 1) % n], pts[i], pts[(i + 1) % n]);
+        let v1 = (b.0 - a.0, b.1 - a.1);
+        let v2 = (c.0 - b.0, c.1 - b.1);
+        (v1.0 * v2.1 - v1.1 * v2.0).atan2(v1.0 * v2.0 + v1.1 * v2.1)
+    };
+    // Start the walk at a vertex that turns the other way, so no run is split across the seam.
+    let start = (0..n)
+        .find(|i| turn(*i).signum() != turn((*i + 1) % n).signum())
+        .map_or(0, |i| (i + 1) % n);
+
+    let mut out: Vec<(f32, f32)> = Vec::with_capacity(n);
+    let mut i = 0usize;
+    while i < n {
+        let a = (start + i) % n;
+        let sign = turn(a).signum();
+        let mut deg = turn(a).abs().to_degrees();
+        let mut len = 1usize;
+        while i + len < n {
+            let b = (start + i + len) % n;
+            let t = turn(b);
+            if t.signum() != sign || deg + t.abs().to_degrees() > MERGE_LIMIT_DEG {
+                break;
+            }
+            deg += t.abs().to_degrees();
+            len += 1;
+        }
+        if len == 1 {
+            out.push(pts[a]);
+            i += 1;
+            continue;
+        }
+        let last = (start + i + len - 1) % n;
+        let a0 = pts[(a + n - 1) % n];
+        let d1 = (pts[a].0 - a0.0, pts[a].1 - a0.1);
+        let b0 = pts[last];
+        let d2 = (pts[(last + 1) % n].0 - b0.0, pts[(last + 1) % n].1 - b0.1);
+        let cross = d1.0 * d2.1 - d1.1 * d2.0;
+        let span = (b0.0 - pts[a].0).hypot(b0.1 - pts[a].1).max(1.0);
+        let ok = if cross.abs() < 1e-4 {
+            None
+        } else {
+            let w = (b0.0 - a0.0, b0.1 - a0.1);
+            let t = (w.0 * d2.1 - w.1 * d2.0) / cross;
+            let v = (a0.0 + t * d1.0, a0.1 + t * d1.1);
+            // The apex has to be near the run it stands for, or the merge bends the lap into
+            // somewhere the outline never went.
+            let mid = ((pts[a].0 + b0.0) / 2.0, (pts[a].1 + b0.1) / 2.0);
+            if t > 1.0 && (v.0 - mid.0).hypot(v.1 - mid.1) < 1.6 * span {
+                Some(v)
+            } else {
+                None
+            }
+        };
+        match ok {
+            Some(v) => {
+                out.push(v);
+                i += len;
+            }
+            None => {
+                out.push(pts[a]);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
 /// How many arcs a corner of `deg` is made of, and how much wider than the apex each one runs.
 ///
 /// A published corner is not one arc. Indiana's are three to nineteen, and the radius *inside
@@ -232,7 +323,7 @@ fn fillet(pts: &[(f32, f32)], rng: &mut Rng) -> (Vec<Segment>, Start) {
             // a hundred-metre sweeper: a lap of them rode, in one word, with "no ruts". So
             // the bands stop at 45 m, and most of the lap sits well under that.
             let (lo, hi) = if deg >= 80.0 {
-                (9.0, 17.0)
+                (7.0, 12.0)
             } else if deg >= 45.0 {
                 (12.0, 24.0)
             } else if deg >= 22.0 {
@@ -268,7 +359,7 @@ fn fillet(pts: &[(f32, f32)], rng: &mut Rng) -> (Vec<Segment>, Start) {
     // — so ask for what the band wants and relax until that holds. Whatever is left over is
     // the straight, and there is very little of it.
     let mut want: Vec<f32> = corners.iter().map(|c| c.as_ref().map_or(0.0, |c| c.tangent)).collect();
-    for _ in 0..24 {
+    for _ in 0..400 {
         let mut moved = false;
         for i in 0..n {
             let edge = (pts[(i + 1) % n].0 - pts[i].0).hypot(pts[(i + 1) % n].1 - pts[i].1);
@@ -306,7 +397,7 @@ fn fillet(pts: &[(f32, f32)], rng: &mut Rng) -> (Vec<Segment>, Start) {
         let here = corners[i].as_ref().map_or(0.0, |c| c.tangent);
         let next = corners[(i + 1) % n].as_ref().map_or(0.0, |c| c.tangent);
         let run = edge - here - next;
-        if run > 0.25 {
+        if run > 0.001 {
             segs.push(Segment::Straight { length: run, rise: 0.0 });
         }
         if let Some(c) = &corners[(i + 1) % n] {
@@ -412,8 +503,8 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
 /// One lap, from one number. Not checked — see [`search`] for that.
 pub fn draw(seed: u64) -> TrackProgram {
     let mut rng = Rng::new(seed);
-    let vertices = rng.int(46, 62) as usize;
-    let points = outline(&mut rng, vertices);
+    let vertices = rng.int(64, 84) as usize;
+    let points = merge_runs(&outline(&mut rng, vertices));
     let (segments, start) = fillet(&points, &mut rng);
     let features = features(&mut rng, &segments);
     let surface = match rng.int(0, 9) {
