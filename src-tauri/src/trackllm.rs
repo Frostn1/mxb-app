@@ -1040,12 +1040,14 @@ impl Ask for ControlPlane {
             problems: attempt.problems.clone(),
         };
         // Generously long: the model thinks before it writes, and a lap is a few thousand
-        // tokens of output.
+        // tokens of output. Ten minutes rather than five because the answer's own ceiling was
+        // raised — a full-length lap plus the thinking that lays it out is most of 32k tokens,
+        // and a client that gives up at five minutes throws away attempts that were working.
         let res = reqwest::Client::new()
             .post(format!("{}/v1/track/generate", self.base.trim_end_matches('/')))
             .bearer_auth(&self.token)
             .json(&body)
-            .timeout(std::time::Duration::from_secs(300))
+            .timeout(std::time::Duration::from_secs(600))
             .send()
             .await
             .context("couldn't reach the track service")?;

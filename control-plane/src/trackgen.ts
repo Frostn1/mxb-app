@@ -378,6 +378,20 @@ function ask(model: string) {
   };
 }
 
+/**
+ * How long the answer may be, in tokens.
+ *
+ * A published-length lap is 130 segments and forty features, and the thinking that lays it
+ * out is counted against the same ceiling. At 16000 the two together ran off the end: the
+ * program came back a truncated string and every attempt was spent on "that didn't parse",
+ * which reads as a model that cannot write JSON rather than one that was cut off.
+ *
+ * Raising it is what forces the streamed call above — the SDK will not take a non-streaming
+ * request whose ceiling could run past ten minutes. Not raised further than this because the
+ * app waits on one response and gives up at ten minutes.
+ */
+const MAX_ANSWER_TOKENS = 32000;
+
 /** Briefs longer than this are not briefs. */
 const MAX_BRIEF = 2000;
 
@@ -430,9 +444,12 @@ export async function generateTrack(request: Request, env: Env): Promise<Respons
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   try {
     const chosen = ask(env.TRACK_MODEL?.trim() || MODEL);
-    const response = await client.messages.parse({
+    // Streamed, and not for the progress: the SDK refuses a non-streaming request whose
+    // ceiling could take it past ten minutes, so `max_tokens` cannot be raised without this.
+    // The answer is still assembled here and returned whole — the app waits for one JSON body.
+    const stream = client.messages.stream({
       model: chosen.model,
-      max_tokens: 16000,
+      max_tokens: MAX_ANSWER_TOKENS,
       system: SYSTEM,
       messages,
       // Laying out a lap is arithmetic the model would have to do — except most of it is
@@ -443,6 +460,7 @@ export async function generateTrack(request: Request, env: Env): Promise<Respons
         ...(chosen.effort ? { effort: chosen.effort } : {}),
       },
     });
+    const response = await stream.finalMessage();
 
     if (response.stop_reason === "refusal") {
       return json(422, { error: "the model declined that brief" });

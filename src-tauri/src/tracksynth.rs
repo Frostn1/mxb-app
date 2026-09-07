@@ -8936,10 +8936,11 @@ mod tests {
         }
     }
 
-    /// Look at the finish jump.
+    /// Look at the finish jump — the worked example's, or any track program's.
     ///
     /// ```text
-    /// FROST_SHOT=/tmp/shots cargo test -- --ignored --nocapture the_finish_jump_picture
+    /// FROST_SHOT=/tmp/shots [FROST_PROGRAM=track/program.json] \
+    ///   cargo test -- --ignored --nocapture the_finish_jump_picture
     /// ```
     #[test]
     #[ignore = "writes pictures to look at — set FROST_SHOT"]
@@ -8947,7 +8948,11 @@ mod tests {
         let dir = std::env::var("FROST_SHOT").expect("set FROST_SHOT");
         let dir = Path::new(&dir);
         std::fs::create_dir_all(dir).unwrap();
-        let p: TrackProgram = serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
+        let json = match std::env::var("FROST_PROGRAM") {
+            Ok(path) => std::fs::read_to_string(path).expect("read the program"),
+            Err(_) => crate::trackprog::EXAMPLE.to_string(),
+        };
+        let p: TrackProgram = serde_json::from_str(&json).unwrap();
         let f = p.finish_jump().expect("a finish jump").clone();
         let s = synthesise(&p).unwrap();
         let mid = f.at() + f.length() * 0.5;

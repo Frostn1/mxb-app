@@ -2,6 +2,12 @@
 
 ## 2026-09-06
 
+### Fixed
+- Generating a track holds a full-length lap. A long circuit no longer runs out of room
+  part-way through being written, which is what turned a good design into "that didn't parse".
+
+## 2026-09-06
+
 ### Changed
 - The track creator is laid out the way you work: the lap as a numbered list on the left, a
   plan view of the circuit in the middle, and the numbers for whichever step you pick on the
