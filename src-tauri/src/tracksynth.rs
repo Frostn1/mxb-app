@@ -2945,6 +2945,13 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     // The game-facing files, byte for byte what the `.pkz` carries.
     put(&format!("{slug}/{slug}.ini"), crlf(&track_ini(prog)), &mut wrote)?;
     put(&format!("{slug}/{slug}.amb"), crlf(AMB), &mut wrote)?;
+    // The sky the `.amb` names. Without it a track borrows the game's stock one, which is
+    // what every generated track did until now — nothing overhead belonging to the place.
+    put(
+        &format!("{slug}/dome.edf"),
+        crate::trackscenery::dome_file(prog.terrain.size_x.max(prog.terrain.size_z) * 1.6),
+        &mut wrote,
+    )?;
     put(&format!("{slug}/gfx.cfg"), crlf(&gfx_cfg(prog)), &mut wrote)?;
     put(&format!("{slug}/{slug}.rdf"), crlf(&rdf(prog, syn.spur.as_ref())), &mut wrote)?;
     put(&format!("{slug}/{slug}.ssc"), SSC.into(), &mut wrote)?;
