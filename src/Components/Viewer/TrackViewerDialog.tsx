@@ -8,6 +8,7 @@ import {
   loadTrackOverview,
   loadTrackBackdrop,
   loadTrackGround,
+  loadTrackGroundLayers,
   loadTrackScenery,
   loadTrackSurfaces,
   loadTrackTerrain,
@@ -20,6 +21,7 @@ import type {
   TrackPlacement,
   TrackBackdrop,
   TrackGround,
+  TrackGroundLayer,
   TrackScenery,
   TrackSceneryTexture,
   TrackTerrain,
@@ -69,6 +71,7 @@ export function TrackViewerDialog({
   const [surfaces, setSurfaces] = useState<TrackSceneryTexture[]>([]);
   const [backdrop, setBackdrop] = useState<TrackBackdrop | null>(null);
   const [ground, setGround] = useState<TrackGround | null>(null);
+  const [groundLayers, setGroundLayers] = useState<TrackGroundLayer[]>([]);
   const [placements, setPlacements] = useState<TrackPlacement[]>([]);
   // On by default: the scenery is the difference between a shape and a place, and a track
   // that carries none simply has nothing to switch off.
@@ -100,6 +103,7 @@ export function TrackViewerDialog({
     setSurfaces([]);
     setBackdrop(null);
     setGround(null);
+    setGroundLayers([]);
     setPicked(null);
     setSceneryError(null);
     setPlacements([]);
@@ -130,6 +134,12 @@ export function TrackViewerDialog({
     // terrain is up.
     loadTrackGround(path)
       .then((g) => alive && setGround(g))
+      .catch(() => {});
+
+    // The ground the game draws. A few hundred kilobytes once reduced, and it replaces the
+    // surface picture rather than adding to it, so it is worth having as early as possible.
+    loadTrackGroundLayers(path)
+      .then((l) => alive && setGroundLayers(l))
       .catch(() => {});
 
     void (async () => {
@@ -291,6 +301,7 @@ export function TrackViewerDialog({
               surfaces={surfaces}
               backdrop={backdrop}
               ground={ground}
+              groundLayers={groundLayers}
               placements={placements}
               showObjects={showObjects}
               onPick={setPicked}

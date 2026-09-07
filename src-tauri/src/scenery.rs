@@ -31,6 +31,9 @@ const SURFACE_CACHE: &str = "track-surfaces-v4";
 /// surfaces' hundreds of megabytes, and finding them means reading the archive a third time.
 const GROUND_CACHE: &str = "track-ground-v2";
 
+/// The ground stack, cached as the blob the front end receives.
+const GROUND_LAYERS_CACHE: &str = "track-ground-layers-v1";
+
 /// How many decoded scenery meshes to keep. Smaller than the terrain's: one of these is
 /// about 30 MB, against 16 for a terrain master.
 const CACHE_KEEP: usize = 4;
@@ -868,6 +871,50 @@ pub fn load_ground(app: &tauri::AppHandle, path: &str) -> Result<Vec<MapTexture>
         prune_cache(app, GROUND_CACHE);
     }
     Ok(sheets)
+}
+
+/// The ground a track is painted with, cached like its surfaces.
+///
+/// Two or three hundred kilobytes once reduced — small next to the surfaces, and worth caching
+/// for the same reason: getting at it means pulling a several-hundred-megabyte `.map` out of an
+/// archive, which is most of a second.
+pub fn load_ground_layers(app: &tauri::AppHandle, path: &str) -> Result<Vec<u8>> {
+    let key = cache_key(path)?;
+    if let Some(hit) = cache_file(app, &key, GROUND_LAYERS_CACHE).and_then(|f| std::fs::read(f).ok())
+    {
+        if hit.len() >= map::GROUND_LAYERS_HEADER && hit.starts_with(b"FGLY") {
+            return Ok(hit);
+        }
+    }
+    let blob = map::ground_layers_blob(&read_ground_layers(path)?);
+    if let Some(f) = cache_file(app, &key, GROUND_LAYERS_CACHE) {
+        if let Some(parent) = f.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&f, &blob);
+        prune_cache(app, GROUND_LAYERS_CACHE);
+    }
+    Ok(blob)
+}
+
+/// The uncached read: the expensive half, and the one the tests come in through.
+fn read_ground_layers(path: &str) -> Result<Vec<map::GroundLayer>> {
+    let p = Path::new(path);
+    let names = crate::track::entry_names(p)?;
+    let stem = track_stem(p);
+    for entry in entries_with_ext(&names, "map", &stem) {
+        let Ok(bytes) = crate::track::read_entry(p, &entry) else {
+            continue;
+        };
+        if !map::is_map(&bytes) {
+            continue;
+        }
+        let layers = map::ground_layers(&bytes);
+        if !layers.is_empty() {
+            return Ok(layers);
+        }
+    }
+    Ok(Vec::new())
 }
 
 /// A track's surfaces, cached apart from its mesh.

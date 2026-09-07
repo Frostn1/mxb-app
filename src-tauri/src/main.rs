@@ -1693,6 +1693,27 @@ async fn load_track_ground(
     .map_err(|e| format!("load_track_ground task failed: {e}"))
 }
 
+/// The ground a track is painted with, layer by layer — what the game puts under the bike.
+///
+/// Separate from `load_track_ground`, which hands back a single sheet to tile everywhere. This
+/// is the stack itself: each layer's sheet, how far it tiles, and the mask that cuts it into
+/// the one below.
+#[tauri::command]
+async fn load_track_ground_layers(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let blob = scenery::load_ground_layers(&app, &path).unwrap_or_else(|e| {
+            log::debug!("[scenery] ground layers for {path}: {e:#}");
+            Vec::new()
+        });
+        tauri::ipc::Response::new(blob)
+    })
+    .await
+    .map_err(|e| format!("load_track_ground_layers task failed: {e}"))
+}
+
 /// The models a track ships that a prop can be placed by name.
 #[tauri::command]
 async fn read_track_placeable(path: String) -> Result<Vec<String>, String> {
@@ -10253,6 +10274,7 @@ fn main() {
             load_track_prop,
             load_track_backdrop,
             load_track_ground,
+            load_track_ground_layers,
             diagnose_track,
             unpack_paint,
             texture_bytes,
