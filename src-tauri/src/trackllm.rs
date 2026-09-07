@@ -595,6 +595,45 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
 
 /// `repair`, for tests in other modules.
 #[cfg(test)]
+/// Read a program, repair it, and say what review makes of it.
+///
+/// The cheap half of building a track: no synthesis, no compiler, so a layout can be tried
+/// and thrown away in milliseconds. Prints `OK` on a lap that passes, which is what a seed
+/// search greps for.
+///
+/// ```text
+/// FROST_PROGRAM=lap.json FROST_SAVE=lap.repaired.json \
+///   cargo test --bin mxb-app -- --ignored --nocapture check_a_program
+/// ```
+#[cfg(test)]
+pub fn check_a_program_impl() {
+    let path = std::env::var("FROST_PROGRAM").expect("set FROST_PROGRAM");
+    let mut prog: TrackProgram =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("read the program"))
+            .expect("the program parses");
+    for note in repair_for_tests(&mut prog) {
+        println!("  repair: {note}");
+    }
+    let notes = validate(&prog);
+    println!(
+        "  {} — {:.0} m, {} segments",
+        prog.name,
+        prog.lap_length(),
+        prog.segments.len()
+    );
+    for n in &notes {
+        println!("  review: {n}");
+    }
+    if notes.is_empty() {
+        println!("OK");
+    }
+    // Saved whether or not it passed. A lap with a note against it is still the lap that
+    // gets built, and measuring the ground of the one that ships is the whole point.
+    if let Ok(to) = std::env::var("FROST_SAVE") {
+        std::fs::write(to, serde_json::to_string_pretty(&prog).unwrap()).unwrap();
+    }
+}
+
 pub fn repair_for_tests(prog: &mut TrackProgram) -> Vec<String> {
     repair(prog)
 }
@@ -1606,3 +1645,11 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod layout_check {
+    #[test]
+    #[ignore = "needs a program — set FROST_PROGRAM"]
+    fn check_a_program() {
+        super::check_a_program_impl();
+    }
+}

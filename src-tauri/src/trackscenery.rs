@@ -769,14 +769,67 @@ fn dome_mesh(radius: f32) -> Mesh {
 }
 
 /// The sky's own sheet: blue overhead, pale at the horizon, with cloud banded across it.
+/// The sky as a file of its own: `dome.edf`, named by the `.amb`.
+///
+/// The band in the map exists because TerrainEd bakes shadow volumes from every mesh in the
+/// scene, so a lid over the plot put the whole track in shadow. That reasoning does not apply
+/// here — a `.edf` the game loads at runtime never goes near the compiler — so this one is
+/// closed all the way over, which is what a published track ships and what a rider looking up
+/// expects to see.
+pub fn dome_file(radius: f32) -> Vec<u8> {
+    let mut m = Mesh::default();
+    const RINGS: usize = 8;
+    const SIDES: usize = 32;
+    // Ring by ring from the horizon to the pole, facing inwards.
+    let ring = |mesh: &mut Mesh, t: f32| -> u32 {
+        let start = mesh.vertex_count() as u32;
+        let phi = t * std::f32::consts::FRAC_PI_2;
+        let (y, r) = (radius * phi.sin(), radius * phi.cos());
+        for k in 0..=SIDES {
+            let a = std::f32::consts::TAU * k as f32 / SIDES as f32;
+            let (x, z) = (a.sin() * r, a.cos() * r);
+            mesh.positions.extend_from_slice(&[x, y, z]);
+            // Outward, and the mesh is doubled below so the inside still draws.
+            //
+            // Pointing them inwards is the obvious thing — that is the side a rider sees —
+            // and it renders the sky at ambient only: `clear`'s ambient is 0.4, so a day sky
+            // comes out at forty per cent of itself, which from the seat is night.
+            let l = (x * x + y * y + z * z).sqrt().max(1e-4);
+            mesh.normals.extend_from_slice(&[x / l, y / l, z / l]);
+            mesh.uvs.extend_from_slice(&[k as f32 / SIDES as f32 * 4.0, 1.0 - t]);
+        }
+        start
+    };
+    let mut prev = ring(&mut m, 0.0);
+    for i in 1..=RINGS {
+        let t = i as f32 / RINGS as f32;
+        let next = ring(&mut m, t);
+        for k in 0..SIDES as u32 {
+            // Wound so the inside faces are the ones drawn.
+            m.indices.extend_from_slice(&[prev + k, next + k, prev + k + 1]);
+            m.indices.extend_from_slice(&[prev + k + 1, next + k, next + k + 1]);
+        }
+        prev = next;
+    }
+    let part = Part {
+        name: "sky".into(),
+        mesh: crate::edfwrite::double_sided(&m),
+        texture: 0,
+        normal: None,
+    };
+    crate::edfwrite::write("dome", &[part], &[dome_sheet()])
+}
+
 fn dome_sheet() -> Texture {
     sheet("sky_c", 256, |u, v| {
         // v is 0 at the zenith and 1 at the horizon — see `dome_mesh`'s uvs.
         let up = 1.0 - v;
+        // A day. Bright enough that whatever light the track's own ambient puts on it, it
+        // still reads as sky rather than as dusk.
         let base = [
-            60.0 + 130.0 * (1.0 - up).powf(1.6),
-            110.0 + 120.0 * (1.0 - up).powf(1.4),
-            180.0 + 55.0 * (1.0 - up).powf(1.2),
+            105.0 + 120.0 * (1.0 - up).powf(1.6),
+            155.0 + 90.0 * (1.0 - up).powf(1.4),
+            215.0 + 35.0 * (1.0 - up).powf(1.2),
         ];
         // Cloud: two scales of noise, thresholded so it comes out as banks rather than fog,
         // and thinned towards the top where a flat sheet would read as a ceiling.
@@ -808,6 +861,51 @@ fn jumpmark_mesh(h: f32) -> Mesh {
     m
 }
 
+/// What a tyre leaves, as a texture: the print of a knobbly.
+///
+/// Asked for outright after two rides — "tyre marks don't mean grooves everywhere, I meant
+/// the actual tyre mark texture". Grooves are the *shape* a hundred passes cut into the
+/// ground, and they are worth having, but they are not a tyre mark. A mark is the print of
+/// the knobs: two rows of blocks either side of a centre line, staggered, about four
+/// centimetres apart, dark where the rubber pressed the dirt down.
+///
+/// Alpha-cut, so what is not a knob is not drawn at all — the ground shows through between
+/// them, which is what makes it read as a print rather than as a stripe.
+fn tyre_sheet() -> Texture {
+    sheet("tyre_c_a", 128, |u, v| {
+        // One print down the sheet: the tread repeats every `TYRE_TREAD_M` of travel, and
+        // the sheet is one repeat, so v runs the length of the print.
+        let across = (u - 0.5) * 2.0; // -1 at one edge, +1 at the other
+        // Two rows of knobs, offset half a step from each other, plus a centre block.
+        let row = |lane: f32, phase: f32| -> f32 {
+            let d = (across - lane).abs();
+            if d > 0.30 {
+                return 0.0;
+            }
+            let along = (v * 3.0 + phase).fract();
+            let block = if (0.12..0.62).contains(&along) { 1.0 } else { 0.0 };
+            // Softened at the edges of each block so it is a print in dirt, not a stamp.
+            let edge = ((0.30 - d) / 0.12).clamp(0.0, 1.0);
+            block * edge
+        };
+        let knob = row(-0.52, 0.0).max(row(0.52, 0.5)).max(row(0.0, 0.25) * 0.85);
+        // Ragged: a print in soil is never the shape of the block that made it.
+        let torn = 0.72 + 0.5 * grain(u * 2.0, v * 2.0, 0x7A31, 40.0);
+        let a = (knob * torn).clamp(0.0, 1.0);
+        if a < 0.30 {
+            return [0, 0, 0, 0];
+        }
+        // Pressed dirt: darker than what it is printed on, and slightly wet-looking.
+        let g = 0.85 + 0.3 * grain(u, v, 0x7A32, 26.0);
+        [
+            (44.0 * g) as u8,
+            (32.0 * g) as u8,
+            (22.0 * g) as u8,
+            (215.0 * a) as u8,
+        ]
+    })
+}
+
 fn jumpmark_sheet() -> Texture {
     sheet("jumpmark_c", 32, |u, v| {
         let g = grain(u, v * 0.3, 0x8B31, 24.0);
@@ -815,6 +913,58 @@ fn jumpmark_sheet() -> Texture {
         [(242.0 * k) as u8, (198.0 * k) as u8, (28.0 * k) as u8, 255]
     })
 }
+
+/// A ribbon of tyre prints laid on the ground, following the line a rider took.
+///
+/// It has to be a mesh rather than part of the terrain's own paint. A terrain layer tiles in
+/// world space — north-south, always — so tread baked into a ground sheet points the same way
+/// everywhere and is wrong wherever the track is not going north. A card knows which way it
+/// is pointing.
+///
+/// The strip follows the ground sample by sample rather than being a flat quad: a two-metre
+/// card laid across a rut stands off it at one end and buries itself at the other.
+fn tyre_ribbon(
+    syn: &Synth,
+    stations: &[crate::trackprog::Station],
+    lat_at: impl Fn(usize) -> f32,
+    width: f32,
+) -> Mesh {
+    let mut m = Mesh::default();
+    let mut v_at = 0.0f32;
+    let mut prev: Option<(u32, f32)> = None;
+    for (i, st) in stations.iter().enumerate() {
+        let (rx, rz) = crate::trackprog::right_vector(st.heading);
+        let lat = lat_at(i);
+        let (cx, cz) = (st.x + rx * lat, st.z + rz * lat);
+        let half = width * 0.5;
+        let start = m.vertex_count() as u32;
+        for side in [-1.0f32, 1.0] {
+            let (x, z) = (cx + rx * half * side, cz + rz * half * side);
+            m.positions.extend_from_slice(&[x, ground(syn, x, z) + TYRE_LIFT_M, z]);
+            m.normals.extend_from_slice(&[0.0, 1.0, 0.0]);
+            m.uvs.extend_from_slice(&[if side < 0.0 { 0.0 } else { 1.0 }, v_at]);
+        }
+        if let Some((prev_start, prev_v)) = prev {
+            let _ = prev_v;
+            m.indices.extend_from_slice(&[prev_start, prev_start + 1, start]);
+            m.indices.extend_from_slice(&[start, prev_start + 1, start + 1]);
+        }
+        let step = if i + 1 < stations.len() {
+            (stations[i + 1].x - st.x).hypot(stations[i + 1].z - st.z)
+        } else {
+            0.0
+        };
+        prev = Some((start, v_at));
+        v_at += step / TYRE_TREAD_M;
+    }
+    m
+}
+
+/// How wide a print is, how far the tread repeats in, and how far the card floats over the
+/// ground so it draws in front of it without standing off it.
+const TYRE_W_M: f32 = 0.16;
+const TYRE_TREAD_M: f32 = 0.42;
+const TYRE_LIFT_M: f32 = 0.035;
 
 /// A pole: a post with a crossbar near the top. Power, floodlight or flag — at the distance
 /// these stand it is a vertical, and what it does is break up the skyline.
@@ -1502,6 +1652,34 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let _ = &mut vans;
 
 
+    // 6b. Tyre marks: the print of a knobbly down the lines riders take.
+    //
+    // Three passes, not one — a line is a handful of them side by side, and one ribbon down
+    // the middle reads as a stripe. Where the ground says it has been worked hardest is where
+    // they are laid, so the marks agree with the shape: `syn.rut` is the same signal the
+    // paint keys to.
+    let mut tyre = Mesh::default();
+    if !syn.stations.is_empty() {
+        for (pass, lean) in [(0usize, -0.55f32), (1, 0.0), (2, 0.62)] {
+            let ribbon = tyre_ribbon(
+                syn,
+                &syn.stations,
+                |i| {
+                    let wander = 0.35
+                        * crate::tracksynth::fbm(
+                            syn.stations[i].s / 26.0,
+                            pass as f32 * 7.0,
+                            prog.terrain.relief.seed ^ 0x7A33,
+                        );
+                    syn.line_lat[i] + lean + wander
+                },
+                TYRE_W_M,
+            );
+            tyre.append(&ribbon);
+        }
+        tally.push(("tyre marks", 3));
+    }
+
     // 7. The sky over all of it.
     let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
     let sky = edfwrite::moved(
@@ -1580,6 +1758,8 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         // The sky is drawn and nothing else: a dome you can ride into is not a sky.
         ("sky", sky, dome_sheet(), false),
         ("gate", gate, gate_sheet(), true),
+        // Drawn, never solid: a mark is paint on the ground, not a kerb.
+        ("tyre marks", tyre, tyre_sheet(), false),
     ];
 
     let mut files = Vec::new();

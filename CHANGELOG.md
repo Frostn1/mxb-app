@@ -56,6 +56,20 @@
 - Banner artwork fills its board at the proportions it was drawn in.
 
 ## 2026-09-06
+### Changed
+- Corners on a generated track tighten into the apex and open out again, instead of holding
+  one radius the whole way round.
+- Generated laps carry real hairpins. A turn can double back on itself, and the run into a
+  corner curves in rather than stepping towards it through a series of short straights.
+
+### Fixed
+- Doubles on a generated track are shaped the way a built one is. The take-off lip and the
+  landing crest turn over a radius, and the ground between them runs down through a rounded
+  valley into the flat.
+- A tight double rides over a saddle rather than through a slot: the valley drops to the
+  ground where there is room for it, and sits higher where the two jumps are close together.
+
+## 2026-09-06
 
 ### Fixed
 - Sharing a track is quicker. The upload no longer waits on the host after the files are
@@ -83,6 +97,18 @@
 ## 2026-09-06
 
 ### Changed
+- A track can be laid out without the model. A seeded layout generator draws a closed lap
+  that never crosses itself, with the corner count, turning and jump density published tracks
+  carry — so a new track is a new seed rather than a wait.
+- Generated tracks have a sky of their own. They used to borrow the game's stock one, because
+  nothing ever shipped a dome or told the game to look for it.
+- The track is dirt again. The whole riding surface is dark worked ground with a darker line
+  ridden into it, instead of pale soil with a stripe down the middle and holes in it.
+- Straights no longer carry a single groove dug down the middle of them. That is a corner's
+  doing, and it stays in the corners.
+- Berms keep their shape: the ground beside the track no longer takes bites out of them.
+- Ground sheets stop tiling visibly. A sheet's slow variation is flattened, so laying it a
+  hundred times across a track no longer draws squares.
 - The step in the ground is gone. Where two legs of a lap graded into the same piece of
   field, the ground between them could stand a metre and a half proud in one sample — ground
   outside the track now slumps to a slope instead of standing as a wall.
