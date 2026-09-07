@@ -6,7 +6,8 @@
 - Tracks in the 3D viewer are drawn with the ground the game draws: each layer's own sheet,
   tiled the way the track states, through the track's own masks. Published tracks used to come
   out one flat brown, because the colour was taken from the surface data a track uses for grip
-  rather than from what it is painted with.
+  rather than from what it is painted with. Indiana now shows its dirt, its ruts and the
+  gravel round the paddock.
 
 ## 2026-09-06
 
