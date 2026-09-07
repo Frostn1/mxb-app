@@ -3,6 +3,8 @@
 ## 2026-09-06
 
 ### Added
+- Generated tracks end the lap on a finish jump: a big tabletop on the main straight, with the
+  finish line past its landing and a gantry over it.
 
 - **You hear each rider from where they actually are.** A rider alongside you is loud and on
   that side; one two corners back is faint; one across the circuit isn't there at all. You
@@ -18,6 +20,12 @@
   name to it.
 
 ### Fixed
+- The Linux app starts on a Steam Deck. The backend the window runs on and the platform the
+  graphics stack is pointed at now name the same thing, which is what a Deck's own session
+  leaves disagreeing.
+- A launch that never paints comes back by itself in safe graphics, and returns to the fast
+  path as soon as one works. `MXB_SAFE_GRAPHICS=0` puts a machine back by hand.
+- The startup log records `EGL_PLATFORM` and which graphics settings the run started with.
 
 - The Servers tab lists the live MX Bikes servers again. The app now signs in to the master
   server exactly the way the game does — the same fields, and the same kind of Steam ticket —
