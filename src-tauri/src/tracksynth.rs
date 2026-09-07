@@ -2298,6 +2298,7 @@ fn berm_profile(features: &[Feature], turn: &Profile, lap: f32) -> Profile {
 /// check is what notices.
 fn apply_rise(along: &mut [f32], st: &[Station], segments: &[Segment]) {
     let mut at = 0.0f32;
+    let mut net = 0.0f32;
     for seg in segments {
         let len = seg.length();
         let rise = seg.rise();
@@ -2320,8 +2321,20 @@ fn apply_rise(along: &mut [f32], st: &[Station], segments: &[Segment]) {
                 let u = ((s.s - at) / len).clamp(0.0, 1.0);
                 along[i] += rise * smoothstep(u);
             }
+            net += rise;
         }
         at += len;
+    }
+
+    // A lap is a loop, so its height has to come back to where it started. Rises that don't
+    // cancel used to be left standing: one straight given a rise lifted everything after it
+    // and never gave it back, so the track was a plateau with the whole climb stacked into a
+    // wall across the start line. Giving the leftover back evenly turns that into the hill
+    // the number was asking for — and where the rises already cancel, this does nothing.
+    if net != 0.0 && at > 0.0 {
+        for (i, s) in st.iter().enumerate() {
+            along[i] -= net * (s.s / at);
+        }
     }
 }
 
@@ -6267,6 +6280,60 @@ pub fn slug(name: &str) -> String {
         "track".into()
     } else {
         s
+    }
+}
+
+#[cfg(test)]
+mod rise {
+    /// Does a segment's `rise` reach the ground, and does the lap come back to meet itself?
+    ///
+    /// Sampled where a rider would be — on the centreline — against the same lap with the
+    /// rise taken out. Both halves are the point: a rise that never arrives is invisible, and
+    /// one that never leaves is a wall across the start line.
+    #[test]
+    fn a_straights_rise_moves_the_ground_under_it() {
+        let base: crate::trackprog::TrackProgram =
+            serde_json::from_str(crate::trackprog::BLANK).unwrap();
+        let mut lifted = base.clone();
+        if let crate::trackprog::Segment::Straight { rise, .. } = &mut lifted.segments[0] {
+            *rise = 5.0;
+        }
+
+        let a = crate::tracksynth::synthesise(&base).expect("flat builds");
+        let b = crate::tracksynth::synthesise(&lifted).expect("lifted builds");
+
+        let at = |syn: &crate::tracksynth::Synth, s: f32| {
+            let p = crate::trackprog::TrackProgram::stations(&base, 1.0);
+            let st = p.iter().min_by(|x, y| (x.s - s).abs().total_cmp(&(y.s - s).abs())).unwrap();
+            let gx = (st.x / syn.mps).round() as usize;
+            let gy = (st.z / syn.mps).round() as usize;
+            syn.heights[gy.min(syn.gh - 1) * syn.gw + gx.min(syn.gw - 1)]
+        };
+
+        let lap = crate::trackprog::TrackProgram::lap_length(&base);
+        for s in [0.0f32, 30.0, 60.0, 119.0, 200.0, 400.0, lap - 1.0] {
+            println!(
+                "s={s:5.0}  flat={:7.3}  lifted={:7.3}  delta={:+7.3}",
+                at(&a, s),
+                at(&b, s),
+                at(&b, s) - at(&a, s)
+            );
+        }
+
+        // It climbs where it was told to.
+        let climbed = (at(&b, 119.0) - at(&b, 0.0)) - (at(&a, 119.0) - at(&a, 0.0));
+        assert!(
+            climbed > 2.5,
+            "a 5 m rise lifted the end of its own straight by only {climbed:.2} m"
+        );
+
+        // And it comes back down. A lap is a loop: the finish has to meet the start, or the
+        // ground carries the difference as a wall across the line.
+        let seam = (at(&b, lap - 1.0) - at(&b, 0.0)) - (at(&a, lap - 1.0) - at(&a, 0.0));
+        assert!(
+            seam.abs() < 0.75,
+            "the lap finishes {seam:.2} m off where it started"
+        );
     }
 }
 
