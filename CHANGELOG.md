@@ -3,6 +3,12 @@
 ## 2026-09-06
 
 ### Fixed
+- The Servers tab lists the live MX Bikes servers again. The app now signs in to the master
+  server exactly as the game does, so the master answers it.
+
+## 2026-09-06
+
+### Fixed
 - Sharing a track is quicker. The upload no longer waits on the host after the files are
   already up, and the app stays responsive while a share is being packed.
 
