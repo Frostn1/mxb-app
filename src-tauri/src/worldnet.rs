@@ -18,8 +18,13 @@
 //!   Binary fields (addresses, the per-record counters) are little-endian where multi-byte.
 //! - **Listing**: the game has a no-auth *browse* mode (core command `0x380` → state 3) that
 //!   sends `GETLIST` with no `LOGIN`, and a *join* mode (state 2) that `LOGIN`s with a Steam
-//!   auth ticket first. We try browse first — if the master answers, no Steam is needed — and
-//!   fall back to the ticket `LOGIN` only when it doesn't.
+//!   auth ticket first. The public master answers nothing to a bare browse, so the ticket
+//!   `LOGIN` is what returns a list; browse runs after it, for a private master and for the
+//!   platforms where there is no Steam to ask.
+//! - **Signing in**: `LOGIN` names the game (`mxbikes`/`0x1502`), the account (SteamID64, in
+//!   decimal) and the ticket, whose length goes on the wire as a binary little-endian `i32`.
+//!   Every one of those is load-bearing, and the master says nothing at all when one is
+//!   wrong — see [`login_message`].
 //!
 //! Set `MXB_WORLDNET_DEBUG=1` to log each decrypted reply as hex; the meaning of a couple of
 //! the per-record bytes is inferred from the read sequence and confirmed against a live
@@ -45,6 +50,13 @@ const MAX_REPLY: usize = 64 * 1024;
 /// past the gate. It tracks the game, so a build that bumps it breaks the list until we follow
 /// — `MXB_WORLDNET_VERSION` is the stopgap.
 const CLIENT_VERSION: i64 = 40;
+
+/// The game's own identity, sent as `LOGIN`'s third and fourth fields. The exe hands
+/// `("mxbikes", 0x1502)` to the setter at `0x1402a9c70` (from `0x140134078`) and the login
+/// writes them back out verbatim — so a master that gates on which game is asking sees the
+/// game, not us. GP Bikes will have its own pair.
+const GAME_ID: &str = "mxbikes";
+const GAME_NUMBER: i64 = 0x1502;
 
 fn client_version() -> i64 {
     std::env::var("MXB_WORLDNET_VERSION")
@@ -98,6 +110,12 @@ impl Writer {
     }
     fn int(&mut self, v: i64) -> &mut Self {
         self.field(&v.to_string())
+    }
+    /// A 4-byte little-endian int, no terminator. The exe writes the ticket length this way
+    /// (`0x140283690`), not as text — get it wrong and everything after it is garbage.
+    fn i32le(&mut self, v: i32) -> &mut Self {
+        self.0.extend_from_slice(&v.to_le_bytes());
+        self
     }
     /// Raw bytes with no terminator — for the Steam ticket blob.
     fn raw(&mut self, b: &[u8]) -> &mut Self {
@@ -214,7 +232,7 @@ fn fetch(masters: &[String], rider: &str, install: &Path) -> Result<Vec<WorldSer
     // One ticket for the whole sweep — each one costs a Steam init and a callback pump.
     let ticket = steam_ticket(install);
     match &ticket {
-        Ok(t) => log::info!("[worldnet] Steam ticket: {} bytes", t.len()),
+        Ok(t) => log::info!("[worldnet] Steam ticket: {} bytes for {}", t.ticket.len(), t.steam_id),
         Err(e) => log::info!("[worldnet] no Steam ticket, browsing instead: {e}"),
     }
     let mut last_err = String::new();
@@ -227,7 +245,7 @@ fn fetch(masters: &[String], rider: &str, install: &Path) -> Result<Vec<WorldSer
             }
         };
         match &ticket {
-            Ok(ticket) => match query(&sock, target, Some((rider, ticket))) {
+            Ok(steam) => match query(&sock, target, Some((rider, steam))) {
                 Ok(list) if !list.is_empty() => {
                     log::info!("[worldnet] {} server(s) from {master}", list.len());
                     return Ok(list);
@@ -264,9 +282,9 @@ fn resolve(addr: &str) -> Result<SocketAddr, String> {
 /// One master conversation: optional `LOGIN`, then `GETLIST`, draining every `LIST` datagram
 /// that arrives before the socket times out. The master may split the list across packets, so
 /// we accumulate rather than assume one reply.
-fn query(sock: &UdpSocket, target: SocketAddr, auth: Option<(&str, &[u8])>) -> Result<Vec<WorldServer>, String> {
-    if let Some((rider, ticket)) = auth {
-        login(sock, target, rider, ticket)?;
+fn query(sock: &UdpSocket, target: SocketAddr, auth: Option<(&str, &SteamAuth)>) -> Result<Vec<WorldServer>, String> {
+    if let Some((rider, steam)) = auth {
+        login(sock, target, rider, steam)?;
     }
 
     // GETLIST carries the count-so-far + 1 (a 1-based "next index I want"); a fresh fetch is 1.
@@ -349,11 +367,11 @@ fn parse_list(r: &mut Reader, out: &mut Vec<WorldServer>) {
     }
 }
 
-/// The authenticated login the game uses before joining: `LOGIN`, a sequence number, the
-/// identity fields, mode 1 (Steam), the rider name, an empty password, the Steam id string,
-/// then the ticket length and the ticket bytes. Succeeds when the master replies `AUTH … OK`.
-fn login(sock: &UdpSocket, target: SocketAddr, rider: &str, ticket: &[u8]) -> Result<(), String> {
-    sock.send_to(&encrypt(login_message(rider, ticket)), target)
+/// The authenticated login the game uses before joining. Succeeds when the master replies
+/// `AUTH … OK`; the body it sends is [`login_message`].
+fn login(sock: &UdpSocket, target: SocketAddr, rider: &str, auth: &SteamAuth) -> Result<(), String> {
+    let body = login_message(rider, &auth.steam_id.to_string(), &auth.ticket);
+    sock.send_to(&encrypt(body), target)
         .map_err(|e| format!("login send failed: {e}"))?;
 
     let mut buf = [0u8; 4096];
@@ -362,17 +380,24 @@ fn login(sock: &UdpSocket, target: SocketAddr, rider: &str, ticket: &[u8]) -> Re
 }
 
 /// The `LOGIN` body, in the exe's field order (built at `0x1402a72a8`).
-fn login_message(rider: &str, ticket: &[u8]) -> Vec<u8> {
+///
+/// The last three fields are the ones the master actually gates a Steam sign-in on: who is
+/// asking ([`GAME_ID`]/[`GAME_NUMBER`]), which account (`steam_id`, decimal — the master
+/// `sscanf`s it as `%llud` at `0x140023250`), and the ticket. The length before the ticket is
+/// a **binary** little-endian `i32`, not text: written as text it reads as a length in the
+/// hundreds of millions, the master's read of the ticket runs off the end of the datagram, and
+/// it drops the packet without a word — which is exactly what "didn't answer the login" was.
+fn login_message(rider: &str, steam_id: &str, ticket: &[u8]) -> Vec<u8> {
     let mut w = Writer::default();
     w.field("LOGIN")
         .int(client_version()) // client version — the master refuses anything older
-        .field(rider) // identity string
-        .int(0) // identity number
+        .field(GAME_ID) // which game is asking
+        .int(GAME_NUMBER) // and its number, beside it
         .int(1) // mode 1 = Steam
         .field(rider) // name
         .field("") // password (none)
-        .field(rider) // steam id string (best-effort; the ticket is what's checked)
-        .int(ticket.len() as i64)
+        .field(steam_id) // the account the ticket belongs to
+        .i32le(ticket.len() as i32)
         .raw(ticket);
     w.finish()
 }
@@ -398,17 +423,24 @@ fn hex(b: &[u8]) -> String {
 
 // --- Steam auth ticket ------------------------------------------------------------------
 //
-// A genuine `GetAuthSessionTicket` blob, obtained by loading Steam's flat C API from
-// `steam_api64.dll` at runtime — no build-time linkage, matching how `steamid.rs` reads Steam
-// without the SDK. Windows only; unverifiable off Windows, so elsewhere it's a clear error and
-// the browse path is what runs.
+// A genuine `GetAuthSessionTicket` blob and the SteamID64 it was issued to, obtained by
+// loading Steam's flat C API from `steam_api64.dll` at runtime — no build-time linkage,
+// matching how `steamid.rs` reads Steam without the SDK. Windows only; unverifiable off
+// Windows, so elsewhere it's a clear error and the browse path is what runs.
+
+/// What a Steam sign-in needs: the account, and the ticket that proves it.
+struct SteamAuth {
+    steam_id: u64,
+    ticket: Vec<u8>,
+}
+
 #[cfg(windows)]
-fn steam_ticket(install: &Path) -> Result<Vec<u8>, String> {
+fn steam_ticket(install: &Path) -> Result<SteamAuth, String> {
     steam_win::auth_ticket(install)
 }
 
 #[cfg(not(windows))]
-fn steam_ticket(_install: &Path) -> Result<Vec<u8>, String> {
+fn steam_ticket(_install: &Path) -> Result<SteamAuth, String> {
     Err("A Steam login is only available on Windows; the browser used the public list instead.".into())
 }
 
@@ -435,6 +467,9 @@ mod steam_win {
     // The identity argument arrived in a later SDK; on the Microsoft x64 ABI an older DLL just
     // ignores the extra register, so one signature covers both.
     type GetTicketFn = unsafe extern "C" fn(*mut c_void, *mut u8, i32, *mut u32, *const c_void) -> u32;
+    // GetSteamID(self) -> CSteamID. A `CSteamID` is one 8-byte value and comes back in RAX
+    // either way, so the same signature reads an old DLL and a new one.
+    type GetSteamIdFn = unsafe extern "C" fn(*mut c_void) -> u64;
 
     /// Every `ISteamUser` accessor Valve has shipped, newest first. A DLL from before they
     /// existed is handled by [`user_via_client`].
@@ -523,11 +558,44 @@ mod steam_win {
         None
     }
 
-    pub fn auth_ticket(install: &Path) -> Result<Vec<u8>, String> {
-        // Init as the game's AppID. The env vars are how the flat API learns which app it is
-        // when the process wasn't launched by Steam.
-        std::env::set_var("SteamAppId", APPID);
-        std::env::set_var("SteamGameId", APPID);
+    /// Sets `SteamAppId`/`SteamGameId` for as long as it lives, then puts them back.
+    ///
+    /// They're how the flat API learns which app it is when Steam didn't launch us, so they
+    /// have to be set across `SteamAPI_Init`. Leaving them set afterwards would say the app
+    /// *is* MX Bikes to everything it goes on to touch — including a `steam://rungameid`
+    /// launch — so the claim ends with the call that needed it.
+    struct AppIdVars {
+        prior: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl AppIdVars {
+        fn claim() -> Self {
+            let prior = ["SteamAppId", "SteamGameId"]
+                .into_iter()
+                .map(|k| {
+                    let was = std::env::var_os(k);
+                    std::env::set_var(k, APPID);
+                    (k, was)
+                })
+                .collect();
+            AppIdVars { prior }
+        }
+    }
+
+    impl Drop for AppIdVars {
+        fn drop(&mut self) {
+            for (key, was) in &self.prior {
+                match was {
+                    Some(v) => std::env::set_var(key, v),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    pub fn auth_ticket(install: &Path) -> Result<super::SteamAuth, String> {
+        // Held for the whole call: every early return below puts the environment back.
+        let _appid = AppIdVars::claim();
 
         let lib = load(install)?;
         unsafe {
@@ -555,6 +623,14 @@ mod steam_win {
                     format!("this {DLL} has no auth-ticket call: {}", why(&e))
                 })?;
 
+            // The master is told which account the ticket belongs to, so ask the interface
+            // that issued it rather than guessing from a name.
+            let steam_id = lib
+                .get::<GetSteamIdFn>(b"SteamAPI_ISteamUser_GetSteamID\0")
+                .ok()
+                .map(|f| f(user))
+                .unwrap_or(0);
+
             let mut ticket = vec![0u8; 1024];
             let mut written: u32 = 0;
             let _handle = get_ticket(user, ticket.as_mut_ptr(), ticket.len() as i32, &mut written, std::ptr::null());
@@ -569,8 +645,11 @@ mod steam_win {
             if written == 0 {
                 return Err("Steam returned an empty auth ticket.".into());
             }
+            if steam_id == 0 {
+                return Err("Steam didn't say which account is signed in.".into());
+            }
             ticket.truncate(written as usize);
-            Ok(ticket)
+            Ok(super::SteamAuth { steam_id, ticket })
         }
     }
 }
@@ -617,10 +696,44 @@ mod tests {
     /// 40 gets past it (probed live). Losing this again costs the whole server list.
     #[test]
     fn login_carries_the_client_version() {
-        let body = login_message("Frost", b"ticket");
+        let body = login_message("Frost", "76561199164505734", b"ticket");
         let mut r = Reader::new(&body);
         assert_eq!(r.field(), "LOGIN");
         assert_eq!(r.field(), CLIENT_VERSION.to_string());
+    }
+
+    /// Every field of `LOGIN`, in the order the exe writes them (`0x1402a72a8`). The master
+    /// answers nothing at all when this is wrong, so the whole thing is pinned, not just the
+    /// parts we happened to get right.
+    #[test]
+    fn login_matches_the_exes_field_order() {
+        let ticket: Vec<u8> = (0u8..=255).collect(); // 256 bytes, like a real one
+        let body = login_message("Frost", "76561199164505734", &ticket);
+
+        let mut r = Reader::new(&body);
+        assert_eq!(r.field(), "LOGIN");
+        assert_eq!(r.field(), CLIENT_VERSION.to_string());
+        assert_eq!(r.field(), "mxbikes"); // the game, not the rider
+        assert_eq!(r.field(), "5378"); // 0x1502, beside it
+        assert_eq!(r.field(), "1"); // mode 1 = Steam
+        assert_eq!(r.field(), "Frost"); // name
+        assert_eq!(r.field(), ""); // password
+        assert_eq!(r.field(), "76561199164505734"); // the account, decimal
+
+        // The length is four raw little-endian bytes — not "256\n", which is what silently
+        // cost us every login.
+        assert_eq!(r.raw(4), Some(&256i32.to_le_bytes()[..]));
+        assert_eq!(r.raw(ticket.len()), Some(&ticket[..]));
+        assert!(r.done(), "nothing follows the ticket");
+    }
+
+    /// A ticket length written as text lands inside the ASCII range, so a reader that expects
+    /// four binary bytes gets a plausible-looking number in the hundreds of millions — no
+    /// error, no reply, just a master reading a ticket that isn't there.
+    #[test]
+    fn a_text_length_would_read_as_a_wild_one() {
+        let text = b"234\n"; // what `.int(234)` used to emit, exactly four bytes
+        assert_eq!(i32::from_le_bytes(*text), 171_193_138);
     }
 
     #[test]
