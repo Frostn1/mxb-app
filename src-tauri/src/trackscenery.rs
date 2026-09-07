@@ -820,8 +820,11 @@ fn jumpmark_mesh(h: f32) -> Mesh {
 /// them, which is what makes it read as a print rather than as a stripe.
 fn tyre_sheet() -> Texture {
     sheet("tyre_c_a", 128, |u, v| {
-        // One print down the sheet: the tread repeats every `TYRE_TREAD_M` of travel, and
-        // the sheet is one repeat, so v runs the length of the print.
+        // Two prints side by side: a fresh one in the left half of the sheet and a faded one
+        // in the right. A ribbon takes whichever half it is given, so some passes read as
+        // this morning's and some as three motos ago without needing a second material.
+        let faded = u >= 0.5;
+        let u = if faded { (u - 0.5) * 2.0 } else { u * 2.0 };
         let across = (u - 0.5) * 2.0; // -1 at one edge, +1 at the other
         // Two rows of knobs, offset half a step from each other, plus a centre block.
         let row = |lane: f32, phase: f32| -> f32 {
@@ -838,8 +841,8 @@ fn tyre_sheet() -> Texture {
         let knob = row(-0.52, 0.0).max(row(0.52, 0.5)).max(row(0.0, 0.25) * 0.85);
         // Ragged: a print in soil is never the shape of the block that made it.
         let torn = 0.72 + 0.5 * grain(u * 2.0, v * 2.0, 0x7A31, 40.0);
-        let a = (knob * torn).clamp(0.0, 1.0);
-        if a < 0.30 {
+        let a = (knob * torn).clamp(0.0, 1.0) * if faded { 0.45 } else { 1.0 };
+        if a < 0.16 {
             return [0, 0, 0, 0];
         }
         // Pressed dirt: darker than what it is printed on, and slightly wet-looking.
@@ -875,6 +878,7 @@ fn tyre_ribbon(
     stations: &[crate::trackprog::Station],
     lat_at: impl Fn(usize) -> f32,
     width: f32,
+    lane: usize,
 ) -> Mesh {
     let mut m = Mesh::default();
     let mut v_at = 0.0f32;
@@ -889,7 +893,9 @@ fn tyre_ribbon(
             let (x, z) = (cx + rx * half * side, cz + rz * half * side);
             m.positions.extend_from_slice(&[x, ground(syn, x, z) + TYRE_LIFT_M, z]);
             m.normals.extend_from_slice(&[0.0, 1.0, 0.0]);
-            m.uvs.extend_from_slice(&[if side < 0.0 { 0.0 } else { 1.0 }, v_at]);
+            // `lane` picks the fresh half of the sheet or the faded one.
+            let u0 = if lane == 0 { 0.0 } else { 0.5 };
+            m.uvs.extend_from_slice(&[u0 + if side < 0.0 { 0.0 } else { 0.5 }, v_at]);
         }
         if let Some((prev_start, prev_v)) = prev {
             let _ = prev_v;
@@ -909,7 +915,9 @@ fn tyre_ribbon(
 
 /// How wide a print is, how far the tread repeats in, and how far the card floats over the
 /// ground so it draws in front of it without standing off it.
-const TYRE_W_M: f32 = 0.16;
+/// A print is a tyre wide, not a pencil line — "too thin, too little in count, should overlap
+/// each other, some more faded some less", from a rider on the track.
+const TYRE_W_M: f32 = 0.34;
 const TYRE_TREAD_M: f32 = 0.42;
 const TYRE_LIFT_M: f32 = 0.035;
 
@@ -1494,7 +1502,19 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     // paint keys to.
     let mut tyre = Mesh::default();
     if !syn.stations.is_empty() {
-        for (pass, lean) in [(0usize, -0.55f32), (1, 0.0), (2, 0.62)] {
+        // Nine passes, overlapping. Three ribbons a third of a metre apart is three stripes;
+        // what a line actually carries is pass on top of pass, some fresh and some old.
+        for (pass, lean) in [
+            (0usize, -1.15f32),
+            (1, -0.85),
+            (2, -0.5),
+            (3, -0.2),
+            (4, 0.1),
+            (5, 0.4),
+            (6, 0.72),
+            (7, 1.05),
+            (8, 1.35),
+        ] {
             let ribbon = tyre_ribbon(
                 syn,
                 &syn.stations,
@@ -1508,10 +1528,12 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
                     syn.line_lat[i] + lean + wander
                 },
                 TYRE_W_M,
+                // Every other pass is an old one.
+                pass % 2,
             );
             tyre.append(&ribbon);
         }
-        tally.push(("tyre marks", 3));
+        tally.push(("tyre marks", 9));
     }
 
     // 7. The sky over all of it.

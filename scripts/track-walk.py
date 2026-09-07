@@ -200,7 +200,7 @@ def grow(rng, plot, width, want_m):
         # What a rider could be given next: a run, or a turn of one of three tightnesses
         # either way. Runs are what carry the lap across the ground; turns are what keep it
         # inside the plot.
-        moves = [{"kind": "straight", "length": rng.uniform(30.0, 70.0), "rise": 0.0}]
+        moves = [{"kind": "straight", "length": rng.uniform(45.0, 115.0), "rise": 0.0}]
         for r in turn_r:
             for side in (1.0, -1.0):
                 moves.append({"kind": "arc", "radius": r * side,
@@ -218,7 +218,7 @@ def grow(rng, plot, width, want_m):
             score = (ground.room(end[0], end[1], laid - 34.0)
                      + 0.8 * ground.room(ahead[0], ahead[1], laid - 34.0))
             if m["kind"] == "arc":
-                score += 6.0            # corners are the point of a motocross track
+                score += 2.0            # corners are the point, but ten to thirty of them
             if score > best_score:
                 best, best_score = m, score
         if best is None:
@@ -232,6 +232,16 @@ def grow(rng, plot, width, want_m):
         # Once past the budget, try to close on every step until one is clear.
         if laid > want_m * 0.72:
             for _, home in dubins(pose, start, rng.choice(turn_r[1:])):
+                # Walked, not trusted. One of the four families has a sign in it that only
+                # bites on some geometries, and the symptom is a lap that misses itself by
+                # thirty metres — which the repair pass then shuts with segments of its own,
+                # and those are the loop this whole approach exists to avoid. A way home that
+                # does not land is simply not a candidate.
+                landed = pose
+                for seg in home:
+                    landed = advance(landed, seg)
+                if math.hypot(landed[0] - start[0], landed[1] - start[1]) > 0.25:
+                    continue
                 p = pose
                 ok = True
                 for seg in home:
@@ -257,10 +267,13 @@ def main():
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else random.randrange(1 << 30)
     rng = random.Random(seed)
     plot = 620.0
-    width = round(rng.uniform(10.0, 13.5), 1)
+    # Ridden and called "little skinny": ten to thirteen and a half metres is the bottom of
+    # what the corpus allows (8 to 20), and a national is wider than that.
+    width = round(rng.uniform(14.5, 18.0), 1)
     grown = None
     for _ in range(6):
-        grown = grow(rng, plot, width, rng.uniform(1500.0, 2100.0))
+        # And longer: 1451 m rode as "overall small". Indiana is 2138.
+        grown = grow(rng, plot, width, rng.uniform(1950.0, 2400.0))
         if grown:
             break
     if not grown:
@@ -282,9 +295,13 @@ def main():
     spec = importlib.util.spec_from_file_location(
         "layout", __file__.rsplit("/", 1)[0] + "/track-layout.py")
     lay = importlib.util.module_from_spec(spec)
+    # Importing it runs its own `main`, which writes a program of its own to stdout — and
+    # two programs on one stream is not JSON. Swallow whatever it says.
+    import io, contextlib
     saved, sys.argv = sys.argv, ["layout"]
     try:
-        spec.loader.exec_module(lay)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            spec.loader.exec_module(lay)
     except SystemExit:
         pass
     finally:

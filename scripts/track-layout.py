@@ -343,10 +343,27 @@ def features(rng, segs):
             pos += 12.0
             continue
         pick = rng.random()
-        if pick < 0.55 and room > 30.0:
-            length = round(min(rng.uniform(19.0, 27.0), room), 1)
+        if pick < 0.36 and room > 30.0:
+            # A table, and a bigger one: "jumps now too small" from the seat.
+            length = round(min(rng.uniform(22.0, 32.0), room), 1)
             out.append({"kind": "tabletop", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(2.4, 3.4), 2)})
+                        "height": round(rng.uniform(3.0, 4.2), 2)})
+        elif pick < 0.55 and room > 30.0:
+            # And a table is not always flat end to end. A whale tail rises, dips over its
+            # middle and rises again before the landing — two crests a rider can either
+            # double or roll — which is a shape a tabletop's three numbers cannot describe,
+            # so it is drawn point by point.
+            length = round(min(rng.uniform(26.0, 38.0), room), 1)
+            h = rng.uniform(2.8, 4.0)
+            dip = rng.uniform(0.45, 0.75)
+            out.append({"kind": "custom", "at": round(pos, 1), "length": length,
+                        "shape": [{"u": 0.0, "h": 0.0},
+                                  {"u": 0.22, "h": round(h * 0.82, 2)},
+                                  {"u": 0.34, "h": round(h, 2)},
+                                  {"u": 0.5, "h": round(h * dip, 2)},
+                                  {"u": 0.66, "h": round(h * 0.96, 2)},
+                                  {"u": 0.8, "h": round(h * 0.78, 2)},
+                                  {"u": 1.0, "h": 0.0}]})
         elif pick < 0.68 and room > 26.0:
             # A double, as a table with its middle taken out, is the one jump that has to be
             # cleared or crashed — and with a lip low enough not to feel enormous from the
@@ -358,14 +375,14 @@ def features(rng, segs):
         elif pick < 0.82 and room > 24.0:
             length = round(min(rng.uniform(24.0, 34.0), room), 1)
             out.append({"kind": "stepUp", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(1.0, 1.7), 2)})
+                        "height": round(rng.uniform(1.6, 2.6), 2)})
         else:
             length = round(min(rng.uniform(10.0, 16.0), room), 1)
             if length < 8.0:
                 break
             out.append({"kind": "roller", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(0.55, 0.95), 2)})
-        pos += length + rng.uniform(8.0, 20.0)
+                        "height": round(rng.uniform(0.7, 1.2), 2)})
+        pos += length + rng.uniform(6.0, 15.0)
     return out
 
 
