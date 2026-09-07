@@ -107,6 +107,9 @@ const FILL_SHOULDER: f32 = 1.7;
 /// A metre, so the machine's reach changes over about the height of the face it is cutting.
 const BENCH_BLEND_M: f32 = 1.0;
 
+/// How far the riding surface stands above the ground it was graded out of.
+const DECK_LIFT_M: f32 = 1.35;
+
 /// How far the grading reaches here: a cut's short face, a fill's long slope, or between.
 fn bench_shoulder(ground: f32, deck: f32) -> f32 {
     let cut = smoothstep(((ground - deck) / BENCH_BLEND_M).clamp(0.0, 1.0));
@@ -266,7 +269,7 @@ const RUT_LIP_EDGE: (f32, f32) = (0.0, 0.52);
 /// The contrast has to come from the gap between floor and wall, not from taking the floor
 /// away: a line solid enough to follow, with the ground beside each groove pulled hard out of
 /// it.
-const RUT_PAINT_FLOOR: f32 = 0.38;
+const RUT_PAINT_FLOOR: f32 = 0.18;
 const RUT_PAINT_WALL: f32 = 1.55;
 
 /// How much darker the floor of a groove is than the line it is worn into, and how much
@@ -276,8 +279,11 @@ const RUT_PAINT_WALL: f32 = 1.55;
 /// than the dark soil of the line, so a rut read paler than its own line and disappeared, and
 /// the loose band was toned darker than a corridor that had become the field's own soil, so
 /// it read as blotches rather than as dust.
-const RUT_FLOOR_DARKEN: f32 = 0.92;
+const RUT_FLOOR_DARKEN: f32 = 0.42;
 const LOOSE_DRY: f32 = 0.85;
+
+/// How much of its brightness the field's soil keeps.
+const FIELD_DARKEN: f32 = 0.72;
 
 /// How much lighter the worked corridor is than the line worn down the middle of it.
 ///
@@ -932,6 +938,13 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         .map(|st| sample(&heights, gw, gh, st.x / mps_x, st.z / mps_z))
         .collect();
     smooth_along(&mut along, (BENCH_SMOOTH_M / STATION_STEP) as usize);
+    // Stood proud of it. On the smoothed landscape every rise the lap crosses is ground
+    // standing higher than the track, so the circuit is a trench you cannot see out of or
+    // along — "stop cutting into the ground the entire track, I want to be able to see the
+    // track". A built track is graded up out of its site.
+    for v in along.iter_mut() {
+        *v += DECK_LIFT_M;
+    }
     apply_rise(&mut along, &stations, &prog.segments);
     apply_elevation(&mut along, &stations, &prog.elevation, lap);
     apply_step_ups(&mut along, &stations, &prog.features);
@@ -1158,9 +1171,15 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             let carve = CARVE_STRAIGHT
                 + (1.0 - CARVE_STRAIGHT)
                     * (turn.at(s).abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
-            let main = trough(on_line, feel.groove)
-                * (0.82 + 0.18 * fbm(s / 13.0, 21.0, r.seed ^ 0x11E5))
-                * carve;
+            // Nothing carved, anywhere.
+            //
+            // The line used to be cut in as a trough on top of the field of grooves riders
+            // actually wear. Faint on the straights it still read as one channel running the
+            // whole lap; kept in the corners it was a groove down the middle of every turn
+            // "for no reason". What a corner carries is the comb — grooves worn between banks
+            // of material thrown up beside them — and that is the field's doing.
+            let main = 0.0f32;
+            let _ = (carve, on_line);
             // And the corner's other way through: outside the first, shallower, and only
             // where the turn has run long enough to have grown one. Its own variation, or it
             // is the same groove drawn twice.
@@ -2613,8 +2632,17 @@ fn apply_step_ups(along: &mut [f32], st: &[Station], features: &[Feature]) {
 /// own `lip` is a shallower arc rather than the same arc stretched over more ground. Either
 /// way it leaves the ground tangent and arrives at the lip steepest.
 fn arc_up(t: f32, height: f32, run: f32) -> f32 {
-    crate::trackprog::face_arc(t, crate::trackprog::face_sweep(height, run))
+    // A quarter pipe, not a ramp. The sweep a face gets from its own height and run is
+    // gentle — a tenth at the foot and a third at the lip, which rides as a hill. A built
+    // takeoff starts almost flat and finishes steep, and its lip is an edge you leave rather
+    // than a curve you roll over. "No snapped end, just big rollers" and "like a quarter half
+    // pipe" ask for the same shape.
+    let sweep = crate::trackprog::face_sweep(height, run).max(FACE_SWEEP_MIN);
+    crate::trackprog::face_arc(t, sweep)
 }
+
+/// How far round its own curve a face turns, at least, in radians.
+const FACE_SWEEP_MIN: f32 = 1.35;
 
 fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
     // Drawn by hand: eased between the points it was given, which is the same easing the lap's
@@ -4676,7 +4704,7 @@ fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> 
         // taking it straight paints a gradient across the pair — which at riding scale is a
         // soft stripe, not a groove with a lit side and a shaded one. Raised to a power the
         // floor is dark over its whole width and the bank is not, so the eye gets an edge.
-        let floor = (-c.rut).clamp(0.0, 1.0).powf(0.7);
+        let floor = (-c.rut).clamp(0.0, 1.0).powf(0.45);
         let wall = c.rut.clamp(0.0, 1.0).powf(0.45);
         let keyed = (RUT_PAINT_FLOOR + (1.0 - RUT_PAINT_FLOOR) * floor - RUT_PAINT_WALL * wall)
             .clamp(0.0, 1.0);
@@ -5507,7 +5535,12 @@ fn ground_looks(surface: Surface) -> Grounds {
     let field = GroundLook {
         base,
         photo: Some("soil_light"),
-        tone: ground_tone,
+        // Knocked back: a whole plot of bright tan reads ugly from the seat.
+        tone: [
+            ground_tone[0] * FIELD_DARKEN,
+            ground_tone[1] * FIELD_DARKEN,
+            ground_tone[2] * FIELD_DARKEN,
+        ],
         grain_tint: (0.82, 1.13),
         fleck: [196.0, 190.0, 176.0],
         fleck_density: 0.03,
@@ -5549,9 +5582,9 @@ fn ground_looks(surface: Surface) -> Grounds {
         ],
         photo: Some("soil_light"),
         tone: [
-            ground_tone[0] * 1.06,
-            ground_tone[1] * 1.04,
-            ground_tone[2] * 1.02,
+            ground_tone[0] * 1.06 * FIELD_DARKEN,
+            ground_tone[1] * 1.04 * FIELD_DARKEN,
+            ground_tone[2] * 1.02 * FIELD_DARKEN,
         ],
         grain_tint: (0.85, 1.11),
         fleck: [165.0, 160.0, 150.0],
@@ -6045,6 +6078,23 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         // Painted over the corridor's base, in the order the ground gets that way: the loose
         // stuff is thrown over the worked soil, and the line is worn back through it.
         Layer {
+            name: "line",
+            sheet: "dirt_line_c",
+            band: BandMask::Line(LINE_HALF_WIDTH_M),
+            look: line,
+            salt: 0x2C7B,
+            tile_m: TILE_LINE_M,
+            mask: Some("mask_line.tga"),
+            thickness: Some(0.09),
+            spec: 24,
+            shininess: 14,
+            wet: true,
+            grass: false,
+        },
+        Layer {
+            // Painted over the line, not under it: with the dark strip laid on top, every
+            // bank thrown up beside a groove was covered and a floor read the same as the
+            // ground either side — "floor 52 against wall 50", a rut nobody can see.
             name: "loose",
             sheet: "loose_c",
             band: BandMask::Loose,
@@ -6060,20 +6110,6 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         },
         // The strip people actually ride, worn into the corridor and darker than it. Painted
         // over the loose, because a line is worn back through what was thrown onto it.
-        Layer {
-            name: "line",
-            sheet: "dirt_line_c",
-            band: BandMask::Line(LINE_HALF_WIDTH_M),
-            look: line,
-            salt: 0x2C7B,
-            tile_m: TILE_LINE_M,
-            mask: Some("mask_line.tga"),
-            thickness: Some(0.09),
-            spec: 24,
-            shininess: 14,
-            wet: true,
-            grass: false,
-        },
         Layer {
             name: "rut",
             sheet: "rut_c",

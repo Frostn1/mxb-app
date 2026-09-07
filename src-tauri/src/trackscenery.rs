@@ -954,7 +954,8 @@ fn tyre_ribbon(
         let coming = crate::tracksynth::fbm(st.s / 34.0, seed as f32 * 0.37, seed ^ 0x5A11);
         // A groove keeps a mark going: the deepest part of a line is where the prints pile
         // up, which is the whole reason a rut reads as ridden rather than as a ditch.
-        let on = !airborne(st.s) && lat.abs() < width * 6.0 && (coming > -0.15 || groove > 0.25);
+        let over_a_jump = airborne(st.s);
+        let on = lat.abs() < width * 6.0 && (coming > -0.15 || groove > 0.25);
         if !on {
             prev = None;
             v_at += 0.0;
@@ -962,7 +963,14 @@ fn tyre_ribbon(
         }
         // Which of the four ages this stretch of the pass is in. It moves along the ribbon,
         // so one mark is crisp at the corner and gone by the exit.
-        let age = ((0.5 - 0.5 * coming) * 3.4 - groove * 1.6).clamp(0.0, 3.0) as usize;
+        // Over a jump the marks stay, at the faintest age there is. A rider does leave the
+        // ground somewhere on a takeoff and the prints that carried him there are on it —
+        // but nothing on a deck is a fresh print, because nobody is on the ground for it.
+        let age = if over_a_jump {
+            TYRE_FADES - 1
+        } else {
+            ((0.5 - 0.5 * coming) * 3.4 - groove * 1.6).clamp(0.0, 3.0) as usize
+        };
         let u0 = age.min(TYRE_FADES - 1) as f32 / TYRE_FADES as f32;
         let du = 1.0 / TYRE_FADES as f32;
         let half = width * 0.5;
