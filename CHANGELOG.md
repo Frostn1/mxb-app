@@ -11,6 +11,11 @@
   riding, and the riders using paint sync anywhere else.
 - A server's details name the track it is running, show its picture when you already have it,
   and point you at the shop or MXB Hub when you don't.
+- Share codes that keep updating. Turn on "Keep it updated" when you share and you get a
+  short code to send once. Publish a new version and everyone who pasted it gets it — no
+  new link, no new code.
+- A Live share codes list under Import: what you publish, what you follow, and which ones
+  have a new version waiting. Turn on Auto and they install themselves.
 
 ### Changed
 - Opening a server asks it for fresh numbers, so the riders, the session and the track are what

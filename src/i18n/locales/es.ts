@@ -1320,6 +1320,58 @@ export const es: Translation = {
   "share.phaseDownloading": "Descargando…",
   "share.phaseInstalling": "Instalando…",
 
+  // ── Códigos de compartir en vivo ───────────────────────────────────────────
+  "share.keepUpdated": "Mantenerlo actualizado",
+  "share.keepUpdatedHint":
+    "Envía un solo código corto. Publica una nueva versión y la recibe todo el que lo pegó — sin enlace nuevo.",
+  "share.hintDoneLive":
+    "Envía este código una vez. Cada versión que publiques llega a quien lo tenga.",
+  "share.liveNotice": "Este código se mantiene al día — se te ofrecerá cada nueva versión.",
+  "share.follow": "Seguir e instalar",
+  "share.subscribed_one": "1 archivo instalado. Recibirás las nuevas versiones de este código.",
+  "share.subscribed_other":
+    "{{count}} archivos instalados. Recibirás las nuevas versiones de este código.",
+  "live.action": "Códigos en vivo…",
+  "live.title": "Códigos de compartir en vivo",
+  "live.help":
+    "Códigos que siempre apuntan a la versión más reciente — los que publicas y los que sigues.",
+  "live.empty":
+    "Aún no hay códigos en vivo. Comparte algo con \"Mantenerlo actualizado\" activado, o pega un código que te hayan enviado.",
+  "live.yours": "Tuyo",
+  "live.updateReady": "Actualización lista",
+  "live.versionAt": "v{{version}}",
+  "live.versionBehind": "v{{have}} instalada · v{{latest}} disponible",
+  "live.publishedAgo": "publicado {{when}}",
+  "live.checkedAgo": "comprobado {{when}}",
+  "live.copyCode": "Copiar código",
+  "live.codeCopied": "Código copiado.",
+  "live.publishUpdate": "Publicar actualización",
+  "live.published": "Publicada la v{{version}}.",
+  "live.ownerCode": "Clave de propietario",
+  "live.ownerCopied":
+    "Clave de propietario copiada — permite que otro equipo publique actualizaciones en este código. No la compartas.",
+  "live.update": "Actualizar",
+  "live.upToDate": "Al día",
+  "live.auto": "Auto",
+  "live.unfollow": "Dejar de seguir",
+  "live.forgetMine": "Quitar",
+  "live.check": "Buscar actualizaciones",
+  "live.checking": "Comprobando…",
+  "live.foundUpdates_one": "1 actualización disponible.",
+  "live.foundUpdates_other": "{{count}} actualizaciones disponibles.",
+  "live.allCurrent": "Todo está al día.",
+  "live.adopt": "Tomar el control",
+  "live.adoptPlaceholder": "Pega una clave de propietario para publicar desde este equipo",
+  "live.adopted": "Ya puedes publicar actualizaciones de {{name}}.",
+  "live.never": "nunca",
+  "live.justNow": "ahora mismo",
+  "live.minsAgo_one": "hace 1 min",
+  "live.minsAgo_other": "hace {{count}} min",
+  "live.hoursAgo_one": "hace 1 hora",
+  "live.hoursAgo_other": "hace {{count}} horas",
+  "live.daysAgo_one": "hace 1 día",
+  "live.daysAgo_other": "hace {{count}} días",
+
   // ── Taquilla ───────────────────────────────────────────────────────────────
   "locker.help":
     "Cambia el modelo y el sonido del motor de cada moto entre los sets que tengas instalados.",

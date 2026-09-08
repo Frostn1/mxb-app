@@ -46,6 +46,7 @@ import {
 } from "./paintspage";
 import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
 import { pluginKeysPage, pluginLicensesPage, pluginsAction } from "./pluginspage";
+import { deleteShare, publishShare, readShare, updateShare } from "./liveshare";
 import { generateTrack } from "./trackgen";
 import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
 import { bearer, hashToken, newToken, tokenMatches } from "./auth";
@@ -262,6 +263,27 @@ async function route(request: Request, env: Env): Promise<Response> {
     return pluginLicensesPage(request, url, env);
   }
   if (method === "POST" && path === "/admin/plugins") return pluginsAction(request, url, env);
+
+  // Live share codes, and the one write path here that nobody signs in for.
+  //
+  // Every other unauthenticated route above is unauthenticated because its caller *cannot*
+  // hold a credential — a booting instance, a browser coming back from Steam, a webhook.
+  // This one is different: the caller is a player who simply has not enrolled, which is most
+  // of them. A share that required an account would be a share almost nobody could make, and
+  // the point of the feature is that a track author sends one code once.
+  //
+  // Ownership is the update key minted at first publish and kept by the app, so a stranger
+  // holding the public code cannot repoint it. Everything else that would normally be the
+  // account's job — the size of a manifest, the shape of every rel in it, the host it may
+  // point at — is done by validation in `liveshare.ts`, which is the only thing standing
+  // between an open POST and files landing in somebody's mods folder.
+  if (method === "POST" && path === "/v1/share") return publishShare(request, env);
+  const share = /^\/v1\/share\/([A-Za-z0-9-]{1,32})$/.exec(path);
+  if (share) {
+    if (method === "GET") return readShare(request, share[1], env);
+    if (method === "PUT") return updateShare(request, share[1], env);
+    if (method === "DELETE") return deleteShare(request, share[1], env);
+  }
 
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });

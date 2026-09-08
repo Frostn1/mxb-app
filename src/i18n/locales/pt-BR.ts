@@ -1318,6 +1318,59 @@ export const ptBR: Translation = {
   "share.phaseDownloading": "Baixando…",
   "share.phaseInstalling": "Instalando…",
 
+  // ── Códigos de compartilhamento ao vivo ────────────────────────────────────
+  "share.keepUpdated": "Manter atualizado",
+  "share.keepUpdatedHint":
+    "Envie um único código curto. Publique uma versão nova e todo mundo que colou o código recebe — sem link novo.",
+  "share.hintDoneLive":
+    "Envie este código uma vez. Cada versão que você publicar chega a quem tem o código.",
+  "share.liveNotice": "Este código continua atualizado — cada versão nova será oferecida a você.",
+  "share.follow": "Seguir e instalar",
+  "share.subscribed_one":
+    "1 arquivo instalado. Você vai receber as novas versões deste compartilhamento.",
+  "share.subscribed_other":
+    "{{count}} arquivos instalados. Você vai receber as novas versões deste compartilhamento.",
+  "live.action": "Códigos ao vivo…",
+  "live.title": "Códigos de compartilhamento ao vivo",
+  "live.help":
+    "Códigos que sempre apontam para a versão mais recente — os que você publica e os que você segue.",
+  "live.empty":
+    "Nenhum código ao vivo ainda. Compartilhe algo com \"Manter atualizado\" ligado, ou cole um código que te enviaram.",
+  "live.yours": "Seu",
+  "live.updateReady": "Atualização pronta",
+  "live.versionAt": "v{{version}}",
+  "live.versionBehind": "v{{have}} instalada · v{{latest}} disponível",
+  "live.publishedAgo": "publicado {{when}}",
+  "live.checkedAgo": "verificado {{when}}",
+  "live.copyCode": "Copiar código",
+  "live.codeCopied": "Código copiado.",
+  "live.publishUpdate": "Publicar atualização",
+  "live.published": "v{{version}} publicada.",
+  "live.ownerCode": "Chave de dono",
+  "live.ownerCopied":
+    "Chave de dono copiada — ela deixa outra máquina publicar atualizações neste código. Guarde só para você.",
+  "live.update": "Atualizar",
+  "live.upToDate": "Atualizado",
+  "live.auto": "Auto",
+  "live.unfollow": "Deixar de seguir",
+  "live.forgetMine": "Remover",
+  "live.check": "Procurar atualizações",
+  "live.checking": "Verificando…",
+  "live.foundUpdates_one": "1 atualização disponível.",
+  "live.foundUpdates_other": "{{count}} atualizações disponíveis.",
+  "live.allCurrent": "Está tudo atualizado.",
+  "live.adopt": "Assumir",
+  "live.adoptPlaceholder": "Cole uma chave de dono para publicar desta máquina",
+  "live.adopted": "Agora você pode publicar atualizações de {{name}}.",
+  "live.never": "nunca",
+  "live.justNow": "agora mesmo",
+  "live.minsAgo_one": "há 1 min",
+  "live.minsAgo_other": "há {{count}} min",
+  "live.hoursAgo_one": "há 1 hora",
+  "live.hoursAgo_other": "há {{count}} horas",
+  "live.daysAgo_one": "há 1 dia",
+  "live.daysAgo_other": "há {{count}} dias",
+
   // ── Armário ────────────────────────────────────────────────────────────────
   "locker.help":
     "Troque o modelo e o som do motor de cada moto entre os sets que você instalou.",

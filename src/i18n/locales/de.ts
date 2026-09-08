@@ -1329,6 +1329,58 @@ export const de: Translation = {
   "share.phaseDownloading": "Wird heruntergeladen…",
   "share.phaseInstalling": "Wird installiert…",
 
+  // ── Live-Share-Codes ───────────────────────────────────────────────────────
+  "share.keepUpdated": "Aktuell halten",
+  "share.keepUpdatedHint":
+    "Ein kurzer Code, einmal verschickt. Du veröffentlichst eine neue Version und alle, die ihn eingefügt haben, bekommen sie — ohne neuen Link.",
+  "share.hintDoneLive":
+    "Diesen Code einmal verschicken. Jede Version, die du veröffentlichst, erreicht alle, die ihn haben.",
+  "share.liveNotice": "Dieser Code bleibt aktuell — jede neue Version wird dir angeboten.",
+  "share.follow": "Folgen & installieren",
+  "share.subscribed_one": "1 Datei installiert. Du bekommst neue Versionen dieses Codes.",
+  "share.subscribed_other":
+    "{{count}} Dateien installiert. Du bekommst neue Versionen dieses Codes.",
+  "live.action": "Live-Codes…",
+  "live.title": "Live-Share-Codes",
+  "live.help":
+    "Codes, die immer auf die neueste Version zeigen — die, die du veröffentlichst, und die, denen du folgst.",
+  "live.empty":
+    "Noch keine Live-Codes. Teile etwas mit \"Aktuell halten\", oder füge einen Code ein, den du bekommen hast.",
+  "live.yours": "Deiner",
+  "live.updateReady": "Update bereit",
+  "live.versionAt": "v{{version}}",
+  "live.versionBehind": "v{{have}} installiert · v{{latest}} verfügbar",
+  "live.publishedAgo": "veröffentlicht {{when}}",
+  "live.checkedAgo": "geprüft {{when}}",
+  "live.copyCode": "Code kopieren",
+  "live.codeCopied": "Code kopiert.",
+  "live.publishUpdate": "Update veröffentlichen",
+  "live.published": "v{{version}} veröffentlicht.",
+  "live.ownerCode": "Besitzerschlüssel",
+  "live.ownerCopied":
+    "Besitzerschlüssel kopiert — damit kann ein anderer Rechner Updates zu diesem Code veröffentlichen. Behalte ihn für dich.",
+  "live.update": "Aktualisieren",
+  "live.upToDate": "Aktuell",
+  "live.auto": "Auto",
+  "live.unfollow": "Nicht mehr folgen",
+  "live.forgetMine": "Entfernen",
+  "live.check": "Nach Updates suchen",
+  "live.checking": "Wird geprüft…",
+  "live.foundUpdates_one": "1 Update verfügbar.",
+  "live.foundUpdates_other": "{{count}} Updates verfügbar.",
+  "live.allCurrent": "Alles ist aktuell.",
+  "live.adopt": "Übernehmen",
+  "live.adoptPlaceholder": "Besitzerschlüssel einfügen, um von diesem Rechner zu veröffentlichen",
+  "live.adopted": "Du kannst jetzt Updates für {{name}} veröffentlichen.",
+  "live.never": "nie",
+  "live.justNow": "gerade eben",
+  "live.minsAgo_one": "vor 1 Min.",
+  "live.minsAgo_other": "vor {{count}} Min.",
+  "live.hoursAgo_one": "vor 1 Stunde",
+  "live.hoursAgo_other": "vor {{count}} Stunden",
+  "live.daysAgo_one": "vor 1 Tag",
+  "live.daysAgo_other": "vor {{count}} Tagen",
+
   // ── Spind ──────────────────────────────────────────────────────────────────
   "locker.help":
     "Wechsle Modell und Motorsound jedes Motorrads zwischen den Sets, die du installiert hast.",

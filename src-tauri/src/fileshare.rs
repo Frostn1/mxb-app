@@ -251,6 +251,21 @@ pub async fn create(
     cfg: &AppConfig,
     paths: &[String],
 ) -> anyhow::Result<String> {
+    Ok(encode(&pack(app, cfg, paths).await?))
+}
+
+/// Pack the picks and upload them, stopping short of writing a code.
+///
+/// [`create`] is this plus [`encode`]. Split because a live share needs the same packing and
+/// the same upload but does not want the result as a `MXBS1-` string — it posts the
+/// `FileShare` to the control plane and hands back a short code instead. Everything that
+/// makes sharing work (the `mods/`-relative rels, the slicing, the retry on a dropped part)
+/// therefore has one implementation rather than two that drift.
+pub async fn pack(
+    app: &AppHandle,
+    cfg: &AppConfig,
+    paths: &[String],
+) -> anyhow::Result<FileShare> {
     let (picks, _) = picks(cfg, paths);
     if picks.is_empty() {
         anyhow::bail!(
@@ -329,7 +344,7 @@ pub async fn create(
         bundle: BundleRef { url: first, host: up.host, size: up.size, parts, part_sizes },
     };
     bundle::emit(app, EVENT, "done", None);
-    Ok(encode(&share))
+    Ok(share)
 }
 
 pub fn encode(share: &FileShare) -> String {
@@ -343,6 +358,15 @@ pub fn decode(text: &str) -> anyhow::Result<FileShare> {
     let t = text.trim();
     if t.starts_with(PRESET_PREFIX) {
         anyhow::bail!("That's a preset code — import it from the Presets tab.");
+    }
+    // A live code carries nothing itself — what it points at lives on the control plane —
+    // so it cannot be decoded here. Named rather than refused as gibberish, for the same
+    // reason a preset code is: the paste was not a mistake, it went to the wrong reader.
+    if crate::liveshare::is_live_code(t) {
+        anyhow::bail!(
+            "That's a live share code — it needs to be fetched, not decoded. \
+             Import it and it'll stay up to date on its own."
+        );
     }
     let body = t.strip_prefix(CODE_PREFIX).unwrap_or(t).trim();
     if body.starts_with('{') {

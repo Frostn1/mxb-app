@@ -19,6 +19,7 @@ import {
   Loader2,
   Share2,
   ClipboardPaste,
+  Cloud,
   ArrowUpDown,
   Check,
   AlertTriangle,
@@ -521,7 +522,7 @@ export default function Library({
 }: LibraryProps) {
   const t = useT();
   const { pickAndImport, staging } = useImport();
-  const { shareFiles, importShare } = useShare();
+  const { shareFiles, importShare, liveShares } = useShare();
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1054,6 +1055,10 @@ export default function Library({
             <DropdownMenuItem onSelect={() => importShare()}>
               <ClipboardPaste className="size-3.5" />
               {t("share.importAction")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => liveShares()}>
+              <Cloud className="size-3.5" />
+              {t("live.action")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => setShowRemoved((v) => !v)}>
