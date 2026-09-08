@@ -93,6 +93,11 @@ pub struct RankedProfile {
     pub season: String,
     pub cards: Vec<RankCard>,
     pub races: Vec<RaceRow>,
+    /// The rider's own achievement banner on mxb-ranked, absolute. Empty when they have none.
+    ///
+    /// Earned artwork, and different for every rider — which is the one thing on the page that
+    /// is *theirs* rather than a number about them, so it is worth carrying across.
+    pub banner: String,
     /// The profile on their site, for the "open on mxb-ranked" link.
     pub url: String,
 }
@@ -243,6 +248,21 @@ pub fn parse(html: &str, guid: &str) -> RankedProfile {
     let season = Selector::parse(r#"[aria-label="Selected Season"]"#).unwrap();
     out.season = doc.select(&season).map(text).find(|t| !t.is_empty()).unwrap_or_default();
 
+    // The banner is a CSS background rather than an <img>, so it is read off the style.
+    let banner = Selector::parse(r#"[style*="Achievements"]"#).unwrap();
+    out.banner = doc
+        .select(&banner)
+        .next()
+        .and_then(|el| el.value().attr("style"))
+        .and_then(|style| {
+            let (_, rest) = style.split_once("url(")?;
+            let (inner, _) = rest.split_once(')')?;
+            Some(inner.trim().trim_matches(['\'', '"']).to_string())
+        })
+        .filter(|u| !u.is_empty())
+        .map(|u| if u.starts_with("http") { u } else { format!("{BASE}/{}", u.trim_start_matches('/')) })
+        .unwrap_or_default();
+
     out.cards = parse_cards(&doc);
     out.races = parse_races(&doc);
     out
@@ -374,6 +394,10 @@ mod tests {
         assert_eq!(p.global_penalty_points, "2.697");
         assert_eq!(p.season, "Season 7");
         assert_eq!(p.url, "https://mxb-ranked.com/Rider/FF011000010178A758");
+        assert_eq!(
+            p.banner,
+            "https://mxb-ranked.com/images/Achievements/2A73E25E-BA3C-429E-A57E-1F94C485F235.jpg"
+        );
     }
 
     #[test]
