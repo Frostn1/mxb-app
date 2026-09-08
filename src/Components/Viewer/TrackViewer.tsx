@@ -987,22 +987,26 @@ function TerrainMesh({
                 "#include <color_fragment>",
                 `#include <color_fragment>
                  {
-                   // A layer's mask is stored a quarter turn from the grid the terrain is
-                   // built on: the paint came out square with the site but across the track,
-                   // grass over the riding line and dirt out in the field. Rotating the
-                   // lookup rather than the stored bytes keeps the mask the size it was sent
-                   // and costs two swizzles.
+                   // A layer's mask is stored *transposed* against the grid the terrain is
+                   // built on — its rows run where the terrain's columns do. Untransposed,
+                   // the paint sits square with the site but across the track: grass over
+                   // the riding line, dirt out in the field.
                    //
-                   // Which way round was settled on screen, not by measurement. Every
-                   // overlay metric tried here sat within noise of chance — the masks cover
-                   // a third to two thirds of the ground, so agreement means little — and
-                   // the first attempt turned it the wrong way and landed 180 degrees out.
-                   // That is what fixes the direction: a quarter turn out, then a half turn
-                   // out, leaves only this one.
+                   // A transpose, not a rotation, which is why turning it never quite
+                   // worked. A quarter turn leaves it mirrored and a half turn leaves it
+                   // reversed; only swapping the two coordinates puts the paint on the
+                   // track. That is what row-major against column-major looks like from
+                   // this side, and it costs one swizzle.
                    //
-                   // The sheets themselves are not rotated: they tile ~200 times across the
+                   // Settled on screen. Every overlay metric tried here sat within noise of
+                   // chance — the masks cover a third to two thirds of the ground, so
+                   // agreement means little — and nothing in the file states where a mask
+                   // sits in the world, so there is no ground truth in the data to check
+                   // against.
+                   //
+                   // The sheets themselves are left alone: they tile ~200 times across the
                    // ground, so their orientation is not something an eye can find.
-                   vec2 maskUv = vec2(vGroundUv.y, 1.0 - vGroundUv.x);
+                   vec2 maskUv = vec2(vGroundUv.y, vGroundUv.x);
                    vec3 ground = vec3(0.5);
                  ${blend}
                    // Multiplied rather than assigned: what is already in diffuseColor is the
