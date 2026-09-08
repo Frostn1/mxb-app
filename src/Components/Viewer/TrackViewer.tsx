@@ -987,25 +987,24 @@ function TerrainMesh({
                 "#include <color_fragment>",
                 `#include <color_fragment>
                  {
-                   // A layer's mask is laid out the obvious way — across by world X, down by
-                   // world Z — and the only thing between it and the terrain's uv is that
-                   // the mesh negates X. buildTerrainGeometry places a vertex at
-                   // originX minus x * step, because the game's frame is left-handed and
-                   // three.js's is not, so u runs the opposite way to the world it came
-                   // from. Undo that one mirror and the paint lands on the track.
+                   // One mirror, in u only.
                    //
-                   // Nothing here is a rotation, though it took turning it every which way
-                   // to find that out: a mirror is a reflection, and no amount of rotating
-                   // fixes a reflection. Untransposed the paint sits square with the site
-                   // but across the track — grass over the riding line, dirt in the field.
+                   // A coverage mask is stored the same way up as the terrain grid, so v is
+                   // left alone — unlike the layer *sheets*, which are bottom-up and get
+                   // flipped as they are read. That difference is the trap: the mask looks
+                   // like it should follow the sheets and does not.
                    //
-                   // Settled on screen. Nothing in the file states where a mask sits in the
-                   // world, so there is no ground truth in the data to measure against, and
-                   // every overlay metric tried sat within noise of chance — the masks cover
-                   // a third to two thirds of the ground, so agreement means little.
+                   // u is mirrored because the mesh is. buildTerrainGeometry places a vertex
+                   // at originX minus x * step, since the game's frame is left-handed and
+                   // three.js's is not, so u runs the opposite way to the world the mask was
+                   // painted in.
                    //
-                   // The sheets themselves are left alone: they tile ~200 times across the
-                   // ground, so their orientation is not something an eye can find.
+                   // Settled on screen over five passes. Nothing in the file states where a
+                   // mask sits in the world, so there is no ground truth in the data to
+                   // measure against, and every overlay metric tried sat within noise of
+                   // chance. The lesson worth keeping: this correction is a reflection, and
+                   // no rotation ever fixes a reflection — turning it only moved the error
+                   // around.
                    vec2 maskUv = vec2(1.0 - vGroundUv.x, vGroundUv.y);
                    vec3 ground = vec3(0.5);
                  ${blend}
