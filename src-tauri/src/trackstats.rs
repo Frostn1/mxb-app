@@ -1794,6 +1794,274 @@ mod tests {
         println!("  chatter on the line {:.3} m   2 m off {:.3}   4 m off {:.3}", r.chatter_zones_m[0], r.chatter_zones_m[1], r.chatter_zones_m[2]);
     }
 
+
+    /// Four corners from a published track: their shape, their bumps, and the ground on them.
+    ///
+    /// Writes one folder per track — a params JSON and, per corner, a height patch and the
+    /// ground as the game paints it — for `scripts/corner-atlas.py` to draw.
+    ///
+    /// ```text
+    /// FROST_TRACK=…/indiana.pkz FROST_OUT=/tmp/atlas/indiana \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture corner_atlas
+    /// ```
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK and FROST_OUT"]
+    fn corner_atlas() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let out = std::path::PathBuf::from(std::env::var("FROST_OUT").expect("set FROST_OUT"));
+        std::fs::create_dir_all(&out).unwrap();
+        let path = std::path::Path::new(&var);
+
+        let names = track::entry_names(path).unwrap();
+        let entry = track::heightfield_entries(&names).into_iter().next().expect("a heightfield");
+        let bytes = track::read_entry(path, &entry).unwrap();
+        let layout = heightfield::probe(&bytes, None).expect("a terrain grid");
+        let mps_src = layout.metres_per_sample.expect("a stated footprint");
+        let size_x = mps_src * (layout.width.max(2) - 1) as f32;
+        let size_z = mps_src * (layout.height.max(2) - 1) as f32;
+        let block_at =
+            layout.offset + layout.width as usize * layout.height as usize * layout.sample.size();
+        let lap = crate::trackline::read(bytes.get(block_at..).unwrap_or(&[])).expect("a centreline");
+        // Full resolution: a corner's bumps are the point, and a downsample is exactly what
+        // would smooth them away.
+        let (fw, fh, v) = heightfield::read_grid(&bytes, &layout, layout.width.max(layout.height));
+        let g = Grid { w: fw as usize, h: fh as usize, size_x, size_z, v };
+
+        // The ground stack, for the colour/texture/mask half of the question.
+        let map_name = names.iter().find(|n| n.to_lowercase().ends_with(".map"));
+        let layers = match map_name {
+            Some(n) => {
+                let mb = track::read_entry(path, n).unwrap();
+                crate::map::ground_layers(&mb)
+            }
+            None => Vec::new(),
+        };
+        println!("{} — {:.0}x{:.0} m, {}x{} samples, {} ground layers",
+            entry, size_x, size_z, fw, fh, layers.len());
+
+        let step = 0.25f32;
+        let all = lap.stations(step);
+        let runs = corner_runs(&lap);
+        println!("lap {:.0} m, {} segments, {} corners", lap.length, lap.segments.len(), runs.len());
+
+        // The four that bend furthest — the ones a rider would name — put back into lap order
+        // so the atlas reads like a lap.
+        let mut ranked = runs.clone();
+        ranked.sort_by(|x, y| y.2.total_cmp(&x.2));
+        let mut chosen: Vec<(f32, f32, f32)> =
+            ranked.into_iter().take(4).map(|(a, b, deg, _)| (deg, a, b)).collect();
+        chosen.sort_by(|x, y| x.1.total_cmp(&y.1));
+
+        let mut json = String::from("{\n");
+        json.push_str(&format!("  \"track\": {:?},\n", path.file_stem().unwrap().to_string_lossy()));
+        json.push_str(&format!("  \"lapLengthM\": {:.1},\n  \"sizeXm\": {:.1},\n  \"sizeZm\": {:.1},\n", lap.length, size_x, size_z));
+        json.push_str(&format!("  \"metresPerSample\": {:.4},\n", mps_src));
+        json.push_str("  \"groundLayers\": [\n");
+        for (i, l) in layers.iter().enumerate() {
+            let tile_m = size_x / l.tile_u.max(0.001);
+            json.push_str(&format!(
+                "    {{\"i\": {i}, \"sheet\": {:?}, \"px\": [{}, {}], \"tileU\": {:.1}, \"tileV\": {:.1}, \"tileMetres\": {:.2}, \"mask\": {}}}{}\n",
+                l.sheet.name, l.sheet.width, l.sheet.height, l.tile_u, l.tile_v, tile_m,
+                match &l.mask { Some(m) => format!("[{}, {}]", m.width, m.height), None => "null".into() },
+                if i + 1 < layers.len() { "," } else { "" }));
+        }
+        json.push_str("  ],\n  \"corners\": [\n");
+
+        for (n, &(deg, a, b)) in chosen.iter().enumerate() {
+            let sel: Vec<&crate::trackline::Station> =
+                all.iter().filter(|s| s.at >= a && s.at <= b).collect();
+            if sel.len() < 8 {
+                continue;
+            }
+            let stations: Vec<(f32, f32, f32)> =
+                sel.iter().map(|s| (s.x, s.z, s.heading)).collect();
+            let shape = super::rut_shape(&stations, step, &g);
+
+            // The arcs the builder actually typed, which is the shape of the turn.
+            let arcs: Vec<&crate::trackline::LineSegment> =
+                lap.segments.iter().filter(|s| s.at >= a - 0.5 && s.at < b + 0.5).collect();
+            let radii: Vec<f32> = arcs.iter().filter(|s| s.radius != 0.0).map(|s| s.radius).collect();
+            let len_m = b - a;
+            let mean_r = if radii.is_empty() { 0.0 } else { radii.iter().sum::<f32>() / radii.len() as f32 };
+            let tightest = radii.iter().cloned().fold(f32::INFINITY, |m, r| m.min(r.abs()));
+            let widest = radii.iter().cloned().fold(0.0f32, |m, r| m.max(r.abs()));
+
+            // Elevation over the turn, off the heightfield under the line.
+            let hs: Vec<f32> = sel.iter().filter_map(|s| Some(g.at(s.x, s.z))).collect();
+            let (hmin, hmax) = hs.iter().fold((f32::MAX, f32::MIN), |(a, b), &h| (a.min(h), b.max(h)));
+
+            let patch = write_corner_patch(&out, n, &sel, &g, &layers, size_x, size_z);
+
+            json.push_str(&format!(
+                "    {{\"n\": {n}, \"atM\": {a:.1}, \"endM\": {b:.1}, \"lengthM\": {len_m:.1}, \"turnDeg\": {deg:.1},\n",
+            ));
+            json.push_str(&format!(
+                "      \"arcs\": {}, \"radiusMeanM\": {mean_r:.1}, \"radiusTightestM\": {tightest:.1}, \"radiusWidestM\": {widest:.1},\n",
+                arcs.iter().filter(|s| s.radius != 0.0).count(),
+            ));
+            json.push_str(&format!(
+                "      \"direction\": {:?}, \"riseM\": {:.2}, \"patch\": {:?},\n",
+                if mean_r > 0.0 { "right" } else { "left" },
+                hmax - hmin,
+                patch,
+            ));
+            match shape {
+                Some(r) => {
+                    json.push_str(&format!(
+                        "      \"grooves\": {:.2}, \"spacingM\": {:.2}, \"floorM\": {:.2}, \"wallDeg\": {:.0},\n",
+                        r.grooves, r.spacing_m, r.floor_m, r.wall_deg,
+                    ));
+                    json.push_str(&format!(
+                        "      \"acrossRmsM\": {:.3}, \"alongRmsM\": {:.3}, \"anisotropy\": {:.2}, \"chatterM\": {:.3},\n",
+                        r.across_rms_m, r.along_rms_m, r.anisotropy, r.chatter_m,
+                    ));
+                    json.push_str(&format!(
+                        "      \"chatterZonesM\": [{:.3}, {:.3}, {:.3}]}}{}\n",
+                        r.chatter_zones_m[0], r.chatter_zones_m[1], r.chatter_zones_m[2],
+                        if n + 1 < chosen.len() { "," } else { "" },
+                    ));
+                }
+                None => json.push_str(&format!("      \"grooves\": null}}{}\n", if n + 1 < chosen.len() { "," } else { "" })),
+            }
+            println!("  corner {n}: {deg:.0} deg over {len_m:.0} m, {} arcs, r {tightest:.0}–{widest:.0} m", radii.len());
+        }
+        json.push_str("  ]\n}\n");
+        std::fs::write(out.join("corners.json"), &json).unwrap();
+        println!("wrote {}", out.join("corners.json").display());
+    }
+
+
+    /// Where each corner starts and ends, which [`crate::trackline::Lap::turns`] cannot say.
+    ///
+    /// Same rule as `trackprog::turns` — a run of same-way arcs, broken by anything straight
+    /// and longer than a nudge — but carrying the positions, because an atlas has to go and
+    /// look at the ground there. Returns `(start_m, end_m, degrees, tightest radius)`.
+    fn corner_runs(lap: &crate::trackline::Lap) -> Vec<(f32, f32, f32, f32)> {
+        const BREAK_M: f32 = 8.0;
+        let mut out = Vec::new();
+        let mut cur: Option<(f32, f32, f32, f32, f32)> = None; // way, start, end, deg, tightest
+        for seg in &lap.segments {
+            let end = seg.at + seg.length;
+            if seg.radius != 0.0 && seg.angle >= crate::trackprog::CORNER_DEG {
+                let way = seg.radius.signum();
+                match cur {
+                    Some((w, st, _, deg, r)) if w == way => {
+                        cur = Some((w, st, end, deg + seg.angle, r.min(seg.radius.abs())));
+                    }
+                    other => {
+                        if let Some((_, st, en, deg, r)) = other {
+                            out.push((st, en, deg, r));
+                        }
+                        cur = Some((way, seg.at, end, seg.angle, seg.radius.abs()));
+                    }
+                }
+            } else if seg.length > BREAK_M {
+                if let Some((_, st, en, deg, r)) = cur.take() {
+                    out.push((st, en, deg, r));
+                }
+            }
+        }
+        if let Some((_, st, en, deg, r)) = cur {
+            out.push((st, en, deg, r));
+        }
+        out
+    }
+
+    /// One corner's patch: heights, and the ground the game paints on them.
+    ///
+    /// The patch is axis-aligned around the corner's own bounding box with a margin, at the
+    /// heightfield's own resolution — the bumps are the subject, so nothing is resampled.
+    fn write_corner_patch(
+        out: &std::path::Path,
+        n: usize,
+        sel: &[&crate::trackline::Station],
+        g: &Grid,
+        layers: &[crate::map::GroundLayer],
+        size_x: f32,
+        size_z: f32,
+    ) -> String {
+        const MARGIN_M: f32 = 12.0;
+        let (mut x0, mut x1, mut z0, mut z1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for s in sel {
+            x0 = x0.min(s.x); x1 = x1.max(s.x);
+            z0 = z0.min(s.z); z1 = z1.max(s.z);
+        }
+        x0 -= MARGIN_M; x1 += MARGIN_M; z0 -= MARGIN_M; z1 += MARGIN_M;
+
+        let mps = size_x / (g.w.max(2) - 1) as f32;
+        let pw = (((x1 - x0) / mps).ceil() as usize).clamp(16, 2048);
+        let ph = (((z1 - z0) / mps).ceil() as usize).clamp(16, 2048);
+
+        let mut buf: Vec<u8> = Vec::with_capacity(32 + pw * ph * 7 + sel.len() * 8);
+        buf.extend_from_slice(b"FRCA");
+        buf.extend_from_slice(&(pw as u32).to_le_bytes());
+        buf.extend_from_slice(&(ph as u32).to_le_bytes());
+        buf.extend_from_slice(&x0.to_le_bytes());
+        buf.extend_from_slice(&z0.to_le_bytes());
+        buf.extend_from_slice(&mps.to_le_bytes());
+
+        // Heights, then the composited ground as RGB.
+        let mut rgb: Vec<u8> = Vec::with_capacity(pw * ph * 3);
+        for j in 0..ph {
+            for i in 0..pw {
+                let x = x0 + i as f32 * mps;
+                let z = z0 + j as f32 * mps;
+                buf.extend_from_slice(&g.at(x, z).to_le_bytes());
+                let [r, gg, b] = ground_at(layers, x, z, size_x, size_z);
+                rgb.push(r); rgb.push(gg); rgb.push(b);
+            }
+        }
+        buf.extend_from_slice(&rgb);
+        buf.extend_from_slice(&(sel.len() as u32).to_le_bytes());
+        for s in sel {
+            buf.extend_from_slice(&s.x.to_le_bytes());
+            buf.extend_from_slice(&s.z.to_le_bytes());
+        }
+        let name = format!("corner{n}.bin");
+        std::fs::write(out.join(&name), &buf).unwrap();
+        name
+    }
+
+    /// The ground stack sampled at one point — base sheet, then every layer its mask lets through.
+    fn ground_at(
+        layers: &[crate::map::GroundLayer],
+        x: f32,
+        z: f32,
+        size_x: f32,
+        size_z: f32,
+    ) -> [u8; 3] {
+        let mut out = [90u8, 80, 70];
+        for (i, l) in layers.iter().enumerate() {
+            let cover = match &l.mask {
+                None => 255u8, // the base layer covers everything
+                Some(m) => {
+                    let mx = ((x / size_x) * m.width as f32) as i64;
+                    let mz = ((z / size_z) * m.height as f32) as i64;
+                    if mx < 0 || mz < 0 || mx >= m.width as i64 || mz >= m.height as i64 {
+                        0
+                    } else {
+                        m.coverage[mz as usize * m.width as usize + mx as usize]
+                    }
+                }
+            };
+            if cover == 0 && i > 0 {
+                continue;
+            }
+            let (sw, sh) = (l.sheet.width.max(1) as f32, l.sheet.height.max(1) as f32);
+            let u = ((x / size_x) * l.tile_u).rem_euclid(1.0) * sw;
+            let v = ((z / size_z) * l.tile_v).rem_euclid(1.0) * sh;
+            let si = ((v as usize).min(sh as usize - 1) * sw as usize + (u as usize).min(sw as usize - 1)) * 4;
+            if si + 2 >= l.sheet.rgba.len() {
+                continue;
+            }
+            let a = cover as f32 / 255.0;
+            for c in 0..3 {
+                out[c] = (out[c] as f32 * (1.0 - a) + l.sheet.rgba[si + c] as f32 * a) as u8;
+            }
+        }
+        out
+    }
+
     /// A published track's race data: where it puts its grid, and in what coordinates.
     ///
     /// ```text
