@@ -466,7 +466,51 @@ landing face steepest at **−21.5°**, total surveyed run 14.25 m.
 Transition radius from the same literature: a worked example gives **r_min = 12.7 m** at 13.7 m/s
 under a 1.5 g limit, agreeing with the builder-side `r = v²/14.7`.
 
-#### 6.3 Engine output — and the absence of a top speed
+#### 6.3 Telemetry — what LitPro actually publishes
+
+LitPro is the GPS box on the helmet, and it measures speed, jump height and distance, and
+g-forces. Almost none of that reaches the public: **all 45 of their per-round "Moto Metrics"
+race breakdowns carry lap times, sector times, "Lap 99" and consistency scores only** — no speeds,
+no airtime, no jump counts, no g-forces.
+
+The figures that have been published, all from LitPro's president directly:
+
+| | Value | Context |
+|---|---|---|
+| Average speed through a jump section, **jumping** | 27.8 mph = **44.7 km/h** | 2019 Daytona SX, Baggett, 450 |
+| Same section, **rolling** | 20.5 mph = **33.0 km/h** | same |
+| Time gained by jumping it | **0.2-0.3 s per lap** | same |
+| **Landing g-force** | **10.7 g** | same — described as unremarkable at pro level |
+| **Rhythm-section transition g-force** | **18 g** | LitPro's own recorded ride |
+| Corner entry to apex (illustrative) | ~50 mph to ~20 mph = **80 to 32 km/h** | LitPro's braking-visualisation example |
+| **Start: 0.85 s to the 15 ft (4.6 m) mark** | 450, dirt start, "gold standard" | derived: **12.7 m/s2 (1.3 g) average, 39 km/h at 4.6 m** |
+| 1st-to-4th margin, 2015 SX season | 0.965 s per lap | |
+
+The corner figure is worth holding onto: **~32 km/h at the apex** is what our `A_LAT = 4.6`
+produces for a 15-20 m radius, so the lateral model is in the right place.
+
+**Radar measurements of national top speeds exist but the numbers were never written down.**
+TransWorld ran a Bushnell radar gun at four 2018 Pro Motocross rounds (Thunder Valley, Southwick,
+Washougal, Spring Creek) and at RedBud's LaRocco's Leap; Swapmoto ran two more at Fox Raceway.
+Every one is video-only — no figure appears in any title, description, article body or caption.
+
+#### 6.4 The signature jumps — real distances
+
+These are the only outdoor-national jump dimensions published anywhere, and they are **distances
+lip to landing**, not gaps of flat ground:
+
+| Jump | Published distance |
+|---|---|
+| Fox Raceway (Pala) quad | "150+ foot" = **45.7 m** |
+| RedBud, LaRocco's Leap | **120 ft (36.6 m)** per Wikipedia; *"125-plus foot"* per the promoter — the two disagree, as do the build years (1991 vs 1992), and neither states a method |
+| Washougal, triple step-up (new for 2025) | "100+ foot" = **30.5 m** |
+
+**Note these exceed MA's 24 m gap ceiling substantially.** That is not a contradiction — MA is an
+Australian homologation standard and AMA homologates nothing — but it does mean a national's one
+signature jump is bigger than any rulebook would permit, and our 15-25 m gap band describes the
+ordinary jumps rather than the famous one.
+
+#### 6.5 Engine output — and the absence of a top speed
 
 **No published measured top speed exists for any stock 450cc motocross bike.** Not from the
 manufacturers (zero "top speed" occurrences on official model pages), not from Cycle World, MXA,
@@ -561,6 +605,10 @@ real-world band.
 | `V_MAX` | 20 m/s = **72 km/h** | **no measured top speed exists.** MXGP fastest-lap *average* 50.4–59.9 km/h; FIM cap 65 km/h average | plausible ceiling |
 | lap average speed | model implies ~60 km/h | **MXGP race average 48.9–54.7 km/h** | **ours is above the real band** |
 | `P_SPEC` 22 W/kg | a 250's drive, to ground | 450 rear-wheel **37–45 kW**; code comment says 40 kW "at the crank" — that is the wheel figure | comment is slightly off |
+| `A_TRACTION` 3.4 m/s2 | corner-exit drive | LitPro start: **12.7 m/s2 (1.3 g)** over the first 4.6 m | a gate launch, not a corner exit — but check |
+| `A_LAT` 4.6 m/s2 | 20 m turn to 35 km/h | LitPro corner apex **~32 km/h** | agrees |
+| landing impact | not modelled | **10.7 g** landing, **18 g** rhythm transition | not modelled |
+| biggest jump on a lap | prompt 2.5-4.0 m, gap 15-25 m | signature jumps **30.5-45.7 m** lip to landing | ours describes ordinary jumps, not the famous one |
 | `terrain.surface` | soil / sand / grass | 12 AMA venues: sand, sandy loam over clay, clay, loam over clay, hardpack+imported | 3 classes covers it |
 
 ### 10. What this changes — in priority order
