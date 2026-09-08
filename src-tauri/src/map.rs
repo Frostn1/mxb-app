@@ -68,8 +68,9 @@ const TEX_DATA_FROM_W: [usize; 2] = [40, 36];
 
 /// Dimensions a texture may have. Wider at the small end than the `.edf` reader's, because a
 /// map really does ship 16x16 and 32x32 surfaces and dropping them shifts every material
-/// after them onto the wrong picture.
-const TEX_SIZES: [u32; 9] = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096];
+/// after them onto the wrong picture. The same holds at the top: Indiana bakes an 8192 sheet,
+/// and stopping at 4096 dropped it.
+const TEX_SIZES: [u32; 11] = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
 
 /// Sanity caps. A real map runs to about 900k vertices; these are loose enough not to reject
 /// a bigger one and tight enough that a misread length can't ask for a gigabyte.
@@ -624,6 +625,11 @@ fn normals_are_unit(b: &[u8], vs: usize, vc: usize) -> bool {
 /// cut-outs still need enough resolution to keep a tree looking like a tree.
 pub const MAX_TEXTURE_DIM: u32 = 512;
 
+/// The same, for the sky and backdrop, which are one sheet each rather than forty-eight.
+/// A dome's picture wraps a full 360°, so at 512 across it is under a degree and a half a
+/// texel and the cloud goes to smears — Indiana bakes its own at 8192.
+pub const SKY_TEXTURE_DIM: u32 = 2048;
+
 /// A texture's name, read in place. `None` when the bytes aren't one.
 fn tex_name(b: &[u8], o: usize) -> Option<String> {
     let mut e = o;
@@ -826,36 +832,41 @@ fn cutout_fraction(rgba: &[u8]) -> f32 {
 const CUTOUT_FRACTION: f32 = 0.02;
 
 /// Whether a name marks a colour map under PiBoSo's own convention.
+#[allow(dead_code)]
 fn is_colour_name(name: &str) -> bool {
     let l = name.to_ascii_lowercase();
     l.ends_with("_c") || l.ends_with("_c_a")
 }
 
-/// Whether a record is a second map for the surface before it rather than a surface of its
-/// own — a normal-and-specular sheet, an environment cube.
+/// Whether a record is a *second* map for some surface rather than a surface of its own.
 ///
-/// Every convention seen puts the secondary map's name on the colour map's stem: `bale1` then
-/// `bale1_n`, `pitlane_c` then `pitlane_n_s`. One sheet is often shared by several materials,
-/// so a name already used as a secondary stays one wherever it appears again.
-fn is_secondary(
-    name: &str,
-    previous: Option<&str>,
-    seen: &std::collections::HashSet<String>,
-) -> bool {
-    let lower = name.to_ascii_lowercase();
-    if lower == "env" || seen.contains(&lower) {
-        return true;
-    }
-    const SUFFIXES: [&str; 5] = ["_n", "_s", "_n_s", "_nrm", "_spec"];
-    let Some(prev) = previous else { return false };
-    let prev = prev.to_ascii_lowercase();
-    let stem = prev
-        .strip_suffix("_c_a")
-        .or_else(|| prev.strip_suffix("_c"))
-        .unwrap_or(&prev);
-    SUFFIXES
-        .iter()
-        .any(|suf| lower == format!("{stem}{suf}") || lower == format!("{prev}{suf}"))
+/// The binding is positional, so what matters is not recognising colour maps but never
+/// skipping one: miss a single record and every material past it wears its neighbour's sheet.
+/// Requiring PiBoSo's `_c` suffix does exactly that — a builder need only name one sheet
+/// plainly to slide the rest. Indiana calls its trackside screen `screen_live` and its trees
+/// `CK_TREE_Ironman`, and from the screen onwards its tents, fences and crowd stands were all
+/// wearing the sheet of the material after them.
+///
+/// So the test is inverted: a record is a surface unless it is demonstrably a companion map.
+/// Across twelve published tracks that finds at least one colour map per material every time,
+/// where the `_c` rule came up short on six of them and found none at all on two, which drew
+/// them entirely grey. Anything over the material count is trailing terrain sheets and is
+/// dropped by the `take` at the binding.
+fn is_companion_name(name: &str) -> bool {
+    let l = name.to_ascii_lowercase();
+    const SUFFIXES: [&str; 5] = ["_n_s", "_n", "_s", "_nrm", "_spec"];
+    l == "env" || l.starts_with("normals") || SUFFIXES.iter().any(|suf| l.ends_with(suf))
+}
+
+/// The records that paint a material, in table order: everything that is not a companion map,
+/// and each name only the first time it appears.
+fn painting_records(
+    all: Vec<(String, u32, u32, usize, usize)>,
+) -> Vec<(String, u32, u32, usize, usize)> {
+    let mut seen = std::collections::HashSet::new();
+    all.into_iter()
+        .filter(|(n, ..)| !is_companion_name(n) && seen.insert(n.to_ascii_lowercase()))
+        .collect()
 }
 
 /// Every surface record a map holds, as `(name, width, height)`, in table order.
@@ -875,24 +886,17 @@ pub fn survey(b: &[u8]) -> Vec<(String, u32, u32)> {
         .collect()
 }
 
-/// The records that look like a material's own colour map, in order.
+/// The records that paint a material, in order — the binding's own walk, uncapped, so a
+/// diagnostic can see how many the map offers against how many materials it declares.
 #[allow(dead_code)]
 pub fn primaries(b: &[u8]) -> Vec<(String, u32, u32)> {
     let Some((from, _)) = texture_table(b) else {
         return Vec::new();
     };
-    let mut seen = std::collections::HashSet::new();
-    let mut previous: Option<String> = None;
-    let mut out = Vec::new();
-    for (n, w, h, ..) in colour_records(b, from) {
-        if is_secondary(&n, previous.as_deref(), &seen) {
-            seen.insert(n.to_ascii_lowercase());
-            continue;
-        }
-        previous = Some(n.clone());
-        out.push((n, w, h));
-    }
-    out
+    painting_records(colour_records(b, from))
+        .into_iter()
+        .map(|(n, w, h, ..)| (n, w, h))
+        .collect()
 }
 
 /// The surfaces a map declares, named and sized but not inflated.
@@ -903,13 +907,13 @@ pub fn declared(b: &[u8]) -> Vec<(String, u32, u32)> {
     let Some((from, count)) = texture_table(b) else {
         return Vec::new();
     };
-    let all = colour_records(b, from);
-    let named = all.iter().filter(|(n, ..)| is_colour_name(n)).count();
-    if count == 0 || named * 4 < count * 3 {
+    // The same walk `textures` makes, so a slot and the sheet that fills it agree.
+    let painting = painting_records(colour_records(b, from));
+    if !covers(painting.len(), count) {
         return Vec::new();
     }
-    all.into_iter()
-        .filter(|(n, ..)| is_colour_name(n))
+    painting
+        .into_iter()
         .take(count)
         .map(|(n, w, h, ..)| (n, w, h))
         .collect()
@@ -1122,7 +1126,7 @@ pub fn largest_picture(b: &[u8]) -> Option<MapTexture> {
 pub fn reduced_texture(name: &str, w: u32, h: u32, mut rgba: Vec<u8>) -> MapTexture {
     let alpha = cutout_fraction(&rgba) > CUTOUT_FRACTION;
     flip_rows(&mut rgba, w, h);
-    let (rgba, w, h) = reduce(rgba, w, h, MAX_TEXTURE_DIM);
+    let (rgba, w, h) = reduce(rgba, w, h, SKY_TEXTURE_DIM);
     MapTexture {
         material: 0,
         name: name.to_string(),
@@ -1136,16 +1140,13 @@ pub fn reduced_texture(name: &str, w: u32, h: u32, mut rgba: Vec<u8>) -> MapText
 /// A map's colour surfaces, one per material, inflated and reduced.
 ///
 /// Nothing in a material record points at a texture, so the binding is positional: the *k*-th
-/// colour map paints material *k*. That only holds when the colour maps can be told apart
-/// from the sheets beside them, and the one reliable marker is PiBoSo's own naming — `_c`
-/// (or `_c_a`) for colour, `_n_s` for the normal-and-specular map next to it.
+/// colour map paints material *k*. Everything therefore turns on not *skipping* a colour map,
+/// because a single miss slides every material after it onto its neighbour's sheet — see
+/// [`is_companion_name`], which is why the test is for the companion maps rather than for the
+/// colour ones.
 ///
-/// **A map that doesn't use those suffixes gets no surfaces here, and draws plain.** Its
-/// table holds more records than materials — one published track has 55 for 49, the last
-/// seven being the terrain's own `dirt`/`grass`/`gravel` — and which of them line up is not
-/// something the file has yet been made to say. Guessing puts a blue tent on a boundary wall,
-/// which is worse than the honest grey: measured against the geometry, the obvious reading is
-/// off by two on that track and nothing in the format explains why.
+/// A map's table still holds more records than it has materials: the terrain's own sheets
+/// trail the scenery's, so the walk stops at the material count.
 /// Push a cut-out's colour outwards into the texels its alpha throws away.
 ///
 /// A foliage sheet stores black in every transparent texel — there is no reason for an artist
@@ -1224,14 +1225,18 @@ pub fn binds(b: &[u8]) -> bool {
     let Some((from, count)) = texture_table(b) else {
         return false;
     };
-    if count == 0 {
-        return false;
-    }
-    let named = colour_records(b, from)
-        .iter()
-        .filter(|(n, ..)| is_colour_name(n))
-        .count();
-    named * 4 >= count * 3
+    covers(painting_records(colour_records(b, from)).len(), count)
+}
+
+/// Whether a map offers enough sheets to be worth binding at all.
+///
+/// The reading has to cover the map, not merely appear in it: painting three materials out of
+/// eighty and leaving the rest grey reads as broken rather than as undecided, so below this a
+/// track keeps the honest grey. Every published track measured clears it outright — the walk
+/// finds at least one sheet per material — so this catches a map whose table we have misread,
+/// not one that is merely named unusually.
+fn covers(painting: usize, materials: usize) -> bool {
+    materials > 0 && painting * 4 >= materials * 3
 }
 
 /// How many materials a map will actually bind a sheet to.
@@ -1245,28 +1250,20 @@ pub fn bound_count(b: &[u8]) -> usize {
     if !binds(b) {
         return 0;
     }
-    colour_records(b, from)
-        .iter()
-        .filter(|(n, ..)| is_colour_name(n))
-        .count()
-        .min(count)
+    painting_records(colour_records(b, from)).len().min(count)
 }
 
 pub fn textures(b: &[u8], max_dim: u32) -> Vec<MapTexture> {
     let Some((from, count)) = texture_table(b) else {
         return Vec::new();
     };
-    let all = colour_records(b, from);
-    // The convention has to cover the map, not merely appear in it. One `_c` among fifty
-    // plainly-named sheets is a coincidence, and binding on it paints a single material and
-    // leaves the rest grey — which reads as broken rather than as undecided.
-    let named = all.iter().filter(|(n, ..)| is_colour_name(n)).count();
-    if count == 0 || named * 4 < count * 3 {
+    let painting = painting_records(colour_records(b, from));
+    if !covers(painting.len(), count) {
         return Vec::new();
     }
-
-    all.into_iter()
-        .filter(|(n, ..)| is_colour_name(n))
+    // Anything past the material count is the terrain's own sheets, which trail the scenery's.
+    painting
+        .into_iter()
         .take(count)
         .enumerate()
         .filter_map(|(i, (name, w, h, off, len))| {
@@ -2491,6 +2488,134 @@ mod tests {
     ///   cargo test --bin mxb-app -- --ignored --nocapture read_a_real_map
     /// ```
     ///
+    /// Indiana's table around the one record that slid it, in file order.
+    const AROUND_THE_SCREEN: [&str; 12] = [
+        "tarp_c",
+        "tarp_n_s",
+        "env",
+        "tarp_n_s",
+        "water_c",
+        "water_n_s",
+        "partytent_white_c",
+        "partytent_n_s",
+        "partytent_n_s",
+        "tent_sides_window_c_a",
+        "screen_live",
+        "crowd_stand_c",
+    ];
+
+    /// A sheet named without PiBoSo's suffix is still a sheet.
+    ///
+    /// The binding is positional, so skipping one record moves every material after it onto
+    /// its neighbour's picture. Indiana's trackside screen is `screen_live` and its trees are
+    /// `CK_TREE_Ironman`; requiring `_c` dropped all three and slid the back half of the
+    /// track — the tents, fences and crowd stands wore the wrong sheets.
+    #[test]
+    fn a_plainly_named_sheet_still_paints_its_material() {
+        let recs: Vec<(String, u32, u32, usize, usize)> = AROUND_THE_SCREEN
+            .iter()
+            .map(|n| (n.to_string(), 64, 64, 0, 0))
+            .collect();
+        let kept: Vec<String> = painting_records(recs).into_iter().map(|(n, ..)| n).collect();
+        assert_eq!(
+            kept,
+            [
+                "tarp_c",
+                "water_c",
+                "partytent_white_c",
+                "tent_sides_window_c_a",
+                "screen_live",
+                "crowd_stand_c",
+            ],
+            "the companion maps go and the plainly-named screen stays"
+        );
+
+        // The trees, which the `_c` rule dropped and drew as untextured slabs.
+        assert!(!is_companion_name("CK_TREE_Ironman"));
+        assert!(!is_companion_name("screen_live"));
+        assert!(!is_companion_name("hm_grass"));
+        // And the ones that really are a second map for the surface before them.
+        for n in ["env", "tarp_n_s", "bark_n", "glass_s", "normals_pro", "x_nrm", "y_spec"] {
+            assert!(is_companion_name(n), "{n} is a companion map");
+        }
+    }
+
+    /// A sheet shared by several materials is listed once, where it first appears.
+    #[test]
+    fn a_repeated_sheet_takes_one_slot() {
+        let recs: Vec<(String, u32, u32, usize, usize)> = ["a_c", "b_c", "a_c", "c_c"]
+            .iter()
+            .map(|n| (n.to_string(), 64, 64, 0, 0))
+            .collect();
+        let kept: Vec<String> = painting_records(recs).into_iter().map(|(n, ..)| n).collect();
+        assert_eq!(kept, ["a_c", "b_c", "c_c"]);
+    }
+
+    /// How many colour maps each rule finds, against how many materials the map declares.
+    ///
+    /// The positional binding needs one colour map per material, in order. Too few and the
+    /// walk slides: every material past the gap wears its neighbour's sheet.
+    ///
+    /// ```text
+    /// FROST_TRACKS=/dir/of/pkzs \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture count_the_colour_maps
+    /// ```
+    #[test]
+    #[ignore = "needs real tracks — set FROST_TRACKS"]
+    fn count_the_colour_maps() {
+        let dir = std::env::var("FROST_TRACKS").expect("set FROST_TRACKS");
+        let mut paths: Vec<_> = std::fs::read_dir(&dir)
+            .expect("read the directory")
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pkz") || e.eq_ignore_ascii_case("zip"))
+            })
+            .collect();
+        paths.sort();
+        println!(
+            "{:<44} {:>7} {:>7} {:>7} {:>7}",
+            "track", "recs", "mats", "_c", "notsec"
+        );
+        for p in &paths {
+            let names = crate::track::entry_names(p).unwrap_or_default();
+            let Some(entry) = names.iter().find(|n| n.to_ascii_lowercase().ends_with(".map"))
+            else {
+                continue;
+            };
+            let Ok(bytes) = crate::track::read_entry(p, entry) else {
+                continue;
+            };
+            let Some((from, count)) = texture_table(&bytes) else {
+                continue;
+            };
+            let all = colour_records(&bytes, from);
+            let named = all.iter().filter(|(n, ..)| is_colour_name(n)).count();
+            let mut seen = std::collections::HashSet::new();
+            let not_secondary = all
+                .iter()
+                .filter(|(n, ..)| {
+                    let l = n.to_ascii_lowercase();
+                    let secondary = l == "env"
+                        || l.starts_with("normals")
+                        || ["_n_s", "_n", "_s", "_nrm", "_spec"]
+                            .iter()
+                            .any(|x| l.ends_with(x));
+                    !secondary && seen.insert(l)
+                })
+                .count();
+            println!(
+                "{:<44} {:>7} {:>7} {:>7} {:>7}{}",
+                p.file_stem().unwrap_or_default().to_string_lossy(),
+                all.len(),
+                count,
+                named,
+                not_secondary,
+                if named < count { "   <- SLIDES" } else { "" }
+            );
+        }
+    }
+
     /// Checks the two things a transcription bug would break: that every normal is unit
     /// length, and that the mesh lands in the world rather than around the origin.
     #[test]

@@ -16,12 +16,23 @@
   new link, no new code.
 - A Live share codes list under Import: what you publish, what you follow, and which ones
   have a new version waiting. Turn on Auto and they install themselves.
+- Generated tracks stand under a photographed sky — a full 360 degree panorama with cloud
+  banks and a sun in it, in place of the drawn one.
 
 ### Changed
 - Opening a server asks it for fresh numbers, so the riders, the session and the track are what
   they are now rather than what they were when the list loaded.
 
 ### Fixed
+- Trackside scenery wears its own textures. Tents, inflatable gates, haybales, fences and
+  crowd stands each take the sheet that belongs to them instead of the one next to it.
+- Tracks that name their textures plainly, without PiBoSo's suffixes, are drawn painted rather
+  than grey. Two of the tracks checked had no readable name at all and now come out fully
+  textured.
+- Trees are drawn on the tracks whose foliage sheets the viewer used to skip.
+- A track's sky shows the dome it ships, at sixteen times the detail it was drawn at, and the
+  viewer settles on the track's clear weather instead of picking a different one each time you
+  open it.
 - Trackside scenery in the 3D viewer no longer stands in slabs of flat grey. A track whose
   textures the viewer can't read now leaves its banners and foliage out rather than drawing
   them blank.

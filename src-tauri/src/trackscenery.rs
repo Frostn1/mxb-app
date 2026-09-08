@@ -741,16 +741,27 @@ fn dome_mesh(radius: f32) -> Mesh {
     const SIDES: usize = 24;
     let mut m = Mesh::default();
     let top = SKY_TOP_DEG.to_radians().tan();
+    // The drawn sheet is noise, tiled four times round and stretched over the band. A
+    // photograph is one exposure that runs horizon to zenith, so it goes round once and the
+    // band takes only the slice of it that it actually covers — the first
+    // [`SKY_TOP_DEG`] degrees — or the whole sky ends up squeezed into 34°.
+    let photo = dome_photo().is_some();
+    let wraps = if photo { 1.0 } else { 4.0 };
     let mut ring_at = |mesh: &mut Mesh, t: f32| -> u32 {
         let start = mesh.vertex_count() as u32;
         let y = radius * top * t;
+        let v = if photo {
+            1.0 - (top * t).atan().to_degrees() / 90.0
+        } else {
+            1.0 - t
+        };
         for k in 0..=SIDES {
             let a = std::f32::consts::TAU * k as f32 / SIDES as f32;
             let (x, z) = (a.sin() * radius, a.cos() * radius);
             mesh.positions.extend_from_slice(&[x, y, z]);
             let l = (x * x + z * z).sqrt().max(1e-4);
             mesh.normals.extend_from_slice(&[-x / l, 0.0, -z / l]);
-            mesh.uvs.extend_from_slice(&[k as f32 / SIDES as f32 * 4.0, 1.0 - t]);
+            mesh.uvs.extend_from_slice(&[k as f32 / SIDES as f32 * wraps, v]);
         }
         start
     };
@@ -768,8 +779,10 @@ fn dome_mesh(radius: f32) -> Mesh {
     m
 }
 
-/// The sky's own sheet: blue overhead, pale at the horizon, with cloud banded across it.
 /// The sky as a file of its own: `dome.edf`, named by the `.amb`.
+///
+/// The sheet is [`dome_photo`] where it loads, and a drawn blue-to-pale gradient with banded
+/// cloud behind it otherwise.
 ///
 /// The band in the map exists because TerrainEd bakes shadow volumes from every mesh in the
 /// scene, so a lid over the plot put the whole track in shadow. That reasoning does not apply
@@ -777,9 +790,14 @@ fn dome_mesh(radius: f32) -> Mesh {
 /// closed all the way over, which is what a published track ships and what a rider looking up
 /// expects to see.
 pub fn dome_file(radius: f32) -> Vec<u8> {
+    let sky = dome_sheet();
     let mut m = Mesh::default();
     const RINGS: usize = 8;
     const SIDES: usize = 32;
+    // How many times the sheet goes round. A drawn sky is noise and tiling it four times
+    // costs nothing, but a photograph is one 360° exposure with a sun in it — wrap that four
+    // times and the track gets four suns.
+    let wraps = if sky.width == sky.height { 4.0 } else { 1.0 };
     // Ring by ring from the horizon to the pole, facing inwards.
     let ring = |mesh: &mut Mesh, t: f32| -> u32 {
         let start = mesh.vertex_count() as u32;
@@ -796,7 +814,7 @@ pub fn dome_file(radius: f32) -> Vec<u8> {
             // comes out at forty per cent of itself, which from the seat is night.
             let l = (x * x + y * y + z * z).sqrt().max(1e-4);
             mesh.normals.extend_from_slice(&[x / l, y / l, z / l]);
-            mesh.uvs.extend_from_slice(&[k as f32 / SIDES as f32 * 4.0, 1.0 - t]);
+            mesh.uvs.extend_from_slice(&[k as f32 / SIDES as f32 * wraps, 1.0 - t]);
         }
         start
     };
@@ -817,10 +835,36 @@ pub fn dome_file(radius: f32) -> Vec<u8> {
         texture: 0,
         normal: None,
     };
-    crate::edfwrite::write("dome", &[part], &[dome_sheet()])
+    crate::edfwrite::write("dome", &[part], &[sky])
+}
+
+/// A published track's sky, as a photograph.
+///
+/// Indiana Pro's own dome sheet, lifted out of its `dome.edf` by [`tests::dump_ground_sheets`]
+/// the same way `assets/ground/*.jpg` were lifted from its `.map`. One 360° exposure, 8192 by
+/// 2048, zenith on the first row — which is the way round [`sheet`] writes and so the way
+/// round `dome_file`'s uvs read it, no flip needed.
+///
+/// A sky is smooth, so it keeps all eight thousand pixels for about a megabyte of JPEG.
+fn dome_photo() -> Option<&'static Texture> {
+    static SKY: std::sync::OnceLock<Option<Texture>> = std::sync::OnceLock::new();
+    SKY.get_or_init(|| {
+        let img = image::load_from_memory(include_bytes!("../assets/sky/dome.jpg")).ok()?;
+        let img = img.to_rgba8();
+        Some(Texture {
+            name: "sky_c".into(),
+            width: img.width(),
+            height: img.height(),
+            rgba: img.into_raw(),
+        })
+    })
+    .as_ref()
 }
 
 fn dome_sheet() -> Texture {
+    if let Some(photo) = dome_photo() {
+        return photo.clone();
+    }
     sheet("sky_c", 256, |u, v| {
         // v is 0 at the zenith and 1 at the horizon — see `dome_mesh`'s uvs.
         let up = 1.0 - v;
@@ -2014,6 +2058,79 @@ mod tests {
         assert_eq!(Print::Boards.window(3), (0.0, 1.0));
         assert!(Print::Boards.post_at(1).is_some(), "a hoarding posts every join");
         assert!(Print::Tiled.post_at(1).is_none(), "a strung banner does not");
+    }
+
+    /// The sky is one exposure, so it goes round exactly once.
+    ///
+    /// The drawn sheet is noise and tiles four times to get some detail out of 256 pixels.
+    /// A photograph has a sun in it, and four wraps put four suns over the track.
+    #[test]
+    fn the_photographed_sky_wraps_once() {
+        let sheet = dome_sheet();
+        let photo = dome_photo().is_some();
+        assert!(photo, "the dome photograph is bundled and decodes");
+        assert_ne!(
+            sheet.width, sheet.height,
+            "the photograph is a 360 panorama, not a square tile"
+        );
+        assert_eq!(
+            sheet.rgba.len(),
+            sheet.width as usize * sheet.height as usize * 4,
+            "the sheet is RGBA"
+        );
+
+        let bytes = dome_file(1200.0);
+        let nodes = crate::edf::parse_world(&bytes);
+        assert!(!nodes.is_empty(), "the dome reads back as a model");
+        let u_max = nodes
+            .iter()
+            .flat_map(|n| n.uvs.chunks_exact(2))
+            .fold(f32::NEG_INFINITY, |m, uv| m.max(uv[0]));
+        assert!(
+            (u_max - 1.0).abs() < 1e-3,
+            "the sheet goes round {u_max} times — a photographed sky must go round once"
+        );
+
+        // And the picture survives the round trip at its full width.
+        let tex = crate::edf::embedded_textures(&bytes);
+        assert_eq!(tex.len(), 1, "one sheet on the dome");
+        assert_eq!((tex[0].width, tex[0].height), (sheet.width, sheet.height));
+
+        // The band baked into the map wears the same sheet, so it wraps once as well — and it
+        // reaches only SKY_TOP_DEG, so it must take that slice of the picture rather than
+        // stretching the whole sky into it.
+        let band = dome_mesh(1200.0);
+        let (mut u_hi, mut v_lo, mut v_hi) = (f32::NEG_INFINITY, f32::INFINITY, f32::NEG_INFINITY);
+        for uv in band.uvs.chunks_exact(2) {
+            u_hi = u_hi.max(uv[0]);
+            v_lo = v_lo.min(uv[1]);
+            v_hi = v_hi.max(uv[1]);
+        }
+        assert!((u_hi - 1.0).abs() < 1e-3, "the band wraps {u_hi} times");
+        assert!((v_hi - 1.0).abs() < 1e-3, "the band starts at the horizon");
+        // v is 1 at the horizon and 0 at the zenith, so a band reaching 34 degrees stops at
+        // 1 - 34/90. Anything near 0 means it swallowed the whole sky.
+        let expect = 1.0 - SKY_TOP_DEG / 90.0;
+        assert!(
+            (v_lo - expect).abs() < 0.02,
+            "the band tops out at v {v_lo}, not {expect} — it is stretching the sky"
+        );
+    }
+
+    /// Write a generated `dome.edf` out, to look at or to drop into a track by hand.
+    ///
+    /// ```text
+    /// FROST_DUMP=/tmp/gen cargo test --bin mxb-app -- --ignored --nocapture write_the_dome
+    /// ```
+    #[test]
+    #[ignore = "writes a dome.edf — set FROST_DUMP"]
+    fn write_the_dome() {
+        let dir = std::env::var("FROST_DUMP").expect("set FROST_DUMP");
+        std::fs::create_dir_all(&dir).unwrap();
+        let bytes = dome_file(1200.0);
+        let path = format!("{dir}/dome.edf");
+        std::fs::write(&path, &bytes).unwrap();
+        println!("{path} {:.2} MB", bytes.len() as f64 / 1_048_576.0);
     }
 
     /// Write the sheets out as PNGs, which is the only way to judge whether a banner reads.
