@@ -7327,8 +7327,8 @@ mod tests {
 
         println!("\n{} — lap {:.0} m, {} segments, {} corners",
             p.name, s.stations.len() as f32 * STATION_STEP, p.segments.len(), runs.len());
-        println!("{:>5} {:>7} {:>8} {:>8} {:>9} {:>8} {:>8} {:>9} {:>9} {:>7} {:>7}",
-            "turn", "arcs", "bend", "len m", "tight r", "rise m", "grooves", "spacing", "acrossRMS", "sweep", "ruts");
+        println!("{:>5} {:>7} {:>8} {:>8} {:>9} {:>8} {:>8} {:>9} {:>9} {:>7} {:>7} {:>8}",
+            "turn", "arcs", "bend", "len m", "tight r", "rise m", "grooves", "spacing", "acrossRMS", "sweep", "ruts", "camber");
 
         let mut agg: Vec<[f32; 7]> = Vec::new();
         for (n, r) in ranked.iter().enumerate() {
@@ -7343,13 +7343,15 @@ mod tests {
             let sweep = crate::trackstats::section_sweep(&stations, &g).unwrap_or(f32::NAN);
             let sweep_ruts =
                 crate::trackstats::section_sweep_ruts(&stations, &g).unwrap_or(f32::NAN);
+            let camber =
+                crate::trackstats::camber_spread(&stations, &g).unwrap_or(f32::NAN);
             let hs: Vec<f32> = sel.iter().map(|st| g.at(st.x, st.z)).collect();
             let rise = hs.iter().cloned().fold(f32::MIN, f32::max)
                 - hs.iter().cloned().fold(f32::MAX, f32::min);
             let (grooves, spacing, across) =
                 shape.map_or((f32::NAN, f32::NAN, f32::NAN), |q| (q.grooves, q.spacing_m, q.across_rms_m));
-            println!("{n:>5} {:>7} {:>8.0} {:>8.0} {:>9.0} {:>8.1} {:>8.1} {:>9.2} {:>9.3} {:>7.2} {:>7.2}",
-                r.arcs, r.degrees, r.end_m - r.start_m, r.tightest_m, rise, grooves, spacing, across, sweep, sweep_ruts);
+            println!("{n:>5} {:>7} {:>8.0} {:>8.0} {:>9.0} {:>8.1} {:>8.1} {:>9.2} {:>9.3} {:>7.2} {:>7.2} {:>8.4}",
+                r.arcs, r.degrees, r.end_m - r.start_m, r.tightest_m, rise, grooves, spacing, across, sweep, sweep_ruts, camber);
             agg.push([r.arcs as f32, r.degrees, r.end_m - r.start_m, rise, across, sweep, r.tightest_m]);
 
             if let Some(d) = &out_dir {

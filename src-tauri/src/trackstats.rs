@@ -1034,6 +1034,51 @@ fn section_sweep_inner(
     Some((r(&a, &b) + r(&b, &c) + r(&a, &c)) / 3.0)
 }
 
+/// How much a corner's cross-slope changes as you go round it, as the standard deviation of
+/// the across-line gradient.
+///
+/// A berm whose height is a function of the corner's radius alone is the same height all the
+/// way round a constant-radius corner, so every cross-section gets the same tilt and the
+/// corner reads as extruded however well its ruts are made. Measured over four corners each:
+/// Indiana 0.039, Southwick 0.095 — sand piles up far more unevenly — against 0.016-0.022 for
+/// ours. This is the quantity behind [`section_sweep`], and the one worth aiming at, because
+/// it names what to change rather than only saying that something is wrong.
+pub fn camber_spread(stations: &[(f32, f32, f32)], g: &Grid) -> Option<f32> {
+    if stations.len() < 12 {
+        return None;
+    }
+    const HALF_WIDTH_M: f32 = 9.0;
+    const SAMPLES: usize = 48;
+    const CUTS: usize = 20;
+    let n = stations.len();
+    let mut slopes = Vec::with_capacity(CUTS);
+    for c in 0..CUTS {
+        let i = (n - 1) * c / (CUTS - 1);
+        let (x, z, heading) = stations[i];
+        let (rx, rz) = crate::trackprog::right_vector(heading);
+        // Least squares slope of height against offset — the cut's tilt, in metres per metre.
+        let (mut sx, mut sy, mut sxy, mut sxx) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        for k in 0..SAMPLES {
+            let off = -HALF_WIDTH_M + 2.0 * HALF_WIDTH_M * k as f32 / (SAMPLES - 1) as f32;
+            let h = g.at(x + rx * off, z + rz * off);
+            sx += off;
+            sy += h;
+            sxy += off * h;
+            sxx += off * off;
+        }
+        let m = SAMPLES as f32;
+        let den = m * sxx - sx * sx;
+        if den.abs() > 1e-6 {
+            slopes.push((m * sxy - sx * sy) / den);
+        }
+    }
+    if slopes.len() < 4 {
+        return None;
+    }
+    let mean = slopes.iter().sum::<f32>() / slopes.len() as f32;
+    Some((slopes.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / slopes.len() as f32).sqrt())
+}
+
 /// [`RutShape`] for a lap over a heightfield, published or generated.
 ///
 /// `stations` is the centreline: `(x, z, heading)` every `step_m` metres.
