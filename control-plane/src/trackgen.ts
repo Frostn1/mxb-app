@@ -322,9 +322,9 @@ explicitly asks otherwise:
                       landscape). NOTHING MAY STAND OVER 3.0 m: Motorcycling Australia and
                       Motorcycling New Zealand both write "jumps must not exceed 3m in
                       height", and no federation anywhere allows more.
-  jump spacing        20–50 m between takeoffs, and NEVER less than 20 m of clear ground in
-                      front of a jump — a written standard, and why a rhythm section is a run
-                      of small jumps rather than a heap of big ones.
+  jump spacing        20–50 m between takeoffs. A rhythm section is closer than that on
+                      purpose — what a jump needs is the SPEED to clear it, not a fixed run,
+                      and that is checked from the lap rather than from a spacing rule.
   jumps and speed     A JUMP IS ONLY AS BIG AS THE RUN AT IT. This is checked and it is the
                       most common thing to get wrong after closure. A rider leaves a hairpin
                       at about 33 km/h and needs 60–80 m of straight to reach 90. So: a big

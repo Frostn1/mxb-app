@@ -67,13 +67,21 @@ pub mod corpus {
     /// at 600 mm. The band spans the two: a regulated set and a supercross-built one.
     pub const WHOOP_HEIGHT_M: (f32, f32) = (0.3, 0.9);
 
-    /// The least clear ground a jump may have in front of it, metres.
-    ///
-    /// A written standard rather than a judgement: MA §14.4.3(d) asks for "at least 20 metres
-    /// of run-up preceding each Jump". It is a floor and the speed check is the ceiling — the
-    /// same clause elsewhere says approach length "should be limited to control approach
-    /// speed", so a jump wants enough run to be cleared and no more.
-    pub const RUN_UP_M: f32 = 20.0;
+    // There is deliberately no minimum run-up here, and the rule that looked like one is a
+    // trap worth naming. MA §14.4.3(d) does say "at least 20 metres of run-up preceding each
+    // Jump" — but section 14 is the FREESTYLE module, and every clause around it is about
+    // metal ramps, landing decks and ramp-to-dirt distances. It governs a ramp hit on its own,
+    // not a track.
+    //
+    // Motocross gets §6.7.2, which carries no number: "the length of approaches to Jumps
+    // should be limited to control approach speed". That is a ceiling on run, not a floor, and
+    // `Rhythm` below already implements it from the speed model — which is the better rule
+    // anyway, because what a jump needs is speed rather than metres.
+    //
+    // Applied as a floor it forbids the one thing it should permit: a rhythm section is
+    // closely spaced jumps by definition, and 20 m between them is normal. It was shipped for
+    // one commit and rejected every lap a model wrote. Same caution applies to the 24 m
+    // "dirt-to-dirt" ceiling in §14.8.1 — also freestyle.
 
     /// The longest a straight may be, metres.
     ///
@@ -981,42 +989,6 @@ pub fn review(prog: &TrackProgram) -> Review {
                     " — or 140 m with a jump in its first 15 m"
                 }
             ));
-        }
-    }
-
-    // Clear ground in front of each jump. A written standard, and the other half of the speed
-    // check below: a jump wants enough run to be cleared and no more.
-    {
-        let mut jumps: Vec<(f32, f32, &'static str)> = prog
-            .features
-            .iter()
-            .filter(|f| {
-                matches!(
-                    f,
-                    Feature::Tabletop { .. } | Feature::Double { .. } | Feature::StepUp { .. }
-                )
-            })
-            .map(|f| (f.at(), f.at() + f.length(), f.name()))
-            .collect();
-        jumps.sort_by(|a, b| a.0.total_cmp(&b.0));
-        for i in 0..jumps.len() {
-            let (at, _, name) = jumps[i];
-            // What stands before it, wrapping round the lap so the first jump is measured
-            // against the last one rather than against the start line.
-            let before = if i == 0 {
-                jumps.last().map(|j| j.1 - prog.lap_length())
-            } else {
-                Some(jumps[i - 1].1)
-            };
-            let Some(before) = before else { continue };
-            let run = at - before;
-            if run < corpus::RUN_UP_M && jumps.len() > 1 {
-                out.push(format!(
-                    "the {name} at {at:.0} m has {run:.0} m of clear ground in front of it; a \
-                     jump needs at least {:.0} m of run-up",
-                    corpus::RUN_UP_M
-                ));
-            }
         }
     }
 
