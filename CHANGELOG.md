@@ -24,6 +24,8 @@
   they are now rather than what they were when the list loaded.
 
 ### Fixed
+- Buttons that pair an icon with a label — Refresh across the app, and the rest of the plain
+  buttons — put a space back between the two instead of running them together.
 - Trackside scenery wears its own textures. Tents, inflatable gates, haybales, fences and
   crowd stands each take the sheet that belongs to them instead of the one next to it.
 - Tracks that name their textures plainly, without PiBoSo's suffixes, are drawn painted rather
