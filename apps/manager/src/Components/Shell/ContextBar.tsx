@@ -1,7 +1,7 @@
 import { createContext, useContext, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
-import { cn } from "@/lib/utils";
-import { useT } from "../../i18n/context";
+import { cn } from "@frost/shared/lib/utils";
+import { useT } from "@frost/shared/i18n/context";
 import type { StudioTab } from "../Studio/Studio";
 import type { DashboardView, RailItem } from "./nav";
 

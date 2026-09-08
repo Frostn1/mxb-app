@@ -1,4 +1,4 @@
-import type { EdfNode } from "../../../types";
+import type { EdfNode } from "@frost/shared/types";
 import { mirrored, sheetRotation, type Layer, type Sheet } from "./layers";
 import { partPath, sideAt, type UvPart } from "./uv";
 

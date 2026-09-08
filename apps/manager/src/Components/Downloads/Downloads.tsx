@@ -24,21 +24,21 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { DownloadRecord, DownloadStatus } from "../../types";
+import type { DownloadRecord, DownloadStatus } from "@frost/shared/types";
 import { useDownloads } from "../../Context/Downloads";
 import { useInstall, type ModTarget } from "../../Context/Install";
-import { useT, type TFunc } from "../../i18n/context";
-import { dayStart, displayName, formatBytes, formatDay, formatTime } from "../../lib/mods";
-import { Button } from "@/Components/ui/button";
+import { useT, type TFunc } from "@frost/shared/i18n/context";
+import { dayStart, displayName, formatBytes, formatDay, formatTime } from "@frost/shared/lib/mods";
+import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
-import HelpHint from "@/Components/ui/help-hint";
+import HelpHint from "@frost/shared/Components/ui/help-hint";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-} from "@/Components/ui/dropdown-menu";
+} from "@frost/shared/Components/ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -48,8 +48,8 @@ import {
   AlertDialogFooter,
   AlertDialogCancel,
   AlertDialogAction,
-} from "@/Components/ui/alert-dialog";
-import { cn } from "@/lib/utils";
+} from "@frost/shared/Components/ui/alert-dialog";
+import { cn } from "@frost/shared/lib/utils";
 
 type Filter = "all" | DownloadStatus;
 

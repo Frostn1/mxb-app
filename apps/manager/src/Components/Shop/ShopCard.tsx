@@ -1,17 +1,17 @@
 import { useState } from "react";
 import { ExternalLink, ShoppingBag, Store } from "lucide-react";
-import type { ShopMod } from "../../types";
+import type { ShopMod } from "@frost/shared/types";
 import PriceTag from "./PriceTag";
 import { openShopUrl } from "../../api/shop";
-import { GRID_THUMB_WIDTH } from "../../lib/imgcache";
-import CachedImg from "@/Components/ui/cached-img";
-import { useT } from "../../i18n/context";
+import { GRID_THUMB_WIDTH } from "@frost/shared/lib/imgcache";
+import CachedImg from "@frost/shared/Components/ui/cached-img";
+import { useT } from "@frost/shared/i18n/context";
 import {
   ContextMenu,
   ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,
-} from "@/Components/ui/context-menu";
+} from "@frost/shared/Components/ui/context-menu";
 
 interface ShopCardProps {
   mod: ShopMod;

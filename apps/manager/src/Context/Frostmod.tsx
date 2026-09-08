@@ -24,13 +24,13 @@ import {
   RUNTIME_DOWNLOAD_URL,
   RUNTIME_DOWNLOADS_PAGE,
   RUNTIME_NAME_KEY,
-} from "../api/mods";
-import type { Attachment, FrostmodStatus, VcRuntime } from "../types";
-import { ATTACH_PROBLEM } from "../types";
-import { displayName } from "../lib/mods";
+} from "@frost/shared/api/mods";
+import type { Attachment, FrostmodStatus, VcRuntime } from "@frost/shared/types";
+import { ATTACH_PROBLEM } from "@frost/shared/types";
+import { displayName } from "@frost/shared/lib/mods";
 import { autoInstallAction } from "../lib/frostmodAuto";
 import { useGameRunning } from "../lib/useGameRunning";
-import { useT, type TFunc } from "../i18n/context";
+import { useT, type TFunc } from "@frost/shared/i18n/context";
 import { FrostmodContext } from "./FrostmodContext";
 
 const POLL_MS = 5000;

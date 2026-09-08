@@ -1,8 +1,8 @@
 import { X } from "lucide-react";
-import { Progress } from "../../ui/progress";
+import { Progress } from "@frost/shared/Components/ui/progress";
 import { isRunning, PHASE_KEY, useTrackBuild } from "../../../Context/TrackBuild";
-import { useT } from "../../../i18n/context";
-import { cn } from "@/lib/utils";
+import { useT } from "@frost/shared/i18n/context";
+import { cn } from "@frost/shared/lib/utils";
 
 /**
  * What the build is doing, under the button that started it.

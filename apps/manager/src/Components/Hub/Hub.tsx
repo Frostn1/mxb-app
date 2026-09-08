@@ -2,9 +2,9 @@ import { useState } from "react";
 import HubCatalog from "./HubCatalog";
 import HubPurchases from "./HubPurchases";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
-import HelpHint from "@/Components/ui/help-hint";
-import { cn } from "@/lib/utils";
-import { useT } from "../../i18n/context";
+import HelpHint from "@frost/shared/Components/ui/help-hint";
+import { cn } from "@frost/shared/lib/utils";
+import { useT } from "@frost/shared/i18n/context";
 
 type HubTab = "catalog" | "purchases";
 

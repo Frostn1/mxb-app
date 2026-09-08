@@ -1,22 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, Search, Tag } from "lucide-react";
-import type { HubCategory, HubMod, HubSort } from "../../types";
+import type { HubCategory, HubMod, HubSort } from "@frost/shared/types";
 import { HUB_SORTS, hubCategories, hubDetail, hubSearch } from "../../api/hub";
 import ShopCard from "../Shop/ShopCard";
 import ShopDetail from "../Shop/ShopDetail";
 import CategoryPill from "../Shop/CategoryPill";
 import { ContextBarRight } from "../Shell/ContextBar";
-import { Button } from "@/Components/ui/button";
-import { Skeleton } from "@/Components/ui/skeleton";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Skeleton } from "@frost/shared/Components/ui/skeleton";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/Components/ui/select";
-import { cn } from "@/lib/utils";
-import { useT } from "../../i18n/context";
+} from "@frost/shared/Components/ui/select";
+import { cn } from "@frost/shared/lib/utils";
+import { useT } from "@frost/shared/i18n/context";
 
 /**
  * Browse the MXB Hub catalog.

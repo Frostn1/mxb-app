@@ -18,19 +18,19 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
-import { Button, CHIP } from "../ui/button";
+import { cn } from "@frost/shared/lib/utils";
+import { Button, CHIP } from "@frost/shared/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
-import HelpHint from "../ui/help-hint";
-import { Input } from "../ui/input";
-import { Switch } from "../ui/switch";
+import HelpHint from "@frost/shared/Components/ui/help-hint";
+import { Input } from "@frost/shared/Components/ui/input";
+import { Switch } from "@frost/shared/Components/ui/switch";
 import {
   Select,
   SelectValue,
   SelectTrigger,
   SelectContent,
   SelectItem,
-} from "../ui/select";
+} from "@frost/shared/Components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -38,7 +38,7 @@ import {
   DialogFooter,
   DialogTitle,
   DialogDescription,
-} from "../ui/dialog";
+} from "@frost/shared/Components/ui/dialog";
 import {
   onModsChanged,
   presetsListProfiles,
@@ -57,18 +57,18 @@ import {
   presetBundleCreate,
   presetBundleImport,
   onPresetBundleProgress,
-} from "../../api/mods";
+} from "@frost/shared/api/mods";
 import type {
   BundlePhase,
   BundlePlan,
   Loadout,
   Preset,
   PresetApplyOutcome,
-} from "../../types";
-import { SlotField } from "./SlotField";
+} from "@frost/shared/types";
+import { SlotField } from "@frost/shared/Components/SlotField";
 import FeelPresets from "./FeelPresets";
-import { Trans } from "../../i18n";
-import { useT, type TFunc, type TKey } from "../../i18n/context";
+import { Trans } from "@frost/shared/i18n";
+import { useT, type TFunc, type TKey } from "@frost/shared/i18n/context";
 import {
   SLOT_GROUPS,
   slotsFor,
@@ -78,8 +78,8 @@ import {
   loadoutSummary,
   copyName,
   type Scans,
-} from "../../lib/presets";
-import { useGearPaints } from "../../lib/useGearPaints";
+} from "@frost/shared/lib/presets";
+import { useGearPaints } from "@frost/shared/lib/useGearPaints";
 import { copyText } from "../../lib/clipboard";
 
 function humanSize(bytes: number): string {

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CheckCircle2, Download, Loader2, Lock, RefreshCw, Trash2, WifiOff } from "lucide-react";
-import { Button } from "@/Components/ui/button";
-import { Input } from "@/Components/ui/input";
-import { cn } from "@/lib/utils";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Input } from "@frost/shared/Components/ui/input";
+import { cn } from "@frost/shared/lib/utils";
 import {
   installPlugin,
   listPlugins,
@@ -12,7 +12,7 @@ import {
   type PluginView,
 } from "@/api/plugins";
 import { mountPlugin, unmountPlugin } from "@/lib/pluginHost";
-import { useT, type TFunc } from "../../i18n/context";
+import { useT, type TFunc } from "@frost/shared/i18n/context";
 
 /** `1756598400` -> `30 September`. Whole days: nobody renews to the minute. */
 function until(at: number | null): string | null {

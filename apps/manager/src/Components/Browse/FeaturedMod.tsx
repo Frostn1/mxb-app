@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Download, Info } from "lucide-react";
-import { Button } from "@/Components/ui/button";
-import CachedImg from "@/Components/ui/cached-img";
+import { Button } from "@frost/shared/Components/ui/button";
+import CachedImg from "@frost/shared/Components/ui/cached-img";
 import RatingStars from "./RatingStars";
-import type { ModRating, ModSummary } from "../../types";
-import { formatDateShort } from "../../lib/mods";
-import { useT } from "../../i18n/context";
+import type { ModRating, ModSummary } from "@frost/shared/types";
+import { formatDateShort } from "@frost/shared/lib/mods";
+import { useT } from "@frost/shared/i18n/context";
 
 interface FeaturedModProps {
   mod: ModSummary;

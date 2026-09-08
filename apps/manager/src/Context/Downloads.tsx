@@ -12,8 +12,8 @@ import {
   downloadHistory,
   forgetDownload,
   recordDownload,
-} from "../api/mods";
-import type { DownloadRecord, NewDownload } from "../types";
+} from "@frost/shared/api/mods";
+import type { DownloadRecord, NewDownload } from "@frost/shared/types";
 
 /** When the Downloads page was last looked at, so the sidebar can badge failures that
  *  happened since. Local to the machine the downloads happened on, hence localStorage. */

@@ -1,16 +1,16 @@
 import { ArrowRight, ExternalLink, Sparkles } from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
-import { Button } from "@/Components/ui/button";
+import { Button } from "@frost/shared/Components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogTitle,
-} from "@/Components/ui/dialog";
-import { useConfig } from "../../Context/Config";
-import { useI18n } from "../../i18n/context";
+} from "@frost/shared/Components/ui/dialog";
+import { useConfig } from "@frost/shared/Context/Config";
+import { useI18n } from "@frost/shared/i18n/context";
 import { prettyHotkey } from "../../lib/hotkey";
-import { usePlatform } from "../../lib/usePlatform";
+import { usePlatform } from "@frost/shared/lib/usePlatform";
 import type { SectionId } from "../Settings/Settings";
 import ShowcaseSupporters from "./ShowcaseSupporters";
 import type { Release } from "./releases";

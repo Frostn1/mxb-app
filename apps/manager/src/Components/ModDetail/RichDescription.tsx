@@ -5,7 +5,7 @@ import {
   DESCRIPTION_IMAGE_WIDTH,
   isCacheableImage,
   schemeIsBroken,
-} from "../../lib/imgcache";
+} from "@frost/shared/lib/imgcache";
 
 interface RichDescriptionProps {
   /** Sanitised in Rust before it reaches here. */

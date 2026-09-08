@@ -3,7 +3,7 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { Move, Rotate3d, ZoomIn } from "lucide-react";
 import * as THREE from "three";
-import { cn } from "@/lib/utils";
+import { cn } from "../../lib/utils";
 import type {
   TrackBackdrop,
   TrackGround,

@@ -1,25 +1,25 @@
 import { useState } from "react";
 import { Check, Download, ExternalLink, Loader2, Store } from "lucide-react";
-import type { ShopMod } from "../../types";
-import type { ShopItem } from "../../api/mods";
+import type { ShopMod } from "@frost/shared/types";
+import type { ShopItem } from "@frost/shared/api/mods";
 import { openShopUrl } from "../../api/shop";
-import { GRID_THUMB_WIDTH } from "../../lib/imgcache";
-import CachedImg from "@/Components/ui/cached-img";
-import { useT } from "../../i18n/context";
-import { Button } from "@/Components/ui/button";
+import { GRID_THUMB_WIDTH } from "@frost/shared/lib/imgcache";
+import CachedImg from "@frost/shared/Components/ui/cached-img";
+import { useT } from "@frost/shared/i18n/context";
+import { Button } from "@frost/shared/Components/ui/button";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/Components/ui/select";
+} from "@frost/shared/Components/ui/select";
 import {
   ContextMenu,
   ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,
-} from "@/Components/ui/context-menu";
+} from "@frost/shared/Components/ui/context-menu";
 
 /** One purchased product, with every file the store lists under it. */
 export interface Purchase {

@@ -4,7 +4,8 @@
     /* Paths */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@frost/shared/*": ["../../packages/shared/src/*"]
     }
   },
   "include": ["src"],

@@ -12,16 +12,16 @@ import {
   EyeOff,
 } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
-import { Button } from "@/Components/ui/button";
+import { cn } from "@frost/shared/lib/utils";
+import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarRight } from "../Shell/ContextBar";
-import HelpHint from "@/Components/ui/help-hint";
+import HelpHint from "@frost/shared/Components/ui/help-hint";
 import {
   listMasterServers,
   joinServer,
   type MasterServer,
-} from "../../api/mods";
-import { useT } from "../../i18n/context";
+} from "@frost/shared/api/mods";
+import { useT } from "@frost/shared/i18n/context";
 import JoinServerDialog from "../Shell/JoinServerDialog";
 import ServerDetail from "./ServerDetail";
 

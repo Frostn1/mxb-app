@@ -8,12 +8,12 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
-import { createConfig, detectGamePath } from "../../api/mods";
-import { usePlatform } from "../../lib/usePlatform";
-import { Trans } from "../../i18n";
-import { useT } from "../../i18n/context";
-import { Button } from "@/Components/ui/button";
-import type { GameInfo } from "../../types";
+import { createConfig, detectGamePath } from "@frost/shared/api/mods";
+import { usePlatform } from "@frost/shared/lib/usePlatform";
+import { Trans } from "@frost/shared/i18n";
+import { useT } from "@frost/shared/i18n/context";
+import { Button } from "@frost/shared/Components/ui/button";
+import type { GameInfo } from "@frost/shared/types";
 import { Plate } from "../Shell/Brand";
 
 interface SetupProps {

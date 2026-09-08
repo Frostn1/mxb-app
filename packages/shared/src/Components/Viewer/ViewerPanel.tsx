@@ -10,7 +10,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent } from "../ui/dialog";
 import { ModelViewer, type CaptureFn, type ViewerMode } from "./ModelViewer";

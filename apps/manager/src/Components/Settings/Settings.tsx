@@ -79,10 +79,10 @@ import {
   setVoiceToggleToTalk,
   type VoiceDevices,
   type VoiceStatus,
-} from "../../api/mods";
+} from "@frost/shared/api/mods";
 import { useUpdate } from "../../Context/Update";
-import { usePlatform } from "../../lib/usePlatform";
-import { useConfig } from "../../Context/Config";
+import { usePlatform } from "@frost/shared/lib/usePlatform";
+import { useConfig } from "@frost/shared/Context/Config";
 import GameSwitcher from "../Shell/GameSwitcher";
 import { ContextBarLeft, ContextBarRight } from "../Shell/ContextBar";
 import ReshadeCard from "./ReshadeCard";
@@ -94,26 +94,26 @@ import {
   type Colorway,
   type ThemeMode,
 } from "../../Context/Theme";
-import { Trans } from "../../i18n";
-import { useI18n, type LocalePref, type TKey } from "../../i18n/context";
-import { getLocale, LOCALE_OPTIONS } from "../../i18n/core";
+import { Trans } from "@frost/shared/i18n";
+import { useI18n, type LocalePref, type TKey } from "@frost/shared/i18n/context";
+import { getLocale, LOCALE_OPTIONS } from "@frost/shared/i18n/core";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { prettyHotkey } from "../../lib/hotkey";
-import { formatBytes, formatDateShort } from "../../lib/mods";
+import { formatBytes, formatDateShort } from "@frost/shared/lib/mods";
 import { copyText } from "../../lib/clipboard";
 import { useTour } from "../Tour/Tour";
-import { Button } from "@/Components/ui/button";
-import HelpHint from "@/Components/ui/help-hint";
-import { Segmented } from "@/Components/ui/segmented";
+import { Button } from "@frost/shared/Components/ui/button";
+import HelpHint from "@frost/shared/Components/ui/help-hint";
+import { Segmented } from "@frost/shared/Components/ui/segmented";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/Components/ui/select";
-import { Switch } from "@/Components/ui/switch";
-import { cn } from "@/lib/utils";
+} from "@frost/shared/Components/ui/select";
+import { Switch } from "@frost/shared/Components/ui/switch";
+import { cn } from "@frost/shared/lib/utils";
 
 const REPO_URL = "https://github.com/Frostn1/mxb-app";
 // Permanent invite (no expiry, no use cap) — a link that dies leaves a dead button

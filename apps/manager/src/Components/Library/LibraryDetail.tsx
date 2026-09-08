@@ -11,23 +11,23 @@ import {
   Share2,
   type LucideIcon,
 } from "lucide-react";
-import { getPkzMeta, getPkzPreview, type ModType } from "../../api/mods";
-import type { LibraryEntry, PkzMeta } from "../../types";
-import { ViewerDialog } from "../Viewer/ViewerDialog";
-import { TrackViewerDialog } from "../Viewer/TrackViewerDialog";
-import { entryViewerProps } from "../Viewer/entryViewer";
-import { useConfig } from "../../Context/Config";
+import { getPkzMeta, getPkzPreview, type ModType } from "@frost/shared/api/mods";
+import type { LibraryEntry, PkzMeta } from "@frost/shared/types";
+import { ViewerDialog } from "@frost/shared/Components/Viewer/ViewerDialog";
+import { TrackViewerDialog } from "@frost/shared/Components/Viewer/TrackViewerDialog";
+import { entryViewerProps } from "@frost/shared/Components/Viewer/entryViewer";
+import { useConfig } from "@frost/shared/Context/Config";
 import {
   displayName,
   folderLabel,
   formatBytes,
   formatLength,
-} from "../../lib/mods";
+} from "@frost/shared/lib/mods";
 import { CATEGORY_ICON, CATEGORY_LABEL, categoryIcon } from "./categories";
-import { Trans } from "../../i18n";
+import { Trans } from "@frost/shared/i18n";
 import { ContextBarLeft } from "../Shell/ContextBar";
-import { useT } from "../../i18n/context";
-import { Button } from "@/Components/ui/button";
+import { useT } from "@frost/shared/i18n/context";
+import { Button } from "@frost/shared/Components/ui/button";
 
 interface LibraryDetailProps {
   entry: LibraryEntry;

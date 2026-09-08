@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Circle, Search } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Button } from "@/Components/ui/button";
+import { cn } from "@frost/shared/lib/utils";
+import { Button } from "@frost/shared/Components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -9,11 +9,11 @@ import {
   DialogFooter,
   DialogTitle,
   DialogDescription,
-} from "@/Components/ui/dialog";
-import { Segmented } from "@/Components/ui/segmented";
-import type { ModEntry, Preset, PresetContent } from "../../types";
-import { useT, type TKey } from "../../i18n/context";
-import { displayName, formatBytes } from "../../lib/mods";
+} from "@frost/shared/Components/ui/dialog";
+import { Segmented } from "@frost/shared/Components/ui/segmented";
+import type { ModEntry, Preset, PresetContent } from "@frost/shared/types";
+import { useT, type TKey } from "@frost/shared/i18n/context";
+import { displayName, formatBytes } from "@frost/shared/lib/mods";
 import { categoryIcon } from "../Library/categories";
 import { contentOf } from "./Manage";
 

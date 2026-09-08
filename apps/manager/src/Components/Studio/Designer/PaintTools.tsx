@@ -13,10 +13,10 @@ import {
   Type as TypeIcon,
   Undo2,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Button } from "../../ui/button";
-import { useT } from "../../../i18n/context";
-import type { TKey } from "../../../i18n/core";
+import { cn } from "@frost/shared/lib/utils";
+import { Button } from "@frost/shared/Components/ui/button";
+import { useT } from "@frost/shared/i18n/context";
+import type { TKey } from "@frost/shared/i18n/core";
 import { Row, Slider } from "./controls";
 import {
   PAINT_TOOLS,

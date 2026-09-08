@@ -7,8 +7,8 @@ import {
   positionAt,
   type TrackProgram,
 } from "../../../api/trackgen";
-import { useT } from "../../../i18n/context";
-import { cn } from "@/lib/utils";
+import { useT } from "@frost/shared/i18n/context";
+import { cn } from "@frost/shared/lib/utils";
 
 /**
  * The lap from above, drawn from the program itself.

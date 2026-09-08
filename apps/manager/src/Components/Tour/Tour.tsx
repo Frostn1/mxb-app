@@ -21,11 +21,11 @@ import {
   ArrowRight,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { Button } from "@/Components/ui/button";
-import { cn } from "@/lib/utils";
-import { useT, type TKey } from "../../i18n/context";
-import { useConfig } from "../../Context/Config";
-import type { GameCaps } from "../../types";
+import { Button } from "@frost/shared/Components/ui/button";
+import { cn } from "@frost/shared/lib/utils";
+import { useT, type TKey } from "@frost/shared/i18n/context";
+import { useConfig } from "@frost/shared/Context/Config";
+import type { GameCaps } from "@frost/shared/types";
 import type { DashboardView } from "../Shell/nav";
 import type { StudioTab } from "../Studio/Studio";
 import { Plate } from "../Shell/Brand";

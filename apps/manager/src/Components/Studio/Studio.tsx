@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn } from "@frost/shared/lib/utils";
 import { ContextBarRight } from "../Shell/ContextBar";
-import HelpHint from "../ui/help-hint";
-import { useT } from "../../i18n/context";
-import { useConfig } from "../../Context/Config";
-import { contentLockAvailable } from "../../api/mods";
-import type { Loadout } from "../../types";
+import HelpHint from "@frost/shared/Components/ui/help-hint";
+import { useT } from "@frost/shared/i18n/context";
+import { useConfig } from "@frost/shared/Context/Config";
+import { contentLockAvailable } from "@frost/shared/api/mods";
+import type { Loadout } from "@frost/shared/types";
 import Designer from "./Designer/Designer";
 import PaintStudio from "../PaintStudio/PaintStudio";
 import RiderStudio from "../Rider/RiderStudio";

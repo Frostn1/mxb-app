@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { modTypesFor, scanLibrary, type ModType } from "../api/mods";
-import type { GameId } from "../types";
+import { modTypesFor, scanLibrary, type ModType } from "@frost/shared/api/mods";
+import type { GameId } from "@frost/shared/types";
 import {
   EMPTY_INSTALLED_INDEX,
   buildInstalledIndex,

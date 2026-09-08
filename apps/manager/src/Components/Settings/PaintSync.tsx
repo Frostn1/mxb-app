@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Download, Upload, TriangleAlert, Trash2 } from "lucide-react";
-import { Button } from "@/Components/ui/button";
-import { Input } from "@/Components/ui/input";
-import { cn } from "@/lib/utils";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Input } from "@frost/shared/Components/ui/input";
+import { cn } from "@frost/shared/lib/utils";
 import {
   experimentalState,
   onSyncEvent,
@@ -13,8 +13,8 @@ import {
   syncPaints,
   type ExperimentalState,
   type SyncEvent,
-} from "../../api/mods";
-import { useT, type TFunc } from "../../i18n/context";
+} from "@frost/shared/api/mods";
+import { useT, type TFunc } from "@frost/shared/i18n/context";
 
 /** `1723459200000` -> `2 minutes ago`, `0` -> null. */
 function ago(t: TFunc, at: number): string | null {

@@ -8,12 +8,12 @@ import {
   X,
   Search,
 } from "lucide-react";
-import { Dialog, DialogContent } from "@/Components/ui/dialog";
-import { Button } from "@/Components/ui/button";
-import { useT } from "../../i18n/context";
-import { labelOf } from "../../i18n/core";
-import { Badge } from "@/Components/ui/badge";
-import { cn } from "@/lib/utils";
+import { Dialog, DialogContent } from "@frost/shared/Components/ui/dialog";
+import { Button } from "@frost/shared/Components/ui/button";
+import { useT } from "@frost/shared/i18n/context";
+import { labelOf } from "@frost/shared/i18n/core";
+import { Badge } from "@frost/shared/Components/ui/badge";
+import { cn } from "@frost/shared/lib/utils";
 import {
   bikeNamesFromDest,
   bikeOfDest,
@@ -29,8 +29,8 @@ import {
   variantForBike,
   type DestOption,
   type ModType,
-} from "../../api/mods";
-import type { DownloadOption, ModDetail as Detail } from "../../types";
+} from "@frost/shared/api/mods";
+import type { DownloadOption, ModDetail as Detail } from "@frost/shared/types";
 
 export interface InstallChoice {
   destFolder: string;

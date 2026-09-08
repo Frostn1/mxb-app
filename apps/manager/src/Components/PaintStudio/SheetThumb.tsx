@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { textureBytes } from "../../api/mods";
+import { textureBytes } from "@frost/shared/api/mods";
 
 /**
  * A small preview of one texture sheet, drawn from the raw RGBA the backend is holding.

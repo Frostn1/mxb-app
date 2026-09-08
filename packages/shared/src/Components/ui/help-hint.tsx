@@ -7,8 +7,8 @@ import {
   PopoverHeader,
   PopoverTitle,
   PopoverTrigger,
-} from "@/Components/ui/popover";
-import { cn } from "@/lib/utils";
+} from "./popover";
+import { cn } from "../../lib/utils";
 
 interface HelpHintProps {
   /** Short heading — usually the screen name. */

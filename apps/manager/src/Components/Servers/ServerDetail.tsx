@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { Lock, Plug, Loader2, Signal, Users, Download, MapPin, CheckCircle2 } from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
-import { Button } from "@/Components/ui/button";
+import { Button } from "@frost/shared/Components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from "@/Components/ui/dialog";
-import { useT } from "../../i18n/context";
+} from "@frost/shared/Components/ui/dialog";
+import { useT } from "@frost/shared/i18n/context";
 import {
   probeServer,
   serverRiders,
@@ -16,7 +16,7 @@ import {
   type MasterServer,
   type ServerRiders,
   type TrackGuess,
-} from "../../api/mods";
+} from "@frost/shared/api/mods";
 
 /**
  * Everything one server publishes about itself.

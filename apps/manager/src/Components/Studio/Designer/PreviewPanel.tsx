@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Box, Loader2, Maximize2, Minimize2, TriangleAlert } from "lucide-react";
 import type * as THREE from "three";
-import { cn } from "@/lib/utils";
-import { Dialog, DialogContent, DialogTitle } from "../../ui/dialog";
-import { ModelViewer } from "../../Viewer/ModelViewer";
-import { TyresPicker } from "../../Viewer/TyresPicker";
-import { useTyresPick } from "../../Viewer/tyresPick";
-import { loadBikeModel, loadRiderModel, scanLibrary } from "../../../api/mods";
-import { displayName } from "../../../lib/mods";
-import { EMPTY_LOADOUT } from "../../../lib/presets";
-import type { BikeRig, EdfNode, Loadout, PaintTexture, RiderPart } from "../../../types";
-import { useT, type TKey } from "../../../i18n/context";
-import { useConfig } from "../../../Context/Config";
+import { cn } from "@frost/shared/lib/utils";
+import { Dialog, DialogContent, DialogTitle } from "@frost/shared/Components/ui/dialog";
+import { ModelViewer } from "@frost/shared/Components/Viewer/ModelViewer";
+import { TyresPicker } from "@frost/shared/Components/Viewer/TyresPicker";
+import { useTyresPick } from "@frost/shared/Components/Viewer/tyresPick";
+import { loadBikeModel, loadRiderModel, scanLibrary } from "@frost/shared/api/mods";
+import { displayName } from "@frost/shared/lib/mods";
+import { EMPTY_LOADOUT } from "@frost/shared/lib/presets";
+import type { BikeRig, EdfNode, Loadout, PaintTexture, RiderPart } from "@frost/shared/types";
+import { useT, type TKey } from "@frost/shared/i18n/context";
+import { useConfig } from "@frost/shared/Context/Config";
 import { gearPartOf, isBikeKind, type PaintDestState } from "../paintDest";
 
 /**
