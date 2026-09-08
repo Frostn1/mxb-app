@@ -65,11 +65,12 @@ https://www.fim-moto.com/fileadmin/user_upload/Documents/2026/2026_MOTOCROSS_SUP
 **1.75 km** maximum length through the 2019 edition, and a **55 km/h** average-speed cap in 2011.
 Rolling-wave spacing was 8–10 m through 2025 and became 8–11 m for 2026.
 
-#### 1.2 Motorcycling Australia — the only published standard with jump geometry
+#### 1.2 Motorcycling Australia — the fullest published jump geometry
 
 MA's *Standards for the Inspection and Licensing of Tracks* (v2024-01-26) is a real homologation
-checklist from an FIM-affiliated federation, and it is the only document found anywhere that
-puts numbers on a jump.
+checklist from an FIM-affiliated federation, and it puts more numbers on a jump than any other
+document — though not its angles, which only the FFM regulates (§1.4). Motorcycling New Zealand's
+requirements mirror it almost clause for clause, independently.
 
 | Parameter | Motocross | Supercross |
 |---|---|---|
@@ -113,6 +114,73 @@ jump should be high enough to enable the rider to sight it."
 
 
 ---
+
+#### 1.4 FFM (France) — the only federation that regulates jump shape
+
+The FFM's *Règles Techniques et de Sécurité* are issued under the French Sports Code (article
+L 131-16) and apply to **every** motocross event on French soil, whether or not the organiser is
+affiliated. Its 2015 annex on circuit layout is the most granular jump and spectator standard found
+anywhere.
+
+| Parameter | Value | How it is measured |
+|---|---|---|
+| **Take-off angle** | **max 45°** | *"du milieu de l'appel jusqu'au sommet du saut"* — mid-face to crest |
+| **Landing angle** | **max 30°** | *"du sommet de la bosse jusqu'au milieu de la zone de réception"* — crest to mid-landing |
+| Jump length, defined | crest of take-off to start of the landing zone | |
+| Landing zone width | jump > 10 m → ≥ 6 m; > 20 m → ≥ 10 m; > 30 m → ≥ 12 m | |
+| **Straight length** | **max 125 m**, or 140 m if there is an obstacle in the first 15 m | |
+| Jump narrowing | a 10 m base should narrow to ~8 m at the crest | |
+| Multiple jumps on flat ground | **prohibited**; allowed only on pronounced up- or down-slopes | |
+| If a second jump sits in the first's landing zone | ≥ **30 m** crest to crest | |
+| Whoops | prohibited; *vagues* allowed at ~0.5 m high, ~3 m apart | |
+| Track width | 4 m solo, 5 m sidecar/quad — **lower than FIM's 6 m** | |
+| Start straight | 80–125 m | |
+| Track length | 800–3000 m | |
+| Berm crest | ~1 m flat strip along the top, for the barrier | |
+| Spectator setback by jump size | < 10 m jump → > 2 m; 10–30 m → > 3 m; > 30 m → > 5 m | |
+| Spectator setback by corner angle | 91–180° corner → 5 m past it; 46–90° → 10 m; 0–45° → 15 m | |
+
+Source: FFM, *Annexe aux RTS Motocross — Règles spécifiques pour l'aménagement des circuits*,
+approved 30 August 2014, applicable 1 January 2015; and the main RTS Motocross, 7 March 2009.
+
+**The 125 m straight cap is the one layout rule any federation states**, and it is worth weighing
+against our own prompt, which asks for an opening straight of 100–160 m.
+
+#### 1.5 Cross-federation comparison — where the standards converge
+
+Eleven federations were read. The striking result is how tightly the ones that publish anything
+agree, and how many publish nothing at all.
+
+| Parameter | MA (AU) | MNZ | FFM (FR) | MSA (ZA) | FIM |
+|---|---|---|---|---|---|
+| Track length | 800–3000 m (1500+ champs) | 1500–3000 m | 800–3000 m | not found | 1500–2000 m |
+| Track width min | 6 m (7 m first third, 40 gates) | 6 m + 1.5 m run-off | **4 m solo** | not found | 6 m |
+| Start straight | 70–125 m | 70–125 m | **80–125 m** | "long enough for safety" | 80–120 m |
+| First corner width | ≥ 12 m → 8 m | ≥ 12 m → 8 m | not stated | not found | not stated |
+| Gate height | 500 mm | 500 mm | not stated | **≥ 350 mm** | 500–520 mm |
+| Gate spacing per rider | 1 m | 1 m | 1 m | 1 m | 1 m |
+| Rear barrier | 3 m | 3 m | not stated | 3 m | 2.5 m |
+| Max mass start | 40 | 40 | 45 (by formula) | 40 | 40 |
+| Jump height max | **3 m** | **3 m** | not stated | not found | not stated |
+| Jump angles | not stated | not stated | **45° / 30°** | not found | not stated |
+| Average lap speed | ≤ 65 km/h | ≤ 65 km/h | not stated | not found | ≤ 65 km/h |
+
+**Four numbers are effectively universal:** 1 m of gate per rider, a 3 m rear barrier, a 40-rider
+maximum, and a 65 km/h average-speed cap. **Two more are agreed by everyone who states them:** a
+3.0 m jump-height ceiling and a 70–125 m start straight.
+
+**Who publishes nothing.** The **ACU (UK)** delegates every dimension to a separate safety-precautions
+publication that is not on its website — no width, length, start straight, gate spacing or gradient.
+The **AMCA (UK)** rule book has no track chapter at all; its only dimension is a flag position.
+The **DMSB (Germany)** delegates to licensing guidelines absent from its public library, though its
+homologation form is itself a dimensions checklist (widest, narrowest, at the start line, at the
+first corner, at the finish, start to first corner). **FIM Europe** adopts FIM by reference. No
+Canadian federation standard survives. **Motorcycling WA** withholds its standards on request only.
+
+**No federation anywhere publishes a track-surface gradient limit.** The only slope ratios in any
+document are FFM's spectator-embankment waivers (1/1 = 45.0°, 1/5 = 11.31°). Instead of regulating
+gradient, MA, MNZ and FIM all cap **average lap speed at 65 km/h** and MA/MNZ cap **jump height at
+3 m** — the outcome rather than the geometry.
 
 ### 2. Real venues — what is actually published, and what is not
 
@@ -365,10 +433,11 @@ primary source. One published units error is also on record (a "5,500 cubic feet
 
 ### 4. Jump geometry — what builders actually do
 
-No motocross standard anywhere gives a takeoff angle. The dimensioned geometry lives in two
-documents nobody cites — **Motorcycling Australia's** track-licensing standard and **Motorcycling
-New Zealand's** MX Track Requirements — and they agree with each other independently and with
-Dirt Wurx's built practice.
+**One federation does publish jump angles: the FFM (France).** Its annex to the Règles Techniques
+et de Sécurité, in force since 1 January 2015, caps a take-off at **45°** and a landing at **30°**,
+and defines exactly how to measure each — see §1.4. Those are ceilings, not targets. The working
+geometry comes from **Motorcycling Australia's** track-licensing standard and **Motorcycling New
+Zealand's** requirements, which agree with each other independently and with Dirt Wurx's practice.
 
 #### 4.1 The face
 
@@ -653,7 +722,9 @@ real-world band.
 | `TABLETOP_DECK_M` | 6.0 min, finish max 12.0 | **MA 3–21 m of flat** | agrees |
 | double `gap` | prompt 8–12 small, 15–25 big | MA gap ceiling **24 m**; SX triple 21.3 m | agrees |
 | `JUMP_FACE_DEG` | 27° at the lip → **13.5° mean** | builders **18.4–26.6° mean**; FMX 23.9° mean / 42–45° exit; Sydney dirt jump 22.4° lip | **ours is shallower than any built jump** |
-| `JUMP_LANDING_DEG` | 19° → 9.5° mean | one builder's jump: 11.0° mean; ~60% of takeoff, 1.8× as long | ours is 70% and 1.44×; close |
+| `JUMP_LANDING_DEG` | 19° → 9.5° mean | one builder's jump: 11.0° mean; ~60% of takeoff, 1.8× as long. **FFM ceiling 30°** | ours is 70% and 1.44×; close, and well under the cap |
+| longest straight | prompt asks 100–160 m opening | **FFM caps a straight at 125 m** (140 m with an obstacle in the first 15 m) | **our upper end is over the only stated cap** |
+| take-off angle ceiling | 27° at the lip | **FFM max 45°**, measured mid-face to crest | far under the cap — room to steepen |
 | face length, 3 m jump | **12.5 m** | 2:1 → 6 m; 3:1 → **9 m** | **ours is 39–108% longer** |
 | run-up before a jump | speed-checked per feature | **≥ 20 m written standard**, both directions | add the floor |
 | `START_SPRINT_M` | 70.0 | FIM **80–120** recommended; MA **70–125** | at the floor of both |
@@ -707,8 +778,11 @@ real-world band.
    **50.6 km/h** and the dry band is 45–54; 60 km/h is the *fastest lap ever recorded*. Everything
    sized off that assumption — how much run a jump needs, where braking starts — inherits it.
    Separately, `V_MAX` at 72 km/h is below the 77.3 km/h a radar caught on a start straight.
-8. **`START_SPRINT_M` 70 → 80–120** to match FIM's recommendation, and `START_LINE_M` 150 is longer
-   than any published start.
+8. **`START_SPRINT_M` 70 → 80–120** to match FIM's and FFM's recommendation, and `START_LINE_M` 150
+   is longer than any published start.
+9. **Cap straights at 125 m.** The FFM is the only federation to state a straight-length limit, and
+   our prompt asks for a 100–160 m opening straight — the top of that range is over it. The rule has
+   an escape hatch worth copying: 140 m is allowed if an obstacle sits in the first 15 m.
 
 ### 11. What cannot be checked against reality, and never will be
 
