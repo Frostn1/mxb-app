@@ -345,37 +345,37 @@ def features(rng, segs):
         pick = rng.random()
         if pick < 0.36 and room > 30.0:
             # A table, and a bigger one: "jumps now too small" from the seat.
-            length = round(min(rng.uniform(22.0, 32.0), room), 1)
+            # Long enough for the speed carried at it: "tables are super short, I have so
+            # much speed for each one but they are small". A 22 m table taken at fifty is a
+            # kicker rather than a jump.
+            length = round(min(rng.uniform(32.0, 46.0), room), 1)
             out.append({"kind": "tabletop", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(3.0, 4.2), 2)})
+                        "height": round(rng.uniform(3.4, 4.6), 2)})
         elif pick < 0.55 and room > 30.0:
             # And a table is not always flat end to end. A whale tail rises, dips over its
             # middle and rises again before the landing — two crests a rider can either
             # double or roll — which is a shape a tabletop's three numbers cannot describe,
             # so it is drawn point by point.
-            length = round(min(rng.uniform(26.0, 38.0), room), 1)
-            h = rng.uniform(2.8, 4.0)
-            dip = rng.uniform(0.45, 0.75)
+            # A triple: one take-off, a landing, and a second lower one short of it for
+            # anyone not committing — "make a second smaller landing like a triple knowing I
+            # would jump it".
+            length = round(min(rng.uniform(46.0, 62.0), room), 1)
+            h = rng.uniform(3.2, 4.4)
+            dip = rng.uniform(0.30, 0.40)
             out.append({"kind": "custom", "at": round(pos, 1), "length": length,
                         "shape": [{"u": 0.0, "h": 0.0},
-                                  {"u": 0.22, "h": round(h * 0.82, 2)},
-                                  {"u": 0.34, "h": round(h, 2)},
-                                  {"u": 0.5, "h": round(h * dip, 2)},
-                                  {"u": 0.66, "h": round(h * 0.96, 2)},
-                                  {"u": 0.8, "h": round(h * 0.78, 2)},
+                                  {"u": 0.18, "h": round(h * 0.86, 2)},
+                                  {"u": 0.26, "h": round(h, 2)},
+                                  {"u": 0.40, "h": round(h * dip, 2)},
+                                  {"u": 0.52, "h": round(h * 0.62, 2)},
+                                  {"u": 0.66, "h": round(h * 0.28, 2)},
+                                  {"u": 0.82, "h": round(h * 0.18, 2)},
                                   {"u": 1.0, "h": 0.0}]})
-        elif pick < 0.68 and room > 26.0:
-            # A double, as a table with its middle taken out, is the one jump that has to be
-            # cleared or crashed — and with a lip low enough not to feel enormous from the
-            # seat, the run-up never carries it: "cannot be cleared from where it stands",
-            # over and over. So it is a table, and the ground decides which.
-            length = round(min(rng.uniform(19.0, 27.0), room), 1)
-            out.append({"kind": "tabletop", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(2.0, 3.0), 2)})
         elif pick < 0.82 and room > 24.0:
-            length = round(min(rng.uniform(24.0, 34.0), room), 1)
+            # A climb rather than a wall with a ramp on it: "that uphill is trash".
+            length = round(min(rng.uniform(34.0, 48.0), room), 1)
             out.append({"kind": "stepUp", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(1.6, 2.6), 2)})
+                        "height": round(rng.uniform(1.2, 2.0), 2)})
         else:
             length = round(min(rng.uniform(10.0, 16.0), room), 1)
             if length < 8.0:

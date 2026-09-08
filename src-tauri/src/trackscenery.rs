@@ -948,9 +948,33 @@ fn tyre_ribbon(
         // marks across its deck is a table nobody jumped. Off the corridor it is not printed
         // because nobody rode there. And along its own length a mark comes and goes, which is
         // what a pass laid on ground that was damp in places actually looks like.
-        let (gx, gz) = ((cx / syn.mps) as usize, (cz / syn.mps) as usize);
-        let cell = gz.min(syn.gh - 1) * syn.gw + gx.min(syn.gw - 1);
-        let groove = -syn.rut.get(cell).copied().unwrap_or(0.0);
+        // Snapped into whatever groove is nearest.
+        //
+        // A pass laid at a fixed offset from the line crosses grooves rather than running
+        // down one, and prints strewn across a rut is not what a rut looks like: the marks
+        // pile up *inside* it. So each pass looks half a metre either side of where it was
+        // going to go and takes the deepest ground it finds — which is the floor of a groove
+        // if there is one near, and where it was going otherwise.
+        let sample_rut = |t: f32| -> f32 {
+            let (x, z) = (st.x + rx * t, st.z + rz * t);
+            let (gx, gz) = ((x / syn.mps) as usize, (z / syn.mps) as usize);
+            -syn.rut
+                .get(gz.min(syn.gh - 1) * syn.gw + gx.min(syn.gw - 1))
+                .copied()
+                .unwrap_or(0.0)
+        };
+        let mut best = (sample_rut(lat), lat);
+        let mut k = -4i32;
+        while k <= 4 {
+            let t = lat + k as f32 * 0.13;
+            let v = sample_rut(t);
+            if v > best.0 {
+                best = (v, t);
+            }
+            k += 1;
+        }
+        let (groove, lat) = best;
+        let (cx, cz) = (st.x + rx * lat, st.z + rz * lat);
         let coming = crate::tracksynth::fbm(st.s / 34.0, seed as f32 * 0.37, seed ^ 0x5A11);
         // A groove keeps a mark going: the deepest part of a line is where the prints pile
         // up, which is the whole reason a rut reads as ridden rather than as a ditch.

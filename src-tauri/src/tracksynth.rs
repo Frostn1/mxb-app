@@ -272,6 +272,10 @@ const RUT_LIP_EDGE: (f32, f32) = (0.0, 0.52);
 const RUT_PAINT_FLOOR: f32 = 0.18;
 const RUT_PAINT_WALL: f32 = 1.55;
 
+/// How high up a groove's inside the packed sheet holds on before the bank takes over. Above
+/// one it lets go late, which is what gives the inside of a rut a colour of its own.
+const RUT_WALL_HOLD: f32 = 1.8;
+
 /// How much darker the floor of a groove is than the line it is worn into, and how much
 /// lighter dry loose dirt is than the ground it lands on.
 ///
@@ -321,7 +325,7 @@ const LINE_FADE_M: f32 = 0.8;
 /// quickly it gets there. A bank is loose over all of itself, not in proportion to how tall it
 /// happens to be, so the signal saturates well before its own peak.
 const RUT_LIP_LOOSE: f32 = 1.0;
-const RUT_LIP_SHARP: f32 = 3.4;
+const RUT_LIP_SHARP: f32 = 2.2;
 
 /// Tyre marks up the face of a jump: the grade at which a face is fully marked, how much wider
 /// the marks fan than the line that fed them, how far they lean towards the side the approach
@@ -1347,64 +1351,6 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         }
     }
 
-    // 3a. Break the walls where two parts of the track grade into the same ground.
-    //
-    // Every cell takes its arc position from the station nearest it, and out in the field
-    // between two branches of the lap that assignment flips: measured on the demo, two
-    // neighbouring samples eleven metres off the line belong to stations a hundred and ten
-    // metres apart round the lap. The deck height, a jump reaching out of the corridor and
-    // the berm are all functions of that position, so where it flips they disagree — and the
-    // ground between a hairpin's two legs came out with a wall 1.3 m high standing in it,
-    // one sample wide. Ridden, that is a step in the ground you can hit.
-    //
-    // A machine grading between two legs of a track leaves one surface, so this makes one:
-    // outside the riding corridor, anything standing far off its own neighbours is pulled
-    // back towards them. Soft-thresholded, so ordinary relief is untouched and only a wall is
-    // treated as a wall, and the corridor itself is never moved.
-    // Averaging cannot do it: run to convergence a blur turns a wall into a ramp of exactly
-    // the same drop, and a 60-degree ramp one sample wide is the same thing to ride into. So
-    // this is the slump instead — ground steeper than it can stand loses material downhill,
-    // pass after pass, until nothing outside the corridor is steeper than a graded slope.
-    {
-        let limit = SEAM_SLOPE_DEG.to_radians().tan() * mps_x.min(mps_z);
-        for _ in 0..SEAM_PASSES {
-            let src = heights.clone();
-            let mut moved = 0.0f32;
-            for i in 0..gw * gh {
-                let (x, y) = (i % gw, i / gw);
-                if corridor[i] || x == 0 || y == 0 || x + 1 == gw || y + 1 == gh {
-                    continue;
-                }
-                // Clear of the track and whatever stands at its edge, then fading in.
-                let past = dist[i] - edge_at[i] - SEAM_KEEP_OUT_M;
-                let strength = smoothstep((past / SEAM_RAMP_M).clamp(0.0, 1.0));
-                if strength <= 0.0 {
-                    continue;
-                }
-                let mut drop = 0.0;
-                for j in [i - 1, i + 1, i - gw, i + gw] {
-                    // Never into the corridor. The face where a track is cut into rising
-                    // ground is meant to be steep, and shedding material into it digs a moat
-                    // down the side of the track instead of taking a seam out of the field.
-                    if corridor[j] {
-                        continue;
-                    }
-                    let over = src[i] - src[j] - limit;
-                    if over > 0.0 {
-                        drop += over * SEAM_SLUMP;
-                    }
-                }
-                if drop > 0.0 {
-                    heights[i] -= drop * strength;
-                    moved += drop * strength;
-                }
-            }
-            if moved < 1e-3 {
-                break;
-            }
-        }
-    }
-
     // 3b. Smooth the ridden ground along the way it was ridden.
     //
     // A rut is a groove somebody drove down: sharp across, smooth along. Everything above
@@ -1559,6 +1505,68 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     let floor = budget * BUDGET_MARGIN;
     for v in &mut heights {
         *v = *v - lo + floor;
+    }
+
+    // Break the walls — last, after everything that moves ground has finished.
+    //
+    // This used to run before the start straight was benched in, and the spur cuts its
+    // own pad beside the lap: the worst step on a ridden track was 1.5 m, twelve metres
+    // off the line, and the slump never saw it because it had already run.
+    //
+    // Every cell takes its arc position from the station nearest it, and out in the field
+    // between two branches of the lap that assignment flips: measured on the demo, two
+    // neighbouring samples eleven metres off the line belong to stations a hundred and ten
+    // metres apart round the lap. The deck height, a jump reaching out of the corridor and
+    // the berm are all functions of that position, so where it flips they disagree — and the
+    // ground between a hairpin's two legs came out with a wall 1.3 m high standing in it,
+    // one sample wide. Ridden, that is a step in the ground you can hit.
+    //
+    // A machine grading between two legs of a track leaves one surface, so this makes one:
+    // outside the riding corridor, anything standing far off its own neighbours is pulled
+    // back towards them. Soft-thresholded, so ordinary relief is untouched and only a wall is
+    // treated as a wall, and the corridor itself is never moved.
+    // Averaging cannot do it: run to convergence a blur turns a wall into a ramp of exactly
+    // the same drop, and a 60-degree ramp one sample wide is the same thing to ride into. So
+    // this is the slump instead — ground steeper than it can stand loses material downhill,
+    // pass after pass, until nothing outside the corridor is steeper than a graded slope.
+    {
+        let limit = SEAM_SLOPE_DEG.to_radians().tan() * mps_x.min(mps_z);
+        for _ in 0..SEAM_PASSES {
+            let src = heights.clone();
+            let mut moved = 0.0f32;
+            for i in 0..gw * gh {
+                let (x, y) = (i % gw, i / gw);
+                if corridor[i] || x == 0 || y == 0 || x + 1 == gw || y + 1 == gh {
+                    continue;
+                }
+                // Clear of the track and whatever stands at its edge, then fading in.
+                let past = dist[i] - edge_at[i] - SEAM_KEEP_OUT_M;
+                let strength = smoothstep((past / SEAM_RAMP_M).clamp(0.0, 1.0));
+                if strength <= 0.0 {
+                    continue;
+                }
+                let mut drop = 0.0;
+                for j in [i - 1, i + 1, i - gw, i + gw] {
+                    // Never into the corridor. The face where a track is cut into rising
+                    // ground is meant to be steep, and shedding material into it digs a moat
+                    // down the side of the track instead of taking a seam out of the field.
+                    if corridor[j] {
+                        continue;
+                    }
+                    let over = src[i] - src[j] - limit;
+                    if over > 0.0 {
+                        drop += over * SEAM_SLUMP;
+                    }
+                }
+                if drop > 0.0 {
+                    heights[i] -= drop * strength;
+                    moved += drop * strength;
+                }
+            }
+            if moved < 1e-3 {
+                break;
+            }
+        }
     }
 
     // How steeply the ground the features built climbs along the lap, per station: the faces
@@ -2368,6 +2376,35 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
     // that merely touch into one shape, and it is the same control that decides how long a
     // single jump's ramps are — they are the same question asked twice.
     smooth_along(&mut out.v, (blend / PROFILE_STEP).round() as usize);
+
+    // And no knuckle before the lip.
+    //
+    // Ridden: "a lot of them were smooth, and had like a knuckle just before the tip". The
+    // smoothing above rounds a jump against whatever is beside it, and where a hollow, a
+    // neighbouring feature or the deck of the jump itself meets the face, the profile can
+    // dip a few centimetres and come back — which is a bump a wheel finds at the worst
+    // moment. A face rises. So each feature's approach is made non-decreasing to its crest
+    // and its landing non-increasing away from it.
+    for f in features {
+        if matches!(f, Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Rut { .. }) {
+            continue;
+        }
+        let (at, len) = (f.at(), f.length());
+        let lo = ((at / PROFILE_STEP).floor().max(0.0) as usize).min(out.v.len() - 1);
+        let hi = (((at + len) / PROFILE_STEP).ceil() as usize).min(out.v.len() - 1);
+        if hi <= lo + 2 {
+            continue;
+        }
+        let crest = (lo..=hi)
+            .max_by(|a, b| out.v[*a].total_cmp(&out.v[*b]))
+            .unwrap_or(lo);
+        for i in lo + 1..=crest {
+            out.v[i] = out.v[i].max(out.v[i - 1]);
+        }
+        for i in (crest..hi).rev() {
+            out.v[i] = out.v[i].max(out.v[i + 1]);
+        }
+    }
     out
 }
 
@@ -4706,8 +4743,15 @@ fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> 
         // floor is dark over its whole width and the bank is not, so the eye gets an edge.
         let floor = (-c.rut).clamp(0.0, 1.0).powf(0.45);
         let wall = c.rut.clamp(0.0, 1.0).powf(0.45);
-        let keyed = (RUT_PAINT_FLOOR + (1.0 - RUT_PAINT_FLOOR) * floor - RUT_PAINT_WALL * wall)
-            .clamp(0.0, 1.0);
+        // The wall of a groove is not the bank behind it. Subtracting the whole way up left
+        // the inside of a rut as bare corridor — dark at the very bottom, pale at the crest,
+        // and nothing of its own in between: "the inside of the ruts should have colour and
+        // tyre marks, not just the bottom, and it should vary". So the packed sheet climbs
+        // the inside and only lets go near the top, and how far up it reaches wanders.
+        let climb = 0.55 + 0.45 * fbm(c.x * 0.06, c.z * 0.06, seed ^ 0x4C11);
+        let keyed = (RUT_PAINT_FLOOR + (1.0 - RUT_PAINT_FLOOR) * floor
+            - RUT_PAINT_WALL * (wall * climb).powf(RUT_WALL_HOLD))
+        .clamp(0.0, 1.0);
         // And never a solid sheet of it. A line packs unevenly — damp here, blown out there —
         // and one texture at full coverage down the whole lap is the single thing that made
         // the line read as a stripe of paint rather than as ground.
