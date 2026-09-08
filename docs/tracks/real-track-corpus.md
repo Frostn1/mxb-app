@@ -137,7 +137,14 @@ Coverage across the twelve AMA venues: soil 12/12, lap times 12/12, acreage 9/12
 | `[ours]` published MX Bikes tracks | 1299–1767 m |
 
 MXGP laps are consistently about a mile. The AMA media figures of 1.2–1.5 mi sit above that
-band and are weakly sourced. **Budds Creek's widely-repeated "1.5 mile layout" fails a
+band and are weakly sourced.
+
+**Even MXGP's own lap lengths disagree across three primary sources** — the `mxgp.com/tracks/<venue>`
+sheet, the FIM Supplementary Regulations, and the length actually raced (from the classification
+header's `Classification after N laps (D km)`). Matterley Basin reads 2120 m on mxgp.com, 2035 m in
+the FIM SR, and was raced at 1640–2240 m across different years. Teutschenthal, Ernée, St Jean,
+Pietramurata, Uddevalla, Kegums and Riola all conflict too. **Use the raced length** — it is the one
+figure derived from timing rather than a brochure. **Budds Creek's widely-repeated "1.5 mile layout" fails a
 cross-check** — with its sourced lap times it implies a 46.2 mph average, 24% faster than any
 speed MXGP has ever recorded — and comes from an AI-generated aggregator. Do not use it.
 
@@ -145,13 +152,26 @@ speed MXGP has ever recorded — and comes from an AI-generated aggregator. Do n
 
 Signed FIM/Infront race classification PDFs, transponder timed, 8 GPs of 2026:
 
-| | Range |
-|---|---|
-| **Winner's race average** | **48.944 – 54.690 km/h** (13.6–15.2 m/s) |
-| **Fastest-lap average** | **50.390 – 59.949 km/h** (14.0–16.7 m/s) |
-| Fastest lap in the sample | Riola Sardo (sand), 59.949 km/h |
-| Slowest | Loket, 48.944 km/h race / 50.390 km/h fastest lap |
-| FIM regulatory ceiling | 65 km/h average |
+MXGP publishes average lap speed directly — every classification PDF footer reads
+`Average speed of winner: 52.288km/h // Fastest lap by ... with 53.683km/h`. **386 MXGP race
+classifications, 2014–2026**, were harvested from that endpoint:
+
+| Statistic | km/h | m/s |
+|---|---|---|
+| minimum (Ernée, wet) | 34.107 | 9.47 |
+| 10th percentile | 45.456 | 12.63 |
+| **median** | **50.586** | **14.05** |
+| mean | 50.023 | 13.90 |
+| 90th percentile | 53.850 | 14.96 |
+| maximum (Maggiora) | 58.863 | 16.35 |
+
+**An MXGP 450 averages about 50 km/h (14 m/s) over a race.** The dry working band is
+**45–54 km/h**; anything under 40 km/h in this corpus is a mud race. The FIM regulatory ceiling of
+65 km/h is never approached.
+
+**The fastest single lap anywhere in 386 races averages 60.525 km/h** (Jasikonis, Valkenswaard 2019
+qualifying, 1870 m). Riola Sardo 2026 is second and third at 59.9. That is the ceiling for a *lap
+average*, not a top speed.
 
 Source: `http://docs.mxgp.com/resultservice/ResPDF/2026/…` per-GP classification PDFs; corroborated at
 `https://results.mxgp.com/reslists.aspx?e=<eventId>&c=9` (2026 MXGP event ids 4101–4118).
@@ -160,9 +180,38 @@ Source: `http://docs.mxgp.com/resultservice/ResPDF/2026/…` per-GP classificati
 verified by enumerating every result type in the official timing system, not assumed. AMA timing
 publishes sector splits but no speed column and no track length, so an AMA average speed cannot
 be sourced at all. Stock-450 top speeds (KX450 83–94 mph, YZ450F 80 mph GPS) are media-only and
-second-hand. **Corner speeds, jump take-off speeds and airtime: not found anywhere.**
+second-hand. **Airtime: not found anywhere.** Corner and feature speeds *do* exist — see §2.3.
 
-#### 2.3 450 lap times, AMA nationals (official timing)
+#### 2.3 Corner and feature speeds — the one instrumented dataset
+
+Dirt Rider ran LAPD radar officers around Team Honda's private supercross test track (Canard,
+Seely, Tomac, Bogle; 50-second lap), published May 2015. It is the only instrumented corner-speed
+dataset in the sport.
+
+| Feature | mph | km/h | m/s |
+|---|---|---|---|
+| **Bowl turn — entry** | 36 | 57.9 | 16.1 |
+| **Bowl turn — apex (slowest point on the track)** | **17** | **27.4** | **7.6** |
+| **Bowl turn — exit** | 28 | 45.1 | 12.5 |
+| Flat turn | 24 | 38.6 | 10.7 |
+| Hump inside a turn | 19 | 30.6 | 8.5 |
+| Whoops, skimming | 34–38 | 54.7–61.2 | 15.2–17.0 |
+| Rhythm section (faster one) | 38 | 61.2 | 17.0 |
+| Step-on, step-off | 41 | 66.0 | 18.3 |
+| Dragon's back | 37 | 59.6 | 16.5 |
+| **Triple — approach** | 37 | 59.6 | 16.5 |
+| Triple — mid-air | 33 | 53.1 | 14.8 |
+| Finish-line double | 30 | 48.3 | 13.4 |
+| **Start** | **48** | **77.3** | **21.5** |
+
+**A hairpin is a 57.9 → 27.4 → 45.1 km/h event.** The apex is the slowest point on the whole track.
+
+Two caveats the article states itself: the radar reads **forward speed only**, so jump-face figures
+understate true speed by about 2–3 mph — a triple is approached at nearer 63 km/h than 59.6. And
+this is a *supercross* track; an outdoor hairpin is probably slower still at the apex, but no source
+says so and no number should be invented for it.
+
+#### 2.4 450 lap times, AMA nationals (official timing)
 
 Best laps run **1:53.851** (Hangtown 2026, Jett Lawrence) to **2:23.895** (Fox Raceway 2024).
 A full 30+2 moto is **15–18 laps**. Per venue, fastest sourced 450 best lap:
@@ -176,7 +225,7 @@ A full 30+2 moto is **15–18 laps**. Per venue, fastest sourced 450 best lap:
 | Southwick | 2:00.728 | Fox Raceway | 2:23.895 (slowest) |
 | Thunder Valley | 2:02.514 | High Point | 2:03.761 |
 
-#### 2.4 Turns per lap
+#### 2.5 Turns per lap
 
 Only two venues publish one: **High Point 18, Ironman 16** (both from the same Wikipedia infobox
 family, so effectively one source). MA defines a "curve" as a direction change **greater than 15°
@@ -185,9 +234,13 @@ with a radius under 300 m** — which is the only definition of a corner in any 
 `[ours]` published MX Bikes tracks measure 13–25 corners of 25°+ per lap. That is consistent with
 16–18, given the different counting threshold.
 
-#### 2.5 Elevation
+#### 2.6 Elevation
 
-**No venue publishes a per-lap climb or drop.** Only two named features anywhere have a measured
+**No venue publishes a per-lap climb or drop — and this holds for MXGP too.** The
+`mxgp.com/tracks/<venue>` sheets carry exactly two data fields, `Length` and `Type of soil`, and the
+FIM Supplementary Regulations template has only `Length` and `Minimum Width`. Turn counts are absent
+from both as well; Loket's often-quoted "16 curves" is a 1989 figure for a layout shortened twice
+since, and Teutschenthal's "7" counts *jumps*, not corners. Only two named features anywhere have a measured
 height: **Budds Creek's downhill at 112 ft (34 m), land-surveyed**, and **Spring Creek's Mt. Martin
 at 300 ft (91 m) of climb** (official).
 
@@ -195,7 +248,7 @@ Site altitude runs 40 ft (Budds Creek) to **6,400 ft (Thunder Valley — "the hi
 motocross event in the world", official)**. Altitude is a power correction, not a layout
 parameter, but Thunder Valley is a six-fold outlier and the only venue where it matters.
 
-#### 2.6 Soil — the one field with full coverage
+#### 2.7 Soil — the one field with full coverage
 
 | Family | Venues |
 |---|---|
@@ -210,7 +263,7 @@ parameter, but Thunder Valley is a six-fold outlier and the only venue where it 
 RedBud all sit on a hard native base with soil or sand trucked in and blended. The racing surface
 is imported.
 
-#### 2.7 Three premises that turned out to be false
+#### 2.8 Three premises that turned out to be false
 
 Worth recording because they are the kind of thing that gets repeated into a prompt:
 **LaRocco's Leap is at RedBud, not Millville** (Spring Creek's hill is Mt. Martin); RedBud's
@@ -602,11 +655,11 @@ real-world band.
 | berm bank angle | not stated | **unpublished.** Physics: 41.5° at 30 km/h through 8 m | no real check available |
 | rut depth | scale 0.86 → p50 ~0.21, p90 ~0.44 | **unpublished.** Proxy: worked layer ripped **0.10–0.30 m** | corroborated |
 | ruts per corner | meas 2.9 across the line | **5–6 per turn** (ex-pro) | counts differ; check |
-| `V_MAX` | 20 m/s = **72 km/h** | **no measured top speed exists.** MXGP fastest-lap *average* 50.4–59.9 km/h; FIM cap 65 km/h average | plausible ceiling |
-| lap average speed | model implies ~60 km/h | **MXGP race average 48.9–54.7 km/h** | **ours is above the real band** |
+| `V_MAX` | 20 m/s = **72 km/h** | **no measured top speed exists.** Radar: SX start **77.3 km/h**, step-on/off 66.0, whoops 54.7–61.2, triple approach ~63 | **a start already exceeds our ceiling** |
+| lap average speed | model implies ~60 km/h | **386 MXGP races: median 50.6, dry band 45–54 km/h**; fastest lap ever averages 60.5 | **ours sits at the all-time fastest lap** |
 | `P_SPEC` 22 W/kg | a 250's drive, to ground | 450 rear-wheel **37–45 kW**; code comment says 40 kW "at the crank" — that is the wheel figure | comment is slightly off |
 | `A_TRACTION` 3.4 m/s2 | corner-exit drive | LitPro start: **12.7 m/s2 (1.3 g)** over the first 4.6 m | a gate launch, not a corner exit — but check |
-| `A_LAT` 4.6 m/s2 | 20 m turn to 35 km/h | LitPro corner apex **~32 km/h** | agrees |
+| `A_LAT` 4.6 m/s2 | 10 m turn to 24, 20 m to 35 km/h | radar bowl-turn apex **27.4 km/h**; LitPro apex ~32 | agrees — implies a 13-16 m apex radius |
 | landing impact | not modelled | **10.7 g** landing, **18 g** rhythm transition | not modelled |
 | biggest jump on a lap | prompt 2.5-4.0 m, gap 15-25 m | signature jumps **30.5-45.7 m** lip to landing | ours describes ordinary jumps, not the famous one |
 | `terrain.surface` | soil / sand / grass | 12 AMA venues: sand, sandy loam over clay, clay, loam over clay, hardpack+imported | 3 classes covers it |
@@ -639,7 +692,11 @@ real-world band.
 4. **Cap whoop height** at 0.6–0.9 m. Currently unconstrained; every source agrees on the figure.
 5. **Add the 20 m run-up floor** per jump, alongside the existing speed check.
 6. **Widen the ridden line** — 4.2 m against a 6 m regulated minimum.
-7. **Check the speed model's average** against MXGP's 48.9–54.7 km/h rather than the assumed 60.
+7. **The speed model runs a whole lap too fast.** `trackspeed`'s comment reasons from "a 2 km lap
+   in about two minutes, which is a 60 km/h average". Across 386 official MXGP races the median is
+   **50.6 km/h** and the dry band is 45–54; 60 km/h is the *fastest lap ever recorded*. Everything
+   sized off that assumption — how much run a jump needs, where braking starts — inherits it.
+   Separately, `V_MAX` at 72 km/h is below the 77.3 km/h a radar caught on a start straight.
 8. **`START_SPRINT_M` 70 → 80–120** to match FIM's recommendation, and `START_LINE_M` 150 is longer
    than any published start.
 
