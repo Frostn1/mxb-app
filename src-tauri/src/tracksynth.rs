@@ -110,6 +110,12 @@ const BENCH_BLEND_M: f32 = 1.0;
 /// How far the riding surface stands above the ground it was graded out of.
 const DECK_LIFT_M: f32 = 1.35;
 
+/// How far either side of a station the deck looks for the ground it should sit on top of.
+///
+/// A track's own width, near enough: the deck has to clear the rise it crosses, and a rise
+/// narrower than the track is one the grading swallows anyway.
+const RIDGE_WINDOW_M: f32 = 16.0;
+
 /// How far the grading reaches here: a cut's short face, a fill's long slope, or between.
 fn bench_shoulder(ground: f32, deck: f32) -> f32 {
     let cut = smoothstep(((ground - deck) / BENCH_BLEND_M).clamp(0.0, 1.0));
@@ -945,11 +951,26 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         .iter()
         .map(|st| sample(&heights, gw, gh, st.x / mps_x, st.z / mps_z))
         .collect();
+    // The high ground, not the mean of it. A deck averaged along the lap sits below every
+    // rise it crosses, so the track is cut into each one and the rider is in a trench with
+    // the banners along the rim — "we are back to be inside the ground". Taking the local
+    // ridge instead and smoothing *that* puts the circuit on top of its site: it crests the
+    // rises and fills the hollows, which is what a machine does to build one.
+    let ridge = (RIDGE_WINDOW_M / STATION_STEP).round() as usize;
+    if ridge > 0 {
+        let src = along.clone();
+        let n = src.len();
+        for (i, v) in along.iter_mut().enumerate() {
+            let mut hi = f32::MIN;
+            for k in i.saturating_sub(ridge)..(i + ridge + 1).min(n) {
+                hi = hi.max(src[k]);
+            }
+            *v = hi;
+        }
+    }
     smooth_along(&mut along, (BENCH_SMOOTH_M / STATION_STEP) as usize);
-    // Stood proud of it. On the smoothed landscape every rise the lap crosses is ground
-    // standing higher than the track, so the circuit is a trench you cannot see out of or
-    // along — "stop cutting into the ground the entire track, I want to be able to see the
-    // track". A built track is graded up out of its site.
+    // And stood proud of that again, so the surface is fill even where the smoothing dips it
+    // back under the ridge it came from.
     for v in along.iter_mut() {
         *v += DECK_LIFT_M;
     }
@@ -6830,6 +6851,67 @@ mod tests {
             );
             let _ = y1;
         }
+    }
+
+    /// How much of the lap is cut into the ground rather than standing on it.
+    ///
+    /// "Stop with the cutting into the ground the entire track, I want to be able to see the
+    /// track", and then again: "we are back to be inside the ground". A rider in a cut cannot
+    /// see the circuit ahead of them, which is most of what reading a track is.
+    #[test]
+    #[ignore]
+    fn how_deep_is_the_cut() {
+        let p: TrackProgram = match std::env::var("FROST_PROGRAM") {
+            Ok(path) => serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(),
+            Err(_) => serde_json::from_str(DEMO).unwrap(),
+        };
+        let s = synthesise(&p).unwrap();
+        // The field beside the track against the track itself, both off the built ground —
+        // which is what a rider sees. Being "in the ground" is the field standing over the
+        // deck; a datum comparison against the raw landscape cannot say, because the finished
+        // heights are shifted into the terrain's own budget.
+        let at = |x: f32, z: f32| -> f32 {
+            let gx = (x / s.mps).round().clamp(0.0, (s.gw - 1) as f32) as usize;
+            let gy = (z / s.mps).round().clamp(0.0, (s.gh - 1) as f32) as usize;
+            s.heights[gy * s.gw + gx]
+        };
+        let mut cut: Vec<f32> = Vec::new();
+        let mut rim: Vec<f32> = Vec::new();
+        for st in s.stations.iter() {
+            let (rx, rz) = crate::trackprog::right_vector(st.heading);
+            let deck = at(st.x, st.z);
+            let side = |d: f32| {
+                at(st.x + rx * d, st.z + rz * d).max(at(st.x - rx * d, st.z - rz * d)) - deck
+            };
+            // Just outside the track, which is the rim a rider is looking over, and out in
+            // the field, which is the site.
+            rim.push(side(12.0));
+            cut.push(side(26.0));
+        }
+        {
+            let mut r = rim.clone();
+            r.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let q = |f: f32| r[((r.len() - 1) as f32 * f) as usize];
+            println!(
+                "  the rim 12 m out: p50 {:+.2} m  p90 {:+.2}  max {:+.2}  — over the deck on {:.0}% of the lap",
+                q(0.5), q(0.9), r[r.len() - 1],
+                rim.iter().filter(|v| **v > 0.25).count() as f32 / rim.len() as f32 * 100.0
+            );
+        }
+        let n = cut.len() as f32;
+        let in_cut = cut.iter().filter(|c| **c > 0.25).count() as f32 / n;
+        let deep = cut.iter().filter(|c| **c > 1.5).count() as f32 / n;
+        let mut sorted = cut.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let q = |f: f32| sorted[((sorted.len() - 1) as f32 * f) as usize];
+        println!(
+            "  field beside the track, above the deck: p10 {:+.2} m  p50 {:+.2}  p90 {:+.2}  max {:+.2}",
+            q(0.1), q(0.5), q(0.9), sorted[sorted.len() - 1]
+        );
+        println!(
+            "  {:.0}% of the lap is in a cut at all, {:.0}% of it deeper than 1.5 m",
+            in_cut * 100.0, deep * 100.0
+        );
     }
 
     /// Where the steepest ground on the riding line actually is.

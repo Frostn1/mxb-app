@@ -256,19 +256,43 @@ def grow(rng, plot, width, want_m):
         # What a rider could be given next: a run, or a turn of one of three tightnesses
         # either way. Runs are what carry the lap across the ground; turns are what keep it
         # inside the plot.
-        moves = [{"kind": "straight", "length": rng.uniform(55.0, 135.0), "rise": 0.0}]
+        moves = [{"kind": "straight", "length": rng.uniform(35.0, 80.0), "rise": 0.0}]
+        # The lap's own wander, and most of what it is made of. A published track is a chain
+        # of arcs — Indiana runs 109 of them against 11 straights — but they average twenty
+        # degrees apiece, not a hundred. Without this move every piece of the lap was a real
+        # corner, which is the slalom: twenty-six arcs averaging 96 degrees, flipping
+        # direction fifteen times.
+        for _ in range(3):
+            r = rng.uniform(48.0, 160.0)
+            for side in (1.0, -1.0):
+                moves.append({"kind": "arc", "radius": r * side,
+                              "angle": rng.uniform(11.0, 32.0), "rise": 0.0})
         for r in turn_r:
             for side in (1.0, -1.0):
                 # A hairpin turns most of the way round. Getting the tight ground a lap needs
                 # out of many small tight corners costs a corner apiece — forty of them,
                 # where a published track carries ten to thirty — while three real hairpins
                 # carry the same metres and read as corners a rider remembers.
-                ang = rng.uniform(105.0, 178.0) if r < 14.0 else rng.uniform(35.0, 115.0)
+                ang = rng.uniform(120.0, 178.0) if r < 14.0 else rng.uniform(55.0, 108.0)
                 moves.append({"kind": "arc", "radius": r * side,
                               "angle": ang, "rise": 0.0})
         rng.shuffle(moves)
+        # No corner straight into the opposite corner. That is what a slalom is, and it is
+        # what the ground between them cannot carry: a rider needs somewhere to stand the
+        # bike up. Two gentle bends may still answer each other, because that is a lap
+        # wandering rather than a rider being thrown from edge to edge.
+        prev = segs[-1] if segs else None
+        def slaloms(m):
+            if prev is None or prev["kind"] != "arc" or m["kind"] != "arc":
+                return False
+            if (prev["radius"] > 0.0) == (m["radius"] > 0.0):
+                return False
+            return max(prev["angle"], m["angle"]) >= 38.0
+
         best, best_score = None, -1e9
         for m in moves:
+            if slaloms(m):
+                continue
             # Ignore the last thirty metres of track when checking clearance: a corner is
             # allowed to come close to the run that fed it.
             if not legal(pose, m, laid - 34.0):
@@ -399,14 +423,18 @@ def main():
         "terrain": {
             "sizeX": plot, "sizeZ": plot, "samples": 2049,
             "scale": rng.choice([63, 70]),
+            # Gently rolling, and no more. A lap is benched into whatever it crosses, so
+            # ground with twenty metres of landform in it puts the track in a trench with
+            # the banners along the rim of the cut — "we are back to be inside the ground".
+            # A motocross venue is a field with shape in it, not a hillside.
             "relief": {
-                "amplitude": round(rng.uniform(5.0, 11.0), 1),
+                "amplitude": round(rng.uniform(4.2, 7.5), 1),
                 "wavelength": rng.choice([320, 380, 420, 480]),
                 "seed": seed % 9973, "texture": 0.085,
-                "tilt": round(rng.uniform(10.0, 30.0), 1),
+                "tilt": round(rng.uniform(6.0, 16.0), 1),
                 "tiltAngle": round(rng.uniform(0.0, 359.0), 1),
-                "landforms": rng.randint(4, 8),
-                "landformHeight": round(rng.uniform(10.0, 22.0), 1),
+                "landforms": rng.randint(2, 4),
+                "landformHeight": round(rng.uniform(2.0, 5.0), 1),
             },
         },
         "start": {"x": round(start[0], 2), "z": round(start[1], 2),

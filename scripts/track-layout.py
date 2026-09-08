@@ -309,6 +309,18 @@ def fillet(pts, rng, width):
     return segs, (round(sx, 2), round(sz, 2), round(heading, 2))
 
 
+def faces(height):
+    """How much run a jump's own faces take, metres — the app's `tabletop_faces`, here.
+
+    The face is an arc tangent to the ground, so its run is the height over the tangent of
+    *half* the angle: a 4 m lip at 27 degrees is sixteen metres of ground before the deck
+    starts, and its landing at 19 is twenty-four more.
+    """
+    up = max(height / math.tan(math.radians(27.0 * 0.5)), 9.0)
+    down = max(height / math.tan(math.radians(19.0 * 0.5)), 9.0)
+    return up + down
+
+
 def features(rng, segs):
     """Jumps down the lap, by distance round it rather than by which segment they land on.
 
@@ -348,9 +360,15 @@ def features(rng, segs):
             # Long enough for the speed carried at it: "tables are super short, I have so
             # much speed for each one but they are small". A 22 m table taken at fifty is a
             # kicker rather than a jump.
-            length = round(min(rng.uniform(32.0, 46.0), room), 1)
+            # Asked for as a *deck*, with the faces added on. A table's size is its deck:
+            # the faces are set by the published lip and landing angles and come to thirty-odd
+            # metres on their own, so stating a 40 m table asked for a 6 m top and got a long
+            # rounded hill with a crest on it.
+            height = round(rng.uniform(3.4, 4.6), 2)
+            deck = rng.uniform(16.0, 27.0)
+            length = round(min(deck + faces(height), room), 1)
             out.append({"kind": "tabletop", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(3.4, 4.6), 2)})
+                        "height": height})
         elif pick < 0.55 and room > 30.0:
             # And a table is not always flat end to end. A whale tail rises, dips over its
             # middle and rises again before the landing — two crests a rider can either

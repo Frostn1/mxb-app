@@ -646,8 +646,13 @@ pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
     // tabletop gets a 2.6 m ramp where 27% of a 22 m length gave it 5.9 m — which is the same
     // way round as it bit on the double. The angle is a ceiling for the tall ones, not a
     // target for all of them.
-    let up = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M).max(length * 0.27);
-    let down = face_run(height, JUMP_LANDING_DEG, JUMP_LANDING_MIN_M).max(length * 0.44);
+    // Sized by the angle alone. Keeping the old fractions as a floor made the ramps grow
+    // with the stated length, so asking for a *longer* table bought ramp rather than deck:
+    // a 3.6 m tabletop asked for at 49 m got 35 m of ramp and a 14 m top, which from the
+    // seat is a long rounded hill with a crest on it and not a table at all. A table's size
+    // is its deck.
+    let up = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M);
+    let down = face_run(height, JUMP_LANDING_DEG, JUMP_LANDING_MIN_M);
     // Whatever the asked-for length has left once the faces are in it — but never less than a
     // deck. The deck wins and the footprint grows; the other way round, keeping the length by
     // steepening the faces to fit a top inside it, is the same jump built worse.
