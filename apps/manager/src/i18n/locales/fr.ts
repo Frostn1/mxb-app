@@ -2014,4 +2014,11 @@ export const fr: Translation = {
   "category.helmet": "Casque",
   "category.boots": "Bottes",
   "category.protection": "Protections",
+  "studioApp.title": "Frost's Studio",
+  "studioApp.pitch": "Les décos, les circuits et l'équipement du pilote se font dans Frost's Studio — son propre logiciel, pour que les outils aient la place qu'il leur faut et que celui-ci reste un gestionnaire de mods.",
+  "studioApp.open": "Ouvrir Frost's Studio",
+  "studioApp.download": "Obtenir Frost's Studio",
+  "studioApp.installed": "Installé, version {{version}}.",
+  "studioApp.notInstalled": "Pas encore installé sur ce PC.",
+  "studioApp.launchFailed": "Impossible de lancer Frost's Studio",
 };

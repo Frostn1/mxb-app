@@ -2003,4 +2003,11 @@ export const ptBR: Translation = {
   "category.helmet": "Capacete",
   "category.boots": "Botas",
   "category.protection": "Proteções",
+  "studioApp.title": "Frost's Studio",
+  "studioApp.pitch": "Pinturas, pistas e equipamento do piloto são feitos no Frost's Studio — um app próprio, para as ferramentas terem espaço e este continuar sendo um gerenciador de mods.",
+  "studioApp.open": "Abrir o Frost's Studio",
+  "studioApp.download": "Baixar o Frost's Studio",
+  "studioApp.installed": "Instalado, versão {{version}}.",
+  "studioApp.notInstalled": "Ainda não instalado neste PC.",
+  "studioApp.launchFailed": "Não foi possível iniciar o Frost's Studio",
 };

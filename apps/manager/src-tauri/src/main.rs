@@ -5992,6 +5992,8 @@ fn main() {
             // wrapper below infer what it is wrapping.
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             window_painted,
+            studio_install,
+            launch_studio,
             scan_rider_targets,
             scan_bike_targets,
             reveal_in_explorer,
@@ -7425,3 +7427,175 @@ fn sync_profile(cfg: &AppConfig) -> Option<String> {
 fn bike_preview_available() -> bool {
     cfg!(sidecar)
 }
+// ─────────────────────────────────────────────────────────────────────────────────────
+// Finding and starting Frost's Studio.
+// ─────────────────────────────────────────────────────────────────────────────────────
+
+/// Where Frost's Studio is installed, if it is.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StudioInstall {
+    /// The binary to start. Absolute.
+    path: String,
+    /// What the installer recorded, when it recorded one. Empty on macOS and Linux, where
+    /// there is no registry to ask.
+    version: String,
+}
+
+/// The product name the studio ships under. Its install is filed under this, not under the
+/// Cargo target name — see `apps/studio/src-tauri/tauri.conf.json`.
+const STUDIO_PRODUCT: &str = "Frost Studio";
+
+/// Read one string value out of HKCU.
+///
+/// Same three-line `advapi32` shape as [`startup_vetoed`], asking for a string instead of
+/// the binary blob that one reads.
+#[cfg(windows)]
+fn hkcu_string(subkey: &str, value: &str) -> Option<String> {
+    use std::os::raw::c_void;
+
+    const HKEY_CURRENT_USER: isize = -2147483647; // 0x80000001
+    const RRF_RT_REG_SZ: u32 = 0x0000_0002;
+
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn RegGetValueW(
+            hkey: isize,
+            subkey: *const u16,
+            value: *const u16,
+            flags: u32,
+            typ: *mut u32,
+            data: *mut c_void,
+            data_len: *mut u32,
+        ) -> i32;
+    }
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    let sk = wide(subkey);
+    let v = wide(value);
+    let mut buf = [0u16; 512];
+    let mut len = (buf.len() * 2) as u32;
+    // SAFETY: a read-only registry query into a fixed stack buffer. `data_len` is in bytes
+    // going in and coming out, which is why it is sized from `len() * 2`.
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            sk.as_ptr(),
+            v.as_ptr(),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            buf.as_mut_ptr() as *mut c_void,
+            &mut len,
+        )
+    };
+    if rc != 0 {
+        return None;
+    }
+    let chars = (len as usize / 2).saturating_sub(1).min(buf.len());
+    let s = String::from_utf16_lossy(&buf[..chars]);
+    (!s.trim().is_empty()).then(|| s.trim().to_string())
+}
+
+/// Is Frost's Studio installed, and where?
+///
+/// Windows can answer properly: Tauri's NSIS template records the install directory under
+/// `Software\<publisher>\<product>` and the version under the Uninstall key. Elsewhere the
+/// answer is a search of the usual places, because there is nothing to ask — and an AppImage
+/// cannot be found at all, which is what `studio_path` in the config is for.
+#[tauri::command]
+fn studio_install(app: tauri::AppHandle) -> Option<StudioInstall> {
+    // A path the player pointed at wins: it is the only thing that can find an AppImage, and
+    // someone who has set it means it. Same shape as `reshade_path`.
+    if let Ok(cfg) = config::load(&app) {
+        let manual = cfg.studio_path.trim();
+        if !manual.is_empty() && std::path::Path::new(manual).exists() {
+            return Some(StudioInstall { path: manual.to_string(), version: String::new() });
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let dir = hkcu_string(&format!("Software\\Frost\\{STUDIO_PRODUCT}"), "")?;
+        let exe = std::path::Path::new(&dir).join(format!("{STUDIO_PRODUCT}.exe"));
+        // The key outlives a failed uninstall, so the file is what actually answers this.
+        if !exe.is_file() {
+            return None;
+        }
+        let version = hkcu_string(
+            &format!(
+                "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{STUDIO_PRODUCT}"
+            ),
+            "DisplayVersion",
+        )
+        .unwrap_or_default();
+        return Some(StudioInstall { path: exe.to_string_lossy().into_owned(), version });
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        for base in ["/Applications", "~/Applications"] {
+            let base = if let Some(rest) = base.strip_prefix("~/") {
+                dirs_next::home_dir()?.join(rest)
+            } else {
+                std::path::PathBuf::from(base)
+            };
+            let bundle = base.join(format!("{STUDIO_PRODUCT}.app"));
+            if bundle.is_dir() {
+                return Some(StudioInstall {
+                    path: bundle.to_string_lossy().into_owned(),
+                    version: String::new(),
+                });
+            }
+        }
+        None
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let mut roots: Vec<std::path::PathBuf> = std::env::var("PATH")
+            .map(|p| std::env::split_paths(&p).collect())
+            .unwrap_or_default();
+        if let Some(home) = dirs_next::home_dir() {
+            roots.push(home.join(".local/bin"));
+        }
+        roots.push(std::path::PathBuf::from("/usr/bin"));
+        roots.push(std::path::PathBuf::from("/usr/local/bin"));
+        for r in roots {
+            let p = r.join("mxb-studio");
+            if p.is_file() {
+                return Some(StudioInstall {
+                    path: p.to_string_lossy().into_owned(),
+                    version: String::new(),
+                });
+            }
+        }
+        None
+    }
+}
+
+/// Start Frost's Studio.
+///
+/// Spawned directly rather than through `plugin-shell`'s `open()`: that hands the path to the
+/// OS default handler, which on Linux is `xdg-open` and will not run an AppImage, and is the
+/// wrong thing entirely for a macOS bundle path. Doing it here also means a real error
+/// string for the toast.
+#[tauri::command]
+fn launch_studio(app: tauri::AppHandle) -> Result<(), String> {
+    let found = studio_install(app).ok_or("Frost's Studio isn't installed")?;
+    let path = std::path::PathBuf::from(&found.path);
+
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg(&path);
+        c
+    };
+    #[cfg(not(target_os = "macos"))]
+    let mut cmd = std::process::Command::new(&path);
+
+    cmd.spawn().map(|_| ()).map_err(|e| format!("couldn't start Frost's Studio: {e}"))
+}
+

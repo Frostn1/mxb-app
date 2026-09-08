@@ -1979,4 +1979,11 @@ export const en = {
   "category.helmet": "Helmet",
   "category.boots": "Boots",
   "category.protection": "Protection",
+  "studioApp.title": "Frost's Studio",
+  "studioApp.pitch": "Paints, tracks and rider kit are made in Frost's Studio — its own app, so the tools get the room they need and this one stays a mod manager.",
+  "studioApp.open": "Open Frost's Studio",
+  "studioApp.download": "Get Frost's Studio",
+  "studioApp.installed": "Installed, version {{version}}.",
+  "studioApp.notInstalled": "Not installed on this PC yet.",
+  "studioApp.launchFailed": "Couldn't start Frost's Studio",
 } as const;

@@ -18,6 +18,10 @@
   have a new version waiting. Turn on Auto and they install themselves.
 
 ### Changed
+- The paint Designer, Paint Studio, Track Studio, the Rider and the content tools are now
+  Frost's Studio, an app of their own. The Studio tab points you at it: it opens the app if
+  you have it, and gets it for you if you don't. Your paints, tracks and presets are
+  untouched — both apps read the same folders.
 - Opening a server asks it for fresh numbers, so the riders, the session and the track are what
   they are now rather than what they were when the list loaded.
 - The app is now Frost's Mod Manager, with a new name and a new mark. Installing this

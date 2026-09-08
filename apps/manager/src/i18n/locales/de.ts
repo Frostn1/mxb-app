@@ -2022,4 +2022,11 @@ export const de: Translation = {
   "category.helmet": "Helm",
   "category.boots": "Stiefel",
   "category.protection": "Protektoren",
+  "studioApp.title": "Frost's Studio",
+  "studioApp.pitch": "Lackierungen, Strecken und Fahrerausrüstung entstehen in Frost's Studio — einer eigenen App, damit die Werkzeuge Platz haben und diese hier ein Mod-Manager bleibt.",
+  "studioApp.open": "Frost's Studio öffnen",
+  "studioApp.download": "Frost's Studio holen",
+  "studioApp.installed": "Installiert, Version {{version}}.",
+  "studioApp.notInstalled": "Auf diesem PC noch nicht installiert.",
+  "studioApp.launchFailed": "Frost's Studio konnte nicht gestartet werden",
 };
