@@ -123,7 +123,7 @@ fn recovered_name(files: &[PathBuf], area: &str) -> String {
         .map(str::trim)
         .filter(|s| !s.is_empty());
     match ini {
-        Some(name) => crate::install::sanitize(name),
+        Some(name) => mxb_core::names::sanitize(name),
         // `helmets` → `helmet`; `protections` → `protection`. Crude, and only ever seen by
         // someone whose mod shipped no descriptor at all.
         None => format!("Recovered {}", area.strip_suffix('s').unwrap_or(area)),
@@ -153,7 +153,7 @@ fn plan_area(dir: &Path, area: &str) -> Option<GearRepair> {
                 // A packaged model belongs here; junk is not worth moving and not worth
                 // reporting as if it were someone's helmet.
                 let packaged = p.extension().is_some_and(|x| x.eq_ignore_ascii_case("pkz"));
-                if !packaged && !crate::install::is_junk(&name) {
+                if !packaged && !mxb_core::names::is_junk(&name) {
                     files.push(p);
                 }
             }
@@ -249,9 +249,9 @@ fn plan_one_buried(dir: &Path, area: &str, folder: &str, path: &Path) -> Option<
             // model beside the package. Not this.
             Ok(m) if m.is_dir() => return None,
             Ok(m) if m.is_file() => {
-                if crate::install::has_ext(&p, "pkz") {
+                if mxb_core::names::has_ext(&p, "pkz") {
                     packages.push(name);
-                } else if !crate::install::is_junk(&name) {
+                } else if !mxb_core::names::is_junk(&name) {
                     return None;
                 }
             }

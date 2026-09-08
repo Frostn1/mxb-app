@@ -18,11 +18,11 @@ use std::path::{Component, Path, PathBuf};
 // The control-plane address moved to `mxb_core::names` when a second binary needed it.
 // Re-exported here because seven modules already say `paintsync::control_plane`, and the
 // address is a paint-sync fact as much as anyone's.
-pub use mxb_core::names::control_plane;
+pub use mxb_core::names::{control_plane, safe_dest};
 
 /// Only `.pnt` files are shared. Models are directories and often large, and none of the
 /// non-paint slots carry a file a receiver could use.
-const PAINT_EXT: &str = "pnt";
+use mxb_core::names::PAINT_EXT;
 
 /// Does this path name a paint? Extension only — the bytes are the decoder's business.
 pub fn is_paint(path: &Path) -> bool {
@@ -92,60 +92,6 @@ pub struct RemoveOutcome {
 /// player, and this is where it becomes a real path. A value like `../../mxbikes.ini`, an
 /// absolute path or a Windows drive letter would each escape the mods folder and let one
 /// player overwrite arbitrary files on everyone else's machine. The control plane rejects
-/// those too, but only this check actually protects a disk, so it does not trust it.
-pub fn safe_dest(mods_dir: &Path, rel_dest: &str) -> Option<PathBuf> {
-    let rel = rel_dest.trim();
-    if rel.is_empty() || rel.len() > 256 {
-        return None;
-    }
-    // One separator form to reason about; a backslash would be a path separator on Windows
-    // while looking like an ordinary character to a naive check.
-    if rel.contains('\\') {
-        return None;
-    }
-    if rel.starts_with('/') {
-        return None;
-    }
-    // `C:` and friends.
-    if rel.as_bytes().get(1) == Some(&b':') {
-        return None;
-    }
-    if rel.chars().any(|c| c.is_control()) {
-        return None;
-    }
-
-    let mut out = mods_dir.to_path_buf();
-    let mut segments = 0usize;
-    for segment in rel.split('/') {
-        if segment.is_empty() || segment == "." || segment == ".." {
-            return None;
-        }
-        // Reject anything the OS would interpret as more than a plain name.
-        let as_path = Path::new(segment);
-        if as_path.components().count() != 1
-            || !matches!(as_path.components().next(), Some(Component::Normal(_)))
-        {
-            return None;
-        }
-        out.push(segment);
-        segments += 1;
-    }
-    if segments < 2 {
-        // A bare filename would drop a paint at the root of the mods folder, which is never
-        // where one belongs.
-        return None;
-    }
-    if out.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase)
-        != Some(PAINT_EXT.to_string())
-    {
-        return None;
-    }
-    // Belt and braces: whatever the segment walk produced must still sit under the root.
-    if !out.starts_with(mods_dir) {
-        return None;
-    }
-    Some(out)
-}
 
 pub fn sha256_file(path: &Path) -> anyhow::Result<String> {
     let bytes = std::fs::read(path)?;

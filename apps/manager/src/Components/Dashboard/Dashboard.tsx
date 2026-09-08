@@ -9,8 +9,6 @@ import Downloads from "../Downloads/Downloads";
 import Locker from "../Locker/Locker";
 import Presets from "../Presets/Presets";
 import Manage from "../Manage/Manage";
-import Secure from "../Secure/Secure";
-import Studio, { type StudioTab } from "../Studio/Studio";
 import Browse from "../Browse/Browse";
 import Servers from "../Servers/Servers";
 import Shop from "../Shop/Shop";
@@ -24,7 +22,6 @@ import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import ReleaseShowcase from "../Showcase/ReleaseShowcase";
 import { useReleaseShowcase } from "../Showcase/useReleaseShowcase";
 import { InstallProvider } from "../../Context/Install";
-import { TrackBuildProvider } from "../../Context/TrackBuild";
 import { DownloadsProvider } from "../../Context/Downloads";
 import { DropReviewProvider } from "../../Context/DropReview";
 import { ShareProvider } from "../../Context/Share";
@@ -33,7 +30,7 @@ import { modTypesFor, setIntroSeen } from "@frost/shared/api/mods";
 import { useModBrowsing } from "../../lib/useModBrowsing";
 import { displayName } from "@frost/shared/lib/mods";
 import { track } from "../../lib/analytics";
-import type { DownloadRecord, Loadout } from "@frost/shared/types";
+import type { DownloadRecord } from "@frost/shared/types";
 
 interface DashboardProps {
   /** True while the Welcome slideshow is still up. The tour waits for it to close
@@ -44,13 +41,6 @@ interface DashboardProps {
 const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   const { config, game } = useConfig();
   const [view, setView] = useState<DashboardView>("browse");
-  // A preset handed off from the Presets tab to load in the Rider tab (its
-  // "View in Rider" button). Consumed once by the Rider view, then cleared.
-  const [riderPreset, setRiderPreset] = useState<Loadout | null>(null);
-  const [riderBike, setRiderBike] = useState<string | null>(null);
-  // Which Studio sub-view is open. Here rather than inside `Studio` because two things
-  // outside it open the Studio *at* a sub-view — Presets' "View in Rider", and the tour.
-  const [studioTab, setStudioTab] = useState<StudioTab>("designer");
 
   const showBrowse = useCallback(() => setView("browse"), []);
   const {
@@ -98,9 +88,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // one name, so a tab added to the sidebar is counted without touching this.
   const page = view.startsWith("plugin:")
     ? "view.plugin"   // one bucket: naming each panel would be unbounded cardinality
-    : view === "studio"
-      ? `view.studio.${studioTab}`
-      : `view.${view}`;
+    : `view.${view}`;
   useEffect(() => {
     track(page);
   }, [page]);
@@ -111,9 +99,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   }, [selectedSlug]);
 
   const navigate = useCallback(
-    (v: DashboardView, studio?: StudioTab) => {
+    (v: DashboardView) => {
       setView(v);
-      if (studio) setStudioTab(studio);
       closeMod();
       if (v !== "settings") setSettingsSection(undefined);
     },
@@ -189,15 +176,6 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   const [ctxRight, setCtxRight] = useState<HTMLDivElement | null>(null);
   const ctxSlots = useMemo(() => ({ left: ctxLeft, right: ctxRight }), [ctxLeft, ctxRight]);
 
-  // Jump from Presets into the Rider tab with a preset loaded, to view it on the model.
-  const openInRider = useCallback((lo: Loadout, bike: string) => {
-    setRiderPreset(lo);
-    // The bike rides along: a loadout names a livery and a model swap but never the bike
-    // they belong to, so without this the Rider tab would dress whichever bike it landed on.
-    setRiderBike(bike);
-    navigate("studio", "rider");
-  }, [navigate]);
-  const clearRiderPreset = useCallback(() => setRiderPreset(null), []);
 
   return (
     <TourContext.Provider value={{ startTour }}>
@@ -209,10 +187,6 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
         anywhere in the window and the Shop's purchases grid both finish in this one sheet. */}
     <DropReviewProvider onInstalled={onInstalled}>
     <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
-    {/* Above the views, because the Studio is unmounted the moment you look at another one
-        and compiling a track is a minute of work — held here it keeps going, keeps its bar,
-        and is still there when you come back. */}
-    <TrackBuildProvider onInstalled={onInstalled}>
       {/* Owns the share/import dialogs for every screen that lists installed content, and
           watches for a share code pasted into the window. */}
       <ShareProvider onImported={onInstalled}>
@@ -222,7 +196,6 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
       <DropZone />
       <TopRail
         view={view}
-        studioTab={studioTab}
         plugins={plugins}
         onNavigate={navigate}
         leftRef={setCtxLeft}
@@ -279,22 +252,11 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
             <Locker />
           ) : view === "presets" ? (
             <Presets
-              onOpenInRider={openInRider}
               onOpenLocker={() => setView("locker")}
               onOpenSettings={() => openSettingsSection("folder")}
             />
-          ) : view === "studio" ? (
-            <Studio
-              tab={studioTab}
-              onTab={setStudioTab}
-              riderPreset={riderPreset}
-              riderBike={riderBike}
-              onRiderPresetLoaded={clearRiderPreset}
-            />
           ) : view === "manage" ? (
             <Manage />
-          ) : view === "secure" ? (
-            <Secure />
           ) : (
             <Settings
               initialSection={settingsSection}
@@ -315,7 +277,6 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
         />
       )}
       </ShareProvider>
-    </TrackBuildProvider>
       </InstallProvider>
     </DropReviewProvider>
     </DownloadsProvider>

@@ -864,26 +864,6 @@ fn scan_generic(dir: &Path) -> Vec<LibraryEntry> {
     out
 }
 
-pub fn scan_library(
-    mods_path: &str,
-    subpath: &str,
-    sound_bikes: &[String],
-    game: &GameProfile,
-) -> anyhow::Result<Vec<LibraryEntry>> {
-    let dir = mods_subdir(mods_path, subpath);
-    if !dir.exists() {
-        return Ok(vec![]);
-    }
-    let kind = subpath.rsplit(['/', '\\']).find(|s| !s.is_empty()).unwrap_or("");
-    Ok(match kind {
-        "tracks" => scan_tracks(&dir),
-        "bikes" => scan_bikes(&dir, sound_bikes),
-        "rider" => scan_rider(&dir, game),
-        // `tyres`, and GP Bikes' `misc/{dashes,stands}` — folders of `.pkz` with no
-        // internal structure to read, which is exactly what `scan_generic` handles.
-        _ => scan_generic(&dir),
-    })
-}
 
 #[cfg(test)]
 mod tests {
@@ -1421,4 +1401,26 @@ mod path_case_tests {
         assert!(got.ends_with("tracks"), "nothing on disk yet, so use what we asked for");
         let _ = std::fs::remove_dir_all(&root);
     }
+}
+
+
+pub fn scan_library(
+    mods_path: &str,
+    subpath: &str,
+    sound_bikes: &[String],
+    game: &GameProfile,
+) -> anyhow::Result<Vec<LibraryEntry>> {
+    let dir = mods_subdir(mods_path, subpath);
+    if !dir.exists() {
+        return Ok(vec![]);
+    }
+    let kind = subpath.rsplit(['/', '\\']).find(|s| !s.is_empty()).unwrap_or("");
+    Ok(match kind {
+        "tracks" => scan_tracks(&dir),
+        "bikes" => scan_bikes(&dir, sound_bikes),
+        "rider" => scan_rider(&dir, game),
+        // `tyres`, and GP Bikes' `misc/{dashes,stands}` — folders of `.pkz` with no
+        // internal structure to read, which is exactly what `scan_generic` handles.
+        _ => scan_generic(&dir),
+    })
 }

@@ -5275,4 +5275,3 @@ mod no_mesh_tests {
         assert!(!crate::edf::is_edf(&[0xfe, 0x9c, 0xa5, 0x6a, 0, 0, 0, 0]));
     }
 }
-

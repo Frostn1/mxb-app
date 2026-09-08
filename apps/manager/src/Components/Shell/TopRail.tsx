@@ -6,12 +6,10 @@ import type { LoadedPlugin } from "@/lib/pluginHost";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useGameRunning } from "../../lib/useGameRunning";
 import { useT } from "@/i18n";
-import { launchGame, contentLockAvailable, contentSecureAvailable } from "@frost/shared/api/mods";
+import { launchGame } from "@frost/shared/api/mods";
 import type { GameCaps } from "@frost/shared/types";
-import type { StudioTab } from "../Studio/Studio";
 import { RAIL, railItemFor, type DashboardView, type RailItem } from "./nav";
 import DownloadQueue from "./DownloadQueue";
-import TrackBuildBadge from "./TrackBuildBadge";
 import Brand from "./Brand";
 import ContextBar from "./ContextBar";
 import WindowControls, { IS_MAC } from "./WindowControls";
@@ -21,9 +19,8 @@ const STARTING_TIMEOUT_MS = 15000;
 
 interface TopRailProps {
   view: DashboardView;
-  studioTab: StudioTab;
   plugins: LoadedPlugin[];
-  onNavigate: (view: DashboardView, studio?: StudioTab) => void;
+  onNavigate: (view: DashboardView) => void;
   /** Where the mounted screen portals its own toolbar — see `ContextBar`. */
   leftRef: Ref<HTMLDivElement>;
   rightRef: Ref<HTMLDivElement>;
@@ -41,19 +38,12 @@ interface TopRailProps {
  * `data-tauri-drag-region={undefined}` by simply being a button — Tauri only drags from
  * elements carrying the attribute.
  */
-export default function TopRail({ view, studioTab, plugins, onNavigate, leftRef, rightRef }: TopRailProps) {
+export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }: TopRailProps) {
   const t = useT();
   const { game } = useConfig();
   const caps = game.caps;
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
   const [starting, setStarting] = useState(false);
-
-  const [hasLock, setHasLock] = useState(false);
-  const [hasSecure, setHasSecure] = useState(false);
-  useEffect(() => {
-    contentLockAvailable().then(setHasLock).catch(() => {});
-    contentSecureAvailable().then(setHasSecure).catch(() => {});
-  }, []);
 
   // Drop out of "Starting…" once the game shows up — or once it's clear it isn't going
   // to, so a launch that failed silently doesn't leave the button stuck.
@@ -84,7 +74,7 @@ export default function TopRail({ view, studioTab, plugins, onNavigate, leftRef,
     refreshGame();
   }, [t, refreshGame]);
 
-  const items = visibleRail(plugins, (cap) => !cap || caps[cap], hasLock, hasSecure);
+  const items = visibleRail(plugins, (cap) => !cap || caps[cap]);
   const active = railItemFor(view, items);
 
   return (
@@ -107,7 +97,7 @@ export default function TopRail({ view, studioTab, plugins, onNavigate, leftRef,
           return (
             <button
               key={item.id}
-              onClick={() => onNavigate(item.view, item.studio)}
+              onClick={() => onNavigate(item.view)}
               className={cn(
                 "relative flex cursor-default items-center font-cond text-[14px] font-semibold uppercase tracking-[0.15em] transition-colors",
                 on ? "text-foreground" : "text-muted-foreground hover:text-foreground",
@@ -125,9 +115,6 @@ export default function TopRail({ view, studioTab, plugins, onNavigate, leftRef,
       <div data-tauri-drag-region className="flex-1" />
 
       <div className="flex items-center gap-1 text-muted-foreground">
-        {/* A track compiles for minutes; this is what makes that visible from anywhere but
-            the Studio, and the way back to it. */}
-        <TrackBuildBadge onOpen={() => onNavigate("studio", "track")} />
         <DownloadQueue collapsed />
         <button
           onClick={() => onNavigate("settings")}
@@ -175,7 +162,6 @@ export default function TopRail({ view, studioTab, plugins, onNavigate, leftRef,
     <ContextBar
       item={active}
       view={view}
-      studioTab={studioTab}
       onNavigate={onNavigate}
       leftRef={leftRef}
       rightRef={rightRef}
@@ -191,17 +177,14 @@ export default function TopRail({ view, studioTab, plugins, onNavigate, leftRef,
 function visibleRail(
   plugins: LoadedPlugin[],
   hasCap: (cap?: keyof GameCaps) => boolean,
-  hasLock: boolean,
-  hasSecure: boolean,
 ): RailItem[] {
-  const ok = (g: { cap?: keyof GameCaps; needsLock?: boolean; needsSecure?: boolean }) =>
-    hasCap(g.cap) && (!g.needsLock || hasLock) && (!g.needsSecure || hasSecure);
+  const ok = (g: { cap?: keyof GameCaps }) => hasCap(g.cap);
 
   const items: RailItem[] = RAIL.filter(ok).map((item) => {
     const tabs = item.tabs?.filter(ok);
     // A group whose tabs are all hidden still opens its own landing view, but a group whose
     // *first* tab is hidden must not land on it — Garage with no 3D viewer opens Presets.
-    return { ...item, tabs, view: tabs?.length ? tabs[0].view : item.view, studio: tabs?.length ? tabs[0].studio : item.studio };
+    return { ...item, tabs, view: tabs?.length ? tabs[0].view : item.view };
   });
 
   if (plugins.length > 0) {
@@ -216,7 +199,6 @@ function visibleRail(
       id: "plugins",
       label: "plugins.section",
       view: panels[0].view,
-      studio: undefined,
       tabs: panels,
     });
   }

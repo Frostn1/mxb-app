@@ -215,7 +215,7 @@ pub fn stage_sheet(dir: &Path, name: &str, png: &[u8]) -> Result<PathBuf> {
     }
     // The name becomes the texture name the mesh binds, so it has to survive the round trip
     // through a file name intact — but it still can't be allowed to name a path.
-    let stem = crate::install::sanitize(name.trim());
+    let stem = mxb_core::names::sanitize(name.trim());
     let stem = stem.trim();
     if stem.is_empty() {
         bail!("a sheet needs a name before it can be saved");
@@ -273,7 +273,7 @@ pub fn extract(pnt: &[u8], dir: &Path) -> Result<Vec<PathBuf>> {
     std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
     let mut out = Vec::with_capacity(textures.len());
     for t in &textures {
-        let file = dir.join(format!("{}.tga", crate::install::sanitize(&t.name)));
+        let file = dir.join(format!("{}.tga", mxb_core::names::sanitize(&t.name)));
         let mut buf = Vec::new();
         image::codecs::tga::TgaEncoder::new(&mut buf)
             .write_image(&t.rgba, t.width, t.height, ExtendedColorType::Rgba8)

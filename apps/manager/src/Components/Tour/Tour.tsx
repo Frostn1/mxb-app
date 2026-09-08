@@ -13,7 +13,6 @@ import {
   Library as LibraryIcon,
   Bike,
   Shirt,
-  User,
   RefreshCw,
   Settings as SettingsIcon,
   Check,
@@ -27,7 +26,6 @@ import { useT, type TKey } from "@/i18n";
 import { useConfig } from "@frost/shared/Context/Config";
 import type { GameCaps } from "@frost/shared/types";
 import type { DashboardView } from "../Shell/nav";
-import type { StudioTab } from "../Studio/Studio";
 import { Plate } from "../Shell/Brand";
 
 /** Bumped when the tour changes enough to warrant showing it again. */
@@ -46,7 +44,6 @@ interface Step {
   view?: DashboardView;
   /** Which Studio sub-view to open with it — a step anchored in the Studio has to name one,
    *  or it lands on whichever was last open. */
-  studio?: StudioTab;
   /** CSS selector of the element to spotlight. Omit for a centered, un-anchored step. */
   selector?: string;
   icon: LucideIcon;
@@ -91,15 +88,6 @@ const STEPS: Step[] = [
     icon: Shirt,
     title: "tour.presets.title",
     body: "tour.presets.body",
-  },
-  {
-    view: "studio",
-    studio: "rider",
-    selector: '[data-tour="studio"]',
-    icon: User,
-    title: "tour.rider.title",
-    body: "tour.rider.body",
-    cap: "viewer",
   },
   {
     selector: '[data-tour="frostmod"]',
@@ -153,7 +141,7 @@ function bubbleStyle(rect: Rect | null, bubbleH: number): React.CSSProperties {
 }
 
 interface TourProps {
-  navigate: (v: DashboardView, studio?: StudioTab) => void;
+  navigate: (v: DashboardView) => void;
   onDone: () => void;
 }
 
@@ -176,8 +164,8 @@ export default function Tour({ navigate, onDone }: TourProps) {
 
   // Switch to the step's view first, so the correct screen renders behind the spotlight.
   useLayoutEffect(() => {
-    if (step.view) navigate(step.view, step.studio);
-  }, [index, step.view, step.studio, navigate]);
+    if (step.view) navigate(step.view);
+  }, [index, step.view, navigate]);
 
   // Measure the target after the view switch has had a frame to lay out; keep it
   // in sync with window resizes. Un-anchored steps clear the rect (centered bubble).
