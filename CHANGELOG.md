@@ -2,6 +2,27 @@
 
 ## 2026-09-07
 
+### Added
+- The server list keeps working while MX Bikes is running. It asks each server directly rather
+  than the master list, so nothing competes with the game for your account.
+- Servers advertising cheats are hidden, by the same rules FrostMod uses in the game. The tab
+  says how many it hid and lets you look at them.
+- A server's details show who is on it: everyone in the session when it is the server you are
+  riding, and the riders using paint sync anywhere else.
+- A server's details name the track it is running, show its picture when you already have it,
+  and point you at the shop or MXB Hub when you don't.
+- Share codes that keep updating. Turn on "Keep it updated" when you share and you get a
+  short code to send once. Publish a new version and everyone who pasted it gets it — no
+  new link, no new code.
+- A Live share codes list under Import: what you publish, what you follow, and which ones
+  have a new version waiting. Turn on Auto and they install themselves.
+- Generated tracks stand under a photographed sky — a full 360 degree panorama with cloud
+  banks and a sun in it, in place of the drawn one.
+
+### Changed
+- Opening a server asks it for fresh numbers, so the riders, the session and the track are what
+  they are now rather than what they were when the list loaded.
+
 ### Fixed
 - A jump's landing is a landing: it rolls away from the deck and is steepest where a rider
   comes down on it, instead of dropping away hardest at the edge of the top.
@@ -15,6 +36,38 @@
   standing where the ground beside the track should be.
 - The ground behind the start gates is scenery rather than track, so the game stops treating
   the bank the gates are set against as somewhere you are allowed to ride.
+- Trackside scenery wears its own textures. Every object now takes the sheet the track itself
+  says it wears, rather than one worked out from the order they are stored in — so banners
+  show their sponsors, the inflatable gates are back to full colour, and the treeline is
+  leaves instead of bark.
+- Tracks that name their textures plainly, without PiBoSo's suffixes, are drawn painted rather
+  than grey. Two of the tracks checked had no readable name at all and now come out fully
+  textured.
+- Trees are drawn on the tracks whose foliage sheets the viewer used to skip.
+- A track's sky shows the dome it ships, at sixteen times the detail it was drawn at, and the
+  viewer settles on the track's clear weather instead of picking a different one each time you
+  open it.
+- Trackside scenery in the 3D viewer no longer stands in slabs of flat grey. A track whose
+  textures the viewer can't read now leaves its banners and foliage out rather than drawing
+  them blank.
+- Trees keep their colour when you pull the camera back, instead of going black across the
+  paddock.
+- The black shapes standing over some tracks are gone. They were shadows, drawn as if they
+  were solid.
+- More tracks show their real ground in the 3D viewer. A track's normal maps are stored a
+  little differently from its colour sheets, and reading them the same way stopped the viewer
+  part way through a track's ground.
+- Tracks show their whole ground in the 3D viewer rather than the first layers of it. Indiana
+  draws all six of its layers, and tracks built in the app draw all seven of theirs.
+
+## 2026-09-06
+
+### Changed
+- Tracks in the 3D viewer are drawn with the ground the game draws: each layer's own sheet,
+  tiled the way the track states, through the track's own masks. Published tracks used to come
+  out one flat brown, because the colour was taken from the surface data a track uses for grip
+  rather than from what it is painted with. Indiana now shows its dirt, its ruts and the
+  gravel round the paddock.
 
 ## 2026-09-06
 

@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import type {
   TrackBackdrop,
   TrackGround,
+  TrackGroundLayer,
   TrackMeshArrays,
   TrackOverview,
   TrackPlacement,
@@ -671,19 +672,39 @@ const GROUND_TILE_METRES = 4;
 /** How far the grain is allowed to swing the ground's brightness. */
 const GROUND_STRENGTH = 0.5;
 
+/**
+ * What the ground stack's average is lifted to, as linear albedo.
+ *
+ * A track's sheets are not albedo maps. They are photographs of dirt taken under their own
+ * light, and several are very dark on purpose — Indiana's base is luma 47 and the dark soil
+ * over it 35, which is 0.02 linear. Handed to a lit material raw, the whole track renders
+ * black. So the stack is scaled to put its *average* here and its layers keep their distances
+ * from each other, which is where the picture is: what the eye reads at any distance is the
+ * masks, not the grain. The same reasoning as `groundMean` on the single-sheet path below,
+ * which divides by the sheet's mean for exactly this reason.
+ */
+const STACK_TARGET_ALBEDO = 0.19;
+
 function TerrainMesh({
   terrain,
   overview,
   ground,
+  layers,
 }: {
   terrain: TrackTerrain;
   overview: TrackOverview | null;
   /** A tiling sheet of the track's own ground, multiplied in for close-up detail. */
   ground: TrackGround | null;
+  /** The ground the game draws: the track's own sheets, through the track's own masks. */
+  layers: TrackGroundLayer[];
 }) {
+  // The stack is the ground when a track states one. Everything below — the surface picture
+  // built from the physics masks, the single sheet tiled everywhere, the elevation ramp — is
+  // what to draw when it doesn't.
+  const stacked = layers.length > 0;
   // A track with no surface data of its own still has ground: its sheet says what colour that
   // is, so the elevation ramp is only reached for when a track states neither.
-  const tinted = overview != null || ground != null;
+  const tinted = overview != null || ground != null || stacked;
   const geometry = useMemo(() => buildGeometry(terrain, tinted), [terrain, tinted]);
 
   // Built once per picture and handed to the GPU as-is. `sRGB` because it's artwork rather
@@ -745,6 +766,85 @@ function TerrainMesh({
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [ground, repeat],
+  );
+
+  // The stack, as the GPU takes it: a sheet per layer wrapped for tiling, and its mask laid
+  // once across the whole ground. Masks are read as a single channel — they are coverage, not
+  // colour — which is a quarter of the memory of the same map as RGBA.
+  const stack = useMemo(() => {
+    return layers.map((l) => {
+      const sheet = new THREE.DataTexture(
+        l.sheet.pixels,
+        l.sheet.width,
+        l.sheet.height,
+        THREE.RGBAFormat,
+      );
+      sheet.wrapS = THREE.RepeatWrapping;
+      sheet.wrapT = THREE.RepeatWrapping;
+      sheet.minFilter = THREE.LinearMipmapLinearFilter;
+      sheet.magFilter = THREE.LinearFilter;
+      sheet.generateMipmaps = true;
+      sheet.anisotropy = 8;
+      sheet.needsUpdate = true;
+      let mask: THREE.DataTexture | null = null;
+      if (l.mask) {
+        mask = new THREE.DataTexture(
+          l.mask.coverage,
+          l.mask.width,
+          l.mask.height,
+          THREE.RedFormat,
+        );
+        // Clamped, never wrapped: a mask covers the ground once, and a repeat would tile the
+        // riding line across the whole map.
+        mask.wrapS = THREE.ClampToEdgeWrapping;
+        mask.wrapT = THREE.ClampToEdgeWrapping;
+        mask.minFilter = THREE.LinearMipmapLinearFilter;
+        mask.magFilter = THREE.LinearFilter;
+        mask.generateMipmaps = true;
+        mask.needsUpdate = true;
+      }
+      return { sheet, mask, tileU: l.tileU, tileV: l.tileV };
+    });
+  }, [layers]);
+
+  // The stack's own average, weighted by how much of the ground each layer actually covers —
+  // a layer masked to a tenth of the map should not pull the whole track's brightness to it.
+  const stackGamma = useMemo(() => {
+    if (layers.length === 0) return 1;
+    let total = 0;
+    let weight = 0;
+    for (const l of layers) {
+      const px = l.sheet.pixels;
+      let lum = 0;
+      let n = 0;
+      for (let i = 0; i < px.length; i += 64) {
+        // Linearised before averaging: the mean of a sheet's sRGB bytes is not the mean of
+        // the light it stands for, and it is the light the material is handed.
+        for (let k = 0; k < 3; k += 1) lum += ((px[i + k] / 255) ** 2.2) * [0.299, 0.587, 0.114][k];
+        n += 1;
+      }
+      if (n === 0) continue;
+      const cover = l.mask
+        ? l.mask.coverage.reduce((a, v, i) => (i % 16 === 0 ? a + v / 255 : a), 0) /
+          Math.ceil(l.mask.coverage.length / 16)
+        : 1;
+      total += (lum / n) * cover;
+      weight += cover;
+    }
+    const mean = total / weight;
+    if (weight === 0 || !(mean > 0) || mean >= 1) return 1;
+    // The exponent that puts the stack's mean on the target. Clamped so a stack that is
+    // already about right is left alone and one sheet read wrong cannot flatten the rest.
+    return Math.min(Math.max(Math.log(STACK_TARGET_ALBEDO) / Math.log(mean), 0.3), 1);
+  }, [layers]);
+
+  useEffect(
+    () => () =>
+      stack.forEach((l) => {
+        l.sheet.dispose();
+        l.mask?.dispose();
+      }),
+    [stack],
   );
 
   // The sheet's own average brightness. Dividing by it is what makes this a *detail* layer:
@@ -816,9 +916,9 @@ function TerrainMesh({
       <meshStandardMaterial
         key={`${texture ? "textured" : "plain"}-${detail ? "grain" : "flat"}-${
           relief ? "relief" : "smooth"
-        }-${repeat}`}
-        color={tint}
-        map={texture ?? undefined}
+        }-${repeat}-stack${stack.length}-${stackGamma.toFixed(2)}`}
+        color={stacked ? "#ffffff" : tint}
+        map={stacked ? undefined : (texture ?? undefined)}
         normalMap={relief ?? undefined}
         // Gentle: this is one ground sheet standing in for every surface a track has, so it
         // should suggest a texture underfoot rather than emboss the whole place.
@@ -827,6 +927,76 @@ function TerrainMesh({
         roughness={0.95}
         metalness={0}
         onBeforeCompile={(shader) => {
+          if (stacked) {
+            // The ground the game draws: the base sheet, then every layer above it mixed in
+            // by its own mask. This is what a track is actually painted with — the surface
+            // picture this replaces is built from the `.trh` coverage masks, which are the
+            // *physics* surfaces, and published tracks barely paint them. Indiana states one
+            // 256x256 patch of concrete over a 2049-square grid, so drawn that way it is a
+            // flat brown slab.
+            shader.uniforms.stackGamma = { value: stackGamma };
+            stack.forEach((l, i) => {
+              shader.uniforms[`stackSheet${i}`] = { value: l.sheet };
+              shader.uniforms[`stackTile${i}`] = {
+                value: new THREE.Vector2(l.tileU, l.tileV),
+              };
+              if (l.mask) shader.uniforms[`stackMask${i}`] = { value: l.mask };
+            });
+            shader.vertexShader = shader.vertexShader
+              .replace(
+                "#include <common>",
+                `#include <common>
+                 varying vec2 vGroundUv;`,
+              )
+              .replace(
+                "#include <begin_vertex>",
+                `#include <begin_vertex>
+                 vGroundUv = uv;`,
+              );
+            const decls = stack
+              .map(
+                (l, i) =>
+                  `uniform sampler2D stackSheet${i};
+                   uniform vec2 stackTile${i};` +
+                  (l.mask ? `\nuniform sampler2D stackMask${i};` : ""),
+              )
+              .join("\n");
+            // Each sheet is sampled at its own tiling — read from the track, not assumed. The
+            // viewer used to tile one sheet every four metres for every surface; Indiana's
+            // base repeats 200 times across 525 m and its dark soil 180, which is 2.6 m
+            // against 2.9 m. Wrong tiling reads as the wrong ground.
+            const blend = stack
+              .map((l, i) => {
+                const sample = `pow(texture2D(stackSheet${i}, vGroundUv * stackTile${i}).rgb, vec3(2.2))`;
+                // Sheets are handed over as raw bytes rather than tagged sRGB, so the decode
+                // is done here — three.js only converts the slots it compiled itself.
+                return i === 0 || !l.mask
+                  ? `  ground = ${sample};`
+                  : `  ground = mix(ground, ${sample}, texture2D(stackMask${i}, vGroundUv).r);`;
+              })
+              .join("\n");
+            shader.fragmentShader = shader.fragmentShader
+              .replace(
+                "#include <common>",
+                `#include <common>
+                 varying vec2 vGroundUv;
+                 uniform float stackGamma;
+                 ${decls}`,
+              )
+              .replace(
+                "#include <color_fragment>",
+                `#include <color_fragment>
+                 {
+                   vec3 ground = vec3(0.5);
+                 ${blend}
+                   // Multiplied rather than assigned: what is already in diffuseColor is the
+                   // cavity shading the relief is read by, and dropping it flattens every
+                   // rut and berm the track has.
+                   diffuseColor.rgb *= pow(ground, vec3(stackGamma));
+                 }`,
+              );
+            return;
+          }
           if (!detail) return;
           shader.uniforms.groundMap = { value: detail };
           shader.uniforms.groundRepeat = { value: repeat };
@@ -961,8 +1131,24 @@ function SceneryMesh({
   // covers — the `.scr` props, whose own sheets aren't read.
   const { materials, slotOf } = useMemo(() => {
     const slots = new Map<number, number>();
+    // A cut-out with no colour in it is a shadow, not a surface. The game multiplies one onto
+    // what it falls across; drawn here as geometry with an alpha test it is a solid black
+    // silhouette standing up out of the ground. Indiana ships 24,465 triangles of
+    // `tunnel_shadow_c_a`, forty metres tall, and they are the black trees.
+    const shadow = (t: TrackSceneryTexture): boolean => {
+      if (!t.alpha) return false;
+      let sum = 0;
+      let n = 0;
+      for (let i = 0; i < t.pixels.length; i += 4) {
+        // Only what the alpha test would keep — the rest is the black behind the cut.
+        if (t.pixels[i + 3] < 128) continue;
+        sum += t.pixels[i] * 0.299 + t.pixels[i + 1] * 0.587 + t.pixels[i + 2] * 0.114;
+        n += 1;
+      }
+      return n > 0 && sum / n < 4;
+    };
     const list: THREE.Material[] = surfaces.map((t, i) => {
-      slots.set(t.material, i);
+      if (!shadow(t)) slots.set(t.material, i);
       const map = new THREE.DataTexture(t.pixels, t.width, t.height, THREE.RGBAFormat);
       map.colorSpace = THREE.SRGBColorSpace;
       // The surfaces tile — a fence sheet repeats along its run — so anything but repeat
@@ -995,8 +1181,13 @@ function SceneryMesh({
     });
     const fallback = list.length;
     list.push(plain);
+    // Materials the map never bound get the plain slot — but a shadow keeps none, so its
+    // triangles are left out of the geometry entirely rather than drawn in grey instead.
+    const shadows = new Set(
+      surfaces.filter((t) => shadow(t)).map((t) => t.material),
+    );
     for (const g of scenery.groups) {
-      if (!slots.has(g.material)) slots.set(g.material, fallback);
+      if (!slots.has(g.material) && !shadows.has(g.material)) slots.set(g.material, fallback);
     }
     return { materials: list, slotOf: slots };
   }, [scenery, surfaces]);
@@ -1198,6 +1389,13 @@ interface TrackViewerProps {
   backdrop?: TrackBackdrop | null;
   /** A tiling sheet of the track's own ground, for detail closer than its data carries. */
   ground?: TrackGround | null;
+  /**
+   * The ground the game draws: the track's own sheets through the track's own masks.
+   *
+   * When a track states a stack this replaces the surface picture entirely — that picture is
+   * built from the `.trh` coverage masks, which are the physics surfaces rather than the paint.
+   */
+  groundLayers?: TrackGroundLayer[];
   /** Told what a click on the scenery landed on, and when the selection clears. */
   onPick?: (piece: PickedPiece | null) => void;
   /**
@@ -1229,6 +1427,7 @@ export function TrackViewer({
   showObjects = true,
   backdrop = null,
   ground = null,
+  groundLayers = [],
   onPick,
   focus = null,
   highlight = null,
@@ -1313,7 +1512,12 @@ export function TrackViewer({
           />
           <directionalLight position={[-6, 3, -5]} intensity={0.4} />
           {terrain && (
-            <TerrainMesh terrain={terrain} overview={overview} ground={ground} />
+            <TerrainMesh
+              terrain={terrain}
+              overview={overview}
+              ground={ground}
+              layers={groundLayers}
+            />
           )}
           {terrain && showObjects && scenery && (
             <SceneryMesh

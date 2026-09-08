@@ -1099,6 +1099,24 @@ export const ptBR: Translation = {
   "serverBrowser.any": "Qualquer",
   "serverBrowser.yes": "Sim",
   "serverBrowser.notJoinable": "O MX Bikes não consegue se conectar ao endereço deste servidor.",
+  "serverBrowser.filtered": "Filtrado",
+  "serverBrowser.hiddenCount": "{{count}} ocultos",
+  "serverBrowser.hideFiltered": "Ocultar de novo",
+  "serverBrowser.hiddenBecause": "Oculto: {{reason}}",
+  "serverBrowser.hiddenHelp":
+    "Servidores que anunciam cheats, e outros spams, ficam ocultos pelas regras do próprio FrostMod. Clique para vê-los mesmo assim.",
+  "serverBrowser.ridersTitle": "Pilotos",
+  "serverBrowser.ridersCount": "{{players}} de {{maxPlayers}} pilotos",
+  "serverBrowser.ridersFromSession": "sua sessão",
+  "serverBrowser.ridersFromApp": "{{count}} usando sincronização de pinturas",
+  "serverBrowser.ridersUnknown":
+    "O MX Bikes só informa ao app quantos pilotos estão em um servidor. Os nomes vêm dos jogadores que usam o MXB App.",
+  "serverBrowser.trackTitle": "Pista",
+  "serverBrowser.trackChecking": "Descobrindo qual pista é essa…",
+  "serverBrowser.trackInstalled": "Você tem esta pista — {{name}}",
+  "serverBrowser.trackMaybe": "Achamos que é {{name}}",
+  "serverBrowser.trackGetShop": "Pegar na loja",
+  "serverBrowser.trackGetHub": "Pegar no MXB Hub",
 
   "sync.autoNote":
     "Seu visual se publica sozinho — cada moto, sempre que você muda no app ou na garagem do jogo. O dos outros chega quando você aperta Jogar.",
@@ -1299,6 +1317,63 @@ export const ptBR: Translation = {
   "share.phaseUploading": "Enviando…",
   "share.phaseDownloading": "Baixando…",
   "share.phaseInstalling": "Instalando…",
+
+  // ── Códigos de compartilhamento ao vivo ────────────────────────────────────
+  "share.keepUpdated": "Manter atualizado",
+  "share.keepUpdatedHint":
+    "Envie um único código curto. Publique uma versão nova e todo mundo que colou o código recebe — sem link novo.",
+  "share.hintDoneLive":
+    "Envie este código uma vez. Cada versão que você publicar chega a quem tem o código.",
+  "share.liveNotice": "Este código continua atualizado — cada versão nova será oferecida a você.",
+  "share.follow": "Seguir e instalar",
+  "share.subscribed_one":
+    "1 arquivo instalado. Você vai receber as novas versões deste compartilhamento.",
+  "share.subscribed_other":
+    "{{count}} arquivos instalados. Você vai receber as novas versões deste compartilhamento.",
+  "live.action": "Códigos ao vivo…",
+  "live.title": "Códigos de compartilhamento ao vivo",
+  "live.help":
+    "Códigos que sempre apontam para a versão mais recente — os que você publica e os que você segue.",
+  "live.empty":
+    "Nenhum código ao vivo ainda. Compartilhe algo com \"Manter atualizado\" ligado, ou cole um código que te enviaram.",
+  "live.yours": "Seu",
+  "live.updateReady": "Atualização pronta",
+  "live.versionAt": "v{{version}}",
+  "live.versionBehind": "v{{have}} → v{{latest}}",
+  "live.publishedAgo": "publicado {{when}}",
+  "live.checkedAgo": "verificado {{when}}",
+  "live.copyCode": "Copiar código",
+  "live.codeCopied": "Código copiado.",
+  "live.publishUpdate": "Publicar atualização",
+  "live.published": "v{{version}} publicada.",
+  "live.ownerCode": "Chave de dono",
+  "live.ownerCopied":
+    "Chave de dono copiada — ela deixa outra máquina publicar atualizações neste código. Guarde só para você.",
+  "live.update": "Atualizar",
+  "live.upToDate": "Atualizado",
+  "live.auto": "Auto",
+  "live.unfollow": "Deixar de seguir",
+  "live.forgetMine": "Remover",
+  "live.check": "Procurar atualizações",
+  "live.checking": "Verificando…",
+  "live.foundUpdates_one": "1 atualização disponível.",
+  "live.foundUpdates_other": "{{count}} atualizações disponíveis.",
+  "live.allCurrent": "Está tudo atualizado.",
+  "live.adopt": "Assumir",
+  "live.moreActions": "Mais ações",
+  "live.adoptTitle": "Publicar de outra máquina",
+  "live.adoptHint":
+    "Cole uma chave de dono copiada da máquina que criou o código. Ela deixa esta máquina publicar atualizações nele.",
+  "live.adoptPlaceholder": "MXBL1-XXXXXXXX#…",
+  "live.adopted": "Agora você pode publicar atualizações de {{name}}.",
+  "live.never": "nunca",
+  "live.justNow": "agora mesmo",
+  "live.minsAgo_one": "há 1 min",
+  "live.minsAgo_other": "há {{count}} min",
+  "live.hoursAgo_one": "há 1 hora",
+  "live.hoursAgo_other": "há {{count}} horas",
+  "live.daysAgo_one": "há 1 dia",
+  "live.daysAgo_other": "há {{count}} dias",
 
   // ── Armário ────────────────────────────────────────────────────────────────
   "locker.help":
@@ -2311,6 +2386,13 @@ export const ptBR: Translation = {
   "trackViewer.relief": "Desnível",
   "trackViewer.objects": "Objetos",
   "trackViewer.painting": "Pintando…",
+  "trackViewer.step.terrain": "Terreno",
+  "trackViewer.step.sky": "Céu",
+  "trackViewer.step.ground": "Solo",
+  "trackViewer.step.scenery": "Cenário",
+  "trackViewer.step.colours": "Cores",
+  "trackViewer.stepsBusy": "Carregando…",
+  "trackViewer.stepsDone": "Pronto",
   "trackViewer.scenery": "Cenário",
   "trackViewer.sceneryTris": "{{count}} triângulos",
   "trackViewer.fixtures": "Elementos marcados",

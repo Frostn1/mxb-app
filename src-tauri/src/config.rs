@@ -205,6 +205,56 @@ pub struct AppConfig {
     /// Deliberately not the account id or the GUID — an anonymous count that could be
     /// joined back to a person is not one.
     pub install_id: String,
+    /// Live share codes this machine publishes, and the key that lets it update each one.
+    ///
+    /// The key is why this is stored at all: publishing a live share needs no account, so
+    /// the only thing that distinguishes the author of a code from anyone else holding it
+    /// is this row. Losing it means the code can still be shared and never updated again —
+    /// which is what `liveshare::owner_code` exists to prevent.
+    pub published_shares: Vec<PublishedShare>,
+    /// Live share codes this machine follows.
+    pub live_subscriptions: Vec<LiveSubscription>,
+}
+
+/// A code this machine minted, and what it last pushed to it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PublishedShare {
+    /// The public code, prefix and all (`MXBL1-K7QP4M2X`).
+    pub code: String,
+    /// The secret half. Never rendered, never logged, never put in a share.
+    pub update_key: String,
+    pub name: String,
+    pub version: u32,
+    /// The mods-relative paths this code carries, so "publish an update" can repack exactly
+    /// what was shared last time without asking the player to pick them again.
+    pub rels: Vec<String>,
+    /// Unix milliseconds of the last successful publish. `0` means never.
+    pub published_at: u64,
+}
+
+/// A code this machine pastes into and follows.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LiveSubscription {
+    pub code: String,
+    pub name: String,
+    /// The version actually installed here — not the newest one the server holds. The gap
+    /// between the two is the whole UI: "v3 installed, v4 available".
+    pub version: u32,
+    /// Newest version seen on the server, from the last check. Equal to `version` when
+    /// there is nothing to do.
+    pub latest: u32,
+    /// Unix milliseconds. `0` means never checked.
+    pub checked_at: u64,
+    /// Bytes the newest version weighs, from the last check. What an update will cost to
+    /// pull, which is worth showing before it starts rather than after.
+    pub size: u64,
+    /// Unix *seconds*, as the server keeps it — when the author last published, not when
+    /// this machine last looked. "updated 2h ago" is about them, not us.
+    pub published_at: u64,
+    /// Install a new version as soon as a check finds one, rather than waiting to be asked.
+    pub auto: bool,
 }
 
 /// The record of the last publish and the last pull.
@@ -308,6 +358,8 @@ impl Default for AppConfig {
             sync: SyncState::default(),
             analytics_enabled: true,
             install_id: String::new(),
+            published_shares: Vec::new(),
+            live_subscriptions: Vec::new(),
         }
     }
 }

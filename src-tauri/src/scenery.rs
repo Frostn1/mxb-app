@@ -25,11 +25,24 @@ use crate::map::{self, Group, MapMesh, MapTexture};
 // v2: the mesh gained UVs and material groups, and the surfaces travel with it.
 // v3: the mesh and the surfaces are cached apart, so the first can be served without the
 // second having been decoded at all.
-const MESH_CACHE: &str = "track-scenery-v4";
-const SURFACE_CACHE: &str = "track-surfaces-v4";
+// v6: a sheet is bound unless it is demonstrably a companion map, so materials no longer
+// slide onto their neighbour's picture and the sheets a track names plainly now bind at all.
+// v7: the binding is read out of the material records rather than walked positionally, which
+// moves most of a track's materials by one and its trees by two. Every earlier entry holds a
+// guess, and the guess put an 80%-transparent sheet on Indiana's banners.
+const MESH_CACHE: &str = "track-scenery-v7";
+const SURFACE_CACHE: &str = "track-surfaces-v7";
 /// The ground sheet and its normal map, cached apart again — two 512×512 sheets against the
 /// surfaces' hundreds of megabytes, and finding them means reading the archive a third time.
-const GROUND_CACHE: &str = "track-ground-v2";
+// v3: 8192-wide sheets are read now, so the pick has records to consider that v2 never saw.
+const GROUND_CACHE: &str = "track-ground-v3";
+
+/// The ground stack, cached as the blob the front end receives.
+// v2: as `GROUND_CACHE` — the record scan reaches sheets it used to stop short of.
+// v3: the walk reads a track's whole stack rather than the first layers of it. The blob a
+// track cached under v2 is the short one, and the key is the track's own bytes, so without
+// the bump anyone who had already opened a track would keep the ground they had.
+const GROUND_LAYERS_CACHE: &str = "track-ground-layers-v3";
 
 /// How many decoded scenery meshes to keep. Smaller than the terrain's: one of these is
 /// about 30 MB, against 16 for a terrain master.
@@ -289,10 +302,37 @@ fn rgb(node: &CfgNode, key: &str) -> Option<[f32; 3]> {
     Some([f("red")?, f("green")?, f("blue")?])
 }
 
+/// Which weather block a viewer shows a track under.
+///
+/// "The first block" is not a thing a `HashMap` has, and iterating one picked a different
+/// condition every load: Indiana's sun, fog and ambient came back `clear`, `cloudy` or `rainy`
+/// at random. Worse, only `clear` names a sky of the track's own — the others name
+/// `*cloudysky.edf`, a game file we do not resolve — so two loads in three drew no sky at all.
+///
+/// `clear` is what a track is authored and photographed under, so it wins; then any block
+/// whose sky the track actually ships; then whatever is left, in name order so it is at least
+/// the same one twice running.
+fn weather(root: &crate::cfg::CfgNode) -> Option<&crate::cfg::CfgNode> {
+    let ships_it = |w: &&crate::cfg::CfgNode| {
+        w.get("sky").is_some_and(|s| !s.trim().starts_with('*'))
+    };
+    let mut named: Vec<&crate::cfg::CfgNode> = {
+        let mut v: Vec<(&String, &crate::cfg::CfgNode)> = root.blocks.iter().collect();
+        v.sort_by(|a, b| a.0.cmp(b.0));
+        v.into_iter().map(|(_, w)| w).collect()
+    };
+    named.retain(|w| w.get("sky").is_some());
+    root.blocks
+        .get("clear")
+        .filter(|w| w.get("sky").is_some())
+        .or_else(|| named.iter().copied().find(ships_it))
+        .or_else(|| named.first().copied())
+}
+
 /// Read a track's `.amb`: the models it wraps itself in, and the light it sits under.
 ///
 /// Weather is a block per condition — `clear`, `cloudy` and the rest — carrying its own sky,
-/// sun and fog. The first one is taken: a viewer shows a track, not a forecast.
+/// sun and fog. `clear` is taken: a viewer shows a track, not a forecast.
 fn ambience(
     path: &Path,
     names: &[String],
@@ -316,11 +356,10 @@ fn ambience(
     };
     let background = root.get("background").map(|s| s.trim().to_string());
 
-    // The weather blocks are the ones carrying a sky; take the first that names one.
     let mut sky = None;
-    for (_, w) in root.blocks.iter() {
-        let Some(model) = w.get("sky") else { continue };
-        sky = Some(model.trim().to_string());
+    let weather = weather(&root);
+    if let Some(w) = weather {
+        sky = w.get("sky").map(|m| m.trim().to_string());
         amb.sky_colour = rgb(w, "sky_color");
         amb.sun_colour = rgb(w, "sun_color");
         amb.ambient_colour = rgb(w, "ambient");
@@ -328,7 +367,6 @@ fn ambience(
             amb.fog_colour = rgb(w, "fog");
             amb.fog_density = fog.get("density").and_then(|v| v.trim().parse().ok());
         }
-        break;
     }
     (amb, background, sky)
 }
@@ -870,6 +908,50 @@ pub fn load_ground(app: &tauri::AppHandle, path: &str) -> Result<Vec<MapTexture>
     Ok(sheets)
 }
 
+/// The ground a track is painted with, cached like its surfaces.
+///
+/// Two or three hundred kilobytes once reduced — small next to the surfaces, and worth caching
+/// for the same reason: getting at it means pulling a several-hundred-megabyte `.map` out of an
+/// archive, which is most of a second.
+pub fn load_ground_layers(app: &tauri::AppHandle, path: &str) -> Result<Vec<u8>> {
+    let key = cache_key(path)?;
+    if let Some(hit) = cache_file(app, &key, GROUND_LAYERS_CACHE).and_then(|f| std::fs::read(f).ok())
+    {
+        if hit.len() >= map::GROUND_LAYERS_HEADER && hit.starts_with(b"FGLY") {
+            return Ok(hit);
+        }
+    }
+    let blob = map::ground_layers_blob(&read_ground_layers(path)?);
+    if let Some(f) = cache_file(app, &key, GROUND_LAYERS_CACHE) {
+        if let Some(parent) = f.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&f, &blob);
+        prune_cache(app, GROUND_LAYERS_CACHE);
+    }
+    Ok(blob)
+}
+
+/// The uncached read: the expensive half, and the one the tests come in through.
+fn read_ground_layers(path: &str) -> Result<Vec<map::GroundLayer>> {
+    let p = Path::new(path);
+    let names = crate::track::entry_names(p)?;
+    let stem = track_stem(p);
+    for entry in entries_with_ext(&names, "map", &stem) {
+        let Ok(bytes) = crate::track::read_entry(p, &entry) else {
+            continue;
+        };
+        if !map::is_map(&bytes) {
+            continue;
+        }
+        let layers = map::ground_layers(&bytes);
+        if !layers.is_empty() {
+            return Ok(layers);
+        }
+    }
+    Ok(Vec::new())
+}
+
 /// A track's surfaces, cached apart from its mesh.
 pub fn load_surfaces(app: &tauri::AppHandle, path: &str) -> Result<Vec<MapTexture>> {
     let key = cache_key(path)?;
@@ -922,8 +1004,21 @@ fn decode_with_key(path: &Path, want_surfaces: bool, key: Option<&str>) -> Resul
                 // A map whose surfaces can't be bound can't draw its cut-outs, and a foliage
                 // card without its alpha is a standing sheet of paper. Thousands of them hide
                 // the track. Drop them rather than show them wrong.
-                let bindable = !map::declared(&bytes).is_empty();
-                mesh = if bindable { m } else { map::without_cards(&m) };
+                //
+                // Asked of the binding, not of the names. This used to ask whether the map
+                // declared any sheet at all, which is true of every map ever built — so the
+                // cards were never dropped, and the tracks that bind nothing drew every one of
+                // them in flat grey. Briarcliff and SFDR are entirely untextured, and both
+                // rendered as a forest of grey slabs standing over the ground.
+                let bindable = map::binds(&bytes);
+                mesh = if bindable {
+                    // Bound, but rarely all of it. The materials past the end of the surface
+                    // list have no sheet, so their cards come out too.
+                    let bound = map::bound_count(&bytes) as u32;
+                    map::without_cards_for(&m, |mat| mat >= bound)
+                } else {
+                    map::without_cards(&m)
+                };
                 info.cards_dropped = !bindable;
                 if want_surfaces {
                     textures = map::textures(&bytes, map::MAX_TEXTURE_DIM);
@@ -1600,6 +1695,50 @@ source1
         );
     }
 
+    /// Indiana's three conditions, in the order and shape its own `.amb` carries them: only
+    /// `clear` names a sky the track ships, and the other two point at the game's.
+    const THREE_CONDITIONS: &str = "\
+sun_position\n{\nx = -7\ny = 7\nz = -5\n}\n\
+background = background.edf\n\
+clear\n{\nsky_color\n{\nred = 0.72\ngreen = 0.80\nblue = 0.84\n}\nsky = dome.edf\n}\n\
+cloudy\n{\nsky_color\n{\nred = 0.33\ngreen = 0.49\nblue = 0.58\n}\nsky = *cloudysky.edf\n}\n\
+rainy\n{\nsky_color\n{\nred = 0.50\ngreen = 0.50\nblue = 0.50\n}\nsky = *rainysky.edf\n}\n";
+
+    /// A viewer shows a track, not a forecast — and it shows it the same way twice.
+    ///
+    /// `blocks` is a `HashMap`, so taking "the first" one drew Indiana under `clear`, `cloudy`
+    /// or `rainy` depending on the run, and only `clear` has a sky we can resolve: two loads
+    /// in three had no sky at all.
+    #[test]
+    fn the_weather_is_clear_and_it_is_the_same_every_time() {
+        let root = crate::cfg::parse(THREE_CONDITIONS.as_bytes());
+        let picked = weather(&root).expect("a condition carrying a sky");
+        assert_eq!(picked.get("sky").map(str::trim), Some("dome.edf"));
+
+        // Re-parsing rebuilds the map, so a fresh hash order every time — the failure this
+        // catches only ever showed up across runs.
+        for _ in 0..32 {
+            let again = crate::cfg::parse(THREE_CONDITIONS.as_bytes());
+            let w = weather(&again).expect("a condition carrying a sky");
+            assert_eq!(w.get("sky").map(str::trim), Some("dome.edf"), "picked a different condition");
+            assert_eq!(rgb(w, "sky_color"), Some([0.72, 0.80, 0.84]), "took another block's light");
+        }
+    }
+
+    /// A track with no `clear` block still has to settle on one condition, and on the one
+    /// whose sky it actually carries rather than a `*` game file.
+    #[test]
+    fn without_clear_it_takes_the_sky_the_track_ships() {
+        const NO_CLEAR: &str = "\
+cloudy\n{\nsky = *cloudysky.edf\n}\n\
+overcast\n{\nsky = my_own_dome.edf\n}\n";
+        for _ in 0..32 {
+            let root = crate::cfg::parse(NO_CLEAR.as_bytes());
+            let w = weather(&root).expect("a condition carrying a sky");
+            assert_eq!(w.get("sky").map(str::trim), Some("my_own_dome.edf"));
+        }
+    }
+
     /// The invariant the blob depends on, checked on the path that broke it: a placed prop
     /// extends the mesh, and every triangle it adds needs a piece id like any other. Without
     /// one the blob is short, the viewer reads past its end, and a track draws no scenery at
@@ -1970,6 +2109,111 @@ source1
     #[test]
     #[ignore = "needs a real track — set FROST_TRACK"]
     fn decode_a_real_track() {
+        real_track_report();
+    }
+
+    /// What each material actually wears, against how much of the track it covers.
+    ///
+    /// A material drawn over thousands of triangles in a sheet whose opaque pixels average
+    /// near black is a black object on screen, and this is the one view that puts those two
+    /// facts side by side.
+    ///
+    /// ```text
+    /// FROST_TRACK="…/track.pkz" \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture what_each_material_wears
+    /// ```
+    #[test]
+    #[ignore = "needs a real track — set FROST_TRACK"]
+    fn what_each_material_wears() {
+        let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let s = decode(Path::new(&path), true).expect("decode the scenery");
+        let tex = &s.textures;
+
+        let mut tris = vec![0u32; s.info.materials.max(1) as usize + 8];
+        // Per material, the box its triangles occupy — a banner run is long, thin and low,
+        // a treeline is tall, and that is what says which material is the thing on screen.
+        let mut box_of = vec![([f32::MAX; 3], [f32::MIN; 3]); s.info.materials.max(1) as usize + 8];
+        for g in &s.mesh.groups {
+            let Some(slot) = tris.get_mut(g.material as usize) else {
+                continue;
+            };
+            *slot += g.tri_count;
+            let bb = &mut box_of[g.material as usize];
+            for t in g.tri_start..g.tri_start + g.tri_count {
+                for k in 0..3 {
+                    let Some(&idx) = s.mesh.indices.get(t as usize * 3 + k) else {
+                        continue;
+                    };
+                    for axis in 0..3 {
+                        let Some(&v) = s.mesh.positions.get(idx as usize * 3 + axis) else {
+                            continue;
+                        };
+                        bb.0[axis] = bb.0[axis].min(v);
+                        bb.1[axis] = bb.1[axis].max(v);
+                    }
+                }
+            }
+        }
+        println!(
+            "{:<4} {:<30} {:>8} {:>6} {:>6} {:>4}  {:>20}",
+            "mat", "sheet", "tris", "luma", "opq", "cut", "extent x/y/z (m)"
+        );
+        for (i, t) in tex.iter().enumerate() {
+            // Only the texels an alpha test would keep: the rest is the black behind a cut,
+            // and averaging it in calls every cut-out dark whether it draws dark or not.
+            let (mut sum, mut n) = (0f64, 0u64);
+            for p in t.rgba.chunks_exact(4) {
+                if p[3] < 128 {
+                    continue;
+                }
+                sum += p[0] as f64 * 0.299 + p[1] as f64 * 0.587 + p[2] as f64 * 0.114;
+                n += 1;
+            }
+            let luma = if n > 0 { sum / n as f64 } else { 0.0 };
+            let opaque = n as f64 * 100.0 / (t.rgba.len() / 4).max(1) as f64;
+            let count = tris.get(t.material as usize).copied().unwrap_or(0);
+            let bb = box_of[t.material as usize];
+            let ext = if bb.0[0] <= bb.1[0] {
+                format!(
+                    "{:.0}x{:.0}x{:.0}",
+                    bb.1[0] - bb.0[0],
+                    bb.1[1] - bb.0[1],
+                    bb.1[2] - bb.0[2]
+                )
+            } else {
+                "-".into()
+            };
+            println!(
+                "{:<4} {:<30} {:>8} {:>6.1} {:>5.1}% {:>4}  {:>20}{}",
+                t.material,
+                t.name,
+                count,
+                luma,
+                opaque,
+                if t.alpha { "cut" } else { "-" },
+                ext,
+                // What the viewer's own guard calls a shadow, and what reads as black.
+                if luma < 4.0 {
+                    "   <- SHADOW-DROPPED"
+                } else if luma < 24.0 && count > 200 {
+                    "   <- DARK"
+                } else {
+                    ""
+                },
+            );
+            let _ = i;
+        }
+        let painted: std::collections::HashSet<u32> = tex.iter().map(|t| t.material).collect();
+        let bare: Vec<(usize, u32)> = (0..s.info.materials as usize)
+            .filter(|m| !painted.contains(&(*m as u32)))
+            .map(|m| (m, tris.get(m).copied().unwrap_or(0)))
+            .filter(|(_, c)| *c > 0)
+            .collect();
+        println!("  {} materials, {} painted", s.info.materials, tex.len());
+        println!("  unpainted but drawn: {bare:?}");
+    }
+
+    fn real_track_report() {
         let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK to a track .pkz/folder");
         let s = decode(Path::new(&path), true).expect("decode the scenery");
         let (lo, hi) = s.mesh.bounds();

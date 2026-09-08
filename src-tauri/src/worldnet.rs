@@ -258,6 +258,16 @@ fn decode_addr(b: &[u8]) -> Option<Addr> {
 
 /// The command entry point: resolve the masters, ask each until one answers, return what the
 /// tab shows. Runs the blocking socket work off the async runtime.
+///
+/// **The master is not always ours to ask.** Signing in to it spends the player's Steam
+/// account, and MX Bikes spends the same account the moment it is running — so while the game
+/// is up the app stays off the master entirely and rebuilds the list by asking the servers
+/// themselves. `GETINFO` needs no account, no ticket and no challenge, so a refresh mid-session
+/// costs nothing that the game is using. See [`crate::serverbook`] for where the addresses to
+/// ask come from.
+///
+/// The same path is the fallback whenever the master fails for any other reason: a remembered
+/// list, refreshed live from each server, beats an error message.
 pub async fn list_servers(app: tauri::AppHandle) -> Result<Vec<WorldServer>, String> {
     let cfg = crate::config::load_or_detect(&app).unwrap_or_default();
     let masters = crate::config::master_servers(&cfg);
@@ -269,9 +279,86 @@ pub async fn list_servers(app: tauri::AppHandle) -> Result<Vec<WorldServer>, Str
         cfg.cp_rider_name.trim().to_string()
     };
     let install = std::path::PathBuf::from(cfg.install_dir());
-    tauri::async_runtime::spawn_blocking(move || fetch(&masters, &rider, &install))
-        .await
-        .map_err(|e| format!("server-list task failed: {e}"))?
+    let remembered = crate::serverbook::rows(&crate::serverbook::load(&app));
+    let playing = crate::gameproc::is_game_running();
+
+    let (mut list, from_master) = tauri::async_runtime::spawn_blocking(move || {
+        if playing {
+            log::info!(
+                "[worldnet] MX Bikes is running — asking {} remembered server(s) directly and \
+                 leaving the master login to the game",
+                remembered.len()
+            );
+            return from_book(remembered).map(|l| (l, false));
+        }
+        match fetch(&masters, &rider, &install) {
+            Ok(list) => Ok((list, true)),
+            // A master that won't answer is exactly when a book of addresses earns its keep.
+            Err(e) => match from_book(remembered) {
+                Ok(list) => {
+                    log::warn!("[worldnet] the master didn't answer ({e}); used the remembered list");
+                    Ok((list, false))
+                }
+                Err(_) => Err(e),
+            },
+        }
+    })
+    .await
+    .map_err(|e| format!("server-list task failed: {e}"))??;
+
+    // Only a real sweep can teach the book an address it doesn't have; a probe of the book can
+    // only ever confirm what taught it.
+    if from_master {
+        crate::serverbook::remember(&app, &list, crate::serverbook::now_millis());
+    }
+
+    let rules = crate::serverfilter::Rules::load(&crate::frostmod_manage::frostmod_dir(&app));
+    let hidden = crate::serverfilter::mark(&rules, &mut list);
+    log::info!("[worldnet] {} server(s), {hidden} hidden by the filter", list.len());
+    Ok(list)
+}
+
+/// Rebuild the list from remembered addresses alone, by asking each server about itself.
+///
+/// A row that doesn't answer is dropped rather than shown from memory: a remembered name beside
+/// a rider count from last week is worse than an absent row, because it looks current. Rows the
+/// game could never reach are dropped for the same reason — they can't be probed, so there is
+/// nothing to say about them that is true right now.
+fn from_book(mut rows: Vec<WorldServer>) -> Result<Vec<WorldServer>, String> {
+    if rows.is_empty() {
+        return Err("There are no remembered servers yet — open the browser once with MX Bikes \
+                    closed and the list will keep working from then on."
+            .into());
+    }
+    let budget = book_budget(rows.len());
+    probe_within(&mut rows, budget);
+    rows.retain(|s| s.ping_ms.is_some());
+    if rows.is_empty() {
+        return Err("None of the remembered servers answered.".into());
+    }
+    Ok(rows)
+}
+
+/// How long to wait on a whole book. The probe is one datagram out per server and the replies
+/// come back in parallel, so this is about the slowest useful round trip plus room for a large
+/// book's send loop — not about the number of servers.
+fn book_budget(n: usize) -> Duration {
+    (PROBE_BUDGET + Duration::from_millis(n as u64)).min(Duration::from_secs(10))
+}
+
+/// Ask one server about itself. What the detail panel opens with, so a row the list built
+/// minutes ago isn't what a player reads before deciding to join.
+pub async fn probe_server(address: String) -> Result<WorldServer, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut one = vec![WorldServer { address, joinable: true, ..Default::default() }];
+        probe_within(&mut one, PROBE_BUDGET);
+        match one.pop() {
+            Some(s) if s.ping_ms.is_some() => Ok(s),
+            _ => Err("That server didn't answer.".into()),
+        }
+    })
+    .await
+    .map_err(|e| format!("probe task failed: {e}"))?
 }
 
 /// Try each master: the Steam-ticket `LOGIN` the game uses, then a no-auth browse.
@@ -475,6 +562,7 @@ fn parse_list(r: &mut Reader, out: &mut Vec<WorldServer>, want: usize) -> Page {
             force_cockpit: event.force_cockpit,
             no_aids: event.no_aids,
             limited_tyre_sets: event.limited_tyre_sets,
+            hidden: String::new(),
         });
     }
     if more {
@@ -619,6 +707,12 @@ const PROBE_BUDGET: Duration = Duration::from_secs(3);
 /// Best-effort throughout: a server that stays quiet keeps the row the master gave it and
 /// simply shows no ping. Live answers win over the master's copy, which can be a minute stale.
 fn probe(servers: &mut [WorldServer]) {
+    probe_within(servers, PROBE_BUDGET)
+}
+
+/// [`probe`], with the budget named by the caller. A whole address book takes longer to hear
+/// back from than the tail of one master sweep, and a single server takes no time at all.
+fn probe_within(servers: &mut [WorldServer], budget: Duration) {
     let Ok(sock) = UdpSocket::bind("0.0.0.0:0") else {
         return;
     };
@@ -643,7 +737,7 @@ fn probe(servers: &mut [WorldServer]) {
         sock.send_to(&encrypt(w.finish()), addr).ok();
     }
 
-    let deadline = start + PROBE_BUDGET;
+    let deadline = start + budget;
     let mut buf = [0u8; 4096];
     while !waiting.is_empty() && Instant::now() < deadline {
         let Ok((n, from)) = sock.recv_from(&mut buf) else {
@@ -655,6 +749,12 @@ fn probe(servers: &mut [WorldServer]) {
         if let Some(info) = parse_serverinfo(&decrypt(&buf[..n.min(MAX_REPLY)])) {
             let s = &mut servers[i];
             s.ping_ms = Some(stamp().saturating_sub(info.echo).max(0) as u32);
+            // The server's own name over the master's forwarded copy — an operator who renamed
+            // it half an hour ago shows as renamed, and a row probed with no name at all (the
+            // detail panel's single-server refresh) gets one.
+            if !info.name.is_empty() {
+                s.name = info.name;
+            }
             s.players = info.players as u32;
             s.max_players = info.max_players as u32;
             s.passworded = info.passworded;
@@ -681,6 +781,7 @@ fn probe(servers: &mut [WorldServer]) {
 /// A `SERVERINFO` reply, as the client reads it back (`0x1402a7ead`).
 struct ServerInfo {
     echo: i32,
+    name: String,
     players: u8,
     max_players: u8,
     passworded: bool,
@@ -696,7 +797,7 @@ fn parse_serverinfo(clear: &[u8]) -> Option<ServerInfo> {
         return None;
     }
     let echo = r.i32_le()?;
-    let _name = r.field();
+    let name = r.field().trim().to_string();
     let max_players = r.u8()?;
     let players = r.u8()?;
     let passworded = r.u8()? != 0;
@@ -704,7 +805,7 @@ fn parse_serverinfo(clear: &[u8]) -> Option<ServerInfo> {
     let _id = r.i32_le();
     let blob_len = r.i16_le().unwrap_or(0).max(0) as usize;
     let blob = r.raw(blob_len).map(|b| &b[..b.len().min(MAX_BLOB)]).unwrap_or_default();
-    Some(ServerInfo { echo, players, max_players, passworded, event: Event::parse(blob) })
+    Some(ServerInfo { echo, name, players, max_players, passworded, event: Event::parse(blob) })
 }
 
 /// The authenticated login the game uses before joining. Succeeds when the master replies
@@ -1505,6 +1606,92 @@ mod tests {
         // A fresh one, when Steam does answer, replaces it.
         let out = reuse_or_fetch(&mut held, stale, || Ok(auth(9))).unwrap();
         assert_eq!(out.steam_id, 9);
+    }
+
+    /// The probe-only refresh, end to end against a server that actually answers.
+    ///
+    /// This is the path the tab runs on while MX Bikes is up, so it is worth exercising for
+    /// real rather than by parsing a handmade buffer: a socket, the request the game sends,
+    /// the cipher in both directions, and the reply parsed back into a row. A regression in
+    /// any one of those is the difference between a live list and an empty tab.
+    #[test]
+    fn a_remembered_server_is_refreshed_by_asking_it() {
+        // Stand in for a dedicated server: read one GETINFO, answer one SERVERINFO.
+        let server = UdpSocket::bind("127.0.0.1:0").expect("a loopback socket");
+        let addr = server.local_addr().unwrap();
+        server.set_read_timeout(Some(Duration::from_secs(5))).ok();
+
+        let listening = std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            let (n, from) = server.recv_from(&mut buf).expect("the probe's request");
+            let asked = decrypt(&buf[..n]);
+
+            // What the game sends, and what a server checks before answering at all.
+            let mut r = Reader::new(&asked);
+            assert_eq!(r.i32_le(), Some(CONNECTIONLESS));
+            assert_eq!(r.i32_le(), Some(GETINFO));
+            assert_eq!(r.i32_le(), Some(client_version() as i32));
+            let stamp = r.i32_le().expect("a client timestamp to echo");
+
+            let mut w = Writer::default();
+            w.i32le(SERVERINFO).i32le(stamp);
+            w.raw(b"Frost's Server\0");
+            w.raw(&[20, 7, 1]); // max, then players, then passworded — this message's order
+            w.raw(b"USA\0");
+            w.raw(&0i32.to_le_bytes());
+            let blob = race_blob();
+            w.raw(&(blob.len() as i16).to_le_bytes()).raw(&blob);
+            server.send_to(&encrypt(w.finish()), from).ok();
+        });
+
+        // A row as the address book hands one over: an address, and nothing else worth trusting.
+        let mut rows = vec![WorldServer {
+            name: "stale name".into(),
+            address: addr.to_string(),
+            joinable: true,
+            ..Default::default()
+        }];
+        probe_within(&mut rows, Duration::from_secs(5));
+        listening.join().expect("the stand-in server");
+
+        let s = &rows[0];
+        assert!(s.ping_ms.is_some(), "a server that answered has a measured ping");
+        assert_eq!(s.players, 7);
+        assert_eq!(s.max_players, 20);
+        assert!(s.passworded);
+        assert_eq!(s.name, "Frost's Server", "the server's own name replaces the remembered one");
+        assert_eq!(s.track, "mmx_supercross", "the event blob is read from the live reply");
+    }
+
+    /// A remembered address that has gone quiet must not be listed. Showing a name beside a
+    /// rider count from last week reads as current, which is worse than an absent row.
+    #[test]
+    fn a_server_that_doesnt_answer_is_dropped_from_a_book_only_refresh() {
+        // Port 1 on loopback: nothing is listening, and nothing will start.
+        let err = from_book(vec![WorldServer {
+            name: "gone".into(),
+            address: "127.0.0.1:1".into(),
+            joinable: true,
+            ..Default::default()
+        }])
+        .unwrap_err();
+        assert!(err.contains("answered"), "unhelpful: {err}");
+    }
+
+    /// With no book at all the tab has to say what would fill it, not just fail.
+    #[test]
+    fn an_empty_book_explains_itself() {
+        let err = from_book(vec![]).unwrap_err();
+        assert!(err.contains("MX Bikes closed"), "unhelpful: {err}");
+    }
+
+    /// The budget grows with the book but stays bounded — a refresh is something a player is
+    /// watching, and a large book must not turn it into a minute of spinner.
+    #[test]
+    fn the_probe_budget_is_bounded() {
+        assert!(book_budget(0) >= PROBE_BUDGET);
+        assert!(book_budget(10_000) <= Duration::from_secs(10));
+        assert!(book_budget(500) > book_budget(5), "a bigger book waits longer");
     }
 
     /// With nothing in hand there is nothing to fall back to, and the Steam reason is what

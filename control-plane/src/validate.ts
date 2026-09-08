@@ -92,7 +92,15 @@ export function isPaintFileName(value: unknown): value is string {
  * is rejected here and again on the client, because only the client's check actually
  * protects a disk — this one just stops the bad value being stored and served.
  */
-export function isRelDest(value: unknown): value is string {
+/**
+ * The traversal rule itself, shared by everything that takes a path from one player and
+ * joins it onto another player's mods folder.
+ *
+ * Split out rather than duplicated because there is exactly one right answer here and it
+ * must not drift between the two callers below — a share code and a paint slot carry the
+ * same kind of string and are equally dangerous.
+ */
+function isSafeRelPath(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const p = value.trim();
   if (p.length === 0 || p.length > 256) return false;
@@ -105,8 +113,37 @@ export function isRelDest(value: unknown): value is string {
   if (segments.some((s) => s === "" || s === "." || s === "..")) return false;
   // eslint-disable-next-line no-control-regex
   if (/[\x00-\x1f\x7f:*?"<>|]/.test(p)) return false;
+  return true;
+}
+
+/**
+ * A destination path, relative to the receiver's `mods` folder, that is safe to write.
+ *
+ * This is the most dangerous value in the whole API: one player uploads it and another
+ * player's app joins it onto a real directory. A value of `../../../mxbikes.ini`, an
+ * absolute path, or a Windows drive letter would each escape the mods folder entirely. It
+ * is rejected here and again on the client, because only the client's check actually
+ * protects a disk — this one just stops the bad value being stored and served.
+ */
+export function isRelDest(value: unknown): value is string {
+  if (!isSafeRelPath(value)) return false;
+  const segments = value.trim().split("/");
   // The last segment has to be the paint itself, under the same rules as any filename.
   return isPaintFileName(segments[segments.length - 1]);
+}
+
+/**
+ * The same path, in a share code rather than a paint slot.
+ *
+ * Identical traversal rules — this is the half that protects the disk — but no requirement
+ * on the filename: a share carries `.pkz` archives, loose `.ini` files and whole folders,
+ * and the app's own guard (`library::is_safe_rel`) puts no extension rule on any of them
+ * either. A single trailing slash is tolerated because that is how some senders write a
+ * folder; it is stripped before the rest is judged, so it can never stand in for a segment.
+ */
+export function isShareRel(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  return isSafeRelPath(value.trim().replace(/\/$/, ""));
 }
 
 /** Paints are single-digit megabytes; anything far past that is not a paint. */

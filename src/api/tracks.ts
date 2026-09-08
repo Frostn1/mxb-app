@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   TrackBackdrop,
   TrackGround,
+  TrackGroundLayer,
   TrackInfo,
   TrackMeshArrays,
   TrackOverview,
@@ -338,6 +339,64 @@ export async function loadTrackGround(path: string): Promise<TrackGround | null>
   if (sheets.length === 0) return null;
   // The colour first, then its relief where the track ships one.
   return { colour: sheets[0], normal: sheets[1] ?? null };
+}
+
+/** Header bytes before the layer table. Mirrors `map::GROUND_LAYERS_HEADER`. */
+const GROUND_LAYERS_HEADER = 16;
+/** Bytes per layer in that table. Mirrors `map::GROUND_LAYER_ENTRY`. */
+const GROUND_LAYER_ENTRY = 32;
+/** "FGLY", little-endian. */
+const GROUND_LAYERS_MAGIC = 0x594c4746;
+
+/**
+ * The ground a track is painted with, layer by layer.
+ *
+ * Empty when the track's `.map` states no stack the walk could read, in which case the viewer
+ * falls back to the single tiled sheet and the surface picture.
+ */
+export async function loadTrackGroundLayers(path: string): Promise<TrackGroundLayer[]> {
+  const buf = await invoke<ArrayBuffer>("load_track_ground_layers", { path });
+  if (buf.byteLength === 0) return [];
+  const view = new DataView(buf);
+  if (buf.byteLength < GROUND_LAYERS_HEADER || view.getUint32(0, true) !== GROUND_LAYERS_MAGIC) {
+    throw new Error("track ground layers are not in the expected format");
+  }
+  const count = view.getUint32(8, true);
+  const table = GROUND_LAYERS_HEADER;
+  const entries = [];
+  for (let i = 0; i < count; i += 1) {
+    const o = table + i * GROUND_LAYER_ENTRY;
+    entries.push({
+      width: view.getUint32(o, true),
+      height: view.getUint32(o + 4, true),
+      bytes: view.getUint32(o + 8, true),
+      tileU: view.getFloat32(o + 12, true),
+      tileV: view.getFloat32(o + 16, true),
+      maskW: view.getUint32(o + 20, true),
+      maskH: view.getUint32(o + 24, true),
+      maskBytes: view.getUint32(o + 28, true),
+    });
+  }
+  // The sheets follow the table back to back, then every mask in the same order.
+  let at = table + count * GROUND_LAYER_ENTRY;
+  const sheets = entries.map((e) => {
+    const pixels = new Uint8Array(buf, at, e.bytes);
+    at += e.bytes;
+    return pixels;
+  });
+  return entries.map((e, i) => {
+    const mask =
+      e.maskBytes > 0
+        ? { width: e.maskW, height: e.maskH, coverage: new Uint8Array(buf, at, e.maskBytes) }
+        : null;
+    at += e.maskBytes;
+    return {
+      sheet: { width: e.width, height: e.height, pixels: sheets[i] },
+      tileU: e.tileU,
+      tileV: e.tileV,
+      mask,
+    };
+  });
 }
 
 /** The models a track ships that a prop can be placed by name. */

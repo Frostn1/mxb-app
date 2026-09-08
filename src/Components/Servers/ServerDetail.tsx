@@ -1,4 +1,6 @@
-import { Lock, Plug, Loader2, Signal, Users } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Lock, Plug, Loader2, Signal, Users, Download, MapPin, CheckCircle2 } from "lucide-react";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { Button } from "@/Components/ui/button";
 import {
   Dialog,
@@ -7,7 +9,14 @@ import {
   DialogTitle,
 } from "@/Components/ui/dialog";
 import { useT } from "../../i18n/context";
-import type { MasterServer } from "../../api/mods";
+import {
+  probeServer,
+  serverRiders,
+  guessServerTrack,
+  type MasterServer,
+  type ServerRiders,
+  type TrackGuess,
+} from "../../api/mods";
 
 /**
  * Everything one server publishes about itself.
@@ -17,6 +26,10 @@ import type { MasterServer } from "../../api/mods";
  * event blob holds the track, the session and the rules, and `location` and the licence
  * class sit beside it. It lands here rather than in the row because it is what you read
  * once, before deciding to join, not what you compare fifty rows on.
+ *
+ * Three things arrive after opening, because none of them is worth fetching for every row in
+ * a list: the server's own live answer, who the app can name on it, and which track the
+ * internal id it publishes actually refers to.
  */
 
 /** One label/value line. Values that came back empty are dropped by {@link Facts}. */
@@ -42,6 +55,135 @@ const Facts = ({ title, facts }: { title: string; facts: Fact[] }) => {
   );
 };
 
+/**
+ * Who is on the server.
+ *
+ * The count is the server's own and is always right. The names are not the same thing and
+ * must not look like they are: MX Bikes tells a stranger how many riders are on and nothing
+ * else, so unless this is the server under you, the names are the riders whose own copy of
+ * MXB App said they were here. That is a subset, and the label says so.
+ */
+const Riders = ({
+  players,
+  maxPlayers,
+  riders,
+  loading,
+}: {
+  players: number;
+  maxPlayers: number;
+  riders: ServerRiders | null;
+  loading: boolean;
+}) => {
+  const t = useT();
+  const names = riders?.riders ?? [];
+  return (
+    <section className="space-y-2">
+      <h3 className="flex items-center gap-2 text-[11.5px] font-semibold uppercase tracking-wide text-faint">
+        {t("serverBrowser.ridersTitle")}
+        {loading && <Loader2 className="size-3 animate-spin" />}
+      </h3>
+      <p className="text-[13px]">
+        {t("serverBrowser.ridersCount", { players, maxPlayers })}
+        {names.length > 0 && (
+          <span className="text-muted-foreground">
+            {" · "}
+            {riders?.source === "session"
+              ? t("serverBrowser.ridersFromSession")
+              : t("serverBrowser.ridersFromApp", { count: names.length })}
+          </span>
+        )}
+      </p>
+      {names.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {names.map((n) => (
+            <span
+              key={n}
+              className="border border-input bg-card px-2 py-0.5 text-[12px] text-muted-foreground"
+            >
+              {n}
+            </span>
+          ))}
+        </div>
+      ) : (
+        !loading &&
+        players > 0 && (
+          <p className="text-[12px] text-faint">{t("serverBrowser.ridersUnknown")}</p>
+        )
+      )}
+    </section>
+  );
+};
+
+/**
+ * Which track this actually is.
+ *
+ * A server publishes an internal id — `mmx_supercross` — which is not a title, not a folder
+ * name and not something anyone can search for. Installed is the best answer and shows the
+ * track's own artwork; otherwise this offers where to get it, and says plainly when the name
+ * only resembles a product rather than matching it.
+ */
+const Track = ({ guess, loading }: { guess: TrackGuess | null; loading: boolean }) => {
+  const t = useT();
+  if (loading) {
+    return (
+      <p className="flex items-center gap-2 text-[12.5px] text-faint">
+        <Loader2 className="size-3.5 animate-spin" />
+        {t("serverBrowser.trackChecking")}
+      </p>
+    );
+  }
+  if (!guess || (!guess.installed && !guess.source)) return null;
+
+  const art = guess.preview || guess.productImage;
+  return (
+    <section className="space-y-2">
+      <h3 className="text-[11.5px] font-semibold uppercase tracking-wide text-faint">
+        {t("serverBrowser.trackTitle")}
+      </h3>
+      <div className="flex items-start gap-3">
+        {art && (
+          <img
+            src={art}
+            alt=""
+            className="h-[72px] w-[128px] shrink-0 border border-input object-cover"
+          />
+        )}
+        <div className="min-w-0 flex-1 space-y-1.5">
+          {guess.installed ? (
+            <p className="flex items-center gap-1.5 text-[13px]">
+              <CheckCircle2 className="size-3.5 shrink-0 text-faint" />
+              <span className="truncate">
+                {t("serverBrowser.trackInstalled", { name: guess.installed })}
+              </span>
+            </p>
+          ) : (
+            <>
+              <p className="text-[13px]">
+                <MapPin className="mr-1.5 inline size-3.5 text-faint" />
+                {guess.exact
+                  ? guess.productName
+                  : t("serverBrowser.trackMaybe", { name: guess.productName })}
+              </p>
+              {guess.productUrl && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void openUrl(guess.productUrl)}
+                >
+                  <Download className="size-3.5" />
+                  {guess.source === "hub"
+                    ? t("serverBrowser.trackGetHub")
+                    : t("serverBrowser.trackGetShop")}
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+};
+
 const ServerDetail = ({
   server,
   onOpenChange,
@@ -54,8 +196,59 @@ const ServerDetail = ({
   joining: string | null;
 }) => {
   const t = useT();
+  // What the row carried, replaced by the server's own answer once it arrives. Held here
+  // rather than pushed back into the list: the list refreshes on its own schedule, and one
+  // row updating under a player's cursor while they read it would be worse than stale.
+  const [live, setLive] = useState<MasterServer | null>(null);
+  const [riders, setRiders] = useState<ServerRiders | null>(null);
+  const [ridersLoading, setRidersLoading] = useState(false);
+  const [guess, setGuess] = useState<TrackGuess | null>(null);
+  const [guessing, setGuessing] = useState(false);
+
+  const address = server?.address ?? "";
+  const name = server?.name ?? "";
+  const track = live?.track || server?.track || "";
+
+  // Ask the server about itself, and ask who is on it. `cancelled` is what keeps a slow
+  // answer for the last server out of the panel for the next one.
+  useEffect(() => {
+    if (!address) return;
+    let cancelled = false;
+    setLive(null);
+    setRiders(null);
+    setRidersLoading(true);
+    probeServer(address)
+      .then((s) => !cancelled && setLive(s))
+      .catch(() => {});
+    serverRiders(address, name)
+      .then((r) => !cancelled && setRiders(r))
+      .catch(() => {})
+      .finally(() => !cancelled && setRidersLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [address, name]);
+
+  // Separate from the probe because it keys on the track, which the probe can change: a
+  // server that rolled over to the next track while the panel was open re-identifies it.
+  useEffect(() => {
+    if (!track) {
+      setGuess(null);
+      return;
+    }
+    let cancelled = false;
+    setGuessing(true);
+    guessServerTrack(track)
+      .then((g) => !cancelled && setGuess(g))
+      .catch(() => {})
+      .finally(() => !cancelled && setGuessing(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [track]);
+
   if (!server) return null;
-  const s = server;
+  const s = live ?? server;
 
   const yes = t("serverBrowser.yes");
   const flag = (on: boolean) => (on ? yes : "");
@@ -86,6 +279,15 @@ const ServerDetail = ({
         </DialogHeader>
 
         <div className="max-h-[60vh] space-y-5 overflow-y-auto pr-1">
+          <Riders
+            players={s.players}
+            maxPlayers={s.maxPlayers}
+            riders={riders}
+            loading={ridersLoading}
+          />
+
+          <Track guess={guess} loading={guessing} />
+
           <Facts
             title={t("serverBrowser.running")}
             facts={[

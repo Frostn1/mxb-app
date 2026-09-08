@@ -747,6 +747,23 @@ export interface TrackGround {
   normal: TrackSceneryTexture | null;
 }
 
+/**
+ * One painted layer of the ground the game draws.
+ *
+ * Not the same thing as the `.trh` coverage masks the overview picture is built from — those
+ * are the *physics* surfaces, a friction table, and published tracks barely paint them. This
+ * is the paint: a stack of tiling sheets, each cut into the one below by its own mask.
+ */
+export interface TrackGroundLayer {
+  /** The sheet, tiled across the ground. */
+  sheet: { width: number; height: number; pixels: Uint8Array<ArrayBuffer> };
+  /** How many times it repeats across the whole ground, per axis. Read from the track. */
+  tileU: number;
+  tileV: number;
+  /** Coverage, one byte a texel. `null` on the base layer, which covers everything. */
+  mask: { width: number; height: number; coverage: Uint8Array<ArrayBuffer> } | null;
+}
+
 /** What a track pins to a point but ships no mesh for. Mirrors `scenery::Placement`. */
 export interface TrackPlacement {
   /** A key, not prose — the UI translates it. */
@@ -1400,6 +1417,40 @@ export interface FileShare {
 export interface SharePreview extends FileShare {
   /** Rels the importer already has. An import overwrites them. */
   existing: string[];
+}
+
+/**
+ * A live share code — one that keeps pointing at the current version.
+ *
+ * `MXBS1-` writes the whole share into the string, so recompiling a track invalidates every
+ * code already handed out. A live code is a permanent `MXBL1-` pointer the control plane
+ * repoints, so the author sends it once. See `src-tauri/src/liveshare.rs`.
+ */
+export interface LiveShareInfo {
+  /** The public code (`MXBL1-K7QP4M2X`). Never carries the update key. */
+  code: string;
+  name: string;
+  /** The version installed on this machine. */
+  version: number;
+  /** The newest version the server had at the last check. Ahead of `version` means an
+   *  update is waiting. */
+  latest: number;
+  /** Unix milliseconds of the last check, or of the publish for an owned code. */
+  checkedAt: number;
+  /** Bytes the newest version weighs — what an update costs to pull. */
+  size: number;
+  /** Unix *seconds* of the author's last publish. */
+  publishedAt: number;
+  /** Install a new version as soon as one appears. */
+  auto: boolean;
+  /** True when this machine published the code, so the row offers "Publish update"
+   *  rather than "Update". */
+  mine: boolean;
+  /** Files an owned code carries. Zero for a subscription. */
+  items: number;
+  /** The paths an owned code carries, so a republish repacks the same files. Empty for a
+   *  subscription — a follower has nothing to republish. */
+  rels: string[];
 }
 
 export type SlotSource =
