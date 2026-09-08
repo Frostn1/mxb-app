@@ -293,7 +293,12 @@ const RUT_WALL_HOLD: f32 = 1.8;
 /// than the dark soil of the line, so a rut read paler than its own line and disappeared, and
 /// the loose band was toned darker than a corridor that had become the field's own soil, so
 /// it read as blotches rather than as dust.
-const RUT_FLOOR_DARKEN: f32 = 0.42;
+// Measured against the sheets published tracks bake into their own `.map`: Indiana's darkest
+// ridden surface averages (49, 35, 23) and Southwick's (54, 36, 22). At 0.42 ours came out
+// (25, 19, 14) — half the luma of the darkest thing either of them lays on a track, and with
+// it a pixel-to-pixel grain of 1.6 against their 3.8-18. Dark and flat is the one combination
+// that reads as the texture having failed rather than as polished dirt.
+const RUT_FLOOR_DARKEN: f32 = 0.82;
 const LOOSE_DRY: f32 = 0.85;
 
 /// How much of its brightness the field's soil keeps.
@@ -559,15 +564,15 @@ const GROUND_TEXTURE_DIM: usize = 1024;
 /// 400 m track and a 900 m one get soil of the same grain. A fixed repetition count does not:
 /// the old 60 put a tile every 4.6 m on the example track and every 11.7 m on ours, which is
 /// most of why the ground looked out of scale.
-const TILE_FIELD_M: f32 = 4.5;
-const TILE_LINE_M: f32 = 3.2;
-const TILE_SHOULDER_M: f32 = 3.8;
+const TILE_FIELD_M: f32 = 3.0;
+const TILE_LINE_M: f32 = 3.0;
+const TILE_SHOULDER_M: f32 = 3.0;
 const TILE_GRASS_M: f32 = 2.8;
 /// The loose dirt tiles coarser than the line it sits on, so the two read as different ground
 /// and not as one sheet at two brightnesses.
-const TILE_LOOSE_M: f32 = 4.1;
+const TILE_LOOSE_M: f32 = 3.0;
 /// And the packed line finer, which is what being driven over does to it.
-const TILE_RUT_M: f32 = 2.4;
+const TILE_RUT_M: f32 = 2.8;
 
 /// The cube a wet layer reflects, per face. Small on purpose: it is seen smeared across a
 /// film of water and never in focus. The example track's own faces are 128 too.
@@ -5807,9 +5812,9 @@ fn ground_looks(surface: Surface) -> Grounds {
         // enough a solid colour. A solid colour laid down the middle of the track is what
         // reads from the seat as the texture being broken and the line impossible to find. A
         // packed rut is smooth in its *shape*; the dirt in it is still dirt.
-        grain_tint: (0.44, 1.52),
-        fleck: [128.0, 124.0, 118.0],
-        fleck_density: 0.045,
+        grain_tint: (0.34, 1.66),
+        fleck: [148.0, 142.0, 132.0],
+        fleck_density: 0.075,
         litter: [120.0, 104.0, 72.0],
         litter_density: 0.28,
         blade: ([0.0; 3], [0.0; 3]),
@@ -10723,6 +10728,75 @@ mod blank_repro {
         match crate::tracksynth::synthesise(&prog) {
             Ok(_) => println!("synthesise: OK"),
             Err(e) => println!("synthesise FAILED: {e:#}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod ground_sheets {
+    use super::*;
+
+    /// Our own ground sheets, measured the way a published track's are.
+    ///
+    /// Detail is the mean absolute luma step between neighbouring texels — what separates a
+    /// surface from a wash. Indiana's terrain sheets run 3.8 to 18.2 and Southwick's 3.9 to
+    /// 16.9, so anything far under that reads as flat from the seat however well toned it is.
+    #[test]
+    #[ignore = "prints a table — set FROST_DUMP to also write the sheets"]
+    fn our_ground_sheets() {
+        let dim = 256usize;
+        let dir = std::env::var("FROST_DUMP").ok();
+        if let Some(d) = &dir {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        for surface in [Surface::Soil, Surface::Sand, Surface::Grass] {
+            let g = ground_looks(surface);
+            println!("\n== {surface:?} ==");
+            println!("{:<12} {:>8} {:>7} {:>20}", "sheet", "m/tile", "detail", "mean rgb");
+            for (name, look, tile) in [
+                ("ground", &g.field, TILE_FIELD_M),
+                ("shoulder", &g.shoulder, TILE_SHOULDER_M),
+                ("dirt", &g.ridden, TILE_LINE_M),
+                ("line", &g.line, TILE_LINE_M),
+                ("loose", &g.loose, TILE_LOOSE_M),
+                ("rut", &g.rut, TILE_RUT_M),
+                ("grass", &g.turf, TILE_GRASS_M),
+            ] {
+                let px = band_pixels(dim, look, 0x51D);
+                let luma = |i: usize| {
+                    px[i * 4] as f64 * 0.299 + px[i * 4 + 1] as f64 * 0.587
+                        + px[i * 4 + 2] as f64 * 0.114
+                };
+                let mut d = 0.0;
+                let mut c = 0usize;
+                for y in 0..dim {
+                    for x in 1..dim {
+                        d += (luma(y * dim + x) - luma(y * dim + x - 1)).abs();
+                        c += 1;
+                    }
+                }
+                let mut s = [0f64; 3];
+                for p in px.chunks_exact(4) {
+                    for k in 0..3 {
+                        s[k] += p[k] as f64;
+                    }
+                }
+                let n = (px.len() / 4) as f64;
+                println!(
+                    "{name:<12} {tile:>8.2} {:>7.2} {:>7.0},{:>4.0},{:>4.0}",
+                    d / c.max(1) as f64,
+                    s[0] / n,
+                    s[1] / n,
+                    s[2] / n
+                );
+                if let (Some(dd), Surface::Soil) = (&dir, surface) {
+                    if let Some(img) =
+                        image::RgbaImage::from_raw(dim as u32, dim as u32, px.clone())
+                    {
+                        let _ = img.save(format!("{dd}/ours_{name}.png"));
+                    }
+                }
+            }
         }
     }
 }

@@ -2692,6 +2692,78 @@ mod tests {
         println!("  {out}  {D}x{D}  {} layers", layers.len());
     }
 
+    /// A track's ground textures: what each sheet is, and how it lands on the ground.
+    ///
+    /// Texels per metre is the number that matters at riding distance — a big sheet tiled
+    /// coarsely reads no sharper than a small one tiled tight. Detail is the high-frequency
+    /// energy left after a blur, which is what stops a surface reading as a flat wash.
+    #[test]
+    #[ignore = "needs a real .map — set FROST_MAP"]
+    fn ground_texture_survey() {
+        let path = std::env::var("FROST_MAP").expect("set FROST_MAP");
+        let label = std::env::var("FROST_LABEL").unwrap_or_else(|_| "track".into());
+        let across: f32 = std::env::var("FROST_ACROSS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(525.0);
+        let b = std::fs::read(&path).expect("read the map");
+        let dir = std::env::var("FROST_DUMP").ok();
+        if let Some(d) = &dir {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        println!(
+            "\n== {label} ==  site {across:.0} m\n{:<22} {:>9} {:>8} {:>9} {:>7} {:>7} {:>18}",
+            "layer", "sheet", "m/tile", "texel/m", "detail", "cover", "mean rgb"
+        );
+        for (i, l) in ground_layers(&b).iter().enumerate() {
+            let t = &l.sheet;
+            let n = (t.rgba.len() / 4).max(1);
+            let mut sum = [0f64; 3];
+            for p in t.rgba.chunks_exact(4) {
+                for k in 0..3 {
+                    sum[k] += p[k] as f64;
+                }
+            }
+            let mean = [sum[0] / n as f64, sum[1] / n as f64, sum[2] / n as f64];
+            // Detail: mean absolute difference between neighbouring texels, in luma. A wash
+            // scores near zero however bright it is.
+            let (w, h) = (t.width as usize, t.height as usize);
+            let luma = |i: usize| {
+                let p = &t.rgba[i * 4..];
+                p[0] as f64 * 0.299 + p[1] as f64 * 0.587 + p[2] as f64 * 0.114
+            };
+            let mut d = 0.0;
+            let mut c = 0usize;
+            for y in 0..h {
+                for x in 1..w {
+                    d += (luma(y * w + x) - luma(y * w + x - 1)).abs();
+                    c += 1;
+                }
+            }
+            let detail = if c > 0 { d / c as f64 } else { 0.0 };
+            let m_per_tile = across / l.tile_u.max(0.001);
+            // Texels per metre uses the sheet as stored here, which is the reduced one; the
+            // ratio between tracks is what this is for.
+            let texel_per_m = t.width as f32 / m_per_tile;
+            let cover = l.mask.as_ref().map_or(100.0, |m| {
+                m.coverage.iter().filter(|&&v| v > 8).count() as f64 * 100.0
+                    / m.coverage.len().max(1) as f64
+            });
+            println!(
+                "{:<22} {:>4}x{:<4} {:>8.2} {:>9.1} {:>7.2} {:>6.1}% {:>6.0},{:>4.0},{:>4.0}",
+                t.name, t.width, t.height, m_per_tile, texel_per_m, detail, cover,
+                mean[0], mean[1], mean[2]
+            );
+            if let Some(d) = &dir {
+                if let Some(img) =
+                    image::RgbaImage::from_raw(t.width, t.height, t.rgba.clone())
+                {
+                    let _ = img.save(format!("{d}/{label}_{i}_{}.png", t.name));
+                }
+            }
+        }
+    }
+
     /// Write a map's ground masks out as PNGs, one per layer.
     ///
     /// The masks are the only statement of where a track's paint goes, and whether they line
