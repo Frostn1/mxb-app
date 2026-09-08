@@ -30,6 +30,7 @@ pub mod pkz;
 pub mod scenery;
 pub mod texstore;
 pub mod track;
+pub mod trackview;
 
 /// The optional local-only module. Absent from the public tree; `build.rs` sets `cfg(sidecar)`
 /// when the file is there and publishes that decision to dependent crates.

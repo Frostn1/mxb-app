@@ -43,6 +43,13 @@ jobs:
       - name: Build
         run: npm run build
 
+      # `generate_handler!` takes a token list, so a command dropped from it is not a build
+      # error — it is a runtime "command not found" on whichever screen needs it. Nothing
+      # else in this pipeline can see that, and moving commands between crates is exactly
+      # what invites it.
+      - name: Command census
+        run: bash scripts/command-census.sh
+
   rust:
     name: Rust (test) — ${{ matrix.platform }}
     strategy:
