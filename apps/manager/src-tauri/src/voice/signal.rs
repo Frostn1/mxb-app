@@ -91,24 +91,24 @@ pub async fn ensure_account(cfg: &AppConfig) -> Result<(String, bool), String> {
     let client = reqwest::Client::builder()
         .timeout(HTTP_TIMEOUT)
         .build()
-        .map_err(|e| format!("Couldn't reach MXB App's service: {e}"))?;
+        .map_err(|e| format!("Couldn't reach Frost's Mod Manager's service: {e}"))?;
     let resp = client
         .post(format!("{}/v1/account", control_plane()))
         .json(&serde_json::json!({ "riderName": rider_name }))
         .send()
         .await
-        .map_err(|e| format!("Couldn't reach MXB App's service: {e}"))?;
+        .map_err(|e| format!("Couldn't reach Frost's Mod Manager's service: {e}"))?;
 
     if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
         return Err("Too many new accounts from this connection today. Try again tomorrow.".into());
     }
     if !resp.status().is_success() {
-        return Err(format!("MXB App's service turned down the sign-up ({}).", resp.status()));
+        return Err(format!("Frost's Mod Manager's service turned down the sign-up ({}).", resp.status()));
     }
     let claimed: ClaimedAccount = resp
         .json()
         .await
-        .map_err(|e| format!("MXB App's service sent something unexpected: {e}"))?;
+        .map_err(|e| format!("Frost's Mod Manager's service sent something unexpected: {e}"))?;
     log::info!("[cp] claimed an account as {}", claimed.rider_name);
     Ok((claimed.token, true))
 }

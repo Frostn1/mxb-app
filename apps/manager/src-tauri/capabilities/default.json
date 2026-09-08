@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main MXB App window",
+  "description": "Capabilities for the main Frost Mod Manager window",
   "windows": ["main"],
   "permissions": [
     "core:default",

@@ -1866,13 +1866,13 @@ pub fn we_are_elevated() -> Option<bool> {
 /// or when Windows won't tell us — a guess here would be worse than the dialog.
 #[cfg(windows)]
 fn steam_elevation_conflict() -> Option<&'static str> {
-    const WE_ARE_ELEVATED: &str = "MXB App is running as administrator and Steam isn't. \
+    const WE_ARE_ELEVATED: &str = "Frost's Mod Manager is running as administrator and Steam isn't. \
         Steam refuses to start a game for a program above it, and that refusal is the \
-        \"Access is denied. (0x5)\" box. Close MXB App and start it normally — or run \
+        \"Access is denied. (0x5)\" box. Close Frost's Mod Manager and start it normally — or run \
         Steam as administrator too — then press Play again.";
-    const STEAM_IS_ELEVATED: &str = "Steam is running as administrator and MXB App isn't, \
+    const STEAM_IS_ELEVATED: &str = "Steam is running as administrator and Frost's Mod Manager isn't, \
         so Steam won't take a launch from us — the refusal comes back as \"Access is \
-        denied. (0x5)\". Restart Steam normally — or run MXB App as administrator too — \
+        denied. (0x5)\". Restart Steam normally — or run Frost's Mod Manager as administrator too — \
         then press Play again.";
 
     let pid = find_pid(STEAM_EXE)?;
@@ -1918,7 +1918,7 @@ fn spawn_error(exe: &std::path::Path, err: &std::io::Error) -> anyhow::Error {
              is blocking it: add the install folder to your antivirus / Windows Security \
              exclusions, and check the folder isn't one your account can only read. \
              Starting the game straight from Explorer hits the same block, which is the \
-             quickest way to confirm it isn't MXB App.",
+             quickest way to confirm it isn't Frost's Mod Manager.",
             exe.display()
         );
     }

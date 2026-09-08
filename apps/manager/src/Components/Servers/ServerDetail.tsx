@@ -61,7 +61,7 @@ const Facts = ({ title, facts }: { title: string; facts: Fact[] }) => {
  * The count is the server's own and is always right. The names are not the same thing and
  * must not look like they are: MX Bikes tells a stranger how many riders are on and nothing
  * else, so unless this is the server under you, the names are the riders whose own copy of
- * MXB App said they were here. That is a subset, and the label says so.
+ * Frost's Mod Manager said they were here. That is a subset, and the label says so.
  */
 const Riders = ({
   players,

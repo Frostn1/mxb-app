@@ -20,6 +20,10 @@
 ### Changed
 - Opening a server asks it for fresh numbers, so the riders, the session and the track are what
   they are now rather than what they were when the list loaded.
+- The app is now Frost's Mod Manager, with a new name and a new mark. Installing this
+  version retires the old one for you: your settings, your disabled mods, your paint
+  templates and your Launch at startup choice all carry over untouched. If you pinned the
+  old app to your taskbar or Start menu, pin it again from the new one.
 
 ### Fixed
 - Trackside scenery in the 3D viewer no longer stands in slabs of flat grey. A track whose

@@ -437,7 +437,7 @@ def main():
     first, second = NAMES[seed % len(NAMES)]
     prog = {
         "name": f"{first} {second}",
-        "author": "MXB App",
+        "author": "Frost's Mod Manager",
         "location": PLACES[(seed // 7) % len(PLACES)],
         "width": width,
         "terrain": {

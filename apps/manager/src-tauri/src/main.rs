@@ -2176,6 +2176,8 @@ fn templates_root(app: &tauri::AppHandle) -> std::path::PathBuf {
     dirs_next::document_dir()
         .or_else(|| app.path().app_data_dir().ok())
         .unwrap_or_else(std::env::temp_dir)
+        // NOT renamed with the product: this folder already exists on players' machines
+        // and holds templates they exported. Moving it orphans them.
         .join("MXB App")
         .join("Paint Templates")
 }
@@ -5690,7 +5692,7 @@ fn log_client(level: String, message: String) {
     }
 }
 
-/// Where MXB App's own logs are, where the game's are, and what's currently in each.
+/// Where Frost's Mod Manager's own logs are, where the game's are, and what's currently in each.
 ///
 /// Read fresh on every call rather than cached: the whole reason someone opens this is
 /// that something just went wrong, and a stale "no logs found" would send them looking in
@@ -6473,6 +6475,55 @@ fn startup_vetoed(app_name: &str) -> bool {
 fn startup_vetoed(_app_name: &str) -> bool {
     false
 }
+
+/// The product name this app shipped under up to v0.13.x.
+///
+/// Kept as a literal rather than read from anywhere: it names things already written to a
+/// user's machine, so it must not follow `productName` when that changes again.
+const LEGACY_APP_NAME: &str = "MXB App";
+
+/// Delete the login item a previous product name left behind.
+///
+/// `tauri-plugin-autostart` names the `Run` value after `package_info().name`, which is
+/// `productName`. A rename therefore does not move that value — it writes a second one and
+/// leaves the first pointing into an install folder the new installer no longer owns, so the
+/// player gets two startup entries, one of them dead. [`Autostart::Rebind`] cannot help: it
+/// only fires when the item is already enabled under the *current* name, which right after a
+/// rename it never is.
+///
+/// The `StartupApproved\Run` flag goes with it, so a stale row does not sit in Task
+/// Manager's Startup list naming a program that is no longer installed.
+#[cfg(windows)]
+fn delete_legacy_login_item(app_name: &str) {
+    const HKEY_CURRENT_USER: isize = -2147483647; // 0x80000001
+
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn RegDeleteKeyValueW(hkey: isize, subkey: *const u16, value: *const u16) -> i32;
+    }
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    let value = wide(app_name);
+    for subkey in [
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run",
+    ] {
+        let sk = wide(subkey);
+        // SAFETY: deletes one named value from a fixed HKCU subkey. Both strings are
+        // NUL-terminated and outlive the call; a value that isn't there returns non-zero
+        // and is the normal case on every launch after the first.
+        let rc = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, sk.as_ptr(), value.as_ptr()) };
+        if rc == 0 {
+            log::info!("removed the stale `{app_name}` login item from HKCU\\{subkey}");
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn delete_legacy_login_item(_app_name: &str) {}
 
 /// Read one `StartupApproved\Run` flag: enabled carries a zero tail, disabled carries the
 /// FILETIME it was switched off. Anything too short to hold one is not a veto.
@@ -7805,7 +7856,7 @@ pub struct ServerRiders {
 ///
 /// That leaves two real answers, and the panel says which one it is showing. If you are on the
 /// server, FrostMod is in the session and hands over the actual grid. Otherwise the control
-/// plane knows where each rider's *app* said it was, which names the players who run MXB App
+/// plane knows where each rider's *app* said it was, which names the players who run Frost's Mod Manager
 /// and nobody else.
 #[tauri::command]
 async fn server_riders(
@@ -10154,7 +10205,7 @@ fn main() {
 
     let builder = tauri::Builder::default();
 
-    // One app, one process. Closing the window parks MXB App in the tray rather than
+    // One app, one process. Closing the window parks Frost's Mod Manager in the tray rather than
     // quitting it, so without this a second launch doesn't reveal the copy already
     // running — it builds a whole new one: another window, another tray icon, another
     // FrostMod, another mod watcher. Five launches in a day left five of everything, and
@@ -10162,11 +10213,11 @@ fn main() {
     //
     // Registered before every other plugin: the guard's setup hook is what kills the
     // second process, and it should do so before anything else has started work that
-    // would then need unwinding. `show_main` is the same path the tray's "Show MXB App"
+    // would then need unwinding. `show_main` is the same path the tray's "Show Frost's Mod Manager"
     // takes, so relaunching behaves exactly like clicking the tray icon.
     //
     // Release builds only, for the same reason close-to-tray is (see `CloseRequested`
-    // below): a `tauri dev` run must still start while the installed MXB App is sitting
+    // below): a `tauri dev` run must still start while the installed Frost's Mod Manager is sitting
     // in the tray, otherwise it would silently exit and just re-show the shipped app.
     //
     // The updater's restart is safe against this by construction, and it's worth knowing
@@ -10237,7 +10288,7 @@ fn main() {
         .manage(voice::Monitor::default())
         .manage(voice::session::Session::default())
         .setup(|app| {
-            log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
+            log::info!("Frost's Mod Manager {} starting", env!("CARGO_PKG_VERSION"));
 
             // The main window is `"create": false` in tauri.conf.json so it is built here
             // rather than by Tauri's own startup loop, which is the only way to decide the
@@ -10353,12 +10404,12 @@ fn main() {
                 });
             }
 
-            let show = MenuItem::with_id(app, "show", "Show MXB App", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "Show Frost's Mod Manager", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("MXB App")
+                .tooltip("Frost's Mod Manager")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -10404,11 +10455,25 @@ fn main() {
                 }
                 let manager = handle.autolaunch();
                 let stale = cfg.autostart_binding_rev < config::AUTOSTART_BINDING_REV;
+                // Every call below is keyed on the *current* product name, so none of them
+                // can see the entry the rename orphaned. Clear it before they run — but read
+                // its veto first: a player who switched the app off in Task Manager did so
+                // under the old name, and the new name carries no flag yet. Without carrying
+                // it over, the reconcile below sees "wanted, not enabled, not vetoed" and
+                // quietly switches it back on, which is the regression `Autostart::Adopt`
+                // exists to prevent.
+                let legacy_vetoed = if stale {
+                    let vetoed = startup_vetoed(LEGACY_APP_NAME);
+                    delete_legacy_login_item(LEGACY_APP_NAME);
+                    vetoed
+                } else {
+                    false
+                };
                 let mut cfg_dirty = false;
                 match autostart_action(
                     cfg.launch_at_startup,
                     manager.is_enabled().unwrap_or(false),
-                    startup_vetoed(&handle.package_info().name),
+                    startup_vetoed(&handle.package_info().name) || legacy_vetoed,
                     stale,
                 ) {
                     Autostart::Enable => {

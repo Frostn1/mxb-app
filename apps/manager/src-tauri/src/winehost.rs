@@ -468,9 +468,9 @@ mod tests {
         assert_eq!(
             windows_path(
                 prefix,
-                Path::new("/Users/x/Library/Application Support/MXB App/frostmod/frostmod.exe")
+                Path::new("/Users/x/Library/Application Support/Frost's Mod Manager/frostmod/frostmod.exe")
             ),
-            "Z:\\Users\\x\\Library\\Application Support\\MXB App\\frostmod\\frostmod.exe"
+            "Z:\\Users\\x\\Library\\Application Support\\Frost's Mod Manager\\frostmod\\frostmod.exe"
         );
     }
 
@@ -504,7 +504,7 @@ mod tests {
  8123 /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine --bottle MXB --cx-app Z:\\Users\\x\\frostmod.exe
  8124 /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wineserver
  8125 C:\\windows\\system32\\explorer.exe /desktop FrostMod.exe --game mxb
- 9000 /Applications/MXB App.app/Contents/MacOS/mxb-app";
+ 9000 /Applications/Frost Mod Manager.app/Contents/MacOS/mxb-app";
         let mut pids = pids_running(ps, "frostmod.exe", 9000);
         pids.sort();
         assert_eq!(pids, [8123, 8125], "both the wrapper and the Wine process: {pids:?}");
@@ -593,7 +593,7 @@ mod tests {
         let ps = "\
   501 /sbin/launchd
  8123 /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine C:\\MX Bikes\\MXBikes.exe
- 9000 /Applications/MXB App.app/Contents/MacOS/mxb-app";
+ 9000 /Applications/Frost Mod Manager.app/Contents/MacOS/mxb-app";
         assert!(running_exe(ps, "mxbikes.exe", 9000));
         // Our own process is the one that carries the path it just launched.
         assert!(!running_exe(ps, "mxbikes.exe", 8123));

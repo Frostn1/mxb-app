@@ -503,7 +503,7 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
 
 /** A one-line page for the browser half of the sign-in. */
 function page(status: number, message: string): Response {
-  const body = `<!doctype html><meta charset="utf-8"><title>MXB App</title>` +
+  const body = `<!doctype html><meta charset="utf-8"><title>Frost's Mod Manager</title>` +
     `<body style="font:16px/1.5 system-ui;margin:4rem auto;max-width:30rem;padding:0 1rem">` +
     `<p>${message.replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"))}</p>`;
   return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });

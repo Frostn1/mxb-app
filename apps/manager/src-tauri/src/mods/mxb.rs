@@ -1576,7 +1576,7 @@ mod client_tests {
     fn a_normal_page_is_not_a_challenge() {
         // Cloudflare injects this script into ordinary pages; a real 212 KB mod page that
         // parses fine contains it. Matching on it would break every mod detail view.
-        let real = r#"<title>MXB App - MXB-Mods.com</title>
+        let real = r#"<title>Frost's Mod Manager - MXB-Mods.com</title>
             <div class="download-container"><a href="https://x/f.pkz">Default</a></div>
             <script src="/cdn-cgi/challenge-platform/h/b/scripts/jsd/main.js"></script>"#;
         assert_eq!(challenge_marker(real), None);
@@ -1708,7 +1708,7 @@ mod client_tests {
             Some("cf-browser-verification")
         );
         assert_eq!(challenge_marker("window._cf_chl_opt = {};"), Some("cf_chl_opt"));
-        assert_eq!(challenge_marker("<h1>MXB App</h1>"), None);
+        assert_eq!(challenge_marker("<h1>Frost's Mod Manager</h1>"), None);
     }
 
     /// Log lines go on one line, and a Cloudflare block page is mostly indentation.

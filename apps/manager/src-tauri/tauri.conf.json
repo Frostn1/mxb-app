@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "MXB App",
-  "mainBinaryName": "MXB App",
-  "version": "0.13.6",
+  "productName": "Frost Mod Manager",
+  "mainBinaryName": "Frost Mod Manager",
+  "version": "0.14.0",
   "identifier": "com.frost.mxbikes",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -13,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "MXB App",
+        "title": "Frost Mod Manager",
         "width": 1400,
         "height": 800,
         "minWidth": 1000,
@@ -51,7 +51,7 @@
     "copyright": "Copyright © 2026 Frost",
     "homepage": "https://github.com/Frostn1/mxb-app",
     "shortDescription": "MX Bikes mod manager",
-    "longDescription": "MXB App is a mod manager for MX Bikes — browse mxb-mods.com, install tracks, bikes and paints with one click, and let FrostMod reload the game for you.",
+    "longDescription": "Frost's Mod Manager is a mod manager for MX Bikes — browse mxb-mods.com, install tracks, bikes and paints with one click, and let FrostMod reload the game for you.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

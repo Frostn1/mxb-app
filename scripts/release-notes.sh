@@ -25,7 +25,7 @@ case "$TAG" in
   *-*)
     cat <<EOF
 > [!NOTE]
-> **This is a beta build of ${TAG%%-*}, for testing.** Installed copies of MXB App won't
+> **This is a beta build of ${TAG%%-*}, for testing.** Installed copies of Frost's Mod Manager won't
 > be offered it by the updater — download the installer below to try it. The full release
 > follows once it's been checked over.
 
@@ -56,7 +56,7 @@ section_block() {
 section_block "$TAG" "What's new in" || true
 
 # A patch is the same app as the `.0` it patches, so its page repeats that release's notes:
-# someone landing on v0.8.1 came for MXB App, not for the two lines that changed since v0.8.0,
+# someone landing on v0.8.1 came for Frost's Mod Manager, not for the two lines that changed since v0.8.0,
 # and the features are what tells them whether they want it. Discord is deliberately left
 # alone — `notify-discord.sh` reads only the tag's own section, because re-dumping a whole
 # feature list into a chat channel for a patch is noise.

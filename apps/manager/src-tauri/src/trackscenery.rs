@@ -94,7 +94,7 @@ const TILED_SHARE: f32 = 0.5;
 /// a wordmark and a small strapline under the name — RACE TECH over "THE SCIENCE OF
 /// SUSPENSION", and thirteen others follow the same rule.
 ///
-/// The wordmark is **artwork**, not type drawn here. A board is somebody's brand: MXB App's is
+/// The wordmark is **artwork**, not type drawn here. A board is somebody's brand: Frost's Mod Manager's is
 /// Barlow Condensed on `--primary`, Creste's is Cormorant Garamond over Hanken Grotesk in its
 /// own `--ink` and `--accent`, and nothing in this crate can rasterise a `.ttf`. Drawing a
 /// look-alike face was tried and it is exactly as convincing as a look-alike logo. So each

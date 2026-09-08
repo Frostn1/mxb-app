@@ -18,6 +18,8 @@
 #                             never fails a release that otherwise built and published fine.
 #   GH_TOKEN                  passed through to `gh` (the workflow hands it GITHUB_TOKEN).
 #   REPO                      owner/name. Defaults to GITHUB_REPOSITORY, then Frostn1/mxb-app.
+#   APP_NAME                  the product this release is of. Defaults to the mod manager;
+#                             a second app's workflow passes its own.
 
 set -euo pipefail
 
@@ -37,6 +39,7 @@ if [ -z "$TAG" ]; then
 fi
 
 REPO="${REPO:-${GITHUB_REPOSITORY:-Frostn1/mxb-app}}"
+APP_NAME="${APP_NAME:-Frost's Mod Manager}"
 
 # A suffixed tag (`v0.8.0-beta.2`) is a beta build of the version it names — the same test
 # release.yml uses to publish it as a pre-release, and release-notes.sh to head the release
@@ -83,7 +86,7 @@ subtitle="$(printf '%s' "$heading" | awk -F'—' '
     print s
   }')"
 
-title="MXB App $TAG"
+title="$APP_NAME $TAG"
 [ -n "$subtitle" ] && title="$title — $subtitle"
 # `changelog-section.sh` reads a beta against the section for the version it's a build of, so
 # a beta borrows that release's headline once it's written and simply has none before then.
@@ -152,10 +155,10 @@ avatar="https://raw.githubusercontent.com/$REPO/main/apps/manager/src-tauri/icon
 # Amber down the side of a beta instead of the usual blue, and a footer that says so — the
 # two announcements sit in different channels, but plenty of people watch both.
 color=10276076
-footer="MXB App • GitHub Releases"
+footer="$APP_NAME • GitHub Releases"
 if [ "$IS_BETA" -eq 1 ]; then
   color=15246141   # 0xE8A33D
-  footer="MXB App • Beta • GitHub Releases"
+  footer="$APP_NAME • Beta • GitHub Releases"
 fi
 
 payload="$(jq -n \
@@ -170,8 +173,9 @@ payload="$(jq -n \
   --arg lin "$lin" \
   --argjson color "$color" \
   --arg footer "$footer" \
+  --arg appname "$APP_NAME" \
   '{
-    username: "MXB App",
+    username: $appname,
     avatar_url: $avatar,
     allowed_mentions: { parse: [] },
     embeds: [{

@@ -57,7 +57,7 @@
 //! original 2015 package has the other two and not it.
 //!
 //! **The app's own image needs VC140 as well, and nothing in this module can say so.**
-//! `MXB App.exe` imports `std::_Xout_of_range` and `std::_Xlength_error` from
+//! `Frost Mod Manager.exe` imports `std::_Xout_of_range` and `std::_Xlength_error` from
 //! `MSVCP140.dll` — the STL's throw helpers, by way of the C++ sources `unrar_sys` builds
 //! against the dynamic CRT. Without the redistributable the loader gives up before `main`
 //! with *"the application was unable to start correctly (0xc000007b)"*, and none of the

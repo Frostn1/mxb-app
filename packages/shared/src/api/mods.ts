@@ -990,7 +990,7 @@ export interface LogGroup {
   files: LogFile[];
 }
 
-/** Every log set: MXB App's own, FrostMod's managed folder, and the game's `log.txt`. */
+/** Every log set: Frost's Mod Manager's own, FrostMod's managed folder, and the game's `log.txt`. */
 export interface LogsInfo {
   app: LogGroup;
   frostmod: LogGroup;
@@ -1004,7 +1004,7 @@ export function logsInfo(): Promise<LogsInfo> {
 }
 
 /**
- * Write a line into MXB App's own log file from here.
+ * Write a line into Frost's Mod Manager's own log file from here.
  *
  * The webview's console goes nowhere a player can send us — only what Rust logs reaches
  * the file behind Settings → Logs. Anything the frontend alone can see has to come back
@@ -2350,7 +2350,7 @@ export function overlayHide(): Promise<void> {
   return invoke<void>("overlay_hide");
 }
 
-/** Close the overlay and bring the main MXB App window to the front. */
+/** Close the overlay and bring the main Frost's Mod Manager window to the front. */
 export function overlayOpenMain(): Promise<void> {
   return invoke<void>("overlay_open_main");
 }
@@ -3121,7 +3121,7 @@ export interface ServerRiders {
  * The riders on a server, as far as anything can honestly say.
  *
  * MX Bikes never tells a stranger who is on a server, so a full list only exists for the
- * server you are on. Everywhere else this names the players running MXB App and nobody else —
+ * server you are on. Everywhere else this names the players running Frost's Mod Manager and nobody else —
  * which is why {@link ServerRiders.source} has to be shown beside it.
  */
 export function serverRiders(address: string, name: string): Promise<ServerRiders> {

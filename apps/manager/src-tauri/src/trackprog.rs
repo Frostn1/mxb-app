@@ -1000,7 +1000,7 @@ impl Feature {
 /// against published tracks, so it cannot drift away from what the code accepts.
 pub const EXAMPLE: &str = r#"{
       "name": "Corpus National",
-      "author": "MXB App",
+      "author": "Frost's Mod Manager",
       "location": "Generated",
       "width": 12,
       "terrain": {
