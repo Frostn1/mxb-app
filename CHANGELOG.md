@@ -24,6 +24,8 @@
   they are now rather than what they were when the list loaded.
 
 ### Fixed
+- Buttons that pair an icon with a label — Refresh across the app, and the rest of the plain
+  buttons — put a space back between the two instead of running them together.
 - Trackside scenery wears its own textures. Every object now takes the sheet the track itself
   says it wears, rather than one worked out from the order they are stored in — so banners
   show their sponsors, the inflatable gates are back to full colour, and the treeline is
