@@ -33,56 +33,68 @@ const walk = (d, out = []) => {
   return out;
 };
 
-// --- what each binary registers -------------------------------------------------------
-const registered = new Set();
-for (const main of walk(path.join(root, "apps")).filter(p => p.endsWith("src-tauri/src/main.rs"))) {
+// --- per app: what it registers, against what its bundle can actually reach ------------
+//
+// Pooled across apps this check is worthless, and worse than worthless — it was pooled when
+// the studio shell was added, and it passed happily while the studio called `app_platform`,
+// which only the manager registered.
+//
+// Source scanning cannot answer it either: `packages/shared/api/mods.ts` wraps every command
+// in the app, and an app that imports two of those wrappers does not ship the other two
+// hundred. So the question is asked of the built bundle, which is tree-shaken and therefore
+// contains exactly the command names that app can reach. That means this has to run after
+// the build; if a bundle is missing it says so and skips, rather than passing quietly.
+const apps = fs.readdirSync(path.join(root, "apps"), { withFileTypes: true })
+  .filter(e => e.isDirectory()).map(e => e.name);
+
+const registeredIn = (main) => {
+  const out = new Set();
+  if (!fs.existsSync(main)) return out;
   const src = fs.readFileSync(main, "utf8");
   const i = src.indexOf("generate_handler![");
-  if (i < 0) continue;
+  if (i < 0) return out;
   const j = src.indexOf("];", i);
   // An entry is a bare name or a path (`plugins::plugin_list`,
-  // `mxb_core::trackview::read_track_info`); the command is the last segment either way.
-  // The trailing comma is optional on the last entry, so it cannot be required here —
-  // requiring it silently drops whichever command happens to be last.
+  // `mxb_core::viewer::load_bike_model`); the command is the last segment either way. The
+  // trailing comma is optional on the last entry, so it cannot be required here.
   for (const m of src.slice(i + 18, j).matchAll(/^\s*([A-Za-z_][A-Za-z0-9_:]*)\s*,?\s*$/gm))
-    registered.add(m[1].split("::").pop());
-}
+    out.add(m[1].split("::").pop());
+  return out;
+};
 
-// --- what the frontends call ----------------------------------------------------------
-// Two passes, deliberately different in strictness.
-//
-// `called` is the strict one — a name literally inside an `invoke(...)` — and it is what
-// can fail this script, so a false positive there would be a broken build for no reason.
-//
-// `mentioned` is every quoted snake_case string anywhere in frontend source. Some commands
-// are reached indirectly (`loadTrackSurfaces` takes the command as a defaulted parameter
-// and passes it on), and those are invisible to the strict pass. It is only used to keep
-// the informational "registered but not called" list from naming them.
-const called = new Map();
-const mentioned = new Set();
-const srcDirs = [...walk(path.join(root, "apps")), ...walk(path.join(root, "packages"))]
-  .filter(p => /\.(ts|tsx)$/.test(p) && !p.includes("src-tauri"));
-for (const f of srcDirs) {
-  const src = fs.readFileSync(f, "utf8");
-  for (const m of src.matchAll(/\binvoke\s*(?:<[^>]*>)?\s*\(\s*"([a-z0-9_]+)"/g))
-    if (!called.has(m[1])) called.set(m[1], path.relative(root, f));
-  for (const m of src.matchAll(/"([a-z][a-z0-9_]*_[a-z0-9_]+)"/g)) mentioned.add(m[1]);
-}
+const perApp = apps.map(app => ({
+  app,
+  reg: registeredIn(path.join(root, "apps", app, "src-tauri/src/main.rs")),
+})).filter(a => a.reg.size);
 
-const missing = [...called.keys()].filter(c => !registered.has(c)).sort();
-const unused = [...registered].filter(r => !called.has(r) && !mentioned.has(r)).sort();
+// Every command name anyone registers — the vocabulary to look for in a bundle.
+const vocabulary = new Set(perApp.flatMap(a => [...a.reg]));
 
-console.log(`registered: ${registered.size}`);
-console.log(`called:     ${called.size}\n`);
-if (unused.length) {
-  console.log(`registered but not called from any frontend (${unused.length}):`);
-  for (const u of unused) console.log("  " + u);
-  console.log("");
+let failed = false, skipped = 0;
+for (const { app, reg } of perApp) {
+  const assets = path.join(root, "apps", app, "dist", "assets");
+  if (!fs.existsSync(assets)) {
+    console.log(`${app}: no build in dist/ — skipped (run \`npm run build\` first)`);
+    skipped++;
+    continue;
+  }
+  const bundle = fs.readdirSync(assets).filter(f => f.endsWith(".js"))
+    .map(f => fs.readFileSync(path.join(assets, f), "utf8")).join("\n");
+  const reachable = [...vocabulary].filter(c => bundle.includes(`"${c}"`)).sort();
+  const missing = reachable.filter(c => !reg.has(c));
+
+  console.log(`${app}: registers ${reg.size}, bundle reaches ${reachable.length}`);
+  if (missing.length) {
+    failed = true;
+    console.log(`  ERROR: in the bundle but registered nowhere in this app (${missing.length}):`);
+    for (const m of missing) console.log(`    ${m}`);
+  }
 }
-if (missing.length) {
-  console.log(`ERROR: called by a frontend but registered nowhere (${missing.length}):`);
-  for (const m of missing) console.log(`  ${m}   (${called.get(m)})`);
+console.log("");
+if (skipped === perApp.length) {
+  console.log("nothing checked — no bundles found.");
   process.exit(1);
 }
-console.log("every command the frontend calls is registered.");
+if (failed) process.exit(1);
+console.log("every app registers every command its frontend calls.");
 JS

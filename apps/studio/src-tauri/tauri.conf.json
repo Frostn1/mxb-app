@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Frost Studio",
+  "mainBinaryName": "Frost Studio",
+  "version": "0.1.0",
+  "identifier": "com.frost.froststudio",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1430",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Frost Studio",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "backgroundColor": "#121417"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "app", "dmg", "appimage", "deb", "rpm"],
+    "category": "Game",
+    "createUpdaterArtifacts": false,
+    "licenseFile": "../../../LICENSE",
+    "publisher": "Frost",
+    "copyright": "Copyright © 2026 Frost",
+    "homepage": "https://github.com/Frostn1/mxb-app",
+    "shortDescription": "MX Bikes content studio",
+    "longDescription": "Frost's Studio is where MX Bikes content is made — paints, tracks and rider kit.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

@@ -5,7 +5,8 @@
   "type": "module",
   "workspaces": [
     "packages/shared",
-    "apps/manager"
+    "apps/manager",
+    "apps/studio"
   ],
   "scripts": {
     "dev": "npm run dev -w apps/manager",
@@ -14,7 +15,9 @@
     "tauri": "npm run tauri -w apps/manager",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "dev:studio": "npm run dev -w apps/studio",
+    "tauri:studio": "npm run tauri -w apps/studio"
   },
   "overrides": {
     "postcss": "^8.5.25"
