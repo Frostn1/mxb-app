@@ -32,6 +32,8 @@
 - More tracks show their real ground in the 3D viewer. A track's normal maps are stored a
   little differently from its colour sheets, and reading them the same way stopped the viewer
   part way through a track's ground.
+- Tracks show their whole ground in the 3D viewer rather than the first layers of it. Indiana
+  draws all six of its layers, and tracks built in the app draw all seven of theirs.
 
 ## 2026-09-06
 
