@@ -2772,25 +2772,60 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
 
 /// A hand-drawn shape's height at `t`, which runs 0 to 1 across the feature.
 ///
-/// Eased rather than joined straight, so points placed roughly still make a shape a bike can
-/// ride. Outside the points it reads as the nearest one, so a shape that does not start at
-/// zero simply begins at the height it was drawn at.
+/// Smooth through the points and never steeper than they ask for. Easing each span with a
+/// smoothstep — which is what this used to do — makes the middle of every span half again
+/// steeper than the two points either end of it, because that is what a smoothstep's slope
+/// peaks at. A triple whose take-off was drawn at 23 degrees was built at 34, and reported
+/// from the seat as almost a wall.
+///
+/// So: monotone cubic, Fritsch-Carlson. It passes through every point, it will not overshoot
+/// one, and where the drawn shape turns over — the lip of a triple, the floor between its two
+/// landings — it arrives flat instead of carrying its slope through.
+///
+/// Outside the points it reads as the nearest one, so a shape that does not start at zero
+/// simply begins at the height it was drawn at.
 fn along_points(points: &[crate::trackprog::ShapePoint], t: f32) -> f32 {
     if points.is_empty() {
         return 0.0;
     }
     let mut p: Vec<_> = points.to_vec();
     p.sort_by(|a, b| a.u.total_cmp(&b.u));
+    let n = p.len();
     if t <= p[0].u {
         return p[0].h;
     }
-    if t >= p[p.len() - 1].u {
-        return p[p.len() - 1].h;
+    if t >= p[n - 1].u {
+        return p[n - 1].h;
     }
-    let i = p.iter().rposition(|q| q.u <= t).unwrap_or(0);
-    let (a, b) = (p[i], p[(i + 1).min(p.len() - 1)]);
-    let span = (b.u - a.u).max(1e-6);
-    a.h + (b.h - a.h) * smoothstep((t - a.u) / span)
+    if n == 1 {
+        return p[0].h;
+    }
+    // Span widths and the slope across each.
+    let w: Vec<f32> = (0..n - 1).map(|i| (p[i + 1].u - p[i].u).max(1e-6)).collect();
+    let d: Vec<f32> = (0..n - 1).map(|i| (p[i + 1].h - p[i].h) / w[i]).collect();
+    // The slope the curve leaves each point with. Zero at a turning point, and otherwise a
+    // weighted harmonic mean of the two spans meeting there — which is the part that keeps a
+    // span from being ridden steeper than it was drawn.
+    let mut m = vec![0.0f32; n];
+    m[0] = d[0];
+    m[n - 1] = d[n - 2];
+    for i in 1..n - 1 {
+        if d[i - 1] * d[i] <= 0.0 {
+            m[i] = 0.0;
+        } else {
+            let (w1, w2) = (2.0 * w[i] + w[i - 1], w[i] + 2.0 * w[i - 1]);
+            m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]);
+        }
+    }
+    let i = p.iter().rposition(|q| q.u <= t).unwrap_or(0).min(n - 2);
+    let h = w[i];
+    let s = ((t - p[i].u) / h).clamp(0.0, 1.0);
+    let (s2, s3) = (s * s, s * s * s);
+    // Hermite.
+    (2.0 * s3 - 3.0 * s2 + 1.0) * p[i].h
+        + (s3 - 2.0 * s2 + s) * h * m[i]
+        + (-2.0 * s3 + 3.0 * s2) * p[i + 1].h
+        + (s3 - s2) * h * m[i + 1]
 }
 
 fn smoothstep(t: f32) -> f32 {
@@ -6854,6 +6889,58 @@ mod tests {
                 s.spur_arc[*i], s.spur_arc[j],
             );
             let _ = y1;
+        }
+    }
+
+    /// The built ground down a named stretch of the lap, metre by metre.
+    ///
+    /// When a fault is reported by where it is — "the second table after the start straight"
+    /// — an aggregate cannot answer it. This prints the profile so the shape can be read.
+    ///
+    /// ```text
+    /// FROST_PROGRAM=lap.json FROST_FROM=140 FROST_TO=290 cargo test --bin mxb-app \
+    ///     -- --ignored --nocapture profile_along
+    /// ```
+    #[test]
+    #[ignore]
+    fn profile_along() {
+        let p: TrackProgram = match std::env::var("FROST_PROGRAM") {
+            Ok(path) => serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(),
+            Err(_) => serde_json::from_str(DEMO).unwrap(),
+        };
+        let from: f32 = std::env::var("FROST_FROM").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        let to: f32 = std::env::var("FROST_TO").ok().and_then(|v| v.parse().ok()).unwrap_or(200.0);
+        let s = synthesise(&p).unwrap();
+        let at = |x: f32, z: f32| -> f32 {
+            let gx = (x / s.mps).round().clamp(0.0, (s.gw - 1) as f32) as usize;
+            let gy = (z / s.mps).round().clamp(0.0, (s.gh - 1) as f32) as usize;
+            s.heights[gy * s.gw + gx]
+        };
+        let mut last: Option<(f32, f32)> = None;
+        let base = s
+            .stations
+            .iter()
+            .find(|st| st.s >= from)
+            .map(|st| at(st.x, st.z))
+            .unwrap_or(0.0);
+        println!("  metres round | height above {from:.0} m | slope over the last 2 m");
+        for st in s.stations.iter() {
+            if st.s < from || st.s > to {
+                continue;
+            }
+            let h = at(st.x, st.z);
+            if let Some((ps, ph)) = last {
+                if st.s - ps < 2.0 {
+                    continue;
+                }
+                let deg = ((h - ph) / (st.s - ps)).atan().to_degrees();
+                let bar = ((h - base) * 4.0).round().max(0.0) as usize;
+                println!(
+                    "  {:7.1} m  {:+6.2} m  {:+6.1}°  {}",
+                    st.s, h - base, deg, "#".repeat(bar.min(60))
+                );
+            }
+            last = Some((st.s, h));
         }
     }
 

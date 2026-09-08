@@ -380,18 +380,28 @@ def features(rng, segs):
             # A triple: one take-off, a landing, and a second lower one short of it for
             # anyone not committing — "make a second smaller landing like a triple knowing I
             # would jump it".
-            length = round(min(rng.uniform(46.0, 62.0), room), 1)
-            h = rng.uniform(3.2, 4.4)
+            h = rng.uniform(2.8, 3.7)
             dip = rng.uniform(0.30, 0.40)
+            # Drawn in metres and normalised afterwards, so the take-off gets the same run a
+            # tabletop of this height gets. Drawn as fractions it had 3.6 m of lip in 8.5 m of
+            # ground — a 23 degree chord, which any curve through it rides steeper still, and
+            # from the seat that is a wall.
+            up = max(h / math.tan(math.radians(27.0 * 0.5)), 9.0)
+            down = max(h / math.tan(math.radians(19.0 * 0.5)), 9.0)
+            near = up + 4.0 + down * 0.55
+            marks = [(0.0, 0.0),
+                     (up, h),
+                     (up + 4.0, h),
+                     (near, h * dip),
+                     (near + 11.0, h * 0.66),
+                     (near + 11.0 + down * 0.7, h * 0.16),
+                     (near + 11.0 + down, 0.0)]
+            span = marks[-1][0]
+            length = round(min(span, room), 1)
+            scale = length / span
             out.append({"kind": "custom", "at": round(pos, 1), "length": length,
-                        "shape": [{"u": 0.0, "h": 0.0},
-                                  {"u": 0.18, "h": round(h * 0.86, 2)},
-                                  {"u": 0.26, "h": round(h, 2)},
-                                  {"u": 0.40, "h": round(h * dip, 2)},
-                                  {"u": 0.52, "h": round(h * 0.62, 2)},
-                                  {"u": 0.66, "h": round(h * 0.28, 2)},
-                                  {"u": 0.82, "h": round(h * 0.18, 2)},
-                                  {"u": 1.0, "h": 0.0}]})
+                        "shape": [{"u": round(m / span, 3), "h": round(v * scale, 2)}
+                                  for m, v in marks]})
         elif pick < 0.82 and room > 24.0:
             # A climb rather than a wall with a ramp on it: "that uphill is trash".
             length = round(min(rng.uniform(34.0, 48.0), room), 1)

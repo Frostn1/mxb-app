@@ -3,6 +3,10 @@
 ## 2026-09-07
 
 ### Fixed
+- Jumps drawn point by point are built at the angle they were drawn at, so a triple's
+  take-off is a face rather than a wall.
+- The Library shows a mod's real name and picture after it has been replaced by a new
+  version of itself, instead of keeping the first one it ever saw.
 - Tabletops are built to the deck they were asked for instead of being mostly run-up, and
   the ground either side of a jump is a bank rather than a wall.
 - Generated tracks no longer have a step in the ground across the start straight, or a bank
