@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-08
+
+### Added
+- A Ranked tab beside the server browser: your MXB Ranked rank, MXP and season stats for
+  Global, MX and SX, plus your last 50 races with the track, your position and the points.
+- Nothing to sign in to or set up — the app works out your MX Bikes GUID from Steam. If you
+  bought MX Bikes direct you can enter your GUID, and the same box looks up anyone else.
+
 ## 2026-09-07
 
 ### Added
