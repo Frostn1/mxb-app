@@ -9,7 +9,7 @@
 //! Also the `.pkz` metadata readers, for the same reason: the Library lists archives and the
 //! studio reads its own output back.
 
-use crate::{config, map, pkz, scenery, track};
+use crate::{map, pkz, scenery, track};
 
 #[tauri::command]
 pub async fn get_pkz_meta(app: tauri::AppHandle, path: String) -> Result<pkz::PkzMeta, String> {

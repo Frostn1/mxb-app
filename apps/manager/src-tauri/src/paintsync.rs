@@ -18,7 +18,7 @@ use std::path::{Component, Path, PathBuf};
 // The control-plane address moved to `mxb_core::names` when a second binary needed it.
 // Re-exported here because seven modules already say `paintsync::control_plane`, and the
 // address is a paint-sync fact as much as anyone's.
-pub use mxb_core::names::{control_plane, CONTROL_PLANE, CONTROL_PLANE_ENV};
+pub use mxb_core::names::control_plane;
 
 /// Only `.pnt` files are shared. Models are directories and often large, and none of the
 /// non-paint slots carry a file a receiver could use.

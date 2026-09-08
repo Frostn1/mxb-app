@@ -2,7 +2,7 @@ use crate::game::{Game, GameProfile};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 /// Where one title's content lives. The active game's copy is mirrored into
 /// [`AppConfig`]'s own `mods_path` / `game_path` / `profiles_path`; this is how the
@@ -596,10 +596,39 @@ pub fn default_user_dir(game: &GameProfile) -> Option<PathBuf> {
     Some(dirs_next::document_dir()?.join("PiBoSo").join(game.user_dir))
 }
 
+/// The folder every binary in this workspace keeps its shared state under.
+///
+/// Deliberately *not* `app.path().app_local_data_dir()`, which derives from the **bundle
+/// identifier**. The studio ships under its own identifier, so that call would hand it an
+/// empty folder: it would open on no config at all and re-run first-time setup rather than
+/// finding the game and mods paths the manager already resolved.
+///
+/// Naming the id here reproduces exactly what Tauri was returning, because the layout is the
+/// same on all three platforms — `%LOCALAPPDATA%\<id>`, `~/Library/Application Support/<id>`,
+/// `$XDG_DATA_HOME/<id>` — and `dirs_next` uses the same bases Tauri does.
+///
+/// Frozen, like the identifier it names: every install already has this folder.
+pub const DATA_ID: &str = "com.frost.mxbikes";
+
+/// The shared app-data root.
+///
+/// Keeps `app` in the signature: every caller already has one, so nothing downstream
+/// changes, and a platform quirk would have somewhere to live.
+pub fn data_dir(_app: &AppHandle) -> Option<PathBuf> {
+    Some(dirs_next::data_local_dir()?.join(DATA_ID))
+}
+
+/// The shared cache root — decoded tracks, unpacked archives.
+///
+/// Shared for the same reason as [`data_dir`], and for one more: a track the manager has
+/// just drawn should not be decoded again the moment the studio opens it.
+pub fn cache_dir(_app: &AppHandle) -> Option<PathBuf> {
+    Some(dirs_next::cache_dir()?.join(DATA_ID))
+}
+
 pub fn config_path(app: &AppHandle) -> PathBuf {
-    app.path()
-        .app_local_data_dir()
-        .expect("could not resolve app local data dir")
+    data_dir(app)
+        .expect("could not resolve the shared app data dir")
         .join("config.json")
 }
 

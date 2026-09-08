@@ -860,8 +860,7 @@ fn remember(key: String, master: Master) {
 }
 
 fn cache_file(app: &tauri::AppHandle, key: &str) -> Option<PathBuf> {
-    use tauri::Manager;
-    let dir = app.path().app_cache_dir().ok()?.join(CACHE_DIR);
+    let dir = crate::config::cache_dir(app)?.join(CACHE_DIR);
     // A key holds a file name and two numbers; anything that isn't safe in a path is
     // flattened rather than escaped, since collisions are caught by the header check.
     let safe: String = key
@@ -915,8 +914,7 @@ fn read_cache(file: &Path) -> Option<Master> {
 /// Keep the cache from growing without limit. Oldest first, since the newest are the tracks
 /// being looked at now.
 fn prune_cache(app: &tauri::AppHandle) {
-    use tauri::Manager;
-    let Ok(base) = app.path().app_cache_dir() else {
+    let Some(base) = crate::config::cache_dir(app) else {
         return;
     };
     let dir = base.join(CACHE_DIR);
