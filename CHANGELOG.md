@@ -26,8 +26,10 @@
 ### Fixed
 - Buttons that pair an icon with a label — Refresh across the app, and the rest of the plain
   buttons — put a space back between the two instead of running them together.
-- Trackside scenery wears its own textures. Tents, inflatable gates, haybales, fences and
-  crowd stands each take the sheet that belongs to them instead of the one next to it.
+- Trackside scenery wears its own textures. Every object now takes the sheet the track itself
+  says it wears, rather than one worked out from the order they are stored in — so banners
+  show their sponsors, the inflatable gates are back to full colour, and the treeline is
+  leaves instead of bark.
 - Tracks that name their textures plainly, without PiBoSo's suffixes, are drawn painted rather
   than grey. Two of the tracks checked had no readable name at all and now come out fully
   textured.
@@ -45,6 +47,8 @@
 - More tracks show their real ground in the 3D viewer. A track's normal maps are stored a
   little differently from its colour sheets, and reading them the same way stopped the viewer
   part way through a track's ground.
+- Tracks show their whole ground in the 3D viewer rather than the first layers of it. Indiana
+  draws all six of its layers, and tracks built in the app draw all seven of theirs.
 
 ## 2026-09-06
 

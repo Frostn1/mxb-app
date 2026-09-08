@@ -305,9 +305,12 @@ const RUT_CORRIDOR_FADE_M: f32 = 1.6;
 /// How wide the ridden line is either side of the racing line, how much wider it gets through
 /// a corner, and how far its own edge fades.
 ///
-/// Measured off what a corner looks like rather than picked: riders take a straight in a file
-/// about three metres wide and a corner across most of it.
-const LINE_HALF_WIDTH_M: f32 = 2.1;
+/// Three metres either side, which is the narrowest *riding width* any federation licenses: FIM
+/// article 4.2 §5 and Motorcycling New Zealand both say 6 m, and Motorcycling Australia asks 7.
+/// This was 2.1 — a 4.2 m file, under every one of them. Note the number this is not: our
+/// `width` is the graded corridor at 10–17 m, and the regulated 6 m is the surface riders use,
+/// which is this. See `docs/tracks/real-track-corpus.md` §8.1.
+const LINE_HALF_WIDTH_M: f32 = 3.0;
 const LINE_CORNER_SPREAD: f32 = 0.85;
 const LINE_FADE_M: f32 = 0.8;
 

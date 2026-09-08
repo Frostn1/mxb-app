@@ -41,6 +41,13 @@ const MAGIC: &[u8; 4] = b"MP2\0";
 /// Where the material records start, and how big one is. Geometry follows the last of them.
 const MATERIALS_AT: usize = 0x0C;
 const MATERIAL_RECORD: usize = 56;
+/// Which word of a material record holds the index of the sheet that paints it.
+///
+/// The one field in the file that states the binding outright. Everything before this read
+/// the sheets positionally and guessed, which is off by one for most of Indiana and by two
+/// for its trees: material 45 takes sheet 0 and material 38 takes sheet 40, skipping 39, so
+/// the order is genuinely the file's rather than an offset anyone could have inferred.
+const MATERIAL_TEX_WORD: usize = 11;
 
 /// Bytes per vertex, and where each attribute's array begins within the block — every one
 /// of them a count of vertices from the block's start, not a stride.
@@ -907,15 +914,15 @@ pub fn declared(b: &[u8]) -> Vec<(String, u32, u32)> {
     let Some((from, count)) = texture_table(b) else {
         return Vec::new();
     };
-    // The same walk `textures` makes, so a slot and the sheet that fills it agree.
+    // The same binding `textures` makes, so a slot and the sheet that fills it agree.
     let painting = painting_records(colour_records(b, from));
     if !covers(painting.len(), count) {
         return Vec::new();
     }
-    painting
+    bindings(b, count, painting.len())
         .into_iter()
-        .take(count)
-        .map(|(n, w, h, ..)| (n, w, h))
+        .filter_map(|(_, sheet)| painting.get(sheet))
+        .map(|(n, w, h, ..)| (n.clone(), *w, *h))
         .collect()
 }
 
@@ -1250,7 +1257,41 @@ pub fn bound_count(b: &[u8]) -> usize {
     if !binds(b) {
         return 0;
     }
-    painting_records(colour_records(b, from)).len().min(count)
+    bindings(b, count, painting_records(colour_records(b, from)).len()).len()
+}
+
+/// Which sheet paints each material, as `(material, sheet)` pairs.
+///
+/// Read out of the material records rather than guessed: see [`MATERIAL_TEX_WORD`]. Checked
+/// against 12 published tracks from 4 authors, every one of which reads as a legal index into
+/// the sheets, and on Indiana it is off by one from the positional walk for most materials
+/// and by two for its trees — which is the difference between a banner showing its sponsor
+/// and showing the 80%-transparent sheet of the object beside it.
+///
+/// Falls back to the positional walk when the field doesn't read as an index, so a map built
+/// by something that leaves it empty is no worse off than before.
+fn bindings(b: &[u8], materials: usize, sheets: usize) -> Vec<(usize, usize)> {
+    let mut out = Vec::with_capacity(materials);
+    let mut distinct = std::collections::HashSet::new();
+    for m in 0..materials {
+        let at = MATERIALS_AT + m * MATERIAL_RECORD + MATERIAL_TEX_WORD * 4;
+        if at + 4 > b.len() {
+            out.clear();
+            break;
+        }
+        let sheet = u32le(b, at) as usize;
+        if sheet >= sheets {
+            out.clear();
+            break;
+        }
+        distinct.insert(sheet);
+        out.push((m, sheet));
+    }
+    // A column holding one value throughout is a constant, not an index.
+    if out.len() == materials && distinct.len() > 1 {
+        return out;
+    }
+    (0..materials.min(sheets)).map(|i| (i, i)).collect()
 }
 
 pub fn textures(b: &[u8], max_dim: u32) -> Vec<MapTexture> {
@@ -1261,13 +1302,16 @@ pub fn textures(b: &[u8], max_dim: u32) -> Vec<MapTexture> {
     if !covers(painting.len(), count) {
         return Vec::new();
     }
-    // Anything past the material count is the terrain's own sheets, which trail the scenery's.
-    painting
+    // Each material names its own sheet, so nothing here is positional. One sheet may paint
+    // several materials, and it is inflated once per material that asks for it — the sheets
+    // are reduced immediately and a map rarely shares more than a handful.
+    let bound = bindings(b, count, painting.len());
+    bound
         .into_iter()
-        .take(count)
-        .enumerate()
-        .filter_map(|(i, (name, w, h, off, len))| {
+        .filter_map(|(material, sheet)| {
+            let (name, w, h, off, len) = painting.get(sheet)?.clone();
             let mut rgba = inflate(b, off, len, w, h)?;
+            let i = material;
             // Read from the pixels, not the name: `_c_a` is the convention, but the alpha
             // channel is the fact, and a sheet that is half see-through is a cut-out whatever
             // it is called.
@@ -1507,7 +1551,13 @@ fn layer_sheet_at(b: &[u8], o: usize) -> Option<(String, u32, u32, usize, usize)
     }
     let pow2 = |v: u32| (4..=8192).contains(&v) && v.is_power_of_two();
     // `(where the width sits, where the length sits)`, colour first.
-    for (w_off, len_off) in [(104usize, 132usize), (100, 124)] {
+    // The normal's length sits at 128, not 124. It has no spacer word before its width, so
+    // every field up to the hash sits one word earlier than the colour's — but it still keeps
+    // the colour's own gap before the length, which put the shorter guess four bytes adrift.
+    // Both tracks measured write it this way, ours and Indiana's; the walk only ever survived
+    // because `trailer_after` scanned past a normal instead of reading it. 124 stays behind it
+    // for any writer that packs the field tight.
+    for (w_off, len_off) in [(104usize, 132usize), (100, 128), (100, 124)] {
         if w_off == 104 {
             // The colour's two spacer words: one before the width, one where sub-records
             // would be counted. The normal has neither, which is how they are told apart.
@@ -1701,12 +1751,20 @@ fn march_layers(b: &[u8], start: usize, decode: bool) -> Vec<GroundLayer> {
         let Some((name, w, h, data, end)) = layer_sheet_at(b, o + LAYER_MATERIAL + 4) else {
             break;
         };
-        // A layer may state more than one sheet, and the extras have to be stepped over
-        // rather than scanned through: TerrainEd writes a `_wet` variant beside the colour
-        // and an `env` cube beside that, and a trailer hunted for from the end of the first
-        // sheet lands inside two megabytes of somebody else's compressed pixels and finds
-        // nothing. Published tracks state one sheet and hit the trailer either way, which is
-        // why this only ever showed up on the tracks we compile ourselves.
+        // Step over the layer's other sheets rather than scanning through them. TerrainEd
+        // writes a normal, a `_wet` variant and an `env` cube behind the colour and states
+        // only some of them, so this is greedy rather than counted. A sibling follows within
+        // a few dozen bytes while the next *layer* is a material record and a count word
+        // further on again, which is what the short window tells apart. Published tracks
+        // carry one sheet a layer and found their trailer either way — this only ever showed
+        // up on the tracks we compile ourselves.
+        let mut end = end;
+        for _ in 0..4 {
+            let Some(next) = (0..48).find_map(|d| layer_sheet_at(b, end + d).map(|s| s.4)) else {
+                break;
+            };
+            end = next;
+        }
         let Some(t) = trailer_after(b, end, end + TRAILER_REACH) else {
             break;
         };
@@ -1769,7 +1827,11 @@ pub fn ground_layers(b: &[u8]) -> Vec<GroundLayer> {
         {
             starts.push(o - LAYER_MATERIAL - 4);
         }
-        o += 4;
+        // A byte at a time, not a word: nothing in the format aligns a sheet record, and the
+        // stacks we compile ourselves land on odd offsets every time. Stepping by four found
+        // the base layer of every published track and not one of ours. The guard in front is
+        // a single byte test, so the extra three quarters of the walk costs almost nothing.
+        o += 1;
     }
 
     // The march that reads the most layers is the stack. Ties go to the earliest, which is the
@@ -1963,7 +2025,11 @@ mod tests {
         e.write_all(&px).unwrap();
         let z = e.finish().unwrap();
 
-        let build = |colour: bool| {
+        // `spacer` is the word a real normal record keeps between its hash and its length —
+        // the one that puts the length at 128. Both tracks measured write it; this test used
+        // to assume it away on its own authority and so agreed with a reader that could not
+        // parse a normal map out of any file on disk.
+        let build = |colour: bool, spacer: bool| {
             let mut b = vec![0u8; 100];
             b[..6].copy_from_slice(b"sand_n");
             if colour {
@@ -1972,7 +2038,7 @@ mod tests {
             b.extend_from_slice(&8u32.to_le_bytes());
             b.extend_from_slice(&8u32.to_le_bytes());
             b.extend_from_slice(&[0u8; 16]);
-            if colour {
+            if colour || spacer {
                 b.extend_from_slice(&0u32.to_le_bytes());
             }
             b.extend_from_slice(&((z.len() + 8) as u32).to_le_bytes());
@@ -1982,12 +2048,15 @@ mod tests {
             b
         };
 
-        for colour in [true, false] {
-            let b = build(colour);
+        for (colour, spacer, what) in [
+            (true, false, "colour"),
+            (false, true, "normal, as both tracks write it"),
+            (false, false, "normal, packed tight"),
+        ] {
+            let b = build(colour, spacer);
             let got = layer_sheet_at(&b, 0);
-            let (name, w, h, data, end) = got.unwrap_or_else(|| {
-                panic!("the {} shape did not parse", if colour { "colour" } else { "normal" })
-            });
+            let (name, w, h, data, end) =
+                got.unwrap_or_else(|| panic!("the {what} shape did not parse"));
             assert_eq!(name, "sand_n");
             assert_eq!((w, h), (8, 8));
             assert_eq!(end - data, z.len(), "the payload has to end where the stream does");
@@ -2526,6 +2595,115 @@ mod tests {
         assert_eq!(kept, ["a_c", "b_c", "c_c"]);
     }
 
+    /// A material names its own sheet, and the walk that guessed is only the fallback.
+    ///
+    /// Built as Indiana's records are: the index is not the material's own number, it is not
+    /// a fixed offset from it, and it does not stay in order — Indiana's material 45 takes
+    /// sheet 0 and its 38 takes sheet 40, skipping 39. Nothing positional reproduces that.
+    #[test]
+    fn a_material_names_the_sheet_that_paints_it() {
+        // Four materials, and a header long enough to hold their records.
+        let mut b = vec![0u8; MATERIALS_AT + 4 * MATERIAL_RECORD];
+        let put = |b: &mut Vec<u8>, m: usize, sheet: u32| {
+            let at = MATERIALS_AT + m * MATERIAL_RECORD + MATERIAL_TEX_WORD * 4;
+            b[at..at + 4].copy_from_slice(&sheet.to_le_bytes());
+        };
+        // Out of order, and one sheet shared by two materials — both of which a positional
+        // walk gets wrong by construction.
+        put(&mut b, 0, 3);
+        put(&mut b, 1, 0);
+        put(&mut b, 2, 2);
+        put(&mut b, 3, 2);
+        assert_eq!(bindings(&b, 4, 4), vec![(0, 3), (1, 0), (2, 2), (3, 2)]);
+
+        // An index past the end of the sheets is not an index, so the walk takes over.
+        let mut bad = b.clone();
+        put(&mut bad, 2, 99);
+        assert_eq!(bindings(&bad, 4, 4), vec![(0, 0), (1, 1), (2, 2), (3, 3)]);
+
+        // Neither is a column holding one value throughout.
+        let mut flat = vec![0u8; MATERIALS_AT + 4 * MATERIAL_RECORD];
+        for m in 0..4 {
+            put(&mut flat, m, 1);
+        }
+        assert_eq!(bindings(&flat, 4, 4), vec![(0, 0), (1, 1), (2, 2), (3, 3)]);
+
+        // And the fallback never invents a sheet a map doesn't carry.
+        assert_eq!(bindings(&flat, 4, 2), vec![(0, 0), (1, 1)]);
+    }
+
+    /// What is actually inside a material record.
+    ///
+    /// The parse has always stepped straight over these 56 bytes, and the whole binding
+    /// problem — which sheet paints which material — is guesswork *because* of that. If one
+    /// of these fourteen words is a texture index, the guessing ends.
+    ///
+    /// ```text
+    /// FROST_MAP="…/track.map" \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture inside_a_material_record
+    /// ```
+    #[test]
+    #[ignore = "needs a real .map — set FROST_MAP"]
+    fn inside_a_material_record() {
+        let path = std::env::var("FROST_MAP").expect("set FROST_MAP");
+        let b = std::fs::read(&path).expect("read the map");
+        let n = material_count(&b).expect("a material count");
+        let sheets = painting_records(colour_records(&b, texture_table(&b).unwrap().0));
+        println!("  {n} materials, {} painting records", sheets.len());
+
+        const WORDS: usize = MATERIAL_RECORD / 4;
+        // A column that is always a small number in range is what a texture index looks like.
+        let mut in_range = [true; WORDS];
+        let mut distinct: Vec<std::collections::HashSet<u32>> = vec![Default::default(); WORDS];
+        for m in 0..n {
+            let at = MATERIALS_AT + m * MATERIAL_RECORD;
+            let mut row = String::new();
+            for w in 0..WORDS {
+                let v = u32le(&b, at + w * 4);
+                distinct[w].insert(v);
+                if v as usize >= sheets.len() {
+                    in_range[w] = false;
+                }
+                let f = f32::from_le_bytes([
+                    b[at + w * 4],
+                    b[at + w * 4 + 1],
+                    b[at + w * 4 + 2],
+                    b[at + w * 4 + 3],
+                ]);
+                // Floats are colours and factors; integers are the interesting ones.
+                row += &if f != 0.0 && f.is_finite() && f.abs() < 1e6 && f.fract() != 0.0 {
+                    format!("{f:>10.3}")
+                } else {
+                    format!("{v:>10}")
+                };
+            }
+            if m < 24 {
+                println!("  m{m:<3}{row}");
+            }
+        }
+        println!();
+        for w in 0..WORDS {
+            println!(
+                "  word {w:<2} distinct={:<4} always_in_sheet_range={}",
+                distinct[w].len(),
+                in_range[w]
+            );
+        }
+
+        // The candidate: one distinct value per material, every one a legal sheet index.
+        let idx = (0..WORDS)
+            .find(|&w| in_range[w] && distinct[w].len() == n && n > 1)
+            .expect("a word that indexes the sheets one-to-one");
+        println!("\n  word {idx} reads as the texture index:");
+        for m in 0..n {
+            let v = u32le(&b, MATERIALS_AT + m * MATERIAL_RECORD + idx * 4) as usize;
+            println!(
+                "  mat{m:<3} -> sheet {v:<3} {}",
+                sheets.get(v).map(|(s, ..)| s.as_str()).unwrap_or("??")
+            );
+        }
+    }
+
     /// How many colour maps each rule finds, against how many materials the map declares.
     ///
     /// The positional binding needs one colour map per material, in order. Too few and the
@@ -2579,13 +2757,38 @@ mod tests {
                     !secondary && seen.insert(l)
                 })
                 .count();
+            // Does word 11 of every material record read as a legal, one-per-material index
+            // into the painting records? That is what makes it the binding rather than a
+            // coincidence, and it has to hold on every track before it can be trusted.
+            // In range is the test; distinct is not. One sheet often paints several
+            // materials — a fence and its gate wear the same picture — so demanding a
+            // one-to-one map wrongly rejected the two largest tracks here.
+            let sheets = not_secondary;
+            let mut seen = std::collections::HashSet::new();
+            let mut legal = count > 0;
+            for m in 0..count {
+                let at = MATERIALS_AT + m * MATERIAL_RECORD + MATERIAL_TEX_WORD * 4;
+                if at + 4 > bytes.len() {
+                    legal = false;
+                    break;
+                }
+                let v = u32le(&bytes, at) as usize;
+                if v >= sheets {
+                    legal = false;
+                    break;
+                }
+                seen.insert(v);
+            }
+            // A column of the same value is a constant, not an index.
+            legal = legal && seen.len() > 1;
             println!(
-                "{:<44} {:>7} {:>7} {:>7} {:>7}{}",
+                "{:<44} {:>7} {:>7} {:>7} {:>7}   w11={}{}",
                 p.file_stem().unwrap_or_default().to_string_lossy(),
                 all.len(),
                 count,
                 named,
                 not_secondary,
+                if legal { "INDEX" } else { "no" },
                 if named < count { "   <- SLIDES" } else { "" }
             );
         }
