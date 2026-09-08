@@ -8,7 +8,7 @@ mod bundle;
 mod cancel;
 pub(crate) use mxb_core::cfg;
 mod cloudfiles;
-mod config;
+pub(crate) use mxb_core::config;
 mod cookie_session;
 mod downloads;
 mod dropzone;
@@ -19,7 +19,7 @@ mod fileshare;
 mod firstpaint;
 mod frostmod;
 mod frostmod_manage;
-mod game;
+pub(crate) use mxb_core::game;
 mod fileinfo;
 mod gameproc;
 pub(crate) use mxb_core::gate;
@@ -31,7 +31,7 @@ mod identity;
 mod imgcache;
 mod install;
 mod ledger;
-mod library;
+pub(crate) use mxb_core::library;
 mod liveshare;
 pub(crate) use mxb_core::linkwalk;
 mod logs;
@@ -57,7 +57,7 @@ mod plugins;
 mod procmods;
 /// Linux only: the Proton prefix the game runs in, and how to put a Windows program in it.
 #[cfg(target_os = "linux")]
-mod proton;
+pub(crate) use mxb_core::proton;
 #[cfg(sidecar)]
 pub(crate) use mxb_core::sidecar;
 #[cfg(sidecar)]
@@ -125,7 +125,7 @@ mod offline_flow_test {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-mod presets;
+pub(crate) use mxb_core::presets;
 mod paintsync;
 mod reshade;
 pub(crate) use mxb_core::scenery;
@@ -153,10 +153,10 @@ mod trackspeed;
 mod trackstats;
 mod tracksynth;
 mod upload;
-mod usage;
+pub(crate) use mxb_core::usage;
 mod vcruntime;
 mod voice;
-mod winehost;
+pub(crate) use mxb_core::winehost;
 
 use config::AppConfig;
 use frostmod::ReloadOutcome;

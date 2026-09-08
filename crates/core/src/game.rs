@@ -11,7 +11,6 @@
 //! title (World Racing Series, Kart Racing Pro) is a new `const` in this file plus its
 //! catalog session.
 
-use crate::cookie_session::Site;
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 
@@ -38,6 +37,12 @@ pub fn set_active(game: Game) {
 /// rather than a wrong write.
 pub fn active() -> &'static GameProfile {
     ACTIVE.read().map(|g| g.profile()).unwrap_or(&MXB)
+}
+
+/// The active title itself, for the lookups that map a game onto something this table
+/// deliberately does not hold — its catalog `Site`, for one.
+pub fn active_game() -> Game {
+    ACTIVE.read().map(|g| *g).unwrap_or(Game::Mxb)
 }
 
 /// The titles the app knows how to drive. Serialized as `"mxb"` / `"gpb"` — these strings
@@ -188,10 +193,11 @@ pub struct GameProfile {
     /// waiting on, so parking them buys nothing and only risks breaking a setup.
     pub manage_dirs: &'static [&'static str],
     pub rider: RiderLayout,
-    /// The mods catalog this title browses — mxb-mods.com or gpb-mods.com. Both are the
-    /// same WordPress/WP-REST stack by the same author, so one client serves either; the
-    /// `Site` carries the host and its own cookie jar identity.
-    pub catalog: &'static Site,
+    /// The mods catalog this title browses. The host only: the cookie jar and the client
+    /// that goes with it live in `mxb_session`, which maps a game to its `Site`. Naming the
+    /// host here rather than holding the `Site` is what keeps this table of constants free
+    /// of the HTTP layer, so it can be shared by a binary that does no browsing at all.
+    pub catalog_domain: &'static str,
     pub caps: Caps,
 }
 
@@ -254,7 +260,7 @@ pub static MXB: GameProfile = GameProfile {
         profile_extras: &[("gloves", "gloves"), ("goggles", "goggles")],
         stock_profiles: &["default_mx", "default_sm"],
     },
-    catalog: &crate::mxb_session::MXB_SITE,
+    catalog_domain: "mxb-mods.com",
     caps: Caps {
         frostmod: true,
         instant_refresh: true,
@@ -305,7 +311,7 @@ pub static GPB: GameProfile = GameProfile {
         profile_extras: &[],
         stock_profiles: &[],
     },
-    catalog: &crate::mxb_session::GPB_SITE,
+    catalog_domain: "gpb-mods.com",
     caps: Caps {
         frostmod: true,
         instant_refresh: false,
@@ -412,7 +418,7 @@ impl GameProfile {
             display: self.display,
             exe: self.exe,
             mods_dirs: self.mods_dirs,
-            catalog_domain: self.catalog.domain,
+            catalog_domain: self.catalog_domain,
             rider_areas: self
                 .installable_areas()
                 .map(|a| RiderAreaInfo {

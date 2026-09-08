@@ -16,6 +16,25 @@ pub struct GamePaths {
     pub reshade_path: String,
 }
 
+/// A dedicated server the player administers, as stored in the app config.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ServerRef {
+    /// Stable handle for the UI; the agent never sees it.
+    pub id: String,
+    /// Display label, free text.
+    pub name: String,
+    /// Base URL of the agent, e.g. `http://203.0.113.10:8787`.
+    pub url: String,
+    /// Bearer token from the host's `agent.json`.
+    pub token: String,
+    /// The control plane's id for this server once it has been put in the public list.
+    /// Empty until published — and it has to be persisted, because it is the only handle
+    /// that can take the row back out again after a restart.
+    #[serde(default)]
+    pub registry_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
@@ -175,7 +194,7 @@ pub struct AppConfig {
     /// Dedicated servers this player administers, each with its agent address and bearer
     /// token. Stored here in clear, like the rest of the config — worth knowing before
     /// adding a server whose token protects anything beyond the game process it runs.
-    pub servers: Vec<crate::servers::ServerRef>,
+    pub servers: Vec<ServerRef>,
     /// Bearer token for this player's control-plane account, from enrolling with an invite
     /// code. Empty until they enroll.
     pub cp_token: String,

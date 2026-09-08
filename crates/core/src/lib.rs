@@ -9,6 +9,13 @@
 //! sites elsewhere kept resolving through the move unchanged.
 
 pub mod bikefiles;
+pub mod config;
+pub mod game;
+pub mod library;
+pub mod presets;
+pub mod proton;
+pub mod usage;
+pub mod winehost;
 pub mod cfg;
 pub mod edf;
 pub mod gate;

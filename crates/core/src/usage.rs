@@ -21,7 +21,7 @@
 //! otherwise, so working on the app doesn't quietly become a user of it.
 
 use crate::config::{self, AppConfig};
-use crate::paintsync::control_plane;
+use crate::names::control_plane;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};

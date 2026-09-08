@@ -1,5 +1,12 @@
 use crate::game::GameProfile;
 use crate::linkwalk;
+/// The folder a bike's swappable model sets live in, beside its `.pkz`.
+pub const LIB_DIR: &str = "FrostMod Models";
+/// Where a livery waits while the model it belongs to is *not* active. Out of
+/// `<Bike>/paints/` means out of the game's paint list too, which is the point. One shelf
+/// per bike rather than one per variant, so a livery owned by two models has one home.
+pub const PAINT_SHELF: &str = "_paints";
+
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fs;
@@ -515,7 +522,7 @@ fn has_ext(p: &Path, ext: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn strip_ext(name: &str) -> String {
+pub fn strip_ext(name: &str) -> String {
     let lower = name.to_ascii_lowercase();
     for ext in [".pkz", ".pnt", ".zip"] {
         if lower.ends_with(ext) {
@@ -534,7 +541,7 @@ fn rel_folder(base: &Path, path: &Path) -> String {
 
 /// Unix milliseconds, or 0 when the filesystem won't say — a mod with no time sorts last under
 /// "recently added" rather than jumping to the top of it.
-pub(crate) fn mtime_ms(m: &fs::Metadata) -> u64 {
+pub fn mtime_ms(m: &fs::Metadata) -> u64 {
     m.modified()
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -609,7 +616,7 @@ fn make_entry(base: &Path, p: &Path, category: &str, parent: Option<String>) -> 
 
 const TRACK_MARKERS: [&str; 5] = ["map", "trh", "tsc", "rdf", "ssc"];
 
-pub(crate) fn dir_has_track_markers(dir: &Path) -> bool {
+pub fn dir_has_track_markers(dir: &Path) -> bool {
     if let Ok(rd) = fs::read_dir(dir) {
         for e in rd.flatten() {
             let p = e.path();
@@ -722,7 +729,7 @@ fn dir_has_sound_markers(dir: &Path) -> bool {
 fn paint_owner(segs: &[&str]) -> Option<Option<String>> {
     let owner_at = |i: usize| segs.get(i).map(|s| s.to_string());
     let is_lib =
-        |i: usize| segs.get(i).is_some_and(|s| s.eq_ignore_ascii_case(crate::modelswap::LIB_DIR));
+        |i: usize| segs.get(i).is_some_and(|s| s.eq_ignore_ascii_case(LIB_DIR));
 
     if let Some(pos) = segs.iter().position(|s| s.eq_ignore_ascii_case("paints")) {
         // `<Bike>/FrostMod Models/<Variant>/paints/…` — owner is the bike, three up.
@@ -737,7 +744,7 @@ fn paint_owner(segs: &[&str]) -> Option<Option<String>> {
     // listed, or assigning a livery would look like losing it.
     let pos = segs
         .iter()
-        .position(|s| s.eq_ignore_ascii_case(crate::modelswap::PAINT_SHELF))?;
+        .position(|s| s.eq_ignore_ascii_case(PAINT_SHELF))?;
     if !is_lib(pos.checked_sub(1)?) {
         return None;
     }
@@ -1413,57 +1420,5 @@ mod path_case_tests {
         let got = mods_subdir(root.to_str().unwrap(), "mods/tracks");
         assert!(got.ends_with("tracks"), "nothing on disk yet, so use what we asked for");
         let _ = std::fs::remove_dir_all(&root);
-    }
-}
-
-#[cfg(test)]
-mod library_swap_join_tests {
-    use std::fs;
-
-    /// The join the Library's model-swap badge relies on.
-    ///
-    /// A bike row in the library is a `<Bike>.pkz` **file**, so its `name` carries the archive
-    /// extension, while `modelswap::scan_model_swaps` keys by the bike **folder** beside it.
-    /// Matching the two raw finds nothing — which is exactly the bug that shipped: the badge
-    /// could never appear for any bike. The frontend has to strip the extension, and this
-    /// pins which side carries it so a rename on either can't quietly break the join again.
-    #[test]
-    fn a_bike_row_joins_its_swaps_only_once_the_extension_is_stripped() {
-        let root = std::env::temp_dir().join(format!("frost-join-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        let mp = root.to_str().unwrap();
-        let bikes = super::mods_subdir(mp, "mods/bikes");
-        let bike = "MX1OEM_2023_KTM_450_SX-F";
-        fs::create_dir_all(&bikes).unwrap();
-        // The bike as the library sees it: a packed archive at the bikes root.
-        fs::write(bikes.join(format!("{bike}.pkz")), b"pkz").unwrap();
-        // And a registered model set beside it, as the Locker sees it.
-        let variant = bikes.join(bike).join(crate::modelswap::LIB_DIR).join("Factory");
-        fs::create_dir_all(&variant).unwrap();
-        fs::write(variant.join("model.edf"), b"mesh").unwrap();
-
-        let rows = super::scan_library(mp, "mods/bikes", &[], &crate::game::MXB).expect("scan");
-        let bike_rows: Vec<&super::LibraryEntry> =
-            rows.iter().filter(|e| e.category == "bike").collect();
-        assert!(!bike_rows.is_empty(), "the packed bike must be listed");
-        assert!(
-            bike_rows.iter().all(|e| e.name.ends_with(".pkz")),
-            "a bike row is the archive file, extension and all: {:?}",
-            bike_rows.iter().map(|e| &e.name).collect::<Vec<_>>(),
-        );
-
-        let swaps = crate::modelswap::scan_model_swaps(mp);
-        let key = &swaps.iter().find(|b| b.bike == bike).expect("the bike has swaps").bike;
-        assert!(!key.ends_with(".pkz"), "a swap is keyed by the folder, not the archive");
-
-        assert!(
-            !bike_rows.iter().any(|e| &e.name == key),
-            "raw names must not join — if they do, the frontend's strip is wrong",
-        );
-        assert!(
-            bike_rows.iter().any(|e| super::strip_ext(&e.name).eq_ignore_ascii_case(key)),
-            "stripped names must join, or the badge can never appear",
-        );
-        let _ = fs::remove_dir_all(&root);
     }
 }

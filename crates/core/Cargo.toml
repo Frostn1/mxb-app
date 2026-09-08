@@ -38,6 +38,19 @@ image = { version = "0.25", default-features = false, features = [
     "gif",
 ] }
 zip = "2"
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "stream",
+    "json",
+    "cookies",
+    "gzip",
+    "brotli",
+    # Preset bundles upload as a multipart form.
+    "multipart",
+] }
+tokio = { version = "1", features = ["time", "sync", "rt"] }
+uuid = { version = "1", features = ["v4"] }
+trash = "5"
 base64 = "0.22"
 log = "0.4"
 dirs-next = "2.0.0"
@@ -48,3 +61,10 @@ getrandom = "0.2"
 # Tauri's mock runtime, so paintwatch's watcher lifecycle can be exercised without a display
 # or a real webview. Dev-only, so the shipped binaries never get the `test` feature.
 tauri = { version = "2", features = ["test"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# `library::move_to_trash` calls NSFileManager directly: the `trash` crate drives Finder over
+# AppleScript on macOS, and Finder refuses a file iCloud has evicted (error -8013), which is
+# exactly what a mods folder under Documents is full of.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSFileManager", "NSURL", "NSError", "NSString"] }
