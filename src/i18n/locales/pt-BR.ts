@@ -1099,6 +1099,10 @@ export const ptBR: Translation = {
   "serverBrowser.any": "Qualquer",
   "serverBrowser.yes": "Sim",
   "serverBrowser.notJoinable": "O MX Bikes não consegue se conectar ao endereço deste servidor.",
+  "serverBrowser.paintSyncHere_one":
+    "{{count}} piloto neste servidor usa a sincronização de pinturas — você verá a pintura real dele.",
+  "serverBrowser.paintSyncHere_other":
+    "{{count}} pilotos neste servidor usam a sincronização de pinturas — você verá as pinturas reais deles.",
   "serverBrowser.filtered": "Filtrado",
   "serverBrowser.hiddenCount": "{{count}} ocultos",
   "serverBrowser.hideFiltered": "Ocultar de novo",

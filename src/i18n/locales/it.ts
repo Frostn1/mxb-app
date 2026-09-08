@@ -1097,6 +1097,10 @@ export const it: Translation = {
   "serverBrowser.any": "Qualsiasi",
   "serverBrowser.yes": "Sì",
   "serverBrowser.notJoinable": "MX Bikes non può essere indirizzato a questo server.",
+  "serverBrowser.paintSyncHere_one":
+    "{{count}} pilota su questo server usa la sincronizzazione delle grafiche: vedrai la sua livrea reale.",
+  "serverBrowser.paintSyncHere_other":
+    "{{count}} piloti su questo server usano la sincronizzazione delle grafiche: vedrai le loro livree reali.",
   "serverBrowser.filtered": "Filtrato",
   "serverBrowser.hiddenCount": "{{count}} nascosti",
   "serverBrowser.hideFiltered": "Nascondili di nuovo",

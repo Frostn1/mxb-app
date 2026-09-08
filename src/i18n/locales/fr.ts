@@ -1104,6 +1104,10 @@ export const fr: Translation = {
   "serverBrowser.any": "Toutes",
   "serverBrowser.yes": "Oui",
   "serverBrowser.notJoinable": "MX Bikes ne peut pas se connecter à l'adresse de ce serveur.",
+  "serverBrowser.paintSyncHere_one":
+    "{{count}} pilote sur ce serveur utilise la synchro des peintures — vous verrez sa vraie livrée.",
+  "serverBrowser.paintSyncHere_other":
+    "{{count}} pilotes sur ce serveur utilisent la synchro des peintures — vous verrez leurs vraies livrées.",
   "serverBrowser.filtered": "Filtré",
   "serverBrowser.hiddenCount": "{{count}} masqués",
   "serverBrowser.hideFiltered": "Masquer à nouveau",
