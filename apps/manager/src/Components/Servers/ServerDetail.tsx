@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@frost/shared/Components/ui/dialog";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import {
   probeServer,
   serverRiders,

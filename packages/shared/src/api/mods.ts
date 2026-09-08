@@ -64,26 +64,26 @@ import type {
   LockOutcome,
   LockProgress,
 } from "../types";
-import type { TKey } from "../i18n";
+import type { BaseTKey } from "../i18n/core";
 
 /** Results per page (mirrors `PER_PAGE` in the Rust backend). */
 export const SEARCH_PAGE_SIZE = 24;
 
 export interface ModCategory {
   id: number;
-  label: TKey;
+  label: BaseTKey;
 }
 
 /** A top-level kind of mod, with its filter categories and install folder. */
 export interface ModType {
   id: string;
-  label: TKey;
+  label: BaseTKey;
   /**
    * The same noun as it reads *inside* a sentence ("Search tracks…").
    * A separate key rather than `label.toLowerCase()` — German capitalizes its
    * nouns everywhere, so lowercasing a translated label produces broken German.
    */
-  labelInline: TKey;
+  labelInline: BaseTKey;
   /** Parent WordPress category id (also the "All" filter). */
   categoryId: number;
   categories: ModCategory[];
@@ -420,7 +420,7 @@ export type ModSort =
 /** The sort choices Browse offers, in menu order. The popular ones are ranked by view
  *  count, which comes from a listing that takes no search term — `noSearch` marks those
  *  so the menu can drop them while the search box has text in it. */
-export const MOD_SORTS: { value: ModSort; label: TKey; noSearch?: boolean }[] = [
+export const MOD_SORTS: { value: ModSort; label: BaseTKey; noSearch?: boolean }[] = [
   { value: "newest", label: "browseSort.newest" },
   { value: "oldest", label: "browseSort.oldest" },
   { value: "popularAll", label: "browseSort.popularAll", noSearch: true },
@@ -1220,7 +1220,7 @@ export interface DestOption {
    * "{{name}} — paints"). The folder name, when one is involved, rides in
    * `labelVars.name` so the translation can put it where its language wants it.
    */
-  labelKey?: TKey;
+  labelKey?: BaseTKey;
   labelVars?: Record<string, string>;
 }
 
@@ -1495,7 +1495,7 @@ function areaSlot(folder: string): string {
   return folder === "protections" ? "protection" : folder;
 }
 
-const AREA_LABELS: Record<string, { newModel: TKey; paints?: TKey; goggles?: TKey }> = {
+const AREA_LABELS: Record<string, { newModel: BaseTKey; paints?: BaseTKey; goggles?: BaseTKey }> = {
   helmets: {
     newModel: "dest.helmetsNewModel",
     paints: "dest.helmetPaintsFor",
@@ -1553,7 +1553,7 @@ export function buildRiderDestinations(
 ): RiderDestinations {
   const seen = new Set<string>();
   const options: DestOption[] = [];
-  const add = (value: string, labelKey: TKey | null, labelVars?: Record<string, string>) => {
+  const add = (value: string, labelKey: BaseTKey | null, labelVars?: Record<string, string>) => {
     if (!seen.has(value)) {
       // A folder a future title adds has no phrasing of its own; its name is the honest label.
       options.push(
@@ -1601,7 +1601,7 @@ export function buildRiderDestinations(
   const rankedProfiles = rankRiderProfiles(profiles, title, categories);
   // Both games keep these in the same folder; each has its own word for what's in it. MX
   // Bikes' kit is worn *with* the boots and gloves, GP Bikes' suit has them built in.
-  const profilePaints: TKey = game.id === "gpb" ? "dest.suitPaintsFor" : "dest.outfitFor";
+  const profilePaints: BaseTKey = game.id === "gpb" ? "dest.suitPaintsFor" : "dest.outfitFor";
   for (const prof of profiles) {
     add(`${RIDERS_DIR}/${prof}/paints`, profilePaints, { name: prof });
     for (const extra of game.riderProfileExtras) {
@@ -2293,7 +2293,7 @@ export const RUNTIME_DOWNLOADS_PAGE =
  *
  *  The architecture is part of the name on purpose: someone told to install "Visual C++"
  *  who already has the x64 package needs to see that it's the other one being asked for. */
-export const RUNTIME_NAME_KEY: Record<VcRuntime, TKey> = {
+export const RUNTIME_NAME_KEY: Record<VcRuntime, BaseTKey> = {
   vc90: "runtime.componentVc90",
   vc140: "runtime.componentVc140",
   vc140_x86: "runtime.componentVc140X86",

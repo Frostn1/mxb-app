@@ -43,7 +43,7 @@ import { Switch } from "@frost/shared/Components/ui/switch";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
 import { loadTrackOverview, loadTrackTerrain } from "@frost/shared/api/tracks";
 import type { TrackOverview, TrackTerrain } from "@frost/shared/types";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import { isRunning, useTrackBuild } from "../../../Context/TrackBuild";
 import { cn } from "@frost/shared/lib/utils";
 import {

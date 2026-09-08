@@ -5,7 +5,7 @@ import PriceTag from "./PriceTag";
 import { openShopUrl } from "../../api/shop";
 import { GRID_THUMB_WIDTH } from "@frost/shared/lib/imgcache";
 import CachedImg from "@frost/shared/Components/ui/cached-img";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import {
   ContextMenu,
   ContextMenuTrigger,

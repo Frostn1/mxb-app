@@ -14,7 +14,7 @@ import {
 } from "@frost/shared/api/mods";
 import { useConfig } from "@frost/shared/Context/Config";
 import type { GameInfo, PaintDest } from "@frost/shared/types";
-import { useT, type TKey } from "@frost/shared/i18n/context";
+import { useT, type TKey } from "@/i18n";
 
 /**
  * Where a paint is going — shared by both halves of the Studio.

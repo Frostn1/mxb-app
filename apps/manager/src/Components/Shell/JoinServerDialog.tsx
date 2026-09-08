@@ -12,7 +12,7 @@ import {
 import { Input } from "@frost/shared/Components/ui/input";
 import { Button } from "@frost/shared/Components/ui/button";
 import { cpServers, joinServer, type RegisteredServer } from "@frost/shared/api/mods";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 
 /** Remembers the last address, so rejoining a regular server is one keystroke. */
 const LAST_ADDRESS_KEY = "mxb:lastServerAddress";

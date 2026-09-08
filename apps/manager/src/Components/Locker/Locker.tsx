@@ -47,8 +47,8 @@ import AssignPaintsDialog from "./AssignPaintsDialog";
 import { ModelSwapActions } from "./ModelSwapActions";
 import { ViewerDialog } from "@frost/shared/Components/Viewer/ViewerDialog";
 import { useConfig } from "@frost/shared/Context/Config";
-import { Trans } from "@frost/shared/i18n";
-import { useT, type TFunc } from "@frost/shared/i18n/context";
+import { Trans, type TKey } from "@/i18n";
+import { useT, type TFunc } from "@/i18n";
 import { useShare } from "../../Context/Share";
 import {
   ContextMenu,
@@ -113,7 +113,7 @@ function pruneHiddenOrphans(live: OrphanedSetup[]): Set<string> {
 function swapNote(
   kind: "model" | "sound",
   outcome: SwapApplyOutcome,
-  t: TFunc,
+  t: TFunc<TKey>,
 ): string {
   if (!outcome.game_running) return t("locker.loadsNextTime");
 

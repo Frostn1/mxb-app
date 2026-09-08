@@ -32,7 +32,7 @@ import { isLiveCode } from "../../lib/liveshare";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import { formatBytes } from "@frost/shared/lib/mods";
 import { copyText } from "../../lib/clipboard";
-import { useT, type TFunc } from "@frost/shared/i18n/context";
+import { useT, type TFunc, type TKey } from "@/i18n";
 import { Button } from "@frost/shared/Components/ui/button";
 import {
   Dialog,
@@ -43,7 +43,7 @@ import {
   DialogFooter,
 } from "@frost/shared/Components/ui/dialog";
 
-function phaseLabel(phase: BundlePhase, t: TFunc): string {
+function phaseLabel(phase: BundlePhase, t: TFunc<TKey>): string {
   switch (phase) {
     case "bundling":
       return t("share.phasePacking");

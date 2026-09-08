@@ -1,6 +1,6 @@
 import type { ShopPrice } from "@frost/shared/types";
 import { formatPrice } from "../../api/shop";
-import { useI18n } from "@frost/shared/i18n/context";
+import { useI18n } from "@/i18n";
 import { cn } from "@frost/shared/lib/utils";
 
 interface PriceTagProps {

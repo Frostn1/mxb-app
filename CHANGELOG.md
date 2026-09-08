@@ -32,6 +32,8 @@
 - More tracks show their real ground in the 3D viewer. A track's normal maps are stored a
   little differently from its colour sheets, and reading them the same way stopped the viewer
   part way through a track's ground.
+- The Settings descriptions for the profiles folder and the game install folder name the
+  game you are set up for.
 
 ## 2026-09-06
 

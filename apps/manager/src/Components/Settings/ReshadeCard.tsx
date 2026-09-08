@@ -20,7 +20,7 @@ import {
 import type { ReshadePreset, ReshadeStatus } from "@frost/shared/types";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useGameRunning } from "../../lib/useGameRunning";
-import { useI18n } from "@frost/shared/i18n/context";
+import { useI18n } from "@/i18n";
 import { Button } from "@frost/shared/Components/ui/button";
 import { cn } from "@frost/shared/lib/utils";
 

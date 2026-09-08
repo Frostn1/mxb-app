@@ -1,3 +1,4 @@
+import { de as base } from "@frost/shared/i18n/base/de";
 import type { Translation } from "..";
 
 /**
@@ -13,21 +14,19 @@ import type { Translation } from "..";
  * inline forms are separate keys rather than `label.toLowerCase()`.
  *
  * German runs ~30% longer than English — this is the locale that stresses layout.
- * Product names (MXB App, FrostMod, MX Bikes) are never translated.
+ * Product names ({{app}}, FrostMod, MX Bikes) are never translated.
  */
 export const de: Translation = {
+  ...base,
   // ── Allgemein ──────────────────────────────────────────────────────────────
   "common.cancel": "Abbrechen",
   "common.back": "Zurück",
   "common.next": "Weiter",
   "common.skip": "Überspringen",
-  "common.close": "Schließen",
   "common.save": "Speichern",
   "common.delete": "Löschen",
   "common.rename": "Umbenennen",
   "common.retry": "Erneut versuchen",
-  "common.tryAgain": "Erneut versuchen",
-  "common.loading": "Wird geladen…",
   "common.installed": "Installiert",
   "common.select": "Auswählen",
   "common.deselect": "Abwählen",
@@ -56,7 +55,6 @@ export const de: Translation = {
   "nav.downloads": "Downloads",
   "nav.locker": "Spind",
   "nav.presets": "Presets",
-  "nav.rider": "Fahrer",
   "nav.pose": "Pose",
   "nav.designer": "Designer",
   "nav.paints": "Designs",
@@ -107,11 +105,11 @@ export const de: Translation = {
     "{{names}} — FrostMod wurde zum Neuladen aufgefordert.",
 
   // ── Ersteinrichtung ────────────────────────────────────────────────────────
-  "setup.title": "Willkommen bei MXB App",
+  "setup.title": "Willkommen bei {{app}}",
   "setup.tagline": "Mods durchsuchen, mit einem Klick installieren und direkt wieder aufs Motorrad.",
   "setup.modsFolder": "Ordner von {{game}}",
   "setup.autoDetect":
-    "MXB App erkennt deinen Ordner {{hint}} automatisch. Du kannst ihn auch selbst auswählen.",
+    "{{app}} erkennt deinen Ordner {{hint}} automatisch. Du kannst ihn auch selbst auswählen.",
   "setup.chooseManually": "Ordner manuell auswählen…",
   "setup.chooseDifferent": "Anderen Ordner auswählen…",
   "setup.gameInstall": "Installation von {{game}}",
@@ -128,17 +126,12 @@ export const de: Translation = {
   "setup.pickInstallFolder": "Wähle den Installationsordner von {{game}}",
 
   // ── Willkommen ─────────────────────────────────────────────────────────────
-  "welcome.intro.title": "Willkommen bei MXB App",
+  "welcome.intro.title": "Willkommen bei {{app}}",
   "welcome.intro.body":
     "Dein Mod-Manager für MX Bikes. Halte Strecken, Motorräder und Lackierungen an einem Ort organisiert — keine ZIP-Dateien mehr über den ganzen Desktop verstreut. Wir zeigen dir das Wichtigste in ein paar Sekunden.",
   "welcome.getStarted": "Los geht's",
   "welcome.analyticsNote":
-    "MXB App zählt anonym, welche Seiten genutzt werden. Keine Namen, keine Dateien — in den Einstellungen abschaltbar.",
-
-  // ── Presets ────────────────────────────────────────────────────────────────
-  "presets.missing": "fehlt",
-  "presets.missingHint":
-    "Dieser Mod ist nicht installiert — im Spiel erscheint er als Stock",
+    "{{app}} zählt anonym, welche Seiten genutzt werden. Keine Namen, keine Dateien — in den Einstellungen abschaltbar.",
   "presets.missingMods":
     "Fehlende Mods: {{mods}}. Installiere sie, damit diese Teile angezeigt werden.",
   "presets.help":
@@ -210,28 +203,6 @@ export const de: Translation = {
   "presets.bundleNotice":
     "Enthält ein komplettes Paket (~{{size}} von {{host}}). Nutze {{fullImport}}, um alles herunterzuladen und zu installieren — vorher werden keine Mods benötigt.",
 
-  // ── Preset-Slots ───────────────────────────────────────────────────────────
-  "slot.paint": "Motorrad-Lackierung",
-  "slot.modelSwap": "Modellwechsel",
-  "slot.bikeFont": "Startnummern-Schrift",
-  "slot.tyres": "Reifen",
-  "slot.rider": "Fahrerprofil",
-  "slot.suitPaint": "Outfit / Kit",
-  "slot.suitFont": "Outfit-Schrift",
-  "slot.glovesPaint": "Handschuhe",
-  "slot.ridingStyle": "Fahrstil",
-  "slot.helmet": "Helm",
-  "slot.helmetPaint": "Helm-Design",
-  "slot.gogglesPaint": "Brille",
-  "slot.boots": "Stiefel",
-  "slot.bootsPaint": "Stiefel-Design",
-  "slot.protection": "Protektoren",
-  "slot.protectionPaint": "Protektoren-Design",
-  "slotGroup.bike": "Motorrad",
-  "slotGroup.rider": "Fahrer",
-  "slotGroup.head": "Kopf",
-  "slotGroup.body": "Körper",
-
 
   // ── Pose studio ────────────────────────────────────────────────────────────
   "pose.help": "Bring den Fahrer in Position — wo die Hände sitzen, wie weit die Beine stehen, ein Bein nach vorn. Nur für die Vorschau; MX Bikes nimmt die Haltung aus dem Fahrstil.",
@@ -298,7 +269,7 @@ export const de: Translation = {
     "Alles, was du installiert hast, an einem Ort — Mods aktualisieren oder entfernen, ohne je eine ZIP-Datei anzufassen.",
   "tour.locker.title": "Der Spind",
   "tour.locker.body":
-    "Tausche Motorradmodelle beliebig aus. MXB App registriert die Teile, damit das Spiel sie erkennt.",
+    "Tausche Motorradmodelle beliebig aus. {{app}} registriert die Teile, damit das Spiel sie erkennt.",
   "tour.presets.title": "Presets",
   "tour.presets.body":
     "Speichere Ausrüstungs- und Design-Kombinationen und wende einen kompletten Look mit einem Klick an — sogar während du fährst.",
@@ -317,12 +288,6 @@ export const de: Translation = {
   "tour.done.body":
     "Das war der Rundgang. Auf zu Entdecken und installiere deinen ersten Mod.",
 
-  // ── Fehler ─────────────────────────────────────────────────────────────────
-  "error.previewFailed": "Vorschau konnte nicht dargestellt werden",
-  "error.somethingWentWrong": "Etwas ist schiefgelaufen",
-  "error.unexpected": "Ein unerwarteter Fehler ist aufgetreten.",
-  "error.reloadApp": "App neu laden",
-
   // ── Updates ────────────────────────────────────────────────────────────────
   "update.available": "{{version}} ist verfügbar.",
   "update.downloading": "Wird heruntergeladen…",
@@ -333,10 +298,6 @@ export const de: Translation = {
   "update.updateAndRestart": "Aktualisieren und neu starten",
   "update.dismiss": "Update-Benachrichtigung ausblenden",
   "update.onLatest": "Du hast bereits die neueste Version",
-
-  // ── Fehlende Visual-C++-Laufzeit ───────────────────────────────────────────
-  "runtime.componentVc90": "Microsoft Visual C++ 2008 (x64)",
-  "runtime.componentVc140": "Microsoft Visual C++ 2015–2022 (x64)",
   "runtime.bannerGame":
     "MX Bikes braucht {{what}}, bevor FrostMod sich einklinken kann.",
   "runtime.bannerFrostmod": "FrostMod braucht {{what}}, um zu laufen.",
@@ -363,7 +324,6 @@ export const de: Translation = {
     "Windows braucht dafür deine Erlaubnis. Der Download von Microsoft wird stattdessen geöffnet.",
   "runtime.installFailed": "Komponente konnte nicht installiert werden",
   "runtime.downloadManually": "Selbst herunterladen",
-  "runtime.componentVc140X86": "Microsoft Visual C++ 2015–2022 (x86)",
   "runtime.repairing": "Wird repariert…",
   "runtime.repairDone": "Laufzeitkomponenten repariert",
   "runtime.repairDoneDesc":
@@ -394,81 +354,14 @@ export const de: Translation = {
   "runtime.strayClearFailed": "Datei konnte nicht verschoben werden",
   "update.checkFailed": "Updates konnten nicht geprüft werden",
   "update.failed": "Update fehlgeschlagen",
-
-  // ── 3D-Ansicht ─────────────────────────────────────────────────────────────
-  "viewer.preview3d": "3D-Vorschau",
-  "viewer.expand": "Vergrößern",
   "viewer.fullscreen": "Vollbild",
   "viewer.exitFullscreen": "Vollbild beenden",
-  "viewer.paint": "Design",
-  "viewer.tyres": "Reifen",
-  "viewer.tyresOwn": "Die des Bikes",
-  "viewer.loadingModel": "Modell wird geladen…",
-  "viewer.loadingPaint": "Design wird geladen…",
-  "viewer.loadingRider": "Fahrer wird geladen…",
-  "viewer.riderLoadFailed": "Vorschau ist veraltet — sie konnte nicht aktualisiert werden",
-  "viewer.both": "Beide",
-  "viewer.onBike": "Auf dem Motorrad",
-  "viewer.noSeat": "Die Setup-Datei dieses Motorrads sagt nicht, wo die Sitzbank ist — der Fahrer kann sich nicht daraufsetzen.",
-  "viewer.loadingBike": "Motorrad wird geladen…",
-  "viewer.bikeLoadFailed": "Motorrad-Vorschau ist veraltet — sie konnte nicht aktualisiert werden",
-  "viewer.dragToRotate": "Ziehen zum Drehen",
-  "viewer.scrollToZoom": "Scrollen zum Zoomen",
-  "viewer.rightDragToPan": "Rechts ziehen zum Verschieben",
-  "viewer.paintReloaded": "Lackierung neu geladen",
-  "viewer.pose": "Haltung",
-  "viewer.poseRear": "Hinten",
-  "viewer.poseFront": "Vorne",
-  "viewer.poseSteer": "Lenkung",
-  "viewer.poseLevel": "Räder ausrichten",
-  "viewer.poseReset": "Zurücksetzen",
-  "viewer.place": "Platzierung",
-  "viewer.placeSide": "Seite",
-  "viewer.placeUp": "Höhe",
-  "viewer.placeFwd": "Vorwärts",
-  "viewer.placeTurn": "Drehen",
   "viewer.resizePanel": "Ziehen zum Anpassen · Doppelklick setzt zurück",
-
-  // ── Combobox ───────────────────────────────────────────────────────────────
-  "combobox.search": "Suchen…",
-  "combobox.use": "„{{value}}“ verwenden",
-
-  // ── Mod-Typen ──────────────────────────────────────────────────────────────
-  "modType.tracks": "Strecken",
-  "modType.bikes": "Motorräder",
-  "modType.rider": "Fahrer",
-  // Deutsche Substantive werden immer großgeschrieben — auch mitten im Satz.
-  "modType.tracksInline": "Strecken",
-  "modType.bikesInline": "Motorräder",
-  "modType.riderInline": "Fahrerausrüstung",
-
-  // ── Kategoriefilter ────────────────────────────────────────────────────────
-  "browseCat.all": "Alle",
-  "browseCat.beginner": "Anfänger",
-  "browseCat.intermediate": "Fortgeschritten",
-  "browseCat.pro": "Profi",
-  "browseCat.assets": "Assets",
-  "browseCat.newBikes": "Neue Motorräder",
-  "browseCat.liveries": "Lackierungen",
-  "browseCat.sounds": "Sounds",
-  "browseCat.riderKit": "Fahrer-Kit",
-  "browseCat.helmets": "Helme",
-  "browseCat.helmetPaints": "Helm-Designs",
-  "browseCat.gloves": "Handschuhe",
-  "browseCat.boots": "Stiefel",
-  "browseCat.bootPaints": "Stiefel-Designs",
-  "browseCat.protection": "Protektoren",
-  "browseCat.protectionPaints": "Protektoren-Designs",
 
   // ── Entdecken ──────────────────────────────────────────────────────────────
   "browse.help":
     "Entdecke und installiere Mods aus dem Online-Katalog — suchen, nach Typ filtern und einen Mod öffnen, um ihn ins Spiel zu laden.",
   "browse.searchPlaceholder": "{{type}} suchen…",
-  "browseSort.newest": "Neueste",
-  "browseSort.oldest": "Älteste",
-  "browseSort.popularAll": "Beliebteste",
-  "browseSort.popularMonth": "Beliebt diesen Monat",
-  "browseSort.popularWeek": "Beliebt diese Woche",
   "browse.loadFailed": "Mods konnten nicht geladen werden",
   "browse.empty": "Keine {{type}} gefunden.",
   "browse.featured": "Empfohlen",
@@ -613,7 +506,7 @@ export const de: Translation = {
   "installDialog.downloadFrom": "Herunterladen von",
   "installDialog.downloadPerBike": "Download (pro Motorrad)",
   "installDialog.opensInBrowser":
-    "Öffnet im Browser — MXB App schließt die Installation ab",
+    "Öffnet im Browser — {{app}} schließt die Installation ab",
   "installDialog.matchedBike": "Passend zu deinem Motorrad",
   "installDialog.differentBike": "Anderes Motorrad / Paket",
   "installDialog.directFastest": "Direkt · am schnellsten",
@@ -631,12 +524,6 @@ export const de: Translation = {
   "installDialog.moreMirrors_other": "{{count}} weitere Spiegelserver",
   "installDialog.perBikeHint":
     "Jeder Download ist ein anderes Motorrad — automatisch passend zu deiner Auswahl. Wähle das Paket „all bikes“, um alle auf einmal zu bekommen.",
-
-  // ── Bibliotheksdetails ─────────────────────────────────────────────────────
-  "libraryDetail.author": "Autor",
-  "libraryDetail.length": "Länge",
-  "libraryDetail.altitude": "Höhe",
-  "libraryDetail.location": "Ort",
   "libraryDetail.type": "Typ",
   "libraryDetail.mod": "Mod",
   "libraryDetail.belongsTo": "Gehört zu",
@@ -704,7 +591,7 @@ export const de: Translation = {
   "settings.notSet": "Nicht festgelegt",
   "settings.selectFolderFor": "Ordner für {{game}} auswählen",
   "settings.gameDesc":
-    "Welchen Titel MXB App steuert. Deine Ordner, deine Bibliothek und deine Presets gehören alle zu dem Spiel, das du hier auswählst.",
+    "Welchen Titel {{app}} steuert. Deine Ordner, deine Bibliothek und deine Presets gehören alle zu dem Spiel, das du hier auswählst.",
   "settings.change": "Ändern…",
   "settings.set": "Festlegen…",
   "settings.theme": "Design",
@@ -726,10 +613,10 @@ export const de: Translation = {
     "Sendet eine zufällige ID, die App-Version und Zähler dazu, welche Seiten und Funktionen du nutzt — damit klar wird, was sich zu bauen lohnt. Niemals dein Name, deine Dateien oder deine Adresse.",
   "settings.runInBackground": "Im Hintergrund weiterlaufen",
   "settings.runInBackgroundDesc":
-    "Beim Schließen des Fensters läuft MXB App im Infobereich weiter, damit FrostMod verbunden bleibt. Beenden über das Symbol im Infobereich.",
+    "Beim Schließen des Fensters läuft {{app}} im Infobereich weiter, damit FrostMod verbunden bleibt. Beenden über das Symbol im Infobereich.",
   "settings.launchAtStartup": "Beim Systemstart starten",
   "settings.launchAtStartupDesc":
-    "MXB App automatisch starten, wenn du dich anmeldest.",
+    "{{app}} automatisch starten, wenn du dich anmeldest.",
   "settings.instantRefresh": "Sofortige Preset-Aktualisierung",
   "settings.instantRefreshDesc":
     "Wenn du ein Preset anwendest, während {{game}} läuft, wird der Look sofort im Spiel aktualisiert — ohne Neustart und ohne das Profil neu auszuwählen. Falls das nicht klappt, wirst du gebeten, dein Profil neu auszuwählen.",
@@ -807,16 +694,16 @@ export const de: Translation = {
     "Den Look ohne Neustart im Spiel zu aktualisieren heißt, in das laufende Spiel hineinzugreifen, und das kann nur die Windows-Version — du wirst stattdessen gebeten, dein Profil neu auszuwählen.",
   "settings.autoRunFrostmod": "FrostMod automatisch starten",
   "settings.autoRunFrostmodDesc":
-    "FrostMod im Hintergrund starten, sobald MXB App geöffnet wird.",
+    "FrostMod im Hintergrund starten, sobald {{app}} geöffnet wird.",
   "settings.frostmodArgs": "FrostMod-Flags",
   "settings.frostmodArgsDesc":
     "Zusätzliche Kommandozeile für FrostMod, so getippt wie im Terminal. Gilt ab dem nächsten Start von FrostMod. Lass das Feld leer, außer du hast ein Flag zum Ausprobieren bekommen.",
   "settings.watchModsReload": "Automatisch neu laden bei Ordneränderungen",
   "settings.watchModsReloadDesc":
-    "Das Spiel automatisch neu laden, wenn Strecken oder Motorräder in deinen Mod-Ordner kommen — auch wenn sie außerhalb von MXB App manuell heruntergeladen wurden.",
+    "Das Spiel automatisch neu laden, wenn Strecken oder Motorräder in deinen Mod-Ordner kommen — auch wenn sie außerhalb von {{app}} manuell heruntergeladen wurden.",
   "settings.secureContentInject": "Gesperrte Inhalte im Spiel nutzen",
   "settings.secureContentInjectDesc":
-    "Erlaubt gekaufte gesperrte Strecken, indem dem laufenden Spiel ein kleiner Helfer hinzugefügt wird. Standardmäßig aus. Wenn aktiv, starte das Spiel über Play — eine Sitzung, die MXB App nicht gestartet hat, bleibt unberührt.",
+    "Erlaubt gekaufte gesperrte Strecken, indem dem laufenden Spiel ein kleiner Helfer hinzugefügt wird. Standardmäßig aus. Wenn aktiv, starte das Spiel über Play — eine Sitzung, die {{app}} nicht gestartet hat, bleibt unberührt.",
   "settings.checking": "Wird geprüft…",
   "settings.runningConnected": "Läuft · Spiel verbunden",
   "settings.notRunning": "Läuft nicht",
@@ -1117,7 +1004,7 @@ export const de: Translation = {
   "serverBrowser.ridersFromSession": "deine Session",
   "serverBrowser.ridersFromApp": "{{count}} mit Paint-Sync",
   "serverBrowser.ridersUnknown":
-    "MX Bikes verrät der App nur, wie viele Fahrer auf einem Server sind. Namen kommen von den Spielern, die MXB App nutzen.",
+    "MX Bikes verrät der App nur, wie viele Fahrer auf einem Server sind. Namen kommen von den Spielern, die {{app}} nutzen.",
   "serverBrowser.trackTitle": "Strecke",
   "serverBrowser.trackChecking": "Ermittle, welche Strecke das ist…",
   "serverBrowser.trackInstalled": "Du hast diese Strecke — {{name}}",
@@ -1196,16 +1083,10 @@ export const de: Translation = {
   "settings.resetToDefault": "Auf Standard zurücksetzen",
   "settings.gameInstallDesc":
     "Spiel-Installationsordner (optional) — wo {{game}} installiert ist (enthält {{file}}). Setze ihn, um den echten Fahrerkörper in der 3D-Vorschau zu laden.",
-  "viewer.stockGearNote":
-    "Auf dem Standard-{{part}} des Spiels gezeigt. Ein Design für ein anderes Modell passt möglicherweise nicht exakt.",
-  "viewer.paintNoChange":
-    "Keine der Texturen dieses Designs wird von den hier gezeigten Teilen verwendet, deshalb ändert sich die Vorschau nicht. Es kann trotzdem die Kette einfärben, die diese Ansicht nicht darstellt.",
-  "viewer.noPaintPreview": "Keine Design-Vorschau ({{err}})",
 
   // ── Bibliothek ─────────────────────────────────────────────────────────────
   "library.help":
     "Deine installierten Mods. Sieh nach, was installiert ist, und entferne, was du nicht mehr willst.",
-  "library.rootFolder": "(Hauptordner)",
   "library.byAuthor": "von {{author}}",
   "library.locked": "Gesperrt — Inhalt kann nicht gelesen werden",
   "library.searchPlaceholder": "Installierte durchsuchen…",
@@ -1235,7 +1116,6 @@ export const de: Translation = {
   "library.scanning": "Deine Bibliothek wird gescannt…",
   "library.empty":
     "Noch keine {{type}} installiert — geh zu Entdecken und füge etwas hinzu.",
-  "library.noMatches": "Keine Treffer.",
   "library.quick3d": "In 3D ansehen",
   "swapActions.menu": "Dieses Modell verschieben oder löschen",
   "swapActions.move": "Auf ein anderes Bike verschieben…",
@@ -1418,7 +1298,6 @@ export const de: Translation = {
   "locker.onlyStock":
     "Nur Stock — installiere einen Sound-Mod zum Tauschen",
   "locker.noModel": "Kein Modell",
-  "locker.stock": "Stock",
   "locker.stockModel": "Spielstandard",
   "locker.activeModel": "Aktives Modell",
   "locker.activeSound": "Aktiver Sound",
@@ -1556,8 +1435,6 @@ export const de: Translation = {
   "downloads.empty":
     "Noch nichts heruntergeladen — geh zu Entdecken und füge etwas hinzu.",
   "downloads.noMatches": "Keine Treffer.",
-  "downloads.today": "Heute",
-  "downloads.yesterday": "Gestern",
   "downloads.sourceSite": "Download",
   "downloads.sourceShop": "Shop",
   "downloads.sourceHub": "MXB Hub",
@@ -1571,13 +1448,11 @@ export const de: Translation = {
 
   // ── Kategorien (Singular) ──────────────────────────────────────────────────
   "category.track": "Strecke",
-  "category.bike": "Motorrad",
   "category.bikePaint": "Lackierung",
   "category.bikeModelSwap": "Modellwechsel",
   "category.sound": "Sound",
   "category.helmet": "Helm",
   "category.helmetPaint": "Helm-Design",
-  "category.goggles": "Brille",
   "category.boots": "Stiefel",
   "category.bootPaint": "Stiefel-Design",
   "category.protection": "Protektoren",
@@ -1600,24 +1475,6 @@ export const de: Translation = {
   "section.protectionPaint": "Protektoren-Designs",
   "section.gloves": "Handschuhe",
   "section.outfit": "Outfit / Kit",
-
-  // ── Installationsziele ─────────────────────────────────────────────────────
-  "dest.bikesRoot": "Motorräder (Hauptordner)",
-  "dest.tracksRoot": "Strecken (Hauptordner)",
-  "dest.bikeFolder": "{{name}} — Motorradordner",
-  "dest.bikePaints": "{{name}} — Lackierungen",
-  "dest.helmetsNewModel": "Helme (neues Modell)",
-  "dest.bootsNewModel": "Stiefel (neues Modell)",
-  "dest.protectionNewModel": "Protektoren (neues Modell)",
-  "dest.riderModelsNew": "Fahrermodelle (neues Modell)",
-  "dest.animationsNewStyle": "Fahrstile (neue Animation)",
-  "dest.helmetPaintsFor": "{{name}} · Helm-Designs",
-  "dest.gogglesFor": "{{name}} · Brille",
-  "dest.bootPaintsFor": "{{name}} · Stiefel-Designs",
-  "dest.protectionPaintsFor": "{{name}} · Protektoren-Designs",
-  "dest.outfitFor": "{{name}} · Outfit / Kit",
-  "dest.suitPaintsFor": "{{name}} · Kombi-Designs",
-  "dest.glovesFor": "{{name}} · Handschuhe",
 
   // In-game overlay — the hotkey panel drawn over MX Bikes.
   "overlay.section": "In-Game-Overlay",
@@ -1684,8 +1541,8 @@ export const de: Translation = {
   "overlay.toClose": "{{hotkey}} zum Schließen",
   "overlay.closeTitle": "Overlay schließen (Esc)",
   "overlay.openMain": "Vollständige App öffnen",
-  "overlay.openMainTitle": "Overlay schließen und das Hauptfenster von MXB App öffnen",
-  "overlay.needsSetup": "Richte MXB App zuerst im Hauptfenster fertig ein — sie muss wissen, wo dein {{game}}-Ordner liegt.",
+  "overlay.openMainTitle": "Overlay schließen und das Hauptfenster von {{app}} öffnen",
+  "overlay.needsSetup": "Richte {{app}} zuerst im Hauptfenster fertig ein — sie muss wissen, wo dein {{game}}-Ordner liegt.",
   "overlay.fullscreenBlocked": "Das Overlay kann nicht über exklusivem Vollbild erscheinen",
   "overlay.fullscreenBlockedDesc": "Stelle {{game}} unter Options → Video auf randlos oder Fenstermodus und drücke das Kürzel erneut.",
 
@@ -1702,19 +1559,19 @@ export const de: Translation = {
   "showcase.v0124.hero.title":
     "Jeder im Starterfeld in der Lackierung, die er wirklich gewählt hat",
   "showcase.v0124.hero.body":
-    "MX Bikes überträgt keine eigenen Inhalte, also war ein Lobby voller Fremder immer ein Lobby voller Standard-Lackierungen. MXB App teilt jetzt, was du trägst, mit den Fahrern um dich herum und installiert deren Lackierungen — auf jedem Server, ohne Zutun des Hosts und ohne Code.",
+    "MX Bikes überträgt keine eigenen Inhalte, also war ein Lobby voller Fremder immer ein Lobby voller Standard-Lackierungen. {{app}} teilt jetzt, was du trägst, mit den Fahrern um dich herum und installiert deren Lackierungen — auf jedem Server, ohne Zutun des Hosts und ohne Code.",
   "showcase.v0124.anyserver":
     "Jeder Server, nicht nur unsere. Die App liest den Server aus dem laufenden Spiel, also funktioniert eine öffentliche Lobby genau wie eine private.",
   "showcase.v0124.nosetup":
     "Nichts einzurichten. Kein Einladungscode, keine Anmeldung, keine Server-Installation — in den Einstellungen einschalten, den Rest macht sie selbst.",
   "showcase.v0124.everyone":
-    "Du siehst jeden Fahrer, der ebenfalls MXB App hat. Je mehr in deiner Lobby, desto mehr vom Feld sieht richtig aus.",
+    "Du siehst jeden Fahrer, der ebenfalls {{app}} hat. Je mehr in deiner Lobby, desto mehr vom Feld sieht richtig aus.",
   "showcase.v0124.settings":
     "Einstellungen → Lackierungs-Sync zeigt, was rausging, was ankam und welche Lackierung nicht überschrieben wurde. Der Schalter zum Abschalten sitzt unter Allgemein.",
   "showcase.v0124.shape":
     "Sprünge werden über ihre Kontur geformt. Zieh die Oberkante eines Tabletops für die Höhe, das hintere Ende für die Länge, die Gegenseite eines Doubles für die Lücke — oder zeichne einen Punkt für Punkt.",
   "showcase.v0124.stats":
-    "MXB App zählt jetzt anonym, welche Seiten und Funktionen genutzt werden — eine zufällige ID und nichts über dich. Einstellungen → Allgemein schaltet es ab.",
+    "{{app}} zählt jetzt anonym, welche Seiten und Funktionen genutzt werden — eine zufällige ID und nichts über dich. Einstellungen → Allgemein schaltet es ab.",
   "showcase.v0122.hero.title":
     "Die Replay-Kamera kann dem Fahrer folgen",
   "showcase.v0122.hero.body":
@@ -1867,7 +1724,7 @@ export const de: Translation = {
     "Wenn FrostMod an einer fehlenden Windows-Laufzeit scheitert, benennt die App sie in klaren Worten und installiert sie für dich. FrostMod lässt sich außerdem aus der App stoppen, egal wer es gestartet hat.",
   "showcase.v090.updates":
     "Ein Update über eine laufende Kopie scheitert nicht mehr an „Fehler beim Öffnen der Datei zum Schreiben“, und ein zweiter Start holt dein vorhandenes Fenster zurück statt eine zweite Kopie zu öffnen.",
-  "showcase.v080.hero.title": "MXB App steuert jetzt auch GP Bikes",
+  "showcase.v080.hero.title": "{{app}} steuert jetzt auch GP Bikes",
   "showcase.v080.hero.body":
     "Wähl dein Spiel beim ersten Start, oder wechsle jederzeit in den Einstellungen — die ganze App folgt: Bibliothek, Verwalten, Presets, Play und ein Durchsuchen-Tab von gpb-mods.com. GPs Fahrer-Ordner werden als GPs gelesen, nicht als die von MX Bikes, und FrostMod lädt auch dort live nach. Jedes Spiel behält seine eigenen Ordner, dein MX-Bikes-Setup bleibt also unangetastet.",
   "showcase.v080.shop":
@@ -1883,7 +1740,7 @@ export const de: Translation = {
   "showcase.v070.hero.title": "Ein Overlay im Spiel, auf einem Kürzel",
   "showcase.v070.hero.body": "Holt Preset, Locker und Browse über MX Bikes — ohne Alt-Tab. Esc gibt die Kontrolle sofort zurück, und ein hier gewähltes Preset landet in der Session, die du gerade fährst. Spiele randlos oder im Fenster: über exklusivem Vollbild lässt sich nichts zeichnen.",
   "showcase.v070.hero.action": "Overlay einrichten",
-  "showcase.v070.languages": "MXB App spricht sechs Sprachen — wähle deine unter Einstellungen → Darstellung.",
+  "showcase.v070.languages": "{{app}} spricht sechs Sprachen — wähle deine unter Einstellungen → Darstellung.",
   "showcase.v070.browse": "Browse sortiert nach den beliebtesten Mods, und die Karten zeigen Sternebewertungen.",
   "showcase.v070.play": "Ein Play-Button in der Seitenleiste startet MX Bikes.",
   "showcase.v070.paint": "Bikes tragen wieder ihr richtiges Design — Kawasaki KX und Yamaha YZ sind repariert.",
@@ -1959,17 +1816,6 @@ export const de: Translation = {
   "game.switch": "Spiel wechseln",
   "game.switchFailed": "Spielwechsel fehlgeschlagen",
   "settings.instantRefreshMxOnly": "Nur MX Bikes — {{game}} kann Profile nicht im Spiel neu laden.",
-  "modType.misc": "Sonstiges",
-  "modType.miscInline": "Extras",
-  "browseCat.raceTracks": "Rennstrecken",
-  "browseCat.kartTracks": "Kartbahnen",
-  "browseCat.others": "Sonstige",
-  "browseCat.riderModels": "Fahrermodelle",
-  "browseCat.suitPaints": "Anzug-Designs",
-  "browseCat.helmetModels": "Helmmodelle",
-  "browseCat.plugins": "Plugins",
-  "browseCat.tools": "Werkzeuge",
-  "browseCat.menuBackgrounds": "Menü-Hintergründe",
   "category.animation": "Fahrstil",
   "section.animation": "Fahrstile",
   "modDetail.restartHint": "Starte {{game}} neu, damit die neuen {{kind}} erkannt werden.",
@@ -2054,8 +1900,8 @@ export const de: Translation = {
   // ── Logs ───────────────────────────────────────────────────────────────────
   "settings.logs": "Logs",
   "logs.desc":
-    "Die Dateien, die du schickst, wenn etwas schiefgeht. MXB App, FrostMod und {{game}} führen jeweils eigene — öffne den Ordner, den du brauchst, speichere alle als ein Zip, oder teile sie als Link für einen Fehlerbericht.",
-  "logs.appLogs": "MXB App",
+    "Die Dateien, die du schickst, wenn etwas schiefgeht. {{app}}, FrostMod und {{game}} führen jeweils eigene — öffne den Ordner, den du brauchst, speichere alle als ein Zip, oder teile sie als Link für einen Fehlerbericht.",
+  "logs.appLogs": "{{app}}",
   "logs.appLogsDesc": "Was die App selbst aufgezeichnet hat",
   "logs.frostmodLogsDesc": "Was der Loader in seinen eigenen Ordner geschrieben hat",
   "logs.gameLogsDesc": "Das Log des Spiels, neben seinen Dateien",
@@ -2093,9 +1939,9 @@ export const de: Translation = {
   // ── Unterstützer (Buy Me a Coffee) ─────────────────────────────────────────
   "settings.supporters": "Unterstützer",
   "settings.supportersDesc":
-    "Die Leute, die MXB App auf Buy Me a Coffee am Laufen halten.",
+    "Die Leute, die {{app}} auf Buy Me a Coffee am Laufen halten.",
   "supporters.intro":
-    "MXB App ist kostenlos und bleibt es. Die Kaffees unten bezahlen die Zeit, die darin steckt — die Leute dahinter sind der Grund, warum es überhaupt eine neue Version zu installieren gibt.",
+    "{{app}} ist kostenlos und bleibt es. Die Kaffees unten bezahlen die Zeit, die darin steckt — die Leute dahinter sind der Grund, warum es überhaupt eine neue Version zu installieren gibt.",
   "supporters.count_one": "{{count}} Unterstützer",
   "supporters.count_other": "{{count}} Unterstützer",
   "supporters.untiered": "Unterstützer",
@@ -2110,9 +1956,6 @@ export const de: Translation = {
     "Die Liste war gerade nicht erreichbar — das hier ist die zuletzt bekannte.",
   "supporters.optOut":
     "Namen erscheinen nur mit Einverständnis. Kurz auf Discord oder Buy Me a Coffee melden, dann ist deiner sofort weg.",
-
-  "modType.reshade": "ReShade",
-  "modType.reshadeInline": "ReShade-Presets",
   "reshade.needsGameFolder":
     "ReShade liegt in deinem {{game}}-Ordner — lege den unter Spielordner fest, oder zeige hier direkt darauf.",
   "reshade.folder": "Gesucht wird in deinem {{game}}-Ordner:",
@@ -2139,7 +1982,7 @@ export const de: Translation = {
   "reshade.deleted": "{{name}} gelöscht",
   "reshade.applied": "{{name}} ist jetzt aktiv",
   "reshade.appliedNextLaunch": "{{name}} ist gesetzt — wirkt beim nächsten Start",
-  "reshade.loosePreset": "In deinem Spielordner — nicht von MXB App installiert",
+  "reshade.loosePreset": "In deinem Spielordner — nicht von {{app}} installiert",
   "reshade.missingEffects_one": "Braucht {{list}}, was nicht installiert ist",
   "reshade.missingEffects_other":
     "Braucht {{count}} Effekte, die nicht installiert sind: {{list}}",
@@ -2400,35 +2243,11 @@ export const de: Translation = {
 
   // The track terrain viewer.
   "trackViewer.open": "Gelände ansehen",
-  "trackViewer.title": "Streckenvorschau",
-  "trackViewer.loading": "Gelände wird gelesen…",
-  "trackViewer.refining": "Wird verfeinert…",
-  "trackViewer.grid": "Raster",
-  "trackViewer.surface": "Surface",
-  "trackViewer.surfaceMasks": "From the track's surface data",
-  "trackViewer.relief": "Höhenunterschied",
-  "trackViewer.objects": "Objekte",
-  "trackViewer.painting": "Texturen…",
-  "trackViewer.scenery": "Kulisse",
-  "trackViewer.sceneryTris": "{{count}} Dreiecke",
-  "trackViewer.fixtures": "Markierte Punkte",
-  "trackViewer.pieces": "Einzelteile",
-  "trackViewer.selected": "Gewähltes Teil",
   "trackViewer.place": "Modell setzen",
   "trackViewer.placePick": "Modell wählen, dann auf den Boden klicken.",
   "trackViewer.placeHint": "Auf den Boden klicken zum Setzen.",
   "trackViewer.placedCount": "{{count}} gesetzt",
   "trackViewer.saveProps": ".scr speichern",
-  "trackViewer.noTerrain": "Kein Gelände zum Anzeigen",
-  "trackViewer.noTerrainHint":
-    "Die Höhendaten dieser Strecke liegen in keinem Format vor, das der Betrachter bereits lesen kann.",
-  "trackViewer.inferredNote":
-    "Die Höhendatei dieser Strecke hat kein dokumentiertes Format, ihre Form wurde also aus den Daten erschlossen. Als nahe, nicht als exakte Lesung zu verstehen.",
-  "trackViewer.assumedScaleNote":
-    "Diese Strecke gibt den Abstand ihrer Höhenpunkte nicht an: Das Relief ist echt, seine Steilheit aber nur eine Näherung.",
-  "trackViewer.whyDetails": "Warum?",
-  "trackViewer.copyDetails": "Details kopieren",
-  "trackViewer.copied": "Kopiert",
   /* ── Protect ─────────────────────────────────────────────────────────── */
   "nav.protect": "Schützen",
   "protect.help": "Sperre die Dateien, die du gebaut hast, auf die GUIDs derjenigen, die sie laden dürfen. Eine gesperrte Datei öffnet sich nur auf der Installation, deren GUID sie trägt — ein Käufer, eine Kopie. Dateien einmal auswählen, GUIDs einfügen, und du bekommst einen Ordner pro Käufer. Deine Originale werden nur gelesen.",
@@ -2602,7 +2421,7 @@ export const de: Translation = {
 
   // --- paid plugins ---
   "plugins.section": "Plugins",
-  "plugins.sectionDesc": "Kostenpflichtige Erweiterungen für MXB App. Eine Lizenz ist ein Monatsabo, das an dein Konto gebunden ist und zwischen den Prüfungen eine Woche offline weiterläuft.",
+  "plugins.sectionDesc": "Kostenpflichtige Erweiterungen für {{app}}. Eine Lizenz ist ein Monatsabo, das an dein Konto gebunden ist und zwischen den Prüfungen eine Woche offline weiterläuft.",
   "plugins.keyLabel": "Schlüssel einlösen",
   "plugins.keyHelp": "Füge den erhaltenen Schlüssel ein. Zum Verlängern dient ein weiterer Schlüssel — er wird auf die verbleibende Zeit addiert.",
   "plugins.redeem": "Einlösen",

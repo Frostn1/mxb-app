@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@frost/shared/lib/utils";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import { layerCorners, selectionBounds } from "./composite";
 import type { Ghost } from "./ghost";
 import {

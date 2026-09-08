@@ -57,7 +57,7 @@ import {
   BarChart3,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { TKey } from "@frost/shared/i18n/context";
+import type { TKey } from "@/i18n";
 
 export interface ReleaseHighlight {
   icon: LucideIcon;

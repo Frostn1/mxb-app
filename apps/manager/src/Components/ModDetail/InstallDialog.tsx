@@ -10,8 +10,8 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent } from "@frost/shared/Components/ui/dialog";
 import { Button } from "@frost/shared/Components/ui/button";
-import { useT } from "@frost/shared/i18n/context";
-import { labelOf } from "@frost/shared/i18n/core";
+import { useT } from "@/i18n";
+import { labelOf } from "@/i18n";
 import { Badge } from "@frost/shared/Components/ui/badge";
 import { cn } from "@frost/shared/lib/utils";
 import {

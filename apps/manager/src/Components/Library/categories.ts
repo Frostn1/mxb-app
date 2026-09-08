@@ -15,7 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { LibraryCategory } from "@frost/shared/types";
-import type { TKey } from "@frost/shared/i18n";
+import type { TKey } from "@/i18n";
 
 /** Translation key per library category (section headers + detail "Type").
  *  Singular — resolved with `t()` at render. */

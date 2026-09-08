@@ -1,0 +1,193 @@
+/**
+ * The base dictionary — English, the source of truth.
+ *
+ * Base is what the SHARED components read, not what both apps happen to say. A string
+ * belongs here only because something in packages/shared looks it up; anything else
+ * lives in the app that renders it. Keep it that way or this file slowly becomes the
+ * 2000-key monolith it was split out of.
+ */
+export const en = {
+  "common.close": "Close",
+  "common.tryAgain": "Try again",
+  "common.loading": "Loading…",
+  "nav.rider": "Rider",
+
+  // ── Presets ────────────────────────────────────────────────────────────────
+  "presets.missing": "missing",
+  "presets.missingHint": "This mod isn't installed — shows as stock in-game",
+
+  // ── Preset / rider loadout slots ───────────────────────────────────────────
+  "slot.paint": "Bike livery",
+  "slot.modelSwap": "Model swap",
+  "slot.bikeFont": "Number font",
+  "slot.tyres": "Tyres",
+  "slot.rider": "Rider profile",
+  "slot.suitPaint": "Kit / suit",
+  "slot.suitFont": "Suit font",
+  "slot.glovesPaint": "Gloves",
+  "slot.ridingStyle": "Riding style",
+  "slot.helmet": "Helmet",
+  "slot.helmetPaint": "Helmet paint",
+  "slot.gogglesPaint": "Goggles",
+  "slot.boots": "Boots",
+  "slot.bootsPaint": "Boot paint",
+  "slot.protection": "Protection",
+  "slot.protectionPaint": "Protection paint",
+  "slotGroup.bike": "Bike",
+  "slotGroup.rider": "Rider",
+  "slotGroup.head": "Head",
+  "slotGroup.body": "Body",
+
+  // ── Error boundary ─────────────────────────────────────────────────────────
+  "error.previewFailed": "Preview failed to render",
+  "error.somethingWentWrong": "Something went wrong",
+  "error.unexpected": "An unexpected error occurred.",
+  "error.reloadApp": "Reload app",
+
+  // ── Missing Visual C++ runtime ─────────────────────────────────────────────
+  "runtime.componentVc90": "Microsoft Visual C++ 2008 (x64)",
+  "runtime.componentVc140": "Microsoft Visual C++ 2015–2022 (x64)",
+  "runtime.componentVc140X86": "Microsoft Visual C++ 2015–2022 (x86)",
+
+  // ── 3D viewer ──────────────────────────────────────────────────────────────
+  "viewer.preview3d": "3D Preview",
+  "viewer.expand": "Expand",
+  "viewer.paint": "Paint",
+  "viewer.tyres": "Tyres",
+  "viewer.tyresOwn": "Bike's own",
+  "viewer.loadingModel": "Loading model…",
+  "viewer.loadingPaint": "Loading paint…",
+  "viewer.loadingRider": "Loading rider…",
+  "viewer.riderLoadFailed": "Preview is out of date — it couldn't be updated",
+  "viewer.both": "Both",
+  "viewer.onBike": "On bike",
+  "viewer.noSeat": "This bike's setup file doesn't say where its seat is, so the rider can't be sat on it.",
+  "viewer.loadingBike": "Loading bike…",
+  "viewer.bikeLoadFailed": "Bike preview is out of date — it couldn't be updated",
+  "viewer.dragToRotate": "Drag to rotate",
+  "viewer.scrollToZoom": "Scroll to zoom",
+  "viewer.rightDragToPan": "Right-drag to pan",
+  "viewer.paintReloaded": "Paint reloaded",
+  "viewer.pose": "Pose",
+  "viewer.poseRear": "Rear",
+  "viewer.poseFront": "Front",
+  "viewer.poseSteer": "Steering",
+  "viewer.poseLevel": "Level wheels",
+  "viewer.poseReset": "Reset",
+  "viewer.place": "Placement",
+  "viewer.placeSide": "Side",
+  "viewer.placeUp": "Up",
+  "viewer.placeFwd": "Forward",
+  "viewer.placeTurn": "Turn",
+
+  // ── Combobox ───────────────────────────────────────────────────────────────
+  "combobox.search": "Search…",
+  "combobox.use": "Use “{{value}}”",
+
+  // ── Mod types (Browse / Library segmented control) ─────────────────────────
+  "modType.tracks": "Tracks",
+  "modType.bikes": "Bikes",
+  "modType.rider": "Rider",
+  // The same nouns as they read inside a sentence ("Search tracks…"). English
+  // lowercases them; languages that capitalize their nouns keep doing so.
+  "modType.tracksInline": "tracks",
+  "modType.bikesInline": "bikes",
+  "modType.riderInline": "rider gear",
+
+  // ── Browse category filters ────────────────────────────────────────────────
+  "browseCat.all": "All",
+  "browseCat.beginner": "Beginner",
+  "browseCat.intermediate": "Intermediate",
+  "browseCat.pro": "Pro",
+  "browseCat.assets": "Assets",
+  "browseCat.newBikes": "New Bikes",
+  "browseCat.liveries": "Liveries",
+  "browseCat.sounds": "Sounds",
+  "browseCat.riderKit": "Rider Kit",
+  "browseCat.helmets": "Helmets",
+  "browseCat.helmetPaints": "Helmet Paints",
+  "browseCat.gloves": "Gloves",
+  "browseCat.boots": "Boots",
+  "browseCat.bootPaints": "Boot Paints",
+  "browseCat.protection": "Protection",
+  "browseCat.protectionPaints": "Protection Paints",
+  "browseSort.newest": "Newest",
+  "browseSort.oldest": "Oldest",
+  "browseSort.popularAll": "Most popular",
+  "browseSort.popularMonth": "Popular this month",
+  "browseSort.popularWeek": "Popular this week",
+
+  // ── Library detail panel ───────────────────────────────────────────────────
+  "libraryDetail.author": "Author",
+  "libraryDetail.length": "Length",
+  "libraryDetail.altitude": "Altitude",
+  "libraryDetail.location": "Location",
+  "viewer.stockGearNote":
+    "Shown on the game's stock {{part}}. A paint made for a different model may not line up perfectly.",
+  "viewer.paintNoChange":
+    "None of this paint's textures are used by the parts shown here, so the preview doesn't change. It may still paint the chain, which this view doesn't render.",
+  "viewer.noPaintPreview": "No paint preview ({{err}})",
+  "library.rootFolder": "(root)",
+  "library.noMatches": "No matches.",
+  "locker.stock": "Stock",
+  "downloads.today": "Today",
+  "downloads.yesterday": "Yesterday",
+  "category.bike": "Bike",
+  "category.goggles": "Goggles",
+
+  // ── Install destinations ───────────────────────────────────────────────────
+  "dest.bikesRoot": "Bikes (root)",
+  "dest.tracksRoot": "Tracks (root)",
+  "dest.bikeFolder": "{{name}} — bike folder",
+  "dest.bikePaints": "{{name}} — paints",
+  "dest.helmetsNewModel": "Helmets (new model)",
+  "dest.bootsNewModel": "Boots (new model)",
+  "dest.protectionNewModel": "Protection (new model)",
+  "dest.riderModelsNew": "Rider models (new model)",
+  "dest.animationsNewStyle": "Riding styles (new animation)",
+  "dest.helmetPaintsFor": "{{name}} · helmet paints",
+  "dest.gogglesFor": "{{name}} · goggles",
+  "dest.bootPaintsFor": "{{name}} · boot paints",
+  "dest.protectionPaintsFor": "{{name}} · protection paints",
+  "dest.outfitFor": "{{name}} · outfit / kit",
+  "dest.suitPaintsFor": "{{name}} · suit paints",
+  "dest.glovesFor": "{{name}} · gloves",
+  "modType.misc": "Misc",
+  "modType.miscInline": "extras",
+  "browseCat.raceTracks": "Race Tracks",
+  "browseCat.kartTracks": "Kart Tracks",
+  "browseCat.others": "Others",
+  "browseCat.riderModels": "Rider Models",
+  "browseCat.suitPaints": "Suit Paints",
+  "browseCat.helmetModels": "Helmet Models",
+  "browseCat.plugins": "Plugins",
+  "browseCat.tools": "Tools",
+  "browseCat.menuBackgrounds": "Menu Backgrounds",
+
+  "modType.reshade": "ReShade",
+  "modType.reshadeInline": "ReShade presets",
+  "trackViewer.title": "Track preview",
+  "trackViewer.loading": "Reading terrain…",
+  "trackViewer.refining": "Sharpening…",
+  "trackViewer.grid": "Grid",
+  "trackViewer.surface": "Surface",
+  "trackViewer.surfaceMasks": "From the track's surface data",
+  "trackViewer.relief": "Elevation range",
+  "trackViewer.objects": "Objects",
+  "trackViewer.painting": "Painting…",
+  "trackViewer.scenery": "Scenery",
+  "trackViewer.sceneryTris": "{{count}} triangles",
+  "trackViewer.fixtures": "Marked fixtures",
+  "trackViewer.pieces": "Separable pieces",
+  "trackViewer.selected": "Selected piece",
+  "trackViewer.noTerrain": "No terrain to show",
+  "trackViewer.noTerrainHint":
+    "This track's height data isn't in a layout the viewer can read yet.",
+  "trackViewer.inferredNote":
+    "This track's height file has no documented layout, so its shape was worked out from the data. Treat the terrain as a close reading rather than an exact one.",
+  "trackViewer.assumedScaleNote":
+    "This track doesn't state how far apart its height samples are, so the relief is real but how steep it looks is an approximation.",
+  "trackViewer.whyDetails": "Why?",
+  "trackViewer.copyDetails": "Copy details",
+  "trackViewer.copied": "Copied",
+} as const;

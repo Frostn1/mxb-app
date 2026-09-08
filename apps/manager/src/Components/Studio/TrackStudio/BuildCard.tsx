@@ -1,7 +1,7 @@
 import { X } from "lucide-react";
 import { Progress } from "@frost/shared/Components/ui/progress";
 import { isRunning, PHASE_KEY, useTrackBuild } from "../../../Context/TrackBuild";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import { cn } from "@frost/shared/lib/utils";
 
 /**

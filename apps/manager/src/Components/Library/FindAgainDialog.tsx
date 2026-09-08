@@ -3,7 +3,7 @@ import { Loader2, ExternalLink, PackageSearch } from "lucide-react";
 import { searchMods } from "@frost/shared/api/mods";
 import { shopCatalogSearch } from "../../api/shop";
 import type { LedgerRow, ShopPrice } from "@frost/shared/types";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import { displayName } from "@frost/shared/lib/mods";
 import {
   Dialog,

@@ -7,7 +7,7 @@ import type { InstalledIndex } from "../../lib/installedMatch";
 import type { ModListing } from "../../lib/useModListing";
 import type { ModSummary } from "@frost/shared/types";
 import { useInstall } from "../../Context/Install";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import ModCard from "./ModCard";
 import FeaturedMod from "./FeaturedMod";
 import { Button } from "@frost/shared/Components/ui/button";

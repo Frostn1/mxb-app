@@ -49,7 +49,7 @@ import {
 } from "@frost/shared/api/mods";
 import FeelEditor from "./FeelEditor";
 import { copyName } from "@frost/shared/lib/presets";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import { copyText } from "../../lib/clipboard";
 
 /** How many settings and how many controls a preset carries. */

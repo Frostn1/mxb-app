@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
-import { useT, type TKey } from "@frost/shared/i18n/context";
+import { useT, type TKey, APP_NAME } from "@/i18n";
 import {
   buildDestinations,
   buildRiderDestinations,
@@ -860,7 +860,7 @@ function BlockedHost({
               key that never leaves the URL fragment, so say what's actually true. */}
           {/proton/i.test(host)
             ? `${t("modDetail.protonHint")} ${t("modDetail.thenAddFile")}`
-            : `${host} only allows browser downloads. Download it, then point MXB App at the file to finish the install.`}
+            : `${host} only allows browser downloads. Download it, then point ${APP_NAME} at the file to finish the install.`}
         </span>
       </div>
       <div className="flex items-start gap-3">

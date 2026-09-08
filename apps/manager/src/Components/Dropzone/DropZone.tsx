@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Loader2, PackageOpen } from "lucide-react";
 import { useDropReview } from "../../Context/DropReview";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import { useImport } from "./useImport";
 
 /**
