@@ -277,7 +277,46 @@ impl Segment {
 /// the median face against Indiana's 12.0, which is what "the jumps are too big" turns out to
 /// mean: not their height, which already matches, but that every one of them is as abrupt as
 /// the worst one on a real track.
-pub const JUMP_FACE_DEG: f32 = 27.0;
+/// Thirty-eight, and it is a ceiling that now rarely binds — which is the point.
+///
+/// Twenty-seven was read off the *terrain* statistic: Indiana's faces measure 27.4° at the
+/// ninetieth percentile, sampled off the ground. That is not the same quantity as the angle a
+/// builder builds to, and taking it as one made every big face too long. Sized by the half
+/// angle, a 27° lip puts a 12.5 m ramp under a 3 m jump — a mean gradient of 13.5°, where
+/// every real source puts a built take-off between 2:1 and 3:1, or 26.6° down to 18.4° of
+/// mean. See `docs/tracks/real-track-corpus.md` §4.1: the ratio a builder quotes describes the
+/// *mean* of a concave face, and its lip runs about 1.8x steeper.
+///
+/// At 38 the angle stops lengthening faces past [`JUMP_FACE_MIN_M`] for anything under about
+/// 3.1 m, so the floor governs the whole realistic range and the angle is what the comment on
+/// [`TABLETOP_DECK_M`] always said it should be: a ceiling for the tall ones, not a target for
+/// all of them. A 3 m jump comes out on the floor at 9 m — 18.4° of mean, which is 3:1 exactly.
+///
+/// The tension worth knowing: our lip is now geometrically steeper than the 27.4° Indiana
+/// *measures*, because a windowed terrain slope under-reads a real lip. If a generated lap
+/// starts measuring past Indiana at the ninetieth, this is the number that did it.
+pub const JUMP_FACE_DEG: f32 = 38.0;
+
+// A straight lip is NOT built here, and the reason is geometric rather than an oversight.
+//
+// The terrain-park literature builds the last ~2 m of a take-off straight, so the ground is
+// not still turning under the wheel at the moment of release — Petrone's constant-EFH jump
+// states it outright. Adding that here was tried and backed out.
+//
+// [`DoubleShape::height_at`] trims the crown off the top of a face and rescales what is left,
+// and that trick is exact *only* because the face is a pure arc: a chord cut off an arc keeps
+// rise and run in the same `tan(sweep/2)` ratio, so the trimmed face is still the face `up`
+// describes and the crown still meets it tangentially. Splice a straight into the top and the
+// identity fails — `sin(u)·tan(u) != 1 − cos(u)` — so the crown joins a face that is no longer
+// at the crown's own angle and the ramp comes out steeper than it states. Measured: a 4 m jump
+// over a 12 m gap stood at 39.1° against a stated 38.
+//
+// Doing it properly means rebuilding the crown construction so it does not lean on
+// self-similarity. That is worth doing and it is not a one-line change. Note the crown already
+// rounds the crest over `0.9·h` of radius, which on a 4 m jump is more ground than the 2 m
+// straight would have occupied — so the release is less abrupt than the bare arc suggests.
+// See `docs/tracks/real-track-corpus.md` §6.2.
+
 
 /// The gentlest face — the one a landing gets. Published landings measure 19.0° at the
 /// ninetieth against a takeoff's 27.0: a built takeoff is short because that is what throws
@@ -365,6 +404,7 @@ pub fn face_arc(t: f32, sweep: f32) -> f32 {
     let phi = (t * sin_s).clamp(-1.0, 1.0).asin();
     (1.0 - phi.cos()) / (1.0 - cos_s)
 }
+
 
 /// How far a face has to run to reach `height` without standing steeper than `deg` at its lip.
 ///
@@ -658,7 +698,7 @@ pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
 /// track — a long tabletop on the main straight with the line painted past its landing. The
 /// range is the top of the published spread rather than the middle of it: this is the one
 /// jump a track is photographed on.
-pub const FINISH_JUMP_M: (f32, f32) = (2.4, 3.6);
+pub const FINISH_JUMP_M: (f32, f32) = (2.4, 3.0);
 
 /// The longest deck a finish jump gets, metres. Published tabletop decks run six to twelve,
 /// and the finish one is at the long end because it is the one everybody lands on.
@@ -712,7 +752,7 @@ pub const START_OFFSET_M: f32 = 40.0;
 /// told. Shorter than the middle of that on purpose: ridden, 85 m of sprint and 90 m of
 /// turn-in is a long way to the first corner, and the whole point of a start straight is that
 /// it ends at one.
-pub const START_SPRINT_M: f32 = 70.0;
+pub const START_SPRINT_M: f32 = 80.0;
 
 /// How far the start straight is angled towards the lap, degrees. Over the sprint it closes
 /// about a fifth of the offset, which leaves one corner to do the rest.
@@ -1009,7 +1049,7 @@ pub const EXAMPLE: &str = r#"{
       },
       "start": { "x": 337.80, "z": 97.64, "angle": 272.27 },
       "segments": [
-        { "kind": "straight", "length": 145.1504 },
+        { "kind": "straight", "length": 125 },
         { "kind": "arc", "radius": 63.4878, "angle": 8.1222 },
         { "kind": "arc", "radius": 24.3538, "angle": 16.4685 },
         { "kind": "arc", "radius": 14.1670, "angle": 28.3103 },
@@ -1035,7 +1075,7 @@ pub const EXAMPLE: &str = r#"{
         { "kind": "arc", "radius": -11.7162, "angle": 144.0096 },
         { "kind": "arc", "radius": -43.0843, "angle": 15.9680 },
         { "kind": "arc", "radius": -64.3372, "angle": 9.7961 },
-        { "kind": "straight", "length": 62.0060 },
+        { "kind": "straight", "length": 82.1895 },
         { "kind": "arc", "radius": 132.9446, "angle": 0.4310 },
         { "kind": "arc", "radius": 38.3394, "angle": 11.9555 },
         { "kind": "arc", "radius": 16.8713, "angle": 30.5645 },
@@ -1126,7 +1166,7 @@ pub const EXAMPLE: &str = r#"{
         { "kind": "arc", "radius": -32.8954, "angle": 13.9340 },
         { "kind": "straight", "length": 11.1325 },
         { "kind": "arc", "radius": 125.4045, "angle": 0.9138 },
-        { "kind": "straight", "length": 90.3427 },
+        { "kind": "straight", "length": 91.4006 },
         { "kind": "arc", "radius": -29.7662, "angle": 15.3989 },
         { "kind": "arc", "radius": -12.1796, "angle": 32.9296 },
         { "kind": "arc", "radius": -14.3360, "angle": 35.9696 },
@@ -1149,42 +1189,42 @@ pub const EXAMPLE: &str = r#"{
       ],
       "features": [
         { "kind": "roller", "at": 31.3, "length": 11.3, "height": 0.8 },
-        { "kind": "tabletop", "at": 52.3, "length": 48.5, "height": 3.6 },
-        { "kind": "roller", "at": 131.0, "length": 14.4, "height": 0.75 },
-        { "kind": "berm", "at": 265.5, "length": 8.0, "height": 1.7 },
-        { "kind": "tabletop", "at": 295.7, "length": 30.0, "height": 1.5 },
-        { "kind": "roller", "at": 408.7, "length": 11.1, "height": 0.79 },
-        { "kind": "tabletop", "at": 481.6, "length": 21.0, "height": 3.4 },
-        { "kind": "roller", "at": 540.0, "length": 11.6, "height": 0.8 },
-        { "kind": "roller", "at": 565.0, "length": 12.0, "height": 0.6 },
-        { "kind": "tabletop", "at": 600.0, "length": 22.0, "height": 3.6 },
-        { "kind": "stepUp", "at": 655.0, "length": 19.3, "height": 2.2 },
-        { "kind": "whoops", "at": 690.0, "count": 7, "spacing": 4.2, "height": 0.57 },
-        { "kind": "roller", "at": 725.0, "length": 13.0, "height": 0.8 },
-        { "kind": "roller", "at": 800.0, "length": 14.0, "height": 0.8 },
-        { "kind": "roller", "at": 845.0, "length": 15.0, "height": 0.85 },
-        { "kind": "tabletop", "at": 870.0, "length": 30.0, "height": 1.6 },
-        { "kind": "stepUp", "at": 925.7, "length": 25.2, "height": 1.9 },
-        { "kind": "roller", "at": 990.6, "length": 14.8, "height": 0.6 },
-        { "kind": "tabletop", "at": 1064.9, "length": 20.0, "height": 2.5 },
-        { "kind": "roller", "at": 1110.0, "length": 14.4, "height": 0.82 },
-        { "kind": "roller", "at": 1135.0, "length": 13.2, "height": 0.58 },
-        { "kind": "tabletop", "at": 1183.2, "length": 24.0, "height": 1.3 },
-        { "kind": "tabletop", "at": 1253.9, "length": 22.0, "height": 3.6 },
-        { "kind": "roller", "at": 1310.0, "length": 14.6, "height": 0.64 },
-        { "kind": "tabletop", "at": 1340.3, "length": 26.0, "height": 1.5 },
-        { "kind": "roller", "at": 1383.5, "length": 15.0, "height": 0.85 },
-        { "kind": "roller", "at": 1426.7, "length": 11.5, "height": 0.77 },
-        { "kind": "tabletop", "at": 1450.0, "length": 20.0, "height": 3.1 },
-        { "kind": "whoops", "at": 1524.5, "count": 7, "spacing": 5.0, "height": 0.75 },
-        { "kind": "tabletop", "at": 1566.5, "length": 30.0, "height": 1.6 },
-        { "kind": "tabletop", "at": 1634.9, "length": 20.0, "height": 2.5 },
-        { "kind": "roller", "at": 1685.0, "length": 13.0, "height": 0.65 },
-        { "kind": "double", "at": 1706.0, "height": 1.3, "gap": 2.0, "lip": 5.5 },
-        { "kind": "roller", "at": 1766.8, "length": 14.3, "height": 0.79 },
-        { "kind": "roller", "at": 1790.0, "length": 15.0, "height": 0.7 },
-        { "kind": "berm", "at": 1830.0, "length": 15.0, "height": 1.7 },
-        { "kind": "tabletop", "at": 1874.0, "length": 27.0, "height": 1.1 }
+        { "kind": "tabletop", "at": 52.3, "length": 48.5, "height": 3 },
+        { "kind": "roller", "at": 131, "length": 14.4, "height": 0.75 },
+        { "kind": "berm", "at": 245.3496, "length": 8.0, "height": 1.7 },
+        { "kind": "tabletop", "at": 275.5496, "length": 30.0, "height": 1.5 },
+        { "kind": "roller", "at": 388.5496, "length": 11.1, "height": 0.79 },
+        { "kind": "tabletop", "at": 461.4496, "length": 21.0, "height": 3 },
+        { "kind": "roller", "at": 540.0331, "length": 11.6, "height": 0.8 },
+        { "kind": "roller", "at": 565.0331, "length": 12.0, "height": 0.6 },
+        { "kind": "tabletop", "at": 600.0331, "length": 22.0, "height": 3 },
+        { "kind": "stepUp", "at": 655.0331, "length": 19.3, "height": 2.2 },
+        { "kind": "whoops", "at": 690.0331, "count": 7, "spacing": 4.2, "height": 0.57 },
+        { "kind": "roller", "at": 725.0331, "length": 13.0, "height": 0.8 },
+        { "kind": "roller", "at": 800.0331, "length": 14.0, "height": 0.8 },
+        { "kind": "roller", "at": 845.0331, "length": 15.0, "height": 0.85 },
+        { "kind": "tabletop", "at": 870.0331, "length": 30.0, "height": 1.6 },
+        { "kind": "stepUp", "at": 925.7331, "length": 25.2, "height": 1.9 },
+        { "kind": "roller", "at": 990.6331, "length": 14.8, "height": 0.6 },
+        { "kind": "tabletop", "at": 1064.9331, "length": 20.0, "height": 2.5 },
+        { "kind": "roller", "at": 1110.0331, "length": 14.4, "height": 0.82 },
+        { "kind": "roller", "at": 1135.0331, "length": 13.2, "height": 0.58 },
+        { "kind": "tabletop", "at": 1183.2331, "length": 24.0, "height": 1.3 },
+        { "kind": "tabletop", "at": 1253.9331, "length": 22.0, "height": 3 },
+        { "kind": "roller", "at": 1310.0331, "length": 14.6, "height": 0.64 },
+        { "kind": "tabletop", "at": 1340.3331, "length": 26.0, "height": 1.5 },
+        { "kind": "roller", "at": 1383.5331, "length": 15.0, "height": 0.85 },
+        { "kind": "roller", "at": 1426.7331, "length": 11.5, "height": 0.77 },
+        { "kind": "tabletop", "at": 1450.0331, "length": 20.0, "height": 3 },
+        { "kind": "whoops", "at": 1524.5331, "count": 7, "spacing": 5.0, "height": 0.75 },
+        { "kind": "tabletop", "at": 1566.5331, "length": 30.0, "height": 1.6 },
+        { "kind": "tabletop", "at": 1634.9331, "length": 20.0, "height": 2.5 },
+        { "kind": "roller", "at": 1685.0331, "length": 13.0, "height": 0.65 },
+        { "kind": "double", "at": 1706.0331, "height": 1.3, "gap": 2.0, "lip": 5.5 },
+        { "kind": "roller", "at": 1767.891, "length": 14.3, "height": 0.79 },
+        { "kind": "roller", "at": 1791.091, "length": 15.0, "height": 0.7 },
+        { "kind": "berm", "at": 1831.091, "length": 15.0, "height": 1.7 },
+        { "kind": "tabletop", "at": 1875.091, "length": 27.0, "height": 1.1 }
       ]
     }"#;
 
