@@ -3,6 +3,8 @@
 ## 2026-09-07
 
 ### Fixed
+- Tabletops are built to the deck they were asked for instead of being mostly run-up, and
+  the ground either side of a jump is a bank rather than a wall.
 - Generated tracks no longer have a step in the ground across the start straight, or a bank
   standing where the ground beside the track should be.
 - The ground behind the start gates is scenery rather than track, so the game stops treating

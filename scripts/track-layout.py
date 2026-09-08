@@ -364,7 +364,10 @@ def features(rng, segs):
             # the faces are set by the published lip and landing angles and come to thirty-odd
             # metres on their own, so stating a 40 m table asked for a 6 m top and got a long
             # rounded hill with a crest on it.
-            height = round(rng.uniform(3.4, 4.6), 2)
+            # The deck is what was asked to grow, not the height: a table built to five and a
+            # half metres over its run-in reads as a wall however long its top is. These come
+            # out about a quarter taller than they are stated, so state them lower.
+            height = round(rng.uniform(2.8, 3.7), 2)
             deck = rng.uniform(16.0, 27.0)
             length = round(min(deck + faces(height), room), 1)
             out.append({"kind": "tabletop", "at": round(pos, 1), "length": length,

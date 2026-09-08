@@ -169,7 +169,7 @@ const SEAM_SLOPE_DEG: f32 = 38.0;
 
 /// And the steepest it may stand *beside* the track, where a cut face and the back of a berm
 /// are meant to be steep. Ground at this angle is a bank to be ridden round, not a step.
-const SEAM_STEEP_DEG: f32 = 55.0;
+const SEAM_STEEP_DEG: f32 = 40.0;
 const SEAM_SLUMP: f32 = 0.25;
 const SEAM_PASSES: u32 = 140;
 
@@ -1580,7 +1580,6 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let past = dist[i] - edge_at[i] - SEAM_KEEP_OUT_M;
                 let strength = smoothstep((past / SEAM_RAMP_M).clamp(0.0, 1.0));
                 let limit = near + (far - near) * strength;
-                let mut drop = 0.0;
                 for j in [i - 1, i + 1, i - gw, i + gw] {
                     // Never into the corridor. The face where a track is cut into rising
                     // ground is meant to be steep, and shedding material into it digs a moat
@@ -1590,12 +1589,17 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     }
                     let over = src[i] - src[j] - limit;
                     if over > 0.0 {
-                        drop += over * SEAM_SLUMP;
+                        // Onto the neighbour, not into nothing. Taking the material away
+                        // without putting it anywhere is erosion, not a slump: it lowered the
+                        // whole field beside the track and left the corridor standing over a
+                        // moat, so asking for a gentler slope made the step at the track's
+                        // edge worse rather than better. A hillside that slips deposits at
+                        // its own toe, and the toe is what removes the wall.
+                        let shed = over * SEAM_SLUMP;
+                        heights[i] -= shed;
+                        heights[j] += shed;
+                        moved += shed;
                     }
-                }
-                if drop > 0.0 {
-                    heights[i] -= drop;
-                    moved += drop;
                 }
             }
             if moved < 1e-3 {
@@ -6851,6 +6855,113 @@ mod tests {
             );
             let _ = y1;
         }
+    }
+
+    /// How steep the ground climbs along the riding line, and where the steep bits are.
+    ///
+    /// Two different things get called "too steep": a jump's own face, which is built, and the
+    /// grade of the ground the lap is laid over, which is the site. They have different fixes,
+    /// so this separates them — the face from the feature profile, the grade from the deck.
+    #[test]
+    #[ignore]
+    fn how_steep_are_the_faces() {
+        let p: TrackProgram = match std::env::var("FROST_PROGRAM") {
+            Ok(path) => serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(),
+            Err(_) => serde_json::from_str(DEMO).unwrap(),
+        };
+        let s = synthesise(&p).unwrap();
+        let at = |x: f32, z: f32| -> f32 {
+            let gx = (x / s.mps).round().clamp(0.0, (s.gw - 1) as f32) as usize;
+            let gy = (z / s.mps).round().clamp(0.0, (s.gh - 1) as f32) as usize;
+            s.heights[gy * s.gw + gx]
+        };
+        // What a rider actually meets: the slope of the built ground along the line itself.
+        let mut ride: Vec<f32> = Vec::new();
+        for w in s.stations.windows(5) {
+            let (a, b) = (&w[0], &w[4]);
+            let run = ((b.x - a.x).powi(2) + (b.z - a.z).powi(2)).sqrt().max(1e-3);
+            ride.push(((at(b.x, b.z) - at(a.x, a.z)) / run).atan().to_degrees().abs());
+        }
+        let mut face: Vec<f32> = s
+            .face
+            .iter()
+            .map(|f| f.atan().to_degrees().abs())
+            .filter(|d| *d > 1.0)
+            .collect();
+        ride.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        face.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let q = |v: &Vec<f32>, f: f32| v[((v.len() - 1) as f32 * f) as usize];
+        println!(
+            "  the ground along the line: p50 {:.1}°  p90 {:.1}°  p99 {:.1}°  max {:.1}°",
+            q(&ride, 0.5), q(&ride, 0.9), q(&ride, 0.99), ride[ride.len() - 1]
+        );
+        println!(
+            "  what the jumps asked for: p50 {:.1}°  p90 {:.1}°  max {:.1}°  (published 12.0 / 27.4)",
+            q(&face, 0.5), q(&face, 0.9), face[face.len() - 1]
+        );
+        // And the ground beside the track, which is what stands over a rider as a wall.
+        {
+            let step = 2.0 * s.mps;
+            let mut off: Vec<(f32, usize)> = Vec::new();
+            for y in 1..s.gh - 1 {
+                for x in 1..s.gw - 1 {
+                    let i = y * s.gw + x;
+                    if s.corridor[i] || s.dist[i] > 30.0 {
+                        continue;
+                    }
+                    let dx = (s.heights[i + 1] - s.heights[i - 1]) / step;
+                    let dz = (s.heights[i + s.gw] - s.heights[i - s.gw]) / step;
+                    off.push(((dx * dx + dz * dz).sqrt().atan().to_degrees(), i));
+                }
+            }
+            let mut vals: Vec<f32> = off.iter().map(|(d, _)| *d).collect();
+            vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let o = |f: f32| vals[((vals.len() - 1) as f32 * f) as usize];
+            println!(
+                "  the ground beside the track: p50 {:.1}°  p90 {:.1}°  p99 {:.1}°  max {:.1}°",
+                o(0.5), o(0.9), o(0.99), vals[vals.len() - 1]
+            );
+            off.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+            let mut shown: Vec<f32> = Vec::new();
+            for (d, i) in off.iter() {
+                if shown.iter().any(|p| (p - s.arc[*i]).abs() < 30.0) {
+                    continue;
+                }
+                println!(
+                    "    {d:.0}° at {:.1} m off the line, {:.0} m round, jump face there {:+.2}",
+                    s.dist[*i], s.arc[*i], s.face[s.station[*i] as usize]
+                );
+                shown.push(s.arc[*i]);
+                if shown.len() == 5 {
+                    break;
+                }
+            }
+        }
+        // The steepest stretches, and how far round the lap they are.
+        let mut worst: Vec<(f32, usize)> =
+            ride.iter().cloned().zip(0..).map(|(d, _)| d).zip(0..).map(|(d, i)| (d, i)).collect();
+        let mut byi: Vec<(f32, f32)> = Vec::new();
+        for (i, w) in s.stations.windows(5).enumerate() {
+            let (a, b) = (&w[0], &w[4]);
+            let run = ((b.x - a.x).powi(2) + (b.z - a.z).powi(2)).sqrt().max(1e-3);
+            byi.push((((at(b.x, b.z) - at(a.x, a.z)) / run).atan().to_degrees().abs(), w[2].s));
+            let _ = i;
+        }
+        byi.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        let _ = &mut worst;
+        print!("  steepest at:");
+        let mut shown: Vec<f32> = Vec::new();
+        for (d, s_m) in byi.iter() {
+            if shown.iter().any(|p| (p - s_m).abs() < 40.0) {
+                continue;
+            }
+            print!("  {:.0}° at {:.0} m", d, s_m);
+            shown.push(*s_m);
+            if shown.len() == 5 {
+                break;
+            }
+        }
+        println!();
     }
 
     /// How much of the lap is cut into the ground rather than standing on it.
