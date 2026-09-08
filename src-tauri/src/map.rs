@@ -1633,15 +1633,15 @@ fn layer_mask_at(b: &[u8], o: usize) -> Option<(GroundMask, usize)> {
     if out.len() != want {
         return None;
     }
-    // Bottom-up, like every other sheet the compilers write — see the flip in [`ground_sheet`].
-    // Left as it lies, a mask puts the riding line on the wrong side of the track.
-    let row = w as usize;
-    for y in 0..(h as usize) / 2 {
-        let (top, bottom) = (y * row, (h as usize - 1 - y) * row);
-        for x in 0..row {
-            out.swap(top + x, bottom + x);
-        }
-    }
+    // Kept as it lies. The *sheets* a compiler writes are bottom-up and are flipped on the
+    // way in, and a coverage mask looks like it should follow them — but it does not, and
+    // flipping it here put the paint across the track: grass over the riding line, dirt out
+    // in the field.
+    //
+    // Settled on screen over four passes, because nothing in the file states where a mask
+    // sits in the world and so there is no ground truth in the data to measure against. What
+    // finally fixed it was noticing the correction is a *reflection*: a quarter turn leaves
+    // it mirrored and a half turn leaves it reversed, so no amount of rotating ever lands it.
     Some((
         GroundMask {
             width: w,
