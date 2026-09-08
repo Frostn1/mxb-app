@@ -774,22 +774,12 @@ pub fn apply_model_swap_reporting(
     Ok(reconcile_paints(mods_path, bike))
 }
 
-/// What the bike's files would look like with `variant` active — filenames only, nothing
-/// read and nothing moved. Lets the viewer show a swap before it's applied.
-#[derive(Debug, Clone)]
-pub struct PreviewSet {
-    pub bike_dir: PathBuf,
-    /// Loose root files that stay put, i.e. the root minus the set the swap would park.
-    pub root_keep: Vec<String>,
-    /// The variant folder and the files it would bring in — empty for Stock, which brings
-    /// in nothing and lets the packed model show through.
-    pub variant_dir: PathBuf,
-    pub variant_files: Vec<String>,
-    /// The liveries this model would offer, as full paths — the ones it claims plus every
-    /// unclaimed one. Resolved here rather than read back off `paints/`, which still holds
-    /// the *active* model's set until the swap actually happens.
-    pub paints: Vec<PathBuf>,
-}
+// `PreviewSet` is the *shape* of a preview — which folders and which files — and the
+// viewer in mxb-core is what turns it into a model. Built here, because working out which
+// files a variant would park is swap business; consumed there, because assembling a bike
+// out of layers is not.
+pub use mxb_core::viewer::PreviewSet;
+
 
 /// The file accounting `apply_model_swap` would do, without doing it. Same rules on
 /// purpose: what the preview shows has to be what applying the swap gives you, so the two
@@ -2326,7 +2316,7 @@ mod tests {
 
         let before = names_at(&dst);
         eprintln!("root before: {before:?}");
-        let nodes_before = crate::load_bike_model_blocking(dst.to_string_lossy().to_string(), None)
+        let nodes_before = mxb_core::viewer::load_bike_model_blocking(dst.to_string_lossy().to_string(), None)
             .expect("the bike loads before the swap")
             .nodes
             .len();
@@ -2340,7 +2330,7 @@ mod tests {
             assert!(after.contains(f), "{f} must still be at the bike root after a swap");
         }
         let model =
-            crate::load_bike_model_blocking(dst.to_string_lossy().to_string(), None)
+            mxb_core::viewer::load_bike_model_blocking(dst.to_string_lossy().to_string(), None)
                 .expect("the bike still loads after the swap");
         assert_eq!(model.nodes.len(), nodes_before, "same parts resolve after the swap");
 

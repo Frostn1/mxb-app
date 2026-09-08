@@ -9,6 +9,7 @@
 //! sites elsewhere kept resolving through the move unchanged.
 
 pub mod bikefiles;
+pub mod cloudfiles;
 pub mod config;
 pub mod game;
 pub mod library;
@@ -31,6 +32,7 @@ pub mod scenery;
 pub mod texstore;
 pub mod track;
 pub mod trackview;
+pub mod viewer;
 
 /// The optional local-only module. Absent from the public tree; `build.rs` sets `cfg(sidecar)`
 /// when the file is there and publishes that decision to dependent crates.

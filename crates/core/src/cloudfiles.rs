@@ -194,7 +194,7 @@ fn provider_of(root: &std::path::Path) -> Option<String> {
 ///   * `RECALL_ON_OPEN` — the older whole-file variant.
 ///   * `OFFLINE` — set by classic HSM tools, and still what some providers use.
 #[cfg(windows)]
-pub(crate) fn is_placeholder(path: &std::path::Path) -> bool {
+pub fn is_placeholder(path: &std::path::Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
 
     const FILE_ATTRIBUTE_OFFLINE: u32 = 0x0000_1000;
@@ -227,7 +227,7 @@ pub(crate) fn is_placeholder(path: &std::path::Path) -> bool {
 ///
 /// Like the Windows half, this asks for attributes only. `stat` does not hydrate.
 #[cfg(target_os = "macos")]
-pub(crate) fn is_placeholder(path: &std::path::Path) -> bool {
+pub fn is_placeholder(path: &std::path::Path) -> bool {
     use std::os::macos::fs::MetadataExt;
     /// `SF_DATALESS` from `sys/stat.h` — the bytes live in iCloud, not here.
     const SF_DATALESS: u32 = 0x4000_0000;
@@ -235,7 +235,7 @@ pub(crate) fn is_placeholder(path: &std::path::Path) -> bool {
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
-pub(crate) fn is_placeholder(_path: &std::path::Path) -> bool {
+pub fn is_placeholder(_path: &std::path::Path) -> bool {
     false
 }
 
