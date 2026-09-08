@@ -10,6 +10,8 @@
 - The tab wears your MXB Ranked achievement banner, your rank's colour on the standings, and
   gold, silver and bronze on your podium finishes. Your rank stays on screen while the results
   scroll on their own.
+- Ranked says what actually happened when mxb-ranked.com is slow to answer, and retries a
+  connection that drops on the way out.
 
 ## 2026-09-07
 

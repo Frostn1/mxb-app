@@ -22,6 +22,7 @@
 
 use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
+use std::time::Duration;
 
 pub const BASE: &str = "https://mxb-ranked.com";
 
@@ -134,8 +135,8 @@ fn client() -> Result<&'static reqwest::Client, String> {
         .get_or_init(|| {
             reqwest::Client::builder()
                 .user_agent(crate::mxb_session::UA)
-                .connect_timeout(std::time::Duration::from_secs(15))
-                .timeout(std::time::Duration::from_secs(30))
+                .connect_timeout(Duration::from_secs(15))
+                .timeout(REQUEST_TIMEOUT)
                 .build()
                 .map_err(|e| format!("{e}"))
         })
@@ -143,18 +144,71 @@ fn client() -> Result<&'static reqwest::Client, String> {
         .map_err(|e| e.clone())
 }
 
+/// What to tell someone whose request never reached an answer.
+///
+/// `reqwest`'s own `Display` is "error sending request for url (…)" and the reason — timed
+/// out, refused, DNS — is only in the source chain, so printing the error alone tells a player
+/// nothing they can act on. Split out from [`fetch`] so it can be tested without conjuring a
+/// `reqwest::Error`, which is not constructible from outside the crate.
+fn transport_message(is_timeout: bool, is_connect: bool) -> &'static str {
+    if is_timeout {
+        // Their site renders each profile on request and does sometimes simply stop answering
+        // — measured 2026-09-08: every `/Rider/…` hung for about twenty minutes while their
+        // home page stayed instant. Waiting is the whole of the fix, so say so.
+        "mxb-ranked.com didn't answer in time. It builds each profile when asked and is \
+         sometimes slow — try again in a moment."
+    } else if is_connect {
+        "Couldn't reach mxb-ranked.com. Check your connection, or their site may be down."
+    } else {
+        "The request to mxb-ranked.com failed before it got an answer. Try again in a moment."
+    }
+}
+
+/// How long to leave a stalled connection before giving up on it.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Fetch and parse one rider profile.
+///
+/// Retries once on a connection that never opened, and not on a timeout: a timeout has already
+/// spent [`REQUEST_TIMEOUT`], and asking a site that is busy to do the work twice is the wrong
+/// way to treat somebody else's server.
 pub async fn fetch(guid: &str) -> Result<RankedProfile, String> {
     let Some(guid) = normalise_guid(guid) else {
         return Err(format!("{guid} isn't an MX Bikes GUID"));
     };
     let url = profile_url(&guid);
     let client = client()?;
-    let res = client.get(&url).send().await.map_err(|e| format!("{e}"))?;
+
+    let mut attempt = 0;
+    let res = loop {
+        attempt += 1;
+        match client.get(&url).send().await {
+            Ok(res) => break res,
+            Err(e) => {
+                // The whole chain goes to the log even though the player sees one sentence:
+                // this is the only place the real reason is ever written down.
+                log::warn!("[ranked] {url} failed (attempt {attempt}): {e}");
+                let mut src = std::error::Error::source(&e);
+                while let Some(s) = src {
+                    log::warn!("[ranked]   caused by: {s}");
+                    src = s.source();
+                }
+                if attempt == 1 && !e.is_timeout() {
+                    tokio::time::sleep(Duration::from_millis(1200)).await;
+                    continue;
+                }
+                return Err(transport_message(e.is_timeout(), e.is_connect()).into());
+            }
+        }
+    };
+
     if !res.status().is_success() {
         return Err(format!("mxb-ranked.com answered {}", res.status()));
     }
-    let html = res.text().await.map_err(|e| format!("{e}"))?;
+    let html = res.text().await.map_err(|e| {
+        log::warn!("[ranked] {url} body failed: {e}");
+        transport_message(e.is_timeout(), false)
+    })?;
     Ok(parse(&html, &guid))
 }
 
@@ -458,6 +512,26 @@ mod tests {
         assert!(p.cards.is_empty());
         assert_eq!(p.races.len(), 5);
         assert_eq!(p.name, "Rand");
+    }
+
+    /// A player who cannot reach the site has to be told which of the three things went wrong,
+    /// because only one of them is worth waiting out.
+    #[test]
+    fn a_failed_request_says_what_happened() {
+        // The exact sentence, because a `\` line-continuation in the source silently eats the
+        // newline *and* the next line's indentation — one missing space glues two words.
+        assert_eq!(
+            transport_message(true, false),
+            "mxb-ranked.com didn't answer in time. It builds each profile when asked and is \
+             sometimes slow — try again in a moment."
+        );
+        assert!(transport_message(true, false).contains("is sometimes slow"));
+        assert!(transport_message(false, true).contains("Couldn't reach"));
+        assert!(transport_message(false, false).contains("failed before it got an answer"));
+        // Never the raw reqwest wording, which is what sent someone here in the first place.
+        for m in [transport_message(true, false), transport_message(false, true)] {
+            assert!(!m.contains("error sending request"), "{m}");
+        }
     }
 
     /// The page is someone else's app and its markup will move. When it does, the parse has to
