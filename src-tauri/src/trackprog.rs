@@ -497,8 +497,8 @@ pub const JUMP_CROWN_R: (f32, f32) = (0.9, 1.5);
 /// comes up short arrives.
 ///
 /// The radius is kept whatever the gap, and it is the *floor* that gives way instead — see
-/// [`double_shape`]. Two jumps close together stand on the ground between them rather than
-/// having a slot cut down to grade to satisfy a rule about where the bottom is.
+/// [`double_shape`]. The two jumps stand on the ground between them rather than having a slot
+/// cut down to grade to satisfy a rule about where the bottom is.
 pub const JUMP_TROUGH_R: (f32, f32) = (2.0, 3.0);
 
 /// The floor a valley wants at the bottom of it, metres.
@@ -508,12 +508,19 @@ pub const JUMP_TROUGH_R: (f32, f32) = (2.0, 3.0);
 /// grade if there is room to do it and still leave that much floor, and stop higher if not.
 pub const JUMP_PAN_M: f32 = 2.0;
 
-/// The least of its own height a double must fall between its crests.
+/// How much of its own height a double falls between its crests. The rest is the pad the pair
+/// stands on.
 ///
-/// The other end of the same argument. A valley that stops too high leaves one long hump with
-/// a dent in it, and a hump is not a double however it was described — so a tight pair keeps a
-/// short pan rather than a shallow one.
-pub const JUMP_VALLEY_FALL: f32 = 0.6;
+/// **The gap is never on the ground.** It used to be dug to grade by definition — a double is
+/// a pair of piles with nothing between them — and that is a drawing-board double, not a built
+/// one. Dirt for a rhythm section is pushed into a bank and the jumps are cut out of it, so the
+/// bottom between two of them is a dip in that bank rather than the field it was built on. Cut
+/// to grade it reads as a trench, and the rider who came up short arrives in the bottom of one.
+///
+/// Three quarters, so the fall between the crests is still nearly the whole jump and the floor
+/// stands a quarter of it up. Less than the ground allows in a tight gap still wins: this is a
+/// ceiling on the fall, not a target for it.
+pub const JUMP_VALLEY_FALL: f32 = 0.75;
 
 /// A double's profile: two crowned crests with a circular valley between them.
 ///
@@ -556,15 +563,12 @@ pub struct DoubleShape {
 /// [`Feature::length`] states is untouched and the crests stay where every other part of the
 /// generator — the speed model, the ruts, the scenery — expects to find them.
 ///
-/// **The floor gives way before the radius does.** A double's gap is at grade, and that is what
-/// makes it a double rather than a long tabletop — but only where there is ground enough to get
-/// down there and back and still leave a [`JUMP_PAN_M`] of floor at the bottom. Squeeze the gap
-/// and the honest answer is a saddle between two crests, not a slot cut to grade with the
-/// valley's radius shaved off to fit it: nobody digs a pit between two jumps a rider is meant
-/// to clear in one, and the ground that matters down there is the ground they land on when they
-/// don't. So the radii are what the height asks for, the fall is what the span allows, and the
-/// floor sits at the difference — at grade on an ordinary double, and up on a saddle as the
-/// pair closes up.
+/// **The floor gives way before the radius does, and it never reaches the ground.** The fall
+/// between the crests is [`JUMP_VALLEY_FALL`] of the jump's height, or less where the span
+/// cannot pay for that much and still leave a [`JUMP_PAN_M`] of floor at the bottom. So the
+/// radii are what the height asks for, the fall is the smaller of what the jump wants and what
+/// the span allows, and the floor sits at the difference — a dip in the ground the pair stands
+/// on, which is what a rhythm section is cut out of.
 pub fn double_shape(height: f32, gap: f32, lip: f32) -> DoubleShape {
     let faces = double_faces(height, lip);
     let h = height.abs();
@@ -592,8 +596,7 @@ pub fn double_shape(height: f32, gap: f32, lip: f32) -> DoubleShape {
         // All arc: solve `2·√(d·(2x − d)) = room`.
         x - (x * x - room * room * 0.25).max(0.0).sqrt()
     }
-    .max(JUMP_VALLEY_FALL * h)
-    .clamp(0.0, h);
+    .clamp(0.0, JUMP_VALLEY_FALL * h);
     let (inner, straight) = if x * k >= drop {
         // The crown and the valley take the whole fall on their own, so the face between them
         // is a point and the angle it passes through is whatever that costs.
@@ -683,8 +686,13 @@ pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
     // tabletop gets a 2.6 m ramp where 27% of a 22 m length gave it 5.9 m — which is the same
     // way round as it bit on the double. The angle is a ceiling for the tall ones, not a
     // target for all of them.
-    let up = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M).max(length * 0.27);
-    let down = face_run(height, JUMP_LANDING_DEG, JUMP_LANDING_MIN_M).max(length * 0.44);
+    // Sized by the angle alone. Keeping the old fractions as a floor made the ramps grow
+    // with the stated length, so asking for a *longer* table bought ramp rather than deck:
+    // a 3.6 m tabletop asked for at 49 m got 35 m of ramp and a 14 m top, which from the
+    // seat is a long rounded hill with a crest on it and not a table at all. A table's size
+    // is its deck.
+    let up = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M);
+    let down = face_run(height, JUMP_LANDING_DEG, JUMP_LANDING_MIN_M);
     // Whatever the asked-for length has left once the faces are in it — but never less than a
     // deck. The deck wins and the footprint grows; the other way round, keeping the length by
     // steepening the faces to fit a top inside it, is the same jump built worse.
@@ -2502,40 +2510,47 @@ mod tests {
     }
 
     #[test]
-    fn a_gap_too_tight_to_dig_out_rides_over_a_saddle() {
-        // The valley keeps the radius its height asks for, so when the two jumps stand close
-        // the ground between them stays up rather than being slotted down to grade. Nobody
-        // digs a pit between two jumps that are meant to be cleared in one.
-        let tight = double_shape(2.5, 0.0, 0.0);
-        let f = &tight.faces;
-        // The bottom of it, wherever that falls — with no gap at all the valley is two arcs
-        // meeting, and the middle of the span is already on the way back up.
-        let (mut u, mut floor) = (f.ramp, f32::MAX);
-        while u <= f.ramp + f.back + f.face {
-            floor = floor.min(tight.height_at(u));
-            u += 0.05;
+    fn the_gap_is_never_on_the_ground() {
+        // The whole point of the valley. A double dug to grade is a trench between two piles,
+        // and the bottom of it is where the rider who came up short arrives. The pair stands
+        // on the ground instead, and the gap is a dip in it.
+        for (height, gap, lip) in [
+            (0.9f32, 2.0f32, 0.0f32),
+            (1.4, 8.0, 0.0),
+            (2.2, 0.0, 0.0),
+            (2.5, 9.0, 6.0),
+            (3.0, 12.0, 20.0),
+            (3.6, 6.0, 0.0),
+        ] {
+            let s = double_shape(height, gap, lip);
+            let f = &s.faces;
+            let (mut u, mut floor) = (f.ramp, f32::MAX);
+            while u <= f.ramp + f.back + gap + f.face {
+                floor = floor.min(s.height_at(u));
+                u += 0.05;
+            }
+            assert!(
+                floor > 0.05,
+                "{height} m over {gap} m digs its gap to {floor:.2} m"
+            );
+            // And it is still two jumps rather than one hump with a dent in it. Not the
+            // full [`JUMP_VALLEY_FALL`]: that is a ceiling, and a gap of nothing at all has
+            // no ground to pay for it.
+            assert!(
+                height - floor >= height * 0.35,
+                "{height} m over {gap} m only falls {:.2} m between its crests",
+                height - floor
+            );
+            assert!(
+                height - floor <= height * JUMP_VALLEY_FALL + 1e-3,
+                "{height} m over {gap} m falls {:.2} m, past the ceiling",
+                height - floor
+            );
         }
-        assert!(
-            floor > 0.3,
-            "a 2.5 m double with no gap is slotted down to {floor:.2} m"
-        );
-        // And it is still two jumps rather than one hump with a dent in it.
-        assert!(
-            floor <= 2.5 * (1.0 - JUMP_VALLEY_FALL) + 1e-3,
-            "it barely falls between the crests: {floor:.2} m of 2.5"
-        );
-        // And an ordinary one still puts its gap on the ground, which is the whole difference
-        // between a double and a long tabletop.
-        let room = double_shape(2.5, 9.0, 6.0);
-        let f = &room.faces;
-        assert!(
-            room.height_at(f.ramp + f.back + 9.0 * 0.5) < 0.02,
-            "a 9 m gap should be at grade"
-        );
     }
 
     #[test]
-    fn the_crests_stand_where_the_faces_say_and_an_ordinary_gap_is_at_grade() {
+    fn the_crests_stand_where_the_faces_say() {
         // The rounding is fitted inside the four faces, so nothing that reads `double_faces`
         // — the speed model, the ruts, the scenery — is looking in the wrong place.
         for (height, gap, lip) in [
@@ -2572,13 +2587,8 @@ mod tests {
                 u += 0.05;
             }
             assert!(peak <= height + 1e-3, "peaks at {peak:.3} against {height}");
-            assert!(floor >= -1e-3, "digs to {floor:.3}");
-            if gap >= JUMP_PAN_M {
-                assert!(
-                    s.height_at(f.ramp + f.back + gap * 0.5) < 0.02,
-                    "the middle of the gap is off grade"
-                );
-            }
+            assert!(floor >= 0.0, "digs below the ground it stands on: {floor:.3}");
+
         }
     }
 

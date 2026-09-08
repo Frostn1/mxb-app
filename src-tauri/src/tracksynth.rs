@@ -107,6 +107,15 @@ const FILL_SHOULDER: f32 = 1.7;
 /// A metre, so the machine's reach changes over about the height of the face it is cutting.
 const BENCH_BLEND_M: f32 = 1.0;
 
+/// How far the riding surface stands above the ground it was graded out of.
+const DECK_LIFT_M: f32 = 1.35;
+
+/// How far either side of a station the deck looks for the ground it should sit on top of.
+///
+/// A track's own width, near enough: the deck has to clear the rise it crosses, and a rise
+/// narrower than the track is one the grading swallows anyway.
+const RIDGE_WINDOW_M: f32 = 16.0;
+
 /// How far the grading reaches here: a cut's short face, a fill's long slope, or between.
 fn bench_shoulder(ground: f32, deck: f32) -> f32 {
     let cut = smoothstep(((ground - deck) / BENCH_BLEND_M).clamp(0.0, 1.0));
@@ -150,15 +159,19 @@ const TEXTURE_WAVELENGTH_M: f32 = 1.8;
 /// A berm is meant to be steep and it stands at the edge of the track, so the slump has to
 /// begin outside it — and smoothly, because the corridor's own edge wobbles from cell to cell
 /// and a hard boundary put the teeth back that the wobble was there to avoid.
-const SEAM_KEEP_OUT_M: f32 = 2.5;
+const SEAM_KEEP_OUT_M: f32 = 1.0;
 const SEAM_RAMP_M: f32 = 3.0;
 
 /// How much of the carved line survives on a straight, where nobody is on one line.
 const CARVE_STRAIGHT: f32 = 0.18;
 
 const SEAM_SLOPE_DEG: f32 = 38.0;
+
+/// And the steepest it may stand *beside* the track, where a cut face and the back of a berm
+/// are meant to be steep. Ground at this angle is a bank to be ridden round, not a step.
+const SEAM_STEEP_DEG: f32 = 40.0;
 const SEAM_SLUMP: f32 = 0.25;
-const SEAM_PASSES: u32 = 60;
+const SEAM_PASSES: u32 = 140;
 
 /// How far along the track the ridden ground is averaged, in how many taps, and how much of
 /// the result is taken.
@@ -210,7 +223,7 @@ const RUT_RADIUS_M: (f32, f32) = (40.0, 14.0);
 // way to compare: at 0.38 a built lap came back with corner grooves at p50 0.13 and p90 0.24
 // against Indiana's 0.21 and 0.44 — half the depth, and a corner you can see but not sit in.
 const RUT_DEPTH_M: f32 = 0.86;
-const RUT_DEPTH_STRAIGHT_M: f32 = 0.09;
+const RUT_DEPTH_STRAIGHT_M: f32 = 0.15;
 
 /// The material the cut displaced, which does not disappear.
 ///
@@ -266,8 +279,12 @@ const RUT_LIP_EDGE: (f32, f32) = (0.0, 0.52);
 /// The contrast has to come from the gap between floor and wall, not from taking the floor
 /// away: a line solid enough to follow, with the ground beside each groove pulled hard out of
 /// it.
-const RUT_PAINT_FLOOR: f32 = 0.38;
+const RUT_PAINT_FLOOR: f32 = 0.18;
 const RUT_PAINT_WALL: f32 = 1.55;
+
+/// How high up a groove's inside the packed sheet holds on before the bank takes over. Above
+/// one it lets go late, which is what gives the inside of a rut a colour of its own.
+const RUT_WALL_HOLD: f32 = 1.8;
 
 /// How much darker the floor of a groove is than the line it is worn into, and how much
 /// lighter dry loose dirt is than the ground it lands on.
@@ -276,8 +293,11 @@ const RUT_PAINT_WALL: f32 = 1.55;
 /// than the dark soil of the line, so a rut read paler than its own line and disappeared, and
 /// the loose band was toned darker than a corridor that had become the field's own soil, so
 /// it read as blotches rather than as dust.
-const RUT_FLOOR_DARKEN: f32 = 0.92;
+const RUT_FLOOR_DARKEN: f32 = 0.42;
 const LOOSE_DRY: f32 = 0.85;
+
+/// How much of its brightness the field's soil keeps.
+const FIELD_DARKEN: f32 = 0.72;
 
 /// How much lighter the worked corridor is than the line worn down the middle of it.
 ///
@@ -318,7 +338,7 @@ const LINE_FADE_M: f32 = 0.8;
 /// quickly it gets there. A bank is loose over all of itself, not in proportion to how tall it
 /// happens to be, so the signal saturates well before its own peak.
 const RUT_LIP_LOOSE: f32 = 1.0;
-const RUT_LIP_SHARP: f32 = 3.4;
+const RUT_LIP_SHARP: f32 = 2.2;
 
 /// Tyre marks up the face of a jump: the grade at which a face is fully marked, how much wider
 /// the marks fan than the line that fed them, how far they lean towards the side the approach
@@ -934,7 +954,29 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         .iter()
         .map(|st| sample(&heights, gw, gh, st.x / mps_x, st.z / mps_z))
         .collect();
+    // The high ground, not the mean of it. A deck averaged along the lap sits below every
+    // rise it crosses, so the track is cut into each one and the rider is in a trench with
+    // the banners along the rim — "we are back to be inside the ground". Taking the local
+    // ridge instead and smoothing *that* puts the circuit on top of its site: it crests the
+    // rises and fills the hollows, which is what a machine does to build one.
+    let ridge = (RIDGE_WINDOW_M / STATION_STEP).round() as usize;
+    if ridge > 0 {
+        let src = along.clone();
+        let n = src.len();
+        for (i, v) in along.iter_mut().enumerate() {
+            let mut hi = f32::MIN;
+            for k in i.saturating_sub(ridge)..(i + ridge + 1).min(n) {
+                hi = hi.max(src[k]);
+            }
+            *v = hi;
+        }
+    }
     smooth_along(&mut along, (BENCH_SMOOTH_M / STATION_STEP) as usize);
+    // And stood proud of that again, so the surface is fill even where the smoothing dips it
+    // back under the ridge it came from.
+    for v in along.iter_mut() {
+        *v += DECK_LIFT_M;
+    }
     apply_rise(&mut along, &stations, &prog.segments);
     apply_elevation(&mut along, &stations, &prog.elevation, lap);
     apply_step_ups(&mut along, &stations, &prog.features);
@@ -1161,9 +1203,15 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             let carve = CARVE_STRAIGHT
                 + (1.0 - CARVE_STRAIGHT)
                     * (turn.at(s).abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
-            let main = trough(on_line, feel.groove)
-                * (0.82 + 0.18 * fbm(s / 13.0, 21.0, r.seed ^ 0x11E5))
-                * carve;
+            // Nothing carved, anywhere.
+            //
+            // The line used to be cut in as a trough on top of the field of grooves riders
+            // actually wear. Faint on the straights it still read as one channel running the
+            // whole lap; kept in the corners it was a groove down the middle of every turn
+            // "for no reason". What a corner carries is the comb — grooves worn between banks
+            // of material thrown up beside them — and that is the field's doing.
+            let main = 0.0f32;
+            let _ = (carve, on_line);
             // And the corner's other way through: outside the first, shallower, and only
             // where the turn has run long enough to have grown one. Its own variation, or it
             // is the same groove drawn twice.
@@ -1331,64 +1379,6 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         }
     }
 
-    // 3a. Break the walls where two parts of the track grade into the same ground.
-    //
-    // Every cell takes its arc position from the station nearest it, and out in the field
-    // between two branches of the lap that assignment flips: measured on the demo, two
-    // neighbouring samples eleven metres off the line belong to stations a hundred and ten
-    // metres apart round the lap. The deck height, a jump reaching out of the corridor and
-    // the berm are all functions of that position, so where it flips they disagree — and the
-    // ground between a hairpin's two legs came out with a wall 1.3 m high standing in it,
-    // one sample wide. Ridden, that is a step in the ground you can hit.
-    //
-    // A machine grading between two legs of a track leaves one surface, so this makes one:
-    // outside the riding corridor, anything standing far off its own neighbours is pulled
-    // back towards them. Soft-thresholded, so ordinary relief is untouched and only a wall is
-    // treated as a wall, and the corridor itself is never moved.
-    // Averaging cannot do it: run to convergence a blur turns a wall into a ramp of exactly
-    // the same drop, and a 60-degree ramp one sample wide is the same thing to ride into. So
-    // this is the slump instead — ground steeper than it can stand loses material downhill,
-    // pass after pass, until nothing outside the corridor is steeper than a graded slope.
-    {
-        let limit = SEAM_SLOPE_DEG.to_radians().tan() * mps_x.min(mps_z);
-        for _ in 0..SEAM_PASSES {
-            let src = heights.clone();
-            let mut moved = 0.0f32;
-            for i in 0..gw * gh {
-                let (x, y) = (i % gw, i / gw);
-                if corridor[i] || x == 0 || y == 0 || x + 1 == gw || y + 1 == gh {
-                    continue;
-                }
-                // Clear of the track and whatever stands at its edge, then fading in.
-                let past = dist[i] - edge_at[i] - SEAM_KEEP_OUT_M;
-                let strength = smoothstep((past / SEAM_RAMP_M).clamp(0.0, 1.0));
-                if strength <= 0.0 {
-                    continue;
-                }
-                let mut drop = 0.0;
-                for j in [i - 1, i + 1, i - gw, i + gw] {
-                    // Never into the corridor. The face where a track is cut into rising
-                    // ground is meant to be steep, and shedding material into it digs a moat
-                    // down the side of the track instead of taking a seam out of the field.
-                    if corridor[j] {
-                        continue;
-                    }
-                    let over = src[i] - src[j] - limit;
-                    if over > 0.0 {
-                        drop += over * SEAM_SLUMP;
-                    }
-                }
-                if drop > 0.0 {
-                    heights[i] -= drop * strength;
-                    moved += drop * strength;
-                }
-            }
-            if moved < 1e-3 {
-                break;
-            }
-        }
-    }
-
     // 3b. Smooth the ridden ground along the way it was ridden.
     //
     // A rut is a groove somebody drove down: sharp across, smooth along. Everything above
@@ -1445,11 +1435,13 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // — the bank the gates are set against — so back there the width is measured
             // across the line rather than from the end of it.
             let mut back = 1.0f32;
+            let mut behind_row = 0.0f32;
             if s <= 0.5 {
                 let q = &spur.stations[0];
                 let (fx, fz) = crate::trackprog::heading_vector(q.heading);
                 let (rx, rz) = crate::trackprog::right_vector(q.heading);
                 let behind = -((wx - q.x) * fx + (wz - q.z) * fz);
+                behind_row = behind;
                 if behind > 0.0 {
                     d = ((wx - q.x) * rx + (wz - q.z) * rz).abs();
                     back = smoothstep(
@@ -1475,14 +1467,18 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // line the ground was benched by a different rule, and the two rules do not meet.
             let spur_e = d - wide;
             let lap_e = dist[i] - widths.at(arc[i]);
-            let lap_e = dist[i] - widths.at(arc[i]);
             // Track surface wherever the start covers it, whatever the ground under it is
             // doing: this is the same width the `.trh` and the `.map` paint, and a corridor
             // that disagreed with them measured eight metres narrower than the file it wrote.
-            if d <= wide && back > 0.0 {
+            // Riding surface up to a couple of metres behind the row — where the bikes sit —
+            // and no further. What is behind that is the bank the gates are set against: it
+            // falls thirty metres from the pad's level to the field's, and calling it track
+            // put a 65 degree slope on the riding line and left the game scoring the bank as
+            // somewhere you are allowed to be.
+            if d <= wide && back > 0.0 && behind_row <= GATE_PAD_BACK_M {
                 corridor[i] = true;
             }
-            let claim = smoothstep(((lap_e - spur_e) / SHOULDER_M).clamp(0.0, 1.0)) * back;
+            let claim = smoothstep(((lap_e - spur_e) / START_FADE_M).clamp(0.0, 1.0)) * back;
             if claim <= 0.0 {
                 continue;
             }
@@ -1543,6 +1539,76 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     let floor = budget * BUDGET_MARGIN;
     for v in &mut heights {
         *v = *v - lo + floor;
+    }
+
+    // Break the walls — last, after everything that moves ground has finished.
+    //
+    // This used to run before the start straight was benched in, and the spur cuts its
+    // own pad beside the lap: the worst step on a ridden track was 1.5 m, twelve metres
+    // off the line, and the slump never saw it because it had already run.
+    //
+    // Every cell takes its arc position from the station nearest it, and out in the field
+    // between two branches of the lap that assignment flips: measured on the demo, two
+    // neighbouring samples eleven metres off the line belong to stations a hundred and ten
+    // metres apart round the lap. The deck height, a jump reaching out of the corridor and
+    // the berm are all functions of that position, so where it flips they disagree — and the
+    // ground between a hairpin's two legs came out with a wall 1.3 m high standing in it,
+    // one sample wide. Ridden, that is a step in the ground you can hit.
+    //
+    // A machine grading between two legs of a track leaves one surface, so this makes one:
+    // outside the riding corridor, anything standing far off its own neighbours is pulled
+    // back towards them. Soft-thresholded, so ordinary relief is untouched and only a wall is
+    // treated as a wall, and the corridor itself is never moved.
+    // Averaging cannot do it: run to convergence a blur turns a wall into a ramp of exactly
+    // the same drop, and a 60-degree ramp one sample wide is the same thing to ride into. So
+    // this is the slump instead — ground steeper than it can stand loses material downhill,
+    // pass after pass, until nothing outside the corridor is steeper than a graded slope.
+    {
+        let far = SEAM_SLOPE_DEG.to_radians().tan() * mps_x.min(mps_z);
+        let near = SEAM_STEEP_DEG.to_radians().tan() * mps_x.min(mps_z);
+        for _ in 0..SEAM_PASSES {
+            let src = heights.clone();
+            let mut moved = 0.0f32;
+            for i in 0..gw * gh {
+                let (x, y) = (i % gw, i / gw);
+                if corridor[i] || x == 0 || y == 0 || x + 1 == gw || y + 1 == gh {
+                    continue;
+                }
+                // Clear of the track and whatever stands at its edge, then fading in — but
+                // the fade is in the *angle*, not in whether this runs at all. Ground beside a
+                // track is allowed to be steep: it is the cut face, or a berm's back. It is
+                // not allowed to be vertical. Gating it off entirely left a 3.6 m wall
+                // standing two metres off the edge, in the wedge between the lap and the
+                // start pad, where both lines call the ground theirs to protect.
+                let past = dist[i] - edge_at[i] - SEAM_KEEP_OUT_M;
+                let strength = smoothstep((past / SEAM_RAMP_M).clamp(0.0, 1.0));
+                let limit = near + (far - near) * strength;
+                for j in [i - 1, i + 1, i - gw, i + gw] {
+                    // Never into the corridor. The face where a track is cut into rising
+                    // ground is meant to be steep, and shedding material into it digs a moat
+                    // down the side of the track instead of taking a seam out of the field.
+                    if corridor[j] {
+                        continue;
+                    }
+                    let over = src[i] - src[j] - limit;
+                    if over > 0.0 {
+                        // Onto the neighbour, not into nothing. Taking the material away
+                        // without putting it anywhere is erosion, not a slump: it lowered the
+                        // whole field beside the track and left the corridor standing over a
+                        // moat, so asking for a gentler slope made the step at the track's
+                        // edge worse rather than better. A hillside that slips deposits at
+                        // its own toe, and the toe is what removes the wall.
+                        let shed = over * SEAM_SLUMP;
+                        heights[i] -= shed;
+                        heights[j] += shed;
+                        moved += shed;
+                    }
+                }
+            }
+            if moved < 1e-3 {
+                break;
+            }
+        }
     }
 
     // How steeply the ground the features built climbs along the lap, per station: the faces
@@ -2352,6 +2418,35 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
     // that merely touch into one shape, and it is the same control that decides how long a
     // single jump's ramps are — they are the same question asked twice.
     smooth_along(&mut out.v, (blend / PROFILE_STEP).round() as usize);
+
+    // And no knuckle before the lip.
+    //
+    // Ridden: "a lot of them were smooth, and had like a knuckle just before the tip". The
+    // smoothing above rounds a jump against whatever is beside it, and where a hollow, a
+    // neighbouring feature or the deck of the jump itself meets the face, the profile can
+    // dip a few centimetres and come back — which is a bump a wheel finds at the worst
+    // moment. A face rises. So each feature's approach is made non-decreasing to its crest
+    // and its landing non-increasing away from it.
+    for f in features {
+        if matches!(f, Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Rut { .. }) {
+            continue;
+        }
+        let (at, len) = (f.at(), f.length());
+        let lo = ((at / PROFILE_STEP).floor().max(0.0) as usize).min(out.v.len() - 1);
+        let hi = (((at + len) / PROFILE_STEP).ceil() as usize).min(out.v.len() - 1);
+        if hi <= lo + 2 {
+            continue;
+        }
+        let crest = (lo..=hi)
+            .max_by(|a, b| out.v[*a].total_cmp(&out.v[*b]))
+            .unwrap_or(lo);
+        for i in lo + 1..=crest {
+            out.v[i] = out.v[i].max(out.v[i - 1]);
+        }
+        for i in (crest..hi).rev() {
+            out.v[i] = out.v[i].max(out.v[i + 1]);
+        }
+    }
     out
 }
 
@@ -2616,7 +2711,31 @@ fn apply_step_ups(along: &mut [f32], st: &[Station], features: &[Feature]) {
 /// own `lip` is a shallower arc rather than the same arc stretched over more ground. Either
 /// way it leaves the ground tangent and arrives at the lip steepest.
 fn arc_up(t: f32, height: f32, run: f32) -> f32 {
-    crate::trackprog::face_arc(t, crate::trackprog::face_sweep(height, run))
+    // A quarter pipe, not a ramp. The sweep a face gets from its own height and run is
+    // gentle — a tenth at the foot and a third at the lip, which rides as a hill. A built
+    // takeoff starts almost flat and finishes steep, and its lip is an edge you leave rather
+    // than a curve you roll over. "No snapped end, just big rollers" and "like a quarter half
+    // pipe" ask for the same shape.
+    let sweep = crate::trackprog::face_sweep(height, run).max(FACE_SWEEP_MIN);
+    crate::trackprog::face_arc(t, sweep)
+}
+
+/// How far round its own curve a face turns, at least, in radians.
+const FACE_SWEEP_MIN: f32 = 1.35;
+
+/// A landing's shape, at `t` from the crest of the jump to the ground that catches you.
+/// Returns 1 at the crest and 0 at the foot.
+///
+/// Tangent at *both* ends, which is what makes it a landing. The take-off arc ridden backwards
+/// — which is what this used to be — puts the steepest part of the landing hard against the
+/// edge of the deck: a flat top breaking to twenty-five degrees within a couple of metres, and
+/// easing off to nine by the time a rider is anywhere near the ground. From the seat that is a
+/// take-off pointing the wrong way, and it is the shape that was reported as one.
+///
+/// A built landing rolls away from the deck, is steepest through its middle where the rider
+/// actually comes down on it, and flattens into the ground rather than meeting it at an angle.
+fn arc_down(t: f32) -> f32 {
+    1.0 - smoothstep(t.clamp(0.0, 1.0))
 }
 
 fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
@@ -2640,9 +2759,9 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
             } else if u <= up + top {
                 height
             } else {
-                // The same arc ridden the other way, so the far side is convex — steep off
-                // the crest and flattening into the ground that catches you.
-                height * arc_up(1.0 - (u - up - top) / down, height, down)
+                // And down the other side, which is its own shape rather than this one
+                // reversed — see `arc_down`.
+                height * arc_down((u - up - top) / down.max(1e-4))
             }
         }
         Feature::Roller { height, .. } => height * (0.5 - 0.5 * (t * std::f32::consts::TAU).cos()),
@@ -2671,25 +2790,60 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
 
 /// A hand-drawn shape's height at `t`, which runs 0 to 1 across the feature.
 ///
-/// Eased rather than joined straight, so points placed roughly still make a shape a bike can
-/// ride. Outside the points it reads as the nearest one, so a shape that does not start at
-/// zero simply begins at the height it was drawn at.
+/// Smooth through the points and never steeper than they ask for. Easing each span with a
+/// smoothstep — which is what this used to do — makes the middle of every span half again
+/// steeper than the two points either end of it, because that is what a smoothstep's slope
+/// peaks at. A triple whose take-off was drawn at 23 degrees was built at 34, and reported
+/// from the seat as almost a wall.
+///
+/// So: monotone cubic, Fritsch-Carlson. It passes through every point, it will not overshoot
+/// one, and where the drawn shape turns over — the lip of a triple, the floor between its two
+/// landings — it arrives flat instead of carrying its slope through.
+///
+/// Outside the points it reads as the nearest one, so a shape that does not start at zero
+/// simply begins at the height it was drawn at.
 fn along_points(points: &[crate::trackprog::ShapePoint], t: f32) -> f32 {
     if points.is_empty() {
         return 0.0;
     }
     let mut p: Vec<_> = points.to_vec();
     p.sort_by(|a, b| a.u.total_cmp(&b.u));
+    let n = p.len();
     if t <= p[0].u {
         return p[0].h;
     }
-    if t >= p[p.len() - 1].u {
-        return p[p.len() - 1].h;
+    if t >= p[n - 1].u {
+        return p[n - 1].h;
     }
-    let i = p.iter().rposition(|q| q.u <= t).unwrap_or(0);
-    let (a, b) = (p[i], p[(i + 1).min(p.len() - 1)]);
-    let span = (b.u - a.u).max(1e-6);
-    a.h + (b.h - a.h) * smoothstep((t - a.u) / span)
+    if n == 1 {
+        return p[0].h;
+    }
+    // Span widths and the slope across each.
+    let w: Vec<f32> = (0..n - 1).map(|i| (p[i + 1].u - p[i].u).max(1e-6)).collect();
+    let d: Vec<f32> = (0..n - 1).map(|i| (p[i + 1].h - p[i].h) / w[i]).collect();
+    // The slope the curve leaves each point with. Zero at a turning point, and otherwise a
+    // weighted harmonic mean of the two spans meeting there — which is the part that keeps a
+    // span from being ridden steeper than it was drawn.
+    let mut m = vec![0.0f32; n];
+    m[0] = d[0];
+    m[n - 1] = d[n - 2];
+    for i in 1..n - 1 {
+        if d[i - 1] * d[i] <= 0.0 {
+            m[i] = 0.0;
+        } else {
+            let (w1, w2) = (2.0 * w[i] + w[i - 1], w[i] + 2.0 * w[i - 1]);
+            m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]);
+        }
+    }
+    let i = p.iter().rposition(|q| q.u <= t).unwrap_or(0).min(n - 2);
+    let h = w[i];
+    let s = ((t - p[i].u) / h).clamp(0.0, 1.0);
+    let (s2, s3) = (s * s, s * s * s);
+    // Hermite.
+    (2.0 * s3 - 3.0 * s2 + 1.0) * p[i].h
+        + (s3 - 2.0 * s2 + s) * h * m[i]
+        + (-2.0 * s3 + 3.0 * s2) * p[i + 1].h
+        + (s3 - s2) * h * m[i + 1]
 }
 
 fn smoothstep(t: f32) -> f32 {
@@ -3431,6 +3585,9 @@ pub struct StartSpur {
 ///
 /// A start is the one place on a track where the ruts are a comb: every rider pulls out of
 /// their own stall in a line, and the lines stay parallel until the pack starts to spread.
+/// How much surface stands behind the gate row: enough for forty bikes to be sitting on it.
+const GATE_PAD_BACK_M: f32 = 2.5;
+
 const GATE_RUT_M: f32 = 35.0;
 const GATE_RUT_DEPTH_M: f32 = 0.09;
 
@@ -3440,11 +3597,26 @@ const MERGE_TAIL_M: f32 = 12.0;
 /// How much further the start pad's cut and fill reach than a track's shoulder does.
 const START_BANK: f32 = 2.0;
 
+/// Over how much of the wedge the start pad hands the ground back to the lap.
+///
+/// Measured in the difference between the two edge distances, which is a quantity that moves
+/// about twice as fast as the ground does — so this is roughly half as wide on the dirt. At a
+/// shoulder's six metres the pad's fill fell three metres of ground from its own height to the
+/// field's, and where the pad is cut ten metres proud that is a wall you can stand under.
+const START_FADE_M: f32 = 26.0;
+
 /// How near the lap the start straight has to come before it is cut to the lap's height
 /// rather than to the ground's, and how far away it stops caring. Inside the first figure the
 /// two are the same surface; outside the second the start is its own earthwork.
-const TIE_NEAR_M: f32 = 22.0;
-const TIE_FAR_M: f32 = 70.0;
+const TIE_NEAR_M: f32 = 45.0;
+
+/// How wide a piece of lap the pad takes its height from.
+///
+/// Wide enough that the answer moves smoothly as the nearest branch of the lap changes — the
+/// whole point of a soft nearest — and no wider, because past that the pad stops following the
+/// ground it is actually beside and starts following the average of a hillside.
+const TIE_BLUR_M: f32 = 25.0;
+const TIE_FAR_M: f32 = 95.0;
 
 /// How much of the start's last stretch counts as the join, where the two surfaces are meant
 /// to be one.
@@ -3545,18 +3717,28 @@ impl StartSpur {
         // and that is where a difference between them would be a wall — the lap is benched
         // into the hill there and the ground beside it is not.
         let _ = landing;
+        // Which lap deck it ties to is a *soft* nearest, not the nearest. The lap comes back
+        // past the pad on its way round, so along the fifty metres of a start the nearest bit
+        // of it changes branch — and a hard nearest hands the deck the other branch's height
+        // in one station step. Measured: a 2.3 m wall standing across the whole start, at a
+        // fixed distance down it, which is the wall on the straightaway.
+        let sigma2 = TIE_BLUR_M * TIE_BLUR_M;
         for (i, q) in stations.iter().enumerate() {
-            let mut best = (f32::MAX, deck[i]);
+            let (mut num, mut den, mut near2) = (0.0f32, 0.0f32, f32::MAX);
             for (j, l) in lap.iter().enumerate() {
-                let d = (l.x - q.x).powi(2) + (l.z - q.z).powi(2);
-                if d < best.0 {
-                    best = (d, lap_deck[j]);
-                }
+                let d2 = (l.x - q.x).powi(2) + (l.z - q.z).powi(2);
+                near2 = near2.min(d2);
+                let w = (-d2 / sigma2).exp();
+                num += w * lap_deck[j];
+                den += w;
             }
-            let d = best.0.sqrt();
-            let u = ((TIE_FAR_M - d) / (TIE_FAR_M - TIE_NEAR_M)).clamp(0.0, 1.0);
-            deck[i] += (best.1 - deck[i]) * smoothstep(u);
+            let target = if den > 1e-9 { num / den } else { deck[i] };
+            let u = ((TIE_FAR_M - near2.sqrt()) / (TIE_FAR_M - TIE_NEAR_M)).clamp(0.0, 1.0);
+            deck[i] += (target - deck[i]) * smoothstep(u);
         }
+        // And smoothed again afterwards, because the tie is the last thing that can put a
+        // step in the pad and a start straight is the one place on a track nobody is slow.
+        smooth_along(&mut deck, (BENCH_SMOOTH_M / STATION_STEP) as usize);
         let len = stations.last().map(|q| q.s).unwrap_or(0.0);
         Some(StartSpur {
             line,
@@ -4679,10 +4861,17 @@ fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> 
         // taking it straight paints a gradient across the pair — which at riding scale is a
         // soft stripe, not a groove with a lit side and a shaded one. Raised to a power the
         // floor is dark over its whole width and the bank is not, so the eye gets an edge.
-        let floor = (-c.rut).clamp(0.0, 1.0).powf(0.7);
+        let floor = (-c.rut).clamp(0.0, 1.0).powf(0.45);
         let wall = c.rut.clamp(0.0, 1.0).powf(0.45);
-        let keyed = (RUT_PAINT_FLOOR + (1.0 - RUT_PAINT_FLOOR) * floor - RUT_PAINT_WALL * wall)
-            .clamp(0.0, 1.0);
+        // The wall of a groove is not the bank behind it. Subtracting the whole way up left
+        // the inside of a rut as bare corridor — dark at the very bottom, pale at the crest,
+        // and nothing of its own in between: "the inside of the ruts should have colour and
+        // tyre marks, not just the bottom, and it should vary". So the packed sheet climbs
+        // the inside and only lets go near the top, and how far up it reaches wanders.
+        let climb = 0.55 + 0.45 * fbm(c.x * 0.06, c.z * 0.06, seed ^ 0x4C11);
+        let keyed = (RUT_PAINT_FLOOR + (1.0 - RUT_PAINT_FLOOR) * floor
+            - RUT_PAINT_WALL * (wall * climb).powf(RUT_WALL_HOLD))
+        .clamp(0.0, 1.0);
         // And never a solid sheet of it. A line packs unevenly — damp here, blown out there —
         // and one texture at full coverage down the whole lap is the single thing that made
         // the line read as a stripe of paint rather than as ground.
@@ -5510,7 +5699,12 @@ fn ground_looks(surface: Surface) -> Grounds {
     let field = GroundLook {
         base,
         photo: Some("soil_light"),
-        tone: ground_tone,
+        // Knocked back: a whole plot of bright tan reads ugly from the seat.
+        tone: [
+            ground_tone[0] * FIELD_DARKEN,
+            ground_tone[1] * FIELD_DARKEN,
+            ground_tone[2] * FIELD_DARKEN,
+        ],
         grain_tint: (0.82, 1.13),
         fleck: [196.0, 190.0, 176.0],
         fleck_density: 0.03,
@@ -5552,9 +5746,9 @@ fn ground_looks(surface: Surface) -> Grounds {
         ],
         photo: Some("soil_light"),
         tone: [
-            ground_tone[0] * 1.06,
-            ground_tone[1] * 1.04,
-            ground_tone[2] * 1.02,
+            ground_tone[0] * 1.06 * FIELD_DARKEN,
+            ground_tone[1] * 1.04 * FIELD_DARKEN,
+            ground_tone[2] * 1.02 * FIELD_DARKEN,
         ],
         grain_tint: (0.85, 1.11),
         fleck: [165.0, 160.0, 150.0],
@@ -6048,6 +6242,23 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         // Painted over the corridor's base, in the order the ground gets that way: the loose
         // stuff is thrown over the worked soil, and the line is worn back through it.
         Layer {
+            name: "line",
+            sheet: "dirt_line_c",
+            band: BandMask::Line(LINE_HALF_WIDTH_M),
+            look: line,
+            salt: 0x2C7B,
+            tile_m: TILE_LINE_M,
+            mask: Some("mask_line.tga"),
+            thickness: Some(0.09),
+            spec: 24,
+            shininess: 14,
+            wet: true,
+            grass: false,
+        },
+        Layer {
+            // Painted over the line, not under it: with the dark strip laid on top, every
+            // bank thrown up beside a groove was covered and a floor read the same as the
+            // ground either side — "floor 52 against wall 50", a rut nobody can see.
             name: "loose",
             sheet: "loose_c",
             band: BandMask::Loose,
@@ -6063,20 +6274,6 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         },
         // The strip people actually ride, worn into the corridor and darker than it. Painted
         // over the loose, because a line is worn back through what was thrown onto it.
-        Layer {
-            name: "line",
-            sheet: "dirt_line_c",
-            band: BandMask::Line(LINE_HALF_WIDTH_M),
-            look: line,
-            salt: 0x2C7B,
-            tile_m: TILE_LINE_M,
-            mask: Some("mask_line.tga"),
-            thickness: Some(0.09),
-            spec: 24,
-            shininess: 14,
-            wet: true,
-            grass: false,
-        },
         Layer {
             name: "rut",
             sheet: "rut_c",
@@ -6702,14 +6899,298 @@ mod tests {
                 i + gw
             };
             println!(
-                "    {d:.2} m at ({x:6.1}, {z:6.1})  lap {lap:6.1} m  spur {spur:6.1} m  corridor {}  \
-                 arc {:7.1} -> {:7.1} ({:+.1} m)  station {} -> {}  dist {:.2} -> {:.2}",
-                s.corridor[*i],
-                s.arc[*i], s.arc[j], s.arc[j] - s.arc[*i],
-                s.station[*i], s.station[j],
-                s.dist[*i], s.dist[j]
+                "    {d:.2} m at ({x:6.1}, {z:6.1})  lap {lap:6.1} m  spur {spur:6.1} m  corridor {}->{}  \
+                 arc {:7.1} -> {:7.1}  spur_d {:7.1} -> {:7.1}  spur_s {:7.1} -> {:7.1}",
+                s.corridor[*i], s.corridor[j],
+                s.arc[*i], s.arc[j],
+                s.spur_dist[*i].min(999.0), s.spur_dist[j].min(999.0),
+                s.spur_arc[*i], s.spur_arc[j],
             );
             let _ = y1;
+        }
+    }
+
+    /// The built ground down a named stretch of the lap, metre by metre.
+    ///
+    /// When a fault is reported by where it is — "the second table after the start straight"
+    /// — an aggregate cannot answer it. This prints the profile so the shape can be read.
+    ///
+    /// ```text
+    /// FROST_PROGRAM=lap.json FROST_FROM=140 FROST_TO=290 cargo test --bin mxb-app \
+    ///     -- --ignored --nocapture profile_along
+    /// ```
+    #[test]
+    #[ignore]
+    fn profile_along() {
+        let p: TrackProgram = match std::env::var("FROST_PROGRAM") {
+            Ok(path) => serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(),
+            Err(_) => serde_json::from_str(DEMO).unwrap(),
+        };
+        let from: f32 = std::env::var("FROST_FROM").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        let to: f32 = std::env::var("FROST_TO").ok().and_then(|v| v.parse().ok()).unwrap_or(200.0);
+        let s = synthesise(&p).unwrap();
+        let at = |x: f32, z: f32| -> f32 {
+            let gx = (x / s.mps).round().clamp(0.0, (s.gw - 1) as f32) as usize;
+            let gy = (z / s.mps).round().clamp(0.0, (s.gh - 1) as f32) as usize;
+            s.heights[gy * s.gw + gx]
+        };
+        let mut last: Option<(f32, f32)> = None;
+        let base = s
+            .stations
+            .iter()
+            .find(|st| st.s >= from)
+            .map(|st| at(st.x, st.z))
+            .unwrap_or(0.0);
+        println!("  metres round | height above {from:.0} m | slope over the last 2 m");
+        for st in s.stations.iter() {
+            if st.s < from || st.s > to {
+                continue;
+            }
+            let h = at(st.x, st.z);
+            if let Some((ps, ph)) = last {
+                if st.s - ps < 2.0 {
+                    continue;
+                }
+                let deg = ((h - ph) / (st.s - ps)).atan().to_degrees();
+                let bar = ((h - base) * 4.0).round().max(0.0) as usize;
+                println!(
+                    "  {:7.1} m  {:+6.2} m  {:+6.1}°  {}",
+                    st.s, h - base, deg, "#".repeat(bar.min(60))
+                );
+            }
+            last = Some((st.s, h));
+        }
+    }
+
+    /// How steep the ground climbs along the riding line, and where the steep bits are.
+    ///
+    /// Two different things get called "too steep": a jump's own face, which is built, and the
+    /// grade of the ground the lap is laid over, which is the site. They have different fixes,
+    /// so this separates them — the face from the feature profile, the grade from the deck.
+    #[test]
+    #[ignore]
+    fn how_steep_are_the_faces() {
+        let p: TrackProgram = match std::env::var("FROST_PROGRAM") {
+            Ok(path) => serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(),
+            Err(_) => serde_json::from_str(DEMO).unwrap(),
+        };
+        let s = synthesise(&p).unwrap();
+        let at = |x: f32, z: f32| -> f32 {
+            let gx = (x / s.mps).round().clamp(0.0, (s.gw - 1) as f32) as usize;
+            let gy = (z / s.mps).round().clamp(0.0, (s.gh - 1) as f32) as usize;
+            s.heights[gy * s.gw + gx]
+        };
+        // What a rider actually meets: the slope of the built ground along the line itself.
+        let mut ride: Vec<f32> = Vec::new();
+        for w in s.stations.windows(5) {
+            let (a, b) = (&w[0], &w[4]);
+            let run = ((b.x - a.x).powi(2) + (b.z - a.z).powi(2)).sqrt().max(1e-3);
+            ride.push(((at(b.x, b.z) - at(a.x, a.z)) / run).atan().to_degrees().abs());
+        }
+        let mut face: Vec<f32> = s
+            .face
+            .iter()
+            .map(|f| f.atan().to_degrees().abs())
+            .filter(|d| *d > 1.0)
+            .collect();
+        ride.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        face.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let q = |v: &Vec<f32>, f: f32| v[((v.len() - 1) as f32 * f) as usize];
+        println!(
+            "  the ground along the line: p50 {:.1}°  p90 {:.1}°  p99 {:.1}°  max {:.1}°",
+            q(&ride, 0.5), q(&ride, 0.9), q(&ride, 0.99), ride[ride.len() - 1]
+        );
+        println!(
+            "  what the jumps asked for: p50 {:.1}°  p90 {:.1}°  max {:.1}°  (published 12.0 / 27.4)",
+            q(&face, 0.5), q(&face, 0.9), face[face.len() - 1]
+        );
+        // And the ground beside the track, which is what stands over a rider as a wall.
+        {
+            let step = 2.0 * s.mps;
+            let mut off: Vec<(f32, usize)> = Vec::new();
+            for y in 1..s.gh - 1 {
+                for x in 1..s.gw - 1 {
+                    let i = y * s.gw + x;
+                    if s.corridor[i] || s.dist[i] > 30.0 {
+                        continue;
+                    }
+                    let dx = (s.heights[i + 1] - s.heights[i - 1]) / step;
+                    let dz = (s.heights[i + s.gw] - s.heights[i - s.gw]) / step;
+                    off.push(((dx * dx + dz * dz).sqrt().atan().to_degrees(), i));
+                }
+            }
+            let mut vals: Vec<f32> = off.iter().map(|(d, _)| *d).collect();
+            vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let o = |f: f32| vals[((vals.len() - 1) as f32 * f) as usize];
+            println!(
+                "  the ground beside the track: p50 {:.1}°  p90 {:.1}°  p99 {:.1}°  max {:.1}°",
+                o(0.5), o(0.9), o(0.99), vals[vals.len() - 1]
+            );
+            off.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+            let mut shown: Vec<f32> = Vec::new();
+            for (d, i) in off.iter() {
+                if shown.iter().any(|p| (p - s.arc[*i]).abs() < 30.0) {
+                    continue;
+                }
+                println!(
+                    "    {d:.0}° at {:.1} m off the line, {:.0} m round, jump face there {:+.2}",
+                    s.dist[*i], s.arc[*i], s.face[s.station[*i] as usize]
+                );
+                shown.push(s.arc[*i]);
+                if shown.len() == 5 {
+                    break;
+                }
+            }
+        }
+        // The steepest stretches, and how far round the lap they are.
+        let mut worst: Vec<(f32, usize)> =
+            ride.iter().cloned().zip(0..).map(|(d, _)| d).zip(0..).map(|(d, i)| (d, i)).collect();
+        let mut byi: Vec<(f32, f32)> = Vec::new();
+        for (i, w) in s.stations.windows(5).enumerate() {
+            let (a, b) = (&w[0], &w[4]);
+            let run = ((b.x - a.x).powi(2) + (b.z - a.z).powi(2)).sqrt().max(1e-3);
+            byi.push((((at(b.x, b.z) - at(a.x, a.z)) / run).atan().to_degrees().abs(), w[2].s));
+            let _ = i;
+        }
+        byi.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        let _ = &mut worst;
+        print!("  steepest at:");
+        let mut shown: Vec<f32> = Vec::new();
+        for (d, s_m) in byi.iter() {
+            if shown.iter().any(|p| (p - s_m).abs() < 40.0) {
+                continue;
+            }
+            print!("  {:.0}° at {:.0} m", d, s_m);
+            shown.push(*s_m);
+            if shown.len() == 5 {
+                break;
+            }
+        }
+        println!();
+    }
+
+    /// How much of the lap is cut into the ground rather than standing on it.
+    ///
+    /// "Stop with the cutting into the ground the entire track, I want to be able to see the
+    /// track", and then again: "we are back to be inside the ground". A rider in a cut cannot
+    /// see the circuit ahead of them, which is most of what reading a track is.
+    #[test]
+    #[ignore]
+    fn how_deep_is_the_cut() {
+        let p: TrackProgram = match std::env::var("FROST_PROGRAM") {
+            Ok(path) => serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(),
+            Err(_) => serde_json::from_str(DEMO).unwrap(),
+        };
+        let s = synthesise(&p).unwrap();
+        // The field beside the track against the track itself, both off the built ground —
+        // which is what a rider sees. Being "in the ground" is the field standing over the
+        // deck; a datum comparison against the raw landscape cannot say, because the finished
+        // heights are shifted into the terrain's own budget.
+        let at = |x: f32, z: f32| -> f32 {
+            let gx = (x / s.mps).round().clamp(0.0, (s.gw - 1) as f32) as usize;
+            let gy = (z / s.mps).round().clamp(0.0, (s.gh - 1) as f32) as usize;
+            s.heights[gy * s.gw + gx]
+        };
+        let mut cut: Vec<f32> = Vec::new();
+        let mut rim: Vec<f32> = Vec::new();
+        for st in s.stations.iter() {
+            let (rx, rz) = crate::trackprog::right_vector(st.heading);
+            let deck = at(st.x, st.z);
+            let side = |d: f32| {
+                at(st.x + rx * d, st.z + rz * d).max(at(st.x - rx * d, st.z - rz * d)) - deck
+            };
+            // Just outside the track, which is the rim a rider is looking over, and out in
+            // the field, which is the site.
+            rim.push(side(12.0));
+            cut.push(side(26.0));
+        }
+        {
+            let mut r = rim.clone();
+            r.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let q = |f: f32| r[((r.len() - 1) as f32 * f) as usize];
+            println!(
+                "  the rim 12 m out: p50 {:+.2} m  p90 {:+.2}  max {:+.2}  — over the deck on {:.0}% of the lap",
+                q(0.5), q(0.9), r[r.len() - 1],
+                rim.iter().filter(|v| **v > 0.25).count() as f32 / rim.len() as f32 * 100.0
+            );
+        }
+        let n = cut.len() as f32;
+        let in_cut = cut.iter().filter(|c| **c > 0.25).count() as f32 / n;
+        let deep = cut.iter().filter(|c| **c > 1.5).count() as f32 / n;
+        let mut sorted = cut.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let q = |f: f32| sorted[((sorted.len() - 1) as f32 * f) as usize];
+        println!(
+            "  field beside the track, above the deck: p10 {:+.2} m  p50 {:+.2}  p90 {:+.2}  max {:+.2}",
+            q(0.1), q(0.5), q(0.9), sorted[sorted.len() - 1]
+        );
+        println!(
+            "  {:.0}% of the lap is in a cut at all, {:.0}% of it deeper than 1.5 m",
+            in_cut * 100.0, deep * 100.0
+        );
+    }
+
+    /// Where the steepest ground on the riding line actually is.
+    ///
+    /// The corpus check measures a p99 slope over the corridor at validation resolution and
+    /// says published tracks run 18-50 degrees. When that reads over, this says which cells
+    /// are doing it -- a jump face, a berm, the start pad's edge -- because the fix for each
+    /// is a different one.
+    #[test]
+    #[ignore]
+    fn steep_hunt() {
+        let mut p: TrackProgram = match std::env::var("FROST_PROGRAM") {
+            Ok(path) => serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(),
+            Err(_) => serde_json::from_str(crate::trackprog::EXAMPLE).unwrap(),
+        };
+        // Repaired, because that is the shape the corpus check judges.
+        crate::trackllm::repair_for_tests(&mut p);
+        p.terrain.samples = p.terrain.samples.min(513);
+        let s = synthesise(&p).unwrap();
+        let (gw, gh, mps) = (s.gw, s.gh, s.mps);
+        let step = 2.0 * mps;
+        let mut slope: Vec<(f32, usize)> = Vec::new();
+        for y in 0..gh {
+            for x in 0..gw {
+                let i = y * gw + x;
+                let (xm, xp) = (x.saturating_sub(1), (x + 1).min(gw - 1));
+                let (ym, yp) = (y.saturating_sub(1), (y + 1).min(gh - 1));
+                let dx = (s.heights[y * gw + xp] - s.heights[y * gw + xm]) / step;
+                let dy = (s.heights[yp * gw + x] - s.heights[ym * gw + x]) / step;
+                if s.corridor[i] {
+                    slope.push(((dx * dx + dy * dy).sqrt().atan().to_degrees(), i));
+                }
+            }
+        }
+        slope.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        let q = |f: f32| slope[((slope.len() - 1) as f32 * f) as usize].0;
+        println!("  {gw}x{gh} at {mps:.2} m, {} corridor cells", slope.len());
+        println!("  slope p50 {:.1} p90 {:.1} p99 {:.1} max {:.1}", q(0.5), q(0.1), q(0.01), slope[0].0);
+        let n = (slope.len() as f32 * 0.01) as usize;
+        let (mut on_pad, mut on_feature, mut plain) = (0, 0, 0);
+        for (_, i) in slope.iter().take(n.max(1)) {
+            if s.spur_dist[*i] < 40.0 {
+                on_pad += 1;
+            } else if s.face[s.station[*i] as usize].abs() > 0.05 {
+                on_feature += 1;
+            } else {
+                plain += 1;
+            }
+        }
+        println!("  the steepest 1%: {on_pad} on the start pad, {on_feature} on a jump, {plain} elsewhere");
+        for (d, i) in slope.iter().take(6) {
+            println!(
+                "    {d:.1} deg at ({:6.1},{:6.1})  lap {:5.1} m  spur {:6.1} m  arc {:7.1}  face {:+.2}",
+                (i % gw) as f32 * mps, (i / gw) as f32 * mps,
+                s.dist[*i], s.spur_dist[*i].min(999.0), s.arc[*i],
+                s.face[s.station[*i] as usize],
+            );
+            println!(
+                "        h {:.2}  x- {:.2} x+ {:.2}  z- {:.2} z+ {:.2}  spur_s {:.1}  corridor {} {} {} {}",
+                s.heights[*i], s.heights[i - 1], s.heights[i + 1],
+                s.heights[i - gw], s.heights[i + gw], s.spur_arc[*i],
+                s.corridor[i - 1], s.corridor[i + 1], s.corridor[i - gw], s.corridor[i + gw],
+            );
         }
     }
 
@@ -8642,9 +9123,12 @@ mod tests {
             let n = (px.len() / 4) as f64;
             std::array::from_fn(|c| (sum[c] / n) as f32)
         };
-        // Indiana's own, measured off its `.map` by `dump_ground_sheets`.
+        // Indiana's own, measured off its `.map` by `dump_ground_sheets` — the field at the
+        // tone the track is graded to, because the published sheet's own level ships a ground
+        // too pale to read as dirt from the seat.
+        let d = FIELD_DARKEN;
         for (what, look, want) in [
-            ("the field", &g.field, [171.0, 134.0, 99.0]),
+            ("the field", &g.field, [171.0 * d, 134.0 * d, 99.0 * d]),
             ("the riding line", &g.line, [49.0, 35.0, 23.0]),
             ("the grass", &g.turf, [93.0, 97.0, 50.0]),
         ] {
@@ -8693,11 +9177,13 @@ mod tests {
         // game — under the track's own sky, with its own shadows on it — a line that dark is
         // one a rider cannot find. What has to survive is the *gap*, because the gap is what
         // makes a racing line visible from the seat.
+        let want = [172.0 * FIELD_DARKEN, 134.0 * FIELD_DARKEN, 99.0 * FIELD_DARKEN];
         for c in 0..3 {
             assert!(
-                (mean(&field)[c] - [172.0, 134.0, 99.0][c]).abs() < 14.0,
-                "the field came out {:?}, and Indiana's sheet is [172, 134, 99]",
-                mean(&field).map(|v| v.round())
+                (mean(&field)[c] - want[c]).abs() < 14.0,
+                "the field came out {:?}, and Indiana's sheet graded down is {:?}",
+                mean(&field).map(|v| v.round()),
+                want.map(|v: f32| v.round()),
             );
         }
         let (f, r) = (mean(&field), mean(&ridden));
@@ -9639,14 +10125,27 @@ mod tests {
         // other.
         // In a corner. The fixture's arc runs 120 to 170 m; past that it is a straight, and
         // a straight is the one place this rule does not hold — see below.
+        //
+        // *A* rut, not the deepest one. A corner carries several, stacked up its bank, and
+        // which of them is deepest is the field's business — asking for the deepest to be the
+        // painted one is asking for a single groove down the middle of every corner, which is
+        // what was reported from the seat: the centre groove that is in every turn for no
+        // reason. What the paint may not do is sit on the ridge between two of them.
         let s = synthesise(&hairpins()).unwrap();
         for at in [130.0f32, 140.0, 150.0, 160.0, 168.0] {
             let k = s.stations.iter().position(|st| st.s >= at).unwrap();
-            let off = deepest_at(&across(&s, at)) - s.line_lat[k];
+            let v = across(&s, at);
+            let ruts = lines_across(&v, 0.02);
+            let off = ruts
+                .iter()
+                .map(|r| (r - s.line_lat[k]).abs())
+                .fold(f32::INFINITY, f32::min);
             assert!(
-                off.abs() <= RUT_HALF_WIDTH_M,
-                "at {at} m the deepest groove is {off:+.2} m off the line, and the painted \
-                 strip is only {RUT_HALF_WIDTH_M:.2} m wide"
+                off <= RUT_HALF_WIDTH_M,
+                "at {at} m the paint sits {off:.2} m from the nearest rut, and the painted \
+                 strip is only {RUT_HALF_WIDTH_M:.2} m wide — the line is on a ridge. \
+                 Ruts at {ruts:?}, paint at {:+.2}",
+                s.line_lat[k]
             );
         }
     }

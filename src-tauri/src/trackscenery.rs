@@ -916,9 +916,13 @@ fn jumpmark_mesh(h: f32) -> Mesh {
 /// Alpha-cut, so what is not a knob is not drawn at all — the ground shows through between
 /// them, which is what makes it read as a print rather than as a stripe.
 fn tyre_sheet() -> Texture {
-    sheet("tyre_c_a", 128, |u, v| {
-        // One print down the sheet: the tread repeats every `TYRE_TREAD_M` of travel, and
-        // the sheet is one repeat, so v runs the length of the print.
+    sheet("tyre_c_a", 256, |u, v| {
+        // Four prints side by side, the same print at four ages. A ribbon takes whichever
+        // lane it is given and can change lane part way along, which is how a mark fades out
+        // in the middle of itself without a second material or a vertex colour to do it with.
+        let lane = (u * TYRE_FADES as f32) as usize;
+        let u = (u * TYRE_FADES as f32).fract();
+        let fade = [1.0f32, 0.68, 0.42, 0.22][lane.min(TYRE_FADES - 1)];
         let across = (u - 0.5) * 2.0; // -1 at one edge, +1 at the other
         // Two rows of knobs, offset half a step from each other, plus a centre block.
         let row = |lane: f32, phase: f32| -> f32 {
@@ -935,8 +939,8 @@ fn tyre_sheet() -> Texture {
         let knob = row(-0.52, 0.0).max(row(0.52, 0.5)).max(row(0.0, 0.25) * 0.85);
         // Ragged: a print in soil is never the shape of the block that made it.
         let torn = 0.72 + 0.5 * grain(u * 2.0, v * 2.0, 0x7A31, 40.0);
-        let a = (knob * torn).clamp(0.0, 1.0);
-        if a < 0.30 {
+        let a = (knob * torn).clamp(0.0, 1.0) * fade;
+        if a < 0.10 {
             return [0, 0, 0, 0];
         }
         // Pressed dirt: darker than what it is printed on, and slightly wet-looking.
@@ -970,26 +974,82 @@ fn jumpmark_sheet() -> Texture {
 fn tyre_ribbon(
     syn: &Synth,
     stations: &[crate::trackprog::Station],
+    airborne: &dyn Fn(f32) -> bool,
     lat_at: impl Fn(usize) -> f32,
     width: f32,
+    seed: u32,
 ) -> Mesh {
     let mut m = Mesh::default();
     let mut v_at = 0.0f32;
-    let mut prev: Option<(u32, f32)> = None;
+    let mut prev: Option<u32> = None;
     for (i, st) in stations.iter().enumerate() {
         let (rx, rz) = crate::trackprog::right_vector(st.heading);
         let lat = lat_at(i);
         let (cx, cz) = (st.x + rx * lat, st.z + rz * lat);
+        // Three reasons a pass is not printed here.
+        //
+        // Over a jump it is not printed because the rider is in the air: a table with tyre
+        // marks across its deck is a table nobody jumped. Off the corridor it is not printed
+        // because nobody rode there. And along its own length a mark comes and goes, which is
+        // what a pass laid on ground that was damp in places actually looks like.
+        // Snapped into whatever groove is nearest.
+        //
+        // A pass laid at a fixed offset from the line crosses grooves rather than running
+        // down one, and prints strewn across a rut is not what a rut looks like: the marks
+        // pile up *inside* it. So each pass looks half a metre either side of where it was
+        // going to go and takes the deepest ground it finds — which is the floor of a groove
+        // if there is one near, and where it was going otherwise.
+        let sample_rut = |t: f32| -> f32 {
+            let (x, z) = (st.x + rx * t, st.z + rz * t);
+            let (gx, gz) = ((x / syn.mps) as usize, (z / syn.mps) as usize);
+            -syn.rut
+                .get(gz.min(syn.gh - 1) * syn.gw + gx.min(syn.gw - 1))
+                .copied()
+                .unwrap_or(0.0)
+        };
+        let mut best = (sample_rut(lat), lat);
+        let mut k = -4i32;
+        while k <= 4 {
+            let t = lat + k as f32 * 0.13;
+            let v = sample_rut(t);
+            if v > best.0 {
+                best = (v, t);
+            }
+            k += 1;
+        }
+        let (groove, lat) = best;
+        let (cx, cz) = (st.x + rx * lat, st.z + rz * lat);
+        let coming = crate::tracksynth::fbm(st.s / 34.0, seed as f32 * 0.37, seed ^ 0x5A11);
+        // A groove keeps a mark going: the deepest part of a line is where the prints pile
+        // up, which is the whole reason a rut reads as ridden rather than as a ditch.
+        let over_a_jump = airborne(st.s);
+        let on = lat.abs() < width * 6.0 && (coming > -0.15 || groove > 0.25);
+        if !on {
+            prev = None;
+            v_at += 0.0;
+            continue;
+        }
+        // Which of the four ages this stretch of the pass is in. It moves along the ribbon,
+        // so one mark is crisp at the corner and gone by the exit.
+        // Over a jump the marks stay, at the faintest age there is. A rider does leave the
+        // ground somewhere on a takeoff and the prints that carried him there are on it —
+        // but nothing on a deck is a fresh print, because nobody is on the ground for it.
+        let age = if over_a_jump {
+            TYRE_FADES - 1
+        } else {
+            ((0.5 - 0.5 * coming) * 3.4 - groove * 1.6).clamp(0.0, 3.0) as usize
+        };
+        let u0 = age.min(TYRE_FADES - 1) as f32 / TYRE_FADES as f32;
+        let du = 1.0 / TYRE_FADES as f32;
         let half = width * 0.5;
         let start = m.vertex_count() as u32;
         for side in [-1.0f32, 1.0] {
             let (x, z) = (cx + rx * half * side, cz + rz * half * side);
             m.positions.extend_from_slice(&[x, ground(syn, x, z) + TYRE_LIFT_M, z]);
             m.normals.extend_from_slice(&[0.0, 1.0, 0.0]);
-            m.uvs.extend_from_slice(&[if side < 0.0 { 0.0 } else { 1.0 }, v_at]);
+            m.uvs.extend_from_slice(&[u0 + if side < 0.0 { 0.0 } else { du }, v_at]);
         }
-        if let Some((prev_start, prev_v)) = prev {
-            let _ = prev_v;
+        if let Some(prev_start) = prev {
             m.indices.extend_from_slice(&[prev_start, prev_start + 1, start]);
             m.indices.extend_from_slice(&[start, prev_start + 1, start + 1]);
         }
@@ -998,15 +1058,23 @@ fn tyre_ribbon(
         } else {
             0.0
         };
-        prev = Some((start, v_at));
+        prev = Some(start);
         v_at += step / TYRE_TREAD_M;
     }
     m
 }
 
+/// How many ages of print the sheet carries, how many passes are laid, and how far the
+/// outermost of them sits off the line.
+const TYRE_FADES: usize = 4;
+const TYRE_PASSES: usize = 27;
+const TYRE_SPREAD_M: f32 = 2.4;
+
 /// How wide a print is, how far the tread repeats in, and how far the card floats over the
 /// ground so it draws in front of it without standing off it.
-const TYRE_W_M: f32 = 0.16;
+/// A print is a tyre wide, not a pencil line — "too thin, too little in count, should overlap
+/// each other, some more faded some less", from a rider on the track.
+const TYRE_W_M: f32 = 0.34;
 const TYRE_TREAD_M: f32 = 0.42;
 const TYRE_LIFT_M: f32 = 0.035;
 
@@ -1698,30 +1766,56 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
 
     // 6b. Tyre marks: the print of a knobbly down the lines riders take.
     //
-    // Three passes, not one — a line is a handful of them side by side, and one ribbon down
-    // the middle reads as a stripe. Where the ground says it has been worked hardest is where
-    // they are laid, so the marks agree with the shape: `syn.rut` is the same signal the
-    // paint keys to.
+    // Twenty-seven passes, not nine, and laid where a rider would have laid them. They bunch
+    // on the racing line and thin out towards the edges — a line is where everybody rides, so
+    // that is where the prints pile up — and each one comes and goes along its own length,
+    // at one of four ages. Over a jump they stop: a table with prints across its deck is a
+    // table nobody jumped.
     let mut tyre = Mesh::default();
     if !syn.stations.is_empty() {
-        for (pass, lean) in [(0usize, -0.55f32), (1, 0.0), (2, 0.62)] {
+        // Where a rider is off the ground, by distance round the lap. The middle half of a
+        // jump is air; the ramp and the landing are not.
+        let airborne_spans: Vec<(f32, f32)> = prog
+            .features
+            .iter()
+            .filter_map(|f| {
+                let (at, len) = (f.at(), f.length());
+                matches!(
+                    f,
+                    crate::trackprog::Feature::Tabletop { .. }
+                        | crate::trackprog::Feature::Double { .. }
+                        | crate::trackprog::Feature::Custom { .. }
+                        | crate::trackprog::Feature::StepUp { .. }
+                )
+                .then_some((at + len * 0.28, at + len * 0.82))
+            })
+            .collect();
+        let airborne = move |s: f32| airborne_spans.iter().any(|(a, b)| s >= *a && s <= *b);
+        let seed = prog.terrain.relief.seed;
+        for pass in 0..TYRE_PASSES {
+            // Bunched on the line: a triangular spread rather than an even one, so the middle
+            // carries three or four passes on top of each other and the edges one.
+            let t = pass as f32 / (TYRE_PASSES - 1) as f32 * 2.0 - 1.0;
+            let lean = t.abs().powf(1.7) * t.signum() * TYRE_SPREAD_M;
             let ribbon = tyre_ribbon(
                 syn,
                 &syn.stations,
+                &airborne,
                 |i| {
-                    let wander = 0.35
+                    let wander = 0.30
                         * crate::tracksynth::fbm(
                             syn.stations[i].s / 26.0,
                             pass as f32 * 7.0,
-                            prog.terrain.relief.seed ^ 0x7A33,
+                            seed ^ 0x7A33,
                         );
                     syn.line_lat[i] + lean + wander
                 },
                 TYRE_W_M,
+                seed ^ (pass as u32 * 0x9E37),
             );
             tyre.append(&ribbon);
         }
-        tally.push(("tyre marks", 3));
+        tally.push(("tyre marks", TYRE_PASSES));
     }
 
     // 7. The sky over all of it.

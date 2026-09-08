@@ -24,6 +24,18 @@
   they are now rather than what they were when the list loaded.
 
 ### Fixed
+- A jump's landing is a landing: it rolls away from the deck and is steepest where a rider
+  comes down on it, instead of dropping away hardest at the edge of the top.
+- Jumps drawn point by point are built at the angle they were drawn at, so a triple's
+  take-off is a face rather than a wall.
+- The Library shows a mod's real name and picture after it has been replaced by a new
+  version of itself, instead of keeping the first one it ever saw.
+- Tabletops are built to the deck they were asked for instead of being mostly run-up, and
+  the ground either side of a jump is a bank rather than a wall.
+- Generated tracks no longer have a step in the ground across the start straight, or a bank
+  standing where the ground beside the track should be.
+- The ground behind the start gates is scenery rather than track, so the game stops treating
+  the bank the gates are set against as somewhere you are allowed to ride.
 - Buttons that pair an icon with a label — Refresh across the app, and the rest of the plain
   buttons — put a space back between the two instead of running them together.
 - Trackside scenery wears its own textures. Every object now takes the sheet the track itself
@@ -125,8 +137,8 @@
 - Doubles on a generated track are shaped the way a built one is. The take-off lip and the
   landing crest turn over a radius, and the ground between them runs down through a rounded
   valley into the flat.
-- A tight double rides over a saddle rather than through a slot: the valley drops to the
-  ground where there is room for it, and sits higher where the two jumps are close together.
+- The gap between the two halves of a double no longer digs down to the ground. The pair
+  stands on the ground and the gap is a dip in it, the way a rhythm section is cut.
 
 ## 2026-09-06
 
