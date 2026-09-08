@@ -55,6 +55,8 @@ export interface RankedProfile {
   season: string;
   cards: RankCard[];
   races: RaceRow[];
+  /** The rider's own achievement banner on mxb-ranked, absolute. Empty when they have none. */
+  banner: string;
   url: string;
 }
 

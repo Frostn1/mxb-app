@@ -7,6 +7,9 @@
   Global, MX and SX, plus your last 50 races with the track, your position and the points.
 - Nothing to sign in to or set up — the app works out your MX Bikes GUID from Steam. If you
   bought MX Bikes direct you can enter your GUID, and the same box looks up anyone else.
+- The tab wears your MXB Ranked achievement banner, your rank's colour on the standings, and
+  gold, silver and bronze on your podium finishes. Your rank stays on screen while the results
+  scroll on their own.
 
 ## 2026-09-07
 
