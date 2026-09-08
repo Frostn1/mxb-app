@@ -403,7 +403,14 @@ const RUT_INSIDE: f32 = -0.022;
 /// whole thing: twenty to one is a rut, one to one is gravel. Indiana's own figure is about
 /// ten metres — a cross-section still matches the one two metres behind it four fifths of the
 /// way, half of it at five metres, and by twenty it is different ground.
-const RUT_ALONG_M: f32 = 34.0;
+///
+/// Set to ten, which is what the paragraph above measured; it sat at 34 for a while, three
+/// times the figure written directly over it. Measured on Ironbark Ridge over four corners:
+/// 34 gave 0.108 m across-line RMS against published hardpack's 0.110-0.141 — under the
+/// bottom of the range — and ten gives 0.118. It does *not* move `section_sweep` (0.46 to
+/// 0.49 either way), which was the reason for going looking: what repeats round one of our
+/// corners is not the ruts.
+const RUT_ALONG_M: f32 = 10.0;
 
 /// Metres between braking bumps.
 ///
@@ -7266,6 +7273,185 @@ mod tests {
                 rows.len()
             );
         }
+    }
+
+
+    /// How far our lap is from a published one, corner by corner.
+    ///
+    /// The loop this exists for: change the generator, run this, see whether the gap closed.
+    /// Everything is measured off the synthesised heightfield — no Wine, no `.pkz`, seconds
+    /// rather than minutes — on exactly the statistics `trackstats::corner_atlas` reads off a
+    /// real track, so the two columns are comparable by construction.
+    ///
+    /// The targets are the two tracks the corpus was measured on, and they are deliberately
+    /// kept apart: Southwick is sand and Indiana is hardpack, they differ by 2.4x on how rough
+    /// the ground is across the line, and a generator aimed at the average of the two is
+    /// aiming at a surface that does not exist.
+    ///
+    /// ```text
+    /// FROST_PROGRAM=lap.json cargo test --bin mxb-app -- --ignored --nocapture scorecard
+    /// ```
+    #[test]
+    #[ignore = "slow — synthesises a lap"]
+    fn scorecard() {
+        let p: TrackProgram = match std::env::var("FROST_PROGRAM") {
+            Ok(path) => serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(),
+            Err(_) => serde_json::from_str(DEMO).unwrap(),
+        };
+        let s = synthesise(&p).unwrap();
+        let g = crate::trackstats::Grid {
+            w: s.gw,
+            h: s.gh,
+            size_x: p.terrain.size_x,
+            size_z: p.terrain.size_z,
+            v: s.heights.clone(),
+        };
+        // Optionally write the same patches `trackstats::corner_atlas` dumps for a published
+        // track, so `scripts/corner-atlas.py` draws ours and theirs the same way and the two
+        // pictures can be put side by side. No ground panel: there is no `.map` until the
+        // track is compiled, and texture is a separate job anyway.
+        let out_dir = std::env::var("FROST_OUT").ok().map(std::path::PathBuf::from);
+        if let Some(d) = &out_dir {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let mut json = format!(
+            "{{\n  \"track\": {:?},\n  \"lapLengthM\": {:.1},\n  \"groundLayers\": [],\n  \"corners\": [\n",
+            p.name, s.stations.len() as f32 * STATION_STEP
+        );
+
+        let runs = crate::trackprog::corner_runs(&p.segments);
+        let mut ranked = runs.clone();
+        ranked.sort_by(|a, b| b.degrees.total_cmp(&a.degrees));
+        ranked.truncate(4);
+        ranked.sort_by(|a, b| a.start_m.total_cmp(&b.start_m));
+
+        println!("\n{} — lap {:.0} m, {} segments, {} corners",
+            p.name, s.stations.len() as f32 * STATION_STEP, p.segments.len(), runs.len());
+        println!("{:>5} {:>7} {:>8} {:>8} {:>9} {:>8} {:>8} {:>9} {:>9} {:>7} {:>7}",
+            "turn", "arcs", "bend", "len m", "tight r", "rise m", "grooves", "spacing", "acrossRMS", "sweep", "ruts");
+
+        let mut agg: Vec<[f32; 7]> = Vec::new();
+        for (n, r) in ranked.iter().enumerate() {
+            let sel: Vec<&Station> =
+                s.stations.iter().filter(|st| st.s >= r.start_m && st.s <= r.end_m).collect();
+            if sel.len() < 12 {
+                continue;
+            }
+            let stations: Vec<(f32, f32, f32)> =
+                sel.iter().map(|st| (st.x, st.z, st.heading)).collect();
+            let shape = crate::trackstats::rut_shape(&stations, STATION_STEP, &g);
+            let sweep = crate::trackstats::section_sweep(&stations, &g).unwrap_or(f32::NAN);
+            let sweep_ruts =
+                crate::trackstats::section_sweep_ruts(&stations, &g).unwrap_or(f32::NAN);
+            let hs: Vec<f32> = sel.iter().map(|st| g.at(st.x, st.z)).collect();
+            let rise = hs.iter().cloned().fold(f32::MIN, f32::max)
+                - hs.iter().cloned().fold(f32::MAX, f32::min);
+            let (grooves, spacing, across) =
+                shape.map_or((f32::NAN, f32::NAN, f32::NAN), |q| (q.grooves, q.spacing_m, q.across_rms_m));
+            println!("{n:>5} {:>7} {:>8.0} {:>8.0} {:>9.0} {:>8.1} {:>8.1} {:>9.2} {:>9.3} {:>7.2} {:>7.2}",
+                r.arcs, r.degrees, r.end_m - r.start_m, r.tightest_m, rise, grooves, spacing, across, sweep, sweep_ruts);
+            agg.push([r.arcs as f32, r.degrees, r.end_m - r.start_m, rise, across, sweep, r.tightest_m]);
+
+            if let Some(d) = &out_dir {
+                let name = write_synth_patch(d, n, &sel, &g);
+                json.push_str(&format!(
+                    "    {{\"n\": {n}, \"atM\": {:.1}, \"endM\": {:.1}, \"lengthM\": {:.1}, \"turnDeg\": {:.1},\n",
+                    r.start_m, r.end_m, r.end_m - r.start_m, r.degrees));
+                json.push_str(&format!(
+                    "      \"arcs\": {}, \"radiusMeanM\": {:.1}, \"radiusTightestM\": {:.1}, \"radiusWidestM\": {:.1},\n",
+                    r.arcs, r.tightest_m, r.tightest_m, r.tightest_m));
+                json.push_str(&format!(
+                    "      \"direction\": \"\", \"riseM\": {rise:.2}, \"sweep\": {sweep:.3}, \"patch\": {name:?},\n"));
+                json.push_str(&format!(
+                    "      \"grooves\": {grooves:.2}, \"spacingM\": {spacing:.2}, \"floorM\": 0.0, \"wallDeg\": 0,\n"));
+                json.push_str(&format!(
+                    "      \"acrossRmsM\": {across:.3}, \"chatterM\": 0.0}},\n"));
+            }
+        }
+        if let Some(d) = &out_dir {
+            // Trim the trailing comma so the file is JSON.
+            if json.ends_with(",\n") {
+                json.truncate(json.len() - 2);
+                json.push('\n');
+            }
+            json.push_str("  ]\n}\n");
+            std::fs::write(d.join("corners.json"), &json).unwrap();
+            println!("  wrote {}", d.join("corners.json").display());
+        }
+        if agg.is_empty() {
+            println!("  no corner long enough to measure");
+            return;
+        }
+        let mean = |i: usize| agg.iter().map(|a| a[i]).sum::<f32>() / agg.len() as f32;
+
+        // Measured off the two published tracks by `corner_atlas`, as ranges over four turns.
+        const DIRT: [(&str, f32, f32); 6] = [
+            ("arcs", 9.0, 16.0), ("bend deg", 187.0, 292.0), ("length m", 94.0, 261.0),
+            ("rise m", 4.2, 13.6), ("across rms", 0.110, 0.141), ("sweep", 0.0, 0.20),
+        ];
+        const SAND: [(&str, f32, f32); 6] = [
+            ("arcs", 10.0, 19.0), ("bend deg", 215.0, 338.0), ("length m", 140.0, 292.0),
+            ("rise m", 8.2, 14.2), ("across rms", 0.272, 0.353), ("sweep", 0.0, 0.20),
+        ];
+        for (label, target) in [("hardpack (Indiana)", DIRT), ("sand (Southwick)", SAND)] {
+            println!("\n  vs {label}");
+            let mut inside = 0;
+            for (i, (name, lo, hi)) in target.iter().enumerate() {
+                let got = mean(i);
+                let verdict = if got < *lo {
+                    format!("LOW  by {:.2}", lo - got)
+                } else if got > *hi {
+                    format!("HIGH by {:.2}", got - hi)
+                } else {
+                    inside += 1;
+                    "in range".to_string()
+                };
+                println!("    {name:<11} ours {got:>8.3}   want {lo:>7.3}-{hi:<7.3}  {verdict}");
+            }
+            println!("    {inside}/6 in range");
+        }
+    }
+
+
+    /// One synthesised corner, in the same patch format the published-track atlas writes.
+    fn write_synth_patch(
+        out: &std::path::Path,
+        n: usize,
+        sel: &[&Station],
+        g: &crate::trackstats::Grid,
+    ) -> String {
+        const MARGIN_M: f32 = 12.0;
+        let (mut x0, mut x1, mut z0, mut z1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for s in sel {
+            x0 = x0.min(s.x); x1 = x1.max(s.x);
+            z0 = z0.min(s.z); z1 = z1.max(s.z);
+        }
+        x0 -= MARGIN_M; x1 += MARGIN_M; z0 -= MARGIN_M; z1 += MARGIN_M;
+        let mps = g.size_x / (g.w.max(2) - 1) as f32;
+        let pw = (((x1 - x0) / mps).ceil() as usize).clamp(16, 2048);
+        let ph = (((z1 - z0) / mps).ceil() as usize).clamp(16, 2048);
+
+        let mut buf: Vec<u8> = Vec::with_capacity(32 + pw * ph * 7 + sel.len() * 8);
+        buf.extend_from_slice(b"FRCA");
+        buf.extend_from_slice(&(pw as u32).to_le_bytes());
+        buf.extend_from_slice(&(ph as u32).to_le_bytes());
+        buf.extend_from_slice(&x0.to_le_bytes());
+        buf.extend_from_slice(&z0.to_le_bytes());
+        buf.extend_from_slice(&mps.to_le_bytes());
+        for j in 0..ph {
+            for i in 0..pw {
+                buf.extend_from_slice(&g.at(x0 + i as f32 * mps, z0 + j as f32 * mps).to_le_bytes());
+            }
+        }
+        buf.extend(std::iter::repeat(60u8).take(pw * ph * 3));
+        buf.extend_from_slice(&(sel.len() as u32).to_le_bytes());
+        for s in sel {
+            buf.extend_from_slice(&s.x.to_le_bytes());
+            buf.extend_from_slice(&s.z.to_le_bytes());
+        }
+        let name = format!("corner{n}.bin");
+        std::fs::write(out.join(&name), &buf).unwrap();
+        name
     }
 
     /// What our ruts are shaped like, on the same statistic a published track is measured by.

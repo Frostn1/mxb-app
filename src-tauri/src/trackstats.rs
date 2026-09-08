@@ -945,6 +945,95 @@ fn rms(v: &[f32]) -> f32 {
     (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt()
 }
 
+/// How much a corner is the same cut swept round an arc.
+///
+/// Take the profile across the line at the corner's entry, apex and exit and correlate the
+/// three. A published corner scores about **0.1** — the ground at its exit has nothing to do
+/// with the ground at its entry, because ruts braid, merge and die out. A corner extruded
+/// along one radius scores **0.9**: one profile, dragged round.
+///
+/// This is the measure that separates a track that reads as built from one that reads as
+/// generated, and no amount of getting the rut *statistics* right moves it — a swept corner
+/// can have exactly the right groove count, spacing and depth at every station and still be
+/// obviously machine-made, because it has the same ones at every station.
+///
+/// `None` when the corner is too short to cut three independent sections through.
+pub fn section_sweep(stations: &[(f32, f32, f32)], g: &Grid) -> Option<f32> {
+    section_sweep_inner(stations, g, false)
+}
+
+/// The same, with the corner's mean cross-section removed first — see `strip_mean_profile`.
+pub fn section_sweep_ruts(stations: &[(f32, f32, f32)], g: &Grid) -> Option<f32> {
+    section_sweep_inner(stations, g, true)
+}
+
+fn section_sweep_inner(
+    stations: &[(f32, f32, f32)],
+    g: &Grid,
+    strip_mean_profile: bool,
+) -> Option<f32> {
+    if stations.len() < 12 {
+        return None;
+    }
+    const HALF_WIDTH_M: f32 = 9.0;
+    const SAMPLES: usize = 72;
+    let cut = |i: usize| -> Vec<f32> {
+        let (x, z, heading) = stations[i];
+        let (rx, rz) = crate::trackprog::right_vector(heading);
+        let mut v: Vec<f32> = (0..SAMPLES)
+            .map(|k| {
+                let t = -HALF_WIDTH_M + 2.0 * HALF_WIDTH_M * k as f32 / (SAMPLES - 1) as f32;
+                g.at(x + rx * t, z + rz * t)
+            })
+            .collect();
+        // The corner's own slope is not its shape: a banked entry would correlate with a
+        // banked exit on tilt alone and say the ruts matched when they don't.
+        let mean = v.iter().sum::<f32>() / v.len() as f32;
+        for h in &mut v {
+            *h -= mean;
+        }
+        v
+    };
+    let n = stations.len();
+    let (mut a, mut b, mut c) = (cut(n * 15 / 100), cut(n / 2), cut(n * 85 / 100));
+    // Optionally take the corner's *average* cross-section out of all three first. What is
+    // left is only what differs station to station — the ruts — so the pair of numbers says
+    // whether a corner repeats because its ruts repeat, or because the shape they sit in
+    // (camber, width, the berm) is the same shape all the way round.
+    if strip_mean_profile {
+        let mut avg = vec![0.0f32; SAMPLES];
+        let taken = 24.min(n);
+        for k in 0..taken {
+            let v = cut(k * (n - 1) / taken.max(1));
+            for (m, h) in avg.iter_mut().zip(&v) {
+                *m += h / taken as f32;
+            }
+        }
+        for v in [&mut a, &mut b, &mut c] {
+            for (h, m) in v.iter_mut().zip(&avg) {
+                *h -= m;
+            }
+        }
+    }
+    let r = |x: &[f32], y: &[f32]| -> f32 {
+        let (mx, my) = (
+            x.iter().sum::<f32>() / x.len() as f32,
+            y.iter().sum::<f32>() / y.len() as f32,
+        );
+        let (mut num, mut dx, mut dy) = (0.0f32, 0.0f32, 0.0f32);
+        for (p, q) in x.iter().zip(y) {
+            num += (p - mx) * (q - my);
+            dx += (p - mx) * (p - mx);
+            dy += (q - my) * (q - my);
+        }
+        if dx <= 0.0 || dy <= 0.0 {
+            return 0.0;
+        }
+        num / (dx * dy).sqrt()
+    };
+    Some((r(&a, &b) + r(&b, &c) + r(&a, &c)) / 3.0)
+}
+
 /// [`RutShape`] for a lap over a heightfield, published or generated.
 ///
 /// `stations` is the centreline: `(x, z, heading)` every `step_m` metres.
@@ -1841,15 +1930,15 @@ mod tests {
 
         let step = 0.25f32;
         let all = lap.stations(step);
-        let runs = corner_runs(&lap);
+        let runs = crate::trackprog::corner_runs(&lap.program_segments());
         println!("lap {:.0} m, {} segments, {} corners", lap.length, lap.segments.len(), runs.len());
 
         // The four that bend furthest — the ones a rider would name — put back into lap order
         // so the atlas reads like a lap.
         let mut ranked = runs.clone();
-        ranked.sort_by(|x, y| y.2.total_cmp(&x.2));
+        ranked.sort_by(|x, y| y.degrees.total_cmp(&x.degrees));
         let mut chosen: Vec<(f32, f32, f32)> =
-            ranked.into_iter().take(4).map(|(a, b, deg, _)| (deg, a, b)).collect();
+            ranked.into_iter().take(4).map(|r| (r.degrees, r.start_m, r.end_m)).collect();
         chosen.sort_by(|x, y| x.1.total_cmp(&y.1));
 
         let mut json = String::from("{\n");
@@ -1876,6 +1965,7 @@ mod tests {
             let stations: Vec<(f32, f32, f32)> =
                 sel.iter().map(|s| (s.x, s.z, s.heading)).collect();
             let shape = super::rut_shape(&stations, step, &g);
+            let sweep = super::section_sweep(&stations, &g).unwrap_or(f32::NAN);
 
             // The arcs the builder actually typed, which is the shape of the turn.
             let arcs: Vec<&crate::trackline::LineSegment> =
@@ -1900,9 +1990,10 @@ mod tests {
                 arcs.iter().filter(|s| s.radius != 0.0).count(),
             ));
             json.push_str(&format!(
-                "      \"direction\": {:?}, \"riseM\": {:.2}, \"patch\": {:?},\n",
+                "      \"direction\": {:?}, \"riseM\": {:.2}, \"sweep\": {:.3}, \"patch\": {:?},\n",
                 if mean_r > 0.0 { "right" } else { "left" },
                 hmax - hmin,
+                sweep,
                 patch,
             ));
             match shape {
@@ -1923,7 +2014,10 @@ mod tests {
                 }
                 None => json.push_str(&format!("      \"grooves\": null}}{}\n", if n + 1 < chosen.len() { "," } else { "" })),
             }
-            println!("  corner {n}: {deg:.0} deg over {len_m:.0} m, {} arcs, r {tightest:.0}–{widest:.0} m", radii.len());
+            println!(
+                "  corner {n}: {deg:.0} deg over {len_m:.0} m, {} arcs, r {tightest:.0}–{widest:.0} m, sweep {sweep:.2}",
+                radii.len()
+            );
         }
         json.push_str("  ]\n}\n");
         std::fs::write(out.join("corners.json"), &json).unwrap();
@@ -1931,41 +2025,6 @@ mod tests {
     }
 
 
-    /// Where each corner starts and ends, which [`crate::trackline::Lap::turns`] cannot say.
-    ///
-    /// Same rule as `trackprog::turns` — a run of same-way arcs, broken by anything straight
-    /// and longer than a nudge — but carrying the positions, because an atlas has to go and
-    /// look at the ground there. Returns `(start_m, end_m, degrees, tightest radius)`.
-    fn corner_runs(lap: &crate::trackline::Lap) -> Vec<(f32, f32, f32, f32)> {
-        const BREAK_M: f32 = 8.0;
-        let mut out = Vec::new();
-        let mut cur: Option<(f32, f32, f32, f32, f32)> = None; // way, start, end, deg, tightest
-        for seg in &lap.segments {
-            let end = seg.at + seg.length;
-            if seg.radius != 0.0 && seg.angle >= crate::trackprog::CORNER_DEG {
-                let way = seg.radius.signum();
-                match cur {
-                    Some((w, st, _, deg, r)) if w == way => {
-                        cur = Some((w, st, end, deg + seg.angle, r.min(seg.radius.abs())));
-                    }
-                    other => {
-                        if let Some((_, st, en, deg, r)) = other {
-                            out.push((st, en, deg, r));
-                        }
-                        cur = Some((way, seg.at, end, seg.angle, seg.radius.abs()));
-                    }
-                }
-            } else if seg.length > BREAK_M {
-                if let Some((_, st, en, deg, r)) = cur.take() {
-                    out.push((st, en, deg, r));
-                }
-            }
-        }
-        if let Some((_, st, en, deg, r)) = cur {
-            out.push((st, en, deg, r));
-        }
-        out
-    }
 
     /// One corner's patch: heights, and the ground the game paints on them.
     ///
