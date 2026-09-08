@@ -1761,7 +1761,7 @@ mod tests {
     /// What a published track's ruts are shaped like.
     ///
     /// ```text
-    /// FROST_TRACK=…/indiana.pkz cargo test --bin mxb-app -- --ignored --nocapture rut_shape_of
+    /// FROST_TRACK=…/indiana.pkz cargo test -p mxb-app --bin mxb-app -- --ignored --nocapture rut_shape_of
     /// ```
     #[test]
     #[ignore = "needs a track — set FROST_TRACK"]

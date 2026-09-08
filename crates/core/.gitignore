@@ -1,0 +1,3 @@
+# Local-only module (not part of the public tree). Placed by the private repo's sync.sh.
+/src/sidecar.rs
+/src/fixtures/test_sidecar.pkz

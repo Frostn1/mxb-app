@@ -2019,7 +2019,7 @@ mod tests {
     /// Write the sheets out as PNGs, which is the only way to judge whether a banner reads.
     ///
     /// ```text
-    /// FROST_SHEETS=/tmp/gen cargo test --bin mxb-app -- --ignored --nocapture the_sheets
+    /// FROST_SHEETS=/tmp/gen cargo test -p mxb-app --bin mxb-app -- --ignored --nocapture the_sheets
     /// ```
     #[test]
     #[ignore = "writes PNGs — set FROST_SHEETS"]

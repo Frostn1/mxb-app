@@ -2230,7 +2230,7 @@ mod tests {
     ///
     /// ```text
     /// FROST_MAP="…/Millville.map" \
-    ///   cargo test --bin mxb-app -- --ignored --nocapture map_textures_via_edf_scanner
+    ///   cargo test -p mxb-core --lib -- --ignored --nocapture map_textures_via_edf_scanner
     /// ```
     #[test]
     #[ignore = "needs a real .map — set FROST_MAP"]
@@ -2457,7 +2457,7 @@ mod tests {
     ///
     /// ```text
     /// FROST_MAP="…/Millville.map" \
-    ///   cargo test --bin mxb-app -- --ignored --nocapture read_a_real_map
+    ///   cargo test -p mxb-core --lib -- --ignored --nocapture read_a_real_map
     /// ```
     ///
     /// Checks the two things a transcription bug would break: that every normal is unit

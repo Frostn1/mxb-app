@@ -7,10 +7,8 @@
 /gen/schemas
 
 # Local-only module (not part of the public tree)
-/src/sidecar.rs
 /src/sidecar_lock.rs
 /src/worldnet.rs
-/src/fixtures/test_sidecar.pkz
 /src/mxbsecure.rs
 /src/mxbsecure.dll
 /resources/*.dll

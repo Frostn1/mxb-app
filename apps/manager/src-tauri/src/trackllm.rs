@@ -603,7 +603,7 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
 ///
 /// ```text
 /// FROST_PROGRAM=lap.json FROST_SAVE=lap.repaired.json \
-///   cargo test --bin mxb-app -- --ignored --nocapture check_a_program
+///   cargo test -p mxb-app --bin mxb-app -- --ignored --nocapture check_a_program
 /// ```
 #[cfg(test)]
 pub fn check_a_program_impl() {

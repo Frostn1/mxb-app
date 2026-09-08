@@ -4,7 +4,7 @@
 # `opt-level = "z"`, and a workspace member cannot carry its own `[profile.*]`.
 [workspace]
 resolver = "2"
-members = ["apps/manager/src-tauri"]
+members = ["crates/core", "apps/manager/src-tauri"]
 exclude = ["server-agent"]
 
 # The profiles live here because Cargo IGNORES `[profile.*]` in a non-root workspace member —

@@ -742,7 +742,7 @@ mod tests {
     /// demand rather than in the suite.
     ///
     /// ```text
-    /// cargo test --bin mxb-app -- --ignored --nocapture a_search_finds_a_lap_that_measures_up
+    /// cargo test -p mxb-app --bin mxb-app -- --ignored --nocapture a_search_finds_a_lap_that_measures_up
     /// ```
     #[test]
     #[ignore = "synthesises every candidate — slow"]

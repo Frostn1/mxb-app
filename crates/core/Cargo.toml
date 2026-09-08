@@ -1,0 +1,50 @@
+[package]
+name = "mxb-core"
+version = "0.14.0"
+description = "Shared core: the game's file formats and the model pipeline both apps read."
+authors = ["Frost"]
+edition = "2021"
+
+# Declaring a `links` key is what lets this crate publish `cargo::metadata` to the crates
+# that depend on it. `apps/manager` needs one fact from here — whether the optional local
+# module is present — because after the move only this crate holds the file, and a build
+# script can only see its own tree.
+links = "mxbcore"
+
+[build-dependencies]
+
+[dependencies]
+anyhow = "1"
+flate2 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# No feature list: the tray and the PNG icon belong to an app shell, not to this crate.
+# Cargo unifies features across the graph, so the manager still gets its own.
+tauri = "2"
+walkdir = "2"
+rayon = "1"
+notify = "6"
+notify-debouncer-mini = "0.4"
+md-5 = "0.10"
+# webp and gif are the remote-thumbnail formats (imgcache) and are not needed to read a
+# game asset; kept for now so the manager's feature set is unchanged, and droppable once
+# imgcache is the only consumer.
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "tga",
+    "bmp",
+    "webp",
+    "gif",
+] }
+zip = "2"
+base64 = "0.22"
+log = "0.4"
+dirs-next = "2.0.0"
+chacha20poly1305 = "0.10"
+getrandom = "0.2"
+
+[dev-dependencies]
+# Tauri's mock runtime, so paintwatch's watcher lifecycle can be exercised without a display
+# or a real webview. Dev-only, so the shipped binaries never get the `test` feature.
+tauri = { version = "2", features = ["test"] }

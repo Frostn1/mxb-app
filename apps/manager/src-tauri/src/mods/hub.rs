@@ -893,7 +893,7 @@ mod tests {
 
     /// The whole read path against the real store. Ignored by default — it needs the network,
     /// and a CI run must not fail because a shop is down. Run it when the store changes shape:
-    /// `cargo test --bin mxb-app -- --ignored --nocapture hub_live`
+    /// `cargo test -p mxb-app --bin mxb-app -- --ignored --nocapture hub_live`
     #[tokio::test]
     #[ignore = "hits shop.mxb-hub.com"]
     async fn hub_live_catalog_answers() {

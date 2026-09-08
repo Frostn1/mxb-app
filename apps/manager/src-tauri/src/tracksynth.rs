@@ -6529,7 +6529,7 @@ mod tests {
     /// sit relative to the centreline the same file carries.
     ///
     /// ```text
-    /// FROST_TRH=…/Corpus_National.trh cargo test --bin mxb-app -- --ignored --nocapture step_hunt
+    /// FROST_TRH=…/Corpus_National.trh cargo test -p mxb-app --bin mxb-app -- --ignored --nocapture step_hunt
     /// ```
     #[test]
     #[ignore = "needs a compiled .trh — set FROST_TRH"]
@@ -6717,7 +6717,7 @@ mod tests {
     /// the height a feature stands above the line either side of it, by kind.
     ///
     /// ```text
-    /// FROST_PROGRAM=lap.json cargo test --bin mxb-app -- --ignored --nocapture jump_heights
+    /// FROST_PROGRAM=lap.json cargo test -p mxb-app --bin mxb-app -- --ignored --nocapture jump_heights
     /// ```
     #[test]
     #[ignore = "synthesises a lap"]
@@ -6783,7 +6783,7 @@ mod tests {
     /// What our ruts are shaped like, on the same statistic a published track is measured by.
     ///
     /// ```text
-    /// cargo test --bin mxb-app -- --ignored --nocapture our_rut_shape
+    /// cargo test -p mxb-app --bin mxb-app -- --ignored --nocapture our_rut_shape
     /// ```
     /// Indiana, for comparison: across 0.115 m rms, along 0.068, anisotropy 1.70, floor
     /// 0.99 m, wall 35 deg, 2.9 grooves at 2.48 m.
@@ -6835,7 +6835,7 @@ mod tests {
     /// ```text
     /// FROST_ALL=1 FROST_MAP=…/2024_ARLMX_RD11_INDIANA_PRO.map FROST_DUMP=/tmp/sheets \
     ///   FROST_SHEETS=soil_dark_c,soil_light_c,sand_bottom,hm_grass \
-    ///   cargo test --bin mxb-app -- --ignored --nocapture dump_ground_sheets
+    ///   cargo test -p mxb-app --bin mxb-app -- --ignored --nocapture dump_ground_sheets
     /// ```
     #[test]
     #[ignore = "needs a real .map — set FROST_MAP"]
