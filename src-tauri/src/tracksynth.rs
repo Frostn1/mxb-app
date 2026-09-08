@@ -6244,7 +6244,11 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         Layer {
             name: "line",
             sheet: "dirt_line_c",
-            band: BandMask::Line(LINE_HALF_WIDTH_M),
+            // The whole corridor, not a strip down the middle of it. Published tracks paint
+            // their ridden colour across the full width — Indiana's second layer covers 99.7%
+            // of the map and Southwick's 60% — and a narrow band left ours reading as a line
+            // drawn on the ground rather than as ground that gets ridden on.
+            band: BandMask::Out(0.0),
             look: line,
             salt: 0x2C7B,
             tile_m: TILE_LINE_M,
