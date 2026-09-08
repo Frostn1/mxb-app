@@ -37,7 +37,10 @@ const GROUND_CACHE: &str = "track-ground-v3";
 
 /// The ground stack, cached as the blob the front end receives.
 // v2: as `GROUND_CACHE` — the record scan reaches sheets it used to stop short of.
-const GROUND_LAYERS_CACHE: &str = "track-ground-layers-v2";
+// v3: the walk reads a track's whole stack rather than the first layers of it. The blob a
+// track cached under v2 is the short one, and the key is the track's own bytes, so without
+// the bump anyone who had already opened a track would keep the ground they had.
+const GROUND_LAYERS_CACHE: &str = "track-ground-layers-v3";
 
 /// How many decoded scenery meshes to keep. Smaller than the terrain's: one of these is
 /// about 30 MB, against 16 for a terrain master.
