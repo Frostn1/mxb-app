@@ -993,11 +993,16 @@ function TerrainMesh({
                    // lookup rather than the stored bytes keeps the mask the size it was sent
                    // and costs two swizzles.
                    //
-                   // Derived in the shader's own index space, where the correction is
-                   // numpy's rot90: C[i,j] = M[j, n-1-i], which is this sample. The sheets
-                   // themselves are not rotated — they tile ~200 times across the ground, so
-                   // their orientation is not something an eye can find.
-                   vec2 maskUv = vec2(1.0 - vGroundUv.y, vGroundUv.x);
+                   // Which way round was settled on screen, not by measurement. Every
+                   // overlay metric tried here sat within noise of chance — the masks cover
+                   // a third to two thirds of the ground, so agreement means little — and
+                   // the first attempt turned it the wrong way and landed 180 degrees out.
+                   // That is what fixes the direction: a quarter turn out, then a half turn
+                   // out, leaves only this one.
+                   //
+                   // The sheets themselves are not rotated: they tile ~200 times across the
+                   // ground, so their orientation is not something an eye can find.
+                   vec2 maskUv = vec2(vGroundUv.y, 1.0 - vGroundUv.x);
                    vec3 ground = vec3(0.5);
                  ${blend}
                    // Multiplied rather than assigned: what is already in diffuseColor is the
