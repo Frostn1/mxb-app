@@ -139,12 +139,16 @@ Running through all of it:
 
 | Path | What it is |
 | --- | --- |
-| [`src/`](src/) | The React frontend — one folder per tab under `src/Components`. |
-| [`src-tauri/`](src-tauri/) | The Rust backend: install, extraction, the game's own file formats, FrostMod, paint sync. |
+| [`apps/manager/src/`](apps/manager/src/) | The React frontend — one folder per tab under `Components`. |
+| [`apps/manager/src-tauri/`](apps/manager/src-tauri/) | The Rust backend: install, extraction, the game's own file formats, FrostMod, paint sync. |
 | [`control-plane/`](control-plane/) | The Cloudflare Worker paint sync, plugin licensing and server registration talk to. |
 | [`server-agent/`](server-agent/) | The Rust agent that runs on a dedicated-server box. |
 | [`scripts/`](scripts/) | Release plumbing — changelog sections, Discord notes, the Linux AppImage fix-up. |
 | [`site/`](site/) | The landing page published by [`pages.yml`](.github/workflows/pages.yml). |
+
+The repo is an npm + Cargo workspace. `apps/` holds the shipped applications;
+`server-agent/` is deliberately outside the Cargo workspace because it needs its own
+release profile.
 
 ## Development
 
@@ -170,11 +174,11 @@ npm run lint         # eslint
 npm run tauri build  # produce a production desktop bundle
 ```
 
-Rust backend (from `src-tauri/`):
+Rust backend (from the repo root — it is the Cargo workspace root):
 
 ```sh
-cargo check          # typecheck the Rust
-cargo test           # unit tests — catalog parsing, download resolution, install
+cargo check --workspace   # typecheck the Rust
+cargo test --workspace    # unit tests — catalog parsing, download resolution, install
                      # routing, the game's file formats. Tests needing a real MX
                      # Bikes asset are #[ignore]d.
 ```
@@ -192,7 +196,7 @@ server-bootstrap scripts.
 
 Two features come from local-only modules that are not in the public tree:
 content locking (Studio → **Protect**) and secure content (the **Secure** tab).
-Their absence is the normal case — [`build.rs`](src-tauri/build.rs) sets a `cfg`
+Their absence is the normal case — [`build.rs`](apps/manager/src-tauri/build.rs) sets a `cfg`
 when the file is present, and without it the app simply doesn't show those rows.
 A fork builds and runs with everything else intact.
 
@@ -211,7 +215,7 @@ cp .env.local.example .env.local   # gitignored; never commit it
 The store authenticates with a single custom header, so `MXB_SHOP_API_HEADER` is the header's
 *name* and `MXB_SHOP_API_KEY` is its value.
 
-`src-tauri/build.rs` reads the file at compile time and bakes the values into the Rust binary
+`apps/manager/src-tauri/build.rs` reads the file at compile time and bakes the values into the Rust binary
 — they are deliberately not Vite env vars, which get inlined into the JS bundle and would
 ship the key to anyone who unzips the app. Setting the same names in the environment
 overrides the file, which is how CI supplies them.
@@ -240,8 +244,8 @@ and the Discord announcement are both composed from it by
 section by the `v<version>` in its heading — so work still sitting under an
 "Unreleased" heading ships notes that never mention it.
 
-Then make sure `package.json`, `src-tauri/tauri.conf.json` and
-`src-tauri/Cargo.toml` all carry the version, and push a matching tag:
+Then make sure `apps/manager/package.json`, `apps/manager/src-tauri/tauri.conf.json`
+and `apps/manager/src-tauri/Cargo.toml` all carry the version, and push a matching tag:
 
 ```sh
 git tag -a v0.13.0 -m "v0.13.0 — what it's called"

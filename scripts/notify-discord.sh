@@ -146,8 +146,8 @@ mac="$(jq -r '[.assets[] | select(.name | test("\\.dmg$"))] | first | .url // em
 # worth putting in a chat message; .deb/.rpm are a click away on the release page.
 lin="$(jq -r '[.assets[] | select(.name | test("\\.AppImage$"))] | first | .url // empty' <<<"$meta")"
 
-icon="https://raw.githubusercontent.com/$REPO/$TAG/src-tauri/icons/icon.png"
-avatar="https://raw.githubusercontent.com/$REPO/main/src-tauri/icons/icon.png"
+icon="https://raw.githubusercontent.com/$REPO/$TAG/apps/manager/src-tauri/icons/icon.png"
+avatar="https://raw.githubusercontent.com/$REPO/main/apps/manager/src-tauri/icons/icon.png"
 
 # Amber down the side of a beta instead of the usual blue, and a footer that says so — the
 # two announcements sit in different channels, but plenty of people watch both.

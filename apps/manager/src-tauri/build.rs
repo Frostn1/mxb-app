@@ -114,12 +114,12 @@ fn release_tag() {
 fn shop_credentials() {
     // Without these, `Swatinem/rust-cache` in CI would happily reuse an object file
     // compiled against yesterday's token — or against no token at all.
-    println!("cargo::rerun-if-changed=../.env.local");
+    println!("cargo::rerun-if-changed=../../../.env.local");
     for key in SHOP_KEYS {
         println!("cargo::rerun-if-env-changed={key}");
     }
 
-    let local = read_dotenv("../.env.local");
+    let local = read_dotenv("../../../.env.local");
     for key in SHOP_KEYS {
         let value = std::env::var(key)
             .ok()

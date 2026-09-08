@@ -50,3 +50,6 @@ docs/secure-content/
 
 # The compiled UI-driving harness; build it with swiftc from the .swift beside it.
 docs/guides/tools/uidrive
+
+# Cargo build output — the workspace target now lives at the repo root.
+/target/

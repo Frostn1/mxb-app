@@ -46,7 +46,7 @@
     "targets": ["nsis", "app", "dmg", "appimage", "deb", "rpm"],
     "category": "Game",
     "createUpdaterArtifacts": true,
-    "licenseFile": "../LICENSE",
+    "licenseFile": "../../../LICENSE",
     "publisher": "Frost",
     "copyright": "Copyright © 2026 Frost",
     "homepage": "https://github.com/Frostn1/mxb-app",

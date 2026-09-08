@@ -78,7 +78,7 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: ./src-tauri -> target
+          workspaces: . -> target
 
       - name: Install frontend dependencies
         run: npm ci
@@ -108,6 +108,19 @@ jobs:
         shell: bash
         run: bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
 
+      # sync.sh writes the pre-monorepo layout (`<root>/src-tauri/...`) because it lives in
+      # Frostn1/mxbapp-private and ships separately from this repo. Fold what it placed into
+      # the app that now owns those paths. Delete this step once sync.sh knows the new ones.
+      - name: Relocate synced sidecar files
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        shell: bash
+        run: |
+          if [ -d src-tauri ]; then
+            cp -R src-tauri/. apps/manager/src-tauri/
+            rm -rf src-tauri
+            echo "folded sync.sh output into apps/manager/src-tauri"
+          fi
+
       # Ask the bundler for the DLL only on the leg that has one. Tauri's `resources` glob
       # is a hard error when it matches nothing, so keeping it in the committed config
       # broke every build without the private module — CI on both platforms, and the
@@ -117,9 +130,9 @@ jobs:
         if: ${{ github.repository == 'Frostn1/mxb-app' && startsWith(matrix.platform, 'windows') }}
         shell: bash
         run: |
-          test -f src-tauri/src/mxbsecure.dll || { echo "::error::mxbsecure.dll missing after sync.sh"; exit 1; }
-          jq '.bundle.resources = ["resources/*.dll"]' src-tauri/tauri.conf.json > tauri.conf.patched
-          mv tauri.conf.patched src-tauri/tauri.conf.json
+          test -f apps/manager/src-tauri/src/mxbsecure.dll || { echo "::error::mxbsecure.dll missing after sync.sh"; exit 1; }
+          jq '.bundle.resources = ["resources/*.dll"]' apps/manager/src-tauri/tauri.conf.json > tauri.conf.patched
+          mv tauri.conf.patched apps/manager/src-tauri/tauri.conf.json
 
       # The release page should say what shipped, not only which file to download — so
       # the body is composed from this tag's CHANGELOG section. Same section the Discord
@@ -163,7 +176,9 @@ jobs:
           # collects the bundles — so the image that gets uploaded is the one `latest.json`
           # carries the signature for. Empty on Windows and macOS, which leaves the action
           # to detect the package manager as it always has.
-          tauriScript: ${{ startsWith(matrix.platform, 'ubuntu') && 'bash scripts/tauri-build.sh' || '' }}
+          tauriScript: ${{ startsWith(matrix.platform, 'ubuntu') && format('bash {0}/scripts/tauri-build.sh', github.workspace) || '' }}
+          # Which app in the workspace this leg builds.
+          projectPath: apps/manager
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.run_number) }}
           releaseName: "MXB App ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}"
           # What shipped, then which file to download — worded in scripts/release-notes.sh.
