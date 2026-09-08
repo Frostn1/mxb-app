@@ -1507,7 +1507,13 @@ fn layer_sheet_at(b: &[u8], o: usize) -> Option<(String, u32, u32, usize, usize)
     }
     let pow2 = |v: u32| (4..=8192).contains(&v) && v.is_power_of_two();
     // `(where the width sits, where the length sits)`, colour first.
-    for (w_off, len_off) in [(104usize, 132usize), (100, 124)] {
+    // The normal's length sits at 128, not 124. It has no spacer word before its width, so
+    // every field up to the hash sits one word earlier than the colour's — but it still keeps
+    // the colour's own gap before the length, which put the shorter guess four bytes adrift.
+    // Both tracks measured write it this way, ours and Indiana's; the walk only ever survived
+    // because `trailer_after` scanned past a normal instead of reading it. 124 stays behind it
+    // for any writer that packs the field tight.
+    for (w_off, len_off) in [(104usize, 132usize), (100, 128), (100, 124)] {
         if w_off == 104 {
             // The colour's two spacer words: one before the width, one where sub-records
             // would be counted. The normal has neither, which is how they are told apart.
@@ -1701,12 +1707,20 @@ fn march_layers(b: &[u8], start: usize, decode: bool) -> Vec<GroundLayer> {
         let Some((name, w, h, data, end)) = layer_sheet_at(b, o + LAYER_MATERIAL + 4) else {
             break;
         };
-        // A layer may state more than one sheet, and the extras have to be stepped over
-        // rather than scanned through: TerrainEd writes a `_wet` variant beside the colour
-        // and an `env` cube beside that, and a trailer hunted for from the end of the first
-        // sheet lands inside two megabytes of somebody else's compressed pixels and finds
-        // nothing. Published tracks state one sheet and hit the trailer either way, which is
-        // why this only ever showed up on the tracks we compile ourselves.
+        // Step over the layer's other sheets rather than scanning through them. TerrainEd
+        // writes a normal, a `_wet` variant and an `env` cube behind the colour and states
+        // only some of them, so this is greedy rather than counted. A sibling follows within
+        // a few dozen bytes while the next *layer* is a material record and a count word
+        // further on again, which is what the short window tells apart. Published tracks
+        // carry one sheet a layer and found their trailer either way — this only ever showed
+        // up on the tracks we compile ourselves.
+        let mut end = end;
+        for _ in 0..4 {
+            let Some(next) = (0..48).find_map(|d| layer_sheet_at(b, end + d).map(|s| s.4)) else {
+                break;
+            };
+            end = next;
+        }
         let Some(t) = trailer_after(b, end, end + TRAILER_REACH) else {
             break;
         };
@@ -1769,7 +1783,11 @@ pub fn ground_layers(b: &[u8]) -> Vec<GroundLayer> {
         {
             starts.push(o - LAYER_MATERIAL - 4);
         }
-        o += 4;
+        // A byte at a time, not a word: nothing in the format aligns a sheet record, and the
+        // stacks we compile ourselves land on odd offsets every time. Stepping by four found
+        // the base layer of every published track and not one of ours. The guard in front is
+        // a single byte test, so the extra three quarters of the walk costs almost nothing.
+        o += 1;
     }
 
     // The march that reads the most layers is the stack. Ties go to the earliest, which is the
@@ -1963,7 +1981,11 @@ mod tests {
         e.write_all(&px).unwrap();
         let z = e.finish().unwrap();
 
-        let build = |colour: bool| {
+        // `spacer` is the word a real normal record keeps between its hash and its length —
+        // the one that puts the length at 128. Both tracks measured write it; this test used
+        // to assume it away on its own authority and so agreed with a reader that could not
+        // parse a normal map out of any file on disk.
+        let build = |colour: bool, spacer: bool| {
             let mut b = vec![0u8; 100];
             b[..6].copy_from_slice(b"sand_n");
             if colour {
@@ -1972,7 +1994,7 @@ mod tests {
             b.extend_from_slice(&8u32.to_le_bytes());
             b.extend_from_slice(&8u32.to_le_bytes());
             b.extend_from_slice(&[0u8; 16]);
-            if colour {
+            if colour || spacer {
                 b.extend_from_slice(&0u32.to_le_bytes());
             }
             b.extend_from_slice(&((z.len() + 8) as u32).to_le_bytes());
@@ -1982,12 +2004,15 @@ mod tests {
             b
         };
 
-        for colour in [true, false] {
-            let b = build(colour);
+        for (colour, spacer, what) in [
+            (true, false, "colour"),
+            (false, true, "normal, as both tracks write it"),
+            (false, false, "normal, packed tight"),
+        ] {
+            let b = build(colour, spacer);
             let got = layer_sheet_at(&b, 0);
-            let (name, w, h, data, end) = got.unwrap_or_else(|| {
-                panic!("the {} shape did not parse", if colour { "colour" } else { "normal" })
-            });
+            let (name, w, h, data, end) =
+                got.unwrap_or_else(|| panic!("the {what} shape did not parse"));
             assert_eq!(name, "sand_n");
             assert_eq!((w, h), (8, 8));
             assert_eq!(end - data, z.len(), "the payload has to end where the stream does");
