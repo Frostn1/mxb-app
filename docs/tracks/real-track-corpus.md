@@ -484,16 +484,26 @@ is nearly the same or does not surpass the EFH along the entire landing"* — eq
 with a target around 4–5 ft. The practitioner version is blunter: *"build a lip, launch your test
 bike, where it lands, that's where you build the landing."*
 
-#### 4.3 Run-up — answered by a written standard
+#### 4.3 Run-up — and a rule that is not the one it looks like
 
-| | Value |
-|---|---|
-| **Minimum run-up before each dirt jump** | **≥ 20 m (66 ft)** |
-| Metal ramp run-up | ≥ 20 m pro, ≥ 25 m amateur |
-| And the other direction | *"The length of approaches to Jumps should be limited to control approach speed."* (MA and MNZ both) |
+> **Correction.** This section first read the 20 m run-up as a motocross rule. **It is not.**
+> MA §14.4.3(d) — *"Have at least 20 metres of run-up preceding each Jump"* — sits in section
+> **14, the Freestyle Motocross module**, alongside certified metal ramps, landing decks and
+> ramp-to-dirt distances. It governs a ramp hit on its own, not a track. The same applies to the
+> 24 m "dirt-to-dirt" ceiling in §14.8.1 quoted below.
+>
+> Applied to a track it forbids what it should permit: a rhythm section is closely spaced jumps
+> by definition. It was implemented as a floor, rejected every lap a model wrote, and removed.
 
-**Run-up is a two-sided device: long enough to clear, short enough to cap the speed.** That is
-exactly the constraint `trackspeed`/`Rhythm` implements, stated as a rule by two federations.
+| | Value | Scope |
+|---|---|---|
+| Minimum run-up before each jump | ≥ 20 m (66 ft) | **freestyle ramps only** |
+| Metal ramp run-up | ≥ 20 m pro, ≥ 25 m amateur | freestyle |
+| **The motocross rule** | *"The length of approaches to Jumps should be limited to control approach speed."* — **no number** | MX, MA §6.7.2 and MNZ |
+
+**So motocross regulates run-up as a ceiling, not a floor**, and only qualitatively. That is
+exactly what `trackspeed`/`Rhythm` already implements from the lap's own speed — which is the
+better rule regardless, because what a jump needs is speed rather than metres.
 
 Gap-to-speed, from projectile motion (`v = √(g·d / sin 2θ)`):
 
@@ -502,11 +512,13 @@ Gap-to-speed, from projectile motion (`v = √(g·d / sin 2θ)`):
 | 10 m | 41 km/h | 37 km/h | 36 km/h |
 | 15 m | 50 km/h | 45 km/h | 43 km/h |
 | 20 m | 58 km/h | 52 km/h | 50 km/h |
-| **24 m** (MA's gap ceiling) | **63 km/h** | 57 km/h | 55 km/h |
+| **24 m** (MA's *freestyle* dirt-to-dirt ceiling) | **63 km/h** | 57 km/h | 55 km/h |
 | 21 m (a 70 ft SX triple) | 59 km/h | 53 km/h | 51 km/h |
 
-**The ~24 m gap ceiling and the 65 km/h average-speed ceiling are mutually consistent** — the
-biggest jump a standard permits sits right at the speed a standard permits.
+The ~24 m ceiling and the 65 km/h average-speed cap line up arithmetically, but **they are not
+corroborating each other** — one is a freestyle rule and the other a track rule, so the agreement
+is a coincidence rather than two standards meeting. Treat 24 m as a freestyle figure that happens
+to bracket a plausible motocross gap, not as a motocross limit.
 
 #### 4.4 Jump types
 
@@ -637,8 +649,8 @@ lip to landing**, not gaps of flat ground:
 | RedBud, LaRocco's Leap | **120 ft (36.6 m)** per Wikipedia; *"125-plus foot"* per the promoter — the two disagree, as do the build years (1991 vs 1992), and neither states a method |
 | Washougal, triple step-up (new for 2025) | "100+ foot" = **30.5 m** |
 
-**Note these exceed MA's 24 m gap ceiling substantially.** That is not a contradiction — MA is an
-Australian homologation standard and AMA homologates nothing — but it does mean a national's one
+**Note these exceed the 24 m figure substantially.** That is not a contradiction — the 24 m is a
+*freestyle* dirt-to-dirt rule from an Australian standard, and AMA homologates nothing — but it does mean a national's one
 signature jump is bigger than any rulebook would permit, and our 15-25 m gap band describes the
 ordinary jumps rather than the famous one.
 
@@ -726,7 +738,7 @@ real-world band.
 | longest straight | prompt asks 100–160 m opening | **FFM caps a straight at 125 m** (140 m with an obstacle in the first 15 m) | **our upper end is over the only stated cap** |
 | take-off angle ceiling | 27° at the lip | **FFM max 45°**, measured mid-face to crest | far under the cap — room to steepen |
 | face length, 3 m jump | **12.5 m** | 2:1 → 6 m; 3:1 → **9 m** | **ours is 39–108% longer** |
-| run-up before a jump | speed-checked per feature | **≥ 20 m written standard**, both directions | add the floor |
+| run-up before a jump | speed-checked per feature | motocross states **no number** — the 20 m rule is freestyle | ours is the right mechanism |
 | `START_SPRINT_M` | 70.0 | FIM **80–120** recommended; MA **70–125** | at the floor of both |
 | `START_LINE_M` | 150.0 | published MXB start lines 79–91 m of straight | **above both** |
 | gate row | 40 stalls × 1.2 m = **48 m** | FIM **40 stalls × 1 m, min 40 m**; AMA 1 m | legal (min), 20% over |
@@ -784,7 +796,11 @@ wrong — both are marked in place below rather than quietly dropped.
    self-similarity. Worth doing, and not a constant. Note the crown already rounds the crest over
    `0.9·h` of radius — on a 4 m jump, more ground than the 2 m straight would have occupied.
 4. **Cap whoop height** at 0.6–0.9 m. Currently unconstrained; every source agrees on the figure.
-5. **Add the 20 m run-up floor** per jump, alongside the existing speed check.
+5. ~~**Add the 20 m run-up floor** per jump, alongside the existing speed check.~~
+
+   **Withdrawn — the rule is freestyle, not motocross.** See the correction in §4.3. It was
+   implemented, rejected every lap a model wrote, and removed. The speed-based check we already
+   had is the correct mechanism and the only one motocross actually asks for.
 6. **Widen the ridden line** — 4.2 m against a 6 m regulated minimum.
 7. **The speed model runs a whole lap too fast.** `trackspeed`'s comment reasons from "a 2 km lap
    in about two minutes, which is a 60 km/h average". Across 386 official MXGP races the median is
