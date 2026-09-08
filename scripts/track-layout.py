@@ -313,10 +313,14 @@ def faces(height):
     """How much run a jump's own faces take, metres — the app's `tabletop_faces`, here.
 
     The face is an arc tangent to the ground, so its run is the height over the tangent of
-    *half* the angle: a 4 m lip at 27 degrees is sixteen metres of ground before the deck
-    starts, and its landing at 19 is twenty-four more.
+    *half* the angle: a 4 m lip at 38 degrees is 11.6 m of ground before the deck starts, and
+    its landing at 19 is 23.9 more.
+
+    These MIRROR `trackprog::JUMP_FACE_DEG` and `JUMP_LANDING_DEG` and nothing enforces it —
+    the 27 here was left behind when the face angle moved, which made every jump this script
+    laid a third longer than the app builds it.
     """
-    up = max(height / math.tan(math.radians(27.0 * 0.5)), 9.0)
+    up = max(height / math.tan(math.radians(38.0 * 0.5)), 9.0)
     down = max(height / math.tan(math.radians(19.0 * 0.5)), 9.0)
     return up + down
 
@@ -367,7 +371,10 @@ def features(rng, segs):
             # The deck is what was asked to grow, not the height: a table built to five and a
             # half metres over its run-in reads as a wall however long its top is. These come
             # out about a quarter taller than they are stated, so state them lower.
-            height = round(rng.uniform(2.8, 3.7), 2)
+            # Capped at three metres: Motorcycling Australia and Motorcycling New Zealand both
+            # write "jumps must not exceed 3m in height", and `corpus::FEATURE_HEIGHT_M` holds
+            # a program to it. 3.7 put eleven jumps a lap outside it.
+            height = round(rng.uniform(2.4, 3.0), 2)
             deck = rng.uniform(16.0, 27.0)
             length = round(min(deck + faces(height), room), 1)
             out.append({"kind": "tabletop", "at": round(pos, 1), "length": length,
@@ -380,13 +387,14 @@ def features(rng, segs):
             # A triple: one take-off, a landing, and a second lower one short of it for
             # anyone not committing — "make a second smaller landing like a triple knowing I
             # would jump it".
-            h = rng.uniform(2.8, 3.7)
+            # Same 3 m ceiling as the tabletop above, and for the same reason.
+            h = rng.uniform(2.4, 3.0)
             dip = rng.uniform(0.30, 0.40)
             # Drawn in metres and normalised afterwards, so the take-off gets the same run a
             # tabletop of this height gets. Drawn as fractions it had 3.6 m of lip in 8.5 m of
             # ground — a 23 degree chord, which any curve through it rides steeper still, and
             # from the seat that is a wall.
-            up = max(h / math.tan(math.radians(27.0 * 0.5)), 9.0)
+            up = max(h / math.tan(math.radians(38.0 * 0.5)), 9.0)
             down = max(h / math.tan(math.radians(19.0 * 0.5)), 9.0)
             near = up + 4.0 + down * 0.55
             marks = [(0.0, 0.0),

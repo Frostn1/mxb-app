@@ -256,7 +256,21 @@ def grow(rng, plot, width, want_m):
         # What a rider could be given next: a run, or a turn of one of three tightnesses
         # either way. Runs are what carry the lap across the ground; turns are what keep it
         # inside the plot.
-        moves = [{"kind": "straight", "length": rng.uniform(35.0, 80.0), "rise": 0.0}]
+        # A straight, unless the lap is already on one long enough. Consecutive straights are
+        # colinear, so the app's `straight_runs` reads a row of them as ONE straight — and a
+        # row of 35-80 m moves reached 248 m against the 125 m cap (`corpus::STRAIGHT_M`, the
+        # FFM's limit and the only one any federation writes). Indiana's longest is 62 m.
+        running = 0.0
+        for prev in reversed(segs):
+            if prev["kind"] != "straight":
+                break
+            running += prev["length"]
+        moves = []
+        room_on_the_straight = 125.0 - running
+        if room_on_the_straight > 35.0:
+            moves.append({"kind": "straight",
+                          "length": rng.uniform(35.0, min(80.0, room_on_the_straight)),
+                          "rise": 0.0})
         # The lap's own wander, and most of what it is made of. A published track is a chain
         # of arcs — Indiana runs 109 of them against 11 straights — but they average twenty
         # degrees apiece, not a hundred. Without this move every piece of the lap was a real
@@ -352,9 +366,42 @@ def grow(rng, plot, width, want_m):
                         ok = False
                         break
                     p = advance(p, seg)
+                # And no straight anywhere on the finished lap may run past the cap.
+                #
+                # Checked on the WHOLE lap rather than on the way home, because two things
+                # make a long straight and neither is one segment: consecutive straights are
+                # colinear, so the app's `straight_runs` reads a row of them as one — and a
+                # Dubins path is arc-straight-arc, so its straight sits in the MIDDLE and a
+                # look at the last segment never sees it. That is what left a 244 m straight
+                # on a lap whose every move was capped at 80. The limit is the FFM's 125 m,
+                # the only straight-length rule any federation writes; Indiana's longest is 62.
+                if ok and longest_straight(segs + home, opening) > 125.0:
+                    continue
                 if ok and all(s["kind"] != "arc" or s["angle"] < 200.0 for s in home):
                     return segs + home, start
     return None
+
+
+def longest_straight(segs, opening):
+    """The longest unbroken straight a rider meets, metres — merged the way the app merges.
+
+    Mirrors `Station::straight_runs`: consecutive straights are one straight, and so is the
+    pair either side of the finish line, because a lap that ends on a straight and begins on
+    one runs through the line without a corner in it.
+    """
+    runs, run = [], 0.0
+    for s in segs:
+        if s["kind"] == "straight":
+            run += s["length"]
+        else:
+            if run:
+                runs.append(run)
+            run = 0.0
+    trailing = run
+    # Through the line: whatever the lap ends on, plus the opening straight it rejoins.
+    if trailing:
+        runs.append(trailing + opening["length"])
+    return max(runs) if runs else 0.0
 
 
 def closes_to(segs, start):
