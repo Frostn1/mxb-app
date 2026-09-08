@@ -708,6 +708,11 @@ pub fn read_grid(bytes: &[u8], layout: &Layout, max_dim: u32) -> (u32, u32, Vec<
 
     let mut out = Vec::with_capacity(out_w * out_h);
     for oy in 0..out_h {
+        // Bottom-up: the file's first row is the far edge in world Z, and the mesh puts the
+        // grid's first row at the near one. Read in file order the whole map comes out
+        // mirrored about a horizontal line — the track shape, its paint and the props on it
+        // all together, which is why it reads as a consistent map rather than as a fault.
+        let oy = out_h - 1 - oy;
         let y0 = oy * h / out_h;
         let y1 = (((oy + 1) * h) / out_h).max(y0 + 1).min(h);
         for ox in 0..out_w {
