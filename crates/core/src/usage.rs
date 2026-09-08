@@ -20,6 +20,22 @@
 //! Then [`DISABLE_ENV`] for a run. And debug builds are silent unless [`DEV_ENV`] says
 //! otherwise, so working on the app doesn't quietly become a user of it.
 
+/// A new anonymous install id.
+///
+/// Behind a feature so only the binary that owns the reporting pulls `uuid` in. A build
+/// without it never mints one, and an empty id means "do not report" — which is the right
+/// answer for a second app sharing this config: the id belongs to the install, and the
+/// manager is what created it.
+#[cfg(feature = "mint-install-id")]
+fn mint_install_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
+#[cfg(not(feature = "mint-install-id"))]
+fn mint_install_id() -> String {
+    String::new()
+}
+
 use crate::config::{self, AppConfig};
 use crate::names::control_plane;
 use serde::Serialize;
@@ -162,7 +178,7 @@ pub fn start(app: &AppHandle) {
         return;
     }
     if cfg.install_id.trim().is_empty() {
-        cfg.install_id = uuid::Uuid::new_v4().to_string();
+        cfg.install_id = mint_install_id();
         if let Err(e) = config::save(app, &cfg) {
             // Without a saved id every launch would look like a new install, which is worse
             // than no numbers at all — so don't count this run.
@@ -247,7 +263,7 @@ pub fn set_enabled(app: &AppHandle, on: bool, cfg: &AppConfig) {
         // A config that has never had an id gets one now rather than at the next launch.
         if cfg.install_id.trim().is_empty() {
             let mut fresh = cfg.clone();
-            fresh.install_id = uuid::Uuid::new_v4().to_string();
+            fresh.install_id = mint_install_id();
             let _ = config::save(app, &fresh);
         }
         return;

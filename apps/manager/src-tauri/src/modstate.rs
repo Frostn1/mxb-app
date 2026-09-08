@@ -377,7 +377,7 @@ fn set_one(mods_path: &str, rel: &str, enabled: bool) -> anyhow::Result<bool> {
 }
 
 /// Refuse to touch anything outside the MX Bikes root — the same guard `library::move_mod`
-/// and `library::uninstall_mod` apply, and the reason a hand-edited preset can't be used to
+/// and `crate::trashbin::uninstall_mod` apply, and the reason a hand-edited preset can't be used to
 /// move files around the disk.
 fn guard_inside(mods_path: &str, p: &Path) -> anyhow::Result<()> {
     let root = Path::new(mods_path.trim());
@@ -448,9 +448,9 @@ pub fn set_many(cfg: &AppConfig, rels: &[String], enabled: bool) -> StateOutcome
 
 /// Send mods to the recycle bin, wherever they currently sit.
 ///
-/// `library::uninstall_mod` already does this for an enabled mod, but it takes an absolute
+/// `crate::trashbin::uninstall_mod` already does this for an enabled mod, but it takes an absolute
 /// path inside a content folder — a disabled mod is parked outside one, and Manage lists
-/// both side by side. Same [`library::move_to_trash`], addressed by `rel` instead.
+/// both side by side. Same [`crate::trashbin::move_to_trash`], addressed by `rel` instead.
 pub fn delete_many(cfg: &AppConfig, rels: &[String]) -> StateOutcome {
     let mut out = StateOutcome::default();
     for rel in rels {
@@ -462,7 +462,7 @@ pub fn delete_many(cfg: &AppConfig, rels: &[String]) -> StateOutcome {
             if !target.exists() {
                 anyhow::bail!("not there any more");
             }
-            library::move_to_trash(&target)?;
+            crate::trashbin::move_to_trash(&target)?;
             Ok(())
         });
         match result {

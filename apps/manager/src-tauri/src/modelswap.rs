@@ -978,7 +978,7 @@ pub fn delete_model_swap(
     mods_path: &str,
     bike: &str,
     variant: &str,
-) -> anyhow::Result<crate::library::TrashedAt> {
+) -> anyhow::Result<crate::trashbin::TrashedAt> {
     if !is_simple_name(bike) || !is_simple_name(variant) {
         anyhow::bail!("invalid bike or model name");
     }
@@ -989,7 +989,7 @@ pub fn delete_model_swap(
     if !dir_exists(&dir) {
         anyhow::bail!("model '{variant}' not found");
     }
-    let trashed = crate::library::move_to_trash(&dir)?;
+    let trashed = crate::trashbin::move_to_trash(&dir)?;
     let mut assign = load_paint_assignments(mods_path, bike);
     assign.retain(|v, _| !v.eq_ignore_ascii_case(variant));
     save_paint_assignments(mods_path, bike, &assign)?;
