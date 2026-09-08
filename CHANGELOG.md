@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-07
+
+### Fixed
+- Generated tracks no longer have a step in the ground across the start straight, or a bank
+  standing where the ground beside the track should be.
+- The ground behind the start gates is scenery rather than track, so the game stops treating
+  the bank the gates are set against as somewhere you are allowed to ride.
+
 ## 2026-09-06
 
 ### Added
