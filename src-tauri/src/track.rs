@@ -1020,6 +1020,16 @@ mod tests {
         }
         image::GrayImage::from_raw(w, h, px).unwrap().save(&out).unwrap();
         println!("  {out}  {w}x{h}");
+        // The heights themselves, row 0 first, for anything that wants to measure rather
+        // than look: `FROST_RAW=/tmp/h.f32` then read w*h little-endian f32.
+        if let Ok(raw) = std::env::var("FROST_RAW") {
+            let mut bytes = Vec::with_capacity(heights.len() * 4);
+            for v in &heights {
+                bytes.extend_from_slice(&(if v.is_finite() { *v } else { 0.0 }).to_le_bytes());
+            }
+            std::fs::write(&raw, &bytes).unwrap();
+            println!("  {raw}  {w}x{h} f32");
+        }
     }
 
     /// Point this at a real track to see the surfaces its height file paints:

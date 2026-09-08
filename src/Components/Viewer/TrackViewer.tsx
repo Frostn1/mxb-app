@@ -972,7 +972,7 @@ function TerrainMesh({
                 // is done here — three.js only converts the slots it compiled itself.
                 return i === 0 || !l.mask
                   ? `  ground = ${sample};`
-                  : `  ground = mix(ground, ${sample}, texture2D(stackMask${i}, vGroundUv).r);`;
+                  : `  ground = mix(ground, ${sample}, texture2D(stackMask${i}, maskUv).r);`;
               })
               .join("\n");
             shader.fragmentShader = shader.fragmentShader
@@ -987,6 +987,17 @@ function TerrainMesh({
                 "#include <color_fragment>",
                 `#include <color_fragment>
                  {
+                   // A layer's mask is stored a quarter turn from the grid the terrain is
+                   // built on: the paint came out square with the site but across the track,
+                   // grass over the riding line and dirt out in the field. Rotating the
+                   // lookup rather than the stored bytes keeps the mask the size it was sent
+                   // and costs two swizzles.
+                   //
+                   // Derived in the shader's own index space, where the correction is
+                   // numpy's rot90: C[i,j] = M[j, n-1-i], which is this sample. The sheets
+                   // themselves are not rotated — they tile ~200 times across the ground, so
+                   // their orientation is not something an eye can find.
+                   vec2 maskUv = vec2(1.0 - vGroundUv.y, vGroundUv.x);
                    vec3 ground = vec3(0.5);
                  ${blend}
                    // Multiplied rather than assigned: what is already in diffuseColor is the
