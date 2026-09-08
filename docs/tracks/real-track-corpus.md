@@ -142,9 +142,19 @@ band and are weakly sourced.
 **Even MXGP's own lap lengths disagree across three primary sources** — the `mxgp.com/tracks/<venue>`
 sheet, the FIM Supplementary Regulations, and the length actually raced (from the classification
 header's `Classification after N laps (D km)`). Matterley Basin reads 2120 m on mxgp.com, 2035 m in
-the FIM SR, and was raced at 1640–2240 m across different years. Teutschenthal, Ernée, St Jean,
-Pietramurata, Uddevalla, Kegums and Riola all conflict too. **Use the raced length** — it is the one
-figure derived from timing rather than a brochure. **Budds Creek's widely-repeated "1.5 mile layout" fails a
+the FIM SR, and was raced at 1640–2240 m across different years. Ernée, Kegums, St Jean,
+Pietramurata and Uddevalla conflict too. **Use the raced length** — it is the one figure derived
+from timing rather than a brochure.
+
+**But check the year before calling something a conflict.** A Supplementary Regulation is issued per
+round per year, so comparing a 2025 document against a current promoter page manufactures
+disagreements that do not exist. Teutschenthal looked like a 1550 vs 1590 m conflict and is not one:
+1590 m is the 2025 regulation, and the 2026 regulation says 1550 m, exactly matching mxgp.com. Loket
+(1586 m in both the 2025 and 2026 documents) and Águeda agree across sources as well.
+
+The FIM Supplementary Regulation template carries only `Name`, `Length` and `Minimum Width` — no
+elevation, no gradient, no turn count. That closes the last plausible published route to those two
+fields. **Budds Creek's widely-repeated "1.5 mile layout" fails a
 cross-check** — with its sourced lap times it implies a 46.2 mph average, 24% faster than any
 speed MXGP has ever recorded — and comes from an AI-generated aggregator. Do not use it.
 
