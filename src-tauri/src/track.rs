@@ -978,6 +978,60 @@ mod tests {
         }
     }
 
+    /// Write the terrain out as a hillshade, in the row order the viewer builds its UVs from.
+    ///
+    /// The reference picture for anything laid over the ground. `resample` hands back row 0
+    /// first and the mesh puts that row at v = 0, so this PNG *is* what the shader addresses
+    /// with `vGroundUv` — put a ground mask beside it and any rotation is plain to see.
+    ///
+    /// ```text
+    /// FROST_TRACK="…/track.pkz" FROST_PNG=/tmp/terrain.png \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture dump_terrain_hillshade
+    /// ```
+    #[test]
+    #[ignore = "writes a PNG — set FROST_TRACK and FROST_PNG"]
+    fn dump_terrain_hillshade() {
+        let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let out = std::env::var("FROST_PNG").expect("set FROST_PNG");
+        let m = decode_master(Path::new(&path)).expect("a terrain master");
+        let want: u32 = std::env::var("FROST_DETAIL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1024);
+        let (w, h, heights) = resample(&m, want);
+        let at = |x: usize, y: usize| -> f32 {
+            let v = heights[y.min(h as usize - 1) * w as usize + x.min(w as usize - 1)];
+            if v.is_finite() {
+                v
+            } else {
+                0.0
+            }
+        };
+        // Slope shading: the ruts and berms are what make a track recognisable from above,
+        // and a flat height ramp buries them under the site's overall fall.
+        let mut px = vec![0u8; (w * h) as usize];
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let dx = at(x + 1, y) - at(x.saturating_sub(1), y);
+                let dy = at(x, y + 1) - at(x, y.saturating_sub(1));
+                let s = (dx * dx + dy * dy).sqrt();
+                px[y * w as usize + x] = (255.0 * (1.0 - (-s * 6.0).exp())).clamp(0.0, 255.0) as u8;
+            }
+        }
+        image::GrayImage::from_raw(w, h, px).unwrap().save(&out).unwrap();
+        println!("  {out}  {w}x{h}");
+        // The heights themselves, row 0 first, for anything that wants to measure rather
+        // than look: `FROST_RAW=/tmp/h.f32` then read w*h little-endian f32.
+        if let Ok(raw) = std::env::var("FROST_RAW") {
+            let mut bytes = Vec::with_capacity(heights.len() * 4);
+            for v in &heights {
+                bytes.extend_from_slice(&(if v.is_finite() { *v } else { 0.0 }).to_le_bytes());
+            }
+            std::fs::write(&raw, &bytes).unwrap();
+            println!("  {raw}  {w}x{h} f32");
+        }
+    }
+
     /// Point this at a real track to see the surfaces its height file paints:
     ///
     /// ```text

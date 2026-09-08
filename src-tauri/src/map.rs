@@ -2632,6 +2632,48 @@ mod tests {
         assert_eq!(bindings(&flat, 4, 2), vec![(0, 0), (1, 1)]);
     }
 
+    /// Write a map's ground masks out as PNGs, one per layer.
+    ///
+    /// The masks are the only statement of where a track's paint goes, and whether they line
+    /// up with the terrain is not something to reason about — the same reasoning has given
+    /// the opposite answer twice. Put them next to a hillshade of the heightfield and look.
+    ///
+    /// ```text
+    /// FROST_MAP="…/track.map" FROST_DUMP=/tmp/masks \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture dump_ground_masks
+    /// ```
+    #[test]
+    #[ignore = "writes PNGs — set FROST_MAP and FROST_DUMP"]
+    fn dump_ground_masks() {
+        let path = std::env::var("FROST_MAP").expect("set FROST_MAP");
+        let dir = std::env::var("FROST_DUMP").expect("set FROST_DUMP");
+        std::fs::create_dir_all(&dir).unwrap();
+        let b = std::fs::read(&path).expect("read the map");
+        for (i, l) in ground_layers(&b).iter().enumerate() {
+            let Some(m) = &l.mask else {
+                println!("  layer {i} {:<24} base, no mask", l.sheet.name);
+                continue;
+            };
+            let covered = m.coverage.iter().filter(|&&c| c > 8).count();
+            println!(
+                "  layer {i} {:<24} mask {}x{}  {:.1}% covered  tile {}x{}",
+                l.sheet.name,
+                m.width,
+                m.height,
+                covered as f64 * 100.0 / m.coverage.len().max(1) as f64,
+                l.tile_u,
+                l.tile_v
+            );
+            // Written exactly as stored — row 0 first — so the picture on disk is the
+            // array the shader samples, and nothing here can hide a flip.
+            let img: image::GrayImage =
+                image::ImageBuffer::from_raw(m.width, m.height, m.coverage.clone()).unwrap();
+            let f = format!("{dir}/mask{i}_{}.png", l.sheet.name);
+            img.save(&f).unwrap();
+            println!("     -> {f}");
+        }
+    }
+
     /// What is actually inside a material record.
     ///
     /// The parse has always stepped straight over these 56 bytes, and the whole binding
