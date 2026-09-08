@@ -30,7 +30,6 @@ import {
 import type { BundlePhase, SharePlan, SharePreview } from "../../types";
 import { isLiveCode } from "../../lib/liveshare";
 import { Switch } from "@/Components/ui/switch";
-import { cn } from "@/lib/utils";
 import { formatBytes } from "../../lib/mods";
 import { copyText } from "../../lib/clipboard";
 import { useT, type TFunc } from "../../i18n/context";
@@ -191,18 +190,26 @@ export function ShareDialog({
           </p>
         )}
 
+        {/* An input for a live code, a textarea for a plain one — the element matches the
+            value rather than being restyled into it. A live code is eight characters on one
+            line; a `MXBS1-` code is a base64 wall that genuinely needs to wrap. Sizing a
+            textarea down to one line leaves it scrolling its own single line. */}
         {code ? (
-          <textarea
-            readOnly
-            value={code}
-            onFocus={(e) => e.currentTarget.select()}
-            className={cn(
-              "w-full resize-none rounded-lg border border-input bg-transparent p-2.5 font-mono leading-snug",
-              // A live code is eight characters. Giving it the same wall of textarea a
-              // base64 blob needs makes it look like something to scroll through.
-              live ? "h-9 text-center text-[15px] tracking-[0.2em]" : "h-24 text-[11px]",
-            )}
-          />
+          live ? (
+            <input
+              readOnly
+              value={code}
+              onFocus={(e) => e.currentTarget.select()}
+              className="w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-center font-mono text-[15px] tracking-[0.2em]"
+            />
+          ) : (
+            <textarea
+              readOnly
+              value={code}
+              onFocus={(e) => e.currentTarget.select()}
+              className="h-24 w-full resize-none rounded-lg border border-input bg-transparent p-2.5 font-mono text-[11px] leading-snug"
+            />
+          )
         ) : (
           <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-white/[0.07] bg-card/40 p-2.5">
             <Switch checked={live} onCheckedChange={setLive} disabled={busy} className="mt-px" />

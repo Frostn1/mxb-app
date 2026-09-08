@@ -17,6 +17,7 @@ import {
   Download,
   KeyRound,
   Loader2,
+  MoreHorizontal,
   RefreshCw,
   Trash2,
   UploadCloud,
@@ -40,6 +41,12 @@ import { useT, type TFunc } from "../../i18n/context";
 import { Button } from "@/Components/ui/button";
 import { Switch } from "@/Components/ui/switch";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/Components/ui/dropdown-menu";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -60,6 +67,13 @@ function ago(seconds: number, t: TFunc): string {
   return t("live.daysAgo", { count: Math.round(hours / 24) });
 }
 
+/**
+ * One code, in three lines: what it is, where it stands, what you can do about it.
+ *
+ * The everyday actions are buttons; the rare and the dangerous ones live behind the menu.
+ * Copying an owner key hands over the ability to replace the track for everyone following
+ * the code, so it is deliberately not a button sitting next to the code you hand out.
+ */
 function Row({
   row,
   busy,
@@ -80,6 +94,16 @@ function Row({
   const behind = !row.mine && row.latest > row.version;
   const working = busy === row.code;
 
+  const facts = [
+    behind
+      ? t("live.versionBehind", { have: row.version, latest: row.latest })
+      : t("live.versionAt", { version: row.version }),
+    ...(row.size > 0 ? [formatBytes(row.size)] : []),
+    row.mine
+      ? t("live.publishedAgo", { when: ago(row.publishedAt, t) })
+      : t("live.checkedAgo", { when: ago(Math.round(row.checkedAt / 1000), t) }),
+  ];
+
   const copy = useCallback(
     async (text: string, message: string) => {
       if (await copyText(text)) {
@@ -96,44 +120,43 @@ function Row({
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 border-b border-white/[0.04] px-3 py-2.5 last:border-b-0",
+        "border-b border-white/[0.06] px-3 py-3 last:border-b-0",
         behind && "bg-sky-500/[0.06]",
       )}
     >
-      <div className="flex items-baseline gap-2">
+      <div className="flex items-center gap-2">
         <span className="truncate text-[13px] font-semibold">{row.name}</span>
-        <span className="flex-none rounded bg-white/[0.06] px-1.5 py-px font-mono text-[10.5px] tracking-wide">
-          {row.code}
-        </span>
         {row.mine ? (
-          <span className="flex-none text-[10.5px] font-semibold uppercase tracking-wide text-emerald-500">
+          <span className="flex-none rounded bg-emerald-500/15 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-emerald-500">
             {t("live.yours")}
           </span>
         ) : behind ? (
-          <span className="flex-none text-[10.5px] font-semibold uppercase tracking-wide text-sky-400">
+          <span className="flex-none rounded bg-sky-500/15 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-sky-400">
             {t("live.updateReady")}
           </span>
         ) : null}
       </div>
 
-      <div className="flex items-baseline gap-2 text-[11.5px] text-muted-foreground">
-        <span>
-          {behind
-            ? t("live.versionBehind", { have: row.version, latest: row.latest })
-            : t("live.versionAt", { version: row.version })}
+      {/* One wrapping line rather than a column of half-empty rows — these are four short
+          facts about the same thing, and stacking them made the list twice as tall. */}
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-muted-foreground">
+        <span className="rounded bg-white/[0.06] px-1.5 py-px font-mono text-[11px] tracking-wide text-foreground/80">
+          {row.code}
         </span>
-        {row.size > 0 && <span>· {formatBytes(row.size)}</span>}
-        <span className="ml-auto flex-none">
-          {row.mine
-            ? t("live.publishedAgo", { when: ago(row.publishedAt, t) })
-            : t("live.checkedAgo", { when: ago(Math.round(row.checkedAt / 1000), t) })}
-        </span>
+        {/* Each fact keeps its own separator and never breaks inside itself, so a line that
+            does wrap breaks between facts rather than stranding a lone dot. */}
+        {facts.map((fact, i) => (
+          <span key={fact} className="whitespace-nowrap">
+            {i > 0 && <span className="mr-2">·</span>}
+            {fact}
+          </span>
+        ))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="mt-2.5 flex items-center gap-1.5">
         <Button
           size="sm"
-          variant="ghost"
+          variant="secondary"
           className="h-7 px-2 text-[11.5px]"
           onClick={() => void copy(row.code, t("live.codeCopied"))}
         >
@@ -142,54 +165,38 @@ function Row({
         </Button>
 
         {row.mine ? (
-          <>
-            <Button
-              size="sm"
-              className="h-7 px-2 text-[11.5px]"
-              disabled={!!busy || row.rels.length === 0}
-              onClick={() => onPublish(row)}
-            >
-              {working ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <UploadCloud className="size-3.5" />
-              )}
-              {t("live.publishUpdate")}
-            </Button>
-            {/* Its own button, never rendered beside the code: whoever holds this string can
-                replace the track for everyone following it. */}
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-[11.5px]"
-              onClick={async () => {
-                try {
-                  await copy(await liveShareOwnerCode(row.code), t("live.ownerCopied"));
-                } catch (e) {
-                  toast.error(String(e).replace(/^Error:\s*/, ""));
-                }
-              }}
-            >
-              <KeyRound className="size-3.5" />
-              {t("live.ownerCode")}
-            </Button>
-          </>
+          <Button
+            size="sm"
+            className="h-7 px-2 text-[11.5px]"
+            disabled={!!busy || row.rels.length === 0}
+            onClick={() => onPublish(row)}
+          >
+            {working ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <UploadCloud className="size-3.5" />
+            )}
+            {t("live.publishUpdate")}
+          </Button>
         ) : (
-          <>
-            <Button
-              size="sm"
-              className="h-7 px-2 text-[11.5px]"
-              disabled={!!busy || !behind}
-              onClick={() => onUpdate(row.code)}
-            >
-              {working ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <Download className="size-3.5" />
-              )}
-              {behind ? t("live.update") : t("live.upToDate")}
-            </Button>
-            <label className="ml-1 flex cursor-pointer items-center gap-1.5 text-[11.5px] text-muted-foreground">
+          <Button
+            size="sm"
+            className="h-7 px-2 text-[11.5px]"
+            disabled={!!busy || !behind}
+            onClick={() => onUpdate(row.code)}
+          >
+            {working ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Download className="size-3.5" />
+            )}
+            {behind ? t("live.update") : t("live.upToDate")}
+          </Button>
+        )}
+
+        <div className="ml-auto flex items-center gap-2">
+          {!row.mine && (
+            <label className="flex cursor-pointer items-center gap-1.5 text-[11.5px] text-muted-foreground">
               <Switch
                 checked={row.auto}
                 onCheckedChange={(v) => onAuto(row.code, v)}
@@ -197,19 +204,43 @@ function Row({
               />
               {t("live.auto")}
             </label>
-          </>
-        )}
-
-        <Button
-          size="sm"
-          variant="ghost"
-          className="ml-auto h-7 px-2 text-[11.5px] text-muted-foreground hover:text-destructive"
-          disabled={!!busy}
-          onClick={() => onForget(row.code)}
-        >
-          <Trash2 className="size-3.5" />
-          {row.mine ? t("live.forgetMine") : t("live.unfollow")}
-        </Button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="size-7 p-0 text-muted-foreground"
+                aria-label={t("live.moreActions")}
+              >
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {row.mine && (
+                <DropdownMenuItem
+                  onSelect={async () => {
+                    try {
+                      await copy(await liveShareOwnerCode(row.code), t("live.ownerCopied"));
+                    } catch (e) {
+                      toast.error(String(e).replace(/^Error:\s*/, ""));
+                    }
+                  }}
+                >
+                  <KeyRound className="size-3.5" />
+                  {t("live.ownerCode")}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem
+                onSelect={() => onForget(row.code)}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="size-3.5" />
+                {row.mine ? t("live.forgetMine") : t("live.unfollow")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
     </div>
   );
@@ -333,7 +364,7 @@ export function LiveSharesDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg gap-4">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Cloud className="size-4" />
@@ -345,7 +376,7 @@ export function LiveSharesDialog({
         {rows.length === 0 ? (
           <p className="py-8 text-center text-[12.5px] text-muted-foreground">{t("live.empty")}</p>
         ) : (
-          <div className="max-h-[22rem] overflow-y-auto rounded-lg border border-white/[0.07] bg-card/40">
+          <div className="max-h-[24rem] overflow-y-auto rounded-lg border border-white/[0.07] bg-card/40">
             {rows.map((row) => (
               <Row
                 key={row.code}
@@ -360,19 +391,32 @@ export function LiveSharesDialog({
           </div>
         )}
 
-        {/* Moving a share to another machine. Tucked under the list because it is the rare
-            case — a reinstall, a second PC — not part of the everyday flow. */}
-        <div className="flex items-center gap-1.5">
-          <input
-            value={adopt}
-            onChange={(e) => setAdopt(e.target.value)}
-            placeholder={t("live.adoptPlaceholder")}
-            className="min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2.5 py-1.5 font-mono text-[11px] placeholder:text-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-          />
-          <Button size="sm" variant="ghost" className="h-8" disabled={!adopt.trim()} onClick={takeOver}>
-            <KeyRound className="size-3.5" />
-            {t("live.adopt")}
-          </Button>
+        {/* Moving a share to another machine. Below a rule and under its own heading because
+            it is the rare case — a reinstall, a second PC, handing a track over — and sitting
+            it flush against the list made it look like part of the everyday flow. */}
+        <div className="border-t border-white/[0.07] pt-3">
+          <p className="text-[11.5px] font-semibold">{t("live.adoptTitle")}</p>
+          <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">
+            {t("live.adoptHint")}
+          </p>
+          <div className="mt-2 flex items-center gap-1.5">
+            <input
+              value={adopt}
+              onChange={(e) => setAdopt(e.target.value)}
+              placeholder={t("live.adoptPlaceholder")}
+              className="min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2.5 py-1.5 font-mono text-[11px] placeholder:text-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-8 flex-none"
+              disabled={!adopt.trim()}
+              onClick={takeOver}
+            >
+              <KeyRound className="size-3.5" />
+              {t("live.adopt")}
+            </Button>
+          </div>
         </div>
 
         <DialogFooter>
