@@ -27,9 +27,11 @@ use crate::map::{self, Group, MapMesh, MapTexture};
 // second having been decoded at all.
 // v6: a sheet is bound unless it is demonstrably a companion map, so materials no longer
 // slide onto their neighbour's picture and the sheets a track names plainly now bind at all.
-// Every v5 entry holds the old binding, which is the wrong colour on the wrong object.
-const MESH_CACHE: &str = "track-scenery-v6";
-const SURFACE_CACHE: &str = "track-surfaces-v6";
+// v7: the binding is read out of the material records rather than walked positionally, which
+// moves most of a track's materials by one and its trees by two. Every earlier entry holds a
+// guess, and the guess put an 80%-transparent sheet on Indiana's banners.
+const MESH_CACHE: &str = "track-scenery-v7";
+const SURFACE_CACHE: &str = "track-surfaces-v7";
 /// The ground sheet and its normal map, cached apart again — two 512×512 sheets against the
 /// surfaces' hundreds of megabytes, and finding them means reading the archive a third time.
 // v3: 8192-wide sheets are read now, so the pick has records to consider that v2 never saw.
@@ -2107,6 +2109,111 @@ overcast\n{\nsky = my_own_dome.edf\n}\n";
     #[test]
     #[ignore = "needs a real track — set FROST_TRACK"]
     fn decode_a_real_track() {
+        real_track_report();
+    }
+
+    /// What each material actually wears, against how much of the track it covers.
+    ///
+    /// A material drawn over thousands of triangles in a sheet whose opaque pixels average
+    /// near black is a black object on screen, and this is the one view that puts those two
+    /// facts side by side.
+    ///
+    /// ```text
+    /// FROST_TRACK="…/track.pkz" \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture what_each_material_wears
+    /// ```
+    #[test]
+    #[ignore = "needs a real track — set FROST_TRACK"]
+    fn what_each_material_wears() {
+        let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let s = decode(Path::new(&path), true).expect("decode the scenery");
+        let tex = &s.textures;
+
+        let mut tris = vec![0u32; s.info.materials.max(1) as usize + 8];
+        // Per material, the box its triangles occupy — a banner run is long, thin and low,
+        // a treeline is tall, and that is what says which material is the thing on screen.
+        let mut box_of = vec![([f32::MAX; 3], [f32::MIN; 3]); s.info.materials.max(1) as usize + 8];
+        for g in &s.mesh.groups {
+            let Some(slot) = tris.get_mut(g.material as usize) else {
+                continue;
+            };
+            *slot += g.tri_count;
+            let bb = &mut box_of[g.material as usize];
+            for t in g.tri_start..g.tri_start + g.tri_count {
+                for k in 0..3 {
+                    let Some(&idx) = s.mesh.indices.get(t as usize * 3 + k) else {
+                        continue;
+                    };
+                    for axis in 0..3 {
+                        let Some(&v) = s.mesh.positions.get(idx as usize * 3 + axis) else {
+                            continue;
+                        };
+                        bb.0[axis] = bb.0[axis].min(v);
+                        bb.1[axis] = bb.1[axis].max(v);
+                    }
+                }
+            }
+        }
+        println!(
+            "{:<4} {:<30} {:>8} {:>6} {:>6} {:>4}  {:>20}",
+            "mat", "sheet", "tris", "luma", "opq", "cut", "extent x/y/z (m)"
+        );
+        for (i, t) in tex.iter().enumerate() {
+            // Only the texels an alpha test would keep: the rest is the black behind a cut,
+            // and averaging it in calls every cut-out dark whether it draws dark or not.
+            let (mut sum, mut n) = (0f64, 0u64);
+            for p in t.rgba.chunks_exact(4) {
+                if p[3] < 128 {
+                    continue;
+                }
+                sum += p[0] as f64 * 0.299 + p[1] as f64 * 0.587 + p[2] as f64 * 0.114;
+                n += 1;
+            }
+            let luma = if n > 0 { sum / n as f64 } else { 0.0 };
+            let opaque = n as f64 * 100.0 / (t.rgba.len() / 4).max(1) as f64;
+            let count = tris.get(t.material as usize).copied().unwrap_or(0);
+            let bb = box_of[t.material as usize];
+            let ext = if bb.0[0] <= bb.1[0] {
+                format!(
+                    "{:.0}x{:.0}x{:.0}",
+                    bb.1[0] - bb.0[0],
+                    bb.1[1] - bb.0[1],
+                    bb.1[2] - bb.0[2]
+                )
+            } else {
+                "-".into()
+            };
+            println!(
+                "{:<4} {:<30} {:>8} {:>6.1} {:>5.1}% {:>4}  {:>20}{}",
+                t.material,
+                t.name,
+                count,
+                luma,
+                opaque,
+                if t.alpha { "cut" } else { "-" },
+                ext,
+                // What the viewer's own guard calls a shadow, and what reads as black.
+                if luma < 4.0 {
+                    "   <- SHADOW-DROPPED"
+                } else if luma < 24.0 && count > 200 {
+                    "   <- DARK"
+                } else {
+                    ""
+                },
+            );
+            let _ = i;
+        }
+        let painted: std::collections::HashSet<u32> = tex.iter().map(|t| t.material).collect();
+        let bare: Vec<(usize, u32)> = (0..s.info.materials as usize)
+            .filter(|m| !painted.contains(&(*m as u32)))
+            .map(|m| (m, tris.get(m).copied().unwrap_or(0)))
+            .filter(|(_, c)| *c > 0)
+            .collect();
+        println!("  {} materials, {} painted", s.info.materials, tex.len());
+        println!("  unpainted but drawn: {bare:?}");
+    }
+
+    fn real_track_report() {
         let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK to a track .pkz/folder");
         let s = decode(Path::new(&path), true).expect("decode the scenery");
         let (lo, hi) = s.mesh.bounds();
