@@ -127,6 +127,7 @@ mod offline_flow_test {
 }
 mod presets;
 mod paintsync;
+mod ranked;
 mod reshade;
 mod scenery;
 mod serverbook;
@@ -8024,6 +8025,75 @@ fn fold_name(raw: &str) -> String {
         .join(" ")
 }
 
+/// Which GUID the Ranked tab will ask about, and where it came from.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RankedIdentity {
+    /// Empty when we have nothing to go on and the player has to type one.
+    guid: String,
+    /// `"steam"` when it was derived from the signed-in Steam account, `"manual"` when the
+    /// player typed it. The tab says which, because a wrong-but-plausible GUID would
+    /// otherwise show somebody else's season with no clue why.
+    source: String,
+}
+
+/// The GUID this machine's profile lives under.
+///
+/// A Steam copy needs no setup: MX Bikes' GUID is `FF` + the SteamID64, and Steam records the
+/// signed-in account on disk. A copy bought direct from PiBoSo has a stand-alone GUID that
+/// only mxb-ranked knows, so that one is typed in and kept in config — which is the same
+/// field used to point the tab at a friend.
+#[tauri::command]
+fn ranked_identity(app: tauri::AppHandle) -> RankedIdentity {
+    let manual = config::load_or_detect(&app).unwrap_or_default().ranked_guid;
+    if let Some(guid) = ranked::normalise_guid(&manual) {
+        return RankedIdentity { guid, source: "manual".into() };
+    }
+    match ranked::local_guid() {
+        Some(guid) => RankedIdentity { guid, source: "steam".into() },
+        None => RankedIdentity::default(),
+    }
+}
+
+/// One rider's rank, season standings and last 50 races, read off mxb-ranked.com.
+///
+/// `guid` names whose — omit it for this machine's own. There is no sign-in: the profile is
+/// public and server-rendered, so this is one request and no account. See [`ranked`].
+#[tauri::command]
+async fn ranked_profile(
+    app: tauri::AppHandle,
+    guid: Option<String>,
+) -> Result<ranked::RankedProfile, String> {
+    let asked = guid.unwrap_or_default();
+    let guid = match ranked::normalise_guid(&asked) {
+        Some(g) => g,
+        // Not "invalid": an empty argument is the tab asking for the player's own.
+        None if asked.trim().is_empty() => ranked_identity(app).guid,
+        None => return Err(format!("{asked} isn't an MX Bikes GUID")),
+    };
+    if guid.is_empty() {
+        return Err("No MX Bikes GUID — sign into Steam, or enter your GUID.".into());
+    }
+    ranked::fetch(&guid).await
+}
+
+/// Remember a hand-entered MXB Ranked GUID, or clear it with an empty string.
+///
+/// Only players whose copy didn't come from Steam need this — everyone else's GUID is derived
+/// — so a value that isn't a GUID is refused here rather than silently showing an empty
+/// profile for ever.
+#[tauri::command]
+fn set_ranked_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
+    let cleaned = if guid.trim().is_empty() {
+        String::new()
+    } else {
+        ranked::normalise_guid(&guid).ok_or_else(|| format!("{guid} isn't an MX Bikes GUID"))?
+    };
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.ranked_guid = cleaned;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 /// The live MX Bikes server list, as the game's WORLD browser sees it.
 ///
 /// All the work — the master-server protocol, the Steam auth ticket, the parsing — lives in
@@ -10791,6 +10861,9 @@ fn main() {
             server_riders,
             servers_with_paint_sync,
             guess_server_track,
+            ranked_identity,
+            ranked_profile,
+            set_ranked_guid,
             experimental_state,
             enroll_account,
             // Paid plugins: the catalogue, redeeming a key, and getting a bundle on disk.
