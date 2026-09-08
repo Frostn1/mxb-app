@@ -25,14 +25,19 @@ use crate::map::{self, Group, MapMesh, MapTexture};
 // v2: the mesh gained UVs and material groups, and the surfaces travel with it.
 // v3: the mesh and the surfaces are cached apart, so the first can be served without the
 // second having been decoded at all.
-const MESH_CACHE: &str = "track-scenery-v5";
-const SURFACE_CACHE: &str = "track-surfaces-v5";
+// v6: a sheet is bound unless it is demonstrably a companion map, so materials no longer
+// slide onto their neighbour's picture and the sheets a track names plainly now bind at all.
+// Every v5 entry holds the old binding, which is the wrong colour on the wrong object.
+const MESH_CACHE: &str = "track-scenery-v6";
+const SURFACE_CACHE: &str = "track-surfaces-v6";
 /// The ground sheet and its normal map, cached apart again — two 512×512 sheets against the
 /// surfaces' hundreds of megabytes, and finding them means reading the archive a third time.
-const GROUND_CACHE: &str = "track-ground-v2";
+// v3: 8192-wide sheets are read now, so the pick has records to consider that v2 never saw.
+const GROUND_CACHE: &str = "track-ground-v3";
 
 /// The ground stack, cached as the blob the front end receives.
-const GROUND_LAYERS_CACHE: &str = "track-ground-layers-v1";
+// v2: as `GROUND_CACHE` — the record scan reaches sheets it used to stop short of.
+const GROUND_LAYERS_CACHE: &str = "track-ground-layers-v2";
 
 /// How many decoded scenery meshes to keep. Smaller than the terrain's: one of these is
 /// about 30 MB, against 16 for a terrain master.
@@ -292,10 +297,37 @@ fn rgb(node: &CfgNode, key: &str) -> Option<[f32; 3]> {
     Some([f("red")?, f("green")?, f("blue")?])
 }
 
+/// Which weather block a viewer shows a track under.
+///
+/// "The first block" is not a thing a `HashMap` has, and iterating one picked a different
+/// condition every load: Indiana's sun, fog and ambient came back `clear`, `cloudy` or `rainy`
+/// at random. Worse, only `clear` names a sky of the track's own — the others name
+/// `*cloudysky.edf`, a game file we do not resolve — so two loads in three drew no sky at all.
+///
+/// `clear` is what a track is authored and photographed under, so it wins; then any block
+/// whose sky the track actually ships; then whatever is left, in name order so it is at least
+/// the same one twice running.
+fn weather(root: &crate::cfg::CfgNode) -> Option<&crate::cfg::CfgNode> {
+    let ships_it = |w: &&crate::cfg::CfgNode| {
+        w.get("sky").is_some_and(|s| !s.trim().starts_with('*'))
+    };
+    let mut named: Vec<&crate::cfg::CfgNode> = {
+        let mut v: Vec<(&String, &crate::cfg::CfgNode)> = root.blocks.iter().collect();
+        v.sort_by(|a, b| a.0.cmp(b.0));
+        v.into_iter().map(|(_, w)| w).collect()
+    };
+    named.retain(|w| w.get("sky").is_some());
+    root.blocks
+        .get("clear")
+        .filter(|w| w.get("sky").is_some())
+        .or_else(|| named.iter().copied().find(ships_it))
+        .or_else(|| named.first().copied())
+}
+
 /// Read a track's `.amb`: the models it wraps itself in, and the light it sits under.
 ///
 /// Weather is a block per condition — `clear`, `cloudy` and the rest — carrying its own sky,
-/// sun and fog. The first one is taken: a viewer shows a track, not a forecast.
+/// sun and fog. `clear` is taken: a viewer shows a track, not a forecast.
 fn ambience(
     path: &Path,
     names: &[String],
@@ -319,11 +351,10 @@ fn ambience(
     };
     let background = root.get("background").map(|s| s.trim().to_string());
 
-    // The weather blocks are the ones carrying a sky; take the first that names one.
     let mut sky = None;
-    for (_, w) in root.blocks.iter() {
-        let Some(model) = w.get("sky") else { continue };
-        sky = Some(model.trim().to_string());
+    let weather = weather(&root);
+    if let Some(w) = weather {
+        sky = w.get("sky").map(|m| m.trim().to_string());
         amb.sky_colour = rgb(w, "sky_color");
         amb.sun_colour = rgb(w, "sun_color");
         amb.ambient_colour = rgb(w, "ambient");
@@ -331,7 +362,6 @@ fn ambience(
             amb.fog_colour = rgb(w, "fog");
             amb.fog_density = fog.get("density").and_then(|v| v.trim().parse().ok());
         }
-        break;
     }
     (amb, background, sky)
 }
@@ -1658,6 +1688,50 @@ source1
             !sky.0.is_empty() || !back.0.is_empty(),
             "a track wraps itself in something"
         );
+    }
+
+    /// Indiana's three conditions, in the order and shape its own `.amb` carries them: only
+    /// `clear` names a sky the track ships, and the other two point at the game's.
+    const THREE_CONDITIONS: &str = "\
+sun_position\n{\nx = -7\ny = 7\nz = -5\n}\n\
+background = background.edf\n\
+clear\n{\nsky_color\n{\nred = 0.72\ngreen = 0.80\nblue = 0.84\n}\nsky = dome.edf\n}\n\
+cloudy\n{\nsky_color\n{\nred = 0.33\ngreen = 0.49\nblue = 0.58\n}\nsky = *cloudysky.edf\n}\n\
+rainy\n{\nsky_color\n{\nred = 0.50\ngreen = 0.50\nblue = 0.50\n}\nsky = *rainysky.edf\n}\n";
+
+    /// A viewer shows a track, not a forecast — and it shows it the same way twice.
+    ///
+    /// `blocks` is a `HashMap`, so taking "the first" one drew Indiana under `clear`, `cloudy`
+    /// or `rainy` depending on the run, and only `clear` has a sky we can resolve: two loads
+    /// in three had no sky at all.
+    #[test]
+    fn the_weather_is_clear_and_it_is_the_same_every_time() {
+        let root = crate::cfg::parse(THREE_CONDITIONS.as_bytes());
+        let picked = weather(&root).expect("a condition carrying a sky");
+        assert_eq!(picked.get("sky").map(str::trim), Some("dome.edf"));
+
+        // Re-parsing rebuilds the map, so a fresh hash order every time — the failure this
+        // catches only ever showed up across runs.
+        for _ in 0..32 {
+            let again = crate::cfg::parse(THREE_CONDITIONS.as_bytes());
+            let w = weather(&again).expect("a condition carrying a sky");
+            assert_eq!(w.get("sky").map(str::trim), Some("dome.edf"), "picked a different condition");
+            assert_eq!(rgb(w, "sky_color"), Some([0.72, 0.80, 0.84]), "took another block's light");
+        }
+    }
+
+    /// A track with no `clear` block still has to settle on one condition, and on the one
+    /// whose sky it actually carries rather than a `*` game file.
+    #[test]
+    fn without_clear_it_takes_the_sky_the_track_ships() {
+        const NO_CLEAR: &str = "\
+cloudy\n{\nsky = *cloudysky.edf\n}\n\
+overcast\n{\nsky = my_own_dome.edf\n}\n";
+        for _ in 0..32 {
+            let root = crate::cfg::parse(NO_CLEAR.as_bytes());
+            let w = weather(&root).expect("a condition carrying a sky");
+            assert_eq!(w.get("sky").map(str::trim), Some("my_own_dome.edf"));
+        }
     }
 
     /// The invariant the blob depends on, checked on the path that broke it: a placed prop
