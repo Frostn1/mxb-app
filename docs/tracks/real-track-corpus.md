@@ -747,6 +747,10 @@ real-world band.
 
 ### 10. What this changes — in priority order
 
+**Status:** eight of these nine shipped, with the worked example and the model's prompt updated
+to match. Item 3 was attempted and backed out for a stated geometric reason, and item 8 was half
+wrong — both are marked in place below rather than quietly dropped.
+
 1. **Jump faces are too long and too shallow.** A 3 m jump gets a 12.5 m face at 13.5° mean, where
    every real source says 6–9 m at 18.4–26.6°. The `face_run` half-angle relation is right and the
    arc shape is right — the exit/mean factor of 2.0 almost exactly matches the certified ramp's 1.82
@@ -770,6 +774,15 @@ real-world band.
    set that ceiling; `FEATURE_HEIGHT_M` currently allows 5.0.
 3. **Straight the last ~2 m of the lip.** `face_arc` is steepest exactly at the lip, which is the
    one thing the terrain-park literature says to avoid — it is an inadvertent-inversion hazard.
+
+   *Attempted, and backed out.* `DoubleShape::height_at` trims the crown off the top of a face
+   and rescales what is left, and that is exact **only** because a chord cut off an arc keeps
+   rise and run in the same `tan(sweep/2)` ratio. Splice a straight into the top and the identity
+   fails — `sin(u)·tan(u) ≠ 1 − cos(u)` — so the crown joins a face that is no longer at the
+   crown's own angle. Measured: a 4 m jump over a 12 m gap stood at **39.1° against a stated 38**.
+   Doing it properly means rebuilding the crown construction so it does not lean on
+   self-similarity. Worth doing, and not a constant. Note the crown already rounds the crest over
+   `0.9·h` of radius — on a 4 m jump, more ground than the 2 m straight would have occupied.
 4. **Cap whoop height** at 0.6–0.9 m. Currently unconstrained; every source agrees on the figure.
 5. **Add the 20 m run-up floor** per jump, alongside the existing speed check.
 6. **Widen the ridden line** — 4.2 m against a 6 m regulated minimum.
@@ -778,8 +791,12 @@ real-world band.
    **50.6 km/h** and the dry band is 45–54; 60 km/h is the *fastest lap ever recorded*. Everything
    sized off that assumption — how much run a jump needs, where braking starts — inherits it.
    Separately, `V_MAX` at 72 km/h is below the 77.3 km/h a radar caught on a start straight.
-8. **`START_SPRINT_M` 70 → 80–120** to match FIM's and FFM's recommendation, and `START_LINE_M` 150
-   is longer than any published start.
+8. **`START_SPRINT_M` 70 → 80–120** to match FIM's and FFM's recommendation.
+
+   *Corrected after implementation:* this item also claimed `START_LINE_M` at 150 m was "longer
+   than any published start". It is not. The 79–91 m figure is the **straight** off the gates;
+   `START_LINE_M` is the whole start line, and published ones run 67–208 m (Indiana 181,
+   SandPoint 208, Smokey Pines 67). 150 sits inside that, and it was left alone.
 9. **Cap straights at 125 m.** The FFM is the only federation to state a straight-length limit, and
    our prompt asks for a 100–160 m opening straight — the top of that range is over it. The rule has
    an escape hatch worth copying: 140 m is allowed if an obstacle sits in the first 15 m.
