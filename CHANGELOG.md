@@ -9,6 +9,8 @@
   says how many it hid and lets you look at them.
 - A server's details show who is on it: everyone in the session when it is the server you are
   riding, and the riders using paint sync anywhere else.
+- The server list marks the rows with riders on paint sync, so you can see where your paints
+  will actually show up without opening each server.
 - A server's details name the track it is running, show its picture when you already have it,
   and point you at the shop or MXB Hub when you don't.
 - Share codes that keep updating. Turn on "Keep it updated" when you share and you get a

@@ -1084,6 +1084,10 @@ export const en = {
   "serverBrowser.any": "Any",
   "serverBrowser.yes": "Yes",
   "serverBrowser.notJoinable": "MX Bikes can't be pointed at this server's address.",
+  "serverBrowser.paintSyncHere_one":
+    "{{count}} rider on this server is running paint sync — you'll see the livery they actually built.",
+  "serverBrowser.paintSyncHere_other":
+    "{{count}} riders on this server are running paint sync — you'll see the liveries they actually built.",
   "serverBrowser.filtered": "Filtered",
   "serverBrowser.hiddenCount": "{{count}} hidden",
   "serverBrowser.hideFiltered": "Hide them again",

@@ -1106,6 +1106,10 @@ export const de: Translation = {
   "serverBrowser.any": "Beliebig",
   "serverBrowser.yes": "Ja",
   "serverBrowser.notJoinable": "MX Bikes kann die Adresse dieses Servers nicht ansteuern.",
+  "serverBrowser.paintSyncHere_one":
+    "{{count}} Fahrer auf diesem Server nutzt Paint-Sync — du siehst sein echtes Design.",
+  "serverBrowser.paintSyncHere_other":
+    "{{count}} Fahrer auf diesem Server nutzen Paint-Sync — du siehst ihre echten Designs.",
   "serverBrowser.filtered": "Gefiltert",
   "serverBrowser.hiddenCount": "{{count}} ausgeblendet",
   "serverBrowser.hideFiltered": "Wieder ausblenden",
