@@ -301,7 +301,7 @@ pub fn load_master(app: &tauri::AppHandle, path: &str) -> Result<Master> {
 }
 
 /// The expensive path: inflate a heightfield, work out its layout, reduce it.
-fn decode_master(path: &Path) -> Result<Master> {
+pub(crate) fn decode_master(path: &Path) -> Result<Master> {
     let names = entry_names(path)?;
     let candidates = heightfield_entries(&names);
     if candidates.is_empty() {
