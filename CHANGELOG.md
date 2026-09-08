@@ -3,6 +3,8 @@
 ## 2026-09-07
 
 ### Fixed
+- A jump's landing is a landing: it rolls away from the deck and is steepest where a rider
+  comes down on it, instead of dropping away hardest at the edge of the top.
 - Jumps drawn point by point are built at the angle they were drawn at, so a triple's
   take-off is a face rather than a wall.
 - The Library shows a mod's real name and picture after it has been replaced by a new

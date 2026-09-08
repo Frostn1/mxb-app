@@ -2720,6 +2720,21 @@ fn arc_up(t: f32, height: f32, run: f32) -> f32 {
 /// How far round its own curve a face turns, at least, in radians.
 const FACE_SWEEP_MIN: f32 = 1.35;
 
+/// A landing's shape, at `t` from the crest of the jump to the ground that catches you.
+/// Returns 1 at the crest and 0 at the foot.
+///
+/// Tangent at *both* ends, which is what makes it a landing. The take-off arc ridden backwards
+/// — which is what this used to be — puts the steepest part of the landing hard against the
+/// edge of the deck: a flat top breaking to twenty-five degrees within a couple of metres, and
+/// easing off to nine by the time a rider is anywhere near the ground. From the seat that is a
+/// take-off pointing the wrong way, and it is the shape that was reported as one.
+///
+/// A built landing rolls away from the deck, is steepest through its middle where the rider
+/// actually comes down on it, and flattens into the ground rather than meeting it at an angle.
+fn arc_down(t: f32) -> f32 {
+    1.0 - smoothstep(t.clamp(0.0, 1.0))
+}
+
 fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
     // Drawn by hand: eased between the points it was given, which is the same easing the lap's
     // own height curve uses. Nothing else here has a shape someone chose point by point.
@@ -2741,9 +2756,9 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
             } else if u <= up + top {
                 height
             } else {
-                // The same arc ridden the other way, so the far side is convex — steep off
-                // the crest and flattening into the ground that catches you.
-                height * arc_up(1.0 - (u - up - top) / down, height, down)
+                // And down the other side, which is its own shape rather than this one
+                // reversed — see `arc_down`.
+                height * arc_down((u - up - top) / down.max(1e-4))
             }
         }
         Feature::Roller { height, .. } => height * (0.5 - 0.5 * (t * std::f32::consts::TAU).cos()),
