@@ -16,6 +16,7 @@ pub mod heightfield;
 pub mod linkwalk;
 pub mod lru;
 pub mod map;
+pub mod names;
 pub mod paint;
 pub mod paintwatch;
 pub mod pkz;
