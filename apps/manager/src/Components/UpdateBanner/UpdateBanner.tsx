@@ -1,8 +1,8 @@
 import { ArrowUpCircle, Loader2, X } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useUpdate } from "@/Context/Update";
-import { Trans } from "@frost/shared/i18n";
-import { useT } from "@frost/shared/i18n/context";
+import { Trans, APP_NAME } from "@/i18n";
+import { useT } from "@/i18n";
 
 /**
  * Slim, dismissible bar shown at the top of the app when a newer signed build
@@ -21,7 +21,9 @@ export default function UpdateBanner() {
           k="update.available"
           values={{
             version: (
-              <span className="font-semibold">MXB App v{available.version}</span>
+              <span className="font-semibold">
+                {APP_NAME} v{available.version}
+              </span>
             ),
           }}
         />

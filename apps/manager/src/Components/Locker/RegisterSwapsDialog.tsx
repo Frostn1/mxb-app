@@ -12,12 +12,12 @@ import {
 import { Button } from "@frost/shared/Components/ui/button";
 import { registerLooseSwaps } from "@frost/shared/api/mods";
 import type { LooseSwapBike, LooseSwapCandidate } from "@frost/shared/types";
-import { Trans } from "@frost/shared/i18n";
-import { useT, type TFunc } from "@frost/shared/i18n/context";
+import { Trans, type TKey } from "@/i18n";
+import { useT, type TFunc } from "@/i18n";
 
 /** "2 model swaps and 1 sound mod" — omits a kind with zero, "sets" if somehow both are 0.
  *  The joiner is a key too; " and " is English, not punctuation. */
-function summarize(models: number, sounds: number, t: TFunc): string {
+function summarize(models: number, sounds: number, t: TFunc<TKey>): string {
   const parts: string[] = [];
   if (models) parts.push(t("swaps.modelSets", { count: models }));
   if (sounds) parts.push(t("swaps.soundSets", { count: sounds }));

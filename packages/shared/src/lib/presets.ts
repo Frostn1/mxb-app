@@ -1,5 +1,5 @@
 import type { BikeModels, LibraryEntry, Loadout } from "../types";
-import type { TKey } from "../i18n";
+import type { BaseTKey } from "../i18n/core";
 import {
   scanLibrary,
   scanRiderTargets,
@@ -11,7 +11,7 @@ import {
 export interface SlotDef {
   key: keyof Loadout;
   /** Translation key — resolved with `t()` at render. */
-  label: TKey;
+  label: BaseTKey;
   group: "bike" | "rider" | "head" | "body";
   /** Which other slot this slot's options depend on (for dependent dropdowns). */
   dependsOn?: "bikeid" | "helmet" | "boots" | "protection" | "rider";
@@ -73,7 +73,7 @@ export function slotsFor(sections: string[] | null | undefined): SlotDef[] {
   });
 }
 
-export const SLOT_GROUPS: { id: SlotDef["group"]; label: TKey }[] = [
+export const SLOT_GROUPS: { id: SlotDef["group"]; label: BaseTKey }[] = [
   { id: "bike", label: "slotGroup.bike" },
   { id: "rider", label: "slotGroup.rider" },
   { id: "head", label: "slotGroup.head" },

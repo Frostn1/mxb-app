@@ -67,7 +67,7 @@ import {
   formatDay,
   formatLength,
 } from "@frost/shared/lib/mods";
-import { useT, type TFunc } from "@frost/shared/i18n/context";
+import { useT, type TFunc, type TKey } from "@/i18n";
 import { metaKey, peekMeta, primeMetaCache, requestMeta } from "../../lib/pkzMeta";
 import {
   CATEGORY_LABEL,
@@ -255,7 +255,7 @@ function ModelSwapList({
 }: {
   bike: string;
   variants: ModelVariant[];
-  t: TFunc;
+  t: TFunc<TKey>;
   /** Undefined when this build can't draw bike geometry — then no row offers a preview. */
   onPreview?: (variant: string) => void;
   /** A model moved or went to the Trash — rescan. */
@@ -439,7 +439,7 @@ function buildSections(
   entries: LibraryEntry[],
   search: string,
   sort: LibrarySort,
-  t: TFunc,
+  t: TFunc<TKey>,
 ): Section[] {
   const q = search.trim().toLowerCase();
   const filtered = q

@@ -3,7 +3,7 @@ import { Camera, Image as ImageIcon, RotateCcw, User } from "lucide-react";
 import { save as pickSavePath } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
-import { useT, type TKey } from "@frost/shared/i18n/context";
+import { useT, type TKey } from "@/i18n";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import { Row, Slider } from "@frost/shared/Components/ui/controls";

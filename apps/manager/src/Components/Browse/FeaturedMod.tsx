@@ -5,7 +5,7 @@ import CachedImg from "@frost/shared/Components/ui/cached-img";
 import RatingStars from "./RatingStars";
 import type { ModRating, ModSummary } from "@frost/shared/types";
 import { formatDateShort } from "@frost/shared/lib/mods";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 
 interface FeaturedModProps {
   mod: ModSummary;

@@ -94,9 +94,9 @@ import {
   type Colorway,
   type ThemeMode,
 } from "../../Context/Theme";
-import { Trans } from "@frost/shared/i18n";
-import { useI18n, type LocalePref, type TKey } from "@frost/shared/i18n/context";
-import { getLocale, LOCALE_OPTIONS } from "@frost/shared/i18n/core";
+import { Trans, APP_NAME } from "@/i18n";
+import { useI18n, type LocalePref, type TKey } from "@/i18n";
+import { getLocale, LOCALE_OPTIONS } from "@/i18n";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { prettyHotkey } from "../../lib/hotkey";
 import { formatBytes, formatDateShort } from "@frost/shared/lib/mods";
@@ -1789,7 +1789,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           >
             <p className="text-[12px] leading-relaxed text-muted-foreground">
               Live-reloads MX Bikes when mods change, so you don&apos;t restart the game.
-              MXB App installs it, keeps it updated, and runs it for you.
+              {APP_NAME} installs it, keeps it updated, and runs it for you.
             </p>
 
             <div className="flex items-center justify-between rounded-lg border border-input bg-background px-3 py-2.5">
@@ -2024,7 +2024,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           )}
 
           {/* logs — the first thing any bug report asks for, and the one thing a player
-              has no way to find on their own: MXB App's log dir is buried in AppData, and
+              has no way to find on their own: {APP_NAME}'s log dir is buried in AppData, and
               the game writes its own beside the executable. Both are named here, either
               can be opened, and the pair zips into one file to attach. */}
           {active === "logs" && (

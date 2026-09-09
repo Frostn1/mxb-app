@@ -7,7 +7,7 @@ import { ContextBarRight } from "../Shell/ContextBar";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
 import { cn } from "@frost/shared/lib/utils";
 import { mxbsecureGenerate, type SecureGenerateOutcome } from "@frost/shared/api/mods";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 
 /**
  * The mxbsecure tab — protect tracks for a buyer.

@@ -42,7 +42,7 @@ import {
   psdSave,
   textureBytes,
 } from "@frost/shared/api/mods";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import { IMAGE_EXTS, PaintDestBar, isBikeKind, usePaintDest } from "../paintDest";
 const PREVIEW_OPEN_KEY = "mxb:designer:preview:v1";
 

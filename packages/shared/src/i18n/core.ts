@@ -1,31 +1,48 @@
 /**
- * The non-React half of the i18n layer: dictionaries, key types, lookup and
- * formatting.
+ * The non-React half of the i18n layer: key types, lookup and formatting.
  *
  * Kept separate from `index.tsx` because React Fast Refresh only hot-swaps a
  * module whose exports are all components or hooks. With `LOCALE_OPTIONS` and
  * friends living alongside `I18nProvider`, every edit to the i18n layer forced a
  * full page reload in dev instead of a hot update.
+ *
+ * This module ships only the BASE dictionary — the strings the shared components
+ * themselves render. An app calls `registerDicts` at startup with its own, fuller
+ * dictionaries; until it does, the base ones are what renders.
  */
-import { en } from "./locales/en";
-import { it } from "./locales/it";
-import { es } from "./locales/es";
-import { fr } from "./locales/fr";
-import { de } from "./locales/de";
-import { ptBR } from "./locales/pt-BR";
+import { en as baseEn } from "./base/en";
+import { it as baseIt } from "./base/it";
+import { es as baseEs } from "./base/es";
+import { fr as baseFr } from "./base/fr";
+import { de as baseDe } from "./base/de";
+import { ptBR as basePtBR } from "./base/pt-BR";
 
-export type Locale = "en" | "it" | "es" | "fr" | "de" | "pt-BR";
+/** Every locale we ship. Also what `isLocale` tests against, so it no longer
+ *  depends on which dictionaries happen to be registered. */
+export const LOCALES = ["en", "it", "es", "fr", "de", "pt-BR"] as const;
+export type Locale = (typeof LOCALES)[number];
 /** What the user picked — `system` follows the OS. */
 export type LocalePref = Locale | "system";
 
-/**
- * Every locale is typed against `en`, so `tsc` rejects a translation that is
- * missing a key or invents one. That's the whole reason this is a local module
- * and not i18next: a missing key can't reach a build.
- */
-export type Translation = Record<keyof typeof en, string>;
+/** A dictionary as this layer handles it: flat, and not necessarily the base one. */
+export type Dict = Record<string, string>;
 
-const DICTS: Record<Locale, Translation> = { en, it, es, fr, de, "pt-BR": ptBR };
+/**
+ * Every base locale is typed against base `en`, so `tsc` rejects a translation
+ * that is missing a key or invents one. That's the whole reason this is a local
+ * module and not i18next: a missing key can't reach a build. Each app keeps the
+ * same guarantee over its own, larger dictionary — see its `i18n/index.ts`.
+ */
+export type BaseTranslation = Record<keyof typeof baseEn, string>;
+
+type BaseKey = keyof typeof baseEn;
+/** `"library.uninstalled_other"` → `"library.uninstalled"`, so the plural family
+ *  is addressable by its base name while staying type-checked. */
+export type PluralBase<K> = K extends `${infer B}_other` ? B : never;
+export type BaseTKey = BaseKey | PluralBase<BaseKey>;
+
+export type TVars = Record<string, string | number>;
+export type TFunc<K extends string = string> = (key: K, vars?: TVars) => string;
 
 /** Listed in their own language — someone who lands in a language they can't
  *  read still has to be able to find their way out. */
@@ -39,19 +56,34 @@ export const LOCALE_OPTIONS: { value: LocalePref; label: string }[] = [
   { value: "pt-BR", label: "Português (BR)" },
 ];
 
-type Key = keyof typeof en;
-/** `"library.uninstalled_other"` → `"library.uninstalled"`, so the plural family
- *  is addressable by its base name while staying type-checked. */
-type PluralBase<K> = K extends `${infer B}_other` ? B : never;
-export type TKey = Key | PluralBase<Key>;
-
-export type TVars = Record<string, string | number>;
-export type TFunc = (key: TKey, vars?: TVars) => string;
-
 export const STORAGE_KEY = "frost-locale";
 
+const BASE_DICTS: Record<Locale, Dict> = {
+  en: baseEn,
+  it: baseIt,
+  es: baseEs,
+  fr: baseFr,
+  de: baseDe,
+  "pt-BR": basePtBR,
+};
+
+let DICTS: Record<Locale, Dict> = BASE_DICTS;
+let FALLBACK: Dict = baseEn;
+
+/**
+ * Hand the layer the app's dictionaries.
+ *
+ * Called for its side effect from the app's `i18n/index.ts`, which imports the
+ * dictionaries anyway to derive its `Translation` type — so the registration
+ * happens on first import, before any component renders.
+ */
+export function registerDicts(dicts: Record<Locale, Dict>): void {
+  DICTS = dicts;
+  FALLBACK = dicts.en;
+}
+
 function isLocale(v: string): v is Locale {
-  return v in DICTS;
+  return (LOCALES as readonly string[]).includes(v);
 }
 
 /**
@@ -87,7 +119,7 @@ export function resolveSystemLocale(tag = navigator.language): Locale {
 }
 
 function lookup(
-  dict: Translation,
+  dict: Dict,
   locale: Locale,
   key: string,
   vars?: TVars,
@@ -111,12 +143,27 @@ function lookup(
  * time someone adds a string and forgets. Mirrored outside React for the same reason the
  * active locale is: the strings are read from plain helpers as well as components.
  *
+ * `{{app}}` is seeded here rather than by a provider because it is a build-time
+ * constant and because `setAmbientVars` has exactly one caller (`App.tsx`) — the
+ * overlay renders its own React tree in a separate webview where that never runs, so
+ * anything waiting on a provider renders its placeholder literally over there.
+ *
  * Explicit vars always win, so a call site can still override.
  */
-let ambientVars: TVars = {};
+/** The product name, for the handful of rendered strings that are hardcoded English
+ *  rather than dictionary entries. Same source as the `{{app}}` placeholder. */
+export const APP_NAME: string = import.meta.env.VITE_APP_NAME;
 
+let ambientVars: TVars = { app: APP_NAME };
+
+/** Merge, don't replace: the build-time seeds above have to survive this. */
 export function setAmbientVars(vars: TVars): void {
-  ambientVars = vars;
+  ambientVars = { ...ambientVars, ...vars };
+}
+
+/** The ambient value for a placeholder name, if there is one. */
+export function ambientValue(name: string): string | number | undefined {
+  return name in ambientVars ? ambientVars[name] : undefined;
 }
 
 function interpolate(str: string, vars?: TVars): string {
@@ -129,7 +176,7 @@ function interpolate(str: string, vars?: TVars): string {
 /** The uninterpolated string for a key, falling back to English. */
 export function template(locale: Locale, key: string, vars?: TVars): string {
   const raw =
-    lookup(DICTS[locale], locale, key, vars) ?? lookup(en, "en", key, vars);
+    lookup(DICTS[locale], locale, key, vars) ?? lookup(FALLBACK, "en", key, vars);
   // The types make this unreachable; showing English beats showing a raw key.
   return raw ?? key;
 }
@@ -139,9 +186,9 @@ export function translate(locale: Locale, key: string, vars?: TVars): string {
 }
 
 /** Render a label that is either a real folder name or a translated phrase. */
-export function labelOf(
-  opt: { label: string; labelKey?: TKey; labelVars?: Record<string, string> },
-  t: TFunc,
+export function labelOf<K extends string>(
+  opt: { label: string; labelKey?: K; labelVars?: Record<string, string> },
+  t: TFunc<K>,
 ): string {
   return opt.labelKey ? t(opt.labelKey, opt.labelVars) : opt.label;
 }

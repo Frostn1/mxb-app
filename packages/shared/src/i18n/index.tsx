@@ -12,6 +12,7 @@
  */
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  ambientValue,
   readStoredLocale,
   resolveSystemLocale,
   setActiveLocale,
@@ -21,17 +22,16 @@ import {
   type Locale,
   type LocalePref,
   type TFunc,
-  type TKey,
 } from "./core";
 import { I18nContext, useI18n } from "./context";
 
 export type {
+  BaseTKey,
+  BaseTranslation,
   Locale,
   LocalePref,
   TFunc,
-  TKey,
   TVars,
-  Translation,
 } from "./core";
 
 export function I18nProvider({ children }: { children: ReactNode }) {
@@ -63,7 +63,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     setLocaleState(pref);
   }, []);
 
-  const t = useCallback<TFunc>(
+  const t = useCallback<TFunc<string>>(
     (key, vars) => translate(resolved, key, vars),
     [resolved],
   );
@@ -90,7 +90,9 @@ export function Trans({
   values,
   count,
 }: {
-  k: TKey;
+  /** Widened for the same reason `useT` is — each app re-exports this narrowed
+   *  to its own key union, which is where the 16 call sites get checked. */
+  k: string;
   values: Record<string, ReactNode>;
   count?: number;
 }) {
@@ -105,11 +107,15 @@ export function Trans({
         const name = match[1];
         return (
           <Fragment key={i}>
+            {/* Ambient vars are the last resort before giving up and showing the
+                placeholder. Without this line `{{game}}` renders literally in any
+                string a call site did not pass it to — which is what
+                `settings.profilesDesc` and `settings.gameInstallDesc` were doing. */}
             {name in values
               ? values[name]
               : count !== undefined && name === "count"
                 ? count
-                : part}
+                : (ambientValue(name) ?? part)}
           </Fragment>
         );
       })}

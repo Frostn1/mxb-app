@@ -11,8 +11,8 @@ import {
   type ActiveInstall,
   type QueuedInstall,
 } from "../../Context/Install";
-import { useT } from "@frost/shared/i18n/context";
-import type { TKey } from "@frost/shared/i18n";
+import { useT } from "@/i18n";
+import type { TKey } from "@/i18n";
 import type { InstallStage } from "@frost/shared/types";
 import { displayName, formatBytes } from "@frost/shared/lib/mods";
 import { Popover, PopoverContent, PopoverTrigger } from "@frost/shared/Components/ui/popover";

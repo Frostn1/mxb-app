@@ -7,7 +7,7 @@ import type {
   HubSort,
 } from "@frost/shared/types";
 import type { ShopItem } from "@frost/shared/api/mods";
-import type { TKey } from "@frost/shared/i18n/core";
+import type { TKey } from "@/i18n";
 
 /**
  * MXB Hub — `shop.mxb-hub.com`, the community marketplace `mxbhub.com` redirects to.

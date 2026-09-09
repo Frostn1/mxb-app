@@ -40,7 +40,7 @@ import type { HubCategory, HubMod } from "@frost/shared/types";
 import { buildInstalledIndex } from "../../lib/installedMatch";
 import { useInstall } from "../../Context/Install";
 import { useConfig } from "@frost/shared/Context/Config";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import PurchaseCard, { type Purchase } from "../Shop/PurchaseCard";
 import ShopDetail from "../Shop/ShopDetail";
 import CategoryPill from "../Shop/CategoryPill";

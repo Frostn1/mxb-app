@@ -24,9 +24,9 @@ import {
   formatLength,
 } from "@frost/shared/lib/mods";
 import { CATEGORY_ICON, CATEGORY_LABEL, categoryIcon } from "./categories";
-import { Trans } from "@frost/shared/i18n";
+import { Trans } from "@/i18n";
 import { ContextBarLeft } from "../Shell/ContextBar";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import { Button } from "@frost/shared/Components/ui/button";
 
 interface LibraryDetailProps {

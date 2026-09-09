@@ -5,7 +5,7 @@ import MyDownloads from "./MyDownloads";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
 import { cn } from "@frost/shared/lib/utils";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 
 type ShopTab = "catalog" | "purchases";
 

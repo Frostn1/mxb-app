@@ -25,7 +25,7 @@ import {
   DialogFooter,
   DialogTitle,
 } from "@frost/shared/Components/ui/dialog";
-import { useT, type TKey } from "@frost/shared/i18n/context";
+import { useT, type TKey } from "@/i18n";
 import type { Feel } from "@frost/shared/api/mods";
 
 /** `profile.ini` sections, in the order a rider thinks about them. */

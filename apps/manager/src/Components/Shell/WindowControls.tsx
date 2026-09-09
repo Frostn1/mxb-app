@@ -1,7 +1,7 @@
 import { Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "@frost/shared/lib/utils";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 
 const appWindow = getCurrentWindow();
 

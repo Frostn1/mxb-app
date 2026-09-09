@@ -4,7 +4,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import Overlay from "./Components/Overlay/Overlay";
 import { ErrorBoundary } from "@frost/shared/Components/ErrorBoundary";
-import { I18nProvider } from "@frost/shared/i18n";
+import { I18nProvider } from "@/i18n";
 import "./index.css";
 
 /** The in-game overlay window loads the same bundle with `?overlay=1` (see

@@ -12,7 +12,7 @@ import {
 } from "@frost/shared/Components/ui/dialog";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
 import type { ModEntry, Preset, PresetContent } from "@frost/shared/types";
-import { useT, type TKey } from "@frost/shared/i18n/context";
+import { useT, type TKey } from "@/i18n";
 import { displayName, formatBytes } from "@frost/shared/lib/mods";
 import { categoryIcon } from "../Library/categories";
 import { contentOf } from "./Manage";

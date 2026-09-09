@@ -23,7 +23,7 @@ import {
 } from "@frost/shared/api/mods";
 import type { LockItem, LockProgress } from "@frost/shared/types";
 import { formatBytes } from "@frost/shared/lib/mods";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 
 /** A GUID as the game prints it. The Rust side is the authority; this is the same rule,
  *  applied as you type so a bad paste is visible before the run rather than after it. */

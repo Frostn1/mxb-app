@@ -5,7 +5,7 @@ import { cn } from "@frost/shared/lib/utils";
 import type { LoadedPlugin } from "@/lib/pluginHost";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useGameRunning } from "../../lib/useGameRunning";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import { launchGame, contentLockAvailable, contentSecureAvailable } from "@frost/shared/api/mods";
 import type { GameCaps } from "@frost/shared/types";
 import type { StudioTab } from "../Studio/Studio";

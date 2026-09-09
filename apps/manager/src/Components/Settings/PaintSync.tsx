@@ -14,10 +14,10 @@ import {
   type ExperimentalState,
   type SyncEvent,
 } from "@frost/shared/api/mods";
-import { useT, type TFunc } from "@frost/shared/i18n/context";
+import { useT, type TFunc, type TKey } from "@/i18n";
 
 /** `1723459200000` -> `2 minutes ago`, `0` -> null. */
-function ago(t: TFunc, at: number): string | null {
+function ago(t: TFunc<TKey>, at: number): string | null {
   if (!at) return null;
   const secs = Math.max(0, Math.round((Date.now() - at) / 1000));
   if (secs < 60) return t("sync.agoJustNow");

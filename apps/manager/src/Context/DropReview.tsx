@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { cancelDrop, commitDrop, repreviewDrop } from "@frost/shared/api/mods";
 import type { DropCommitItem, DropPlan, NewDownload } from "@frost/shared/types";
 import { useDownloads } from "./Downloads";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import DropReview, { type RowState } from "../Components/Dropzone/DropReview";
 
 /**

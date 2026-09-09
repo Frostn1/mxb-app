@@ -28,8 +28,8 @@ import {
 } from "@frost/shared/Components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@frost/shared/Components/ui/popover";
 import { cn } from "@frost/shared/lib/utils";
-import { useT } from "@frost/shared/i18n/context";
-import type { TKey } from "@frost/shared/i18n";
+import { useT } from "@/i18n";
+import type { TKey } from "@/i18n";
 import type { DropChoice, DropItem, DropKind, DropPlan, DropReason } from "@frost/shared/types";
 
 /** A row plus the edits the user has made to it. */
