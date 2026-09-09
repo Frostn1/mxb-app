@@ -127,8 +127,6 @@ export const fr: Translation = {
   "welcome.intro.body":
     "Votre gestionnaire de mods pour MX Bikes. Gardez circuits, motos et décos organisés au même endroit — fini les fichiers zip éparpillés sur le bureau. On vous fait faire le tour en quelques secondes.",
   "welcome.getStarted": "C'est parti",
-  "welcome.analyticsNote":
-    "{{app}} compte anonymement quelles pages sont utilisées. Aucun nom, aucun fichier — désactivable dans les Réglages.",
   "presets.missingMods":
     "Mods manquants : {{mods}}. Installez-les pour voir ces éléments.",
   "presets.help":
@@ -605,9 +603,6 @@ export const fr: Translation = {
   "settings.colorwayRetro": "Rétro",
   "settings.language": "Langue",
   "settings.languageSystem": "Système",
-  "settings.analytics": "Partager des statistiques d'usage anonymes",
-  "settings.analyticsDesc":
-    "Envoie un identifiant aléatoire, la version de l'app et le nombre d'utilisations de chaque page et fonction, pour savoir quoi construire. Jamais votre nom, vos fichiers ni votre adresse.",
   "settings.runInBackground": "Continuer en arrière-plan",
   "settings.runInBackgroundDesc":
     "Fermer la fenêtre place {{app}} dans la barre d'état pour que FrostMod reste connecté. Quittez depuis l'icône de la barre.",
