@@ -68,11 +68,22 @@ const P_SPEC: f32 = 22.0;
 /// Brakes, m/s². Limited by the same ground that limits everything else.
 const A_BRAKE: f32 = 6.0;
 
-/// The fastest anything goes on a national, m/s — about 79 km/h.
+/// The fastest anything goes, m/s — 77 km/h.
 ///
-/// Measured off lap times rather than picked: a 2 km national lap runs about two minutes,
-/// which is a 60 km/h average, and a lap whose *average* is 60 does not have a 100 km/h top.
-const V_MAX: f32 = 20.0;
+/// This used to be reasoned from "a 2 km national lap runs about two minutes, which is a
+/// 60 km/h average". That average was wrong, and it was the load-bearing number: across 386
+/// official MXGP race classifications, 2014–2026, the median winner's race average is
+/// **50.6 km/h** and the dry band is 45–54. Sixty is the fastest single lap in twelve seasons.
+///
+/// The top itself is now measured rather than inferred. Nobody publishes a top speed for a
+/// motocross bike — not the manufacturers, not Cycle World, not MXA — but Dirt Rider had LAPD
+/// officers radar a supercross test track, and the fastest thing on it was the start at
+/// 48 mph. That is 21.4 m/s, and it is the only instrumented number of its kind.
+///
+/// Note it went *up* while the lap got slower: a lap's average is held down by its corners,
+/// which [`A_LAT`] already had right — the same radar put a bowl turn's apex at 27.4 km/h and
+/// this model puts a 13 m corner at 27.5. See `docs/tracks/real-track-corpus.md` §2.3.
+const V_MAX: f32 = 21.4;
 
 /// The slowest a corner is ever taken, m/s. A first-gear pivot turn is still moving.
 const V_MIN: f32 = 3.0;
