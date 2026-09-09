@@ -185,6 +185,29 @@ const RIDDEN_SMOOTH: f32 = 0.95;
 const TEXTURE_OCTAVES: u32 = 3;
 const TEXTURE_GAIN: f32 = 0.34;
 
+/// Wheel-scale chop: the half-metre chatter a ridden surface carries, and how deep it runs.
+///
+/// Separate from [`TEXTURE_WAVELENGTH_M`] because the two are different things and one cannot
+/// stand in for the other. The texture is broad-spectrum grain built from three octaves off a
+/// 1.8 m base, so only a fraction of its power lands where a wheel feels it — and measured by
+/// wavelength band against Indiana, a generated corner was short by **nine times** at 0.5-1 m
+/// while matching it at 2-4 m. Scaling the texture cannot fix that: at six times the amplitude
+/// and a tenth of the polish, chatter moved 4.60 cm to 4.87 against Indiana's 10.5, because
+/// the extra power goes where the spectrum already was.
+///
+/// Also unmoved by the texture's wavelength, its octaves and gain, the ridden smoothing, the
+/// rut depth, and the sampling step the measurement uses. All six were tried; this is what was
+/// missing rather than mis-tuned.
+/// Read in track coordinates and stretched across them: short along the direction of travel,
+/// long across it, so the chop stands as ridges a wheel crosses rather than as isotropic
+/// gravel. That ratio is the point. Isotropic, it lifts roughness along and across the line
+/// equally, and a published corner is not equal — Indiana's chatter is 77% of its across-line
+/// RMS where an isotropic field gives 39%, so matching the chatter meant overshooting the
+/// across-line figure by half before it arrived.
+const CHOP_WAVELENGTH_M: f32 = 0.55;
+const CHOP_ACROSS_M: f32 = 3.0;
+const CHOP_M: f32 = 0.30;
+
 /// The same, for the field that lays out where the grooves go.
 const RUT_FIELD_OCTAVES: u32 = 2;
 const RUT_FIELD_GAIN: f32 = 0.32;
@@ -222,7 +245,7 @@ const RUT_RADIUS_M: (f32, f32) = (40.0, 14.0);
 // Measured against Indiana on the same statistic the corpus survey prints, which is the only
 // way to compare: at 0.38 a built lap came back with corner grooves at p50 0.13 and p90 0.24
 // against Indiana's 0.21 and 0.44 — half the depth, and a corner you can see but not sit in.
-const RUT_DEPTH_M: f32 = 0.86;
+const RUT_DEPTH_M: f32 = 1.8;
 const RUT_DEPTH_STRAIGHT_M: f32 = 0.15;
 
 /// The material the cut displaced, which does not disappear.
@@ -416,6 +439,17 @@ const RUT_INSIDE: f32 = -0.022;
 /// whole thing: twenty to one is a rut, one to one is gravel. Indiana's own figure is about
 /// ten metres — a cross-section still matches the one two metres behind it four fifths of the
 /// way, half of it at five metres, and by twenty it is different ground.
+///
+/// Left at 34 even though the paragraph above measures ten, and the difference is worth
+/// keeping written down. At ten the across-line RMS goes 0.108 -> 0.118, into published
+/// hardpack's 0.110-0.141 from just under it — and three corpus guardrails fail:
+/// `a_straight_is_not_smooth_either`, `ordinary_ground_still_wears_the_way_it_was_measured`
+/// and `the_deepest_groove_lies_under_the_painted_line`. Ruts that turn over every ten metres
+/// do not survive down a straight and do not stay under the painted line.
+///
+/// So ten is right for a corner and wrong for the rest of the lap, and the change this wants
+/// is a length that varies with the corner rather than a smaller constant. Changed to ten and
+/// committed once without running the suite; this is the revert.
 const RUT_ALONG_M: f32 = 34.0;
 
 /// Metres between braking bumps.
@@ -461,6 +495,33 @@ const ACCEL_HEIGHT_M: f32 = 0.07;
 /// difference is visible from directly above without measuring anything.
 const EDGE_WOBBLE_M: f32 = 2.2;
 const EDGE_WOBBLE_WAVELENGTH_M: f32 = 26.0;
+
+/// How far the deck tilts across the track, metres of fall per metre out, and over what length
+/// of lap the tilt changes.
+///
+/// Ours had none. `deck` is one height per station and every cell across the corridor was set
+/// to it, so the track was flat across its whole width and its only cross-slope was whatever
+/// the berm and the ruts happened to add. Measured as the spread of the across-line gradient
+/// round a corner, that is 0.021 against Indiana's 0.039 and Southwick's 0.095 — and it is why
+/// nothing applied outside the corridor could move it, and why twenty cross-sections through
+/// one of our corners all traced the same envelope while a published corner's fan out by more
+/// than two metres.
+///
+/// A real corner is banked and the bank changes as you go round it: riders build the outside up
+/// over a session and scoop the inside, and neither happens evenly.
+///
+/// `CAMBER_INTO_BEND` is zero on purpose, having been tried at 0.45 and 0.15. A lean that is a
+/// clean function of the corner's radius is constant through a constant-radius corner, which is
+/// the thing being fixed — it made the sweep *worse* (0.46 to 0.55) while the wander alone
+/// improves it. The knob stays because the lean is real and belongs here once it varies too;
+/// it is the constant part that has no business in a corner.
+///
+/// Amplitude set against Indiana rather than by eye. At 0.09 the across-line RMS lands on
+/// 0.137 against Indiana's 0.136, and the camber spread goes 0.021 -> 0.030 against its 0.038.
+/// Above that the RMS overshoots the published range before the camber arrives.
+const CAMBER_MAX: f32 = 0.09;
+const CAMBER_ALONG_M: f32 = 20.0;
+const CAMBER_INTO_BEND: f32 = 0.0;
 
 /// The windrow of spoil left along the edge of a bladed track: how tall it stands above the
 /// riding line, and how far out it reaches.
@@ -1093,6 +1154,16 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         // of the track reads from the seat.
         let ground = heights[i];
         let deck = bench.at(s);
+        // Across the track as well as along it — see `CAMBER_MAX`. Tilted about the centre and
+        // clamped to the corridor, so the shoulder is not levered up with it, and folded in
+        // through `w` below so it fades out into the field rather than tipping it.
+        let bend = turn.at(s);
+        let into = -bend.signum() * (bend.abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
+        let camber = CAMBER_MAX
+            * (CAMBER_INTO_BEND * into
+                + (1.0 - CAMBER_INTO_BEND)
+                    * fbm(s / CAMBER_ALONG_M, 53.0, r.seed ^ 0xCA33));
+        let deck = deck + camber * t.clamp(-half, half);
         let shoulder = SHOULDER_M * bench_shoulder(ground, deck);
         let w = bench_weight(d, plain_half, shoulder);
         if w > 0.0 {
@@ -1368,6 +1439,20 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 * gain
                 * polished
                 * (0.25 * w + 0.75 * across);
+            // And the chop at the scale of a wheel — see `CHOP_WAVELENGTH_M`. One octave, so
+            // all of it lands in the band it is for, and polished far less than the grain is:
+            // a published line is not smooth, it is the most worked-over strip on the track.
+            heights[i] += fbm_of(
+                s / CHOP_WAVELENGTH_M,
+                t / CHOP_ACROSS_M,
+                r.seed ^ 0xC40F,
+                1,
+                0.5,
+            ) * CHOP_M
+                * gain
+                * (0.45 + 0.55 * polished)
+                * w;
+
             // The seams between the machine's passes, running the way it drove.
             heights[i] -= ((t / PASS_SPACING_M) * std::f32::consts::TAU).sin().abs()
                 * PASS_DEPTH_M
@@ -7416,6 +7501,192 @@ mod tests {
                 rows.len()
             );
         }
+    }
+
+
+    /// How far our lap is from a published one, corner by corner.
+    ///
+    /// The loop this exists for: change the generator, run this, see whether the gap closed.
+    /// Everything is measured off the synthesised heightfield — no Wine, no `.pkz`, seconds
+    /// rather than minutes — on exactly the statistics `trackstats::corner_atlas` reads off a
+    /// real track, so the two columns are comparable by construction.
+    ///
+    /// The targets are the two tracks the corpus was measured on, and they are deliberately
+    /// kept apart: Southwick is sand and Indiana is hardpack, they differ by 2.4x on how rough
+    /// the ground is across the line, and a generator aimed at the average of the two is
+    /// aiming at a surface that does not exist.
+    ///
+    /// ```text
+    /// FROST_PROGRAM=lap.json cargo test --bin mxb-app -- --ignored --nocapture scorecard
+    /// ```
+    #[test]
+    #[ignore = "slow — synthesises a lap"]
+    fn scorecard() {
+        let p: TrackProgram = match std::env::var("FROST_PROGRAM") {
+            Ok(path) => serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap(),
+            Err(_) => serde_json::from_str(DEMO).unwrap(),
+        };
+        let s = synthesise(&p).unwrap();
+        let g = crate::trackstats::Grid {
+            w: s.gw,
+            h: s.gh,
+            size_x: p.terrain.size_x,
+            size_z: p.terrain.size_z,
+            v: s.heights.clone(),
+        };
+        // Optionally write the same patches `trackstats::corner_atlas` dumps for a published
+        // track, so `scripts/corner-atlas.py` draws ours and theirs the same way and the two
+        // pictures can be put side by side. No ground panel: there is no `.map` until the
+        // track is compiled, and texture is a separate job anyway.
+        let out_dir = std::env::var("FROST_OUT").ok().map(std::path::PathBuf::from);
+        if let Some(d) = &out_dir {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let mut json = format!(
+            "{{\n  \"track\": {:?},\n  \"lapLengthM\": {:.1},\n  \"groundLayers\": [],\n  \"corners\": [\n",
+            p.name, s.stations.len() as f32 * STATION_STEP
+        );
+
+        let runs = crate::trackprog::corner_runs(&p.segments);
+        let mut ranked = runs.clone();
+        ranked.sort_by(|a, b| b.degrees.total_cmp(&a.degrees));
+        ranked.truncate(4);
+        ranked.sort_by(|a, b| a.start_m.total_cmp(&b.start_m));
+
+        println!("\n{} — lap {:.0} m, {} segments, {} corners",
+            p.name, s.stations.len() as f32 * STATION_STEP, p.segments.len(), runs.len());
+        println!("{:>5} {:>7} {:>8} {:>8} {:>9} {:>8} {:>8} {:>9} {:>9} {:>7} {:>7} {:>8}",
+            "turn", "arcs", "bend", "len m", "tight r", "rise m", "grooves", "spacing", "acrossRMS", "sweep", "ruts", "camber");
+
+        let mut agg: Vec<[f32; 7]> = Vec::new();
+        for (n, r) in ranked.iter().enumerate() {
+            let sel: Vec<&Station> =
+                s.stations.iter().filter(|st| st.s >= r.start_m && st.s <= r.end_m).collect();
+            if sel.len() < 12 {
+                continue;
+            }
+            let stations: Vec<(f32, f32, f32)> =
+                sel.iter().map(|st| (st.x, st.z, st.heading)).collect();
+            let shape = crate::trackstats::rut_shape(&stations, STATION_STEP, &g);
+            let sweep = crate::trackstats::section_sweep(&stations, &g).unwrap_or(f32::NAN);
+            let sweep_ruts =
+                crate::trackstats::section_sweep_ruts(&stations, &g).unwrap_or(f32::NAN);
+            let camber =
+                crate::trackstats::camber_spread(&stations, &g).unwrap_or(f32::NAN);
+            let hs: Vec<f32> = sel.iter().map(|st| g.at(st.x, st.z)).collect();
+            let rise = hs.iter().cloned().fold(f32::MIN, f32::max)
+                - hs.iter().cloned().fold(f32::MAX, f32::min);
+            let (grooves, spacing, across) =
+                shape.map_or((f32::NAN, f32::NAN, f32::NAN), |q| (q.grooves, q.spacing_m, q.across_rms_m));
+            println!("{n:>5} {:>7} {:>8.0} {:>8.0} {:>9.0} {:>8.1} {:>8.1} {:>9.2} {:>9.3} {:>7.2} {:>7.2} {:>8.4}",
+                r.arcs, r.degrees, r.end_m - r.start_m, r.tightest_m, rise, grooves, spacing, across, sweep, sweep_ruts, camber);
+            agg.push([r.arcs as f32, r.degrees, r.end_m - r.start_m, rise, across, sweep, r.tightest_m]);
+
+            if let Some(d) = &out_dir {
+                let name = write_synth_patch(d, n, &sel, &g);
+                json.push_str(&format!(
+                    "    {{\"n\": {n}, \"atM\": {:.1}, \"endM\": {:.1}, \"lengthM\": {:.1}, \"turnDeg\": {:.1},\n",
+                    r.start_m, r.end_m, r.end_m - r.start_m, r.degrees));
+                json.push_str(&format!(
+                    "      \"arcs\": {}, \"radiusMeanM\": {:.1}, \"radiusTightestM\": {:.1}, \"radiusWidestM\": {:.1},\n",
+                    r.arcs, r.tightest_m, r.tightest_m, r.tightest_m));
+                json.push_str(&format!(
+                    "      \"direction\": \"\", \"riseM\": {rise:.2}, \"sweep\": {sweep:.3}, \"patch\": {name:?},\n"));
+                // Real figures. These were zeros while the writer was being sketched, and a
+                // zero that looks like a measurement is worse than a missing field: it read
+                // as "our corners have no chatter at all" against Indiana's 10.5 cm, twice.
+                let (floor, wall, chat) = shape
+                    .map_or((f32::NAN, f32::NAN, f32::NAN), |q| (q.floor_m, q.wall_deg, q.chatter_m));
+                json.push_str(&format!(
+                    "      \"grooves\": {grooves:.2}, \"spacingM\": {spacing:.2}, \"floorM\": {floor:.3}, \"wallDeg\": {wall:.1},\n"));
+                json.push_str(&format!(
+                    "      \"acrossRmsM\": {across:.3}, \"chatterM\": {chat:.4}}},\n"));
+            }
+        }
+        if let Some(d) = &out_dir {
+            // Trim the trailing comma so the file is JSON.
+            if json.ends_with(",\n") {
+                json.truncate(json.len() - 2);
+                json.push('\n');
+            }
+            json.push_str("  ]\n}\n");
+            std::fs::write(d.join("corners.json"), &json).unwrap();
+            println!("  wrote {}", d.join("corners.json").display());
+        }
+        if agg.is_empty() {
+            println!("  no corner long enough to measure");
+            return;
+        }
+        let mean = |i: usize| agg.iter().map(|a| a[i]).sum::<f32>() / agg.len() as f32;
+
+        // Measured off the two published tracks by `corner_atlas`, as ranges over four turns.
+        const DIRT: [(&str, f32, f32); 6] = [
+            ("arcs", 9.0, 16.0), ("bend deg", 187.0, 292.0), ("length m", 94.0, 261.0),
+            ("rise m", 4.2, 13.6), ("across rms", 0.110, 0.141), ("sweep", 0.0, 0.20),
+        ];
+        const SAND: [(&str, f32, f32); 6] = [
+            ("arcs", 10.0, 19.0), ("bend deg", 215.0, 338.0), ("length m", 140.0, 292.0),
+            ("rise m", 8.2, 14.2), ("across rms", 0.272, 0.353), ("sweep", 0.0, 0.20),
+        ];
+        for (label, target) in [("hardpack (Indiana)", DIRT), ("sand (Southwick)", SAND)] {
+            println!("\n  vs {label}");
+            let mut inside = 0;
+            for (i, (name, lo, hi)) in target.iter().enumerate() {
+                let got = mean(i);
+                let verdict = if got < *lo {
+                    format!("LOW  by {:.2}", lo - got)
+                } else if got > *hi {
+                    format!("HIGH by {:.2}", got - hi)
+                } else {
+                    inside += 1;
+                    "in range".to_string()
+                };
+                println!("    {name:<11} ours {got:>8.3}   want {lo:>7.3}-{hi:<7.3}  {verdict}");
+            }
+            println!("    {inside}/6 in range");
+        }
+    }
+
+
+    /// One synthesised corner, in the same patch format the published-track atlas writes.
+    fn write_synth_patch(
+        out: &std::path::Path,
+        n: usize,
+        sel: &[&Station],
+        g: &crate::trackstats::Grid,
+    ) -> String {
+        const MARGIN_M: f32 = 12.0;
+        let (mut x0, mut x1, mut z0, mut z1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for s in sel {
+            x0 = x0.min(s.x); x1 = x1.max(s.x);
+            z0 = z0.min(s.z); z1 = z1.max(s.z);
+        }
+        x0 -= MARGIN_M; x1 += MARGIN_M; z0 -= MARGIN_M; z1 += MARGIN_M;
+        let mps = g.size_x / (g.w.max(2) - 1) as f32;
+        let pw = (((x1 - x0) / mps).ceil() as usize).clamp(16, 2048);
+        let ph = (((z1 - z0) / mps).ceil() as usize).clamp(16, 2048);
+
+        let mut buf: Vec<u8> = Vec::with_capacity(32 + pw * ph * 7 + sel.len() * 8);
+        buf.extend_from_slice(b"FRCA");
+        buf.extend_from_slice(&(pw as u32).to_le_bytes());
+        buf.extend_from_slice(&(ph as u32).to_le_bytes());
+        buf.extend_from_slice(&x0.to_le_bytes());
+        buf.extend_from_slice(&z0.to_le_bytes());
+        buf.extend_from_slice(&mps.to_le_bytes());
+        for j in 0..ph {
+            for i in 0..pw {
+                buf.extend_from_slice(&g.at(x0 + i as f32 * mps, z0 + j as f32 * mps).to_le_bytes());
+            }
+        }
+        buf.extend(std::iter::repeat(60u8).take(pw * ph * 3));
+        buf.extend_from_slice(&(sel.len() as u32).to_le_bytes());
+        for s in sel {
+            buf.extend_from_slice(&s.x.to_le_bytes());
+            buf.extend_from_slice(&s.z.to_le_bytes());
+        }
+        let name = format!("corner{n}.bin");
+        std::fs::write(out.join(&name), &buf).unwrap();
+        name
     }
 
     /// What our ruts are shaped like, on the same statistic a published track is measured by.

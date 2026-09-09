@@ -859,6 +859,76 @@ pub fn turns(segments: &[Segment]) -> Vec<(f32, f32)> {
     out
 }
 
+/// A corner, and where it is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CornerRun {
+    /// Metres round the lap the corner starts and ends at.
+    pub start_m: f32,
+    pub end_m: f32,
+    /// Unsigned degrees turned through.
+    pub degrees: f32,
+    /// The tightest radius anywhere in it, metres.
+    pub tightest_m: f32,
+    /// How many arcs the builder used. A published corner is 9-19 of them; one arc is a
+    /// compass sweep, and it rides like one.
+    pub arcs: usize,
+}
+
+/// The same corners [`turns`] counts, carrying where each one is.
+///
+/// `turns` answers "how many corners, how tight" and is used to judge a whole lap. This
+/// answers "and where", which is what anything that has to go and look at the ground there
+/// needs — and what the corner atlas is built on.
+pub fn corner_runs(segments: &[Segment]) -> Vec<CornerRun> {
+    let mut out: Vec<CornerRun> = Vec::new();
+    let mut at = 0.0f32;
+    let mut cur: Option<(f32, CornerRun)> = None; // way, run
+    for seg in segments {
+        let end = at + seg.length();
+        match *seg {
+            Segment::Arc { radius, angle, .. } if radius != 0.0 && angle.abs() >= CORNER_DEG => {
+                let way = radius.signum();
+                match cur {
+                    Some((w, ref mut r)) if w == way => {
+                        r.end_m = end;
+                        r.degrees += angle.abs();
+                        r.tightest_m = r.tightest_m.min(radius.abs());
+                        r.arcs += 1;
+                    }
+                    other => {
+                        if let Some((_, r)) = other {
+                            out.push(r);
+                        }
+                        cur = Some((
+                            way,
+                            CornerRun {
+                                start_m: at,
+                                end_m: end,
+                                degrees: angle.abs(),
+                                tightest_m: radius.abs(),
+                                arcs: 1,
+                            },
+                        ));
+                    }
+                }
+            }
+            _ => {
+                // Same break as `turns`: anything straight and longer than a nudge ends it.
+                if seg.length() > 8.0 {
+                    if let Some((_, r)) = cur.take() {
+                        out.push(r);
+                    }
+                }
+            }
+        }
+        at = end;
+    }
+    if let Some((_, r)) = cur {
+        out.push(r);
+    }
+    out
+}
+
 impl Segment {
     pub fn length(&self) -> f32 {
         match self {

@@ -39,6 +39,9 @@
   phosphor, monospaced type, square corners and a scanline over the window.
 
 ### Changed
+- Generated corners are cut deeper and carry the chop a wheel feels, so a turn has a rut
+  wall to lean on instead of a shallow saucer.
+- Generated tracks are cambered across their width, so a corner leans the way a built one does.
 - A new look. Navigation moved out of the sidebar into a bar across the top, so mod artwork
   gets the full width of the window — seven mods to a row instead of five. Locker and Presets
   sit together under Garage, Race mode has its own place, and every page puts its filters,
