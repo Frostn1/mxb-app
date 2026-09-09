@@ -104,6 +104,16 @@ export function blankTrackProgram(): Promise<TrackProgram> {
 }
 
 /**
+ * A whole track from a number, walked rather than written.
+ *
+ * The shape of a lap is geometry, and geometry is checkable — so this half needs no model,
+ * no key and no round trip. Omit the seed for a different track every time.
+ */
+export function randomTrackProgram(seed?: number): Promise<TrackProgram> {
+  return invoke<TrackProgram>("random_track_program", { seed });
+}
+
+/**
  * Give the track a height budget that fits it.
  *
  * The budget exists only because samples are quantised against it, so nobody should be asked

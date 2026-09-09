@@ -309,6 +309,24 @@ def fillet(pts, rng, width):
     return segs, (round(sx, 2), round(sz, 2), round(heading, 2))
 
 
+def faces(height):
+    """How much run a jump's own faces take, metres — the app's `tabletop_faces`, here.
+
+    The face is an arc tangent to the ground, so its run is the height over the tangent of
+    *half* the angle: a 4 m lip at 38 degrees is 11.6 m of ground before the deck starts, and
+    its landing at 19 is 23.9 more.
+
+    These MIRROR `trackprog::JUMP_FACE_DEG`, `JUMP_LANDING_DEG` and the two `*_MIN_M` floors,
+    and nothing enforces it — the 27 here was left behind when the face angle moved, which made
+    every jump this script laid a third longer than the app builds it, and the landing floor
+    was 9 against the app's 12. `tracklayout::faces` calls `trackprog::face_run` instead, which
+    is the version that cannot drift.
+    """
+    up = max(height / math.tan(math.radians(38.0 * 0.5)), 9.0)
+    down = max(height / math.tan(math.radians(19.0 * 0.5)), 12.0)
+    return up + down
+
+
 def features(rng, segs):
     """Jumps down the lap, by distance round it rather than by which segment they land on.
 
@@ -343,26 +361,69 @@ def features(rng, segs):
             pos += 12.0
             continue
         pick = rng.random()
-        if pick < 0.55 and room > 30.0:
-            length = round(min(rng.uniform(19.0, 27.0), room), 1)
+        if pick < 0.36 and room > 30.0:
+            # A table, and a bigger one: "jumps now too small" from the seat.
+            # Long enough for the speed carried at it: "tables are super short, I have so
+            # much speed for each one but they are small". A 22 m table taken at fifty is a
+            # kicker rather than a jump.
+            # Asked for as a *deck*, with the faces added on. A table's size is its deck:
+            # the faces are set by the published lip and landing angles and come to thirty-odd
+            # metres on their own, so stating a 40 m table asked for a 6 m top and got a long
+            # rounded hill with a crest on it.
+            # The deck is what was asked to grow, not the height: a table built to five and a
+            # half metres over its run-in reads as a wall however long its top is. These come
+            # out about a quarter taller than they are stated, so state them lower.
+            # Capped at three metres: Motorcycling Australia and Motorcycling New Zealand both
+            # write "jumps must not exceed 3m in height", and `corpus::FEATURE_HEIGHT_M` holds
+            # a program to it. 3.7 put eleven jumps a lap outside it.
+            height = round(rng.uniform(2.4, 3.0), 2)
+            deck = rng.uniform(16.0, 27.0)
+            length = round(min(deck + faces(height), room), 1)
             out.append({"kind": "tabletop", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(2.4, 3.4), 2)})
-        elif pick < 0.68 and room > 26.0:
-            gap = round(rng.uniform(3.5, 7.5), 1)
-            length = min(gap + 14.0, room)
-            out.append({"kind": "double", "at": round(pos, 1),
-                        "height": round(rng.uniform(0.8, 1.3), 2), "gap": gap})
+                        "height": height})
+        elif pick < 0.55 and room > 30.0:
+            # And a table is not always flat end to end. A whale tail rises, dips over its
+            # middle and rises again before the landing — two crests a rider can either
+            # double or roll — which is a shape a tabletop's three numbers cannot describe,
+            # so it is drawn point by point.
+            # A triple: one take-off, a landing, and a second lower one short of it for
+            # anyone not committing — "make a second smaller landing like a triple knowing I
+            # would jump it".
+            # Same 3 m ceiling as the tabletop above, and for the same reason.
+            h = rng.uniform(2.4, 3.0)
+            dip = rng.uniform(0.30, 0.40)
+            # Drawn in metres and normalised afterwards, so the take-off gets the same run a
+            # tabletop of this height gets. Drawn as fractions it had 3.6 m of lip in 8.5 m of
+            # ground — a 23 degree chord, which any curve through it rides steeper still, and
+            # from the seat that is a wall.
+            up = max(h / math.tan(math.radians(38.0 * 0.5)), 9.0)
+            down = max(h / math.tan(math.radians(19.0 * 0.5)), 12.0)
+            near = up + 4.0 + down * 0.55
+            marks = [(0.0, 0.0),
+                     (up, h),
+                     (up + 4.0, h),
+                     (near, h * dip),
+                     (near + 11.0, h * 0.66),
+                     (near + 11.0 + down * 0.7, h * 0.16),
+                     (near + 11.0 + down, 0.0)]
+            span = marks[-1][0]
+            length = round(min(span, room), 1)
+            scale = length / span
+            out.append({"kind": "custom", "at": round(pos, 1), "length": length,
+                        "shape": [{"u": round(m / span, 3), "h": round(v * scale, 2)}
+                                  for m, v in marks]})
         elif pick < 0.82 and room > 24.0:
-            length = round(min(rng.uniform(24.0, 34.0), room), 1)
+            # A climb rather than a wall with a ramp on it: "that uphill is trash".
+            length = round(min(rng.uniform(34.0, 48.0), room), 1)
             out.append({"kind": "stepUp", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(1.0, 1.7), 2)})
+                        "height": round(rng.uniform(1.2, 2.0), 2)})
         else:
             length = round(min(rng.uniform(10.0, 16.0), room), 1)
             if length < 8.0:
                 break
             out.append({"kind": "roller", "at": round(pos, 1), "length": length,
-                        "height": round(rng.uniform(0.55, 0.95), 2)})
-        pos += length + rng.uniform(8.0, 20.0)
+                        "height": round(rng.uniform(0.7, 1.2), 2)})
+        pos += length + rng.uniform(6.0, 15.0)
     return out
 
 
@@ -441,6 +502,12 @@ def main():
         "location": PLACES[(seed // 7) % len(PLACES)],
         "width": width,
         "terrain": {
+            # What the ground is. Left unset every track came out soil, so five generated
+            # tracks shipped byte-identical sheets and tiling and differed only in where the
+            # masks fell. Published tracks each have a palette of their own — Indiana is soil,
+            # Southwick sand — and it is most of what makes them look like different places.
+            # Weighted to soil because the corpus is.
+            "surface": rng.choices(["soil", "sand", "grass"], weights=[6, 3, 1])[0],
             "sizeX": 620, "sizeZ": 620, "samples": 2049,
             "scale": rng.choice([50, 63, 70]),
             "relief": {
