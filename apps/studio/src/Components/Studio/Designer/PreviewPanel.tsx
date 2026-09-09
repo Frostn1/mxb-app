@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "@frost/shared/Components/ui/card";
-import { Maximize2, Minimize2, TriangleAlert } from "lucide-react";
+import { Maximize2, Minimize2, Moon, Sun, TriangleAlert } from "lucide-react";
 import type * as THREE from "three";
 import { cn } from "@frost/shared/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@frost/shared/Components/ui/dialog";
@@ -104,6 +104,9 @@ export function PreviewPanel({
   const [err, setErr] = useState<string | null>(null);
   const [hidden, setHidden] = useState<RiderPart["part"][]>([]);
   const [soloGear, setSoloGear] = useState(true);
+  // Light by default — most bikes and most helmets are black. A white livery has the opposite
+  // problem, so it is a switch rather than a decision made once for everybody.
+  const [lit, setLit] = useState(true);
   // The same panel, drawn over the editor rather than beside it — see the render below.
   const [full, setFull] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -140,9 +143,11 @@ export function PreviewPanel({
    */
   useEffect(() => {
     setHidden(HIDEABLE.filter((h) => h.part !== gearPart).map((h) => h.part));
-    // Back to the rider whenever what's being painted changes: kit and gloves have no piece
-    // to show on its own, so a toggle left on would be a control over nothing.
-    setSoloGear(false);
+    // Back to the piece on its own whenever what's being painted changes. `solo` is already
+    // gated on there being a piece and a model, so this is inert for kit and gloves — and it
+    // runs on mount, which is why setting it the other way here left Full body on despite the
+    // initial value.
+    setSoloGear(true);
   }, [gearPart]);
 
   /** The rider slots to fill so the piece being painted is the piece on screen. */
@@ -315,15 +320,28 @@ export function PreviewPanel({
         onClick={() => setSoloGear((v) => !v)}
         title={t("designer.fullBodyHint")}
         className={cn(
-          "absolute bottom-1.5 left-1.5 z-10 cursor-default rounded-md px-1.5 py-0.5 text-[11px] transition-colors",
+          "absolute bottom-1.5 left-1.5 z-10 cursor-default rounded-md px-1.5 py-0.5 text-[11px] backdrop-blur-[2px] transition-colors",
           solo
-            ? "text-foreground/45 hover:bg-foreground/10 hover:text-foreground"
-            : "bg-foreground/[0.10] text-foreground",
+            ? "bg-black/30 text-white/80 hover:bg-black/55 hover:text-white"
+            : "bg-white/85 text-black/80",
         )}
       >
         {t("designer.fullBody")}
       </button>
     ) : null;
+
+  /** Light or dark behind the model, beside the control that makes it bigger. */
+  const relight = unavailable ? null : (
+    <button
+      type="button"
+      onClick={() => setLit((v) => !v)}
+      title={t(lit ? "designer.backdropDark" : "designer.backdropLight")}
+      aria-label={t(lit ? "designer.backdropDark" : "designer.backdropLight")}
+      className="absolute left-1.5 top-1.5 z-10 cursor-default rounded-md bg-black/30 p-1 text-white/80 backdrop-blur-[2px] transition-colors hover:bg-black/55 hover:text-white"
+    >
+      {lit ? <Moon className="size-3.5" /> : <Sun className="size-3.5" />}
+    </button>
+  );
 
   const expand = unavailable ? null : (
     <button
@@ -361,7 +379,7 @@ export function PreviewPanel({
         // Light, not the near-black default. Most bikes and most helmets are black, and a
         // black object on a black backdrop has no silhouette — which is the one thing a
         // preview beside a flat sheet exists to give you.
-        scene="white"
+        scene={lit ? "white" : "studio"}
         // No floor: this panel exists to judge a paint, and the ground is scenery that takes
         // contrast away from the thing being judged. It also means a solo helmet is not half
         // sunk into it — `Center` puts a model's middle at the origin.
@@ -411,6 +429,7 @@ export function PreviewPanel({
         >
           {!full && body}
           {!full && expand}
+          {!full && relight}
           {!full && fullBody}
         </div>
       </Card>

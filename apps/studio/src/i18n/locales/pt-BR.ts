@@ -197,6 +197,8 @@ export const ptBR: Translation = {
   "designer.color": "Cor",
   "designer.outline": "Contorno",
   "designer.noModelFound": "“{{model}}” não está na sua biblioteca, então não há onde mostrar.",
+  "designer.backdropDark": "Fundo escuro",
+  "designer.backdropLight": "Fundo claro",
   "designer.fullBody": "Corpo inteiro",
   "designer.fullBodyHint": "Mostra a peça no piloto padrão, em vez de sozinha.",
   "designer.reference": "Referência",

@@ -201,6 +201,8 @@ export const en = {
   "designer.outline": "Outline",
   "designer.noModelFound":
     "“{{model}}” isn't in your library, so there's nothing to show it on.",
+  "designer.backdropDark": "Dark backdrop",
+  "designer.backdropLight": "Light backdrop",
   "designer.fullBody": "Full body",
   "designer.fullBodyHint": "Show the piece on the stock rider, rather than on its own.",
   "designer.reference": "Reference",

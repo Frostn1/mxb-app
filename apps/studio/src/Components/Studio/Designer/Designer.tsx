@@ -2287,6 +2287,31 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     return !unsavedRef.current;
   };
 
+  /**
+   * The menu, routed to the same handlers the buttons use.
+   *
+   * Every item is a request rather than an action of its own: a menu entry and the control
+   * beside the canvas end up in one place, so they cannot drift. Registered once — the
+   * handlers are read off refs so this never has to re-subscribe.
+   */
+  const menuRef = useRef<Record<string, () => void>>({});
+  menuRef.current = {
+    "new-paint": () => setStarted(false),
+    "open-paint": () => void startFromPaint(),
+    "open-psd": () => void startFromPsd(),
+    "add-sheet": addBlankSheet,
+    "sheet-from-image": () => void addSheetFromImage(),
+    save: () => void saveRef.current?.(),
+    "export-psd": () => void exportPsd(),
+    "toggle-model": () => togglePreview(),
+  };
+  useEffect(() => {
+    const un = listen<string>("menu", (e) => menuRef.current[e.payload]?.());
+    return () => {
+      void un.then((f) => f());
+    };
+  }, []);
+
   // Whether the model can say where the far flank is at all, for the controls that need it.
   const mirrorReady = mirrorRef.current.ready && mirrorRef.current.sheetId === activeId;
   const canGroup = chosen.length > 1;
@@ -2605,7 +2630,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             />
             <button
               onClick={() => togglePreview()}
-              className="absolute bottom-1.5 right-1.5 z-10 cursor-default rounded-md px-1.5 py-0.5 text-[11px] text-foreground/45 transition-colors hover:bg-foreground/10 hover:text-foreground"
+              className="absolute bottom-1.5 right-1.5 z-10 cursor-default rounded-md bg-black/30 px-1.5 py-0.5 text-[11px] text-white/80 backdrop-blur-[2px] transition-colors hover:bg-black/55 hover:text-white"
             >
               {t("designer.hideModel")}
             </button>

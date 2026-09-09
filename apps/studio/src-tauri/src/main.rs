@@ -127,6 +127,15 @@ fn main() {
             mxb_core::viewer::unpack_pkz,
             mxb_core::viewer::watch_paint_files,
         ])
+        .setup(|app| {
+            app.set_menu(app_menu(app.handle())?)?;
+            Ok(())
+        })
+        // Every item is a request the frontend answers, because everything a menu here can do
+        // is something a tool already knows how to do. The id travels as-is.
+        .on_menu_event(|app, event| {
+            let _ = tauri::Emitter::emit(app, "menu", event.id().0.as_str());
+        })
         .run(tauri::generate_context!())
         .expect("error while running Frost's Studio");
 }
@@ -1882,4 +1891,71 @@ fn psd_watch(app: tauri::AppHandle, state: tauri::State<'_, PsdWatcher>, paths: 
 #[tauri::command]
 fn psd_unwatch(state: tauri::State<'_, PsdWatcher>) {
     mxb_core::paintwatch::stop(&state.0);
+}
+
+/// The application menu.
+///
+/// The same items on both platforms: macOS puts them in the menu bar and Windows draws them
+/// across the top of the window, which is the answer to wanting a File menu that exists on
+/// Windows too. Nothing here does any work — each item emits its id and the frontend routes
+/// it to whichever tool is open, so a menu entry and the button beside the canvas are always
+/// the same code path.
+///
+/// The macOS app submenu has to be built by hand: setting a menu at all replaces the default
+/// one, and without it there would be no Quit.
+fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+
+    let item = |id: &str, text: &str, accel: &str| {
+        MenuItemBuilder::with_id(id, text).accelerator(accel).build(app)
+    };
+
+    let file = SubmenuBuilder::new(app, "File")
+        .item(&item("new-paint", "New Paint", "CmdOrCtrl+N")?)
+        .item(&item("open-paint", "Open a Paint…", "CmdOrCtrl+O")?)
+        .item(&item("open-psd", "Open a Photoshop File…", "CmdOrCtrl+Shift+O")?)
+        .separator()
+        .item(&item("add-sheet", "Add a Sheet", "CmdOrCtrl+Shift+N")?)
+        .item(&item("sheet-from-image", "Add a Sheet from an Image…", "CmdOrCtrl+I")?)
+        .separator()
+        .item(&item("save", "Save Paint", "CmdOrCtrl+S")?)
+        .item(&item("export-psd", "Export PSD…", "CmdOrCtrl+E")?)
+        .separator()
+        .close_window()
+        .build()?;
+
+    let edit = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+
+    let view = SubmenuBuilder::new(app, "View")
+        .item(&item("toggle-model", "Show the Model", "CmdOrCtrl+M")?)
+        .item(&item("reset-view", "Reset the View", "CmdOrCtrl+0")?)
+        .separator()
+        .fullscreen()
+        .build()?;
+
+    let window = SubmenuBuilder::new(app, "Window").minimize().maximize().build()?;
+
+    let mut menu = MenuBuilder::new(app);
+    #[cfg(target_os = "macos")]
+    {
+        let about = SubmenuBuilder::new(app, "Frost's Studio")
+            .about(None)
+            .separator()
+            .hide()
+            .hide_others()
+            .show_all()
+            .separator()
+            .quit()
+            .build()?;
+        menu = menu.item(&about);
+    }
+    menu.item(&file).item(&edit).item(&view).item(&window).build()
 }

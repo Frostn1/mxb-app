@@ -198,6 +198,8 @@ export const es: Translation = {
   "designer.outline": "Contorno",
   "designer.noModelFound":
     "“{{model}}” no está en tu biblioteca, así que no hay nada donde mostrarla.",
+  "designer.backdropDark": "Fondo oscuro",
+  "designer.backdropLight": "Fondo claro",
   "designer.fullBody": "Cuerpo entero",
   "designer.fullBodyHint": "Muestra la pieza sobre el piloto estándar, en vez de sola.",
   "designer.reference": "Referencia",

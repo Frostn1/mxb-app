@@ -198,6 +198,8 @@ export const fr: Translation = {
   "designer.outline": "Contour",
   "designer.noModelFound":
     "« {{model}} » n'est pas dans ta bibliothèque, il n'y a donc rien pour l'afficher.",
+  "designer.backdropDark": "Fond sombre",
+  "designer.backdropLight": "Fond clair",
   "designer.fullBody": "Corps entier",
   "designer.fullBodyHint": "Montrer la pièce sur le pilote par défaut plutôt que seule.",
   "designer.reference": "Référence",

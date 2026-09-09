@@ -198,6 +198,8 @@ export const de: Translation = {
   "designer.outline": "Kontur",
   "designer.noModelFound":
     "„{{model}}“ ist nicht in deiner Bibliothek, also gibt es nichts, worauf es gezeigt werden könnte.",
+  "designer.backdropDark": "Dunkler Hintergrund",
+  "designer.backdropLight": "Heller Hintergrund",
   "designer.fullBody": "Ganzer Körper",
   "designer.fullBodyHint": "Das Teil am Standardfahrer zeigen statt allein.",
   "designer.reference": "Referenz",

@@ -198,6 +198,8 @@ export const it: Translation = {
   "designer.outline": "Contorno",
   "designer.noModelFound":
     "“{{model}}” non è nella tua libreria, quindi non c'è niente su cui mostrarla.",
+  "designer.backdropDark": "Sfondo scuro",
+  "designer.backdropLight": "Sfondo chiaro",
   "designer.fullBody": "Corpo intero",
   "designer.fullBodyHint": "Mostra il pezzo sul pilota predefinito invece che da solo.",
   "designer.reference": "Riferimento",
