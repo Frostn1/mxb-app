@@ -148,6 +148,7 @@ mod tracklayout;
 mod trackllm;
 mod trackobjects;
 mod trackprog;
+mod trackprops;
 mod trackscenery;
 mod trackshot;
 mod trackspeed;
