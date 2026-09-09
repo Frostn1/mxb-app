@@ -11,7 +11,7 @@ function Row({ label, value, onOpen }: { label: string; value: string; onOpen?: 
   return (
     <div className="flex items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
       <div className="min-w-0">
-        <div className="font-cond text-[10.5px] font-semibold uppercase tracking-[0.2em] text-faint">
+        <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
           {label}
         </div>
         <div className="mt-1 truncate font-mono text-[12px] text-muted-foreground">
@@ -71,7 +71,7 @@ export default function Settings() {
         </Button>
 
         <div className="mt-10">
-          <div className="font-cond text-[10.5px] font-semibold uppercase tracking-[0.2em] text-faint">
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
             {t("studioSettings.language")}
           </div>
           <select

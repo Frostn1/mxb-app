@@ -305,7 +305,7 @@ export default function RiderStudio() {
                     already know. Neither free text nor empty is a bike, so both are off. */}
                 {/* Same row as every other slot — it is one, it just isn't a `SlotField`. */}
                 <div className="flex flex-col border border-border bg-card px-3 py-1.5">
-                  <span className="font-cond text-[10.5px] font-semibold uppercase tracking-[0.2em] text-faint">
+                  <span className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
                     {t("slotGroup.bike")}
                   </span>
                   <Combobox

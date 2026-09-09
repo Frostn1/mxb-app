@@ -347,9 +347,8 @@ export default function PaintStudio({ onSendToDesigner }: PaintStudioProps) {
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-5">
         {/* ── The sheets ────────────────────────────────────────────────────── */}
         <section className="flex min-w-0 flex-col gap-3">
-          <div className="flex items-center gap-2.5">
-            <span className="u-skew h-3 w-1 bg-primary" />
-            <h2 className="font-cond text-[13px] font-bold uppercase tracking-[0.2em] text-foreground">
+          <div className="flex items-center">
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
               {t("paints.sheetsTitle")}
             </h2>
           </div>
