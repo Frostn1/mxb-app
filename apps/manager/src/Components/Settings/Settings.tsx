@@ -47,7 +47,6 @@ import {
   setOverlayEnabled,
   setOverlayHotkey,
   setProfilesPath,
-  setAnalyticsEnabled,
   setRunInBackground,
   setWatchModsReload,
   setSecureContentInject,
@@ -469,7 +468,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       : t("settings.insideModsFolder"));
 
   const runInBackground = config.runInBackground ?? true;
-  const analyticsEnabled = config.analyticsEnabled ?? true;
   const launchAtStartup = config.launchAtStartup ?? false;
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
   // Typed flags are edited freely and saved on blur, so the field holds a draft until then —
@@ -807,15 +805,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const toggleBackground = async (v: boolean) => {
     try {
       await setRunInBackground(v);
-      await reloadConfig();
-    } catch (e) {
-      toast.error(t("settings.updateFailed"), { description: String(e) });
-    }
-  };
-
-  const toggleAnalytics = async (v: boolean) => {
-    try {
-      await setAnalyticsEnabled(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
@@ -1288,13 +1277,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               desc={t("settings.paintSyncDesc")}
               checked={paintSyncEnabled}
               onChange={togglePaintSync}
-            />
-            <div className="h-px bg-border" />
-            <ToggleRow
-              label={t("settings.analytics")}
-              desc={t("settings.analyticsDesc")}
-              checked={analyticsEnabled}
-              onChange={toggleAnalytics}
             />
             {secureAvailable && (
               <>
