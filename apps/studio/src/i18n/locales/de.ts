@@ -202,9 +202,8 @@ export const de: Translation = {
   "designer.gearOnly": "Nur Teil",
   "designer.gearOnlyHint": "Nur das Teil zeigen, das du bemalst — ohne Fahrer",
   "designer.reference": "Referenz",
-  "designer.traceTemplate": "Vorlage",
-  "designer.traceHint":
-    "Hebt die Lackierung, mit der du angefangen hast, aus dem Blatt heraus und zeigt sie schwach darunter zum Abpausen. Sie ist dann nicht mehr Teil dessen, was du speicherst.",
+  "designer.traceTemplate": "Nur nachzeichnen",
+  "designer.traceHint": "Nimmt das Bild aus der Lackierung und lässt es blass darunter zum Nachzeichnen. Es wird nicht mitgespeichert. Nochmal drücken legt es zurück.",
   "designer.noTemplate": "Dieses Blatt hat keine Vorlage zum Abpausen — es war von Anfang an leer.",
   "designer.stockTexture": "Originaltextur",
   "designer.stockHint":

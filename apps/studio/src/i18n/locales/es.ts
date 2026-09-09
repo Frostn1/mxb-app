@@ -202,9 +202,8 @@ export const es: Translation = {
   "designer.gearOnly": "Solo la pieza",
   "designer.gearOnlyHint": "Muestra solo la pieza que estás pintando, sin el piloto",
   "designer.reference": "Referencia",
-  "designer.traceTemplate": "Plantilla",
-  "designer.traceHint":
-    "Saca de la hoja la pintura de la que partiste y muéstrala tenue por debajo, para calcarla. Deja de formar parte de lo que guardas.",
+  "designer.traceTemplate": "Solo calcar",
+  "designer.traceHint": "Saca la imagen de la pintura y la deja tenue debajo para calcar. Deja de formar parte de lo que guardas. Púlsalo otra vez para devolverla.",
   "designer.noTemplate": "Esta hoja no tiene plantilla que calcar: nació en blanco.",
   "designer.stockTexture": "Textura de fábrica",
   "designer.stockHint":

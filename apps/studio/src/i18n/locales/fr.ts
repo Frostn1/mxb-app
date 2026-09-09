@@ -202,9 +202,8 @@ export const fr: Translation = {
   "designer.gearOnly": "Pièce seule",
   "designer.gearOnlyHint": "Afficher seulement la pièce que tu peins, sans le pilote",
   "designer.reference": "Référence",
-  "designer.traceTemplate": "Modèle",
-  "designer.traceHint":
-    "Sors de la planche la peinture dont tu es parti et affiche-la en transparence dessous, pour la décalquer. Elle cesse de faire partie de ce que tu enregistres.",
+  "designer.traceTemplate": "Décalquer",
+  "designer.traceHint": "Sort l'image de la peinture et la laisse en transparence dessous pour décalquer. Elle n'est plus enregistrée. Appuyez à nouveau pour la remettre.",
   "designer.noTemplate": "Cette planche n'a aucun modèle à décalquer : elle est partie vierge.",
   "designer.stockTexture": "Texture d'origine",
   "designer.stockHint":

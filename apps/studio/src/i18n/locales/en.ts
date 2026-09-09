@@ -204,9 +204,8 @@ export const en = {
   "designer.gearOnly": "Gear only",
   "designer.gearOnlyHint": "Show just the piece you're painting, off the rider",
   "designer.reference": "Reference",
-  "designer.traceTemplate": "Template",
-  "designer.traceHint":
-    "Lift the paint you started from out of the sheet and show it faintly underneath, to trace over. It stops being part of what you save.",
+  "designer.traceTemplate": "Trace only",
+  "designer.traceHint": "Take the picture out of the paint and leave it faintly underneath to trace over. It stops being part of what you save. Press again to put it back.",
   "designer.noTemplate": "This sheet has no template to trace â it started blank.",
   "designer.stockTexture": "Stock texture",
   "designer.stockHint":

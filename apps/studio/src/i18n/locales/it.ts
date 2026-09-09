@@ -201,9 +201,8 @@ export const it: Translation = {
   "designer.gearOnly": "Solo il pezzo",
   "designer.gearOnlyHint": "Mostra solo il pezzo che stai dipingendo, senza il pilota",
   "designer.reference": "Riferimento",
-  "designer.traceTemplate": "Modello",
-  "designer.traceHint":
-    "Togli dalla planche la vernice di partenza e mostrala in trasparenza sotto, per ricalcarla. Smette di far parte di ciò che salvi.",
+  "designer.traceTemplate": "Solo ricalco",
+  "designer.traceHint": "Toglie l'immagine dalla livrea e la lascia sbiadita sotto per ricalcarla. Non viene più salvata. Premi di nuovo per rimetterla.",
   "designer.noTemplate": "Questa planche non ha un modello da ricalcare: è nata vuota.",
   "designer.stockTexture": "Texture originale",
   "designer.stockHint":

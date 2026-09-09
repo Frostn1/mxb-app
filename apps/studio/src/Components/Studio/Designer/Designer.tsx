@@ -61,7 +61,7 @@ import { IMAGE_EXTS, isBikeKind, usePaintDest } from "../paintDest";
 const PREVIEW_OPEN_KEY = "mxb:designer:preview:v1";
 
 import { CanvasStage } from "./CanvasStage";
-import { Row, Slider } from "./controls";
+import { Slider } from "./controls";
 import { PreviewPanel } from "./PreviewPanel";
 import { LayerInspector } from "./LayerInspector";
 import { PaintTools } from "./PaintTools";
@@ -2285,8 +2285,15 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             onAddBlank={addBlankSheet}
             onAddHintSheets={addHintSheets}
           />
+          </div>
+        )}
 
+        {/* ── The sheet, the whole window ──────────────────────────────────────── */}
+          {/* Held to the sheet's own area: the cluster positions itself from the top right,
+              and the panes container runs under the docks, so without this it would sit on
+              top of the tools column. */}
           {active && (
+            <div className="pointer-events-none absolute inset-y-0 left-[264px] right-[312px] z-10">
             <GhostPanel
               ghost={ghostOf(active.id)}
               sheetName={active.name}
@@ -2300,11 +2307,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               onClearBase={() => clearBase(active.id)}
               onChange={(fn) => patchGhost(active.id, fn)}
             />
+            </div>
           )}
-          </div>
-        )}
-
-        {/* ── The sheet, the whole window ──────────────────────────────────────── */}
           {active ? (
             <CanvasStage
               className="absolute inset-y-0 left-[264px] right-[312px] rounded-none border-0 bg-canvas"
@@ -2699,57 +2703,33 @@ function GhostPanel({
   // reference draws underneath, so this is showing nothing until the template is lifted out.
   const buried = showing && hasBase;
 
-  return (
-    <Card className="bg-card/40">
-      <CardHeader>
-        <CardTitle>{t("designer.reference")}</CardTitle>
-        <CardAction>
-        <button
-          type="button"
-          className="text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
-          disabled={!ghost.template && !ghost.stock && !ghost.wire}
-          onClick={() =>
-            onChange((g) => {
-              // One eye over both, and it turns them off together rather than remembering
-              // which was on — coming back to a "reference" that shows half of what it did
-              // is the kind of state nobody is keeping track of.
-              const off = ghostShows(g);
-              return {
-                ...g,
-                showTemplate: !off,
-                // Not gated on already having one, unlike the wire below: the stock texture is
-                // fetched *because* this is on, so requiring it first would be a switch that
-                // could never be turned back on.
-                showStock: !off,
-                showWire: !off && !!g.wire,
-                // Faded all the way out counts as hidden, so switching back on has to undo
-                // that too. Otherwise the eye says "showing" over a reference at zero.
-                opacity: !off && g.opacity <= 0 ? EMPTY_GHOST.opacity : g.opacity,
-              };
-            })
-          }
-          title={t(showing ? "designer.hide" : "designer.show")}
-        >
-          {showing ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
-        </button>
-        </CardAction>
-      </CardHeader>
-      <CardContent>
+  // Nothing to reference and nothing to put in the sheet — no cluster at all rather than a
+  // row of controls that can only be greyed out.
+  if (!canTrace && !hasStock && !hasGeometry) return null;
 
-      <div className="mb-2 flex flex-wrap gap-1.5">
-        <GhostToggle
-          icon={<LayersIcon className="size-3.5" />}
-          label={t("designer.traceTemplate")}
-          title={t(canTrace ? "designer.traceHint" : "designer.noTemplate")}
-          on={tracing && ghost.showTemplate}
-          disabled={!canTrace}
-          onClick={() => {
-            // Already lifted and visible — this press is asking to see it in the paint again,
-            // so put it back. Otherwise lift it, or just show what has already been lifted.
-            if (!tracing || ghost.showTemplate) onTrace();
-            else onChange((g) => ({ ...g, showTemplate: true }));
-          }}
-        />
+  return (
+    /* On the picture rather than in a panel. What these switch is drawn on the sheet you are
+       looking at, and a control for that belongs on the thing it changes — the left column was
+       an inch of dead panel that existed to hold three toggles and a slider.
+       The opacity comes out on hover: it is the adjustment you make after deciding *what* to
+       show, and having it up permanently made a four-control cluster out of a three-control
+       decision. */
+    <div className="group pointer-events-auto absolute right-2 top-2 z-10 flex flex-col items-end gap-1">
+      <div className="flex items-center gap-1 rounded-lg bg-background/55 p-1 opacity-80 shadow-sm backdrop-blur transition-opacity hover:opacity-100 group-hover:opacity-100">
+        {canTrace && (
+          <GhostToggle
+            icon={<LayersIcon className="size-3.5" />}
+            label={t("designer.traceTemplate")}
+            title={t("designer.traceHint")}
+            on={tracing && ghost.showTemplate}
+            onClick={() => {
+              // Already lifted and visible — this press is asking to see it in the paint
+              // again, so put it back. Otherwise lift it, or show what has been lifted.
+              if (!tracing || ghost.showTemplate) onTrace();
+              else onChange((g) => ({ ...g, showTemplate: true }));
+            }}
+          />
+        )}
         <GhostToggle
           icon={<Bike className="size-3.5" />}
           label={t("designer.stockTexture")}
@@ -2766,73 +2746,67 @@ function GhostPanel({
           disabled={!hasGeometry}
           onClick={() => onChange((g) => ({ ...g, showWire: !g.showWire }))}
         />
+        {hasStock && (
+          <button
+            type="button"
+            disabled={(!stockSheet && !hasBase) || busy}
+            title={t(
+              hasBase
+                ? "designer.clearBase"
+                : stockSheet
+                  ? "designer.stockAsBaseHint"
+                  : "designer.stockNoMatch",
+              { name: sheetName.trim() },
+            )}
+            onClick={hasBase ? onClearBase : onStockBase}
+            className={cn(
+              "ml-0.5 cursor-default rounded-md px-1.5 py-1 transition-colors disabled:opacity-30",
+              hasBase
+                ? "bg-primary/15 text-foreground"
+                : "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
+            )}
+          >
+            {busy ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <PaintBucket className="size-3.5" />
+            )}
+          </button>
+        )}
       </div>
 
-      {/* Not a toggle and not part of the reference — what it puts in is the sheet itself, and
-          stays there through the save. It sits here because the picture it puts in is the one
-          the button above shows faintly, and wanting that at full strength with a number over
-          it is what a good half of the people who turn the reference on came for. */}
-      {hasStock && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="mb-2 w-full min-w-0 justify-start"
-          disabled={(!stockSheet && !hasBase) || busy}
-          title={t(stockSheet ? "designer.stockAsBaseHint" : "designer.stockNoMatch", {
-            name: sheetName.trim(),
-          })}
-          onClick={hasBase ? onClearBase : onStockBase}
-        >
-          {busy ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <PaintBucket className="size-3.5" />
-          )}
-          <span className="truncate">
-            {t(hasBase ? "designer.clearBase" : "designer.stockAsBase")}
+      {showing && (
+        <div className="flex w-[190px] items-center gap-2 rounded-lg bg-background/85 px-2.5 py-1.5 opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100">
+          <span className="flex-none text-[10.5px] uppercase tracking-[0.09em] text-faint">
+            {t("designer.opacity")}
           </span>
-        </Button>
+          <Slider
+            value={ghost.opacity}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(v) => onChange((g) => ({ ...g, opacity: v }))}
+            format={(v) => `${Math.round(v * 100)}%`}
+          />
+        </div>
       )}
 
-      <Row label={t("designer.opacity")}>
-        <Slider
-          value={ghost.opacity}
-          min={0}
-          max={1}
-          step={0.01}
-          onChange={(v) => onChange((g) => ({ ...g, opacity: v }))}
-          format={(v) => `${Math.round(v * 100)}%`}
-        />
-      </Row>
-
-      {/* The reference is underneath, so an opaque sheet hides it completely. Saying so is
-          the difference between a feature that looks broken and one that tells you the next
-          move — which is the button directly above this line. */}
-      {buried && (
-        <p className="mt-1.5 text-[11px] leading-snug text-warning">
-          {t("designer.ghostBuried")}
+      {/* The three ways this shows nothing, said where the thing itself is. */}
+      {(buried || noMatch || (noStock && !noMatch)) && (
+        <p
+          className={cn(
+            "max-w-[260px] rounded-lg bg-background/85 px-2.5 py-1.5 text-right text-[11px] leading-snug shadow-sm backdrop-blur",
+            buried ? "text-warning" : noMatch ? "text-destructive" : "text-faint",
+          )}
+        >
+          {buried
+            ? t("designer.ghostBuried")
+            : noMatch
+              ? t("designer.uvNoMatch", { name: sheetName.trim() })
+              : t("designer.stockNoMatch", { name: sheetName.trim() })}
         </p>
       )}
-
-      {/* The name binds the sheet to the mesh, so a name nothing asks for is worth saying
-          plainly — it is the same mistake that makes a paint load and show nothing. */}
-      {noMatch && (
-        <p className="mt-1.5 text-[11px] leading-snug text-destructive">
-          {t("designer.uvNoMatch", { name: sheetName.trim() })}
-        </p>
-      )}
-
-      {/* Not the same miss as the one above, and worth saying separately: a model can draw a
-          texture without shipping one of its own, so a sheet every paint replaces has islands
-          to show and no stock artwork behind them. Said without claiming which of the two it
-          is — with the UV map off there is nothing here that knows. */}
-      {noStock && !noMatch && (
-        <p className="mt-1.5 text-[11px] leading-snug text-faint">
-          {t("designer.stockNoMatch", { name: sheetName.trim() })}
-        </p>
-      )}
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
@@ -2848,7 +2822,7 @@ function GhostToggle({
   label: string;
   title: string;
   on: boolean;
-  disabled: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (

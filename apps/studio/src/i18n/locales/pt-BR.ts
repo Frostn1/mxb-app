@@ -200,9 +200,8 @@ export const ptBR: Translation = {
   "designer.gearOnly": "Só a peça",
   "designer.gearOnlyHint": "Mostra só a peça que você está pintando, sem o piloto",
   "designer.reference": "Referência",
-  "designer.traceTemplate": "Modelo",
-  "designer.traceHint":
-    "Tira da folha a pintura da qual você partiu e a mostra apagada por baixo, para decalcar. Ela deixa de fazer parte do que você salva.",
+  "designer.traceTemplate": "Só decalcar",
+  "designer.traceHint": "Tira a imagem da pintura e a deixa esmaecida embaixo para decalcar. Ela deixa de ser salva. Aperte de novo para devolvê-la.",
   "designer.noTemplate": "Esta folha não tem modelo para decalcar — ela nasceu em branco.",
   "designer.stockTexture": "Textura de fábrica",
   "designer.stockHint":
