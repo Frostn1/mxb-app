@@ -316,11 +316,24 @@ const RUT_WALL_HOLD: f32 = 1.8;
 /// than the dark soil of the line, so a rut read paler than its own line and disappeared, and
 /// the loose band was toned darker than a corridor that had become the field's own soil, so
 /// it read as blotches rather than as dust.
-const RUT_FLOOR_DARKEN: f32 = 0.42;
-const LOOSE_DRY: f32 = 0.85;
+// Measured against the sheets published tracks bake into their own `.map`: Indiana's darkest
+// ridden surface averages (49, 35, 23) and Southwick's (54, 36, 22). At 0.42 ours came out
+// (25, 19, 14) — half the luma of the darkest thing either of them lays on a track, and with
+// it a pixel-to-pixel grain of 1.6 against their 3.8-18. Dark and flat is the one combination
+// that reads as the texture having failed rather than as polished dirt.
+const RUT_FLOOR_DARKEN: f32 = 1.14;
+// The dry stuff thrown off the line. Their brightest dry surfaces reach (171, 134, 99) and
+// (220, 185, 150); at 0.85 ours reached (145, 113, 84), darker than either.
+const LOOSE_DRY: f32 = 1.10;
 
 /// How much of its brightness the field's soil keeps.
-const FIELD_DARKEN: f32 = 0.72;
+///
+/// Published tracks run their ground from a dark worn surface to a bright dry one: Indiana
+/// (49, 35, 23) up to (171, 134, 99), Southwick (54, 36, 22) up to (220, 185, 150). At 0.72
+/// ours topped out at (123, 95, 71) — no bright end at all, which is most of why our ground
+/// read as mud rather than as dry dirt. Lands on (162, 125, 94), inside Indiana's range and
+/// short of Southwick's sand.
+const FIELD_DARKEN: f32 = 0.95;
 
 /// How much lighter the worked corridor is than the line worn down the middle of it.
 ///
@@ -332,7 +345,7 @@ const FIELD_DARKEN: f32 = 0.72;
 /// Lifted again after a ride that read as "the good dirt colour, but all of the same one".
 /// Between the corridor and the line there has to be a step a rider can see at speed, and at
 /// 1.45 there was twenty levels in it. At 1.9 there is forty.
-const CORRIDOR_LIFT: f32 = 2.60;
+const CORRIDOR_LIFT: f32 = 2.05;
 
 /// How much of the packed sheet is available off the racing line, where the ground still has
 /// grooves in it but no strip was ever painted.
@@ -620,15 +633,15 @@ const GROUND_TEXTURE_DIM: usize = 1024;
 /// 400 m track and a 900 m one get soil of the same grain. A fixed repetition count does not:
 /// the old 60 put a tile every 4.6 m on the example track and every 11.7 m on ours, which is
 /// most of why the ground looked out of scale.
-const TILE_FIELD_M: f32 = 4.5;
-const TILE_LINE_M: f32 = 3.2;
-const TILE_SHOULDER_M: f32 = 3.8;
+const TILE_FIELD_M: f32 = 3.0;
+const TILE_LINE_M: f32 = 3.0;
+const TILE_SHOULDER_M: f32 = 3.0;
 const TILE_GRASS_M: f32 = 2.8;
 /// The loose dirt tiles coarser than the line it sits on, so the two read as different ground
 /// and not as one sheet at two brightnesses.
-const TILE_LOOSE_M: f32 = 4.1;
+const TILE_LOOSE_M: f32 = 3.0;
 /// And the packed line finer, which is what being driven over does to it.
-const TILE_RUT_M: f32 = 2.4;
+const TILE_RUT_M: f32 = 2.8;
 
 /// The cube a wet layer reflects, per face. Small on purpose: it is seen smeared across a
 /// film of water and never in focus. The example track's own faces are 128 too.
@@ -3078,10 +3091,9 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         let l = bands.iter().find(|l| l.name == name).expect("a band by that name");
         band_of(l.band)
     };
-    let dirt = band_named("dirt");
-    let line = band_named("line");
-    let shoulder = band_named("shoulder");
-    let grass = band_named("grass");
+    let dirt = band_named("soil_dark_c");
+    let line = band_named("soil_worn_c");
+    let grass = band_named("hm_grass");
     // Off-track starts where the graded shoulder ends: the rider is on the track, or in the
     // field, with the shoulder belonging to neither. This one decides where the game says a
     // rider has gone off, so it is the one boundary that stays smooth.
@@ -3116,11 +3128,6 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     put("mask_line.tga", tga_alpha(MASK_DIM, MASK_DIM, &line), &mut wrote)?;
     put("mask_loose.tga", tga_alpha(MASK_DIM, MASK_DIM, &loose), &mut wrote)?;
     put("mask_rut.tga", tga_alpha(MASK_DIM, MASK_DIM, &rut), &mut wrote)?;
-    put(
-        "mask_shoulder.tga",
-        tga_alpha(MASK_DIM, MASK_DIM, &shoulder),
-        &mut wrote,
-    )?;
     // The pit lane, in the same place the race data puts its stalls. It runs along the
     // opening straight, so the straight's own frame gives the side the lane is on — the
     // distance the other masks read is unsigned and would paint a lane on both sides.
@@ -4625,9 +4632,14 @@ fn turf_cover(x: f32, z: f32, seed: u32) -> f32 {
     let fine = fbm(x / (TURF_PATCH_M * 0.28), z / (TURF_PATCH_M * 0.28), seed ^ 0x3C72);
     let n = broad * 0.72 + fine * 0.28;
     // `fbm` runs either side of zero, so the threshold does too: bare where the field dips
-    // well below it, full turf where it rises, and a soft edge in between. About two thirds
-    // of the ground comes out grassed, which is what a venue looks like from the air.
-    smoothstep(((n + 0.25) * 2.5).clamp(0.0, 1.0))
+    // well below it, full turf where it rises, and a soft edge in between.
+    //
+    // Measured against what published tracks actually grass: Indiana 41.8%, Southwick 60.3%,
+    // against ours at 70.8%. A venue is worked dirt with grass on it, and we had it the other
+    // way round — a lawn with a track drawn on it, which is what made our ground read wrong
+    // however well the sheets themselves were toned. The threshold now lands about half way
+    // between the two of them.
+    smoothstep(((n + 0.10) * 2.5).clamp(0.0, 1.0))
 }
 
 /// A mask of the track's edge — the lap's and the start straight's together.
@@ -5232,7 +5244,59 @@ fn band_pixels(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
             }
         }
     }
+    cap_grain(&mut px, dim);
     px
+}
+
+/// The grittiest a ground sheet may be, as a mean absolute luma step between neighbouring
+/// texels.
+///
+/// Measured off the sheets published tracks bake into their own `.map`: Indiana's run 3.8 to
+/// 18.2 and Southwick's 3.9 to 16.9. Ours went past both because `tone` is a multiply — it
+/// lifts a sheet's grain in step with its brightness — so making the ground dry enough to
+/// look right also made it coarser than anything either track ships. Our corridor read at
+/// 22.5 on soil and 32.6 on sand, next to a rut at 3.2, which is a surface that changes
+/// character over a few metres.
+const MAX_SHEET_GRAIN: f32 = 18.0;
+
+/// Pull a sheet's contrast about its own mean until its grain is inside [`MAX_SHEET_GRAIN`].
+///
+/// About the mean rather than toward grey, so the tone the band was graded to is kept and
+/// only the roughness moves.
+fn cap_grain(px: &mut [u8], dim: usize) {
+    let luma = |p: &[u8]| p[0] as f32 * 0.299 + p[1] as f32 * 0.587 + p[2] as f32 * 0.114;
+    let (mut step, mut n) = (0.0f32, 0usize);
+    for y in 0..dim {
+        for x in 1..dim {
+            let a = luma(&px[(y * dim + x) * 4..]);
+            let b = luma(&px[(y * dim + x - 1) * 4..]);
+            step += (a - b).abs();
+            n += 1;
+        }
+    }
+    if n == 0 {
+        return;
+    }
+    let grain = step / n as f32;
+    if grain <= MAX_SHEET_GRAIN {
+        return;
+    }
+    let k = MAX_SHEET_GRAIN / grain;
+    let mut mean = [0.0f32; 3];
+    for p in px.chunks_exact(4) {
+        for c in 0..3 {
+            mean[c] += p[c] as f32;
+        }
+    }
+    let count = (px.len() / 4) as f32;
+    for c in 0..3 {
+        mean[c] /= count;
+    }
+    for p in px.chunks_exact_mut(4) {
+        for c in 0..3 {
+            p[c] = (mean[c] + (p[c] as f32 - mean[c]) * k).clamp(0.0, 255.0) as u8;
+        }
+    }
 }
 
 /// Take the slow variation out of a sheet, so tiling it does not draw a grid.
@@ -5806,7 +5870,10 @@ fn ground_looks(surface: Surface) -> Grounds {
         base: line,
         photo: Some("soil_dark"),
         tone: line_tone,
-        grain_tint: (0.70, 1.28),
+        // 22.5 measured, where Indiana's grittiest sheet is 18.2 and Southwick's 16.9 — and
+        // it sits next to the rut, so the corridor jumped from heavy grit to smooth over a
+        // few metres. Pulled inside their range.
+        grain_tint: (0.80, 1.19),
         fleck: [150.0, 146.0, 138.0],
         fleck_density: 0.03,
         litter: [140.0, 122.0, 84.0],
@@ -5831,9 +5898,9 @@ fn ground_looks(surface: Surface) -> Grounds {
         ],
         photo: Some("soil_light"),
         tone: [
-            ground_tone[0] * 1.06 * FIELD_DARKEN,
-            ground_tone[1] * 1.04 * FIELD_DARKEN,
-            ground_tone[2] * 1.02 * FIELD_DARKEN,
+            ground_tone[0] * 0.80 * FIELD_DARKEN,
+            ground_tone[1] * 0.79 * FIELD_DARKEN,
+            ground_tone[2] * 0.78 * FIELD_DARKEN,
         ],
         grain_tint: (0.85, 1.11),
         fleck: [165.0, 160.0, 150.0],
@@ -5892,9 +5959,9 @@ fn ground_looks(surface: Surface) -> Grounds {
         // enough a solid colour. A solid colour laid down the middle of the track is what
         // reads from the seat as the texture being broken and the line impossible to find. A
         // packed rut is smooth in its *shape*; the dirt in it is still dirt.
-        grain_tint: (0.44, 1.52),
-        fleck: [128.0, 124.0, 118.0],
-        fleck_density: 0.045,
+        grain_tint: (0.34, 1.66),
+        fleck: [148.0, 142.0, 132.0],
+        fleck_density: 0.075,
         litter: [120.0, 104.0, 72.0],
         litter_density: 0.28,
         blade: ([0.0; 3], [0.0; 3]),
@@ -6279,7 +6346,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
     let (_, shoulder_scale) = ground(prog.terrain.surface);
     vec![
         Layer {
-            name: "ground",
+            name: "soil_light_c",
             sheet: "ground_c",
             band: BandMask::Everywhere,
             look: field,
@@ -6292,26 +6359,12 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             wet: true,
             grass: false,
         },
-        Layer {
-            name: "shoulder",
-            sheet: "shoulder_c",
-            band: BandMask::Out(SHOULDER_M * shoulder_scale),
-            look: shoulder,
-            salt: 0x30D2,
-            tile_m: TILE_SHOULDER_M,
-            mask: Some("mask_shoulder.tga"),
-            thickness: Some(0.05),
-            spec: 20,
-            shininess: 12,
-            wet: true,
-            grass: false,
-        },
         // The riding surface: every metre of the corridor, opaque. It used to be masked as a
         // strip about the racing line, which left the pale shoulder showing through the gaps
         // in its own patchiness — dark dirt with holes in it, and pale ground underneath for
         // no reason a rider could see.
         Layer {
-            name: "dirt",
+            name: "soil_dark_c",
             sheet: "dirt_c",
             band: BandMask::Out(0.0),
             look: ridden,
@@ -6327,7 +6380,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         // Painted over the corridor's base, in the order the ground gets that way: the loose
         // stuff is thrown over the worked soil, and the line is worn back through it.
         Layer {
-            name: "line",
+            name: "soil_worn_c",
             sheet: "dirt_line_c",
             // The whole corridor, not a strip down the middle of it. Published tracks paint
             // their ridden colour across the full width — Indiana's second layer covers 99.7%
@@ -6348,7 +6401,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             // Painted over the line, not under it: with the dark strip laid on top, every
             // bank thrown up beside a groove was covered and a floor read the same as the
             // ground either side — "floor 52 against wall 50", a rut nobody can see.
-            name: "loose",
+            name: "sand_top_c",
             sheet: "loose_c",
             band: BandMask::Loose,
             look: loose,
@@ -6364,7 +6417,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         // The strip people actually ride, worn into the corridor and darker than it. Painted
         // over the loose, because a line is worn back through what was thrown onto it.
         Layer {
-            name: "rut",
+            name: "sand_bottom",
             sheet: "rut_c",
             band: BandMask::Rut,
             look: rut,
@@ -6378,7 +6431,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             grass: false,
         },
         Layer {
-            name: "grass",
+            name: "hm_grass",
             sheet: "grass_c",
             band: BandMask::Beyond,
             look: turf,
@@ -8503,7 +8556,7 @@ mod tests {
         let hmf = std::fs::read_to_string(dir.join("track.hmf")).unwrap();
         assert_eq!(
             hmf.matches("frame1").count(),
-            6,
+            5,
             "every soil band gets a wet sheet, the grass does not:\n{hmf}"
         );
         for l in layers(&p) {
@@ -8511,8 +8564,8 @@ mod tests {
             assert_eq!(wet.is_file(), l.wet, "{} wet sheet", l.name);
         }
         // And it is the same ground, darker — not a different sheet.
-        let dry = std::fs::metadata(dir.join("maps/line.tga")).unwrap().len();
-        let wet = std::fs::metadata(dir.join("maps/line_wet.tga"))
+        let dry = std::fs::metadata(dir.join("maps/soil_worn_c.tga")).unwrap().len();
+        let wet = std::fs::metadata(dir.join("maps/soil_worn_c_wet.tga"))
             .unwrap()
             .len();
         assert_eq!(dry, wet, "the wet sheet is the dry one shaded, same shape");
@@ -10994,6 +11047,111 @@ mod blank_repro {
         match crate::tracksynth::synthesise(&prog) {
             Ok(_) => println!("synthesise: OK"),
             Err(e) => println!("synthesise FAILED: {e:#}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod ground_sheets {
+    use super::*;
+
+    /// Our own ground sheets, measured the way a published track's are.
+    ///
+    /// Detail is the mean absolute luma step between neighbouring texels — what separates a
+    /// surface from a wash. Indiana's terrain sheets run 3.8 to 18.2 and Southwick's 3.9 to
+    /// 16.9, so anything far under that reads as flat from the seat however well toned it is.
+    #[test]
+    #[ignore = "prints a table — set FROST_DUMP to also write the sheets"]
+    fn our_ground_sheets() {
+        let dim = 256usize;
+        let dir = std::env::var("FROST_DUMP").ok();
+        if let Some(d) = &dir {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        for surface in [Surface::Soil, Surface::Sand, Surface::Grass] {
+            let g = ground_looks(surface);
+            println!("\n== {surface:?} ==");
+            println!("{:<12} {:>8} {:>7} {:>20}", "sheet", "m/tile", "detail", "mean rgb");
+            // The bands as `layers` states them, so the names printed are the names the
+            // track actually ships rather than a second list kept alongside it.
+            let prog: crate::trackprog::TrackProgram =
+                serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
+            let named: Vec<(&str, &GroundLook, f32)> = layers(&prog)
+                .into_iter()
+                .map(|l| {
+                    let look: &GroundLook = match l.name {
+                        "soil_light_c" => &g.field,
+                        "soil_dark_c" => &g.ridden,
+                        "soil_worn_c" => &g.line,
+                        "sand_top_c" => &g.loose,
+                        "sand_bottom" => &g.rut,
+                        _ => &g.turf,
+                    };
+                    (l.name, look, l.tile_m)
+                })
+                .collect();
+            for (name, look, tile) in named {
+                let px = band_pixels(dim, look, 0x51D);
+                let luma = |i: usize| {
+                    px[i * 4] as f64 * 0.299 + px[i * 4 + 1] as f64 * 0.587
+                        + px[i * 4 + 2] as f64 * 0.114
+                };
+                let mut d = 0.0;
+                let mut c = 0usize;
+                for y in 0..dim {
+                    for x in 1..dim {
+                        d += (luma(y * dim + x) - luma(y * dim + x - 1)).abs();
+                        c += 1;
+                    }
+                }
+                let mut s = [0f64; 3];
+                for p in px.chunks_exact(4) {
+                    for k in 0..3 {
+                        s[k] += p[k] as f64;
+                    }
+                }
+                let n = (px.len() / 4) as f64;
+                println!(
+                    "{name:<12} {tile:>8.2} {:>7.2} {:>7.0},{:>4.0},{:>4.0}",
+                    d / c.max(1) as f64,
+                    s[0] / n,
+                    s[1] / n,
+                    s[2] / n
+                );
+                if let (Some(dd), Surface::Soil) = (&dir, surface) {
+                    if let Some(img) =
+                        image::RgbaImage::from_raw(dim as u32, dim as u32, px.clone())
+                    {
+                        let _ = img.save(format!("{dd}/ours_{name}.png"));
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod cover_check {
+    use super::*;
+
+    /// How much of the plot each band paints, against what published tracks paint.
+    ///
+    /// Indiana grasses 41.8% of its site and Southwick 60.3%; ours grassed 70.8%, which is a
+    /// lawn with a track drawn on it rather than a venue of worked dirt with grass on it.
+    #[test]
+    #[ignore = "prints a table"]
+    fn how_much_of_the_plot_each_band_paints() {
+        let p: crate::trackprog::TrackProgram =
+            serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
+        let syn = synthesise(&p).unwrap();
+        let half = p.width * 0.5;
+        let seed = p.terrain.relief.seed;
+        const D: usize = 512;
+        println!("{:<16} {:>8}", "band", "cover");
+        for l in layers(&p) {
+            let m = band_mask(&syn, l.band, half, seed, D, D);
+            let c = m.iter().filter(|&&v| v > 8).count() as f64 * 100.0 / m.len() as f64;
+            println!("{:<16} {:>7.1}%", l.name, c);
         }
     }
 }

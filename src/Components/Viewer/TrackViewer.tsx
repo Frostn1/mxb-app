@@ -1005,7 +1005,7 @@ function TerrainMesh({
                    // chance. The lesson worth keeping: this correction is a reflection, and
                    // no rotation ever fixes a reflection — turning it only moved the error
                    // around.
-                   vec2 maskUv = vGroundUv;
+                   vec2 maskUv = vec2(vGroundUv.x, 1.0 - vGroundUv.y);
                    vec3 ground = vec3(0.5);
                  ${blend}
                    // Multiplied rather than assigned: what is already in diffuseColor is the

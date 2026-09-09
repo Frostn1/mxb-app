@@ -11,6 +11,12 @@ through ground it has already used, preferring the direction with the most room 
 and when the distance budget runs down it computes the shortest pair of turns and a straight
 that lands exactly on the start pose — a Dubins path — and takes it if it is clear.
 
+What it lays is measured rather than chosen. A corner is drawn whole and the ground between
+corners is drawn from the corpus's own radius distribution — see the two tables below, and
+`scripts/track-survey.py`, which reads them off the published tracks' own centrelines. And the
+moves live on a stack, because a walk that may not touch itself is a self-avoiding walk and a
+greedy one paints itself in.
+
 Conventions are the app's, so nothing has to be converted: heading is measured with
 `heading_vector(h) = (sin h, cos h)`, a positive radius turns right, and an arc of signed
 radius r through angle a moves the pose by `r*(cos h0 - cos h1), r*(sin h1 - sin h0)`.
@@ -142,10 +148,18 @@ class Cover:
         return len(hit)
 
     def add(self, pts):
+        """Mark the ground, and hand back what to unmark if the move is taken back."""
+        marked = []
         for x, z, _ in pts:
             i = self.index(x, z)
-            if i is not None:
+            if i is not None and not self.seen[i]:
                 self.seen[i] = True
+                marked.append(i)
+        return marked
+
+    def undo(self, marked):
+        for i in marked:
+            self.seen[i] = False
 
 
 class Ground:
@@ -167,10 +181,32 @@ class Ground:
                 yield r * self.n + c
 
     def add(self, pts, at):
+        """Lay ground, and hand back how much each cell grew by so it can be taken back."""
+        grew = {}
         for x, z, along in pts:
             i = int(z / self.cell) * self.n + int(x / self.cell)
             if 0 <= i < len(self.used):
                 self.used[i].append((x, z, at + along))
+                grew[i] = grew.get(i, 0) + 1
+        return grew
+
+    def undo(self, grew):
+        for i, k in grew.items():
+            del self.used[i][-k:]
+
+    def blocked(self, x, z, ignore_after, clear):
+        """Is anything already laid within `clear` of here? Stops at the first one.
+
+        `nearest` measures, which costs a sweep of every cell inside sixty metres — 225 of
+        them — when the walk only ever asks whether one point is too close. This looks at 25.
+        """
+        for i in self._cells(x, z, clear):
+            for px, pz, age in self.used[i]:
+                if age > ignore_after:
+                    continue
+                if (px - x) ** 2 + (pz - z) ** 2 < clear * clear:
+                    return True
+        return False
 
     def nearest(self, x, z, ignore_after, reach=60.0, ignore_before=-1.0):
         """Distance to the closest track laid between `ignore_before` and `ignore_after`.
@@ -195,192 +231,284 @@ class Ground:
         return min(self.nearest(x, z, ignore_after), edge)
 
 
-# How much of a lap has to be tight enough to wear a rut. A hand-written track that measures
-# like Indiana carries about this much under a 14 m radius.
-TIGHT_SHARE = 0.10
+# What a lap is made of. `scripts/track-survey.py` prints this off the tracks' own `.trh`
+# centrelines; a corner is same-handed turning under a 300 m radius with under ten metres let
+# into it.
+#
+#                     Indiana   Southwick   all 18
+#   lap                 2170 m     2217 m   1065-3055
+#   corners           16 (7.4)   18 (8.1)   7.4-10.3 per km
+#   arcs in a corner         4          5   1-6
+#   a corner's angle       159d       166d   90-166 (p50 136)
+#   apex radius         10.4 m     11.9 m   7.1-18.5
+#   ground per corner     68 m       74 m   14-82
+#   run between them      27 m       30 m   20-72
+CORNERS_PER_KM = (7.4, 10.3)
+LAP_MAX_M = 2550.0          # `trackllm::corpus::LAP_M` refuses anything over 2600
+TIGHT_SHARE = 0.10          # how much of a lap is tight enough to wear a rut
+
+# And the ground between the corners, as length by radius. A published lap is almost never
+# straight and a third of it drifts through a radius over 300 m, which rides as a straight and
+# measures as an arc. A wander of 55-190 m instead read as part of the corner beside it.
+#
+#                    Indiana   Southwick
+#   a true straight     2.9%        0.8%
+#   R 40-80 m          16.7%       14.7%
+#   R 80-160           14.1%       13.6%
+#   R 160-300          11.2%       13.4%
+#   R 300-1000         18.1%       19.0%
+#   R over 1000        15.9%        8.2%
+WANDER = [(40.0, 80.0, 0.21), (80.0, 160.0, 0.19), (160.0, 300.0, 0.17),
+          (300.0, 1000.0, 0.26), (1000.0, 3000.0, 0.17)]
+
+
+def a_wander(rng):
+    """A piece of the ground between corners: a radius off the corpus, and 15 to 45 m of it.
+
+    Drawn as a length with the angle following, because a fixed angle band makes a 500 m
+    sweeper 200 m long. Indiana's segments average eighteen metres.
+    """
+    roll, acc = rng.random(), 0.0
+    lo, hi = WANDER[-1][0], WANDER[-1][1]
+    for a, b, w in WANDER:
+        acc += w
+        if roll <= acc:
+            lo, hi = a, b
+            break
+    r = math.exp(rng.uniform(math.log(lo), math.log(hi)))
+    run = rng.uniform(15.0, 45.0)
+    side = rng.choice((1.0, -1.0))
+    return [{"kind": "arc", "radius": r * side,
+             "angle": math.degrees(run / r), "rise": 0.0}]
+
+
+def a_corner(rng, side=None):
+    """One corner, built the way a real one is: in on a loosening arc, round, and out.
+
+    A published corner is not one arc — Indiana's median is four and Southwick's five — which
+    is why it covers seventy metres of ground turning through 160 degrees where a lone arc of
+    the same apex radius covers thirty. Offered one arc at a time the walk could only reach
+    the corpus's tight radii with a hairpin, and a same-handed wander landing beside it read
+    as one corner of 197 degrees.
+    """
+    if side is None:
+        side = rng.choice((1.0, -1.0))
+    shape = rng.random()
+    if shape < 0.22:
+        # Not every corner is a hairpin: a fifth of the corpus's are a single sweep.
+        return [{"kind": "arc", "radius": side * rng.uniform(15.0, 32.0),
+                 "angle": rng.uniform(40.0, 95.0), "rise": 0.0}]
+    entry = {"kind": "arc", "radius": side * rng.uniform(26.0, 60.0),
+             "angle": rng.uniform(22.0, 50.0), "rise": 0.0}
+    apex = {"kind": "arc", "radius": side * rng.uniform(8.0, 15.0),
+            "angle": rng.uniform(55.0, 105.0), "rise": 0.0}
+    exit_ = {"kind": "arc", "radius": side * rng.uniform(18.0, 45.0),
+             "angle": rng.uniform(18.0, 45.0), "rise": 0.0}
+    return [entry, apex, exit_]
+
+
+def chain_length(segs):
+    return sum(s["length"] if s["kind"] == "straight"
+               else abs(s["radius"]) * math.radians(s["angle"]) for s in segs)
 
 
 def grow(rng, plot, width, want_m):
     """Walk a lap out of the ground and dock it back onto its own start.
 
-    Each step offers the same handful of moves — hold the line, ease left or right, turn hard
+    Each step offers the same handful of moves — a run, a gentle wander, or a whole corner
     either way — and the one taken is whichever leaves the track in the most open ground while
     clearing everything already laid. When the budget runs down, the shortest Dubins path back
     to the start pose that is also clear closes the lap exactly, which is why there is no
     return leg to route round anything.
+
+    And it takes moves back. Greedy, sixty seeds gave one lap and the other fifty-nine ran out
+    of legal moves 150 to 900 m in, because the first dead end was final. The moves live on a
+    stack now, and a dead end pops one and takes the next-best instead.
     """
     clear = width + 5.0          # how near the lap may come to itself
     margin = 26.0
+    # Drawn once: redrawn at every step it averages to the middle and the noise decides.
+    want_rate = rng.uniform(*CORNERS_PER_KM) / 1000.0
     gate_room = 78.0        # the start spur stands beside the lap and needs ground
-    # Three tightnesses, and the tightest is a hairpin.
-    #
-    # Ruts reach full depth at a 14 m radius and start forming at 40 — which is measured, and
-    # is the whole reason a corner wears and a sweeper does not. The first laps out of this
-    # walk put one per cent of their length under 14 m against a hand-written track's eight,
-    # and rode, in one word, with no ruts. Not even in the turns: at 20 to 30 m the ground
-    # barely digs.
-    turn_r = [rng.uniform(8.5, 12.5), rng.uniform(14.0, 20.0), rng.uniform(24.0, 34.0)]
     start = (plot * 0.5, margin + gate_room, 0.0)   # facing +z, up the plot
-    pose = start
     ground = Ground(plot)
     cover = Cover(plot)
     segs = []
-    laid = 0.0
     # The first stretch is the start straight, and nothing may be built on it.
     opening = {"kind": "straight", "length": rng.uniform(90.0, 130.0), "rise": 0.0}
-    tight_m = 0.0
     segs.append(opening)
-    ground.add(samples(pose, opening), 0.0)
-    cover.add(samples(pose, opening))
-    pose = advance(pose, opening)
-    laid += opening["length"]
+    ground.add(samples(start, opening), 0.0)
+    cover.add(samples(start, opening))
+    pose = advance(start, opening)
+    laid = opening["length"]
 
-    def legal(from_pose, seg, age_cut, near_gate=0.0):
-        for x, z, _ in samples(from_pose, seg, 2.5):
-            if not (margin <= x <= plot - margin and margin <= z <= plot - margin):
-                return False
-            # Arriving at the gate is allowed to be close to the gate, and to nothing else.
-            #
-            # Exempting the first stretch of the *lap* instead let the way home drive
-            # straight through the first corner — "segment 1 runs within 0 m of segment 44" —
-            # because that corner is early, not because it is near the finish. The exemption
-            # has to be about where a piece is, not when it was laid.
-            if near_gate > 0.0 and math.hypot(x - start[0], z - start[1]) < near_gate:
-                continue
-            if ground.nearest(x, z, age_cut) < clear:
-                return False
+    def legal(from_pose, chain, age_cut, near_gate=0.0):
+        p = from_pose
+        for seg in chain:
+            for x, z, _ in samples(p, seg, 2.5):
+                if not (margin <= x <= plot - margin and margin <= z <= plot - margin):
+                    return False
+                # Arriving at the gate is allowed to be close to the gate, and to nothing
+                # else. Exempting the first stretch of the *lap* instead let the way home
+                # drive straight through the first corner — "segment 1 runs within 0 m of
+                # segment 44" — because that corner is early, not because it is near the
+                # finish. The exemption has to be about where a piece is, not when it was
+                # laid.
+                if near_gate > 0.0 and math.hypot(x - start[0], z - start[1]) < near_gate:
+                    continue
+                if ground.blocked(x, z, age_cut, clear):
+                    return False
+            p = advance(p, seg)
         return True
 
-    cap = want_m * 1.7
-    while laid < cap:
-        # What a rider could be given next: a run, or a turn of one of three tightnesses
-        # either way. Runs are what carry the lap across the ground; turns are what keep it
-        # inside the plot.
-        # A straight, unless the lap is already on one long enough. Consecutive straights are
-        # colinear, so the app's `straight_runs` reads a row of them as ONE straight — and a
-        # row of 35-80 m moves reached 248 m against the 125 m cap (`corpus::STRAIGHT_M`, the
-        # FFM's limit and the only one any federation writes). Indiana's longest is 62 m.
+    def offers(pose, laid, since_corner, corners_laid, tight_m):
+        """Every move worth trying here, best first.
+
+        Scored on ground it would be the first to visit — per metre travelled, not per move,
+        because rewarding raw coverage buys it with long straights, and a lap of long runs
+        with angles between them is not a track.
+        """
         running = 0.0
         for prev in reversed(segs):
             if prev["kind"] != "straight":
                 break
             running += prev["length"]
-        moves = []
+        cand = []
+        # A straight, unless the lap is already on one long enough. Consecutive straights are
+        # colinear, so the app's `straight_runs` reads a row of them as ONE straight — and a
+        # row of 35-80 m moves reached 248 m against the 125 m cap (`corpus::STRAIGHT_M`, the
+        # FFM's limit and the only one any federation writes).
         room_on_the_straight = 125.0 - running
-        if room_on_the_straight > 35.0:
-            moves.append({"kind": "straight",
-                          "length": rng.uniform(35.0, min(80.0, room_on_the_straight)),
-                          "rise": 0.0})
-        # The lap's own wander, and most of what it is made of. A published track is a chain
-        # of arcs — Indiana runs 109 of them against 11 straights — but they average twenty
-        # degrees apiece, not a hundred. Without this move every piece of the lap was a real
-        # corner, which is the slalom: twenty-six arcs averaging 96 degrees, flipping
-        # direction fifteen times.
-        for _ in range(3):
-            r = rng.uniform(48.0, 160.0)
-            for side in (1.0, -1.0):
-                moves.append({"kind": "arc", "radius": r * side,
-                              "angle": rng.uniform(11.0, 32.0), "rise": 0.0})
-        for r in turn_r:
-            for side in (1.0, -1.0):
-                # A hairpin turns most of the way round. Getting the tight ground a lap needs
-                # out of many small tight corners costs a corner apiece — forty of them,
-                # where a published track carries ten to thirty — while three real hairpins
-                # carry the same metres and read as corners a rider remembers.
-                ang = rng.uniform(120.0, 178.0) if r < 14.0 else rng.uniform(55.0, 108.0)
-                moves.append({"kind": "arc", "radius": r * side,
-                              "angle": ang, "rise": 0.0})
-        rng.shuffle(moves)
-        # No corner straight into the opposite corner. That is what a slalom is, and it is
-        # what the ground between them cannot carry: a rider needs somewhere to stand the
-        # bike up. Two gentle bends may still answer each other, because that is a lap
-        # wandering rather than a rider being thrown from edge to edge.
-        prev = segs[-1] if segs else None
-        def slaloms(m):
-            if prev is None or prev["kind"] != "arc" or m["kind"] != "arc":
-                return False
-            if (prev["radius"] > 0.0) == (m["radius"] > 0.0):
-                return False
-            return max(prev["angle"], m["angle"]) >= 38.0
+        if room_on_the_straight > 30.0:
+            cand.append([{"kind": "straight",
+                          "length": rng.uniform(30.0, min(75.0, room_on_the_straight)),
+                          "rise": 0.0}])
+        # The lap's own wander, and most of the ground between corners.
+        for _ in range(7):
+            cand.append(a_wander(rng))
+        # And corners, whole — but only once the lap has run far enough since the last one for
+        # the two to be told apart, or a same-handed pair reads as one corner of twice the
+        # angle. The corpus's p50 run between corners is 27 to 30 m.
+        if since_corner >= 20.0:
+            for _ in range(4):
+                cand.append(a_corner(rng))
 
-        best, best_score = None, -1e9
-        for m in moves:
-            if slaloms(m):
+        behind = corners_laid < laid * want_rate
+        scored = []
+        for chain in cand:
+            run_m = chain_length(chain)
+            pts = []
+            p = pose
+            for seg in chain:
+                pts += samples(p, seg, 6.0)
+                p = advance(p, seg)
+            score = 190.0 * cover.fresh(pts) / max(run_m, 1.0)
+            ahead = (p[0] + math.sin(p[2]) * 26.0, p[1] + math.cos(p[2]) * 26.0)
+            score += 0.35 * ground.room(ahead[0], ahead[1], laid - 34.0)
+            corner = len(chain) > 1 or (chain[0]["kind"] == "arc"
+                                        and chain[0]["angle"] >= 40.0)
+            if corner:
+                # Corners are the point — but eight a kilometre, not as many as will fit.
+                score += 34.0 if behind else -22.0
+                apex = min(abs(s["radius"]) for s in chain)
+                if apex < 14.0 and tight_m < laid * TIGHT_SHARE:
+                    score += 20.0
+            scored.append((score, chain))
+        scored.sort(key=lambda t: -t[0])
+        return [c for _, c in scored]
+
+    def home_from(pose, laid, segs):
+        """A way back onto the start pose that lands, is clear, and breaks no rule."""
+        for _, home in dubins(pose, start, rng.uniform(14.0, 22.0)):
+            # Walked, not trusted: one of the four families has a sign in it that only bites
+            # on some geometries, and the symptom is a lap that misses itself by thirty metres.
+            landed = pose
+            for seg in home:
+                landed = advance(landed, seg)
+            if math.hypot(landed[0] - start[0], landed[1] - start[1]) > 0.25:
                 continue
+            # The way home may run up beside the start straight — that is where it is going —
+            # so the first stretch of the lap is not an obstacle to it.
+            if not legal(pose, home, laid - 34.0, near_gate=opening["length"] * 0.8):
+                continue
+            # And no straight on the finished lap may run past the FFM's 125 m. Checked on the
+            # whole lap: consecutive straights are colinear so `straight_runs` reads a row of
+            # them as one, and a Dubins path's straight sits in its middle.
+            if longest_straight(segs + home, opening) > 125.0:
+                continue
+            # The way home is part of the lap and its own length counts: laps came out at
+            # 2627 and 2820 m because the walk stopped at the cap and Dubins added to it.
+            if laid + chain_length(home) > LAP_MAX_M:
+                continue
+            if all(s["kind"] != "arc" or s["angle"] < 200.0 for s in home):
+                return home
+        return None
+
+    cap = min(want_m * 1.25, LAP_MAX_M)
+    # Each entry is one move on the lap and what it would take to undo it.
+    stack = []
+    budget = 9000           # moves tried, so a hopeless seed gives up rather than hangs
+    since_corner, corners_laid, tight_m = 0.0, 0, 0.0
+    node = None
+    while budget > 0:
+        if node is None:
+            if laid > want_m * 0.86:
+                home = home_from(pose, laid, segs)
+                if home:
+                    return segs + home, start
+            node = {"cands": (offers(pose, laid, since_corner, corners_laid, tight_m)
+                              if laid < cap else []),
+                    "i": 0}
+        budget -= 1
+        # Take the best move left here that is actually clear.
+        chain = None
+        while node["i"] < len(node["cands"]):
+            c = node["cands"][node["i"]]
+            node["i"] += 1
             # Ignore the last thirty metres of track when checking clearance: a corner is
             # allowed to come close to the run that fed it.
-            if not legal(pose, m, laid - 34.0):
-                continue
-            end = advance(pose, m)
-            # Ground it would be the first to visit, which is what makes a lap fill its plot
-            # rather than circle it.
-            # Per metre travelled, not per move: rewarding raw coverage buys it with long
-            # straights, because a hundred metres of run touches more ground than a corner
-            # ever will, and a lap of long runs with angles between them is not a track.
-            run_m = (m["length"] if m["kind"] == "straight"
-                     else abs(m["radius"]) * math.radians(m["angle"]))
-            score = 190.0 * cover.fresh(samples(pose, m, 6.0)) / max(run_m, 1.0)
-            # Room still counts, but only enough to keep the walk from painting itself in.
-            ahead = (end[0] + math.sin(end[2]) * 26.0, end[1] + math.cos(end[2]) * 26.0)
-            score += 0.35 * ground.room(ahead[0], ahead[1], laid - 34.0)
-            if m["kind"] == "arc":
-                score += 3.0            # corners are the point, but ten to thirty of them
-                # And a lap needs its share of ground tight enough to wear. Until it has
-                # that, a hairpin outscores anything the open ground can offer.
-                if abs(m["radius"]) < 14.0:
-                    # In metres, like the room term it competes with: at four it was noise.
-                    score += 45.0 if tight_m < laid * TIGHT_SHARE else 1.0
-            if score > best_score:
-                best, best_score = m, score
-        if best is None:
-            return None                 # painted in; the caller tries another seed
-
-        ground.add(samples(pose, best), laid)
-        cover.add(samples(pose, best))
-        pose = advance(pose, best)
-        run = (best["length"] if best["kind"] == "straight"
-               else abs(best["radius"]) * math.radians(best["angle"]))
-        if best["kind"] == "arc" and abs(best["radius"]) < 14.0:
-            tight_m += run
-        laid += run
-        segs.append(best)
-        # Once past the budget, try to close on every step until one is clear.
-        if laid > want_m * 0.72:
-            for _, home in dubins(pose, start, rng.choice(turn_r[1:])):
-                # Walked, not trusted. One of the four families has a sign in it that only
-                # bites on some geometries, and the symptom is a lap that misses itself by
-                # thirty metres — which the repair pass then shuts with segments of its own,
-                # and those are the loop this whole approach exists to avoid. A way home that
-                # does not land is simply not a candidate.
-                landed = pose
-                for seg in home:
-                    landed = advance(landed, seg)
-                if math.hypot(landed[0] - start[0], landed[1] - start[1]) > 0.25:
-                    continue
-                p = pose
-                ok = True
-                for seg in home:
-                    # The way home may run up beside the start straight — that is where it is
-                    # going — so the first stretch of the lap is not an obstacle to it.
-                    if not legal(p, seg, laid - 34.0, near_gate=opening["length"] * 0.8):
-                        ok = False
-                        break
-                    p = advance(p, seg)
-                # And no straight anywhere on the finished lap may run past the cap.
-                #
-                # Checked on the WHOLE lap rather than on the way home, because two things
-                # make a long straight and neither is one segment: consecutive straights are
-                # colinear, so the app's `straight_runs` reads a row of them as one — and a
-                # Dubins path is arc-straight-arc, so its straight sits in the MIDDLE and a
-                # look at the last segment never sees it. That is what left a 244 m straight
-                # on a lap whose every move was capped at 80. The limit is the FFM's 125 m,
-                # the only straight-length rule any federation writes; Indiana's longest is 62.
-                if ok and longest_straight(segs + home, opening) > 125.0:
-                    continue
-                if ok and all(s["kind"] != "arc" or s["angle"] < 200.0 for s in home):
-                    return segs + home, start
+            if legal(pose, c, laid - 34.0):
+                chain = c
+                break
+        if chain is None:
+            # Painted in. Take the last move back and try this node's next-best instead.
+            if not stack:
+                return None
+            back = stack.pop()
+            ground.undo(back["ground"])
+            cover.undo(back["cover"])
+            del segs[len(segs) - back["n"]:]
+            pose, laid = back["pose"], back["laid"]
+            since_corner, corners_laid = back["since"], back["corners"]
+            tight_m = back["tight"]
+            node = back["node"]
+            continue
+        was = dict(pose=pose, laid=laid, n=len(chain), node=node,
+                   since=since_corner, corners=corners_laid, tight=tight_m)
+        g, cv = {}, []
+        p, at = pose, laid
+        for seg in chain:
+            pts = samples(p, seg)
+            for i, k in ground.add(pts, at).items():
+                g[i] = g.get(i, 0) + k
+            cv += cover.add(pts)
+            at += chain_length([seg])
+            p = advance(p, seg)
+        was["ground"], was["cover"] = g, cv
+        stack.append(was)
+        run = chain_length(chain)
+        corner = len(chain) > 1 or (chain[0]["kind"] == "arc" and chain[0]["angle"] >= 40.0)
+        if corner:
+            corners_laid += 1
+            since_corner = 0.0
+            tight_m += sum(abs(s["radius"]) * math.radians(s["angle"]) for s in chain
+                           if abs(s["radius"]) < 14.0)
+        else:
+            since_corner += run
+        pose, laid = p, laid + run
+        segs += chain
+        node = None
     return None
-
 
 def longest_straight(segs, opening):
     """The longest unbroken straight a rider meets, metres — merged the way the app merges.
@@ -429,7 +557,7 @@ def main():
     for _ in range(6):
         # And longer: 1451 m rode as "overall small". Indiana is 2138.
         # Pulled back: 2400 m rode 'a bit too big'.
-        grown = grow(rng, plot, width, rng.uniform(1650.0, 2050.0))
+        grown = grow(rng, plot, width, rng.uniform(2000.0, 2350.0))
         if grown:
             break
     if not grown:

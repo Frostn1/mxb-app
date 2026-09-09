@@ -1703,6 +1703,22 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0137.hero.title":
+    "Jeder MX-Bikes-Server, live, während du fährst",
+  "showcase.v0137.hero.body":
+    "Der Server-Tab listet jeden Server der Master-Liste mit echtem Ping, der tatsächlich gefahrenen Strecke und der laufenden Session. Er funktioniert weiter, während MX Bikes läuft — die App fragt jeden Server direkt, sodass nichts mit dem Spiel um deinen Account konkurriert.",
+  "showcase.v0137.whoson":
+    "Öffne einen Server und sieh, wer darauf fährt, was er erlaubt und welche Strecke läuft — mit Bild, wenn du sie hast, und dem Weg dorthin, wenn nicht.",
+  "showcase.v0137.cheats":
+    "Server, die mit Cheats werben, werden ausgeblendet — nach denselben Regeln wie FrostMod im Spiel. Der Tab nennt die Zahl und zeigt sie dir auf Wunsch.",
+  "showcase.v0137.livecodes":
+    "Share-Codes, die aktuell bleiben. Einmal einen kurzen Code schicken, dann neue Versionen darauf veröffentlichen — alle, die ihn eingefügt haben, bekommen sie, und Auto installiert sie.",
+  "showcase.v0137.viewer":
+    "Die 3D-Ansicht zeichnet den echten Untergrund einer Strecke: jede Ebene mit eigener Textur durch die Masken der Strecke, die Objekte in ihren eigenen Texturen und den mitgelieferten Himmel.",
+  "showcase.v0137.ranked":
+    "Ein Ranked-Tab mit deinem MXB-Ranked-Rang, MXP, Saisonwerten und deinen letzten 50 Rennen. Nichts anzumelden — die GUID kommt aus Steam.",
+  "showcase.v0137.look":
+    "Ein neuer Look. Die Navigation sitzt jetzt in einer Leiste oben, sodass Mod-Bilder die volle Fensterbreite bekommen — sieben pro Reihe statt fünf.",
   "showcase.v0124.hero.title":
     "Jeder im Starterfeld in der Lackierung, die er wirklich gewählt hat",
   "showcase.v0124.hero.body":

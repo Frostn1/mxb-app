@@ -2632,6 +2632,138 @@ mod tests {
         assert_eq!(bindings(&flat, 4, 2), vec![(0, 0), (1, 1)]);
     }
 
+    /// Composite a track's ground the way the shader does, as one PNG.
+    ///
+    /// Base sheet, then each layer mixed in by its own mask, sampled straight. The sheets
+    /// tile a hundred-odd times across the ground, so at this size each one is its own mean
+    /// colour — which is what makes the placement of the paint readable rather than its grain.
+    #[test]
+    #[ignore = "writes a PNG — set FROST_MAP and FROST_PNG"]
+    fn dump_ground_composite() {
+        let path = std::env::var("FROST_MAP").expect("set FROST_MAP");
+        let out = std::env::var("FROST_PNG").expect("set FROST_PNG");
+        let b = std::fs::read(&path).expect("read the map");
+        let layers = ground_layers(&b);
+        assert!(!layers.is_empty(), "the map carries a ground stack");
+        const D: usize = 768;
+        let mean = |t: &MapTexture| -> [f64; 3] {
+            let mut s = [0f64; 3];
+            let n = (t.rgba.len() / 4).max(1);
+            for p in t.rgba.chunks_exact(4) {
+                for k in 0..3 {
+                    s[k] += p[k] as f64;
+                }
+            }
+            [s[0] / n as f64, s[1] / n as f64, s[2] / n as f64]
+        };
+        let mut px = vec![0f64; D * D * 3];
+        for (i, l) in layers.iter().enumerate() {
+            let c = mean(&l.sheet);
+            for y in 0..D {
+                for x in 0..D {
+                    let o = (y * D + x) * 3;
+                    let a = match &l.mask {
+                        Some(m) => {
+                            let mx = x * m.width as usize / D;
+                            let my = y * m.height as usize / D;
+                            m.coverage[my * m.width as usize + mx] as f64 / 255.0
+                        }
+                        None => 1.0,
+                    };
+                    let a = if i == 0 { 1.0 } else { a };
+                    for k in 0..3 {
+                        px[o + k] = px[o + k] * (1.0 - a) + c[k] * a;
+                    }
+                }
+            }
+        }
+        // Written with the last grid row first, so the picture reads the way the track does
+        // from above: the grid's y runs with world +Z, and a PNG's first row is its top.
+        let mut bytes: Vec<u8> = Vec::with_capacity(D * D * 3);
+        for y in (0..D).rev() {
+            for x in 0..D {
+                let o = (y * D + x) * 3;
+                for k in 0..3 {
+                    bytes.push(px[o + k].clamp(0.0, 255.0) as u8);
+                }
+            }
+        }
+        image::RgbImage::from_raw(D as u32, D as u32, bytes).unwrap().save(&out).unwrap();
+        println!("  {out}  {D}x{D}  {} layers", layers.len());
+    }
+
+    /// A track's ground textures: what each sheet is, and how it lands on the ground.
+    ///
+    /// Texels per metre is the number that matters at riding distance — a big sheet tiled
+    /// coarsely reads no sharper than a small one tiled tight. Detail is the high-frequency
+    /// energy left after a blur, which is what stops a surface reading as a flat wash.
+    #[test]
+    #[ignore = "needs a real .map — set FROST_MAP"]
+    fn ground_texture_survey() {
+        let path = std::env::var("FROST_MAP").expect("set FROST_MAP");
+        let label = std::env::var("FROST_LABEL").unwrap_or_else(|_| "track".into());
+        let across: f32 = std::env::var("FROST_ACROSS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(525.0);
+        let b = std::fs::read(&path).expect("read the map");
+        let dir = std::env::var("FROST_DUMP").ok();
+        if let Some(d) = &dir {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        println!(
+            "\n== {label} ==  site {across:.0} m\n{:<22} {:>9} {:>8} {:>9} {:>7} {:>7} {:>18}",
+            "layer", "sheet", "m/tile", "texel/m", "detail", "cover", "mean rgb"
+        );
+        for (i, l) in ground_layers(&b).iter().enumerate() {
+            let t = &l.sheet;
+            let n = (t.rgba.len() / 4).max(1);
+            let mut sum = [0f64; 3];
+            for p in t.rgba.chunks_exact(4) {
+                for k in 0..3 {
+                    sum[k] += p[k] as f64;
+                }
+            }
+            let mean = [sum[0] / n as f64, sum[1] / n as f64, sum[2] / n as f64];
+            // Detail: mean absolute difference between neighbouring texels, in luma. A wash
+            // scores near zero however bright it is.
+            let (w, h) = (t.width as usize, t.height as usize);
+            let luma = |i: usize| {
+                let p = &t.rgba[i * 4..];
+                p[0] as f64 * 0.299 + p[1] as f64 * 0.587 + p[2] as f64 * 0.114
+            };
+            let mut d = 0.0;
+            let mut c = 0usize;
+            for y in 0..h {
+                for x in 1..w {
+                    d += (luma(y * w + x) - luma(y * w + x - 1)).abs();
+                    c += 1;
+                }
+            }
+            let detail = if c > 0 { d / c as f64 } else { 0.0 };
+            let m_per_tile = across / l.tile_u.max(0.001);
+            // Texels per metre uses the sheet as stored here, which is the reduced one; the
+            // ratio between tracks is what this is for.
+            let texel_per_m = t.width as f32 / m_per_tile;
+            let cover = l.mask.as_ref().map_or(100.0, |m| {
+                m.coverage.iter().filter(|&&v| v > 8).count() as f64 * 100.0
+                    / m.coverage.len().max(1) as f64
+            });
+            println!(
+                "{:<22} {:>4}x{:<4} {:>8.2} {:>9.1} {:>7.2} {:>6.1}% {:>6.0},{:>4.0},{:>4.0}",
+                t.name, t.width, t.height, m_per_tile, texel_per_m, detail, cover,
+                mean[0], mean[1], mean[2]
+            );
+            if let Some(d) = &dir {
+                if let Some(img) =
+                    image::RgbaImage::from_raw(t.width, t.height, t.rgba.clone())
+                {
+                    let _ = img.save(format!("{d}/{label}_{i}_{}.png", t.name));
+                }
+            }
+        }
+    }
+
     /// Write a map's ground masks out as PNGs, one per layer.
     ///
     /// The masks are the only statement of where a track's paint goes, and whether they line
