@@ -832,6 +832,21 @@ export interface RecentPaint {
   savedAt: number;
 }
 
+/**
+ * Watch exported `.psd` files and announce each save as a `psd-changed` event.
+ *
+ * One set at a time: calling this again replaces what is being watched, which is what you
+ * want when a second export supersedes the first.
+ */
+export function psdWatch(paths: string[]): Promise<void> {
+  return invoke<void>("psd_watch", { paths });
+}
+
+/** Stop watching. */
+export function psdUnwatch(): Promise<void> {
+  return invoke<void>("psd_unwatch");
+}
+
 /** What the Designer offers to reopen. Entries whose file is gone are dropped on read. */
 export function designerRecents(): Promise<RecentPaint[]> {
   return invoke<RecentPaint[]>("designer_recents");

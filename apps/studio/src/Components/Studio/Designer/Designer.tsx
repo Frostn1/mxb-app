@@ -8,28 +8,10 @@ import {
   useState,
 } from "react";
 import {
-  Bike,
-  ClipboardPaste,
-  Copy,
-  CopyPlus,
-  Eye,
-  EyeOff,
-  FilePlus2,
-  FlipHorizontal2,
-  FlipVertical2,
-  Grid3x3,
-  Group,
-  Layers as LayersIcon,
-  Link2,
-  Link2Off,
-  Loader2,
-  PaintBucket,
-  Plus,
-  Save,
-  Trash2,
-  Ungroup,
+  Bike,  CircleCheck,  ClipboardPaste,  Copy,  CopyPlus,  Eye,  EyeOff,  FilePlus2,  FlipHorizontal2,  FlipVertical2,  Grid3x3,  GripVertical,  Group,  Layers as LayersIcon,  Link2,  Link2Off,  Loader2,  PaintBucket,  Plus,  Save,  Trash2,  Ungroup,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import * as THREE from "three";
 import { cn } from "@frost/shared/lib/utils";
@@ -52,6 +34,8 @@ import {
   paintStudioTarget,
   designerRecentNote,
   psdRead,
+  psdUnwatch,
+  psdWatch,
   psdSave,
   textureBytes,
 } from "@frost/shared/api/mods";
@@ -1033,6 +1017,41 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * canvases until something asks, and asking here is what stops an export shipping a frame
    * older than the screen.
    */
+  /**
+   * The `.psd` files this session exported, and which sheet each came from.
+   *
+   * A ref because the listener below is registered once and must see the current map — and
+   * because nothing on screen depends on it until a file actually changes.
+   */
+  const watched = useRef(new Map<string, string>());
+
+  useEffect(() => {
+    const un = listen<{ path: string }>("psd-changed", async (e) => {
+      const sheetId = watched.current.get(e.payload.path);
+      if (!sheetId) return;
+      try {
+        const { psdToSheet } = await import("./psd");
+        const stem = (e.payload.path.replace(/\\/g, "/").split("/").pop() ?? "").replace(
+          /\.psb?d$/i,
+          "",
+        );
+        const made = await psdToSheet(await psdRead(e.payload.path), stem);
+        // The sheet keeps its name and its place: it is the same sheet, redrawn. Replacing
+        // the name would rebind it to different bodywork on the next save.
+        remember();
+        patchSheet(sheetId, (sheet) => ({ ...sheet, ...made, id: sheet.id, name: sheet.name }));
+        bump();
+        toast.success(t("designer.psdReloaded", { name: stem }));
+      } catch (err) {
+        toast.error(String(err).replace(/^Error:\s*/, ""));
+      }
+    });
+    return () => {
+      void un.then((f) => f());
+      void psdUnwatch().catch(() => {});
+    };
+  }, [bump, patchSheet, remember, t]);
+
   const exportPsd = useCallback(async () => {
     if (!sheets.length) return;
     const picked = await openDialog({ directory: true });
@@ -1046,16 +1065,25 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       const sep = dir.includes("\\") ? "\\" : "/";
       const prefix = name.trim() ? `${name.trim()} - ` : "";
       let written = 0;
+      const exported = new Map<string, string>();
       for (const sheet of sheets) {
         const canvas = canvasFor(sheet);
         composite(canvas, sheet);
         // A sheet is named after a texture, and a texture name is not obliged to be a legal
         // file name. Nothing is renamed on the sheet — only on the file it is written to.
         const label = (sheet.name.trim() || `sheet-${written + 1}`).replace(/[\\/:*?"<>|]/g, "_");
-        await psdSave(`${dir}${sep}${prefix}${label}.psd`, sheetToPsd(sheet, canvas));
+        const at = `${dir}${sep}${prefix}${label}.psd`;
+        await psdSave(at, sheetToPsd(sheet, canvas));
+        exported.set(at, sheet.id);
         written += 1;
       }
-      toast.success(t("designer.exportedPsd", { count: written, dir }));
+      // Watched from here, which is what makes this a round trip rather than an export:
+      // save in Photoshop and the sheet it came from is replaced in place.
+      watched.current = exported;
+      await psdWatch([...exported.keys()]).catch(() => {});
+      toast.success(t("designer.exportedPsd", { count: written, dir }), {
+        description: t("designer.psdWatching"),
+      });
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
     } finally {
@@ -1970,22 +1998,21 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   );
 
   /**
-   * Move a sheet within the list.
+   * Drop `id` where `before` sits.
    *
-   * Not cosmetic: `write` packs the sheets in this order, so it is the order they end up in
-   * the `.pnt`. The mesh binds by name either way, but a paint whose sheets are ordered the
-   * way its author expects is easier to diff and to hand to somebody else.
+   * The list order is the order `write` packs them in, so this is not cosmetic. It replaced a
+   * pair of arrows on every row — six controls to move a list of five things, each disabled
+   * at one end — with the gesture people already try first.
    */
-  const reorderSheet = useCallback(
-    (id: string, delta: number) => {
-      // Keyed, so walking a sheet three places up is one step back rather than three.
+  const moveSheet = useCallback(
+    (id: string, before: string) => {
       remember(`sheet-order:${id}`);
       setSheets((prev) => {
-        const at = prev.findIndex((s) => s.id === id);
-        const to = at + delta;
-        if (at < 0 || to < 0 || to >= prev.length) return prev;
+        const from = prev.findIndex((s) => s.id === id);
+        const to = prev.findIndex((s) => s.id === before);
+        if (from < 0 || to < 0 || from === to) return prev;
         const next = [...prev];
-        const [moved] = next.splice(at, 1);
+        const [moved] = next.splice(from, 1);
         next.splice(to, 0, moved);
         return next;
       });
@@ -2280,7 +2307,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               bump();
             }}
             onRemove={removeSheet}
-            onReorder={reorderSheet}
+            onMove={moveSheet}
             missingHints={missingHints}
             onAddBlank={addBlankSheet}
             onAddHintSheets={addHintSheets}
@@ -2509,7 +2536,7 @@ function SheetList({
   onPick,
   onRename,
   onRemove,
-  onReorder,
+  onMove,
   onAddBlank,
   onAddHintSheets,
 }: {
@@ -2523,12 +2550,19 @@ function SheetList({
   onPick: (id: string) => void;
   onRename: (id: string, value: string) => void;
   onRemove: (id: string) => void;
-  onReorder: (id: string, delta: number) => void;
+  onMove: (id: string, before: string) => void;
   onAddBlank: () => void;
   onAddHintSheets: () => void;
-  /** Nothing has been drawn yet — see the Designer's own `pristine`. */
 }) {
   const t = useT();
+  // Which row is being dragged. A ref, not state: it changes on every dragover and nothing
+  // on screen depends on it until the drop.
+  const drag = useRef<string | null>(null);
+  // The names the model actually binds, for the mark on each row.
+  const bound = useMemo(
+    () => new Set(hints.map((h) => h.trim().toLowerCase())),
+    [hints],
+  );
   return (
     <Card className={cn("bg-card/40", className)}>
       <CardHeader>
@@ -2548,7 +2582,7 @@ function SheetList({
       {/* Scrolls rather than growing: a bike's paint runs to two dozen sheets, and a list that
           long pushed the hint line and every button below the fold of the rail. */}
       <div className="flex max-h-[46vh] flex-col gap-1.5 overflow-y-auto pr-0.5">
-        {sheets.map((sheet, i) => (
+        {sheets.map((sheet) => (
           /* The row picks the sheet. It used to be the size label that did — a `2048²` that
              was secretly the button — while the name was a text field and reorder and delete
              sat beside it, so five sheets meant five text fields and fifteen buttons on a
@@ -2556,6 +2590,20 @@ function SheetList({
              size is what it always looked like: a label. */
           <div
             key={sheet.id}
+            draggable
+            onDragStart={(e) => {
+              drag.current = sheet.id;
+              e.dataTransfer.effectAllowed = "move";
+            }}
+            onDragOver={(e) => {
+              if (drag.current && drag.current !== sheet.id) e.preventDefault();
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (drag.current && drag.current !== sheet.id) onMove(drag.current, sheet.id);
+              drag.current = null;
+            }}
+            onDragEnd={() => (drag.current = null)}
             onClick={() => onPick(sheet.id)}
             className={cn(
               "group flex cursor-default items-center gap-1 rounded-md border px-1.5 py-1 transition-colors",
@@ -2564,6 +2612,17 @@ function SheetList({
                 : "border-transparent hover:bg-foreground/[0.04]",
             )}
           >
+            <span
+              className={cn(
+                "flex-none cursor-grab text-faint transition-opacity",
+                sheet.id === activeId
+                  ? "opacity-100"
+                  : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+              )}
+              title={t("designer.dragToOrder")}
+            >
+              <GripVertical className="size-3.5" />
+            </span>
             <Input
               value={sheet.name}
               placeholder={t("designer.sheetName")}
@@ -2571,6 +2630,17 @@ function SheetList({
               onFocus={() => onPick(sheet.id)}
               onChange={(e) => onRename(sheet.id, e.target.value)}
             />
+            {/* The model binds this name. Worth marking, because a sheet named anything
+                else paints nothing — and it used to be said as a wall of names underneath
+                the list rather than against the row it is about. */}
+            {bound.has(sheet.name.trim().toLowerCase()) && (
+              <span
+                className="flex-none text-faint"
+                title={t("paints.expectedOne", { name: sheet.name.trim() })}
+              >
+                <CircleCheck className="size-3.5" />
+              </span>
+            )}
             <span className="flex-none px-0.5 text-[10.5px] tabular-nums text-faint">
               {sheet.width}²
             </span>
@@ -2582,24 +2652,6 @@ function SheetList({
                   : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
               )}
             >
-              <button
-                type="button"
-                className="px-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-                disabled={i === 0}
-                onClick={() => onReorder(sheet.id, -1)}
-                title={t("designer.moveUp")}
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                className="px-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-                disabled={i === sheets.length - 1}
-                onClick={() => onReorder(sheet.id, 1)}
-                title={t("designer.moveDown")}
-              >
-                ↓
-              </button>
               <button
                 type="button"
                 className="px-0.5 text-muted-foreground hover:text-destructive"
@@ -2619,9 +2671,6 @@ function SheetList({
           leaving the list to be copied out by hand. */}
       {!!hints.length && (
         <div className="mt-2 flex flex-col items-start gap-1.5">
-          <p className="text-[11px] leading-snug text-faint">
-            {t("paints.expected")} {hints.join(", ")}
-          </p>
           {/* Full width and clipping, not sized to its label: the rail is 224px, a bike can
               want two dozen sheets, and `Button` is `whitespace-nowrap` — so a count in the
               label, or a longer word for it in another language, ran straight out of the rail. */}

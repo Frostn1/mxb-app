@@ -43,6 +43,7 @@ pub(crate) use mxb_core::mxbsecure;
 
 fn main() {
     tauri::Builder::default()
+        .manage(PsdWatcher::default())
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -56,6 +57,8 @@ fn main() {
             set_preview_tyres,
             scan_model_swaps,
             designer_recents,
+            psd_watch,
+            psd_unwatch,
             designer_recent_note,
             designer_recent_forget,
             mxb_core::viewer::unpack_paint,
@@ -1840,4 +1843,43 @@ fn designer_recent_forget(app: tauri::AppHandle, path: String) -> Result<(), Str
     all.retain(|r| !r.path.eq_ignore_ascii_case(&path));
     let body = serde_json::to_string_pretty(&all).map_err(|e| e.to_string())?;
     std::fs::write(&p, body).map_err(|e| e.to_string())
+}
+
+/* ── The Photoshop round trip ───────────────────────────────────────────────────────────
+ *
+ * Export a sheet, edit it in Photoshop, hit save, and have the Designer pick it up. The
+ * export and the re-import already existed; what was missing was anything noticing the file
+ * had changed, so a round trip meant exporting, editing, and then finding the file again
+ * through a picker.
+ *
+ * Its own watch set rather than the viewer's: they answer different questions and are turned
+ * on and off at different times, and sharing one would mean exporting a PSD stopped the
+ * preview watching the paint.
+ */
+
+#[derive(Default)]
+pub struct PsdWatcher(mxb_core::paintwatch::WatchSet);
+
+/// Emitted with the caller's own spelling of the path, so the frontend can match it against
+/// the sheet it exported.
+const PSD_EVENT: &str = "psd-changed";
+
+#[derive(Clone, serde::Serialize)]
+struct PsdChanged {
+    path: String,
+}
+
+#[tauri::command]
+fn psd_watch(app: tauri::AppHandle, state: tauri::State<'_, PsdWatcher>, paths: Vec<String>) {
+    let handle = app.clone();
+    mxb_core::paintwatch::start_with(&state.0, "psd watcher", &paths, move |changed| {
+        for path in changed {
+            let _ = tauri::Emitter::emit(&handle, PSD_EVENT, PsdChanged { path });
+        }
+    });
+}
+
+#[tauri::command]
+fn psd_unwatch(state: tauri::State<'_, PsdWatcher>) {
+    mxb_core::paintwatch::stop(&state.0);
 }
