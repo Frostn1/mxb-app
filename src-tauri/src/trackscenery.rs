@@ -2635,3 +2635,115 @@ mod built {
         )
     }
 }
+
+/// Replay a lifted prop library onto this lap.
+///
+/// Each instance was recorded against its donor's centreline as a fraction round the lap, a
+/// signed lateral offset and a yaw relative to the heading there — see [`crate::trackprops`].
+/// Replaying is the same three numbers read the other way: find our station at that fraction,
+/// step out by the offset, and turn the prop by the yaw plus our heading.
+///
+/// The transform is **baked into the geometry** rather than written as a `scene` block's
+/// `rot`. TerrainEd bakes every block into the `.map` regardless, so the compiled track is
+/// identical either way, and baking uses only the path `builds_a_track_with_objects` already
+/// proves. Nothing here has ever written a non-zero `rot` and its sense is unverified; that is
+/// an optimisation for the export folder's size, not for the track's.
+///
+/// Props are merged by sheet, because a model carries one sheet and one only.
+pub fn placed(
+    lib: &crate::trackprops::PropLibrary,
+    prog: &TrackProgram,
+    syn: &Synth,
+) -> Vec<(String, Mesh, Texture, bool)> {
+    let lap = prog.lap_length();
+    let half = prog.width * 0.5;
+    let stations = prog.stations(0.5);
+    let coarse = prog.stations(2.0);
+    let at = |s: f32| -> crate::trackprog::Station {
+        let i = ((s / 0.5) as usize).min(stations.len().saturating_sub(1));
+        stations[i]
+    };
+
+    let sheet_rgba: std::collections::HashMap<&str, &(String, u32, u32, Vec<u8>)> =
+        lib.sheets.iter().map(|s| (s.0.as_str(), s)).collect();
+    let mut by_sheet: std::collections::HashMap<String, Mesh> = std::collections::HashMap::new();
+
+    for inst in &lib.instances {
+        let prop = &lib.props[inst.prop];
+        let st = at((inst.along * lap).clamp(0.0, lap));
+        let (rx, rz) = crate::trackprog::right_vector(st.heading);
+
+        // Push anything that would land on the riding line out to the shoulder. A donor's
+        // corridor is not ours: its 7 m is inside our track where ours is wider.
+        //
+        // By the prop's own footprint, not by its anchor. A clump anchored exactly on the
+        // margin still reaches half its span back over the line, which is how a tree ended up
+        // 5.4 m from the centreline of a 6 m corridor.
+        let reach = prop.reach;
+        let margin = half + 2.0 + reach;
+        let want = inst.offset;
+        let off = if want.abs() < margin {
+            margin * if want == 0.0 { 1.0 } else { want.signum() }
+        } else {
+            want
+        };
+        let (x, z) = (st.x + rx * off, st.z + rz * off);
+
+        let clear_of_the_start = syn
+            .outside_the_start(x, z)
+            .map(|e| e > OFF_THE_START_M + reach)
+            .unwrap_or(true);
+        if !inside(prog, x, z, 2.0)
+            || clearance(&coarse, x, z) < half + 1.5 + reach
+            || !clear_of_the_start
+        {
+            continue;
+        }
+
+        // Yaw is relative to the donor's heading, so it adds to ours. Degrees, because
+        // `edfwrite::turned` takes degrees and shares this convention — see `principal_axis`.
+        let deg = (inst.yaw + st.heading).to_degrees();
+        let turned = edfwrite::turned(&prop.mesh, deg);
+        let foot = ground(syn, x, z) + inst.lift;
+        by_sheet
+            .entry(prop.sheet.clone())
+            .or_default()
+            .append(&edfwrite::moved(&turned, [x, foot, z]));
+    }
+
+    let mut out = Vec::new();
+    for (sheet, mesh) in by_sheet {
+        if mesh.vertex_count() < 8 {
+            continue;
+        }
+        let Some((name, w, h, rgba)) = sheet_rgba.get(sheet.as_str()) else {
+            // A prop whose sheet did not inflate would render untextured. Drop it rather
+            // than ship a white slab.
+            continue;
+        };
+        let tex = Texture {
+            name: name.clone(),
+            width: *w,
+            height: *h,
+            rgba: rgba.clone(),
+        };
+        // Solid is by class, and by class only: you ride through foliage and into a building.
+        let solid = lib
+            .props
+            .iter()
+            .any(|p| p.sheet == sheet && matches!(p.class, crate::trackobjects::Class::Structure | crate::trackobjects::Class::Vehicle | crate::trackobjects::Class::Bale));
+        out.push((short_sheet(&sheet), mesh, tex, solid));
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// A sheet name cut down to a model name.
+fn short_sheet(sheet: &str) -> String {
+    sheet
+        .trim_end_matches("_c_a")
+        .trim_end_matches("_c")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect()
+}

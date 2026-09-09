@@ -72,6 +72,13 @@ pub struct Prop {
     pub height: f32,
     /// Longest footprint dimension, metres.
     pub span: f32,
+    /// The furthest any of its geometry stands from its own anchor in the XZ plane, metres.
+    ///
+    /// Not `span * 0.5`, which is the half of the longest *side*: a footprint's diagonal
+    /// corner reaches further than that, by up to a factor of root two, and a prop turned to
+    /// a new yaw presents that corner to the track. Measured off the mesh, so it bounds the
+    /// prop at every rotation and is what the corridor margin is built from.
+    pub reach: f32,
     /// The principal axis the first copy stood at, radians. Every later copy's yaw is measured
     /// against this, so the prop's own mesh is the zero and nothing depends on world north.
     pub axis_ref: f32,
@@ -568,6 +575,11 @@ pub fn extract(donor: &Donor, keep: &[Class]) -> PropLibrary {
             None => {
                 let height = o.max[1] - o.min[1];
                 let span = (o.max[0] - o.min[0]).max(o.max[2] - o.min[2]);
+                let reach = mesh
+                    .positions
+                    .chunks_exact(3)
+                    .map(|v| (v[0] * v[0] + v[2] * v[2]).sqrt())
+                    .fold(0.0f32, f32::max);
                 props.push(Prop {
                     id: format!("{}_{:04x}", short(&o.sheet), sig & 0xffff),
                     sheet: o.sheet.clone(),
@@ -575,6 +587,7 @@ pub fn extract(donor: &Donor, keep: &[Class]) -> PropLibrary {
                     mesh,
                     height,
                     span,
+                    reach,
                     axis_ref: axis,
                 });
                 by_sig.insert(sig, props.len() - 1);
@@ -869,6 +882,82 @@ mod folddiag {
         eprintln!("reuse factor {:.1}x\n", total as f32 / v.len().max(1) as f32);
         for (n, class, sheet, tris) in v.iter().take(25) {
             eprintln!("  {n:6} x {:9} {:32} {tris} tris", class.key(), sheet);
+        }
+    }
+}
+
+#[cfg(test)]
+mod replay {
+    use super::*;
+
+    /// Lift Indiana and stand its venue on a generated lap.
+    ///
+    /// The whole loop in one test: open a donor, lift its props, inflate their sheets, replay
+    /// them onto a lap of a different length and shape, and check the two invariants that
+    /// matter — nothing lands on the riding line, and everything stands on the ground.
+    ///
+    /// ```text
+    /// FROST_TRACK=~/Projects/pkz/tracks/2024_ARLMX_RD11_INDIANA_PRO.pkz \
+    ///   cargo test -- --ignored --nocapture replay_a_donor_onto_our_lap
+    /// ```
+    #[test]
+    #[ignore]
+    fn replay_a_donor_onto_our_lap() {
+        let track = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let donor = open(&std::path::PathBuf::from(track)).expect("opens");
+        let mut lib = extract(
+            &donor,
+            &[Class::Structure, Class::Vehicle, Class::Tree, Class::Bale, Class::Pole],
+        );
+        sheets_for(&donor, &mut lib, 1024);
+        eprintln!(
+            "lifted {} props / {} instances, {} sheets",
+            lib.props.len(),
+            lib.instances.len(),
+            lib.sheets.len()
+        );
+
+        let prog: crate::trackprog::TrackProgram =
+            serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
+        let syn = crate::tracksynth::synthesise(&prog).unwrap();
+        let placed = crate::trackscenery::placed(&lib, &prog, &syn);
+
+        let lap = prog.lap_length();
+        eprintln!(
+            "\ndonor lap {:.0} m -> ours {:.0} m\n",
+            lib.donor_lap_m, lap
+        );
+        let mut tris = 0usize;
+        for (name, mesh, tex, solid) in &placed {
+            eprintln!(
+                "  {:28} {:7} tris  {:4}x{:<4} {}",
+                name,
+                mesh.triangle_count(),
+                tex.width,
+                tex.height,
+                if *solid { "solid" } else { "drawn" }
+            );
+            tris += mesh.triangle_count();
+        }
+        eprintln!("\n{} models, {tris} triangles placed", placed.len());
+        assert!(!placed.is_empty(), "a donor's venue should reach our lap");
+
+        // Nothing stands on the riding line. The one invariant a rider would notice.
+        let stations = prog.stations(2.0);
+        let half = prog.width * 0.5;
+        for (name, mesh, ..) in &placed {
+            for v in mesh.positions.chunks_exact(3) {
+                let mut d2 = f32::INFINITY;
+                for st in &stations {
+                    let (dx, dz) = (v[0] - st.x, v[2] - st.z);
+                    d2 = d2.min(dx * dx + dz * dz);
+                }
+                assert!(
+                    d2.sqrt() >= half,
+                    "{name} has geometry {:.1} m from the centreline, inside the {half:.1} m corridor",
+                    d2.sqrt()
+                );
+            }
         }
     }
 }
