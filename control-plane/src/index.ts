@@ -71,8 +71,6 @@ import {
   PRESENCE_TTL_MS,
 } from "./validate";
 import { claimDeviceAccount, iceServers, voiceRoom } from "./voice";
-import { pruneUsage, reportUsage, usageStats } from "./usage";
-import { usageDashboard } from "./usagepage";
 import { VoiceRoom } from "./voiceroom";
 
 interface Account {
@@ -115,7 +113,6 @@ export default {
         reapIdleServers(env),
         advanceImageBuild(env),
         pruneDeviceClaims(env),
-        pruneUsage(env),
         pruneReports(env),
       ]).then(
         () => undefined,
@@ -194,24 +191,10 @@ async function route(request: Request, env: Env): Promise<Response> {
   // The plugin catalogue, before there is anyone to authenticate. What is on offer is not a
   // secret and the app lists it on a first run, with no account and nothing enrolled.
   if (method === "GET" && path === "/v1/plugins") return listPlugins(env);
-  // Anonymous usage counters, from every install rather than every account. Unauthenticated
-  // for the reason the feature exists: most people who run the app never claim an invite, so
-  // a report that required a token would only ever describe the few who did. Nothing here
-  // identifies anyone — see `usage.ts` — and everything about it is bounded by size, by
-  // count and by a per-address daily cap.
-  if (method === "POST" && path === "/v1/usage") return reportUsage(request, env);
-
-  // Reading the numbers back. Behind `ADMIN_KEY`, above the account gate because it is not a
-  // player's endpoint at all: the key belongs to whoever runs the deployment, and an account
-  // token must never be enough to read what everybody else is doing.
-  if (method === "GET" && path === "/v1/usage/stats") return usageStats(request, url, env);
-
-  // The three dashboards are one tool, so they have one front door: `/admin` is the URL to
-  // bookmark, and every page it leads to carries the same tabs and the same search box. It
-  // opens on usage — the widest of the three — rather than redirecting, so what stays in the
-  // address bar is the URL that was typed.
+  // The dashboards are one tool, so they have one front door: `/admin` is the URL to
+  // bookmark, and every page it leads to carries the same tabs and the same search box.
   if (method === "GET" && (path === "/admin" || path === "/admin/usage")) {
-    return usageDashboard(request, url, env);
+    return Response.redirect(new URL("/admin/paints", url).toString(), 302);
   }
 
   // One question asked of all three at once. Same key, same gate, no new facts — it runs the

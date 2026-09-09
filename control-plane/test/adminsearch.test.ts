@@ -35,23 +35,17 @@ describe("what was typed", () => {
 
 describe("the tabs", () => {
   it("carry the key, or every one of them lands on a 401", () => {
-    const page = shell({ title: "Usage", section: "usage", body: "", c });
-    for (const path of ["/admin", "/admin/diagnostics", "/admin/paints"]) {
+    const page = shell({ title: "Diagnostics", section: "diagnostics", body: "", c });
+    for (const path of ["/admin/diagnostics", "/admin/paints", "/admin/plugins"]) {
       expect(page).toContain(`href="${path}?key=s3cret"`);
     }
-  });
-
-  it("point the usage tab at the URL worth bookmarking, not at its alias", () => {
-    const page = shell({ title: "Usage", section: "usage", body: "", c });
-    expect(page).toContain(`<a class="on" href="/admin?key=s3cret">Usage</a>`);
-    expect(page).not.toContain("/admin/usage");
   });
 
   it("light the section being looked at, and only that one", () => {
     const page = shell({ title: "Paints", section: "paints", body: "", c });
     expect(page).toContain(`<a class="on" href="/admin/paints?key=s3cret">Paints</a>`);
-    expect(page).toContain(`<a class="" href="/admin?key=s3cret">Usage</a>`);
     expect(page).toContain(`<a class="" href="/admin/diagnostics?key=s3cret">Diagnostics</a>`);
+    expect(page).toContain(`<a class="" href="/admin/plugins?key=s3cret">Plugins</a>`);
   });
 
   it("light none of them on the page that belongs to no section", () => {
@@ -60,11 +54,11 @@ describe("the tabs", () => {
   });
 
   it("are on every page, which is what makes one browser tab enough", () => {
-    for (const section of ["usage", "diagnostics", "paints"] as const) {
+    for (const section of ["diagnostics", "paints", "plugins"] as const) {
       const page = shell({ title: "x", section, body: "", c });
-      expect(page).toContain(">Usage</a>");
       expect(page).toContain(">Diagnostics</a>");
       expect(page).toContain(">Paints</a>");
+      expect(page).toContain(">Plugins</a>");
     }
   });
 });
@@ -81,12 +75,12 @@ describe("the second row", () => {
   });
 
   it("is left out entirely when a section has no views and no window", () => {
-    const page = shell({ title: "Usage", section: "usage", body: "", c });
+    const page = shell({ title: "Plugins", section: "plugins", body: "", c });
     expect(page).not.toContain(`<div class="subbar">`);
   });
 
-  it("is drawn for a window alone, which is all the usage tab has", () => {
-    const page = shell({ title: "Usage", section: "usage", aside: "<a>30d</a>", body: "", c });
+  it("is drawn for a window alone", () => {
+    const page = shell({ title: "Plugins", section: "plugins", aside: "<a>30d</a>", body: "", c });
     expect(page).toContain(`<div class="subbar">`);
   });
 });

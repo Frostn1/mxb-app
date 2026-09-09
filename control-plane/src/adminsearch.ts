@@ -37,7 +37,7 @@ import {
   type KeyRow,
   type LicenseAdminRow,
 } from "./plugins";
-import { adminAllowed } from "./usage";
+import { adminAllowed } from "./auth";
 
 const TITLE = "Search";
 

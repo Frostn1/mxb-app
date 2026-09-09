@@ -155,7 +155,6 @@ mod trackspeed;
 mod trackstats;
 mod tracksynth;
 mod upload;
-mod usage;
 mod vcruntime;
 mod voice;
 mod winehost;
@@ -1272,7 +1271,6 @@ async fn generate_track(app: tauri::AppHandle, brief: String) -> Result<serde_js
     let prog = trackllm::generate(brief.trim(), &ask, 4)
         .await
         .map_err(|e| format!("{e:#}"))?;
-    usage::track("track.generate");
     serde_json::to_value(&prog).map_err(|e| e.to_string())
 }
 
@@ -1657,7 +1655,6 @@ async fn build_track(
             if let Some(tracks) = tracks {
                 say(plan.start("installing"));
                 let at = trackbuild::install(&pkz, &tracks).map_err(|e| format!("{e:#}"))?;
-                usage::track("track.build.install");
                 out.installed = Some(at.to_string_lossy().into_owned());
             }
         }
@@ -2204,7 +2201,6 @@ async fn paint_studio_save(
             bytes.len(),
             names.join(", ")
         );
-        usage::track("paint.save");
         Ok(SavedPaint {
             path: target.to_string_lossy().into_owned(),
             textures: names,
@@ -5589,7 +5585,6 @@ async fn add_to_library(
         .await
         .map(install::Placed::review)
         .map_err(|e| format!("{e:#}"))?;
-    usage::track("mod.install");
     Ok(placed)
 }
 
@@ -5704,7 +5699,6 @@ fn commit_plan(
     // which every library scanner listens to — firing it per item would re-run them all
     // N times for a single user action.
     if !outcome.installed.is_empty() {
-        usage::track("drop.import");
         install::notify_frostmod(app, "drop");
     }
     Ok(outcome)
@@ -6386,7 +6380,6 @@ async fn content_lock_run(
         .await
         .map_err(|e| format!("content_lock_run task failed: {e}"))?
         .map_err(|e| format!("{e:#}"))?;
-        usage::track("content.protect");
         return serde_json::to_value(outcome).map_err(|e| e.to_string());
     }
     #[cfg(not(sidecar))]
@@ -6421,29 +6414,6 @@ fn set_run_in_background(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.run_in_background = enabled;
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
-}
-
-/// Count something the UI did.
-///
-/// The webview is where pages and most features are, so it needs a way in — but not a way
-/// to invent the payload: it sends a name and nothing else, and a name that isn't one is
-/// dropped by [`usage::track`] rather than stored.
-#[tauri::command]
-fn track_event(name: String) {
-    usage::track(&name);
-}
-
-/// The one switch that stops anonymous usage counts.
-///
-/// Saves first and only then tells [`usage`], so a save that failed can never leave the app
-/// counting things the player has said no to.
-#[tauri::command]
-fn set_analytics_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    let mut cfg = config::load(&app).unwrap_or_default();
-    cfg.analytics_enabled = enabled;
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
-    usage::set_enabled(&app, enabled, &cfg);
-    Ok(())
 }
 
 #[tauri::command]
@@ -6658,7 +6628,6 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     let outcome = gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
-        usage::track("game.launch");
         // Both directions, because Play is the last moment before either one matters: the
         // grid needs everyone else's paints on disk, and everyone else needs ours. No
         // address to aim at — they'll pick from the in-game browser — so the pre-pull
@@ -7039,7 +7008,6 @@ fn publish_paints_soon(app: &tauri::AppHandle, cfg: &AppConfig, profile: Option<
                         o.uploaded
                     );
                     remember_publish(&app, &o);
-                    usage::track("paint.publish");
                 }
                 emit_sync(&app, SyncEvent::published(&o));
             }
@@ -7857,7 +7825,6 @@ fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::Launc
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     let outcome = gameproc::join(&cfg, &address).map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
-        usage::track("server.join");
         publish_paints_soon(&app, &cfg, None);
         live_sync_session(&app, Some(address.clone()));
         // We know exactly where they're going, so this syncs that server alone.
@@ -8305,7 +8272,6 @@ async fn frostmod_install(
         .await
         .map_err(|e| format!("{e:#}"))?;
 
-    usage::track("frostmod.install");
     if was_running || !was_installed {
         let _ = frostmod_manage::start(&app, &state);
     }
@@ -9256,7 +9222,6 @@ fn record_download(
     entry: downloads::NewDownload,
 ) -> Result<Option<downloads::DownloadRecord>, String> {
     let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
-    usage::track("mod.download");
     downloads::record(&dir, entry).map_err(|e| format!("{e:#}"))
 }
 
@@ -9621,7 +9586,6 @@ fn apply_loadout_now(
         model_refresh = model_refresh_cmd(app, cfg.instant_refresh, bikeid);
     }
     let content_reload = frostmod::signal_reload();
-    usage::track("preset.apply");
     // The look on disk just changed, so what the control plane holds for this rider is now
     // stale. Queued rather than awaited — this function is the synchronous apply path.
     publish_paints_soon(app, cfg, Some(profile));
@@ -9641,7 +9605,6 @@ fn presets_list(app: tauri::AppHandle) -> Result<Vec<presets::Preset>, String> {
 #[tauri::command]
 fn presets_save(app: tauri::AppHandle, preset: presets::Preset) -> Result<(), String> {
     presets::save_preset(&presets_dir(&app)?, preset).map_err(|e| format!("{e:#}"))?;
-    usage::track("preset.save");
     Ok(())
 }
 
@@ -10632,7 +10595,6 @@ fn main() {
                     "show" => show_main(app),
                     "quit" => {
                         frostmod_manage::stop(&app.state::<FrostmodProcess>());
-                        usage::flush_on_exit(app);
                         app.exit(0);
                     }
                     _ => {}
@@ -10774,9 +10736,6 @@ fn main() {
             mxb_session::load(handle);
             imgcache::start_maintenance(handle);
             memwatch::start();
-            // Anonymous counters. Started last of the startup tasks and after the config
-            // work above, because the install id it mints is saved into that same config.
-            usage::start(handle);
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);
@@ -10816,7 +10775,6 @@ fn main() {
                 }
                 // Closing for real: this is the last chance to report the session, and a
                 // short one would otherwise never be counted at all.
-                usage::flush_on_exit(window.app_handle());
                 if !painted {
                     log::warn!(
                         "[startup] closing a main window that never painted — quitting \
@@ -10957,8 +10915,6 @@ fn main() {
             count_profiles_in,
             get_mods_root,
             set_run_in_background,
-            set_analytics_enabled,
-            track_event,
             set_launch_at_startup,
             set_auto_run_frostmod,
             set_frostmod_args,

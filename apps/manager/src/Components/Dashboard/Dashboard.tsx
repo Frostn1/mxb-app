@@ -33,7 +33,6 @@ import { useConfig } from "@frost/shared/Context/Config";
 import { modTypesFor, setIntroSeen } from "@frost/shared/api/mods";
 import { useModBrowsing } from "../../lib/useModBrowsing";
 import { displayName } from "@frost/shared/lib/mods";
-import { track } from "../../lib/analytics";
 import type { DownloadRecord, Loadout } from "@frost/shared/types";
 
 interface DashboardProps {
@@ -90,27 +89,6 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     const p = plugins.find((x) => x.manifest.id === ref.plugin);
     return p?.panels.find((panel) => panel.id === ref.panel) ?? null;
   })();
-  // Which page is open, as the usage counters name it.
-  //
-  // Derived and counted by an effect rather than inside `navigate`, because plenty of
-  // things move the view without going through it — the tour, the release showcase, a
-  // download row jumping to the Library — and a page nobody counted is worse than one
-  // counted twice. Studio's sub-views are pages in their own right; everything else is
-  // one name, so a tab added to the sidebar is counted without touching this.
-  const page = view.startsWith("plugin:")
-    ? "view.plugin"   // one bucket: naming each panel would be unbounded cardinality
-    : view === "studio"
-      ? `view.studio.${studioTab}`
-      : `view.${view}`;
-  useEffect(() => {
-    track(page);
-  }, [page]);
-
-  // Opening a mod's page is a use of the browser, not a page of its own.
-  useEffect(() => {
-    if (selectedSlug) track("mod.detail");
-  }, [selectedSlug]);
-
   const navigate = useCallback(
     (v: DashboardView, studio?: StudioTab) => {
       setView(v);

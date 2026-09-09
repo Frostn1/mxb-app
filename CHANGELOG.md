@@ -2,6 +2,10 @@
 
 ## 2026-09-09
 
+### Removed
+- Anonymous usage stats. The app no longer counts or sends anything about how it is used, the
+  setting for it is gone, and the endpoint that received it is gone with it.
+
 ### Added
 - Random track in the Track Studio. It draws a whole track from a number — no brief to write
   and nothing to wait for — and you edit it like any other.

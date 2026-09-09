@@ -93,13 +93,11 @@ export function errorPage(title: string, status: number, message: string): Respo
 // ---------------------------------------------------------------------------
 
 /** The dashboards. One tab each, on every page. */
-export type Section = "usage" | "diagnostics" | "paints" | "plugins";
+export type Section = "diagnostics" | "paints" | "plugins";
 
-// Usage is `/admin` rather than `/admin/usage`: the front door and the first tab are the same
-// page, so the URL to bookmark is the one every link uses. `/admin/usage` still answers, for
-// the bookmarks that predate this.
+// `/admin` and `/admin/usage` both redirect to the first tab, so an old bookmark still lands
+// somewhere real now that the usage dashboard is gone.
 const SECTIONS: readonly (readonly [Section, string, string])[] = [
-  ["usage", "Usage", "/admin"],
   ["diagnostics", "Diagnostics", "/admin/diagnostics"],
   ["paints", "Paints", "/admin/paints"],
   ["plugins", "Plugins", "/admin/plugins"],

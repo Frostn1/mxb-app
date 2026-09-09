@@ -33,7 +33,7 @@ import {
   type Params,
   type SubTab,
 } from "./adminui";
-import { adminAllowed } from "./usage";
+import { adminAllowed } from "./auth";
 import { imageTable, paintThumb, pickImage, type PntImage } from "./pntthumb";
 import { PRESENCE_TTL_MS } from "./validate";
 

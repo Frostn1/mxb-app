@@ -62,7 +62,7 @@ import {
   type Sighting,
   type SightingQuery,
 } from "./diagnosticssearch";
-import { adminAllowed } from "./usage";
+import { adminAllowed } from "./auth";
 import {
   ago,
   bytes,

@@ -90,8 +90,6 @@ export interface Config {
   wineRunner?: string;
   /** Hide to the tray on close and keep running (default true). */
   runInBackground?: boolean;
-  /** Share anonymous usage counts (default true). */
-  analyticsEnabled?: boolean;
   /** A hand-entered MXB Ranked GUID, for a copy that didn't come from Steam. Empty means
    *  the GUID is derived from the signed-in Steam account. */
   rankedGuid?: string;

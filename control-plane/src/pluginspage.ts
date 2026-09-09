@@ -38,7 +38,7 @@ import {
   type LicenseState,
   type PluginRow,
 } from "./plugins";
-import { adminAllowed } from "./usage";
+import { adminAllowed } from "./auth";
 import {
   ago,
   count,

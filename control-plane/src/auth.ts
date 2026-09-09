@@ -54,3 +54,27 @@ function base64url(bytes: Uint8Array): string {
   for (const b of bytes) binary += String.fromCharCode(b);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
+
+/**
+ * Is this request allowed to read the numbers?
+ *
+ * `ADMIN_KEY` is a secret like the rest (see `env.d.ts`); a deployment without one has no
+ * admin surface at all rather than an open one. The key may arrive as a bearer token or as
+ * `?key=`, because the dashboard is opened by typing a URL into a browser and a browser
+ * cannot send a header.
+ */
+export function adminAllowed(request: Request, url: URL, env: Env): "ok" | "unset" | "denied" {
+  const expected = env.ADMIN_KEY;
+  if (!expected) return "unset";
+  const header = request.headers.get("Authorization");
+  const presented = /^Bearer\s+(.+)$/i.exec(header?.trim() ?? "")?.[1] ?? url.searchParams.get("key");
+  if (!presented) return "denied";
+  return tokenMatches(expected, presented) ? "ok" : "denied";
+}
+
+/** How many days a request asked for, clamped to something a dashboard can draw. */
+export function windowDays(url: URL): number {
+  const asked = Number(url.searchParams.get("days") ?? "30");
+  if (!Number.isFinite(asked)) return 30;
+  return Math.min(365, Math.max(1, Math.trunc(asked)));
+}
