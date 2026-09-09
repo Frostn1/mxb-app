@@ -530,9 +530,14 @@ mod tests {
         let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!(args, ["/data/frostmod/frostmod.exe"]);
         let env: Vec<_> = cmd.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        // Joined the way the code joins it rather than spelled out: `Path::join` writes the
+        // host's separator, so a literal ".../pfx" is only ever right on the platforms this
+        // code actually runs on. Wine and Proton are Linux and macOS, so nobody noticed —
+        // and nobody could have, because this crate's tests never started on Windows.
+        let prefix = PathBuf::from("/steam/steamapps/compatdata/655500").join("pfx");
         assert!(env.contains(&(
             "WINEPREFIX".to_string(),
-            Some("/steam/steamapps/compatdata/655500/pfx".to_string())
+            Some(prefix.to_string_lossy().into_owned())
         )));
     }
 }

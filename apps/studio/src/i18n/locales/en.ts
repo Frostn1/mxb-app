@@ -306,6 +306,7 @@ export const en = {
   "track.pointAtTools": "Point at the track tools…",
   "track.toolsNotFound": "No terrained.exe in that folder",
   "track.rideIt": "Installed — pick it in MX Bikes",
+  "track.random": "Random track",
   "track.base": "Base track",
   "track.baseLoaded": "Loaded “{{name}}”",
   "track.name": "Track name",

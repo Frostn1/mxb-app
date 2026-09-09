@@ -302,6 +302,7 @@ export const ptBR: Translation = {
   "track.pointAtTools": "Indicar as ferramentas…",
   "track.toolsNotFound": "Sem terrained.exe nessa pasta",
   "track.rideIt": "Instalada — escolha-a no MX Bikes",
+  "track.random": "Pista aleatória",
   "track.base": "Pista base",
   "track.baseLoaded": "“{{name}}” carregada",
   "track.name": "Nome da pista",
