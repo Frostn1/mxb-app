@@ -81,12 +81,14 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: ./src-tauri -> target
+          workspaces: . -> target
 
       - name: Run tests
-        working-directory: ./src-tauri
+        # The Cargo workspace root is the repo root now, so this runs from there and
+        # `--workspace` covers every member. `server-agent` is excluded from the
+        # workspace and keeps its own job below.
         # Tests needing a real MX Bikes asset are `#[ignore]`d and stay skipped here.
-        run: cargo test --locked
+        run: cargo test --workspace --locked
 
   # The two things paint sync depends on that nothing was checking. Both ship separately
   # from the app — the Worker is deployed by hand and the agent runs on someone else's

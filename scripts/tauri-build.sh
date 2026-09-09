@@ -18,7 +18,10 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(dirname "$here")"
-cd "$root"
+# The Tauri project is one app inside the workspace, so `tauri build` has to run from there
+# to find its tauri.conf.json. The bundles, though, land in the workspace target at the
+# repo root — which is why the globs below are anchored on "$root", not on the cwd.
+cd "$root/apps/manager"
 
 # `npx tauri` is the `tauri` script in package.json without npm's round trip through a
 # shell — which matters below, where the bundle's path has a space in it.
@@ -32,8 +35,8 @@ fi
 shopt -s nullglob
 # Second pattern for a `--target`ed build, which bundles under the triple instead.
 images=(
-  src-tauri/target/release/bundle/appimage/*.AppImage
-  src-tauri/target/*/release/bundle/appimage/*.AppImage
+  "$root"/target/release/bundle/appimage/*.AppImage
+  "$root"/target/*/release/bundle/appimage/*.AppImage
 )
 if [ "${#images[@]}" -eq 0 ]; then
   echo "$0: no AppImage in this build — nothing to fix up"

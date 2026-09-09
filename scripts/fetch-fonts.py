@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Re-vendor Barlow + Barlow Condensed into public/fonts and regenerate src/fonts.css.
+"""Re-vendor Barlow + Barlow Condensed into apps/manager/public/fonts and regenerate apps/manager/src/fonts.css.
 
 The app must render offline, so the faces are bundled rather than pulled from
 Google at runtime. Only the latin and latin-ext subsets are kept — between them
@@ -18,7 +18,7 @@ css = subprocess.run(["curl", "-s", "--max-time", "30", "-A", UA, URL],
 if "@font-face" not in css:
     sys.exit("could not fetch the font stylesheet")
 
-os.makedirs(os.path.join(ROOT, "public/fonts"), exist_ok=True)
+os.makedirs(os.path.join(ROOT, "apps/manager/public/fonts"), exist_ok=True)
 parts = re.split(r"/\*\s*([a-z-]+)\s*\*/", css)
 out, i = [], 1
 while i < len(parts) - 1:
@@ -31,15 +31,15 @@ while i < len(parts) - 1:
     rng = re.search(r"unicode-range:\s*([^;]+);", block).group(1).strip()
     name = (fam.replace(" ", "") + "-" + wt + "-" + subset + ".woff2").lower()
     subprocess.run(["curl", "-s", "--max-time", "30", "-A", UA, "-o",
-                    os.path.join(ROOT, "public/fonts", name), url], check=True)
+                    os.path.join(ROOT, "apps/manager/public/fonts", name), url], check=True)
     out.append("@font-face {\n  font-family: '%s';\n  font-style: normal;\n"
                "  font-weight: %s;\n  font-display: swap;\n"
                "  src: url('/fonts/%s') format('woff2');\n  unicode-range: %s;\n}"
                % (fam, wt, name, rng))
 
-with open(os.path.join(ROOT, "src/fonts.css"), "w") as fh:
+with open(os.path.join(ROOT, "apps/manager/src/fonts.css"), "w") as fh:
     fh.write("/* Barlow + Barlow Condensed (SIL Open Font License 1.1), vendored so the app\n"
              "   renders correctly offline. latin + latin-ext only: those cover all six\n"
              "   shipped locales. Regenerate with scripts/fetch-fonts.py. */\n\n"
              + "\n\n".join(out) + "\n")
-print("wrote src/fonts.css with %d faces" % len(out))
+print("wrote apps/manager/src/fonts.css with %d faces" % len(out))

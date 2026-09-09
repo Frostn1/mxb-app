@@ -9,8 +9,8 @@ export default tseslint.config(
   // build machinery, not source.
   {
     ignores: [
-      "dist",
-      "src-tauri/target",
+      "**/dist",
+      "**/target",
       "vite.config.ts.timestamp-*.mjs",
       // Separate deployable with its own tsconfig, lint rules and generated types — the
       // desktop app's browser-oriented config only produces noise against Workers code.
@@ -48,9 +48,9 @@ export default tseslint.config(
     // `<ambientLight intensity>`), which eslint-plugin-react judges against the DOM and
     // flags wholesale. @react-three/fiber ships types for them, so tsc is the real check.
     files: [
-      "src/Components/Viewer/ModelViewer.tsx",
-      "src/Components/Viewer/PoseHandles.tsx",
-      "src/Components/Viewer/TrackViewer.tsx",
+      "apps/*/src/Components/Viewer/ModelViewer.tsx",
+      "apps/*/src/Components/Viewer/PoseHandles.tsx",
+      "apps/*/src/Components/Viewer/TrackViewer.tsx",
     ],
     rules: { "react/no-unknown-property": "off" },
   },

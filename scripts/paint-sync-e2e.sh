@@ -57,6 +57,6 @@ fi
 echo "    up"
 
 echo "==> two riders, one server"
-cd "$ROOT/src-tauri"
+cd "$ROOT/apps/manager/src-tauri"
 MXB_CONTROL_PLANE="$BASE" \
   cargo test --locked two_riders -- --ignored --nocapture --test-threads=1

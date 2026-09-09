@@ -1,0 +1,46 @@
+# The workspace root.
+#
+# `server-agent` is deliberately NOT a member: it ships to an EC2 box and wants its own
+# `opt-level = "z"`, and a workspace member cannot carry its own `[profile.*]`.
+[workspace]
+resolver = "2"
+members = ["apps/manager/src-tauri"]
+exclude = ["server-agent"]
+
+# The profiles live here because Cargo IGNORES `[profile.*]` in a non-root workspace member —
+# it warns, in the middle of a long build log, and otherwise silently gives you the defaults.
+# Left in the app's manifest, the release block below would stop applying and we would ship an
+# unstripped, un-LTO'd binary carrying its full symbol table.
+# `tauri dev` builds this profile, and cargo's default leaves everything at opt-level 0 —
+# which is fine for our own glue but not for the crates doing the heavy lifting. Unpacking one
+# 36 MB gear paint (three 4096² textures) spends nearly all its time inside `flate2`'s inflate
+# and `image`'s resize: 4.3 s unoptimized against 0.33 s optimized.
+[profile.dev]
+# The local crate too, but only lightly: a creator-sealed `.pnt` is decrypted a byte at a time
+# over the whole file before it is even parsed, and that loop is ours. Keeps debug info.
+opt-level = 1
+
+[profile.dev.package."*"]
+# Dependencies are never stepped through, and they're built once and then cached.
+opt-level = 3
+
+# Ship a hardened, hard-to-reverse binary. cargo defaults leave the symbol table in and
+# emit no debug info; this strips symbols and leans on the optimizer to erase structure.
+# opt-level stays at 3 so the viewer's hot paths aren't sacrificed for it.
+[profile.release]
+opt-level = 3
+# Remove the symbol table (and any debug symbols) from every platform's artifact, so a
+# profiler/decompiler sees `frost.exe+0x…` rather than function names.
+strip = "symbols"
+# Fat cross-crate LTO: inlines and merges functions across crate boundaries, which both
+# speeds up hot paths and dissolves the clean call structure a decompiler leans on.
+lto = "fat"
+# One codegen unit: maximal optimization, and fewer tidy module boundaries to recover.
+codegen-units = 1
+# Abort on panic: drops the unwinding tables and landing pads (smaller, less to read).
+# Safe here — nothing in the crate relies on catching a panic (no catch_unwind).
+panic = "abort"
+# No debug info: on Windows/MSVC this means no PDB is produced at all.
+debug = false
+# Strip the overflow-check branches from release too.
+overflow-checks = false

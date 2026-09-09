@@ -22,7 +22,7 @@ import {
   boneTip,
   buildSkeleton,
   riderFrame,
-} from "../src/lib/riderPose.ts";
+} from "../apps/manager/src/lib/riderPose.ts";
 
 let failed = 0;
 const ok = (cond, what) => {

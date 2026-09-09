@@ -1,4 +1,7 @@
 {
+  /* Shared by every app and package in the workspace. Anything path-shaped — `baseUrl`,
+     `paths`, `include`, `references` — belongs to the individual project, because it is
+     relative to that project's own directory. */
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
@@ -18,14 +21,6 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-
-    /* Paths */
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    }
-  },
-  "include": ["src"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+    "noFallthroughCasesInSwitch": true
+  }
 }
