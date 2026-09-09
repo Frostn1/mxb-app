@@ -233,6 +233,13 @@ pub struct AppConfig {
     pub published_shares: Vec<PublishedShare>,
     /// Live share codes this machine follows.
     pub live_subscriptions: Vec<LiveSubscription>,
+    /// An MXB Ranked GUID typed by hand, for the players whose GUID we cannot derive.
+    ///
+    /// A Steam copy's GUID is `FF` + the SteamID64, which [`crate::ranked`] works out with no
+    /// setup at all. A copy bought direct from PiBoSo has a stand-alone GUID instead, known
+    /// only to the site — so it is typed once and kept here. Also how you point the tab at
+    /// somebody else.
+    pub ranked_guid: String,
 }
 
 /// A code this machine minted, and what it last pushed to it.
@@ -382,6 +389,7 @@ impl Default for AppConfig {
             install_id: String::new(),
             published_shares: Vec::new(),
             live_subscriptions: Vec::new(),
+            ranked_guid: String::new(),
         }
     }
 }

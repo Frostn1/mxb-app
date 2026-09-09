@@ -708,6 +708,11 @@ pub fn read_grid(bytes: &[u8], layout: &Layout, max_dim: u32) -> (u32, u32, Vec<
 
     let mut out = Vec::with_capacity(out_w * out_h);
     for oy in 0..out_h {
+        // Read in file order. A `.trh` comes back matching what made it: `heightmap_raw`
+        // already writes bottom row first because TerrainEd reads the raw bottom-up, and the
+        // correlation between the two is +1.0000 as-is. Flipping here as well mirrors a track
+        // against its own scenery — the props are placed from the synthesis — and puts trees
+        // on the riding line.
         let y0 = oy * h / out_h;
         let y1 = (((oy + 1) * h) / out_h).max(y0 + 1).min(h);
         for ox in 0..out_w {
