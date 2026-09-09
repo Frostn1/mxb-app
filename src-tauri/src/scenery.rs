@@ -2391,3 +2391,172 @@ obj3
         assert_eq!(objs[0].0.name, "ok.edf");
     }
 }
+
+#[cfg(test)]
+mod props_on_terrain {
+    use super::*;
+
+    /// Where the props stand, drawn on the terrain the viewer draws.
+    ///
+    /// Scenery is placed from the synthesis and the terrain comes from the `.trh`. If the two
+    /// disagree about which way round the ground is, the trees land on the riding line. Both
+    /// readings are drawn so the difference is a picture rather than a number.
+    #[test]
+    #[ignore = "writes a PNG — set FROST_TRACK and FROST_PNG"]
+    fn props_over_terrain() {
+        let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let out = std::env::var("FROST_PNG").expect("set FROST_PNG");
+        let s = decode(Path::new(&path), true).expect("scenery");
+        let m = crate::track::decode_master(Path::new(&path)).expect("terrain");
+        let (gw, gh) = (m.info.width as usize, m.info.height as usize);
+        let mpp = m.info.metres_per_sample;
+        let plot = gw as f32 * mpp;
+
+        // Which material the trees are on, by the sheet it wears.
+        let tree_mat: Vec<u32> = s
+            .textures
+            .iter()
+            .filter(|t| t.name.contains("tree"))
+            .map(|t| t.material)
+            .collect();
+        let mut pts: Vec<(f32, f32)> = Vec::new();
+        for g in &s.mesh.groups {
+            if !tree_mat.contains(&g.material) {
+                continue;
+            }
+            for t in g.tri_start..g.tri_start + g.tri_count {
+                if let Some(&i) = s.mesh.indices.get(t as usize * 3) {
+                    let o = i as usize * 3;
+                    if let (Some(&x), Some(&z)) =
+                        (s.mesh.positions.get(o), s.mesh.positions.get(o + 2))
+                    {
+                        pts.push((x, z));
+                    }
+                }
+            }
+        }
+        println!("  {} tree points, {} tree materials", pts.len(), tree_mat.len());
+
+        const P: usize = 760;
+        let panel = |flip: bool| -> Vec<u8> {
+            let mut img = vec![0u8; P * P * 3];
+            for py in 0..P {
+                for px in 0..P {
+                    let gx = (px * gw / P).min(gw - 2).max(1);
+                    let raw = (py * gh / P).min(gh - 2).max(1);
+                    let gz = if flip { gh - 1 - raw } else { raw };
+                    let h = |a: usize, b: usize| m.heights[b.min(gh - 1) * gw + a.min(gw - 1)];
+                    let g = ((h(gx + 1, gz) - h(gx - 1, gz)).powi(2)
+                        + (h(gx, gz + 1) - h(gx, gz - 1)).powi(2))
+                    .sqrt();
+                    let v = (255.0 * (1.0 - (-g * 7.0).exp())).clamp(0.0, 255.0) as u8;
+                    let o = (py * P + px) * 3;
+                    img[o] = v;
+                    img[o + 1] = v;
+                    img[o + 2] = v;
+                }
+            }
+            // The trees, in world coordinates, as the scenery states them.
+            for (x, z) in &pts {
+                let px = (x / plot * P as f32) as isize;
+                let py = (z / plot * P as f32) as isize;
+                for dy in -1..=1isize {
+                    for dx in -1..=1isize {
+                        let (a, b) = (px + dx, py + dy);
+                        if a < 0 || b < 0 || a >= P as isize || b >= P as isize {
+                            continue;
+                        }
+                        let o = (b as usize * P + a as usize) * 3;
+                        img[o] = 255;
+                        img[o + 1] = 40;
+                        img[o + 2] = 40;
+                    }
+                }
+            }
+            img
+        };
+        let mut wide = vec![255u8; (P * 2 + 12) * P * 3];
+        for (k, img) in [panel(false), panel(true)].into_iter().enumerate() {
+            for y in 0..P {
+                for x in 0..P {
+                    let src = (y * P + x) * 3;
+                    let dst = (y * (P * 2 + 12) + x + k * (P + 12)) * 3;
+                    wide[dst..dst + 3].copy_from_slice(&img[src..src + 3]);
+                }
+            }
+        }
+        image::RgbImage::from_raw((P * 2 + 12) as u32, P as u32, wide)
+            .unwrap()
+            .save(&out)
+            .unwrap();
+        println!("  {out}   left = read as written (shipped), right = read flipped");
+    }
+}
+
+#[cfg(test)]
+mod prop_clearance {
+    use super::*;
+
+    /// How far every prop actually stands from the riding line.
+    ///
+    /// The placement rules state minimums — trees 34 m out, the wood 30 — and this is whether
+    /// the track that shipped honours them. Measured against the centreline the `.trh` still
+    /// carries, so it is the lap the game drives, not the one we think we drew.
+    #[test]
+    #[ignore = "needs a built track — set FROST_TRACK"]
+    fn how_far_the_props_stand_from_the_line() {
+        let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let s = decode(Path::new(&path), true).expect("scenery");
+        let names = crate::track::entry_names(Path::new(&path)).unwrap();
+        let hf = crate::track::heightfield_entries(&names).into_iter().next().unwrap();
+        let hb = crate::track::read_entry(Path::new(&path), &hf).unwrap();
+        let layout = crate::heightfield::probe(&hb, None).unwrap();
+        let at = layout.offset + layout.width as usize * layout.height as usize * layout.sample.size();
+        let lap = crate::trackline::read(&hb[at..]).expect("a centreline");
+        let stations = lap.stations(2.0);
+
+        let near = |x: f32, z: f32| -> f32 {
+            stations
+                .iter()
+                .map(|st| ((st.x - x).powi(2) + (st.z - z).powi(2)).sqrt())
+                .fold(f32::MAX, f32::min)
+        };
+        println!("{:<16} {:>7} {:>7} {:>8} {:>8} {:>8} {:>8}", "material", "pts", "spots", "min m", "p10 m", "median", "max m");
+        for t in &s.textures {
+            let mut d: Vec<f32> = Vec::new();
+            for g in s.mesh.groups.iter().filter(|g| g.material == t.material) {
+                for tri in g.tri_start..g.tri_start + g.tri_count {
+                    if let Some(&i) = s.mesh.indices.get(tri as usize * 3) {
+                        let o = i as usize * 3;
+                        if let (Some(&x), Some(&z)) =
+                            (s.mesh.positions.get(o), s.mesh.positions.get(o + 2))
+                        {
+                            d.push(near(x, z));
+                        }
+                    }
+                }
+            }
+            if d.is_empty() {
+                continue;
+            }
+            d.sort_by(f32::total_cmp);
+            // Distinct places, not vertices: a tree is forty triangles in one spot.
+            let mut spots: Vec<f32> = Vec::new();
+            for v in &d {
+                if spots.last().map_or(true, |l: &f32| (v - l).abs() > 2.0) {
+                    spots.push(*v);
+                }
+            }
+            println!(
+                "{:<16} {:>7} {:>7} {:>8.1} {:>8.1} {:>8.1} {:>8.1}",
+                t.name,
+                d.len(),
+                spots.len(),
+                d[0],
+                d[d.len() / 10],
+                d[d.len() / 2],
+                d[d.len() - 1]
+            );
+        }
+    }
+}
