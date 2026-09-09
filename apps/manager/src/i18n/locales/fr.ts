@@ -604,6 +604,11 @@ export const fr: Translation = {
   "settings.colorwayRetro": "Rétro",
   "settings.language": "Langue",
   "settings.languageSystem": "Système",
+  "settings.preferServer": "Préférer les fichiers serveur dédié",
+  "settings.preferServerDesc": "Prendre la version serveur dédié quand un mod en propose une. Pour une machine qui héberge un serveur plutôt que pour jouer.",
+  "settings.preferredHost": "Hébergeur préféré",
+  "settings.preferredHostDesc": "Quand un mod est disponible sur plusieurs hébergeurs, prendre celui-ci en premier.",
+  "settings.preferredHostNone": "Aucune préférence",
   "settings.runInBackground": "Continuer en arrière-plan",
   "settings.runInBackgroundDesc":
     "Fermer la fenêtre place {{app}} dans la barre d'état pour que FrostMod reste connecté. Quittez depuis l'icône de la barre.",
