@@ -287,3 +287,272 @@ mod tests {
         assert!(read(&b).is_none());
     }
 }
+
+#[cfg(test)]
+mod corner_survey {
+    use super::*;
+    use std::path::Path;
+
+    /// Four corners of a real track, as pictures and as numbers.
+    ///
+    /// Corners come from the centreline the builder typed, which the `.trh` still carries, so
+    /// the radius and the angle are stated rather than inferred. The shape is then measured
+    /// off the heightfield around each one: how wide the worked ground is, how far the berm
+    /// stands over the apex, and how rough the surface is once the corner's own fall is taken
+    /// out.
+    ///
+    /// ```text
+    /// FROST_TRACK=… FROST_DUMP=/tmp/corners \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture four_corners
+    /// ```
+    #[test]
+    #[ignore = "needs a real track — set FROST_TRACK and FROST_DUMP"]
+    fn four_corners() {
+        let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let dir = std::env::var("FROST_DUMP").expect("set FROST_DUMP");
+        let label = std::env::var("FROST_LABEL").unwrap_or_else(|_| "track".into());
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let m = crate::track::decode_master(Path::new(&path)).expect("terrain");
+        // The centreline sits in the trailing block, straight after the samples.
+        let names = crate::track::entry_names(Path::new(&path)).expect("entries");
+        let hf = crate::track::heightfield_entries(&names)
+            .into_iter()
+            .next()
+            .expect("a heightfield");
+        let hb = crate::track::read_entry(Path::new(&path), &hf).expect("read it");
+        let layout = crate::heightfield::probe(&hb, None).expect("a terrain grid");
+        let block_at =
+            layout.offset + layout.width as usize * layout.height as usize * layout.sample.size();
+        let lap = read(hb.get(block_at..).unwrap_or(&[])).expect("a centreline in the .trh");
+        let (gw, gh) = (m.info.width as usize, m.info.height as usize);
+        let mpp = m.info.metres_per_sample;
+        let half = gw as f32 * mpp * 0.5;
+        // The centreline is stated from a corner of the plot, not its centre: Indiana's x
+        // runs 22 to 470 across a 525 m site. Which way each axis then runs is not stated,
+        // so it is chosen by looking: the mapping that puts the lap on rutted ground wins,
+        // and the three that put it in a field are flat.
+        let (fx_dir, fz_dir) = pick_axes(&m, &lap, mpp, gw, gh);
+        let at = |x: f32, z: f32| -> f32 {
+            let sx = if fx_dir { x } else { gw as f32 * mpp - x };
+            let sz = if fz_dir { z } else { gh as f32 * mpp - z };
+            let gx = (sx / mpp).clamp(0.0, gw as f32 - 1.001);
+            let gz = (sz / mpp).clamp(0.0, gh as f32 - 1.001);
+            let (x0, z0) = (gx as usize, gz as usize);
+            let (fx, fz) = (gx - x0 as f32, gz - z0 as f32);
+            let h = |a: usize, b: usize| m.heights[b.min(gh - 1) * gw + a.min(gw - 1)];
+            let top = h(x0, z0) * (1.0 - fx) + h(x0 + 1, z0) * fx;
+            let bot = h(x0, z0 + 1) * (1.0 - fx) + h(x0 + 1, z0 + 1) * fx;
+            top * (1.0 - fz) + bot * fz
+        };
+
+        // The corners the file states, biggest turn first, spread round the lap.
+        let mut corners: Vec<&LineSegment> =
+            lap.segments.iter().filter(|s| s.is_corner()).collect();
+        corners.sort_by(|a, b| b.angle.total_cmp(&a.angle));
+        let mut picked: Vec<&LineSegment> = Vec::new();
+        for c in corners {
+            if picked.iter().all(|p| (p.at - c.at).abs() > lap.length * 0.12) {
+                picked.push(c);
+            }
+            if picked.len() == 4 {
+                break;
+            }
+        }
+
+        let (mut xlo, mut xhi, mut zlo, mut zhi) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for sgm in &lap.segments {
+            xlo = xlo.min(sgm.x); xhi = xhi.max(sgm.x);
+            zlo = zlo.min(sgm.z); zhi = zhi.max(sgm.z);
+        }
+        println!(
+            "  centreline x[{xlo:.0}, {xhi:.0}] z[{zlo:.0}, {zhi:.0}]   terrain half-extent {half:.0} m  ({} x {} @ {mpp:.3})",
+            gw, gh
+        );
+        println!("\n== {label}: {} corners on a {:.0} m lap ==", 
+            lap.segments.iter().filter(|s| s.is_corner()).count(), lap.length);
+        println!(
+            "{:<4} {:>7} {:>7} {:>8} {:>9} {:>8} {:>8} {:>8}",
+            "#", "radius", "angle", "arc_len", "worked_w", "berm", "camber", "rough"
+        );
+        for (i, c) in picked.iter().enumerate() {
+            let (fx, fz) = crate::trackprog::heading_vector(c.heading);
+            let (rx, rz) = crate::trackprog::right_vector(c.heading);
+            // Across the corner at its apex: sample out to 25 m each side.
+            // Half way round the arc, not half way along its chord: a 108 degree turn puts
+            // its apex nowhere near the start heading, and stepping straight lands in the
+            // field beside the track.
+            let half_ang = (c.angle * 0.5).to_radians() * c.radius.signum();
+            let mid_heading = c.heading + half_ang;
+            let (ax, az) = {
+                let r = c.radius.abs();
+                // Centre of the arc, then the point half way round it.
+                let (cx, cz) = (c.x + rx * r * c.radius.signum(), c.z + rz * r * c.radius.signum());
+                let (bx, bz) = (c.x - cx, c.z - cz);
+                let (s, co) = (half_ang.sin(), half_ang.cos());
+                (cx + bx * co - bz * s, cz + bx * s + bz * co)
+            };
+            let (px, pz) = (ax, az);
+            let (fx, fz) = crate::trackprog::heading_vector(mid_heading);
+            let (rx, rz) = crate::trackprog::right_vector(mid_heading);
+            let _ = (fx, fz);
+            const REACH: f32 = 25.0;
+            const N: usize = 201;
+            let profile: Vec<(f32, f32)> = (0..N)
+                .map(|k| {
+                    let d = (k as f32 / (N - 1) as f32 - 0.5) * 2.0 * REACH;
+                    (d, at(px + rx * d, pz + rz * d))
+                })
+                .collect();
+            let mid = profile[N / 2].1;
+            // Worked ground: how far out the surface stays within a hand's breadth of the
+            // apex's own plane before the field takes over.
+            let flat = |sign: f32| -> f32 {
+                let mut last = 0.0;
+                for (d, h) in &profile {
+                    if d.signum() != sign || d.abs() < 0.2 {
+                        continue;
+                    }
+                    if (h - mid).abs() < 1.2 {
+                        last = d.abs();
+                    } else if d.abs() > last + 3.0 {
+                        break;
+                    }
+                }
+                last
+            };
+            let worked = flat(-1.0) + flat(1.0);
+            // The berm: the most the ground stands above the apex on the outside of the turn.
+            let outside = if c.radius > 0.0 { -1.0 } else { 1.0 };
+            let berm = profile
+                .iter()
+                .filter(|(d, _)| d.signum() == outside && d.abs() <= 12.0)
+                .map(|(_, h)| h - mid)
+                .fold(f32::MIN, f32::max);
+            // Camber across the worked width, degrees.
+            let e = worked.max(2.0) * 0.5;
+            let camber = ((at(px + rx * e, pz + rz * e) - at(px - rx * e, pz - rz * e))
+                / (2.0 * e))
+                .atan()
+                .to_degrees();
+            // Roughness along the corner: chatter left after the corner's own fall is out.
+            let along: Vec<f32> = (0..=((c.length / 0.5) as usize).max(2))
+                .map(|k| {
+                    let d = k as f32 * 0.5;
+                    let ang = (d / c.radius.abs()).min(c.angle.to_radians());
+                    let hh = c.heading + ang * c.radius.signum();
+                    let (hx, hz) = crate::trackprog::heading_vector(hh);
+                    at(c.x + hx * d, c.z + hz * d)
+                })
+                .collect();
+            let rough = detrended_rms(&along);
+            println!(
+                "{:<4} {:>6.1}m {:>6.0}° {:>7.1}m {:>8.1}m {:>7.2}m {:>7.1}° {:>7.3}m",
+                i + 1,
+                c.radius.abs(),
+                c.angle,
+                c.length,
+                worked,
+                berm.max(0.0),
+                camber,
+                rough
+            );
+
+            // The picture: relief round the corner, with the centreline on it.
+            const PIX: usize = 300;
+            const SPAN: f32 = 70.0;
+            let mut img = vec![0u8; PIX * PIX * 3];
+            for py in 0..PIX {
+                for pxi in 0..PIX {
+                    let wx = px + (pxi as f32 / PIX as f32 - 0.5) * SPAN;
+                    let wz = pz + (py as f32 / PIX as f32 - 0.5) * SPAN;
+                    let s = SPAN / PIX as f32;
+                    let g = ((at(wx + s, wz) - at(wx - s, wz)).powi(2)
+                        + (at(wx, wz + s) - at(wx, wz - s)).powi(2))
+                    .sqrt();
+                    let v = (255.0 * (1.0 - (-g * 9.0).exp())).clamp(0.0, 255.0) as u8;
+                    let o = (py * PIX + pxi) * 3;
+                    img[o] = v;
+                    img[o + 1] = v;
+                    img[o + 2] = v;
+                }
+            }
+            for k in 0..=((c.length / 0.25) as usize) {
+                let d = k as f32 * 0.25;
+                let ang = (d / c.radius.abs()).min(c.angle.to_radians());
+                let hh = c.heading + ang * c.radius.signum();
+                let (hx, hz) = crate::trackprog::heading_vector(hh);
+                let (wx, wz) = (c.x + hx * d, c.z + hz * d);
+                let pxi = ((wx - px) / SPAN + 0.5) * PIX as f32;
+                let py = ((wz - pz) / SPAN + 0.5) * PIX as f32;
+                if (0.0..PIX as f32).contains(&pxi) && (0.0..PIX as f32).contains(&py) {
+                    let o = (py as usize * PIX + pxi as usize) * 3;
+                    img[o] = 255;
+                    img[o + 1] = 40;
+                    img[o + 2] = 40;
+                }
+            }
+            image::RgbImage::from_raw(PIX as u32, PIX as u32, img)
+                .unwrap()
+                .save(format!("{dir}/{label}_corner{}.png", i + 1))
+                .unwrap();
+        }
+    }
+
+    /// Which way each axis of the centreline runs against the grid.
+    ///
+    /// Scored by relief: a lap laid on the track crosses ruts and berms, and the same lap
+    /// laid in a field crosses almost nothing, so the spread of heights under it separates
+    /// the four readings cleanly.
+    fn pick_axes(
+        m: &crate::track::Master,
+        lap: &Lap,
+        mpp: f32,
+        gw: usize,
+        gh: usize,
+    ) -> (bool, bool) {
+        let mut best = (true, true);
+        let mut best_score = -1.0f64;
+        for fx in [true, false] {
+            for fz in [true, false] {
+                let mut vals = Vec::new();
+                for st in lap.stations(4.0) {
+                    let sx = if fx { st.x } else { gw as f32 * mpp - st.x };
+                    let sz = if fz { st.z } else { gh as f32 * mpp - st.z };
+                    let gx = (sx / mpp).clamp(0.0, gw as f32 - 1.0) as usize;
+                    let gz = (sz / mpp).clamp(0.0, gh as f32 - 1.0) as usize;
+                    vals.push(m.heights[gz * gw + gx] as f64);
+                }
+                if vals.len() < 8 {
+                    continue;
+                }
+                // Local spread along the lap: ruts and berms, not the site's overall fall.
+                let mut d = 0.0;
+                for w in vals.windows(2) {
+                    d += (w[1] - w[0]).abs();
+                }
+                let score = d / vals.len() as f64;
+                if score > best_score {
+                    best_score = score;
+                    best = (fx, fz);
+                }
+            }
+        }
+        best
+    }
+
+    /// RMS left after a straight line through the run is removed — the chatter, not the fall.
+    fn detrended_rms(v: &[f32]) -> f32 {
+        let n = v.len();
+        if n < 3 {
+            return 0.0;
+        }
+        let (a, b) = (v[0], v[n - 1]);
+        let mut s = 0.0f64;
+        for (i, h) in v.iter().enumerate() {
+            let want = a + (b - a) * i as f32 / (n - 1) as f32;
+            s += ((h - want) as f64).powi(2);
+        }
+        (s / n as f64).sqrt() as f32
+    }
+}

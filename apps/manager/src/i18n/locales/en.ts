@@ -895,6 +895,10 @@ export const en = {
   "serverBrowser.any": "Any",
   "serverBrowser.yes": "Yes",
   "serverBrowser.notJoinable": "MX Bikes can't be pointed at this server's address.",
+  "serverBrowser.paintSyncHere_one":
+    "{{count}} rider on this server is running paint sync — you'll see the livery they actually built.",
+  "serverBrowser.paintSyncHere_other":
+    "{{count}} riders on this server are running paint sync — you'll see the liveries they actually built.",
   "serverBrowser.filtered": "Filtered",
   "serverBrowser.hiddenCount": "{{count}} hidden",
   "serverBrowser.hideFiltered": "Hide them again",
@@ -1437,6 +1441,22 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0137.hero.title":
+    "Every MX Bikes server, live, while you ride",
+  "showcase.v0137.hero.body":
+    "The Servers tab lists every server on the master list with its real ping, the track actually being ridden and the session in progress. It keeps working while MX Bikes is running — the app asks each server directly, so nothing competes with the game for your account.",
+  "showcase.v0137.whoson":
+    "Open a server to see who is on it, what it allows, and the track it is running — with its picture if you have it, and where to get it if you don't.",
+  "showcase.v0137.cheats":
+    "Servers advertising cheats are hidden, by the same rules FrostMod uses in the game. The tab says how many it hid and lets you look at them.",
+  "showcase.v0137.livecodes":
+    "Share codes that keep updating. Send one short code once, then publish new versions into it — everyone who pasted it gets them, and Auto installs them.",
+  "showcase.v0137.viewer":
+    "The 3D view draws a track's real ground: every layer's own sheet through the track's own masks, its scenery in its own textures, and the sky it ships.",
+  "showcase.v0137.ranked":
+    "A Ranked tab with your MXB Ranked rank, MXP and season stats, and your last 50 races. Nothing to sign in to — it works out your GUID from Steam.",
+  "showcase.v0137.look":
+    "A new look. Navigation moved to a bar across the top, so mod artwork gets the full width of the window — seven to a row instead of five.",
   "showcase.v0124.hero.title":
     "Everyone on the grid, in the paint they actually chose",
   "showcase.v0124.hero.body":
@@ -1986,4 +2006,39 @@ export const en = {
   "studioApp.installed": "Installed, version {{version}}.",
   "studioApp.notInstalled": "Not installed on this PC yet.",
   "studioApp.launchFailed": "Couldn't start Frost's Studio",
+
+  // ── MXB Ranked ─────────────────────────────────────────────────────────────
+  "nav.ranked": "Ranked",
+  "nav.serverBrowser": "Browser",
+  "ranked.changeGuid": "GUID",
+  "ranked.refresh": "Refresh",
+  "ranked.openSite": "On mxb-ranked",
+  "ranked.loading": "Reading your profile on mxb-ranked.com…",
+  "ranked.retry": "Try again",
+  "ranked.refreshFailed": "Couldn't refresh from mxb-ranked.com",
+  "ranked.noGuid": "MXB Ranked identifies riders by their MX Bikes GUID. Yours is worked out from the Steam account you're signed into — if you bought MX Bikes direct instead, enter the GUID from your mxb-ranked profile.",
+  "ranked.enterGuid": "Enter GUID",
+  "ranked.guidTitle": "MX Bikes GUID",
+  "ranked.guidHelp": "Whose profile to show. Paste a GUID or a link to an mxb-ranked profile; leave it empty to go back to your own Steam account.",
+  "ranked.since": "member since {{date}}",
+  "ranked.manualGuid": "entered by hand",
+  "ranked.exp": "EXP",
+  "ranked.riderRating": "Rider rating",
+  "ranked.penaltyPoints": "Penalty pts",
+  "ranked.globalAvg": "Global average: {{value}}",
+  "ranked.rank": "Rank {{rank}}",
+  "ranked.races": "Races",
+  "ranked.avgPosition": "Avg position",
+  "ranked.wins": "Wins",
+  "ranked.podiums": "Podiums",
+  "ranked.wrLaps": "WR laps",
+  "ranked.pbLaps": "PB laps",
+  "ranked.holeshots": "Holeshots",
+  "ranked.track": "Track",
+  "ranked.server": "Server",
+  "ranked.position": "Pos",
+  "ranked.bike": "Bike",
+  "ranked.mxp": "MXP",
+  "ranked.penalty": "Penalty",
+  "ranked.finished": "Finished",
 } as const;

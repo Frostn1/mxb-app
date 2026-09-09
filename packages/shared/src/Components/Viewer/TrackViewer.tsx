@@ -972,7 +972,7 @@ function TerrainMesh({
                 // is done here — three.js only converts the slots it compiled itself.
                 return i === 0 || !l.mask
                   ? `  ground = ${sample};`
-                  : `  ground = mix(ground, ${sample}, texture2D(stackMask${i}, vGroundUv).r);`;
+                  : `  ground = mix(ground, ${sample}, texture2D(stackMask${i}, maskUv).r);`;
               })
               .join("\n");
             shader.fragmentShader = shader.fragmentShader
@@ -987,6 +987,25 @@ function TerrainMesh({
                 "#include <color_fragment>",
                 `#include <color_fragment>
                  {
+                   // One mirror, in u only.
+                   //
+                   // A coverage mask is stored the same way up as the terrain grid, so v is
+                   // left alone — unlike the layer *sheets*, which are bottom-up and get
+                   // flipped as they are read. That difference is the trap: the mask looks
+                   // like it should follow the sheets and does not.
+                   //
+                   // u is mirrored because the mesh is. buildTerrainGeometry places a vertex
+                   // at originX minus x * step, since the game's frame is left-handed and
+                   // three.js's is not, so u runs the opposite way to the world the mask was
+                   // painted in.
+                   //
+                   // Settled on screen over five passes. Nothing in the file states where a
+                   // mask sits in the world, so there is no ground truth in the data to
+                   // measure against, and every overlay metric tried sat within noise of
+                   // chance. The lesson worth keeping: this correction is a reflection, and
+                   // no rotation ever fixes a reflection — turning it only moved the error
+                   // around.
+                   vec2 maskUv = vGroundUv;
                    vec3 ground = vec3(0.5);
                  ${blend}
                    // Multiplied rather than assigned: what is already in diffuseColor is the
