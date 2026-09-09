@@ -108,18 +108,6 @@ jobs:
         shell: bash
         run: bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
 
-      # sync.sh writes the pre-monorepo layout (`<root>/src-tauri/...`) because it lives in
-      # Frostn1/mxbapp-private and ships separately from this repo. Fold what it placed into
-      # the app that now owns those paths. Delete this step once sync.sh knows the new ones.
-      - name: Relocate synced sidecar files
-        if: ${{ github.repository == 'Frostn1/mxb-app' }}
-        shell: bash
-        run: |
-          if [ -d src-tauri ]; then
-            cp -R src-tauri/. apps/manager/src-tauri/
-            rm -rf src-tauri
-            echo "folded sync.sh output into apps/manager/src-tauri"
-          fi
 
       # Ask the bundler for the DLL only on the leg that has one. Tauri's `resources` glob
       # is a hard error when it matches nothing, so keeping it in the committed config

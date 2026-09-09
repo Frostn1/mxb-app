@@ -38,6 +38,8 @@ pub(crate) use mxb_core::{
 };
 #[cfg(sidecar)]
 pub(crate) use mxb_core::sidecar;
+#[cfg(mxbsecure)]
+pub(crate) use mxb_core::mxbsecure;
 
 fn main() {
     tauri::Builder::default()
@@ -1545,7 +1547,7 @@ async fn mxbsecure_generate(
         let mut rnd = [0u8; 6];
         getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
         let suffix: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
-        let asset_id = format!("{}-{suffix}", sanitize_asset_id(&name));
+        let asset_id = format!("{}-{suffix}", mxb_core::names::sanitize_asset_id(&name));
 
         let locked = mxbsecure::lock(&plaintext, &asset_id, "k1");
         let sealed = mxbsecure::seal_key_to_identity(&locked.content_key, &steam_id, "");

@@ -136,3 +136,15 @@ pub fn safe_dest(mods_dir: &Path, rel_dest: &str) -> Option<PathBuf> {
     }
     Some(out)
 }
+
+/// Keep an asset id to the characters a header and a URL are both happy with.
+///
+/// Both binaries need it: the studio names a sealed asset, the manager opens one.
+pub fn sanitize_asset_id(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .collect();
+    let trimmed = cleaned.trim_matches('_');
+    if trimmed.is_empty() { "asset".to_string() } else { trimmed.to_string() }
+}

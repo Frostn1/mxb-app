@@ -33,12 +33,13 @@ fn main() {
     }
     println!("cargo::rerun-if-changed=src/worldnet.rs");
 
-    // The secure-content packer, gated independently of the sidecar modules above.
+    // The secure-content packer lives in mxb-core now, for the same reason `sidecar` does:
+    // both binaries use it. Mirror core's decision rather than looking for a file we no
+    // longer hold.
     println!("cargo::rustc-check-cfg=cfg(mxbsecure)");
-    if Path::new("src/mxbsecure.rs").exists() {
+    if std::env::var("DEP_MXBCORE_MXBSECURE").as_deref() == Ok("1") {
         println!("cargo::rustc-cfg=mxbsecure");
     }
-    println!("cargo::rerun-if-changed=src/mxbsecure.rs");
 
     // Place the injected client DLL next to the built executable, so a dev build can find it
     // beside itself with nothing to copy by hand. The file is gitignored and put here by
