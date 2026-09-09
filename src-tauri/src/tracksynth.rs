@@ -3006,10 +3006,10 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         let l = bands.iter().find(|l| l.name == name).expect("a band by that name");
         band_of(l.band)
     };
-    let dirt = band_named("dirt");
-    let line = band_named("line");
-    let shoulder = band_named("shoulder");
-    let grass = band_named("grass");
+    let dirt = band_named("soil_dark_c");
+    let line = band_named("soil_worn_c");
+    let shoulder = band_named("soil_mid_c");
+    let grass = band_named("hm_grass");
     // Off-track starts where the graded shoulder ends: the rider is on the track, or in the
     // field, with the shoulder belonging to neither. This one decides where the game says a
     // rider has gone off, so it is the one boundary that stays smooth.
@@ -4553,9 +4553,14 @@ fn turf_cover(x: f32, z: f32, seed: u32) -> f32 {
     let fine = fbm(x / (TURF_PATCH_M * 0.28), z / (TURF_PATCH_M * 0.28), seed ^ 0x3C72);
     let n = broad * 0.72 + fine * 0.28;
     // `fbm` runs either side of zero, so the threshold does too: bare where the field dips
-    // well below it, full turf where it rises, and a soft edge in between. About two thirds
-    // of the ground comes out grassed, which is what a venue looks like from the air.
-    smoothstep(((n + 0.25) * 2.5).clamp(0.0, 1.0))
+    // well below it, full turf where it rises, and a soft edge in between.
+    //
+    // Measured against what published tracks actually grass: Indiana 41.8%, Southwick 60.3%,
+    // against ours at 70.8%. A venue is worked dirt with grass on it, and we had it the other
+    // way round — a lawn with a track drawn on it, which is what made our ground read wrong
+    // however well the sheets themselves were toned. The threshold now lands about half way
+    // between the two of them.
+    smoothstep(((n + 0.10) * 2.5).clamp(0.0, 1.0))
 }
 
 /// A mask of the track's edge — the lap's and the start straight's together.
@@ -6262,7 +6267,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
     let (_, shoulder_scale) = ground(prog.terrain.surface);
     vec![
         Layer {
-            name: "ground",
+            name: "soil_light_c",
             sheet: "ground_c",
             band: BandMask::Everywhere,
             look: field,
@@ -6276,7 +6281,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             grass: false,
         },
         Layer {
-            name: "shoulder",
+            name: "soil_mid_c",
             sheet: "shoulder_c",
             band: BandMask::Out(SHOULDER_M * shoulder_scale),
             look: shoulder,
@@ -6294,7 +6299,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         // in its own patchiness — dark dirt with holes in it, and pale ground underneath for
         // no reason a rider could see.
         Layer {
-            name: "dirt",
+            name: "soil_dark_c",
             sheet: "dirt_c",
             band: BandMask::Out(0.0),
             look: ridden,
@@ -6310,7 +6315,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         // Painted over the corridor's base, in the order the ground gets that way: the loose
         // stuff is thrown over the worked soil, and the line is worn back through it.
         Layer {
-            name: "line",
+            name: "soil_worn_c",
             sheet: "dirt_line_c",
             // The whole corridor, not a strip down the middle of it. Published tracks paint
             // their ridden colour across the full width — Indiana's second layer covers 99.7%
@@ -6331,7 +6336,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             // Painted over the line, not under it: with the dark strip laid on top, every
             // bank thrown up beside a groove was covered and a floor read the same as the
             // ground either side — "floor 52 against wall 50", a rut nobody can see.
-            name: "loose",
+            name: "sand_top_c",
             sheet: "loose_c",
             band: BandMask::Loose,
             look: loose,
@@ -6347,7 +6352,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         // The strip people actually ride, worn into the corridor and darker than it. Painted
         // over the loose, because a line is worn back through what was thrown onto it.
         Layer {
-            name: "rut",
+            name: "sand_bottom",
             sheet: "rut_c",
             band: BandMask::Rut,
             look: rut,
@@ -6361,7 +6366,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             grass: false,
         },
         Layer {
-            name: "grass",
+            name: "hm_grass",
             sheet: "grass_c",
             band: BandMask::Beyond,
             look: turf,
@@ -8308,8 +8313,8 @@ mod tests {
             assert_eq!(wet.is_file(), l.wet, "{} wet sheet", l.name);
         }
         // And it is the same ground, darker — not a different sheet.
-        let dry = std::fs::metadata(dir.join("maps/line.tga")).unwrap().len();
-        let wet = std::fs::metadata(dir.join("maps/line_wet.tga"))
+        let dry = std::fs::metadata(dir.join("maps/soil_worn_c.tga")).unwrap().len();
+        let wet = std::fs::metadata(dir.join("maps/soil_worn_c_wet.tga"))
             .unwrap()
             .len();
         assert_eq!(dry, wet, "the wet sheet is the dry one shaded, same shape");
@@ -10860,6 +10865,32 @@ mod ground_sheets {
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod cover_check {
+    use super::*;
+
+    /// How much of the plot each band paints, against what published tracks paint.
+    ///
+    /// Indiana grasses 41.8% of its site and Southwick 60.3%; ours grassed 70.8%, which is a
+    /// lawn with a track drawn on it rather than a venue of worked dirt with grass on it.
+    #[test]
+    #[ignore = "prints a table"]
+    fn how_much_of_the_plot_each_band_paints() {
+        let p: crate::trackprog::TrackProgram =
+            serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
+        let syn = synthesise(&p).unwrap();
+        let half = p.width * 0.5;
+        let seed = p.terrain.relief.seed;
+        const D: usize = 512;
+        println!("{:<16} {:>8}", "band", "cover");
+        for l in layers(&p) {
+            let m = band_mask(&syn, l.band, half, seed, D, D);
+            let c = m.iter().filter(|&&v| v > 8).count() as f64 * 100.0 / m.len() as f64;
+            println!("{:<16} {:>7.1}%", l.name, c);
         }
     }
 }
