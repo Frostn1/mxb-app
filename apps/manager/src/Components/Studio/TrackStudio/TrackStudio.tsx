@@ -49,6 +49,7 @@ import { cn } from "@/lib/utils";
 import {
   baseTrackProgram,
   blankTrackProgram,
+  randomTrackProgram,
   closeTrackLap,
   fitTrackBudget,
   checkTrack,
@@ -603,6 +604,13 @@ export default function TrackStudio() {
               {busy === "generate" ? t("track.generatingHint") : t("track.empty")}
             </p>
             <div className="mt-4 flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => void onLoad(randomTrackProgram)}
+                disabled={busy !== null}
+              >
+                {t("track.random")}
+              </Button>
               <Button
                 variant="outline"
                 onClick={() => void onLoad(baseTrackProgram)}
@@ -1264,6 +1272,13 @@ export default function TrackStudio() {
                   <span className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
                     {t("track.startOver")}
                   </span>
+                  <button
+                    onClick={() => void onLoad(randomTrackProgram)}
+                    disabled={busy !== null}
+                    className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                  >
+                    {t("track.random")}
+                  </button>
                   <button
                     onClick={() => void onLoad(baseTrackProgram)}
                     disabled={busy !== null}

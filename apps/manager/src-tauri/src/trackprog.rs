@@ -277,7 +277,46 @@ impl Segment {
 /// the median face against Indiana's 12.0, which is what "the jumps are too big" turns out to
 /// mean: not their height, which already matches, but that every one of them is as abrupt as
 /// the worst one on a real track.
-pub const JUMP_FACE_DEG: f32 = 27.0;
+/// Thirty-eight, and it is a ceiling that now rarely binds — which is the point.
+///
+/// Twenty-seven was read off the *terrain* statistic: Indiana's faces measure 27.4° at the
+/// ninetieth percentile, sampled off the ground. That is not the same quantity as the angle a
+/// builder builds to, and taking it as one made every big face too long. Sized by the half
+/// angle, a 27° lip puts a 12.5 m ramp under a 3 m jump — a mean gradient of 13.5°, where
+/// every real source puts a built take-off between 2:1 and 3:1, or 26.6° down to 18.4° of
+/// mean. See `docs/tracks/real-track-corpus.md` §4.1: the ratio a builder quotes describes the
+/// *mean* of a concave face, and its lip runs about 1.8x steeper.
+///
+/// At 38 the angle stops lengthening faces past [`JUMP_FACE_MIN_M`] for anything under about
+/// 3.1 m, so the floor governs the whole realistic range and the angle is what the comment on
+/// [`TABLETOP_DECK_M`] always said it should be: a ceiling for the tall ones, not a target for
+/// all of them. A 3 m jump comes out on the floor at 9 m — 18.4° of mean, which is 3:1 exactly.
+///
+/// The tension worth knowing: our lip is now geometrically steeper than the 27.4° Indiana
+/// *measures*, because a windowed terrain slope under-reads a real lip. If a generated lap
+/// starts measuring past Indiana at the ninetieth, this is the number that did it.
+pub const JUMP_FACE_DEG: f32 = 38.0;
+
+// A straight lip is NOT built here, and the reason is geometric rather than an oversight.
+//
+// The terrain-park literature builds the last ~2 m of a take-off straight, so the ground is
+// not still turning under the wheel at the moment of release — Petrone's constant-EFH jump
+// states it outright. Adding that here was tried and backed out.
+//
+// [`DoubleShape::height_at`] trims the crown off the top of a face and rescales what is left,
+// and that trick is exact *only* because the face is a pure arc: a chord cut off an arc keeps
+// rise and run in the same `tan(sweep/2)` ratio, so the trimmed face is still the face `up`
+// describes and the crown still meets it tangentially. Splice a straight into the top and the
+// identity fails — `sin(u)·tan(u) != 1 − cos(u)` — so the crown joins a face that is no longer
+// at the crown's own angle and the ramp comes out steeper than it states. Measured: a 4 m jump
+// over a 12 m gap stood at 39.1° against a stated 38.
+//
+// Doing it properly means rebuilding the crown construction so it does not lean on
+// self-similarity. That is worth doing and it is not a one-line change. Note the crown already
+// rounds the crest over `0.9·h` of radius, which on a 4 m jump is more ground than the 2 m
+// straight would have occupied — so the release is less abrupt than the bare arc suggests.
+// See `docs/tracks/real-track-corpus.md` §6.2.
+
 
 /// The gentlest face — the one a landing gets. Published landings measure 19.0° at the
 /// ninetieth against a takeoff's 27.0: a built takeoff is short because that is what throws
@@ -365,6 +404,7 @@ pub fn face_arc(t: f32, sweep: f32) -> f32 {
     let phi = (t * sin_s).clamp(-1.0, 1.0).asin();
     (1.0 - phi.cos()) / (1.0 - cos_s)
 }
+
 
 /// How far a face has to run to reach `height` without standing steeper than `deg` at its lip.
 ///
@@ -457,8 +497,8 @@ pub const JUMP_CROWN_R: (f32, f32) = (0.9, 1.5);
 /// comes up short arrives.
 ///
 /// The radius is kept whatever the gap, and it is the *floor* that gives way instead — see
-/// [`double_shape`]. Two jumps close together stand on the ground between them rather than
-/// having a slot cut down to grade to satisfy a rule about where the bottom is.
+/// [`double_shape`]. The two jumps stand on the ground between them rather than having a slot
+/// cut down to grade to satisfy a rule about where the bottom is.
 pub const JUMP_TROUGH_R: (f32, f32) = (2.0, 3.0);
 
 /// The floor a valley wants at the bottom of it, metres.
@@ -468,12 +508,19 @@ pub const JUMP_TROUGH_R: (f32, f32) = (2.0, 3.0);
 /// grade if there is room to do it and still leave that much floor, and stop higher if not.
 pub const JUMP_PAN_M: f32 = 2.0;
 
-/// The least of its own height a double must fall between its crests.
+/// How much of its own height a double falls between its crests. The rest is the pad the pair
+/// stands on.
 ///
-/// The other end of the same argument. A valley that stops too high leaves one long hump with
-/// a dent in it, and a hump is not a double however it was described — so a tight pair keeps a
-/// short pan rather than a shallow one.
-pub const JUMP_VALLEY_FALL: f32 = 0.6;
+/// **The gap is never on the ground.** It used to be dug to grade by definition — a double is
+/// a pair of piles with nothing between them — and that is a drawing-board double, not a built
+/// one. Dirt for a rhythm section is pushed into a bank and the jumps are cut out of it, so the
+/// bottom between two of them is a dip in that bank rather than the field it was built on. Cut
+/// to grade it reads as a trench, and the rider who came up short arrives in the bottom of one.
+///
+/// Three quarters, so the fall between the crests is still nearly the whole jump and the floor
+/// stands a quarter of it up. Less than the ground allows in a tight gap still wins: this is a
+/// ceiling on the fall, not a target for it.
+pub const JUMP_VALLEY_FALL: f32 = 0.75;
 
 /// A double's profile: two crowned crests with a circular valley between them.
 ///
@@ -516,15 +563,12 @@ pub struct DoubleShape {
 /// [`Feature::length`] states is untouched and the crests stay where every other part of the
 /// generator — the speed model, the ruts, the scenery — expects to find them.
 ///
-/// **The floor gives way before the radius does.** A double's gap is at grade, and that is what
-/// makes it a double rather than a long tabletop — but only where there is ground enough to get
-/// down there and back and still leave a [`JUMP_PAN_M`] of floor at the bottom. Squeeze the gap
-/// and the honest answer is a saddle between two crests, not a slot cut to grade with the
-/// valley's radius shaved off to fit it: nobody digs a pit between two jumps a rider is meant
-/// to clear in one, and the ground that matters down there is the ground they land on when they
-/// don't. So the radii are what the height asks for, the fall is what the span allows, and the
-/// floor sits at the difference — at grade on an ordinary double, and up on a saddle as the
-/// pair closes up.
+/// **The floor gives way before the radius does, and it never reaches the ground.** The fall
+/// between the crests is [`JUMP_VALLEY_FALL`] of the jump's height, or less where the span
+/// cannot pay for that much and still leave a [`JUMP_PAN_M`] of floor at the bottom. So the
+/// radii are what the height asks for, the fall is the smaller of what the jump wants and what
+/// the span allows, and the floor sits at the difference — a dip in the ground the pair stands
+/// on, which is what a rhythm section is cut out of.
 pub fn double_shape(height: f32, gap: f32, lip: f32) -> DoubleShape {
     let faces = double_faces(height, lip);
     let h = height.abs();
@@ -552,8 +596,7 @@ pub fn double_shape(height: f32, gap: f32, lip: f32) -> DoubleShape {
         // All arc: solve `2·√(d·(2x − d)) = room`.
         x - (x * x - room * room * 0.25).max(0.0).sqrt()
     }
-    .max(JUMP_VALLEY_FALL * h)
-    .clamp(0.0, h);
+    .clamp(0.0, JUMP_VALLEY_FALL * h);
     let (inner, straight) = if x * k >= drop {
         // The crown and the valley take the whole fall on their own, so the face between them
         // is a point and the angle it passes through is whatever that costs.
@@ -643,8 +686,13 @@ pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
     // tabletop gets a 2.6 m ramp where 27% of a 22 m length gave it 5.9 m — which is the same
     // way round as it bit on the double. The angle is a ceiling for the tall ones, not a
     // target for all of them.
-    let up = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M).max(length * 0.27);
-    let down = face_run(height, JUMP_LANDING_DEG, JUMP_LANDING_MIN_M).max(length * 0.44);
+    // Sized by the angle alone. Keeping the old fractions as a floor made the ramps grow
+    // with the stated length, so asking for a *longer* table bought ramp rather than deck:
+    // a 3.6 m tabletop asked for at 49 m got 35 m of ramp and a 14 m top, which from the
+    // seat is a long rounded hill with a crest on it and not a table at all. A table's size
+    // is its deck.
+    let up = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M);
+    let down = face_run(height, JUMP_LANDING_DEG, JUMP_LANDING_MIN_M);
     // Whatever the asked-for length has left once the faces are in it — but never less than a
     // deck. The deck wins and the footprint grows; the other way round, keeping the length by
     // steepening the faces to fit a top inside it, is the same jump built worse.
@@ -658,7 +706,7 @@ pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
 /// track — a long tabletop on the main straight with the line painted past its landing. The
 /// range is the top of the published spread rather than the middle of it: this is the one
 /// jump a track is photographed on.
-pub const FINISH_JUMP_M: (f32, f32) = (2.4, 3.6);
+pub const FINISH_JUMP_M: (f32, f32) = (2.4, 3.0);
 
 /// The longest deck a finish jump gets, metres. Published tabletop decks run six to twelve,
 /// and the finish one is at the long end because it is the one everybody lands on.
@@ -712,7 +760,7 @@ pub const START_OFFSET_M: f32 = 40.0;
 /// told. Shorter than the middle of that on purpose: ridden, 85 m of sprint and 90 m of
 /// turn-in is a long way to the first corner, and the whole point of a start straight is that
 /// it ends at one.
-pub const START_SPRINT_M: f32 = 70.0;
+pub const START_SPRINT_M: f32 = 80.0;
 
 /// How far the start straight is angled towards the lap, degrees. Over the sprint it closes
 /// about a fifth of the offset, which leaves one corner to do the rest.
@@ -807,6 +855,76 @@ pub fn turns(segments: &[Segment]) -> Vec<(f32, f32)> {
     }
     if let Some((_, deg, r)) = cur {
         out.push((deg, r));
+    }
+    out
+}
+
+/// A corner, and where it is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CornerRun {
+    /// Metres round the lap the corner starts and ends at.
+    pub start_m: f32,
+    pub end_m: f32,
+    /// Unsigned degrees turned through.
+    pub degrees: f32,
+    /// The tightest radius anywhere in it, metres.
+    pub tightest_m: f32,
+    /// How many arcs the builder used. A published corner is 9-19 of them; one arc is a
+    /// compass sweep, and it rides like one.
+    pub arcs: usize,
+}
+
+/// The same corners [`turns`] counts, carrying where each one is.
+///
+/// `turns` answers "how many corners, how tight" and is used to judge a whole lap. This
+/// answers "and where", which is what anything that has to go and look at the ground there
+/// needs — and what the corner atlas is built on.
+pub fn corner_runs(segments: &[Segment]) -> Vec<CornerRun> {
+    let mut out: Vec<CornerRun> = Vec::new();
+    let mut at = 0.0f32;
+    let mut cur: Option<(f32, CornerRun)> = None; // way, run
+    for seg in segments {
+        let end = at + seg.length();
+        match *seg {
+            Segment::Arc { radius, angle, .. } if radius != 0.0 && angle.abs() >= CORNER_DEG => {
+                let way = radius.signum();
+                match cur {
+                    Some((w, ref mut r)) if w == way => {
+                        r.end_m = end;
+                        r.degrees += angle.abs();
+                        r.tightest_m = r.tightest_m.min(radius.abs());
+                        r.arcs += 1;
+                    }
+                    other => {
+                        if let Some((_, r)) = other {
+                            out.push(r);
+                        }
+                        cur = Some((
+                            way,
+                            CornerRun {
+                                start_m: at,
+                                end_m: end,
+                                degrees: angle.abs(),
+                                tightest_m: radius.abs(),
+                                arcs: 1,
+                            },
+                        ));
+                    }
+                }
+            }
+            _ => {
+                // Same break as `turns`: anything straight and longer than a nudge ends it.
+                if seg.length() > 8.0 {
+                    if let Some((_, r)) = cur.take() {
+                        out.push(r);
+                    }
+                }
+            }
+        }
+        at = end;
+    }
+    if let Some((_, r)) = cur {
+        out.push(r);
     }
     out
 }
@@ -973,218 +1091,155 @@ impl Feature {
 
 /// A worked example of a track program: what a good one looks like.
 ///
-/// Grown as a simple closed loop on a lattice, then smoothed and fitted back to arcs and
-/// straights. That construction is the point. A lap that goes round a centre once can never
-/// cross itself, which is why the prompt says to build one that way — and it can only ever
-/// draw a star, because every part of it faces outwards from the middle. Published tracks are
-/// not star-shaped: Indiana folds back across its own infield four times. A loop grown on a
-/// lattice folds as often as it likes and is still simple, so it cannot cross either.
+/// Walked, not written. [`crate::tracklayout::draw`] grows a lap piece by piece out of a 470 m
+/// plot, refusing any piece that would put the track through ground it has already used, and
+/// docks it back onto its own start with a Dubins path — so it closes to 0.00 m and never
+/// crosses itself, without either being asserted. Seed 24, then left exactly as the repair
+/// pass leaves it, which is why loading it has nothing to say about it.
 ///
-/// It begins on its longest straight, all 145 m of it, with the start straight running
-/// beside it — 176 m from the gate row to where it merges back on: the gate row, the finish
-/// line and the run at turn one all sit on the lap's opening straight, and a lap that opens on
-/// a corner puts forty gates round a bend. Turned round to start there rather than redrawn —
-/// see [`TrackProgram::rotate_start`], and the printer beside its tests.
+/// It measures like a published national, because that is what the walk is calibrated against
+/// — see `scripts/track-survey.py`, which reads these numbers off a track's own `.trh`:
 ///
-/// The finish jump stands on that straight: a 3.6 m tabletop 49 m across, fifty metres of
-/// drive off the last corner, with the line painted past its landing. See
-/// [`TrackProgram::finish_window`] — a lap that arrives without one has one built.
+/// ```text
+///                          here    Indiana   Southwick
+///   lap                   1966 m     2170 m     2217 m
+///   corners            19 (9.7)   16 (7.4)   18 (8.1)  per km
+///   a corner's angle        142°       159°       166°
+///   apex radius           12.1 m     10.4 m     11.9 m
+///   ground per corner       64 m       68 m       74 m
+///   run between them        30 m       27 m       30 m
+///   turning share           0.71       0.63       0.72
+/// ```
 ///
-/// 1905 m, 137 segments of which 109 are arcs, seventeen corners at a median 12.6 m through
-/// their tightest point — Indiana's is 10.6 — and 2651° of turning. Thirty-seven features,
-/// eight of them over 2.2 m and the rest small ground, which is the ratio Indiana has. It
-/// climbs 22 m round the lap, which is Indiana's 21.3 — half the published corpus is a
-/// hillside and a flat plot rides like one.
+/// 81 segments, 75 of them arcs, 2576° of turning gross. It begins on its longest straight,
+/// all 123 m of it — the gate row, the finish line and the run at turn one all sit there, and
+/// a lap that opens on a corner puts forty gates round a bend. Twenty-seven features, sixteen
+/// of them over 2.2 m and the rest small ground, none over the 3 m two federations write.
 ///
 /// This is the schema's own test. It is parsed by the test suite, synthesised, and measured
-/// against published tracks, so it cannot drift away from what the code accepts.
+/// against published tracks, so it cannot drift away from what the code accepts. Remake it
+/// with `BASE_SEED=<n> cargo test --bin mxb-app -- --ignored --nocapture emit_base_track`.
 pub const EXAMPLE: &str = r#"{
       "name": "Corpus National",
       "author": "MXB App",
       "location": "Generated",
-      "width": 12,
+      "width": 17.915,
       "terrain": {
-        "sizeX": 500, "sizeZ": 500, "samples": 2049, "scale": 63,
-        "relief": { "amplitude": 7, "wavelength": 420, "seed": 3, "texture": 0.085, "tilt": 26, "tiltAngle": 35, "landforms": 6, "landformHeight": 18 }
+        "sizeX": 470, "sizeZ": 470, "samples": 2049, "scale": 22, "surface": "soil",
+        "relief": { "amplitude": 6.1914, "wavelength": 435.8793, "seed": 24, "texture": 0.085, "tilt": 14.009, "tiltAngle": 62.7413, "landforms": 2, "landformHeight": 2.6008 }
       },
-      "start": { "x": 337.80, "z": 97.64, "angle": 272.27 },
+      "start": { "x": 256.1954, "z": 152.6315, "angle": 0 },
       "segments": [
-        { "kind": "straight", "length": 145.1504 },
-        { "kind": "arc", "radius": 63.4878, "angle": 8.1222 },
-        { "kind": "arc", "radius": 24.3538, "angle": 16.4685 },
-        { "kind": "arc", "radius": 14.1670, "angle": 28.3103 },
-        { "kind": "arc", "radius": 12.3171, "angle": 37.2139 },
-        { "kind": "arc", "radius": 17.9501, "angle": 19.1517 },
-        { "kind": "arc", "radius": 23.3857, "angle": 58.4283 },
-        { "kind": "arc", "radius": -104.9259, "angle": 6.3486 },
-        { "kind": "arc", "radius": -19.5275, "angle": 38.7176 },
-        { "kind": "arc", "radius": -39.7687, "angle": 14.4072 },
-        { "kind": "arc", "radius": -74.5822, "angle": 6.1458 },
-        { "kind": "arc", "radius": -42.0795, "angle": 13.6161 },
-        { "kind": "arc", "radius": -16.5471, "angle": 23.1113 },
-        { "kind": "arc", "radius": -11.6523, "angle": 39.3369 },
-        { "kind": "arc", "radius": -14.0358, "angle": 37.2584 },
-        { "kind": "straight", "length": 15.3679 },
-        { "kind": "arc", "radius": 64.0898, "angle": 9.6823 },
-        { "kind": "arc", "radius": 14.7865, "angle": 81.0247 },
-        { "kind": "arc", "radius": 53.3343, "angle": 12.5608 },
-        { "kind": "arc", "radius": 43.7892, "angle": 39.4672 },
-        { "kind": "arc", "radius": 12.5892, "angle": 54.7641 },
-        { "kind": "arc", "radius": 38.9548, "angle": 15.2833 },
-        { "kind": "arc", "radius": -58.6517, "angle": 28.7574 },
-        { "kind": "arc", "radius": -11.7162, "angle": 144.0096 },
-        { "kind": "arc", "radius": -43.0843, "angle": 15.9680 },
-        { "kind": "arc", "radius": -64.3372, "angle": 9.7961 },
-        { "kind": "straight", "length": 62.0060 },
-        { "kind": "arc", "radius": 132.9446, "angle": 0.4310 },
-        { "kind": "arc", "radius": 38.3394, "angle": 11.9555 },
-        { "kind": "arc", "radius": 16.8713, "angle": 30.5645 },
-        { "kind": "arc", "radius": 13.3686, "angle": 51.6012 },
-        { "kind": "arc", "radius": 45.9996, "angle": 8.9355 },
-        { "kind": "straight", "length": 8.0000 },
-        { "kind": "arc", "radius": -111.1202, "angle": 8.4608 },
-        { "kind": "arc", "radius": -88.9165, "angle": 9.8254 },
-        { "kind": "arc", "radius": -71.2502, "angle": 15.2018 },
-        { "kind": "arc", "radius": 38.6483, "angle": 11.1248 },
-        { "kind": "arc", "radius": 12.5988, "angle": 70.8392 },
-        { "kind": "arc", "radius": 29.6001, "angle": 15.4853 },
-        { "kind": "arc", "radius": 70.1511, "angle": 8.9842 },
-        { "kind": "straight", "length": 8.0007 },
-        { "kind": "arc", "radius": 48.7480, "angle": 36.4587 },
-        { "kind": "arc", "radius": 12.3140, "angle": 27.9175 },
-        { "kind": "arc", "radius": 16.6110, "angle": 31.0434 },
-        { "kind": "arc", "radius": 35.6166, "angle": 13.9455 },
-        { "kind": "straight", "length": 11.8299 },
-        { "kind": "arc", "radius": -51.7270, "angle": 8.8613 },
-        { "kind": "arc", "radius": -20.9836, "angle": 21.8441 },
-        { "kind": "arc", "radius": -12.4799, "angle": 32.1373 },
-        { "kind": "arc", "radius": -14.0539, "angle": 51.9955 },
-        { "kind": "arc", "radius": -36.5470, "angle": 25.3047 },
-        { "kind": "arc", "radius": -31.1949, "angle": 22.8600 },
-        { "kind": "arc", "radius": -41.6514, "angle": 16.7050 },
-        { "kind": "arc", "radius": -64.1241, "angle": 9.8286 },
-        { "kind": "straight", "length": 8.0000 },
-        { "kind": "arc", "radius": 77.0328, "angle": 21.3500 },
-        { "kind": "arc", "radius": 16.8378, "angle": 27.2225 },
-        { "kind": "arc", "radius": 13.2154, "angle": 60.6973 },
-        { "kind": "arc", "radius": 15.7352, "angle": 67.2981 },
-        { "kind": "arc", "radius": 79.9602, "angle": 7.1655 },
-        { "kind": "straight", "length": 11.4033 },
-        { "kind": "arc", "radius": -41.7771, "angle": 13.7146 },
-        { "kind": "arc", "radius": -16.6347, "angle": 82.6642 },
-        { "kind": "arc", "radius": -40.3388, "angle": 15.6240 },
-        { "kind": "arc", "radius": -61.1380, "angle": 17.3928 },
-        { "kind": "arc", "radius": -44.5320, "angle": 45.3140 },
-        { "kind": "arc", "radius": -36.7480, "angle": 16.0456 },
-        { "kind": "straight", "length": 8.0000 },
-        { "kind": "arc", "radius": -111.5436, "angle": 2.5683 },
-        { "kind": "straight", "length": 8.0000 },
-        { "kind": "arc", "radius": -97.5813, "angle": 2.3486 },
-        { "kind": "straight", "length": 8.0000 },
-        { "kind": "arc", "radius": -95.6497, "angle": 2.3961 },
-        { "kind": "straight", "length": 14.7615 },
-        { "kind": "arc", "radius": 79.0345, "angle": 3.6247 },
-        { "kind": "straight", "length": 8.0000 },
-        { "kind": "arc", "radius": 76.4078, "angle": 3.7493 },
-        { "kind": "straight", "length": 8.0000 },
-        { "kind": "arc", "radius": 75.1038, "angle": 3.8144 },
-        { "kind": "straight", "length": 8.0000 },
-        { "kind": "arc", "radius": 31.3451, "angle": 16.4511 },
-        { "kind": "arc", "radius": 17.9834, "angle": 19.1163 },
-        { "kind": "arc", "radius": 25.3736, "angle": 22.5809 },
-        { "kind": "arc", "radius": 43.9072, "angle": 14.3956 },
-        { "kind": "arc", "radius": 65.2845, "angle": 19.3079 },
-        { "kind": "arc", "radius": 25.1877, "angle": 20.4727 },
-        { "kind": "arc", "radius": 13.3985, "angle": 25.6577 },
-        { "kind": "arc", "radius": 14.0484, "angle": 36.7060 },
-        { "kind": "arc", "radius": 27.1469, "angle": 15.9588 },
-        { "kind": "straight", "length": 13.1010 },
-        { "kind": "arc", "radius": 123.9773, "angle": 1.3864 },
-        { "kind": "straight", "length": 46.3870 },
-        { "kind": "arc", "radius": -128.6030, "angle": 7.0432 },
-        { "kind": "arc", "radius": -111.1204, "angle": 8.1209 },
-        { "kind": "arc", "radius": -96.7222, "angle": 8.9334 },
-        { "kind": "arc", "radius": -90.6860, "angle": 6.3180 },
-        { "kind": "straight", "length": 9.2034 },
-        { "kind": "arc", "radius": 128.0951, "angle": 6.6157 },
-        { "kind": "arc", "radius": 113.2117, "angle": 6.9247 },
-        { "kind": "arc", "radius": 106.5941, "angle": 11.2878 },
-        { "kind": "straight", "length": 51.2131 },
-        { "kind": "arc", "radius": 44.5350, "angle": 10.9382 },
-        { "kind": "arc", "radius": 16.0928, "angle": 100.9716 },
-        { "kind": "arc", "radius": 17.8110, "angle": 23.8868 },
-        { "kind": "arc", "radius": 15.3306, "angle": 30.4143 },
-        { "kind": "arc", "radius": 18.6944, "angle": 24.3946 },
-        { "kind": "straight", "length": 8.0000 },
-        { "kind": "arc", "radius": -65.9762, "angle": 9.2278 },
-        { "kind": "arc", "radius": -15.9124, "angle": 27.9868 },
-        { "kind": "arc", "radius": -15.6179, "angle": 41.1691 },
-        { "kind": "arc", "radius": -54.6225, "angle": 12.4011 },
-        { "kind": "arc", "radius": -52.9898, "angle": 32.2688 },
-        { "kind": "arc", "radius": -12.0022, "angle": 36.2527 },
-        { "kind": "arc", "radius": -12.8808, "angle": 31.1370 },
-        { "kind": "arc", "radius": -32.8954, "angle": 13.9340 },
-        { "kind": "straight", "length": 11.1325 },
-        { "kind": "arc", "radius": 125.4045, "angle": 0.9138 },
-        { "kind": "straight", "length": 90.3427 },
-        { "kind": "arc", "radius": -29.7662, "angle": 15.3989 },
-        { "kind": "arc", "radius": -12.1796, "angle": 32.9296 },
-        { "kind": "arc", "radius": -14.3360, "angle": 35.9696 },
-        { "kind": "arc", "radius": -26.7612, "angle": 17.1280 },
-        { "kind": "arc", "radius": -62.8691, "angle": 10.0249 },
-        { "kind": "straight", "length": 14.8925 },
-        { "kind": "arc", "radius": 85.2827, "angle": 2.0155 },
-        { "kind": "straight", "length": 8.0000 },
-        { "kind": "arc", "radius": 58.4038, "angle": 6.6786 },
-        { "kind": "arc", "radius": 30.0985, "angle": 17.1325 },
-        { "kind": "arc", "radius": 20.2107, "angle": 34.8569 },
-        { "kind": "arc", "radius": 58.4731, "angle": 11.9787 },
-        { "kind": "arc", "radius": 81.8716, "angle": 8.8265 },
-        { "kind": "arc", "radius": 48.2785, "angle": 9.4942 },
-        { "kind": "arc", "radius": 16.6843, "angle": 24.0389 },
-        { "kind": "arc", "radius": 11.4412, "angle": 75.1175 },
-        { "kind": "arc", "radius": 36.3257, "angle": 12.0854 },
-        { "kind": "straight", "length": 24.1297 },
-        { "kind": "arc", "radius": -118.9746, "angle": 0.4816 }
+        { "kind": "straight", "length": 122.9492 },
+        { "kind": "arc", "radius": -133.2064, "angle": 14.839 },
+        { "kind": "arc", "radius": -53.4614, "angle": 48.8316 },
+        { "kind": "arc", "radius": -11.244, "angle": 60.0766 },
+        { "kind": "arc", "radius": -28.0832, "angle": 35.8188 },
+        { "kind": "arc", "radius": 1958.4766, "angle": 0.8702 },
+        { "kind": "arc", "radius": 32.2781, "angle": 45.6807 },
+        { "kind": "arc", "radius": 12.7373, "angle": 72.4345 },
+        { "kind": "arc", "radius": 35.9925, "angle": 23.9197 },
+        { "kind": "arc", "radius": 1993.6255, "angle": 0.4758 },
+        { "kind": "straight", "length": 55.4307 },
+        { "kind": "arc", "radius": -39.4175, "angle": 37.6541 },
+        { "kind": "arc", "radius": -9.9936, "angle": 59.5987 },
+        { "kind": "arc", "radius": -30.7245, "angle": 25.1118 },
+        { "kind": "straight", "length": 40.7213 },
+        { "kind": "arc", "radius": -56.9071, "angle": 34.9567 },
+        { "kind": "arc", "radius": -18.3666, "angle": 64.2324 },
+        { "kind": "arc", "radius": 54.0919, "angle": 22.8846 },
+        { "kind": "arc", "radius": 30.8657, "angle": 73.3281 },
+        { "kind": "arc", "radius": -804.506, "angle": 1.0815 },
+        { "kind": "arc", "radius": -96.2804, "angle": 15.7937 },
+        { "kind": "arc", "radius": -26.151, "angle": 31.7055 },
+        { "kind": "arc", "radius": -9.4828, "angle": 75.9252 },
+        { "kind": "arc", "radius": -22.5444, "angle": 40.3391 },
+        { "kind": "arc", "radius": 205.7876, "angle": 7.0174 },
+        { "kind": "arc", "radius": 32.7481, "angle": 30.6139 },
+        { "kind": "arc", "radius": 9.3417, "angle": 89.4145 },
+        { "kind": "arc", "radius": 44.4781, "angle": 25.0302 },
+        { "kind": "straight", "length": 57.5223 },
+        { "kind": "arc", "radius": -30.1948, "angle": 23.1322 },
+        { "kind": "arc", "radius": -11.573, "angle": 73.1673 },
+        { "kind": "arc", "radius": -30.0339, "angle": 31.7977 },
+        { "kind": "arc", "radius": 222.5027, "angle": 4.0167 },
+        { "kind": "arc", "radius": 90.9703, "angle": 12.6145 },
+        { "kind": "arc", "radius": -787.2003, "angle": 2.1754 },
+        { "kind": "arc", "radius": -39.9979, "angle": 29.184 },
+        { "kind": "arc", "radius": -9.8889, "angle": 73.56 },
+        { "kind": "arc", "radius": -37.1907, "angle": 32.554 },
+        { "kind": "arc", "radius": -2507.4094, "angle": 0.3772 },
+        { "kind": "arc", "radius": 62.0363, "angle": 31.5193 },
+        { "kind": "arc", "radius": 30.7817, "angle": 26.7053 },
+        { "kind": "arc", "radius": 9.0443, "angle": 71.4329 },
+        { "kind": "arc", "radius": 18.3599, "angle": 40.3008 },
+        { "kind": "arc", "radius": 93.959, "angle": 22.7176 },
+        { "kind": "arc", "radius": 244.5581, "angle": 6.957 },
+        { "kind": "arc", "radius": 40.8589, "angle": 40.1394 },
+        { "kind": "arc", "radius": -70.3812, "angle": 23.6812 },
+        { "kind": "arc", "radius": -38.254, "angle": 26.1157 },
+        { "kind": "arc", "radius": -8.589, "angle": 61.385 },
+        { "kind": "arc", "radius": -33.5193, "angle": 29.2947 },
+        { "kind": "arc", "radius": 158.4616, "angle": 10.9687 },
+        { "kind": "arc", "radius": 180.7058, "angle": 7.8077 },
+        { "kind": "arc", "radius": -276.5016, "angle": 5.2418 },
+        { "kind": "arc", "radius": 990.5795, "angle": 2.2139 },
+        { "kind": "arc", "radius": -34.6546, "angle": 40.9371 },
+        { "kind": "arc", "radius": -12.114, "angle": 73.2081 },
+        { "kind": "arc", "radius": -44.6829, "angle": 33.5183 },
+        { "kind": "arc", "radius": 59.0933, "angle": 21.1865 },
+        { "kind": "arc", "radius": 123.7654, "angle": 7.4816 },
+        { "kind": "arc", "radius": 41.8533, "angle": 33.118 },
+        { "kind": "arc", "radius": 13.7662, "angle": 63.2443 },
+        { "kind": "arc", "radius": 18.169, "angle": 39.8962 },
+        { "kind": "arc", "radius": 651.9402, "angle": 2.2312 },
+        { "kind": "arc", "radius": -129.2143, "angle": 15.616 },
+        { "kind": "arc", "radius": -33.9027, "angle": 33.336 },
+        { "kind": "arc", "radius": -12.3871, "angle": 79.5806 },
+        { "kind": "arc", "radius": -28.5095, "angle": 19.5129 },
+        { "kind": "straight", "length": 48.0517 },
+        { "kind": "arc", "radius": 900.189, "angle": 0.959 },
+        { "kind": "arc", "radius": -808.1417, "angle": 1.7771 },
+        { "kind": "arc", "radius": -47.6576, "angle": 37.8741 },
+        { "kind": "arc", "radius": -11.8378, "angle": 89.9026 },
+        { "kind": "arc", "radius": -32.5569, "angle": 24.4252 },
+        { "kind": "arc", "radius": -740.1279, "angle": 1.6309 },
+        { "kind": "arc", "radius": 17.8338, "angle": 72.9269 },
+        { "kind": "arc", "radius": -87.758, "angle": 23.2023 },
+        { "kind": "arc", "radius": -128.2221, "angle": 9.8403 },
+        { "kind": "arc", "radius": -70.2375, "angle": 25.9744 },
+        { "kind": "arc", "radius": 13.4996, "angle": 27.8083 },
+        { "kind": "straight", "length": 13.9521 },
+        { "kind": "arc", "radius": 13.4996, "angle": 170.0518 }
       ],
       "features": [
-        { "kind": "roller", "at": 31.3, "length": 11.3, "height": 0.8 },
-        { "kind": "tabletop", "at": 52.3, "length": 48.5, "height": 3.6 },
-        { "kind": "roller", "at": 131.0, "length": 14.4, "height": 0.75 },
-        { "kind": "berm", "at": 265.5, "length": 8.0, "height": 1.7 },
-        { "kind": "tabletop", "at": 295.7, "length": 30.0, "height": 1.5 },
-        { "kind": "roller", "at": 408.7, "length": 11.1, "height": 0.79 },
-        { "kind": "tabletop", "at": 481.6, "length": 21.0, "height": 3.4 },
-        { "kind": "roller", "at": 540.0, "length": 11.6, "height": 0.8 },
-        { "kind": "roller", "at": 565.0, "length": 12.0, "height": 0.6 },
-        { "kind": "tabletop", "at": 600.0, "length": 22.0, "height": 3.6 },
-        { "kind": "stepUp", "at": 655.0, "length": 19.3, "height": 2.2 },
-        { "kind": "whoops", "at": 690.0, "count": 7, "spacing": 4.2, "height": 0.57 },
-        { "kind": "roller", "at": 725.0, "length": 13.0, "height": 0.8 },
-        { "kind": "roller", "at": 800.0, "length": 14.0, "height": 0.8 },
-        { "kind": "roller", "at": 845.0, "length": 15.0, "height": 0.85 },
-        { "kind": "tabletop", "at": 870.0, "length": 30.0, "height": 1.6 },
-        { "kind": "stepUp", "at": 925.7, "length": 25.2, "height": 1.9 },
-        { "kind": "roller", "at": 990.6, "length": 14.8, "height": 0.6 },
-        { "kind": "tabletop", "at": 1064.9, "length": 20.0, "height": 2.5 },
-        { "kind": "roller", "at": 1110.0, "length": 14.4, "height": 0.82 },
-        { "kind": "roller", "at": 1135.0, "length": 13.2, "height": 0.58 },
-        { "kind": "tabletop", "at": 1183.2, "length": 24.0, "height": 1.3 },
-        { "kind": "tabletop", "at": 1253.9, "length": 22.0, "height": 3.6 },
-        { "kind": "roller", "at": 1310.0, "length": 14.6, "height": 0.64 },
-        { "kind": "tabletop", "at": 1340.3, "length": 26.0, "height": 1.5 },
-        { "kind": "roller", "at": 1383.5, "length": 15.0, "height": 0.85 },
-        { "kind": "roller", "at": 1426.7, "length": 11.5, "height": 0.77 },
-        { "kind": "tabletop", "at": 1450.0, "length": 20.0, "height": 3.1 },
-        { "kind": "whoops", "at": 1524.5, "count": 7, "spacing": 5.0, "height": 0.75 },
-        { "kind": "tabletop", "at": 1566.5, "length": 30.0, "height": 1.6 },
-        { "kind": "tabletop", "at": 1634.9, "length": 20.0, "height": 2.5 },
-        { "kind": "roller", "at": 1685.0, "length": 13.0, "height": 0.65 },
-        { "kind": "double", "at": 1706.0, "height": 1.3, "gap": 2.0, "lip": 5.5 },
-        { "kind": "roller", "at": 1766.8, "length": 14.3, "height": 0.79 },
-        { "kind": "roller", "at": 1790.0, "length": 15.0, "height": 0.7 },
-        { "kind": "berm", "at": 1830.0, "length": 15.0, "height": 1.7 },
-        { "kind": "tabletop", "at": 1874.0, "length": 27.0, "height": 1.1 }
+        { "at": 42.5618, "height": 3, "kind": "tabletop", "length": 38.9273 },
+        { "at": 130, "height": 1.7432, "kind": "stepUp", "length": 38.59 },
+        { "at": 217.0695, "kind": "custom", "length": 48.9877, "shape": [{ "u": 0, "h": 0 }, { "u": 0.1837, "h": 2.6977 }, { "u": 0.2654, "h": 2.6977 }, { "u": 0.4464, "h": 0.9474 }, { "u": 0.6709, "h": 1.7805 }, { "u": 0.9013, "h": 0.4316 }, { "u": 1, "h": 0 }] },
+        { "at": 315.3342, "height": 0.7529, "kind": "roller", "length": 13.8284 },
+        { "at": 338.3765, "kind": "custom", "length": 47.1762, "shape": [{ "u": 0, "h": 0 }, { "u": 0.1908, "h": 2.5022 }, { "u": 0.2756, "h": 2.5022 }, { "u": 0.4499, "h": 0.9406 }, { "u": 0.6831, "h": 1.6514 }, { "u": 0.9049, "h": 0.4003 }, { "u": 1, "h": 0 }] },
+        { "at": 435.0512, "kind": "custom", "length": 51.1081, "shape": [{ "u": 0, "h": 0 }, { "u": 0.1761, "h": 2.9267 }, { "u": 0.2544, "h": 2.9267 }, { "u": 0.4426, "h": 1.0054 }, { "u": 0.6578, "h": 1.9316 }, { "u": 0.8973, "h": 0.4683 }, { "u": 1, "h": 0 }] },
+        { "at": 540.3735, "height": 2.4679, "kind": "tabletop", "length": 44.8531 },
+        { "at": 594.4503, "height": 1.1548, "kind": "roller", "length": 14.3485 },
+        { "at": 619.9902, "height": 1.4442, "kind": "stepUp", "length": 46.3114 },
+        { "at": 680.6862, "height": 1.7585, "kind": "stepUp", "length": 44.2904 },
+        { "at": 746.8671, "height": 2.7924, "kind": "tabletop", "length": 49.9226 },
+        { "at": 852.6547, "height": 0.8124, "kind": "roller", "length": 12.3339 },
+        { "at": 879.6068, "height": 0.9514, "kind": "roller", "length": 11.3021 },
+        { "at": 901.0566, "height": 1.5473, "kind": "stepUp", "length": 41.2666 },
+        { "at": 965.8376, "height": 0.8404, "kind": "roller", "length": 14.8294 },
+        { "at": 989.4913, "height": 2.5286, "kind": "tabletop", "length": 45.4786 },
+        { "at": 1073.5754, "height": 2.513, "kind": "tabletop", "length": 48.9711 },
+        { "at": 1130.5054, "kind": "custom", "length": 47.0286, "shape": [{ "u": 0, "h": 0 }, { "u": 0.1914, "h": 2.4862 }, { "u": 0.2764, "h": 2.4862 }, { "u": 0.4502, "h": 0.7911 }, { "u": 0.6841, "h": 1.6409 }, { "u": 0.9052, "h": 0.3978 }, { "u": 1, "h": 0 }] },
+        { "at": 1222.0911, "kind": "custom", "length": 51.0641, "shape": [{ "u": 0, "h": 0 }, { "u": 0.1762, "h": 2.9219 }, { "u": 0.2546, "h": 2.9219 }, { "u": 0.4426, "h": 0.9918 }, { "u": 0.6581, "h": 1.9285 }, { "u": 0.8974, "h": 0.4675 }, { "u": 1, "h": 0 }] },
+        { "at": 1282.8604, "height": 2.9493, "kind": "tabletop", "length": 52.8953 },
+        { "at": 1342.0234, "height": 2.4605, "kind": "tabletop", "length": 48.5582 },
+        { "at": 1402.2888, "height": 0.8952, "kind": "roller", "length": 10.168 },
+        { "at": 1420.5527, "kind": "custom", "length": 50.9471, "shape": [{ "u": 0, "h": 0 }, { "u": 0.1767, "h": 2.9093 }, { "u": 0.2552, "h": 2.9093 }, { "u": 0.4428, "h": 0.9301 }, { "u": 0.6588, "h": 1.9201 }, { "u": 0.8976, "h": 0.4655 }, { "u": 1, "h": 0 }] },
+        { "at": 1517.1718, "height": 1.217, "kind": "stepUp", "length": 46.508 },
+        { "at": 1618.7429, "kind": "custom", "length": 50.6683, "shape": [{ "u": 0, "h": 0 }, { "u": 0.1776, "h": 2.8792 }, { "u": 0.2566, "h": 2.8792 }, { "u": 0.4433, "h": 1.0154 }, { "u": 0.6604, "h": 1.9003 }, { "u": 0.8981, "h": 0.4607 }, { "u": 1, "h": 0 }] },
+        { "at": 1678.3564, "height": 2.6433, "kind": "tabletop", "length": 45.2331 },
+        { "at": 1822.2726, "kind": "custom", "length": 46.8515, "shape": [{ "u": 0, "h": 0 }, { "u": 0.1921, "h": 2.4671 }, { "u": 0.2775, "h": 2.4671 }, { "u": 0.4505, "h": 0.8094 }, { "u": 0.6853, "h": 1.6283 }, { "u": 0.9056, "h": 0.3947 }, { "u": 1, "h": 0 }] }
       ]
     }"#;
 
@@ -2462,40 +2517,47 @@ mod tests {
     }
 
     #[test]
-    fn a_gap_too_tight_to_dig_out_rides_over_a_saddle() {
-        // The valley keeps the radius its height asks for, so when the two jumps stand close
-        // the ground between them stays up rather than being slotted down to grade. Nobody
-        // digs a pit between two jumps that are meant to be cleared in one.
-        let tight = double_shape(2.5, 0.0, 0.0);
-        let f = &tight.faces;
-        // The bottom of it, wherever that falls — with no gap at all the valley is two arcs
-        // meeting, and the middle of the span is already on the way back up.
-        let (mut u, mut floor) = (f.ramp, f32::MAX);
-        while u <= f.ramp + f.back + f.face {
-            floor = floor.min(tight.height_at(u));
-            u += 0.05;
+    fn the_gap_is_never_on_the_ground() {
+        // The whole point of the valley. A double dug to grade is a trench between two piles,
+        // and the bottom of it is where the rider who came up short arrives. The pair stands
+        // on the ground instead, and the gap is a dip in it.
+        for (height, gap, lip) in [
+            (0.9f32, 2.0f32, 0.0f32),
+            (1.4, 8.0, 0.0),
+            (2.2, 0.0, 0.0),
+            (2.5, 9.0, 6.0),
+            (3.0, 12.0, 20.0),
+            (3.6, 6.0, 0.0),
+        ] {
+            let s = double_shape(height, gap, lip);
+            let f = &s.faces;
+            let (mut u, mut floor) = (f.ramp, f32::MAX);
+            while u <= f.ramp + f.back + gap + f.face {
+                floor = floor.min(s.height_at(u));
+                u += 0.05;
+            }
+            assert!(
+                floor > 0.05,
+                "{height} m over {gap} m digs its gap to {floor:.2} m"
+            );
+            // And it is still two jumps rather than one hump with a dent in it. Not the
+            // full [`JUMP_VALLEY_FALL`]: that is a ceiling, and a gap of nothing at all has
+            // no ground to pay for it.
+            assert!(
+                height - floor >= height * 0.35,
+                "{height} m over {gap} m only falls {:.2} m between its crests",
+                height - floor
+            );
+            assert!(
+                height - floor <= height * JUMP_VALLEY_FALL + 1e-3,
+                "{height} m over {gap} m falls {:.2} m, past the ceiling",
+                height - floor
+            );
         }
-        assert!(
-            floor > 0.3,
-            "a 2.5 m double with no gap is slotted down to {floor:.2} m"
-        );
-        // And it is still two jumps rather than one hump with a dent in it.
-        assert!(
-            floor <= 2.5 * (1.0 - JUMP_VALLEY_FALL) + 1e-3,
-            "it barely falls between the crests: {floor:.2} m of 2.5"
-        );
-        // And an ordinary one still puts its gap on the ground, which is the whole difference
-        // between a double and a long tabletop.
-        let room = double_shape(2.5, 9.0, 6.0);
-        let f = &room.faces;
-        assert!(
-            room.height_at(f.ramp + f.back + 9.0 * 0.5) < 0.02,
-            "a 9 m gap should be at grade"
-        );
     }
 
     #[test]
-    fn the_crests_stand_where_the_faces_say_and_an_ordinary_gap_is_at_grade() {
+    fn the_crests_stand_where_the_faces_say() {
         // The rounding is fitted inside the four faces, so nothing that reads `double_faces`
         // — the speed model, the ruts, the scenery — is looking in the wrong place.
         for (height, gap, lip) in [
@@ -2532,13 +2594,8 @@ mod tests {
                 u += 0.05;
             }
             assert!(peak <= height + 1e-3, "peaks at {peak:.3} against {height}");
-            assert!(floor >= -1e-3, "digs to {floor:.3}");
-            if gap >= JUMP_PAN_M {
-                assert!(
-                    s.height_at(f.ramp + f.back + gap * 0.5) < 0.02,
-                    "the middle of the gap is off grade"
-                );
-            }
+            assert!(floor >= 0.0, "digs below the ground it stands on: {floor:.3}");
+
         }
     }
 
