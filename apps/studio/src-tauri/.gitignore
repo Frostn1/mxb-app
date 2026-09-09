@@ -1,0 +1,5 @@
+# Proprietary, local-only — see crates/core/.gitignore.
+/src/sidecar.rs
+/src/sidecar_lock.rs
+/src/mxbsecure.rs
+/src/worldnet.rs
