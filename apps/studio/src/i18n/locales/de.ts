@@ -114,6 +114,8 @@ export const de: Translation = {
   "designer.newTextValue": "TEXT",
   "designer.layers": "Ebenen",
   "designer.showRail": "Bahnen und Ebenen einblenden",
+  "designer.hideTools": "Werkzeuge ausblenden",
+  "designer.showTools": "Werkzeuge einblenden",
   "designer.hideRail": "Bahnen und Ebenen ausblenden",
   "designer.noLayers":
     "Noch keine Ebenen — füge ein Bild, Text oder eine Malebene zum Zeichnen hinzu.",

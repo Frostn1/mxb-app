@@ -13,6 +13,7 @@ import {
   Type as TypeIcon,
   Undo2,
 } from "lucide-react";
+import { Card } from "@frost/shared/Components/ui/card";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useT } from "@/i18n";
@@ -82,7 +83,7 @@ export function PaintTools({
   const shaped = SHAPES.has(tool);
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card/40 p-3.5">
+    <Card className="gap-2 bg-card/40 p-3.5">
       <div className="flex items-center justify-between">
         <h2 className="text-[13px] font-semibold">{t("designer.paint")}</h2>
         <div className="flex items-center gap-0.5">
@@ -304,6 +305,6 @@ export function PaintTools({
           </p>
         </>
       )}
-    </div>
+    </Card>
   );
 }

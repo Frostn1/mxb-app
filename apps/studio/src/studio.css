@@ -12,6 +12,8 @@
  */
 
 .studio-skin {
+  color-scheme: light;
+
   /* One line rounds the whole app. The shared theme maps every radius step to `--radius`
      through `@theme inline`, so `rounded-sm` through `rounded-xl` all compile to
      `border-radius: var(--radius)` and pick this up by inheritance — there is no
@@ -19,15 +21,49 @@
      component would be reading nothing. */
   --radius: 0.5rem;
 
-  /* Three grounds instead of two. The manager has a rail and a content area; the Studio has
-     a rail, panels, and a canvas that must read as deeper than both — you should be able to
-     tell where the work stops without looking for a border. */
-  --window: #0a0a0c;
-  --background: #0a0a0c;
-  --canvas: #08080a;
-  --card: #121216;
-  --panel: #16161a;
-  --border: rgba(255, 255, 255, 0.07);
+  /* Light gray. The manager is near-black because it is a launcher you glance at; a studio
+     is a window you stare into while judging colour, and a dark surround pushes every value
+     you are looking at lighter than it really is. Four grounds: the rail frames, the app
+     sits above it, panels are white and float, and the canvas is the one mid gray — the
+     deepest layer, so artwork reads against it whether it is light or dark.
+     Kept achromatic on purpose; the only saturated thing on screen should be the paint. */
+  --window: #e8e8ec;
+  --background: #f2f2f5;
+  --canvas: #d9d9df;
+  --card: #ffffff;
+  --panel: #fafafb;
+
+  --foreground: #16161a;
+  --card-foreground: #16161a;
+  --popover: #ffffff;
+  --popover-foreground: #16161a;
+
+  /* The brand's ice blue is a light-on-dark accent — at 77% lightness it cannot carry white
+     text or sit on white. Same hue, taken down until it can do both. */
+  --primary: #2b7ba8;
+  --primary-foreground: #ffffff;
+  --primary-hover: color-mix(in oklab, var(--primary) 88%, #000 12%);
+  --primary-press: color-mix(in oklab, var(--primary) 78%, #000 22%);
+  --primary-tint: color-mix(in srgb, var(--primary) 12%, transparent);
+  --primary-line: color-mix(in srgb, var(--primary) 45%, transparent);
+
+  --secondary: #e5e5ea;
+  --secondary-foreground: #16161a;
+  --muted: #f0f0f3;
+  --muted-foreground: #5b5b65;
+  --faint: #8a8a94;
+
+  --accent: rgba(43, 123, 168, 0.12);
+  --accent-foreground: #1d5c80;
+
+  --destructive: #b3382c;
+  --destructive-foreground: #ffffff;
+  --success: #2c7a4b;
+  --warning: #96681a;
+
+  --border: rgba(0, 0, 0, 0.10);
+  --input: rgba(0, 0, 0, 0.18);
+  --ring: #2b7ba8;
 }
 
 @theme inline {
@@ -45,11 +81,46 @@
   clip-path: none;
 }
 
-/* Buttons keep Barlow Condensed, but not the plate's letter-spacing: at 0.14em a two-word
-   label is a banner. Sentence case is left alone — it is set per call site. */
+/* Buttons stop shouting.
+ *
+ * `Button` sets Barlow Condensed, uppercase, 0.14em — the manager's number-plate voice, and
+ * the single loudest thing carried over. "SAVE PAINT" and "STOCK AS BASE" as banners is a
+ * race product talking; a tool labels its controls the way a sentence does. Panel titles keep
+ * their small caps, because there a label needs to read as a label and not as content. */
 .studio-skin [data-slot="button"],
-.studio-skin button {
-  letter-spacing: 0.04em;
+.studio-skin button:not([data-keep-case]) {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0.005em;
+}
+
+/* A default radius for controls that never asked for one.
+ *
+ * The shared primitives were written against a radius-0 theme, so most of them simply have no
+ * `rounded-*` class — there was nothing for `--radius` to change, and they stayed square here
+ * however the token was set. `Button` and `Badge` are fixed at the source (a scale class
+ * resolves to var(--radius), which is still 0 in the manager). This covers the rest: the
+ * Studio's own tool panels are thousands of lines of hand-written `border … px-2 py-1`
+ * controls, and chasing every one of them would be a worse diff than a default.
+ *
+ * `:where()` drops the selector to zero specificity, so any explicit `rounded-*` on the
+ * element still wins — including `rounded-none` where something means to stay square. */
+:where(.studio-skin) button,
+:where(.studio-skin) [role="button"],
+:where(.studio-skin) select,
+:where(.studio-skin) textarea,
+:where(.studio-skin) input:not([type="range"]):not([type="checkbox"]):not([type="radio"]) {
+  border-radius: var(--radius);
+}
+
+/* Two controls that read as pills anywhere but a number plate. Studio-only rules rather than
+   a shared `rounded-full`, which would not be a no-op in the manager. */
+.studio-skin [role="switch"],
+.studio-skin [role="switch"] > span,
+.studio-skin [data-slot="progress"],
+.studio-skin [data-slot="progress"] > div {
+  border-radius: 999px;
 }
 
 /* The native range control is styled into a skewed plate thumb in the shared theme. The
@@ -80,8 +151,45 @@
   border: 3px solid transparent;
   border-radius: 999px;
   background-clip: content-box;
-  background-color: color-mix(in srgb, var(--foreground) 14%, transparent);
+  background-color: color-mix(in srgb, var(--foreground) 20%, transparent);
 }
 .studio-skin ::-webkit-scrollbar-thumb:hover {
-  background-color: color-mix(in srgb, var(--foreground) 24%, transparent);
+  background-color: color-mix(in srgb, var(--foreground) 34%, transparent);
+}
+
+/* Panels are regions, not cards.
+ *
+ * The first pass made them float — rounded, translucent, drop-shadowed. That is the look of
+ * a mockup rather than of a tool: every panel competes for depth with the thing being drawn,
+ * and nothing that ships in Photoshop, Affinity or Substance looks like it. Real editors put
+ * the chrome flat against the edge and let it disappear, so the only thing on screen with
+ * presence is the work.
+ *
+ * So inside a dock a Card keeps its structure and gives up its surface: no border, no
+ * shadow, no fill, no radius. The dock itself carries one hairline against the canvas. */
+.studio-skin [data-dock] [data-slot="card"] {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+}
+.studio-skin [data-dock] [data-slot="card"] + [data-slot="card"] {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.studio-skin [data-dock="left"] {
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+}
+.studio-skin [data-dock="right"] {
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+}
+
+/* Containers stay square; only the things you click are rounded. A uniform radius on every
+   box is what makes a layout read as generated — the radius should mark what is interactive,
+   not decorate the walls. */
+.studio-skin [data-slot="card"] {
+  border-radius: 0;
 }

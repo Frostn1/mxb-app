@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Toaster } from "sonner";
-import { Brush, Image, Lock, Mountain, PersonStanding, Settings2, Shield, User } from "lucide-react";
 import { appPlatform, contentLockAvailable, getConfig, listGames } from "@frost/shared/api/mods";
 import type { Config, GameInfo } from "@frost/shared/types";
 import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
@@ -58,13 +57,13 @@ function Shell() {
   // optional local module. A tool that could only ever fail is not offered.
   const entries = useMemo(() => {
     const all: (RailEntry<View> & { when?: boolean })[] = [
-      { id: "designer", label: t("nav.designer"), icon: Brush },
-      { id: "paints", label: t("nav.paints"), icon: Image },
-      { id: "rider", label: t("nav.rider"), icon: User, when: game.caps.viewer },
-      { id: "pose", label: t("nav.pose"), icon: PersonStanding, when: game.caps.viewer },
-      { id: "track", label: t("nav.track"), icon: Mountain },
-      { id: "protect", label: t("nav.protect"), icon: Lock, when: hasLock },
-      { id: "secure", label: t("nav.secure"), icon: Shield, when: hasLock },
+      { id: "designer", label: t("nav.designer") },
+      { id: "paints", label: t("nav.paints") },
+      { id: "rider", label: t("nav.rider"), when: game.caps.viewer },
+      { id: "pose", label: t("nav.pose"), when: game.caps.viewer },
+      { id: "track", label: t("nav.track") },
+      { id: "protect", label: t("nav.protect"), when: hasLock },
+      { id: "secure", label: t("nav.secure"), when: hasLock },
     ];
     return all.filter((e) => e.when !== false);
   }, [t, game.caps.viewer, hasLock]);
@@ -83,24 +82,23 @@ function Shell() {
     <ConfigContext.Provider value={ctx}>
       <TrackBuildProvider>
         <ContextSlots.Provider value={slots}>
-          <div className="studio-skin flex h-screen bg-background text-foreground">
+          <div className="flex h-screen bg-background text-foreground">
             <Rail
               entries={entries}
               active={view}
               onPick={setView}
               header={
-                <div data-tauri-drag-region className="flex select-none flex-col items-center gap-1.5 pt-1">
+                <div data-tauri-drag-region className="flex select-none items-center gap-2 px-2.5 pt-1">
                   {/* The app's own mark, not a lettered plate — the same two-paint snowflake
                       the icon and the installer carry. */}
-                  <img src="/logo.svg" alt="" className="size-8" draggable={false} />
-                  <span className="text-[9px] font-medium uppercase tracking-[0.14em] text-faint">
+                  <img src="/logo.svg" alt="" className="size-[18px]" draggable={false} />
+                  <span className="text-[12.5px] font-semibold tracking-[0.01em] text-foreground">
                     Studio
                   </span>
                 </div>
               }
               footer={
                 <RailButton
-                  icon={Settings2}
                   label={t("nav.settings")}
                   on={view === "settings"}
                   onClick={() => setView("settings")}
@@ -141,7 +139,7 @@ function Shell() {
               </div>
             </div>
           </div>
-          <Toaster position="bottom-right" theme="dark" richColors />
+          <Toaster position="bottom-right" theme="light" richColors />
         </ContextSlots.Provider>
       </TrackBuildProvider>
     </ConfigContext.Provider>

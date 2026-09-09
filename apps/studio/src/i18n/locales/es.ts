@@ -114,6 +114,8 @@ export const es: Translation = {
   "designer.newTextValue": "TEXTO",
   "designer.layers": "Capas",
   "designer.showRail": "Mostrar hojas y capas",
+  "designer.hideTools": "Ocultar las herramientas",
+  "designer.showTools": "Mostrar las herramientas",
   "designer.hideRail": "Ocultar hojas y capas",
   "designer.noLayers":
     "Aún no hay capas — añade una imagen, texto o una capa de pintura sobre la que dibujar.",

@@ -114,6 +114,8 @@ export const ptBR: Translation = {
   "designer.newTextValue": "TEXTO",
   "designer.layers": "Camadas",
   "designer.showRail": "Mostrar folhas e camadas",
+  "designer.hideTools": "Ocultar as ferramentas",
+  "designer.showTools": "Mostrar as ferramentas",
   "designer.hideRail": "Ocultar folhas e camadas",
   "designer.noLayers":
     "Nenhuma camada ainda — adicione uma imagem, um texto ou uma camada de pintura para desenhar.",

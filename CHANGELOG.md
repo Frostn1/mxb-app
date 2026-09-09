@@ -3,12 +3,12 @@
 ## 2026-09-08
 
 ### Changed
-- Frost's Studio has a look of its own. Rounded, upright and quieter than the mod manager,
-  which is built to look like a race product and reads as noise around a paint you are
-  working on.
+- Frost's Studio has a look of its own, and it is light. A dark surround pushes every colour
+  you are judging lighter than it really is, which is the wrong way round for an app you pick
+  paint in.
 - The Designer uses the whole window. The sheet runs edge to edge, the setup row moved into
-  the bar at the top, and the three columns are yours to drag — the sizes you set are the
-  sizes you get next time.
+  the bar at the top, and the panels sit flat against the sides instead of boxing the work in.
+- The tools are named down the left rather than drawn as icons.
 - Frost's Studio has its own mark: the snowflake, split into two paints.
 
 ## 2026-09-07

@@ -114,6 +114,8 @@ export const it: Translation = {
   "designer.newTextValue": "TESTO",
   "designer.layers": "Livelli",
   "designer.showRail": "Mostra fogli e livelli",
+  "designer.hideTools": "Nascondi gli strumenti",
+  "designer.showTools": "Mostra gli strumenti",
   "designer.hideRail": "Nascondi fogli e livelli",
   "designer.noLayers":
     "Ancora nessun livello — aggiungi un'immagine, del testo o un livello pittura su cui disegnare.",

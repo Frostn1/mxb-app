@@ -21,6 +21,8 @@ import {
   PaintBucket,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Plus,
   Save,
   Trash2,
@@ -33,18 +35,12 @@ import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Input } from "@frost/shared/Components/ui/input";
 import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@frost/shared/Components/ui/resizable";
-import {
   Card,
   CardAction,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@frost/shared/Components/ui/card";
-import { ScrollArea } from "@frost/shared/Components/ui/scroll-area";
 import { Separator } from "@frost/shared/Components/ui/separator";
 import { ContextBarLeft } from "../../Shell/ContextBar";
 import {
@@ -220,6 +216,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const [busy, setBusy] = useState(false);
   // The sheets/layers rail folds away, because once a paint is set up the thing worth the
   // width is the canvas and the model — not the list of what you already chose.
+  const [toolsOpen, setToolsOpen] = useState(true);
   const [railOpen, setRailOpen] = useState(true);
   // Remembered: someone who paints with it hidden wants it hidden next session too.
   const [previewOpen, setPreviewOpen] = useState(
@@ -2044,6 +2041,16 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             <PanelLeftOpen className="size-4" />
           )}
         </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 flex-none"
+          title={t(toolsOpen ? "designer.hideTools" : "designer.showTools")}
+          aria-label={t(toolsOpen ? "designer.hideTools" : "designer.showTools")}
+          onClick={() => setToolsOpen((o) => !o)}
+        >
+          {toolsOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
+        </Button>
         <Separator orientation="vertical" className="h-5" />
         <PaintDestBar state={destState} className="w-[280px]" />
         <Input
@@ -2079,29 +2086,15 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         </div>
       </ContextBarLeft>
 
-      {/* Three panes the user sizes. How much of the window the sheet deserves against the
-          model beside it changes with what is being drawn, and `autoSaveId` means that
-          decision is made once rather than every session. */}
-      <ResizablePanelGroup
-        direction="horizontal"
-        autoSaveId="designer.panes"
-        className="min-h-0 flex-1"
-      >
+      {/* The sheet is the window; everything else floats on it.
+          Three columns side by side is still a dashboard — the thing being worked on is
+          boxed in by chrome on both sides and never gets the room. An editor puts the work
+          underneath and the tools on top of it, so the canvas is the full width of the app
+          and the panels are things you can put away. */}
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         {/* ── Sheets, and the tracing ghost under them ─────────────────────────── */}
         {railOpen && (
-          <>
-            {/* The two side panes sit a shade above the canvas, so the sheet reads as the
-                deepest thing on screen rather than as one more panel among three. */}
-            <ResizablePanel
-              id="sheets"
-              order={1}
-              defaultSize={19}
-              minSize={12}
-              maxSize={32}
-              className="bg-background"
-            >
-              <ScrollArea className="h-full">
-                <div className="flex min-h-full flex-col gap-3 p-3">
+          <div data-dock="left" className="absolute inset-y-0 left-0 z-10 flex w-[264px] flex-col gap-3 overflow-y-auto p-3">
           <SheetList
             className="min-h-0 flex-1"
             sheets={sheets}
@@ -2140,24 +2133,13 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               onChange={(fn) => patchGhost(active.id, fn)}
             />
           )}
-                </div>
-              </ScrollArea>
-            </ResizablePanel>
-            <ResizableHandle />
-          </>
+          </div>
         )}
 
-        {/* ── The sheet, edge to edge ──────────────────────────────────────────── */}
-        <ResizablePanel
-          id="stage"
-          order={2}
-          defaultSize={56}
-          minSize={28}
-          className="flex min-h-0 flex-col bg-canvas"
-        >
+        {/* ── The sheet, the whole window ──────────────────────────────────────── */}
           {active ? (
             <CanvasStage
-              className="flex-1"
+              className="absolute inset-0 rounded-none border-0 bg-canvas"
               sheet={active}
               source={canvases.current.get(active.id) ?? null}
               version={version}
@@ -2177,7 +2159,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               onPaintEnd={endPaint}
             />
           ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-5 p-10 text-center">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 p-10 text-center">
               <p className="max-w-md text-[13.5px] leading-relaxed text-muted-foreground">
                 {t("designer.empty")}
               </p>
@@ -2276,22 +2258,12 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             />
           </DropdownMenuContent>
         </DropdownMenu>
-        </ResizablePanel>
-        <ResizableHandle />
 
-        {/* ── The model and the tools, beside the sheet they act on ────────────── */}
-        <ResizablePanel
-          id="tools"
-          order={3}
-          defaultSize={25}
-          minSize={16}
-          maxSize={42}
-          className="bg-background"
-        >
-          <ScrollArea className="h-full">
-            <div className="flex min-h-full flex-col gap-3 p-3">
+        {/* ── The model and the tools, over the sheet they act on ──────────────── */}
+        {toolsOpen && (
+          <div data-dock="right" className="absolute inset-y-0 right-0 z-10 flex w-[312px] flex-col gap-3 overflow-y-auto p-3">
         {previewOpen ? (
-          <div className="h-[260px] flex-none overflow-hidden rounded-lg border border-border bg-card">
+          <div data-slot="card" className="h-[260px] flex-none overflow-hidden rounded-lg border border-border bg-card">
             <PreviewPanel
               compact
               state={destState}
@@ -2359,10 +2331,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               onChange={(fn) => patchSelection(fn, `layer:${selection.join(",")}`)}
             />
           )}
-            </div>
-          </ScrollArea>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

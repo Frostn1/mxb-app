@@ -118,6 +118,8 @@ export const en = {
   "designer.newTextValue": "TEXT",
   "designer.layers": "Layers",
   "designer.showRail": "Show sheets and layers",
+  "designer.hideTools": "Hide the tools",
+  "designer.showTools": "Show the tools",
   "designer.hideRail": "Hide sheets and layers",
   "designer.noLayers": "No layers yet — add an image, some text, or a paint layer to draw on.",
   "designer.layerTitle": "Selected layer",

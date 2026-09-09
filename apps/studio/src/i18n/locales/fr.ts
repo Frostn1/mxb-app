@@ -114,6 +114,8 @@ export const fr: Translation = {
   "designer.newTextValue": "TEXTE",
   "designer.layers": "Calques",
   "designer.showRail": "Afficher planches et calques",
+  "designer.hideTools": "Masquer les outils",
+  "designer.showTools": "Afficher les outils",
   "designer.hideRail": "Masquer planches et calques",
   "designer.noLayers":
     "Aucun calque — ajoute une image, du texte ou un calque de peinture pour dessiner dessus.",
