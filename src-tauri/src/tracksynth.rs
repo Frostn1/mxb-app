@@ -222,7 +222,7 @@ const RUT_RADIUS_M: (f32, f32) = (40.0, 14.0);
 // Measured against Indiana on the same statistic the corpus survey prints, which is the only
 // way to compare: at 0.38 a built lap came back with corner grooves at p50 0.13 and p90 0.24
 // against Indiana's 0.21 and 0.44 — half the depth, and a corner you can see but not sit in.
-const RUT_DEPTH_M: f32 = 0.86;
+const RUT_DEPTH_M: f32 = 1.8;
 const RUT_DEPTH_STRAIGHT_M: f32 = 0.15;
 
 /// The material the cut displaced, which does not disappear.
