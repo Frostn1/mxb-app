@@ -589,8 +589,31 @@ mod build_one {
         let tools_dir = PathBuf::from(std::env::var("FROST_TOOLS").expect("set FROST_TOOLS"));
         let tools = find(&tools_dir).expect("terrained.exe under FROST_TOOLS");
 
-        let prog: crate::trackprog::TrackProgram =
-            serde_json::from_str(&std::fs::read_to_string(&prog_path).unwrap()).unwrap();
+        // A seed goes through the Rust layout generator, which is the one that measures the
+        // lap it drew against the corpus and rejects what does not pass. A path still reads a
+        // program from disk, for a shape that came from somewhere else.
+        let prog: crate::trackprog::TrackProgram = if prog_path.starts_with("seed:") {
+            let from: u64 = prog_path[5..].parse().expect("seed:<number>");
+            match crate::tracklayout::search(from, 400) {
+                Ok(m) => {
+                    println!("  seed {} passed review and ground notes", m.seed);
+                    m.program
+                }
+                Err(rejected) => {
+                    let best = rejected
+                        .iter()
+                        .min_by_key(|m| m.review.len() + m.ground.len())
+                        .expect("something tried");
+                    println!(
+                        "  no seed passed cleanly in 400; best is {} with {:?} {:?}",
+                        best.seed, best.review, best.ground
+                    );
+                    best.program.clone()
+                }
+            }
+        } else {
+            serde_json::from_str(&std::fs::read_to_string(&prog_path).unwrap()).unwrap()
+        };
         let prog = crate::tracksynth::with_fitted_budget(&prog).expect("a height budget");
         let syn = crate::tracksynth::synthesise(&prog).expect("synthesise");
 
