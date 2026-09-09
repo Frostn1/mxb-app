@@ -592,6 +592,7 @@ export const es: Translation = {
   "settings.themeDark": "Oscuro",
   "settings.themeSystem": "Sistema",
   "settings.colorway": "Paleta",
+  "settings.uiScale": "Tamaño de la interfaz",
   "settings.colorwayFrost": "Escarcha",
   "settings.colorwayEmber": "Brasa",
   "settings.colorwayMoss": "Musgo",
