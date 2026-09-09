@@ -1,5 +1,5 @@
 /**
- * Who's funding MXB App on Buy Me a Coffee, and where that list comes from.
+ * Who's funding Frost's Mod Manager on Buy Me a Coffee, and where that list comes from.
  *
  * The list changes between releases, and a credits page that only refreshes when
  * someone ships a build would thank a new supporter weeks late — so the names live in

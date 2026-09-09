@@ -100,7 +100,7 @@ pub fn verify_with(token: &str, public_key_b64: &str) -> Result<License> {
     let e: License =
         serde_json::from_slice(&payload).context("license payload is not one of ours")?;
     if e.v != LICENSE_VERSION {
-        bail!("that license is version {}; this build understands {LICENSE_VERSION}. Update MXB App.", e.v);
+        bail!("that license is version {}; this build understands {LICENSE_VERSION}. Update Frost's Mod Manager.", e.v);
     }
     Ok(e)
 }
@@ -352,7 +352,7 @@ pub fn install_bundle(
     }
     if let Some(need) = &manifest.min_app_version {
         if !version_at_least(app_version, need) {
-            bail!("{} needs MXB App {need} or newer; this is {app_version}", manifest.name);
+            bail!("{} needs Frost's Mod Manager {need} or newer; this is {app_version}", manifest.name);
         }
     }
 
@@ -724,7 +724,7 @@ mod tests {
 // ---------------------------------------------------------------------------
 
 /// Where installed plugins live. Under app-local data with the rest of the app's state, so
-/// an uninstall of MXB App takes them with it.
+/// an uninstall of Frost's Mod Manager takes them with it.
 pub fn plugins_dir(app: &tauri::AppHandle) -> Result<PathBuf> {
     use tauri::Manager;
     let dir = app

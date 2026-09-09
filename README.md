@@ -1,4 +1,4 @@
-# MXB App
+# Frost's Mod Manager
 
 [![CI](https://github.com/Frostn1/mxb-app/actions/workflows/ci.yml/badge.svg)](https://github.com/Frostn1/mxb-app/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/Frostn1/mxb-app?sort=semver&label=release)](https://github.com/Frostn1/mxb-app/releases)
@@ -7,14 +7,14 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0078D6)](#development)
 
-**MXB App** is a desktop mod manager for [MX Bikes](https://mx-bikes.com/). It
+**Frost's Mod Manager** is a desktop mod manager for [MX Bikes](https://mx-bikes.com/). It
 replaces the tedious manual install dance — open mxb-mods.com, follow the link,
 download from MediaFire, unzip, and move files into the right folder — with a
 single flow:
 
 > **Search a mod → open its page → click _Add to Library_ → done.**
 
-MXB App downloads the mod, extracts it, and drops the files into the matching MX
+Frost's Mod Manager downloads the mod, extracts it, and drops the files into the matching MX
 Bikes `mods` folder automatically.
 
 Tracks, bikes, rider gear, paints, sounds, model swaps and riding-style

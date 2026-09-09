@@ -558,16 +558,16 @@ fn blocked_reason() -> String {
     match crate::gameproc::we_are_elevated() {
         // The ordinary case, and the one worth naming outright.
         Some(false) => format!(
-            "{game} is running as administrator and MXB App isn't, so FrostMod can't get \
+            "{game} is running as administrator and Frost's Mod Manager isn't, so FrostMod can't get \
              into it — no in-game pill, no live reloads, no model swaps. Close {game} and \
-             start it without administrator, or run MXB App as administrator too, then \
+             start it without administrator, or run Frost's Mod Manager as administrator too, then \
              launch the game again."
         ),
         // We are the elevated one, or Windows wouldn't say. Either way "run as admin" is
         // no longer advice we can give straight-faced, so describe the shape of the fix.
         _ => format!(
-            "Windows won't let MXB App see inside {game}, so FrostMod can't get into it \
-             either — no in-game pill, no live reloads, no model swaps. {game} and MXB App \
+            "Windows won't let Frost's Mod Manager see inside {game}, so FrostMod can't get into it \
+             either — no in-game pill, no live reloads, no model swaps. {game} and Frost's Mod Manager \
              have to run at the same level: either both as administrator, or neither."
         ),
     }

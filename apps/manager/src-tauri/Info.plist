@@ -14,6 +14,6 @@
 <plist version="1.0">
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>MXB App uses your microphone for in-game voice chat with the riders on your server. It is only open while voice chat is switched on, and nothing is ever recorded.</string>
+	<string>Frost's Mod Manager uses your microphone for in-game voice chat with the riders on your server. It is only open while voice chat is switched on, and nothing is ever recorded.</string>
 </dict>
 </plist>

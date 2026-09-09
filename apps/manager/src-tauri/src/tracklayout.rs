@@ -979,7 +979,7 @@ pub fn draw(seed: u64) -> Option<TrackProgram> {
     };
     Some(TrackProgram {
         name: NAMES[(seed % NAMES.len() as u64) as usize].to_string(),
-        author: "MXB App".into(),
+        author: "Frost's Mod Manager".into(),
         location: PLACES[((seed / 7) % PLACES.len() as u64) as usize].to_string(),
         width,
         blend: crate::trackprog::default_blend(),
