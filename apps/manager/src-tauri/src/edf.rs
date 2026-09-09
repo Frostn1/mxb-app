@@ -888,7 +888,9 @@ fn tex_name(b: &[u8], o: usize) -> Option<String> {
 // Enumerate every texture in a model.edf, in file order. Anchored on the name, then
 // validated by shape (power-of-two dims, 8 zero pad bytes, payload fits the file).
 pub fn embedded_textures(b: &[u8]) -> Vec<EmbeddedTexture> {
-    const SIZES: [u32; 7] = [64, 128, 256, 512, 1024, 2048, 4096];
+    // A sky dome is the big one: Indiana's is 8192x2048, and a 4096 ceiling threw the whole
+    // sheet away, so a 23 MB file read as a model carrying no picture at all.
+    const SIZES: [u32; 9] = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
     let mut out = Vec::new();
     let mut o = 0usize;
     // Where the last accepted record ended. The next one starts exactly there, and at that

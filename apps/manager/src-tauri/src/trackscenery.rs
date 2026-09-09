@@ -150,7 +150,13 @@ const FENCE_PANEL_M: f32 = 4.0;
 
 /// Bales guard what a rider would otherwise hit. Corpus offset runs 10.9–34.6; the near end
 /// of that is where they do any good.
-const BALE_OFF_M: f32 = 7.5;
+/// How far outside the track's own edge a bale stands.
+///
+/// Off the edge, not a fixed distance from the line. It was 7.5 m flat, against a clearance
+/// bar of `half a track's width + 0.5` — so the two crossed at a 14 m track and every bale on
+/// anything wider was thrown away by the bar for standing too near the corner it belongs to.
+/// The old 12 m example cleared it by a metre, which is why nothing showed.
+const BALE_OFF_M: f32 = 1.0;
 const BALE_W_M: f32 = 1.2;
 const BALE_H_M: f32 = 1.0;
 const BALE_D_M: f32 = 0.8;
@@ -741,16 +747,27 @@ fn dome_mesh(radius: f32) -> Mesh {
     const SIDES: usize = 24;
     let mut m = Mesh::default();
     let top = SKY_TOP_DEG.to_radians().tan();
+    // The drawn sheet is noise, tiled four times round and stretched over the band. A
+    // photograph is one exposure that runs horizon to zenith, so it goes round once and the
+    // band takes only the slice of it that it actually covers — the first
+    // [`SKY_TOP_DEG`] degrees — or the whole sky ends up squeezed into 34°.
+    let photo = dome_photo().is_some();
+    let wraps = if photo { 1.0 } else { 4.0 };
     let mut ring_at = |mesh: &mut Mesh, t: f32| -> u32 {
         let start = mesh.vertex_count() as u32;
         let y = radius * top * t;
+        let v = if photo {
+            1.0 - (top * t).atan().to_degrees() / 90.0
+        } else {
+            1.0 - t
+        };
         for k in 0..=SIDES {
             let a = std::f32::consts::TAU * k as f32 / SIDES as f32;
             let (x, z) = (a.sin() * radius, a.cos() * radius);
             mesh.positions.extend_from_slice(&[x, y, z]);
             let l = (x * x + z * z).sqrt().max(1e-4);
             mesh.normals.extend_from_slice(&[-x / l, 0.0, -z / l]);
-            mesh.uvs.extend_from_slice(&[k as f32 / SIDES as f32 * 4.0, 1.0 - t]);
+            mesh.uvs.extend_from_slice(&[k as f32 / SIDES as f32 * wraps, v]);
         }
         start
     };
@@ -768,8 +785,10 @@ fn dome_mesh(radius: f32) -> Mesh {
     m
 }
 
-/// The sky's own sheet: blue overhead, pale at the horizon, with cloud banded across it.
 /// The sky as a file of its own: `dome.edf`, named by the `.amb`.
+///
+/// The sheet is [`dome_photo`] where it loads, and a drawn blue-to-pale gradient with banded
+/// cloud behind it otherwise.
 ///
 /// The band in the map exists because TerrainEd bakes shadow volumes from every mesh in the
 /// scene, so a lid over the plot put the whole track in shadow. That reasoning does not apply
@@ -777,9 +796,14 @@ fn dome_mesh(radius: f32) -> Mesh {
 /// closed all the way over, which is what a published track ships and what a rider looking up
 /// expects to see.
 pub fn dome_file(radius: f32) -> Vec<u8> {
+    let sky = dome_sheet();
     let mut m = Mesh::default();
     const RINGS: usize = 8;
     const SIDES: usize = 32;
+    // How many times the sheet goes round. A drawn sky is noise and tiling it four times
+    // costs nothing, but a photograph is one 360° exposure with a sun in it — wrap that four
+    // times and the track gets four suns.
+    let wraps = if sky.width == sky.height { 4.0 } else { 1.0 };
     // Ring by ring from the horizon to the pole, facing inwards.
     let ring = |mesh: &mut Mesh, t: f32| -> u32 {
         let start = mesh.vertex_count() as u32;
@@ -796,7 +820,7 @@ pub fn dome_file(radius: f32) -> Vec<u8> {
             // comes out at forty per cent of itself, which from the seat is night.
             let l = (x * x + y * y + z * z).sqrt().max(1e-4);
             mesh.normals.extend_from_slice(&[x / l, y / l, z / l]);
-            mesh.uvs.extend_from_slice(&[k as f32 / SIDES as f32 * 4.0, 1.0 - t]);
+            mesh.uvs.extend_from_slice(&[k as f32 / SIDES as f32 * wraps, 1.0 - t]);
         }
         start
     };
@@ -817,10 +841,36 @@ pub fn dome_file(radius: f32) -> Vec<u8> {
         texture: 0,
         normal: None,
     };
-    crate::edfwrite::write("dome", &[part], &[dome_sheet()])
+    crate::edfwrite::write("dome", &[part], &[sky])
+}
+
+/// A published track's sky, as a photograph.
+///
+/// Indiana Pro's own dome sheet, lifted out of its `dome.edf` by [`tests::dump_ground_sheets`]
+/// the same way `assets/ground/*.jpg` were lifted from its `.map`. One 360° exposure, 8192 by
+/// 2048, zenith on the first row — which is the way round [`sheet`] writes and so the way
+/// round `dome_file`'s uvs read it, no flip needed.
+///
+/// A sky is smooth, so it keeps all eight thousand pixels for about a megabyte of JPEG.
+fn dome_photo() -> Option<&'static Texture> {
+    static SKY: std::sync::OnceLock<Option<Texture>> = std::sync::OnceLock::new();
+    SKY.get_or_init(|| {
+        let img = image::load_from_memory(include_bytes!("../assets/sky/dome.jpg")).ok()?;
+        let img = img.to_rgba8();
+        Some(Texture {
+            name: "sky_c".into(),
+            width: img.width(),
+            height: img.height(),
+            rgba: img.into_raw(),
+        })
+    })
+    .as_ref()
 }
 
 fn dome_sheet() -> Texture {
+    if let Some(photo) = dome_photo() {
+        return photo.clone();
+    }
     sheet("sky_c", 256, |u, v| {
         // v is 0 at the zenith and 1 at the horizon — see `dome_mesh`'s uvs.
         let up = 1.0 - v;
@@ -872,9 +922,13 @@ fn jumpmark_mesh(h: f32) -> Mesh {
 /// Alpha-cut, so what is not a knob is not drawn at all — the ground shows through between
 /// them, which is what makes it read as a print rather than as a stripe.
 fn tyre_sheet() -> Texture {
-    sheet("tyre_c_a", 128, |u, v| {
-        // One print down the sheet: the tread repeats every `TYRE_TREAD_M` of travel, and
-        // the sheet is one repeat, so v runs the length of the print.
+    sheet("tyre_c_a", 256, |u, v| {
+        // Four prints side by side, the same print at four ages. A ribbon takes whichever
+        // lane it is given and can change lane part way along, which is how a mark fades out
+        // in the middle of itself without a second material or a vertex colour to do it with.
+        let lane = (u * TYRE_FADES as f32) as usize;
+        let u = (u * TYRE_FADES as f32).fract();
+        let fade = [1.0f32, 0.68, 0.42, 0.22][lane.min(TYRE_FADES - 1)];
         let across = (u - 0.5) * 2.0; // -1 at one edge, +1 at the other
         // Two rows of knobs, offset half a step from each other, plus a centre block.
         let row = |lane: f32, phase: f32| -> f32 {
@@ -891,8 +945,8 @@ fn tyre_sheet() -> Texture {
         let knob = row(-0.52, 0.0).max(row(0.52, 0.5)).max(row(0.0, 0.25) * 0.85);
         // Ragged: a print in soil is never the shape of the block that made it.
         let torn = 0.72 + 0.5 * grain(u * 2.0, v * 2.0, 0x7A31, 40.0);
-        let a = (knob * torn).clamp(0.0, 1.0);
-        if a < 0.30 {
+        let a = (knob * torn).clamp(0.0, 1.0) * fade;
+        if a < 0.10 {
             return [0, 0, 0, 0];
         }
         // Pressed dirt: darker than what it is printed on, and slightly wet-looking.
@@ -926,26 +980,82 @@ fn jumpmark_sheet() -> Texture {
 fn tyre_ribbon(
     syn: &Synth,
     stations: &[crate::trackprog::Station],
+    airborne: &dyn Fn(f32) -> bool,
     lat_at: impl Fn(usize) -> f32,
     width: f32,
+    seed: u32,
 ) -> Mesh {
     let mut m = Mesh::default();
     let mut v_at = 0.0f32;
-    let mut prev: Option<(u32, f32)> = None;
+    let mut prev: Option<u32> = None;
     for (i, st) in stations.iter().enumerate() {
         let (rx, rz) = crate::trackprog::right_vector(st.heading);
         let lat = lat_at(i);
         let (cx, cz) = (st.x + rx * lat, st.z + rz * lat);
+        // Three reasons a pass is not printed here.
+        //
+        // Over a jump it is not printed because the rider is in the air: a table with tyre
+        // marks across its deck is a table nobody jumped. Off the corridor it is not printed
+        // because nobody rode there. And along its own length a mark comes and goes, which is
+        // what a pass laid on ground that was damp in places actually looks like.
+        // Snapped into whatever groove is nearest.
+        //
+        // A pass laid at a fixed offset from the line crosses grooves rather than running
+        // down one, and prints strewn across a rut is not what a rut looks like: the marks
+        // pile up *inside* it. So each pass looks half a metre either side of where it was
+        // going to go and takes the deepest ground it finds — which is the floor of a groove
+        // if there is one near, and where it was going otherwise.
+        let sample_rut = |t: f32| -> f32 {
+            let (x, z) = (st.x + rx * t, st.z + rz * t);
+            let (gx, gz) = ((x / syn.mps) as usize, (z / syn.mps) as usize);
+            -syn.rut
+                .get(gz.min(syn.gh - 1) * syn.gw + gx.min(syn.gw - 1))
+                .copied()
+                .unwrap_or(0.0)
+        };
+        let mut best = (sample_rut(lat), lat);
+        let mut k = -4i32;
+        while k <= 4 {
+            let t = lat + k as f32 * 0.13;
+            let v = sample_rut(t);
+            if v > best.0 {
+                best = (v, t);
+            }
+            k += 1;
+        }
+        let (groove, lat) = best;
+        let (cx, cz) = (st.x + rx * lat, st.z + rz * lat);
+        let coming = crate::tracksynth::fbm(st.s / 34.0, seed as f32 * 0.37, seed ^ 0x5A11);
+        // A groove keeps a mark going: the deepest part of a line is where the prints pile
+        // up, which is the whole reason a rut reads as ridden rather than as a ditch.
+        let over_a_jump = airborne(st.s);
+        let on = lat.abs() < width * 6.0 && (coming > -0.15 || groove > 0.25);
+        if !on {
+            prev = None;
+            v_at += 0.0;
+            continue;
+        }
+        // Which of the four ages this stretch of the pass is in. It moves along the ribbon,
+        // so one mark is crisp at the corner and gone by the exit.
+        // Over a jump the marks stay, at the faintest age there is. A rider does leave the
+        // ground somewhere on a takeoff and the prints that carried him there are on it —
+        // but nothing on a deck is a fresh print, because nobody is on the ground for it.
+        let age = if over_a_jump {
+            TYRE_FADES - 1
+        } else {
+            ((0.5 - 0.5 * coming) * 3.4 - groove * 1.6).clamp(0.0, 3.0) as usize
+        };
+        let u0 = age.min(TYRE_FADES - 1) as f32 / TYRE_FADES as f32;
+        let du = 1.0 / TYRE_FADES as f32;
         let half = width * 0.5;
         let start = m.vertex_count() as u32;
         for side in [-1.0f32, 1.0] {
             let (x, z) = (cx + rx * half * side, cz + rz * half * side);
             m.positions.extend_from_slice(&[x, ground(syn, x, z) + TYRE_LIFT_M, z]);
             m.normals.extend_from_slice(&[0.0, 1.0, 0.0]);
-            m.uvs.extend_from_slice(&[if side < 0.0 { 0.0 } else { 1.0 }, v_at]);
+            m.uvs.extend_from_slice(&[u0 + if side < 0.0 { 0.0 } else { du }, v_at]);
         }
-        if let Some((prev_start, prev_v)) = prev {
-            let _ = prev_v;
+        if let Some(prev_start) = prev {
             m.indices.extend_from_slice(&[prev_start, prev_start + 1, start]);
             m.indices.extend_from_slice(&[start, prev_start + 1, start + 1]);
         }
@@ -954,15 +1064,23 @@ fn tyre_ribbon(
         } else {
             0.0
         };
-        prev = Some((start, v_at));
+        prev = Some(start);
         v_at += step / TYRE_TREAD_M;
     }
     m
 }
 
+/// How many ages of print the sheet carries, how many passes are laid, and how far the
+/// outermost of them sits off the line.
+const TYRE_FADES: usize = 4;
+const TYRE_PASSES: usize = 27;
+const TYRE_SPREAD_M: f32 = 2.4;
+
 /// How wide a print is, how far the tread repeats in, and how far the card floats over the
 /// ground so it draws in front of it without standing off it.
-const TYRE_W_M: f32 = 0.16;
+/// A print is a tyre wide, not a pencil line — "too thin, too little in count, should overlap
+/// each other, some more faded some less", from a rider on the track.
+const TYRE_W_M: f32 = 0.34;
 const TYRE_TREAD_M: f32 = 0.42;
 const TYRE_LIFT_M: f32 = 0.035;
 
@@ -1457,7 +1575,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             // A fixed offset and no jitter: a row of blocks is a *row*, and a row that
             // wanders reads as rubbish left at the edge of a corner rather than as something
             // somebody laid out.
-            let off = BALE_OFF_M;
+            let off = half + BALE_OFF_M;
             let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
             // Just off the edge of the track — which is where a block goes, and it is also
             // why the clearance bar is low: at seven and a half metres from the line, a bar of
@@ -1652,33 +1770,10 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let _ = &mut vans;
 
 
-    // 6b. Tyre marks: the print of a knobbly down the lines riders take.
-    //
-    // Three passes, not one — a line is a handful of them side by side, and one ribbon down
-    // the middle reads as a stripe. Where the ground says it has been worked hardest is where
-    // they are laid, so the marks agree with the shape: `syn.rut` is the same signal the
-    // paint keys to.
-    let mut tyre = Mesh::default();
-    if !syn.stations.is_empty() {
-        for (pass, lean) in [(0usize, -0.55f32), (1, 0.0), (2, 0.62)] {
-            let ribbon = tyre_ribbon(
-                syn,
-                &syn.stations,
-                |i| {
-                    let wander = 0.35
-                        * crate::tracksynth::fbm(
-                            syn.stations[i].s / 26.0,
-                            pass as f32 * 7.0,
-                            prog.terrain.relief.seed ^ 0x7A33,
-                        );
-                    syn.line_lat[i] + lean + wander
-                },
-                TYRE_W_M,
-            );
-            tyre.append(&ribbon);
-        }
-        tally.push(("tyre marks", 3));
-    }
+    // No tyre marks. Asked for and then asked out again: a ribbon of prints down the racing
+    // line reads as a stripe painted on the ground rather than as ground anyone has ridden,
+    // and no published track lays anything like it. Indiana carries none.
+    let tyre = Mesh::default();
 
     // 7. The sky over all of it.
     let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
@@ -1747,20 +1842,35 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     // TerrainEd faults on the second material in a model whatever the geometry — see
     // `edfwrite`'s note and the case-by-case test behind it. PiBoSo's own example track is
     // built the same way, three `scene` blocks for three objects.
-    let kinds: Vec<(&str, Mesh, Texture, bool)> = vec![
-        ("stakes", stakes, stake_sheet(), false),
-        ("banners", banners, banner_sheet(), true),
-        ("bales", bales, bale_sheet(), true),
+    let kinds: Vec<(String, Mesh, Texture, bool)> = vec![
+        ("stakes".into(), stakes, stake_sheet(), false),
+        ("banners".into(), banners, banner_sheet(), true),
+        ("bales".into(), bales, bale_sheet(), true),
         // Not solid: clipping a marker board should cost a rider nothing.
-        ("jumpmarks", jumpmarks, jumpmark_sheet(), false),
-        ("trees", trees, tree_sheet(), true),
-        ("poles", poles, pole_sheet(), false),
+        ("jumpmarks".into(), jumpmarks, jumpmark_sheet(), false),
+        ("trees".into(), trees, tree_sheet(), true),
+        ("poles".into(), poles, pole_sheet(), false),
         // The sky is drawn and nothing else: a dome you can ride into is not a sky.
-        ("sky", sky, dome_sheet(), false),
-        ("gate", gate, gate_sheet(), true),
+        ("sky".into(), sky, dome_sheet(), false),
+        ("gate".into(), gate, gate_sheet(), true),
         // Drawn, never solid: a mark is paint on the ground, not a kerb.
-        ("tyre marks", tyre, tyre_sheet(), false),
     ];
+
+    // A lifted venue, if one is installed. Absence is ordinary: a library is baked from a
+    // donor archive the user already has, so most builds have none and place nothing.
+    let mut kinds = kinds;
+    if let Some(lib) = crate::trackprops::load() {
+        let from = kinds.len();
+        for (name, mesh, tex, is_solid) in lifted(&lib, prog, syn) {
+            tally.push(("lifted", mesh.triangle_count()));
+            kinds.push((name, mesh, tex, is_solid));
+        }
+        log::info!(
+            "placed {} lifted models from {}",
+            kinds.len() - from,
+            lib.donor
+        );
+    }
 
     let mut files = Vec::new();
     let mut drawn = Vec::new();
@@ -1770,7 +1880,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             continue;
         }
         let file = format!("{name}.edf");
-        let bytes = edfwrite::write(name, &[Part { name: name.into(), mesh, texture: 0, normal: None }], &[sheet]);
+        let bytes = edfwrite::write(&name, &[Part { name: name.clone(), mesh, texture: 0, normal: None }], &[sheet]);
         files.push((file.clone(), bytes));
         let at = Scene { file, pos: [0.0, 0.0, 0.0], rot: [0.0, 0.0, 0.0] };
         // Collision only for what should stop a bike. A stake snaps and the fence is behind
@@ -2014,6 +2124,79 @@ mod tests {
         assert_eq!(Print::Boards.window(3), (0.0, 1.0));
         assert!(Print::Boards.post_at(1).is_some(), "a hoarding posts every join");
         assert!(Print::Tiled.post_at(1).is_none(), "a strung banner does not");
+    }
+
+    /// The sky is one exposure, so it goes round exactly once.
+    ///
+    /// The drawn sheet is noise and tiles four times to get some detail out of 256 pixels.
+    /// A photograph has a sun in it, and four wraps put four suns over the track.
+    #[test]
+    fn the_photographed_sky_wraps_once() {
+        let sheet = dome_sheet();
+        let photo = dome_photo().is_some();
+        assert!(photo, "the dome photograph is bundled and decodes");
+        assert_ne!(
+            sheet.width, sheet.height,
+            "the photograph is a 360 panorama, not a square tile"
+        );
+        assert_eq!(
+            sheet.rgba.len(),
+            sheet.width as usize * sheet.height as usize * 4,
+            "the sheet is RGBA"
+        );
+
+        let bytes = dome_file(1200.0);
+        let nodes = crate::edf::parse_world(&bytes);
+        assert!(!nodes.is_empty(), "the dome reads back as a model");
+        let u_max = nodes
+            .iter()
+            .flat_map(|n| n.uvs.chunks_exact(2))
+            .fold(f32::NEG_INFINITY, |m, uv| m.max(uv[0]));
+        assert!(
+            (u_max - 1.0).abs() < 1e-3,
+            "the sheet goes round {u_max} times — a photographed sky must go round once"
+        );
+
+        // And the picture survives the round trip at its full width.
+        let tex = crate::edf::embedded_textures(&bytes);
+        assert_eq!(tex.len(), 1, "one sheet on the dome");
+        assert_eq!((tex[0].width, tex[0].height), (sheet.width, sheet.height));
+
+        // The band baked into the map wears the same sheet, so it wraps once as well — and it
+        // reaches only SKY_TOP_DEG, so it must take that slice of the picture rather than
+        // stretching the whole sky into it.
+        let band = dome_mesh(1200.0);
+        let (mut u_hi, mut v_lo, mut v_hi) = (f32::NEG_INFINITY, f32::INFINITY, f32::NEG_INFINITY);
+        for uv in band.uvs.chunks_exact(2) {
+            u_hi = u_hi.max(uv[0]);
+            v_lo = v_lo.min(uv[1]);
+            v_hi = v_hi.max(uv[1]);
+        }
+        assert!((u_hi - 1.0).abs() < 1e-3, "the band wraps {u_hi} times");
+        assert!((v_hi - 1.0).abs() < 1e-3, "the band starts at the horizon");
+        // v is 1 at the horizon and 0 at the zenith, so a band reaching 34 degrees stops at
+        // 1 - 34/90. Anything near 0 means it swallowed the whole sky.
+        let expect = 1.0 - SKY_TOP_DEG / 90.0;
+        assert!(
+            (v_lo - expect).abs() < 0.02,
+            "the band tops out at v {v_lo}, not {expect} — it is stretching the sky"
+        );
+    }
+
+    /// Write a generated `dome.edf` out, to look at or to drop into a track by hand.
+    ///
+    /// ```text
+    /// FROST_DUMP=/tmp/gen cargo test --bin mxb-app -- --ignored --nocapture write_the_dome
+    /// ```
+    #[test]
+    #[ignore = "writes a dome.edf — set FROST_DUMP"]
+    fn write_the_dome() {
+        let dir = std::env::var("FROST_DUMP").expect("set FROST_DUMP");
+        std::fs::create_dir_all(&dir).unwrap();
+        let bytes = dome_file(1200.0);
+        let path = format!("{dir}/dome.edf");
+        std::fs::write(&path, &bytes).unwrap();
+        println!("{path} {:.2} MB", bytes.len() as f64 / 1_048_576.0);
     }
 
     /// Write the sheets out as PNGs, which is the only way to judge whether a banner reads.
@@ -2473,4 +2656,116 @@ mod built {
             String::from_utf8_lossy(&out.stderr)
         )
     }
+}
+
+/// Replay a lifted prop library onto this lap.
+///
+/// Each instance was recorded against its donor's centreline as a fraction round the lap, a
+/// signed lateral offset and a yaw relative to the heading there — see [`crate::trackprops`].
+/// Replaying is the same three numbers read the other way: find our station at that fraction,
+/// step out by the offset, and turn the prop by the yaw plus our heading.
+///
+/// The transform is **baked into the geometry** rather than written as a `scene` block's
+/// `rot`. TerrainEd bakes every block into the `.map` regardless, so the compiled track is
+/// identical either way, and baking uses only the path `builds_a_track_with_objects` already
+/// proves. Nothing here has ever written a non-zero `rot` and its sense is unverified; that is
+/// an optimisation for the export folder's size, not for the track's.
+///
+/// Props are merged by sheet, because a model carries one sheet and one only.
+pub fn lifted(
+    lib: &crate::trackprops::PropLibrary,
+    prog: &TrackProgram,
+    syn: &Synth,
+) -> Vec<(String, Mesh, Texture, bool)> {
+    let lap = prog.lap_length();
+    let half = prog.width * 0.5;
+    let stations = prog.stations(0.5);
+    let coarse = prog.stations(2.0);
+    let at = |s: f32| -> crate::trackprog::Station {
+        let i = ((s / 0.5) as usize).min(stations.len().saturating_sub(1));
+        stations[i]
+    };
+
+    let sheet_rgba: std::collections::HashMap<&str, &(String, u32, u32, Vec<u8>)> =
+        lib.sheets.iter().map(|s| (s.0.as_str(), s)).collect();
+    let mut by_sheet: std::collections::HashMap<String, Mesh> = std::collections::HashMap::new();
+
+    for inst in &lib.instances {
+        let prop = &lib.props[inst.prop];
+        let st = at((inst.along * lap).clamp(0.0, lap));
+        let (rx, rz) = crate::trackprog::right_vector(st.heading);
+
+        // Push anything that would land on the riding line out to the shoulder. A donor's
+        // corridor is not ours: its 7 m is inside our track where ours is wider.
+        //
+        // By the prop's own footprint, not by its anchor. A clump anchored exactly on the
+        // margin still reaches half its span back over the line, which is how a tree ended up
+        // 5.4 m from the centreline of a 6 m corridor.
+        let reach = prop.reach;
+        let margin = half + 2.0 + reach;
+        let want = inst.offset;
+        let off = if want.abs() < margin {
+            margin * if want == 0.0 { 1.0 } else { want.signum() }
+        } else {
+            want
+        };
+        let (x, z) = (st.x + rx * off, st.z + rz * off);
+
+        let clear_of_the_start = syn
+            .outside_the_start(x, z)
+            .map(|e| e > OFF_THE_START_M + reach)
+            .unwrap_or(true);
+        if !inside(prog, x, z, 2.0)
+            || clearance(&coarse, x, z) < half + 1.5 + reach
+            || !clear_of_the_start
+        {
+            continue;
+        }
+
+        // Yaw is relative to the donor's heading, so it adds to ours. Degrees, because
+        // `edfwrite::turned` takes degrees and shares this convention — see `principal_axis`.
+        let deg = (inst.yaw + st.heading).to_degrees();
+        let turned = edfwrite::turned(&prop.mesh, deg);
+        let foot = ground(syn, x, z) + inst.lift;
+        by_sheet
+            .entry(prop.sheet.clone())
+            .or_default()
+            .append(&edfwrite::moved(&turned, [x, foot, z]));
+    }
+
+    let mut out = Vec::new();
+    for (sheet, mesh) in by_sheet {
+        if mesh.vertex_count() < 8 {
+            continue;
+        }
+        let Some((name, w, h, rgba)) = sheet_rgba.get(sheet.as_str()) else {
+            // A prop whose sheet did not inflate would render untextured. Drop it rather
+            // than ship a white slab.
+            continue;
+        };
+        let tex = Texture {
+            name: name.clone(),
+            width: *w,
+            height: *h,
+            rgba: rgba.clone(),
+        };
+        // Solid is by class, and by class only: you ride through foliage and into a building.
+        let solid = lib
+            .props
+            .iter()
+            .any(|p| p.sheet == sheet && matches!(p.class, crate::trackobjects::Class::Structure | crate::trackobjects::Class::Vehicle | crate::trackobjects::Class::Bale));
+        out.push((short_sheet(&sheet), mesh, tex, solid));
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// A sheet name cut down to a model name.
+fn short_sheet(sheet: &str) -> String {
+    sheet
+        .trim_end_matches("_c_a")
+        .trim_end_matches("_c")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect()
 }

@@ -301,7 +301,7 @@ pub fn load_master(app: &tauri::AppHandle, path: &str) -> Result<Master> {
 }
 
 /// The expensive path: inflate a heightfield, work out its layout, reduce it.
-fn decode_master(path: &Path) -> Result<Master> {
+pub(crate) fn decode_master(path: &Path) -> Result<Master> {
     let names = entry_names(path)?;
     let candidates = heightfield_entries(&names);
     if candidates.is_empty() {
@@ -978,6 +978,60 @@ mod tests {
         }
     }
 
+    /// Write the terrain out as a hillshade, in the row order the viewer builds its UVs from.
+    ///
+    /// The reference picture for anything laid over the ground. `resample` hands back row 0
+    /// first and the mesh puts that row at v = 0, so this PNG *is* what the shader addresses
+    /// with `vGroundUv` — put a ground mask beside it and any rotation is plain to see.
+    ///
+    /// ```text
+    /// FROST_TRACK="…/track.pkz" FROST_PNG=/tmp/terrain.png \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture dump_terrain_hillshade
+    /// ```
+    #[test]
+    #[ignore = "writes a PNG — set FROST_TRACK and FROST_PNG"]
+    fn dump_terrain_hillshade() {
+        let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let out = std::env::var("FROST_PNG").expect("set FROST_PNG");
+        let m = decode_master(Path::new(&path)).expect("a terrain master");
+        let want: u32 = std::env::var("FROST_DETAIL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1024);
+        let (w, h, heights) = resample(&m, want);
+        let at = |x: usize, y: usize| -> f32 {
+            let v = heights[y.min(h as usize - 1) * w as usize + x.min(w as usize - 1)];
+            if v.is_finite() {
+                v
+            } else {
+                0.0
+            }
+        };
+        // Slope shading: the ruts and berms are what make a track recognisable from above,
+        // and a flat height ramp buries them under the site's overall fall.
+        let mut px = vec![0u8; (w * h) as usize];
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let dx = at(x + 1, y) - at(x.saturating_sub(1), y);
+                let dy = at(x, y + 1) - at(x, y.saturating_sub(1));
+                let s = (dx * dx + dy * dy).sqrt();
+                px[y * w as usize + x] = (255.0 * (1.0 - (-s * 6.0).exp())).clamp(0.0, 255.0) as u8;
+            }
+        }
+        image::GrayImage::from_raw(w, h, px).unwrap().save(&out).unwrap();
+        println!("  {out}  {w}x{h}");
+        // The heights themselves, row 0 first, for anything that wants to measure rather
+        // than look: `FROST_RAW=/tmp/h.f32` then read w*h little-endian f32.
+        if let Ok(raw) = std::env::var("FROST_RAW") {
+            let mut bytes = Vec::with_capacity(heights.len() * 4);
+            for v in &heights {
+                bytes.extend_from_slice(&(if v.is_finite() { *v } else { 0.0 }).to_le_bytes());
+            }
+            std::fs::write(&raw, &bytes).unwrap();
+            println!("  {raw}  {w}x{h} f32");
+        }
+    }
+
     /// Point this at a real track to see the surfaces its height file paints:
     ///
     /// ```text
@@ -1424,5 +1478,48 @@ mod tests {
             "a short grid must be re-decoded, not read past",
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod our_own_trh {
+    use super::*;
+
+    /// A track we built reads back the way we wrote it.
+    ///
+    /// The scenery is placed from the synthesis and the terrain comes from the `.trh`
+    /// TerrainEd baked out of our own heightmap. If the two disagree about which way round
+    /// the ground goes, the props land mirrored against it — trees on the riding line.
+    #[test]
+    #[ignore = "needs a built track — set FROST_TRACK and FROST_PROGRAM"]
+    fn a_built_track_reads_back_the_way_we_wrote_it() {
+        let track = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let prog_path = std::env::var("FROST_PROGRAM").expect("set FROST_PROGRAM");
+        let prog: crate::trackprog::TrackProgram =
+            serde_json::from_str(&std::fs::read_to_string(&prog_path).unwrap()).unwrap();
+        let m = decode_master(Path::new(&track)).expect("terrain");
+        let (gw, gh) = (m.info.width as usize, m.info.height as usize);
+        let mpp = m.info.metres_per_sample;
+        // On the track the ground is graded and rutted; off it, it is not. The reading that
+        // puts the lap on the rougher ground is the one that matches.
+        let rough = |flip: bool| -> f64 {
+            let (mut total, mut n) = (0.0f64, 0.0f64);
+            for st in prog.stations(6.0) {
+                let gx = (st.x / mpp).clamp(1.0, gw as f32 - 2.0) as usize;
+                let raw = (st.z / mpp).clamp(1.0, gh as f32 - 2.0) as usize;
+                let gz = if flip { gh - 1 - raw } else { raw };
+                let h = |a: usize, b: usize| m.heights[b.min(gh - 1) * gw + a.min(gw - 1)];
+                total += ((h(gx + 1, gz) - h(gx - 1, gz)).abs()
+                    + (h(gx, gz + 1) - h(gx, gz - 1)).abs()) as f64;
+                n += 1.0;
+            }
+            total / n.max(1.0)
+        };
+        let (straight, flipped) = (rough(false), rough(true));
+        println!("  as written {straight:.4}   flipped {flipped:.4}");
+        assert!(
+            straight > flipped,
+            "the built terrain is mirrored against the synthesis that placed its scenery"
+        );
     }
 }
