@@ -185,6 +185,29 @@ const RIDDEN_SMOOTH: f32 = 0.95;
 const TEXTURE_OCTAVES: u32 = 3;
 const TEXTURE_GAIN: f32 = 0.34;
 
+/// Wheel-scale chop: the half-metre chatter a ridden surface carries, and how deep it runs.
+///
+/// Separate from [`TEXTURE_WAVELENGTH_M`] because the two are different things and one cannot
+/// stand in for the other. The texture is broad-spectrum grain built from three octaves off a
+/// 1.8 m base, so only a fraction of its power lands where a wheel feels it — and measured by
+/// wavelength band against Indiana, a generated corner was short by **nine times** at 0.5-1 m
+/// while matching it at 2-4 m. Scaling the texture cannot fix that: at six times the amplitude
+/// and a tenth of the polish, chatter moved 4.60 cm to 4.87 against Indiana's 10.5, because
+/// the extra power goes where the spectrum already was.
+///
+/// Also unmoved by the texture's wavelength, its octaves and gain, the ridden smoothing, the
+/// rut depth, and the sampling step the measurement uses. All six were tried; this is what was
+/// missing rather than mis-tuned.
+/// Read in track coordinates and stretched across them: short along the direction of travel,
+/// long across it, so the chop stands as ridges a wheel crosses rather than as isotropic
+/// gravel. That ratio is the point. Isotropic, it lifts roughness along and across the line
+/// equally, and a published corner is not equal — Indiana's chatter is 77% of its across-line
+/// RMS where an isotropic field gives 39%, so matching the chatter meant overshooting the
+/// across-line figure by half before it arrived.
+const CHOP_WAVELENGTH_M: f32 = 0.55;
+const CHOP_ACROSS_M: f32 = 3.0;
+const CHOP_M: f32 = 0.30;
+
 /// The same, for the field that lays out where the grooves go.
 const RUT_FIELD_OCTAVES: u32 = 2;
 const RUT_FIELD_GAIN: f32 = 0.32;
@@ -1403,6 +1426,20 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 * gain
                 * polished
                 * (0.25 * w + 0.75 * across);
+            // And the chop at the scale of a wheel — see `CHOP_WAVELENGTH_M`. One octave, so
+            // all of it lands in the band it is for, and polished far less than the grain is:
+            // a published line is not smooth, it is the most worked-over strip on the track.
+            heights[i] += fbm_of(
+                s / CHOP_WAVELENGTH_M,
+                t / CHOP_ACROSS_M,
+                r.seed ^ 0xC40F,
+                1,
+                0.5,
+            ) * CHOP_M
+                * gain
+                * (0.45 + 0.55 * polished)
+                * w;
+
             // The seams between the machine's passes, running the way it drove.
             heights[i] -= ((t / PASS_SPACING_M) * std::f32::consts::TAU).sin().abs()
                 * PASS_DEPTH_M
