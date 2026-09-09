@@ -90,7 +90,9 @@ import SupportersCard from "./SupportersCard";
 import {
   COLORWAYS,
   COLORWAY_SWATCH,
+  UI_SCALES,
   useTheme,
+  type UiScale,
   type Colorway,
   type ThemeMode,
 } from "../../Context/Theme";
@@ -300,7 +302,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // everywhere it runs: natively on Windows, under Proton on Linux, in a CrossOver/Whisky
   // bottle on macOS. The app starts FrostMod in whichever prefix holds the game.
   const hasFrostmod = isWindows || platform === "linux" || isMac;
-  const { theme, setTheme, colorway, setColorway } = useTheme();
+  const { theme, setTheme, colorway, setColorway, scale, setScale } = useTheme();
   const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes, strayMsvcr90, clearingStray, clearStrayMsvcr90 } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
@@ -1728,6 +1730,30 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   {t(COLORWAY_LABEL[colorway])}
                 </span>
               </div>
+            </div>
+
+            {/* The webview's own zoom, so it moves type, spacing and icons together.
+                Scaling the root font instead would leave the app's 778 pixel-valued
+                type sizes exactly where they were. */}
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-[12.5px] text-foreground/85">
+                {t("settings.uiScale")}
+              </span>
+              <Select
+                value={String(scale)}
+                onValueChange={(v) => setScale(Number(v) as UiScale)}
+              >
+                <SelectTrigger className="h-8 w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {UI_SCALES.map((factor) => (
+                    <SelectItem key={factor} value={String(factor)}>
+                      {Math.round(factor * 100)}%
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* A Select, not a Segmented control — seven options don't fit the
