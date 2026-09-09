@@ -1694,6 +1694,22 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0137.hero.title":
+    "Tous les serveurs MX Bikes, en direct, pendant que tu roules",
+  "showcase.v0137.hero.body":
+    "L'onglet Serveurs liste tous les serveurs de la liste maître avec leur vrai ping, le circuit réellement roulé et la session en cours. Il continue de fonctionner pendant que MX Bikes tourne : l'app interroge chaque serveur directement, donc rien ne se dispute ton compte avec le jeu.",
+  "showcase.v0137.whoson":
+    "Ouvre un serveur pour voir qui y roule, ce qu'il autorise et le circuit en cours — avec son image si tu l'as, et où l'obtenir sinon.",
+  "showcase.v0137.cheats":
+    "Les serveurs qui affichent des cheats sont masqués, selon les mêmes règles que FrostMod applique en jeu. L'onglet indique combien il en a masqués et te laisse les voir.",
+  "showcase.v0137.livecodes":
+    "Des codes de partage qui restent à jour. Envoie un code court une fois, puis publie de nouvelles versions dedans : tous ceux qui l'ont collé les reçoivent, et Auto les installe.",
+  "showcase.v0137.viewer":
+    "La vue 3D dessine le vrai sol d'un circuit : chaque couche avec sa propre texture à travers les masques du circuit, ses décors dans leurs textures et le ciel qu'il embarque.",
+  "showcase.v0137.ranked":
+    "Un onglet Ranked avec ton rang MXB Ranked, tes MXP, tes stats de saison et tes 50 dernières courses. Rien à créer : ton GUID vient de Steam.",
+  "showcase.v0137.look":
+    "Un nouveau look. La navigation passe dans une barre en haut, les visuels des mods prennent toute la largeur — sept par ligne au lieu de cinq.",
   "showcase.v0124.hero.title":
     "Toute la grille dans la peinture qu'elle a vraiment choisie",
   "showcase.v0124.hero.body":
