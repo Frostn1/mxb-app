@@ -216,6 +216,16 @@ pub fn reconcile_store(store: &mut Store, mods_path: &str, scanned: &[ModEntry],
             .entries
             .entry(key.clone())
             .or_insert_with(|| LedgerEntry::new(&key, m, now));
+        // Replaced in place. The snapshot — the mod's own name, its author, and the picture
+        // the Library shows it by — is taken once and then never again, so an archive rebuilt
+        // under the same filename kept the first build's title and thumbnail for ever. That is
+        // exactly what a track being worked on does: the same `.pkz`, different contents,
+        // every build. Size is what this pass already knows about the file, and a rebuild
+        // never lands on the same byte count.
+        if !e.is_dir && e.size != m.size && e.snapshot_at.is_some() {
+            e.snapshot_at = None;
+            e.thumb = None;
+        }
         e.rel = m.rel.clone();
         e.name = m.name.clone();
         e.category = m.category.clone();
@@ -532,6 +542,40 @@ mod tests {
         assert_eq!(load(&dir, "mxb").entries.len(), 1);
         assert!(load(&dir, "gpb").entries.is_empty(), "the other title sees nothing");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A track being worked on is the same `.pkz` with different contents every build, and
+    /// the snapshot is taken once. Without this the Library shows the first build's name and
+    /// picture for ever — reported as "the preview image is still as before".
+    #[test]
+    fn rebuilding_a_mod_in_place_takes_its_snapshot_again() {
+        let mut s = Store::default();
+        let mut m = entry("mods/tracks/Eastmoor_Raceway.pkz", true);
+        reconcile_store(&mut s, "/mods", &[m.clone()], true, 1_000);
+
+        let key = "mods/tracks/eastmoor_raceway.pkz";
+        let e = s.entries.get_mut(key).unwrap();
+        e.snapshot_at = Some(1_000);
+        e.title = Some("the first build".into());
+        e.thumb = Some("old.jpg".into());
+        assert!(!e.needs_snapshot());
+
+        // Built again, over the top of itself.
+        m.size += 4_096;
+        reconcile_store(&mut s, "/mods", &[m.clone()], true, 2_000);
+        let e = s.entries.get(key).unwrap();
+        assert!(e.needs_snapshot(), "a replaced archive has to be read again");
+        assert_eq!(e.thumb, None, "and must not keep the old build's picture");
+
+        // A pass that finds it unchanged leaves the snapshot alone, because re-reading every
+        // archive on every pass is what the snapshot exists to avoid.
+        let e = s.entries.get_mut(key).unwrap();
+        e.snapshot_at = Some(2_000);
+        e.thumb = Some("new.jpg".into());
+        reconcile_store(&mut s, "/mods", &[m], true, 3_000);
+        let e = s.entries.get(key).unwrap();
+        assert!(!e.needs_snapshot(), "an unchanged mod is not re-read");
+        assert_eq!(e.thumb.as_deref(), Some("new.jpg"));
     }
 
     #[test]
