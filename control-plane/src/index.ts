@@ -323,6 +323,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
   if (method === "GET" && path === "/v1/roster") return roster(url, account, env);
   if (method === "GET" && path === "/v1/presence") return whoIsOn(url, env);
+  if (method === "GET" && path === "/v1/presence/counts") return presenceCounts(env);
 
   const openPaint = /^\/v1\/paints\/([0-9a-f]{64})$/.exec(path);
   if (openPaint) {
@@ -1960,6 +1961,40 @@ async function whoIsOn(url: URL, env: Env): Promise<Response> {
     if (!seen.has(key)) seen.set(key, { riderName: r.rider_name, guid: r.guid });
   }
   return json(200, { riders: [...seen.values()] });
+}
+
+/**
+ * How many riders are on each server, without saying who any of them is.
+ *
+ * The server browser wants to mark the rows worth joining before anyone clicks one, and
+ * `whoIsOn` cannot answer that: it is one request per server, so a list of eighty rows would
+ * be eighty requests to draw eighty badges.
+ *
+ * `whoIsOn` declines to answer "who is on every server" and still does — that would hand the
+ * whole platform's whereabouts to anyone who asked. A count is a different question. Nobody
+ * is named, nobody is locatable, and the answer is the same one the row already shows in
+ * another form. What it adds is which of those riders the app can actually sync with.
+ *
+ * A rider is in `presence` precisely because their app is publishing and pulling, so this
+ * count *is* the answer to "will paint sync do anything on this server". The result is only
+ * as long as the number of servers being played on right now — presence rows age out after
+ * `PRESENCE_TTL_MS` — so this stays small without a limit clause.
+ */
+async function presenceCounts(env: Env): Promise<Response> {
+  // Counted the same way `whoIsOn` de-duplicates: one rider recorded under both key forms of
+  // the same server would otherwise be two people standing on it.
+  const rows = await env.DB.prepare(
+    "SELECT pr.server_id, COUNT(DISTINCT COALESCE(a.guid, 'name:' || lower(a.rider_name)))" +
+      " AS riders FROM presence pr" +
+      " JOIN accounts a ON a.id = pr.account_id" +
+      " WHERE pr.updated_at > ? GROUP BY pr.server_id",
+  )
+    .bind(Date.now() - PRESENCE_TTL_MS)
+    .all<{ server_id: string; riders: number }>();
+
+  const servers: Record<string, number> = {};
+  for (const r of rows.results) if (r.riders > 0) servers[r.server_id] = r.riders;
+  return json(200, { servers });
 }
 
 /** Read a column we wrote as JSON. A row that somehow isn't parseable is an empty list, not

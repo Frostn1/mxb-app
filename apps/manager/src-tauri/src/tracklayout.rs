@@ -23,9 +23,14 @@
 
 use crate::trackprog::{Feature, Relief, Segment, Start, Surface, Terrain, TrackProgram};
 
-/// The plot every generated track is laid out on, and its middle.
-const PLOT_M: f32 = 620.0;
-const CENTRE: f32 = PLOT_M / 2.0;
+/// The plot every generated track is laid out on.
+///
+/// Smaller than the 620 m it was, on purpose. A 1700 m lap inside a 620 m plot is shorter than
+/// the plot's own perimeter — 2160 m round the inside of the margin — so a ring fits
+/// comfortably and the walk has no reason to fold inwards. Indiana is 525 m across with a
+/// 2138 m lap: its lap is *longer* than its perimeter, so it has to double back through its
+/// own middle, and that is what a track looks like.
+const PLOT_M: f32 = 470.0;
 
 /// Under this radius a corner is no place for a takeoff: a rider cannot leave the ground
 /// square out of a turn that tight.
@@ -87,339 +92,734 @@ impl Rng {
     }
 }
 
-/// One turn of the outline, once it has been rounded off.
-struct Corner {
-    /// The arcs the turn is made of, widest at each end and tightest in the middle.
-    /// `(signed radius, degrees)`, positive turning right, matching [`Segment::Arc`].
-    arcs: Vec<(f32, f32)>,
-    /// How much of each edge beside it the rounding eats.
-    tangent: f32,
+/// What a lap is made of. `scripts/track-survey.py` prints this off the tracks' own `.trh`
+/// centrelines; a corner is same-handed turning under a 300 m radius with under ten metres of
+/// run let into it — Motorcycling Australia's own definition of a curve.
+///
+/// ```text
+///                     Indiana   Southwick   all 18
+///   lap                 2170 m     2217 m   1065-3055
+///   corners           16 (7.4)   18 (8.1)   7.4-10.3 per km
+///   arcs in a corner         4          5   1-6
+///   a corner's angle      159°       166°   90-166 (p50 136)
+///   apex radius         10.4 m     11.9 m   7.1-18.5
+///   ground per corner     68 m       74 m   14-82
+///   run between them      27 m       30 m   20-72
+/// ```
+const CORNERS_PER_KM: (f32, f32) = (7.4, 10.3);
+
+/// `crate::trackllm::corpus::LAP_M` refuses anything over 2600.
+const LAP_MAX_M: f32 = 2550.0;
+
+/// How much of a lap is tight enough to wear a rut. Indiana measures 8.4% under a 14 m
+/// radius and Southwick 7.3%.
+const TIGHT_SHARE: f32 = 0.10;
+
+/// The longest straight a rider may meet — the FFM's, and the only one any federation writes.
+const STRAIGHT_CAP_M: f32 = 125.0;
+
+/// The ground between the corners, as share of lap length by radius. A published lap is almost
+/// never straight — 2.9% of Indiana and 0.8% of Southwick — and a third of it drifts through a
+/// radius over 300 m, which rides as a straight and measures as an arc. Draw that band too
+/// tight and it reads as part of the corner beside it, which moves two statistics at once.
+///
+/// ```text
+///                    Indiana   Southwick
+///   a true straight     2.9%        0.8%
+///   R 40-80 m          16.7%       14.7%
+///   R 80-160           14.1%       13.6%
+///   R 160-300          11.2%       13.4%
+///   R 300-1000         18.1%       19.0%
+///   R over 1000        15.9%        8.2%
+/// ```
+const WANDER: [(f32, f32, f32); 5] = [
+    (40.0, 80.0, 0.21),
+    (80.0, 160.0, 0.19),
+    (160.0, 300.0, 0.17),
+    (300.0, 1000.0, 0.26),
+    (1000.0, 3000.0, 0.17),
+];
+
+/// How far the walk may run before it must be closing, and how near it may come to itself.
+const MARGIN_M: f32 = 26.0;
+/// The start spur stands beside the lap and needs ground of its own.
+const GATE_ROOM_M: f32 = 78.0;
+
+fn seg_length(s: &Segment) -> f32 {
+    match s {
+        Segment::Straight { length, .. } => *length,
+        Segment::Arc { radius, angle, .. } => radius.abs() * angle.to_radians(),
+    }
 }
 
-/// The outline: `n` points round the centre, at a radius that wobbles with the angle.
+fn chain_length(segs: &[Segment]) -> f32 {
+    segs.iter().map(seg_length).sum()
+}
+
+/// Where a segment leaves you, in the app's own frame.
+fn advance(pose: (f32, f32, f32), s: &Segment) -> (f32, f32, f32) {
+    let (x, z, h) = pose;
+    match s {
+        Segment::Straight { length, .. } => {
+            let (hx, hz) = crate::trackprog::heading_vector(h);
+            (x + hx * length, z + hz * length, h)
+        }
+        Segment::Arc { radius, angle, .. } => {
+            let a = angle.to_radians() * if *radius > 0.0 { 1.0 } else { -1.0 };
+            let nh = h + a;
+            (
+                x + radius * (h.cos() - nh.cos()),
+                z + radius * (nh.sin() - h.sin()),
+                nh,
+            )
+        }
+    }
+}
+
+/// The ground a segment covers: `(x, z, how far along the segment)`.
 ///
-/// Wobbled hard on purpose. A gentle loop turns 360° in total and a published lap turns 1400
-/// to 3600; the difference is corners that go the other way, and those only exist where the
-/// radius swings far enough in and out to bend the loop back on itself.
-fn outline(rng: &mut Rng, n: usize) -> Vec<(f32, f32)> {
-    let base = rng.range(185.0, 225.0);
-    let waves: [(f32, f32, f32); 3] = [
-        (rng.int(3, 6) as f32, rng.range(0.26, 0.40), rng.range(0.0, std::f32::consts::TAU)),
-        (rng.int(6, 10) as f32, rng.range(0.16, 0.28), rng.range(0.0, std::f32::consts::TAU)),
-        (rng.int(9, 13) as f32, rng.range(0.06, 0.14), rng.range(0.0, std::f32::consts::TAU)),
-    ];
-    let step = std::f32::consts::TAU / n as f32;
-    let mut radii: Vec<f32> = (0..n)
-        .map(|i| {
-            let th = step * i as f32;
-            let r: f32 = base
-                * (1.0 + waves.iter().map(|(k, a, p)| a * (k * th + p).sin()).sum::<f32>());
-            r.max(60.0)
-        })
-        .collect();
-    // How fast the loop may pull in and out.
-    //
-    // Star-shaped keeps the *centreline* from crossing, and that is not the same as a track
-    // not touching itself: a lap ten metres wide whose radius drops forty metres between two
-    // vertices folds back over its own ground, and the reviewer says so. The radius may not
-    // move by more than about the distance the loop travels in the same step, which is what
-    // holds the turn at each vertex under a fold.
-    for _ in 0..4 {
-        for i in 0..n {
-            let j = (i + 1) % n;
-            let allow = SLEW * radii[i] * step;
-            let d = radii[j] - radii[i];
-            if d.abs() > allow {
-                let half = (d.abs() - allow) * 0.5 * d.signum();
-                radii[i] += half;
-                radii[j] -= half;
+/// Each point carries its own distance, not the segment's. Giving a whole segment one age is
+/// what made every walk paint itself in on the first move: the piece just laid ends where the
+/// next one starts, so if its far end is dated from its own beginning it is still "old" track
+/// sitting right under the new piece, and nothing is ever legal.
+fn samples(pose: (f32, f32, f32), s: &Segment, step: f32, out: &mut Vec<(f32, f32, f32)>) {
+    match s {
+        Segment::Straight { length, .. } => {
+            let n = ((length / step) as usize).max(1);
+            let (hx, hz) = crate::trackprog::heading_vector(pose.2);
+            for k in 1..=n {
+                let t = length * k as f32 / n as f32;
+                out.push((pose.0 + hx * t, pose.1 + hz * t, t));
+            }
+        }
+        Segment::Arc { radius, angle, .. } => {
+            let ang = angle.to_radians();
+            let run = radius.abs() * ang;
+            let n = ((run / step) as usize).max(1);
+            for k in 1..=n {
+                let a = ang * k as f32 / n as f32 * if *radius > 0.0 { 1.0 } else { -1.0 };
+                let nh = pose.2 + a;
+                out.push((
+                    pose.0 + radius * (pose.2.cos() - nh.cos()),
+                    pose.1 + radius * (nh.sin() - pose.2.sin()),
+                    run * k as f32 / n as f32,
+                ));
             }
         }
     }
-    (0..n)
-        .map(|i| {
-            let th = step * i as f32;
-            (CENTRE + radii[i] * th.cos(), CENTRE + radii[i] * th.sin())
-        })
-        .collect()
 }
 
-/// How far the loop's radius may move from one vertex to the next, as a multiple of how far
-/// it travels round in the same step. Above about 1.2 the lap starts folding onto itself.
-const SLEW: f32 = 0.85;
-
-/// How much of an edge the two corners on it may take between them. The remainder is the
-/// straight, and a published lap has almost none: Indiana's whole lap carries one, of 62 m.
-const EDGE_FILL: f32 = 0.985;
-
-/// The most a merged run of same-way vertices may turn before it is left as two corners.
-/// Past about this the two edges either side run nearly parallel and their crossing point —
-/// the virtual apex the run is filleted about — shoots off to infinity.
-const MERGE_LIMIT_DEG: f32 = 172.0;
-
-/// Collapse runs of consecutive same-way vertices into one.
+/// The four turn-straight-turn ways from one pose to another, shortest first.
 ///
-/// The outline turns a little at every vertex and leaves a straight on every edge, so a lap
-/// approaches a corner *polygonally* — `arc R44, straight 31 m, arc R44, straight 29 m, arc
-/// R22` was one real approach, all of it turning the same way. Curvature snapping between
-/// zero and 1/44 every twenty metres is what made the racing line visibly weave, and capping
-/// each corner at one vertex is why nothing we drew turned more than 89° when Indiana's
-/// corners run to 313°.
-///
-/// A run of same-way vertices is one corner. Its two outer edges, extended, cross at a
-/// virtual apex; putting that point in place of the whole run gives a polygon that is still
-/// closed — the edges either side are the ones it already had — and filleting *it* gives one
-/// long chain where there were three corners and two straights.
-fn merge_runs(pts: &[(f32, f32)]) -> Vec<(f32, f32)> {
-    let n = pts.len();
-    if n < 6 {
-        return pts.to_vec();
-    }
-    let turn = |i: usize| -> f32 {
-        let (a, b, c) = (pts[(i + n - 1) % n], pts[i], pts[(i + 1) % n]);
-        let v1 = (b.0 - a.0, b.1 - a.1);
-        let v2 = (c.0 - b.0, c.1 - b.1);
-        (v1.0 * v2.1 - v1.1 * v2.0).atan2(v1.0 * v2.0 + v1.1 * v2.1)
-    };
-    // Start the walk at a vertex that turns the other way, so no run is split across the seam.
-    let start = (0..n)
-        .find(|i| turn(*i).signum() != turn((*i + 1) % n).signum())
-        .map_or(0, |i| (i + 1) % n);
-
-    let mut out: Vec<(f32, f32)> = Vec::with_capacity(n);
-    let mut i = 0usize;
-    while i < n {
-        let a = (start + i) % n;
-        let sign = turn(a).signum();
-        let mut deg = turn(a).abs().to_degrees();
-        let mut len = 1usize;
-        while i + len < n {
-            let b = (start + i + len) % n;
-            let t = turn(b);
-            if t.signum() != sign || deg + t.abs().to_degrees() > MERGE_LIMIT_DEG {
-                break;
+/// Only the CSC families: with a lap this size the RLR and LRL cases only matter when the two
+/// poses are almost on top of each other, and a lap that close to its own start has finished.
+fn dubins(start: (f32, f32, f32), goal: (f32, f32, f32), r: f32) -> Vec<(f32, Vec<Segment>)> {
+    let mut out: Vec<(f32, Vec<Segment>)> = Vec::new();
+    for s1 in [1.0f32, -1.0] {
+        for s2 in [1.0f32, -1.0] {
+            let rv1 = crate::trackprog::right_vector(start.2);
+            let rv2 = crate::trackprog::right_vector(goal.2);
+            let c1 = (start.0 + s1 * r * rv1.0, start.1 + s1 * r * rv1.1);
+            let c2 = (goal.0 + s2 * r * rv2.0, goal.1 + s2 * r * rv2.1);
+            let (dx, dz) = (c2.0 - c1.0, c2.1 - c1.1);
+            let d = dx.hypot(dz);
+            if d < 1e-6 {
+                continue;
             }
-            deg += t.abs().to_degrees();
-            len += 1;
-        }
-        if len == 1 {
-            out.push(pts[a]);
-            i += 1;
-            continue;
-        }
-        let last = (start + i + len - 1) % n;
-        let a0 = pts[(a + n - 1) % n];
-        let d1 = (pts[a].0 - a0.0, pts[a].1 - a0.1);
-        let b0 = pts[last];
-        let d2 = (pts[(last + 1) % n].0 - b0.0, pts[(last + 1) % n].1 - b0.1);
-        let cross = d1.0 * d2.1 - d1.1 * d2.0;
-        let span = (b0.0 - pts[a].0).hypot(b0.1 - pts[a].1).max(1.0);
-        let ok = if cross.abs() < 1e-4 {
-            None
-        } else {
-            let w = (b0.0 - a0.0, b0.1 - a0.1);
-            let t = (w.0 * d2.1 - w.1 * d2.0) / cross;
-            let v = (a0.0 + t * d1.0, a0.1 + t * d1.1);
-            // The apex has to be near the run it stands for, or the merge bends the lap into
-            // somewhere the outline never went.
-            let mid = ((pts[a].0 + b0.0) / 2.0, (pts[a].1 + b0.1) / 2.0);
-            if t > 1.0 && (v.0 - mid.0).hypot(v.1 - mid.1) < 1.6 * span {
-                Some(v)
+            let theta = dx.atan2(dz); // app frame: the heading of the line of centres
+            let (tangent_h, run) = if s1 == s2 {
+                // Same handedness: the straight is parallel to the line of centres.
+                (theta, d)
             } else {
-                None
+                // Opposite: the straight crosses between them, and only if they are far
+                // enough apart to have a common internal tangent.
+                if d < 2.0 * r {
+                    continue;
+                }
+                let alpha = (2.0 * r / d).min(1.0).acos();
+                (
+                    theta + if s1 > 0.0 { alpha } else { -alpha },
+                    (d * d - 4.0 * r * r).max(0.0).sqrt(),
+                )
+            };
+            let a1 = ((tangent_h - start.2) * s1).rem_euclid(std::f32::consts::TAU);
+            let a2 = ((goal.2 - tangent_h) * s2).rem_euclid(std::f32::consts::TAU);
+            let mut segs = Vec::new();
+            if a1 > 1e-4 {
+                segs.push(Segment::Arc { radius: r * s1, angle: a1.to_degrees(), rise: 0.0 });
             }
-        };
-        match ok {
-            Some(v) => {
-                out.push(v);
-                i += len;
+            if run > 0.5 {
+                segs.push(Segment::Straight { length: run, rise: 0.0 });
             }
-            None => {
-                out.push(pts[a]);
-                i += 1;
+            if a2 > 1e-4 {
+                segs.push(Segment::Arc { radius: r * s2, angle: a2.to_degrees(), rise: 0.0 });
             }
+            out.push((a1 * r + run + a2 * r, segs));
         }
     }
+    out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     out
 }
 
-/// How many arcs a corner of `deg` is made of, and how much wider than the apex each one runs.
+/// Which parts of the plot the lap has been near, on a coarse grid.
 ///
-/// A published corner is not one arc. Indiana's are three to nineteen, and the radius *inside
-/// a single corner* spans an order of magnitude — 6.4 m at the apex of its first hairpin and
-/// 72 m on the way in. That is what a rider feels as a corner that tightens and releases, and
-/// one arc cannot have it: filleting each vertex with a single radius is what left our lap
-/// reading as straights joined by corners, at 0.49 arcs to Indiana's 0.99.
-///
-/// Every arc is the same *length*, not the same turn. That is the part of the signature that
-/// matters: Indiana's arcs run 9.5 to 27 m almost regardless of radius (p50 15.8 m), so the
-/// wide ones on the way in are long sweeps that turn only a degree or two, and nearly all of
-/// the corner's heading change happens on the short tight arc at the apex. Turning each arc
-/// equally instead makes the entry arcs enormous and the apex no tighter than the rest.
-///
-/// Equal length means turn share goes as `1/radius`, which is all this has to say.
-fn chain_shape(deg: f32, rng: &mut Rng) -> Vec<(f32, f32)> {
-    let k = ((deg / rng.range(13.0, 19.0)).round() as i32).clamp(1, 9) as usize;
-    if k <= 1 {
-        return vec![(1.0, 1.0)];
-    }
-    // Indiana's radius spans 56x inside the median corner — apex 11 m, entry 70 to 200.
-    let spread = rng.range(8.0, 28.0);
-    let bias = rng.range(1.6, 2.6);
-    let mid = (k - 1) as f32 / 2.0;
-    let mults: Vec<f32> = (0..k)
-        .map(|i| {
-            let u = (i as f32 - mid).abs() / mid.max(1e-3);
-            1.0 + spread * u.powf(bias)
-        })
-        .collect();
-    let total: f32 = mults.iter().map(|m| 1.0 / m).sum();
-    mults.iter().map(|m| (*m, (1.0 / m) / total)).collect()
+/// The walk used to be scored by how much open ground lay ahead of it, and the most open
+/// ground is always the perimeter — so it followed the boundary round and left the middle
+/// empty, which from above is a giant ring. Rewarding *new ground covered* instead makes it
+/// fill the plot.
+struct Cover {
+    cell: f32,
+    n: usize,
+    seen: Vec<bool>,
 }
 
-/// The tangent length a chain of unit apex radius needs, for a corner turning `deg`.
-///
-/// The chain is symmetric, so it leaves the corner tangent to both edges the same distance
-/// from the vertex and drops into the single fillet's place exactly — the polygon still
-/// closes, and so does the lap. Walk it once and measure: for one arc this is `tan(deg/2)`,
-/// which is what the fillet used before.
-fn chain_tangent(shape: &[(f32, f32)], deg: f32) -> f32 {
-    let total = deg.to_radians();
-    let (mut x, mut z, mut th) = (0.0f32, 0.0f32, 0.0f32);
-    for (m, frac) in shape {
-        let d = frac * total;
-        x += m * ((th + d).sin() - th.sin());
-        z += m * (th.cos() - (th + d).cos());
-        th += d;
+impl Cover {
+    fn new(plot: f32) -> Self {
+        let cell = 26.0;
+        let n = (plot / cell) as usize + 1;
+        Cover { cell, n, seen: vec![false; n * n] }
     }
-    x.hypot(z) / (2.0 * (total / 2.0).cos()).abs().max(1e-3)
-}
 
-/// Round every corner of the outline, and keep what is left of each edge as a straight.
-///
-/// The radius is chosen by how hard the corner is — a hairpin is 9 to 19 m and a sweeper is a
-/// hundred — and then taken as large as the edges allow. Both matter. Using the hairpin's
-/// radius for every bend leaves a lap reading as straights joined by corners: an arc of radius
-/// 25 through 15° is seven metres long and the forty metres either side of it are straight.
-/// Taking a random radius inside the band rather than the largest one available is worth
-/// twenty points of arc fraction on its own.
-fn fillet(pts: &[(f32, f32)], rng: &mut Rng) -> (Vec<Segment>, Start) {
-    let n = pts.len();
-    let corners: Vec<Option<Corner>> = (0..n)
-        .map(|i| {
-            let (a, b, c) = (pts[(i + n - 1) % n], pts[i], pts[(i + 1) % n]);
-            let v1 = (b.0 - a.0, b.1 - a.1);
-            let v2 = (c.0 - b.0, c.1 - b.1);
-            let (l1, l2) = (v1.0.hypot(v1.1).max(1e-6), v2.0.hypot(v2.1).max(1e-6));
-            let cross = v1.0 * v2.1 - v1.1 * v2.0;
-            let dot = v1.0 * v2.0 + v1.1 * v2.1;
-            let delta = cross.atan2(dot);
-            if delta.abs() < 6f32.to_radians() {
-                return None;
-            }
-            let half = delta.abs() / 2.0;
-            let deg = delta.abs().to_degrees();
-            // Tight. A corner only wears grooves if riders lean on it, and nothing leans on
-            // a hundred-metre sweeper: a lap of them rode, in one word, with "no ruts". So
-            // the bands stop at 45 m, and most of the lap sits well under that.
-            let (lo, hi) = if deg >= 80.0 {
-                (7.0, 12.0)
-            } else if deg >= 45.0 {
-                (12.0, 24.0)
-            } else if deg >= 22.0 {
-                (18.0, 34.0)
-            } else {
-                (26.0, 45.0)
-            };
-            // The band is the *apex* radius now; the arcs either side of it open out from
-            // there, so a corner is tight where it is ridden and wide on the way in.
-            let _ = (l1, l2, half);
-            let shape = chain_shape(deg, rng);
-            let unit = chain_tangent(&shape, deg);
-            let mut r = hi * rng.range(0.88, 1.0);
-            if r < lo {
-                r = lo;
-            }
-            // Screen-space positive cross is a left turn, and a left turn is a negative
-            // radius.
-            let sign = if delta > 0.0 { -1.0 } else { 1.0 };
-            Some(Corner {
-                arcs: shape.iter().map(|(m, f)| (r * m * sign, deg * f)).collect(),
-                tangent: r * unit,
-            })
-        })
-        .collect();
+    fn index(&self, x: f32, z: f32) -> Option<usize> {
+        if x < 0.0 || z < 0.0 {
+            return None;
+        }
+        let (c, r) = ((x / self.cell) as usize, (z / self.cell) as usize);
+        (c < self.n && r < self.n).then_some(r * self.n + c)
+    }
 
-    // Fit the corners to the edges they actually share.
-    //
-    // Capping each corner at `0.49 * min(both its edges)` is what left twenty-metre straights
-    // all round the lap: it is the *same* budget whatever shape the corner is, and where one
-    // edge is twice its neighbour the short one's allowance is spent on the long one too. The
-    // real constraint is per edge — the two corners on it may not want more of it than it has
-    // — so ask for what the band wants and relax until that holds. Whatever is left over is
-    // the straight, and there is very little of it.
-    let mut want: Vec<f32> = corners.iter().map(|c| c.as_ref().map_or(0.0, |c| c.tangent)).collect();
-    for _ in 0..400 {
-        let mut moved = false;
-        for i in 0..n {
-            let edge = (pts[(i + 1) % n].0 - pts[i].0).hypot(pts[(i + 1) % n].1 - pts[i].1);
-            let j = (i + 1) % n;
-            let sum = want[i] + want[j];
-            if sum > EDGE_FILL * edge {
-                let f = EDGE_FILL * edge / sum.max(1e-6);
-                want[i] *= f;
-                want[j] *= f;
-                moved = true;
+    /// How many cells this piece would visit that nothing has visited yet.
+    fn fresh(&self, pts: &[(f32, f32, f32)]) -> usize {
+        let mut hit: Vec<usize> = Vec::new();
+        for (x, z, _) in pts {
+            if let Some(i) = self.index(*x, *z) {
+                if !self.seen[i] && !hit.contains(&i) {
+                    hit.push(i);
+                }
             }
         }
-        if !moved {
+        hit.len()
+    }
+
+    /// Mark the ground, and hand back what to unmark if the move is taken back.
+    fn add(&mut self, pts: &[(f32, f32, f32)]) -> Vec<usize> {
+        let mut marked = Vec::new();
+        for (x, z, _) in pts {
+            if let Some(i) = self.index(*x, *z) {
+                if !self.seen[i] {
+                    self.seen[i] = true;
+                    marked.push(i);
+                }
+            }
+        }
+        marked
+    }
+
+    fn undo(&mut self, marked: &[usize]) {
+        for i in marked {
+            self.seen[*i] = false;
+        }
+    }
+}
+
+/// What the lap has used, on a coarse grid, so "is this clear" is cheap.
+struct Ground {
+    cell: f32,
+    n: usize,
+    plot: f32,
+    used: Vec<Vec<(f32, f32, f32)>>,
+}
+
+impl Ground {
+    fn new(plot: f32) -> Self {
+        let cell = 8.0;
+        let n = (plot / cell) as usize + 1;
+        Ground { cell, n, plot, used: vec![Vec::new(); n * n] }
+    }
+
+    fn cells(&self, x: f32, z: f32, reach: f32) -> impl Iterator<Item = usize> + '_ {
+        let c0 = ((x - reach) / self.cell).max(0.0) as usize;
+        let c1 = (((x + reach) / self.cell) as usize).min(self.n - 1);
+        let r0 = ((z - reach) / self.cell).max(0.0) as usize;
+        let r1 = (((z + reach) / self.cell) as usize).min(self.n - 1);
+        let n = self.n;
+        (r0..=r1).flat_map(move |r| (c0..=c1).map(move |c| r * n + c))
+    }
+
+    /// Lay ground, and hand back how much each cell grew by so it can be taken back.
+    fn add(&mut self, pts: &[(f32, f32, f32)], at: f32) -> Vec<(usize, usize)> {
+        let mut grew: Vec<(usize, usize)> = Vec::new();
+        for (x, z, along) in pts {
+            if *x < 0.0 || *z < 0.0 {
+                continue;
+            }
+            let i = (*z / self.cell) as usize * self.n + (*x / self.cell) as usize;
+            if i < self.used.len() {
+                self.used[i].push((*x, *z, at + along));
+                match grew.iter_mut().find(|(c, _)| *c == i) {
+                    Some(e) => e.1 += 1,
+                    None => grew.push((i, 1)),
+                }
+            }
+        }
+        grew
+    }
+
+    fn undo(&mut self, grew: &[(usize, usize)]) {
+        for (i, k) in grew {
+            let keep = self.used[*i].len() - k;
+            self.used[*i].truncate(keep);
+        }
+    }
+
+    /// Is anything already laid within `clear` of here? Stops at the first one.
+    ///
+    /// `nearest` measures, which costs a sweep of every cell inside sixty metres — 225 of
+    /// them — when the walk only ever asks whether one point is too close. This looks at 25.
+    ///
+    /// Both bounds are ages round the lap. `ignore_after` is the last thirty metres, because a
+    /// corner may come close to the run that fed it. `ignore_before` is for the way home: a
+    /// lap arriving back at its gate necessarily runs up beside the straight it left on.
+    fn blocked(&self, x: f32, z: f32, ignore_after: f32, ignore_before: f32, clear: f32) -> bool {
+        for i in self.cells(x, z, clear) {
+            for (px, pz, age) in &self.used[i] {
+                if *age > ignore_after || *age < ignore_before {
+                    continue;
+                }
+                if (px - x) * (px - x) + (pz - z) * (pz - z) < clear * clear {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn nearest(&self, x: f32, z: f32, ignore_after: f32) -> f32 {
+        let reach = 60.0;
+        let mut best = reach;
+        for i in self.cells(x, z, reach) {
+            for (px, pz, age) in &self.used[i] {
+                if *age > ignore_after {
+                    continue;
+                }
+                let d = (px - x).hypot(pz - z);
+                if d < best {
+                    best = d;
+                }
+            }
+        }
+        best
+    }
+
+    /// How open the ground is here — used to steer towards what has not been ridden.
+    fn room(&self, x: f32, z: f32, ignore_after: f32) -> f32 {
+        let edge = x.min(z).min(self.plot - x).min(self.plot - z);
+        self.nearest(x, z, ignore_after).min(edge)
+    }
+}
+
+/// A piece of the ground between corners: a radius off the corpus, and 15 to 45 m of it.
+///
+/// Drawn as a length with the angle following, because a fixed angle band makes a 500 m
+/// sweeper 200 m long. Indiana's segments average eighteen metres.
+fn a_wander(rng: &mut Rng) -> Vec<Segment> {
+    let roll = rng.range(0.0, 1.0);
+    let mut acc = 0.0;
+    let mut band = WANDER[WANDER.len() - 1];
+    for w in WANDER {
+        acc += w.2;
+        if roll <= acc {
+            band = w;
             break;
         }
     }
-    let corners: Vec<Option<Corner>> = corners
-        .into_iter()
-        .zip(&want)
-        .map(|(c, t)| {
-            c.map(|c| {
-                let f = t / c.tangent.max(1e-6);
-                Corner {
-                    arcs: c.arcs.iter().map(|(r, a)| (r * f, *a)).collect(),
-                    tangent: *t,
-                }
-            })
-        })
-        .collect();
+    let r = rng.range(band.0.ln(), band.1.ln()).exp();
+    let run = rng.range(15.0, 45.0);
+    let side = if rng.chance(0.5) { 1.0 } else { -1.0 };
+    vec![Segment::Arc {
+        radius: r * side,
+        angle: (run / r).to_degrees(),
+        rise: 0.0,
+    }]
+}
 
-    let mut segs = Vec::with_capacity(n * 2);
-    for i in 0..n {
-        let (a, b) = (pts[i], pts[(i + 1) % n]);
-        let edge = (b.0 - a.0).hypot(b.1 - a.1);
-        let here = corners[i].as_ref().map_or(0.0, |c| c.tangent);
-        let next = corners[(i + 1) % n].as_ref().map_or(0.0, |c| c.tangent);
-        let run = edge - here - next;
-        if run > 0.001 {
-            segs.push(Segment::Straight { length: run, rise: 0.0 });
-        }
-        if let Some(c) = &corners[(i + 1) % n] {
-            // Not rounded. Fifty corners rounded to a tenth of a degree is a couple of
-            // degrees of heading by the end of the lap, and a couple of degrees over two
-            // kilometres is a lap that misses itself by forty metres.
-            for (radius, angle) in &c.arcs {
-                segs.push(Segment::Arc { radius: *radius, angle: *angle, rise: 0.0 });
+/// One corner, built the way a real one is: in on a loosening arc, round, and out.
+///
+/// A published corner is not one arc — Indiana's median is four and Southwick's five — which
+/// is why it covers seventy metres of ground turning through 160 degrees where a lone arc of
+/// the same apex radius covers thirty. Offered one arc at a time the walk could only reach the
+/// corpus's tight radii with a hairpin, and a same-handed wander landing beside it read as one
+/// corner of 197 degrees.
+fn a_corner(rng: &mut Rng) -> Vec<Segment> {
+    let side = if rng.chance(0.5) { 1.0 } else { -1.0 };
+    if rng.chance(0.22) {
+        // Not every corner is a hairpin: a fifth of the corpus's are a single sweep.
+        return vec![Segment::Arc {
+            radius: side * rng.range(15.0, 32.0),
+            angle: rng.range(40.0, 95.0),
+            rise: 0.0,
+        }];
+    }
+    vec![
+        Segment::Arc { radius: side * rng.range(26.0, 60.0), angle: rng.range(22.0, 50.0), rise: 0.0 },
+        Segment::Arc { radius: side * rng.range(8.0, 15.0), angle: rng.range(55.0, 105.0), rise: 0.0 },
+        Segment::Arc { radius: side * rng.range(18.0, 45.0), angle: rng.range(18.0, 45.0), rise: 0.0 },
+    ]
+}
+
+/// Is this chain a corner, or the ground between two of them?
+fn is_corner(chain: &[Segment]) -> bool {
+    chain.len() > 1
+        || matches!(chain.first(), Some(Segment::Arc { angle, .. }) if *angle >= 40.0)
+}
+
+/// The longest unbroken straight a rider meets, metres — merged the way the app merges.
+///
+/// Mirrors `Station::straight_runs`: consecutive straights are one straight, and so is the
+/// pair either side of the finish line, because a lap that ends on a straight and begins on
+/// one runs through the line without a corner in it.
+fn longest_straight(segs: &[Segment], opening: f32) -> f32 {
+    let mut runs = Vec::new();
+    let mut run = 0.0;
+    for s in segs {
+        match s {
+            Segment::Straight { length, .. } => run += length,
+            _ => {
+                if run > 0.0 {
+                    runs.push(run);
+                }
+                run = 0.0;
             }
         }
     }
+    // Through the line: whatever the lap ends on, plus the opening straight it rejoins.
+    runs.push(run + opening);
+    runs.into_iter().fold(0.0f32, f32::max)
+}
 
-    // Where the lap begins: the first tangent point, running along the first edge.
-    let (a, b) = (pts[0], pts[1]);
-    let t0 = corners[0].as_ref().map_or(0.0, |c| c.tangent);
-    let l = (b.0 - a.0).hypot(b.1 - a.1).max(1e-6);
-    let start = Start {
-        x: a.0 + (b.0 - a.0) / l * t0,
-        z: a.1 + (b.1 - a.1) / l * t0,
-        angle: (b.0 - a.0).atan2(b.1 - a.1).to_degrees().rem_euclid(360.0),
-    };
-    (segs, start)
+/// One move on the lap, and what it would take to undo it.
+struct Step {
+    pose: (f32, f32, f32),
+    laid: f32,
+    n: usize,
+    cands: Vec<Vec<Segment>>,
+    cursor: usize,
+    ground: Vec<(usize, usize)>,
+    cover: Vec<usize>,
+    since: f32,
+    corners: u32,
+    tight: f32,
+}
+
+/// Walk a lap out of the ground and dock it back onto its own start.
+///
+/// Each step offers the same handful of moves — a run, a gentle wander, or a whole corner
+/// either way — and the one taken is whichever leaves the track in the most open ground while
+/// clearing everything already laid. When the budget runs down, the shortest Dubins path back
+/// to the start pose that is also clear closes the lap exactly, which is why there is no
+/// return leg to route round anything.
+///
+/// And it takes moves back. Greedy, sixty seeds gave one lap and the other fifty-nine ran out
+/// of legal moves 150 to 900 m in, because the first dead end was final. The moves live on a
+/// stack, and a dead end pops one and takes the next-best instead.
+fn walk(rng: &mut Rng, plot: f32, width: f32, want_m: f32) -> Option<(Vec<Segment>, Start)> {
+    let clear = width + 5.0;
+    // Drawn once: redrawn at every step it averages to the middle and the noise decides.
+    let want_rate = rng.range(CORNERS_PER_KM.0, CORNERS_PER_KM.1) / 1000.0;
+    let start = (plot * 0.5, MARGIN_M + GATE_ROOM_M, 0.0); // facing +z, up the plot
+    let mut ground = Ground::new(plot);
+    let mut cover = Cover::new(plot);
+    let mut segs: Vec<Segment> = Vec::new();
+    let mut pts = Vec::new();
+
+    // The first stretch is the start straight, and nothing may be built on it.
+    let opening = Segment::Straight { length: rng.range(90.0, 130.0), rise: 0.0 };
+    samples(start, &opening, 3.0, &mut pts);
+    ground.add(&pts, 0.0);
+    cover.add(&pts);
+    let mut pose = advance(start, &opening);
+    let mut laid = seg_length(&opening);
+    let opening_m = laid;
+    segs.push(opening);
+
+    let cap = (want_m * 1.25).min(LAP_MAX_M);
+    let mut stack: Vec<Step> = Vec::new();
+    let mut budget = 9000u32;
+    let (mut since_corner, mut corners_laid, mut tight_m) = (0.0f32, 0u32, 0.0f32);
+    let mut node: Option<(Vec<Vec<Segment>>, usize)> = None;
+
+    while budget > 0 {
+        if node.is_none() {
+            if laid > want_m * 0.86 {
+                if let Some(home) = home_from(
+                    rng, &ground, plot, clear, start, pose, laid, &segs, opening_m,
+                ) {
+                    segs.extend(home);
+                    return Some((
+                        segs,
+                        Start {
+                            x: start.0,
+                            z: start.1,
+                            angle: start.2.to_degrees().rem_euclid(360.0),
+                        },
+                    ));
+                }
+            }
+            let cands = if laid < cap {
+                offers(rng, &ground, &cover, &segs, pose, laid, since_corner, corners_laid,
+                       tight_m, want_rate)
+            } else {
+                Vec::new()
+            };
+            node = Some((cands, 0));
+        }
+        budget -= 1;
+
+        // Take the best move left here that is actually clear. Ignore the last thirty metres
+        // of track when checking: a corner is allowed to come close to the run that fed it.
+        let (cands, cursor) = node.as_mut().unwrap();
+        let mut chain: Option<Vec<Segment>> = None;
+        while *cursor < cands.len() {
+            let c = cands[*cursor].clone();
+            *cursor += 1;
+            if legal(&ground, plot, clear, pose, &c, laid - 34.0, 0.0) {
+                chain = Some(c);
+                break;
+            }
+        }
+
+        let Some(chain) = chain else {
+            // Painted in. Take the last move back and try this node's next-best instead.
+            let back = stack.pop()?;
+            ground.undo(&back.ground);
+            cover.undo(&back.cover);
+            segs.truncate(segs.len() - back.n);
+            pose = back.pose;
+            laid = back.laid;
+            since_corner = back.since;
+            corners_laid = back.corners;
+            tight_m = back.tight;
+            node = Some((back.cands, back.cursor));
+            continue;
+        };
+
+        let (cands, cursor) = node.take().unwrap();
+        let mut grew = Vec::new();
+        let mut marked = Vec::new();
+        let (mut p, mut at) = (pose, laid);
+        for seg in &chain {
+            pts.clear();
+            samples(p, seg, 3.0, &mut pts);
+            for (i, k) in ground.add(&pts, at) {
+                match grew.iter_mut().find(|(c, _): &&mut (usize, usize)| *c == i) {
+                    Some(e) => e.1 += k,
+                    None => grew.push((i, k)),
+                }
+            }
+            marked.extend(cover.add(&pts));
+            at += seg_length(seg);
+            p = advance(p, seg);
+        }
+        stack.push(Step {
+            pose,
+            laid,
+            n: chain.len(),
+            cands,
+            cursor,
+            ground: grew,
+            cover: marked,
+            since: since_corner,
+            corners: corners_laid,
+            tight: tight_m,
+        });
+        let run = chain_length(&chain);
+        if is_corner(&chain) {
+            corners_laid += 1;
+            since_corner = 0.0;
+            tight_m += chain
+                .iter()
+                .filter(|s| matches!(s, Segment::Arc { radius, .. } if radius.abs() < 14.0))
+                .map(|s| seg_length(s))
+                .sum::<f32>();
+        } else {
+            since_corner += run;
+        }
+        pose = p;
+        laid += run;
+        segs.extend(chain);
+    }
+    None
+}
+
+/// Would this chain of segments fit on ground nothing has used?
+#[allow(clippy::too_many_arguments)]
+fn legal(
+    ground: &Ground,
+    plot: f32,
+    clear: f32,
+    from: (f32, f32, f32),
+    chain: &[Segment],
+    age_cut: f32,
+    skip_before: f32,
+) -> bool {
+    let mut p = from;
+    let mut pts = Vec::new();
+    for seg in chain {
+        pts.clear();
+        samples(p, seg, 2.5, &mut pts);
+        for (x, z, _) in &pts {
+            if !(MARGIN_M..=plot - MARGIN_M).contains(x)
+                || !(MARGIN_M..=plot - MARGIN_M).contains(z)
+            {
+                return false;
+            }
+            if ground.blocked(*x, *z, age_cut, skip_before, clear) {
+                return false;
+            }
+        }
+        p = advance(p, seg);
+    }
+    true
+}
+
+/// Every move worth trying here, best first.
+///
+/// Scored on ground it would be the first to visit — per metre travelled, not per move,
+/// because rewarding raw coverage buys it with long straights, and a lap of long runs with
+/// angles between them is not a track.
+#[allow(clippy::too_many_arguments)]
+fn offers(
+    rng: &mut Rng,
+    ground: &Ground,
+    cover: &Cover,
+    segs: &[Segment],
+    pose: (f32, f32, f32),
+    laid: f32,
+    since_corner: f32,
+    corners_laid: u32,
+    tight_m: f32,
+    want_rate: f32,
+) -> Vec<Vec<Segment>> {
+    let mut running = 0.0;
+    for prev in segs.iter().rev() {
+        match prev {
+            Segment::Straight { length, .. } => running += length,
+            _ => break,
+        }
+    }
+    let mut cand: Vec<Vec<Segment>> = Vec::new();
+    // A straight, unless the lap is already on one long enough. Consecutive straights are
+    // colinear, so the app's `straight_runs` reads a row of them as ONE straight.
+    let room = STRAIGHT_CAP_M - running;
+    if room > 30.0 {
+        cand.push(vec![Segment::Straight { length: rng.range(30.0, room.min(75.0)), rise: 0.0 }]);
+    }
+    // The lap's own wander, and most of the ground between corners.
+    for _ in 0..7 {
+        cand.push(a_wander(rng));
+    }
+    // And corners, whole — but only once the lap has run far enough since the last one for the
+    // two to be told apart, or a same-handed pair reads as one corner of twice the angle. The
+    // corpus's p50 run between corners is 27 to 30 m.
+    if since_corner >= 20.0 {
+        for _ in 0..4 {
+            cand.push(a_corner(rng));
+        }
+    }
+
+    let behind = (corners_laid as f32) < laid * want_rate;
+    let mut scored: Vec<(f32, Vec<Segment>)> = Vec::with_capacity(cand.len());
+    let mut pts = Vec::new();
+    for chain in cand {
+        let run_m = chain_length(&chain);
+        pts.clear();
+        let mut p = pose;
+        for seg in &chain {
+            samples(p, seg, 6.0, &mut pts);
+            p = advance(p, seg);
+        }
+        let mut score = 190.0 * cover.fresh(&pts) as f32 / run_m.max(1.0);
+        let (hx, hz) = crate::trackprog::heading_vector(p.2);
+        score += 0.35 * ground.room(p.0 + hx * 26.0, p.1 + hz * 26.0, laid - 34.0);
+        if is_corner(&chain) {
+            // Corners are the point — but eight a kilometre, not as many as will fit.
+            score += if behind { 34.0 } else { -22.0 };
+            let apex = chain
+                .iter()
+                .map(|s| match s {
+                    Segment::Arc { radius, .. } => radius.abs(),
+                    _ => f32::MAX,
+                })
+                .fold(f32::MAX, f32::min);
+            if apex < 14.0 && tight_m < laid * TIGHT_SHARE {
+                score += 20.0;
+            }
+        }
+        scored.push((score, chain));
+    }
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored.into_iter().map(|(_, c)| c).collect()
+}
+
+/// A way back onto the start pose that lands, is clear, and breaks no rule.
+#[allow(clippy::too_many_arguments)]
+fn home_from(
+    rng: &mut Rng,
+    ground: &Ground,
+    plot: f32,
+    clear: f32,
+    start: (f32, f32, f32),
+    pose: (f32, f32, f32),
+    laid: f32,
+    segs: &[Segment],
+    opening: f32,
+) -> Option<Vec<Segment>> {
+    // Several radii, not one. A Dubins path is fixed by the radius you give it, so a single
+    // draw is a single shape: with the gate exemption tightened to an age, one shape closed on
+    // two seeds in three and the rest walked on to the cap, which showed up as 12.6 corners a
+    // kilometre. Five radii is five shapes, and the shortest that clears wins.
+    let mut ways: Vec<(f32, Vec<Segment>)> = Vec::new();
+    for r in [14.0f32, 18.0, 23.0, 29.0, 36.0] {
+        ways.extend(dubins(pose, start, r * rng.range(0.92, 1.08)));
+    }
+    ways.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    for (_, home) in ways {
+        // Walked, not trusted: one of the four families has a sign in it that only bites on
+        // some geometries, and the symptom is a lap that misses itself by thirty metres.
+        let landed = home.iter().fold(pose, |p, s| advance(p, s));
+        if (landed.0 - start.0).hypot(landed.1 - start.1) > 0.25 {
+            continue;
+        }
+        // The way home may run up beside the start straight — that is where it is going — so
+        // the opening straight is not an obstacle to it, and nothing else is excused.
+        //
+        // This used to be a disc round the start pose, which excused every *other* piece of
+        // lap that happened to pass through the disc too: `review` caught a way home running
+        // 12 m from a mid-lap straight on a 15 m track. Ages are exact where a radius is not.
+        if !legal(ground, plot, clear, pose, &home, laid - 34.0, opening) {
+            continue;
+        }
+        // The way home is part of the lap and its own length counts: laps came out at 2627 and
+        // 2820 m because the walk stopped at the cap and Dubins added on top of it.
+        if laid + chain_length(&home) > LAP_MAX_M {
+            continue;
+        }
+        // And no straight on the finished lap may run past the FFM's 125 m. Checked on the
+        // whole lap: consecutive straights are colinear so `straight_runs` reads a row of them
+        // as one, and a Dubins path's straight sits in its middle.
+        let mut all: Vec<Segment> = segs.to_vec();
+        all.extend(home.iter().copied());
+        if longest_straight(&all, opening) > STRAIGHT_CAP_M {
+            continue;
+        }
+        if home
+            .iter()
+            .all(|s| !matches!(s, Segment::Arc { angle, .. } if *angle >= 200.0))
+        {
+            return Some(home);
+        }
+    }
+    None
 }
 
 /// Where each segment sits round the lap, and how tight it is there.
@@ -444,6 +844,31 @@ fn spans(segs: &[Segment]) -> (f32, Vec<(f32, f32, Option<f32>)>) {
     (at, out)
 }
 
+/// How much run a jump's own faces take, metres — through the app's own arithmetic.
+///
+/// `scripts/track-walk.py` mirrors this by hand and nothing enforces the mirror, which is how
+/// it came to hold a 27 degree face angle after `JUMP_FACE_DEG` moved to 38. Here it is the
+/// same call the builder makes.
+fn faces(height: f32) -> f32 {
+    lip_run(height) + landing_run(height)
+}
+
+fn lip_run(height: f32) -> f32 {
+    crate::trackprog::face_run(
+        height,
+        crate::trackprog::JUMP_FACE_DEG,
+        crate::trackprog::JUMP_FACE_MIN_M,
+    )
+}
+
+fn landing_run(height: f32) -> f32 {
+    crate::trackprog::face_run(
+        height,
+        crate::trackprog::JUMP_LANDING_DEG,
+        crate::trackprog::JUMP_LANDING_MIN_M,
+    )
+}
+
 /// Jumps, placed by distance round the lap rather than by which segment they land on.
 ///
 /// Published tracks put them everywhere: Indiana is 109 arcs to 11 straights and still carries
@@ -458,6 +883,8 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             .any(|(a, b, r)| r.is_some_and(|r| r < TIGHT_M) && *b > at && *a < at + length)
     };
     let mut out = Vec::new();
+    // The first stretch is where the gate row goes, and forty riders arrive at the first jump
+    // in a pack. Leave it bare.
     let mut pos = START_CLEAR_M;
     while pos < total - 40.0 {
         let room = total - 20.0 - pos;
@@ -465,58 +892,96 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             pos += 12.0;
             continue;
         }
-        // No whoops. Asked for outright, after riding a lap with them: they are the one
-        // thing on a track that has to be built right or not at all, and ours are not.
+        // No whoops. Asked for outright, after riding a lap with them: they are the one thing
+        // on a track that has to be built right or not at all, and ours are not.
         let pick = rng.range(0.0, 1.0);
         let length;
-        if pick < 0.55 && room > 30.0 {
-            // A table a rider can actually jump. The first ones out of here were 18 m long
-            // and a metre high, which from the seat is a speed bump.
-            length = rng.range(19.0, 27.0).min(room);
-            out.push(Feature::Tabletop {
+        if pick < 0.36 && room > 30.0 {
+            // A table's size is its *deck*, with the faces added on. The faces are set by the
+            // published lip and landing angles and come to thirty-odd metres on their own, so
+            // stating a 40 m table asks for a 6 m top and gets a long rounded hill.
+            //
+            // Capped at three metres: Motorcycling Australia and Motorcycling New Zealand both
+            // write "jumps must not exceed 3m in height", and `corpus::FEATURE_HEIGHT_M` holds
+            // a program to it. This used to draw up to 3.4 and every table was outside it.
+            let height = rng.range(2.4, 3.0);
+            length = (rng.range(16.0, 27.0) + faces(height)).min(room);
+            out.push(Feature::Tabletop { at: pos, length, height });
+        } else if pick < 0.55 && room > 30.0 {
+            // A table is not always flat end to end. A whale tail rises, dips over its middle
+            // and rises again before the landing — two crests a rider can either double or
+            // roll — which is a shape a tabletop's three numbers cannot describe.
+            //
+            // Drawn in metres and normalised afterwards, so the take-off gets the same run a
+            // tabletop of this height gets. Drawn as fractions it had 3.6 m of lip in 8.5 m of
+            // ground, and from the seat that is a wall.
+            let h = rng.range(2.4, 3.0);
+            let dip = rng.range(0.30, 0.40);
+            let (up, down) = (lip_run(h), landing_run(h));
+            let near = up + 4.0 + down * 0.55;
+            let marks = [
+                (0.0, 0.0),
+                (up, h),
+                (up + 4.0, h),
+                (near, h * dip),
+                (near + 11.0, h * 0.66),
+                (near + 11.0 + down * 0.7, h * 0.16),
+                (near + 11.0 + down, 0.0),
+            ];
+            let span = marks[marks.len() - 1].0;
+            length = span.min(room);
+            let scale = length / span;
+            out.push(Feature::Custom {
                 at: pos,
                 length,
-                height: rng.range(2.4, 3.4),
+                shape: marks
+                    .iter()
+                    .map(|(m, v)| crate::trackprog::ShapePoint { u: m / span, h: v * scale })
+                    .collect(),
             });
-        } else if pick < 0.68 && room > 26.0 {
-            let gap = rng.range(3.5, 7.5);
-            length = (gap + 14.0).min(room);
-            out.push(Feature::Double { at: pos, height: rng.range(0.8, 1.3), gap, lip: 4.0 });
         } else if pick < 0.82 && room > 24.0 {
-            length = rng.range(24.0, 34.0).min(room);
-            out.push(Feature::StepUp { at: pos, length, height: rng.range(1.0, 1.7) });
+            // A climb rather than a wall with a ramp on it.
+            length = rng.range(34.0, 48.0).min(room);
+            out.push(Feature::StepUp { at: pos, length, height: rng.range(1.2, 2.0) });
         } else {
             length = rng.range(10.0, 16.0).min(room);
             if length < 8.0 {
                 break;
             }
-            out.push(Feature::Roller { at: pos, length, height: rng.range(0.55, 0.95) });
+            out.push(Feature::Roller { at: pos, length, height: rng.range(0.7, 1.2) });
         }
-        // Close together. A lap that rode as "a lot of flat long sections, almost zero
-        // features" was leaving up to 34 m of nothing between one jump and the next, on top
-        // of whatever the corners took.
-        pos += length + rng.range(8.0, 20.0);
+        pos += length + rng.range(6.0, 15.0);
     }
     out
 }
 
 /// One lap, from one number. Not checked — see [`search`] for that.
-pub fn draw(seed: u64) -> TrackProgram {
+pub fn draw(seed: u64) -> Option<TrackProgram> {
     let mut rng = Rng::new(seed);
-    let vertices = rng.int(64, 84) as usize;
-    let points = merge_runs(&outline(&mut rng, vertices));
-    let (segments, start) = fillet(&points, &mut rng);
+    // Ridden and called "little skinny": ten to thirteen and a half metres is the bottom of
+    // what the corpus allows, and a national is wider than that.
+    let width = rng.range(14.5, 18.0);
+    // And longer: 1451 m rode as "overall small" and 2400 m "a bit too big". Indiana is 2138.
+    let mut grown = None;
+    for _ in 0..6 {
+        let want = rng.range(2000.0, 2350.0);
+        grown = walk(&mut rng, PLOT_M, width, want);
+        if grown.is_some() {
+            break;
+        }
+    }
+    let (segments, start) = grown?;
     let features = features(&mut rng, &segments);
     let surface = match rng.int(0, 9) {
         0..=6 => Surface::Soil,
         7..=8 => Surface::Sand,
         _ => Surface::Grass,
     };
-    TrackProgram {
+    Some(TrackProgram {
         name: NAMES[(seed % NAMES.len() as u64) as usize].to_string(),
         author: "MXB App".into(),
         location: PLACES[((seed / 7) % PLACES.len() as u64) as usize].to_string(),
-        width: rng.range(10.0, 13.5),
+        width,
         blend: crate::trackprog::default_blend(),
         terrain: Terrain {
             size_x: PLOT_M,
@@ -525,22 +990,25 @@ pub fn draw(seed: u64) -> TrackProgram {
             scale: if rng.chance(0.5) { 63.0 } else { 70.0 },
             surface,
             wear: crate::trackprog::default_wear(),
+            // Gently rolling, and no more. A lap is benched into whatever it crosses, so
+            // ground with twenty metres of landform in it puts the track in a trench with the
+            // banners along the rim of the cut. A motocross venue is a field with shape in it.
             relief: Relief {
-                amplitude: rng.range(5.0, 11.0),
+                amplitude: rng.range(4.2, 7.5),
                 wavelength: rng.range(320.0, 480.0),
                 seed: (seed % 9973) as u32,
                 texture: 0.085,
-                tilt: rng.range(10.0, 30.0),
+                tilt: rng.range(6.0, 16.0),
                 tilt_angle: rng.range(0.0, 359.0),
-                landforms: rng.int(4, 8) as u32,
-                landform_height: rng.range(10.0, 22.0),
+                landforms: rng.int(2, 4) as u32,
+                landform_height: rng.range(2.0, 5.0),
             },
         },
         start,
         segments,
         features,
         elevation: Vec::new(),
-    }
+    })
 }
 
 /// What a lap came out measuring, once it was built.
@@ -650,7 +1118,8 @@ pub fn search(from: u64, tries: u32) -> Result<Measured, Vec<Measured>> {
     let mut rejected = Vec::new();
     for i in 0..tries as u64 {
         let seed = from + i;
-        let mut program = draw(seed);
+        // A seed the walk paints itself in on is not a lap; it is the next seed's turn.
+        let Some(mut program) = draw(seed) else { continue };
         crate::trackllm::repair_for_tests(&mut program);
         let review = crate::trackllm::review(&program);
         let mut notes = review.problems.clone();
@@ -673,14 +1142,65 @@ pub fn search(from: u64, tries: u32) -> Result<Measured, Vec<Measured>> {
 mod tests {
     use super::*;
 
+    /// A seed that draws, for the tests that need one. Roughly nine in ten do.
+    fn drawn(seed: u64) -> TrackProgram {
+        (0..24)
+            .find_map(|i| draw(seed + i))
+            .unwrap_or_else(|| panic!("no seed near {seed} drew a lap"))
+    }
+
+    /// Corners, grouped the way `scripts/track-survey.py` groups a published one: same-handed
+    /// turning under a 300 m radius, with under ten metres of run let into it.
+    ///
+    /// Both halves of that matter. Over 300 m is a sweeper — Motorcycling Australia's own
+    /// definition of a curve is a direction change over 15 degrees with a radius under 300 —
+    /// and counting arcs instead of corners counts a published corner four or five times over.
+    /// Grouping any same-signed arc, which is what this used to do, reported Indiana as
+    /// carrying 615-degree corners.
+    fn corners(segs: &[Segment]) -> Vec<(f32, f32, f32, usize)> {
+        const SWEEP: f32 = 300.0;
+        const JOIN: f32 = 10.0;
+        let mut out: Vec<(f32, f32, f32, usize)> = Vec::new(); // angle, ground, apex, arcs
+        let (mut sign, mut gap) = (0.0f32, f32::MAX);
+        for s in segs {
+            let turning = matches!(s, Segment::Arc { radius, .. } if radius.abs() <= SWEEP);
+            match s {
+                Segment::Arc { radius, angle, .. } if turning => {
+                    let run = radius.abs() * angle.to_radians();
+                    if radius.signum() == sign && gap <= JOIN {
+                        let c = out.last_mut().unwrap();
+                        c.0 += angle;
+                        c.1 += run + gap;
+                        c.2 = c.2.min(radius.abs());
+                        c.3 += 1;
+                    } else {
+                        out.push((*angle, run, radius.abs(), 1));
+                    }
+                    sign = radius.signum();
+                    gap = 0.0;
+                }
+                _ => gap += seg_length(s),
+            }
+        }
+        out.retain(|c| c.0 >= 25.0);
+        out
+    }
+
+    fn median(mut v: Vec<f32>) -> f32 {
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v.get(v.len() / 2).copied().unwrap_or(0.0)
+    }
+
     /// The two properties the shape exists to guarantee, over a spread of seeds.
     #[test]
     fn every_lap_closes_and_none_crosses_itself() {
         for seed in [1u64, 7, 42, 777, 1234, 31337] {
-            let mut p = draw(seed);
+            let mut p = drawn(seed);
             crate::trackllm::repair_for_tests(&mut p);
+            // The walk docks onto its own start pose with a Dubins path it has walked, so
+            // this is exact rather than nearly: it used to be allowed 20 m.
             assert!(
-                p.closure_error() < 20.0,
+                p.closure_error() < 2.0,
                 "seed {seed}: the lap misses itself by {:.1} m",
                 p.closure_error()
             );
@@ -692,48 +1212,118 @@ mod tests {
         }
     }
 
-    /// And the shape of it: corners, turning, jumps, all against the corpus.
+    /// And the shape of it, against what Indiana and Southwick measure.
+    ///
+    /// These are the numbers the walk exists to hit, so they are asserted rather than printed.
+    /// The bands are the corpus's own, from `scripts/track-survey.py` over the eighteen laps
+    /// in `~/Projects/pkz`; the medians of Indiana and Southwick sit in the middle of each.
     #[test]
-    #[ignore = "the ring skeleton is superseded by scripts/track-layout.py's ribbon,                 which this module has yet to be ported to"]
     fn a_drawn_lap_is_shaped_like_a_published_one() {
-        let mut p = draw(1234);
-        crate::trackllm::repair_for_tests(&mut p);
-        let lap = p.lap_length();
-        let arcs: f32 = p
-            .segments
-            .iter()
-            .filter_map(|s| match s {
-                Segment::Arc { radius, angle, .. } => Some(radius.abs() * angle.to_radians()),
-                _ => None,
-            })
-            .sum();
-        let turning: f32 = p
-            .segments
-            .iter()
-            .filter_map(|s| match s {
-                Segment::Arc { angle, .. } => Some(angle.abs()),
-                _ => None,
-            })
-            .sum();
-        assert!((500.0..2600.0).contains(&lap), "the lap is {lap:.0} m");
-        assert!(arcs / lap > 0.5, "only {:.0}% of it is arcs", arcs / lap * 100.0);
-        assert!(turning > 1400.0, "it turns {turning:.0}° in total");
-        let per_km = p.features.len() as f32 / lap * 1000.0;
-        assert!((12.0..45.0).contains(&per_km), "{per_km:.0} jumps a km");
+        for seed in [1u64, 7, 42, 777, 1234, 31337] {
+            let mut p = drawn(seed);
+            crate::trackllm::repair_for_tests(&mut p);
+            let lap = p.lap_length();
+            let turning: f32 = p
+                .segments
+                .iter()
+                .filter_map(|s| match s {
+                    Segment::Arc { radius, angle, .. } if radius.abs() <= 300.0 => {
+                        Some(radius.abs() * angle.to_radians())
+                    }
+                    _ => None,
+                })
+                .sum();
+            let gross: f32 = p
+                .segments
+                .iter()
+                .map(|s| match s {
+                    Segment::Arc { angle, .. } => angle.abs(),
+                    _ => 0.0,
+                })
+                .sum();
+            let cs = corners(&p.segments);
+            let per_km = cs.len() as f32 / lap * 1000.0;
+            let angle = median(cs.iter().map(|c| c.0).collect());
+            let apex = median(cs.iter().map(|c| c.2).collect());
+            let ground = median(cs.iter().map(|c| c.1).collect());
+            let jumps = p.features.len() as f32 / lap * 1000.0;
+            let tallest = p
+                .features
+                .iter()
+                .map(|f| f.height())
+                .fold(0.0f32, f32::max);
+
+            let say = format!(
+                "seed {seed}: {lap:.0} m, {} corners ({per_km:.1}/km), {angle:.0}° each, \
+                 apex {apex:.1} m, {ground:.0} m of ground, {:.2} turning, {gross:.0}° gross, \
+                 {jumps:.0} jumps/km, tallest {tallest:.1} m",
+                cs.len(),
+                turning / lap
+            );
+            // Indiana 2170, Southwick 2217; the corpus runs 1065-3055.
+            assert!((1700.0..2600.0).contains(&lap), "{say}");
+            // Indiana 7.4, Southwick 8.1; the corpus 7.4-10.3.
+            assert!((6.5..12.0).contains(&per_km), "{say}");
+            // Indiana 159, Southwick 166; the corpus p50 90-166.
+            assert!((85.0..185.0).contains(&angle), "{say}");
+            // Indiana 10.4, Southwick 11.9; the corpus p50 7.1-18.5.
+            assert!((7.0..20.0).contains(&apex), "{say}");
+            // Indiana 68, Southwick 74; the corpus p50 14-82.
+            assert!((40.0..95.0).contains(&ground), "{say}");
+            // Indiana 0.63, Southwick 0.72.
+            assert!((0.55..0.88).contains(&(turning / lap)), "{say}");
+            // `trackllm::corpus::LIPS_PER_KM`, and the height ceiling two federations write.
+            assert!((12.0..45.0).contains(&jumps), "{say}");
+            assert!(tallest <= 3.0 + 1e-3, "{say}");
+        }
+    }
+
+    /// What `random_track_program` hands the studio: a value with every defaulted field
+    /// filled in, that parses straight back into the type.
+    ///
+    /// This is the trap [`crate::trackprog::BLANK`] documents from the other side. A track
+    /// program has fields with serde defaults — `blend`, `elevation`, the ground's `wear` —
+    /// and a value missing any of them puts an `undefined` into a number input the moment the
+    /// studio loads it. Serialising the *type* is what fills them; nothing else does.
+    #[test]
+    fn a_random_track_arrives_whole() {
+        let p = drawn(4242);
+        let v = serde_json::to_value(&p).expect("serialises");
+        for key in ["name", "author", "location", "width", "terrain", "start", "segments",
+                    "features", "blend", "elevation"] {
+            assert!(v.get(key).is_some(), "the studio is handed no `{key}`");
+        }
+        for key in ["sizeX", "sizeZ", "samples", "scale", "surface", "wear", "relief"] {
+            assert!(v["terrain"].get(key).is_some(), "no `terrain.{key}`");
+        }
+        let back: TrackProgram = serde_json::from_value(v).expect("and parses back");
+        assert_eq!(back.name, p.name);
+        assert_eq!(back.segments.len(), p.segments.len());
+        back.check().expect("and it is a track");
     }
 
     /// The same number gives the same track, on any machine. Seeds are how a track is named
     /// and found again, so this is not a detail.
     #[test]
     fn a_seed_draws_the_same_lap_every_time() {
-        let a = draw(99);
-        let b = draw(99);
+        let a = drawn(99);
+        let b = drawn(99);
         assert_eq!(a.name, b.name);
         assert_eq!(a.segments.len(), b.segments.len());
         assert_eq!(
             serde_json::to_string(&a).unwrap(),
             serde_json::to_string(&b).unwrap()
         );
+    }
+
+    /// Most seeds draw. The walk backtracks, and this is what that bought: greedy, one seed in
+    /// sixty produced a lap and the rest ran out of legal moves a fifth of the way round.
+    #[test]
+    fn most_seeds_draw_a_lap() {
+        let drew = (200u64..240).filter(|s| draw(*s).is_some()).count();
+        // Measured at 27-30 of 40. `random_track_program` searches forward from its seed, so
+        // what this guards is a regression to the greedy walk's one in sixty.
+        assert!(drew >= 24, "only {drew} of 40 seeds drew a lap");
     }
 
     /// The whole point: a seed range yields a lap that passes both halves.
@@ -776,84 +1366,164 @@ mod tests {
 mod corner_shape_tests {
     use super::*;
 
-    /// What a drawn lap measures against Indiana, seed by seed. Printing, not asserting —
-    /// `cargo test -- --ignored --nocapture drawn_layout_numbers`.
+    /// Write drawn programmes where `scripts/track-survey.py` can measure them, which is how
+    /// the Rust walk is checked against the Python one it was ported from.
+    ///
+    /// ```text
+    /// LAYOUT_OUT=/tmp/laps LAYOUT_SEEDS=40 \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture dump_programs
+    /// ```
     #[test]
     #[ignore]
-    fn drawn_layout_numbers() {
-        println!("[chain v2 equal-length]");
-        println!("seed  segs  arc%  corners  arcs/corner  turning  straights p50  closure");
-        for seed in [1u64, 16, 31, 7, 42, 1234] {
-            let mut p = draw(seed);
-            crate::trackllm::repair_for_tests(&mut p);
-            let n = p.segments.len();
-            let straights: Vec<f32> = p
-                .segments
-                .iter()
-                .filter_map(|s| match s {
-                    Segment::Straight { length, .. } => Some(*length),
-                    _ => None,
-                })
-                .collect();
-            let turning: f32 = p
-                .segments
-                .iter()
-                .map(|s| match s {
-                    Segment::Arc { angle, .. } => *angle,
-                    _ => 0.0,
-                })
-                .sum();
-            // Corners: runs of consecutive same-sign arcs turning 25 deg or more.
-            let mut runs: Vec<(f32, usize)> = Vec::new();
-            let (mut deg, mut cnt, mut sign) = (0.0f32, 0usize, 0.0f32);
-            for s in &p.segments {
-                match s {
-                    Segment::Arc { radius, angle, .. } if radius.signum() == sign || cnt == 0 => {
-                        sign = radius.signum();
-                        deg += angle;
-                        cnt += 1;
-                    }
-                    Segment::Arc { radius, angle, .. } => {
-                        if deg >= 25.0 {
-                            runs.push((deg, cnt));
-                        }
-                        sign = radius.signum();
-                        deg = *angle;
-                        cnt = 1;
-                    }
-                    _ => {
-                        if deg >= 25.0 {
-                            runs.push((deg, cnt));
-                        }
-                        deg = 0.0;
-                        cnt = 0;
-                        sign = 0.0;
-                    }
-                }
-            }
-            if deg >= 25.0 {
-                runs.push((deg, cnt));
-            }
-            let mut per: Vec<usize> = runs.iter().map(|r| r.1).collect();
-            per.sort_unstable();
-            let mut st = straights.clone();
-            st.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    fn dump_programs() {
+        let Ok(dir) = std::env::var("LAYOUT_OUT") else {
+            println!("set LAYOUT_OUT");
+            return;
+        };
+        let n: u64 = std::env::var("LAYOUT_SEEDS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(40);
+        let from: u64 = std::env::var("LAYOUT_FROM")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1);
+        std::fs::create_dir_all(&dir).expect("create");
+        let mut drew = 0;
+        for seed in from..from + n {
+            let Some(p) = draw(seed) else {
+                println!("seed {seed}: painted in");
+                continue;
+            };
+            drew += 1;
+            let out = std::path::Path::new(&dir).join(format!("seed{seed}.json"));
+            std::fs::write(&out, serde_json::to_vec_pretty(&p).unwrap()).expect("write");
             println!(
-                "{seed:5} {n:5} {:5.2} {:8} {:12} {:8.0} {:14.0} {:8.1}",
-                1.0 - straights.len() as f32 / n as f32,
-                runs.len(),
-                per.get(per.len() / 2).copied().unwrap_or(0),
-                turning,
-                st.get(st.len() / 2).copied().unwrap_or(0.0),
-                p.closure_error(),
+                "seed {seed}: {} — {:.0} m, {} segments, {} features",
+                p.name,
+                p.lap_length(),
+                p.segments.len(),
+                p.features.len()
             );
-            let arc_len: f32 = p.segments.iter().filter_map(|s| match s {
-                Segment::Arc { radius, angle, .. } => Some(radius.abs() * angle.to_radians()),
-                _ => None,
-            }).sum();
-            println!("        arc share by length {:.2}", arc_len / p.lap_length());
         }
-        println!("Indiana: 120 segs, arc% 0.99, 14 corners, 6 arcs/corner, 2407 deg, 1 straight");
+        println!("{drew} of {n} seeds drew a lap; programmes in {dir}");
+    }
+
+    /// Print a drawn lap as a `trackprog::EXAMPLE` literal — this is how the base track is
+    /// made, so it can be remade when the walk changes rather than being hand-kept.
+    ///
+    /// ```text
+    /// BASE_SEED=24 cargo test --bin mxb-app -- --ignored --nocapture emit_base_track
+    /// ```
+    #[test]
+    #[ignore]
+    fn emit_base_track() {
+        let seed: u64 = std::env::var("BASE_SEED")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(24);
+        let mut p = draw(seed).expect("that seed paints itself in");
+        p.name = "Corpus National".into();
+        p.location = "Generated".into();
+        // Left exactly as the repair pass leaves it, so the base track loads with nothing to
+        // say about it: begun on a straight, on ground sized and centred for where the lap
+        // ends up rather than where it started.
+        crate::trackllm::repair_for_tests(&mut p);
+        let n = |v: f32| {
+            let t = format!("{v:.4}");
+            let t = t.trim_end_matches('0').trim_end_matches('.').to_string();
+            if t == "-0" { "0".into() } else { t }
+        };
+        let mut out = String::from("pub const EXAMPLE: &str = r#\"{\n");
+        out += &format!("      \"name\": \"{}\",\n", p.name);
+        out += &format!("      \"author\": \"{}\",\n", p.author);
+        out += &format!("      \"location\": \"{}\",\n", p.location);
+        out += &format!("      \"width\": {},\n", n(p.width));
+        out += "      \"terrain\": {\n";
+        out += &format!(
+            "        \"sizeX\": {}, \"sizeZ\": {}, \"samples\": {}, \"scale\": {}, \"surface\": \"{}\",\n",
+            n(p.terrain.size_x), n(p.terrain.size_z), p.terrain.samples, n(p.terrain.scale),
+            serde_json::to_value(p.terrain.surface).unwrap().as_str().unwrap()
+        );
+        let r = &p.terrain.relief;
+        out += &format!(
+            "        \"relief\": {{ \"amplitude\": {}, \"wavelength\": {}, \"seed\": {}, \"texture\": {}, \"tilt\": {}, \"tiltAngle\": {}, \"landforms\": {}, \"landformHeight\": {} }}\n",
+            n(r.amplitude), n(r.wavelength), r.seed, n(r.texture), n(r.tilt),
+            n(r.tilt_angle), r.landforms, n(r.landform_height)
+        );
+        out += "      },\n";
+        out += &format!(
+            "      \"start\": {{ \"x\": {}, \"z\": {}, \"angle\": {} }},\n",
+            n(p.start.x), n(p.start.z), n(p.start.angle)
+        );
+        out += "      \"segments\": [\n";
+        let segs: Vec<String> = p
+            .segments
+            .iter()
+            .map(|s| match s {
+                Segment::Straight { length, .. } => {
+                    format!("        {{ \"kind\": \"straight\", \"length\": {} }}", n(*length))
+                }
+                Segment::Arc { radius, angle, .. } => format!(
+                    "        {{ \"kind\": \"arc\", \"radius\": {}, \"angle\": {} }}",
+                    n(*radius),
+                    n(*angle)
+                ),
+            })
+            .collect();
+        out += &segs.join(",\n");
+        out += "\n      ],\n      \"features\": [\n";
+        let feats: Vec<String> = p
+            .features
+            .iter()
+            .map(|f| {
+                let v = serde_json::to_value(f).unwrap();
+                let o = v.as_object().unwrap();
+                let body: Vec<String> = o
+                    .iter()
+                    .map(|(k, val)| {
+                        let val = match (val.as_f64(), val.as_array()) {
+                            (Some(x), _) => n(x as f32),
+                            (_, Some(pts)) => {
+                                let marks: Vec<String> = pts
+                                    .iter()
+                                    .map(|m| {
+                                        let m = m.as_object().unwrap();
+                                        format!(
+                                            "{{ \"u\": {}, \"h\": {} }}",
+                                            n(m["u"].as_f64().unwrap() as f32),
+                                            n(m["h"].as_f64().unwrap() as f32)
+                                        )
+                                    })
+                                    .collect();
+                                format!("[{}]", marks.join(", "))
+                            }
+                            _ => serde_json::to_string(val).unwrap(),
+                        };
+                        format!("\"{k}\": {val}")
+                    })
+                    .collect();
+                format!("        {{ {} }}", body.join(", "))
+            })
+            .collect();
+        out += &feats.join(",\n");
+        out += "\n      ]\n    }\"#;\n";
+        println!("{out}");
+
+        let review = crate::trackllm::review(&p);
+        println!(
+            "\n// seed {seed}: {:.0} m, {} segments, {} features, closes to {:.2} m",
+            p.lap_length(),
+            p.segments.len(),
+            p.features.len(),
+            p.closure_error()
+        );
+        for note in review.problems.iter().chain(review.notes.iter()) {
+            println!("// REVIEW: {note}");
+        }
+        if review.problems.is_empty() && review.notes.is_empty() {
+            println!("// review: nothing to say");
+        }
     }
 
     /// Write a seed's `.trh` where the comparison scripts can read it.
@@ -866,7 +1536,7 @@ mod corner_shape_tests {
             return;
         };
         let seed: u64 = std::env::var("TRH_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(16);
-        let mut p = draw(seed);
+        let mut p = draw(seed).expect("that seed paints itself in");
         crate::trackllm::repair_for_tests(&mut p);
         let syn = crate::tracksynth::synthesise(&p).expect("synthesise");
         let bytes = crate::tracksynth::trh(&p, &syn, true);
