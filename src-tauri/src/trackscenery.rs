@@ -1842,19 +1842,35 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     // TerrainEd faults on the second material in a model whatever the geometry — see
     // `edfwrite`'s note and the case-by-case test behind it. PiBoSo's own example track is
     // built the same way, three `scene` blocks for three objects.
-    let kinds: Vec<(&str, Mesh, Texture, bool)> = vec![
-        ("stakes", stakes, stake_sheet(), false),
-        ("banners", banners, banner_sheet(), true),
-        ("bales", bales, bale_sheet(), true),
+    let kinds: Vec<(String, Mesh, Texture, bool)> = vec![
+        ("stakes".into(), stakes, stake_sheet(), false),
+        ("banners".into(), banners, banner_sheet(), true),
+        ("bales".into(), bales, bale_sheet(), true),
         // Not solid: clipping a marker board should cost a rider nothing.
-        ("jumpmarks", jumpmarks, jumpmark_sheet(), false),
-        ("trees", trees, tree_sheet(), true),
-        ("poles", poles, pole_sheet(), false),
+        ("jumpmarks".into(), jumpmarks, jumpmark_sheet(), false),
+        ("trees".into(), trees, tree_sheet(), true),
+        ("poles".into(), poles, pole_sheet(), false),
         // The sky is drawn and nothing else: a dome you can ride into is not a sky.
-        ("sky", sky, dome_sheet(), false),
-        ("gate", gate, gate_sheet(), true),
+        ("sky".into(), sky, dome_sheet(), false),
+        ("gate".into(), gate, gate_sheet(), true),
         // Drawn, never solid: a mark is paint on the ground, not a kerb.
     ];
+
+    // A lifted venue, if one is installed. Absence is ordinary: a library is baked from a
+    // donor archive the user already has, so most builds have none and place nothing.
+    let mut kinds = kinds;
+    if let Some(lib) = crate::trackprops::load() {
+        let from = kinds.len();
+        for (name, mesh, tex, is_solid) in lifted(&lib, prog, syn) {
+            tally.push(("lifted", mesh.triangle_count()));
+            kinds.push((name, mesh, tex, is_solid));
+        }
+        log::info!(
+            "placed {} lifted models from {}",
+            kinds.len() - from,
+            lib.donor
+        );
+    }
 
     let mut files = Vec::new();
     let mut drawn = Vec::new();
@@ -1864,7 +1880,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             continue;
         }
         let file = format!("{name}.edf");
-        let bytes = edfwrite::write(name, &[Part { name: name.into(), mesh, texture: 0, normal: None }], &[sheet]);
+        let bytes = edfwrite::write(&name, &[Part { name: name.clone(), mesh, texture: 0, normal: None }], &[sheet]);
         files.push((file.clone(), bytes));
         let at = Scene { file, pos: [0.0, 0.0, 0.0], rot: [0.0, 0.0, 0.0] };
         // Collision only for what should stop a bike. A stake snaps and the fence is behind
@@ -2640,4 +2656,116 @@ mod built {
             String::from_utf8_lossy(&out.stderr)
         )
     }
+}
+
+/// Replay a lifted prop library onto this lap.
+///
+/// Each instance was recorded against its donor's centreline as a fraction round the lap, a
+/// signed lateral offset and a yaw relative to the heading there — see [`crate::trackprops`].
+/// Replaying is the same three numbers read the other way: find our station at that fraction,
+/// step out by the offset, and turn the prop by the yaw plus our heading.
+///
+/// The transform is **baked into the geometry** rather than written as a `scene` block's
+/// `rot`. TerrainEd bakes every block into the `.map` regardless, so the compiled track is
+/// identical either way, and baking uses only the path `builds_a_track_with_objects` already
+/// proves. Nothing here has ever written a non-zero `rot` and its sense is unverified; that is
+/// an optimisation for the export folder's size, not for the track's.
+///
+/// Props are merged by sheet, because a model carries one sheet and one only.
+pub fn lifted(
+    lib: &crate::trackprops::PropLibrary,
+    prog: &TrackProgram,
+    syn: &Synth,
+) -> Vec<(String, Mesh, Texture, bool)> {
+    let lap = prog.lap_length();
+    let half = prog.width * 0.5;
+    let stations = prog.stations(0.5);
+    let coarse = prog.stations(2.0);
+    let at = |s: f32| -> crate::trackprog::Station {
+        let i = ((s / 0.5) as usize).min(stations.len().saturating_sub(1));
+        stations[i]
+    };
+
+    let sheet_rgba: std::collections::HashMap<&str, &(String, u32, u32, Vec<u8>)> =
+        lib.sheets.iter().map(|s| (s.0.as_str(), s)).collect();
+    let mut by_sheet: std::collections::HashMap<String, Mesh> = std::collections::HashMap::new();
+
+    for inst in &lib.instances {
+        let prop = &lib.props[inst.prop];
+        let st = at((inst.along * lap).clamp(0.0, lap));
+        let (rx, rz) = crate::trackprog::right_vector(st.heading);
+
+        // Push anything that would land on the riding line out to the shoulder. A donor's
+        // corridor is not ours: its 7 m is inside our track where ours is wider.
+        //
+        // By the prop's own footprint, not by its anchor. A clump anchored exactly on the
+        // margin still reaches half its span back over the line, which is how a tree ended up
+        // 5.4 m from the centreline of a 6 m corridor.
+        let reach = prop.reach;
+        let margin = half + 2.0 + reach;
+        let want = inst.offset;
+        let off = if want.abs() < margin {
+            margin * if want == 0.0 { 1.0 } else { want.signum() }
+        } else {
+            want
+        };
+        let (x, z) = (st.x + rx * off, st.z + rz * off);
+
+        let clear_of_the_start = syn
+            .outside_the_start(x, z)
+            .map(|e| e > OFF_THE_START_M + reach)
+            .unwrap_or(true);
+        if !inside(prog, x, z, 2.0)
+            || clearance(&coarse, x, z) < half + 1.5 + reach
+            || !clear_of_the_start
+        {
+            continue;
+        }
+
+        // Yaw is relative to the donor's heading, so it adds to ours. Degrees, because
+        // `edfwrite::turned` takes degrees and shares this convention — see `principal_axis`.
+        let deg = (inst.yaw + st.heading).to_degrees();
+        let turned = edfwrite::turned(&prop.mesh, deg);
+        let foot = ground(syn, x, z) + inst.lift;
+        by_sheet
+            .entry(prop.sheet.clone())
+            .or_default()
+            .append(&edfwrite::moved(&turned, [x, foot, z]));
+    }
+
+    let mut out = Vec::new();
+    for (sheet, mesh) in by_sheet {
+        if mesh.vertex_count() < 8 {
+            continue;
+        }
+        let Some((name, w, h, rgba)) = sheet_rgba.get(sheet.as_str()) else {
+            // A prop whose sheet did not inflate would render untextured. Drop it rather
+            // than ship a white slab.
+            continue;
+        };
+        let tex = Texture {
+            name: name.clone(),
+            width: *w,
+            height: *h,
+            rgba: rgba.clone(),
+        };
+        // Solid is by class, and by class only: you ride through foliage and into a building.
+        let solid = lib
+            .props
+            .iter()
+            .any(|p| p.sheet == sheet && matches!(p.class, crate::trackobjects::Class::Structure | crate::trackobjects::Class::Vehicle | crate::trackobjects::Class::Bale));
+        out.push((short_sheet(&sheet), mesh, tex, solid));
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// A sheet name cut down to a model name.
+fn short_sheet(sheet: &str) -> String {
+    sheet
+        .trim_end_matches("_c_a")
+        .trim_end_matches("_c")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect()
 }

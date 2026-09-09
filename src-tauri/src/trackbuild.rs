@@ -577,10 +577,15 @@ mod build_one {
     /// ```text
     /// FROST_PROGRAM=/tmp/prog.json FROST_OUT=/tmp/build \
     /// FROST_TOOLS=~/Downloads/mxb-trackbuild/tools \
+    /// FROST_GAME="~/Downloads/mxb-trackbuild/prefix/drive_c/MX Bikes" \
     /// FROST_PREFIX=~/Downloads/mxb-trackbuild/prefix \
     /// FROST_WINE="~/Downloads/mxb-trackbuild/Wine Devel.app/Contents/Resources/wine/bin/wine" \
     ///   cargo test --bin mxb-app -- --ignored --nocapture build_a_track_to_pkz
     /// ```
+    ///
+    /// `FROST_GAME` is not optional despite defaulting to empty: the prefix is found by
+    /// splitting the *game* path, so without it the compile stops on "the compilers are
+    /// Windows programs" however good the runner is. The folder need not hold a game.
     #[test]
     #[ignore = "needs PiBoSo's compilers and a Wine prefix"]
     fn build_a_track_to_pkz() {
