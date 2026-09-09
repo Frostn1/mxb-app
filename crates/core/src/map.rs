@@ -41,6 +41,13 @@ const MAGIC: &[u8; 4] = b"MP2\0";
 /// Where the material records start, and how big one is. Geometry follows the last of them.
 const MATERIALS_AT: usize = 0x0C;
 const MATERIAL_RECORD: usize = 56;
+/// Which word of a material record holds the index of the sheet that paints it.
+///
+/// The one field in the file that states the binding outright. Everything before this read
+/// the sheets positionally and guessed, which is off by one for most of Indiana and by two
+/// for its trees: material 45 takes sheet 0 and material 38 takes sheet 40, skipping 39, so
+/// the order is genuinely the file's rather than an offset anyone could have inferred.
+const MATERIAL_TEX_WORD: usize = 11;
 
 /// Bytes per vertex, and where each attribute's array begins within the block — every one
 /// of them a count of vertices from the block's start, not a stride.
@@ -68,8 +75,9 @@ const TEX_DATA_FROM_W: [usize; 2] = [40, 36];
 
 /// Dimensions a texture may have. Wider at the small end than the `.edf` reader's, because a
 /// map really does ship 16x16 and 32x32 surfaces and dropping them shifts every material
-/// after them onto the wrong picture.
-const TEX_SIZES: [u32; 9] = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096];
+/// after them onto the wrong picture. The same holds at the top: Indiana bakes an 8192 sheet,
+/// and stopping at 4096 dropped it.
+const TEX_SIZES: [u32; 11] = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
 
 /// Sanity caps. A real map runs to about 900k vertices; these are loose enough not to reject
 /// a bigger one and tight enough that a misread length can't ask for a gigabyte.
@@ -624,6 +632,11 @@ fn normals_are_unit(b: &[u8], vs: usize, vc: usize) -> bool {
 /// cut-outs still need enough resolution to keep a tree looking like a tree.
 pub const MAX_TEXTURE_DIM: u32 = 512;
 
+/// The same, for the sky and backdrop, which are one sheet each rather than forty-eight.
+/// A dome's picture wraps a full 360°, so at 512 across it is under a degree and a half a
+/// texel and the cloud goes to smears — Indiana bakes its own at 8192.
+pub const SKY_TEXTURE_DIM: u32 = 2048;
+
 /// A texture's name, read in place. `None` when the bytes aren't one.
 fn tex_name(b: &[u8], o: usize) -> Option<String> {
     let mut e = o;
@@ -826,36 +839,41 @@ fn cutout_fraction(rgba: &[u8]) -> f32 {
 const CUTOUT_FRACTION: f32 = 0.02;
 
 /// Whether a name marks a colour map under PiBoSo's own convention.
+#[allow(dead_code)]
 fn is_colour_name(name: &str) -> bool {
     let l = name.to_ascii_lowercase();
     l.ends_with("_c") || l.ends_with("_c_a")
 }
 
-/// Whether a record is a second map for the surface before it rather than a surface of its
-/// own — a normal-and-specular sheet, an environment cube.
+/// Whether a record is a *second* map for some surface rather than a surface of its own.
 ///
-/// Every convention seen puts the secondary map's name on the colour map's stem: `bale1` then
-/// `bale1_n`, `pitlane_c` then `pitlane_n_s`. One sheet is often shared by several materials,
-/// so a name already used as a secondary stays one wherever it appears again.
-fn is_secondary(
-    name: &str,
-    previous: Option<&str>,
-    seen: &std::collections::HashSet<String>,
-) -> bool {
-    let lower = name.to_ascii_lowercase();
-    if lower == "env" || seen.contains(&lower) {
-        return true;
-    }
-    const SUFFIXES: [&str; 5] = ["_n", "_s", "_n_s", "_nrm", "_spec"];
-    let Some(prev) = previous else { return false };
-    let prev = prev.to_ascii_lowercase();
-    let stem = prev
-        .strip_suffix("_c_a")
-        .or_else(|| prev.strip_suffix("_c"))
-        .unwrap_or(&prev);
-    SUFFIXES
-        .iter()
-        .any(|suf| lower == format!("{stem}{suf}") || lower == format!("{prev}{suf}"))
+/// The binding is positional, so what matters is not recognising colour maps but never
+/// skipping one: miss a single record and every material past it wears its neighbour's sheet.
+/// Requiring PiBoSo's `_c` suffix does exactly that — a builder need only name one sheet
+/// plainly to slide the rest. Indiana calls its trackside screen `screen_live` and its trees
+/// `CK_TREE_Ironman`, and from the screen onwards its tents, fences and crowd stands were all
+/// wearing the sheet of the material after them.
+///
+/// So the test is inverted: a record is a surface unless it is demonstrably a companion map.
+/// Across twelve published tracks that finds at least one colour map per material every time,
+/// where the `_c` rule came up short on six of them and found none at all on two, which drew
+/// them entirely grey. Anything over the material count is trailing terrain sheets and is
+/// dropped by the `take` at the binding.
+fn is_companion_name(name: &str) -> bool {
+    let l = name.to_ascii_lowercase();
+    const SUFFIXES: [&str; 5] = ["_n_s", "_n", "_s", "_nrm", "_spec"];
+    l == "env" || l.starts_with("normals") || SUFFIXES.iter().any(|suf| l.ends_with(suf))
+}
+
+/// The records that paint a material, in table order: everything that is not a companion map,
+/// and each name only the first time it appears.
+fn painting_records(
+    all: Vec<(String, u32, u32, usize, usize)>,
+) -> Vec<(String, u32, u32, usize, usize)> {
+    let mut seen = std::collections::HashSet::new();
+    all.into_iter()
+        .filter(|(n, ..)| !is_companion_name(n) && seen.insert(n.to_ascii_lowercase()))
+        .collect()
 }
 
 /// Every surface record a map holds, as `(name, width, height)`, in table order.
@@ -875,24 +893,17 @@ pub fn survey(b: &[u8]) -> Vec<(String, u32, u32)> {
         .collect()
 }
 
-/// The records that look like a material's own colour map, in order.
+/// The records that paint a material, in order — the binding's own walk, uncapped, so a
+/// diagnostic can see how many the map offers against how many materials it declares.
 #[allow(dead_code)]
 pub fn primaries(b: &[u8]) -> Vec<(String, u32, u32)> {
     let Some((from, _)) = texture_table(b) else {
         return Vec::new();
     };
-    let mut seen = std::collections::HashSet::new();
-    let mut previous: Option<String> = None;
-    let mut out = Vec::new();
-    for (n, w, h, ..) in colour_records(b, from) {
-        if is_secondary(&n, previous.as_deref(), &seen) {
-            seen.insert(n.to_ascii_lowercase());
-            continue;
-        }
-        previous = Some(n.clone());
-        out.push((n, w, h));
-    }
-    out
+    painting_records(colour_records(b, from))
+        .into_iter()
+        .map(|(n, w, h, ..)| (n, w, h))
+        .collect()
 }
 
 /// The surfaces a map declares, named and sized but not inflated.
@@ -903,15 +914,15 @@ pub fn declared(b: &[u8]) -> Vec<(String, u32, u32)> {
     let Some((from, count)) = texture_table(b) else {
         return Vec::new();
     };
-    let all = colour_records(b, from);
-    let named = all.iter().filter(|(n, ..)| is_colour_name(n)).count();
-    if count == 0 || named * 4 < count * 3 {
+    // The same binding `textures` makes, so a slot and the sheet that fills it agree.
+    let painting = painting_records(colour_records(b, from));
+    if !covers(painting.len(), count) {
         return Vec::new();
     }
-    all.into_iter()
-        .filter(|(n, ..)| is_colour_name(n))
-        .take(count)
-        .map(|(n, w, h, ..)| (n, w, h))
+    bindings(b, count, painting.len())
+        .into_iter()
+        .filter_map(|(_, sheet)| painting.get(sheet))
+        .map(|(n, w, h, ..)| (n.clone(), *w, *h))
         .collect()
 }
 
@@ -1122,7 +1133,7 @@ pub fn largest_picture(b: &[u8]) -> Option<MapTexture> {
 pub fn reduced_texture(name: &str, w: u32, h: u32, mut rgba: Vec<u8>) -> MapTexture {
     let alpha = cutout_fraction(&rgba) > CUTOUT_FRACTION;
     flip_rows(&mut rgba, w, h);
-    let (rgba, w, h) = reduce(rgba, w, h, MAX_TEXTURE_DIM);
+    let (rgba, w, h) = reduce(rgba, w, h, SKY_TEXTURE_DIM);
     MapTexture {
         material: 0,
         name: name.to_string(),
@@ -1136,16 +1147,13 @@ pub fn reduced_texture(name: &str, w: u32, h: u32, mut rgba: Vec<u8>) -> MapText
 /// A map's colour surfaces, one per material, inflated and reduced.
 ///
 /// Nothing in a material record points at a texture, so the binding is positional: the *k*-th
-/// colour map paints material *k*. That only holds when the colour maps can be told apart
-/// from the sheets beside them, and the one reliable marker is PiBoSo's own naming — `_c`
-/// (or `_c_a`) for colour, `_n_s` for the normal-and-specular map next to it.
+/// colour map paints material *k*. Everything therefore turns on not *skipping* a colour map,
+/// because a single miss slides every material after it onto its neighbour's sheet — see
+/// [`is_companion_name`], which is why the test is for the companion maps rather than for the
+/// colour ones.
 ///
-/// **A map that doesn't use those suffixes gets no surfaces here, and draws plain.** Its
-/// table holds more records than materials — one published track has 55 for 49, the last
-/// seven being the terrain's own `dirt`/`grass`/`gravel` — and which of them line up is not
-/// something the file has yet been made to say. Guessing puts a blue tent on a boundary wall,
-/// which is worse than the honest grey: measured against the geometry, the obvious reading is
-/// off by two on that track and nothing in the format explains why.
+/// A map's table still holds more records than it has materials: the terrain's own sheets
+/// trail the scenery's, so the walk stops at the material count.
 /// Push a cut-out's colour outwards into the texels its alpha throws away.
 ///
 /// A foliage sheet stores black in every transparent texel — there is no reason for an artist
@@ -1224,14 +1232,18 @@ pub fn binds(b: &[u8]) -> bool {
     let Some((from, count)) = texture_table(b) else {
         return false;
     };
-    if count == 0 {
-        return false;
-    }
-    let named = colour_records(b, from)
-        .iter()
-        .filter(|(n, ..)| is_colour_name(n))
-        .count();
-    named * 4 >= count * 3
+    covers(painting_records(colour_records(b, from)).len(), count)
+}
+
+/// Whether a map offers enough sheets to be worth binding at all.
+///
+/// The reading has to cover the map, not merely appear in it: painting three materials out of
+/// eighty and leaving the rest grey reads as broken rather than as undecided, so below this a
+/// track keeps the honest grey. Every published track measured clears it outright — the walk
+/// finds at least one sheet per material — so this catches a map whose table we have misread,
+/// not one that is merely named unusually.
+fn covers(painting: usize, materials: usize) -> bool {
+    materials > 0 && painting * 4 >= materials * 3
 }
 
 /// How many materials a map will actually bind a sheet to.
@@ -1245,32 +1257,61 @@ pub fn bound_count(b: &[u8]) -> usize {
     if !binds(b) {
         return 0;
     }
-    colour_records(b, from)
-        .iter()
-        .filter(|(n, ..)| is_colour_name(n))
-        .count()
-        .min(count)
+    bindings(b, count, painting_records(colour_records(b, from)).len()).len()
+}
+
+/// Which sheet paints each material, as `(material, sheet)` pairs.
+///
+/// Read out of the material records rather than guessed: see [`MATERIAL_TEX_WORD`]. Checked
+/// against 12 published tracks from 4 authors, every one of which reads as a legal index into
+/// the sheets, and on Indiana it is off by one from the positional walk for most materials
+/// and by two for its trees — which is the difference between a banner showing its sponsor
+/// and showing the 80%-transparent sheet of the object beside it.
+///
+/// Falls back to the positional walk when the field doesn't read as an index, so a map built
+/// by something that leaves it empty is no worse off than before.
+fn bindings(b: &[u8], materials: usize, sheets: usize) -> Vec<(usize, usize)> {
+    let mut out = Vec::with_capacity(materials);
+    let mut distinct = std::collections::HashSet::new();
+    for m in 0..materials {
+        let at = MATERIALS_AT + m * MATERIAL_RECORD + MATERIAL_TEX_WORD * 4;
+        if at + 4 > b.len() {
+            out.clear();
+            break;
+        }
+        let sheet = u32le(b, at) as usize;
+        if sheet >= sheets {
+            out.clear();
+            break;
+        }
+        distinct.insert(sheet);
+        out.push((m, sheet));
+    }
+    // A column holding one value throughout is a constant, not an index.
+    if out.len() == materials && distinct.len() > 1 {
+        return out;
+    }
+    (0..materials.min(sheets)).map(|i| (i, i)).collect()
 }
 
 pub fn textures(b: &[u8], max_dim: u32) -> Vec<MapTexture> {
     let Some((from, count)) = texture_table(b) else {
         return Vec::new();
     };
-    let all = colour_records(b, from);
-    // The convention has to cover the map, not merely appear in it. One `_c` among fifty
-    // plainly-named sheets is a coincidence, and binding on it paints a single material and
-    // leaves the rest grey — which reads as broken rather than as undecided.
-    let named = all.iter().filter(|(n, ..)| is_colour_name(n)).count();
-    if count == 0 || named * 4 < count * 3 {
+    let painting = painting_records(colour_records(b, from));
+    if !covers(painting.len(), count) {
         return Vec::new();
     }
-
-    all.into_iter()
-        .filter(|(n, ..)| is_colour_name(n))
-        .take(count)
-        .enumerate()
-        .filter_map(|(i, (name, w, h, off, len))| {
+    // Each material names its own sheet, so nothing here is positional. One sheet may paint
+    // several materials, and it is inflated once per material that asks for it — the sheets
+    // are reduced immediately and a map rarely shares more than a handful.
+    let bound = bindings(b, count, painting.len());
+    bound
+        .into_iter()
+        .filter_map(|(material, sheet)| {
+            let (name, w, h, off, len) = painting.get(sheet)?.clone();
             let mut rgba = inflate(b, off, len, w, h)?;
+            let i = material;
             // Read from the pixels, not the name: `_c_a` is the convention, but the alpha
             // channel is the fact, and a sheet that is half see-through is a cut-out whatever
             // it is called.
@@ -1510,7 +1551,13 @@ fn layer_sheet_at(b: &[u8], o: usize) -> Option<(String, u32, u32, usize, usize)
     }
     let pow2 = |v: u32| (4..=8192).contains(&v) && v.is_power_of_two();
     // `(where the width sits, where the length sits)`, colour first.
-    for (w_off, len_off) in [(104usize, 132usize), (100, 124)] {
+    // The normal's length sits at 128, not 124. It has no spacer word before its width, so
+    // every field up to the hash sits one word earlier than the colour's — but it still keeps
+    // the colour's own gap before the length, which put the shorter guess four bytes adrift.
+    // Both tracks measured write it this way, ours and Indiana's; the walk only ever survived
+    // because `trailer_after` scanned past a normal instead of reading it. 124 stays behind it
+    // for any writer that packs the field tight.
+    for (w_off, len_off) in [(104usize, 132usize), (100, 128), (100, 124)] {
         if w_off == 104 {
             // The colour's two spacer words: one before the width, one where sub-records
             // would be counted. The normal has neither, which is how they are told apart.
@@ -1586,15 +1633,15 @@ fn layer_mask_at(b: &[u8], o: usize) -> Option<(GroundMask, usize)> {
     if out.len() != want {
         return None;
     }
-    // Bottom-up, like every other sheet the compilers write — see the flip in [`ground_sheet`].
-    // Left as it lies, a mask puts the riding line on the wrong side of the track.
-    let row = w as usize;
-    for y in 0..(h as usize) / 2 {
-        let (top, bottom) = (y * row, (h as usize - 1 - y) * row);
-        for x in 0..row {
-            out.swap(top + x, bottom + x);
-        }
-    }
+    // Kept as it lies. The *sheets* a compiler writes are bottom-up and are flipped on the
+    // way in, and a coverage mask looks like it should follow them — but it does not, and
+    // flipping it here put the paint across the track: grass over the riding line, dirt out
+    // in the field.
+    //
+    // Settled on screen over four passes, because nothing in the file states where a mask
+    // sits in the world and so there is no ground truth in the data to measure against. What
+    // finally fixed it was noticing the correction is a *reflection*: a quarter turn leaves
+    // it mirrored and a half turn leaves it reversed, so no amount of rotating ever lands it.
     Some((
         GroundMask {
             width: w,
@@ -1704,6 +1751,20 @@ fn march_layers(b: &[u8], start: usize, decode: bool) -> Vec<GroundLayer> {
         let Some((name, w, h, data, end)) = layer_sheet_at(b, o + LAYER_MATERIAL + 4) else {
             break;
         };
+        // Step over the layer's other sheets rather than scanning through them. TerrainEd
+        // writes a normal, a `_wet` variant and an `env` cube behind the colour and states
+        // only some of them, so this is greedy rather than counted. A sibling follows within
+        // a few dozen bytes while the next *layer* is a material record and a count word
+        // further on again, which is what the short window tells apart. Published tracks
+        // carry one sheet a layer and found their trailer either way — this only ever showed
+        // up on the tracks we compile ourselves.
+        let mut end = end;
+        for _ in 0..4 {
+            let Some(next) = (0..48).find_map(|d| layer_sheet_at(b, end + d).map(|s| s.4)) else {
+                break;
+            };
+            end = next;
+        }
         let Some(t) = trailer_after(b, end, end + TRAILER_REACH) else {
             break;
         };
@@ -1766,7 +1827,11 @@ pub fn ground_layers(b: &[u8]) -> Vec<GroundLayer> {
         {
             starts.push(o - LAYER_MATERIAL - 4);
         }
-        o += 4;
+        // A byte at a time, not a word: nothing in the format aligns a sheet record, and the
+        // stacks we compile ourselves land on odd offsets every time. Stepping by four found
+        // the base layer of every published track and not one of ours. The guard in front is
+        // a single byte test, so the extra three quarters of the walk costs almost nothing.
+        o += 1;
     }
 
     // The march that reads the most layers is the stack. Ties go to the earliest, which is the
@@ -1960,7 +2025,11 @@ mod tests {
         e.write_all(&px).unwrap();
         let z = e.finish().unwrap();
 
-        let build = |colour: bool| {
+        // `spacer` is the word a real normal record keeps between its hash and its length —
+        // the one that puts the length at 128. Both tracks measured write it; this test used
+        // to assume it away on its own authority and so agreed with a reader that could not
+        // parse a normal map out of any file on disk.
+        let build = |colour: bool, spacer: bool| {
             let mut b = vec![0u8; 100];
             b[..6].copy_from_slice(b"sand_n");
             if colour {
@@ -1969,7 +2038,7 @@ mod tests {
             b.extend_from_slice(&8u32.to_le_bytes());
             b.extend_from_slice(&8u32.to_le_bytes());
             b.extend_from_slice(&[0u8; 16]);
-            if colour {
+            if colour || spacer {
                 b.extend_from_slice(&0u32.to_le_bytes());
             }
             b.extend_from_slice(&((z.len() + 8) as u32).to_le_bytes());
@@ -1979,12 +2048,15 @@ mod tests {
             b
         };
 
-        for colour in [true, false] {
-            let b = build(colour);
+        for (colour, spacer, what) in [
+            (true, false, "colour"),
+            (false, true, "normal, as both tracks write it"),
+            (false, false, "normal, packed tight"),
+        ] {
+            let b = build(colour, spacer);
             let got = layer_sheet_at(&b, 0);
-            let (name, w, h, data, end) = got.unwrap_or_else(|| {
-                panic!("the {} shape did not parse", if colour { "colour" } else { "normal" })
-            });
+            let (name, w, h, data, end) =
+                got.unwrap_or_else(|| panic!("the {what} shape did not parse"));
             assert_eq!(name, "sand_n");
             assert_eq!((w, h), (8, 8));
             assert_eq!(end - data, z.len(), "the payload has to end where the stream does");
@@ -2460,6 +2532,442 @@ mod tests {
     ///   cargo test -p mxb-core --lib -- --ignored --nocapture read_a_real_map
     /// ```
     ///
+    /// Indiana's table around the one record that slid it, in file order.
+    const AROUND_THE_SCREEN: [&str; 12] = [
+        "tarp_c",
+        "tarp_n_s",
+        "env",
+        "tarp_n_s",
+        "water_c",
+        "water_n_s",
+        "partytent_white_c",
+        "partytent_n_s",
+        "partytent_n_s",
+        "tent_sides_window_c_a",
+        "screen_live",
+        "crowd_stand_c",
+    ];
+
+    /// A sheet named without PiBoSo's suffix is still a sheet.
+    ///
+    /// The binding is positional, so skipping one record moves every material after it onto
+    /// its neighbour's picture. Indiana's trackside screen is `screen_live` and its trees are
+    /// `CK_TREE_Ironman`; requiring `_c` dropped all three and slid the back half of the
+    /// track — the tents, fences and crowd stands wore the wrong sheets.
+    #[test]
+    fn a_plainly_named_sheet_still_paints_its_material() {
+        let recs: Vec<(String, u32, u32, usize, usize)> = AROUND_THE_SCREEN
+            .iter()
+            .map(|n| (n.to_string(), 64, 64, 0, 0))
+            .collect();
+        let kept: Vec<String> = painting_records(recs).into_iter().map(|(n, ..)| n).collect();
+        assert_eq!(
+            kept,
+            [
+                "tarp_c",
+                "water_c",
+                "partytent_white_c",
+                "tent_sides_window_c_a",
+                "screen_live",
+                "crowd_stand_c",
+            ],
+            "the companion maps go and the plainly-named screen stays"
+        );
+
+        // The trees, which the `_c` rule dropped and drew as untextured slabs.
+        assert!(!is_companion_name("CK_TREE_Ironman"));
+        assert!(!is_companion_name("screen_live"));
+        assert!(!is_companion_name("hm_grass"));
+        // And the ones that really are a second map for the surface before them.
+        for n in ["env", "tarp_n_s", "bark_n", "glass_s", "normals_pro", "x_nrm", "y_spec"] {
+            assert!(is_companion_name(n), "{n} is a companion map");
+        }
+    }
+
+    /// A sheet shared by several materials is listed once, where it first appears.
+    #[test]
+    fn a_repeated_sheet_takes_one_slot() {
+        let recs: Vec<(String, u32, u32, usize, usize)> = ["a_c", "b_c", "a_c", "c_c"]
+            .iter()
+            .map(|n| (n.to_string(), 64, 64, 0, 0))
+            .collect();
+        let kept: Vec<String> = painting_records(recs).into_iter().map(|(n, ..)| n).collect();
+        assert_eq!(kept, ["a_c", "b_c", "c_c"]);
+    }
+
+    /// A material names its own sheet, and the walk that guessed is only the fallback.
+    ///
+    /// Built as Indiana's records are: the index is not the material's own number, it is not
+    /// a fixed offset from it, and it does not stay in order — Indiana's material 45 takes
+    /// sheet 0 and its 38 takes sheet 40, skipping 39. Nothing positional reproduces that.
+    #[test]
+    fn a_material_names_the_sheet_that_paints_it() {
+        // Four materials, and a header long enough to hold their records.
+        let mut b = vec![0u8; MATERIALS_AT + 4 * MATERIAL_RECORD];
+        let put = |b: &mut Vec<u8>, m: usize, sheet: u32| {
+            let at = MATERIALS_AT + m * MATERIAL_RECORD + MATERIAL_TEX_WORD * 4;
+            b[at..at + 4].copy_from_slice(&sheet.to_le_bytes());
+        };
+        // Out of order, and one sheet shared by two materials — both of which a positional
+        // walk gets wrong by construction.
+        put(&mut b, 0, 3);
+        put(&mut b, 1, 0);
+        put(&mut b, 2, 2);
+        put(&mut b, 3, 2);
+        assert_eq!(bindings(&b, 4, 4), vec![(0, 3), (1, 0), (2, 2), (3, 2)]);
+
+        // An index past the end of the sheets is not an index, so the walk takes over.
+        let mut bad = b.clone();
+        put(&mut bad, 2, 99);
+        assert_eq!(bindings(&bad, 4, 4), vec![(0, 0), (1, 1), (2, 2), (3, 3)]);
+
+        // Neither is a column holding one value throughout.
+        let mut flat = vec![0u8; MATERIALS_AT + 4 * MATERIAL_RECORD];
+        for m in 0..4 {
+            put(&mut flat, m, 1);
+        }
+        assert_eq!(bindings(&flat, 4, 4), vec![(0, 0), (1, 1), (2, 2), (3, 3)]);
+
+        // And the fallback never invents a sheet a map doesn't carry.
+        assert_eq!(bindings(&flat, 4, 2), vec![(0, 0), (1, 1)]);
+    }
+
+    /// Composite a track's ground the way the shader does, as one PNG.
+    ///
+    /// Base sheet, then each layer mixed in by its own mask, sampled straight. The sheets
+    /// tile a hundred-odd times across the ground, so at this size each one is its own mean
+    /// colour — which is what makes the placement of the paint readable rather than its grain.
+    #[test]
+    #[ignore = "writes a PNG — set FROST_MAP and FROST_PNG"]
+    fn dump_ground_composite() {
+        let path = std::env::var("FROST_MAP").expect("set FROST_MAP");
+        let out = std::env::var("FROST_PNG").expect("set FROST_PNG");
+        let b = std::fs::read(&path).expect("read the map");
+        let layers = ground_layers(&b);
+        assert!(!layers.is_empty(), "the map carries a ground stack");
+        const D: usize = 768;
+        let mean = |t: &MapTexture| -> [f64; 3] {
+            let mut s = [0f64; 3];
+            let n = (t.rgba.len() / 4).max(1);
+            for p in t.rgba.chunks_exact(4) {
+                for k in 0..3 {
+                    s[k] += p[k] as f64;
+                }
+            }
+            [s[0] / n as f64, s[1] / n as f64, s[2] / n as f64]
+        };
+        let mut px = vec![0f64; D * D * 3];
+        for (i, l) in layers.iter().enumerate() {
+            let c = mean(&l.sheet);
+            for y in 0..D {
+                for x in 0..D {
+                    let o = (y * D + x) * 3;
+                    let a = match &l.mask {
+                        Some(m) => {
+                            let mx = x * m.width as usize / D;
+                            let my = y * m.height as usize / D;
+                            m.coverage[my * m.width as usize + mx] as f64 / 255.0
+                        }
+                        None => 1.0,
+                    };
+                    let a = if i == 0 { 1.0 } else { a };
+                    for k in 0..3 {
+                        px[o + k] = px[o + k] * (1.0 - a) + c[k] * a;
+                    }
+                }
+            }
+        }
+        // Written with the last grid row first, so the picture reads the way the track does
+        // from above: the grid's y runs with world +Z, and a PNG's first row is its top.
+        let mut bytes: Vec<u8> = Vec::with_capacity(D * D * 3);
+        for y in (0..D).rev() {
+            for x in 0..D {
+                let o = (y * D + x) * 3;
+                for k in 0..3 {
+                    bytes.push(px[o + k].clamp(0.0, 255.0) as u8);
+                }
+            }
+        }
+        image::RgbImage::from_raw(D as u32, D as u32, bytes).unwrap().save(&out).unwrap();
+        println!("  {out}  {D}x{D}  {} layers", layers.len());
+    }
+
+    /// A track's ground textures: what each sheet is, and how it lands on the ground.
+    ///
+    /// Texels per metre is the number that matters at riding distance — a big sheet tiled
+    /// coarsely reads no sharper than a small one tiled tight. Detail is the high-frequency
+    /// energy left after a blur, which is what stops a surface reading as a flat wash.
+    #[test]
+    #[ignore = "needs a real .map — set FROST_MAP"]
+    fn ground_texture_survey() {
+        let path = std::env::var("FROST_MAP").expect("set FROST_MAP");
+        let label = std::env::var("FROST_LABEL").unwrap_or_else(|_| "track".into());
+        let across: f32 = std::env::var("FROST_ACROSS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(525.0);
+        let b = std::fs::read(&path).expect("read the map");
+        let dir = std::env::var("FROST_DUMP").ok();
+        if let Some(d) = &dir {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        println!(
+            "\n== {label} ==  site {across:.0} m\n{:<22} {:>9} {:>8} {:>9} {:>7} {:>7} {:>18}",
+            "layer", "sheet", "m/tile", "texel/m", "detail", "cover", "mean rgb"
+        );
+        for (i, l) in ground_layers(&b).iter().enumerate() {
+            let t = &l.sheet;
+            let n = (t.rgba.len() / 4).max(1);
+            let mut sum = [0f64; 3];
+            for p in t.rgba.chunks_exact(4) {
+                for k in 0..3 {
+                    sum[k] += p[k] as f64;
+                }
+            }
+            let mean = [sum[0] / n as f64, sum[1] / n as f64, sum[2] / n as f64];
+            // Detail: mean absolute difference between neighbouring texels, in luma. A wash
+            // scores near zero however bright it is.
+            let (w, h) = (t.width as usize, t.height as usize);
+            let luma = |i: usize| {
+                let p = &t.rgba[i * 4..];
+                p[0] as f64 * 0.299 + p[1] as f64 * 0.587 + p[2] as f64 * 0.114
+            };
+            let mut d = 0.0;
+            let mut c = 0usize;
+            for y in 0..h {
+                for x in 1..w {
+                    d += (luma(y * w + x) - luma(y * w + x - 1)).abs();
+                    c += 1;
+                }
+            }
+            let detail = if c > 0 { d / c as f64 } else { 0.0 };
+            let m_per_tile = across / l.tile_u.max(0.001);
+            // Texels per metre uses the sheet as stored here, which is the reduced one; the
+            // ratio between tracks is what this is for.
+            let texel_per_m = t.width as f32 / m_per_tile;
+            let cover = l.mask.as_ref().map_or(100.0, |m| {
+                m.coverage.iter().filter(|&&v| v > 8).count() as f64 * 100.0
+                    / m.coverage.len().max(1) as f64
+            });
+            println!(
+                "{:<22} {:>4}x{:<4} {:>8.2} {:>9.1} {:>7.2} {:>6.1}% {:>6.0},{:>4.0},{:>4.0}",
+                t.name, t.width, t.height, m_per_tile, texel_per_m, detail, cover,
+                mean[0], mean[1], mean[2]
+            );
+            if let Some(d) = &dir {
+                if let Some(img) =
+                    image::RgbaImage::from_raw(t.width, t.height, t.rgba.clone())
+                {
+                    let _ = img.save(format!("{d}/{label}_{i}_{}.png", t.name));
+                }
+            }
+        }
+    }
+
+    /// Write a map's ground masks out as PNGs, one per layer.
+    ///
+    /// The masks are the only statement of where a track's paint goes, and whether they line
+    /// up with the terrain is not something to reason about — the same reasoning has given
+    /// the opposite answer twice. Put them next to a hillshade of the heightfield and look.
+    ///
+    /// ```text
+    /// FROST_MAP="…/track.map" FROST_DUMP=/tmp/masks \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture dump_ground_masks
+    /// ```
+    #[test]
+    #[ignore = "writes PNGs — set FROST_MAP and FROST_DUMP"]
+    fn dump_ground_masks() {
+        let path = std::env::var("FROST_MAP").expect("set FROST_MAP");
+        let dir = std::env::var("FROST_DUMP").expect("set FROST_DUMP");
+        std::fs::create_dir_all(&dir).unwrap();
+        let b = std::fs::read(&path).expect("read the map");
+        for (i, l) in ground_layers(&b).iter().enumerate() {
+            let Some(m) = &l.mask else {
+                println!("  layer {i} {:<24} base, no mask", l.sheet.name);
+                continue;
+            };
+            let covered = m.coverage.iter().filter(|&&c| c > 8).count();
+            println!(
+                "  layer {i} {:<24} mask {}x{}  {:.1}% covered  tile {}x{}",
+                l.sheet.name,
+                m.width,
+                m.height,
+                covered as f64 * 100.0 / m.coverage.len().max(1) as f64,
+                l.tile_u,
+                l.tile_v
+            );
+            // Written exactly as stored — row 0 first — so the picture on disk is the
+            // array the shader samples, and nothing here can hide a flip.
+            let img: image::GrayImage =
+                image::ImageBuffer::from_raw(m.width, m.height, m.coverage.clone()).unwrap();
+            let f = format!("{dir}/mask{i}_{}.png", l.sheet.name);
+            img.save(&f).unwrap();
+            println!("     -> {f}");
+        }
+    }
+
+    /// What is actually inside a material record.
+    ///
+    /// The parse has always stepped straight over these 56 bytes, and the whole binding
+    /// problem — which sheet paints which material — is guesswork *because* of that. If one
+    /// of these fourteen words is a texture index, the guessing ends.
+    ///
+    /// ```text
+    /// FROST_MAP="…/track.map" \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture inside_a_material_record
+    /// ```
+    #[test]
+    #[ignore = "needs a real .map — set FROST_MAP"]
+    fn inside_a_material_record() {
+        let path = std::env::var("FROST_MAP").expect("set FROST_MAP");
+        let b = std::fs::read(&path).expect("read the map");
+        let n = material_count(&b).expect("a material count");
+        let sheets = painting_records(colour_records(&b, texture_table(&b).unwrap().0));
+        println!("  {n} materials, {} painting records", sheets.len());
+
+        const WORDS: usize = MATERIAL_RECORD / 4;
+        // A column that is always a small number in range is what a texture index looks like.
+        let mut in_range = [true; WORDS];
+        let mut distinct: Vec<std::collections::HashSet<u32>> = vec![Default::default(); WORDS];
+        for m in 0..n {
+            let at = MATERIALS_AT + m * MATERIAL_RECORD;
+            let mut row = String::new();
+            for w in 0..WORDS {
+                let v = u32le(&b, at + w * 4);
+                distinct[w].insert(v);
+                if v as usize >= sheets.len() {
+                    in_range[w] = false;
+                }
+                let f = f32::from_le_bytes([
+                    b[at + w * 4],
+                    b[at + w * 4 + 1],
+                    b[at + w * 4 + 2],
+                    b[at + w * 4 + 3],
+                ]);
+                // Floats are colours and factors; integers are the interesting ones.
+                row += &if f != 0.0 && f.is_finite() && f.abs() < 1e6 && f.fract() != 0.0 {
+                    format!("{f:>10.3}")
+                } else {
+                    format!("{v:>10}")
+                };
+            }
+            if m < 24 {
+                println!("  m{m:<3}{row}");
+            }
+        }
+        println!();
+        for w in 0..WORDS {
+            println!(
+                "  word {w:<2} distinct={:<4} always_in_sheet_range={}",
+                distinct[w].len(),
+                in_range[w]
+            );
+        }
+
+        // The candidate: one distinct value per material, every one a legal sheet index.
+        let idx = (0..WORDS)
+            .find(|&w| in_range[w] && distinct[w].len() == n && n > 1)
+            .expect("a word that indexes the sheets one-to-one");
+        println!("\n  word {idx} reads as the texture index:");
+        for m in 0..n {
+            let v = u32le(&b, MATERIALS_AT + m * MATERIAL_RECORD + idx * 4) as usize;
+            println!(
+                "  mat{m:<3} -> sheet {v:<3} {}",
+                sheets.get(v).map(|(s, ..)| s.as_str()).unwrap_or("??")
+            );
+        }
+    }
+
+    /// How many colour maps each rule finds, against how many materials the map declares.
+    ///
+    /// The positional binding needs one colour map per material, in order. Too few and the
+    /// walk slides: every material past the gap wears its neighbour's sheet.
+    ///
+    /// ```text
+    /// FROST_TRACKS=/dir/of/pkzs \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture count_the_colour_maps
+    /// ```
+    #[test]
+    #[ignore = "needs real tracks — set FROST_TRACKS"]
+    fn count_the_colour_maps() {
+        let dir = std::env::var("FROST_TRACKS").expect("set FROST_TRACKS");
+        let mut paths: Vec<_> = std::fs::read_dir(&dir)
+            .expect("read the directory")
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pkz") || e.eq_ignore_ascii_case("zip"))
+            })
+            .collect();
+        paths.sort();
+        println!(
+            "{:<44} {:>7} {:>7} {:>7} {:>7}",
+            "track", "recs", "mats", "_c", "notsec"
+        );
+        for p in &paths {
+            let names = crate::track::entry_names(p).unwrap_or_default();
+            let Some(entry) = names.iter().find(|n| n.to_ascii_lowercase().ends_with(".map"))
+            else {
+                continue;
+            };
+            let Ok(bytes) = crate::track::read_entry(p, entry) else {
+                continue;
+            };
+            let Some((from, count)) = texture_table(&bytes) else {
+                continue;
+            };
+            let all = colour_records(&bytes, from);
+            let named = all.iter().filter(|(n, ..)| is_colour_name(n)).count();
+            let mut seen = std::collections::HashSet::new();
+            let not_secondary = all
+                .iter()
+                .filter(|(n, ..)| {
+                    let l = n.to_ascii_lowercase();
+                    let secondary = l == "env"
+                        || l.starts_with("normals")
+                        || ["_n_s", "_n", "_s", "_nrm", "_spec"]
+                            .iter()
+                            .any(|x| l.ends_with(x));
+                    !secondary && seen.insert(l)
+                })
+                .count();
+            // Does word 11 of every material record read as a legal, one-per-material index
+            // into the painting records? That is what makes it the binding rather than a
+            // coincidence, and it has to hold on every track before it can be trusted.
+            // In range is the test; distinct is not. One sheet often paints several
+            // materials — a fence and its gate wear the same picture — so demanding a
+            // one-to-one map wrongly rejected the two largest tracks here.
+            let sheets = not_secondary;
+            let mut seen = std::collections::HashSet::new();
+            let mut legal = count > 0;
+            for m in 0..count {
+                let at = MATERIALS_AT + m * MATERIAL_RECORD + MATERIAL_TEX_WORD * 4;
+                if at + 4 > bytes.len() {
+                    legal = false;
+                    break;
+                }
+                let v = u32le(&bytes, at) as usize;
+                if v >= sheets {
+                    legal = false;
+                    break;
+                }
+                seen.insert(v);
+            }
+            // A column of the same value is a constant, not an index.
+            legal = legal && seen.len() > 1;
+            println!(
+                "{:<44} {:>7} {:>7} {:>7} {:>7}   w11={}{}",
+                p.file_stem().unwrap_or_default().to_string_lossy(),
+                all.len(),
+                count,
+                named,
+                not_secondary,
+                if legal { "INDEX" } else { "no" },
+                if named < count { "   <- SLIDES" } else { "" }
+            );
+        }
+    }
+
     /// Checks the two things a transcription bug would break: that every normal is unit
     /// length, and that the mesh lands in the world rather than around the origin.
     #[test]

@@ -12,6 +12,7 @@ import StudioCard from "../StudioCard/StudioCard";
 import Manage from "../Manage/Manage";
 import Browse from "../Browse/Browse";
 import Servers from "../Servers/Servers";
+import Ranked from "../Ranked/Ranked";
 import Shop from "../Shop/Shop";
 import Hub from "../Hub/Hub";
 import ModDetail from "../ModDetail/ModDetail";
@@ -228,6 +229,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
             />
           ) : view === "servers" ? (
             <Servers />
+          ) : view === "ranked" ? (
+            <Ranked />
           ) : view === "shop" ? (
             <Shop refreshKey={libraryVersion} />
           ) : view === "hub" ? (

@@ -427,6 +427,31 @@ pub async fn who_is_on(token: Option<&str>, keys: &[String]) -> anyhow::Result<V
     Ok(resp.riders.into_iter().map(|r| r.rider_name).collect())
 }
 
+/// How many riders are on each server, keyed the way presence is recorded.
+///
+/// The counterpart of [`who_is_on`] for the server *list* rather than one server's panel.
+/// That one names people and costs a request per server, which is the wrong shape for a
+/// browser drawing a badge on every row — so this is counts only, every server at once, one
+/// request for the whole list.
+///
+/// Keys come back exactly as they were written, meaning both forms of the same server may
+/// appear: see [`server_key_for`] for why there are two. Resolving a row to a number is the
+/// caller's job, because only the caller knows which rows it is asking about.
+pub async fn presence_counts(
+    token: Option<&str>,
+) -> anyhow::Result<std::collections::HashMap<String, u32>> {
+    #[derive(Deserialize)]
+    struct Resp {
+        servers: std::collections::HashMap<String, u32>,
+    }
+    let mut req = client()?.get(format!("{}/v1/presence/counts", control_plane()));
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    let resp: Resp = req.send().await?.error_for_status()?.json().await?;
+    Ok(resp.servers)
+}
+
 /// A server in the control plane's registry, as `GET /v1/servers` returns it.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

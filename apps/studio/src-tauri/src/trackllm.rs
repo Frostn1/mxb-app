@@ -50,9 +50,55 @@ pub mod corpus {
     pub const LIPS_PER_KM: (f32, f32) = (12.0, 45.0);
     /// One jump's height above the ground it sits on, as the program states it.
     ///
-    /// Up to five metres because published ones are: measured lips top out at 3.0–5.9 m per
-    /// track, and a lap whose biggest jump is 1.6 m has no big jump on it.
-    pub const FEATURE_HEIGHT_M: (f32, f32) = (0.3, 5.0);
+    /// Three metres, which is the regulated ceiling: Motorcycling Australia §6.7.1(a) and
+    /// Motorcycling New Zealand §3.9.2(b) both say "jumps must not exceed 3m in height", and
+    /// no federation anywhere allows more. It was five, on the grounds that measured lips top
+    /// out at 3.0–5.9 m per published track — but that figure is a *prominence* against a 60 m
+    /// mean, which the same survey warns reads a 3.6 m table as 1.9 m and picks up the
+    /// hillside on a wider baseline. The regulated 3 m and the program's `height` are the same
+    /// quantity — the obstacle standing off the ground — and the measured lip is not.
+    /// See `docs/tracks/real-track-corpus.md` §1.2 and §8.2.
+    pub const FEATURE_HEIGHT_M: (f32, f32) = (0.3, 3.0);
+
+    /// How tall one whoop stands.
+    ///
+    /// The best-sourced obstacle in motocross and it was unconstrained here. Dirt Wurx build
+    /// them at 3 ft — "The Whoops – Typical height is 3 feet" — and MA and MNZ both cap a whoop
+    /// at 600 mm. The band spans the two: a regulated set and a supercross-built one.
+    pub const WHOOP_HEIGHT_M: (f32, f32) = (0.3, 0.9);
+
+    // There is deliberately no minimum run-up here, and the rule that looked like one is a
+    // trap worth naming. MA §14.4.3(d) does say "at least 20 metres of run-up preceding each
+    // Jump" — but section 14 is the FREESTYLE module, and every clause around it is about
+    // metal ramps, landing decks and ramp-to-dirt distances. It governs a ramp hit on its own,
+    // not a track.
+    //
+    // Motocross gets §6.7.2, which carries no number: "the length of approaches to Jumps
+    // should be limited to control approach speed". That is a ceiling on run, not a floor, and
+    // `Rhythm` below already implements it from the speed model — which is the better rule
+    // anyway, because what a jump needs is speed rather than metres.
+    //
+    // Applied as a floor it forbids the one thing it should permit: a rhythm section is
+    // closely spaced jumps by definition, and 20 m between them is normal. It was shipped for
+    // one commit and rejected every lap a model wrote. Same caution applies to the 24 m
+    // "dirt-to-dirt" ceiling in §14.8.1 — also freestyle.
+
+    /// The longest a straight may be, metres.
+    ///
+    /// The FFM is the only federation that states one: a straight "must not exceed 125 metres,
+    /// or 140 if there is an obstacle in the first 15 metres". Ours ran to 160 on the opening
+    /// straight. The allowance is kept because our own opening straight carries the finish
+    /// jump, which is exactly the obstacle the rule has in mind.
+    pub const STRAIGHT_M: f32 = 125.0;
+    pub const STRAIGHT_WITH_OBSTACLE_M: f32 = 140.0;
+
+    /// What a lap averages once a rider is round it, km/h.
+    ///
+    /// Measured over 386 official MXGP race classifications, 2014–2026: median 50.6, and a dry
+    /// working band of 45–54. The ceiling is the regulation — FIM 4.1 §5, MA §6.6.1 and MNZ
+    /// §3.8 all cap a lap's average at 65 km/h — and the floor is a mud race. A track whose
+    /// modelled average lands outside this is not one anybody would licence.
+    pub const LAP_AVG_KMH: (f32, f32) = (40.0, 65.0);
     /// Between the crests of a whoop section.
     pub const WHOOP_SPACING_M: (f32, f32) = (2.5, 8.0);
     /// A corner tight enough to need a berm, and one loose enough not to be a corner.
@@ -919,6 +965,33 @@ pub fn review(prog: &TrackProgram) -> Review {
         between("feature density", per_km, corpus::LIPS_PER_KM, " per km", &mut notes);
     }
 
+    // Straights, against the only length limit any federation states. The FFM allows the
+    // longer one when an obstacle stands in the first fifteen metres, which our opening
+    // straight has — it carries the finish jump — so a straight is measured against whichever
+    // applies to it.
+    for (_, at, len) in prog.straight_runs() {
+        let obstacle = prog
+            .features
+            .iter()
+            .any(|f| f.at() >= at - 1.0 && f.at() <= at + 15.0);
+        let cap = if obstacle {
+            corpus::STRAIGHT_WITH_OBSTACLE_M
+        } else {
+            corpus::STRAIGHT_M
+        };
+        if len > cap {
+            out.push(format!(
+                "the straight at {at:.0} m runs {len:.0} m; a straight may not exceed \
+                 {cap:.0} m{}",
+                if obstacle {
+                    " even with an obstacle on it"
+                } else {
+                    " — or 140 m with a jump in its first 15 m"
+                }
+            ));
+        }
+    }
+
     // Per-feature, where the complaint can name the thing that's wrong.
     let turn = prog.stations(1.0);
     let speed = crate::trackspeed::of(prog);
@@ -982,12 +1055,21 @@ pub fn review(prog: &TrackProgram) -> Review {
                 corpus::FEATURE_HEIGHT_M.1
             ));
         }
-        if let Feature::Whoops { at, spacing, .. } = f {
+        if let Feature::Whoops { at, spacing, height, .. } = f {
             if *spacing < corpus::WHOOP_SPACING_M.0 || *spacing > corpus::WHOOP_SPACING_M.1 {
                 out.push(format!(
                     "the whoops at {at:.0} m are {spacing:.1} m apart; whoops run {:.1}–{:.1} m",
                     corpus::WHOOP_SPACING_M.0,
                     corpus::WHOOP_SPACING_M.1
+                ));
+            }
+            let wh = height.abs();
+            if wh < corpus::WHOOP_HEIGHT_M.0 || wh > corpus::WHOOP_HEIGHT_M.1 {
+                out.push(format!(
+                    "the whoops at {at:.0} m stand {wh:.2} m; a whoop is {:.1}–{:.1} m — the \
+                     regulated ceiling is 0.6 and a supercross one is built at 0.9",
+                    corpus::WHOOP_HEIGHT_M.0,
+                    corpus::WHOOP_HEIGHT_M.1
                 ));
             }
         }
@@ -1011,6 +1093,23 @@ pub fn review(prog: &TrackProgram) -> Review {
                      banks the outside of a corner.{nearest}"
                 ));
             }
+        }
+    }
+
+    // What the lap averages, which is the one thing every federation regulates about how a
+    // track rides. The model already knows: a rider's speed round the lap, integrated as the
+    // time it takes them.
+    {
+        let step = 1.0f32;
+        let mut time = 0.0f32;
+        let mut at = 0.0f32;
+        while at < prog.lap_length() {
+            time += step / speed.at(at).max(1.0);
+            at += step;
+        }
+        if time > 1.0 {
+            let kmh = prog.lap_length() / time * 3.6;
+            between("the lap's average speed", kmh, corpus::LAP_AVG_KMH, " km/h", &mut notes);
         }
     }
 
@@ -1220,7 +1319,33 @@ mod tests {
             .collect();
         // camelCase on the wire, so a step-up is `stepUp` and not `step_up`.
         assert!(kinds.contains(&"stepUp"), "{kinds:?}");
-        assert!(kinds.contains(&"tabletop") && kinds.contains(&"berm"));
+        assert!(kinds.contains(&"tabletop"), "{kinds:?}");
+        // And every kind, not only the ones this example happens to use — the example is a
+        // walked lap now and its mix changes with the seed, which is no reason for the wire
+        // names to go unchecked.
+        use crate::trackprog::{Feature, ShapePoint};
+        let one_of_each = [
+            Feature::Tabletop { at: 0.0, length: 30.0, height: 2.0 },
+            Feature::Double { at: 0.0, height: 1.0, gap: 3.0, lip: 5.0 },
+            Feature::Roller { at: 0.0, length: 12.0, height: 0.8 },
+            Feature::Whoops { at: 0.0, count: 6, spacing: 4.0, height: 0.6 },
+            Feature::StepUp { at: 0.0, length: 25.0, height: 1.5 },
+            Feature::Berm { at: 0.0, length: 10.0, height: 1.5 },
+            Feature::Rut { at: 0.0, length: 10.0, depth: 0.3 },
+            Feature::Custom {
+                at: 0.0,
+                length: 20.0,
+                shape: vec![ShapePoint { u: 0.0, h: 0.0 }, ShapePoint { u: 1.0, h: 0.0 }],
+            },
+        ];
+        let names: Vec<String> = one_of_each
+            .iter()
+            .map(|f| serde_json::to_value(f).unwrap()["kind"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            names,
+            ["tabletop", "double", "roller", "whoops", "stepUp", "berm", "rut", "custom"]
+        );
     }
 
     /// The example is what the model is shown, and `generate` puts every answer through
@@ -1254,7 +1379,8 @@ mod tests {
         let wide = serde_json::to_string(&tweaked(|p| p.width = 31.0)).unwrap();
         let ask = Canned::new(&[&wide, EXAMPLE]);
         let got = block_on(generate("a national", &ask, 3)).unwrap();
-        assert_eq!(got.width, 12.0);
+        let example: TrackProgram = serde_json::from_str(EXAMPLE).unwrap();
+        assert_eq!(got.width, example.width);
 
         let seen = ask.seen.borrow();
         assert_eq!(seen.len(), 2, "it should have asked twice");

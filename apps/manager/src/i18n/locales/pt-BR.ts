@@ -911,6 +911,10 @@ export const ptBR: Translation = {
   "serverBrowser.any": "Qualquer",
   "serverBrowser.yes": "Sim",
   "serverBrowser.notJoinable": "O MX Bikes não consegue se conectar ao endereço deste servidor.",
+  "serverBrowser.paintSyncHere_one":
+    "{{count}} piloto neste servidor usa a sincronização de pinturas — você verá a pintura real dele.",
+  "serverBrowser.paintSyncHere_other":
+    "{{count}} pilotos neste servidor usam a sincronização de pinturas — você verá as pinturas reais deles.",
   "serverBrowser.filtered": "Filtrado",
   "serverBrowser.hiddenCount": "{{count}} ocultos",
   "serverBrowser.hideFiltered": "Ocultar de novo",
@@ -1459,6 +1463,22 @@ export const ptBR: Translation = {
   "showcase.supporters.title_one": "Possível graças a {{count}} apoiador",
   "showcase.supporters.title_other": "Possível graças a {{count}} apoiadores",
   "showcase.supporters.more": "+{{count}} outros",
+  "showcase.v0137.hero.title":
+    "Todos os servidores de MX Bikes, ao vivo, enquanto você pilota",
+  "showcase.v0137.hero.body":
+    "A aba Servidores lista todos os servidores da lista mestre com o ping real, a pista que está sendo pilotada e a sessão em andamento. Continua funcionando com o MX Bikes aberto: o app pergunta a cada servidor diretamente, então nada disputa sua conta com o jogo.",
+  "showcase.v0137.whoson":
+    "Abra um servidor para ver quem está nele, o que ele permite e a pista que está rodando — com a imagem se você tiver, e onde conseguir se não tiver.",
+  "showcase.v0137.cheats":
+    "Servidores que anunciam cheats ficam ocultos, pelas mesmas regras que o FrostMod usa no jogo. A aba diz quantos escondeu e deixa você vê-los.",
+  "showcase.v0137.livecodes":
+    "Códigos de compartilhamento que continuam atualizados. Mande um código curto uma vez e publique novas versões nele: quem colou recebe, e o Auto instala.",
+  "showcase.v0137.viewer":
+    "A vista 3D desenha o chão real da pista: cada camada com a própria textura através das máscaras da pista, o cenário com as texturas dele e o céu que ela traz.",
+  "showcase.v0137.ranked":
+    "Uma aba Ranked com seu rank no MXB Ranked, MXP, estatísticas da temporada e suas últimas 50 corridas. Nada para cadastrar: o GUID vem do Steam.",
+  "showcase.v0137.look":
+    "Visual novo. A navegação foi para uma barra no topo, então as artes dos mods ganham a largura toda — sete por linha em vez de cinco.",
   "showcase.v0124.hero.title":
     "Todo o grid com a pintura que realmente escolheu",
   "showcase.v0124.hero.body":
@@ -2010,4 +2030,39 @@ export const ptBR: Translation = {
   "studioApp.installed": "Instalado, versão {{version}}.",
   "studioApp.notInstalled": "Ainda não instalado neste PC.",
   "studioApp.launchFailed": "Não foi possível iniciar o Frost's Studio",
+
+  // ── MXB Ranked ─────────────────────────────────────────────────────────────
+  "nav.ranked": "Ranked",
+  "nav.serverBrowser": "Navegador",
+  "ranked.changeGuid": "GUID",
+  "ranked.refresh": "Atualizar",
+  "ranked.openSite": "No mxb-ranked",
+  "ranked.loading": "Lendo seu perfil no mxb-ranked.com…",
+  "ranked.retry": "Tentar de novo",
+  "ranked.refreshFailed": "Não foi possível atualizar pelo mxb-ranked.com",
+  "ranked.noGuid": "O MXB Ranked identifica os pilotos pelo GUID do MX Bikes. O seu é deduzido da conta Steam conectada — se você comprou o MX Bikes direto, digite o GUID do seu perfil no mxb-ranked.",
+  "ranked.enterGuid": "Digitar GUID",
+  "ranked.guidTitle": "GUID do MX Bikes",
+  "ranked.guidHelp": "Qual perfil mostrar. Cole um GUID ou um link de perfil do mxb-ranked; deixe vazio para voltar à sua conta Steam.",
+  "ranked.since": "membro desde {{date}}",
+  "ranked.manualGuid": "digitado à mão",
+  "ranked.exp": "EXP",
+  "ranked.riderRating": "Nota do piloto",
+  "ranked.penaltyPoints": "Pts de penalidade",
+  "ranked.globalAvg": "Média global: {{value}}",
+  "ranked.rank": "Posição {{rank}}",
+  "ranked.races": "Corridas",
+  "ranked.avgPosition": "Posição média",
+  "ranked.wins": "Vitórias",
+  "ranked.podiums": "Pódios",
+  "ranked.wrLaps": "Voltas WR",
+  "ranked.pbLaps": "Voltas PB",
+  "ranked.holeshots": "Holeshots",
+  "ranked.track": "Pista",
+  "ranked.server": "Servidor",
+  "ranked.position": "Pos",
+  "ranked.bike": "Moto",
+  "ranked.mxp": "MXP",
+  "ranked.penalty": "Penalidade",
+  "ranked.finished": "Disputada",
 };

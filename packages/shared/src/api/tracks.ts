@@ -421,6 +421,23 @@ export async function loadTrackProp(
 }
 
 /**
+ * Bake a track you already have into a prop library the generator can place.
+ *
+ * A generated track otherwise stands on a kit we author ourselves. A library lifts a real
+ * venue's objects — tents, trailers, buildings, poles, trees — and replays them against a
+ * generated centreline, so a new lap gets a paddock rather than an empty field.
+ *
+ * Baking takes about ten seconds and writes one file; it only has to happen once, and every
+ * track generated afterwards uses it. Returns a line describing what was lifted.
+ */
+export function bakePropLibrary(
+  path: string,
+  sheetMax?: number,
+): Promise<string> {
+  return invoke<string>("bake_prop_library", { path, sheetMax });
+}
+
+/**
  * Save a track's props to a `.scr` the game will load.
  *
  * The `.scr` states where a prop goes in plain text and the game reads it at load, so it is

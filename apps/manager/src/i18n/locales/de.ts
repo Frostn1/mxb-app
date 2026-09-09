@@ -917,6 +917,10 @@ export const de: Translation = {
   "serverBrowser.any": "Beliebig",
   "serverBrowser.yes": "Ja",
   "serverBrowser.notJoinable": "MX Bikes kann die Adresse dieses Servers nicht ansteuern.",
+  "serverBrowser.paintSyncHere_one":
+    "{{count}} Fahrer auf diesem Server nutzt Paint-Sync — du siehst sein echtes Design.",
+  "serverBrowser.paintSyncHere_other":
+    "{{count}} Fahrer auf diesem Server nutzen Paint-Sync — du siehst ihre echten Designs.",
   "serverBrowser.filtered": "Gefiltert",
   "serverBrowser.hiddenCount": "{{count}} ausgeblendet",
   "serverBrowser.hideFiltered": "Wieder ausblenden",
@@ -1477,6 +1481,22 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0137.hero.title":
+    "Jeder MX-Bikes-Server, live, während du fährst",
+  "showcase.v0137.hero.body":
+    "Der Server-Tab listet jeden Server der Master-Liste mit echtem Ping, der tatsächlich gefahrenen Strecke und der laufenden Session. Er funktioniert weiter, während MX Bikes läuft — die App fragt jeden Server direkt, sodass nichts mit dem Spiel um deinen Account konkurriert.",
+  "showcase.v0137.whoson":
+    "Öffne einen Server und sieh, wer darauf fährt, was er erlaubt und welche Strecke läuft — mit Bild, wenn du sie hast, und dem Weg dorthin, wenn nicht.",
+  "showcase.v0137.cheats":
+    "Server, die mit Cheats werben, werden ausgeblendet — nach denselben Regeln wie FrostMod im Spiel. Der Tab nennt die Zahl und zeigt sie dir auf Wunsch.",
+  "showcase.v0137.livecodes":
+    "Share-Codes, die aktuell bleiben. Einmal einen kurzen Code schicken, dann neue Versionen darauf veröffentlichen — alle, die ihn eingefügt haben, bekommen sie, und Auto installiert sie.",
+  "showcase.v0137.viewer":
+    "Die 3D-Ansicht zeichnet den echten Untergrund einer Strecke: jede Ebene mit eigener Textur durch die Masken der Strecke, die Objekte in ihren eigenen Texturen und den mitgelieferten Himmel.",
+  "showcase.v0137.ranked":
+    "Ein Ranked-Tab mit deinem MXB-Ranked-Rang, MXP, Saisonwerten und deinen letzten 50 Rennen. Nichts anzumelden — die GUID kommt aus Steam.",
+  "showcase.v0137.look":
+    "Ein neuer Look. Die Navigation sitzt jetzt in einer Leiste oben, sodass Mod-Bilder die volle Fensterbreite bekommen — sieben pro Reihe statt fünf.",
   "showcase.v0124.hero.title":
     "Jeder im Starterfeld in der Lackierung, die er wirklich gewählt hat",
   "showcase.v0124.hero.body":
@@ -2029,4 +2049,39 @@ export const de: Translation = {
   "studioApp.installed": "Installiert, Version {{version}}.",
   "studioApp.notInstalled": "Auf diesem PC noch nicht installiert.",
   "studioApp.launchFailed": "Frost's Studio konnte nicht gestartet werden",
+
+  // ── MXB Ranked ─────────────────────────────────────────────────────────────
+  "nav.ranked": "Ranked",
+  "nav.serverBrowser": "Browser",
+  "ranked.changeGuid": "GUID",
+  "ranked.refresh": "Aktualisieren",
+  "ranked.openSite": "Auf mxb-ranked",
+  "ranked.loading": "Dein Profil wird von mxb-ranked.com gelesen…",
+  "ranked.retry": "Nochmal versuchen",
+  "ranked.refreshFailed": "Aktualisieren von mxb-ranked.com fehlgeschlagen",
+  "ranked.noGuid": "MXB Ranked erkennt Fahrer an ihrer MX-Bikes-GUID. Deine wird aus dem angemeldeten Steam-Konto abgeleitet — wenn du MX Bikes direkt gekauft hast, trag die GUID aus deinem mxb-ranked-Profil ein.",
+  "ranked.enterGuid": "GUID eintragen",
+  "ranked.guidTitle": "MX-Bikes-GUID",
+  "ranked.guidHelp": "Wessen Profil gezeigt wird. Füg eine GUID oder einen Link zu einem mxb-ranked-Profil ein; leer lassen, um wieder dein eigenes Steam-Konto zu nehmen.",
+  "ranked.since": "dabei seit {{date}}",
+  "ranked.manualGuid": "manuell eingetragen",
+  "ranked.exp": "EXP",
+  "ranked.riderRating": "Fahrerwertung",
+  "ranked.penaltyPoints": "Strafpunkte",
+  "ranked.globalAvg": "Globaler Durchschnitt: {{value}}",
+  "ranked.rank": "Platz {{rank}}",
+  "ranked.races": "Rennen",
+  "ranked.avgPosition": "Ø Platzierung",
+  "ranked.wins": "Siege",
+  "ranked.podiums": "Podien",
+  "ranked.wrLaps": "WR-Runden",
+  "ranked.pbLaps": "PB-Runden",
+  "ranked.holeshots": "Holeshots",
+  "ranked.track": "Strecke",
+  "ranked.server": "Server",
+  "ranked.position": "Pos",
+  "ranked.bike": "Bike",
+  "ranked.mxp": "MXP",
+  "ranked.penalty": "Strafe",
+  "ranked.finished": "Gefahren",
 };
