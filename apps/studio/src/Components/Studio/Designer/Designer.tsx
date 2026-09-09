@@ -227,7 +227,13 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * unreachable — and why there was nowhere to put "carry on with what you were doing".
    * Nothing is filled in until this is true.
    */
-  const [started, setStarted] = useState(false);
+  const [started, setStarted] = useState(
+    // A development escape hatch, off unless it is asked for: set
+    // `VITE_DESIGNER_AUTOSTART=1` in `apps/studio/.env.local` and the tab opens straight into
+    // the editor on whatever destination is chosen by default, rather than the start screen.
+    // Working on the Designer otherwise means clicking through the front door every reload.
+    () => import.meta.env.VITE_DESIGNER_AUTOSTART === "1",
+  );
   const { setBare } = useContext(ShellChrome);
   useEffect(() => {
     setBare(!started);
@@ -2138,7 +2144,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             controls — it names what is on screen rather than doing anything to it. It was a
             text box in the toolbar from the moment the tab opened: a question asked before
             there was anything to name. */}
-        <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 w-[320px] -translate-x-1/2 -translate-y-1/2 text-center">
+        <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 w-[240px] -translate-x-1/2 -translate-y-1/2 text-center">
           {naming ? (
             <Input
               ref={nameRef}
@@ -2234,7 +2240,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         {(
           <div data-dock="left" className="absolute inset-y-0 left-0 z-10 flex w-[264px] flex-col gap-3 overflow-y-auto p-3">
           <SheetList
-            className="min-h-0 flex-1"
             sheets={sheets}
             activeId={activeId}
             hints={hints}
@@ -2278,7 +2283,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         {/* ── The sheet, the whole window ──────────────────────────────────────── */}
           {active ? (
             <CanvasStage
-              className="absolute inset-0 rounded-none border-0 bg-canvas"
+              className="absolute inset-y-0 left-[264px] right-[312px] rounded-none border-0 bg-canvas"
               sheet={active}
               source={canvases.current.get(active.id) ?? null}
               version={version}
@@ -2378,7 +2383,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
 
         {/* ── The model and the tools, over the sheet they act on ──────────────── */}
         {(
-          <div data-dock="right" className="absolute inset-y-0 right-0 z-10 flex w-[312px] flex-col gap-3 overflow-y-auto p-3">
+          <div data-dock="right" className="absolute inset-y-0 right-0 z-10 flex w-[312px] flex-col px-3 pb-3 pt-1.5">
         {previewOpen ? (
           /* The switch sits on the corner of the thing it hides, rather than on its own row
              underneath — a full-width button for a preference is a lot of furniture. */
@@ -2408,6 +2413,24 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             {t("designer.showModel")}
           </button>
         )}
+          {/* The model stays put and everything under it scrolls. Scrolling the whole column
+              meant the bike slid off the top the moment the tool panel grew — which it does
+              every time you pick a brush. */}
+          <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+          {active && (
+            <LayerList
+              layers={active.layers}
+              selection={selection}
+              onSelect={select}
+              onToggle={(id, visible) => {
+                patchLayer(id, (l) => ({ ...l, visible }));
+                bump();
+              }}
+              onRemove={(id) => removeLayers([id])}
+              onReorder={reorder}
+              onAdd={addPaintLayer}
+            />
+          )}
           {active && (
             <PaintTools
               settings={paint}
@@ -2423,20 +2446,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             />
           )}
 
-          {active && (
-            <LayerList
-              layers={active.layers}
-              selection={selection}
-              onSelect={select}
-              onToggle={(id, visible) => {
-                patchLayer(id, (l) => ({ ...l, visible }));
-                bump();
-              }}
-              onRemove={(id) => removeLayers([id])}
-              onReorder={reorder}
-              onAdd={addPaintLayer}
-            />
-          )}
           {!!chosen.length && active && (
             <LayerInspector
               layers={chosen}
@@ -2455,6 +2464,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               onChange={(fn) => patchSelection(fn, `layer:${selection.join(",")}`)}
             />
           )}
+          </div>
           </div>
         )}
       </div>
@@ -2514,10 +2524,10 @@ function SheetList({
           </button>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col">
+      <CardContent className="flex min-h-0 flex-col">
       {/* Scrolls rather than growing: a bike's paint runs to two dozen sheets, and a list that
           long pushed the hint line and every button below the fold of the rail. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-0.5">
+      <div className="flex max-h-[46vh] flex-col gap-1.5 overflow-y-auto pr-0.5">
         {sheets.map((sheet, i) => (
           /* The row picks the sheet. It used to be the size label that did — a `2048²` that
              was secretly the button — while the name was a text field and reorder and delete

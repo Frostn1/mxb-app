@@ -439,7 +439,6 @@ export const ptBR: Translation = {
   "category.protection": "Proteções",
   "designer.mirrorWhy.no-model":
     "Carregue a moto na prévia primeiro — sem o modelo não há outro lado para achar.",
-  "designer.toolGroup.select": "Seleção",
   "designer.toolGroup.paint": "Pintar",
   "designer.toolGroup.shapes": "Formas",
   "designer.tool.move": "Mover",

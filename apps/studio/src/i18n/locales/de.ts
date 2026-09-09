@@ -442,7 +442,6 @@ export const de: Translation = {
   "category.protection": "Protektoren",
   "designer.mirrorWhy.no-model":
     "Lade zuerst das Motorrad in die Vorschau — ohne Modell gibt es keine andere Seite zu finden.",
-  "designer.toolGroup.select": "Auswahl",
   "designer.toolGroup.paint": "Malen",
   "designer.toolGroup.shapes": "Formen",
   "designer.tool.move": "Verschieben",

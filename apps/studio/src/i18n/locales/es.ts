@@ -442,7 +442,6 @@ export const es: Translation = {
   "category.protection": "Protecciones",
   "designer.mirrorWhy.no-model":
     "Carga primero la moto en la vista previa: sin el modelo no hay otro lado que encontrar.",
-  "designer.toolGroup.select": "Selección",
   "designer.toolGroup.paint": "Pintar",
   "designer.toolGroup.shapes": "Formas",
   "designer.tool.move": "Mover",

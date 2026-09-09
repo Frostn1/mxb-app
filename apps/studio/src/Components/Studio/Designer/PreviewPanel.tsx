@@ -288,7 +288,7 @@ export function PreviewPanel({
      fullscreen view that couldn't take the helmet off would be the smaller view. */
   const controls = (
     <>
-      {isBike && <TyresPicker pick={tyresPick} className="ml-auto" />}
+      {isBike && full && <TyresPicker pick={tyresPick} className="ml-auto" />}
       {!isBike && (
         <div className="ml-auto flex items-center gap-1">
           {/* A helmet on a rider is a small thing across the canvas with half of it turned
@@ -321,20 +321,25 @@ export function PreviewPanel({
         </div>
       )}
       {loading && <Loader2 className="ml-1 size-3.5 animate-spin text-muted-foreground" />}
-      {/* Not offered when there is nothing to draw: filling the window with the sentence
-          explaining why there's no preview is a bigger version of nothing. */}
-      {!unavailable && (
-        <button
-          type="button"
-          onClick={() => setFull((f) => !f)}
-          title={t(full ? "viewer.exitFullscreen" : "viewer.fullscreen")}
-          aria-label={t(full ? "viewer.exitFullscreen" : "viewer.fullscreen")}
-          className="ml-0.5 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-        >
-          {full ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-        </button>
-      )}
     </>
+  );
+
+  /**
+   * The expand control, over the picture rather than in the header.
+   *
+   * Not offered when there is nothing to draw: filling the window with the sentence
+   * explaining why there's no preview is a bigger version of nothing.
+   */
+  const expand = unavailable ? null : (
+    <button
+      type="button"
+      onClick={() => setFull((f) => !f)}
+      title={t(full ? "viewer.exitFullscreen" : "viewer.fullscreen")}
+      aria-label={t(full ? "viewer.exitFullscreen" : "viewer.fullscreen")}
+      className="absolute right-1.5 top-1.5 z-10 cursor-default rounded-md p-1 text-white/45 transition-colors hover:bg-black/30 hover:text-white/85"
+    >
+      {full ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+    </button>
   );
 
   /** A black bike on a black panel has no silhouette — the case you hit the moment you
@@ -398,7 +403,6 @@ export function PreviewPanel({
     <>
       <Card ref={panelRef} className={cn("min-h-0 overflow-hidden", className)}>
         <div className="flex items-center gap-2 overflow-x-auto px-1 py-1.5 text-[12.5px] font-medium">
-          <span className="flex-none whitespace-nowrap">{t("viewer.preview3d")}</span>
           {controls}
         </div>
         {/* Empty while the fullscreen view has it: the canvas is moved rather than copied, so
@@ -410,6 +414,7 @@ export function PreviewPanel({
           )}
         >
           {!full && body}
+          {!full && expand}
         </div>
         {note}
       </Card>
@@ -423,7 +428,7 @@ export function PreviewPanel({
           // Nothing in here is typed into, so the focus ring the dialog would otherwise put
           // on the first control reads as a stray selection over a picture.
           onOpenAutoFocus={(e) => e.preventDefault()}
-          className="left-0 top-[42px] flex h-[calc(100vh-42px)] w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-none"
+          className="left-0 top-[52px] flex h-[calc(100vh-52px)] w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-none"
         >
           <div className="flex flex-none items-center gap-2 border-b border-border px-3 py-2 text-[12.5px] font-medium">
             <DialogTitle className="text-[12.5px] font-medium">

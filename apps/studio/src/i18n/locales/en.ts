@@ -444,7 +444,6 @@ export const en = {
   "category.protection": "Protection",
   "designer.mirrorWhy.no-model":
     "Load the bike in the preview first — without the model there is no far side to find.",
-  "designer.toolGroup.select": "Select",
   "designer.toolGroup.paint": "Paint",
   "designer.toolGroup.shapes": "Shapes",
   "designer.tool.move": "Move",

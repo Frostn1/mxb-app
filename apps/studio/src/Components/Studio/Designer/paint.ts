@@ -58,10 +58,18 @@ export const PAINT_TOOLS: PaintTool[] = [
  * because the shapes become layers and the strokes do not.
  */
 export const TOOL_GROUPS: { label: string; tools: PaintTool[] }[] = [
-  { label: "designer.toolGroup.select", tools: ["move"] },
   { label: "designer.toolGroup.paint", tools: ["brush", "eraser", "fill", "gradient"] },
   { label: "designer.toolGroup.shapes", tools: ["rect", "ellipse", "line"] },
 ];
+
+/**
+ * The pointer, which is not in a group.
+ *
+ * On its own it was a heading and a full-width button for one tool — two rows to say "stop
+ * painting". It belongs beside undo and redo at the top of the panel: it is the neutral state
+ * you come back to, not a fourth kind of brush.
+ */
+export const NEUTRAL_TOOL: PaintTool = "move";
 
 /**
  * Tools whose result is defined by a press-drag-release, rather than by the path dragged.

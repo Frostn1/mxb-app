@@ -18,6 +18,7 @@ import { useT } from "@/i18n";
 import type { TKey } from "@/i18n";
 import { Row, Slider } from "./controls";
 import {
+  NEUTRAL_TOOL,
   TOOL_GROUPS,
   TOOL_KEYS,
   hasTip,
@@ -85,6 +86,24 @@ export function PaintTools({
       <div className="flex items-center justify-between">
         <h2 className="text-[13px] font-semibold">{t("designer.paint")}</h2>
         <div className="flex items-center gap-0.5">
+          {/* The pointer sits with undo and redo: it is the neutral state you come back to,
+              not a fourth kind of brush, and on its own below it cost a heading and a
+              full-width button to say "stop painting". */}
+          <button
+            type="button"
+            onClick={() => onTool(NEUTRAL_TOOL)}
+            title={`${t("designer.tool.move")} (${TOOL_KEYS[NEUTRAL_TOOL].toUpperCase()})`}
+            aria-label={t("designer.tool.move")}
+            aria-pressed={tool === NEUTRAL_TOOL}
+            className={cn(
+              "mr-1 rounded p-1 transition-colors",
+              tool === NEUTRAL_TOOL
+                ? "bg-primary/15 text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <MousePointer2 className="size-3.5" />
+          </button>
           <button
             type="button"
             disabled={!canUndo}

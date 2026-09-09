@@ -27,11 +27,11 @@
      sits above it, panels are white and float, and the canvas is the one mid gray — the
      deepest layer, so artwork reads against it whether it is light or dark.
      Kept achromatic on purpose; the only saturated thing on screen should be the paint. */
-  --window: #e8e8ec;
-  --background: #f2f2f5;
-  --canvas: #d9d9df;
+  --window: #e6e6ea;
+  --background: #f4f4f7;
+  --canvas: #c9c9d2;
   --card: #ffffff;
-  --panel: #fafafb;
+  --panel: #fcfcfd;
 
   --foreground: #16161a;
   --card-foreground: #16161a;
@@ -61,7 +61,7 @@
   --success: #2c7a4b;
   --warning: #96681a;
 
-  --border: rgba(0, 0, 0, 0.10);
+  --border: rgba(0, 0, 0, 0.13);
   --input: rgba(0, 0, 0, 0.18);
   --ring: #2b7ba8;
 }
