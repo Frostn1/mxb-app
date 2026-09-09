@@ -92,6 +92,9 @@ export interface Config {
   runInBackground?: boolean;
   /** Share anonymous usage counts (default true). */
   analyticsEnabled?: boolean;
+  /** A hand-entered MXB Ranked GUID, for a copy that didn't come from Steam. Empty means
+   *  the GUID is derived from the signed-in Steam account. */
+  rankedGuid?: string;
   /** Launch on login (default true). */
   launchAtStartup?: boolean;
   /** Auto-run FrostMod when the app opens (default true). */
