@@ -934,7 +934,7 @@ export default function TrackStudio() {
                 </div>
               )}
 
-              {/* What the colours on the map mean. */}
+              {/* What the colors on the map mean. */}
               {stage === "plan" && !full && (
                 <div className="pointer-events-none absolute left-4 top-4 flex items-center gap-4">
                   <Legend className="bg-primary" label={t("track.legendSelected")} />
@@ -1664,7 +1664,7 @@ function climbOf(program: TrackProgram): number {
   return Number.isFinite(hi - lo) ? hi - lo : 0;
 }
 
-/** One key of the plan's colour code. */
+/** One key of the plan's color code. */
 function Legend({ className, label }: { className: string; label: string }) {
   return (
     <span className="flex items-center gap-2">

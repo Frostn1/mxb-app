@@ -189,7 +189,7 @@ export const de: Translation = {
   "designer.text": "Text",
   "designer.font": "Schrift",
   "designer.size": "Textgröße",
-  "designer.colour": "Farbe",
+  "designer.color": "Farbe",
   "designer.outline": "Kontur",
   "designer.noModelFound":
     "„{{model}}“ ist nicht in deiner Bibliothek, also gibt es nichts, worauf es gezeigt werden könnte.",
@@ -209,6 +209,7 @@ export const de: Translation = {
     "Nur Bikes können sagen, welche Texturen ihre eigenen sind. Ein Helm trägt die Lackierung, mit der er kam, und die ist kein Originallook zum Abpausen.",
   "designer.stockNoMatch":
     "Dieses Modell bringt keine eigene Textur namens „{{name}}“ mit, also gibt es vom Bike nichts unter diesem Blatt zu zeigen.",
+  "designer.clearBase": "Grundbild entfernen",
   "designer.stockAsBase": "Original als Basis",
   "designer.stockAsBaseHint":
     "Malt die eigene Textur des Bikes in voller Deckkraft in dieses Blatt — der Originallook als Ausgangspunkt, eine Startnummer von einer fertigen Lackierung entfernt. Anders als die Referenz darüber gehört diese zu dem, was du speicherst.",
@@ -225,9 +226,9 @@ export const de: Translation = {
   "designer.paintLayerName": "Malerei",
   "designer.moveHint":
     "Ziehe Ebenen auf der Bahn, um sie zu platzieren — sie rasten an Nähten und aneinander ein, halte Alt zum freien Platzieren. Umschalt+Klick erweitert die Auswahl, ein Zug über leere Fläche zieht ein Lasso, und der Rechtsklick hat den Rest. Wähle oben ein Werkzeug, um stattdessen darauf zu malen.",
-  "designer.colourFrom": "Damit malen",
-  "designer.colourTo": "Dahin verlaufen",
-  "designer.swapColours": "Die beiden Farben tauschen",
+  "designer.colorFrom": "Damit malen",
+  "designer.colorTo": "Dahin verlaufen",
+  "designer.swapColors": "Die beiden Farben tauschen",
   "designer.brushSize": "Pinsel",
   "designer.hardness": "Kante",
   "designer.strength": "Stärke",

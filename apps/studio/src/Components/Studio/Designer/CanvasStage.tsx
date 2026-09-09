@@ -461,7 +461,7 @@ export function CanvasStage({
     const top = originY - h / 2;
 
     // Checkerboard first, so transparent parts of the sheet read as transparent rather than
-    // as black — which on a livery is a real colour and would be badly misleading.
+    // as black — which on a livery is a real color and would be badly misleading.
     ctx.save();
     ctx.beginPath();
     ctx.rect(left, top, w, h);
@@ -1051,7 +1051,7 @@ export function CanvasStage({
         )}
       />
       {/* What the wash over the islands means. Only while the islands are showing, and only on
-          a model that can say — a legend for a colour nobody can see is furniture. It sits
+          a model that can say — a legend for a color nobody can see is furniture. It sits
           here rather than in the readout below because the wash is on screen whether or not
           the pointer is over anything, and that is exactly when it needs explaining. */}
       {washed && (
@@ -1091,7 +1091,7 @@ export function CanvasStage({
                 afternoon: it means this island is worn by each side of the bike. */}
             {overSide && overSide !== "centre" && (
               <span
-                // The same colours the sheet is washed with, so the word and the region under
+                // The same colors the sheet is washed with, so the word and the region under
                 // the pointer are recognisably the same answer.
                 className={cn(
                   overSide === "left" && "text-[hsl(28_95%_62%)]",

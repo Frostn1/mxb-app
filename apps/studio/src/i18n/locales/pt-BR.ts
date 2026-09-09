@@ -189,7 +189,7 @@ export const ptBR: Translation = {
   "designer.text": "Texto",
   "designer.font": "Fonte",
   "designer.size": "Tamanho do texto",
-  "designer.colour": "Cor",
+  "designer.color": "Cor",
   "designer.outline": "Contorno",
   "designer.noModelFound": "“{{model}}” não está na sua biblioteca, então não há onde mostrar.",
   "designer.gearNote": "Mostrado no piloto padrão — o seu equipamento não está carregado aqui.",
@@ -207,6 +207,7 @@ export const ptBR: Translation = {
     "Só motos conseguem dizer quais texturas são delas. Um capacete usa a pintura com que veio, e isso não é um visual de fábrica para decalcar.",
   "designer.stockNoMatch":
     "Este modelo não traz nenhuma textura própria chamada “{{name}}”, então não há nada da moto para mostrar sob esta folha.",
+  "designer.clearBase": "Remover a base",
   "designer.stockAsBase": "Fábrica como base",
   "designer.stockAsBaseHint":
     "Pinta a textura da própria moto nesta folha em intensidade total — o visual de fábrica como ponto de partida, a um número de virar uma pintura. Diferente da referência acima, esta faz parte do que você salva.",
@@ -223,9 +224,9 @@ export const ptBR: Translation = {
   "designer.paintLayerName": "Pintura",
   "designer.moveHint":
     "Arraste as camadas na folha para posicioná-las: elas encaixam nas emendas e umas nas outras — segure Alt para posicionar livre. Shift+clique soma à seleção, arrastar no vazio faz um laço, e o botão direito tem o resto. Escolha uma ferramenta acima para pintar nela.",
-  "designer.colourFrom": "Pintar com esta",
-  "designer.colourTo": "Transitar para esta",
-  "designer.swapColours": "Trocar as duas cores",
+  "designer.colorFrom": "Pintar com esta",
+  "designer.colorTo": "Transitar para esta",
+  "designer.swapColors": "Trocar as duas cores",
   "designer.brushSize": "Pincel",
   "designer.hardness": "Borda",
   "designer.strength": "Intensidade",

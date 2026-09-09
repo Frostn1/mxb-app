@@ -486,7 +486,7 @@ export function blankSheet(name: string, size: number): Sheet {
   return { id: newId("sheet"), name, width: size, height: size, base: null, layers: [] };
 }
 
-/** Suffixes that mark a texture as a companion map rather than a colour sheet. Mirrors
+/** Suffixes that mark a texture as a companion map rather than a color sheet. Mirrors
  *  `is_companion_map` / `is_exporter_companion` on the Rust side. */
 const COMPANION_SUFFIXES = [
   "_n",
@@ -506,7 +506,7 @@ const COMPANION_SUFFIXES = [
 ];
 
 /**
- * Whether a texture name is a companion map — a normal or roughness sheet, not a colour one.
+ * Whether a texture name is a companion map — a normal or roughness sheet, not a color one.
  *
  * Worth telling apart when *offering* to make sheets. A companion map is derived from the
  * shape of the surface, not drawn like a livery, and a blank one is actively destructive: the

@@ -60,7 +60,7 @@ interface PaintToolsProps {
  * The tool kit: what the pointer does on the sheet, and what it does it with.
  *
  * Rows appear with the tool that needs them rather than all at once — hardness means nothing to
- * a gradient and an end colour means nothing to a brush, and a panel of controls that don't
+ * a gradient and an end color means nothing to a brush, and a panel of controls that don't
  * apply is a panel nobody reads.
  */
 export function PaintTools({
@@ -168,21 +168,21 @@ export function PaintTools({
 
       {tool === "move" ? null : (
         <>
-          <Row label={t("designer.colour")}>
+          <Row label={t("designer.color")}>
             <input
               type="color"
               value={settings.colorA}
               onChange={(e) => onChange({ colorA: e.target.value })}
-              className="h-6 w-9 flex-none rounded border border-input bg-background"
-              title={t("designer.colourFrom")}
+              className="h-6 w-8 flex-none"
+              title={t("designer.colorFrom")}
             />
             {tool === "gradient" && (
               <>
                 <button
                   type="button"
                   onClick={() => onChange({ colorA: settings.colorB, colorB: settings.colorA })}
-                  title={t("designer.swapColours")}
-                  aria-label={t("designer.swapColours")}
+                  title={t("designer.swapColors")}
+                  aria-label={t("designer.swapColors")}
                   className="flex-none rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
                 >
                   <ArrowLeftRight className="size-3" />
@@ -191,8 +191,8 @@ export function PaintTools({
                   type="color"
                   value={settings.colorB}
                   onChange={(e) => onChange({ colorB: e.target.value })}
-                  className="h-6 w-9 flex-none rounded border border-input bg-background"
-                  title={t("designer.colourTo")}
+                  className="h-6 w-8 flex-none"
+                  title={t("designer.colorTo")}
                 />
               </>
             )}
@@ -294,18 +294,6 @@ export function PaintTools({
               />
             </Row>
           )}
-
-          {/* The gradient and the fill cover the whole layer, which is the one thing about
-              them worth saying out loud — a brush stroke made first is underneath it. */}
-          <p className="text-[11px] leading-snug text-faint">
-            {t(
-              tool === "fill"
-                ? "designer.fillHint"
-                : tool === "gradient"
-                  ? "designer.gradientHint"
-                  : "designer.paintHint",
-            )}
-          </p>
         </>
       )}
     </Card>

@@ -291,12 +291,12 @@ export function LayerInspector({
         </select>
       </Row>
 
-      {/* A shape is geometry, so it keeps its colour and its pen editable for as long as the
+      {/* A shape is geometry, so it keeps its color and its pen editable for as long as the
           paint is open — which is the whole point of it not being pixels. Size and angle are
           the shared controls above; only what it is drawn *with* is particular to it. */}
       {layer?.kind === "shape" && !linked && (
         <>
-          <Row label={t("designer.colour")}>
+          <Row label={t("designer.color")}>
             <input
               type="color"
               value={layer.color}
@@ -379,7 +379,7 @@ export function LayerInspector({
             />
           </Row>
 
-          <Row label={t("designer.colour")}>
+          <Row label={t("designer.color")}>
             <input
               type="color"
               value={layer.color}

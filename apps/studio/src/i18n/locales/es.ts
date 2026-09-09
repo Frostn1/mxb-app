@@ -189,7 +189,7 @@ export const es: Translation = {
   "designer.text": "Texto",
   "designer.font": "Fuente",
   "designer.size": "Tamaño del texto",
-  "designer.colour": "Color",
+  "designer.color": "Color",
   "designer.outline": "Contorno",
   "designer.noModelFound":
     "“{{model}}” no está en tu biblioteca, así que no hay nada donde mostrarla.",
@@ -209,6 +209,7 @@ export const es: Translation = {
     "Solo las motos pueden decir qué texturas son suyas. Un casco lleva la pintura con la que vino, y eso no es un aspecto de fábrica que calcar.",
   "designer.stockNoMatch":
     "Este modelo no trae ninguna textura propia llamada “{{name}}”, así que no hay nada de la moto que mostrar bajo esta hoja.",
+  "designer.clearBase": "Quitar la base",
   "designer.stockAsBase": "Fábrica como base",
   "designer.stockAsBaseHint":
     "Pinta la textura propia de la moto en esta hoja a plena intensidad — el aspecto de fábrica como punto de partida, a un número de ser una pintura. A diferencia de la referencia de arriba, esta sí forma parte de lo que guardas.",
@@ -225,9 +226,9 @@ export const es: Translation = {
   "designer.paintLayerName": "Pintura",
   "designer.moveHint":
     "Arrastra las capas sobre la hoja para colocarlas: se enganchan a las costuras y entre sí; mantén Alt para colocarlas libremente. Mayús+clic añade a la selección, arrastrar sobre el vacío hace un lazo, y el clic derecho tiene el resto. Elige una herramienta arriba para pintar sobre ella.",
-  "designer.colourFrom": "Pinta con este",
-  "designer.colourTo": "Funde hacia este",
-  "designer.swapColours": "Intercambiar los dos colores",
+  "designer.colorFrom": "Pinta con este",
+  "designer.colorTo": "Funde hacia este",
+  "designer.swapColors": "Intercambiar los dos colores",
   "designer.brushSize": "Pincel",
   "designer.hardness": "Borde",
   "designer.strength": "Intensidad",

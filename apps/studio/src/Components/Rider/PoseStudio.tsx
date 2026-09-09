@@ -284,9 +284,6 @@ export default function PoseStudio() {
               {t("pose.savePhoto")}
             </Button>
           </div>
-          <p className="mt-1.5 text-[10px] leading-snug text-muted-foreground">
-            {t("pose.photoHint")}
-          </p>
         </Card>
 
         <section>
@@ -326,10 +323,6 @@ export default function PoseStudio() {
             {t(rig ? "pose.quickHint" : "pose.quickWaiting")}
           </p>
         </section>
-
-        <p className="-mb-1 text-[10px] leading-snug text-muted-foreground">
-          {t("pose.dragHint")}
-        </p>
 
         {BONE_GROUPS.map((g) => (
           <section

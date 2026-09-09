@@ -37,6 +37,7 @@ import * as THREE from "three";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Input } from "@frost/shared/Components/ui/input";
+import { Progress } from "@frost/shared/Components/ui/progress";
 import {
   Card,
   CardAction,
@@ -58,7 +59,7 @@ import {
 } from "@frost/shared/api/mods";
 import { useT } from "@/i18n";
 import StartScreen from "./StartScreen";
-import { IMAGE_EXTS, PaintDestBar, isBikeKind, usePaintDest } from "../paintDest";
+import { IMAGE_EXTS, isBikeKind, usePaintDest } from "../paintDest";
 const PREVIEW_OPEN_KEY = "mxb:designer:preview:v1";
 
 import { CanvasStage } from "./CanvasStage";
@@ -1059,7 +1060,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * Texture names this model wants that have no sheet yet — what the create button offers,
    * and the name a new blank sheet is given.
    *
-   * Colour sheets only. The hint line lists the companion maps too, because knowing the bike
+   * Color sheets only. The hint line lists the companion maps too, because knowing the bike
    * has a `plastics_n` is worth knowing, but an *empty* one is worse than none: a paint
    * replaces textures by name, so saving a blank normal map strips the bike's real one.
    */
@@ -1093,7 +1094,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   }, [addBlankSheet, hints]);
 
   /**
-   * One sheet per colour texture the model asks for that isn't on the list yet.
+   * One sheet per color texture the model asks for that isn't on the list yet.
    *
    * The names are the whole binding — a sheet called anything else paints nothing — and until
    * now the only way to get them right without an installed paint to start from was to read
@@ -1775,7 +1776,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   /**
    * Give a companion sheet something correct to start from.
    *
-   * A colour sheet starts blank because blank is where a livery starts. A companion map is the
+   * A color sheet starts blank because blank is where a livery starts. A companion map is the
    * opposite: a paint replaces the model's textures *by name*, so saving an empty `plastics_n`
    * does not add a normal map — it throws the bike's real one away and puts black in its
    * place, which decodes to a surface pointing back into itself. That is why these are kept
@@ -1870,6 +1871,16 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * the same store; the fetch is for the sheet whose ghost is switched off, since the button
    * has to work without asking anyone to turn a guide on first.
    */
+  /** Take the base back out. `stockAsBase` had no counterpart, so it was a one-way door. */
+  const clearBase = useCallback(
+    (sheetId: string) => {
+      remember();
+      patchSheet(sheetId, (sheet) => ({ ...sheet, base: null }));
+      bump();
+    },
+    [bump, patchSheet, remember],
+  );
+
   const stockAsBase = useCallback(
     async (sheetId: string) => {
       const sheet = sheetsRef.current.find((s) => s.id === sheetId);
@@ -1879,6 +1890,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         toast.error(t("designer.stockNoMatch", { name: sheet.name.trim() }));
         return;
       }
+      remember();
       const held = ghostOf(sheetId);
       const ready = held.stockFor === sheet.name ? held.stock : null;
       setBusy(true);
@@ -1902,7 +1914,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       bump();
       toast.success(t("designer.stockAsBaseDone", { name: sheet.name.trim() }));
     },
-    [bump, ghostOf, patchGhost, patchSheet, stockFor, t],
+    [bump, ghostOf, patchGhost, patchSheet, remember, stockFor, t],
   );
 
   // Ghosts of sheets that are gone. Each holds a decoded bitmap and a raster the size of the
@@ -2108,12 +2120,20 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   }
 
   return (
-    <div ref={rootRef} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div ref={rootRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* Something on screen while it works: unpacking a `.pnt` reads the file, inflates
+          every sheet and writes them out, and before this the window simply sat there. */}
+      {busy && (
+        <Progress className="absolute inset-x-0 top-0 z-30 h-[2px] rounded-none bg-transparent" />
+      )}
       {/* The decisions made once — where it goes, what it's called, save — go in the shell's
           own strip rather than a row of their own, so the sheet and the model get the whole
           window below it. */}
       <ContextBarLeft>
-        <PaintDestBar state={destState} className="w-[280px]" />
+        <span className="flex min-w-0 items-baseline gap-2 pl-1 text-[12.5px] text-faint">
+          <span className="flex-none font-medium">{t(destState.kind.label)}</span>
+          <span className="min-w-0 truncate">{destState.folder ?? destState.model}</span>
+        </span>
         {/* The paint's title, in the middle of the window and not in either group of
             controls — it names what is on screen rather than doing anything to it. It was a
             text box in the toolbar from the moment the tab opened: a question asked before
@@ -2248,6 +2268,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               busy={busy}
               onTrace={() => toggleTrace(active.id)}
               onStockBase={() => void stockAsBase(active.id)}
+              onClearBase={() => clearBase(active.id)}
               onChange={(fn) => patchGhost(active.id, fn)}
             />
           )}
@@ -2404,7 +2425,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
 
           {active && (
             <LayerList
-              className="min-h-0 flex-1"
               layers={active.layers}
               selection={selection}
               onSelect={select}
@@ -2464,7 +2484,7 @@ function SheetList({
   activeId: string | null;
   /** Every texture name the model's paints use — shown in full, companion maps included. */
   hints: string[];
-  /** The colour sheets among them that don't exist yet: what the create button would make. */
+  /** The color sheets among them that don't exist yet: what the create button would make. */
   missingHints: string[];
   onPick: (id: string) => void;
   onRename: (id: string, value: string) => void;
@@ -2637,6 +2657,7 @@ function GhostPanel({
   busy,
   onTrace,
   onStockBase,
+  onClearBase,
   onChange,
 }: {
   ghost: Ghost;
@@ -2652,6 +2673,7 @@ function GhostPanel({
   onTrace: () => void;
   /** Put that texture into the sheet for real, rather than faintly underneath it. */
   onStockBase: () => void;
+  onClearBase: () => void;
   onChange: (fn: (g: Ghost) => Ghost) => void;
 }) {
   const t = useT();
@@ -2748,18 +2770,20 @@ function GhostPanel({
           variant="outline"
           size="sm"
           className="mb-2 w-full min-w-0 justify-start"
-          disabled={!stockSheet || busy}
+          disabled={(!stockSheet && !hasBase) || busy}
           title={t(stockSheet ? "designer.stockAsBaseHint" : "designer.stockNoMatch", {
             name: sheetName.trim(),
           })}
-          onClick={onStockBase}
+          onClick={hasBase ? onClearBase : onStockBase}
         >
           {busy ? (
             <Loader2 className="size-3.5 animate-spin" />
           ) : (
             <PaintBucket className="size-3.5" />
           )}
-          <span className="truncate">{t("designer.stockAsBase")}</span>
+          <span className="truncate">
+            {t(hasBase ? "designer.clearBase" : "designer.stockAsBase")}
+          </span>
         </Button>
       )}
 

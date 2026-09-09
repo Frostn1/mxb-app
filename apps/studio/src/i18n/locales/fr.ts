@@ -189,7 +189,7 @@ export const fr: Translation = {
   "designer.text": "Texte",
   "designer.font": "Police",
   "designer.size": "Taille du texte",
-  "designer.colour": "Couleur",
+  "designer.color": "Couleur",
   "designer.outline": "Contour",
   "designer.noModelFound":
     "« {{model}} » n'est pas dans ta bibliothèque, il n'y a donc rien pour l'afficher.",
@@ -209,6 +209,7 @@ export const fr: Translation = {
     "Seules les motos savent dire quelles textures leur appartiennent. Un casque porte la peinture avec laquelle il est arrivé, et ce n'est pas un aspect d'origine à décalquer.",
   "designer.stockNoMatch":
     "Ce modèle n'embarque aucune texture à lui nommée « {{name}} », il n'y a donc rien de la moto à montrer sous cette planche.",
+  "designer.clearBase": "Retirer la base",
   "designer.stockAsBase": "Origine en base",
   "designer.stockAsBaseHint":
     "Peint la texture de la moto elle-même dans cette planche à pleine intensité — l'aspect d'origine comme point de départ, à un numéro d'être une peinture. Contrairement à la référence ci-dessus, celle-ci fait partie de ce que tu enregistres.",
@@ -225,9 +226,9 @@ export const fr: Translation = {
   "designer.paintLayerName": "Peinture",
   "designer.moveHint":
     "Fais glisser les calques sur la planche pour les placer : ils s'aimantent aux coutures et entre eux — maintiens Alt pour placer librement. Maj+clic ajoute à la sélection, un glissé sur le vide fait un lasso, et le clic droit a le reste. Choisis un outil ci-dessus pour peindre dessus.",
-  "designer.colourFrom": "Peindre avec cette couleur",
-  "designer.colourTo": "Fondre vers cette couleur",
-  "designer.swapColours": "Inverser les deux couleurs",
+  "designer.colorFrom": "Peindre avec cette couleur",
+  "designer.colorTo": "Fondre vers cette couleur",
+  "designer.swapColors": "Inverser les deux couleurs",
   "designer.brushSize": "Pinceau",
   "designer.hardness": "Bord",
   "designer.strength": "Intensité",

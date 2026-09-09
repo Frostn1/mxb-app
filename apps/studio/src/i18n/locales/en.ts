@@ -192,7 +192,7 @@ export const en = {
   "designer.text": "Text",
   "designer.font": "Font",
   "designer.size": "Text size",
-  "designer.colour": "Colour",
+  "designer.color": "Color",
   "designer.outline": "Outline",
   "designer.noModelFound":
     "“{{model}}” isn't in your library, so there's nothing to show it on.",
@@ -211,12 +211,13 @@ export const en = {
     "Only bikes can say which textures are their own. A helmet wears whichever paint it shipped with, and that isn't a stock look to trace.",
   "designer.stockNoMatch":
     "This model carries no texture of its own called “{{name}}”, so there's nothing of the bike's to show under this sheet.",
+  "designer.clearBase": "Remove the base",
   "designer.stockAsBase": "Stock as base",
   "designer.stockAsBaseHint":
     "Paint the bike's own texture into this sheet at full strength — the stock look as your starting point, a number away from being a paint. Unlike the reference above, this one is part of what you save.",
   "designer.uvMap": "UV map",
   "designer.uvHint":
-    "Show where the model's bodywork lands on this sheet, each piece in its own colour.",
+    "Show where the model's bodywork lands on this sheet, each piece in its own color.",
   "designer.noGeometry": "Load a model in the preview to see its UV layout.",
   "designer.uvNoMatch":
     "Nothing on the model uses a texture called “{{name}}”, so there is no UV layout to show.",
@@ -227,9 +228,9 @@ export const en = {
   "designer.paintLayerName": "Paint",
   "designer.moveHint":
     "Drag layers on the sheet to place them, and they snap to the seams and to each other — hold Alt to place one freely. Shift-click adds to the selection, a drag over empty space lassoes, and right-click has the rest. Pick a tool above to paint on it instead.",
-  "designer.colourFrom": "Paint with this",
-  "designer.colourTo": "Run into this",
-  "designer.swapColours": "Swap the two colours",
+  "designer.colorFrom": "Paint with this",
+  "designer.colorTo": "Run into this",
+  "designer.swapColors": "Swap the two colors",
   "designer.brushSize": "Brush",
   "designer.hardness": "Edge",
   "designer.strength": "Strength",

@@ -473,9 +473,18 @@ export function PaintDestCard({
       {touched && (
         <div className="animate-in fade-in-0 slide-in-from-top-2 duration-200">
       <div className="mt-6 flex max-w-[720px] flex-col gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
-          {t(state.modelLabel)}
-        </span>
+        {/* The answer beside the question: the list below can be scrolled far from the row
+            that is chosen, and a label on its own then names something you cannot see. */}
+        <div className="flex items-baseline gap-2.5">
+          <span className="flex-none text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
+            {t(state.modelLabel)}
+          </span>
+          {model && (
+            <span className="min-w-0 truncate text-[13px] font-medium text-foreground">
+              {model}
+            </span>
+          )}
+        </div>
         <ModelSearch value={model} options={models} onChange={setModel} />
         {!models.length && (
           <span className="text-[11px] leading-snug text-faint">{t("paints.noModels")}</span>

@@ -123,19 +123,56 @@
   border-radius: 999px;
 }
 
-/* The native range control is styled into a skewed plate thumb in the shared theme. The
-   Studio uses the shadcn `Slider` instead, but Designer's numeric controls still reach for
-   `input[type=range]` in places, so round those rather than leave one plate on screen. */
+/* The native range control.
+ *
+ * The shared theme paints it as a plate: a 3px track and an 8×14 skewed rectangle for a
+ * thumb. Un-skewed that is just a small grey oblong, which is what "the sliders look weird"
+ * was — it reads as a rendering artefact rather than as a control. This is the shape every
+ * other slider on the platform has, so nobody has to work out what it is.
+ *
+ * `--fill` is set inline by the control, because a native track cannot know its own value. */
+.studio-skin input[type="range"] {
+  height: 18px;
+}
 .studio-skin input[type="range"]::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--primary) 0,
+    var(--primary) var(--fill, 0%),
+    color-mix(in srgb, var(--foreground) 13%, transparent) var(--fill, 0%)
+  );
 }
 .studio-skin input[type="range"]::-webkit-slider-thumb {
-  width: 13px;
-  height: 13px;
-  margin-top: -4.5px;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
   border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #000 12%, transparent);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
   transform: none;
+}
+.studio-skin input[type="range"]:active::-webkit-slider-thumb {
+  background: color-mix(in srgb, #fff 92%, var(--primary));
+}
+
+/* A colour well, not a square sitting in a box. The native control draws its swatch inside
+   its own padded wrapper, so without this you get a small block floating in a border. */
+.studio-skin input[type="color"] {
+  padding: 0;
+  border: 1px solid var(--input);
+  border-radius: 999px;
+  overflow: hidden;
+  cursor: default;
+}
+.studio-skin input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.studio-skin input[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: inherit;
 }
 
 /* Scrollbars inside panels. The Studio has a lot of narrow scrolling columns and the
@@ -224,4 +261,37 @@
 }
 .studio-skin button:disabled svg {
   color: var(--faint);
+}
+
+/* A one-shot sweep across a button the moment it becomes usable.
+ *
+ * Create sits in the bottom corner, a long way from the tiles you were just clicking, and
+ * going from off to on down there is easy to miss. One pass of light, then nothing — it says
+ * "this is live now" without becoming something that moves on screen while you work. */
+@keyframes frost-shimmer {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(220%);
+  }
+}
+.frost-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.frost-shimmer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 45%;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    color-mix(in srgb, var(--foreground) 22%, transparent),
+    transparent
+  );
+  animation: frost-shimmer 0.75s ease-out;
 }
