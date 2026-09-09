@@ -9,8 +9,8 @@ import ModDetail from "../ModDetail/ModDetail";
 import Manage from "../Manage/Manage";
 import Presets from "../Presets/Presets";
 import { ThemeProvider } from "../../Context/Theme";
-import { useI18n } from "@frost/shared/i18n/context";
-import { setAmbientVars, type TKey } from "@frost/shared/i18n/core";
+import { useI18n, APP_NAME } from "@/i18n";
+import { setAmbientVars, type TKey } from "@/i18n";
 import { FrostmodProvider } from "../../Context/Frostmod";
 import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
 import { InstallProvider } from "../../Context/Install";
@@ -188,7 +188,7 @@ export default function Overlay() {
                 className="flex h-[42px] flex-none select-none items-center gap-3 border-b border-white/[0.06] pl-4 pr-1.5"
               >
                 <span data-tauri-drag-region className="text-[13px] font-bold tracking-[0.2px]">
-                  MXB App
+                  {APP_NAME}
                 </span>
 
                 <nav className="flex items-center gap-0.5">

@@ -67,8 +67,8 @@ import type {
 } from "@frost/shared/types";
 import { SlotField } from "@frost/shared/Components/SlotField";
 import FeelPresets from "./FeelPresets";
-import { Trans } from "@frost/shared/i18n";
-import { useT, type TFunc, type TKey } from "@frost/shared/i18n/context";
+import { Trans } from "@/i18n";
+import { useT, type TFunc, type TKey } from "@/i18n";
 import {
   SLOT_GROUPS,
   slotsFor,
@@ -88,7 +88,7 @@ function humanSize(bytes: number): string {
   return `${bytes} B`;
 }
 
-function phaseLabel(phase: BundlePhase, t: TFunc): string {
+function phaseLabel(phase: BundlePhase, t: TFunc<TKey>): string {
   switch (phase) {
     case "bundling":
       return t("presets.phaseBundling");

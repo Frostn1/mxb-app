@@ -20,8 +20,8 @@ import {
   setIntroSeen,
 } from "@frost/shared/api/mods";
 import { TOUR_DONE_KEY } from "./Components/Tour/Tour";
-import { useI18n } from "@frost/shared/i18n/context";
-import { setAmbientVars } from "@frost/shared/i18n/core";
+import { useI18n } from "@/i18n";
+import { setAmbientVars } from "@/i18n";
 import { UpdateProvider } from "./Context/Update";
 import RuntimeBanner from "./Components/RuntimeBanner/RuntimeBanner";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";

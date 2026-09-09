@@ -23,7 +23,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { cn } from "@frost/shared/lib/utils";
-import { useT, type TKey } from "@frost/shared/i18n/context";
+import { useT, type TKey } from "@/i18n";
 import { useConfig } from "@frost/shared/Context/Config";
 import type { GameCaps } from "@frost/shared/types";
 import type { DashboardView } from "../Shell/nav";

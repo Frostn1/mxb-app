@@ -23,7 +23,7 @@ import { hubInstall, type HubItem } from "../api/hub";
 import type { DownloadSource, InstallStage, ReloadOutcome } from "@frost/shared/types";
 import { useDownloads } from "./Downloads";
 import { useDropReview } from "./DropReview";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 
 /** Where the bytes come from — a resolvable host, a file the user picked, or something already
  *  bought on one of the two stores.

@@ -12,7 +12,7 @@ import {
 } from "@frost/shared/Components/ui/dialog";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Input } from "@frost/shared/Components/ui/input";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import { listBikeLiveries, setModelPaints } from "@frost/shared/api/mods";
 import type { BikeModels, SwapApplyOutcome } from "@frost/shared/types";
 

@@ -1,5 +1,5 @@
 import { ChevronRight, Coffee } from "lucide-react";
-import { useI18n } from "@frost/shared/i18n/context";
+import { useI18n } from "@/i18n";
 import { groupByTier } from "../Settings/supporters";
 import { useSupporters } from "../Settings/useSupporters";
 

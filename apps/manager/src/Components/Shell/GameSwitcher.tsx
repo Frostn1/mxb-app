@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@frost/shared/Components/ui/dropdown-menu";
 import { useConfig } from "@frost/shared/Context/Config";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import type { GameId } from "@frost/shared/types";
 
 /**

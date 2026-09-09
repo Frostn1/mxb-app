@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Snowflake, ArrowLeft, ArrowRight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useT, type TKey } from "@frost/shared/i18n/context";
+import { useT, type TKey } from "@/i18n";
 import { Button } from "@frost/shared/Components/ui/button";
 import { cn } from "@frost/shared/lib/utils";
 import { Plate } from "../Shell/Brand";

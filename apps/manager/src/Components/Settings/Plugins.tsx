@@ -12,7 +12,7 @@ import {
   type PluginView,
 } from "@/api/plugins";
 import { mountPlugin, unmountPlugin } from "@/lib/pluginHost";
-import { useT, type TFunc } from "@frost/shared/i18n/context";
+import { useT, type TFunc, type TKey } from "@/i18n";
 
 /** `1756598400` -> `30 September`. Whole days: nobody renews to the minute. */
 function until(at: number | null): string | null {
@@ -32,7 +32,7 @@ function until(at: number | null): string | null {
  * one of those sends the person somewhere different, and a single "unavailable" state would
  * send them all to the same place — support.
  */
-function describe(t: TFunc, p: PluginView): { tone: Tone; title: string; detail: string } {
+function describe(t: TFunc<TKey>, p: PluginView): { tone: Tone; title: string; detail: string } {
   if (p.status === "expired") {
     return p.expires
       ? {

@@ -37,7 +37,7 @@ import {
 import type { LiveShareInfo } from "@frost/shared/types";
 import { formatBytes } from "@frost/shared/lib/mods";
 import { copyText } from "../../lib/clipboard";
-import { useT, type TFunc } from "@frost/shared/i18n/context";
+import { useT, type TFunc, type TKey } from "@/i18n";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import {
@@ -57,7 +57,7 @@ import {
 import { cn } from "@frost/shared/lib/utils";
 
 /** "2h ago", from unix seconds. `0` means it never happened. */
-function ago(seconds: number, t: TFunc): string {
+function ago(seconds: number, t: TFunc<TKey>): string {
   if (!seconds) return t("live.never");
   const mins = Math.max(0, Math.round((Date.now() / 1000 - seconds) / 60));
   if (mins < 1) return t("live.justNow");

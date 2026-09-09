@@ -10,7 +10,7 @@ import { loadBikeModel, loadRiderModel, scanLibrary } from "@frost/shared/api/mo
 import { displayName } from "@frost/shared/lib/mods";
 import { EMPTY_LOADOUT } from "@frost/shared/lib/presets";
 import type { BikeRig, EdfNode, Loadout, PaintTexture, RiderPart } from "@frost/shared/types";
-import { useT, type TKey } from "@frost/shared/i18n/context";
+import { useT, type TKey } from "@/i18n";
 import { useConfig } from "@frost/shared/Context/Config";
 import { gearPartOf, isBikeKind, type PaintDestState } from "../paintDest";
 

@@ -52,7 +52,7 @@ import type {
   PresetContent,
   StatePlan,
 } from "@frost/shared/types";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import { displayName, formatBytes } from "@frost/shared/lib/mods";
 import { CATEGORY_LABEL, categoryIcon } from "../Library/categories";
 import { useShare } from "../../Context/Share";

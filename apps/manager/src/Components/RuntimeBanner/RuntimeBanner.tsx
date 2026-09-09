@@ -12,8 +12,8 @@ import { Button } from "@frost/shared/Components/ui/button";
 import { RUNTIME_NAME_KEY, onModsDehydrated } from "@frost/shared/api/mods";
 import type { ModsDehydrated } from "@frost/shared/types";
 import { useFrostmod } from "@/Context/FrostmodContext";
-import { Trans } from "@frost/shared/i18n";
-import { useT } from "@frost/shared/i18n/context";
+import { Trans } from "@/i18n";
+import { useT } from "@/i18n";
 
 /**
  * Slim bar for the two things that stop FrostMod reaching the game and can't be fixed

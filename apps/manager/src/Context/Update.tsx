@@ -9,7 +9,7 @@ import {
 import { check as checkForUpdate, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { toast } from "sonner";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 
 /** The updater only works inside the Tauri runtime (no-op in the browser). */
 function inTauri(): boolean {

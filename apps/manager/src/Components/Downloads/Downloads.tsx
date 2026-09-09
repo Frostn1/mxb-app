@@ -27,7 +27,7 @@ import {
 import type { DownloadRecord, DownloadStatus } from "@frost/shared/types";
 import { useDownloads } from "../../Context/Downloads";
 import { useInstall, type ModTarget } from "../../Context/Install";
-import { useT, type TFunc } from "@frost/shared/i18n/context";
+import { useT, type TFunc, type TKey } from "@/i18n";
 import { dayStart, displayName, formatBytes, formatDay, formatTime } from "@frost/shared/lib/mods";
 import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
@@ -82,7 +82,7 @@ function groupByDay(records: DownloadRecord[]): DayGroup[] {
   return groups;
 }
 
-function sourceLabel(record: DownloadRecord, t: TFunc): string {
+function sourceLabel(record: DownloadRecord, t: TFunc<TKey>): string {
   if (record.source === "site") return record.host || t("downloads.sourceSite");
   if (record.source === "shop") return t("downloads.sourceShop");
   return record.source === "hub" ? t("downloads.sourceHub") : t("downloads.sourceFile");

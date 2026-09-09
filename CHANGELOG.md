@@ -51,6 +51,27 @@
   phosphor, monospaced type, square corners and a scanline over the window.
 
 ### Changed
+- Opening a server asks it for fresh numbers, so the riders, the session and the track are what
+  they are now rather than what they were when the list loaded.
+
+### Fixed
+- Trackside scenery in the 3D viewer no longer stands in slabs of flat grey. A track whose
+  textures the viewer can't read now leaves its banners and foliage out rather than drawing
+  them blank.
+- Trees keep their colour when you pull the camera back, instead of going black across the
+  paddock.
+- The black shapes standing over some tracks are gone. They were shadows, drawn as if they
+  were solid.
+- More tracks show their real ground in the 3D viewer. A track's normal maps are stored a
+  little differently from its colour sheets, and reading them the same way stopped the viewer
+  part way through a track's ground.
+- The Settings descriptions for the profiles folder and the game install folder name the
+  game you are set up for.
+
+## 2026-09-06
+
+### Changed
+- Tracks in the 3D viewer are drawn with the ground the game draws: each layer's own sheet,
 - Generated corners are cut deeper and carry the chop a wheel feels, so a turn has a rut
   wall to lean on instead of a shallow saucer.
 - Generated tracks are cambered across their width, so a corner leans the way a built one does.

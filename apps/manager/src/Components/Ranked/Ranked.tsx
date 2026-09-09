@@ -14,7 +14,7 @@ import {
   type RankedIdentity,
 } from "../../api/ranked";
 import { useConfig } from "@frost/shared/Context/Config";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import GuidDialog from "./GuidDialog";
 
 /**

@@ -45,7 +45,7 @@ import type { ShopCategory, ShopMod } from "@frost/shared/types";
 import { buildInstalledIndex } from "../../lib/installedMatch";
 import { useInstall } from "../../Context/Install";
 import { useConfig } from "@frost/shared/Context/Config";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import PurchaseCard, { type Purchase } from "./PurchaseCard";
 import InstallDialog, { type InstallChoice } from "../ModDetail/InstallDialog";
 import {

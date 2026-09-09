@@ -23,7 +23,7 @@ import {
   serversWithPaintSync,
   type MasterServer,
 } from "@frost/shared/api/mods";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import JoinServerDialog from "../Shell/JoinServerDialog";
 import ServerDetail from "./ServerDetail";
 

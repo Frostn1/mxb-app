@@ -30,7 +30,7 @@ import { ATTACH_PROBLEM } from "@frost/shared/types";
 import { displayName } from "@frost/shared/lib/mods";
 import { autoInstallAction } from "../lib/frostmodAuto";
 import { useGameRunning } from "../lib/useGameRunning";
-import { useT, type TFunc } from "@frost/shared/i18n/context";
+import { useT, type TFunc, type TKey } from "@/i18n";
 import { FrostmodContext } from "./FrostmodContext";
 
 const POLL_MS = 5000;
@@ -53,7 +53,7 @@ const VERSION_CHECK_MS = 30 * 60 * 1000;
  * Takes `t` rather than lowercasing a translated sentence to splice it mid-phrase —
  * that only works in languages that lowercase mid-sentence, which German doesn't.
  */
-function watchDescription(mods: string[], t: TFunc): string {
+function watchDescription(mods: string[], t: TFunc<TKey>): string {
   if (mods.length === 0) return t("frostmod.askedReload");
   const names = mods.map((m) => displayName(m.split("/").pop() ?? m));
   const shown = names.slice(0, 3).join(", ");

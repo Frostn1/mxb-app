@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { cn } from "@frost/shared/lib/utils";
 import { ContextBarRight } from "../Shell/ContextBar";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import { useConfig } from "@frost/shared/Context/Config";
 import { contentLockAvailable } from "@frost/shared/api/mods";
 import type { Loadout } from "@frost/shared/types";

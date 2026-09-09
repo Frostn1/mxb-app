@@ -45,7 +45,7 @@ import {
   paintStudioTarget,
 } from "@frost/shared/api/mods";
 import type { SavedPaint, StudioImage } from "@frost/shared/types";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 
 /**
  * Paint Studio — build a `.pnt` out of ordinary image files.

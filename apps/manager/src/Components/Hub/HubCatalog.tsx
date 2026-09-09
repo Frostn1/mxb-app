@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@frost/shared/Components/ui/select";
 import { cn } from "@frost/shared/lib/utils";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 
 /**
  * Browse the MXB Hub catalog.

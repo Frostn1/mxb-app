@@ -8,7 +8,7 @@ import {
   moveModelSwap,
 } from "@frost/shared/api/mods";
 import type { ModelVariant } from "@frost/shared/types";
-import { useT } from "@frost/shared/i18n/context";
+import { useT } from "@/i18n";
 import { cn } from "@frost/shared/lib/utils";
 import {
   DropdownMenu,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, AlertTriangle, Save, Loader2, FolderInput } from "lucide-react";
 import { toast } from "sonner";
-import { useT, type TKey } from "@frost/shared/i18n/context";
+import { useT, type TKey } from "@/i18n";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Input } from "@frost/shared/Components/ui/input";
 import { Switch } from "@frost/shared/Components/ui/switch";

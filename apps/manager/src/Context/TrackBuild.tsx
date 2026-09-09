@@ -17,8 +17,8 @@ import {
   type BuildStep,
   type TrackProgram,
 } from "../api/trackgen";
-import { useT } from "@frost/shared/i18n/context";
-import type { TKey } from "@frost/shared/i18n";
+import { useT } from "@/i18n";
+import type { TKey } from "@/i18n";
 
 /**
  * The track build, held above the tab it was started from.
