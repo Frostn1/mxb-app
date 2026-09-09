@@ -97,6 +97,32 @@ jobs:
         # Tests needing a real MX Bikes asset are `#[ignore]`d and stay skipped here.
         run: cargo test --workspace --locked
 
+      # TEMPORARY DIAGNOSTIC — not for merge.
+      # `mxb_core`'s test binary dies at 0xc0000139 STATUS_ENTRYPOINT_NOT_FOUND before any
+      # test runs, on every PR in the monorepo stack and on none of main's. That is the
+      # loader failing to resolve an import, and the only way to learn which one is to ask
+      # Windows.
+      - name: Diagnose the mxb-core test binary
+        if: always() && matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem target\debug\deps\mxb_core-*.exe |
+                 Where-Object { $_.Name -notmatch '\.d$' } |
+                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          Write-Host "== binary =="; $exe.FullName
+          Write-Host "== DLLs sitting beside it =="
+          Get-ChildItem target\debug\deps\*.dll -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Name
+          $dumpbin = Get-ChildItem "C:\Program Files*\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" -ErrorAction SilentlyContinue |
+                     Select-Object -First 1
+          if ($dumpbin) {
+            Write-Host "== imported DLLs =="
+            & $dumpbin.FullName /DEPENDENTS $exe.FullName
+          } else { Write-Host "dumpbin not found" }
+          Write-Host "== run it and report the loader error =="
+          & $exe.FullName --list 2>&1 | Select-Object -First 5
+          Write-Host "exit: $LASTEXITCODE"
+
   # The two things paint sync depends on that nothing was checking. Both ship separately
   # from the app — the Worker is deployed by hand and the agent runs on someone else's
   # machine — so a break in either surfaced only when a player hit it.
