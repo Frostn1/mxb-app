@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Card } from "@frost/shared/Components/ui/card";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { Lock, Loader2, FileUp, Check, X } from "lucide-react";
@@ -83,8 +84,8 @@ const Secure = () => {
       </ContextBarRight>
 
 
-      <div className="mx-auto w-full max-w-2xl px-7 pb-10">
-        <div className="rounded-xl border border-primary/30 bg-primary/[0.04] p-5">
+      <div className="mx-auto w-full max-w-2xl px-4 pb-10">
+        <Card className="bg-primary/[0.04] p-5">
           <div className="flex items-center gap-2">
             <Lock className="size-4 text-primary" />
             <h2 className="text-[14px] font-semibold">{t("secure.genTitle")}</h2>
@@ -105,7 +106,7 @@ const Secure = () => {
             className={cn(
               "mt-1.5 w-full rounded-lg border bg-background/60 px-3 py-2 font-mono text-[13px] outline-none transition-colors",
               steamId.length === 0
-                ? "border-white/[0.1] focus:border-primary/50"
+                ? "border-border focus:border-primary/50"
                 : steamIdOk
                   ? "border-success/50"
                   : "border-destructive/50",
@@ -130,7 +131,7 @@ const Secure = () => {
               {files.map((path) => (
                 <li
                   key={path}
-                  className="flex items-center gap-2 rounded-md bg-white/[0.03] px-2.5 py-1.5"
+                  className="flex items-center gap-2 rounded-md bg-foreground/[0.03] px-2.5 py-1.5"
                 >
                   <span className="min-w-0 flex-1 truncate text-[12px]" title={path}>
                     {path.split(/[\\/]/).pop()}
@@ -158,11 +159,11 @@ const Secure = () => {
             {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Lock className="size-3.5" />}
             {t("secure.generate")}
           </Button>
-        </div>
+        </Card>
 
         {/* Results — the two files per track, ready to send */}
         {results.length > 0 && (
-          <div className="mt-4 rounded-xl border border-white/[0.07] p-4">
+          <Card className="mt-4 p-4">
             <div className="flex items-center gap-2">
               <Check className="size-4 text-success" />
               <h2 className="text-[13.5px] font-semibold">{t("secure.genResult")}</h2>
@@ -172,7 +173,7 @@ const Secure = () => {
             </p>
             <ul className="mt-3 space-y-3">
               {results.map((r) => (
-                <li key={r.blobPath} className="border-t border-white/[0.05] pt-3 first:border-0 first:pt-0">
+                <li key={r.blobPath} className="border-t border-border pt-3 first:border-0 first:pt-0">
                   <p className="text-[12.5px] font-medium">{r.gameName}</p>
                   <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground" title={r.blobPath}>
                     {r.blobPath}
@@ -183,7 +184,7 @@ const Secure = () => {
                 </li>
               ))}
             </ul>
-          </div>
+          </Card>
         )}
       </div>
     </div>

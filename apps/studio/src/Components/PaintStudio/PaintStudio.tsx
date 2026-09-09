@@ -285,7 +285,7 @@ export default function PaintStudio({ onSendToDesigner }: PaintStudioProps) {
     <div className="flex min-h-0 flex-1 flex-col">
       {/* One band: where it goes, what it is called, and everything that puts sheets on
           the screen. Saving is the run bar at the bottom, like Protect and the Designer. */}
-      <div className="flex flex-none flex-wrap items-center gap-2 px-7 pb-3 pt-4">
+      <div className="flex flex-none flex-wrap items-center gap-2 px-4 pb-3 pt-4">
         <PaintDestBar state={destState} className="w-[290px]" />
         <Input
           value={name}
@@ -344,7 +344,7 @@ export default function PaintStudio({ onSendToDesigner }: PaintStudioProps) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-7 pb-5">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-5">
         {/* ── The sheets ────────────────────────────────────────────────────── */}
         <section className="flex min-w-0 flex-col gap-3">
           <div className="flex items-center gap-2.5">
@@ -408,7 +408,7 @@ export default function PaintStudio({ onSendToDesigner }: PaintStudioProps) {
                       </div>
                       <span className="break-all text-[11px] leading-snug text-faint">{s.path}</span>
                       {s.resized && (
-                        <span className="flex items-center gap-1.5 text-[11px] leading-snug text-amber-500">
+                        <span className="flex items-center gap-1.5 text-[11px] leading-snug text-warning">
                           <TriangleAlert className="size-3 flex-none" />
                           {t("paints.resized", {
                             from: `${s.sourceWidth}×${s.sourceHeight}`,
@@ -417,7 +417,7 @@ export default function PaintStudio({ onSendToDesigner }: PaintStudioProps) {
                         </span>
                       )}
                       {unknown && (
-                        <span className="flex items-center gap-1.5 text-[11px] leading-snug text-amber-500">
+                        <span className="flex items-center gap-1.5 text-[11px] leading-snug text-warning">
                           <TriangleAlert className="size-3 flex-none" />
                           {t("paints.unknownName")}
                         </span>
@@ -455,7 +455,7 @@ export default function PaintStudio({ onSendToDesigner }: PaintStudioProps) {
 
       {/* Saving lives here, in the same place on every Studio screen, with the reason it
           is disabled beside it rather than floating at the end of the toolbar. */}
-      <div className="flex h-[52px] flex-none items-center gap-3 border-t border-border bg-window px-7">
+      <div className="flex h-[52px] flex-none items-center gap-3 border-t border-border bg-window px-4">
         {blocked && <span className="text-[11.5px] text-muted-foreground">{blocked}</span>}
         <div className="flex-1" />
         <Button disabled={busy || !!blocked} title={blocked ?? undefined} onClick={() => void save()}>

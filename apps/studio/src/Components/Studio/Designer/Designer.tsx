@@ -19,10 +19,6 @@ import {
   Loader2,
   PackageOpen,
   PaintBucket,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
   Plus,
   Save,
   Trash2,
@@ -41,7 +37,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@frost/shared/Components/ui/card";
-import { Separator } from "@frost/shared/Components/ui/separator";
 import { ContextBarLeft } from "../../Shell/ContextBar";
 import {
   paintStudioExtract,
@@ -216,8 +211,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const [busy, setBusy] = useState(false);
   // The sheets/layers rail folds away, because once a paint is set up the thing worth the
   // width is the canvas and the model — not the list of what you already chose.
-  const [toolsOpen, setToolsOpen] = useState(true);
-  const [railOpen, setRailOpen] = useState(true);
   // Remembered: someone who paints with it hidden wants it hidden next session too.
   const [previewOpen, setPreviewOpen] = useState(
     () => localStorage.getItem(PREVIEW_OPEN_KEY) !== "0",
@@ -2027,31 +2020,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           own strip rather than a row of their own, so the sheet and the model get the whole
           window below it. */}
       <ContextBarLeft>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 flex-none"
-          title={t(railOpen ? "designer.hideRail" : "designer.showRail")}
-          aria-label={t(railOpen ? "designer.hideRail" : "designer.showRail")}
-          onClick={() => setRailOpen((o) => !o)}
-        >
-          {railOpen ? (
-            <PanelLeftClose className="size-4" />
-          ) : (
-            <PanelLeftOpen className="size-4" />
-          )}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 flex-none"
-          title={t(toolsOpen ? "designer.hideTools" : "designer.showTools")}
-          aria-label={t(toolsOpen ? "designer.hideTools" : "designer.showTools")}
-          onClick={() => setToolsOpen((o) => !o)}
-        >
-          {toolsOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
-        </Button>
-        <Separator orientation="vertical" className="h-5" />
         <PaintDestBar state={destState} className="w-[280px]" />
         <Input
           value={name}
@@ -2065,13 +2033,12 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             finishing a job in Photoshop is looking for. */}
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
             disabled={busy || !sheets.length}
             title={t("designer.exportPsdHint")}
             onClick={() => void exportPsd()}
           >
-            <FileImage className="size-3.5" />
             {t("designer.exportPsd")}
           </Button>
           <Button
@@ -2093,7 +2060,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           and the panels are things you can put away. */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {/* ── Sheets, and the tracing ghost under them ─────────────────────────── */}
-        {railOpen && (
+        {(
           <div data-dock="left" className="absolute inset-y-0 left-0 z-10 flex w-[264px] flex-col gap-3 overflow-y-auto p-3">
           <SheetList
             className="min-h-0 flex-1"
@@ -2260,7 +2227,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         </DropdownMenu>
 
         {/* ── The model and the tools, over the sheet they act on ──────────────── */}
-        {toolsOpen && (
+        {(
           <div data-dock="right" className="absolute inset-y-0 right-0 z-10 flex w-[312px] flex-col gap-3 overflow-y-auto p-3">
         {previewOpen ? (
           <div data-slot="card" className="h-[260px] flex-none overflow-hidden rounded-lg border border-border bg-card">
@@ -2395,54 +2362,66 @@ function SheetList({
           long pushed the hint line and every button below the fold of the rail. */}
       <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-0.5">
         {sheets.map((sheet, i) => (
+          /* The row picks the sheet. It used to be the size label that did — a `2048²` that
+             was secretly the button — while the name was a text field and reorder and delete
+             sat beside it, so five sheets meant five text fields and fifteen buttons on a
+             264px column. Reorder and delete are now on the row you are touching, and the
+             size is what it always looked like: a label. */
           <div
             key={sheet.id}
+            onClick={() => onPick(sheet.id)}
             className={cn(
-              "flex items-center gap-1.5 rounded-md border px-1.5 py-1 transition-colors",
-              sheet.id === activeId ? "border-primary bg-primary/10" : "border-border",
+              "group flex cursor-default items-center gap-1 rounded-md border px-1.5 py-1 transition-colors",
+              sheet.id === activeId
+                ? "border-primary bg-primary/10"
+                : "border-transparent hover:bg-foreground/[0.04]",
             )}
           >
-            <button
-              type="button"
-              className="flex-none text-[11px] text-muted-foreground hover:text-foreground"
-              onClick={() => onPick(sheet.id)}
-              title={t("designer.editSheet")}
-            >
-              {sheet.width}²
-            </button>
             <Input
               value={sheet.name}
               placeholder={t("designer.sheetName")}
-              className="h-6 min-w-0 flex-1 border-0 bg-transparent px-1 text-[11.5px] shadow-none focus-visible:ring-0"
+              className="h-6 min-w-0 flex-1 border-0 bg-transparent px-1 text-[12px] shadow-none focus-visible:ring-0"
               onFocus={() => onPick(sheet.id)}
               onChange={(e) => onRename(sheet.id, e.target.value)}
             />
-            <button
-              type="button"
-              className="flex-none px-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-              disabled={i === 0}
-              onClick={() => onReorder(sheet.id, -1)}
-              title={t("designer.moveUp")}
+            <span className="flex-none px-0.5 text-[10.5px] tabular-nums text-faint">
+              {sheet.width}²
+            </span>
+            <div
+              className={cn(
+                "flex flex-none items-center transition-opacity",
+                sheet.id === activeId
+                  ? "opacity-100"
+                  : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+              )}
             >
-              ↑
-            </button>
-            <button
-              type="button"
-              className="flex-none px-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-              disabled={i === sheets.length - 1}
-              onClick={() => onReorder(sheet.id, 1)}
-              title={t("designer.moveDown")}
-            >
-              ↓
-            </button>
-            <button
-              type="button"
-              className="flex-none text-muted-foreground hover:text-destructive"
-              onClick={() => onRemove(sheet.id)}
-              title={t("common.remove")}
-            >
-              <Trash2 className="size-3.5" />
-            </button>
+              <button
+                type="button"
+                className="px-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                disabled={i === 0}
+                onClick={() => onReorder(sheet.id, -1)}
+                title={t("designer.moveUp")}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="px-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                disabled={i === sheets.length - 1}
+                onClick={() => onReorder(sheet.id, 1)}
+                title={t("designer.moveDown")}
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                className="px-0.5 text-muted-foreground hover:text-destructive"
+                onClick={() => onRemove(sheet.id)}
+                title={t("common.remove")}
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -2662,7 +2641,7 @@ function GhostPanel({
           the difference between a feature that looks broken and one that tells you the next
           move — which is the button directly above this line. */}
       {buried && (
-        <p className="mt-1.5 text-[11px] leading-snug text-amber-500/90">
+        <p className="mt-1.5 text-[11px] leading-snug text-warning">
           {t("designer.ghostBuried")}
         </p>
       )}

@@ -574,7 +574,7 @@ export default function TrackStudio() {
       {!program ? (
         /* Nothing loaded yet. One line describes a track and the schema does the rest, and
            two starting points sit beside it for when the model isn't the answer. */
-        <div className="flex min-h-0 flex-1 items-center justify-center px-7">
+        <div className="flex min-h-0 flex-1 items-center justify-center px-4">
           <div className="w-full max-w-[560px]">
             <div className="flex items-center gap-2.5">
               <span className="u-skew h-3 w-1 bg-primary" />
@@ -915,8 +915,8 @@ export default function TrackStudio() {
                 <div className="absolute left-4 top-4 flex items-center gap-2">
                   {rebuilding ? (
                     <span className="flex items-center gap-2 bg-black/55 px-2.5 py-1 backdrop-blur">
-                      <RefreshCw className="size-3 animate-spin text-white/90" />
-                      <span className="font-cond text-[10.5px] font-semibold uppercase tracking-[0.16em] text-white/90">
+                      <RefreshCw className="size-3 animate-spin text-foreground" />
+                      <span className="font-cond text-[10.5px] font-semibold uppercase tracking-[0.16em] text-foreground">
                         {t("track.building")}
                       </span>
                     </span>
@@ -973,7 +973,7 @@ export default function TrackStudio() {
                     onClick={() => setFull((v) => !v)}
                     title={t(full ? "track.exitFullscreen" : "track.fullscreen")}
                     aria-label={t(full ? "track.exitFullscreen" : "track.fullscreen")}
-                    className="size-8 bg-black/45 text-white/90 backdrop-blur hover:bg-black/65"
+                    className="size-8 bg-black/45 text-foreground backdrop-blur hover:bg-black/65"
                   >
                     {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
                   </Button>

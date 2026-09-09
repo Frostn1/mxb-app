@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Card } from "@frost/shared/Components/ui/card";
 import { RefreshCw, AlertTriangle, Save, Loader2, FolderInput } from "lucide-react";
 import { toast } from "sonner";
 import { useT, type TKey } from "@/i18n";
@@ -200,7 +201,7 @@ export default function RiderStudio() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5">
+      <header className="flex flex-none items-center gap-3.5 px-4 pb-3.5">
         <div className="ml-auto flex items-center gap-2">
           <Input
             value={name}
@@ -230,9 +231,9 @@ export default function RiderStudio() {
       {repairs.map((r) => (
         <div
           key={r.id}
-          className="mx-7 mb-3 flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[12.5px]"
+          className="mx-7 mb-3 flex items-start gap-2.5 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2.5 text-[12.5px]"
         >
-          <FolderInput className="mt-0.5 size-4 flex-none text-amber-500" />
+          <FolderInput className="mt-0.5 size-4 flex-none text-warning" />
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="font-semibold">
               {t(r.kind === "unwrap" ? "rider.unwrapTitle" : "rider.repairTitle", {
@@ -273,14 +274,14 @@ export default function RiderStudio() {
         </div>
       ))}
 
-      <div ref={row} className="flex min-h-0 flex-1 gap-5 overflow-hidden px-7 pb-6">
+      <div ref={row} className="flex min-h-0 flex-1 gap-5 overflow-hidden px-4 pb-4">
         {/* Picker column */}
         <section
           className="flex flex-none flex-col gap-4 overflow-y-auto pr-1"
           style={{ width: pickersW }}
         >
           {/* Show-on-model toggles */}
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-white/[0.07] bg-card/40 p-3.5">
+          <Card className="flex flex-wrap items-center gap-x-5 gap-y-2 p-3.5">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">
               {t("rider.showOnModel")}
             </span>
@@ -290,7 +291,7 @@ export default function RiderStudio() {
                 {t(label)}
               </label>
             ))}
-          </div>
+          </Card>
 
           {/* Bike — the other half of a preset's look, and what the pair view draws */}
           {bikePreview && (
@@ -383,7 +384,7 @@ export default function RiderStudio() {
             }}
             className="group absolute -left-3.5 top-0 z-10 h-full w-3 cursor-col-resize touch-none focus:outline-none"
           >
-            <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded bg-white/[0.07] transition-colors group-hover:bg-primary/60 group-focus:bg-primary/60" />
+            <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded bg-foreground/[0.07] transition-colors group-hover:bg-primary/60 group-focus:bg-primary/60" />
           </div>
           <ViewerPanel
             loadout={loadout}

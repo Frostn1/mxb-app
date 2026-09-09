@@ -356,10 +356,15 @@ export function usePaintDest(onChange?: () => void): PaintDestState {
 export function PaintDestBar({ state, className }: { state: PaintDestState; className?: string }) {
   const t = useT();
   const { kind, model, folder } = state;
+  // The full path, and the part of it worth reading. The bar showed the whole relative path,
+  // so a 280px control spent its width on "bikes/" and a trailing "/paints" and truncated the
+  // only part that identifies anything. `model` is that part; the kind label beside it already
+  // says what sort of thing it is, and the path stays in the tooltip.
+  const full = folder ? folder.replace(/\\/g, "/") : model ? relFor(kind, model) : null;
   const where = folder
-    ? folder.replace(/\\/g, "/").split("/").slice(-2).join("/")
+    ? full!.split("/").slice(-2).join("/")
     : model
-      ? relFor(kind, model)
+      ? model
       : t("paints.needTarget");
   return (
     <Popover>
@@ -370,7 +375,7 @@ export function PaintDestBar({ state, className }: { state: PaintDestState; clas
         )}
       >
         <span className="flex-none text-[11.5px] font-semibold">{t(kind.label)}</span>
-        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title={where}>
+        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title={full ?? where}>
           {where}
         </span>
         <ChevronDown className="size-3.5 flex-none text-muted-foreground" />

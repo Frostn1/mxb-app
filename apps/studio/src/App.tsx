@@ -72,10 +72,6 @@ function Shell() {
     if (!entries.some((e) => e.id === view) && view !== "settings") setView("designer");
   }, [entries, view]);
 
-  const title =
-    view === "settings"
-      ? t("nav.settings")
-      : (entries.find((e) => e.id === view)?.label ?? "");
 
 
   return (
@@ -91,8 +87,13 @@ function Shell() {
                 <div data-tauri-drag-region className="flex select-none items-center gap-2 px-2.5 pt-1">
                   {/* The app's own mark, not a lettered plate — the same two-paint snowflake
                       the icon and the installer carry. */}
-                  <img src="/logo.svg" alt="" className="size-[18px]" draggable={false} />
-                  <span className="text-[12.5px] font-semibold tracking-[0.01em] text-foreground">
+                  <img
+                    src="/logo.svg"
+                    alt=""
+                    draggable={false}
+                    className="size-[26px] [filter:drop-shadow(0_1px_3px_rgba(0,0,0,0.28))]"
+                  />
+                  <span className="text-[17px] font-semibold tracking-[-0.005em] text-foreground">
                     Studio
                   </span>
                 </div>
@@ -115,9 +116,6 @@ function Shell() {
                 data-tauri-drag-region
                 className="flex h-[52px] shrink-0 items-center gap-3 border-b border-border px-4"
               >
-                <span className="shrink-0 select-none text-[13px] font-semibold tracking-[0.01em] text-foreground">
-                  {title}
-                </span>
                 <div ref={setLeft} className="flex min-w-0 flex-1 items-center gap-2" />
                 <div ref={setRight} className="flex shrink-0 items-center gap-2" />
               </div>
