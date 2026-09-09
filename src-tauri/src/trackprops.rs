@@ -53,6 +53,19 @@ const NEAR_M: f32 = 60.0;
 /// Lifted as props they would be ~9,000 models; measured they are four numbers.
 const LINE_LIKE: [Class; 3] = [Class::Banner, Class::Fence, Class::Crowd];
 
+/// The largest thing that is still a prop, metres across.
+///
+/// Indiana's biggest real object is a 25.6 m tent. Anything much beyond that is not furniture:
+/// it is ground dressing draped over the venue — foliage litter runs to **452 m** across — and
+/// a decal cut to one terrain is meaningless on another.
+const PROP_SPAN_MAX_M: f32 = 40.0;
+
+/// The shortest thing that is still a prop, metres tall. Below this it is paint, not an object.
+const PROP_TALL_MIN_M: f32 = 0.4;
+
+/// Above this share of near-horizontal normals a thing is lying down, not standing up.
+const PROP_FLAT_SHARE: f32 = 0.6;
+
 /// Quantum for the shape signature, metres. Coarse enough that two copies of one model agree
 /// through the exporter's float noise, fine enough that a bale and a tent never collide.
 const SIG_Q: f32 = 0.05;
@@ -493,6 +506,25 @@ fn nearest(stations: &[crate::trackline::Station], x: f32, z: f32) -> (f32, f32,
     (best.0, best.2, best.3)
 }
 
+/// Whether a lifted shape is ground dressing rather than an object.
+///
+/// A `.map` carries both under object-looking sheet names, and only the geometry tells them
+/// apart. Indiana's `leafs_twigs_QP_c_a` is 99% horizontal and spans 452 m — foliage litter
+/// spread over the venue floor, not a canopy — and re-placed on our terrain it hangs in the
+/// field as a dark slab. `tent_sides_window_c_a` gives degenerate zero-height sheets 340 m
+/// across. Together they were 180 of 761 props and every visible fault in the first render.
+fn is_dressing(mesh: &Mesh, height: f32, span: f32) -> bool {
+    if span > PROP_SPAN_MAX_M || height < PROP_TALL_MIN_M {
+        return true;
+    }
+    let n = mesh.normals.len() / 3;
+    if n == 0 {
+        return true;
+    }
+    let up = mesh.normals.chunks_exact(3).filter(|v| v[1].abs() > 0.7).count();
+    up as f32 / n as f32 > PROP_FLAT_SHARE
+}
+
 /// Lift a donor track's discrete objects into a prop library, and measure its runs.
 ///
 /// `keep` decides which classes are lifted as props; everything in [`LINE_LIKE`] is measured
@@ -575,6 +607,9 @@ pub fn extract(donor: &Donor, keep: &[Class]) -> PropLibrary {
             None => {
                 let height = o.max[1] - o.min[1];
                 let span = (o.max[0] - o.min[0]).max(o.max[2] - o.min[2]);
+                if is_dressing(&mesh, height, span) {
+                    continue;
+                }
                 let reach = mesh
                     .positions
                     .chunks_exact(3)
@@ -1304,5 +1339,147 @@ mod baked {
         let back = PropLibrary::decode(&std::fs::read(&path).unwrap()).expect("reads back");
         assert_eq!(back.props.len(), lib.props.len());
         assert_eq!(back.instances.len(), lib.instances.len());
+    }
+}
+
+#[cfg(test)]
+mod uvcheck {
+    use super::*;
+
+    /// Which lifted props address their sheet outside 0..1.
+    ///
+    /// Indiana tiles several of its props — a flagpost runs `v` to 49.5 up the pole, a metal
+    /// pole `u` to 2.25 — and a tiled UV is only right if the material it lands on repeats.
+    /// `edfwrite` writes one fixed material record, so this asks which props depend on a
+    /// wrap we may not be asking for.
+    #[test]
+    #[ignore]
+    fn which_props_tile_their_sheet() {
+        let track = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let donor = open(&std::path::PathBuf::from(track)).expect("opens");
+        let lib = extract(
+            &donor,
+            &[Class::Structure, Class::Vehicle, Class::Tree, Class::Bale, Class::Pole],
+        );
+
+        let mut by_sheet: HashMap<String, (f32, f32, f32, f32, usize, usize)> = HashMap::new();
+        for p in &lib.props {
+            let e = by_sheet
+                .entry(p.sheet.clone())
+                .or_insert((f32::MAX, f32::MIN, f32::MAX, f32::MIN, 0, 0));
+            e.4 += 1;
+            let mut tiles = false;
+            for uv in p.mesh.uvs.chunks_exact(2) {
+                e.0 = e.0.min(uv[0]);
+                e.1 = e.1.max(uv[0]);
+                e.2 = e.2.min(uv[1]);
+                e.3 = e.3.max(uv[1]);
+                if uv[0] < -0.001 || uv[0] > 1.001 || uv[1] < -0.001 || uv[1] > 1.001 {
+                    tiles = true;
+                }
+            }
+            if tiles {
+                e.5 += 1;
+            }
+        }
+        let mut v: Vec<_> = by_sheet.into_iter().collect();
+        v.sort_by(|a, b| b.1 .5.cmp(&a.1 .5));
+        eprintln!("\n{:32} {:>6} {:>6}  u range        v range", "sheet", "props", "tiled");
+        for (sheet, (u0, u1, v0, v1, n, tiled)) in &v {
+            eprintln!(
+                "{sheet:32} {n:6} {tiled:6}  {u0:6.2}..{u1:<6.2} {v0:6.2}..{v1:<6.2}{}",
+                if *tiled > 0 { "   <-- TILES" } else { "" }
+            );
+        }
+        let tiled: usize = v.iter().map(|x| x.1 .5).sum();
+        let total: usize = v.iter().map(|x| x.1 .4).sum();
+        eprintln!("\n{tiled} of {total} props address outside 0..1");
+    }
+}
+
+#[cfg(test)]
+mod sheetdump {
+    use super::*;
+
+    /// Write every sheet a library carries, to look at.
+    ///
+    /// The render showed dark props and there are two ways that happens — the sheet is dark,
+    /// or we bound the wrong part of it. Only the picture separates them.
+    #[test]
+    #[ignore]
+    fn dump_the_sheets() {
+        let track = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let out = std::path::PathBuf::from(std::env::var("FROST_DUMP").expect("set FROST_DUMP"));
+        std::fs::create_dir_all(&out).unwrap();
+        let donor = open(&std::path::PathBuf::from(track)).expect("opens");
+        let mut lib = extract(
+            &donor,
+            &[Class::Structure, Class::Vehicle, Class::Tree, Class::Bale, Class::Pole],
+        );
+        sheets_for(&donor, &mut lib, 512);
+        for (name, w, h, rgba) in &lib.sheets {
+            let mean: f64 = rgba.chunks_exact(4).map(|p| {
+                (p[0] as f64 + p[1] as f64 + p[2] as f64) / 3.0
+            }).sum::<f64>() / (rgba.len() / 4) as f64;
+            let alpha: f64 = rgba.chunks_exact(4).filter(|p| p[3] < 128).count() as f64
+                / (rgba.len() / 4) as f64;
+            eprintln!("{name:32} {w:5}x{h:<5} luma {mean:6.1}  {:.0}% cut out", alpha * 100.0);
+            let img = image::RgbaImage::from_raw(*w, *h, rgba.clone()).unwrap();
+            img.save(out.join(format!("{name}.png"))).unwrap();
+        }
+        eprintln!("\n{} sheets -> {}", lib.sheets.len(), out.display());
+    }
+}
+
+#[cfg(test)]
+mod flatcheck {
+    use super::*;
+
+    /// Which lifted props are lying down rather than standing up.
+    ///
+    /// A `.map` carries ground dressing as well as objects — foliage litter, tyre marks, mud
+    /// spread — and it wears object-looking sheet names. Lifted and re-placed on a different
+    /// terrain it becomes a flat dark slab hanging in a field, which is what the render shows.
+    #[test]
+    #[ignore]
+    fn which_props_lie_flat() {
+        let track = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let donor = open(&std::path::PathBuf::from(track)).expect("opens");
+        let lib = extract(
+            &donor,
+            &[Class::Structure, Class::Vehicle, Class::Tree, Class::Bale, Class::Pole],
+        );
+        let mut flat: Vec<(&str, &str, f32, f32, f32)> = Vec::new();
+        for p in &lib.props {
+            // The share of its area whose normal points mostly up or down.
+            let mut up = 0usize;
+            let n = p.mesh.normals.len() / 3;
+            for v in p.mesh.normals.chunks_exact(3) {
+                if v[1].abs() > 0.7 {
+                    up += 1;
+                }
+            }
+            let share = if n == 0 { 0.0 } else { up as f32 / n as f32 };
+            if share > 0.6 || p.height < 0.4 {
+                flat.push((&p.id, p.class.key(), p.height, p.span, share));
+            }
+        }
+        flat.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap());
+        eprintln!("\n{} of {} props lie flat or stand under 0.4 m", flat.len(), lib.props.len());
+        eprintln!("{:30} {:10} {:>7} {:>8} {:>7}", "id", "class", "tall", "span", "flat");
+        for (id, k, h, s, share) in flat.iter().take(20) {
+            eprintln!("{id:30} {k:10} {h:7.2} {s:8.1} {:6.0}%", share * 100.0);
+        }
+        let inst = lib
+            .instances
+            .iter()
+            .filter(|i| {
+                let p = &lib.props[i.prop];
+                let n = p.mesh.normals.len() / 3;
+                let up = p.mesh.normals.chunks_exact(3).filter(|v| v[1].abs() > 0.7).count();
+                (n > 0 && up as f32 / n as f32 > 0.6) || p.height < 0.4
+            })
+            .count();
+        eprintln!("\nthey account for {inst} of {} placements", lib.instances.len());
     }
 }
