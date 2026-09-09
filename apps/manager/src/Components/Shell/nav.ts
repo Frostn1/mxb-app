@@ -1,5 +1,5 @@
-import type { GameCaps } from "../../types";
-import type { TKey } from "../../i18n/context";
+import type { GameCaps } from "@frost/shared/types";
+import type { TKey } from "@frost/shared/i18n/context";
 import type { StudioTab } from "../Studio/Studio";
 
 /**

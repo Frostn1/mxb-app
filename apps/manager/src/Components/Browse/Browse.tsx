@@ -1,26 +1,26 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Search, Download, X } from "lucide-react";
 import { toast } from "sonner";
-import { resolveQuickInstall, type ModSort, type ModType } from "../../api/mods";
-import { useConfig } from "../../Context/Config";
+import { resolveQuickInstall, type ModSort, type ModType } from "@frost/shared/api/mods";
+import { useConfig } from "@frost/shared/Context/Config";
 import type { InstalledIndex } from "../../lib/installedMatch";
 import type { ModListing } from "../../lib/useModListing";
-import type { ModSummary } from "../../types";
+import type { ModSummary } from "@frost/shared/types";
 import { useInstall } from "../../Context/Install";
-import { useT } from "../../i18n/context";
+import { useT } from "@frost/shared/i18n/context";
 import ModCard from "./ModCard";
 import FeaturedMod from "./FeaturedMod";
-import { Button } from "@/Components/ui/button";
+import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
-import HelpHint from "@/Components/ui/help-hint";
-import { Skeleton } from "@/Components/ui/skeleton";
+import HelpHint from "@frost/shared/Components/ui/help-hint";
+import { Skeleton } from "@frost/shared/Components/ui/skeleton";
 import {
   Select,
   SelectValue,
   SelectTrigger,
   SelectContent,
   SelectItem,
-} from "@/Components/ui/select";
+} from "@frost/shared/Components/ui/select";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -30,7 +30,7 @@ import {
   AlertDialogFooter,
   AlertDialogCancel,
   AlertDialogAction,
-} from "@/Components/ui/alert-dialog";
+} from "@frost/shared/Components/ui/alert-dialog";
 
 interface BrowseProps {
   modType: ModType;

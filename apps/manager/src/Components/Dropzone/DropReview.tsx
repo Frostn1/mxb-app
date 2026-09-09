@@ -15,9 +15,9 @@ import {
   Sparkles,
   Volume2,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogTitle } from "@/Components/ui/dialog";
-import { Button } from "@/Components/ui/button";
-import { Badge } from "@/Components/ui/badge";
+import { Dialog, DialogContent, DialogTitle } from "@frost/shared/Components/ui/dialog";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Badge } from "@frost/shared/Components/ui/badge";
 import {
   Command,
   CommandEmpty,
@@ -25,12 +25,12 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from "@/Components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/Components/ui/popover";
-import { cn } from "@/lib/utils";
-import { useT } from "../../i18n/context";
-import type { TKey } from "../../i18n";
-import type { DropChoice, DropItem, DropKind, DropPlan, DropReason } from "../../types";
+} from "@frost/shared/Components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@frost/shared/Components/ui/popover";
+import { cn } from "@frost/shared/lib/utils";
+import { useT } from "@frost/shared/i18n/context";
+import type { TKey } from "@frost/shared/i18n";
+import type { DropChoice, DropItem, DropKind, DropPlan, DropReason } from "@frost/shared/types";
 
 /** A row plus the edits the user has made to it. */
 export interface RowState {

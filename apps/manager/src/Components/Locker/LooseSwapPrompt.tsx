@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import RegisterSwapsDialog from "./RegisterSwapsDialog";
-import { detectLooseSwaps } from "../../api/mods";
-import type { LooseSwapBike } from "../../types";
+import { detectLooseSwaps } from "@frost/shared/api/mods";
+import type { LooseSwapBike } from "@frost/shared/types";
 
 /**
  * The set of loose swaps we last prompted about. Keyed on the candidates themselves, not

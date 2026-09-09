@@ -34,18 +34,18 @@ import {
   type DestOption,
   type ModType,
   type ShopItem,
-} from "../../api/mods";
+} from "@frost/shared/api/mods";
 import {
   PURCHASE_SORTS,
   shopCatalogCategories,
   shopMatchCatalog,
   type PurchaseSort,
 } from "../../api/shop";
-import type { ShopCategory, ShopMod } from "../../types";
+import type { ShopCategory, ShopMod } from "@frost/shared/types";
 import { buildInstalledIndex } from "../../lib/installedMatch";
 import { useInstall } from "../../Context/Install";
-import { useConfig } from "../../Context/Config";
-import { useT } from "../../i18n/context";
+import { useConfig } from "@frost/shared/Context/Config";
+import { useT } from "@frost/shared/i18n/context";
 import PurchaseCard, { type Purchase } from "./PurchaseCard";
 import InstallDialog, { type InstallChoice } from "../ModDetail/InstallDialog";
 import {
@@ -57,20 +57,20 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/Components/ui/alert-dialog";
+} from "@frost/shared/Components/ui/alert-dialog";
 import ShopDetail from "./ShopDetail";
 import CategoryPill from "./CategoryPill";
 import { ContextBarRight } from "../Shell/ContextBar";
-import { Button } from "@/Components/ui/button";
-import { Skeleton } from "@/Components/ui/skeleton";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Skeleton } from "@frost/shared/Components/ui/skeleton";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/Components/ui/select";
-import { cn } from "@/lib/utils";
+} from "@frost/shared/Components/ui/select";
+import { cn } from "@frost/shared/lib/utils";
 
 /** The pill for purchases the catalog doesn't list. */
 const OTHER_CATEGORY = -1;

@@ -1,10 +1,10 @@
 import { useCallback, useRef, useState } from "react";
 import { open as pickPaths } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
-import { planDrop } from "../../api/mods";
+import { planDrop } from "@frost/shared/api/mods";
 import { useDropReview } from "../../Context/DropReview";
-import { useT } from "../../i18n/context";
-import type { TKey } from "../../i18n/core";
+import { useT } from "@frost/shared/i18n/context";
+import type { TKey } from "@frost/shared/i18n/core";
 
 /** What the drop pipeline recognises by name. Anything else still stages — the classifier
  *  carries an unknown file through and asks where it goes — so the picker offers "all files"

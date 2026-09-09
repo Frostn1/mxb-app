@@ -1,9 +1,9 @@
 import { Hammer, X } from "lucide-react";
 import { isRunning, PHASE_KEY, useTrackBuild } from "../../Context/TrackBuild";
-import { useT } from "../../i18n/context";
-import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
-import { Progress } from "../ui/progress";
-import { cn } from "@/lib/utils";
+import { useT } from "@frost/shared/i18n/context";
+import { Popover, PopoverContent, PopoverTrigger } from "@frost/shared/Components/ui/popover";
+import { Progress } from "@frost/shared/Components/ui/progress";
+import { cn } from "@frost/shared/lib/utils";
 
 /**
  * A track compiling, in the rail.

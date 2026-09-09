@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Boxes, Check, Copy, Loader2, Minus, Mountain, X } from "lucide-react";
 import { Dialog, DialogClose, DialogContent } from "../ui/dialog";
-import { Button } from "@/Components/ui/button";
+import { Button } from "../ui/button";
 import { TrackViewer, type PickedPiece } from "./TrackViewer";
 import {
   diagnoseTrack,

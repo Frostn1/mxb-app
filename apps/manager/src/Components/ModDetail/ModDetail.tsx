@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
-import { useT, type TKey } from "../../i18n/context";
+import { useT, type TKey } from "@frost/shared/i18n/context";
 import {
   buildDestinations,
   buildRiderDestinations,
@@ -34,21 +34,21 @@ import {
   sortMirrors,
   type DestOption,
   type ModType,
-} from "../../api/mods";
+} from "@frost/shared/api/mods";
 import type {
   DownloadOption,
   InstalledMod,
   InstallStage,
   ModDetail as Detail,
-} from "../../types";
+} from "@frost/shared/types";
 import { ContextBarLeft } from "../Shell/ContextBar";
-import CachedImg from "@/Components/ui/cached-img";
+import CachedImg from "@frost/shared/Components/ui/cached-img";
 import RichDescription from "./RichDescription";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
 import { useInstall } from "../../Context/Install";
 import type { InstalledIndex } from "../../lib/installedMatch";
-import { fileFormat, formatDate } from "../../lib/mods";
-import { Button } from "@/Components/ui/button";
+import { fileFormat, formatDate } from "@frost/shared/lib/mods";
+import { Button } from "@frost/shared/Components/ui/button";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -58,9 +58,9 @@ import {
   AlertDialogFooter,
   AlertDialogCancel,
   AlertDialogAction,
-} from "@/Components/ui/alert-dialog";
-import { cn } from "@/lib/utils";
-import { useConfig } from "../../Context/Config";
+} from "@frost/shared/Components/ui/alert-dialog";
+import { cn } from "@frost/shared/lib/utils";
+import { useConfig } from "@frost/shared/Context/Config";
 
 interface ModDetailProps {
   slug: string;

@@ -9,9 +9,9 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
-import { Button } from "../../ui/button";
-import { Input } from "../../ui/input";
+import { cn } from "@frost/shared/lib/utils";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Input } from "@frost/shared/Components/ui/input";
 import {
   contentLockPlan,
   contentLockRun,
@@ -20,10 +20,10 @@ import {
   onContentLockProgress,
   revealInExplorer,
   setGuid as saveGuid,
-} from "../../../api/mods";
-import type { LockItem, LockProgress } from "../../../types";
-import { formatBytes } from "../../../lib/mods";
-import { useT } from "../../../i18n/context";
+} from "@frost/shared/api/mods";
+import type { LockItem, LockProgress } from "@frost/shared/types";
+import { formatBytes } from "@frost/shared/lib/mods";
+import { useT } from "@frost/shared/i18n/context";
 
 /** A GUID as the game prints it. The Rust side is the authority; this is the same rule,
  *  applied as you type so a bad paste is visible before the run rather than after it. */

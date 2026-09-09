@@ -5,9 +5,9 @@ import type { Swiper as SwiperClass } from "swiper";
 import "swiper/css";
 import "swiper/css/navigation";
 import "swiper/css/pagination";
-import { cn } from "@/lib/utils";
-import { STRIP_THUMB_WIDTH } from "../../lib/imgcache";
-import CachedImg from "@/Components/ui/cached-img";
+import { cn } from "@frost/shared/lib/utils";
+import { STRIP_THUMB_WIDTH } from "@frost/shared/lib/imgcache";
+import CachedImg from "@frost/shared/Components/ui/cached-img";
 
 interface GalleryProps {
   images: string[];

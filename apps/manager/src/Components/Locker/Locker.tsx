@@ -17,10 +17,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Share2 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Button } from "@/Components/ui/button";
+import { cn } from "@frost/shared/lib/utils";
+import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarRight } from "../Shell/ContextBar";
-import HelpHint from "@/Components/ui/help-hint";
+import HelpHint from "@frost/shared/Components/ui/help-hint";
 import {
   scanModelSwaps,
   applyModelSwap,
@@ -32,7 +32,7 @@ import {
   applySoundSwap,
   bindSound,
   unbindSound,
-} from "../../api/mods";
+} from "@frost/shared/api/mods";
 import type {
   BikeModels,
   BikeSounds,
@@ -41,21 +41,21 @@ import type {
   OrphanedSetup,
   SoundVariant,
   SwapApplyOutcome,
-} from "../../types";
+} from "@frost/shared/types";
 import RegisterSwapsDialog from "./RegisterSwapsDialog";
 import AssignPaintsDialog from "./AssignPaintsDialog";
 import { ModelSwapActions } from "./ModelSwapActions";
-import { ViewerDialog } from "../Viewer/ViewerDialog";
-import { useConfig } from "../../Context/Config";
-import { Trans } from "../../i18n";
-import { useT, type TFunc } from "../../i18n/context";
+import { ViewerDialog } from "@frost/shared/Components/Viewer/ViewerDialog";
+import { useConfig } from "@frost/shared/Context/Config";
+import { Trans } from "@frost/shared/i18n";
+import { useT, type TFunc } from "@frost/shared/i18n/context";
 import { useShare } from "../../Context/Share";
 import {
   ContextMenu,
   ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,
-} from "@/Components/ui/context-menu";
+} from "@frost/shared/Components/ui/context-menu";
 
 /**
  * Locker — the app-side bike **model & sound swap** manager, twinned with FrostMod's

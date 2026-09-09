@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
-import type { Loadout, RiderPart } from "../../types";
-import type { Scans } from "../../lib/presets";
+import type { Loadout, RiderPart } from "@frost/shared/types";
+import type { Scans } from "@frost/shared/lib/presets";
 
 /**
  * The kit the Rider and Pose tabs both show.

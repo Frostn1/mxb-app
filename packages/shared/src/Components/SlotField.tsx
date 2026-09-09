@@ -1,8 +1,8 @@
 import type React from "react";
-import { cn } from "@/lib/utils";
-import { Combobox } from "../ui/combobox";
-import type { SlotDef } from "../../lib/presets";
-import { useT } from "../../i18n/context";
+import { cn } from "../lib/utils";
+import { Combobox } from "./ui/combobox";
+import type { SlotDef } from "../lib/presets";
+import { useT } from "../i18n/context";
 
 /**
  * One editable customization slot: a searchable **creatable** combobox over the

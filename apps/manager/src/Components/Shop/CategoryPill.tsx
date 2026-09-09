@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "@frost/shared/lib/utils";
 
 /** One filter pill, shared by both halves of the Shop so the two rows can't drift. */
 export default function CategoryPill({

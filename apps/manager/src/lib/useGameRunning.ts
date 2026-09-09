@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isGameRunning } from "../api/mods";
+import { isGameRunning } from "@frost/shared/api/mods";
 
 /** Same cadence as the FrostMod probe in `Context/Frostmod.tsx`. */
 const POLL_MS = 5000;

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, Loader2, Palette, Search } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn } from "@frost/shared/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -9,12 +9,12 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@/Components/ui/dialog";
-import { Button } from "@/Components/ui/button";
-import { Input } from "@/Components/ui/input";
-import { useT } from "@/i18n/context";
-import { listBikeLiveries, setModelPaints } from "../../api/mods";
-import type { BikeModels, SwapApplyOutcome } from "../../types";
+} from "@frost/shared/Components/ui/dialog";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Input } from "@frost/shared/Components/ui/input";
+import { useT } from "@frost/shared/i18n/context";
+import { listBikeLiveries, setModelPaints } from "@frost/shared/api/mods";
+import type { BikeModels, SwapApplyOutcome } from "@frost/shared/types";
 
 /**
  * Assigns a bike's liveries to one model swap.

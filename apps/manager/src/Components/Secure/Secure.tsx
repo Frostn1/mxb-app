@@ -2,12 +2,12 @@ import { useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { Lock, Loader2, FileUp, Check, X } from "lucide-react";
-import { Button } from "../ui/button";
+import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarRight } from "../Shell/ContextBar";
-import HelpHint from "@/Components/ui/help-hint";
-import { cn } from "@/lib/utils";
-import { mxbsecureGenerate, type SecureGenerateOutcome } from "../../api/mods";
-import { useT } from "../../i18n/context";
+import HelpHint from "@frost/shared/Components/ui/help-hint";
+import { cn } from "@frost/shared/lib/utils";
+import { mxbsecureGenerate, type SecureGenerateOutcome } from "@frost/shared/api/mods";
+import { useT } from "@frost/shared/i18n/context";
 
 /**
  * The mxbsecure tab — protect tracks for a buyer.

@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Bike, ExternalLink, Home, Shirt, SlidersHorizontal, X } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Toaster } from "@/Components/ui/sonner";
-import { TooltipProvider } from "@/Components/ui/tooltip";
+import { cn } from "@frost/shared/lib/utils";
+import { Toaster } from "@frost/shared/Components/ui/sonner";
+import { TooltipProvider } from "@frost/shared/Components/ui/tooltip";
 import Browse from "../Browse/Browse";
 import Locker from "../Locker/Locker";
 import ModDetail from "../ModDetail/ModDetail";
 import Manage from "../Manage/Manage";
 import Presets from "../Presets/Presets";
 import { ThemeProvider } from "../../Context/Theme";
-import { useI18n } from "../../i18n/context";
-import { setAmbientVars, type TKey } from "../../i18n/core";
+import { useI18n } from "@frost/shared/i18n/context";
+import { setAmbientVars, type TKey } from "@frost/shared/i18n/core";
 import { FrostmodProvider } from "../../Context/Frostmod";
-import { ConfigContext, MXB_FALLBACK } from "../../Context/Config";
+import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
 import { InstallProvider } from "../../Context/Install";
 import { DownloadsProvider } from "../../Context/Downloads";
 import { DropReviewProvider } from "../../Context/DropReview";
@@ -25,8 +25,8 @@ import {
   isConfigured,
   overlayHide,
   overlayOpenMain,
-} from "../../api/mods";
-import type { Config, GameCaps, GameInfo } from "../../types";
+} from "@frost/shared/api/mods";
+import type { Config, GameCaps, GameInfo } from "@frost/shared/types";
 
 /**
  * The in-game overlay: a compact, frameless panel drawn over MX Bikes and summoned by

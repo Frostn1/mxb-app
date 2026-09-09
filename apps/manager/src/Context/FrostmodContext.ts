@@ -5,7 +5,7 @@ import type {
   ReloadOutcome,
   StrayMsvcr90,
   VcRuntime,
-} from "../types";
+} from "@frost/shared/types";
 
 export interface FrostmodContextValue {
   /** Whether FrostMod is currently running (polled). `null` until first probe. */

@@ -11,12 +11,12 @@ import {
   type ActiveInstall,
   type QueuedInstall,
 } from "../../Context/Install";
-import { useT } from "../../i18n/context";
-import type { TKey } from "../../i18n";
-import type { InstallStage } from "../../types";
-import { displayName, formatBytes } from "../../lib/mods";
-import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
-import { cn } from "@/lib/utils";
+import { useT } from "@frost/shared/i18n/context";
+import type { TKey } from "@frost/shared/i18n";
+import type { InstallStage } from "@frost/shared/types";
+import { displayName, formatBytes } from "@frost/shared/lib/mods";
+import { Popover, PopoverContent, PopoverTrigger } from "@frost/shared/Components/ui/popover";
+import { cn } from "@frost/shared/lib/utils";
 
 /** Stages that mean an install is still moving — anything else is done, failed, or idle.
  *  `review` counts: the bytes are down but nothing is installed, and dropping the card would

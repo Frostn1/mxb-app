@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Loadout, RiderPart } from "../../types";
-import { EMPTY_LOADOUT, loadScans, type Scans } from "../../lib/presets";
-import { scanBikeTargets } from "../../api/mods";
+import type { Loadout, RiderPart } from "@frost/shared/types";
+import { EMPTY_LOADOUT, loadScans, type Scans } from "@frost/shared/lib/presets";
+import { scanBikeTargets } from "@frost/shared/api/mods";
 import { RiderKitContext, type RiderKitValue } from "./RiderKitContext";
 
 interface RiderKitProviderProps {

@@ -1,23 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, AlertTriangle, Save, Loader2, FolderInput } from "lucide-react";
 import { toast } from "sonner";
-import { useT, type TKey } from "../../i18n/context";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Switch } from "../ui/switch";
-import type { RiderPart } from "../../types";
+import { useT, type TKey } from "@frost/shared/i18n/context";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Input } from "@frost/shared/Components/ui/input";
+import { Switch } from "@frost/shared/Components/ui/switch";
+import type { RiderPart } from "@frost/shared/types";
 import {
   presetsSave,
   scanGearRepairs,
   repairGear,
   type GearRepair,
-} from "../../api/mods";
-import { ViewerPanel } from "../Viewer/ViewerPanel";
-import { SlotField } from "../Presets/SlotField";
-import { SLOTS, SLOT_GROUPS, pickedModel, type SlotDef } from "../../lib/presets";
-import { useGearPaints } from "../../lib/useGearPaints";
-import { useConfig } from "../../Context/Config";
-import { Combobox } from "../ui/combobox";
+} from "@frost/shared/api/mods";
+import { ViewerPanel } from "@frost/shared/Components/Viewer/ViewerPanel";
+import { SlotField } from "@frost/shared/Components/SlotField";
+import { SLOTS, SLOT_GROUPS, pickedModel, type SlotDef } from "@frost/shared/lib/presets";
+import { useGearPaints } from "@frost/shared/lib/useGearPaints";
+import { useConfig } from "@frost/shared/Context/Config";
+import { Combobox } from "@frost/shared/Components/ui/combobox";
 import { useRiderKit } from "./RiderKitContext";
 
 const RIDER_GROUPS = SLOT_GROUPS.filter((g) => g.id !== "bike");

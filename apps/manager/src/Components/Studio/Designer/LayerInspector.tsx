@@ -1,6 +1,6 @@
 import { Crop, FlipHorizontal2, FlipVertical2, Group, Link2Off, Maximize2, Ungroup } from "lucide-react";
-import { Input } from "../../ui/input";
-import { useT } from "../../../i18n/context";
+import { Input } from "@frost/shared/Components/ui/input";
+import { useT } from "@frost/shared/i18n/context";
 import { NumberField, Row, Slider } from "./controls";
 import { BLEND_MODES, FONTS, type BlendMode, type Layer } from "./layers";
 import type { UvPart } from "./uv";

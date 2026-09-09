@@ -3,8 +3,8 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Center, ContactShadows } from "@react-three/drei";
 import { ChevronDown, Move, Move3d, Rotate3d, SlidersHorizontal, ZoomIn } from "lucide-react";
 import * as THREE from "three";
-import { cn } from "@/lib/utils";
-import { Row, Slider } from "@/Components/ui/controls";
+import { cn } from "../../lib/utils";
+import { Row, Slider } from "../ui/controls";
 import type { BikeRig, Bone, EdfNode, PaintTexture, RiderPart, Skin, Vec3 } from "../../types";
 import {
   applyPose,

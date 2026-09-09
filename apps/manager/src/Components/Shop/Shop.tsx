@@ -3,9 +3,9 @@ import { shopCatalogAvailable } from "../../api/shop";
 import ShopCatalog from "./ShopCatalog";
 import MyDownloads from "./MyDownloads";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
-import HelpHint from "@/Components/ui/help-hint";
-import { cn } from "@/lib/utils";
-import { useT } from "../../i18n/context";
+import HelpHint from "@frost/shared/Components/ui/help-hint";
+import { cn } from "@frost/shared/lib/utils";
+import { useT } from "@frost/shared/i18n/context";
 
 type ShopTab = "catalog" | "purchases";
 

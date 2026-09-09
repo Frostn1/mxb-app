@@ -51,7 +51,7 @@ import {
   downloadHistory,
   scanModelSwaps,
   type ModType,
-} from "../../api/mods";
+} from "@frost/shared/api/mods";
 import type {
   BikeModels,
   DownloadRecord,
@@ -59,15 +59,15 @@ import type {
   LibraryEntry,
   ModelVariant,
   PkzMeta,
-} from "../../types";
+} from "@frost/shared/types";
 import {
   displayName,
   folderLabel,
   formatBytes,
   formatDay,
   formatLength,
-} from "../../lib/mods";
-import { useT, type TFunc } from "../../i18n/context";
+} from "@frost/shared/lib/mods";
+import { useT, type TFunc } from "@frost/shared/i18n/context";
 import { metaKey, peekMeta, primeMetaCache, requestMeta } from "../../lib/pkzMeta";
 import {
   CATEGORY_LABEL,
@@ -75,13 +75,13 @@ import {
   RIDER_SECTION_ORDER,
   categoryIcon,
 } from "./categories";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@frost/shared/Components/ui/tooltip";
 import LibraryDetail from "./LibraryDetail";
 import { ModelSwapActions } from "../Locker/ModelSwapActions";
 import FindAgainDialog from "./FindAgainDialog";
-import { ViewerDialog } from "../Viewer/ViewerDialog";
-import { entryViewerProps } from "../Viewer/entryViewer";
-import { useConfig } from "../../Context/Config";
+import { ViewerDialog } from "@frost/shared/Components/Viewer/ViewerDialog";
+import { entryViewerProps } from "@frost/shared/Components/Viewer/entryViewer";
+import { useConfig } from "@frost/shared/Context/Config";
 import { useImport } from "../Dropzone/useImport";
 import { useShare } from "../../Context/Share";
 import { cachedScan, dropScans, putScan } from "./scanCache";
@@ -90,23 +90,23 @@ import { cachedScan, dropScans, putScan } from "./scanCache";
  *  with one. */
 const SWAPS_KEY = "\u0000model-swaps";
 import { useInstall } from "../../Context/Install";
-import { Button } from "@/Components/ui/button";
+import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
-import HelpHint from "@/Components/ui/help-hint";
+import HelpHint from "@frost/shared/Components/ui/help-hint";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-} from "@/Components/ui/dropdown-menu";
+} from "@frost/shared/Components/ui/dropdown-menu";
 import {
   ContextMenu,
   ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
-} from "@/Components/ui/context-menu";
+} from "@frost/shared/Components/ui/context-menu";
 import {
   Dialog,
   DialogContent,
@@ -114,7 +114,7 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@/Components/ui/dialog";
+} from "@frost/shared/Components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -124,8 +124,8 @@ import {
   AlertDialogFooter,
   AlertDialogCancel,
   AlertDialogAction,
-} from "@/Components/ui/alert-dialog";
-import { cn } from "@/lib/utils";
+} from "@frost/shared/Components/ui/alert-dialog";
+import { cn } from "@frost/shared/lib/utils";
 
 interface RowAction {
   key: string;

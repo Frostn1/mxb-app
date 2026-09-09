@@ -6,17 +6,17 @@ import {
   deleteModelSwap,
   modelSwapLiveries,
   moveModelSwap,
-} from "../../api/mods";
-import type { ModelVariant } from "../../types";
-import { useT } from "../../i18n/context";
-import { cn } from "@/lib/utils";
+} from "@frost/shared/api/mods";
+import type { ModelVariant } from "@frost/shared/types";
+import { useT } from "@frost/shared/i18n/context";
+import { cn } from "@frost/shared/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-} from "@/Components/ui/dropdown-menu";
+} from "@frost/shared/Components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -24,15 +24,15 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@/Components/ui/dialog";
-import { Button } from "@/Components/ui/button";
+} from "@frost/shared/Components/ui/dialog";
+import { Button } from "@frost/shared/Components/ui/button";
 import {
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectItem,
-} from "@/Components/ui/select";
+} from "@frost/shared/Components/ui/select";
 
 /**
  * Move / delete for one model set, shared by the Locker and the Library so the two can never

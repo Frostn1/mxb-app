@@ -16,13 +16,13 @@ import {
   reshadeStatus,
   setReshadePath,
   RESHADE_OFF,
-} from "../../api/mods";
-import type { ReshadePreset, ReshadeStatus } from "../../types";
-import { useConfig } from "../../Context/Config";
+} from "@frost/shared/api/mods";
+import type { ReshadePreset, ReshadeStatus } from "@frost/shared/types";
+import { useConfig } from "@frost/shared/Context/Config";
 import { useGameRunning } from "../../lib/useGameRunning";
-import { useI18n } from "../../i18n/context";
-import { Button } from "@/Components/ui/button";
-import { cn } from "@/lib/utils";
+import { useI18n } from "@frost/shared/i18n/context";
+import { Button } from "@frost/shared/Components/ui/button";
+import { cn } from "@frost/shared/lib/utils";
 
 /** ReShade's own site. The app never mirrors the installer — reshade.me asks that people be
  *  linked here rather than handed the binaries, so this button is the whole install path. */

@@ -1,22 +1,22 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, Check, Download, ExternalLink, Loader2, Store, User } from "lucide-react";
-import type { ShopModDetail } from "../../types";
-import type { ShopItem } from "../../api/mods";
+import type { ShopModDetail } from "@frost/shared/types";
+import type { ShopItem } from "@frost/shared/api/mods";
 import { openShopUrl, shopCatalogDetail } from "../../api/shop";
 import PriceTag, { SaleEnds } from "./PriceTag";
 import Gallery from "../ModDetail/Gallery";
 import RichDescription from "../ModDetail/RichDescription";
-import { Button } from "@/Components/ui/button";
-import { Skeleton } from "@/Components/ui/skeleton";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Skeleton } from "@frost/shared/Components/ui/skeleton";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/Components/ui/select";
-import { useT } from "../../i18n/context";
-import { formatDate } from "../../lib/mods";
+} from "@frost/shared/Components/ui/select";
+import { useT } from "@frost/shared/i18n/context";
+import { formatDate } from "@frost/shared/lib/mods";
 
 /** What the right rail offers when the viewer already owns this. */
 export interface OwnedActions {

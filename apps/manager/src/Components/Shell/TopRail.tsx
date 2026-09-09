@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState, type Ref } from "react";
 import { Settings as SettingsIcon, Play, Gamepad2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn } from "@frost/shared/lib/utils";
 import type { LoadedPlugin } from "@/lib/pluginHost";
-import { useConfig } from "../../Context/Config";
+import { useConfig } from "@frost/shared/Context/Config";
 import { useGameRunning } from "../../lib/useGameRunning";
-import { useT } from "../../i18n/context";
-import { launchGame, contentLockAvailable, contentSecureAvailable } from "../../api/mods";
-import type { GameCaps } from "../../types";
+import { useT } from "@frost/shared/i18n/context";
+import { launchGame, contentLockAvailable, contentSecureAvailable } from "@frost/shared/api/mods";
+import type { GameCaps } from "@frost/shared/types";
 import type { StudioTab } from "../Studio/Studio";
 import { RAIL, railItemFor, type DashboardView, type RailItem } from "./nav";
 import DownloadQueue from "./DownloadQueue";

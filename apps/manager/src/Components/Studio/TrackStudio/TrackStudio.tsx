@@ -31,21 +31,21 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "../../ui/alert-dialog";
+} from "@frost/shared/Components/ui/alert-dialog";
 
-import { Button } from "../../ui/button";
-import { Input } from "../../ui/input";
-import { TrackViewer } from "../../Viewer/TrackViewer";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Input } from "@frost/shared/Components/ui/input";
+import { TrackViewer } from "@frost/shared/Components/Viewer/TrackViewer";
 import BuildCard from "./BuildCard";
 import LapPlan from "./LapPlan";
 import ElevationCurve from "./ElevationCurve";
-import { Switch } from "../../ui/switch";
-import { Segmented } from "../../ui/segmented";
-import { loadTrackOverview, loadTrackTerrain } from "../../../api/tracks";
-import type { TrackOverview, TrackTerrain } from "../../../types";
-import { useT } from "../../../i18n/context";
+import { Switch } from "@frost/shared/Components/ui/switch";
+import { Segmented } from "@frost/shared/Components/ui/segmented";
+import { loadTrackOverview, loadTrackTerrain } from "@frost/shared/api/tracks";
+import type { TrackOverview, TrackTerrain } from "@frost/shared/types";
+import { useT } from "@frost/shared/i18n/context";
 import { isRunning, useTrackBuild } from "../../../Context/TrackBuild";
-import { cn } from "@/lib/utils";
+import { cn } from "@frost/shared/lib/utils";
 import {
   baseTrackProgram,
   blankTrackProgram,

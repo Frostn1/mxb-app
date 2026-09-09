@@ -10,18 +10,18 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
-import { Button } from "@/Components/ui/button";
+import { cn } from "@frost/shared/lib/utils";
+import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarLeft, ContextBarRight, ContextTab } from "../Shell/ContextBar";
-import HelpHint from "@/Components/ui/help-hint";
-import { Switch } from "@/Components/ui/switch";
+import HelpHint from "@frost/shared/Components/ui/help-hint";
+import { Switch } from "@frost/shared/Components/ui/switch";
 import {
   Select,
   SelectValue,
   SelectTrigger,
   SelectContent,
   SelectItem,
-} from "@/Components/ui/select";
+} from "@frost/shared/Components/ui/select";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -31,7 +31,7 @@ import {
   AlertDialogFooter,
   AlertDialogCancel,
   AlertDialogAction,
-} from "@/Components/ui/alert-dialog";
+} from "@frost/shared/Components/ui/alert-dialog";
 import {
   modsStateApply,
   modsStateDelete,
@@ -44,16 +44,16 @@ import {
   presetsListBikes,
   presetsListProfiles,
   presetsSave,
-} from "../../api/mods";
+} from "@frost/shared/api/mods";
 import type {
   ModEntry,
   ModsStateOutcome,
   Preset,
   PresetContent,
   StatePlan,
-} from "../../types";
-import { useT } from "../../i18n/context";
-import { displayName, formatBytes } from "../../lib/mods";
+} from "@frost/shared/types";
+import { useT } from "@frost/shared/i18n/context";
+import { displayName, formatBytes } from "@frost/shared/lib/mods";
 import { CATEGORY_LABEL, categoryIcon } from "../Library/categories";
 import { useShare } from "../../Context/Share";
 import { ContentDialog } from "./ContentDialog";

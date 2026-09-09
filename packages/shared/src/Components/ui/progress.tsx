@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "../../lib/utils";
 
 interface ProgressProps {
   /** 0–100. Omit for an indeterminate bar. */

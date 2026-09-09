@@ -6,8 +6,8 @@ import {
   searchMods,
   type ModSort,
   type ModType,
-} from "../api/mods";
-import type { ModRating, ModSummary } from "../types";
+} from "@frost/shared/api/mods";
+import type { ModRating, ModSummary } from "@frost/shared/types";
 
 /**
  * What the browse grid is showing: the filters, the pages fetched under them, and where

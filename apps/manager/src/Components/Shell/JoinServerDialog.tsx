@@ -8,11 +8,11 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@/Components/ui/dialog";
-import { Input } from "@/Components/ui/input";
-import { Button } from "@/Components/ui/button";
-import { cpServers, joinServer, type RegisteredServer } from "../../api/mods";
-import { useT } from "../../i18n/context";
+} from "@frost/shared/Components/ui/dialog";
+import { Input } from "@frost/shared/Components/ui/input";
+import { Button } from "@frost/shared/Components/ui/button";
+import { cpServers, joinServer, type RegisteredServer } from "@frost/shared/api/mods";
+import { useT } from "@frost/shared/i18n/context";
 
 /** Remembers the last address, so rejoining a regular server is one keystroke. */
 const LAST_ADDRESS_KEY = "mxb:lastServerAddress";

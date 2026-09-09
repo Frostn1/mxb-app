@@ -18,6 +18,9 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // `@/` is this app's own src; the shared package gets its own specifier so an
+      // import line always says which side of the boundary a module is on.
+      "@frost/shared": path.resolve(__dirname, "../../packages/shared/src"),
     },
   },
 

@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
 import { Loader2, ExternalLink, PackageSearch } from "lucide-react";
-import { searchMods } from "../../api/mods";
+import { searchMods } from "@frost/shared/api/mods";
 import { shopCatalogSearch } from "../../api/shop";
-import type { LedgerRow, ShopPrice } from "../../types";
-import { useT } from "../../i18n/context";
-import { displayName } from "../../lib/mods";
+import type { LedgerRow, ShopPrice } from "@frost/shared/types";
+import { useT } from "@frost/shared/i18n/context";
+import { displayName } from "@frost/shared/lib/mods";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
-} from "../ui/dialog";
+} from "@frost/shared/Components/ui/dialog";
 
 /** One hit, flattened to the little every source can supply. */
 interface Hit {
