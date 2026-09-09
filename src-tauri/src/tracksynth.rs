@@ -404,13 +404,17 @@ const RUT_INSIDE: f32 = -0.022;
 /// ten metres — a cross-section still matches the one two metres behind it four fifths of the
 /// way, half of it at five metres, and by twenty it is different ground.
 ///
-/// Set to ten, which is what the paragraph above measured; it sat at 34 for a while, three
-/// times the figure written directly over it. Measured on Ironbark Ridge over four corners:
-/// 34 gave 0.108 m across-line RMS against published hardpack's 0.110-0.141 — under the
-/// bottom of the range — and ten gives 0.118. It does *not* move `section_sweep` (0.46 to
-/// 0.49 either way), which was the reason for going looking: what repeats round one of our
-/// corners is not the ruts.
-const RUT_ALONG_M: f32 = 10.0;
+/// Left at 34 even though the paragraph above measures ten, and the difference is worth
+/// keeping written down. At ten the across-line RMS goes 0.108 -> 0.118, into published
+/// hardpack's 0.110-0.141 from just under it — and three corpus guardrails fail:
+/// `a_straight_is_not_smooth_either`, `ordinary_ground_still_wears_the_way_it_was_measured`
+/// and `the_deepest_groove_lies_under_the_painted_line`. Ruts that turn over every ten metres
+/// do not survive down a straight and do not stay under the painted line.
+///
+/// So ten is right for a corner and wrong for the rest of the lap, and the change this wants
+/// is a length that varies with the corner rather than a smaller constant. Changed to ten and
+/// committed once without running the suite; this is the revert.
+const RUT_ALONG_M: f32 = 34.0;
 
 /// Metres between braking bumps.
 ///
