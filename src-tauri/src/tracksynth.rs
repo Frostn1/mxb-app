@@ -298,10 +298,10 @@ const RUT_WALL_HOLD: f32 = 1.8;
 // (25, 19, 14) — half the luma of the darkest thing either of them lays on a track, and with
 // it a pixel-to-pixel grain of 1.6 against their 3.8-18. Dark and flat is the one combination
 // that reads as the texture having failed rather than as polished dirt.
-const RUT_FLOOR_DARKEN: f32 = 0.82;
+const RUT_FLOOR_DARKEN: f32 = 1.14;
 // The dry stuff thrown off the line. Their brightest dry surfaces reach (171, 134, 99) and
 // (220, 185, 150); at 0.85 ours reached (145, 113, 84), darker than either.
-const LOOSE_DRY: f32 = 1.06;
+const LOOSE_DRY: f32 = 1.10;
 
 /// How much of its brightness the field's soil keeps.
 ///
@@ -322,7 +322,7 @@ const FIELD_DARKEN: f32 = 0.95;
 /// Lifted again after a ride that read as "the good dirt colour, but all of the same one".
 /// Between the corridor and the line there has to be a step a rider can see at speed, and at
 /// 1.45 there was twenty levels in it. At 1.9 there is forty.
-const CORRIDOR_LIFT: f32 = 2.60;
+const CORRIDOR_LIFT: f32 = 2.05;
 
 /// How much of the packed sheet is available off the racing line, where the ground still has
 /// grooves in it but no strip was ever painted.
@@ -3008,7 +3008,6 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     };
     let dirt = band_named("soil_dark_c");
     let line = band_named("soil_worn_c");
-    let shoulder = band_named("soil_mid_c");
     let grass = band_named("hm_grass");
     // Off-track starts where the graded shoulder ends: the rider is on the track, or in the
     // field, with the shoulder belonging to neither. This one decides where the game says a
@@ -3044,11 +3043,6 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     put("mask_line.tga", tga_alpha(MASK_DIM, MASK_DIM, &line), &mut wrote)?;
     put("mask_loose.tga", tga_alpha(MASK_DIM, MASK_DIM, &loose), &mut wrote)?;
     put("mask_rut.tga", tga_alpha(MASK_DIM, MASK_DIM, &rut), &mut wrote)?;
-    put(
-        "mask_shoulder.tga",
-        tga_alpha(MASK_DIM, MASK_DIM, &shoulder),
-        &mut wrote,
-    )?;
     // The pit lane, in the same place the race data puts its stalls. It runs along the
     // opening straight, so the straight's own frame gives the side the lane is on — the
     // distance the other masks read is unsigned and would paint a lane on both sides.
@@ -5819,9 +5813,9 @@ fn ground_looks(surface: Surface) -> Grounds {
         ],
         photo: Some("soil_light"),
         tone: [
-            ground_tone[0] * 1.06 * FIELD_DARKEN,
-            ground_tone[1] * 1.04 * FIELD_DARKEN,
-            ground_tone[2] * 1.02 * FIELD_DARKEN,
+            ground_tone[0] * 0.80 * FIELD_DARKEN,
+            ground_tone[1] * 0.79 * FIELD_DARKEN,
+            ground_tone[2] * 0.78 * FIELD_DARKEN,
         ],
         grain_tint: (0.85, 1.11),
         fleck: [165.0, 160.0, 150.0],
@@ -6276,20 +6270,6 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             mask: None,
             thickness: None,
             spec: 18,
-            shininess: 12,
-            wet: true,
-            grass: false,
-        },
-        Layer {
-            name: "soil_mid_c",
-            sheet: "shoulder_c",
-            band: BandMask::Out(SHOULDER_M * shoulder_scale),
-            look: shoulder,
-            salt: 0x30D2,
-            tile_m: TILE_SHOULDER_M,
-            mask: Some("mask_shoulder.tga"),
-            thickness: Some(0.05),
-            spec: 20,
             shininess: 12,
             wet: true,
             grass: false,
@@ -8305,7 +8285,7 @@ mod tests {
         let hmf = std::fs::read_to_string(dir.join("track.hmf")).unwrap();
         assert_eq!(
             hmf.matches("frame1").count(),
-            6,
+            5,
             "every soil band gets a wet sheet, the grass does not:\n{hmf}"
         );
         for l in layers(&p) {
@@ -10821,15 +10801,25 @@ mod ground_sheets {
             let g = ground_looks(surface);
             println!("\n== {surface:?} ==");
             println!("{:<12} {:>8} {:>7} {:>20}", "sheet", "m/tile", "detail", "mean rgb");
-            for (name, look, tile) in [
-                ("ground", &g.field, TILE_FIELD_M),
-                ("shoulder", &g.shoulder, TILE_SHOULDER_M),
-                ("dirt", &g.ridden, TILE_LINE_M),
-                ("line", &g.line, TILE_LINE_M),
-                ("loose", &g.loose, TILE_LOOSE_M),
-                ("rut", &g.rut, TILE_RUT_M),
-                ("grass", &g.turf, TILE_GRASS_M),
-            ] {
+            // The bands as `layers` states them, so the names printed are the names the
+            // track actually ships rather than a second list kept alongside it.
+            let prog: crate::trackprog::TrackProgram =
+                serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
+            let named: Vec<(&str, &GroundLook, f32)> = layers(&prog)
+                .into_iter()
+                .map(|l| {
+                    let look: &GroundLook = match l.name {
+                        "soil_light_c" => &g.field,
+                        "soil_dark_c" => &g.ridden,
+                        "soil_worn_c" => &g.line,
+                        "sand_top_c" => &g.loose,
+                        "sand_bottom" => &g.rut,
+                        _ => &g.turf,
+                    };
+                    (l.name, look, l.tile_m)
+                })
+                .collect();
+            for (name, look, tile) in named {
                 let px = band_pixels(dim, look, 0x51D);
                 let luma = |i: usize| {
                     px[i * 4] as f64 * 0.299 + px[i * 4 + 1] as f64 * 0.587
