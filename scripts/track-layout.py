@@ -500,6 +500,12 @@ def main():
         "location": PLACES[(seed // 7) % len(PLACES)],
         "width": width,
         "terrain": {
+            # What the ground is. Left unset every track came out soil, so five generated
+            # tracks shipped byte-identical sheets and tiling and differed only in where the
+            # masks fell. Published tracks each have a palette of their own — Indiana is soil,
+            # Southwick sand — and it is most of what makes them look like different places.
+            # Weighted to soil because the corpus is.
+            "surface": rng.choices(["soil", "sand", "grass"], weights=[6, 3, 1])[0],
             "sizeX": 620, "sizeZ": 620, "samples": 2049,
             "scale": rng.choice([50, 63, 70]),
             "relief": {
