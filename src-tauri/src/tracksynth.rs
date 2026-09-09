@@ -460,6 +460,33 @@ const ACCEL_HEIGHT_M: f32 = 0.07;
 const EDGE_WOBBLE_M: f32 = 2.2;
 const EDGE_WOBBLE_WAVELENGTH_M: f32 = 26.0;
 
+/// How far the deck tilts across the track, metres of fall per metre out, and over what length
+/// of lap the tilt changes.
+///
+/// Ours had none. `deck` is one height per station and every cell across the corridor was set
+/// to it, so the track was flat across its whole width and its only cross-slope was whatever
+/// the berm and the ruts happened to add. Measured as the spread of the across-line gradient
+/// round a corner, that is 0.021 against Indiana's 0.039 and Southwick's 0.095 — and it is why
+/// nothing applied outside the corridor could move it, and why twenty cross-sections through
+/// one of our corners all traced the same envelope while a published corner's fan out by more
+/// than two metres.
+///
+/// A real corner is banked and the bank changes as you go round it: riders build the outside up
+/// over a session and scoop the inside, and neither happens evenly.
+///
+/// `CAMBER_INTO_BEND` is zero on purpose, having been tried at 0.45 and 0.15. A lean that is a
+/// clean function of the corner's radius is constant through a constant-radius corner, which is
+/// the thing being fixed — it made the sweep *worse* (0.46 to 0.55) while the wander alone
+/// improves it. The knob stays because the lean is real and belongs here once it varies too;
+/// it is the constant part that has no business in a corner.
+///
+/// Amplitude set against Indiana rather than by eye. At 0.09 the across-line RMS lands on
+/// 0.137 against Indiana's 0.136, and the camber spread goes 0.021 -> 0.030 against its 0.038.
+/// Above that the RMS overshoots the published range before the camber arrives.
+const CAMBER_MAX: f32 = 0.09;
+const CAMBER_ALONG_M: f32 = 20.0;
+const CAMBER_INTO_BEND: f32 = 0.0;
+
 /// The windrow of spoil left along the edge of a bladed track: how tall it stands above the
 /// riding line, and how far out it reaches.
 ///
@@ -1091,6 +1118,16 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         // of the track reads from the seat.
         let ground = heights[i];
         let deck = bench.at(s);
+        // Across the track as well as along it — see `CAMBER_MAX`. Tilted about the centre and
+        // clamped to the corridor, so the shoulder is not levered up with it, and folded in
+        // through `w` below so it fades out into the field rather than tipping it.
+        let bend = turn.at(s);
+        let into = -bend.signum() * (bend.abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
+        let camber = CAMBER_MAX
+            * (CAMBER_INTO_BEND * into
+                + (1.0 - CAMBER_INTO_BEND)
+                    * fbm(s / CAMBER_ALONG_M, 53.0, r.seed ^ 0xCA33));
+        let deck = deck + camber * t.clamp(-half, half);
         let shoulder = SHOULDER_M * bench_shoulder(ground, deck);
         let w = bench_weight(d, plain_half, shoulder);
         if w > 0.0 {
