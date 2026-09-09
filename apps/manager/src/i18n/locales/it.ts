@@ -125,8 +125,6 @@ export const it: Translation = {
   "welcome.intro.body":
     "Il tuo gestore di mod per MX Bikes. Tieni piste, moto e grafiche organizzate in un unico posto — niente più file zip sparsi sul desktop. Ti facciamo fare un giro in pochi secondi.",
   "welcome.getStarted": "Iniziamo",
-  "welcome.analyticsNote":
-    "{{app}} conta in modo anonimo quali pagine vengono usate. Nessun nome, nessun file — puoi disattivarlo nelle Impostazioni.",
   "presets.missingMods":
     "Mod mancanti: {{mods}}. Installale per vedere quelle parti.",
   "presets.help":
@@ -601,9 +599,6 @@ export const it: Translation = {
   "settings.colorwayRetro": "Retrò",
   "settings.language": "Lingua",
   "settings.languageSystem": "Sistema",
-  "settings.analytics": "Condividi statistiche d'uso anonime",
-  "settings.analyticsDesc":
-    "Invia un ID casuale, la versione dell'app e quante volte usi ogni pagina e funzione, così si capisce cosa vale la pena costruire. Mai il tuo nome, i tuoi file o il tuo indirizzo.",
   "settings.runInBackground": "Continua in background",
   "settings.runInBackgroundDesc":
     "Chiudendo la finestra, {{app}} resta nella barra di sistema così FrostMod rimane collegato. Esci dall'icona nella barra.",
