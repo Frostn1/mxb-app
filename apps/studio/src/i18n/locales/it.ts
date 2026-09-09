@@ -10,6 +10,7 @@ export const it: Translation = {
   "common.clear": "Svuota",
   "common.remove": "Rimuovi",
   "nav.pose": "Posa",
+  "nav.settings": "Impostazioni",
   "nav.designer": "Designer",
   "nav.paints": "Livree",
 
@@ -458,4 +459,11 @@ export const it: Translation = {
     "1 livello di pittura è stato lasciato fuori: un livello di pittura è il foglio, e questo è di un'altra misura.",
   "designer.pasteDropped_other":
     "{{count}} livelli di pittura sono stati lasciati fuori: un livello di pittura è il foglio, e questo è di un'altra misura.",
+  "studioSettings.title": "Impostazioni",
+  "studioSettings.game": "Gioco",
+  "studioSettings.mods": "Cartella mod",
+  "studioSettings.gameFolder": "Installazione del gioco",
+  "studioSettings.foldersWhy": "Vengono lette dalla stessa configurazione che scrive Frost's Mod Manager: è lui a trovare il gioco e a gestire la configurazione iniziale, così su dov'è MX Bikes c'è una sola risposta.",
+  "studioSettings.getManager": "Scarica Frost's Mod Manager",
+  "studioSettings.language": "Lingua",
 };

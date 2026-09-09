@@ -33,6 +33,21 @@ import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Input } from "@frost/shared/Components/ui/input";
 import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@frost/shared/Components/ui/resizable";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@frost/shared/Components/ui/card";
+import { ScrollArea } from "@frost/shared/Components/ui/scroll-area";
+import { Separator } from "@frost/shared/Components/ui/separator";
+import { ContextBarLeft } from "../../Shell/ContextBar";
+import {
   paintStudioExtract,
   paintStudioPixels,
   paintStudioSave,
@@ -2010,13 +2025,11 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const canUnlink = chosen.some((l) => l.mirror);
 
   return (
-    <div
-      ref={rootRef}
-      className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-7 pb-6"
-    >
-      {/* The decisions made once — where it goes, what it's called, save — on one row, so
-          the two things looked at continuously get the rest of the window. */}
-      <div className="flex flex-none flex-wrap items-center gap-2">
+    <div ref={rootRef} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* The decisions made once — where it goes, what it's called, save — go in the shell's
+          own strip rather than a row of their own, so the sheet and the model get the whole
+          window below it. */}
+      <ContextBarLeft>
         <Button
           variant="ghost"
           size="icon"
@@ -2031,48 +2044,66 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             <PanelLeftOpen className="size-4" />
           )}
         </Button>
-        <PaintDestBar state={destState} className="w-[290px]" />
+        <Separator orientation="vertical" className="h-5" />
+        <PaintDestBar state={destState} className="w-[280px]" />
         <Input
           value={name}
           placeholder={t("paints.namePlaceholder")}
-          className="h-8 w-[168px]"
+          className="h-8 w-[170px]"
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void save()}
         />
-        <Button
-          size="sm"
-          disabled={busy || !canSave}
-          title={blocked ?? undefined}
-          onClick={() => void save()}
-        >
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-          {t("paints.save")}
-        </Button>
-        {/* Beside Save rather than buried in a menu: it is the other way out of here, and the
-            one somebody finishing a job in Photoshop is looking for. */}
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy || !sheets.length}
-          title={t("designer.exportPsdHint")}
-          onClick={() => void exportPsd()}
-        >
-          <FileImage className="size-3.5" />
-          {t("designer.exportPsd")}
-        </Button>
-      </div>
+        {/* The two ways out of the screen, pushed to the far end away from the setup that
+            precedes them. Export sits beside Save rather than in a menu: it is what somebody
+            finishing a job in Photoshop is looking for. */}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy || !sheets.length}
+            title={t("designer.exportPsdHint")}
+            onClick={() => void exportPsd()}
+          >
+            <FileImage className="size-3.5" />
+            {t("designer.exportPsd")}
+          </Button>
+          <Button
+            size="sm"
+            disabled={busy || !canSave}
+            title={blocked ?? undefined}
+            onClick={() => void save()}
+          >
+            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+            {t("paints.save")}
+          </Button>
+        </div>
+      </ContextBarLeft>
 
-      <div
-        className={cn(
-          "grid min-h-0 flex-1 gap-3",
-          railOpen
-            ? "xl:grid-cols-[224px_minmax(0,1fr)_300px]"
-            : "xl:grid-cols-[minmax(0,1fr)_300px]",
-        )}
+      {/* Three panes the user sizes. How much of the window the sheet deserves against the
+          model beside it changes with what is being drawn, and `autoSaveId` means that
+          decision is made once rather than every session. */}
+      <ResizablePanelGroup
+        direction="horizontal"
+        autoSaveId="designer.panes"
+        className="min-h-0 flex-1"
       >
-        {/* ── Sheets, layers, and the selected layer ───────────────────────────── */}
-        <section className={cn("min-h-0 flex-col gap-3 overflow-y-auto", railOpen ? "flex" : "hidden")}>
+        {/* ── Sheets, and the tracing ghost under them ─────────────────────────── */}
+        {railOpen && (
+          <>
+            {/* The two side panes sit a shade above the canvas, so the sheet reads as the
+                deepest thing on screen rather than as one more panel among three. */}
+            <ResizablePanel
+              id="sheets"
+              order={1}
+              defaultSize={19}
+              minSize={12}
+              maxSize={32}
+              className="bg-background"
+            >
+              <ScrollArea className="h-full">
+                <div className="flex min-h-full flex-col gap-3 p-3">
           <SheetList
+            className="min-h-0 flex-1"
             sheets={sheets}
             activeId={activeId}
             hints={hints}
@@ -2109,11 +2140,21 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               onChange={(fn) => patchGhost(active.id, fn)}
             />
           )}
+                </div>
+              </ScrollArea>
+            </ResizablePanel>
+            <ResizableHandle />
+          </>
+        )}
 
-        </section>
-
-        {/* ── The sheet ────────────────────────────────────────────────────────── */}
-        <section className="flex min-h-0 flex-col">
+        {/* ── The sheet, edge to edge ──────────────────────────────────────────── */}
+        <ResizablePanel
+          id="stage"
+          order={2}
+          defaultSize={56}
+          minSize={28}
+          className="flex min-h-0 flex-col bg-canvas"
+        >
           {active ? (
             <CanvasStage
               className="flex-1"
@@ -2136,11 +2177,11 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               onPaintEnd={endPaint}
             />
           ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border text-center">
-              <p className="max-w-sm text-[12.5px] leading-relaxed text-muted-foreground">
+            <div className="flex flex-1 flex-col items-center justify-center gap-5 p-10 text-center">
+              <p className="max-w-md text-[13.5px] leading-relaxed text-muted-foreground">
                 {t("designer.empty")}
               </p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap justify-center gap-2">
                 <Button size="sm" disabled={busy} onClick={() => void startFromPaint()}>
                   <PackageOpen className="size-3.5" /> {t("designer.startFromPaint")}
                 </Button>
@@ -2235,12 +2276,22 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             />
           </DropdownMenuContent>
         </DropdownMenu>
-      </section>
+        </ResizablePanel>
+        <ResizableHandle />
 
-      {/* ── The model and the tools, beside the sheet they act on ────────────── */}
-      <section className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+        {/* ── The model and the tools, beside the sheet they act on ────────────── */}
+        <ResizablePanel
+          id="tools"
+          order={3}
+          defaultSize={25}
+          minSize={16}
+          maxSize={42}
+          className="bg-background"
+        >
+          <ScrollArea className="h-full">
+            <div className="flex min-h-full flex-col gap-3 p-3">
         {previewOpen ? (
-          <div className="h-[240px] flex-none overflow-hidden border border-border">
+          <div className="h-[260px] flex-none overflow-hidden rounded-lg border border-border bg-card">
             <PreviewPanel
               compact
               state={destState}
@@ -2255,7 +2306,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         ) : null}
         <button
           onClick={() => togglePreview()}
-          className="flex flex-none cursor-default items-center justify-center gap-2 border border-border py-1.5 font-cond text-[11.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
+          className="flex flex-none cursor-default items-center justify-center gap-2 rounded-md py-1.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
         >
           <Box className="size-3.5" />
           {t(previewOpen ? "designer.hideModel" : "designer.showModel")}
@@ -2277,6 +2328,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
 
           {active && (
             <LayerList
+              className="min-h-0 flex-1"
               layers={active.layers}
               selection={selection}
               onSelect={select}
@@ -2307,13 +2359,16 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               onChange={(fn) => patchSelection(fn, `layer:${selection.join(",")}`)}
             />
           )}
-      </section>
-      </div>
+            </div>
+          </ScrollArea>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   );
 }
 
 function SheetList({
+  className,
   sheets,
   activeId,
   hints,
@@ -2329,6 +2384,7 @@ function SheetList({
   pristine,
   busy,
 }: {
+  className?: string;
   sheets: Sheet[];
   activeId: string | null;
   /** Every texture name the model's paints use — shown in full, companion maps included. */
@@ -2349,21 +2405,24 @@ function SheetList({
 }) {
   const t = useT();
   return (
-    <div className="rounded-lg border border-border bg-card/40 p-3.5">
-      <div className="mb-2.5 flex items-center gap-2">
-        <h2 className="text-[13px] font-semibold">{t("designer.sheets")}</h2>
-        <button
-          type="button"
-          className="ml-auto text-muted-foreground transition-colors hover:text-foreground"
-          onClick={onAddBlank}
-          title={t("designer.addSheet")}
-        >
-          <Plus className="size-4" />
-        </button>
-      </div>
+    <Card className={cn("bg-card/40", className)}>
+      <CardHeader>
+        <CardTitle>{t("designer.sheets")}</CardTitle>
+        <CardAction>
+          <button
+            type="button"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+            onClick={onAddBlank}
+            title={t("designer.addSheet")}
+          >
+            <Plus className="size-4" />
+          </button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex min-h-0 flex-1 flex-col">
       {/* Scrolls rather than growing: a bike's paint runs to two dozen sheets, and a list that
           long pushed the hint line and every button below the fold of the rail. */}
-      <div className="flex max-h-[40vh] flex-col gap-1.5 overflow-y-auto pr-0.5">
+      <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-0.5">
         {sheets.map((sheet, i) => (
           <div
             key={sheet.id}
@@ -2469,7 +2528,8 @@ function SheetList({
           </Button>
         </div>
       )}
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2524,12 +2584,13 @@ function GhostPanel({
   const buried = showing && hasBase;
 
   return (
-    <div className="rounded-lg border border-border bg-card/40 p-3.5">
-      <div className="mb-2.5 flex items-center gap-2">
-        <h2 className="text-[13px] font-semibold">{t("designer.reference")}</h2>
+    <Card className="bg-card/40">
+      <CardHeader>
+        <CardTitle>{t("designer.reference")}</CardTitle>
+        <CardAction>
         <button
           type="button"
-          className="ml-auto text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
+          className="text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
           disabled={!ghost.template && !ghost.stock && !ghost.wire}
           onClick={() =>
             onChange((g) => {
@@ -2555,7 +2616,9 @@ function GhostPanel({
         >
           {showing ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
         </button>
-      </div>
+        </CardAction>
+      </CardHeader>
+      <CardContent>
 
       <div className="mb-2 flex flex-wrap gap-1.5">
         <GhostToggle
@@ -2650,7 +2713,8 @@ function GhostPanel({
           {t("designer.stockNoMatch", { name: sheetName.trim() })}
         </p>
       )}
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2694,6 +2758,7 @@ function GhostToggle({
  * this list included, gets to stay flat.
  */
 function LayerList({
+  className,
   layers,
   selection,
   onSelect,
@@ -2702,6 +2767,7 @@ function LayerList({
   onReorder,
   onAdd,
 }: {
+  className?: string;
   layers: Layer[];
   selection: string[];
   onSelect: (ids: string[], mode: "replace" | "toggle" | "isolate") => void;
@@ -2786,22 +2852,25 @@ function LayerList({
   );
 
   return (
-    <div className="rounded-lg border border-border bg-card/40 p-3.5">
-      <div className="mb-2.5 flex items-center gap-2">
-        <h2 className="text-[13px] font-semibold">{t("designer.layers")}</h2>
-        <button
-          type="button"
-          className="ml-auto text-muted-foreground transition-colors hover:text-foreground"
-          onClick={onAdd}
-          title={t("designer.addPaint")}
-        >
-          <Plus className="size-4" />
-        </button>
-      </div>
+    <Card className={cn("bg-card/40", className)}>
+      <CardHeader>
+        <CardTitle>{t("designer.layers")}</CardTitle>
+        <CardAction>
+          <button
+            type="button"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+            onClick={onAdd}
+            title={t("designer.addPaint")}
+          >
+            <Plus className="size-4" />
+          </button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex min-h-0 flex-1 flex-col">
       {!layers.length ? (
         <p className="text-[11px] leading-snug text-faint">{t("designer.noLayers")}</p>
       ) : (
-        <div className="flex flex-col gap-1">
+        <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-0.5">
           {rows.map((block) =>
             block.tag === null ? (
               row(block.members[0])
@@ -2842,6 +2911,7 @@ function LayerList({
           )}
         </div>
       )}
-    </div>
+      </CardContent>
+    </Card>
   );
 }

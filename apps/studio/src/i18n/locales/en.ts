@@ -14,6 +14,7 @@ export const en = {
   "common.clear": "Clear",
   "common.remove": "Remove",
   "nav.pose": "Pose",
+  "nav.settings": "Settings",
   "nav.designer": "Designer",
   "nav.paints": "Paints",
 
@@ -461,4 +462,11 @@ export const en = {
     "1 paint layer was left out — a paint layer is the sheet, and this one is a different size.",
   "designer.pasteDropped_other":
     "{{count}} paint layers were left out — a paint layer is the sheet, and this one is a different size.",
+  "studioSettings.title": "Settings",
+  "studioSettings.game": "Game",
+  "studioSettings.mods": "Mods folder",
+  "studioSettings.gameFolder": "Game install",
+  "studioSettings.foldersWhy": "These are read from the same config Frost's Mod Manager writes — it finds the game and owns first-run setup, so there is only ever one answer to where MX Bikes lives.",
+  "studioSettings.getManager": "Get Frost's Mod Manager",
+  "studioSettings.language": "Language",
 } as const;

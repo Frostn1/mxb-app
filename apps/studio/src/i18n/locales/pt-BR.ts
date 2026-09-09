@@ -10,6 +10,7 @@ export const ptBR: Translation = {
   "common.clear": "Limpar",
   "common.remove": "Remover",
   "nav.pose": "Pose",
+  "nav.settings": "Configurações",
   "nav.designer": "Designer",
   "nav.paints": "Pinturas",
 
@@ -456,4 +457,11 @@ export const ptBR: Translation = {
     "1 camada de pintura ficou de fora: uma camada de pintura é a folha, e esta é de outro tamanho.",
   "designer.pasteDropped_other":
     "{{count}} camadas de pintura ficaram de fora: uma camada de pintura é a folha, e esta é de outro tamanho.",
+  "studioSettings.title": "Configurações",
+  "studioSettings.game": "Jogo",
+  "studioSettings.mods": "Pasta de mods",
+  "studioSettings.gameFolder": "Instalação do jogo",
+  "studioSettings.foldersWhy": "São lidas da mesma configuração que o Frost's Mod Manager escreve — é ele que encontra o jogo e cuida da configuração inicial, então há só uma resposta para onde o MX Bikes está.",
+  "studioSettings.getManager": "Baixar o Frost's Mod Manager",
+  "studioSettings.language": "Idioma",
 };

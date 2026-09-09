@@ -10,6 +10,7 @@ export const fr: Translation = {
   "common.clear": "Effacer",
   "common.remove": "Retirer",
   "nav.pose": "Posture",
+  "nav.settings": "Réglages",
   "nav.designer": "Designer",
   "nav.paints": "Décos",
 
@@ -459,4 +460,11 @@ export const fr: Translation = {
     "1 calque de peinture a été laissé de côté — un calque de peinture est la planche, et celle-ci n'a pas la même taille.",
   "designer.pasteDropped_other":
     "{{count}} calques de peinture ont été laissés de côté — un calque de peinture est la planche, et celle-ci n'a pas la même taille.",
+  "studioSettings.title": "Réglages",
+  "studioSettings.game": "Jeu",
+  "studioSettings.mods": "Dossier des mods",
+  "studioSettings.gameFolder": "Installation du jeu",
+  "studioSettings.foldersWhy": "Lus depuis la même configuration qu'écrit Frost's Mod Manager : c'est lui qui trouve le jeu et gère la configuration initiale, il n'y a donc qu'une seule réponse à où se trouve MX Bikes.",
+  "studioSettings.getManager": "Obtenir Frost's Mod Manager",
+  "studioSettings.language": "Langue",
 };

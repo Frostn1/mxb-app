@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-08
+
+### Changed
+- Frost's Studio has a look of its own. Rounded, upright and quieter than the mod manager,
+  which is built to look like a race product and reads as noise around a paint you are
+  working on.
+- The Designer uses the whole window. The sheet runs edge to edge, the setup row moved into
+  the bar at the top, and the three columns are yours to drag — the sizes you set are the
+  sizes you get next time.
+- Frost's Studio has its own mark: the snowflake, split into two paints.
+
 ## 2026-09-07
 
 ### Added

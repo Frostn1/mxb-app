@@ -1,0 +1,87 @@
+/* Frost's Studio's own skin.
+ *
+ * The manager's "Paddock" look is a motocross number plate: radius 0, a shallow left lean
+ * on every button, and dense uppercase micro-labels. That reads as a race product, which is
+ * what it is. It reads badly here. A studio is a room you sit in for an hour with one
+ * picture in the middle of it, and hard-cut leaning chrome around that picture competes
+ * with it — every edge is a line your eye has to rule out before it can look at the work.
+ *
+ * So the Studio keeps the palette and the type, and changes the geometry: rounded, upright,
+ * and quieter. Nothing here is a new component — it is the same shared shadcn primitives
+ * with different tokens under them, which is the point of having tokens.
+ */
+
+.studio-skin {
+  /* One line rounds the whole app. The shared theme maps every radius step to `--radius`
+     through `@theme inline`, so `rounded-sm` through `rounded-xl` all compile to
+     `border-radius: var(--radius)` and pick this up by inheritance — there is no
+     `--radius-md` custom property to override, and `calc(var(--radius-md) …)` in a
+     component would be reading nothing. */
+  --radius: 0.5rem;
+
+  /* Three grounds instead of two. The manager has a rail and a content area; the Studio has
+     a rail, panels, and a canvas that must read as deeper than both — you should be able to
+     tell where the work stops without looking for a border. */
+  --window: #0a0a0c;
+  --background: #0a0a0c;
+  --canvas: #08080a;
+  --card: #121216;
+  --panel: #16161a;
+  --border: rgba(255, 255, 255, 0.07);
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
+}
+
+/* The lean comes off. `Button` applies `.u-skew` to the box and `.u-unskew` to the label,
+   so neutralising both leaves the geometry upright with no change to any component. */
+.studio-skin .u-skew,
+.studio-skin .u-unskew {
+  transform: none;
+}
+.studio-skin .u-notch {
+  clip-path: none;
+}
+
+/* Buttons keep Barlow Condensed, but not the plate's letter-spacing: at 0.14em a two-word
+   label is a banner. Sentence case is left alone — it is set per call site. */
+.studio-skin [data-slot="button"],
+.studio-skin button {
+  letter-spacing: 0.04em;
+}
+
+/* The native range control is styled into a skewed plate thumb in the shared theme. The
+   Studio uses the shadcn `Slider` instead, but Designer's numeric controls still reach for
+   `input[type=range]` in places, so round those rather than leave one plate on screen. */
+.studio-skin input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+}
+.studio-skin input[type="range"]::-webkit-slider-thumb {
+  width: 13px;
+  height: 13px;
+  margin-top: -4.5px;
+  border-radius: 999px;
+  transform: none;
+}
+
+/* Scrollbars inside panels. The Studio has a lot of narrow scrolling columns and the
+   platform bar is wider than some of them. */
+.studio-skin ::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.studio-skin ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.studio-skin ::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+  background-color: color-mix(in srgb, var(--foreground) 14%, transparent);
+}
+.studio-skin ::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--foreground) 24%, transparent);
+}

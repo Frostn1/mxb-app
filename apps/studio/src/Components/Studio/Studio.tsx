@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { cn } from "@frost/shared/lib/utils";
-import { ContextBarRight } from "../Shell/ContextBar";
+import { ContextBarRight, PaneActive } from "../Shell/ContextBar";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
 import { useT } from "@/i18n";
 import { useConfig } from "@frost/shared/Context/Config";
@@ -155,6 +155,8 @@ export default function Studio({
 /** A sub-view that keeps its state while another one is on screen. */
 function Pane({ active, children }: { active: boolean; children: React.ReactNode }) {
   return (
-    <div className={cn("min-h-0 flex-1 flex-col", active ? "flex" : "hidden")}>{children}</div>
+    <PaneActive.Provider value={active}>
+      <div className={cn("min-h-0 flex-1 flex-col", active ? "flex" : "hidden")}>{children}</div>
+    </PaneActive.Provider>
   );
 }

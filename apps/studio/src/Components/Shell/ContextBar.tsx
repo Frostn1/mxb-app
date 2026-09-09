@@ -19,16 +19,29 @@ export const ContextSlots = createContext<{ left: HTMLElement | null; right: HTM
   right: null,
 });
 
+/**
+ * Whether the tool doing the portalling is the one on screen.
+ *
+ * The Studio hides sub-views rather than unmounting them, so they keep their work — which
+ * means every tool anyone has opened is still mounted, and every one of their portals still
+ * renders. Without this gate the second tool you visit puts its toolbar in the bar beside
+ * the first one's and neither leaves. Default true, so a tool used outside a `Pane` needs
+ * no provider.
+ */
+export const PaneActive = createContext(true);
+
 /** Tabs or filters, beside the rail item's own tabs. */
 export function ContextBarLeft({ children }: { children: ReactNode }) {
   const { left } = useContext(ContextSlots);
-  return left ? createPortal(children, left) : null;
+  const on = useContext(PaneActive);
+  return left && on ? createPortal(children, left) : null;
 }
 
 /** Search, sort, a primary action — pinned right. */
 export function ContextBarRight({ children }: { children: ReactNode }) {
   const { right } = useContext(ContextSlots);
-  return right ? createPortal(children, right) : null;
+  const on = useContext(PaneActive);
+  return right && on ? createPortal(children, right) : null;
 }
 
 /** One tab, so a screen's own tabs are indistinguishable from the rail item's. */

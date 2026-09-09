@@ -10,6 +10,7 @@ export const de: Translation = {
   "common.clear": "Leeren",
   "common.remove": "Entfernen",
   "nav.pose": "Pose",
+  "nav.settings": "Einstellungen",
   "nav.designer": "Designer",
   "nav.paints": "Designs",
 
@@ -459,4 +460,11 @@ export const de: Translation = {
     "1 Malebene wurde ausgelassen — eine Malebene ist die Bahn, und diese hat eine andere Größe.",
   "designer.pasteDropped_other":
     "{{count}} Malebenen wurden ausgelassen — eine Malebene ist die Bahn, und diese hat eine andere Größe.",
+  "studioSettings.title": "Einstellungen",
+  "studioSettings.game": "Spiel",
+  "studioSettings.mods": "Mods-Ordner",
+  "studioSettings.gameFolder": "Spielinstallation",
+  "studioSettings.foldersWhy": "Werden aus derselben Konfiguration gelesen, die Frost's Mod Manager schreibt — er findet das Spiel und übernimmt die Ersteinrichtung, damit es nur eine Antwort darauf gibt, wo MX Bikes liegt.",
+  "studioSettings.getManager": "Frost's Mod Manager holen",
+  "studioSettings.language": "Sprache",
 };

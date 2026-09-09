@@ -51,6 +51,11 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             mxb_core::viewer::app_platform,
             // The studio's own: making a track, packing a paint, sealing content.
+            preview_model_swap,
+            log_client,
+            set_preview_tyres,
+            scan_model_swaps,
+            mxb_core::viewer::unpack_paint,
             get_config,
             list_games,
             bike_preview_available,
@@ -1701,5 +1706,61 @@ fn set_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
     let mut cfg = config::load_or_detect(&app).unwrap_or_default();
     cfg.cp_guid = guid.trim().to_string();
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Draw a bike for the shared viewer.
+///
+/// The viewer asks for "this bike as variant X" because in the mod manager a bike can have
+/// model swaps parked beside it, and Stock is one variant among several. Nothing here parks
+/// anything: the studio paints the bike that is installed, so the variant is always Stock and
+/// the honest answer is the bike itself. Resolving a real swap needs `modelswap`, which is
+/// the manager's — a studio that could answer for it would be a studio that could disagree.
+#[tauri::command]
+async fn preview_model_swap(
+    app: tauri::AppHandle,
+    bike: String,
+    variant: String,
+    tyres: Option<String>,
+) -> Result<mxb_core::viewer::BikeModel, String> {
+    let _ = variant;
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let dir = library::mods_subdir(&cfg.mods_path, "mods/bikes").join(&bike);
+        viewer::load_bike_model_blocking(dir.to_string_lossy().into_owned(), tyres)
+    })
+    .await
+    .map_err(|e| format!("preview_model_swap task failed: {e}"))?
+}
+
+/// Frontend log lines, into the same file the Rust side writes.
+#[tauri::command]
+fn log_client(level: String, message: String) {
+    // A log line is not a transport for arbitrary payloads. Trim rather than reject: a
+    // truncated fact still reads, and a dropped one is a support thread that goes nowhere.
+    let msg: String = message.chars().take(2000).collect();
+    match level.as_str() {
+        "error" => log::error!("[webview] {msg}"),
+        "warn" => log::warn!("[webview] {msg}"),
+        _ => log::info!("[webview] {msg}"),
+    }
+}
+
+/// Remember which tyres the 3D preview should wear.
+#[tauri::command]
+fn set_preview_tyres(app: tauri::AppHandle, tyres: String) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.preview_tyres = tyres;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// The model swaps parked beside a bike — always none here.
+///
+/// Parking a mesh so the game loads a different one is the mod manager's Locker, and doing
+/// it needs `modelswap`, which is its module. The shared viewer asks every host this so it
+/// can offer a variant picker; the honest answer from the studio is that there are none, and
+/// the picker then does not appear.
+#[tauri::command]
+fn scan_model_swaps(_mods_path: String) -> Vec<serde_json::Value> {
+    Vec::new()
 }
 
