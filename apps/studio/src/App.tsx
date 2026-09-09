@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Toaster } from "sonner";
 import { appPlatform, contentLockAvailable, getConfig, listGames } from "@frost/shared/api/mods";
 import type { Config, GameInfo } from "@frost/shared/types";
+import { cn } from "@frost/shared/lib/utils";
 import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
 import { I18nProvider, setAmbientVars, useT } from "@/i18n";
 import Rail, { RailButton, type RailEntry } from "./Components/Shell/Rail";
-import { ContextSlots } from "./Components/Shell/ContextBar";
+import { ContextSlots, ShellChrome } from "./Components/Shell/ContextBar";
 import Settings from "./Components/Settings/Settings";
 import Studio, { type StudioTab } from "./Components/Studio/Studio";
 import Secure from "./Components/Secure/Secure";
@@ -22,6 +23,9 @@ function Shell() {
   const [hasLock, setHasLock] = useState(false);
   const [left, setLeft] = useState<HTMLElement | null>(null);
   const [right, setRight] = useState<HTMLElement | null>(null);
+  // A tool can say it is showing something that owns the window — the Designer's start
+  // screen — and the strip goes with it rather than sitting above it with nothing in it.
+  const [bare, setBare] = useState(false);
 
   const reloadConfig = useCallback(async () => setConfig(await getConfig()), []);
 
@@ -52,18 +56,21 @@ function Shell() {
     [config, reloadConfig, games, game],
   );
   const slots = useMemo(() => ({ left, right }), [left, right]);
+  const chrome = useMemo(() => ({ bare, setBare }), [bare]);
 
   // The rider rig is MX Bikes only — GP Bikes' has no part bindings — and locking needs the
   // optional local module. A tool that could only ever fail is not offered.
   const entries = useMemo(() => {
     const all: (RailEntry<View> & { when?: boolean })[] = [
-      { id: "designer", label: t("nav.designer") },
-      { id: "paints", label: t("nav.paints") },
-      { id: "rider", label: t("nav.rider"), when: game.caps.viewer },
-      { id: "pose", label: t("nav.pose"), when: game.caps.viewer },
-      { id: "track", label: t("nav.track") },
-      { id: "protect", label: t("nav.protect"), when: hasLock },
-      { id: "secure", label: t("nav.secure"), when: hasLock },
+      // Two errands, not one list of seven: making something, and locking something you
+      // have already made.
+      { id: "designer", label: t("nav.designer"), group: "make" },
+      { id: "paints", label: t("nav.paints"), group: "make" },
+      { id: "rider", label: t("nav.rider"), group: "make", when: game.caps.viewer },
+      { id: "pose", label: t("nav.pose"), group: "make", when: game.caps.viewer },
+      { id: "track", label: t("nav.track"), group: "make" },
+      { id: "protect", label: t("nav.protect"), group: "sell", when: hasLock },
+      { id: "secure", label: t("nav.secure"), group: "sell", when: hasLock },
     ];
     return all.filter((e) => e.when !== false);
   }, [t, game.caps.viewer, hasLock]);
@@ -78,23 +85,35 @@ function Shell() {
     <ConfigContext.Provider value={ctx}>
       <TrackBuildProvider>
         <ContextSlots.Provider value={slots}>
+        <ShellChrome.Provider value={chrome}>
           <div className="flex h-screen bg-background text-foreground">
             <Rail
               entries={entries}
               active={view}
               onPick={setView}
               header={
-                <div data-tauri-drag-region className="flex select-none items-center gap-2 px-2.5 pt-1">
+                <div
+                  data-tauri-drag-region
+                  className="flex select-none items-center gap-2.5 px-2.5 pt-0.5"
+                >
                   {/* The app's own mark, not a lettered plate — the same two-paint snowflake
                       the icon and the installer carry. */}
                   <img
                     src="/logo.svg"
                     alt=""
                     draggable={false}
-                    className="size-[26px] [filter:drop-shadow(0_1px_3px_rgba(0,0,0,0.28))]"
+                    className="size-[28px] flex-none [filter:drop-shadow(0_1px_3px_rgba(0,0,0,0.25))]"
                   />
-                  <span className="text-[17px] font-semibold tracking-[-0.005em] text-foreground">
-                    Studio
+                  {/* Two lines set as a logotype rather than as a stack: the possessive in
+                      the only face in the app that is not Barlow, and the name stepped in
+                      under it so the two overlap. Reads as one mark, not two labels. */}
+                  <span className="flex min-w-0 flex-col items-start">
+                    <span className="font-serif text-[15px] italic leading-none text-muted-foreground">
+                      Frost&apos;s
+                    </span>
+                    <span className="-mt-[5px] ml-[15px] font-serif text-[19px] font-bold italic leading-none tracking-[-0.01em] text-foreground">
+                      Studio
+                    </span>
                   </span>
                 </div>
               }
@@ -114,7 +133,10 @@ function Shell() {
                   the Studio has, so it can afford to breathe. */}
               <div
                 data-tauri-drag-region
-                className="relative flex h-[52px] shrink-0 items-center gap-3 border-b border-border px-4"
+                className={cn(
+                  "relative flex h-[52px] shrink-0 items-center gap-3 border-b border-border px-4",
+                  bare && "hidden",
+                )}
               >
                 <div ref={setLeft} className="flex min-w-0 flex-1 items-center gap-2" />
                 <div ref={setRight} className="flex shrink-0 items-center gap-2" />
@@ -138,6 +160,7 @@ function Shell() {
             </div>
           </div>
           <Toaster position="bottom-right" theme="light" richColors />
+        </ShellChrome.Provider>
         </ContextSlots.Provider>
       </TrackBuildProvider>
     </ConfigContext.Provider>

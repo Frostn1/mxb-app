@@ -5,6 +5,10 @@ export const de: Translation = {
   ...base,
   ...base,
   // ── Allgemein ──────────────────────────────────────────────────────────────
+  "common.search": "Suchen",
+  "designer.createPaint": "Erstellen",
+  "designer.noRecent": "Keine zuletzt verwendeten Lackierungen",
+  "designer.noMatches": "Keine Treffer",
   "common.cancel": "Abbrechen",
   "common.delete": "Löschen",
   "common.clear": "Leeren",
@@ -63,7 +67,7 @@ export const de: Translation = {
   "paints.unpack": "Design entpacken…",
   "paints.toDesigner": "Darauf zeichnen…",
   "paints.unpacked": "{{count}} Texturen entpackt — bearbeiten, dann speichern.",
-  "paints.whereTitle": "Ziel",
+  "paints.whereTitle": "Was lackierst du?",
   "paints.kind.helmet": "Helm",
   "paints.kind.protection": "Protektoren",
   "paints.noModels": "Noch nichts installiert, das bemalt werden könnte.",
@@ -98,6 +102,10 @@ export const de: Translation = {
     "Zeichne ein Design auf die Bahnen, die das Spiel wirklich liest, und sieh es dabei am Modell. Wähl ein Modell und seine Bahnen sind schon da, unter den Namen, die es nutzt — oder fang bei einem installierten Design oder einer Photoshop-Datei an und bring deine Arbeit mit. Male mit Pinsel, Verlauf oder Formen, leg Bilder und Text darüber und speichere: heraus kommt eine .pnt, die das Spiel lädt — kein Export, den noch jemand umwandeln muss.",
   "designer.empty":
     "Noch nichts zum Zeichnen da. Fang bei einem für dieses Modell installierten Design an, öffne eine Photoshop-Datei, um ihre Ebenen zu behalten, oder füge eine leere Bahn hinzu.",
+  "designer.startTitle": "Öffnen",
+  "designer.startBlank": "Neue Lackierung beginnen",
+  "designer.recent": "Zuletzt verwendet",
+  "designer.forget": "Aus dieser Liste entfernen",
   "designer.startFromPaint": "Von einem Design ausgehen…",
   "designer.startFromPsd": "Von einer PSD ausgehen…",
   "designer.exportPsd": "Als PSD exportieren",
@@ -351,7 +359,7 @@ export const de: Translation = {
   "track.stale": "Älterer Build — neu bauen",
   "track.groupLap": "Die Runde",
   "track.groupOnIt": "Darauf",
-  "nav.secure": "Schützen",
+  "nav.secure": "MXB Secure",
   "pose.group.torso": "Rumpf und Kopf",
   "pose.group.arms": "Arme",
   "pose.group.hands": "Hände",
@@ -446,7 +454,7 @@ export const de: Translation = {
   "designer.tool.rect": "Rechteck",
 
 
-  "nav.protect": "Schützen",
+  "nav.protect": "GUID-Sperre",
   "track.problemCount_one": "{{count}} Problem",
   "track.problemCount_other": "{{count}} Probleme",
   "track.noteCount_one": "{{count}} Hinweis",

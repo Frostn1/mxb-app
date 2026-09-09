@@ -9,6 +9,10 @@ export const en = {
   ...base,
   ...base,
   // ── Generic, reused everywhere ─────────────────────────────────────────────
+  "common.search": "Search",
+  "designer.createPaint": "Create",
+  "designer.noRecent": "No recent paints",
+  "designer.noMatches": "No matches",
   "common.cancel": "Cancel",
   "common.delete": "Delete",
   "common.clear": "Clear",
@@ -67,7 +71,7 @@ export const en = {
   "paints.unpack": "Unpack a paint…",
   "paints.toDesigner": "Draw on these…",
   "paints.unpacked": "Unpacked {{count}} sheet(s) — edit them, then save.",
-  "paints.whereTitle": "Where it goes",
+  "paints.whereTitle": "What are you painting?",
   "paints.kind.helmet": "Helmet",
   "paints.kind.protection": "Protection",
   "paints.noModels": "Nothing installed to paint for yet.",
@@ -102,6 +106,10 @@ export const en = {
     "Draw a paint on the sheets the game actually reads, and watch it on the model as you go. Pick a model and its sheets are already there under the names it binds — or start from an installed paint or a Photoshop file to bring artwork with you. Paint with a brush, a gradient or a shape, stack images and text on top, then save: what comes out is a .pnt the game loads, not an export to convert.",
   "designer.empty":
     "Nothing to draw on yet. Start from a paint installed for this model, open a Photoshop file to keep its layers, or add a blank sheet.",
+  "designer.startTitle": "Open",
+  "designer.startBlank": "Start a new paint",
+  "designer.recent": "Recent",
+  "designer.forget": "Remove from this list",
   "designer.startFromPaint": "Start from a paint…",
   "designer.startFromPsd": "Start from a PSD…",
   "designer.exportPsd": "Export PSD",
@@ -353,7 +361,7 @@ export const en = {
   "track.stale": "Older build — rebuild",
   "track.groupLap": "The lap",
   "track.groupOnIt": "On it",
-  "nav.secure": "Secure",
+  "nav.secure": "MXB Secure",
   "pose.group.torso": "Torso and head",
   "pose.group.arms": "Arms",
   "pose.group.hands": "Hands",
@@ -448,7 +456,7 @@ export const en = {
   "designer.tool.rect": "Rectangle",
 
 
-  "nav.protect": "Protect",
+  "nav.protect": "GUID Lock",
   "track.problemCount_one": "{{count}} problem",
   "track.problemCount_other": "{{count}} problems",
   "track.noteCount_one": "{{count}} note",

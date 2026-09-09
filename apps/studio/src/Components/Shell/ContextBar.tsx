@@ -30,6 +30,18 @@ export const ContextSlots = createContext<{ left: HTMLElement | null; right: HTM
  */
 export const PaneActive = createContext(true);
 
+/**
+ * A tool saying it is showing something that owns the window.
+ *
+ * The Designer's start screen is a page, not a document with chrome around it — and the
+ * strip above it held one question mark. A tool sets `bare` while that is true and the shell
+ * drops the strip; nothing else in the app has to know why.
+ */
+export const ShellChrome = createContext<{ bare: boolean; setBare: (v: boolean) => void }>({
+  bare: false,
+  setBare: () => {},
+});
+
 /** Tabs or filters, beside the rail item's own tabs. */
 export function ContextBarLeft({ children }: { children: ReactNode }) {
   const { left } = useContext(ContextSlots);

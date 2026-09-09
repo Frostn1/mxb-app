@@ -5,6 +5,10 @@ export const ptBR: Translation = {
   ...base,
   ...base,
   // ── Genérico ───────────────────────────────────────────────────────────────
+  "common.search": "Buscar",
+  "designer.createPaint": "Criar",
+  "designer.noRecent": "Sem pinturas recentes",
+  "designer.noMatches": "Sem resultados",
   "common.cancel": "Cancelar",
   "common.delete": "Excluir",
   "common.clear": "Limpar",
@@ -63,7 +67,7 @@ export const ptBR: Translation = {
   "paints.unpack": "Descompactar uma pintura…",
   "paints.toDesigner": "Desenhar nelas…",
   "paints.unpacked": "{{count}} texturas extraídas — edite e depois salve.",
-  "paints.whereTitle": "Onde vai",
+  "paints.whereTitle": "O que você está pintando?",
   "paints.kind.helmet": "Capacete",
   "paints.kind.protection": "Proteções",
   "paints.noModels": "Ainda não há nada instalado para pintar.",
@@ -98,6 +102,10 @@ export const ptBR: Translation = {
     "Desenhe uma pintura nas folhas que o jogo realmente lê e veja no modelo enquanto trabalha. Escolha um modelo e as folhas dele já estão aí, com os nomes que ele usa — ou comece de uma pintura instalada ou de um arquivo do Photoshop para trazer o trabalho junto. Pinte com pincel, gradiente ou formas, empilhe imagens e texto por cima e salve: o que sai é um .pnt que o jogo carrega, não uma exportação para converter.",
   "designer.empty":
     "Ainda não há nada para desenhar. Comece de uma pintura instalada para este modelo, abra um arquivo do Photoshop para manter as camadas dele, ou adicione uma folha em branco.",
+  "designer.startTitle": "Abrir",
+  "designer.startBlank": "Começar uma pintura nova",
+  "designer.recent": "Recentes",
+  "designer.forget": "Remover desta lista",
   "designer.startFromPaint": "Começar de uma pintura…",
   "designer.startFromPsd": "Começar de um PSD…",
   "designer.exportPsd": "Exportar PSD",
@@ -349,7 +357,7 @@ export const ptBR: Translation = {
   "track.stale": "Build anterior — reconstruir",
   "track.groupLap": "A volta",
   "track.groupOnIt": "Em cima",
-  "nav.secure": "Proteger",
+  "nav.secure": "MXB Secure",
   "pose.group.torso": "Tronco e cabeça",
   "pose.group.arms": "Braços",
   "pose.group.hands": "Mãos",
@@ -443,7 +451,7 @@ export const ptBR: Translation = {
   "designer.tool.rect": "Retângulo",
 
 
-  "nav.protect": "Proteger",
+  "nav.protect": "Bloqueio GUID",
   "track.problemCount_one": "{{count}} problema",
   "track.problemCount_other": "{{count}} problemas",
   "track.noteCount_one": "{{count}} observação",

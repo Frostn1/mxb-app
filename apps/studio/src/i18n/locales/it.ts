@@ -5,6 +5,10 @@ export const it: Translation = {
   ...base,
   ...base,
   // ── Generico ───────────────────────────────────────────────────────────────
+  "common.search": "Cerca",
+  "designer.createPaint": "Crea",
+  "designer.noRecent": "Nessuna livrea recente",
+  "designer.noMatches": "Nessun risultato",
   "common.cancel": "Annulla",
   "common.delete": "Elimina",
   "common.clear": "Svuota",
@@ -63,7 +67,7 @@ export const it: Translation = {
   "paints.unpack": "Scompatta una livrea…",
   "paints.toDesigner": "Disegna su questi…",
   "paints.unpacked": "Estratte {{count}} texture — modificale, poi salva.",
-  "paints.whereTitle": "Dove va",
+  "paints.whereTitle": "Cosa stai dipingendo?",
   "paints.kind.helmet": "Casco",
   "paints.kind.protection": "Protezioni",
   "paints.noModels": "Non c'è ancora nulla da dipingere.",
@@ -98,6 +102,10 @@ export const it: Translation = {
     "Disegna una livrea sui fogli che il gioco legge davvero e guardala sul modello mentre lavori. Scegli un modello e i suoi fogli ci sono già, con i nomi che lui usa — oppure parti da una livrea installata o da un file di Photoshop per portarti dietro il lavoro. Dipingi con pennello, sfumatura o forme, aggiungi immagini e testo, poi salva: quello che esce è un .pnt che il gioco carica, non un export da convertire.",
   "designer.empty":
     "Non c'è ancora niente su cui disegnare. Parti da una livrea installata per questo modello, apri un file di Photoshop per conservarne i livelli, oppure aggiungi un foglio vuoto.",
+  "designer.startTitle": "Apri",
+  "designer.startBlank": "Inizia una nuova livrea",
+  "designer.recent": "Recenti",
+  "designer.forget": "Rimuovi da questo elenco",
   "designer.startFromPaint": "Parti da una livrea…",
   "designer.startFromPsd": "Parti da un PSD…",
   "designer.exportPsd": "Esporta PSD",
@@ -350,7 +358,7 @@ export const it: Translation = {
   "track.stale": "Build precedente — ricostruisci",
   "track.groupLap": "Il giro",
   "track.groupOnIt": "Sopra",
-  "nav.secure": "Proteggi",
+  "nav.secure": "MXB Secure",
   "pose.group.torso": "Busto e testa",
   "pose.group.arms": "Braccia",
   "pose.group.hands": "Mani",
@@ -445,7 +453,7 @@ export const it: Translation = {
   "designer.tool.rect": "Rettangolo",
 
 
-  "nav.protect": "Protezione",
+  "nav.protect": "Blocco GUID",
   "track.problemCount_one": "{{count}} problema",
   "track.problemCount_other": "{{count}} problemi",
   "track.noteCount_one": "{{count}} nota",

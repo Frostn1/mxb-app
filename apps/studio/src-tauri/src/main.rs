@@ -55,6 +55,9 @@ fn main() {
             log_client,
             set_preview_tyres,
             scan_model_swaps,
+            designer_recents,
+            designer_recent_note,
+            designer_recent_forget,
             mxb_core::viewer::unpack_paint,
             get_config,
             list_games,
@@ -1764,3 +1767,77 @@ fn scan_model_swaps(_mods_path: String) -> Vec<serde_json::Value> {
     Vec::new()
 }
 
+
+/* ── Recent paints ──────────────────────────────────────────────────────────────────────
+ *
+ * The Designer's front door. Opening it used to mean choosing a bike from a popover in the
+ * toolbar and then adding sheets by hand — the flow gave no way back to something you were
+ * working on last week except the OS file picker.
+ *
+ * A list of what you have saved, kept here rather than in `config.json`: both apps write
+ * that file, and a studio-only list is not worth the chance of one process landing on the
+ * other's write. Entries whose file has since been deleted are dropped on read, so the list
+ * cannot offer something that would fail to open.
+ */
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentPaint {
+    /// The `.pnt` on disk. Also the identity: saving over one moves it up rather than
+    /// adding a second entry.
+    pub path: String,
+    pub name: String,
+    /// What it paints, already translated — the label the picker showed when it was made.
+    pub kind: String,
+    /// The bike or gear folder it was made for.
+    pub model: String,
+    /// Unix seconds. Written by the app so the ordering survives a file being touched.
+    pub saved_at: i64,
+}
+
+const RECENTS_CAP: usize = 12;
+
+fn recents_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    mxb_core::config::data_dir(app).map(|d| d.join("designer-recents.json"))
+}
+
+#[tauri::command]
+fn designer_recents(app: tauri::AppHandle) -> Vec<RecentPaint> {
+    let Some(p) = recents_path(&app) else {
+        return Vec::new();
+    };
+    let Ok(raw) = std::fs::read_to_string(&p) else {
+        return Vec::new();
+    };
+    let all: Vec<RecentPaint> = serde_json::from_str(&raw).unwrap_or_default();
+    all.into_iter()
+        .filter(|r| std::path::Path::new(&r.path).is_file())
+        .collect()
+}
+
+#[tauri::command]
+fn designer_recent_note(app: tauri::AppHandle, entry: RecentPaint) -> Result<(), String> {
+    let Some(p) = recents_path(&app) else {
+        return Ok(());
+    };
+    let mut all = designer_recents(app);
+    all.retain(|r| !r.path.eq_ignore_ascii_case(&entry.path));
+    all.insert(0, entry);
+    all.truncate(RECENTS_CAP);
+    if let Some(dir) = p.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let body = serde_json::to_string_pretty(&all).map_err(|e| e.to_string())?;
+    std::fs::write(&p, body).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn designer_recent_forget(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let Some(p) = recents_path(&app) else {
+        return Ok(());
+    };
+    let mut all = designer_recents(app);
+    all.retain(|r| !r.path.eq_ignore_ascii_case(&path));
+    let body = serde_json::to_string_pretty(&all).map_err(|e| e.to_string())?;
+    std::fs::write(&p, body).map_err(|e| e.to_string())
+}

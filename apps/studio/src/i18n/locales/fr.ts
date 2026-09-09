@@ -5,6 +5,10 @@ export const fr: Translation = {
   ...base,
   ...base,
   // ── Générique ──────────────────────────────────────────────────────────────
+  "common.search": "Rechercher",
+  "designer.createPaint": "Créer",
+  "designer.noRecent": "Aucune peinture récente",
+  "designer.noMatches": "Aucun résultat",
   "common.cancel": "Annuler",
   "common.delete": "Supprimer",
   "common.clear": "Effacer",
@@ -63,7 +67,7 @@ export const fr: Translation = {
   "paints.unpack": "Décompresser une déco…",
   "paints.toDesigner": "Dessiner dessus…",
   "paints.unpacked": "{{count}} textures extraites — modifiez-les, puis enregistrez.",
-  "paints.whereTitle": "Destination",
+  "paints.whereTitle": "Que peignez-vous ?",
   "paints.kind.helmet": "Casque",
   "paints.kind.protection": "Protections",
   "paints.noModels": "Rien d'installé à peindre pour l'instant.",
@@ -98,6 +102,10 @@ export const fr: Translation = {
     "Dessine une déco sur les planches que le jeu lit vraiment, et regarde-la sur le modèle au fur et à mesure. Choisis un modèle et ses planches sont déjà là, sous les noms qu'il utilise — ou pars d'une déco installée ou d'un fichier Photoshop pour amener ton travail avec toi. Peins au pinceau, au dégradé ou avec des formes, empile images et textes par-dessus, puis enregistre : ce qui sort est un .pnt que le jeu charge, pas un export à convertir.",
   "designer.empty":
     "Rien sur quoi dessiner pour l'instant. Pars d'une déco installée pour ce modèle, ouvre un fichier Photoshop pour en garder les calques, ou ajoute une planche vierge.",
+  "designer.startTitle": "Ouvrir",
+  "designer.startBlank": "Commencer une nouvelle peinture",
+  "designer.recent": "Récents",
+  "designer.forget": "Retirer de cette liste",
   "designer.startFromPaint": "Partir d'une déco…",
   "designer.startFromPsd": "Partir d'un PSD…",
   "designer.exportPsd": "Exporter en PSD",
@@ -351,7 +359,7 @@ export const fr: Translation = {
   "track.stale": "Build précédent — reconstruire",
   "track.groupLap": "Le tour",
   "track.groupOnIt": "Dessus",
-  "nav.secure": "Sécuriser",
+  "nav.secure": "MXB Secure",
   "pose.group.torso": "Buste et tête",
   "pose.group.arms": "Bras",
   "pose.group.hands": "Mains",
@@ -446,7 +454,7 @@ export const fr: Translation = {
   "designer.tool.rect": "Rectangle",
 
 
-  "nav.protect": "Protéger",
+  "nav.protect": "Verrou GUID",
   "track.problemCount_one": "{{count}} problème",
   "track.problemCount_other": "{{count}} problèmes",
   "track.noteCount_one": "{{count}} remarque",

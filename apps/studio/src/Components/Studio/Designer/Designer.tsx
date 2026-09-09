@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Bike,
   ClipboardPaste,
@@ -36,18 +44,20 @@ import {
   CardHeader,
   CardTitle,
 } from "@frost/shared/Components/ui/card";
-import { ContextBarLeft } from "../../Shell/ContextBar";
+import { ContextBarLeft, ShellChrome } from "../../Shell/ContextBar";
 import {
   paintStudioExtract,
   paintStudioPixels,
   paintStudioSave,
   paintStudioStage,
   paintStudioTarget,
+  designerRecentNote,
   psdRead,
   psdSave,
   textureBytes,
 } from "@frost/shared/api/mods";
 import { useT } from "@/i18n";
+import StartScreen from "./StartScreen";
 import { IMAGE_EXTS, PaintDestBar, isBikeKind, usePaintDest } from "../paintDest";
 const PREVIEW_OPEN_KEY = "mxb:designer:preview:v1";
 
@@ -207,6 +217,21 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // Where the canvas's right-click menu is, in client coordinates, or null for closed.
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [name, setName] = useState("");
+  /**
+   * Whether the user has started something.
+   *
+   * The tab used to open straight into a bike: a destination is picked for you, and the
+   * effect below fills in that model's sheet names as soon as it knows them, so there was
+   * never a moment where nothing was open. That is why the empty state was effectively
+   * unreachable — and why there was nowhere to put "carry on with what you were doing".
+   * Nothing is filled in until this is true.
+   */
+  const [started, setStarted] = useState(false);
+  const { setBare } = useContext(ShellChrome);
+  useEffect(() => {
+    setBare(!started);
+    return () => setBare(false);
+  }, [setBare, started]);
   // The title is editable in place: open when it is clicked, or when a save needs a name.
   const [naming, setNaming] = useState(false);
   const [draftName, setDraftName] = useState("");
@@ -902,13 +927,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     [installSheets, readImage, t],
   );
 
-  const startFromPaint = useCallback(async () => {
-    const picked = await openDialog({
-      multiple: false,
-      filters: [{ name: "MX Bikes paint", extensions: ["pnt"] }],
-    });
-    const path = Array.isArray(picked) ? picked[0] : picked;
-    if (!path) return;
+  const openPaint = useCallback(
+    async (path: string) => {
     // Busy from here, not from inside `loadSheets`: unpacking the `.pnt` is the slow half —
     // it reads the file, inflates every sheet and writes them out — and leaving it outside the
     // spinner is why picking a paint looked like nothing had happened.
@@ -924,7 +944,21 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     } finally {
       setBusy(false);
     }
-  }, [loadSheets]);
+    },
+    [loadSheets],
+  );
+
+  /** The same act with the path still to be chosen. */
+  const startFromPaint = useCallback(async () => {
+    const picked = await openDialog({
+      multiple: false,
+      filters: [{ name: "MX Bikes paint", extensions: ["pnt"] }],
+    });
+    const path = Array.isArray(picked) ? picked[0] : picked;
+    if (!path) return;
+    setStarted(true);
+    await openPaint(path);
+  }, [openPaint]);
 
   /**
    * Start from a Photoshop file — one sheet per document.
@@ -945,6 +979,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     });
     const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
     if (!paths.length) return;
+    setStarted(true);
     setBusy(true);
     try {
       // Loaded on demand, here and in the export below. The PSD codec is a quarter of a
@@ -1009,6 +1044,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // same thing — that tab has already done the unpacking.
   useEffect(() => {
     if (!incoming?.length) return;
+    // Sheets handed over by Paint Studio are a start like any other.
+    setStarted(true);
     setBusy(true);
     void loadSheets(incoming)
       .catch((e) => toast.error(String(e).replace(/^Error:\s*/, "")))
@@ -1042,6 +1079,18 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     setSelection([]);
     bump();
   }, [bump, missingHints, remember]);
+
+  /**
+   * Start a new paint for the destination that is chosen.
+   *
+   * The sheets themselves come from the effect above, which knows what the model binds. When
+   * a model offers no names — a loose folder, mostly — one blank sheet is a better editor to
+   * be dropped into than none at all.
+   */
+  const beginNew = useCallback(() => {
+    setStarted(true);
+    if (!hints.some((h) => !isCompanionMap(h))) addBlankSheet();
+  }, [addBlankSheet, hints]);
 
   /**
    * One sheet per colour texture the model asks for that isn't on the list yet.
@@ -1100,6 +1149,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   useEffect(() => {
     // Not until the hints are about the destination that's actually chosen: they're fetched,
     // and acting on the last model's list would fill a KTM with a Yamaha's sheet names.
+    if (!started) return;
     if (!destKey || hintsFor !== destKey || filled.current === destKey) return;
     const wanted = hints.filter((h) => !isCompanionMap(h));
     if (!wanted.length) return;
@@ -1124,7 +1174,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         onClick: () => installSheets(make()),
       },
     });
-  }, [destKey, hints, hintsFor, installSheets, pristine, sheets.length, t]);
+  }, [destKey, hints, hintsFor, installSheets, pristine, sheets.length, started, t]);
 
   const addImage = useCallback(async () => {
     if (!active) return;
@@ -1981,13 +2031,21 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         toast.success(t("paints.saved", { path: outcome.path }), {
           description: blank ? t("designer.blankSheetsSkipped", { count: blank }) : undefined,
         });
+        // Best effort: failing to note a recent must never look like a failed save.
+        void designerRecentNote({
+          path: outcome.path,
+          name: title,
+          kind: t(destState.kind.label),
+          model: destState.folder ?? destState.model,
+          savedAt: Math.round(Date.now() / 1000),
+        }).catch(() => {});
       } catch (e) {
         toast.error(String(e).replace(/^Error:\s*/, ""));
       } finally {
         setBusy(false);
       }
     },
-    [canvasFor, dest, name, sheets, t],
+    [canvasFor, dest, destState, name, sheets, t],
   );
 
   const save = useCallback(
@@ -2029,6 +2087,25 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const canGroup = chosen.length > 1;
   const canUngroup = chosen.some((l) => l.group);
   const canUnlink = chosen.some((l) => l.mirror);
+
+  if (!started) {
+    return (
+      <div ref={rootRef} className="relative min-h-0 flex-1 overflow-hidden">
+        <StartScreen
+          dest={destState}
+          busy={busy}
+          onBlank={beginNew}
+          onFromPaint={() => void startFromPaint()}
+          onFromPsd={() => void startFromPsd()}
+          onOpenRecent={(r) => {
+            setName(r.name);
+            setStarted(true);
+            void openPaint(r.path);
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div ref={rootRef} className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -2199,29 +2276,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               onPaintMove={movePaint}
               onPaintEnd={endPaint}
             />
-          ) : (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 p-10 text-center">
-              <p className="max-w-md text-[13.5px] leading-relaxed text-muted-foreground">
-                {t("designer.empty")}
-              </p>
-              <div className="flex flex-wrap justify-center gap-2">
-                <Button size="sm" disabled={busy} onClick={() => void startFromPaint()}>
-                  <PackageOpen className="size-3.5" /> {t("designer.startFromPaint")}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => void startFromPsd()}
-                >
-                  <FileImage className="size-3.5" /> {t("designer.startFromPsd")}
-                </Button>
-                <Button variant="outline" size="sm" onClick={addBlankSheet}>
-                  <FilePlus2 className="size-3.5" /> {t("designer.blankSheet")}
-                </Button>
-            </div>
-          </div>
-        )}
+          ) : null}
 
         {/* The canvas's own menu. Anchored to a point rather than to the canvas, because what
             it is about is whatever was under the pointer — and opened from the *release* of a

@@ -1,3 +1,5 @@
+import type { ComponentType } from "react";
+import { Bike, Footprints, Glasses, Hand, HardHat, Shield, Shirt } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, FolderOpen } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -395,25 +397,56 @@ export function PaintDestCard({ state, bare }: { state: PaintDestState; bare?: b
     <div className={cn("p-3.5", !bare && "rounded-lg border border-border bg-card/40")}>
       <h2 className="mb-2.5 text-[13px] font-semibold">{t("paints.whereTitle")}</h2>
 
-      <div className="flex flex-wrap gap-1.5">
-        {kinds.map((k) => (
-          <button
-            key={k.id}
-            type="button"
-            onClick={() => setKind(k)}
-            className={cn(
-              "rounded-md border px-2 py-1 text-[11.5px] font-medium transition-colors",
-              kind.id === k.id
-                ? "u-selected border-transparent"
-                : "border-border text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {t(k.label)}
-          </button>
-        ))}
+      {/* Not a row of equal chips. A bike livery is most of what gets made here and a pair
+          of gloves is not, so the two are not offered as the same size of decision — and the
+          five gear pieces read as one group rather than five separate choices. */}
+      <div className="flex max-w-[560px] flex-col gap-2">
+        <div className="grid grid-cols-3 gap-2">
+          {kinds
+            .filter((k) => k.id === "bike")
+            .map((k) => (
+              <KindCard
+                key={k.id}
+                kind={k}
+                on={kind.id === k.id}
+                onPick={() => setKind(k)}
+                className="col-span-2 h-[104px]"
+                iconClass="size-8"
+                labelClass="text-[15px]"
+              />
+            ))}
+          {kinds
+            .filter((k) => k.id === "kit")
+            .map((k) => (
+              <KindCard
+                key={k.id}
+                kind={k}
+                on={kind.id === k.id}
+                onPick={() => setKind(k)}
+                className="h-[104px]"
+                iconClass="size-6"
+                labelClass="text-[13px]"
+              />
+            ))}
+        </div>
+        <div className="grid grid-cols-5 gap-2">
+          {kinds
+            .filter((k) => k.id !== "bike" && k.id !== "kit")
+            .map((k) => (
+              <KindCard
+                key={k.id}
+                kind={k}
+                on={kind.id === k.id}
+                onPick={() => setKind(k)}
+                className="h-[68px]"
+                iconClass="size-[18px]"
+                labelClass="text-[11px]"
+              />
+            ))}
+        </div>
       </div>
 
-      <div className="mt-3 flex flex-col gap-1">
+      <div className="mt-4 flex max-w-[420px] flex-col gap-1.5">
         <span className="text-[11px] font-medium text-muted-foreground">
           {t(state.modelLabel)}
         </span>
@@ -423,7 +456,7 @@ export function PaintDestCard({ state, bare }: { state: PaintDestState; bare?: b
         )}
       </div>
 
-      <div className="mt-3 flex flex-col gap-1.5">
+      <div className="mt-3 flex max-w-[420px] flex-col gap-1.5">
         {folder ? (
           <div className="flex items-start gap-2 rounded-md border border-border bg-background/60 px-2 py-1.5">
             <FolderOpen className="mt-0.5 size-3.5 flex-none text-muted-foreground" />
@@ -437,7 +470,7 @@ export function PaintDestCard({ state, bare }: { state: PaintDestState; bare?: b
             </button>
           </div>
         ) : (
-          <p className="text-[11px] leading-snug text-faint">
+          <p className="min-w-0 truncate text-[11px] leading-snug text-faint">
             {t("paints.destPath", { rel: model ? relFor(kind, model) : "…" })}
           </p>
         )}
@@ -450,5 +483,80 @@ export function PaintDestCard({ state, bare }: { state: PaintDestState; bare?: b
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * One thing you can paint, as a card.
+ *
+ * The icon is faded and oversized behind the label rather than sitting beside it: at this
+ * size a glyph in a row reads as a bullet point, and what these cards need is to be
+ * distinguishable at a glance from across the screen.
+ */
+const KIND_ICON: Record<string, ComponentType<{ className?: string }>> = {
+  bike: Bike,
+  kit: Shirt,
+  helmets: HardHat,
+  goggles: Glasses,
+  boots: Footprints,
+  gloves: Hand,
+  protections: Shield,
+  protection: Shield,
+};
+
+function iconFor(k: PaintKindDef): ComponentType<{ className?: string }> {
+  if (KIND_ICON[k.id]) return KIND_ICON[k.id];
+  // `area:helmets`, `goggles:helmets`, `extra:gloves` — the folder is the half that names it.
+  const folder = k.id.includes(":") ? k.id.slice(k.id.indexOf(":") + 1) : k.id;
+  return KIND_ICON[k.id.startsWith("goggles:") ? "goggles" : folder] ?? Shirt;
+}
+
+function KindCard({
+  kind,
+  on,
+  onPick,
+  className,
+  iconClass,
+  labelClass,
+}: {
+  kind: PaintKindDef;
+  on: boolean;
+  onPick: () => void;
+  className?: string;
+  iconClass?: string;
+  labelClass?: string;
+}) {
+  const t = useT();
+  const Icon = iconFor(kind);
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      aria-pressed={on}
+      className={cn(
+        "relative flex cursor-default flex-col items-start justify-end overflow-hidden rounded-lg border p-3 text-left transition-colors",
+        on
+          ? "border-primary bg-primary/[0.08]"
+          : "border-border hover:border-input hover:bg-foreground/[0.03]",
+        className,
+      )}
+    >
+      <Icon
+        className={cn(
+          "absolute right-3 top-3 transition-colors",
+          on ? "text-primary" : "text-faint",
+          iconClass,
+        )}
+      />
+      <span
+        className={cn(
+          "relative max-w-full truncate font-medium leading-tight",
+          on ? "text-foreground" : "text-muted-foreground",
+          labelClass,
+        )}
+      >
+        {t(kind.label)}
+      </span>
+    </button>
   );
 }
