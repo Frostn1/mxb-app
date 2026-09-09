@@ -10,6 +10,7 @@ export type DashboardView =
   | `plugin:${string}`
   | "browse"
   | "servers"
+  | "ranked"
   | "shop"
   | "hub"
   | "library"
@@ -80,7 +81,15 @@ export const RAIL: RailItem[] = [
     ],
   },
   { id: "manage", label: "nav.manage", view: "manage", cap: "manage" },
-  { id: "servers", label: "nav.servers", view: "servers" },
+  {
+    id: "servers",
+    label: "nav.servers",
+    view: "servers",
+    tabs: [
+      { view: "servers", label: "nav.serverBrowser" },
+      { view: "ranked", label: "nav.ranked" },
+    ],
+  },
 ];
 
 /** Which rail item owns a view, so the right item lights up and the right tabs show. */

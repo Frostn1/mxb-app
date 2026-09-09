@@ -18,6 +18,7 @@ mod trackline;
 mod trackllm;
 mod trackobjects;
 mod trackprog;
+mod trackprops;
 mod trackscenery;
 mod trackshot;
 mod trackspeed;
@@ -69,6 +70,8 @@ fn main() {
             repair_gear,
             generate_track,
             base_track_program,
+            random_track_program,
+            bake_prop_library,
             blank_track_program,
             fit_track_budget,
             close_track_lap,
@@ -190,6 +193,84 @@ async fn base_track_program() -> Result<serde_json::Value, String> {
     serde_json::from_str::<trackprog::TrackProgram>(trackprog::EXAMPLE)
         .and_then(|p| serde_json::to_value(&p))
         .map_err(|e| format!("the built-in track didn't load: {e}"))
+}
+
+/// A whole track from a number, with no model in it.
+///
+/// The shape of a lap is geometry and geometry is checkable — it either closes, stays off
+/// itself and carries the corners a published track carries, or it does not. That half needs
+/// no model, and asking one for it costs a round trip and a key. So this walks a lap out of
+/// the ground against the numbers in `scripts/track-survey.py`'s corpus and hands back a
+/// programme the studio can edit like any other.
+///
+/// A seed is a *lap*, not an attempt: [`tracklayout::draw`] already retries the walk six times
+/// inside one seed, and a seed it still paints itself in on is skipped rather than reported —
+/// which is why this takes a seed and searches forward from it. Roughly nine seeds in ten
+/// give a lap on the first try.
+#[tauri::command]
+async fn random_track_program(seed: Option<u64>) -> Result<serde_json::Value, String> {
+    let from = seed.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(1)
+    });
+    let prog = tauri::async_runtime::spawn_blocking(move || {
+        (0..24u64).find_map(|i| tracklayout::draw(from.wrapping_add(i)))
+    })
+    .await
+    .map_err(|e| format!("random_track_program task failed: {e}"))?
+    .ok_or_else(|| "the walk painted itself in on every seed it tried".to_string())?;
+    serde_json::to_value(&prog).map_err(|e| e.to_string())
+}
+
+/// Bake a track you own into a prop library the generator can place.
+///
+/// A generated track otherwise stands on a kit we author ourselves. A library lifts a real
+/// venue's objects — its tents, trailers, buildings, poles and trees — and replays them
+/// against our own centreline, so a generated lap gets a paddock rather than a field.
+///
+/// It reads a track archive already installed and writes one file into the app's own data
+/// folder. Baking takes about ten seconds and only has to happen once.
+#[tauri::command]
+async fn bake_prop_library(path: String, sheet_max: Option<u32>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use trackobjects::Class;
+        let donor = trackprops::open(std::path::Path::new(&path))
+            .map_err(|e| format!("{path}: {e:#}"))?;
+        let mut lib = trackprops::extract(
+            &donor,
+            &[Class::Structure, Class::Vehicle, Class::Tree, Class::Bale, Class::Pole],
+        );
+        if lib.props.is_empty() {
+            return Err(format!("{} carries no objects to lift", donor.stem));
+        }
+        trackprops::sheets_for(&donor, &mut lib, sheet_max.unwrap_or(1024).clamp(64, 4096));
+
+        let out = dirs_next::data_local_dir()
+            .ok_or("no app data folder")?
+            .join(mxb_core::config::DATA_ID)
+            .join("props");
+        std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+        let file = out.join("library.fpl");
+        let bytes = lib.encode();
+        std::fs::write(&file, &bytes).map_err(|e| format!("{}: {e}", file.display()))?;
+        log::info!(
+            "[props] baked {} props / {} instances from {} -> {:.1} MB",
+            lib.props.len(),
+            lib.instances.len(),
+            donor.stem,
+            bytes.len() as f32 / 1_048_576.0
+        );
+        Ok(format!(
+            "{} props from {} placed objects, {:.1} MB",
+            lib.props.len(),
+            lib.instances.len(),
+            bytes.len() as f32 / 1_048_576.0
+        ))
+    })
+    .await
+    .map_err(|e| format!("bake_prop_library task failed: {e}"))?
 }
 
 /// A lap with nothing on it: somewhere to start from scratch.
