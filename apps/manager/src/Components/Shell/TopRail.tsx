@@ -12,6 +12,7 @@ import type { StudioTab } from "../Studio/Studio";
 import { RAIL, railItemFor, type DashboardView, type RailItem } from "./nav";
 import DownloadQueue from "./DownloadQueue";
 import TrackBuildBadge from "./TrackBuildBadge";
+import FrostmodBadge from "./FrostmodBadge";
 import Brand from "./Brand";
 import ContextBar from "./ContextBar";
 import WindowControls, { IS_MAC } from "./WindowControls";
@@ -128,6 +129,10 @@ export default function TopRail({ view, studioTab, plugins, onNavigate, leftRef,
         {/* A track compiles for minutes; this is what makes that visible from anywhere but
             the Studio, and the way back to it. */}
         <TrackBuildBadge onOpen={() => onNavigate("studio", "track")} />
+        {/* What FrostMod is doing, and Start/Stop, from wherever you are. The sidebar
+            carried this on every screen and the rail has to as well: its state changes
+            while you are somewhere else, and Settings is four screens away. */}
+        <FrostmodBadge />
         <DownloadQueue collapsed />
         <button
           onClick={() => onNavigate("settings")}
