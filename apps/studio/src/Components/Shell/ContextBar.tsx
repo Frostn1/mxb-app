@@ -37,6 +37,28 @@ export const PaneActive = createContext(true);
  * strip above it held one question mark. A tool sets `bare` while that is true and the shell
  * drops the strip; nothing else in the app has to know why.
  */
+/**
+ * Work that would be lost by closing the window.
+ *
+ * A tool registers what it is holding and how to save it; the shell asks on the way out. Kept
+ * as a registry rather than a boolean so the answer comes from whichever tool actually has the
+ * work, and so "save" means that tool's save rather than something the shell has to know how
+ * to do.
+ */
+export interface UnsavedWork {
+  /** True when closing now would lose something. */
+  dirty: () => boolean;
+  /**
+   * Save it. Returns false when it could not — including when it needs the user first, in
+   * which case the tool has put them where they need to be and the close should be dropped.
+   */
+  save: () => Promise<boolean>;
+}
+
+export const UnsavedRegistry = createContext<{
+  register: (w: UnsavedWork | null) => void;
+}>({ register: () => {} });
+
 export const ShellChrome = createContext<{ bare: boolean; setBare: (v: boolean) => void }>({
   bare: false,
   setBare: () => {},

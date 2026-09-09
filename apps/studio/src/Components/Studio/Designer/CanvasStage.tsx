@@ -1056,7 +1056,7 @@ export function CanvasStage({
           the pointer is over anything, and that is exactly when it needs explaining. */}
       {washed && (
         <div
-          className="pointer-events-auto absolute left-2 top-2 flex items-center gap-2 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45"
+          className="pointer-events-auto absolute left-2 top-2 flex items-center gap-2 rounded-md bg-foreground/[0.05] px-2 py-1 text-[11px] leading-none text-muted-foreground"
           title={t("designer.flankWashHint")}
         >
           <span className="flex items-center gap-1">
@@ -1069,7 +1069,7 @@ export function CanvasStage({
           </span>
         </div>
       )}
-      <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-2 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45">
+      <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-2 rounded-md bg-foreground/[0.05] px-2 py-1 text-[11px] leading-none text-muted-foreground">
         <span>
           {sheet.width}×{sheet.height}
         </span>
@@ -1096,7 +1096,7 @@ export function CanvasStage({
                 className={cn(
                   overSide === "left" && "text-[hsl(28_95%_62%)]",
                   overSide === "right" && "text-[hsl(205_95%_66%)]",
-                  overSide === "both" && "text-white/45",
+                  overSide === "both" && "text-muted-foreground",
                 )}
                 title={overSide === "both" ? t("designer.flankSharedHint") : undefined}
               >
@@ -1119,7 +1119,7 @@ export function CanvasStage({
       <button
         type="button"
         onClick={reset}
-        className="absolute bottom-2 right-2 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45 transition-colors hover:text-white/80"
+        className="absolute bottom-2 right-2 cursor-default rounded-md bg-foreground/[0.05] px-2 py-1 text-[11px] leading-none text-muted-foreground transition-colors hover:text-foreground"
       >
         {t("designer.resetView")}
       </button>

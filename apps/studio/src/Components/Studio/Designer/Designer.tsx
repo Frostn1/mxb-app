@@ -14,7 +14,6 @@ import {
   CopyPlus,
   Eye,
   EyeOff,
-  FileImage,
   FilePlus2,
   FlipHorizontal2,
   FlipVertical2,
@@ -24,7 +23,6 @@ import {
   Link2,
   Link2Off,
   Loader2,
-  PackageOpen,
   PaintBucket,
   Plus,
   Save,
@@ -45,7 +43,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@frost/shared/Components/ui/card";
-import { ContextBarLeft, ShellChrome } from "../../Shell/ContextBar";
+import { ContextBarLeft, ShellChrome, UnsavedRegistry } from "../../Shell/ContextBar";
 import {
   paintStudioExtract,
   paintStudioPixels,
@@ -235,10 +233,25 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     () => import.meta.env.VITE_DESIGNER_AUTOSTART === "1",
   );
   const { setBare } = useContext(ShellChrome);
+  // Set by every edit, cleared by a save that lands. `pristine` cannot answer this: it stays
+  // false after a save, and a paint you have just written is not work you would lose.
+  const [unsaved, setUnsaved] = useState(false);
   useEffect(() => {
     setBare(!started);
     return () => setBare(false);
   }, [setBare, started]);
+
+  const { register } = useContext(UnsavedRegistry);
+  const saveRef = useRef<(() => Promise<boolean>) | null>(null);
+  const unsavedRef = useRef(false);
+  unsavedRef.current = unsaved && started;
+  useEffect(() => {
+    register({
+      dirty: () => unsavedRef.current,
+      save: async () => saveRef.current?.() ?? false,
+    });
+    return () => register(null);
+  }, [register]);
   // The title is editable in place: open when it is clicked, or when a save needs a name.
   const [naming, setNaming] = useState(false);
   const [draftName, setDraftName] = useState("");
@@ -334,7 +347,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   sheetsRef.current = sheets;
 
   const active = sheets.find((s) => s.id === activeId) ?? null;
-  const bump = useCallback(() => setVersion((v) => v + 1), []);
+  const bump = useCallback(() => {
+    setVersion((v) => v + 1);
+    setUnsaved(true);
+  }, []);
 
   /**
    * The one selected layer, where "one" is what the question means.
@@ -2049,6 +2065,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         toast.success(t("paints.saved", { path: outcome.path }), {
           description: blank ? t("designer.blankSheetsSkipped", { count: blank }) : undefined,
         });
+        setUnsaved(false);
         // Best effort: failing to note a recent must never look like a failed save.
         void designerRecentNote({
           path: outcome.path,
@@ -2099,6 +2116,17 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     },
     [blocked, dest, name, sheets.length, t, write],
   );
+
+  saveRef.current = async () => {
+    if (!name.trim()) {
+      setDraftName(name);
+      saveAfterName.current = true;
+      setNaming(true);
+      return false;
+    }
+    await save();
+    return !unsavedRef.current;
+  };
 
   // Whether the model can say where the far flank is at all, for the controls that need it.
   const mirrorReady = mirrorRef.current.ready && mirrorRef.current.sheetId === activeId;
@@ -2256,10 +2284,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             missingHints={missingHints}
             onAddBlank={addBlankSheet}
             onAddHintSheets={addHintSheets}
-            onStartFromPaint={() => void startFromPaint()}
-            onStartFromPsd={() => void startFromPsd()}
-            pristine={pristine}
-            busy={busy}
           />
 
           {active && (
@@ -2484,10 +2508,6 @@ function SheetList({
   onReorder,
   onAddBlank,
   onAddHintSheets,
-  onStartFromPaint,
-  onStartFromPsd,
-  pristine,
-  busy,
 }: {
   className?: string;
   sheets: Sheet[];
@@ -2502,11 +2522,7 @@ function SheetList({
   onReorder: (id: string, delta: number) => void;
   onAddBlank: () => void;
   onAddHintSheets: () => void;
-  onStartFromPaint: () => void;
-  onStartFromPsd: () => void;
   /** Nothing has been drawn yet — see the Designer's own `pristine`. */
-  pristine: boolean;
-  busy: boolean;
 }) {
   const t = useT();
   return (
@@ -2622,29 +2638,10 @@ function SheetList({
         </div>
       )}
 
-      {/* Only while there is nothing to lose. Starting from a paint or a `.psd` *replaces*
-          every sheet — that's what makes it a template step — so offering it beside work in
-          progress is offering to throw that work away. The blank sheets a model arrives with
-          are not work, which is why this reaches past "the list is empty" to "nothing has been
-          drawn on it". Adding another sheet is the ＋ above. */}
-      {pristine && (
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
-          <Button variant="outline" size="sm" disabled={busy} onClick={onStartFromPaint}>
-            {busy ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <PackageOpen className="size-3.5" />
-            )}
-            {t("designer.startFromPaint")}
-          </Button>
-          <Button variant="outline" size="sm" disabled={busy} onClick={onStartFromPsd}>
-            <FileImage className="size-3.5" /> {t("designer.startFromPsd")}
-          </Button>
-          <Button variant="outline" size="sm" onClick={onAddBlank}>
-            <FilePlus2 className="size-3.5" /> {t("designer.blankSheet")}
-          </Button>
-        </div>
-      )}
+      {/* The three ways to start used to sit here as well, offered while the editor was
+          still pristine. The start screen asks that question now, and asking it twice — once
+          at the front door and again in a panel beside the work — is how you end up throwing
+          away a sheet you had just made. Adding another sheet is the ＋ above. */}
       </CardContent>
     </Card>
   );

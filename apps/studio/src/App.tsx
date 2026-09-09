@@ -1,12 +1,28 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Toaster } from "sonner";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@frost/shared/Components/ui/alert-dialog";
+import { Button } from "@frost/shared/Components/ui/button";
 import { appPlatform, contentLockAvailable, getConfig, listGames } from "@frost/shared/api/mods";
 import type { Config, GameInfo } from "@frost/shared/types";
 import { cn } from "@frost/shared/lib/utils";
 import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
 import { I18nProvider, setAmbientVars, useT } from "@/i18n";
 import Rail, { RailButton, type RailEntry } from "./Components/Shell/Rail";
-import { ContextSlots, ShellChrome } from "./Components/Shell/ContextBar";
+import {
+  ContextSlots,
+  ShellChrome,
+  UnsavedRegistry,
+  type UnsavedWork,
+} from "./Components/Shell/ContextBar";
 import Settings from "./Components/Settings/Settings";
 import Studio, { type StudioTab } from "./Components/Studio/Studio";
 import Secure from "./Components/Secure/Secure";
@@ -26,6 +42,50 @@ function Shell() {
   // A tool can say it is showing something that owns the window — the Designer's start
   // screen — and the strip goes with it rather than sitting above it with nothing in it.
   const [bare, setBare] = useState(false);
+  // What the mounted tool is holding, and how to save it — see `UnsavedRegistry`.
+  const work = useRef<UnsavedWork | null>(null);
+  const registry = useMemo(
+    () => ({ register: (w: UnsavedWork | null) => (work.current = w) }),
+    [],
+  );
+  const [asking, setAsking] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  /**
+   * Closing the window asks first, once, if there is anything to lose.
+   *
+   * `close()` from inside the handler would re-enter it, so the answer is remembered and the
+   * second pass is let through — the flag is only ever set immediately before closing.
+   */
+  const leaving = useRef(false);
+  useEffect(() => {
+    const win = getCurrentWindow();
+    const un = win.onCloseRequested((e) => {
+      if (leaving.current || !work.current?.dirty()) return;
+      e.preventDefault();
+      setAsking(true);
+    });
+    return () => {
+      void un.then((f) => f());
+    };
+  }, []);
+
+  const leave = useCallback(async () => {
+    leaving.current = true;
+    setAsking(false);
+    await getCurrentWindow().close();
+  }, []);
+
+  const saveAndLeave = useCallback(async () => {
+    setSaving(true);
+    const ok = await work.current?.save().catch(() => false);
+    setSaving(false);
+    // False means it could not save — usually because it needs a name and has just put the
+    // cursor there. Dropping the close is the only sane answer; quitting anyway loses the
+    // work the dialog exists to protect.
+    if (ok) await leave();
+    else setAsking(false);
+  }, [leave]);
 
   const reloadConfig = useCallback(async () => setConfig(await getConfig()), []);
 
@@ -86,6 +146,7 @@ function Shell() {
       <TrackBuildProvider>
         <ContextSlots.Provider value={slots}>
         <ShellChrome.Provider value={chrome}>
+        <UnsavedRegistry.Provider value={registry}>
           <div className="flex h-screen bg-background text-foreground">
             <Rail
               entries={entries}
@@ -160,6 +221,25 @@ function Shell() {
             </div>
           </div>
           <Toaster position="bottom-right" theme="light" richColors />
+
+          <AlertDialog open={asking} onOpenChange={(o) => !o && setAsking(false)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t("quit.title")}</AlertDialogTitle>
+                <AlertDialogDescription>{t("quit.body")}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={saving}>{t("common.cancel")}</AlertDialogCancel>
+                <Button variant="outline" disabled={saving} onClick={() => void leave()}>
+                  {t("quit.discard")}
+                </Button>
+                <Button disabled={saving} onClick={() => void saveAndLeave()}>
+                  {t("quit.save")}
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </UnsavedRegistry.Provider>
         </ShellChrome.Provider>
         </ContextSlots.Provider>
       </TrackBuildProvider>
