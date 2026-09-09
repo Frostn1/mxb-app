@@ -230,6 +230,9 @@ what ten published circuits are made of:
                       main straight is the one exception: the start spur runs beside it and
                       the finish jump stands on it.
   lap length          1800-2500 m.
+  average speed       the lap must come out between 45 and 65 km/h averaged over it. Every
+                      federation caps it at 65, and 386 official MXGP races run a median of
+                      50.6 — a lap that averages more is one long straight.
 
 So: build each corner as a run of arcs, keep the straights short, and let the lap wander.
 Count the arcs before you send it — if straights outnumber corners you have written a shape.
@@ -237,11 +240,15 @@ Count the arcs before you send it — if straights outnumber corners you have wr
 START THE LAP ON A STRAIGHT. A motocross start is forty gates in a line 48 m across, and the
 gate row stands on its own spur beside the lap's opening straight, which is also where the
 finish line goes — a lap that begins on a corner has its gates laid round a bend. So the FIRST
-segment is a straight of 100-160 m, and the lap has to come back to it. That is the one long
+segment is a straight of 100-125 m, and the lap has to come back to it. That is the one long
 straight; the rest stay short.
 
+NO STRAIGHT MAY EXCEED 125 m — or 140 m where a jump stands in its first fifteen metres. The
+FFM is the only federation that writes a straight-length limit and that is it. A longer
+straight arrives at its next corner faster than the corner was built for.
+
 AND THAT STRAIGHT CARRIES THE FINISH JUMP. Every national ends the lap on one: the biggest
-tabletop on the track, 2.4-3.6 m tall, with the finish line painted past its landing. Put one
+tabletop on the track, 2.4-3.0 m tall, with the finish line painted past its landing. Put one
 there — leaving the first 18 m off the last corner clear so there is drive at it, and 10 m
 past the landing before the straight runs out. Leave it out and the app builds it anyway,
 taking the ground whatever you put there was standing on; what the app cannot do is lengthen
@@ -310,10 +317,14 @@ explicitly asks otherwise:
                       stand over a metre. Six or eight big ones of 2.5–4 m, and the rest
                       rollers of 0.4–0.9 m. A lap of thirty identical 1.5 m tabletops is
                       wrong in both directions at once.
-  a jump's height     0.4–0.9 m for a roller, 1.0–2.0 m for an ordinary jump, 2.5–4.0 m for
+  a jump's height     0.4–0.9 m for a roller, 1.0–2.0 m for an ordinary jump, 2.5–3.0 m for
                       the handful that matter (it measures about 0.75x that against the
-                      landscape). Published lips top out at 3.0–5.9 m.
-  jump spacing        20–50 m between takeoffs
+                      landscape). NOTHING MAY STAND OVER 3.0 m: Motorcycling Australia and
+                      Motorcycling New Zealand both write "jumps must not exceed 3m in
+                      height", and no federation anywhere allows more.
+  jump spacing        20–50 m between takeoffs. A rhythm section is closer than that on
+                      purpose — what a jump needs is the SPEED to clear it, not a fixed run,
+                      and that is checked from the lap rather than from a spacing rule.
   jumps and speed     A JUMP IS ONLY AS BIG AS THE RUN AT IT. This is checked and it is the
                       most common thing to get wrong after closure. A rider leaves a hairpin
                       at about 33 km/h and needs 60–80 m of straight to reach 90. So: a big
@@ -325,7 +336,8 @@ explicitly asks otherwise:
                       back as a problem with the number.
   after a corner      small first, then bigger. That progression is what a rhythm section is,
                       and it falls out of the speed rather than being a style.
-  whoop spacing       4–6 m crest to crest
+  whoop spacing       4–6 m crest to crest, and 0.6–0.9 m TALL. Dirt Wurx cut them at 13–14
+                      feet and three feet high; the regulated ceiling is 0.6 m.
   corner radius       7–30 m at the tightest point of a corner; 40 m and up barely turns
   steepest ground     27–41°
 

@@ -945,6 +945,140 @@ fn rms(v: &[f32]) -> f32 {
     (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt()
 }
 
+/// How much a corner is the same cut swept round an arc.
+///
+/// Take the profile across the line at the corner's entry, apex and exit and correlate the
+/// three. A published corner scores about **0.1** — the ground at its exit has nothing to do
+/// with the ground at its entry, because ruts braid, merge and die out. A corner extruded
+/// along one radius scores **0.9**: one profile, dragged round.
+///
+/// This is the measure that separates a track that reads as built from one that reads as
+/// generated, and no amount of getting the rut *statistics* right moves it — a swept corner
+/// can have exactly the right groove count, spacing and depth at every station and still be
+/// obviously machine-made, because it has the same ones at every station.
+///
+/// `None` when the corner is too short to cut three independent sections through.
+pub fn section_sweep(stations: &[(f32, f32, f32)], g: &Grid) -> Option<f32> {
+    section_sweep_inner(stations, g, false)
+}
+
+/// The same, with the corner's mean cross-section removed first — see `strip_mean_profile`.
+pub fn section_sweep_ruts(stations: &[(f32, f32, f32)], g: &Grid) -> Option<f32> {
+    section_sweep_inner(stations, g, true)
+}
+
+fn section_sweep_inner(
+    stations: &[(f32, f32, f32)],
+    g: &Grid,
+    strip_mean_profile: bool,
+) -> Option<f32> {
+    if stations.len() < 12 {
+        return None;
+    }
+    const HALF_WIDTH_M: f32 = 9.0;
+    const SAMPLES: usize = 72;
+    let cut = |i: usize| -> Vec<f32> {
+        let (x, z, heading) = stations[i];
+        let (rx, rz) = crate::trackprog::right_vector(heading);
+        let mut v: Vec<f32> = (0..SAMPLES)
+            .map(|k| {
+                let t = -HALF_WIDTH_M + 2.0 * HALF_WIDTH_M * k as f32 / (SAMPLES - 1) as f32;
+                g.at(x + rx * t, z + rz * t)
+            })
+            .collect();
+        // The corner's own slope is not its shape: a banked entry would correlate with a
+        // banked exit on tilt alone and say the ruts matched when they don't.
+        let mean = v.iter().sum::<f32>() / v.len() as f32;
+        for h in &mut v {
+            *h -= mean;
+        }
+        v
+    };
+    let n = stations.len();
+    let (mut a, mut b, mut c) = (cut(n * 15 / 100), cut(n / 2), cut(n * 85 / 100));
+    // Optionally take the corner's *average* cross-section out of all three first. What is
+    // left is only what differs station to station — the ruts — so the pair of numbers says
+    // whether a corner repeats because its ruts repeat, or because the shape they sit in
+    // (camber, width, the berm) is the same shape all the way round.
+    if strip_mean_profile {
+        let mut avg = vec![0.0f32; SAMPLES];
+        let taken = 24.min(n);
+        for k in 0..taken {
+            let v = cut(k * (n - 1) / taken.max(1));
+            for (m, h) in avg.iter_mut().zip(&v) {
+                *m += h / taken as f32;
+            }
+        }
+        for v in [&mut a, &mut b, &mut c] {
+            for (h, m) in v.iter_mut().zip(&avg) {
+                *h -= m;
+            }
+        }
+    }
+    let r = |x: &[f32], y: &[f32]| -> f32 {
+        let (mx, my) = (
+            x.iter().sum::<f32>() / x.len() as f32,
+            y.iter().sum::<f32>() / y.len() as f32,
+        );
+        let (mut num, mut dx, mut dy) = (0.0f32, 0.0f32, 0.0f32);
+        for (p, q) in x.iter().zip(y) {
+            num += (p - mx) * (q - my);
+            dx += (p - mx) * (p - mx);
+            dy += (q - my) * (q - my);
+        }
+        if dx <= 0.0 || dy <= 0.0 {
+            return 0.0;
+        }
+        num / (dx * dy).sqrt()
+    };
+    Some((r(&a, &b) + r(&b, &c) + r(&a, &c)) / 3.0)
+}
+
+/// How much a corner's cross-slope changes as you go round it, as the standard deviation of
+/// the across-line gradient.
+///
+/// A berm whose height is a function of the corner's radius alone is the same height all the
+/// way round a constant-radius corner, so every cross-section gets the same tilt and the
+/// corner reads as extruded however well its ruts are made. Measured over four corners each:
+/// Indiana 0.039, Southwick 0.095 — sand piles up far more unevenly — against 0.016-0.022 for
+/// ours. This is the quantity behind [`section_sweep`], and the one worth aiming at, because
+/// it names what to change rather than only saying that something is wrong.
+pub fn camber_spread(stations: &[(f32, f32, f32)], g: &Grid) -> Option<f32> {
+    if stations.len() < 12 {
+        return None;
+    }
+    const HALF_WIDTH_M: f32 = 9.0;
+    const SAMPLES: usize = 48;
+    const CUTS: usize = 20;
+    let n = stations.len();
+    let mut slopes = Vec::with_capacity(CUTS);
+    for c in 0..CUTS {
+        let i = (n - 1) * c / (CUTS - 1);
+        let (x, z, heading) = stations[i];
+        let (rx, rz) = crate::trackprog::right_vector(heading);
+        // Least squares slope of height against offset — the cut's tilt, in metres per metre.
+        let (mut sx, mut sy, mut sxy, mut sxx) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        for k in 0..SAMPLES {
+            let off = -HALF_WIDTH_M + 2.0 * HALF_WIDTH_M * k as f32 / (SAMPLES - 1) as f32;
+            let h = g.at(x + rx * off, z + rz * off);
+            sx += off;
+            sy += h;
+            sxy += off * h;
+            sxx += off * off;
+        }
+        let m = SAMPLES as f32;
+        let den = m * sxx - sx * sx;
+        if den.abs() > 1e-6 {
+            slopes.push((m * sxy - sx * sy) / den);
+        }
+    }
+    if slopes.len() < 4 {
+        return None;
+    }
+    let mean = slopes.iter().sum::<f32>() / slopes.len() as f32;
+    Some((slopes.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / slopes.len() as f32).sqrt())
+}
+
 /// [`RutShape`] for a lap over a heightfield, published or generated.
 ///
 /// `stations` is the centreline: `(x, z, heading)` every `step_m` metres.
@@ -1792,6 +1926,244 @@ mod tests {
         println!("  across {:.3} m rms   along {:.3} m rms   anisotropy {:.2}", r.across_rms_m, r.along_rms_m, r.anisotropy);
         println!("  floor {:.2} m   wall {:.0} deg   {:.1} grooves at {:.2} m   chatter {:.3} m", r.floor_m, r.wall_deg, r.grooves, r.spacing_m, r.chatter_m);
         println!("  chatter on the line {:.3} m   2 m off {:.3}   4 m off {:.3}", r.chatter_zones_m[0], r.chatter_zones_m[1], r.chatter_zones_m[2]);
+    }
+
+
+    /// Four corners from a published track: their shape, their bumps, and the ground on them.
+    ///
+    /// Writes one folder per track — a params JSON and, per corner, a height patch and the
+    /// ground as the game paints it — for `scripts/corner-atlas.py` to draw.
+    ///
+    /// ```text
+    /// FROST_TRACK=…/indiana.pkz FROST_OUT=/tmp/atlas/indiana \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture corner_atlas
+    /// ```
+    #[test]
+    #[ignore = "needs a track — set FROST_TRACK and FROST_OUT"]
+    fn corner_atlas() {
+        let var = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let out = std::path::PathBuf::from(std::env::var("FROST_OUT").expect("set FROST_OUT"));
+        std::fs::create_dir_all(&out).unwrap();
+        let path = std::path::Path::new(&var);
+
+        let names = track::entry_names(path).unwrap();
+        let entry = track::heightfield_entries(&names).into_iter().next().expect("a heightfield");
+        let bytes = track::read_entry(path, &entry).unwrap();
+        let layout = heightfield::probe(&bytes, None).expect("a terrain grid");
+        let mps_src = layout.metres_per_sample.expect("a stated footprint");
+        let size_x = mps_src * (layout.width.max(2) - 1) as f32;
+        let size_z = mps_src * (layout.height.max(2) - 1) as f32;
+        let block_at =
+            layout.offset + layout.width as usize * layout.height as usize * layout.sample.size();
+        let lap = crate::trackline::read(bytes.get(block_at..).unwrap_or(&[])).expect("a centreline");
+        // Full resolution: a corner's bumps are the point, and a downsample is exactly what
+        // would smooth them away.
+        let (fw, fh, v) = heightfield::read_grid(&bytes, &layout, layout.width.max(layout.height));
+        let g = Grid { w: fw as usize, h: fh as usize, size_x, size_z, v };
+
+        // The ground stack, for the colour/texture/mask half of the question.
+        let map_name = names.iter().find(|n| n.to_lowercase().ends_with(".map"));
+        let layers = match map_name {
+            Some(n) => {
+                let mb = track::read_entry(path, n).unwrap();
+                crate::map::ground_layers(&mb)
+            }
+            None => Vec::new(),
+        };
+        println!("{} — {:.0}x{:.0} m, {}x{} samples, {} ground layers",
+            entry, size_x, size_z, fw, fh, layers.len());
+
+        let step = 0.25f32;
+        let all = lap.stations(step);
+        let runs = crate::trackprog::corner_runs(&lap.program_segments());
+        println!("lap {:.0} m, {} segments, {} corners", lap.length, lap.segments.len(), runs.len());
+
+        // The four that bend furthest — the ones a rider would name — put back into lap order
+        // so the atlas reads like a lap.
+        let mut ranked = runs.clone();
+        ranked.sort_by(|x, y| y.degrees.total_cmp(&x.degrees));
+        let mut chosen: Vec<(f32, f32, f32)> =
+            ranked.into_iter().take(4).map(|r| (r.degrees, r.start_m, r.end_m)).collect();
+        chosen.sort_by(|x, y| x.1.total_cmp(&y.1));
+
+        let mut json = String::from("{\n");
+        json.push_str(&format!("  \"track\": {:?},\n", path.file_stem().unwrap().to_string_lossy()));
+        json.push_str(&format!("  \"lapLengthM\": {:.1},\n  \"sizeXm\": {:.1},\n  \"sizeZm\": {:.1},\n", lap.length, size_x, size_z));
+        json.push_str(&format!("  \"metresPerSample\": {:.4},\n", mps_src));
+        json.push_str("  \"groundLayers\": [\n");
+        for (i, l) in layers.iter().enumerate() {
+            let tile_m = size_x / l.tile_u.max(0.001);
+            json.push_str(&format!(
+                "    {{\"i\": {i}, \"sheet\": {:?}, \"px\": [{}, {}], \"tileU\": {:.1}, \"tileV\": {:.1}, \"tileMetres\": {:.2}, \"mask\": {}}}{}\n",
+                l.sheet.name, l.sheet.width, l.sheet.height, l.tile_u, l.tile_v, tile_m,
+                match &l.mask { Some(m) => format!("[{}, {}]", m.width, m.height), None => "null".into() },
+                if i + 1 < layers.len() { "," } else { "" }));
+        }
+        json.push_str("  ],\n  \"corners\": [\n");
+
+        for (n, &(deg, a, b)) in chosen.iter().enumerate() {
+            let sel: Vec<&crate::trackline::Station> =
+                all.iter().filter(|s| s.at >= a && s.at <= b).collect();
+            if sel.len() < 8 {
+                continue;
+            }
+            let stations: Vec<(f32, f32, f32)> =
+                sel.iter().map(|s| (s.x, s.z, s.heading)).collect();
+            let shape = super::rut_shape(&stations, step, &g);
+            let sweep = super::section_sweep(&stations, &g).unwrap_or(f32::NAN);
+
+            // The arcs the builder actually typed, which is the shape of the turn.
+            let arcs: Vec<&crate::trackline::LineSegment> =
+                lap.segments.iter().filter(|s| s.at >= a - 0.5 && s.at < b + 0.5).collect();
+            let radii: Vec<f32> = arcs.iter().filter(|s| s.radius != 0.0).map(|s| s.radius).collect();
+            let len_m = b - a;
+            let mean_r = if radii.is_empty() { 0.0 } else { radii.iter().sum::<f32>() / radii.len() as f32 };
+            let tightest = radii.iter().cloned().fold(f32::INFINITY, |m, r| m.min(r.abs()));
+            let widest = radii.iter().cloned().fold(0.0f32, |m, r| m.max(r.abs()));
+
+            // Elevation over the turn, off the heightfield under the line.
+            let hs: Vec<f32> = sel.iter().filter_map(|s| Some(g.at(s.x, s.z))).collect();
+            let (hmin, hmax) = hs.iter().fold((f32::MAX, f32::MIN), |(a, b), &h| (a.min(h), b.max(h)));
+
+            let patch = write_corner_patch(&out, n, &sel, &g, &layers, size_x, size_z);
+
+            json.push_str(&format!(
+                "    {{\"n\": {n}, \"atM\": {a:.1}, \"endM\": {b:.1}, \"lengthM\": {len_m:.1}, \"turnDeg\": {deg:.1},\n",
+            ));
+            json.push_str(&format!(
+                "      \"arcs\": {}, \"radiusMeanM\": {mean_r:.1}, \"radiusTightestM\": {tightest:.1}, \"radiusWidestM\": {widest:.1},\n",
+                arcs.iter().filter(|s| s.radius != 0.0).count(),
+            ));
+            json.push_str(&format!(
+                "      \"direction\": {:?}, \"riseM\": {:.2}, \"sweep\": {:.3}, \"patch\": {:?},\n",
+                if mean_r > 0.0 { "right" } else { "left" },
+                hmax - hmin,
+                sweep,
+                patch,
+            ));
+            match shape {
+                Some(r) => {
+                    json.push_str(&format!(
+                        "      \"grooves\": {:.2}, \"spacingM\": {:.2}, \"floorM\": {:.2}, \"wallDeg\": {:.0},\n",
+                        r.grooves, r.spacing_m, r.floor_m, r.wall_deg,
+                    ));
+                    json.push_str(&format!(
+                        "      \"acrossRmsM\": {:.3}, \"alongRmsM\": {:.3}, \"anisotropy\": {:.2}, \"chatterM\": {:.3},\n",
+                        r.across_rms_m, r.along_rms_m, r.anisotropy, r.chatter_m,
+                    ));
+                    json.push_str(&format!(
+                        "      \"chatterZonesM\": [{:.3}, {:.3}, {:.3}]}}{}\n",
+                        r.chatter_zones_m[0], r.chatter_zones_m[1], r.chatter_zones_m[2],
+                        if n + 1 < chosen.len() { "," } else { "" },
+                    ));
+                }
+                None => json.push_str(&format!("      \"grooves\": null}}{}\n", if n + 1 < chosen.len() { "," } else { "" })),
+            }
+            println!(
+                "  corner {n}: {deg:.0} deg over {len_m:.0} m, {} arcs, r {tightest:.0}–{widest:.0} m, sweep {sweep:.2}",
+                radii.len()
+            );
+        }
+        json.push_str("  ]\n}\n");
+        std::fs::write(out.join("corners.json"), &json).unwrap();
+        println!("wrote {}", out.join("corners.json").display());
+    }
+
+
+
+    /// One corner's patch: heights, and the ground the game paints on them.
+    ///
+    /// The patch is axis-aligned around the corner's own bounding box with a margin, at the
+    /// heightfield's own resolution — the bumps are the subject, so nothing is resampled.
+    fn write_corner_patch(
+        out: &std::path::Path,
+        n: usize,
+        sel: &[&crate::trackline::Station],
+        g: &Grid,
+        layers: &[crate::map::GroundLayer],
+        size_x: f32,
+        size_z: f32,
+    ) -> String {
+        const MARGIN_M: f32 = 12.0;
+        let (mut x0, mut x1, mut z0, mut z1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for s in sel {
+            x0 = x0.min(s.x); x1 = x1.max(s.x);
+            z0 = z0.min(s.z); z1 = z1.max(s.z);
+        }
+        x0 -= MARGIN_M; x1 += MARGIN_M; z0 -= MARGIN_M; z1 += MARGIN_M;
+
+        let mps = size_x / (g.w.max(2) - 1) as f32;
+        let pw = (((x1 - x0) / mps).ceil() as usize).clamp(16, 2048);
+        let ph = (((z1 - z0) / mps).ceil() as usize).clamp(16, 2048);
+
+        let mut buf: Vec<u8> = Vec::with_capacity(32 + pw * ph * 7 + sel.len() * 8);
+        buf.extend_from_slice(b"FRCA");
+        buf.extend_from_slice(&(pw as u32).to_le_bytes());
+        buf.extend_from_slice(&(ph as u32).to_le_bytes());
+        buf.extend_from_slice(&x0.to_le_bytes());
+        buf.extend_from_slice(&z0.to_le_bytes());
+        buf.extend_from_slice(&mps.to_le_bytes());
+
+        // Heights, then the composited ground as RGB.
+        let mut rgb: Vec<u8> = Vec::with_capacity(pw * ph * 3);
+        for j in 0..ph {
+            for i in 0..pw {
+                let x = x0 + i as f32 * mps;
+                let z = z0 + j as f32 * mps;
+                buf.extend_from_slice(&g.at(x, z).to_le_bytes());
+                let [r, gg, b] = ground_at(layers, x, z, size_x, size_z);
+                rgb.push(r); rgb.push(gg); rgb.push(b);
+            }
+        }
+        buf.extend_from_slice(&rgb);
+        buf.extend_from_slice(&(sel.len() as u32).to_le_bytes());
+        for s in sel {
+            buf.extend_from_slice(&s.x.to_le_bytes());
+            buf.extend_from_slice(&s.z.to_le_bytes());
+        }
+        let name = format!("corner{n}.bin");
+        std::fs::write(out.join(&name), &buf).unwrap();
+        name
+    }
+
+    /// The ground stack sampled at one point — base sheet, then every layer its mask lets through.
+    fn ground_at(
+        layers: &[crate::map::GroundLayer],
+        x: f32,
+        z: f32,
+        size_x: f32,
+        size_z: f32,
+    ) -> [u8; 3] {
+        let mut out = [90u8, 80, 70];
+        for (i, l) in layers.iter().enumerate() {
+            let cover = match &l.mask {
+                None => 255u8, // the base layer covers everything
+                Some(m) => {
+                    let mx = ((x / size_x) * m.width as f32) as i64;
+                    let mz = ((z / size_z) * m.height as f32) as i64;
+                    if mx < 0 || mz < 0 || mx >= m.width as i64 || mz >= m.height as i64 {
+                        0
+                    } else {
+                        m.coverage[mz as usize * m.width as usize + mx as usize]
+                    }
+                }
+            };
+            if cover == 0 && i > 0 {
+                continue;
+            }
+            let (sw, sh) = (l.sheet.width.max(1) as f32, l.sheet.height.max(1) as f32);
+            let u = ((x / size_x) * l.tile_u).rem_euclid(1.0) * sw;
+            let v = ((z / size_z) * l.tile_v).rem_euclid(1.0) * sh;
+            let si = ((v as usize).min(sh as usize - 1) * sw as usize + (u as usize).min(sw as usize - 1)) * 4;
+            if si + 2 >= l.sheet.rgba.len() {
+                continue;
+            }
+            let a = cover as f32 / 255.0;
+            for c in 0..3 {
+                out[c] = (out[c] as f32 * (1.0 - a) + l.sheet.rgba[si + c] as f32 * a) as u8;
+            }
+        }
+        out
     }
 
     /// A published track's race data: where it puts its grid, and in what coordinates.

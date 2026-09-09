@@ -317,6 +317,7 @@ export const fr: Translation = {
   "track.pointAtTools": "Indiquer les outils…",
   "track.toolsNotFound": "Aucun terrained.exe dans ce dossier",
   "track.rideIt": "Installée — choisis-la dans MX Bikes",
+  "track.random": "Circuit aléatoire",
   "track.base": "Circuit de base",
   "track.baseLoaded": "« {{name}} » chargé",
   "track.name": "Nom du circuit",

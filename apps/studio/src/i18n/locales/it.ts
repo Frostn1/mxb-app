@@ -317,6 +317,7 @@ export const it: Translation = {
   "track.pointAtTools": "Indica gli strumenti…",
   "track.toolsNotFound": "Nessun terrained.exe in quella cartella",
   "track.rideIt": "Installata — scegliila in MX Bikes",
+  "track.random": "Pista casuale",
   "track.base": "Pista base",
   "track.baseLoaded": "Caricata «{{name}}»",
   "track.name": "Nome pista",

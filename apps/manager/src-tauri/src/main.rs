@@ -120,6 +120,7 @@ mod offline_flow_test {
 }
 pub(crate) use mxb_core::presets;
 mod paintsync;
+mod ranked;
 mod reshade;
 pub(crate) use mxb_core::scenery;
 mod serverbook;
@@ -3213,6 +3214,73 @@ async fn server_riders(
     Ok(ServerRiders { riders, source: "app".into() })
 }
 
+/// One row of the server browser, as much of it as naming a server takes.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerRow {
+    pub name: String,
+    pub address: String,
+}
+
+/// How many riders on each of these servers are running paint sync, by address.
+///
+/// The detail panel asks [`server_riders`] who is on one server; a browser row only needs to
+/// know whether joining would put the player among people they can actually sync with, and
+/// asking that server-by-server would be one request per row. This is the whole list in one
+/// request — plus the registry, which is what turns an address into the key a rider who
+/// joined through the app was recorded under.
+///
+/// A row with nobody on it is absent rather than zero: the badge is a thing that is there or
+/// isn't, and a map of mostly-zeroes is a bigger answer than the question deserves.
+///
+/// Best-effort throughout. A control plane that can't be reached means no badges, which is
+/// the same as the browser has always looked — never an error over the list itself.
+#[tauri::command]
+async fn servers_with_paint_sync(
+    app: tauri::AppHandle,
+    servers: Vec<ServerRow>,
+) -> Result<std::collections::HashMap<String, u32>, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let token = Some(cfg.cp_token.as_str()).filter(|t| !t.trim().is_empty());
+    let counts = paintsync::presence_counts(token).await.map_err(|e| format!("{e:#}"))?;
+    if counts.is_empty() {
+        return Ok(Default::default());
+    }
+    // Only worth fetching once there is something to map onto, and only for the address key:
+    // a server nobody registered is keyed by its own address either way.
+    let registry = paintsync::registry(token).await.unwrap_or_default();
+
+    Ok(match_presence(&counts, &registry, &servers))
+}
+
+/// Resolve each browser row to the number of synced riders standing on it.
+///
+/// Split out from the command because this is the whole of the thinking: a server is recorded
+/// under two different keys depending on how the reporting app found out where it was, so a
+/// row has to be looked up twice and the answers reconciled.
+///
+/// **The larger of the two, never the sum.** Both keys can hold the same rider — their app
+/// reported the address, the rider beside them reported the folded name — and nothing here can
+/// tell a second rider from the same one counted twice. Adding them would show four riders on
+/// a server holding two, which is worse than showing two on a server holding three.
+fn match_presence(
+    counts: &std::collections::HashMap<String, u32>,
+    registry: &[paintsync::RegisteredServer],
+    servers: &[ServerRow],
+) -> std::collections::HashMap<String, u32> {
+    let mut present = std::collections::HashMap::new();
+    for row in servers {
+        let by_address = counts.get(&paintsync::server_key_for(registry, &row.address));
+        let by_name = counts.get(&voice::session::room_key(&row.name));
+        let riders = by_address.into_iter().chain(by_name).copied().max().unwrap_or(0);
+        // Absent rather than zero: the badge is a thing that is there or isn't.
+        if riders > 0 {
+            present.insert(row.address.clone(), riders);
+        }
+    }
+    present
+}
+
 /// What track a server is running, matched against what the player has and what they could get.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -3321,6 +3389,75 @@ fn fold_name(raw: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Which GUID the Ranked tab will ask about, and where it came from.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RankedIdentity {
+    /// Empty when we have nothing to go on and the player has to type one.
+    guid: String,
+    /// `"steam"` when it was derived from the signed-in Steam account, `"manual"` when the
+    /// player typed it. The tab says which, because a wrong-but-plausible GUID would
+    /// otherwise show somebody else's season with no clue why.
+    source: String,
+}
+
+/// The GUID this machine's profile lives under.
+///
+/// A Steam copy needs no setup: MX Bikes' GUID is `FF` + the SteamID64, and Steam records the
+/// signed-in account on disk. A copy bought direct from PiBoSo has a stand-alone GUID that
+/// only mxb-ranked knows, so that one is typed in and kept in config — which is the same
+/// field used to point the tab at a friend.
+#[tauri::command]
+fn ranked_identity(app: tauri::AppHandle) -> RankedIdentity {
+    let manual = config::load_or_detect(&app).unwrap_or_default().ranked_guid;
+    if let Some(guid) = ranked::normalise_guid(&manual) {
+        return RankedIdentity { guid, source: "manual".into() };
+    }
+    match ranked::local_guid() {
+        Some(guid) => RankedIdentity { guid, source: "steam".into() },
+        None => RankedIdentity::default(),
+    }
+}
+
+/// One rider's rank, season standings and last 50 races, read off mxb-ranked.com.
+///
+/// `guid` names whose — omit it for this machine's own. There is no sign-in: the profile is
+/// public and server-rendered, so this is one request and no account. See [`ranked`].
+#[tauri::command]
+async fn ranked_profile(
+    app: tauri::AppHandle,
+    guid: Option<String>,
+) -> Result<ranked::RankedProfile, String> {
+    let asked = guid.unwrap_or_default();
+    let guid = match ranked::normalise_guid(&asked) {
+        Some(g) => g,
+        // Not "invalid": an empty argument is the tab asking for the player's own.
+        None if asked.trim().is_empty() => ranked_identity(app).guid,
+        None => return Err(format!("{asked} isn't an MX Bikes GUID")),
+    };
+    if guid.is_empty() {
+        return Err("No MX Bikes GUID — sign into Steam, or enter your GUID.".into());
+    }
+    ranked::fetch(&guid).await
+}
+
+/// Remember a hand-entered MXB Ranked GUID, or clear it with an empty string.
+///
+/// Only players whose copy didn't come from Steam need this — everyone else's GUID is derived
+/// — so a value that isn't a GUID is refused here rather than silently showing an empty
+/// profile for ever.
+#[tauri::command]
+fn set_ranked_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
+    let cleaned = if guid.trim().is_empty() {
+        String::new()
+    } else {
+        ranked::normalise_guid(&guid).ok_or_else(|| format!("{guid} isn't an MX Bikes GUID"))?
+    };
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.ranked_guid = cleaned;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
 /// The live MX Bikes server list, as the game's WORLD browser sees it.
@@ -6069,7 +6206,11 @@ fn main() {
             list_master_servers,
             probe_server,
             server_riders,
+            servers_with_paint_sync,
             guess_server_track,
+            ranked_identity,
+            ranked_profile,
+            set_ranked_guid,
             enroll_account,
             // Paid plugins: the catalogue, redeeming a key, and getting a bundle on disk.
             plugins::plugin_list,
@@ -7532,3 +7673,72 @@ fn launch_studio(app: tauri::AppHandle) -> Result<(), String> {
     cmd.spawn().map(|_| ()).map_err(|e| format!("couldn't start Frost's Studio: {e}"))
 }
 
+
+/// The server browser's paint-sync badge.
+///
+/// Presence is keyed two ways for one server, so every one of these is about a row being
+/// looked up twice and the two answers reconciled into one number.
+#[cfg(test)]
+mod paint_sync_badge_tests {
+    use super::*;
+
+    fn counts(pairs: &[(&str, u32)]) -> std::collections::HashMap<String, u32> {
+        pairs.iter().map(|(k, n)| ((*k).to_string(), *n)).collect()
+    }
+
+    fn row(name: &str, address: &str) -> ServerRow {
+        ServerRow { name: name.into(), address: address.into() }
+    }
+
+    /// A community server nobody registered: its riders are recorded under the folded name,
+    /// because that is the only key every rider in the session can compute.
+    #[test]
+    fn a_server_is_found_by_its_folded_name() {
+        let counts = counts(&[("mxb hub public", 4)]);
+        let got = match_presence(&counts, &[], &[row("MXB  Hub   Public", "1.2.3.4:54210")]);
+        assert_eq!(got.get("1.2.3.4:54210"), Some(&4), "{got:?}");
+    }
+
+    /// A rider who joined through the app reports the address, not the name — so a row whose
+    /// name we have never seen still has to resolve.
+    #[test]
+    fn a_server_is_found_by_its_address() {
+        let counts = counts(&[("1.2.3.4:54210", 2)]);
+        let got = match_presence(&counts, &[], &[row("Something Else Entirely", "1.2.3.4:54210")]);
+        assert_eq!(got.get("1.2.3.4:54210"), Some(&2), "{got:?}");
+    }
+
+    /// Both keys holding riders is the ordinary case in a mixed session, and the two sets
+    /// overlap by an unknowable amount. Summing them would put four riders on a server that
+    /// might hold two.
+    #[test]
+    fn two_keys_are_the_larger_not_the_sum() {
+        let counts = counts(&[("1.2.3.4:54210", 2), ("night league", 3)]);
+        let got = match_presence(&counts, &[], &[row("Night League", "1.2.3.4:54210")]);
+        assert_eq!(got.get("1.2.3.4:54210"), Some(&3), "{got:?}");
+    }
+
+    /// A registered server's riders are recorded under its registry id, which is neither its
+    /// address nor its name — that is what the registry is fetched for.
+    #[test]
+    fn a_registered_server_resolves_through_its_id() {
+        let registry = vec![paintsync::RegisteredServer {
+            id: "mxb-eu-1".into(),
+            name: "MXB EU 1".into(),
+            region: "eu".into(),
+            address: "5.6.7.8:54210".into(),
+        }];
+        let counts = counts(&[("mxb-eu-1", 6)]);
+        let got = match_presence(&counts, &registry, &[row("MXB EU 1", "5.6.7.8:54210")]);
+        assert_eq!(got.get("5.6.7.8:54210"), Some(&6), "{got:?}");
+    }
+
+    /// An empty entry is not a badge that says nothing, it is no badge. The frontend keys on
+    /// presence in the map, so a zero here would draw one.
+    #[test]
+    fn a_server_with_nobody_on_it_is_absent() {
+        let counts = counts(&[("somewhere else", 3)]);
+        let got = match_presence(&counts, &[], &[row("Quiet Server", "9.9.9.9:54210")]);
+        assert!(got.is_empty(), "{got:?}");
+    }
+}

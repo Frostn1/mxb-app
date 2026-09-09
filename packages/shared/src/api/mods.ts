@@ -3155,6 +3155,22 @@ export function serverRiders(address: string, name: string): Promise<ServerRider
   return invoke<ServerRiders>("server_riders", { address, name });
 }
 
+/**
+ * How many riders on each of these servers are running paint sync, keyed by address.
+ *
+ * Servers with nobody on them are left out rather than sent back as zero — the browser draws
+ * a badge or it doesn't, and there is no row that wants to say "0 riders synced".
+ *
+ * One request for the whole list, which is why this takes the list rather than being called
+ * per row: {@link serverRiders} names the people on one server and is what the detail panel
+ * asks once a row is open.
+ */
+export function serversWithPaintSync(
+  servers: { name: string; address: string }[],
+): Promise<Record<string, number>> {
+  return invoke<Record<string, number>>("servers_with_paint_sync", { servers });
+}
+
 /** What track a server is running, matched against what you have and what you could get. */
 export interface TrackGuess {
   /** The internal id the server published, e.g. `mmx_supercross`. */
