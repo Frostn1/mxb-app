@@ -194,15 +194,19 @@ class Ground:
         for i, k in grew.items():
             del self.used[i][-k:]
 
-    def blocked(self, x, z, ignore_after, clear):
+    def blocked(self, x, z, ignore_after, clear, ignore_before=-1.0):
         """Is anything already laid within `clear` of here? Stops at the first one.
 
         `nearest` measures, which costs a sweep of every cell inside sixty metres — 225 of
         them — when the walk only ever asks whether one point is too close. This looks at 25.
+
+        Both bounds are ages round the lap: the last thirty metres, because a corner may come
+        close to the run that fed it, and the opening straight, because the way home runs up
+        beside it.
         """
         for i in self._cells(x, z, clear):
             for px, pz, age in self.used[i]:
-                if age > ignore_after:
+                if age > ignore_after or age < ignore_before:
                     continue
                 if (px - x) ** 2 + (pz - z) ** 2 < clear * clear:
                     return True
@@ -342,21 +346,13 @@ def grow(rng, plot, width, want_m):
     pose = advance(start, opening)
     laid = opening["length"]
 
-    def legal(from_pose, chain, age_cut, near_gate=0.0):
+    def legal(from_pose, chain, age_cut, skip_before=-1.0):
         p = from_pose
         for seg in chain:
             for x, z, _ in samples(p, seg, 2.5):
                 if not (margin <= x <= plot - margin and margin <= z <= plot - margin):
                     return False
-                # Arriving at the gate is allowed to be close to the gate, and to nothing
-                # else. Exempting the first stretch of the *lap* instead let the way home
-                # drive straight through the first corner — "segment 1 runs within 0 m of
-                # segment 44" — because that corner is early, not because it is near the
-                # finish. The exemption has to be about where a piece is, not when it was
-                # laid.
-                if near_gate > 0.0 and math.hypot(x - start[0], z - start[1]) < near_gate:
-                    continue
-                if ground.blocked(x, z, age_cut, clear):
+                if ground.blocked(x, z, age_cut, clear, skip_before):
                     return False
             p = advance(p, seg)
         return True
@@ -419,7 +415,14 @@ def grow(rng, plot, width, want_m):
 
     def home_from(pose, laid, segs):
         """A way back onto the start pose that lands, is clear, and breaks no rule."""
-        for _, home in dubins(pose, start, rng.uniform(14.0, 22.0)):
+        # Several radii, not one. A Dubins path is fixed by the radius you give it, so a
+        # single draw is a single shape, and two seeds in three walked on to the cap instead
+        # of closing.
+        ways = []
+        for r in (14.0, 18.0, 23.0, 29.0, 36.0):
+            ways += dubins(pose, start, r * rng.uniform(0.92, 1.08))
+        ways.sort(key=lambda t: t[0])
+        for _, home in ways:
             # Walked, not trusted: one of the four families has a sign in it that only bites
             # on some geometries, and the symptom is a lap that misses itself by thirty metres.
             landed = pose
@@ -428,8 +431,13 @@ def grow(rng, plot, width, want_m):
             if math.hypot(landed[0] - start[0], landed[1] - start[1]) > 0.25:
                 continue
             # The way home may run up beside the start straight — that is where it is going —
-            # so the first stretch of the lap is not an obstacle to it.
-            if not legal(pose, home, laid - 34.0, near_gate=opening["length"] * 0.8):
+            # so the opening straight is not an obstacle to it, and nothing else is excused.
+            #
+            # This used to be a disc round the start pose, which excused every *other* piece
+            # of lap that happened to pass through the disc too: the app's `review` caught a
+            # way home running 12 m from a mid-lap straight on a 15 m track. Ages are exact
+            # where a radius is not.
+            if not legal(pose, home, laid - 34.0, skip_before=opening["length"]):
                 continue
             # And no straight on the finished lap may run past the FFM's 125 m. Checked on the
             # whole lap: consecutive straights are colinear so `straight_runs` reads a row of

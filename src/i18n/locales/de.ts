@@ -2571,6 +2571,7 @@ export const de: Translation = {
   "track.toolsFailed": "Streckentools konnten nicht geladen werden",
   "track.rideIt": "Installiert — in MX Bikes auswählen",
   "track.stillNeeded": "Baut die Strecke mit TerrainEd und installiert sie — dann in MX Bikes auswählen. Öffne sie in TrackEd, wenn du die Kameras verschieben willst.",
+  "track.random": "Zufalls-Strecke",
   "track.base": "Basis-Strecke",
   "track.baseLoaded": "„{{name}}“ geladen",
   "track.name": "Streckenname",

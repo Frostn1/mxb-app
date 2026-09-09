@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-09
+
+### Added
+- Random track in the Track Studio. It draws a whole track from a number — no brief to write
+  and nothing to wait for — and you edit it like any other.
+
+### Changed
+- A new base track. It is a walked lap now, and it measures like a published national: 1966 m,
+  nineteen corners, and the corner shape and spacing read off Indiana and Southwick.
+- Straw bales stand off the track edge rather than a fixed distance from the line, so tracks
+  wider than 14 m get them.
+
 ## 2026-09-08 — v0.13.7 — Servers, live share codes and a new 3D view
 
 ### Added

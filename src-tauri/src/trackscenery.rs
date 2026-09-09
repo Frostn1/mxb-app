@@ -150,7 +150,13 @@ const FENCE_PANEL_M: f32 = 4.0;
 
 /// Bales guard what a rider would otherwise hit. Corpus offset runs 10.9–34.6; the near end
 /// of that is where they do any good.
-const BALE_OFF_M: f32 = 7.5;
+/// How far outside the track's own edge a bale stands.
+///
+/// Off the edge, not a fixed distance from the line. It was 7.5 m flat, against a clearance
+/// bar of `half a track's width + 0.5` — so the two crossed at a 14 m track and every bale on
+/// anything wider was thrown away by the bar for standing too near the corner it belongs to.
+/// The old 12 m example cleared it by a metre, which is why nothing showed.
+const BALE_OFF_M: f32 = 1.0;
 const BALE_W_M: f32 = 1.2;
 const BALE_H_M: f32 = 1.0;
 const BALE_D_M: f32 = 0.8;
@@ -1569,7 +1575,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             // A fixed offset and no jitter: a row of blocks is a *row*, and a row that
             // wanders reads as rubbish left at the edge of a corner rather than as something
             // somebody laid out.
-            let off = BALE_OFF_M;
+            let off = half + BALE_OFF_M;
             let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
             // Just off the edge of the track — which is where a block goes, and it is also
             // why the clearance bar is low: at seven and a half metres from the line, a bar of

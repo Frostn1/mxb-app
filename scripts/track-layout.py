@@ -316,12 +316,14 @@ def faces(height):
     *half* the angle: a 4 m lip at 38 degrees is 11.6 m of ground before the deck starts, and
     its landing at 19 is 23.9 more.
 
-    These MIRROR `trackprog::JUMP_FACE_DEG` and `JUMP_LANDING_DEG` and nothing enforces it —
-    the 27 here was left behind when the face angle moved, which made every jump this script
-    laid a third longer than the app builds it.
+    These MIRROR `trackprog::JUMP_FACE_DEG`, `JUMP_LANDING_DEG` and the two `*_MIN_M` floors,
+    and nothing enforces it — the 27 here was left behind when the face angle moved, which made
+    every jump this script laid a third longer than the app builds it, and the landing floor
+    was 9 against the app's 12. `tracklayout::faces` calls `trackprog::face_run` instead, which
+    is the version that cannot drift.
     """
     up = max(height / math.tan(math.radians(38.0 * 0.5)), 9.0)
-    down = max(height / math.tan(math.radians(19.0 * 0.5)), 9.0)
+    down = max(height / math.tan(math.radians(19.0 * 0.5)), 12.0)
     return up + down
 
 
@@ -395,7 +397,7 @@ def features(rng, segs):
             # ground — a 23 degree chord, which any curve through it rides steeper still, and
             # from the seat that is a wall.
             up = max(h / math.tan(math.radians(38.0 * 0.5)), 9.0)
-            down = max(h / math.tan(math.radians(19.0 * 0.5)), 9.0)
+            down = max(h / math.tan(math.radians(19.0 * 0.5)), 12.0)
             near = up + 4.0 + down * 0.55
             marks = [(0.0, 0.0),
                      (up, h),

@@ -2526,6 +2526,7 @@ export const en = {
   "track.toolsFailed": "Couldn't fetch the track tools",
   "track.rideIt": "Installed — pick it in MX Bikes",
   "track.stillNeeded": "Build compiles it with TerrainEd and installs it — then pick it in MX Bikes. Open it in TrackEd afterwards if you want to move the cameras.",
+  "track.random": "Random track",
   "track.base": "Base track",
   "track.baseLoaded": "Loaded “{{name}}”",
   "track.name": "Track name",

@@ -2562,6 +2562,7 @@ export const fr: Translation = {
   "track.toolsFailed": "Impossible de télécharger les outils",
   "track.rideIt": "Installée — choisis-la dans MX Bikes",
   "track.stillNeeded": "Compile la piste avec TerrainEd et l'installe — choisis-la ensuite dans MX Bikes. Ouvre-la dans TrackEd pour déplacer les caméras.",
+  "track.random": "Circuit aléatoire",
   "track.base": "Circuit de base",
   "track.baseLoaded": "« {{name}} » chargé",
   "track.name": "Nom du circuit",
