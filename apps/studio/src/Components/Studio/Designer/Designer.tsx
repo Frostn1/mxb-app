@@ -28,6 +28,7 @@ import {
   PaintBucket,
   Plus,
   Save,
+  Shirt,
   Trash2,
   Ungroup,
 } from "lucide-react";
@@ -2471,6 +2472,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             <div className="pointer-events-none absolute inset-y-0 left-[264px] right-[312px] z-10">
             <GhostPanel
               ghost={ghostOf(active.id)}
+              isBike={isBikeKind(destState.kind)}
               sheetName={active.name}
               hasBase={!!active.base}
               hasGeometry={!!geometry}
@@ -2873,6 +2875,7 @@ function SheetList({
  */
 function GhostPanel({
   ghost,
+  isBike,
   sheetName,
   hasBase,
   hasGeometry,
@@ -2885,6 +2888,8 @@ function GhostPanel({
   onChange,
 }: {
   ghost: Ghost;
+  /** What is being painted, for the glyph on the stock toggle. */
+  isBike: boolean;
   sheetName: string;
   /** Whether the sheet still holds a template that tracing could lift out of it. */
   hasBase: boolean;
@@ -2944,7 +2949,7 @@ function GhostPanel({
           />
         )}
         <GhostToggle
-          icon={<Bike className="size-3.5" />}
+          icon={isBike ? <Bike className="size-3.5" /> : <Shirt className="size-3.5" />}
           label={t("designer.stockTexture")}
           title={t(hasStock ? "designer.stockHint" : "designer.noStock")}
           on={ghost.showStock}

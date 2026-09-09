@@ -256,8 +256,16 @@ export function PreviewPanel({
       nodes ? assembled : false,
     );
     // Through the same effect, so the mesh and the textures said to be its own can never
-    // describe two different models. Gated on `nodes` because that is the bike branch.
-    onStock?.(nodes ? stock : NO_STOCK);
+    // describe two different models.
+    //
+    // Gear was sending `NO_STOCK` unconditionally — `nodes` is the bike branch, and the test
+    // was reading as "is this a bike" when what it meant was "which loader answered". A
+    // helmet's own artwork therefore never reached the sheet: Stock texture and Stock as base
+    // were permanently greyed for every piece of gear, and a paint drawn on it had nothing to
+    // trace. `RiderPart` has carried its textures all along.
+    onStock?.(
+      nodes ? stock : riderParts ? riderParts.flatMap((p) => p.textures) : NO_STOCK,
+    );
   }, [nodes, assembled, riderParts, stock, onGeometry, onStock]);
 
   // Toggled-off gear is dropped before it reaches the viewer, which is what makes hiding it
