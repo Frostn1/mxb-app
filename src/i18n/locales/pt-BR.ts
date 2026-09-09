@@ -2548,6 +2548,7 @@ export const ptBR: Translation = {
   "track.toolsFailed": "Não foi possível baixar as ferramentas",
   "track.rideIt": "Instalada — escolha-a no MX Bikes",
   "track.stillNeeded": "Compila a pista com o TerrainEd e a instala — depois escolha-a no MX Bikes. Abra no TrackEd se quiser mover as câmeras.",
+  "track.random": "Pista aleatória",
   "track.base": "Pista base",
   "track.baseLoaded": "“{{name}}” carregada",
   "track.name": "Nome da pista",

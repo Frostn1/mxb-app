@@ -1287,6 +1287,35 @@ async fn base_track_program() -> Result<serde_json::Value, String> {
         .map_err(|e| format!("the built-in track didn't load: {e}"))
 }
 
+/// A whole track from a number, with no model in it.
+///
+/// The shape of a lap is geometry and geometry is checkable — it either closes, stays off
+/// itself and carries the corners a published track carries, or it does not. That half needs
+/// no model, and asking one for it costs a round trip and a key. So this walks a lap out of
+/// the ground against the numbers in `scripts/track-survey.py`'s corpus and hands back a
+/// programme the studio can edit like any other.
+///
+/// A seed is a *lap*, not an attempt: [`tracklayout::draw`] already retries the walk six times
+/// inside one seed, and a seed it still paints itself in on is skipped rather than reported —
+/// which is why this takes a seed and searches forward from it. Roughly nine seeds in ten
+/// give a lap on the first try.
+#[tauri::command]
+async fn random_track_program(seed: Option<u64>) -> Result<serde_json::Value, String> {
+    let from = seed.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(1)
+    });
+    let prog = tauri::async_runtime::spawn_blocking(move || {
+        (0..24u64).find_map(|i| tracklayout::draw(from.wrapping_add(i)))
+    })
+    .await
+    .map_err(|e| format!("random_track_program task failed: {e}"))?
+    .ok_or_else(|| "the walk painted itself in on every seed it tried".to_string())?;
+    serde_json::to_value(&prog).map_err(|e| e.to_string())
+}
+
 /// A lap with nothing on it: somewhere to start from scratch.
 ///
 /// Answered from the type, not from the source text, exactly as the base track is. The
@@ -10708,6 +10737,7 @@ fn main() {
             check_track,
             base_track_program,
             blank_track_program,
+            random_track_program,
             close_track_lap,
             fit_track_budget,
             preview_track,

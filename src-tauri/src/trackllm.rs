@@ -1319,7 +1319,33 @@ mod tests {
             .collect();
         // camelCase on the wire, so a step-up is `stepUp` and not `step_up`.
         assert!(kinds.contains(&"stepUp"), "{kinds:?}");
-        assert!(kinds.contains(&"tabletop") && kinds.contains(&"berm"));
+        assert!(kinds.contains(&"tabletop"), "{kinds:?}");
+        // And every kind, not only the ones this example happens to use — the example is a
+        // walked lap now and its mix changes with the seed, which is no reason for the wire
+        // names to go unchecked.
+        use crate::trackprog::{Feature, ShapePoint};
+        let one_of_each = [
+            Feature::Tabletop { at: 0.0, length: 30.0, height: 2.0 },
+            Feature::Double { at: 0.0, height: 1.0, gap: 3.0, lip: 5.0 },
+            Feature::Roller { at: 0.0, length: 12.0, height: 0.8 },
+            Feature::Whoops { at: 0.0, count: 6, spacing: 4.0, height: 0.6 },
+            Feature::StepUp { at: 0.0, length: 25.0, height: 1.5 },
+            Feature::Berm { at: 0.0, length: 10.0, height: 1.5 },
+            Feature::Rut { at: 0.0, length: 10.0, depth: 0.3 },
+            Feature::Custom {
+                at: 0.0,
+                length: 20.0,
+                shape: vec![ShapePoint { u: 0.0, h: 0.0 }, ShapePoint { u: 1.0, h: 0.0 }],
+            },
+        ];
+        let names: Vec<String> = one_of_each
+            .iter()
+            .map(|f| serde_json::to_value(f).unwrap()["kind"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            names,
+            ["tabletop", "double", "roller", "whoops", "stepUp", "berm", "rut", "custom"]
+        );
     }
 
     /// The example is what the model is shown, and `generate` puts every answer through
@@ -1353,7 +1379,8 @@ mod tests {
         let wide = serde_json::to_string(&tweaked(|p| p.width = 31.0)).unwrap();
         let ask = Canned::new(&[&wide, EXAMPLE]);
         let got = block_on(generate("a national", &ask, 3)).unwrap();
-        assert_eq!(got.width, 12.0);
+        let example: TrackProgram = serde_json::from_str(EXAMPLE).unwrap();
+        assert_eq!(got.width, example.width);
 
         let seen = ask.seen.borrow();
         assert_eq!(seen.len(), 2, "it should have asked twice");
