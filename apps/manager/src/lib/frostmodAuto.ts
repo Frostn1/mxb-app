@@ -1,4 +1,4 @@
-import type { FrostmodStatus } from "../types";
+import type { FrostmodStatus } from "@frost/shared/types";
 
 /** Everything outside the status snapshot that can hold an unattended install back. */
 export interface AutoGates {

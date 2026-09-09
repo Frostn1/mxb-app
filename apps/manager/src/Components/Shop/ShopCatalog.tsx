@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { RefreshCw, Search, Tag } from "lucide-react";
-import type { ShopCategory, ShopMod, ShopSort, ShopStatus } from "../../types";
+import type { ShopCategory, ShopMod, ShopSort, ShopStatus } from "@frost/shared/types";
 import {
   SHOP_CATALOG_UPDATED,
   SHOP_SORTS,
@@ -14,17 +14,17 @@ import ShopCard from "./ShopCard";
 import ShopDetail from "./ShopDetail";
 import CategoryPill from "./CategoryPill";
 import { ContextBarRight } from "../Shell/ContextBar";
-import { Button } from "@/Components/ui/button";
-import { Skeleton } from "@/Components/ui/skeleton";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Skeleton } from "@frost/shared/Components/ui/skeleton";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/Components/ui/select";
-import { cn } from "@/lib/utils";
-import { useT } from "../../i18n/context";
+} from "@frost/shared/Components/ui/select";
+import { cn } from "@frost/shared/lib/utils";
+import { useT } from "@frost/shared/i18n/context";
 
 /**
  * Browse the mxbikes-shop.com catalog.

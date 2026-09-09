@@ -4,6 +4,7 @@
   "version": "0.13.7",
   "type": "module",
   "workspaces": [
+    "packages/shared",
     "apps/manager"
   ],
   "scripts": {

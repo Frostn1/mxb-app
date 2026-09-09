@@ -1,8 +1,8 @@
 import { ArrowUpCircle, Loader2, X } from "lucide-react";
-import { Button } from "@/Components/ui/button";
+import { Button } from "@frost/shared/Components/ui/button";
 import { useUpdate } from "@/Context/Update";
-import { Trans } from "@/i18n";
-import { useT } from "@/i18n/context";
+import { Trans } from "@frost/shared/i18n";
+import { useT } from "@frost/shared/i18n/context";
 
 /**
  * Slim, dismissible bar shown at the top of the app when a newer signed build

@@ -1,5 +1,5 @@
-import { getPkzMeta, getPkzMetaCached } from "../api/mods";
-import type { LibraryEntry, PkzMeta } from "../types";
+import { getPkzMeta, getPkzMetaCached } from "@frost/shared/api/mods";
+import type { LibraryEntry, PkzMeta } from "@frost/shared/types";
 
 /**
  * Shared store for mod metadata (name, author, thumbnail) read out of `.pkz` archives.

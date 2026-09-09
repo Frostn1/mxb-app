@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { setSeenVersion } from "../../api/mods";
-import { useConfig } from "../../Context/Config";
+import { setSeenVersion } from "@frost/shared/api/mods";
+import { useConfig } from "@frost/shared/Context/Config";
 import { RELEASES, releaseToShow, type Release } from "./releases";
 
 /**

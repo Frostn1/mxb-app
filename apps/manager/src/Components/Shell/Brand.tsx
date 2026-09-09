@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { cn } from "@/lib/utils";
+import { cn } from "@frost/shared/lib/utils";
 
 /**
  * The mark's shape on its own, for the screens that show an icon rather than the wordmark

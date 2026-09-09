@@ -29,12 +29,12 @@ import { TrackBuildProvider } from "../../Context/TrackBuild";
 import { DownloadsProvider } from "../../Context/Downloads";
 import { DropReviewProvider } from "../../Context/DropReview";
 import { ShareProvider } from "../../Context/Share";
-import { useConfig } from "../../Context/Config";
-import { modTypesFor, setIntroSeen } from "../../api/mods";
+import { useConfig } from "@frost/shared/Context/Config";
+import { modTypesFor, setIntroSeen } from "@frost/shared/api/mods";
 import { useModBrowsing } from "../../lib/useModBrowsing";
-import { displayName } from "../../lib/mods";
+import { displayName } from "@frost/shared/lib/mods";
 import { track } from "../../lib/analytics";
-import type { DownloadRecord, Loadout } from "../../types";
+import type { DownloadRecord, Loadout } from "@frost/shared/types";
 
 interface DashboardProps {
   /** True while the Welcome slideshow is still up. The tour waits for it to close

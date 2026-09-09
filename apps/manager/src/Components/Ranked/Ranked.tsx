@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Loader2, RefreshCw, Trophy, ArrowUp, ArrowDown, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
-import { cn } from "@/lib/utils";
-import { Button } from "@/Components/ui/button";
-import CachedImg from "@/Components/ui/cached-img";
+import { cn } from "@frost/shared/lib/utils";
+import { Button } from "@frost/shared/Components/ui/button";
+import CachedImg from "@frost/shared/Components/ui/cached-img";
 import { ContextBarRight } from "../Shell/ContextBar";
 import {
   rankedIdentity,
@@ -13,8 +13,8 @@ import {
   type RankedProfile,
   type RankedIdentity,
 } from "../../api/ranked";
-import { useConfig } from "../../Context/Config";
-import { useT } from "../../i18n/context";
+import { useConfig } from "@frost/shared/Context/Config";
+import { useT } from "@frost/shared/i18n/context";
 import GuidDialog from "./GuidDialog";
 
 /**

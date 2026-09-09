@@ -1,5 +1,5 @@
 import { Star } from "lucide-react";
-import type { ModRating } from "../../types";
+import type { ModRating } from "@frost/shared/types";
 
 /** mxb-mods.com prints one decimal ("3.7"), and drops the ".0" on whole numbers. */
 function formatAverage(average: number): string {

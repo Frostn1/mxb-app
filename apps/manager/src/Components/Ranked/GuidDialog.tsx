@@ -6,10 +6,10 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@/Components/ui/dialog";
-import { Input } from "@/Components/ui/input";
-import { Button } from "@/Components/ui/button";
-import { useT } from "../../i18n/context";
+} from "@frost/shared/Components/ui/dialog";
+import { Input } from "@frost/shared/Components/ui/input";
+import { Button } from "@frost/shared/Components/ui/button";
+import { useT } from "@frost/shared/i18n/context";
 
 interface GuidDialogProps {
   open: boolean;

@@ -7,8 +7,8 @@ import type {
   ShopPage,
   ShopSort,
   ShopStatus,
-} from "../types";
-import type { TKey } from "../i18n/core";
+} from "@frost/shared/types";
+import type { TKey } from "@frost/shared/i18n/core";
 
 /**
  * The mxbikes-shop.com catalog.

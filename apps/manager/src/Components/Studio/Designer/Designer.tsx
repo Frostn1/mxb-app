@@ -29,9 +29,9 @@ import {
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import * as THREE from "three";
-import { cn } from "@/lib/utils";
-import { Button } from "../../ui/button";
-import { Input } from "../../ui/input";
+import { cn } from "@frost/shared/lib/utils";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Input } from "@frost/shared/Components/ui/input";
 import {
   paintStudioExtract,
   paintStudioPixels,
@@ -41,8 +41,8 @@ import {
   psdRead,
   psdSave,
   textureBytes,
-} from "../../../api/mods";
-import { useT } from "../../../i18n/context";
+} from "@frost/shared/api/mods";
+import { useT } from "@frost/shared/i18n/context";
 import { IMAGE_EXTS, PaintDestBar, isBikeKind, usePaintDest } from "../paintDest";
 const PREVIEW_OPEN_KEY = "mxb:designer:preview:v1";
 
@@ -91,7 +91,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "../../ui/dropdown-menu";
+} from "@frost/shared/Components/ui/dropdown-menu";
 import {
   DEFAULT_PAINT,
   PaintHistory,
@@ -103,7 +103,7 @@ import {
   type PaintTool,
   type Point,
 } from "./paint";
-import type { EdfNode, PaintTexture } from "../../../types";
+import type { EdfNode, PaintTexture } from "@frost/shared/types";
 
 /**
  * The paint designer: layers on a sheet, the sheet on the model, and a `.pnt` at the end.

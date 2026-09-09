@@ -26,14 +26,14 @@ import {
   liveSharePublish,
   liveShareSubscribe,
   onFileShareProgress,
-} from "../../api/mods";
-import type { BundlePhase, SharePlan, SharePreview } from "../../types";
+} from "@frost/shared/api/mods";
+import type { BundlePhase, SharePlan, SharePreview } from "@frost/shared/types";
 import { isLiveCode } from "../../lib/liveshare";
-import { Switch } from "@/Components/ui/switch";
-import { formatBytes } from "../../lib/mods";
+import { Switch } from "@frost/shared/Components/ui/switch";
+import { formatBytes } from "@frost/shared/lib/mods";
 import { copyText } from "../../lib/clipboard";
-import { useT, type TFunc } from "../../i18n/context";
-import { Button } from "@/Components/ui/button";
+import { useT, type TFunc } from "@frost/shared/i18n/context";
+import { Button } from "@frost/shared/Components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -41,7 +41,7 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@/Components/ui/dialog";
+} from "@frost/shared/Components/ui/dialog";
 
 function phaseLabel(phase: BundlePhase, t: TFunc): string {
   switch (phase) {

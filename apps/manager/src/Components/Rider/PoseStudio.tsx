@@ -2,18 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Camera, Image as ImageIcon, RotateCcw, User } from "lucide-react";
 import { save as pickSavePath } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
-import { useT, type TKey } from "../../i18n/context";
-import { Button } from "../ui/button";
-import { Switch } from "../ui/switch";
-import { Row, Slider } from "../ui/controls";
-import { ViewerPanel } from "../Viewer/ViewerPanel";
-import type { CaptureFn } from "../Viewer/ModelViewer";
-import { pickedModel } from "../../lib/presets";
-import { photoSave } from "../../api/mods";
-import { useConfig } from "../../Context/Config";
+import { cn } from "@frost/shared/lib/utils";
+import { useT, type TKey } from "@frost/shared/i18n/context";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Switch } from "@frost/shared/Components/ui/switch";
+import { Row, Slider } from "@frost/shared/Components/ui/controls";
+import { ViewerPanel } from "@frost/shared/Components/Viewer/ViewerPanel";
+import type { CaptureFn } from "@frost/shared/Components/Viewer/ModelViewer";
+import { pickedModel } from "@frost/shared/lib/presets";
+import { photoSave } from "@frost/shared/api/mods";
+import { useConfig } from "@frost/shared/Context/Config";
 import { useRiderKit } from "./RiderKitContext";
-import { DEFAULT_SCENE, SCENES, type SceneId } from "../../lib/viewerScene";
+import { DEFAULT_SCENE, SCENES, type SceneId } from "@frost/shared/lib/viewerScene";
 import {
   applyQuickMove,
   BONE_GROUPS,
@@ -30,7 +30,7 @@ import {
   type PosableRig,
   type QuickMoveId,
   type RiderPose,
-} from "../../lib/riderPose";
+} from "@frost/shared/lib/riderPose";
 
 /**
  * Where a rider's pose is remembered, keyed by the profile it was built for.

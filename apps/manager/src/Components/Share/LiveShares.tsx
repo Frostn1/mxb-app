@@ -33,19 +33,19 @@ import {
   liveShareSetAuto,
   liveShareSync,
   onFileShareProgress,
-} from "../../api/mods";
-import type { LiveShareInfo } from "../../types";
-import { formatBytes } from "../../lib/mods";
+} from "@frost/shared/api/mods";
+import type { LiveShareInfo } from "@frost/shared/types";
+import { formatBytes } from "@frost/shared/lib/mods";
 import { copyText } from "../../lib/clipboard";
-import { useT, type TFunc } from "../../i18n/context";
-import { Button } from "@/Components/ui/button";
-import { Switch } from "@/Components/ui/switch";
+import { useT, type TFunc } from "@frost/shared/i18n/context";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Switch } from "@frost/shared/Components/ui/switch";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/Components/ui/dropdown-menu";
+} from "@frost/shared/Components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -53,8 +53,8 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@/Components/ui/dialog";
-import { cn } from "@/lib/utils";
+} from "@frost/shared/Components/ui/dialog";
+import { cn } from "@frost/shared/lib/utils";
 
 /** "2h ago", from unix seconds. `0` means it never happened. */
 function ago(seconds: number, t: TFunc): string {

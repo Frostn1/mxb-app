@@ -8,7 +8,7 @@
  * steps, each one only firing when it can't plausibly be a coincidence.
  */
 
-import { normalizeModName } from "../api/mods";
+import { normalizeModName } from "@frost/shared/api/mods";
 
 /** Packaged-file extensions, stripped before a name is read as words. */
 const EXT = /\.(pkz|zip|rar|7z|pnt)$/i;

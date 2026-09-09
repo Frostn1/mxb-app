@@ -18,12 +18,12 @@ import {
   onInstallProgress,
   shopInstall,
   type ShopItem,
-} from "../api/mods";
+} from "@frost/shared/api/mods";
 import { hubInstall, type HubItem } from "../api/hub";
-import type { DownloadSource, InstallStage, ReloadOutcome } from "../types";
+import type { DownloadSource, InstallStage, ReloadOutcome } from "@frost/shared/types";
 import { useDownloads } from "./Downloads";
 import { useDropReview } from "./DropReview";
-import { useT } from "../i18n/context";
+import { useT } from "@frost/shared/i18n/context";
 
 /** Where the bytes come from — a resolvable host, a file the user picked, or something already
  *  bought on one of the two stores.

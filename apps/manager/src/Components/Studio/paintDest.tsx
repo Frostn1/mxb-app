@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, FolderOpen } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { cn } from "@/lib/utils";
-import { Combobox } from "../ui/combobox";
-import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { cn } from "@frost/shared/lib/utils";
+import { Combobox } from "@frost/shared/Components/ui/combobox";
+import { Popover, PopoverContent, PopoverTrigger } from "@frost/shared/Components/ui/popover";
 import {
   bikePreviewAvailable,
   EMPTY_RIDER_TARGETS,
@@ -11,10 +11,10 @@ import {
   scanBikeTargets,
   scanRiderTargets,
   type RiderTargets,
-} from "../../api/mods";
-import { useConfig } from "../../Context/Config";
-import type { GameInfo, PaintDest } from "../../types";
-import { useT, type TKey } from "../../i18n/context";
+} from "@frost/shared/api/mods";
+import { useConfig } from "@frost/shared/Context/Config";
+import type { GameInfo, PaintDest } from "@frost/shared/types";
+import { useT, type TKey } from "@frost/shared/i18n/context";
 
 /**
  * Where a paint is going — shared by both halves of the Studio.

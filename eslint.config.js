@@ -48,9 +48,9 @@ export default tseslint.config(
     // `<ambientLight intensity>`), which eslint-plugin-react judges against the DOM and
     // flags wholesale. @react-three/fiber ships types for them, so tsc is the real check.
     files: [
-      "apps/*/src/Components/Viewer/ModelViewer.tsx",
-      "apps/*/src/Components/Viewer/PoseHandles.tsx",
-      "apps/*/src/Components/Viewer/TrackViewer.tsx",
+      "packages/shared/src/Components/Viewer/ModelViewer.tsx",
+      "packages/shared/src/Components/Viewer/PoseHandles.tsx",
+      "packages/shared/src/Components/Viewer/TrackViewer.tsx",
     ],
     rules: { "react/no-unknown-property": "off" },
   },

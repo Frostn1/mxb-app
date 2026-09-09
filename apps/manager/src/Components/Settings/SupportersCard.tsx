@@ -1,9 +1,9 @@
 import { Coffee, ExternalLink, RefreshCw } from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
-import { useI18n } from "../../i18n/context";
-import { getLocale } from "../../i18n/core";
-import { Button } from "@/Components/ui/button";
-import { cn } from "@/lib/utils";
+import { useI18n } from "@frost/shared/i18n/context";
+import { getLocale } from "@frost/shared/i18n/core";
+import { Button } from "@frost/shared/Components/ui/button";
+import { cn } from "@frost/shared/lib/utils";
 import { SUPPORT_URL, groupByTier } from "./supporters";
 import { useSupporters } from "./useSupporters";
 

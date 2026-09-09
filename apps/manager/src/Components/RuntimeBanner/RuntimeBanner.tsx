@@ -8,12 +8,12 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import { Button } from "@/Components/ui/button";
-import { RUNTIME_NAME_KEY, onModsDehydrated } from "@/api/mods";
-import type { ModsDehydrated } from "@/types";
+import { Button } from "@frost/shared/Components/ui/button";
+import { RUNTIME_NAME_KEY, onModsDehydrated } from "@frost/shared/api/mods";
+import type { ModsDehydrated } from "@frost/shared/types";
 import { useFrostmod } from "@/Context/FrostmodContext";
-import { Trans } from "@/i18n";
-import { useT } from "@/i18n/context";
+import { Trans } from "@frost/shared/i18n";
+import { useT } from "@frost/shared/i18n/context";
 
 /**
  * Slim bar for the two things that stop FrostMod reaching the game and can't be fixed

@@ -15,9 +15,9 @@ import {
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { open as openPath } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
+import { cn } from "@frost/shared/lib/utils";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Input } from "@frost/shared/Components/ui/input";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,9 +27,9 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "../ui/alert-dialog";
-import { ViewerDialog } from "../Viewer/ViewerDialog";
-import type { EntryViewerProps } from "../Viewer/entryViewer";
+} from "@frost/shared/Components/ui/alert-dialog";
+import { ViewerDialog } from "@frost/shared/Components/Viewer/ViewerDialog";
+import type { EntryViewerProps } from "@frost/shared/Components/Viewer/entryViewer";
 import { SheetThumb } from "./SheetThumb";
 import {
   gearPartOf,
@@ -43,9 +43,9 @@ import {
   paintStudioLoad,
   paintStudioSave,
   paintStudioTarget,
-} from "../../api/mods";
-import type { SavedPaint, StudioImage } from "../../types";
-import { useT } from "../../i18n/context";
+} from "@frost/shared/api/mods";
+import type { SavedPaint, StudioImage } from "@frost/shared/types";
+import { useT } from "@frost/shared/i18n/context";
 
 /**
  * Paint Studio — build a `.pnt` out of ordinary image files.

@@ -5,9 +5,9 @@ import type {
   HubModDetail,
   HubPage,
   HubSort,
-} from "../types";
-import type { ShopItem } from "./mods";
-import type { TKey } from "../i18n/core";
+} from "@frost/shared/types";
+import type { ShopItem } from "@frost/shared/api/mods";
+import type { TKey } from "@frost/shared/i18n/core";
 
 /**
  * MXB Hub — `shop.mxb-hub.com`, the community marketplace `mxbhub.com` redirects to.
@@ -114,7 +114,7 @@ export function onHubAuth(handler: (ok: boolean) => void) {
  */
 export interface HubDownloads {
   items: HubItem[];
-  listings: (import("../types").HubMod | null)[];
+  listings: (import("@frost/shared/types").HubMod | null)[];
 }
 
 export function hubMyDownloads(): Promise<HubDownloads> {

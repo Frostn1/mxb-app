@@ -6,10 +6,10 @@ import Welcome from "./Components/Welcome/Welcome";
 import LooseSwapPrompt from "./Components/Locker/LooseSwapPrompt";
 import { ThemeProvider } from "./Context/Theme";
 import { FrostmodProvider } from "./Context/Frostmod";
-import { ConfigContext, MXB_FALLBACK } from "./Context/Config";
+import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
 import { toast } from "sonner";
-import { Toaster } from "@/Components/ui/sonner";
-import { TooltipProvider } from "@/Components/ui/tooltip";
+import { Toaster } from "@frost/shared/Components/ui/sonner";
+import { TooltipProvider } from "@frost/shared/Components/ui/tooltip";
 import {
   bikePreviewAvailable,
   getConfig,
@@ -18,14 +18,14 @@ import {
   onOverlayFullscreenBlocked,
   setActiveGame,
   setIntroSeen,
-} from "./api/mods";
+} from "@frost/shared/api/mods";
 import { TOUR_DONE_KEY } from "./Components/Tour/Tour";
-import { useI18n } from "./i18n/context";
-import { setAmbientVars } from "./i18n/core";
+import { useI18n } from "@frost/shared/i18n/context";
+import { setAmbientVars } from "@frost/shared/i18n/core";
 import { UpdateProvider } from "./Context/Update";
 import RuntimeBanner from "./Components/RuntimeBanner/RuntimeBanner";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
-import type { Config, GameId, GameInfo } from "./types";
+import type { Config, GameId, GameInfo } from "@frost/shared/types";
 
 /**
  * Bumped when the intro tour changes enough to warrant showing it again.

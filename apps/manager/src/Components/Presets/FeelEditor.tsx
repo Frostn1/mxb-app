@@ -12,21 +12,21 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Save, ChevronRight, Search } from "lucide-react";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Switch } from "../ui/switch";
-import { Slider } from "../ui/controls";
-import { Segmented } from "../ui/segmented";
-import { cn } from "@/lib/utils";
+import { Button } from "@frost/shared/Components/ui/button";
+import { Input } from "@frost/shared/Components/ui/input";
+import { Switch } from "@frost/shared/Components/ui/switch";
+import { Slider } from "@frost/shared/Components/ui/controls";
+import { Segmented } from "@frost/shared/Components/ui/segmented";
+import { cn } from "@frost/shared/lib/utils";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogFooter,
   DialogTitle,
-} from "../ui/dialog";
-import { useT, type TKey } from "../../i18n/context";
-import type { Feel } from "../../api/mods";
+} from "@frost/shared/Components/ui/dialog";
+import { useT, type TKey } from "@frost/shared/i18n/context";
+import type { Feel } from "@frost/shared/api/mods";
 
 /** `profile.ini` sections, in the order a rider thinks about them. */
 const SECTION_ORDER = ["input", "aids", "view", "ext_view", "gfx"] as const;

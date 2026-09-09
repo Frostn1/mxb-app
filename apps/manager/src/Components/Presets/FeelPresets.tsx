@@ -19,16 +19,16 @@ import {
   CopyPlus,
 } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
-import { Button, CHIP } from "../ui/button";
-import { Input } from "../ui/input";
+import { cn } from "@frost/shared/lib/utils";
+import { Button, CHIP } from "@frost/shared/Components/ui/button";
+import { Input } from "@frost/shared/Components/ui/input";
 import {
   Select,
   SelectValue,
   SelectTrigger,
   SelectContent,
   SelectItem,
-} from "../ui/select";
+} from "@frost/shared/Components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -36,7 +36,7 @@ import {
   DialogFooter,
   DialogTitle,
   DialogDescription,
-} from "../ui/dialog";
+} from "@frost/shared/Components/ui/dialog";
 import {
   feelList,
   feelCapture,
@@ -46,10 +46,10 @@ import {
   feelExport,
   feelImport,
   type Feel,
-} from "../../api/mods";
+} from "@frost/shared/api/mods";
 import FeelEditor from "./FeelEditor";
-import { copyName } from "../../lib/presets";
-import { useT } from "../../i18n/context";
+import { copyName } from "@frost/shared/lib/presets";
+import { useT } from "@frost/shared/i18n/context";
 import { copyText } from "../../lib/clipboard";
 
 /** How many settings and how many controls a preset carries. */

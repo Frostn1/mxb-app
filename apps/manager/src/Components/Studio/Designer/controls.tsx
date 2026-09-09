@@ -2,7 +2,7 @@ import { useState } from "react";
 
 // `Row` and `Slider` moved to the shared ui controls once the 3D viewer's pose panel wanted
 // the same rows; re-exported here so the Designer's own imports read as they always have.
-export { Row, Slider } from "@/Components/ui/controls";
+export { Row, Slider } from "@frost/shared/Components/ui/controls";
 
 /**
  * A number typed rather than dragged.

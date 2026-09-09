@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.base.json",
+  /* No "paths": every import inside this package is relative, so it resolves the same
+     way for tsc, for vite, and for whichever app is consuming it. */
+  "include": ["src"]
+}

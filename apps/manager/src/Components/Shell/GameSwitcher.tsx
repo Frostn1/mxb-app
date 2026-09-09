@@ -1,17 +1,17 @@
 import { useState } from "react";
 import { Check, ChevronsUpDown, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn } from "@frost/shared/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-} from "@/Components/ui/dropdown-menu";
-import { useConfig } from "../../Context/Config";
-import { useT } from "../../i18n/context";
-import type { GameId } from "../../types";
+} from "@frost/shared/Components/ui/dropdown-menu";
+import { useConfig } from "@frost/shared/Context/Config";
+import { useT } from "@frost/shared/i18n/context";
+import type { GameId } from "@frost/shared/types";
 
 /**
  * Picks which PiBoSo title the app is driving.
