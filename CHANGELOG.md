@@ -3,6 +3,8 @@
 ## 2026-09-09
 
 ### Added
+- FrostMod's status sits in the top bar, on every screen, with Start, Stop and Reload behind
+  it. The dot says whether it is running and whether it actually reached the game.
 - Random track in the Track Studio. It draws a whole track from a number — no brief to write
   and nothing to wait for — and you edit it like any other.
 
