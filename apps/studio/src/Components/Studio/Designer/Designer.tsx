@@ -14,6 +14,7 @@ import {
   CopyPlus,
   Eye,
   EyeOff,
+  FileImage,
   FilePlus2,
   FlipHorizontal2,
   FlipVertical2,
@@ -1179,6 +1180,53 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   }, [addBlankSheet, hints]);
 
   /**
+   * Add a sheet from an image on disk.
+   *
+   * Not the same act as "Start from a paint", which is the template step and *replaces*
+   * everything. This adds one sheet beside the others — the answer to having a `.tga` for one
+   * piece of bodywork and nothing else, which until now meant making a blank sheet, adding the
+   * image as a layer and resizing the sheet to match by hand.
+   *
+   * The file name becomes the sheet name, because the name is the entire binding and the file
+   * is usually already called what the model asks for. The image lands as the sheet's base
+   * rather than as a layer: it is the sheet, not something placed on it.
+   */
+  const addSheetFromImage = useCallback(async () => {
+    const picked = await openDialog({
+      multiple: true,
+      filters: [{ name: "Images", extensions: IMAGE_EXTS }],
+    });
+    const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
+    if (!paths.length) return;
+    setBusy(true);
+    try {
+      const made: Sheet[] = [];
+      for (const path of paths) {
+        const { name: fileName, bitmap } = await readImage(path);
+        const stem = (fileName.replace(/\\/g, "/").split("/").pop() ?? fileName).replace(
+          /\.[^.]+$/,
+          "",
+        );
+        made.push({
+          ...blankSheet(stem, bitmap.width),
+          width: bitmap.width,
+          height: bitmap.height,
+          base: bitmap,
+        });
+      }
+      remember();
+      setSheets((prev) => [...prev, ...made]);
+      setActiveId(made[0].id);
+      setSelection([]);
+      bump();
+    } catch (e) {
+      toast.error(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(false);
+    }
+  }, [bump, readImage, remember]);
+
+  /**
    * One sheet per color texture the model asks for that isn't on the list yet.
    *
    * The names are the whole binding — a sheet called anything else paints nothing — and until
@@ -2056,21 +2104,28 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   }, [sheetIdKey]);
 
   /** Reorder within the stack. `delta` of -1 is one step down (further back). */
-  const reorder = useCallback(
-    (id: string, delta: number) => {
+  /**
+   * Drop `id` where `before` sits in the stack.
+   *
+   * The list is drawn top-of-stack first while the array is bottom-first, so both indices are
+   * read from the array and the reversal in the panel takes care of itself.
+   */
+  const moveLayer = useCallback(
+    (id: string, before: string) => {
       if (!activeId) return;
+      remember(`layer-order:${id}`);
       patchSheet(activeId, (s) => {
-        const at = s.layers.findIndex((l) => l.id === id);
-        const to = at + delta;
-        if (at < 0 || to < 0 || to >= s.layers.length) return s;
+        const from = s.layers.findIndex((l) => l.id === id);
+        const to = s.layers.findIndex((l) => l.id === before);
+        if (from < 0 || to < 0 || from === to) return s;
         const layers = [...s.layers];
-        const [moved] = layers.splice(at, 1);
+        const [moved] = layers.splice(from, 1);
         layers.splice(to, 0, moved);
         return { ...s, layers };
       });
       bump();
     },
-    [activeId, bump, patchSheet],
+    [activeId, bump, patchSheet, remember],
   );
 
   /**
@@ -2389,6 +2444,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             onAddHintSheets={addHintSheets}
             missingCompanions={missingCompanions}
             onAddCompanions={() => void addCompanionSheets()}
+            onAddFromImage={() => void addSheetFromImage()}
           />
           {active && (
             <LayerList
@@ -2400,7 +2456,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
                 bump();
               }}
               onRemove={(id) => removeLayers([id])}
-              onReorder={reorder}
+              onMove={moveLayer}
               onAdd={addPaintLayer}
             />
           )}
@@ -2560,6 +2616,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             {t("designer.showModel")}
           </button>
         )}
+          {/* The model stays put and everything under it scrolls. Scrolling the whole column
+              meant the bike slid off the top the moment the tool panel grew — which it does
+              every time you pick a brush. */}
+          <div className="mt-10 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
           {active && (
             <PaintTools
               settings={paint}
@@ -2574,10 +2634,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               busy={busy}
             />
           )}
-          {/* The model stays put and everything under it scrolls. Scrolling the whole column
-              meant the bike slid off the top the moment the tool panel grew — which it does
-              every time you pick a brush. */}
-          <div className="mt-6 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
           {!!chosen.length && active && (
             <LayerInspector
               layers={chosen}
@@ -2618,6 +2674,7 @@ function SheetList({
   onAddHintSheets,
   missingCompanions,
   onAddCompanions,
+  onAddFromImage,
 }: {
   className?: string;
   sheets: Sheet[];
@@ -2635,6 +2692,7 @@ function SheetList({
   /** The companion maps — normals, mostly — the model asks for that aren't on the list. */
   missingCompanions: string[];
   onAddCompanions: () => void;
+  onAddFromImage: () => void;
 }) {
   const t = useT();
   // Which row is being dragged. A ref, not state: it changes on every dragover and nothing
@@ -2650,14 +2708,23 @@ function SheetList({
       <CardHeader>
         <CardTitle>{t("designer.sheets")}</CardTitle>
         <CardAction>
-          <button
-            type="button"
-            className="text-muted-foreground transition-colors hover:text-foreground"
-            onClick={onAddBlank}
-            title={t("designer.addSheet")}
-          >
-            <Plus className="size-4" />
-          </button>
+          {/* Two ways to add one, behind the one control that means "add one". */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="cursor-default rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+              title={t("designer.addSheet")}
+            >
+              <Plus className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <MenuRow icon={FilePlus2} label={t("designer.blankSheet")} onPick={onAddBlank} />
+              <MenuRow
+                icon={FileImage}
+                label={t("designer.sheetFromImage")}
+                onPick={onAddFromImage}
+              />
+            </DropdownMenuContent>
+          </DropdownMenu>
         </CardAction>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-col">
@@ -3002,7 +3069,7 @@ function LayerList({
   onSelect,
   onToggle,
   onRemove,
-  onReorder,
+  onMove,
   onAdd,
 }: {
   className?: string;
@@ -3011,10 +3078,13 @@ function LayerList({
   onSelect: (ids: string[], mode: "replace" | "toggle" | "isolate") => void;
   onToggle: (id: string, visible: boolean) => void;
   onRemove: (id: string) => void;
-  onReorder: (id: string, delta: number) => void;
+  onMove: (id: string, before: string) => void;
   onAdd: () => void;
 }) {
   const t = useT();
+  // Which row is being dragged. A ref, not state: it changes on every dragover and nothing
+  // on screen depends on it until the drop.
+  const drag = useRef<string | null>(null);
   // Top of the list is the top of the stack, which is how a layer panel reads — the array
   // itself is bottom-first because that's the order it's drawn in.
   const shown = [...layers].reverse();
@@ -3031,21 +3101,41 @@ function LayerList({
   }
 
   const row = (layer: Layer) => (
+    /* The same shape as a sheet row: grab it on the left, and what you can do to it on the
+       right. Two arrows per row, each disabled at one end, was the old way of saying "move
+       this" — and a layer stack is the one list where dragging is the obvious gesture. */
     <div
       key={layer.id}
+      draggable
+      onDragStart={(e) => {
+        drag.current = layer.id;
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onDragOver={(e) => {
+        if (drag.current && drag.current !== layer.id) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        if (drag.current && drag.current !== layer.id) onMove(drag.current, layer.id);
+        drag.current = null;
+      }}
+      onDragEnd={() => (drag.current = null)}
       className={cn(
-        "flex items-center gap-1.5 rounded-md border px-1.5 py-1 text-[11.5px] transition-colors",
-        selection.includes(layer.id) ? "border-primary bg-primary/10" : "border-border",
+        "group flex shrink-0 items-center gap-1.5 rounded-md border px-1.5 py-1 text-[11.5px] transition-colors",
+        selection.includes(layer.id) ? "border-primary bg-primary/10" : "border-transparent",
       )}
     >
-      <button
-        type="button"
-        className="flex-none text-muted-foreground hover:text-foreground"
-        onClick={() => onToggle(layer.id, !layer.visible)}
-        title={t(layer.visible ? "designer.hide" : "designer.show")}
+      <span
+        className={cn(
+          "flex-none cursor-grab text-faint transition-opacity",
+          selection.includes(layer.id)
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+        )}
+        title={t("designer.dragToOrder")}
       >
-        {layer.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
-      </button>
+        <GripVertical className="size-3.5" />
+      </span>
       {/* A follower says so here as well as in the inspector: this is the list you scan when
           you can't work out why a layer won't move. */}
       {layer.mirror && (
@@ -3062,21 +3152,16 @@ function LayerList({
       >
         {layer.kind === "text" ? layer.text || layer.name : layer.name}
       </button>
+      {/* Showing and removing, together at the end: both are about the layer as a whole
+          rather than about what it is, and the rule keeps them out of the name. */}
+      <span className="ml-1 h-3.5 w-px flex-none bg-border" />
       <button
         type="button"
-        className="flex-none px-0.5 text-muted-foreground hover:text-foreground"
-        onClick={() => onReorder(layer.id, 1)}
-        title={t("designer.raise")}
+        className="flex-none text-muted-foreground hover:text-foreground"
+        onClick={() => onToggle(layer.id, !layer.visible)}
+        title={t(layer.visible ? "designer.hide" : "designer.show")}
       >
-        ↑
-      </button>
-      <button
-        type="button"
-        className="flex-none px-0.5 text-muted-foreground hover:text-foreground"
-        onClick={() => onReorder(layer.id, -1)}
-        title={t("designer.lower")}
-      >
-        ↓
+        {layer.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
       </button>
       <button
         type="button"
