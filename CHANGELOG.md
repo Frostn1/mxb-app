@@ -1,21 +1,54 @@
 # Changelog
 
-## 2026-09-07
+## 2026-09-09
 
 ### Added
-- The server list keeps working while MX Bikes is running. It asks each server directly rather
-  than the master list, so nothing competes with the game for your account.
+- Random track in the Track Studio. It draws a whole track from a number — no brief to write
+  and nothing to wait for — and you edit it like any other.
+
+### Changed
+- A new base track. It is a walked lap now, and it measures like a published national: 1966 m,
+  nineteen corners, and the corner shape and spacing read off Indiana and Southwick.
+- Straw bales stand off the track edge rather than a fixed distance from the line, so tracks
+  wider than 14 m get them.
+
+## 2026-09-08 — v0.13.7 — Servers, live share codes and a new 3D view
+
+### Added
+- A Servers tab that lists every MX Bikes server, with the real ping to each one, the track
+  actually being ridden and the operator's own location label.
+- The list keeps working while MX Bikes is running. It asks each server directly rather than
+  the master list, so nothing competes with the game for your account.
 - Servers advertising cheats are hidden, by the same rules FrostMod uses in the game. The tab
   says how many it hid and lets you look at them.
-- A server's details show who is on it: everyone in the session when it is the server you are
-  riding, and the riders using paint sync anywhere else.
-- A server's details name the track it is running, show its picture when you already have it,
-  and point you at the shop or MXB Hub when you don't.
-- Share codes that keep updating. Turn on "Keep it updated" when you share and you get a
-  short code to send once. Publish a new version and everyone who pasted it gets it — no
-  new link, no new code.
-- A Live share codes list under Import: what you publish, what you follow, and which ones
-  have a new version waiting. Turn on Auto and they install themselves.
+- Clicking a server opens it: who is on it, the session in progress and how long it runs, the
+  weather and conditions, which bike categories and models are allowed, the licence class it
+  requires, whether it forces cockpit view, bans aids or limits tyre sets, and its addresses.
+  Opening one asks it for fresh numbers rather than showing what the list last saw.
+- A server's details name the track it is running and show its picture when you already have
+  it, and point you at the shop or MXB Hub when you don't.
+- The list marks the rows with riders on paint sync, so you can see where your paints will
+  actually show up without opening each server.
+- Share codes that keep updating. Turn on "Keep it updated" when you share and you get a short
+  code to send once. Publish a new version and everyone who pasted it gets it — no new link,
+  no new code.
+- A Live share codes list under Import: what you publish, what you follow, and which ones have
+  a new version waiting. Turn on Auto and they install themselves.
+- A Ranked tab beside the servers: your MXB Ranked rank, MXP and season stats for Global, MX
+  and SX, plus your last 50 races with the track, your position and the points. Nothing to
+  sign in to — the app works out your MX Bikes GUID from Steam, and the same box looks up
+  anyone else.
+- Build a track and ride it without leaving the app. Press Build & install and the app fetches
+  PiBoSo's track tools, compiles the track and puts it in your mods folder, ready to pick in
+  MX Bikes.
+- A track can be laid out from a seed, without waiting on a model: a closed lap that never
+  crosses itself, with the corner count, turning and jump density published tracks carry.
+- A progress bar while a track compiles, saying what it is working on and how far along it is.
+  It shows in the top bar from anywhere in the app and keeps building if you leave the Track
+  Studio.
+- Seven colorways in Settings — Frost is still the default; Ember, Moss, Violet, Rose and
+  Slate move the whole window, not just the buttons. Plus Retro, which goes further: amber
+  phosphor, monospaced type, square corners and a scanline over the window.
 
 ### Changed
 - Opening a server asks it for fresh numbers, so the riders, the session and the track are what
@@ -39,461 +72,92 @@
 
 ### Changed
 - Tracks in the 3D viewer are drawn with the ground the game draws: each layer's own sheet,
+- Generated corners are cut deeper and carry the chop a wheel feels, so a turn has a rut
+  wall to lean on instead of a shallow saucer.
+- Generated tracks are cambered across their width, so a corner leans the way a built one does.
+- A new look. Navigation moved out of the sidebar into a bar across the top, so mod artwork
+  gets the full width of the window — seven mods to a row instead of five. Locker and Presets
+  sit together under Garage, Race mode has its own place, and every page puts its filters,
+  categories and search in one bar under the navigation.
+- Text is set in Barlow, which ships inside the app so it reads the same offline.
+- Browse opens on a full-width banner for the newest mod, so you can see what you are
+  installing before you click it.
+- The 3D viewer draws a track's ground the way the game draws it: each layer's own sheet,
   tiled the way the track states, through the track's own masks. Published tracks used to come
   out one flat brown, because the colour was taken from the surface data a track uses for grip
   rather than from what it is painted with. Indiana now shows its dirt, its ruts and the
   gravel round the paddock.
-
-## 2026-09-06
-
-### Added
-- The Servers tab lists every server on the master list, and measures the real ping to each
-  one instead of leaving the column blank.
-- Server rows show the track actually being ridden and the operator's own location label.
-- Clicking a server opens its details: the session in progress and how long it runs, the
-  weather and conditions, which bike categories and models are allowed, the licence class it
-  requires, whether it forces cockpit view, bans aids or limits tyre sets, and its addresses.
-
-### Fixed
-- Servers whose address the master reports in IPv6 form can be joined, and a server the game
-  genuinely can't be pointed at says so instead of offering a Join that goes nowhere.
-
-## 2026-09-06
-
-### Fixed
-- Trackside boards are boards. They have a thickness you can see the edge of instead of being
-  a flat sheet, and the sponsor's name reads the right way round from both sides of the track
-  rather than backwards on one of them.
-
-## 2026-09-06
-
-### Fixed
-- Generated tracks state their lap length, so the game and the app's track info show it
-  instead of leaving the line blank.
-- Generating a track holds a full-length lap. A long circuit no longer runs out of room
-  part-way through being written, which is what turned a good design into "that didn't parse".
-
-## 2026-09-06
-
-### Changed
+- Trackside scenery wears its own textures. Every object takes the sheet the track itself says
+  it wears, rather than one worked out from the order they are stored in — so banners show
+  their sponsors, the inflatable gates are back to full colour, and the treeline is leaves
+  instead of bark.
+- A track's sky in the viewer shows the dome it ships, at sixteen times the detail it was
+  drawn at, and settles on the track's clear weather instead of picking a different one each
+  time you open it.
+- Coming back to the Library is instant. It no longer re-measures every mod folder each time
+  you leave the page and return, or switch between its tabs.
+- A share code goes on your clipboard the moment the upload finishes, even if you left the app
+  to wait, and it says which of its files you already have before you import it.
+- Sharing is quicker. The app packs straight out of your mods folder, sends and fetches three
+  parts at a time, fills one progress bar for the whole thing, and unpacks beside your mods
+  folder so files are moved into place rather than copied across drives.
 - The track creator is laid out the way you work: the lap as a numbered list on the left, a
   plan view of the circuit in the middle, and the numbers for whichever step you pick on the
-  right. Click a step in the list or on the map to shape it. The 3D ground is still a click
-  away, next to the plan.
-- Generated tracks carry a continuous printed banner down the lap as well as sponsor boards:
-  one design repeated on pieces joined end to end, the way a real track runs one.
-
-### Added
-- You can add straights and turns to a lap, not just jumps. Add step offers the lap's own
-  shape first — a straight, a left turn, a right turn — and the new piece lands after
-  whichever step you have selected.
-
-### Fixed
-- The Servers tab holds its Steam sign-in for the session, so refreshing the list keeps
-  working. A refresh that doesn't get through leaves the servers you already had on screen.
-- Starting a blank track works.
-- Giving a straight or a corner a rise now shapes a hill. The climb comes back down over the
-  rest of the lap, so the circuit meets itself at the start line.
-- The 3D preview says when it is rebuilding, and says so when it is showing an older build
-  than the numbers on screen.
-- Banners on a generated track read the right way round from either side of the board.
-- Banner artwork fills its board at the proportions it was drawn in.
-
-## 2026-09-06
-### Changed
-- Corners on a generated track tighten into the apex and open out again, instead of holding
-  one radius the whole way round.
-- Generated laps carry real hairpins. A turn can double back on itself, and the run into a
-  corner curves in rather than stepping towards it through a series of short straights.
-
-### Fixed
-- Doubles on a generated track are shaped the way a built one is. The take-off lip and the
-  landing crest turn over a radius, and the ground between them runs down through a rounded
-  valley into the flat.
-- A tight double rides over a saddle rather than through a slot: the valley drops to the
-  ground where there is room for it, and sits higher where the two jumps are close together.
-
-## 2026-09-06
-
-### Fixed
-- Sharing a track is quicker. The upload no longer waits on the host after the files are
-  already up, and the app stays responsive while a share is being packed.
-
-## 2026-09-06
-
-### Fixed
-- The Servers tab lists the live MX Bikes servers. The app signs in to the master server the
-  same way the game does, through your Steam copy of MX Bikes.
-
-## 2026-09-06
-
-### Changed
-- A mod's screenshots are shown whole on its page. Clicking one opens it full screen, where the
-  arrow keys move through the set and Escape closes it.
-
-## 2026-09-06
-
-### Added
-- A progress bar while a track compiles, saying what it is working on and how far along it is.
-- A compiling track shows in the top bar from anywhere in the app, and keeps building if you
-  leave the Track Studio — the bar is still there when you come back.
-
-## 2026-09-06
-
-### Changed
-- A track can be laid out without the model. A seeded layout generator draws a closed lap
-  that never crosses itself, with the corner count, turning and jump density published tracks
-  carry — so a new track is a new seed rather than a wait.
-- Generated tracks have a sky of their own. They used to borrow the game's stock one, because
-  nothing ever shipped a dome or told the game to look for it.
-- The track is dirt again. The whole riding surface is dark worked ground with a darker line
-  ridden into it, instead of pale soil with a stripe down the middle and holes in it.
-- Straights no longer carry a single groove dug down the middle of them. That is a corner's
-  doing, and it stays in the corners.
-- Berms keep their shape: the ground beside the track no longer takes bites out of them.
-- Ground sheets stop tiling visibly. A sheet's slow variation is flattened, so laying it a
-  hundred times across a track no longer draws squares.
-- The step in the ground is gone. Where two legs of a lap graded into the same piece of
-  field, the ground between them could stand a metre and a half proud in one sample — ground
-  outside the track now slumps to a slope instead of standing as a wall.
-- Ruts read as ruts again: the floor of a groove is darker than the line it is worn into, and
-  the dry dirt thrown off the line is paler than the ground around it rather than darker.
-- Band edges no longer come out as teeth. An edge was wandering at three quarters of a metre
-  where the ground is drawn at four tenths, which no mask can hold.
-- Ruts are shaped the way a ridden track's are: fewer grooves, further apart, with flatter
-  bottoms, and smooth along their length instead of chopped up at every scale. A lap holds
-  a line rather than shaking the bike over it.
-- Sharing a track is quicker. The app packs it straight out of your mods folder instead of
-  making a copy of it first.
-- A share code sends and fetches its parts three at a time instead of one after another, and a
-  download fills one progress bar for the whole thing rather than restarting it per part.
-- Importing a share unpacks beside your mods folder, so the files are moved into place rather
-  than copied across drives.
-- A generated track has a riding line in it. The corridor is worked dirt with a darker line
-  worn through it and tyre marks in the ruts, instead of one dark ribbon from edge to edge.
-- Generated tracks are painted with real ground. The soil, the riding line, the packed bottom
-  of a rut and the grass outside the track are photographs of ground rather than drawn dirt,
-  so a lap reads like somewhere that has been ridden.
-- The trackside advertising is a hoarding: printed plastic boards bolted edge to edge into
-  runs down both sides of the lap, sharing an upright at every join, with clear ground between
-  one run and the next. They used to be single banners slung every fifty metres.
-
-### Fixed
-- Generated laps no longer run over their own ground. A lap is checked for crossing itself
-  before it is built, and how much it turns in total is held to what published tracks measure.
-
-## 2026-09-06
-
-### Changed
-- Jumps are shaped the way built ones are. A takeoff now stands at the angle a published one
-  measures rather than at the steepest in the whole corpus, and a small jump is a long low rise
-  instead of carrying the same lip as a big one — so a lap has a range of jumps in it rather
-  than thirty of the same abrupt shape.
-- Every tabletop has a top. A tall one used to have its deck eaten by its own two ramps and
-  came out as a peak, which rides as a double however it was written.
-- The worked example carries the mix a published lap does: a handful of big jumps, and the
-  rest ground under a metre.
-- Ground edges wander. Where the riding line meets the shoulder, and the shoulder the grass,
-  the paint fades across the boundary and the boundary itself wanders, so the track reads as
-  ground somebody dug rather than as a stripe with a stepped edge.
-- Generated tracks are marked the way a real one is: a line of little white plastic stakes
-  down each edge of the riding line, at the track edge and every six and a half metres. They
-  are half the size they were, which is what lets them stand that close without the edge
-  reading as a fence.
-- The trackside banners are printed. Five panels — MXB App, Frost, FrostMod and Creste — each
-  set in its own brand's typeface and colours with the app's snowflake beside it, and a lap
-  cycles through them instead of showing the same blank panel every fifty metres.
-
-## 2026-09-06
-
-### Fixed
-- Sharing a large preset or track works again. The host stores files by their contents, so once
-  it had kept only part of an upload it handed back that same broken copy every time the same
-  file was shared — no amount of retrying could shift it. A share that comes back short is now
-  cut into different pieces and sent again, which is bytes the host has to store afresh.
-
-## 2026-09-06
-
-### Changed
-- The gates are in one row. They were stated against whichever bit of lap was nearest to each
-  one, which put a stagger through the row.
-- The start pad is ridden ground: the comb of grooves the gate leaves is painted as well as
-  cut, and the pad is churned dirt rather than bare fill.
-
-### Fixed
-- Sharing a bundle made by an older build no longer gives up on a short part. It asks the host
-  what it is holding and retries that part, instead of only noticing when the joined file does
-  not add up.
-
-## 2026-09-06
-
-### Changed
-- The parked vans are gone. They stood close enough to the riding line to be something a rider
-  runs into.
-- The banners are back.
-- Jump posts stand at the top of the takeoff face rather than at its foot: the post grows with
-  the jump, so the flag sits at the crest.
-- No gap between the start straight and the lap. The tracks this is measured against are flat
-  ground from the gate row right up to the racing line, and the two are one surface.
-
-## 2026-09-06
-
-### Changed
-- The printed banners are gone.
-- A third as many blocks round a corner, and each one now has a dark foot under its white body
-  so it reads as a block rather than a paper cube.
-- Jumps are flagged rather than posted: a yellow pennant on top of the marker, and only on the
-  jumps big enough to need warning of.
-
-## 2026-09-06
-
-### Changed
-- The start straight keeps its distance from the lap until the two meet at turn one. There is
-  a strip of ground between them, so a rider on a flying lap has no way back onto it.
-- White blocks sit at the edge of the track rather than out in the field, the printed banners
-  are back, and there are fewer marker posts — some with a painted white tip, some bare.
-- Jumps are marked with a yellow post at the top of the takeoff face rather than a board
-  standing before it.
-
-## 2026-09-06
-
-### Added
-- Yellow boards either side of every jump's takeoff, on the ones worth marking. A rider coming
-  at a blind crest reads the boards, not the dirt.
-
-### Changed
-- Half as many white blocks round a corner — a run of them with ground showing between, rather
-  than a wall.
-- The printed banners are gone.
-
-## 2026-09-06
-
-### Changed
-- The start straight ends in turn one. It runs down the outside of the first corner and joins
-  the lap inside it, so the gate drop delivers you into the turn instead of onto a piece of
-  track with no clue which way it goes.
-- The riding line is lighter. Under the track's own sky a line at the colour a soil sheet
-  measures on its own was one you could not find; the gap to the field that makes a line
-  visible is still there, and the line now reads at speed.
-- The sky is a band round the horizon rather than a lid. A closed dome put the whole track in
-  its own shadow, which is what made the ground so dark.
-- Marker boards are thinner on the ground, blocks are plain white and laid in a line along the
-  outside of a corner rather than scattered, and a few trees stand in the infield.
-
-## 2026-09-06
-
-### Added
-- A wood behind the track. The tracks people rate carry thousands of trees past 60 m and only
-  a handful trackside, so that is what a built track gets now — a backdrop of mixed pine and
-  broadleaf out to the edge of the ground, with a few standing closer in.
-- Poles and parked vans down both sides, at the spacing the same tracks use, and a sky of the
-  track's own instead of the game's default one.
-- The start pad is ridden ground: the same surface texture the rest of the track has, and the
-  comb of grooves forty bikes leave pulling out of forty stalls.
-
-### Changed
-- The ground round a track is grass in patches over bare worked dirt rather than one flat
-  green field.
-- Marker blocks are white.
-- Nothing is planted on the start straight any more, and the fence is gone for now — it ran
-  along the lap and closed the start off.
-
-### Fixed
-- The start straight ends where the gates are. Its surface ran on behind the row for as far
-  as the ground went.
-- The picture a track is listed by shows the colours it will actually have. It was mixing
-  each band's base colour rather than the sheet made from it, which turned a green field into
-  a desert.
-
-## 2026-09-06
-
-### Changed
-- Jumps stand up on the ground they are built on. A track cut into a hillside had its ground
-  falling three metres across a jump's own footprint, so a metre-and-a-quarter tabletop rose a
-  handspan above its own foot and a lap read as having no jumps on it at all. Every jump now
-  gets a pad cut level under it, the way a builder does it.
-- Ruts are rounded, with a bank of material beside each one to lean on, instead of a
-  square-edged slot cut into the ground. There are fewer of them and they sit further apart.
-- Jumps are sized for a 250, not a 450. A gap only the fastest bike on the gate can clear is
-  one most riders single.
-- Jumps are sized to the speed a bike actually carries. Acceleration used to hold flat all the
-  way to the top, so a lap left a hairpin at 33 km/h and was doing 100 sixty metres later, and
-  gaps got built for a speed nobody arrives at. A two-kilometre lap now runs where one runs.
-- No two jumps on a lap are the same size any more, and a lap carries a handful of doubles
-  rather than one every hundred metres.
-- Corners wear three or four lines rather than one groove and a spread, so there is a choice
-  of ways through after a few motos.
-- Ruts read much harder against the ground beside them: the packed floor is darker, the bank
-  beside it drier, and the shape shows at speed instead of only being felt. They are deeper,
-  too — matched against a published national's own ground rather than estimated.
-- Tyre marks up the face of a jump are cut into the ground as well as painted on it, fanned
-  towards the side the last corner sends you in from.
-- The racing line is smooth where the wheels run. Braking chop, acceleration chop and the
-  ground's own grain used to cover the whole width, which took away most of what the bike
-  makes down a straight.
-- The start on a track you build is its own straight beside the circuit now, the way a real
-  one is: the gate row stands 40 m off the lap, sprints 85 m, and turns in to join the track
-  at turn one. A flying lap never crosses the gates.
-- The gates stand on a start pad 54 m across — wide enough for all forty of them. It holds
-  that width the whole way down the sprint and comes down through the turn into the track,
-  rather than tapering along the straight. The pit lane sits on the other side of the main
-  straight, out of the way.
-
-### Fixed
-- Riders start on the gate row. Every position in a track's race data is stated against the
-  lap, wherever it physically stands, and the gates were being written against the start
-  straight instead — so the game put the field across the middle of the track.
-
-### Added
-- A track you build now has things standing beside it. Stakes with painted tops mark the edge
-  of the riding line the whole way round, the way they do on a real track, with fencing behind
-  them, banners at intervals, hay bales on the outside of the corners, trees back in the field
-  and a gantry over the start.
-- A tree, a bale, a banner and the gantry stop a bike. A stake does not, so clipping one on
-  the way past costs you nothing.
-
-## 2026-09-05
-
-### Changed
-- A new look. Navigation moved out of the sidebar into a bar across the top, so mod
-  artwork gets the full width of the window — seven mods to a row instead of five.
-- Locker and Presets sit together under Garage, and Race mode has its own place in the
-  top bar.
-- Text is set in Barlow, which ships inside the app so it reads the same offline.
-- Browse opens on a full-width banner for the newest mod, so you can see what you are
-  installing before you click it.
-- Every page puts its filters, categories and search in one bar under the navigation,
-  so there are two rows of controls above your mods instead of four.
-- Race mode opens with what the game is set to load: how many mods are on, and how much
-  they weigh. Its filters, search and the enable/disable buttons moved up into the bar.
-- The page you get when something goes wrong offers one way out — Reload app.
-- A share code goes on your clipboard the moment the upload finishes, even if you left
-  the app to wait. Nothing to click before you paste it — tracks, mods and presets alike.
-- Coming back to the Library is instant. It no longer re-measures every mod folder each
-  time you leave the page and return, or switch between its tabs.
-- A share code says which of its files you already have before you import it. The ones it
-  would replace are marked in the list.
-- Jump faces are shaped the way a machine leaves them: curving up from flat ground and
-  steepest right at the lip. They used to flatten off over the last metre before the edge,
-  which is why a big jump could still ride like a roller.
-- Landings are longer and gentler than the takeoffs that feed them, instead of a mirror image
-  of them.
-- Jumps are sized to the speed there is. A gap the lap cannot deliver you to at speed gets
-  shortened, and a big double goes where there is a run at it rather than straight out of a
-  hairpin.
-- Braking bumps form where you are actually braking, and for as long as you are — a long
-  approach to a hairpin builds a long braking zone, a flat kink builds almost none.
-- Corners grow a second line beside the first, so there is more than one way through after a
-  few motos.
-- The dark packed line you steer by and the groove you drop into are now the same line.
-- A jump's face carries a single line up it, and the lip stays swept.
-- Sand tracks ride like sand: deeper ruts further apart, far bigger berms, and long swells
-  under braking instead of a sharp washboard. Grass circuits barely wear at all.
-- Tracks can be built anywhere from freshly prepped to raced-in, and there is ground left for
-  a session to cut its own lines into either way.
-- The picture the game lists a built track by is now a view of the place rather than a
-  diagram of it: the ground rendered from above and off to one side, lit by the track's own
-  sun, with the lap cut into it and the country running out to the haze.
-- Tracks you build now start where a start belongs. The lap begins on its longest straight,
-  with the gate row a few metres onto it, the finish line past that and the run at turn one
-  beyond — instead of the gates landing wherever the lap happened to be forty metres in.
-- The start opens out to hold the whole row. Forty gates are 48 m across, so the track fans
-  out to 54 m where they stand, graded flat as far as the ground beside it allows, and
-  funnels back down to riding width by turn one. The pit lane, the thirty-second board and
-  the timing line move out with it.
-- Corners on a track you build now have ruts you can sit in. A groove is cut shallow and the
-  dirt out of it stands as a low smooth bank on its outer side, with flat ground between one
-  and the next — so a corner gives you something to lean on instead of a set of holes.
-- You can see the ruts. The packed dark line follows the floor of each groove and the dry
-  light dirt sits on the bank beside it, so the shape reads at speed instead of only being
-  felt.
-- Tyre marks up the face of every jump, fanned towards the side the last corner sends you —
-  so the face tells you where the riders ahead came from.
-- The riding line varies along its length instead of running as one flat stripe.
-- Ground textures are finer. The soil sheets carried a patch big enough to repeat with the
-  tile, which printed a faint chequerboard over the whole track.
-
-### Fixed
-- Sharing a big preset or file no longer produces a code that downloads without complaint and
-  then does not open. Each slice is checked against the size it should be, on the way up and
-  on the way down, and a short one is retried instead of passed on.
-
-### Changed
-- Tracks you build now read as tracks. The riding surface was one flat brown from edge to
-  edge, with nothing to tell you where the line went or where the track stopped. It is now
-  painted in five: a bright graded verge either side, dry loose dirt at the edges and round
-  the outside of a bend, the worked soil between, and the packed racing line running through
-  it — leaning into each corner and drifting back out on the way to the next.
-
-### Fixed
-- Tracks you build match their own map. The ground was being handed to the compiler upside
-  down, so the jumps and ruts sat mirrored against the paint, the mini-map and the racing
-  line — at the start gate the ground was 4 m out and further round the lap 15 m. It now
-  lines up exactly.
-
-### Changed
-- Building a track now runs MX Bikes' own track compilers over it. The Track Studio
-  fetches PiBoSo's tools the first time you build and does the whole job in one press —
-  export, compile, package, install — so what lands in your tracks folder is a track the
-  game built, not one the app guessed at.
-
-### Added
-- Seven colorways in Settings. Frost is still the default; Ember, Moss, Violet, Rose and
-  Slate move the whole window, not just the buttons. Each works in light and dark.
-- Retro, a colorway that goes further: amber phosphor, monospaced type, square corners and
-  a scanline over the window. The overlay follows whatever you pick, straight away.
-- A Servers tab that lists every live MX Bikes server the way the in-game browser does —
-  who's on each one, the track it's running, and its address. Press Join to launch straight
-  into any of them.
-- The overlay reviews an install the way the main window does. A pack you download without
-  leaving the game comes up in the same sheet, listing what it found and where each piece
-  goes before anything is written.
-
-### Fixed
-- Corners on a generated track wear a bundle of ruts rather than a single deep gouge. The
-  deepest groove now cuts about 0.45 m where it used to cut a metre.
-- Braking bumps appear on the approach to every corner, not just the handful that follow a
-  dead-straight section, and there is acceleration chop on the way out.
-- The cloud-storage warning names OneDrive instead of guessing at "a cloud sync tool", says
-  the app itself is fine, and takes up one thin line instead of a block.
-- Sharing a track goes through. Big shares upload in smaller pieces and a piece the host
-  drops is sent again, so a share code comes back instead of an upload error.
-- Tracks you build in the app have a riding line. The ground is painted in four bands —
-  field, worked shoulder, the line itself and the grass over the top — and you can see all
-  four: nothing is laid over the top of them any more.
-- Every band takes the light: each one carries its own relief map, so soil reads as soil
-  instead of a painted surface.
-- Sound mods install. The ones that come as a folder per bike, the ones that hand you an
-  `engine.scl` to drop in yourself, and the ones whose sample list isn't called
-  `engine.scl` — all of them download and land where the game reads them.
-- ReShade presets shared as a bare `.ini` install. That is about half the presets on the
-  site, and they used to stop with nothing to try but the same button again.
-- Downloads that point at a whole folder — a folder per bike, a designer's six liveries,
-  an unpacked bike — bring the folder down instead of guessing at one file inside it.
-- Anything a download holds beside its `mods` folder is installed too, and a download
-  holding several mods asks which bike each one is for rather than choosing for you.
-- Pictures load on machines where the app's image cache can't be reached. Browse, Shop and
-  MXB Hub fall back to loading a thumbnail straight from the site, so the grids show what
-  you are downloading instead of placeholder icons.
-
-## 2026-09-04
-
-### Added
-- Build a track and ride it without leaving the app. Press Build & install and the app
-  fetches PiBoSo's track tools, compiles the track and puts it in your mods folder, ready
-  to pick in MX Bikes.
-- Tracks you generate build with a normal map and shader for every ground layer, so the
-  soil, the riding line and the grass each take the light and show their grain.
+  right. You can add straights and turns to a lap, not just jumps.
+- A track you build reads like somewhere that has been ridden. The soil, the riding line, the
+  packed floor of a rut and the grass are photographs of ground; jumps are sized to the speed
+  the lap actually delivers and stand on pads cut level under them; ruts are rounded with a
+  bank of material beside each one to lean on; corners wear three or four lines rather than
+  one; and every jump face carries tyre marks fanned towards the side the last corner sends
+  you in from.
+- The start is its own straight beside the circuit, the way a real one is: forty gates on a
+  54 m pad, a sprint, and a turn that joins the lap at turn one. A flying lap never crosses
+  the gates, and the ground behind the row is scenery rather than track.
+- A track you build has things standing beside it — white marker blocks along the outside of
+  a corner, stakes down each edge of the riding line, printed sponsor boards bolted into runs
+  down both sides, hay bales, a gantry over the start, and a wood of mixed pine and broadleaf
+  behind. A tree, a bale, a board and the gantry stop a bike; a stake does not, so clipping
+  one costs you nothing.
+- Generated tracks stand under a photographed sky — a full 360 degree panorama with cloud
+  banks and a sun in it, in place of the drawn one.
 - Rain changes the ground. Every soil layer ships a wet sheet with its own reflection, so a
   rainy race runs on dark, shining dirt.
-- The pit lane counts as pit lane, so sitting in it isn't scored as leaving the track.
-- Grass varies in colour across a track instead of being one flat green.
+- A mod's screenshots are shown whole on its page. Clicking one opens it full screen, where
+  the arrow keys move through the set and Escape closes it.
 
-### Changed
-- Ground textures tile to each axis, so the soil keeps its scale on a track that is wider
-  than it is deep.
-- Races start on the line the track draws: the start line is built and merged with the
-  racing line.
+### Fixed
+- Sharing a large preset or track works again. The host stores files by their contents, so
+  once it had kept only part of an upload it handed back that same broken copy every time the
+  same file was shared — no amount of retrying could shift it. A share that comes back short
+  is now cut into different pieces and sent again.
+- Every slice of a share is checked against the size it should be, on the way up and on the
+  way down, so a code no longer downloads without complaint and then refuses to open.
+- The Library shows a mod's real name and picture after it has been replaced by a new version
+  of itself, instead of keeping the first one it ever saw.
+- Buttons that pair an icon with a label — Refresh across the app, and the rest of the plain
+  buttons — put a space back between the two instead of running them together.
+- Tracks show their whole ground in the 3D viewer rather than the first layers of it, with the
+  masks landing where the track is: Indiana draws all six of its layers, and tracks built in
+  the app draw all seven of theirs.
+- Trees keep their colour when you pull the camera back, and the black shapes standing over
+  some tracks are gone — they were shadows, drawn as if they were solid.
+- Tracks that name their textures plainly, without PiBoSo's suffixes, are drawn painted rather
+  than grey, and trees are drawn on the tracks whose foliage sheets the viewer used to skip.
+- Tracks you build match their own map. The ground was being handed to the compiler upside
+  down, so the jumps and ruts sat mirrored against the paint, the mini-map and the racing line.
+- The picture a track is listed by shows the colours it will actually have, rather than
+  turning a green field into a desert.
+- Generated tracks state their lap length, so the game and the app's track info show it
+  instead of leaving the line blank.
+- Generated laps no longer run over their own ground, and a long circuit no longer runs out of
+  room part-way through being written.
+- Riders start on the gate row. Every position in a track's race data is stated against the
+  lap, and the gates were being written against the start straight, which put the field across
+  the middle of the track.
+- The pit lane counts as pit lane, so sitting in it isn't scored as leaving the track.
+- Servers whose address the master reports in IPv6 form can be joined, and a server the game
+  genuinely can't be pointed at says so instead of offering a Join that goes nowhere.
+- The page you get when something goes wrong offers one way out — Reload app.
 
 ## 2026-09-04 — v0.13.6 — Paint sync, in beta
 

@@ -992,6 +992,10 @@ export const fr: Translation = {
   "serverBrowser.any": "Toutes",
   "serverBrowser.yes": "Oui",
   "serverBrowser.notJoinable": "MX Bikes ne peut pas se connecter à l'adresse de ce serveur.",
+  "serverBrowser.paintSyncHere_one":
+    "{{count}} pilote sur ce serveur utilise la synchro des peintures — vous verrez sa vraie livrée.",
+  "serverBrowser.paintSyncHere_other":
+    "{{count}} pilotes sur ce serveur utilisent la synchro des peintures — vous verrez leurs vraies livrées.",
   "serverBrowser.filtered": "Filtré",
   "serverBrowser.hiddenCount": "{{count}} masqués",
   "serverBrowser.hideFiltered": "Masquer à nouveau",
@@ -1548,6 +1552,22 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0137.hero.title":
+    "Tous les serveurs MX Bikes, en direct, pendant que tu roules",
+  "showcase.v0137.hero.body":
+    "L'onglet Serveurs liste tous les serveurs de la liste maître avec leur vrai ping, le circuit réellement roulé et la session en cours. Il continue de fonctionner pendant que MX Bikes tourne : l'app interroge chaque serveur directement, donc rien ne se dispute ton compte avec le jeu.",
+  "showcase.v0137.whoson":
+    "Ouvre un serveur pour voir qui y roule, ce qu'il autorise et le circuit en cours — avec son image si tu l'as, et où l'obtenir sinon.",
+  "showcase.v0137.cheats":
+    "Les serveurs qui affichent des cheats sont masqués, selon les mêmes règles que FrostMod applique en jeu. L'onglet indique combien il en a masqués et te laisse les voir.",
+  "showcase.v0137.livecodes":
+    "Des codes de partage qui restent à jour. Envoie un code court une fois, puis publie de nouvelles versions dedans : tous ceux qui l'ont collé les reçoivent, et Auto les installe.",
+  "showcase.v0137.viewer":
+    "La vue 3D dessine le vrai sol d'un circuit : chaque couche avec sa propre texture à travers les masques du circuit, ses décors dans leurs textures et le ciel qu'il embarque.",
+  "showcase.v0137.ranked":
+    "Un onglet Ranked avec ton rang MXB Ranked, tes MXP, tes stats de saison et tes 50 dernières courses. Rien à créer : ton GUID vient de Steam.",
+  "showcase.v0137.look":
+    "Un nouveau look. La navigation passe dans une barre en haut, les visuels des mods prennent toute la largeur — sept par ligne au lieu de cinq.",
   "showcase.v0124.hero.title":
     "Toute la grille dans la peinture qu'elle a vraiment choisie",
   "showcase.v0124.hero.body":
@@ -2355,6 +2375,7 @@ export const fr: Translation = {
   "track.toolsFailed": "Impossible de télécharger les outils",
   "track.rideIt": "Installée — choisis-la dans MX Bikes",
   "track.stillNeeded": "Compile la piste avec TerrainEd et l'installe — choisis-la ensuite dans MX Bikes. Ouvre-la dans TrackEd pour déplacer les caméras.",
+  "track.random": "Circuit aléatoire",
   "track.base": "Circuit de base",
   "track.baseLoaded": "« {{name}} » chargé",
   "track.name": "Nom du circuit",
@@ -2438,4 +2459,39 @@ export const fr: Translation = {
   "plugins.lapsedDetail": "votre licence a expiré le {{date}}. Utilisez une clé pour continuer.",
   "plugins.notLicensed": "Sans licence",
   "plugins.notLicensedDetail": "utilisez une clé ci-dessus pour le débloquer.",
+
+  // ── MXB Ranked ─────────────────────────────────────────────────────────────
+  "nav.ranked": "Ranked",
+  "nav.serverBrowser": "Navigateur",
+  "ranked.changeGuid": "GUID",
+  "ranked.refresh": "Actualiser",
+  "ranked.openSite": "Sur mxb-ranked",
+  "ranked.loading": "Lecture de votre profil sur mxb-ranked.com…",
+  "ranked.retry": "Réessayer",
+  "ranked.refreshFailed": "Impossible d'actualiser depuis mxb-ranked.com",
+  "ranked.noGuid": "MXB Ranked identifie les pilotes par leur GUID MX Bikes. Le vôtre est déduit du compte Steam connecté — si vous avez acheté MX Bikes en direct, saisissez le GUID de votre profil mxb-ranked.",
+  "ranked.enterGuid": "Saisir le GUID",
+  "ranked.guidTitle": "GUID MX Bikes",
+  "ranked.guidHelp": "Quel profil afficher. Collez un GUID ou un lien vers un profil mxb-ranked ; laissez vide pour revenir à votre propre compte Steam.",
+  "ranked.since": "membre depuis le {{date}}",
+  "ranked.manualGuid": "saisi à la main",
+  "ranked.exp": "EXP",
+  "ranked.riderRating": "Note pilote",
+  "ranked.penaltyPoints": "Pts de pénalité",
+  "ranked.globalAvg": "Moyenne globale : {{value}}",
+  "ranked.rank": "Rang {{rank}}",
+  "ranked.races": "Courses",
+  "ranked.avgPosition": "Position moy.",
+  "ranked.wins": "Victoires",
+  "ranked.podiums": "Podiums",
+  "ranked.wrLaps": "Tours WR",
+  "ranked.pbLaps": "Tours PB",
+  "ranked.holeshots": "Holeshots",
+  "ranked.track": "Circuit",
+  "ranked.server": "Serveur",
+  "ranked.position": "Pos",
+  "ranked.bike": "Moto",
+  "ranked.mxp": "MXP",
+  "ranked.penalty": "Pénalité",
+  "ranked.finished": "Disputée",
 };
