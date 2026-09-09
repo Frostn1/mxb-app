@@ -363,7 +363,11 @@ fn command(exe: &Path, args: &[&str], game_path: &str) -> Result<std::process::C
              prefix — CrossOver, Whisky or plain Wine — and they'll run through that."
         );
     };
-    let Some(runner) = crate::winehost::resolve("", Some(&prefix)) else {
+    // `FROST_WINE` names a runner outside the places the resolver looks, which is how the
+    // build harness drives a Wine build that lives beside the compilers rather than installed.
+    // Empty unless set, so nothing changes for the app.
+    let over = std::env::var("FROST_WINE").unwrap_or_default();
+    let Some(runner) = crate::winehost::resolve(&over, Some(&prefix)) else {
         bail!("found a Wine prefix at {prefix:?} but nothing that can run it");
     };
     let extra: Vec<String> = args.iter().map(|a| a.to_string()).collect();
@@ -559,3 +563,55 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod build_one {
+    use super::*;
+
+    /// Build a whole track from a program and leave a `.pkz` where the game can open it.
+    ///
+    /// Export, then TerrainEd for the `.map` and the `.trh`, then `tracked -merge` for the
+    /// lines, then pack. What the app does, driven from a program on disk so a generated
+    /// track can be looked at in the game and in the viewer.
+    ///
+    /// ```text
+    /// FROST_PROGRAM=/tmp/prog.json FROST_OUT=/tmp/build \
+    /// FROST_TOOLS=~/Downloads/mxb-trackbuild/tools \
+    /// FROST_PREFIX=~/Downloads/mxb-trackbuild/prefix \
+    /// FROST_WINE="~/Downloads/mxb-trackbuild/Wine Devel.app/Contents/Resources/wine/bin/wine" \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture build_a_track_to_pkz
+    /// ```
+    #[test]
+    #[ignore = "needs PiBoSo's compilers and a Wine prefix"]
+    fn build_a_track_to_pkz() {
+        let prog_path = std::env::var("FROST_PROGRAM").expect("set FROST_PROGRAM");
+        let out = PathBuf::from(std::env::var("FROST_OUT").expect("set FROST_OUT"));
+        let tools_dir = PathBuf::from(std::env::var("FROST_TOOLS").expect("set FROST_TOOLS"));
+        let tools = find(&tools_dir).expect("terrained.exe under FROST_TOOLS");
+
+        let prog: crate::trackprog::TrackProgram =
+            serde_json::from_str(&std::fs::read_to_string(&prog_path).unwrap()).unwrap();
+        let prog = crate::tracksynth::with_fitted_budget(&prog).expect("a height budget");
+        let syn = crate::tracksynth::synthesise(&prog).expect("synthesise");
+
+        let slug = prog.name.replace(' ', "_");
+        let dir = out.join(&slug);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let wrote = crate::tracksynth::write_source(&prog, &syn, &dir).expect("export");
+        println!("  exported {} files to {}", wrote.len(), dir.display());
+
+        let mut phase = |p: &'static str| println!("  .. {p}");
+        let game = std::env::var("FROST_GAME").unwrap_or_default();
+        let steps = compile(&tools, &dir, &slug, &game, &mut phase).expect("compile");
+        for s in &steps {
+            println!("  {} -> {}", s.name, if s.ok { "ok" } else { "FAILED" });
+            if !s.ok {
+                println!("{}", s.output);
+            }
+        }
+        let pkz = out.join(format!("{slug}.pkz"));
+        let n = package(&dir, &slug, &pkz).expect("package");
+        println!("  {} -- {:.1} MB", pkz.display(), n as f64 / 1_048_576.0);
+    }
+}
