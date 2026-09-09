@@ -1764,59 +1764,10 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let _ = &mut vans;
 
 
-    // 6b. Tyre marks: the print of a knobbly down the lines riders take.
-    //
-    // Twenty-seven passes, not nine, and laid where a rider would have laid them. They bunch
-    // on the racing line and thin out towards the edges — a line is where everybody rides, so
-    // that is where the prints pile up — and each one comes and goes along its own length,
-    // at one of four ages. Over a jump they stop: a table with prints across its deck is a
-    // table nobody jumped.
-    let mut tyre = Mesh::default();
-    if !syn.stations.is_empty() {
-        // Where a rider is off the ground, by distance round the lap. The middle half of a
-        // jump is air; the ramp and the landing are not.
-        let airborne_spans: Vec<(f32, f32)> = prog
-            .features
-            .iter()
-            .filter_map(|f| {
-                let (at, len) = (f.at(), f.length());
-                matches!(
-                    f,
-                    crate::trackprog::Feature::Tabletop { .. }
-                        | crate::trackprog::Feature::Double { .. }
-                        | crate::trackprog::Feature::Custom { .. }
-                        | crate::trackprog::Feature::StepUp { .. }
-                )
-                .then_some((at + len * 0.28, at + len * 0.82))
-            })
-            .collect();
-        let airborne = move |s: f32| airborne_spans.iter().any(|(a, b)| s >= *a && s <= *b);
-        let seed = prog.terrain.relief.seed;
-        for pass in 0..TYRE_PASSES {
-            // Bunched on the line: a triangular spread rather than an even one, so the middle
-            // carries three or four passes on top of each other and the edges one.
-            let t = pass as f32 / (TYRE_PASSES - 1) as f32 * 2.0 - 1.0;
-            let lean = t.abs().powf(1.7) * t.signum() * TYRE_SPREAD_M;
-            let ribbon = tyre_ribbon(
-                syn,
-                &syn.stations,
-                &airborne,
-                |i| {
-                    let wander = 0.30
-                        * crate::tracksynth::fbm(
-                            syn.stations[i].s / 26.0,
-                            pass as f32 * 7.0,
-                            seed ^ 0x7A33,
-                        );
-                    syn.line_lat[i] + lean + wander
-                },
-                TYRE_W_M,
-                seed ^ (pass as u32 * 0x9E37),
-            );
-            tyre.append(&ribbon);
-        }
-        tally.push(("tyre marks", TYRE_PASSES));
-    }
+    // No tyre marks. Asked for and then asked out again: a ribbon of prints down the racing
+    // line reads as a stripe painted on the ground rather than as ground anyone has ridden,
+    // and no published track lays anything like it. Indiana carries none.
+    let tyre = Mesh::default();
 
     // 7. The sky over all of it.
     let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
@@ -1897,7 +1848,6 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         ("sky", sky, dome_sheet(), false),
         ("gate", gate, gate_sheet(), true),
         // Drawn, never solid: a mark is paint on the ground, not a kerb.
-        ("tyre marks", tyre, tyre_sheet(), false),
     ];
 
     let mut files = Vec::new();

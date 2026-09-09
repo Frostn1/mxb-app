@@ -3092,7 +3092,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         band_of(l.band)
     };
     let dirt = band_named("soil_dark_c");
-    let line = band_named("soil_worn_c");
+    let line = band_named("soil_dark_c");
     let grass = band_named("hm_grass");
     // Off-track starts where the graded shoulder ends: the rider is on the track, or in the
     // field, with the shoulder belonging to neither. This one decides where the game says a
@@ -3122,9 +3122,11 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     };
     // These two keep the riding line's own width: a rut is worn by everyone taking the same
     // line and the loose stuff piles up beside it, and neither happens out on a start pad.
-    let rut = rut_mask(syn, half, seed, MASK_DIM, MASK_DIM);
+    let rut = band_of(BandMask::Grooves);
     let loose = loose_mask(syn, half, seed, MASK_DIM, MASK_DIM);
     put("mask_dirt.tga", tga_alpha(MASK_DIM, MASK_DIM, &dirt), &mut wrote)?;
+    let patches = band_of(BandMask::Patches);
+    put("mask_patches.tga", tga_alpha(MASK_DIM, MASK_DIM, &patches), &mut wrote)?;
     put("mask_line.tga", tga_alpha(MASK_DIM, MASK_DIM, &line), &mut wrote)?;
     put("mask_loose.tga", tga_alpha(MASK_DIM, MASK_DIM, &loose), &mut wrote)?;
     put("mask_rut.tga", tga_alpha(MASK_DIM, MASK_DIM, &rut), &mut wrote)?;
@@ -4784,6 +4786,40 @@ enum BandMask {
     Rut,
     /// Loose dirt off the line and round the outside of a bend.
     Loose,
+    /// Inside the corridor, wherever the ground itself is grooved.
+    ///
+    /// Not a band about the centreline — that is a stripe painted down the middle, which is
+    /// what this replaced. The mask is the ground's own rut signal, so the darker packed dirt
+    /// lands in the grooves a hundred passes actually cut and the crowns between them stay
+    /// light. A published track's riding surface is never one flat tone: Indiana's varies
+    /// across its width, and the variation follows the shape, not the survey line.
+    Grooves,
+    /// Broad patches of drier ground, laid across the whole plot and owing nothing to where
+    /// the track runs.
+    ///
+    /// This is what stops a site reading as one flat tone with a ribbon on it. Indiana paints
+    /// its dry `soil_light_c` over 59.9% of its ground in patches that cross the track and the
+    /// field alike, and Southwick its `sand_top_c` over 42.3% the same way. Every other band
+    /// here is keyed to the racing line, which is exactly why the ground off the track had
+    /// nothing happening in it.
+    Patches,
+}
+
+/// How much of the plot [`BandMask::Patches`] covers, near enough — Indiana 59.9%,
+/// Southwick 42.3%.
+const PATCH_BIAS: f32 = 0.06;
+/// How big a patch is. Larger than the turf's, so the two do not cut the same shapes.
+const PATCH_M: f32 = 78.0;
+
+/// How wide a groove is, near enough — the radius the rut field is averaged over before it is
+/// painted. Under this the mask combs; far over it the grooves smear into one band.
+const GROOVE_BLUR_M: f32 = 0.75;
+
+/// Broad dry ground, independent of the lap.
+fn patch_cover(x: f32, z: f32, seed: u32) -> f32 {
+    let broad = fbm(x / PATCH_M, z / PATCH_M, seed ^ 0x5E11);
+    let fine = fbm(x / (PATCH_M * 0.34), z / (PATCH_M * 0.34), seed ^ 0x5E12);
+    smoothstep((((broad * 0.78 + fine * 0.22) + PATCH_BIAS) * 2.2).clamp(0.0, 1.0))
 }
 
 /// Where one painted band goes, as coverage per cell.
@@ -4811,6 +4847,52 @@ fn band_mask(
             band_edge(e, x, z, extra, seed ^ 0xB3ED)
         }),
         BandMask::Line(w) => line_mask(syn, half, w, seed, mw, mh),
+        BandMask::Grooves => {
+            // How far to average the rut field over, in cells: about one groove's width.
+            //
+            // `rut` alternates floor to wall every couple of cells, and a groove pitch is
+            // close to the mask's own texel pitch — sampled point by point the two beat
+            // against each other and the paint comes out as a comb of teeth rather than as
+            // packed dirt. Averaged over a groove instead, what is left is *how rutted this
+            // ground is*, which is the thing worth painting.
+            let r = ((GROOVE_BLUR_M / syn.mps).round() as isize).max(1);
+            mask_across(syn, mw, mh, move |c| {
+                if c.lat.abs() > half + RUT_CORRIDOR_FADE_M {
+                    return 0;
+                }
+                let (gx, gy) = ((c.i % syn.gw) as isize, (c.i / syn.gw) as isize);
+                let (mut sum, mut n) = (0.0f32, 0.0f32);
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        let (x, y) = (gx + dx, gy + dy);
+                        if x < 0 || y < 0 || x >= syn.gw as isize || y >= syn.gh as isize {
+                            continue;
+                        }
+                        sum += (-syn.rut[y as usize * syn.gw + x as usize]).clamp(0.0, 1.0);
+                        n += 1.0;
+                    }
+                }
+                let depth = if n > 0.0 { sum / n } else { 0.0 };
+                // Gentler than linear: a groove is packed long before it is deep, so the
+                // paint should show up over most of the ridden width rather than only in the
+                // handful of cells that hit the bottom.
+                let worn = depth.powf(0.55);
+                let grain = 0.78 + 0.22 * fbm(c.x / 6.0, c.z / 6.0, seed ^ 0x41B9);
+                (worn * grain * 255.0).clamp(0.0, 255.0) as u8
+            })
+        }
+        BandMask::Patches => {
+            let mut out = vec![0u8; mw * mh];
+            let (pw, ph) = (syn.gw as f32 * syn.mps, syn.gh as f32 * syn.mps);
+            for j in 0..mh {
+                let z = (j as f32 + 0.5) / mh as f32 * ph;
+                for i in 0..mw {
+                    let x = (i as f32 + 0.5) / mw as f32 * pw;
+                    out[j * mw + i] = (patch_cover(x, z, seed) * 255.0) as u8;
+                }
+            }
+            out
+        }
     }
 }
 
@@ -6345,58 +6427,85 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         ground_looks(prog.terrain.surface);
     let (_, shoulder_scale) = ground(prog.terrain.surface);
     vec![
-        Layer {
-            name: "soil_light_c",
-            sheet: "ground_c",
-            band: BandMask::Everywhere,
-            look: field,
-            salt: 0x9A0D,
-            tile_m: TILE_FIELD_M,
-            mask: None,
-            thickness: None,
-            spec: 18,
-            shininess: 12,
-            wet: true,
-            grass: false,
-        },
-        // The riding surface: every metre of the corridor, opaque. It used to be masked as a
-        // strip about the racing line, which left the pale shoulder showing through the gaps
-        // in its own patchiness — dark dirt with holes in it, and pale ground underneath for
-        // no reason a rider could see.
+        // Dark soil over the whole site, and the riding line painted *light* on top of it.
+        //
+        // The way round a published track has it. Indiana lays `soil_dark_c` (49, 35, 23)
+        // across 99.7% of its ground, its dry `soil_light_c` (171, 134, 99) over 60%, and its
+        // grass over 42% — so the track is the brightest thing on the site and the infield is
+        // what goes green. Ours was inverted: a light field with the corridor painted darker,
+        // which can only ever read as a brown ribbon drawn on a pale sheet, whatever the
+        // sheets themselves are toned to.
         Layer {
             name: "soil_dark_c",
             sheet: "dirt_c",
-            band: BandMask::Out(0.0),
-            look: ridden,
+            band: BandMask::Everywhere,
+            look: line,
             salt: 0x11E5,
             tile_m: TILE_LINE_M,
-            mask: Some("mask_dirt.tga"),
-            thickness: Some(0.1),
+            mask: None,
+            thickness: None,
             spec: 22,
             shininess: 12,
             wet: true,
             grass: false,
         },
-        // Painted over the corridor's base, in the order the ground gets that way: the loose
-        // stuff is thrown over the worked soil, and the line is worn back through it.
+        // Drier ground in broad patches, owing nothing to where the lap runs. Indiana covers
+        // 59.9% of its site this way and Southwick 42.3%; without it the ground off the track
+        // is one flat tone with a ribbon drawn on it.
         Layer {
-            name: "soil_worn_c",
-            sheet: "dirt_line_c",
-            // The whole corridor, not a strip down the middle of it. Published tracks paint
-            // their ridden colour across the full width — Indiana's second layer covers 99.7%
-            // of the map and Southwick's 60% — and a narrow band left ours reading as a line
-            // drawn on the ground rather than as ground that gets ridden on.
-            band: BandMask::Out(0.0),
-            look: line,
-            salt: 0x2C7B,
-            tile_m: TILE_LINE_M,
-            mask: Some("mask_line.tga"),
-            thickness: Some(0.09),
-            spec: 24,
-            shininess: 14,
+            name: "soil_mid_c",
+            sheet: "shoulder_c",
+            band: BandMask::Patches,
+            look: ridden,
+            salt: 0x30D2,
+            tile_m: TILE_SHOULDER_M,
+            mask: Some("mask_patches.tga"),
+            thickness: Some(0.04),
+            spec: 20,
+            shininess: 12,
             wet: true,
             grass: false,
         },
+        // The riding surface: every metre of the corridor, opaque, and the light end of the
+        // palette because that is what worked dry dirt looks like from above.
+        Layer {
+            name: "soil_light_c",
+            sheet: "ground_c",
+            band: BandMask::Out(0.0),
+            look: field,
+            salt: 0x9A0D,
+            tile_m: TILE_FIELD_M,
+            mask: Some("mask_dirt.tga"),
+            thickness: Some(0.1),
+            spec: 18,
+            shininess: 12,
+            wet: true,
+            grass: false,
+        },
+        // The grooves themselves, darker, inside the corridor and nowhere else. This is the
+        // variation *within* the riding surface — a track is not one flat tone from edge to
+        // edge, and what breaks it up is the packed dirt in the ruts against the drier crowns
+        // between them.
+        Layer {
+            name: "soil_worn_c",
+            sheet: "rut_c",
+            band: BandMask::Grooves,
+            look: rut,
+            salt: 0x5B93,
+            tile_m: TILE_RUT_M,
+            mask: Some("mask_rut.tga"),
+            thickness: Some(0.08),
+            spec: 30,
+            shininess: 20,
+            wet: true,
+            grass: false,
+        },
+        // Painted over the corridor's base, in the order the ground gets that way: the loose
+        // stuff is thrown over the worked soil, and the line is worn back through it.
+        // No dark ribbon down the track. A tone this dark confined to the corridor paints
+        // a black band on the ground; Indiana has nothing like it — its riding surface is the
+        // *light* tan and the infield is what goes green. The worn tone is gone and the
+        // corridor carries the mid soil instead.
         Layer {
             // Painted over the line, not under it: with the dark strip laid on top, every
             // bank thrown up beside a groove was covered and a floor read the same as the
@@ -6414,22 +6523,10 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             wet: true,
             grass: false,
         },
-        // The strip people actually ride, worn into the corridor and darker than it. Painted
-        // over the loose, because a line is worn back through what was thrown onto it.
-        Layer {
-            name: "sand_bottom",
-            sheet: "rut_c",
-            band: BandMask::Rut,
-            look: rut,
-            salt: 0x5B93,
-            tile_m: TILE_RUT_M,
-            mask: Some("mask_rut.tga"),
-            thickness: Some(0.08),
-            spec: 30,
-            shininess: 20,
-            wet: true,
-            grass: false,
-        },
+        // No band down the racing line. A strip keyed to the centreline paints a stripe
+        // along the middle of the track, and no published track has one: Indiana lays its
+        // dark soil over the whole site and lets the *shape* of the ruts do the work. The
+        // groove is still cut into the ground; it is simply not painted on.
         Layer {
             name: "hm_grass",
             sheet: "grass_c",
@@ -8564,8 +8661,8 @@ mod tests {
             assert_eq!(wet.is_file(), l.wet, "{} wet sheet", l.name);
         }
         // And it is the same ground, darker — not a different sheet.
-        let dry = std::fs::metadata(dir.join("maps/soil_worn_c.tga")).unwrap().len();
-        let wet = std::fs::metadata(dir.join("maps/soil_worn_c_wet.tga"))
+        let dry = std::fs::metadata(dir.join("maps/soil_dark_c.tga")).unwrap().len();
+        let wet = std::fs::metadata(dir.join("maps/soil_dark_c_wet.tga"))
             .unwrap()
             .len();
         assert_eq!(dry, wet, "the wet sheet is the dry one shaded, same shape");
@@ -11153,5 +11250,117 @@ mod cover_check {
             let c = m.iter().filter(|&&v| v > 8).count() as f64 * 100.0 / m.len() as f64;
             println!("{:<16} {:>7.1}%", l.name, c);
         }
+    }
+}
+
+#[cfg(test)]
+mod ground_preview {
+    use super::*;
+
+    /// A close-up of the ground a track will be painted with, without compiling it.
+    ///
+    /// Every band's mask over its own sheet at the tiling the track states, shaded by the
+    /// terrain the same synthesis produced. What this shows is *placement* — whether the
+    /// worn line lands on the line, the corridor on the corridor and the turf off the track.
+    ///
+    /// ```text
+    /// FROST_PROGRAM=/tmp/prog.json FROST_PNG=/tmp/close.png FROST_SPAN=120 \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture ground_close_up
+    /// ```
+    #[test]
+    #[ignore = "writes a PNG — set FROST_PROGRAM and FROST_PNG"]
+    fn ground_close_up() {
+        let prog: crate::trackprog::TrackProgram = match std::env::var("FROST_PROGRAM") {
+            Ok(p) => serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap(),
+            Err(_) => serde_json::from_str(crate::trackprog::EXAMPLE).unwrap(),
+        };
+        let out = std::env::var("FROST_PNG").expect("set FROST_PNG");
+        let span: f32 = std::env::var("FROST_SPAN")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(140.0);
+        let syn = synthesise(&prog).unwrap();
+        let seed = prog.terrain.relief.seed;
+        let half = prog.width * 0.5;
+        let looks = ground_looks(prog.terrain.surface);
+        let bands = layers(&prog);
+
+        // Each band's mask over the whole plot, and its sheet.
+        const MD: usize = 1024;
+        let masks: Vec<Vec<u8>> = bands
+            .iter()
+            .map(|l| band_mask(&syn, l.band, half, seed, MD, MD))
+            .collect();
+        const SD: usize = 256;
+        let sheets: Vec<Vec<u8>> = bands
+            .iter()
+            .map(|l| {
+                let look = match l.name {
+                    "soil_light_c" => &looks.field,
+                    "soil_dark_c" => &looks.ridden,
+                    "soil_worn_c" => &looks.line,
+                    "sand_top_c" => &looks.loose,
+                    "sand_bottom" => &looks.rut,
+                    _ => &looks.turf,
+                };
+                band_pixels(SD, look, seed ^ l.salt)
+            })
+            .collect();
+
+        // Centre the window on a piece of the lap rather than on the plot: the middle of a
+        // plot is often infield, and infield is not what anyone is asking to look at.
+        let st = syn.stations[syn.stations.len() / 5];
+        let (cx, cz) = (st.x, st.z);
+
+        const P: usize = 900;
+        let mut img = vec![0u8; P * P * 3];
+        let gw = syn.gw as f32;
+        for py in 0..P {
+            for px in 0..P {
+                let wx = cx + (px as f32 / P as f32 - 0.5) * span;
+                let wz = cz + (py as f32 / P as f32 - 0.5) * span;
+                // The masks span the plot, not the track: `half` is the corridor's half
+                // width and belongs to the band test, not to this lookup.
+                let plot = syn.gw as f32 * syn.mps;
+                let u = (wx / plot).clamp(0.0, 0.999);
+                let v = (wz / plot).clamp(0.0, 0.999);
+                let mi = (v * MD as f32) as usize * MD + (u * MD as f32) as usize;
+
+                let mut rgb = [0f32; 3];
+                for (li, l) in bands.iter().enumerate() {
+                    let a = if l.mask.is_none() {
+                        1.0
+                    } else {
+                        masks[li][mi] as f32 / 255.0
+                    };
+                    if a <= 0.003 {
+                        continue;
+                    }
+                    // Sheet sampled at the tiling the track states.
+                    let sx = ((wx / l.tile_m).rem_euclid(1.0) * SD as f32) as usize % SD;
+                    let sz = ((wz / l.tile_m).rem_euclid(1.0) * SD as f32) as usize % SD;
+                    let o = (sz * SD + sx) * 4;
+                    for c in 0..3 {
+                        rgb[c] = rgb[c] * (1.0 - a) + sheets[li][o + c] as f32 * a;
+                    }
+                }
+                // Relief, from the same heightfield the paint was cut against.
+                let gx = (wx / syn.mps).clamp(1.0, gw - 2.0) as usize;
+                let gz = (wz / syn.mps).clamp(1.0, syn.gh as f32 - 2.0) as usize;
+                let h = |a: usize, b: usize| syn.heights[b * syn.gw + a];
+                let dx = h(gx + 1, gz) - h(gx - 1, gz);
+                let dz = h(gx, gz + 1) - h(gx, gz - 1);
+                let shade = (1.0 - (dx * 0.9 + dz * 0.5)).clamp(0.55, 1.5);
+                let o = (py * P + px) * 3;
+                for c in 0..3 {
+                    img[o + c] = (rgb[c] * shade).clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        image::RgbImage::from_raw(P as u32, P as u32, img)
+            .unwrap()
+            .save(&out)
+            .unwrap();
+        println!("  {out}  {span:.0} m across, centred on the lap at ({cx:.0}, {cz:.0})");
     }
 }
