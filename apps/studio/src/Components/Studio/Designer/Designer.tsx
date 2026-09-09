@@ -8,7 +8,27 @@ import {
   useState,
 } from "react";
 import {
-  Bike,  CircleCheck,  ClipboardPaste,  Copy,  CopyPlus,  Eye,  EyeOff,  FilePlus2,  FlipHorizontal2,  FlipVertical2,  Grid3x3,  GripVertical,  Group,  Layers as LayersIcon,  Link2,  Link2Off,  Loader2,  PaintBucket,  Plus,  Save,  Trash2,  Ungroup,
+  Bike,
+  ClipboardPaste,
+  Copy,
+  CopyPlus,
+  Eye,
+  EyeOff,
+  FilePlus2,
+  FlipHorizontal2,
+  FlipVertical2,
+  Grid3x3,
+  GripVertical,
+  Group,
+  Layers as LayersIcon,
+  Link2,
+  Link2Off,
+  Loader2,
+  PaintBucket,
+  Plus,
+  Save,
+  Trash2,
+  Ungroup,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
@@ -1243,6 +1263,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       );
       patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, ...added] }));
       setSelection(added.length ? [added[added.length - 1].id] : []);
+      // Straight into the pointer, with the new layer selected: what you do with an image you
+      // have just placed is move it, and any paint tool would have painted over it instead.
+      setPaint((p) => ({ ...p, tool: "move" }));
       bump();
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
@@ -1256,6 +1279,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     const layer = textLayer(t("designer.newTextValue"), active);
     patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, layer] }));
     setSelection([layer.id]);
+    setPaint((p) => ({ ...p, tool: "move" }));
     bump();
   }, [active, bump, patchSheet, t]);
 
@@ -2626,21 +2650,20 @@ function SheetList({
             <Input
               value={sheet.name}
               placeholder={t("designer.sheetName")}
-              className="h-6 min-w-0 flex-1 border-0 bg-transparent px-1 text-[12px] shadow-none focus-visible:ring-0"
+              title={
+                bound.size && !bound.has(sheet.name.trim().toLowerCase())
+                  ? t("designer.sheetUnbound")
+                  : undefined
+              }
+              className={cn(
+                "h-6 min-w-0 flex-1 border-0 bg-transparent px-1 text-[12px] shadow-none focus-visible:ring-0",
+                bound.size &&
+                  !bound.has(sheet.name.trim().toLowerCase()) &&
+                  "text-warning decoration-warning/40 decoration-dotted underline-offset-4 [text-decoration-line:underline]",
+              )}
               onFocus={() => onPick(sheet.id)}
               onChange={(e) => onRename(sheet.id, e.target.value)}
             />
-            {/* The model binds this name. Worth marking, because a sheet named anything
-                else paints nothing — and it used to be said as a wall of names underneath
-                the list rather than against the row it is about. */}
-            {bound.has(sheet.name.trim().toLowerCase()) && (
-              <span
-                className="flex-none text-faint"
-                title={t("paints.expectedOne", { name: sheet.name.trim() })}
-              >
-                <CircleCheck className="size-3.5" />
-              </span>
-            )}
             <span className="flex-none px-0.5 text-[10.5px] tabular-nums text-faint">
               {sheet.width}²
             </span>
