@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, FolderOpen } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Input } from "@frost/shared/Components/ui/input";
+import { ChevronDown, FolderOpen, Search } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { cn } from "@frost/shared/lib/utils";
-import { Combobox } from "@frost/shared/Components/ui/combobox";
 import { Popover, PopoverContent, PopoverTrigger } from "@frost/shared/Components/ui/popover";
 import {
   bikePreviewAvailable,
@@ -394,6 +394,7 @@ export function PaintDestCard({
   staged,
   hideTitle,
   onPicked,
+  hidePath,
 }: {
   state: PaintDestState;
   bare?: boolean;
@@ -403,12 +404,14 @@ export function PaintDestCard({
   hideTitle?: boolean;
   /** Told whether a kind is chosen, so the caller can enable what depends on one. */
   onPicked?: (picked: boolean) => void;
+  /** The caller is showing where it lands somewhere else — beside its confirming button. */
+  hidePath?: boolean;
 }) {
   const t = useT();
   // What has actually been chosen, as opposed to what the state defaults to. Clicking the
   // chosen one lets go of it — a set of tiles you cannot get back out of is a trap.
   const [touched, setTouched] = useState(!staged);
-  const { kind, setKind, kinds, model, setModel, models, folder, pickFolder, clearFolder } = state;
+  const { kind, setKind, kinds, model, setModel, models } = state;
   const pick = (k: PaintKindDef) => {
     const off = touched && kind.id === k.id;
     setTouched(!off);
@@ -424,7 +427,7 @@ export function PaintDestCard({
       {/* Not a row of equal chips. A bike livery is most of what gets made here and a pair
           of gloves is not, so the two are not offered as the same size of decision — and the
           five gear pieces read as one group rather than five separate choices. */}
-      <div className="flex max-w-[560px] flex-col gap-2">
+      <div className="flex max-w-[720px] flex-col gap-2">
         <div className="grid grid-cols-3 gap-2">
           {kinds
             .filter((k) => k.id === "bike")
@@ -469,49 +472,17 @@ export function PaintDestCard({
 
       {touched && (
         <div className="animate-in fade-in-0 slide-in-from-top-2 duration-200">
-      <div className="mt-5 flex max-w-[420px] flex-col gap-1.5">
+      <div className="mt-6 flex max-w-[720px] flex-col gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
           {t(state.modelLabel)}
         </span>
-        {/* Taller and typed like the tiles above it: this is the second half of the same
-            question, not a text field that happens to sit underneath one. */}
-        <Combobox
-          value={model}
-          options={models}
-          onChange={setModel}
-          className="h-11 rounded-lg px-4 text-[14px]"
-        />
+        <ModelSearch value={model} options={models} onChange={setModel} />
         {!models.length && (
           <span className="text-[11px] leading-snug text-faint">{t("paints.noModels")}</span>
         )}
       </div>
 
-      <div className="mt-3 flex max-w-[420px] flex-col gap-1.5">
-        {folder ? (
-          <div className="flex items-start gap-2 rounded-md border border-border bg-background/60 px-2 py-1.5">
-            <FolderOpen className="mt-0.5 size-3.5 flex-none text-muted-foreground" />
-            <span className="min-w-0 flex-1 break-all text-[11px] leading-snug">{folder}</span>
-            <button
-              type="button"
-              className="text-[11px] text-muted-foreground hover:text-foreground"
-              onClick={clearFolder}
-            >
-              {t("common.clear")}
-            </button>
-          </div>
-        ) : (
-          <p className="min-w-0 truncate text-[11px] leading-snug text-faint">
-            {t("paints.destPath", { rel: model ? relFor(kind, model) : "…" })}
-          </p>
-        )}
-        <button
-          type="button"
-          className="self-start text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-          onClick={() => void pickFolder()}
-        >
-          {t("paints.saveElsewhere")}
-        </button>
-      </div>
+      {!hidePath && <PaintDestPath state={state} />}
         </div>
       )}
     </div>
@@ -556,5 +527,128 @@ function KindCard({
         {t(kind.label)}
       </span>
     </button>
+  );
+}
+
+/**
+ * Pick the model by searching for it.
+ *
+ * Not a dropdown. A bike list runs to a hundred entries with names like
+ * `MX2OEM_2023_KTM_250_SX-F`, and a popover you open to scroll a hundred of those is a worse
+ * way to find one than typing three letters of it. The list is always on screen, so there is
+ * never a step where the options are hidden behind a click — which is the only thing a
+ * select buys you, and it costs the whole list to get it.
+ *
+ * The search box only appears once there are enough entries to be worth filtering; below
+ * that it is a field asking you to narrow down eight things.
+ */
+function ModelSearch({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+}) {
+  const t = useT();
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLowerCase();
+  const shown = useMemo(
+    () => (needle ? options.filter((o) => o.toLowerCase().includes(needle)) : options),
+    [options, needle],
+  );
+  // Scroll the chosen one into view when the list first shows: with a hundred entries it is
+  // otherwise off screen, and the field looks like nothing is chosen.
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    listRef.current?.querySelector('[data-on="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [value]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      {options.length > 8 && (
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-faint" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("common.search")}
+            className="h-10 w-full rounded-lg pl-10 text-[14px]"
+          />
+        </div>
+      )}
+      <div
+        ref={listRef}
+        className="flex max-h-[300px] flex-col gap-0.5 overflow-y-auto rounded-lg border border-border bg-card/50 p-1.5"
+      >
+        {shown.length ? (
+          shown.map((o) => (
+            <button
+              key={o}
+              type="button"
+              data-on={o === value}
+              onClick={() => onChange(o)}
+              className={cn(
+                "cursor-default truncate rounded-md px-3 py-2 text-left text-[13.5px] transition-colors",
+                o === value
+                  ? "bg-primary/[0.12] font-medium text-foreground"
+                  : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+              )}
+            >
+              {o}
+            </button>
+          ))
+        ) : (
+          <p className="px-2.5 py-2 text-[12.5px] text-faint">{t("designer.noMatches")}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Where the paint lands, and the way to send it somewhere else.
+ *
+ * Its own component because it does not belong with the questions: it is the consequence of
+ * the answers rather than one of them, so on the start screen it sits with Create — the two
+ * things about what happens when you press it.
+ */
+export function PaintDestPath({
+  state,
+  className,
+}: {
+  state: PaintDestState;
+  className?: string;
+}) {
+  const t = useT();
+  const { kind, model, folder, pickFolder, clearFolder } = state;
+  return (
+    <div className={cn("flex min-w-0 flex-col gap-1", className)}>
+      {folder ? (
+        <div className="flex min-w-0 items-start gap-2">
+          <FolderOpen className="mt-0.5 size-3.5 flex-none text-muted-foreground" />
+          <span className="min-w-0 flex-1 break-all text-[11px] leading-snug">{folder}</span>
+          <button
+            type="button"
+            className="flex-none text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={clearFolder}
+          >
+            {t("common.clear")}
+          </button>
+        </div>
+      ) : (
+        <p className="min-w-0 truncate text-[11px] leading-snug text-faint">
+          {t("paints.destPath", { rel: model ? relFor(kind, model) : "…" })}
+        </p>
+      )}
+      <button
+        type="button"
+        className="self-start text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+        onClick={() => void pickFolder()}
+      >
+        {t("paints.saveElsewhere")}
+      </button>
+    </div>
   );
 }

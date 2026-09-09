@@ -7,7 +7,7 @@ import {
 } from "@frost/shared/api/mods";
 import { useT } from "@/i18n";
 import { relativeTime } from "./relativeTime";
-import { PaintDestCard, type PaintDestState } from "../paintDest";
+import { PaintDestCard, PaintDestPath, type PaintDestState } from "../paintDest";
 
 /**
  * The Designer's front door, shaped like an IDE's.
@@ -109,11 +109,12 @@ export default function StartScreen({
             waiting. The card carries its own padding for the popover it usually lives in;
             here the column already has some. */}
         <div className="min-h-0 flex-1 overflow-y-auto px-9 py-10 [&>div]:p-0">
-          <PaintDestCard state={dest} bare staged onPicked={setPicked} />
+          <PaintDestCard state={dest} bare staged hidePath onPicked={setPicked} />
         </div>
-        {/* The way out, where a window's confirming action goes: the bottom corner you end
-            up at, rather than above the questions it depends on. */}
-        <div className="flex flex-none justify-end px-9 pb-8 pt-2">
+        {/* Where it lands and the way out, on one line: both are about what happens when you
+            press the button, not about the questions above it. */}
+        <div className="flex flex-none items-end justify-between gap-6 border-t border-border px-9 pb-7 pt-4">
+          {picked ? <PaintDestPath state={dest} className="max-w-[520px]" /> : <span />}
           <Button
             variant="secondary"
             disabled={busy || !picked || !dest.model}
