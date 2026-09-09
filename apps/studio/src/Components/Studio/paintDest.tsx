@@ -1,5 +1,3 @@
-import type { ComponentType } from "react";
-import { Bike, Footprints, Glasses, Hand, HardHat, Shield, Shirt } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, FolderOpen } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -390,12 +388,38 @@ export function PaintDestBar({ state, className }: { state: PaintDestState; clas
 }
 
 /** The "Where it goes" card: kind, model, and the folder escape hatch. */
-export function PaintDestCard({ state, bare }: { state: PaintDestState; bare?: boolean }) {
+export function PaintDestCard({
+  state,
+  bare,
+  staged,
+  hideTitle,
+  onPicked,
+}: {
+  state: PaintDestState;
+  bare?: boolean;
+  /** Hold the model and destination back until a kind has been picked. */
+  staged?: boolean;
+  /** The caller is putting the question in its own header row, beside something else. */
+  hideTitle?: boolean;
+  /** Told whether a kind is chosen, so the caller can enable what depends on one. */
+  onPicked?: (picked: boolean) => void;
+}) {
   const t = useT();
+  // What has actually been chosen, as opposed to what the state defaults to. Clicking the
+  // chosen one lets go of it — a set of tiles you cannot get back out of is a trap.
+  const [touched, setTouched] = useState(!staged);
   const { kind, setKind, kinds, model, setModel, models, folder, pickFolder, clearFolder } = state;
+  const pick = (k: PaintKindDef) => {
+    const off = touched && kind.id === k.id;
+    setTouched(!off);
+    if (!off) setKind(k);
+    onPicked?.(!off);
+  };
   return (
     <div className={cn("p-3.5", !bare && "rounded-lg border border-border bg-card/40")}>
-      <h2 className="mb-2.5 text-[13px] font-semibold">{t("paints.whereTitle")}</h2>
+      {!hideTitle && (
+        <h2 className="mb-2.5 text-[13px] font-semibold">{t("paints.whereTitle")}</h2>
+      )}
 
       {/* Not a row of equal chips. A bike livery is most of what gets made here and a pair
           of gloves is not, so the two are not offered as the same size of decision — and the
@@ -408,10 +432,9 @@ export function PaintDestCard({ state, bare }: { state: PaintDestState; bare?: b
               <KindCard
                 key={k.id}
                 kind={k}
-                on={kind.id === k.id}
-                onPick={() => setKind(k)}
-                className="col-span-2 h-[104px]"
-                iconClass="size-8"
+                on={touched && kind.id === k.id}
+                onPick={() => pick(k)}
+                className="col-span-2 h-[74px]"
                 labelClass="text-[15px]"
               />
             ))}
@@ -421,10 +444,9 @@ export function PaintDestCard({ state, bare }: { state: PaintDestState; bare?: b
               <KindCard
                 key={k.id}
                 kind={k}
-                on={kind.id === k.id}
-                onPick={() => setKind(k)}
-                className="h-[104px]"
-                iconClass="size-6"
+                on={touched && kind.id === k.id}
+                onPick={() => pick(k)}
+                className="h-[74px]"
                 labelClass="text-[13px]"
               />
             ))}
@@ -436,21 +458,29 @@ export function PaintDestCard({ state, bare }: { state: PaintDestState; bare?: b
               <KindCard
                 key={k.id}
                 kind={k}
-                on={kind.id === k.id}
-                onPick={() => setKind(k)}
-                className="h-[68px]"
-                iconClass="size-[18px]"
+                on={touched && kind.id === k.id}
+                onPick={() => pick(k)}
+                className="h-[52px]"
                 labelClass="text-[11px]"
               />
             ))}
         </div>
       </div>
 
-      <div className="mt-4 flex max-w-[420px] flex-col gap-1.5">
-        <span className="text-[11px] font-medium text-muted-foreground">
+      {touched && (
+        <div className="animate-in fade-in-0 slide-in-from-top-2 duration-200">
+      <div className="mt-5 flex max-w-[420px] flex-col gap-1.5">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
           {t(state.modelLabel)}
         </span>
-        <Combobox value={model} options={models} onChange={setModel} />
+        {/* Taller and typed like the tiles above it: this is the second half of the same
+            question, not a text field that happens to sit underneath one. */}
+        <Combobox
+          value={model}
+          options={models}
+          onChange={setModel}
+          className="h-11 rounded-lg px-4 text-[14px]"
+        />
         {!models.length && (
           <span className="text-[11px] leading-snug text-faint">{t("paints.noModels")}</span>
         )}
@@ -482,75 +512,43 @@ export function PaintDestCard({ state, bare }: { state: PaintDestState; bare?: b
           {t("paints.saveElsewhere")}
         </button>
       </div>
+        </div>
+      )}
     </div>
   );
 }
 
-/**
- * One thing you can paint, as a card.
- *
- * The icon is faded and oversized behind the label rather than sitting beside it: at this
- * size a glyph in a row reads as a bullet point, and what these cards need is to be
- * distinguishable at a glance from across the screen.
- */
-const KIND_ICON: Record<string, ComponentType<{ className?: string }>> = {
-  bike: Bike,
-  kit: Shirt,
-  helmets: HardHat,
-  goggles: Glasses,
-  boots: Footprints,
-  gloves: Hand,
-  protections: Shield,
-  protection: Shield,
-};
-
-function iconFor(k: PaintKindDef): ComponentType<{ className?: string }> {
-  if (KIND_ICON[k.id]) return KIND_ICON[k.id];
-  // `area:helmets`, `goggles:helmets`, `extra:gloves` — the folder is the half that names it.
-  const folder = k.id.includes(":") ? k.id.slice(k.id.indexOf(":") + 1) : k.id;
-  return KIND_ICON[k.id.startsWith("goggles:") ? "goggles" : folder] ?? Shirt;
-}
-
+/** One thing you can paint, as a card. */
 function KindCard({
   kind,
   on,
   onPick,
   className,
-  iconClass,
   labelClass,
 }: {
   kind: PaintKindDef;
   on: boolean;
   onPick: () => void;
   className?: string;
-  iconClass?: string;
   labelClass?: string;
 }) {
   const t = useT();
-  const Icon = iconFor(kind);
   return (
     <button
       type="button"
       onClick={onPick}
       aria-pressed={on}
       className={cn(
-        "relative flex cursor-default flex-col items-start justify-end overflow-hidden rounded-lg border p-3 text-left transition-colors",
+        "flex cursor-default items-center overflow-hidden rounded-lg border px-4 text-left transition-colors",
         on
           ? "border-primary bg-primary/[0.08]"
           : "border-border hover:border-input hover:bg-foreground/[0.03]",
         className,
       )}
     >
-      <Icon
-        className={cn(
-          "absolute right-3 top-3 transition-colors",
-          on ? "text-primary" : "text-faint",
-          iconClass,
-        )}
-      />
       <span
         className={cn(
-          "relative max-w-full truncate font-medium leading-tight",
+          "min-w-0 truncate font-medium leading-tight",
           on ? "text-foreground" : "text-muted-foreground",
           labelClass,
         )}

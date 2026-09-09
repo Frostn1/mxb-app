@@ -85,7 +85,7 @@ const Secure = () => {
 
 
       <div className="mx-auto w-full max-w-2xl px-4 pb-10">
-        <Card className="bg-primary/[0.04] p-5">
+        <Card data-raised className="rounded-lg border border-primary/30 bg-primary/[0.04] p-5">
           <div className="flex items-center gap-2">
             <Lock className="size-4 text-primary" />
             <h2 className="text-[14px] font-semibold">{t("secure.genTitle")}</h2>

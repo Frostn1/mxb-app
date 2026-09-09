@@ -39,6 +39,8 @@ export default function StartScreen({
 }) {
   const t = useT();
   const [recent, setRecent] = useState<RecentPaint[] | null>(null);
+  // Nothing is chosen for you, so Create has nothing to do until you choose.
+  const [picked, setPicked] = useState(false);
 
   useEffect(() => {
     designerRecents()
@@ -101,15 +103,22 @@ export default function StartScreen({
       </div>
 
       {/* ── Or start something ──────────────────────────────────────────────── */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-9 py-10">
-        <Heading>{t("designer.startBlank")}</Heading>
-        {/* The card carries its own padding for the popover it usually lives in; here the
-            column already has some. */}
-        <div className="mt-3 [&>div]:p-0">
-          <PaintDestCard state={dest} bare />
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* `staged` holds the model and destination back until a kind is picked, so the
+            second question arrives when the first is answered instead of sitting there
+            waiting. The card carries its own padding for the popover it usually lives in;
+            here the column already has some. */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-9 py-10 [&>div]:p-0">
+          <PaintDestCard state={dest} bare staged onPicked={setPicked} />
         </div>
-        <div className="mt-6 flex-none">
-          <Button disabled={busy || !dest.model} onClick={onBlank}>
+        {/* The way out, where a window's confirming action goes: the bottom corner you end
+            up at, rather than above the questions it depends on. */}
+        <div className="flex flex-none justify-end px-9 pb-8 pt-2">
+          <Button
+            variant="secondary"
+            disabled={busy || !picked || !dest.model}
+            onClick={onBlank}
+          >
             {t("designer.createPaint")}
           </Button>
         </div>

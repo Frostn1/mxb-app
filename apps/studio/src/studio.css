@@ -165,18 +165,24 @@
  * the chrome flat against the edge and let it disappear, so the only thing on screen with
  * presence is the work.
  *
- * So inside a dock a Card keeps its structure and gives up its surface: no border, no
- * shadow, no fill, no radius. The dock itself carries one hairline against the canvas. */
-.studio-skin [data-dock] [data-slot="card"] {
+ * This is the whole app, not just the Designer's docks. Pose and Rider were still stacking
+ * white bordered cards on grey — the dashboard look the Designer had already left behind —
+ * because the rule was scoped to a dock. A Card keeps its structure everywhere and gives up
+ * its surface: no border, no shadow, no fill, no radius. Siblings are separated by a rule,
+ * which is all a section boundary needs.
+ *
+ * A panel that genuinely needs to stand out marks itself: `data-raised` opts back in. */
+.studio-skin [data-slot="card"]:not([data-raised]) {
   background: none;
   border: 0;
   border-radius: 0;
   box-shadow: none;
   padding: 0;
 }
-.studio-skin [data-dock] [data-slot="card"] + [data-slot="card"] {
+.studio-skin [data-slot="card"]:not([data-raised]) + [data-slot="card"]:not([data-raised]) {
   border-top: 1px solid var(--border);
   padding-top: 14px;
+  margin-top: 14px;
 }
 .studio-skin [data-dock="left"] {
   border-right: 1px solid var(--border);
@@ -192,4 +198,30 @@
    not decorate the walls. */
 .studio-skin [data-slot="card"] {
   border-radius: 0;
+}
+
+/* A flattened panel's own header rule is a line under a line: the card above it has already
+   given up its border, so the divider marks nothing. The 3D preview is the one panel that
+   still draws one, because it is shared with the manager, where the card is square and
+   bordered and the rule belongs. */
+.studio-skin [data-slot="card"]:not([data-raised]) > .border-b {
+  border-bottom: 0;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+}
+
+/* A disabled button stops being the accent colour.
+ *
+ * `Button` disables with `opacity-50`, which on a filled primary is the brand blue at half
+ * strength — a washed-out version of the most important colour on screen, which reads as a
+ * rendering fault rather than as "not yet". A disabled control should look like a control
+ * that is off, so it takes the neutral fill and the faint ink. */
+.studio-skin button:disabled:not([data-slot="toggle"]) {
+  opacity: 1;
+  background-color: color-mix(in srgb, var(--foreground) 7%, transparent);
+  color: var(--faint);
+  border-color: transparent;
+}
+.studio-skin button:disabled svg {
+  color: var(--faint);
 }
