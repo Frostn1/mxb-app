@@ -198,9 +198,8 @@ export const it: Translation = {
   "designer.outline": "Contorno",
   "designer.noModelFound":
     "“{{model}}” non è nella tua libreria, quindi non c'è niente su cui mostrarla.",
-  "designer.gearNote": "Mostrato sul pilota di serie — la tua tenuta non è caricata qui.",
-  "designer.gearOnly": "Solo il pezzo",
-  "designer.gearOnlyHint": "Mostra solo il pezzo che stai dipingendo, senza il pilota",
+  "designer.fullBody": "Corpo intero",
+  "designer.fullBodyHint": "Mostra il pezzo sul pilota predefinito invece che da solo.",
   "designer.reference": "Riferimento",
   "designer.traceTemplate": "Solo ricalco",
   "designer.traceHint": "Toglie l'immagine dalla livrea e la lascia sbiadita sotto per ricalcarla. Non viene più salvata. Premi di nuovo per rimetterla.",

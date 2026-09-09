@@ -198,10 +198,8 @@ export const de: Translation = {
   "designer.outline": "Kontur",
   "designer.noModelFound":
     "„{{model}}“ ist nicht in deiner Bibliothek, also gibt es nichts, worauf es gezeigt werden könnte.",
-  "designer.gearNote":
-    "Auf dem Standardfahrer gezeigt — deine eigene Ausrüstung ist hier nicht geladen.",
-  "designer.gearOnly": "Nur Teil",
-  "designer.gearOnlyHint": "Nur das Teil zeigen, das du bemalst — ohne Fahrer",
+  "designer.fullBody": "Ganzer Körper",
+  "designer.fullBodyHint": "Das Teil am Standardfahrer zeigen statt allein.",
   "designer.reference": "Referenz",
   "designer.traceTemplate": "Nur nachzeichnen",
   "designer.traceHint": "Nimmt das Bild aus der Lackierung und lässt es blass darunter zum Nachzeichnen. Es wird nicht mitgespeichert. Nochmal drücken legt es zurück.",

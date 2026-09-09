@@ -198,10 +198,8 @@ export const fr: Translation = {
   "designer.outline": "Contour",
   "designer.noModelFound":
     "« {{model}} » n'est pas dans ta bibliothèque, il n'y a donc rien pour l'afficher.",
-  "designer.gearNote":
-    "Affiché sur le pilote d'origine — ta propre tenue n'est pas chargée ici.",
-  "designer.gearOnly": "Pièce seule",
-  "designer.gearOnlyHint": "Afficher seulement la pièce que tu peins, sans le pilote",
+  "designer.fullBody": "Corps entier",
+  "designer.fullBodyHint": "Montrer la pièce sur le pilote par défaut plutôt que seule.",
   "designer.reference": "Référence",
   "designer.traceTemplate": "Décalquer",
   "designer.traceHint": "Sort l'image de la peinture et la laisse en transparence dessous pour décalquer. Elle n'est plus enregistrée. Appuyez à nouveau pour la remettre.",

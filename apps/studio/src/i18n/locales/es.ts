@@ -198,10 +198,8 @@ export const es: Translation = {
   "designer.outline": "Contorno",
   "designer.noModelFound":
     "“{{model}}” no está en tu biblioteca, así que no hay nada donde mostrarla.",
-  "designer.gearNote":
-    "Se muestra sobre el piloto de serie — tu propio equipo no está cargado aquí.",
-  "designer.gearOnly": "Solo la pieza",
-  "designer.gearOnlyHint": "Muestra solo la pieza que estás pintando, sin el piloto",
+  "designer.fullBody": "Cuerpo entero",
+  "designer.fullBodyHint": "Muestra la pieza sobre el piloto estándar, en vez de sola.",
   "designer.reference": "Referencia",
   "designer.traceTemplate": "Solo calcar",
   "designer.traceHint": "Saca la imagen de la pintura y la deja tenue debajo para calcar. Deja de formar parte de lo que guardas. Púlsalo otra vez para devolverla.",

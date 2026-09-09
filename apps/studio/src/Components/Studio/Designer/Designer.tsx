@@ -2589,10 +2589,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         {/* ── The model and the tools, over the sheet they act on ──────────────── */}
         {(
           <div data-dock="right" className="absolute inset-y-0 right-0 z-10 flex w-[312px] flex-col px-3 pb-3 pt-1.5">
-        {previewOpen ? (
-          /* The switch sits on the corner of the thing it hides, rather than on its own row
-             underneath — a full-width button for a preference is a lot of furniture. */
-          <div className="relative h-[260px] flex-none">
+        {/* Hidden rather than unmounted. Unmounting dropped the WebGL context and the model
+            with it, so putting the preview away and bringing it back re-read the mesh, re-framed
+            the camera, and left the UV map and the stock textures unavailable in between. */}
+        <div className={cn("relative h-[260px] flex-none", !previewOpen && "hidden")}>
             <PreviewPanel
               compact
               state={destState}
@@ -2605,12 +2605,12 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             />
             <button
               onClick={() => togglePreview()}
-              className="absolute bottom-1.5 right-1.5 cursor-default rounded-md px-1.5 py-0.5 text-[11px] text-white/45 transition-colors hover:bg-black/30 hover:text-white/80"
+              className="absolute bottom-1.5 right-1.5 z-10 cursor-default rounded-md px-1.5 py-0.5 text-[11px] text-foreground/45 transition-colors hover:bg-foreground/10 hover:text-foreground"
             >
               {t("designer.hideModel")}
             </button>
-          </div>
-        ) : (
+        </div>
+        {!previewOpen && (
           <button
             onClick={() => togglePreview()}
             className="flex flex-none cursor-default items-center justify-center rounded-md py-1.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"

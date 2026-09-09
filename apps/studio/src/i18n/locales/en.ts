@@ -201,9 +201,8 @@ export const en = {
   "designer.outline": "Outline",
   "designer.noModelFound":
     "“{{model}}” isn't in your library, so there's nothing to show it on.",
-  "designer.gearNote": "Shown on the stock rider — your own kit isn't loaded here.",
-  "designer.gearOnly": "Gear only",
-  "designer.gearOnlyHint": "Show just the piece you're painting, off the rider",
+  "designer.fullBody": "Full body",
+  "designer.fullBodyHint": "Show the piece on the stock rider, rather than on its own.",
   "designer.reference": "Reference",
   "designer.traceTemplate": "Trace only",
   "designer.traceHint": "Take the picture out of the paint and leave it faintly underneath to trace over. It stops being part of what you save. Press again to put it back.",

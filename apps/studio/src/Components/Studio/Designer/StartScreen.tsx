@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { cn } from "@frost/shared/lib/utils";
 import {
@@ -42,18 +42,8 @@ export default function StartScreen({
   const [recent, setRecent] = useState<RecentPaint[] | null>(null);
   // Nothing is chosen for you, so Create has nothing to do until you choose.
   const [picked, setPicked] = useState(false);
-  // One sweep across Create when it becomes usable, and only on the way in.
+  // Create sweeps for as long as there is something to create — see `frost-shimmer`.
   const ready = !busy && picked && !!dest.model;
-  const [shimmer, setShimmer] = useState(false);
-  const wasReady = useRef(false);
-  useEffect(() => {
-    if (ready && !wasReady.current) {
-      setShimmer(true);
-      const id = setTimeout(() => setShimmer(false), 800);
-      return () => clearTimeout(id);
-    }
-    wasReady.current = ready;
-  }, [ready]);
 
   useEffect(() => {
     designerRecents()
@@ -130,7 +120,7 @@ export default function StartScreen({
           {picked ? <PaintDestPath state={dest} className="max-w-[520px]" /> : <span />}
           <Button
             variant="secondary"
-            className={cn(shimmer && "frost-shimmer")}
+            className={cn(ready && "frost-shimmer")}
             disabled={!ready}
             onClick={onBlank}
           >

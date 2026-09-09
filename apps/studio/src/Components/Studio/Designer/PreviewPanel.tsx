@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "@frost/shared/Components/ui/card";
-import { Loader2, Maximize2, Minimize2, TriangleAlert } from "lucide-react";
+import { Maximize2, Minimize2, TriangleAlert } from "lucide-react";
 import type * as THREE from "three";
 import { cn } from "@frost/shared/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@frost/shared/Components/ui/dialog";
@@ -103,7 +103,7 @@ export function PreviewPanel({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [hidden, setHidden] = useState<RiderPart["part"][]>([]);
-  const [soloGear, setSoloGear] = useState(false);
+  const [soloGear, setSoloGear] = useState(true);
   // The same panel, drawn over the editor rather than beside it — see the render below.
   const [full, setFull] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -297,38 +297,6 @@ export function PreviewPanel({
   const controls = (
     <>
       {isBike && full && <TyresPicker pick={tyresPick} className="ml-auto" />}
-      {!isBike && (
-        <div className="ml-auto flex items-center gap-1">
-          {/* A helmet on a rider is a small thing across the canvas with half of it turned
-              away. This takes it off and fills the frame with it. The hide toggles go while
-              it's on — they'd be controls over a rider that isn't on screen. */}
-          {!!gearPart && !!model && (
-            <Chip
-              on={solo}
-              onClick={() => setSoloGear((s) => !s)}
-              title={t("designer.gearOnlyHint")}
-            >
-              {t("designer.gearOnly")}
-            </Chip>
-          )}
-          {!solo &&
-            HIDEABLE.map(({ part, label }) => (
-              <Chip
-                key={part}
-                on={!hidden.includes(part)}
-                onClick={() =>
-                  setHidden((h) =>
-                    h.includes(part) ? h.filter((p) => p !== part) : [...h, part],
-                  )
-                }
-                title={t(label)}
-              >
-                {t(label)}
-              </Chip>
-            ))}
-        </div>
-      )}
-      {loading && <Loader2 className="ml-1 size-3.5 animate-spin text-muted-foreground" />}
     </>
   );
 
@@ -338,13 +306,32 @@ export function PreviewPanel({
    * Not offered when there is nothing to draw: filling the window with the sentence
    * explaining why there's no preview is a bigger version of nothing.
    */
+  /* Opposite "Hide model", on the picture rather than in the header: both are about how much
+     of the thing you are looking at, and the header is for what the picture is of. */
+  const fullBody =
+    !isBike && !!gearPart && !!model ? (
+      <button
+        type="button"
+        onClick={() => setSoloGear((v) => !v)}
+        title={t("designer.fullBodyHint")}
+        className={cn(
+          "absolute bottom-1.5 left-1.5 z-10 cursor-default rounded-md px-1.5 py-0.5 text-[11px] transition-colors",
+          solo
+            ? "text-foreground/45 hover:bg-foreground/10 hover:text-foreground"
+            : "bg-foreground/[0.10] text-foreground",
+        )}
+      >
+        {t("designer.fullBody")}
+      </button>
+    ) : null;
+
   const expand = unavailable ? null : (
     <button
       type="button"
       onClick={() => setFull((f) => !f)}
       title={t(full ? "viewer.exitFullscreen" : "viewer.fullscreen")}
       aria-label={t(full ? "viewer.exitFullscreen" : "viewer.fullscreen")}
-      className="absolute right-1.5 top-1.5 z-10 cursor-default rounded-md p-1 text-white/45 transition-colors hover:bg-black/30 hover:text-white/85"
+      className="absolute right-1.5 top-1.5 z-10 cursor-default rounded-md p-1 text-foreground/45 transition-colors hover:bg-foreground/10 hover:text-foreground"
     >
       {full ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
     </button>
@@ -371,6 +358,14 @@ export function PreviewPanel({
     <>
       {backdrop}
       <ModelViewer
+        // Light, not the near-black default. Most bikes and most helmets are black, and a
+        // black object on a black backdrop has no silhouette — which is the one thing a
+        // preview beside a flat sheet exists to give you.
+        scene="white"
+        // No floor: this panel exists to judge a paint, and the ground is scenery that takes
+        // contrast away from the thing being judged. It also means a solo helmet is not half
+        // sunk into it — `Center` puts a model's middle at the origin.
+        grounded={false}
         hideHints={compact}
         mode={isBike ? "bike" : "rider"}
         nodes={nodes}
@@ -400,13 +395,6 @@ export function PreviewPanel({
     </>
   );
 
-  // Only true of the rider view.
-  const note = !!gearPart && !solo && (
-    <p className="flex-none border-t border-border px-3 py-1.5 text-[11px] leading-snug text-faint">
-      {t("designer.gearNote")}
-    </p>
-  );
-
   return (
     <>
       <Card ref={panelRef} className={cn("min-h-0 overflow-hidden", className)}>
@@ -423,8 +411,8 @@ export function PreviewPanel({
         >
           {!full && body}
           {!full && expand}
+          {!full && fullBody}
         </div>
-        {note}
       </Card>
 
       <Dialog open={full} onOpenChange={setFull}>
@@ -445,39 +433,13 @@ export function PreviewPanel({
             {controls}
           </div>
           <div className="relative min-h-0 flex-1">{full && body}</div>
-          {note}
-        </DialogContent>
+          </DialogContent>
       </Dialog>
     </>
   );
 }
 
 /** A header toggle: lit when what it names is on. */
-function Chip({
-  on,
-  onClick,
-  title,
-  children,
-}: {
-  on: boolean;
-  onClick: () => void;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className={cn(
-        "rounded border px-1.5 py-0.5 text-[10.5px] font-medium transition-colors",
-        on ? "border-primary/60 bg-primary/10 text-foreground" : "border-border text-faint",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
 
 function Message({ text }: { text: string }) {
   return (

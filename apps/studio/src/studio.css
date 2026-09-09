@@ -263,16 +263,20 @@
   color: var(--faint);
 }
 
-/* A one-shot sweep across a button the moment it becomes usable.
+/* A sweep across a button while it is waiting to be pressed.
  *
  * Create sits in the bottom corner, a long way from the tiles you were just clicking, and
- * going from off to on down there is easy to miss. One pass of light, then nothing — it says
- * "this is live now" without becoming something that moves on screen while you work. */
+ * going from off to on down there is easy to miss. It keeps sweeping for as long as there is
+ * something to create — most of the cycle is the pause, so it reads as a slow pulse rather
+ * than as something flashing at you. */
 @keyframes frost-shimmer {
-  from {
+  0% {
     transform: translateX(-120%);
   }
-  to {
+  32% {
+    transform: translateX(220%);
+  }
+  100% {
     transform: translateX(220%);
   }
 }
@@ -293,7 +297,7 @@
     color-mix(in srgb, var(--foreground) 22%, transparent),
     transparent
   );
-  animation: frost-shimmer 0.75s ease-out;
+  animation: frost-shimmer 2.4s ease-out infinite;
 }
 
 /* Icon weight.
