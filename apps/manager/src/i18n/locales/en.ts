@@ -585,6 +585,7 @@ export const en = {
   "settings.themeDark": "Dark",
   "settings.themeSystem": "System",
   "settings.colorway": "Colorway",
+  "settings.uiScale": "Interface size",
   "settings.colorwayFrost": "Frost",
   "settings.colorwayEmber": "Ember",
   "settings.colorwayMoss": "Moss",

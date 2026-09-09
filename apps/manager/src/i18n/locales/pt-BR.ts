@@ -594,6 +594,7 @@ export const ptBR: Translation = {
   "settings.themeDark": "Escuro",
   "settings.themeSystem": "Sistema",
   "settings.colorway": "Paleta",
+  "settings.uiScale": "Tamanho da interface",
   "settings.colorwayFrost": "Gelo",
   "settings.colorwayEmber": "Brasa",
   "settings.colorwayMoss": "Musgo",
