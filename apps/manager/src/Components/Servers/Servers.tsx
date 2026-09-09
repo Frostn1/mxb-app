@@ -10,6 +10,7 @@ import {
   Plug,
   ServerOff,
   EyeOff,
+  Palette,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
@@ -19,6 +20,7 @@ import HelpHint from "@frost/shared/Components/ui/help-hint";
 import {
   listMasterServers,
   joinServer,
+  serversWithPaintSync,
   type MasterServer,
 } from "@frost/shared/api/mods";
 import { useT } from "@/i18n";
@@ -47,6 +49,10 @@ const Servers = () => {
   // Spam and cheat-advertising servers are marked by the backend, not dropped, so this can
   // reveal them. Off by default: the whole point is not to have to read past them.
   const [showHidden, setShowHidden] = useState(false);
+  // Riders running paint sync, by address. Which rows are worth joining used to mean opening
+  // each one and reading its Riders panel — a request per server to answer a question about
+  // the list. This is one request for all of them, and it marks the rows.
+  const [paintSync, setPaintSync] = useState<Record<string, number>>({});
 
   // One fetch at a time. Two overlapping ones each sign in to Steam, and the loser's
   // failure used to replace the winner's list with an error.
@@ -64,6 +70,13 @@ const Servers = () => {
         list.sort((a, b) => b.players - a.players);
         onScreen.current = list;
         setServers(list);
+        // After the list, never with it: the browser has to draw whether or not the control
+        // plane answers, and badges arriving a moment later is the right trade for that.
+        serversWithPaintSync(
+          list.map((s) => ({ name: s.name, address: s.address })),
+        )
+          .then(setPaintSync)
+          .catch(() => setPaintSync({}));
       })
       .catch((e: unknown) => {
         const message = typeof e === "string" ? e : String(e);
@@ -257,6 +270,17 @@ const Servers = () => {
                             title={t("serverBrowser.hiddenBecause", { reason: s.hidden })}
                           >
                             {t("serverBrowser.filtered")}
+                          </span>
+                        )}
+                        {(paintSync[s.address] ?? 0) > 0 && (
+                          <span
+                            className="inline-flex shrink-0 items-center gap-1 border border-success/40 bg-success/10 px-1.5 py-px text-[10.5px] tabular-nums text-success"
+                            title={t("serverBrowser.paintSyncHere", {
+                              count: paintSync[s.address],
+                            })}
+                          >
+                            <Palette className="size-3" />
+                            {paintSync[s.address]}
                           </span>
                         )}
                       </div>
