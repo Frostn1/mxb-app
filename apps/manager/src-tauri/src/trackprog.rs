@@ -1121,7 +1121,7 @@ impl Feature {
 /// with `BASE_SEED=<n> cargo test --bin mxb-app -- --ignored --nocapture emit_base_track`.
 pub const EXAMPLE: &str = r#"{
       "name": "Corpus National",
-      "author": "MXB App",
+      "author": "Frost's Mod Manager",
       "location": "Generated",
       "width": 17.915,
       "terrain": {

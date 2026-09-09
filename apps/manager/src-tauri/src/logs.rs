@@ -1,7 +1,7 @@
 //! Where the logs are, and how to get them off the machine they're on.
 //!
 //! Three sets matter when something has gone wrong, and they live in different places:
-//! MXB App's own file log — written by `tauri_plugin_log` into the OS log dir
+//! Frost's Mod Manager's own file log — written by `tauri_plugin_log` into the OS log dir
 //! (`%LOCALAPPDATA%\com.frost.mxbikes\logs` on Windows) — the game's `log.txt`, which
 //! PiBoSo titles write beside the executable or into the user folder depending on how the
 //! game was started, and whatever FrostMod leaves in the folder we install and run it
@@ -64,7 +64,7 @@ impl LogGroup {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogsInfo {
-    /// MXB App's own log dir.
+    /// Frost's Mod Manager's own log dir.
     pub app: LogGroup,
     /// The managed FrostMod folder — where we install it and where it runs from.
     pub frostmod: LogGroup,
@@ -363,7 +363,7 @@ pub fn summary(
     info: &LogsInfo,
 ) -> String {
     let mut out = String::new();
-    out.push_str(&format!("MXB App {version}\n"));
+    out.push_str(&format!("Frost's Mod Manager {version}\n"));
     out.push_str(&format!("os: {} ({})\n", std::env::consts::OS, std::env::consts::ARCH));
     // Which FrostMod is installed, if any. The loader's own log is in the zip beside this,
     // and "which build wrote it" is the first thing anyone reading that log has to ask —
@@ -524,7 +524,7 @@ mod tests {
         let info = info(&app_dir, &frostmod_dir, &cfg);
 
         let text = summary("9.9.9", Some("v0.13.0"), &cfg, &info);
-        assert!(text.contains("MXB App 9.9.9"), "{text}");
+        assert!(text.contains("Frost's Mod Manager 9.9.9"), "{text}");
         assert!(text.contains("frostmod: v0.13.0"), "{text}");
         assert!(text.contains("frostmod.log"), "{text}");
 

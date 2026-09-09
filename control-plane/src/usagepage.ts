@@ -16,7 +16,7 @@ import { adminAllowed, collectStats, windowDays, type Bucket, type EventRow, typ
 /** Windows the header offers. Anything else still works via `?days=`. */
 const RANGES = [7, 30, 90, 365];
 
-const TITLE = "MXB App usage";
+const TITLE = "Frost's Mod Manager usage";
 
 export async function usageDashboard(request: Request, url: URL, env: Env): Promise<Response> {
   const allowed = adminAllowed(request, url, env);

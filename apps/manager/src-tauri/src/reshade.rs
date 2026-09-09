@@ -44,7 +44,7 @@ use std::path::{Path, PathBuf};
 /// This app's preset library, under the game's install dir.
 ///
 /// Named like [`crate::soundmods::SOUND_LIB_DIR`] so a player browsing their game folder can
-/// tell at a glance which folders MXB App made.
+/// tell at a glance which folders Frost's Mod Manager made.
 pub const PRESET_DIR: &str = "FrostMod ReShade";
 
 /// ReShade's own configuration file. Never a preset, even though it is also an `.ini` with a

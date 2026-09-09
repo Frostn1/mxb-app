@@ -59,7 +59,7 @@ import {
 
 const ROOT = "/admin/plugins";
 
-const TITLE = "MXB App plugins";
+const TITLE = "Frost's Mod Manager plugins";
 
 /** Seconds here, milliseconds in `adminui`: these tables were written in `unixepoch()`. */
 const ms = (seconds: number | null): number => (seconds ? seconds * 1000 : 0);

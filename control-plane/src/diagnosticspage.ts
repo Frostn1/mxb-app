@@ -87,7 +87,7 @@ const RANGES = [1, 7, 30, 90];
 const ROOT = "/admin/diagnostics";
 
 /** Named on every error page this module returns, so the title is written once. */
-const TITLE = "MXB App diagnostics";
+const TITLE = "Frost's Mod Manager diagnostics";
 
 // ---------------------------------------------------------------------------
 // Routes

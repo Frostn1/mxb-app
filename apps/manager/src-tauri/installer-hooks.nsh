@@ -1,8 +1,8 @@
 ; Installer hooks — clear the way before the installer writes over the app it is replacing.
 ;
-; MXB App hides to the tray when its window is closed and launches at login, so an
+; Frost Mod Manager hides to the tray when its window is closed and launches at login, so an
 ; installer a user started by hand nearly always finds it running; the in-app updater
-; launches the installer from inside the app itself. Either way `$INSTDIR\MXB App.exe` — the
+; launches the installer from inside the app itself. Either way `$INSTDIR\Frost Mod Manager.exe` — the
 ; app's own image — can still be held when the copy starts, and NSIS answers that with a
 ; blunt "error opening file for writing", reported against v0.8.1.
 ;
@@ -54,6 +54,73 @@
 !macro DropLegacyBinaries
   Delete "$INSTDIR\frost.exe"
   Delete "$INSTDIR\frost.exe.old*"
+  Delete "$INSTDIR\MXB App.exe"
+  Delete "$INSTDIR\MXB App.exe.old*"
+!macroend
+
+; Up to v0.13.x the app shipped as `MXB App.exe`. Same story as `CloseLegacyApp` above, one
+; name later: `${MAINBINARYNAME}` no longer matches it, so `CloseRunningApp` walks straight
+; past the build being replaced — and this one is nearly always running, because it parks in
+; the tray and launches at login.
+!macro CloseLegacyMxbApp
+  nsExec::Exec 'taskkill /F /IM "MXB App.exe"'
+  Pop $0 ; 0 = closed it, 128 = wasn't running. Either is the state we want.
+!macroend
+
+; The manufacturer key the previous product name was filed under. The bundler defines
+; MANUFACTURER from tauri.conf.json's `publisher` before including this file; the guard is
+; there so a future template that stops doing so fails visibly at the registry read rather
+; than silently expanding to an empty path and matching the wrong key.
+!ifndef MANUFACTURER
+  !define MANUFACTURER "Frost"
+!endif
+!define LEGACY_PRODUCTNAME    "MXB App"
+!define LEGACY_MANUPRODUCTKEY "Software\${MANUFACTURER}\${LEGACY_PRODUCTNAME}"
+!define LEGACY_UNINSTKEY      "Software\Microsoft\Windows\CurrentVersion\Uninstall\${LEGACY_PRODUCTNAME}"
+
+; Retire the install the rename orphaned.
+;
+; Everything the bundler's template uses to find a previous install is keyed on
+; ${PRODUCTNAME}, not on the bundle identifier: $INSTDIR's default, both registry keys,
+; every shortcut and the login item. Rename the product and the new installer therefore sees
+; no previous install at all — its reinstall page aborts, its own old-binary sweep reads an
+; empty key, and `%LOCALAPPDATA%\MXB App` is left behind with a live exe, its uninstaller,
+; its Add/Remove entry and its Run value. Since the app parks in the tray and launches at
+; login, the next reboot then starts two of it: two tray icons, two FrostMods, two mod
+; watchers. `tauri-plugin-single-instance` cannot help — it dedupes on the identifier, which
+; is frozen and therefore the same for both.
+;
+; Deliberately NOT by running the old uninstaller: its path can reach
+; `RmDir /r "$LOCALAPPDATA\${BUNDLEID}"`, and the identifier is frozen — that folder is the
+; NEW app's config, its logs and its installed FrostMod.
+!macro RetireLegacyInstall
+  ReadRegStr $R0 HKCU "${LEGACY_MANUPRODUCTKEY}" ""
+  ${If} $R0 != ""
+  ${AndIf} $R0 != "$INSTDIR"
+  ${AndIf} ${FileExists} "$R0\uninstall.exe"   ; proof it is one of ours, before any RMDir /r
+    Delete "$R0\${LEGACY_PRODUCTNAME}.exe"
+    Delete "$R0\${LEGACY_PRODUCTNAME}.exe.old*"
+    Delete "$R0\uninstall.exe"
+    RMDir /r "$R0"
+  ${EndIf}
+
+  ; `startMenuFolder` is unset, so the template puts the Start-menu link straight in
+  ; $SMPROGRAMS under the product name rather than in a folder of its own.
+  Delete "$SMPROGRAMS\${LEGACY_PRODUCTNAME}.lnk"
+  Delete "$DESKTOP\${LEGACY_PRODUCTNAME}.lnk"
+
+  ; Add/Remove Programs, the remembered install dir, and the login item. The last one is
+  ; what would otherwise leave a second startup entry pointing at a deleted binary.
+  DeleteRegKey HKCU "${LEGACY_UNINSTKEY}"
+  DeleteRegKey HKCU "${LEGACY_MANUPRODUCTKEY}"
+  DeleteRegKey /ifempty HKCU "Software\${MANUFACTURER}"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${LEGACY_PRODUCTNAME}"
+
+  ; The matching `StartupApproved\Run` flag is deliberately LEFT here. It records whether the
+  ; player switched the app off in Task Manager, and the new product name carries no flag of
+  ; its own yet — so the app reads this one on first launch to carry the choice across, and
+  ; clears it then (`delete_legacy_login_item`). Deleting it now would lose the answer before
+  ; anything could read it, and the app would switch itself back on.
 !macroend
 
 ; Drop the images past installs moved aside. Plain `Delete`, not `/REBOOTOK`: a leftover
@@ -108,7 +175,7 @@
 
 ; The Visual C++ 2015-2022 x64 runtime, which the app cannot start without.
 ;
-; `MXB App.exe` imports exactly two symbols from `MSVCP140.dll` — `std::_Xout_of_range` and
+; `Frost Mod Manager.exe` imports exactly two symbols from `MSVCP140.dll` — `std::_Xout_of_range` and
 ; `std::_Xlength_error`, the STL's throw helpers — by way of UnRAR's C++ sources, which
 ; `unrar_sys` builds against the dynamic CRT. `MSVCP140.dll` is not an inbox Windows file;
 ; it arrives only with the redistributable. On a machine that has never had it the first
@@ -119,7 +186,7 @@
 ; and nothing else — no window, no log line, nothing the app can report, because this
 ; happens before `main`. Every build since v0.3.2 has carried the import; it stays invisible
 ; because some other game nearly always brings the runtime in first. What exposes it is a
-; clean Windows: reported by a player who had been running MXB App for weeks and hit this
+; clean Windows: reported by a player who had been running the app for weeks and hit this
 ; the day after resetting their PC.
 ;
 ; `crate::vcruntime` already detects and installs this exact package and cannot help here —
@@ -189,7 +256,7 @@
         ; Silent is the in-app updater running this installer from inside the app. A modal
         ; there would hang an update with no window to answer it.
         ${IfNot} ${Silent}
-          MessageBox MB_YESNO|MB_ICONEXCLAMATION "MXB App needs the Microsoft Visual C++ 2015-2022 (x64) runtime, and this PC doesn't have it. Installing it just now didn't work.$\r$\n$\r$\nMXB App is installed either way, but it will close on launch with error 0xc000007b until the runtime is in. Open Microsoft's download page?" IDNO vc140_declined
+          MessageBox MB_YESNO|MB_ICONEXCLAMATION "Frost's Mod Manager needs the Microsoft Visual C++ 2015-2022 (x64) runtime, and this PC doesn't have it. Installing it just now didn't work.$\r$\n$\r$\nFrost's Mod Manager is installed either way, but it will close on launch with error 0xc000007b until the runtime is in. Open Microsoft's download page?" IDNO vc140_declined
           ExecShell "open" "${VC140_URL}"
           vc140_declined:
         ${EndIf}
@@ -201,6 +268,9 @@
 !macro NSIS_HOOK_PREINSTALL
   !insertmacro CloseRunningApp
   !insertmacro CloseLegacyApp
+  ; Before RetireLegacyInstall: its folder cannot be deleted while its image is running.
+  !insertmacro CloseLegacyMxbApp
+  !insertmacro RetireLegacyInstall
   !insertmacro FreeMainBinary
   ; Last: freeing the binary is a race against a process that just died, while this can
   ; spend a minute on the wire.
@@ -219,6 +289,7 @@
 !macro NSIS_HOOK_PREUNINSTALL
   !insertmacro CloseRunningApp
   !insertmacro CloseLegacyApp
+  !insertmacro CloseLegacyMxbApp
   !insertmacro FreeMainBinary
   !insertmacro DropLegacyBinaries
 !macroend

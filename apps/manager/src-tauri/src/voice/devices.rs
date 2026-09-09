@@ -203,11 +203,11 @@ pub(super) fn permission() -> Result<(), String> {
     };
 
     match status {
-        AVAuthorizationStatus::Denied => Err("macOS is blocking the microphone for MXB App. \
-            Open System Settings → Privacy & Security → Microphone and switch MXB App on."
+        AVAuthorizationStatus::Denied => Err("macOS is blocking the microphone for Frost's Mod Manager. \
+            Open System Settings → Privacy & Security → Microphone and switch Frost's Mod Manager on."
             .to_string()),
         AVAuthorizationStatus::Restricted => Err("This Mac does not allow microphone access \
-            for MXB App — usually a Screen Time or device-management restriction."
+            for Frost's Mod Manager — usually a Screen Time or device-management restriction."
             .to_string()),
         // Authorized, or NotDetermined: opening the stream is what raises the prompt.
         _ => Ok(()),
