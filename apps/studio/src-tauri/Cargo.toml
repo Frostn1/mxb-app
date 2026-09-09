@@ -1,7 +1,7 @@
 [package]
 # Cargo target names cannot hold a space, so this is as close to `mainBinaryName` as it
 # gets. The description is what Windows Task Manager shows in its Processes tab.
-name = "mxb-studio"
+name = "frost-studio"
 version = "0.1.0"
 description = "Frost's Studio — MX Bikes content studio"
 authors = ["Frost"]

@@ -7492,13 +7492,17 @@ fn studio_install(app: tauri::AppHandle) -> Option<StudioInstall> {
         }
         roots.push(std::path::PathBuf::from("/usr/bin"));
         roots.push(std::path::PathBuf::from("/usr/local/bin"));
+        // Several names, because the one on PATH depends on how it was installed: the deb
+        // and the AppImage take `mainBinaryName`, a `cargo install` takes the crate name.
         for r in roots {
-            let p = r.join("mxb-studio");
-            if p.is_file() {
-                return Some(StudioInstall {
-                    path: p.to_string_lossy().into_owned(),
-                    version: String::new(),
-                });
+            for stem in ["Frost Studio", "frost-studio", "frost_studio"] {
+                let p = r.join(stem);
+                if p.is_file() {
+                    return Some(StudioInstall {
+                        path: p.to_string_lossy().into_owned(),
+                        version: String::new(),
+                    });
+                }
             }
         }
         None

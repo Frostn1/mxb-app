@@ -4,13 +4,11 @@ import {
   Brush,
   Circle,
   Eraser,
-  ImagePlus,
   Minus,
   MousePointer2,
   PaintBucket,
   Redo2,
   Square,
-  Type as TypeIcon,
   Undo2,
 } from "lucide-react";
 import { Card } from "@frost/shared/Components/ui/card";
@@ -20,7 +18,7 @@ import { useT } from "@/i18n";
 import type { TKey } from "@/i18n";
 import { Row, Slider } from "./controls";
 import {
-  PAINT_TOOLS,
+  TOOL_GROUPS,
   TOOL_KEYS,
   hasTip,
   type GradientMode,
@@ -110,60 +108,65 @@ export function PaintTools({
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-1">
-        {PAINT_TOOLS.map((id) => {
-          const Icon = ICONS[id];
-          const label = t(`designer.tool.${id}` as TKey);
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => onTool(id)}
-              title={`${label} (${TOOL_KEYS[id].toUpperCase()})`}
-              aria-label={label}
-              aria-pressed={id === tool}
-              className={cn(
-                "flex h-7 items-center justify-center rounded-md border transition-colors",
-                id === tool
-                  ? "border-primary bg-primary/15 text-foreground"
-                  : "border-border text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon className="size-3.5" />
-            </button>
-          );
-        })}
-      </div>
+      {/* Grouped, because eight unlabelled glyphs in one 4×2 block is a puzzle: nothing
+          says which of them draw and which of them place a shape, and the only way to find
+          out is to try one. Three named groups is how every editor lays this out. */}
+      {TOOL_GROUPS.map((group) => (
+        <div key={group.label} className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-faint">
+            {t(group.label as TKey)}
+          </span>
+          <div className="flex flex-wrap gap-1">
+            {group.tools.map((id) => {
+              const Icon = ICONS[id];
+              const label = t(`designer.tool.${id}` as TKey);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => onTool(id)}
+                  title={`${label} (${TOOL_KEYS[id].toUpperCase()})`}
+                  aria-label={label}
+                  aria-pressed={id === tool}
+                  className={cn(
+                    "flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md border px-2 text-[11.5px] transition-colors",
+                    id === tool
+                      ? "border-primary bg-primary/15 text-foreground"
+                      : "border-border text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-3.5 flex-none" />
+                  <span className="truncate">{label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
 
-      {/* Full width and truncating, like everything else in a 224px rail — a label is a
-          translation away from being too long for half of it. */}
       <div className="grid grid-cols-2 gap-1">
         <Button
           variant="outline"
           size="sm"
-          className="w-full min-w-0 justify-start"
+          className="w-full min-w-0"
           disabled={busy}
           onClick={onAddImage}
           title={t("designer.addImage")}
         >
-          <ImagePlus className="size-3.5" />
           <span className="truncate">{t("designer.addImage")}</span>
         </Button>
         <Button
           variant="outline"
           size="sm"
-          className="w-full min-w-0 justify-start"
+          className="w-full min-w-0"
           onClick={onAddText}
           title={t("designer.addText")}
         >
-          <TypeIcon className="size-3.5" />
           <span className="truncate">{t("designer.addText")}</span>
         </Button>
       </div>
 
-      {tool === "move" ? (
-        <p className="text-[11px] leading-snug text-faint">{t("designer.moveHint")}</p>
-      ) : (
+      {tool === "move" ? null : (
         <>
           <Row label={t("designer.colour")}>
             <input

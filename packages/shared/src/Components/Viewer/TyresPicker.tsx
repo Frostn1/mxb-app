@@ -1,5 +1,12 @@
 import { useT } from "../../i18n/context";
 import { cn } from "../../lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { BIKE_OWN_TYRES, type TyresPick } from "./tyresPick";
 
 /**
@@ -13,22 +20,21 @@ export function TyresPicker({ pick, className }: { pick: TyresPick; className?: 
   const t = useT();
   if (!pick.options.length) return null;
   return (
-    <label
-      className={cn("flex items-center gap-1.5 text-xs text-muted-foreground", className)}
-    >
-      {t("viewer.tyres")}
-      <select
-        value={pick.tyres}
-        onChange={(e) => pick.choose(e.target.value)}
-        className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
-      >
-        <option value={BIKE_OWN_TYRES}>{t("viewer.tyresOwn")}</option>
-        {pick.options.map((name) => (
-          <option key={name} value={name}>
-            {name}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className={cn("flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground", className)}>
+      <span className="flex-none">{t("viewer.tyres")}</span>
+      <Select value={pick.tyres} onValueChange={pick.choose}>
+        <SelectTrigger className="h-7 min-w-0 max-w-[150px] text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={BIKE_OWN_TYRES}>{t("viewer.tyresOwn")}</SelectItem>
+          {pick.options.map((name) => (
+            <SelectItem key={name} value={name}>
+              {name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   );
 }

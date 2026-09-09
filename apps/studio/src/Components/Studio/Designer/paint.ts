@@ -51,6 +51,19 @@ export const PAINT_TOOLS: PaintTool[] = [
 ];
 
 /**
+ * The same tools, grouped the way a paint program groups them.
+ *
+ * One block of eight glyphs said nothing about which of them draw a stroke, which fill an
+ * area and which place a shape you can move afterwards — a distinction that matters here,
+ * because the shapes become layers and the strokes do not.
+ */
+export const TOOL_GROUPS: { label: string; tools: PaintTool[] }[] = [
+  { label: "designer.toolGroup.select", tools: ["move"] },
+  { label: "designer.toolGroup.paint", tools: ["brush", "eraser", "fill", "gradient"] },
+  { label: "designer.toolGroup.shapes", tools: ["rect", "ellipse", "line"] },
+];
+
+/**
  * Tools whose result is defined by a press-drag-release, rather than by the path dragged.
  *
  * Only the gradient, now that the shapes are layers. A gradient is a wash across whatever it

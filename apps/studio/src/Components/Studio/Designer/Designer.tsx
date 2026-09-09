@@ -12,7 +12,6 @@ import {
   FlipVertical2,
   Grid3x3,
   Group,
-  Box,
   Layers as LayersIcon,
   Link2,
   Link2Off,
@@ -208,6 +207,12 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // Where the canvas's right-click menu is, in client coordinates, or null for closed.
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [name, setName] = useState("");
+  // The title is editable in place: open when it is clicked, or when a save needs a name.
+  const [naming, setNaming] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const nameRef = useRef<HTMLInputElement>(null);
+  // Set when Save asked for the name, so Enter in the title finishes that save.
+  const saveAfterName = useRef(false);
   const [busy, setBusy] = useState(false);
   // The sheets/layers rail folds away, because once a paint is set up the thing worth the
   // width is the canvas and the model — not the list of what you already chose.
@@ -1933,11 +1938,11 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     return null;
   }, [sheets, name, dest, t]);
 
-  const canSave = sheets.length > 0 && !blocked;
 
   const write = useCallback(
-    async (overwrite: boolean) => {
+    async (overwrite: boolean, as?: string) => {
       if (!dest) return;
+      const title = (as ?? name).trim();
       setBusy(true);
       try {
         // Composite every sheet first: they only exist as canvases until now, and doing it on
@@ -1965,8 +1970,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           }),
         );
         const outcome = await paintStudioSave({
-          name: name.trim(),
-          fileName: name.trim(),
+          name: title,
+          fileName: title,
           textures: staged,
           dest,
           overwrite,
@@ -1985,19 +1990,28 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     [canvasFor, dest, name, sheets, t],
   );
 
-  const save = useCallback(async () => {
-    if (!canSave || !dest) {
-      if (blocked) toast.error(blocked);
+  const save = useCallback(
+    async (as?: string) => {
+    const title = (as ?? name).trim();
+    // `blocked` covers the name too, so a save started from the dialog has to be judged
+    // against the name being handed in rather than the one in state.
+    const stop = as ? blocked && blocked !== t("paints.needName") : blocked;
+    if (!sheets.length || !dest || !title) {
+      if (stop) toast.error(stop);
+      return;
+    }
+    if (stop) {
+      toast.error(stop);
       return;
     }
     try {
-      const target = await paintStudioTarget(name.trim(), dest);
+      const target = await paintStudioTarget(title, dest);
       // Overwriting is the normal case here — you save, look, adjust, save again — so this
       // asks with a toast action rather than a modal that would interrupt that rhythm.
       if (target.exists) {
         toast.warning(t("paints.replaceTitle"), {
           description: t("paints.replaceBody", { path: target.path }),
-          action: { label: t("paints.replace"), onClick: () => void write(true) },
+          action: { label: t("paints.replace"), onClick: () => void write(true, title) },
         });
         return;
       }
@@ -2005,8 +2019,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       toast.error(String(e).replace(/^Error:\s*/, ""));
       return;
     }
-    await write(false);
-  }, [blocked, canSave, dest, name, t, write]);
+    await write(false, title);
+    },
+    [blocked, dest, name, sheets.length, t, write],
+  );
 
   // Whether the model can say where the far flank is at all, for the controls that need it.
   const mirrorReady = mirrorRef.current.ready && mirrorRef.current.sheetId === activeId;
@@ -2021,13 +2037,57 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           window below it. */}
       <ContextBarLeft>
         <PaintDestBar state={destState} className="w-[280px]" />
-        <Input
-          value={name}
-          placeholder={t("paints.namePlaceholder")}
-          className="h-8 w-[170px]"
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && void save()}
-        />
+        {/* The paint's title, in the middle of the window and not in either group of
+            controls — it names what is on screen rather than doing anything to it. It was a
+            text box in the toolbar from the moment the tab opened: a question asked before
+            there was anything to name. */}
+        <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 w-[320px] -translate-x-1/2 -translate-y-1/2 text-center">
+          {naming ? (
+            <Input
+              ref={nameRef}
+              autoFocus
+              value={draftName}
+              placeholder={t("paints.namePlaceholder")}
+              className="pointer-events-auto h-8 text-center text-[13px]"
+              onChange={(e) => setDraftName(e.target.value)}
+              onBlur={() => {
+                setNaming(false);
+                if (draftName.trim()) setName(draftName.trim());
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setNaming(false);
+                  return;
+                }
+                if (e.key !== "Enter" || !draftName.trim()) return;
+                const next = draftName.trim();
+                setName(next);
+                setNaming(false);
+                // Enter from the field a save asked for finishes the save it interrupted.
+                if (saveAfterName.current) {
+                  saveAfterName.current = false;
+                  void save(next);
+                }
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setDraftName(name);
+                setNaming(true);
+              }}
+              className="pointer-events-auto max-w-full cursor-default truncate rounded-md px-2 py-1 text-[13px] transition-colors hover:bg-foreground/[0.06]"
+              title={t("paints.nameTitle")}
+            >
+              {name.trim() ? (
+                <span className="font-medium text-foreground">{name.trim()}</span>
+              ) : (
+                <span className="text-faint">{t("paints.untitled")}</span>
+              )}
+            </button>
+          )}
+        </div>
         {/* The two ways out of the screen, pushed to the far end away from the setup that
             precedes them. Export sits beside Save rather than in a menu: it is what somebody
             finishing a job in Photoshop is looking for. */}
@@ -2035,6 +2095,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           <Button
             variant="outline"
             size="sm"
+            className="border-border text-muted-foreground hover:text-foreground"
             disabled={busy || !sheets.length}
             title={t("designer.exportPsdHint")}
             onClick={() => void exportPsd()}
@@ -2043,15 +2104,28 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           </Button>
           <Button
             size="sm"
-            disabled={busy || !canSave}
+            disabled={busy || !sheets.length}
             title={blocked ?? undefined}
-            onClick={() => void save()}
+            onClick={() => {
+              // An unnamed paint puts the cursor in the title instead of refusing to save.
+              // Enter there finishes what this click started.
+              if (!name.trim()) {
+                setDraftName(name);
+                saveAfterName.current = true;
+                setNaming(true);
+                return;
+              }
+              void save();
+            }}
           >
             {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
             {t("paints.save")}
           </Button>
         </div>
       </ContextBarLeft>
+
+      {/* No dialog: naming is a two-word edit, and dimming the app to collect it is
+          heavier than the thing being collected. The title edits where it sits. */}
 
       {/* The sheet is the window; everything else floats on it.
           Three columns side by side is still a dashboard — the thing being worked on is
@@ -2230,7 +2304,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         {(
           <div data-dock="right" className="absolute inset-y-0 right-0 z-10 flex w-[312px] flex-col gap-3 overflow-y-auto p-3">
         {previewOpen ? (
-          <div data-slot="card" className="h-[260px] flex-none overflow-hidden rounded-lg border border-border bg-card">
+          /* The switch sits on the corner of the thing it hides, rather than on its own row
+             underneath — a full-width button for a preference is a lot of furniture. */
+          <div className="relative h-[260px] flex-none">
             <PreviewPanel
               compact
               state={destState}
@@ -2241,15 +2317,21 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               highlight={hoverIsland}
               className="h-full"
             />
+            <button
+              onClick={() => togglePreview()}
+              className="absolute bottom-1.5 right-1.5 cursor-default rounded-md px-1.5 py-0.5 text-[11px] text-white/45 transition-colors hover:bg-black/30 hover:text-white/80"
+            >
+              {t("designer.hideModel")}
+            </button>
           </div>
-        ) : null}
-        <button
-          onClick={() => togglePreview()}
-          className="flex flex-none cursor-default items-center justify-center gap-2 rounded-md py-1.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
-        >
-          <Box className="size-3.5" />
-          {t(previewOpen ? "designer.hideModel" : "designer.showModel")}
-        </button>
+        ) : (
+          <button
+            onClick={() => togglePreview()}
+            className="flex flex-none cursor-default items-center justify-center rounded-md py-1.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+          >
+            {t("designer.showModel")}
+          </button>
+        )}
           {active && (
             <PaintTools
               settings={paint}

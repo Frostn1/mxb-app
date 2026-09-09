@@ -114,7 +114,7 @@ function Shell() {
                   the Studio has, so it can afford to breathe. */}
               <div
                 data-tauri-drag-region
-                className="flex h-[52px] shrink-0 items-center gap-3 border-b border-border px-4"
+                className="relative flex h-[52px] shrink-0 items-center gap-3 border-b border-border px-4"
               >
                 <div ref={setLeft} className="flex min-w-0 flex-1 items-center gap-2" />
                 <div ref={setRight} className="flex shrink-0 items-center gap-2" />

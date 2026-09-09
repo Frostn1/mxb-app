@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Box, Loader2, Maximize2, Minimize2, TriangleAlert } from "lucide-react";
+import { Card } from "@frost/shared/Components/ui/card";
+import { Loader2, Maximize2, Minimize2, TriangleAlert } from "lucide-react";
 import type * as THREE from "three";
 import { cn } from "@frost/shared/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@frost/shared/Components/ui/dialog";
@@ -395,25 +396,23 @@ export function PreviewPanel({
 
   return (
     <>
-      <div
-        ref={panelRef}
-        className={cn(
-          "flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card",
-          className,
-        )}
-      >
-        <div className="flex items-center gap-2 overflow-x-auto border-b border-border px-3 py-1.5 text-[12.5px] font-medium">
-          <Box className="size-3.5 flex-none text-muted-foreground" />
+      <Card ref={panelRef} className={cn("min-h-0 overflow-hidden", className)}>
+        <div className="flex items-center gap-2 overflow-x-auto px-1 py-1.5 text-[12.5px] font-medium">
           <span className="flex-none whitespace-nowrap">{t("viewer.preview3d")}</span>
           {controls}
         </div>
         {/* Empty while the fullscreen view has it: the canvas is moved rather than copied, so
             there is only ever one model on a GPU and one camera to have turned. */}
-        <div className={cn("relative flex-1", compact ? "min-h-0" : "min-h-[240px]")}>
+        <div
+          className={cn(
+            "relative flex-1 overflow-hidden rounded-lg",
+            compact ? "min-h-0" : "min-h-[240px]",
+          )}
+        >
           {!full && body}
         </div>
         {note}
-      </div>
+      </Card>
 
       <Dialog open={full} onOpenChange={setFull}>
         {/* Everything below the title bar rather than the whole screen: the window's own
@@ -427,7 +426,6 @@ export function PreviewPanel({
           className="left-0 top-[42px] flex h-[calc(100vh-42px)] w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-none"
         >
           <div className="flex flex-none items-center gap-2 border-b border-border px-3 py-2 text-[12.5px] font-medium">
-            <Box className="size-3.5 text-muted-foreground" />
             <DialogTitle className="text-[12.5px] font-medium">
               {t("viewer.preview3d")}
             </DialogTitle>

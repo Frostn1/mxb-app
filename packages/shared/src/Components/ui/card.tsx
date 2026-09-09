@@ -7,9 +7,12 @@ import { cn } from "../../lib/utils";
  * and lifts them off the ground — see `studio.css`. Same component either way, so a panel
  * moved between the two apps doesn't have to be restyled.
  */
-function Card({ className, ...props }: React.ComponentProps<"div">) {
-  return (
+// Forwards its ref: on React 18 a ref handed to a plain function component is silently
+// null, and a panel that measures or moves its own canvas needs the node.
+const Card = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(
+  ({ className, ...props }, ref) => (
     <div
+      ref={ref}
       data-slot="card"
       className={cn(
         "flex flex-col rounded-lg border border-border bg-card text-card-foreground",
@@ -17,8 +20,9 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
       )}
       {...props}
     />
-  );
-}
+  ),
+);
+Card.displayName = "Card";
 
 function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
