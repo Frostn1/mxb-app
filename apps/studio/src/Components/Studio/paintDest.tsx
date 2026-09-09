@@ -590,7 +590,10 @@ function ModelSearch({
               data-on={o === value}
               onClick={() => onChange(o)}
               className={cn(
-                "cursor-default truncate rounded-md px-3 py-2 text-left text-[13.5px] transition-colors",
+                // `shrink-0`: this is a flex column with a scroll cap, so without it a
+                // hundred bikes each get squeezed under their own line height and the names
+                // are crammed together. Only visible on the long lists.
+                "shrink-0 cursor-default truncate rounded-md px-3 py-2 text-left text-[13.5px] transition-colors",
                 o === value
                   ? "bg-primary/[0.12] font-medium text-foreground"
                   : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
