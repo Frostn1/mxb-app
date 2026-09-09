@@ -131,7 +131,7 @@ export const es: Translation = {
   "designer.newTextValue": "TEXTO",
   "designer.layers": "Capas",
   "designer.noLayers":
-    "Aún no hay capas — añade una imagen, texto o una capa de pintura sobre la que dibujar.",
+    "Aún no hay capas",
   "designer.layerTitle": "Capa seleccionada",
   "designer.hide": "Ocultar",
   "designer.show": "Mostrar",
@@ -478,6 +478,8 @@ export const es: Translation = {
   "designer.blankSheetsSkipped_other": "Se dejaron fuera {{count}} hojas vacías: una hoja vacía borraría la textura del modelo.",
   "designer.createExpected_one": "Crear 1 hoja",
   "designer.createExpected_other": "Crear {{count}} hojas",
+  "designer.createCompanions_one": "Añadir el mapa de normales",
+  "designer.createCompanions_other": "Añadir los {{count}} mapas de normales",
   "designer.pasteDropped_one":
     "Se dejó fuera 1 capa de pintura: una capa de pintura es la hoja, y esta es de otro tamaño.",
   "designer.pasteDropped_other":

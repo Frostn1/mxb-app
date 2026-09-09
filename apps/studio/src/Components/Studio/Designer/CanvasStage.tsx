@@ -1056,7 +1056,7 @@ export function CanvasStage({
           the pointer is over anything, and that is exactly when it needs explaining. */}
       {washed && (
         <div
-          className="pointer-events-auto absolute left-2 top-2 flex items-center gap-2 rounded-md bg-foreground/[0.05] px-2 py-1 text-[11px] leading-none text-muted-foreground"
+          className="pointer-events-auto absolute left-4 top-4 flex items-center gap-2 rounded-md bg-foreground/[0.05] px-2 py-1 text-[11px] leading-none text-muted-foreground"
           title={t("designer.flankWashHint")}
         >
           <span className="flex items-center gap-1">
@@ -1069,7 +1069,7 @@ export function CanvasStage({
           </span>
         </div>
       )}
-      <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-2 rounded-md bg-foreground/[0.05] px-2 py-1 text-[11px] leading-none text-muted-foreground">
+      <div className="pointer-events-none absolute bottom-4 left-4 flex items-center gap-2 rounded-md bg-foreground/[0.05] px-2 py-1 text-[11px] leading-none text-muted-foreground">
         <span>
           {sheet.width}×{sheet.height}
         </span>
@@ -1119,7 +1119,7 @@ export function CanvasStage({
       <button
         type="button"
         onClick={reset}
-        className="absolute bottom-2 right-2 cursor-default rounded-md bg-foreground/[0.05] px-2 py-1 text-[11px] leading-none text-muted-foreground transition-colors hover:text-foreground"
+        className="absolute bottom-4 right-4 cursor-default rounded-md bg-foreground/[0.05] px-2 py-1 text-[11px] leading-none text-muted-foreground transition-colors hover:text-foreground"
       >
         {t("designer.resetView")}
       </button>

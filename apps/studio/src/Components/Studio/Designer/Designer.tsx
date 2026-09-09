@@ -149,6 +149,15 @@ const BLANK_SIZE = 2048;
  * Null covers both ends of it: the store evicts, and a rejected read is the same nothing to
  * draw as a name that matched no texture at all.
  */
+/** A square of one colour, for a companion map with no stock texture to copy. */
+async function flatBitmap(color: string, size: number): Promise<ImageBitmap> {
+  const canvas = new OffscreenCanvas(size, size);
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, size, size);
+  return createImageBitmap(canvas);
+}
+
 function stockBitmap(tex: PaintTexture): Promise<ImageBitmap | null> {
   return textureBytes(tex.token)
     .then((buf) => bitmapFromRgba(buf, tex.width, tex.height))
@@ -1139,6 +1148,12 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     return hints.filter((h) => !taken.has(h.trim().toLowerCase()) && !isCompanionMap(h));
   }, [hints, sheets]);
 
+  /** The companion maps the model asks for that aren't on the list — normals, mostly. */
+  const missingCompanions = useMemo(() => {
+    const taken = new Set(sheets.map((s) => s.name.trim().toLowerCase()));
+    return hints.filter((h) => !taken.has(h.trim().toLowerCase()) && isCompanionMap(h));
+  }, [hints, sheets]);
+
   const addBlankSheet = useCallback(() => {
     // Name it after a texture the chosen model actually asks for, when we know one — that's
     // the difference between a paint that shows and a paint that doesn't.
@@ -1783,29 +1798,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * be saved into the paint, which is the thing somebody asking to trace is trying to avoid;
    * and keeping the bitmap on the other side is what lets this be undone by pressing it again.
    */
-  const toggleTrace = useCallback(
-    (sheetId: string) => {
-      const sheet = sheets.find((s) => s.id === sheetId);
-      if (!sheet) return;
-      const ghost = ghostOf(sheetId);
-      // Not recorded by the history, either way: the bitmap moves between the sheet and the
-      // ghost, and the ghost isn't part of the document — an undo would put the template back
-      // on the sheet while the ghost still held it, which is the copy this is careful not to
-      // make. Pressing the button again is the way back, as it always was.
-      if (sheet.base) {
-        const template = sheet.base;
-        patchSheet(sheetId, (s) => ({ ...s, base: null }), false);
-        patchGhost(sheetId, (g) => ({ ...g, template, showTemplate: true }));
-      } else if (ghost.template) {
-        const base = ghost.template;
-        patchSheet(sheetId, (s) => ({ ...s, base }), false);
-        patchGhost(sheetId, (g) => ({ ...g, template: null }));
-      }
-      bump();
-    },
-    [bump, ghostOf, patchGhost, patchSheet, sheets],
-  );
-
   /**
    * Build the active sheet's UV map, once the user has asked for one.
    *
@@ -1953,6 +1945,66 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       bump();
     },
     [bump, patchSheet, remember],
+  );
+
+  /**
+   * Add the companion maps, seeded rather than blank.
+   *
+   * These are kept out of the automatic fill for a good reason: a `.pnt` replaces the model's
+   * textures by name, so shipping an empty `plastics_n` throws away the bike's real normal
+   * map. Offered separately, and never empty — each one starts as the model's own texture, or
+   * for a normal map with no stock to copy, as the flat value that says "exactly as the mesh
+   * says". Both are a correct sheet; a blank one is a hole in the bike.
+   */
+  const addCompanionSheets = useCallback(async () => {
+    if (!missingCompanions.length) return;
+    setBusy(true);
+    try {
+      const made: Sheet[] = [];
+      for (const wanted of missingCompanions) {
+        const tex = stockFor(wanted);
+        const base = tex ? await stockBitmap(tex) : null;
+        const size = tex?.width ?? BLANK_SIZE;
+        const sheet = blankSheet(wanted, size);
+        made.push(
+          base
+            ? { ...sheet, width: tex?.width ?? size, height: tex?.height ?? size, base }
+            : { ...sheet, base: await flatBitmap(FLAT_NORMAL, size) },
+        );
+      }
+      remember();
+      setSheets((prev) => [...prev, ...made]);
+      setActiveId(made[0].id);
+      setSelection([]);
+      bump();
+    } catch (e) {
+      toast.error(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(false);
+    }
+  }, [bump, missingCompanions, remember, stockFor]);
+
+  const toggleTrace = useCallback(
+    (sheetId: string) => {
+      const sheet = sheets.find((s) => s.id === sheetId);
+      if (!sheet) return;
+      const ghost = ghostOf(sheetId);
+      // Not recorded by the history, either way: the bitmap moves between the sheet and the
+      // ghost, and the ghost isn't part of the document — an undo would put the template back
+      // on the sheet while the ghost still held it, which is the copy this is careful not to
+      // make. Pressing the button again is the way back, as it always was.
+      if (sheet.base) {
+        const template = sheet.base;
+        patchSheet(sheetId, (s) => ({ ...s, base: null }), false);
+        patchGhost(sheetId, (g) => ({ ...g, template, showTemplate: true }));
+      } else if (ghost.template) {
+        const base = ghost.template;
+        patchSheet(sheetId, (s) => ({ ...s, base }), false);
+        patchGhost(sheetId, (g) => ({ ...g, template: null }));
+      }
+      bump();
+    },
+    [bump, ghostOf, patchGhost, patchSheet, sheets],
   );
 
   const stockAsBase = useCallback(
@@ -2335,7 +2387,23 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             missingHints={missingHints}
             onAddBlank={addBlankSheet}
             onAddHintSheets={addHintSheets}
+            missingCompanions={missingCompanions}
+            onAddCompanions={() => void addCompanionSheets()}
           />
+          {active && (
+            <LayerList
+              layers={active.layers}
+              selection={selection}
+              onSelect={select}
+              onToggle={(id, visible) => {
+                patchLayer(id, (l) => ({ ...l, visible }));
+                bump();
+              }}
+              onRemove={(id) => removeLayers([id])}
+              onReorder={reorder}
+              onAdd={addPaintLayer}
+            />
+          )}
           </div>
         )}
 
@@ -2492,24 +2560,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             {t("designer.showModel")}
           </button>
         )}
-          {/* The model stays put and everything under it scrolls. Scrolling the whole column
-              meant the bike slid off the top the moment the tool panel grew — which it does
-              every time you pick a brush. */}
-          <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-          {active && (
-            <LayerList
-              layers={active.layers}
-              selection={selection}
-              onSelect={select}
-              onToggle={(id, visible) => {
-                patchLayer(id, (l) => ({ ...l, visible }));
-                bump();
-              }}
-              onRemove={(id) => removeLayers([id])}
-              onReorder={reorder}
-              onAdd={addPaintLayer}
-            />
-          )}
           {active && (
             <PaintTools
               settings={paint}
@@ -2524,7 +2574,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               busy={busy}
             />
           )}
-
+          {/* The model stays put and everything under it scrolls. Scrolling the whole column
+              meant the bike slid off the top the moment the tool panel grew — which it does
+              every time you pick a brush. */}
+          <div className="mt-6 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
           {!!chosen.length && active && (
             <LayerInspector
               layers={chosen}
@@ -2563,6 +2616,8 @@ function SheetList({
   onMove,
   onAddBlank,
   onAddHintSheets,
+  missingCompanions,
+  onAddCompanions,
 }: {
   className?: string;
   sheets: Sheet[];
@@ -2577,6 +2632,9 @@ function SheetList({
   onMove: (id: string, before: string) => void;
   onAddBlank: () => void;
   onAddHintSheets: () => void;
+  /** The companion maps — normals, mostly — the model asks for that aren't on the list. */
+  missingCompanions: string[];
+  onAddCompanions: () => void;
 }) {
   const t = useT();
   // Which row is being dragged. A ref, not state: it changes on every dragover and nothing
@@ -2711,6 +2769,22 @@ function SheetList({
               </span>
             </Button>
           )}
+          {/* Separate from the colour sheets on purpose. Adding these is the less common job
+              and the riskier one — see `addCompanionSheets`. */}
+          {!!missingCompanions.length && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full min-w-0 justify-start"
+              onClick={onAddCompanions}
+              title={missingCompanions.join(", ")}
+            >
+              <FilePlus2 className="size-3.5" />
+              <span className="truncate">
+                {t("designer.createCompanions", { count: missingCompanions.length })}
+              </span>
+            </Button>
+          )}
         </div>
       )}
 
@@ -2786,7 +2860,7 @@ function GhostPanel({
        The opacity comes out on hover: it is the adjustment you make after deciding *what* to
        show, and having it up permanently made a four-control cluster out of a three-control
        decision. */
-    <div className="group pointer-events-auto absolute right-2 top-2 z-10 flex flex-col items-end gap-1">
+    <div className="group pointer-events-auto absolute right-4 top-4 z-10 flex flex-col items-end gap-1">
       <div className="flex items-center gap-1 rounded-lg bg-background/55 p-1 opacity-80 shadow-sm backdrop-blur transition-opacity hover:opacity-100 group-hover:opacity-100">
         {canTrace && (
           <GhostToggle

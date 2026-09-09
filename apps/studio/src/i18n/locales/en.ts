@@ -134,7 +134,7 @@ export const en = {
   "designer.addText": "Add text",
   "designer.newTextValue": "TEXT",
   "designer.layers": "Layers",
-  "designer.noLayers": "No layers yet — add an image, some text, or a paint layer to draw on.",
+  "designer.noLayers": "No layers yet",
   "designer.layerTitle": "Selected layer",
   "designer.hide": "Hide",
   "designer.show": "Show",
@@ -480,6 +480,8 @@ export const en = {
   "designer.blankSheetsSkipped_other": "{{count}} empty sheets were left out — an empty one would wipe the model's own texture.",
   "designer.createExpected_one": "Create 1 sheet",
   "designer.createExpected_other": "Create {{count}} sheets",
+  "designer.createCompanions_one": "Add the normal map",
+  "designer.createCompanions_other": "Add the {{count}} normal maps",
   "designer.pasteDropped_one":
     "1 paint layer was left out — a paint layer is the sheet, and this one is a different size.",
   "designer.pasteDropped_other":

@@ -295,3 +295,16 @@
   );
   animation: frost-shimmer 0.75s ease-out;
 }
+
+/* Icon weight.
+ *
+ * lucide draws at a 2px stroke with square joins, which next to San Francisco reads heavy and
+ * a little mechanical — the pointer is the one that already looked right, and it is the
+ * lightest glyph in the set. This brings the rest to the same weight and rounds the ends, so
+ * a row of them sits with the type rather than on top of it. The attribute on each `<svg>` is
+ * what CSS overrides here. */
+.studio-skin svg {
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

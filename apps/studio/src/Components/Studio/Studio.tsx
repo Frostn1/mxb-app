@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import { cn } from "@frost/shared/lib/utils";
-import { ContextBarRight, PaneActive } from "../Shell/ContextBar";
-import HelpHint from "@frost/shared/Components/ui/help-hint";
-import { useT } from "@/i18n";
+import { PaneActive } from "../Shell/ContextBar";
 import { useConfig } from "@frost/shared/Context/Config";
 import { contentLockAvailable } from "@frost/shared/api/mods";
 import type { Loadout } from "@frost/shared/types";
@@ -46,7 +44,6 @@ export default function Studio({
   riderBike,
   onRiderPresetLoaded,
 }: StudioProps) {
-  const t = useT();
   const { game } = useConfig();
   // The Rider sub-view is the 3D rider rig, and GP Bikes' rig has no part bindings — so it
   // isn't offered there rather than being offered and empty. Designer and Paints both work
@@ -76,26 +73,8 @@ export default function Studio({
     if (!hasLock && tab === "protect") onTab("designer");
   }, [hasRider, hasLock, tab, onTab]);
 
-  // One help hint, on whichever sub-view is open. Each had its own before they shared a tab,
-  // and three "?" icons for one screen would be three ways to ask the same question.
-  const help =
-    tab === "designer"
-      ? { title: t("nav.designer"), body: t("designer.help") }
-      : tab === "paints"
-        ? { title: t("nav.paints"), body: t("paints.help") }
-        : tab === "pose"
-          ? { title: t("nav.pose"), body: t("pose.help") }
-          : tab === "track"
-            ? { title: t("nav.track"), body: t("track.help") }
-            : tab === "protect"
-              ? { title: t("nav.protect"), body: t("protect.help") }
-              : { title: t("nav.rider"), body: t("rider.help") };
-
   return (
     <div className="flex h-full flex-col">
-      <ContextBarRight>
-        <HelpHint title={help.title} description={help.body} />
-      </ContextBarRight>
 
 
       {/* Hidden, not unmounted. These hold real work — a stack of layers, a list of sheets,

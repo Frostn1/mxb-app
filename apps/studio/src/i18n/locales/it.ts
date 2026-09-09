@@ -131,7 +131,7 @@ export const it: Translation = {
   "designer.newTextValue": "TESTO",
   "designer.layers": "Livelli",
   "designer.noLayers":
-    "Ancora nessun livello — aggiungi un'immagine, del testo o un livello pittura su cui disegnare.",
+    "Ancora nessun livello",
   "designer.layerTitle": "Livello selezionato",
   "designer.hide": "Nascondi",
   "designer.show": "Mostra",
@@ -477,6 +477,8 @@ export const it: Translation = {
   "designer.blankSheetsSkipped_other": "{{count}} fogli vuoti sono stati esclusi: un foglio vuoto cancellerebbe la texture del modello.",
   "designer.createExpected_one": "Crea 1 foglio",
   "designer.createExpected_other": "Crea {{count}} fogli",
+  "designer.createCompanions_one": "Aggiungi la normal map",
+  "designer.createCompanions_other": "Aggiungi le {{count}} normal map",
   "designer.pasteDropped_one":
     "1 livello di pittura è stato lasciato fuori: un livello di pittura è il foglio, e questo è di un'altra misura.",
   "designer.pasteDropped_other":

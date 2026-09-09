@@ -131,7 +131,7 @@ export const fr: Translation = {
   "designer.newTextValue": "TEXTE",
   "designer.layers": "Calques",
   "designer.noLayers":
-    "Aucun calque — ajoute une image, du texte ou un calque de peinture pour dessiner dessus.",
+    "Aucun calque pour l'instant",
   "designer.layerTitle": "Calque sélectionné",
   "designer.hide": "Masquer",
   "designer.show": "Afficher",
@@ -478,6 +478,8 @@ export const fr: Translation = {
   "designer.blankSheetsSkipped_other": "{{count}} planches vides ont été écartées : une planche vide effacerait la texture du modèle.",
   "designer.createExpected_one": "Créer 1 planche",
   "designer.createExpected_other": "Créer {{count}} planches",
+  "designer.createCompanions_one": "Ajouter la normal map",
+  "designer.createCompanions_other": "Ajouter les {{count}} normal maps",
   "designer.pasteDropped_one":
     "1 calque de peinture a été laissé de côté — un calque de peinture est la planche, et celle-ci n'a pas la même taille.",
   "designer.pasteDropped_other":

@@ -131,7 +131,7 @@ export const ptBR: Translation = {
   "designer.newTextValue": "TEXTO",
   "designer.layers": "Camadas",
   "designer.noLayers":
-    "Nenhuma camada ainda — adicione uma imagem, um texto ou uma camada de pintura para desenhar.",
+    "Ainda sem camadas",
   "designer.layerTitle": "Camada selecionada",
   "designer.hide": "Ocultar",
   "designer.show": "Mostrar",
@@ -475,6 +475,8 @@ export const ptBR: Translation = {
   "designer.blankSheetsSkipped_other": "{{count}} folhas vazias ficaram de fora — uma vazia apagaria a textura do próprio modelo.",
   "designer.createExpected_one": "Criar 1 folha",
   "designer.createExpected_other": "Criar {{count}} folhas",
+  "designer.createCompanions_one": "Adicionar o mapa de normais",
+  "designer.createCompanions_other": "Adicionar os {{count}} mapas de normais",
   "designer.pasteDropped_one":
     "1 camada de pintura ficou de fora: uma camada de pintura é a folha, e esta é de outro tamanho.",
   "designer.pasteDropped_other":

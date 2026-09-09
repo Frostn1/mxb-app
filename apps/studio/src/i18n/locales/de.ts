@@ -131,7 +131,7 @@ export const de: Translation = {
   "designer.newTextValue": "TEXT",
   "designer.layers": "Ebenen",
   "designer.noLayers":
-    "Noch keine Ebenen — füge ein Bild, Text oder eine Malebene zum Zeichnen hinzu.",
+    "Noch keine Ebenen",
   "designer.layerTitle": "Ausgewählte Ebene",
   "designer.hide": "Ausblenden",
   "designer.show": "Einblenden",
@@ -478,6 +478,8 @@ export const de: Translation = {
   "designer.blankSheetsSkipped_other": "{{count}} leere Bahnen wurden ausgelassen — eine leere würde die Textur des Modells löschen.",
   "designer.createExpected_one": "1 Bahn anlegen",
   "designer.createExpected_other": "{{count}} Bahnen anlegen",
+  "designer.createCompanions_one": "Normal-Map hinzufügen",
+  "designer.createCompanions_other": "Die {{count}} Normal-Maps hinzufügen",
   "designer.pasteDropped_one":
     "1 Malebene wurde ausgelassen — eine Malebene ist die Bahn, und diese hat eine andere Größe.",
   "designer.pasteDropped_other":
