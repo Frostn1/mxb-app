@@ -1746,6 +1746,55 @@ async fn load_track_prop(
     .map_err(|e| format!("load_track_prop task failed: {e}"))
 }
 
+/// Bake a track you own into a prop library the generator can place.
+///
+/// A generated track otherwise stands on a kit we author ourselves. A library lifts a real
+/// venue's objects — its tents, trailers, buildings, poles and trees — and replays them
+/// against our own centreline, so a generated lap gets a paddock rather than a field.
+///
+/// It reads a track archive already installed and writes one file into the app's own data
+/// folder. Baking takes about ten seconds and only has to happen once.
+#[tauri::command]
+async fn bake_prop_library(path: String, sheet_max: Option<u32>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use trackobjects::Class;
+        let donor = trackprops::open(std::path::Path::new(&path))
+            .map_err(|e| format!("{path}: {e:#}"))?;
+        let mut lib = trackprops::extract(
+            &donor,
+            &[Class::Structure, Class::Vehicle, Class::Tree, Class::Bale, Class::Pole],
+        );
+        if lib.props.is_empty() {
+            return Err(format!("{} carries no objects to lift", donor.stem));
+        }
+        trackprops::sheets_for(&donor, &mut lib, sheet_max.unwrap_or(1024).clamp(64, 4096));
+
+        let out = dirs_next::data_local_dir()
+            .ok_or("no app data folder")?
+            .join(APP_IDENTIFIER)
+            .join("props");
+        std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+        let file = out.join("library.fpl");
+        let bytes = lib.encode();
+        std::fs::write(&file, &bytes).map_err(|e| format!("{}: {e}", file.display()))?;
+        log::info!(
+            "[props] baked {} props / {} instances from {} -> {:.1} MB",
+            lib.props.len(),
+            lib.instances.len(),
+            donor.stem,
+            bytes.len() as f32 / 1_048_576.0
+        );
+        Ok(format!(
+            "{} props from {} placed objects, {:.1} MB",
+            lib.props.len(),
+            lib.instances.len(),
+            bytes.len() as f32 / 1_048_576.0
+        ))
+    })
+    .await
+    .map_err(|e| format!("bake_prop_library task failed: {e}"))?
+}
+
 /// Save a track's props to a `.scr` the game will load.
 ///
 /// The `.scr` is the one part of a track that states where a thing goes in plain text, so it
@@ -10722,6 +10771,7 @@ fn main() {
             load_track_surfaces,
             read_track_placements,
             save_track_props,
+            bake_prop_library,
             read_track_placeable,
             load_track_prop,
             load_track_backdrop,

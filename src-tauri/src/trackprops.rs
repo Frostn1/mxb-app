@@ -920,7 +920,7 @@ mod replay {
         let prog: crate::trackprog::TrackProgram =
             serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
         let syn = crate::tracksynth::synthesise(&prog).unwrap();
-        let placed = crate::trackscenery::placed(&lib, &prog, &syn);
+        let placed = crate::trackscenery::lifted(&lib, &prog, &syn);
 
         let lap = prog.lap_length();
         eprintln!(
@@ -959,5 +959,350 @@ mod replay {
                 );
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Baking a library to a file
+//
+// Lifting takes eleven seconds and a 388 MB donor archive, neither of which belongs in a
+// track build. So a library is baked once and read back many times, in a format that is its
+// own version check: `FPL1`, then the whole payload DEFLATEd, because half of it is RGBA.
+// ---------------------------------------------------------------------------------------
+
+const LIB_MAGIC: &[u8; 4] = b"FPL1";
+
+fn put_u32(o: &mut Vec<u8>, v: u32) {
+    o.extend_from_slice(&v.to_le_bytes());
+}
+fn put_f32(o: &mut Vec<u8>, v: f32) {
+    o.extend_from_slice(&v.to_le_bytes());
+}
+fn put_str(o: &mut Vec<u8>, s: &str) {
+    put_u32(o, s.len() as u32);
+    o.extend_from_slice(s.as_bytes());
+}
+fn put_f32s(o: &mut Vec<u8>, v: &[f32]) {
+    put_u32(o, v.len() as u32);
+    for x in v {
+        put_f32(o, *x);
+    }
+}
+
+struct Rd<'a> {
+    b: &'a [u8],
+    at: usize,
+}
+impl<'a> Rd<'a> {
+    fn u32(&mut self) -> Option<u32> {
+        let v = u32::from_le_bytes(self.b.get(self.at..self.at + 4)?.try_into().ok()?);
+        self.at += 4;
+        Some(v)
+    }
+    fn f32(&mut self) -> Option<f32> {
+        Some(f32::from_bits(self.u32()?))
+    }
+    fn s(&mut self) -> Option<String> {
+        let n = self.u32()? as usize;
+        let s = String::from_utf8_lossy(self.b.get(self.at..self.at + n)?).into_owned();
+        self.at += n;
+        Some(s)
+    }
+    fn f32s(&mut self) -> Option<Vec<f32>> {
+        let n = self.u32()? as usize;
+        let mut v = Vec::with_capacity(n);
+        for _ in 0..n {
+            v.push(self.f32()?);
+        }
+        Some(v)
+    }
+    fn bytes(&mut self) -> Option<Vec<u8>> {
+        let n = self.u32()? as usize;
+        let v = self.b.get(self.at..self.at + n)?.to_vec();
+        self.at += n;
+        Some(v)
+    }
+}
+
+/// Every class a library can carry, in a fixed order, so the file is stable across releases.
+///
+/// Written as an index rather than a name because a class is one byte either way and a
+/// renamed variant should break the version, not silently reclass every prop in the file.
+const CLASSES: [Class; 8] = [
+    Class::Tree,
+    Class::Fence,
+    Class::Bale,
+    Class::Banner,
+    Class::Crowd,
+    Class::Structure,
+    Class::Pole,
+    Class::Vehicle,
+];
+
+impl PropLibrary {
+    /// Pack a library into bytes.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut o = Vec::new();
+        put_str(&mut o, &self.donor);
+        put_f32(&mut o, self.donor_lap_m);
+
+        put_u32(&mut o, self.props.len() as u32);
+        for p in &self.props {
+            put_str(&mut o, &p.id);
+            put_str(&mut o, &p.sheet);
+            put_u32(
+                &mut o,
+                CLASSES.iter().position(|c| *c == p.class).unwrap_or(0) as u32,
+            );
+            put_f32(&mut o, p.height);
+            put_f32(&mut o, p.span);
+            put_f32(&mut o, p.reach);
+            put_f32(&mut o, p.axis_ref);
+            put_f32s(&mut o, &p.mesh.positions);
+            put_f32s(&mut o, &p.mesh.uvs);
+            put_f32s(&mut o, &p.mesh.normals);
+            put_u32(&mut o, p.mesh.indices.len() as u32);
+            for i in &p.mesh.indices {
+                put_u32(&mut o, *i);
+            }
+        }
+
+        put_u32(&mut o, self.instances.len() as u32);
+        for i in &self.instances {
+            put_u32(&mut o, i.prop as u32);
+            put_f32(&mut o, i.along);
+            put_f32(&mut o, i.offset);
+            put_f32(&mut o, i.yaw);
+            put_f32(&mut o, i.lift);
+            put_u32(&mut o, i.near as u32);
+        }
+
+        put_u32(&mut o, self.sheets.len() as u32);
+        for (name, w, h, rgba) in &self.sheets {
+            put_str(&mut o, name);
+            put_u32(&mut o, *w);
+            put_u32(&mut o, *h);
+            put_u32(&mut o, rgba.len() as u32);
+            o.extend_from_slice(rgba);
+        }
+
+        let mut out = LIB_MAGIC.to_vec();
+        let mut enc =
+            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+        use std::io::Write;
+        let _ = enc.write_all(&o);
+        out.extend_from_slice(&enc.finish().unwrap_or_default());
+        out
+    }
+
+    /// Read a library back, or `None` if these are not a library's bytes.
+    pub fn decode(b: &[u8]) -> Option<PropLibrary> {
+        if b.len() < 4 || &b[0..4] != LIB_MAGIC {
+            return None;
+        }
+        use std::io::Read;
+        let mut raw = Vec::new();
+        flate2::read::DeflateDecoder::new(&b[4..])
+            .read_to_end(&mut raw)
+            .ok()?;
+        let mut r = Rd { b: &raw, at: 0 };
+
+        let donor = r.s()?;
+        let donor_lap_m = r.f32()?;
+
+        let n = r.u32()? as usize;
+        let mut props = Vec::with_capacity(n);
+        for _ in 0..n {
+            let id = r.s()?;
+            let sheet = r.s()?;
+            let class = *CLASSES.get(r.u32()? as usize)?;
+            let height = r.f32()?;
+            let span = r.f32()?;
+            let reach = r.f32()?;
+            let axis_ref = r.f32()?;
+            let positions = r.f32s()?;
+            let uvs = r.f32s()?;
+            let normals = r.f32s()?;
+            let ni = r.u32()? as usize;
+            let mut indices = Vec::with_capacity(ni);
+            for _ in 0..ni {
+                indices.push(r.u32()?);
+            }
+            props.push(Prop {
+                id,
+                sheet,
+                class,
+                mesh: Mesh { positions, uvs, normals, indices },
+                height,
+                span,
+                reach,
+                axis_ref,
+            });
+        }
+
+        let n = r.u32()? as usize;
+        let mut instances = Vec::with_capacity(n);
+        for _ in 0..n {
+            instances.push(Instance {
+                prop: r.u32()? as usize,
+                along: r.f32()?,
+                offset: r.f32()?,
+                yaw: r.f32()?,
+                lift: r.f32()?,
+                near: r.u32()? != 0,
+            });
+        }
+
+        let n = r.u32()? as usize;
+        let mut sheets = Vec::with_capacity(n);
+        for _ in 0..n {
+            let name = r.s()?;
+            let w = r.u32()?;
+            let h = r.u32()?;
+            let rgba = r.bytes()?;
+            sheets.push((name, w, h, rgba));
+        }
+
+        Some(PropLibrary {
+            donor,
+            donor_lap_m,
+            props,
+            instances,
+            runs: Vec::new(),
+            sheets,
+        })
+    }
+}
+
+/// Where a baked library lives, if one is installed.
+///
+/// `FROST_PROPS` overrides, which is how a bake is tried before it is installed. Otherwise
+/// the app's own data directory, beside the caches the rest of the pipeline keeps.
+///
+/// A library is a donor track's geometry and sheets, so it is *not* committed and *not*
+/// bundled: it is baked from an archive the user already has, and its absence is ordinary —
+/// [`crate::trackscenery::build`] simply places nothing from it.
+pub fn library_path() -> Option<std::path::PathBuf> {
+    if let Ok(p) = std::env::var("FROST_PROPS") {
+        let p = std::path::PathBuf::from(p);
+        return p.exists().then_some(p);
+    }
+    let p = dirs_next::data_local_dir()?
+        .join("com.frost.mxbikes")
+        .join("props")
+        .join("library.fpl");
+    p.exists().then_some(p)
+}
+
+/// Load the installed library, if there is one and it reads.
+pub fn load() -> Option<PropLibrary> {
+    let p = library_path()?;
+    let b = std::fs::read(&p).ok()?;
+    let lib = PropLibrary::decode(&b);
+    if lib.is_none() {
+        log::warn!("prop library at {} does not read; ignoring it", p.display());
+    }
+    lib
+}
+
+#[cfg(test)]
+mod baked {
+    use super::*;
+
+    /// A library must survive the round trip exactly, or a bake silently ships wrong geometry.
+    #[test]
+    fn a_library_reads_back_as_it_was_written() {
+        let lib = PropLibrary {
+            donor: "somewhere".into(),
+            donor_lap_m: 2170.0,
+            props: vec![Prop {
+                id: "tent_0001".into(),
+                sheet: "big_tent_c".into(),
+                class: Class::Structure,
+                mesh: crate::edfwrite::cuboid(4.0, 2.5, 3.0),
+                height: 2.5,
+                span: 4.0,
+                reach: 2.5,
+                axis_ref: 0.25,
+            }],
+            instances: vec![Instance {
+                prop: 0,
+                along: 0.375,
+                offset: -18.5,
+                yaw: 1.25,
+                lift: 0.0,
+                near: true,
+            }],
+            runs: Vec::new(),
+            sheets: vec![("big_tent_c".into(), 2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8])],
+        };
+
+        let back = PropLibrary::decode(&lib.encode()).expect("reads back");
+        assert_eq!(back.donor, lib.donor);
+        assert_eq!(back.donor_lap_m, lib.donor_lap_m);
+        assert_eq!(back.props.len(), 1);
+        assert_eq!(back.props[0].id, "tent_0001");
+        assert_eq!(back.props[0].class, Class::Structure);
+        assert_eq!(back.props[0].reach, 2.5);
+        assert_eq!(back.props[0].mesh.positions, lib.props[0].mesh.positions);
+        assert_eq!(back.props[0].mesh.indices, lib.props[0].mesh.indices);
+        assert_eq!(back.instances[0].offset, -18.5);
+        assert_eq!(back.instances[0].yaw, 1.25);
+        assert!(back.instances[0].near);
+        assert_eq!(back.sheets[0].3, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+
+        // Anything that is not a library must be refused rather than half-read.
+        assert!(PropLibrary::decode(b"not a library at all").is_none());
+        assert!(PropLibrary::decode(&[]).is_none());
+    }
+
+    /// Bake a donor into an installable library.
+    ///
+    /// ```text
+    /// FROST_TRACK=~/Projects/pkz/tracks/2024_ARLMX_RD11_INDIANA_PRO.pkz \
+    /// FROST_BAKE=~/Library/Application\ Support/com.frost.mxbikes/props/library.fpl \
+    ///   cargo test -- --ignored --nocapture bake_a_library
+    /// ```
+    #[test]
+    #[ignore]
+    fn bake_a_library() {
+        let track = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let out = std::env::var("FROST_BAKE").expect("set FROST_BAKE to the file to write");
+        let cap: u32 = std::env::var("FROST_SHEET_MAX")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1024);
+
+        let donor = open(&std::path::PathBuf::from(track)).expect("opens");
+        let mut lib = extract(
+            &donor,
+            &[Class::Structure, Class::Vehicle, Class::Tree, Class::Bale, Class::Pole],
+        );
+        sheets_for(&donor, &mut lib, cap);
+        let bytes = lib.encode();
+
+        let path = std::path::PathBuf::from(&out);
+        if let Some(d) = path.parent() {
+            std::fs::create_dir_all(d).expect("makes the folder");
+        }
+        std::fs::write(&path, &bytes).expect("writes");
+
+        let tris: usize = lib.props.iter().map(|p| p.mesh.triangle_count()).sum();
+        let px: usize = lib.sheets.iter().map(|s| s.3.len()).sum();
+        eprintln!(
+            "\n{} -> {}\n  {} props / {} instances, {tris} tris\n  {} sheets, {:.1} MB of pixels\n  {:.1} MB written",
+            lib.donor,
+            path.display(),
+            lib.props.len(),
+            lib.instances.len(),
+            lib.sheets.len(),
+            px as f32 / 1_048_576.0,
+            bytes.len() as f32 / 1_048_576.0
+        );
+
+        // It has to read back, here, before anything relies on it.
+        let back = PropLibrary::decode(&std::fs::read(&path).unwrap()).expect("reads back");
+        assert_eq!(back.props.len(), lib.props.len());
+        assert_eq!(back.instances.len(), lib.instances.len());
     }
 }

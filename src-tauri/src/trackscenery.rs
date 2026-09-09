@@ -1836,19 +1836,35 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     // TerrainEd faults on the second material in a model whatever the geometry — see
     // `edfwrite`'s note and the case-by-case test behind it. PiBoSo's own example track is
     // built the same way, three `scene` blocks for three objects.
-    let kinds: Vec<(&str, Mesh, Texture, bool)> = vec![
-        ("stakes", stakes, stake_sheet(), false),
-        ("banners", banners, banner_sheet(), true),
-        ("bales", bales, bale_sheet(), true),
+    let kinds: Vec<(String, Mesh, Texture, bool)> = vec![
+        ("stakes".into(), stakes, stake_sheet(), false),
+        ("banners".into(), banners, banner_sheet(), true),
+        ("bales".into(), bales, bale_sheet(), true),
         // Not solid: clipping a marker board should cost a rider nothing.
-        ("jumpmarks", jumpmarks, jumpmark_sheet(), false),
-        ("trees", trees, tree_sheet(), true),
-        ("poles", poles, pole_sheet(), false),
+        ("jumpmarks".into(), jumpmarks, jumpmark_sheet(), false),
+        ("trees".into(), trees, tree_sheet(), true),
+        ("poles".into(), poles, pole_sheet(), false),
         // The sky is drawn and nothing else: a dome you can ride into is not a sky.
-        ("sky", sky, dome_sheet(), false),
-        ("gate", gate, gate_sheet(), true),
+        ("sky".into(), sky, dome_sheet(), false),
+        ("gate".into(), gate, gate_sheet(), true),
         // Drawn, never solid: a mark is paint on the ground, not a kerb.
     ];
+
+    // A lifted venue, if one is installed. Absence is ordinary: a library is baked from a
+    // donor archive the user already has, so most builds have none and place nothing.
+    let mut kinds = kinds;
+    if let Some(lib) = crate::trackprops::load() {
+        let from = kinds.len();
+        for (name, mesh, tex, is_solid) in lifted(&lib, prog, syn) {
+            tally.push(("lifted", mesh.triangle_count()));
+            kinds.push((name, mesh, tex, is_solid));
+        }
+        log::info!(
+            "placed {} lifted models from {}",
+            kinds.len() - from,
+            lib.donor
+        );
+    }
 
     let mut files = Vec::new();
     let mut drawn = Vec::new();
@@ -1858,7 +1874,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             continue;
         }
         let file = format!("{name}.edf");
-        let bytes = edfwrite::write(name, &[Part { name: name.into(), mesh, texture: 0, normal: None }], &[sheet]);
+        let bytes = edfwrite::write(&name, &[Part { name: name.clone(), mesh, texture: 0, normal: None }], &[sheet]);
         files.push((file.clone(), bytes));
         let at = Scene { file, pos: [0.0, 0.0, 0.0], rot: [0.0, 0.0, 0.0] };
         // Collision only for what should stop a bike. A stake snaps and the fence is behind
@@ -2650,7 +2666,7 @@ mod built {
 /// an optimisation for the export folder's size, not for the track's.
 ///
 /// Props are merged by sheet, because a model carries one sheet and one only.
-pub fn placed(
+pub fn lifted(
     lib: &crate::trackprops::PropLibrary,
     prog: &TrackProgram,
     syn: &Synth,
