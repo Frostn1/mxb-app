@@ -1,3 +1,8 @@
-# Local-only module (not part of the public tree). Placed by the private repo's sync.sh.
+# Proprietary, local-only, placed by the private repo's sync.sh. The old
+# src-tauri/.gitignore only covered these at their pre-monorepo paths, and a
+# `git add -A` put them in a public repo once already.
 /src/sidecar.rs
+/src/sidecar_lock.rs
+/src/mxbsecure.rs
 /src/fixtures/test_sidecar.pkz
+/src/mxbsecure.dll
