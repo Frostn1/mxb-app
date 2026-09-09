@@ -27,6 +27,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+# Metres either way on the bumps panel. Fixed, so every picture is on the same scale.
+BUMP_SCALE_M = 0.25
+
 INK = "#f2f3f5"
 GROUND = "#0c0c0e"
 PANEL = "#141417"
@@ -127,8 +130,12 @@ def draw(out_dir, meta, c):
 
     ax = fig.add_subplot(grid[1])
     sky(ax, "bumps  (6 m detrend)")
-    lim = float(np.percentile(np.abs(bumps), 99)) or 0.05
-    ax.imshow(bumps, cmap="RdBu_r", origin="lower", extent=extent, vmin=-lim, vmax=lim)
+    # One fixed scale for every picture, always. Normalising each panel to its own range
+    # stretches a smooth corner to fill the same colours as a rough one, so two tracks drawn
+    # side by side look equally chopped up whatever they actually measure — which is exactly
+    # backwards for a comparison, and it made ours look redder than Indiana while being
+    # measurably smoother.
+    ax.imshow(bumps, cmap="RdBu_r", origin="lower", extent=extent, vmin=-BUMP_SCALE_M, vmax=BUMP_SCALE_M)
     ax.plot(sx, sz, color="#111", lw=0.9, alpha=0.7)
     ax.set_aspect("equal")
 

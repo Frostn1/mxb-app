@@ -7405,10 +7405,15 @@ mod tests {
                     r.arcs, r.tightest_m, r.tightest_m, r.tightest_m));
                 json.push_str(&format!(
                     "      \"direction\": \"\", \"riseM\": {rise:.2}, \"sweep\": {sweep:.3}, \"patch\": {name:?},\n"));
+                // Real figures. These were zeros while the writer was being sketched, and a
+                // zero that looks like a measurement is worse than a missing field: it read
+                // as "our corners have no chatter at all" against Indiana's 10.5 cm, twice.
+                let (floor, wall, chat) = shape
+                    .map_or((f32::NAN, f32::NAN, f32::NAN), |q| (q.floor_m, q.wall_deg, q.chatter_m));
                 json.push_str(&format!(
-                    "      \"grooves\": {grooves:.2}, \"spacingM\": {spacing:.2}, \"floorM\": 0.0, \"wallDeg\": 0,\n"));
+                    "      \"grooves\": {grooves:.2}, \"spacingM\": {spacing:.2}, \"floorM\": {floor:.3}, \"wallDeg\": {wall:.1},\n"));
                 json.push_str(&format!(
-                    "      \"acrossRmsM\": {across:.3}, \"chatterM\": 0.0}},\n"));
+                    "      \"acrossRmsM\": {across:.3}, \"chatterM\": {chat:.4}}},\n"));
             }
         }
         if let Some(d) = &out_dir {
