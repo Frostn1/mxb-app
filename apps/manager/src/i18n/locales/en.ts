@@ -593,6 +593,11 @@ export const en = {
   "settings.colorwayRetro": "Retro",
   "settings.language": "Language",
   "settings.languageSystem": "System",
+  "settings.preferServer": "Prefer dedicated-server files",
+  "settings.preferServerDesc": "Take the dedicated-server build where a mod ships one. For a machine running a server rather than playing.",
+  "settings.preferredHost": "Preferred download host",
+  "settings.preferredHostDesc": "Where a mod is mirrored on several hosts, take this one first.",
+  "settings.preferredHostNone": "No preference",
   "settings.runInBackground": "Keep running in the background",
   "settings.runInBackgroundDesc":
     "Closing the window hides {{app}} to the tray so FrostMod stays connected. Quit from the tray icon.",

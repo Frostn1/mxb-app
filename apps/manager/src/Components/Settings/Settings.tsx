@@ -98,6 +98,12 @@ import {
 import { Trans, APP_NAME } from "@/i18n";
 import { useI18n, type LocalePref, type TKey } from "@/i18n";
 import { getLocale, LOCALE_OPTIONS } from "@/i18n";
+import {
+  KNOWN_HOSTS,
+  readDownloadPrefs,
+  writeDownloadPrefs,
+  type DownloadPrefs,
+} from "@frost/shared/lib/downloadPrefs";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { prettyHotkey } from "../../lib/hotkey";
 import { formatBytes, formatDateShort } from "@frost/shared/lib/mods";
@@ -302,6 +308,12 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // bottle on macOS. The app starts FrostMod in whichever prefix holds the game.
   const hasFrostmod = isWindows || platform === "linux" || isMac;
   const { theme, setTheme, colorway, setColorway, scale, setScale } = useTheme();
+  // Which download to take when a mod offers several — see `lib/downloadPrefs`.
+  const [dlPrefs, setDlPrefsState] = useState<DownloadPrefs>(readDownloadPrefs);
+  const setDlPrefs = useCallback((next: DownloadPrefs) => {
+    writeDownloadPrefs(next);
+    setDlPrefsState(next);
+  }, []);
   const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes, strayMsvcr90, clearingStray, clearStrayMsvcr90 } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
@@ -1280,6 +1292,47 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               checked={paintSyncEnabled}
               onChange={togglePaintSync}
             />
+            <div className="h-px bg-border" />
+            {/* Which file to take when a mod ships the same thing twice. Both of these are
+                one-click-install problems: without them a dedicated-server rig picks the
+                server build by hand on every mod, and a Drive link that answers "too many
+                downloads" has to be stepped past by hand too. */}
+            <ToggleRow
+              label={t("settings.preferServer")}
+              desc={t("settings.preferServerDesc")}
+              checked={dlPrefs.preferServer}
+              onChange={(v) => setDlPrefs({ ...dlPrefs, preferServer: v })}
+            />
+            <div className="h-px bg-border" />
+            <div className="flex items-center justify-between gap-4 py-3">
+              <div className="min-w-0">
+                <div className="text-[12.5px] text-foreground/85">
+                  {t("settings.preferredHost")}
+                </div>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {t("settings.preferredHostDesc")}
+                </p>
+              </div>
+              <Select
+                value={dlPrefs.preferredHost || "none"}
+                onValueChange={(v) =>
+                  setDlPrefs({ ...dlPrefs, preferredHost: v === "none" ? "" : v })
+                }
+              >
+                <SelectTrigger className="h-8 w-[180px] flex-none">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{t("settings.preferredHostNone")}</SelectItem>
+                  {KNOWN_HOSTS.map((h) => (
+                    <SelectItem key={h.id} value={h.id}>
+                      {h.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {secureAvailable && (
               <>
                 <div className="h-px bg-border" />
