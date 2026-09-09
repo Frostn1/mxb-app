@@ -299,10 +299,18 @@ const RUT_WALL_HOLD: f32 = 1.8;
 // it a pixel-to-pixel grain of 1.6 against their 3.8-18. Dark and flat is the one combination
 // that reads as the texture having failed rather than as polished dirt.
 const RUT_FLOOR_DARKEN: f32 = 0.82;
-const LOOSE_DRY: f32 = 0.85;
+// The dry stuff thrown off the line. Their brightest dry surfaces reach (171, 134, 99) and
+// (220, 185, 150); at 0.85 ours reached (145, 113, 84), darker than either.
+const LOOSE_DRY: f32 = 1.06;
 
 /// How much of its brightness the field's soil keeps.
-const FIELD_DARKEN: f32 = 0.72;
+///
+/// Published tracks run their ground from a dark worn surface to a bright dry one: Indiana
+/// (49, 35, 23) up to (171, 134, 99), Southwick (54, 36, 22) up to (220, 185, 150). At 0.72
+/// ours topped out at (123, 95, 71) — no bright end at all, which is most of why our ground
+/// read as mud rather than as dry dirt. Lands on (162, 125, 94), inside Indiana's range and
+/// short of Southwick's sand.
+const FIELD_DARKEN: f32 = 0.95;
 
 /// How much lighter the worked corridor is than the line worn down the middle of it.
 ///
@@ -5152,7 +5160,59 @@ fn band_pixels(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
             }
         }
     }
+    cap_grain(&mut px, dim);
     px
+}
+
+/// The grittiest a ground sheet may be, as a mean absolute luma step between neighbouring
+/// texels.
+///
+/// Measured off the sheets published tracks bake into their own `.map`: Indiana's run 3.8 to
+/// 18.2 and Southwick's 3.9 to 16.9. Ours went past both because `tone` is a multiply — it
+/// lifts a sheet's grain in step with its brightness — so making the ground dry enough to
+/// look right also made it coarser than anything either track ships. Our corridor read at
+/// 22.5 on soil and 32.6 on sand, next to a rut at 3.2, which is a surface that changes
+/// character over a few metres.
+const MAX_SHEET_GRAIN: f32 = 18.0;
+
+/// Pull a sheet's contrast about its own mean until its grain is inside [`MAX_SHEET_GRAIN`].
+///
+/// About the mean rather than toward grey, so the tone the band was graded to is kept and
+/// only the roughness moves.
+fn cap_grain(px: &mut [u8], dim: usize) {
+    let luma = |p: &[u8]| p[0] as f32 * 0.299 + p[1] as f32 * 0.587 + p[2] as f32 * 0.114;
+    let (mut step, mut n) = (0.0f32, 0usize);
+    for y in 0..dim {
+        for x in 1..dim {
+            let a = luma(&px[(y * dim + x) * 4..]);
+            let b = luma(&px[(y * dim + x - 1) * 4..]);
+            step += (a - b).abs();
+            n += 1;
+        }
+    }
+    if n == 0 {
+        return;
+    }
+    let grain = step / n as f32;
+    if grain <= MAX_SHEET_GRAIN {
+        return;
+    }
+    let k = MAX_SHEET_GRAIN / grain;
+    let mut mean = [0.0f32; 3];
+    for p in px.chunks_exact(4) {
+        for c in 0..3 {
+            mean[c] += p[c] as f32;
+        }
+    }
+    let count = (px.len() / 4) as f32;
+    for c in 0..3 {
+        mean[c] /= count;
+    }
+    for p in px.chunks_exact_mut(4) {
+        for c in 0..3 {
+            p[c] = (mean[c] + (p[c] as f32 - mean[c]) * k).clamp(0.0, 255.0) as u8;
+        }
+    }
 }
 
 /// Take the slow variation out of a sheet, so tiling it does not draw a grid.
@@ -5726,7 +5786,10 @@ fn ground_looks(surface: Surface) -> Grounds {
         base: line,
         photo: Some("soil_dark"),
         tone: line_tone,
-        grain_tint: (0.70, 1.28),
+        // 22.5 measured, where Indiana's grittiest sheet is 18.2 and Southwick's 16.9 — and
+        // it sits next to the rut, so the corridor jumped from heavy grit to smooth over a
+        // few metres. Pulled inside their range.
+        grain_tint: (0.80, 1.19),
         fleck: [150.0, 146.0, 138.0],
         fleck_density: 0.03,
         litter: [140.0, 122.0, 84.0],
