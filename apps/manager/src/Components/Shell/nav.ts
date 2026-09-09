@@ -11,6 +11,7 @@ export type DashboardView =
   | "browse"
   | "studio"
   | "servers"
+  | "ranked"
   | "shop"
   | "hub"
   | "library"
@@ -83,7 +84,15 @@ export const RAIL: RailItem[] = [
   // Not a group any more: the tools are their own app, and this is the way to it.
   { id: "studio", label: "nav.studio", view: "studio" },
   { id: "manage", label: "nav.manage", view: "manage", cap: "manage" },
-  { id: "servers", label: "nav.servers", view: "servers" },
+  {
+    id: "servers",
+    label: "nav.servers",
+    view: "servers",
+    tabs: [
+      { view: "servers", label: "nav.serverBrowser" },
+      { view: "ranked", label: "nav.ranked" },
+    ],
+  },
 ];
 
 /** Which rail item owns a view, so the right item lights up and the right tabs show. */
