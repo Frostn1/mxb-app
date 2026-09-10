@@ -3363,3 +3363,17 @@ export function serverSetConfig(
 ): Promise<unknown> {
   return invoke<unknown>("server_set_config", { id, patch });
 }
+
+/** Where Frost's Studio is installed, if it is. `null` when it isn't. */
+export type StudioInstall = { path: string; version: string };
+
+/** Is Frost's Studio installed? Windows answers from the registry; elsewhere this is a
+ *  search of the usual places, plus whatever path the player pointed at. */
+export function studioInstall(): Promise<StudioInstall | null> {
+  return invoke<StudioInstall | null>("studio_install");
+}
+
+/** Start Frost's Studio. Rejects with a real reason when it can't. */
+export function launchStudio(): Promise<void> {
+  return invoke<void>("launch_studio");
+}

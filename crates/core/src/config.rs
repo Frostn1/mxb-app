@@ -38,6 +38,11 @@ pub struct ServerRef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
+    /// Where Frost's Studio is, when the app cannot work it out — a Linux AppImage, or an
+    /// install somewhere unusual. Blank is the normal case, and not per-game: the studio is
+    /// one install whichever title you are working on.
+    #[serde(default)]
+    pub studio_path: String,
     /// The title the app is currently driving. Absent in every config written before
     /// multi-game support, which deserializes to [`Game::Mxb`] — the title those
     /// installs are for.
@@ -343,6 +348,7 @@ pub const LEGACY_OVERLAY_HOTKEYS: &[&str] = &["CommandOrControl+Shift+M"];
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            studio_path: String::new(),
             active_game: Game::default(),
             games: BTreeMap::new(),
             mods_path: String::new(),

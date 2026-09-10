@@ -9,6 +9,7 @@ import type { TKey } from "@/i18n";
 export type DashboardView =
   | `plugin:${string}`
   | "browse"
+  | "studio"
   | "servers"
   | "ranked"
   | "shop"
@@ -80,6 +81,8 @@ export const RAIL: RailItem[] = [
       { view: "presets", label: "nav.presets" },
     ],
   },
+  // Not a group any more: the tools are their own app, and this is the way to it.
+  { id: "studio", label: "nav.studio", view: "studio" },
   { id: "manage", label: "nav.manage", view: "manage", cap: "manage" },
   {
     id: "servers",

@@ -2024,6 +2024,13 @@ export const it: Translation = {
   "category.helmet": "Casco",
   "category.boots": "Stivali",
   "category.protection": "Protezioni",
+  "studioApp.title": "Frost's Studio",
+  "studioApp.pitch": "Verniciature, tracciati e attrezzatura del pilota si creano in Frost's Studio — un'app a sé, così gli strumenti hanno lo spazio che serve e questa resta un gestore di mod.",
+  "studioApp.open": "Apri Frost's Studio",
+  "studioApp.download": "Scarica Frost's Studio",
+  "studioApp.installed": "Installato, versione {{version}}.",
+  "studioApp.notInstalled": "Non ancora installato su questo PC.",
+  "studioApp.launchFailed": "Impossibile avviare Frost's Studio",
 
   // ── MXB Ranked ─────────────────────────────────────────────────────────────
   "nav.ranked": "Ranked",

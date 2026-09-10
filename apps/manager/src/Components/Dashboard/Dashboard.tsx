@@ -8,6 +8,7 @@ import Library from "../Library/Library";
 import Downloads from "../Downloads/Downloads";
 import Locker from "../Locker/Locker";
 import Presets from "../Presets/Presets";
+import StudioCard from "../StudioCard/StudioCard";
 import Manage from "../Manage/Manage";
 import Browse from "../Browse/Browse";
 import Servers from "../Servers/Servers";
@@ -258,6 +259,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onOpenLocker={() => setView("locker")}
               onOpenSettings={() => openSettingsSection("folder")}
             />
+          ) : view === "studio" ? (
+            <StudioCard />
           ) : view === "manage" ? (
             <Manage />
           ) : (
