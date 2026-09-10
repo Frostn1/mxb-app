@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "predev": "node ../../scripts/free-dev-port.mjs FROST_STUDIO_DEV_PORT 1430",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
