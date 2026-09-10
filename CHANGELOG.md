@@ -1,23 +1,6 @@
 # Changelog
 
-## 2026-09-09
-
-### Fixed
-- The 3D bike view no longer draws faint diagonal banding across the bodywork.
-
-## 2026-09-08
-
-### Changed
-- Frost's Studio has a look of its own, and it is light. A dark surround pushes every colour
-  you are judging lighter than it really is, which is the wrong way round for an app you pick
-  paint in.
-- The Designer uses the whole window. The sheet runs edge to edge, the setup row moved into
-  the bar at the top, and the panels sit flat against the sides instead of boxing the work in.
-- The tools are named down the left rather than drawn as icons.
-- Frost's Studio has its own mark: the snowflake, split into two paints.
-
-## 2026-09-07
-## 2026-09-09
+## 2026-09-09 — v0.14.0 — Frost's Mod Manager, and a Studio of its own
 
 ### Added
 - FrostMod's status sits in the top bar, on every screen, with Start, Stop and Reload behind
@@ -32,15 +15,47 @@
   and nothing to wait for — and you edit it like any other.
 
 ### Changed
+- The app is now Frost's Mod Manager, with a new name and a new mark. Installing this
+  version retires the old one for you: your settings, your disabled mods, your paint
+  templates and your Launch at startup choice all carry over untouched. If you pinned the
+  old app to your taskbar or Start menu, pin it again from the new one.
+- The paint Designer, Paint Studio, Track Studio, the Rider and the content tools are now
+  Frost's Studio, an app of their own. The Studio tab points you at it: it opens the app if
+  you have it, and gets it for you if you don't. Your paints, tracks and presets are
+  untouched — both apps read the same folders.
+- Frost's Studio has a look of its own, and it is light. A dark surround pushes every colour
+  you are judging lighter than it really is, which is the wrong way round for an app you pick
+  paint in.
+- The Designer uses the whole window. The sheet runs edge to edge, the setup row moved into
+  the bar at the top, and the panels sit flat against the sides instead of boxing the work in.
+- The tools are named down the left rather than drawn as icons.
+- Frost's Studio has its own mark: the snowflake, split into two paints.
 - The Servers tab knows the tracks that come with MX Bikes. A server on Forest Raceway, Nevada
   or Holjes now says you have it, with the track's own picture, instead of pointing you at a
   download.
 - It looks on mxb-mods for a track it doesn't recognise, ahead of the paid catalogues, and only
   offers something whose name actually matches the track the server named.
+- Opening a server asks it for fresh numbers, so the riders, the session and the track are what
+  they are now rather than what they were when the list loaded.
 - A new base track. It is a walked lap now, and it measures like a published national: 1966 m,
   nineteen corners, and the corner shape and spacing read off Indiana and Southwick.
 - Straw bales stand off the track edge rather than a fixed distance from the line, so tracks
   wider than 14 m get them.
+
+### Fixed
+- The 3D bike view no longer draws faint diagonal banding across the bodywork.
+- Trackside scenery in the 3D viewer no longer stands in slabs of flat grey. A track whose
+  textures the viewer can't read now leaves its banners and foliage out rather than drawing
+  them blank.
+- Trees keep their colour when you pull the camera back, instead of going black across the
+  paddock.
+- The black shapes standing over some tracks are gone. They were shadows, drawn as if they
+  were solid.
+- More tracks show their real ground in the 3D viewer. A track's normal maps are stored a
+  little differently from its colour sheets, and reading them the same way stopped the viewer
+  part way through a track's ground.
+- The Settings descriptions for the profiles folder and the game install folder name the
+  game you are set up for.
 
 ## 2026-09-08 — v0.13.7 — Servers, live share codes and a new 3D view
 
@@ -79,32 +94,6 @@
 - Seven colorways in Settings — Frost is still the default; Ember, Moss, Violet, Rose and
   Slate move the whole window, not just the buttons. Plus Retro, which goes further: amber
   phosphor, monospaced type, square corners and a scanline over the window.
-
-### Changed
-- The paint Designer, Paint Studio, Track Studio, the Rider and the content tools are now
-  Frost's Studio, an app of their own. The Studio tab points you at it: it opens the app if
-  you have it, and gets it for you if you don't. Your paints, tracks and presets are
-  untouched — both apps read the same folders.
-- Opening a server asks it for fresh numbers, so the riders, the session and the track are what
-  they are now rather than what they were when the list loaded.
-- The app is now Frost's Mod Manager, with a new name and a new mark. Installing this
-  version retires the old one for you: your settings, your disabled mods, your paint
-  templates and your Launch at startup choice all carry over untouched. If you pinned the
-  old app to your taskbar or Start menu, pin it again from the new one.
-
-### Fixed
-- Trackside scenery in the 3D viewer no longer stands in slabs of flat grey. A track whose
-  textures the viewer can't read now leaves its banners and foliage out rather than drawing
-  them blank.
-- Trees keep their colour when you pull the camera back, instead of going black across the
-  paddock.
-- The black shapes standing over some tracks are gone. They were shadows, drawn as if they
-  were solid.
-- More tracks show their real ground in the 3D viewer. A track's normal maps are stored a
-  little differently from its colour sheets, and reading them the same way stopped the viewer
-  part way through a track's ground.
-- The Settings descriptions for the profiles folder and the game install folder name the
-  game you are set up for.
 
 ## 2026-09-06
 
