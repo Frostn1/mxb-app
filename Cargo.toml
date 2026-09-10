@@ -2,10 +2,16 @@
 #
 # `server-agent` is deliberately NOT a member: it ships to an EC2 box and wants its own
 # `opt-level = "z"`, and a workspace member cannot carry its own `[profile.*]`.
+#
+# `.sidecar-src` is the release workflow's checkout of the private crate. It lands inside this
+# directory, so once the repo root became a workspace Cargo started claiming its manifest and
+# refusing to build it — "current package believes it's in a workspace when it's not", which
+# failed the Windows leg of v0.14.0-beta.1 at the secure-content DLL. It is gitignored and
+# only ever exists in CI, so it can never be a member; excluding it is what tells Cargo that.
 [workspace]
 resolver = "2"
 members = ["crates/core", "apps/manager/src-tauri", "apps/studio/src-tauri"]
-exclude = ["server-agent"]
+exclude = ["server-agent", ".sidecar-src"]
 
 # The profiles live here because Cargo IGNORES `[profile.*]` in a non-root workspace member —
 # it warns, in the middle of a long build log, and otherwise silently gives you the defaults.
