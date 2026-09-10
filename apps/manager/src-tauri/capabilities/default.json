@@ -12,6 +12,7 @@
     "core:window:allow-unmaximize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
+    "core:webview:allow-set-webview-zoom",
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",
