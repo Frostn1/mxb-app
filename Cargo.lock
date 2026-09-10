@@ -3713,6 +3713,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mxb-studio"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "mxb-core",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-log",
+ "tauri-plugin-shell",
+]
+
+[[package]]
 name = "native-tls"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"

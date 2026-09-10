@@ -1,0 +1,6 @@
+/* Same arrangement as the manager's: Tailwind's own scanner is off, so every source glob
+   is declared, and the shared package declares its own inside @frost/shared/theme.css. */
+@import "tailwindcss" source(none);
+@import "@frost/shared/theme.css";
+@source "./**/*.{ts,tsx}";
+@source "../index.html";

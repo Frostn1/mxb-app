@@ -7,6 +7,19 @@
 
 use std::path::PathBuf;
 
+/// The OS we're running on — `"windows"`, `"macos"`, `"linux"`.
+///
+/// The frontend used to infer this from `navigator.userAgent`, which can tell a Mac from
+/// everything else and nothing more. Features that only exist on Windows (FrostMod, the
+/// live in-game refresh) need to know the difference between Windows and Linux, so it
+/// comes from the backend rather than adding `plugin-os` and a capability for one string.
+///
+/// Here rather than in either app because `@frost/shared` calls it, so both must answer it.
+#[tauri::command]
+pub fn app_platform() -> &'static str {
+    std::env::consts::OS
+}
+
 use rayon::prelude::*;
 use tauri::State;
 
@@ -823,7 +836,7 @@ pub fn tyres_mod_exists(tyres_dir: &std::path::Path, name: &str) -> bool {
 }
 
 /// A tyres mod, opened: the name it goes by and the files a wheel resolves through.
-struct TyreSet {
+pub(crate) struct TyreSet {
     name: String,
     files: Vec<(String, Vec<u8>)>,
 }
@@ -838,7 +851,7 @@ struct TyreSet {
 ///
 /// `None` when there is no line, no mod, or nothing readable in one — the bike the viewer
 /// drew before wheels, not a failure.
-pub fn gather_tyre_files(
+pub(crate) fn gather_tyre_files(
     tyres_dir: &std::path::Path,
     gfx_bytes: &[u8],
     // The pack the player picked, if they picked one. Blank or absent → the bike's own.
@@ -1304,7 +1317,7 @@ pub async fn load_rider_body_model(
 /// the `w_` planes render as nothing, so inflating and re-encoding them is time spent on
 /// pixels no one will ever see — and on a rider body that decode costs more than parsing the
 /// mesh does.
-pub fn body_textures(src: &BodySource, profile: &str) -> Option<Vec<paint::PaintTexture>> {
+pub(crate) fn body_textures(src: &BodySource, profile: &str) -> Option<Vec<paint::PaintTexture>> {
     static C: std::sync::OnceLock<
         std::sync::Mutex<std::collections::HashMap<String, Vec<paint::PaintTexture>>>,
     > = std::sync::OnceLock::new();
@@ -1691,7 +1704,7 @@ pub fn body_turn_cache() -> &'static std::sync::Mutex<lru::Lru<[[f32; 3]; 3]>> {
 /// is decided from the rig's own extents rather than the mesh's: both are authored in the
 /// same frame, so they agree, and asking the rig costs nothing where asking the mesh would
 /// mean parsing 67 MB a second time.
-pub fn body_rig(src: &BodySource, profile: &str) -> Vec<edf::Bone> {
+pub(crate) fn body_rig(src: &BodySource, profile: &str) -> Vec<edf::Bone> {
     let key = format!("rig:{}", src.cache_key(profile));
     if let Some(r) = rig_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
         return r;
@@ -1735,7 +1748,7 @@ pub fn body_rig(src: &BodySource, profile: &str) -> Vec<edf::Bone> {
 /// The body's binding to its rig, memoised. Working it out is quick — a third of a million
 /// point-to-segment distances — but it depends only on the model, and a loadout change must
 /// not pay for it again.
-pub fn body_skin(
+pub(crate) fn body_skin(
     src: &BodySource,
     profile: &str,
     nodes: &[edf::EdfNode],
@@ -1810,7 +1823,7 @@ pub fn rider_profile_or_stock(profile: &str) -> &str {
 /// not the only one: reading only `rider.pkz` left a picked custom profile rendering no body
 /// at all, just gear floating where the rider should be.
 #[derive(Debug, Clone)]
-enum BodySource {
+pub(crate) enum BodySource {
     /// `mods/rider/riders/<profile>/rider.edf`, installed loose — the shape every rider
     /// model on mxb-mods ships.
     Loose(std::path::PathBuf),
@@ -1849,7 +1862,7 @@ pub fn read_pkz_basename(pkz: &std::path::Path, base: &str) -> Option<Vec<u8>> {
     pkz::read_selected(pkz, want).ok()?.into_iter().next().map(|(_, d)| d)
 }
 
-pub fn rider_body_source(cfg: &config::AppConfig, profile: &str) -> Option<BodySource> {
+pub(crate) fn rider_body_source(cfg: &config::AppConfig, profile: &str) -> Option<BodySource> {
     let riders = library::mods_subdir(&cfg.mods_path, "mods/rider/riders");
     let loose = riders.join(profile).join("rider.edf");
     if loose.is_file() {
@@ -1865,7 +1878,7 @@ pub fn rider_body_source(cfg: &config::AppConfig, profile: &str) -> Option<BodyS
 /// The body mesh, submeshes already bound to their textures. Binding depends on the model
 /// and not on the loadout, so it happens on the parse that fills the cache — a paint change
 /// must not re-read a 60 MB body.
-pub fn rider_body_nodes(src: &BodySource, profile: &str) -> Option<Vec<edf::EdfNode>> {
+pub(crate) fn rider_body_nodes(src: &BodySource, profile: &str) -> Option<Vec<edf::EdfNode>> {
     let key = src.cache_key(profile);
     if let Some(n) = cached_mesh(&key) {
         return Some(n);
@@ -2143,7 +2156,7 @@ pub async fn list_installed_gear_paints(
 /// ships — a folder inside `rider.pkz`. A paint pack for a packaged mod installs loose in a
 /// folder beside it, because nothing can write into the `.pkz`. So a picker that stopped at
 /// the first source it found showed one of those sets and never the other.
-pub fn gear_paints_for(cfg: &config::AppConfig, spec: &GearSpec, model: &str) -> GearPaints {
+pub(crate) fn gear_paints_for(cfg: &config::AppConfig, spec: &GearSpec, model: &str) -> GearPaints {
     let stem = model.trim_end_matches(".pkz");
     let rider = library::mods_subdir(&cfg.mods_path, "mods/rider");
     let mut out = GearPaints::default();
@@ -2222,7 +2235,7 @@ pub fn gear_folder_paint_name(entry: &str, folder: &str) -> Option<String> {
 /// mesh's textures by name, so a side is the names it supplies plus the colour texture a
 /// piece falls back on when the mesh asks for one this side doesn't carry.
 #[derive(Default)]
-struct GearSide {
+pub(crate) struct GearSide {
     names: Vec<String>,
     primary: Option<String>,
 }
@@ -2558,7 +2571,7 @@ pub fn paint_texture_names<'a>(paints: impl Iterator<Item = &'a [u8]>) -> Vec<St
 /// ships: the Bell Moto 10's goggle submeshes are called `Armega.001` and drawn from
 /// `Racecraft`, neither of which reads as "goggles" — so on names alone the whole goggle
 /// went out wearing the helmet's paint.
-pub fn on_goggle_side(emb: Option<&str>, spelled_goggle: bool, main: &GearSide, goggle: &GearSide) -> bool {
+pub(crate) fn on_goggle_side(emb: Option<&str>, spelled_goggle: bool, main: &GearSide, goggle: &GearSide) -> bool {
     match emb {
         Some(e) if goggle.supplies(e).is_some() => true,
         Some(e) if main.supplies(e).is_some() => false,
@@ -2574,7 +2587,7 @@ pub fn on_goggle_side(emb: Option<&str>, spelled_goggle: bool, main: &GearSide, 
 /// is. A paint replaces textures by name, so a side wearing one it doesn't supply falls back
 /// to its primary; unmatched → `None`, so the frontend renders neutral grey rather than
 /// smearing another part's texture over it.
-pub fn bind_gear_submeshes(
+pub(crate) fn bind_gear_submeshes(
     nodes: &mut [edf::EdfNode],
     mesh: Option<&[u8]>,
     main: &GearSide,
@@ -2725,7 +2738,7 @@ pub fn read_gear_source(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<
         .collect())
 }
 
-struct GearSpec {
+pub(crate) struct GearSpec {
     part: &'static str,
     /// Folders under `mods/rider` this slot's models live in. The first is the game's own —
     /// where a new install goes — and any after it are read for what earlier versions of this
@@ -2744,7 +2757,7 @@ const GEAR: [GearSpec; 3] = [
 
 /// Everywhere a gear model of this slot could be installed, in the order they're preferred:
 /// each of the slot's folders as an unpacked `<model>/` and as a packed `<model>.pkz`.
-pub fn gear_sources(rider: &std::path::Path, spec: &GearSpec, stem: &str) -> Vec<std::path::PathBuf> {
+pub(crate) fn gear_sources(rider: &std::path::Path, spec: &GearSpec, stem: &str) -> Vec<std::path::PathBuf> {
     spec.mods_kind
         .iter()
         .flat_map(|kind| {
@@ -2754,7 +2767,7 @@ pub fn gear_sources(rider: &std::path::Path, spec: &GearSpec, stem: &str) -> Vec
         .collect()
 }
 
-pub fn load_gear(
+pub(crate) fn load_gear(
     cfg: &config::AppConfig,
     base: &std::path::Path,
     spec: &GearSpec,

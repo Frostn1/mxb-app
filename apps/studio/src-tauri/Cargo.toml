@@ -1,0 +1,27 @@
+[package]
+# Cargo target names cannot hold a space, so this is as close to `mainBinaryName` as it
+# gets. The description is what Windows Task Manager shows in its Processes tab.
+name = "mxb-studio"
+version = "0.1.0"
+description = "Frost's Studio — MX Bikes content studio"
+authors = ["Frost"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# The shared core. Everything this app can currently do comes from here — which is the
+# point of standing the skeleton up before the studio's own code moves in.
+mxb-core = { path = "../../../crates/core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-log = "2"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# Matches the manager's. `tauri build` turns it on; a dev run leaves it off.
+custom-protocol = ["tauri/custom-protocol"]
