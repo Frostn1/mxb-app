@@ -921,6 +921,21 @@ export const en = {
   "serverBrowser.trackGetMods": "Get it from mxb-mods",
   "serverBrowser.trackGetHub": "Get it from MXB Hub",
 
+  // ── Server browser: favourites, region filter (ported) ──
+  "serverBrowser.favesOnly": "Favourites",
+  "serverBrowser.star": "Star this server",
+  "serverBrowser.unstar": "Remove from favourites",
+  "serverBrowser.favesEmpty": "No favourites yet — star a server to keep it here.",
+  "serverBrowser.region.all": "All regions",
+  "serverBrowser.region.naEast": "North America (East)",
+  "serverBrowser.region.naWest": "North America (West)",
+  "serverBrowser.region.na": "North America",
+  "serverBrowser.region.europe": "Europe",
+  "serverBrowser.region.oceania": "Oceania",
+  "serverBrowser.region.southAmerica": "South America",
+  "serverBrowser.region.asia": "Asia",
+  "serverBrowser.region.other": "Other",
+
   "sync.autoNote":
     "Your look publishes itself — every bike, whenever you change it in the app or in the game's own garage. Everyone else's arrives when you press Play.",
 

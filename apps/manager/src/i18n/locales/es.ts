@@ -937,6 +937,21 @@ export const es: Translation = {
   "serverBrowser.trackGetMods": "Conseguirlo en mxb-mods",
   "serverBrowser.trackGetHub": "Conseguirlo en MXB Hub",
 
+  // ── Navegador de servidores: favoritos, filtro de región (portado) ──
+  "serverBrowser.favesOnly": "Favoritos",
+  "serverBrowser.star": "Añadir a favoritos",
+  "serverBrowser.unstar": "Quitar de favoritos",
+  "serverBrowser.favesEmpty": "Aún no hay favoritos — marca un servidor con la estrella para guardarlo aquí.",
+  "serverBrowser.region.all": "Todas las regiones",
+  "serverBrowser.region.naEast": "Norteamérica (Este)",
+  "serverBrowser.region.naWest": "Norteamérica (Oeste)",
+  "serverBrowser.region.na": "Norteamérica",
+  "serverBrowser.region.europe": "Europa",
+  "serverBrowser.region.oceania": "Oceanía",
+  "serverBrowser.region.southAmerica": "Sudamérica",
+  "serverBrowser.region.asia": "Asia",
+  "serverBrowser.region.other": "Otra",
+
   "sync.autoNote":
     "Tu look se publica solo — cada moto, cada vez que lo cambias en la app o en el garaje del juego. El de los demás llega cuando pulsas Jugar.",
 

@@ -937,6 +937,21 @@ export const ptBR: Translation = {
   "serverBrowser.trackGetMods": "Pegar no mxb-mods",
   "serverBrowser.trackGetHub": "Pegar no MXB Hub",
 
+  // ── Navegador de servidores: favoritos, filtro de região (portado) ──
+  "serverBrowser.favesOnly": "Favoritos",
+  "serverBrowser.star": "Adicionar aos favoritos",
+  "serverBrowser.unstar": "Remover dos favoritos",
+  "serverBrowser.favesEmpty": "Nenhum favorito ainda — marque um servidor com a estrela para mantê-lo aqui.",
+  "serverBrowser.region.all": "Todas as regiões",
+  "serverBrowser.region.naEast": "América do Norte (Leste)",
+  "serverBrowser.region.naWest": "América do Norte (Oeste)",
+  "serverBrowser.region.na": "América do Norte",
+  "serverBrowser.region.europe": "Europa",
+  "serverBrowser.region.oceania": "Oceania",
+  "serverBrowser.region.southAmerica": "América do Sul",
+  "serverBrowser.region.asia": "Ásia",
+  "serverBrowser.region.other": "Outra",
+
   "sync.autoNote":
     "Seu visual se publica sozinho — cada moto, sempre que você muda no app ou na garagem do jogo. O dos outros chega quando você aperta Jogar.",
 

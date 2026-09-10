@@ -943,6 +943,21 @@ export const de: Translation = {
   "serverBrowser.trackGetMods": "Bei mxb-mods holen",
   "serverBrowser.trackGetHub": "Bei MXB Hub holen",
 
+  // ── Server-Browser: Favoriten, Regionsfilter (portiert) ──
+  "serverBrowser.favesOnly": "Favoriten",
+  "serverBrowser.star": "Zu Favoriten hinzufügen",
+  "serverBrowser.unstar": "Aus Favoriten entfernen",
+  "serverBrowser.favesEmpty": "Noch keine Favoriten — markiere einen Server mit dem Stern, um ihn hier zu behalten.",
+  "serverBrowser.region.all": "Alle Regionen",
+  "serverBrowser.region.naEast": "Nordamerika (Ost)",
+  "serverBrowser.region.naWest": "Nordamerika (West)",
+  "serverBrowser.region.na": "Nordamerika",
+  "serverBrowser.region.europe": "Europa",
+  "serverBrowser.region.oceania": "Ozeanien",
+  "serverBrowser.region.southAmerica": "Südamerika",
+  "serverBrowser.region.asia": "Asien",
+  "serverBrowser.region.other": "Andere",
+
   "sync.autoNote":
     "Dein Look veröffentlicht sich selbst — jedes Bike, sobald du ihn in der App oder in der Garage des Spiels änderst. Der der anderen kommt, wenn du auf Spielen drückst.",
 
