@@ -31,6 +31,7 @@ pub mod pkz;
 pub mod scenery;
 pub mod texstore;
 pub mod track;
+pub mod trackstock;
 pub mod trackview;
 pub mod viewer;
 

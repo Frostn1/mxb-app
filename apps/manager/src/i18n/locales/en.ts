@@ -915,8 +915,10 @@ export const en = {
   "serverBrowser.trackTitle": "Track",
   "serverBrowser.trackChecking": "Working out which track this is…",
   "serverBrowser.trackInstalled": "You have this track — {{name}}",
+  "serverBrowser.trackStock": "Comes with the game — {{name}}",
   "serverBrowser.trackMaybe": "We think this is {{name}}",
   "serverBrowser.trackGetShop": "Get it from the shop",
+  "serverBrowser.trackGetMods": "Get it from mxb-mods",
   "serverBrowser.trackGetHub": "Get it from MXB Hub",
 
   "sync.autoNote":

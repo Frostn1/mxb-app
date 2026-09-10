@@ -140,6 +140,8 @@ mod shop_session;
 mod soundmods;
 pub(crate) use mxb_core::texstore;
 pub(crate) use mxb_core::track;
+/// The tracks that came with the game — the ones no scan of the mods tree can see.
+pub(crate) use mxb_core::trackstock;
 mod upload;
 pub(crate) use mxb_core::usage;
 mod vcruntime;
@@ -3360,11 +3362,16 @@ fn match_presence(
 pub struct TrackGuess {
     /// The internal id the server published, e.g. `mmx_supercross`.
     pub id: String,
-    /// The installed track's file or folder name, empty when it isn't installed.
+    /// The installed track's file or folder name, empty when it isn't installed. For a
+    /// stock track this is the name the game shows — "Forest Raceway", not `forest`.
     pub installed: String,
+    /// True when the track came with the game rather than being installed. Still counts as
+    /// having it; the panel just says so differently, because there is nothing to go and get.
+    pub stock: bool,
     /// The installed track's own preview image, as a data URL.
     pub preview: String,
-    /// Where a copy could come from when it isn't installed: `"shop"`, `"hub"`, or empty.
+    /// Where a copy could come from when it isn't installed: `"mods"` (mxb-mods.com),
+    /// `"shop"`, `"hub"`, or empty.
     pub source: String,
     pub product_id: u64,
     pub product_name: String,
@@ -3382,9 +3389,12 @@ pub struct TrackGuess {
 /// product title, not a folder name, and not something a player can search for, which is why
 /// the tab has always shown it raw and left everyone to guess.
 ///
-/// Three answers in order of how much they are worth: the track is installed and the panel can
-/// show its own preview; there is an exact catalogue match and the panel can offer it; the name
-/// merely resembles something, which is offered as a guess and labelled as one.
+/// Answers in order of how much they are worth: the player already has it (installed, or it
+/// came with the game); a catalogue matches the name outright; a catalogue has something the
+/// name resembles, offered as a guess and labelled as one.
+///
+/// Three catalogues, and mxb-mods.com goes first because that is where tracks come from —
+/// it holds around 1,600 of them and asks nothing for them. The shop and the Hub follow.
 #[tauri::command]
 async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<TrackGuess, String> {
     let id = track.trim().to_string();
@@ -3407,6 +3417,37 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
         }
     }
 
+    // The stock tracks, which no scan of the mods tree can see: they live inside the install
+    // dir's `tracks.pkz`. Without this a server on `forest` read as a track the player didn't
+    // have, and the catalogue search below then offered them a bike livery to buy for it.
+    if let Some(stock) = stock_track(&app, &id).await {
+        guess.installed = stock.name;
+        guess.preview = stock.preview;
+        guess.stock = true;
+        guess.exact = true;
+        return Ok(guess);
+    }
+
+    // The id is snake_case and a product title is not, so the underscores become spaces
+    // before any catalogue sees it.
+    let words = id.replace('_', " ");
+    let tracks_category = game::active().catalog_tracks_category;
+
+    // mxb-mods.com. Scoped to its Tracks category: an unscoped search for `forest` comes
+    // back four bike liveries deep, and a track is the only thing a server can be running.
+    // Asked directly rather than through `with_clearance` — see the Hub note below.
+    if let Ok(items) = mods::mxb::search(&words, tracks_category, 1, ModSort::default()).await {
+        if let Some((hit, exact)) = best_track_hit(&id, items, |m| m.title.clone(), |_| true) {
+            guess.source = "mods".into();
+            guess.product_id = hit.id;
+            guess.product_name = hit.title;
+            guess.product_url = hit.link;
+            guess.product_image = hit.image.unwrap_or_default();
+            guess.exact = exact;
+            return Ok(guess);
+        }
+    }
+
     // The shop's own matcher, which is the fold the Browse grid already trusts to decide
     // whether something is installed — reused here rather than a second opinion about names.
     if let Ok(hits) = mods::shop_catalog::match_products(&app, &[id.clone()]).await {
@@ -3414,31 +3455,56 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
             return Ok(shop_guess(guess, hit, true));
         }
     }
-    // Nothing matched outright, so fall back to searching for it. The id is snake_case and a
-    // product title is not, so the underscores become spaces before either catalogue sees it.
-    let words = id.replace('_', " ");
     if let Ok(page) =
         mods::shop_catalog::search(&app, &words, None, 1, mods::shop_catalog::ShopSort::default(), false).await
     {
-        if let Some(hit) = page.items.into_iter().next() {
-            return Ok(shop_guess(guess, hit, false));
+        if let Some((hit, exact)) = best_track_hit(&id, page.items, |m| m.title.clone(), |m| {
+            sells_tracks(&m.category_names)
+        }) {
+            return Ok(shop_guess(guess, hit, exact));
         }
     }
 
-    // Nothing in the shop; the hub is the other half of where tracks come from. Asked directly
-    // rather than through `with_hub_clearance`: that answers the robot challenge by opening a
-    // browser, and this runs from opening a panel. A browser window appearing because someone
-    // clicked a server row would be an ambush, so a challenge here simply means no guess.
+    // Nothing in the shop; the hub is the other half of where paid tracks come from. Asked
+    // directly rather than through `with_hub_clearance`: that answers the robot challenge by
+    // opening a browser, and this runs from opening a panel. A browser window appearing
+    // because someone clicked a server row would be an ambush, so a challenge here simply
+    // means no guess.
     if let Ok(page) = mods::hub::search(&words, None, 1, mods::hub::HubSort::default(), false).await {
-        if let Some(hit) = page.items.into_iter().next() {
+        if let Some((hit, exact)) = best_track_hit(&id, page.items, |m| m.title.clone(), |m| {
+            sells_tracks(&m.category_names)
+        }) {
             guess.source = "hub".into();
             guess.product_id = hit.id;
             guess.product_name = hit.title;
             guess.product_url = hit.url.unwrap_or_default();
             guess.product_image = hit.image.unwrap_or_default();
+            guess.exact = exact;
         }
     }
     Ok(guess)
+}
+
+/// A stock track's display name and artwork, off the blocking pool.
+///
+/// Both come out of a 1.7 GB archive in the install dir, so neither belongs on the async
+/// runtime — and the preview is an image decode on top of that.
+async fn stock_track(app: &tauri::AppHandle, id: &str) -> Option<StockGuess> {
+    let install = config::load(app).map(|c| c.install_dir()).unwrap_or_default();
+    let id = id.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        let hit = trackstock::find(&install, &id)?;
+        let preview = trackstock::preview(&install, &hit).unwrap_or_default();
+        Some(StockGuess { name: hit.name, preview })
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+struct StockGuess {
+    name: String,
+    preview: String,
 }
 
 fn shop_guess(mut guess: TrackGuess, hit: mods::shop_catalog::ShopMod, exact: bool) -> TrackGuess {
@@ -3449,6 +3515,65 @@ fn shop_guess(mut guess: TrackGuess, hit: mods::shop_catalog::ShopMod, exact: bo
     guess.product_image = hit.image.unwrap_or_default();
     guess.exact = exact;
     guess
+}
+
+/// The best answer a catalogue page has to a track id, and whether it is a match rather than
+/// a resemblance.
+///
+/// Not simply the first item. A catalogue asked for "forest" hands back everything it holds
+/// that mentions the word, ordered by its own idea of relevance — which on mxb-mods put
+/// "Senderville Snowcross Showdown" above the track actually named that. Taking the first row
+/// is how a server on a track nobody sells came to be advertised as a product.
+fn best_track_hit<T>(
+    id: &str,
+    items: Vec<T>,
+    title: impl Fn(&T) -> String,
+    eligible: impl Fn(&T) -> bool,
+) -> Option<(T, bool)> {
+    let mut resembles = None;
+    for item in items {
+        if !eligible(&item) {
+            continue;
+        }
+        match name_answers(id, &title(&item)) {
+            // An outright match ends it — nothing later in the page can beat it.
+            Some(true) => return Some((item, true)),
+            Some(false) if resembles.is_none() => resembles = Some(item),
+            _ => {}
+        }
+    }
+    resembles.map(|item| (item, false))
+}
+
+/// Whether a catalogue title answers to a track id: `Some(true)` for the same name folded,
+/// `Some(false)` for a resemblance worth offering as a guess, `None` for a title that merely
+/// happens to share a word with it.
+///
+/// A resemblance has to carry **every** word of the id, and the id has to account for at least
+/// half of the title. The second half of that is what does the work: "forest" is in "Forest MX"
+/// (one word of two) and also in "Club Forest Racing Park Winter Edition" (one of six), and
+/// only the first is plausibly the same track.
+fn name_answers(id: &str, title: &str) -> Option<bool> {
+    let (want, got) = (fold_name(id), fold_name(title));
+    if want.is_empty() || got.is_empty() {
+        return None;
+    }
+    if want == got {
+        return Some(true);
+    }
+    let wanted: Vec<&str> = want.split(' ').collect();
+    let have: Vec<&str> = got.split(' ').collect();
+    if !wanted.iter().all(|w| have.contains(w)) {
+        return None;
+    }
+    (wanted.len() * 2 >= have.len()).then_some(false)
+}
+
+/// Whether a product's categories say it is a track. An empty list is allowed through: a
+/// catalogue that told us nothing about a product shouldn't be able to silence the guess.
+fn sells_tracks(categories: &[String]) -> bool {
+    categories.is_empty()
+        || categories.iter().any(|c| c.to_ascii_lowercase().contains("track"))
 }
 
 /// Lowercase and reduce everything that isn't alphanumeric to a single space, so an internal
@@ -6403,6 +6528,136 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod server_track_tests {
+    use super::*;
+
+    /// The real fault, in the one place it can be checked without a network: mxb-mods'
+    /// answer to "forest" led with a snowcross track, and the panel offered it. The names
+    /// here are the site's own, taken from a live search on 2026-09-09.
+    #[test]
+    fn a_title_that_only_shares_a_word_is_not_an_answer() {
+        for wrong in [
+            "Senderville Snowcross Showdown",
+            "Catheys Creek Motocross Park",
+            "MacksTracks-ForestLoop",
+            "Forest KTM 250 SX-F",
+        ] {
+            assert_eq!(name_answers("forest", wrong), None, "{wrong} should be refused");
+        }
+        assert_eq!(name_answers("forest", "Forest"), Some(true));
+        assert_eq!(name_answers("forest", "Forest MX"), Some(false), "half the title is the id");
+    }
+
+    /// What the panel is for: an id that is a product's name in snake_case.
+    #[test]
+    fn an_id_matches_the_track_it_names() {
+        assert_eq!(name_answers("sfdr", "SFDR"), Some(true));
+        assert_eq!(name_answers("Briarcliff MX", "briarcliff_mx"), Some(true));
+        assert_eq!(name_answers("mmx_supercross", "MMX Supercross"), Some(true));
+        assert_eq!(
+            name_answers("mmx_supercross", "MMX Supercross 2024"),
+            Some(false),
+            "a longer title is still worth offering, labelled as a guess",
+        );
+        assert_eq!(name_answers("", "Anything"), None);
+    }
+
+    /// A page is scanned for the best row, not read from the top — and an outright match
+    /// wins wherever it sits.
+    #[test]
+    fn the_page_is_searched_rather_than_taken_in_order() {
+        let page = vec![
+            "Senderville Snowcross Showdown".to_string(),
+            "Redwood".to_string(),
+            "Forest MX".to_string(),
+            "Forest".to_string(),
+        ];
+        let (hit, exact) =
+            best_track_hit("forest", page.clone(), |t| t.clone(), |_| true).expect("a hit");
+        assert_eq!((hit.as_str(), exact), ("Forest", true));
+
+        // With the match removed, the resemblance is offered instead.
+        let (hit, exact) =
+            best_track_hit("forest", page[..3].to_vec(), |t| t.clone(), |_| true).expect("a hit");
+        assert_eq!((hit.as_str(), exact), ("Forest MX", false));
+
+        assert!(
+            best_track_hit("forest", page, |t| t.clone(), |_| false).is_none(),
+            "nothing eligible means no guess at all",
+        );
+    }
+
+    /// The live catalogue, which is the half of this that no fixture can check: does
+    /// mxb-mods, asked the way the panel asks it, actually find the track a server names?
+    ///
+    /// Track ids taken from installed tracks — the same strings a server publishes when it
+    /// runs one. Run with `--ignored`; it needs the network.
+    #[test]
+    #[ignore = "hits mxb-mods.com"]
+    fn mxb_mods_finds_the_tracks_servers_run() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let cat = game::MXB.catalog_tracks_category;
+        let mut found = 0;
+        let ids = [
+            "SFDR",
+            "Briarcliff MX",
+            "I40 MX",
+            "Highland-Mx",
+            "Mx Twenty-Three",
+            "Blackpine_Park",
+        ];
+        for id in ids {
+            let words = id.replace('_', " ");
+            let items = rt
+                .block_on(mods::mxb::search(&words, cat, 1, ModSort::default()))
+                .unwrap_or_default();
+            match best_track_hit(id, items, |m| m.title.clone(), |_| true) {
+                Some((hit, exact)) => {
+                    println!("{id} -> {} (exact: {exact})", hit.title);
+                    found += 1;
+                }
+                None => println!("{id} -> nothing"),
+            }
+        }
+        assert!(found >= 4, "only {found} of {} ids resolved", ids.len());
+
+        // And why the stock check has to come first. Asked for `forest`, the catalogue
+        // leads with a snowcross track — refused here — but it genuinely does carry
+        // "Forest MX" and "Forest SX", which this rule cannot tell from the stock Forest
+        // Raceway and never will. Only knowing the game's own tracks settles it.
+        let items = rt
+            .block_on(mods::mxb::search("forest", cat, 1, ModSort::default()))
+            .unwrap_or_default();
+        let titles: Vec<String> = items.iter().map(|m| m.title.clone()).collect();
+        println!("forest page: {titles:?}");
+        assert_eq!(
+            name_answers("forest", titles.first().map(String::as_str).unwrap_or("")),
+            None,
+            "the row the catalogue puts first is not the answer",
+        );
+        assert!(
+            best_track_hit("forest", items, |m| m.title.clone(), |_| true).is_some(),
+            "the catalogue would still offer something, which is exactly why \
+             `guess_server_track` asks trackstock before it asks any catalogue",
+        );
+        assert!(
+            trackstock::find("", "forest").is_some(),
+            "and trackstock is what stops it",
+        );
+    }
+
+    /// A product filed under bikes is never the answer to a track — but a catalogue that
+    /// published no categories must not be able to silence the guess.
+    #[test]
+    fn only_products_filed_as_tracks_are_offered() {
+        assert!(sells_tracks(&["Tracks".to_string()]));
+        assert!(sells_tracks(&["Race Tracks".to_string(), "Pro".to_string()]));
+        assert!(sells_tracks(&[]));
+        assert!(!sells_tracks(&["Liveries".to_string(), "Bikes".to_string()]));
+    }
 }
 
 

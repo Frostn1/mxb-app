@@ -936,8 +936,10 @@ export const fr: Translation = {
   "serverBrowser.trackTitle": "Circuit",
   "serverBrowser.trackChecking": "Identification du circuit…",
   "serverBrowser.trackInstalled": "Vous avez ce circuit — {{name}}",
+  "serverBrowser.trackStock": "Fourni avec le jeu — {{name}}",
   "serverBrowser.trackMaybe": "Nous pensons qu'il s'agit de {{name}}",
   "serverBrowser.trackGetShop": "L'obtenir sur la boutique",
+  "serverBrowser.trackGetMods": "L'obtenir sur mxb-mods",
   "serverBrowser.trackGetHub": "L'obtenir sur MXB Hub",
 
   "sync.autoNote":

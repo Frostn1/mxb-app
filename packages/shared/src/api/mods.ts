@@ -3155,12 +3155,23 @@ export function serversWithPaintSync(
 export interface TrackGuess {
   /** The internal id the server published, e.g. `mmx_supercross`. */
   id: string;
-  /** The installed track's file or folder name; `""` when it isn't installed. */
+  /**
+   * The installed track's file or folder name; `""` when it isn't installed. For a stock
+   * track this is the name the game shows — "Forest Raceway", not `forest`.
+   */
   installed: string;
+  /**
+   * True when the track shipped with the game. Still means you have it — there is just
+   * nowhere to go and get it, because it was never a mod.
+   */
+  stock: boolean;
   /** The installed track's own preview image, as a data URL. */
   preview: string;
-  /** Where a copy could come from: `"shop"`, `"hub"`, or `""` when nothing matched. */
-  source: "shop" | "hub" | "";
+  /**
+   * Where a copy could come from: `"mods"` (mxb-mods.com), `"shop"`, `"hub"`, or `""` when
+   * nothing matched.
+   */
+  source: "mods" | "shop" | "hub" | "";
   productId: number;
   productName: string;
   productUrl: string;
