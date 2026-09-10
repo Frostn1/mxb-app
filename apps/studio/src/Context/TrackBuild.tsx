@@ -35,6 +35,7 @@ import type { TKey } from "@/i18n";
 export type BuildState = BuildPhase | "done" | "failed";
 
 const RUNNING: BuildState[] = [
+  "preparing",
   "synthesising",
   "writing",
   "map",
@@ -55,6 +56,7 @@ export function isRunning(state: BuildState): boolean {
  * argument TerrainEd takes, and nobody waiting on a track wants to be told about a `.map`.
  */
 export const PHASE_KEY: Record<BuildState, TKey> = {
+  preparing: "track.phase.preparing",
   synthesising: "track.phase.synthesising",
   writing: "track.phase.writing",
   map: "track.phase.map",

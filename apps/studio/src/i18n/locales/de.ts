@@ -432,6 +432,7 @@ export const de: Translation = {
   "protect.showFolder": "Ordner anzeigen",
   "track.gap": "Lücke",
   "track.deep": "tief",
+  "track.phase.preparing": "Compiler werden vorbereitet",
   "track.phase.synthesising": "Gelände wird geformt",
   "track.phase.writing": "Quelldateien werden geschrieben",
   "track.phase.map": "Grafik wird kompiliert",

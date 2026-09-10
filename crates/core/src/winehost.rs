@@ -418,6 +418,129 @@ pub fn describe(override_path: &str) -> HostInfo {
     }
 }
 
+/// A Wine host that can run a Windows program: what to launch it with, and where.
+///
+/// Resolved rather than asked for — see [`tool_host`].
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[derive(Debug, Clone)]
+pub struct Host {
+    pub runner: Runner,
+    pub prefix: PathBuf,
+    /// The prefix doesn't exist yet, so the first program run in it pays for creating it.
+    pub fresh: bool,
+}
+
+/// Find something on this machine that can run a Windows console program.
+///
+/// PiBoSo's track compilers need a Wine prefix, but not *the game's*: they are CPU-only,
+/// they load nothing the game installed, and the prefix is only somewhere for a Windows
+/// program to find a `C:`. So the game's bottle is the first choice rather than the
+/// requirement — asking someone to move their game inside a prefix to compile a track is
+/// asking them to do our work.
+///
+/// In order: the prefix the game sits in, any other prefix on this machine, and then `own`
+/// — ours, which [`ensure_prefix`] creates the first time it is used. `None` is the one
+/// answer a person has to act on: no Wine here at all.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn tool_host(game_path: &Path, own: &Path, override_path: &str) -> Option<Host> {
+    pick_host(game_path, own, bottles(), &|prefix| resolve(override_path, prefix))
+}
+
+/// [`tool_host`]'s order of preference, with the machine handed in so it can be tested on
+/// one that has no Wine on it.
+fn pick_host(
+    game_path: &Path,
+    own: &Path,
+    bottles: Vec<PathBuf>,
+    resolve: &dyn Fn(Option<&Path>) -> Option<Runner>,
+) -> Option<Host> {
+    // The game's own bottle is exempt from the check below: whatever runs the game is
+    // already running in there, and this is the same launch the Play button makes.
+    if let Some((prefix, _)) = split_prefix(game_path) {
+        if let Some(runner) = resolve(Some(&prefix)) {
+            return Some(Host { runner, prefix, fresh: false });
+        }
+    }
+    for prefix in bottles {
+        match resolve(Some(&prefix)) {
+            Some(runner) if borrowable(&prefix, &runner) => {
+                return Some(Host { runner, prefix, fresh: false })
+            }
+            _ => {}
+        }
+    }
+    let runner = resolve(None)?;
+    Some(Host { fresh: !is_prefix(own), runner, prefix: own.to_path_buf() })
+}
+
+/// May we run `runner` in someone else's `prefix`?
+///
+/// Only when the two belong together. A wrapper's bottle is built by its own Wine, and a
+/// different build launched against it upgrades the prefix in place — which is a stranger's
+/// game install broken by a track compile. A bare prefix (`~/.wine`, `$WINEPREFIX`) has no
+/// owner to disagree with, and our own is made below.
+fn borrowable(prefix: &Path, runner: &Runner) -> bool {
+    match owner_of(prefix) {
+        None | Some(Wrapper::Plain) => true,
+        Some(Wrapper::CrossOver) => runner.via() == "CrossOver",
+        Some(Wrapper::Whisky) => runner.via() == "Whisky",
+    }
+}
+
+/// How long a first `wineboot` is given before it is treated as stuck.
+const BOOT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Lay down `prefix` if it isn't one yet.
+///
+/// `wineboot -i` is what writes `drive_c` and the registry. Doing it here rather than
+/// leaving it to the first real program keeps the wait somewhere the app can name, and
+/// keeps `wineboot`'s output out of a compiler's log.
+///
+/// Mono and Gecko are overridden off: a fresh prefix otherwise opens a dialog offering to
+/// download them, which on a machine with nobody watching is a build that never returns.
+/// Nothing we run in here is a .NET or a browser program.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn ensure_prefix(runner: &Runner, prefix: &Path) -> std::io::Result<()> {
+    // A wrapper's own bottle is made by the wrapper. Only ours is ever missing.
+    if is_prefix(prefix) || matches!(runner.kind, RunnerKind::CrossOver { .. }) {
+        return Ok(());
+    }
+    std::fs::create_dir_all(prefix)?;
+    let mut child = std::process::Command::new(&runner.program)
+        .args(["wineboot", "-i"])
+        .env("WINEPREFIX", prefix)
+        .env("WINEDEBUG", "-all")
+        .env("WINEDLLOVERRIDES", "mscoree,mshtml=")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+
+    let deadline = std::time::Instant::now() + BOOT_TIMEOUT;
+    loop {
+        if child.try_wait()?.is_some() {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("wineboot took longer than {}s in {prefix:?}", BOOT_TIMEOUT.as_secs()),
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    // The exit status is not the test — some Wine builds boot a prefix and still exit
+    // non-zero — but a prefix with no `drive_c` is one nothing can run in.
+    if !is_prefix(prefix) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("{} made no drive_c in {prefix:?}", runner.via()),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,6 +550,89 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn any_wine() -> Runner {
+        Runner {
+            program: PathBuf::from("/opt/wine"),
+            kind: RunnerKind::Wine { via: "Wine" },
+        }
+    }
+
+    /// The game's own bottle first: it is the one already proven to run Windows code here.
+    #[test]
+    fn the_games_prefix_is_the_first_choice() {
+        let host = pick_host(
+            Path::new("/b/MXB/drive_c/MX Bikes/mxbikes.exe"),
+            Path::new("/data/ours"),
+            vec![PathBuf::from("/b/Other")],
+            &|_| Some(any_wine()),
+        )
+        .expect("a runner was offered");
+        assert_eq!(host.prefix, PathBuf::from("/b/MXB"));
+        assert!(!host.fresh);
+    }
+
+    /// A game installed outside a prefix — a copy on the Desktop, a folder of files — used
+    /// to end the build. Any other bottle on the machine runs a console tool just as well.
+    #[test]
+    fn a_game_outside_a_prefix_borrows_another_bottle() {
+        let host = pick_host(
+            Path::new("/Applications/MX Bikes"),
+            Path::new("/data/ours"),
+            vec![PathBuf::from("/b/Whisky")],
+            &|_| Some(any_wine()),
+        )
+        .expect("a runner was offered");
+        assert_eq!(host.prefix, PathBuf::from("/b/Whisky"));
+    }
+
+    /// A bottle CrossOver or Whisky built is theirs. Running our own Wine in it would
+    /// upgrade the prefix in place — someone's game broken by a track compile — so a
+    /// prefix we can't drive properly is skipped for one of ours.
+    #[test]
+    fn a_wrappers_bottle_is_left_to_its_wrapper() {
+        let home = dirs_next::home_dir().expect("a home directory");
+        let whisky = home.join("Library/Containers/com.isaacmarovitz.Whisky/Bottles/theirs");
+        let host = pick_host(
+            Path::new(""),
+            Path::new("/data/ours"),
+            vec![whisky],
+            &|_| Some(any_wine()),
+        )
+        .expect("a runner was offered");
+        assert_eq!(host.prefix, PathBuf::from("/data/ours"));
+    }
+
+    /// Nothing on the machine but Wine itself: we make a prefix of our own rather than
+    /// asking anyone to make one.
+    #[test]
+    fn with_no_bottles_it_uses_its_own_prefix() {
+        let host = pick_host(
+            Path::new(""),
+            Path::new("/data/ours"),
+            vec![],
+            &|prefix| prefix.is_none().then(any_wine),
+        )
+        .expect("a runner was offered");
+        assert_eq!(host.prefix, PathBuf::from("/data/ours"));
+        assert!(host.fresh, "/data/ours doesn't exist, so it has to be created");
+    }
+
+    /// No Wine at all is the one case a person has to do something about.
+    #[test]
+    fn no_runner_anywhere_is_the_only_dead_end() {
+        assert!(pick_host(Path::new(""), Path::new("/data/ours"), vec![], &|_| None).is_none());
+    }
+
+    /// A prefix that is already there is not booted again — `fresh` is what decides, and a
+    /// second build must not pay for `wineboot`.
+    #[test]
+    fn an_existing_prefix_is_not_fresh() {
+        let dir = temp_dir("existing");
+        std::fs::create_dir_all(dir.join(DRIVE_C)).unwrap();
+        let host = pick_host(Path::new(""), &dir, vec![], &|_| Some(any_wine())).unwrap();
+        assert!(!host.fresh);
     }
 
     #[test]

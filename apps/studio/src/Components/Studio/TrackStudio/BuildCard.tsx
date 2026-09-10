@@ -74,8 +74,8 @@ export default function BuildCard() {
         </ul>
       )}
 
-      {/* A build that never reached a compiler — no Wine prefix, no tools — has no steps to
-          show, so its reason has nowhere else to go. */}
+      {/* A build that never reached a compiler — no tools, nothing to run them with — has
+          no steps to show, so its reason has nowhere else to go. */}
       {build.state === "failed" && build.steps.length === 0 && build.error && (
         <span className="line-clamp-4 text-[11px] leading-snug text-destructive">
           {build.error}

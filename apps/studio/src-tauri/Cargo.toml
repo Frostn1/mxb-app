@@ -59,3 +59,9 @@ image = { version = "0.25", default-features = false, features = [
 [features]
 # Matches the manager's. `tauri build` turns it on; a dev run leaves it off.
 custom-protocol = ["tauri/custom-protocol"]
+
+[dev-dependencies]
+# Tauri's mock runtime. The content locker's tests run against a mock app, and without the
+# `test` feature the studio's tests don't build at all. Dev-only — dev-dependencies aren't
+# part of a normal build, so the shipped binary never gets it.
+tauri = { version = "2", features = ["test"] }

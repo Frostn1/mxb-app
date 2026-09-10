@@ -98,6 +98,19 @@ pub struct Progress {
     pub expect: f32,
 }
 
+/// The bar while the machine is being got ready to compile — finding a Wine host, fetching
+/// one, laying down a prefix.
+///
+/// Ahead of the [`Plan`] rather than in it, and given a sliver of the bar rather than a
+/// share of the work: what it costs is a download and a first boot, which have nothing to do
+/// with how big the track is. Normally it is over in the time it takes to look at a folder.
+pub const PREPARING: Progress = Progress {
+    phase: "preparing",
+    from: 0.0,
+    to: 0.02,
+    expect: 45.0,
+};
+
 /// Seconds a phase takes per million terrain samples, as a first guess.
 ///
 /// Measured on 2026-09-06 against a generated 2049² track — 4.2 megasamples — with PiBoSo's
@@ -190,8 +203,8 @@ impl Plan {
 
 /// The three runs, in order. Stops at the first failure that makes the next one pointless.
 ///
-/// `game_path` is only used to find a Wine prefix on macOS — the compilers are Windows
-/// binaries and the prefix that runs the game is the one that has the runtime they need.
+/// `host` is what runs a Windows program on this machine — see [`host`], which resolves it
+/// once for the whole build.
 ///
 /// `starting` is called with each run's name just before it begins. It is the only sign of
 /// life there is while a build is going: see [`Progress`] for why the compilers' own output
@@ -200,7 +213,7 @@ pub fn compile(
     tools: &Tools,
     dir: &Path,
     slug: &str,
-    game_path: &str,
+    host: &Host,
     starting: &mut dyn FnMut(&'static str),
 ) -> Result<Vec<Step>> {
     if !dir.join("track.hmf").is_file() {
@@ -215,7 +228,7 @@ pub fn compile(
         &tools.terrained,
         &["track.hmf", &map, "params.ini"],
         dir,
-        game_path,
+        host,
         Some(&map),
     )?);
 
@@ -226,7 +239,7 @@ pub fn compile(
         &tools.terrained,
         &["track.tht", &trh, "trh_params.ini"],
         dir,
-        game_path,
+        host,
         Some(&trh),
     )?);
 
@@ -236,7 +249,7 @@ pub fn compile(
     if let (Some(tracked), true) = (&tools.tracked, dir.join(&trh).is_file()) {
         starting("centerline");
         let args = merge_args(&trh, dir.join("track_start.tcl").is_file());
-        steps.push(run("centerline", tracked, &args, dir, game_path, Some(&trh))?);
+        steps.push(run("centerline", tracked, &args, dir, host, Some(&trh))?);
     }
     Ok(steps)
 }
@@ -316,10 +329,10 @@ fn run(
     exe: &Path,
     args: &[&str],
     dir: &Path,
-    game_path: &str,
+    host: &Host,
     produces: Option<&str>,
 ) -> Result<Step> {
-    let mut cmd = command(exe, args, game_path)?;
+    let mut cmd = command(exe, args, host)?;
     cmd.current_dir(dir);
     let out = cmd
         .output()
@@ -344,39 +357,85 @@ fn run(
     })
 }
 
+/// How the compilers are run on this machine, resolved once for a whole build.
+///
+/// Nothing to hold on Windows, where they are simply run. Everywhere else they are Windows
+/// binaries and go through a Wine host.
+#[derive(Clone, Debug)]
+pub struct Host {
+    #[cfg(not(target_os = "windows"))]
+    wine: crate::winehost::Host,
+}
+
+impl Host {
+    /// What this ran through, for a log line. Empty on Windows, where there is no answer
+    /// more useful than "the machine".
+    pub fn via(&self) -> String {
+        #[cfg(target_os = "windows")]
+        return String::new();
+        #[cfg(not(target_os = "windows"))]
+        format!("{} at {}", self.wine.runner.via(), self.wine.prefix.display())
+    }
+}
+
+/// Windows runs Windows programs. There is nothing to find.
+#[cfg(target_os = "windows")]
+pub fn host(_game_path: &str, _own_prefix: &Path, _wine: &str) -> Result<Host> {
+    Ok(Host {})
+}
+
+/// Find a Wine host for the compilers, and make its prefix if it is ours and new.
+///
+/// The compilers are console programs: they read a `.hmf` and write a `.map`, they load
+/// nothing the game installed, and they do not touch a GPU. So any Wine prefix on the
+/// machine runs them, and where there is none, one of ours does — see
+/// [`crate::winehost::tool_host`] for the order. The game's path is still the first place
+/// looked, because a bottle that already runs MX Bikes is the safest bet, but it is no
+/// longer a requirement: this used to stop with "set the game path to a copy inside a Wine
+/// prefix", which asked someone to move their game to compile a track.
+///
+/// `wine` is an explicit runner — the Settings box, or one this app fetched. `FROST_WINE`
+/// does the same for the build harness, which drives a Wine that lives beside the compilers.
+#[cfg(not(target_os = "windows"))]
+pub fn host(game_path: &str, own_prefix: &Path, wine: &str) -> Result<Host> {
+    let over = match wine.trim() {
+        "" => std::env::var("FROST_WINE").unwrap_or_default(),
+        given => given.to_string(),
+    };
+    let Some(wine) = crate::winehost::tool_host(Path::new(game_path), own_prefix, &over) else {
+        bail!(
+            "the compilers are Windows programs, and there's no Wine on this machine to run \
+             them with. Install CrossOver, Whisky or Wine and the studio finds it by itself."
+        );
+    };
+    crate::winehost::ensure_prefix(&wine.runner, &wine.prefix)
+        .with_context(|| format!("preparing the Wine prefix at {:?}", wine.prefix))?;
+    Ok(Host { wine })
+}
+
 /// The command that runs a Windows executable here.
 #[cfg(target_os = "windows")]
-fn command(exe: &Path, args: &[&str], _game_path: &str) -> Result<std::process::Command> {
+fn command(exe: &Path, args: &[&str], _host: &Host) -> Result<std::process::Command> {
     let mut cmd = std::process::Command::new(exe);
     cmd.args(args);
     Ok(cmd)
 }
 
-/// On macOS the compilers are Windows binaries, so they go through the same Wine host the
-/// game does — and through the game's own prefix, which already has whatever runtime PiBoSo's
-/// tools were built against.
+/// Off Windows the compilers are Windows binaries, so they go through the host [`host`]
+/// resolved: a wrapper's bottle, or one of ours.
 #[cfg(not(target_os = "windows"))]
-fn command(exe: &Path, args: &[&str], game_path: &str) -> Result<std::process::Command> {
-    let Some((prefix, _)) = crate::winehost::split_prefix(Path::new(game_path)) else {
-        bail!(
-            "the compilers are Windows programs. Set the game path to a copy inside a Wine \
-             prefix — CrossOver, Whisky or plain Wine — and they'll run through that."
-        );
-    };
-    // `FROST_WINE` names a runner outside the places the resolver looks, which is how the
-    // build harness drives a Wine build that lives beside the compilers rather than installed.
-    // Empty unless set, so nothing changes for the app.
-    let over = std::env::var("FROST_WINE").unwrap_or_default();
-    let Some(runner) = crate::winehost::resolve(&over, Some(&prefix)) else {
-        bail!("found a Wine prefix at {prefix:?} but nothing that can run it");
-    };
+fn command(exe: &Path, args: &[&str], host: &Host) -> Result<std::process::Command> {
     let extra: Vec<String> = args.iter().map(|a| a.to_string()).collect();
-    let launch = crate::winehost::plan(&runner, &prefix, exe, &extra);
+    let launch = crate::winehost::plan(&host.wine.runner, &host.wine.prefix, exe, &extra);
     let mut cmd = std::process::Command::new(&launch.program);
     cmd.args(&launch.args);
     for (k, v) in &launch.env {
         cmd.env(k, v);
     }
+    // A fresh prefix would otherwise stop on a dialog offering to install Mono, which no
+    // compiler here needs and nobody is watching for.
+    cmd.env("WINEDEBUG", "-all");
+    cmd.env("WINEDLLOVERRIDES", "mscoree,mshtml=");
     Ok(cmd)
 }
 
@@ -530,7 +589,7 @@ mod tests {
             terrained: dir.join("terrained.exe"),
             tracked: None,
         };
-        let err = compile(&tools, &dir, "x", "", &mut |_| {}).unwrap_err().to_string();
+        let err = compile(&tools, &dir, "x", &nowhere(), &mut |_| {}).unwrap_err().to_string();
         assert!(err.contains("no track.hmf"), "{err}");
     }
 
@@ -547,19 +606,43 @@ mod tests {
             tracked: None,
         };
         let mut said = Vec::new();
-        let _ = compile(&tools, &dir, "x", "", &mut |phase| said.push(phase));
+        let _ = compile(&tools, &dir, "x", &nowhere(), &mut |phase| said.push(phase));
         assert_eq!(said.first(), Some(&"map"), "said {said:?}");
     }
 
-    /// Not on Windows, and not inside a Wine prefix, the failure has to name the reason
-    /// rather than surfacing whatever the OS says about an unrunnable file.
+    /// A host pointing at a Wine that isn't there. Enough to reach the compilers, which is
+    /// all a test that never means to run one needs.
+    #[cfg(not(target_os = "windows"))]
+    fn nowhere() -> Host {
+        Host {
+            wine: crate::winehost::Host {
+                runner: crate::winehost::Runner {
+                    program: PathBuf::from("/nowhere/wine"),
+                    kind: crate::winehost::RunnerKind::Wine { via: "Wine" },
+                },
+                prefix: PathBuf::from("/nowhere/prefix"),
+                fresh: false,
+            },
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn nowhere() -> Host {
+        Host {}
+    }
+
+    /// The one dead end left: a runner was named and it isn't there, so nothing on the
+    /// machine can run a Windows program. The message has to say that rather than surface
+    /// whatever the OS says about an unrunnable file — and it must not send anyone off to
+    /// move their game into a prefix, which is not what compiling needs.
     #[cfg(not(target_os = "windows"))]
     #[test]
-    fn without_a_prefix_it_explains_itself() {
-        let err = command(Path::new("/nowhere/terrained.exe"), &["a"], "/Applications/Game")
+    fn with_nothing_to_run_it_says_so() {
+        let err = host("", Path::new("/nowhere/prefix"), "/nowhere/wine")
             .unwrap_err()
             .to_string();
-        assert!(err.contains("Wine prefix"), "{err}");
+        assert!(err.contains("no Wine on this machine"), "{err}");
+        assert!(!err.contains("Set the game path"), "{err}");
     }
 }
 
@@ -578,14 +661,13 @@ mod build_one {
     /// FROST_PROGRAM=/tmp/prog.json FROST_OUT=/tmp/build \
     /// FROST_TOOLS=~/Downloads/mxb-trackbuild/tools \
     /// FROST_GAME="~/Downloads/mxb-trackbuild/prefix/drive_c/MX Bikes" \
-    /// FROST_PREFIX=~/Downloads/mxb-trackbuild/prefix \
     /// FROST_WINE="~/Downloads/mxb-trackbuild/Wine Devel.app/Contents/Resources/wine/bin/wine" \
-    ///   cargo test --bin mxb-app -- --ignored --nocapture build_a_track_to_pkz
+    ///   cargo test --bin frost-studio -- --ignored --nocapture build_a_track_to_pkz
     /// ```
     ///
-    /// `FROST_GAME` is not optional despite defaulting to empty: the prefix is found by
-    /// splitting the *game* path, so without it the compile stops on "the compilers are
-    /// Windows programs" however good the runner is. The folder need not hold a game.
+    /// Both of those are optional now: without `FROST_GAME` the host falls back to any
+    /// prefix on the machine and then to one of its own under `FROST_OUT`, and without
+    /// `FROST_WINE` it uses whatever Wine is installed.
     #[test]
     #[ignore = "needs PiBoSo's compilers and a Wine prefix"]
     fn build_a_track_to_pkz() {
@@ -631,7 +713,9 @@ mod build_one {
 
         let mut phase = |p: &'static str| println!("  .. {p}");
         let game = std::env::var("FROST_GAME").unwrap_or_default();
-        let steps = compile(&tools, &dir, &slug, &game, &mut phase).expect("compile");
+        let wine = host(&game, &out.join("wine-prefix"), "").expect("a Wine host");
+        println!("  running through {}", wine.via());
+        let steps = compile(&tools, &dir, &slug, &wine, &mut phase).expect("compile");
         for s in &steps {
             println!("  {} -> {}", s.name, if s.ok { "ok" } else { "FAILED" });
             if !s.ok {

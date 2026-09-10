@@ -15,6 +15,8 @@
   and nothing to wait for — and you edit it like any other.
 
 ### Changed
+- Building a track on a Mac no longer asks you to put the game inside a Wine prefix. The
+  Studio finds its own way to run PiBoSo's compilers, and gets one if the Mac hasn't got it.
 - The app is now Frost's Mod Manager, with a new name and a new mark. Installing this
   version retires the old one for you: your settings, your disabled mods, your paint
   templates and your Launch at startup choice all carry over untouched. If you pinned the

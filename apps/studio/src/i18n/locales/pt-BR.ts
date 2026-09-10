@@ -430,6 +430,7 @@ export const ptBR: Translation = {
   "protect.showFolder": "Mostrar pasta",
   "track.gap": "de vão",
   "track.deep": "de profundidade",
+  "track.phase.preparing": "Preparando os compiladores",
   "track.phase.synthesising": "Modelando o terreno",
   "track.phase.writing": "Escrevendo os fontes",
   "track.phase.map": "Compilando os gráficos",

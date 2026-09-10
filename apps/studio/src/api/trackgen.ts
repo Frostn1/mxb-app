@@ -448,8 +448,9 @@ export interface BuildResult {
  * which is what makes building one press. `install` puts the finished `.pkz` in the mods
  * tree, where the game lists it.
  *
- * The compilers are PiBoSo's and Windows-only; on macOS they go through the same Wine prefix
- * the game does. Minutes, not seconds — TerrainEd bakes shadow maps over the whole terrain.
+ * The compilers are PiBoSo's and Windows-only; off Windows they go through a Wine host the
+ * app finds — or fetches — by itself, so there is nothing to install first. Minutes, not
+ * seconds — TerrainEd bakes shadow maps over the whole terrain.
  */
 export function buildTrack(
   program: TrackProgram,
@@ -461,6 +462,7 @@ export function buildTrack(
 
 /** The phases of a build, in the order they run. */
 export type BuildPhase =
+  | "preparing"
   | "synthesising"
   | "writing"
   | "map"
