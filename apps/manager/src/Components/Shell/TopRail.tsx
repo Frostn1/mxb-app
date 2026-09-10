@@ -10,6 +10,7 @@ import { launchGame } from "@frost/shared/api/mods";
 import type { GameCaps } from "@frost/shared/types";
 import { RAIL, railItemFor, type DashboardView, type RailItem } from "./nav";
 import DownloadQueue from "./DownloadQueue";
+import FrostmodBadge from "./FrostmodBadge";
 import Brand from "./Brand";
 import ContextBar from "./ContextBar";
 import WindowControls, { IS_MAC } from "./WindowControls";
@@ -115,6 +116,10 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
       <div data-tauri-drag-region className="flex-1" />
 
       <div className="flex items-center gap-1 text-muted-foreground">
+        {/* What FrostMod is doing, and Start/Stop, from wherever you are. The sidebar
+            carried this on every screen and the rail has to as well: its state changes
+            while you are somewhere else, and Settings is four screens away. */}
+        <FrostmodBadge />
         <DownloadQueue collapsed />
         <button
           onClick={() => onNavigate("settings")}
