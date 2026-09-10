@@ -47,7 +47,6 @@ import {
   setOverlayEnabled,
   setOverlayHotkey,
   setProfilesPath,
-  setAnalyticsEnabled,
   setRunInBackground,
   setWatchModsReload,
   setSecureContentInject,
@@ -90,13 +89,21 @@ import SupportersCard from "./SupportersCard";
 import {
   COLORWAYS,
   COLORWAY_SWATCH,
+  UI_SCALES,
   useTheme,
+  type UiScale,
   type Colorway,
   type ThemeMode,
 } from "../../Context/Theme";
 import { Trans, APP_NAME } from "@/i18n";
 import { useI18n, type LocalePref, type TKey } from "@/i18n";
 import { getLocale, LOCALE_OPTIONS } from "@/i18n";
+import {
+  KNOWN_HOSTS,
+  readDownloadPrefs,
+  writeDownloadPrefs,
+  type DownloadPrefs,
+} from "@frost/shared/lib/downloadPrefs";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { prettyHotkey } from "../../lib/hotkey";
 import { formatBytes, formatDateShort } from "@frost/shared/lib/mods";
@@ -300,7 +307,13 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // everywhere it runs: natively on Windows, under Proton on Linux, in a CrossOver/Whisky
   // bottle on macOS. The app starts FrostMod in whichever prefix holds the game.
   const hasFrostmod = isWindows || platform === "linux" || isMac;
-  const { theme, setTheme, colorway, setColorway } = useTheme();
+  const { theme, setTheme, colorway, setColorway, scale, setScale } = useTheme();
+  // Which download to take when a mod offers several — see `lib/downloadPrefs`.
+  const [dlPrefs, setDlPrefsState] = useState<DownloadPrefs>(readDownloadPrefs);
+  const setDlPrefs = useCallback((next: DownloadPrefs) => {
+    writeDownloadPrefs(next);
+    setDlPrefsState(next);
+  }, []);
   const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes, strayMsvcr90, clearingStray, clearStrayMsvcr90 } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
@@ -469,7 +482,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       : t("settings.insideModsFolder"));
 
   const runInBackground = config.runInBackground ?? true;
-  const analyticsEnabled = config.analyticsEnabled ?? true;
   const launchAtStartup = config.launchAtStartup ?? false;
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
   // Typed flags are edited freely and saved on blur, so the field holds a draft until then —
@@ -807,15 +819,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const toggleBackground = async (v: boolean) => {
     try {
       await setRunInBackground(v);
-      await reloadConfig();
-    } catch (e) {
-      toast.error(t("settings.updateFailed"), { description: String(e) });
-    }
-  };
-
-  const toggleAnalytics = async (v: boolean) => {
-    try {
-      await setAnalyticsEnabled(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
@@ -1290,12 +1293,46 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               onChange={togglePaintSync}
             />
             <div className="h-px bg-border" />
+            {/* Which file to take when a mod ships the same thing twice. Both of these are
+                one-click-install problems: without them a dedicated-server rig picks the
+                server build by hand on every mod, and a Drive link that answers "too many
+                downloads" has to be stepped past by hand too. */}
             <ToggleRow
-              label={t("settings.analytics")}
-              desc={t("settings.analyticsDesc")}
-              checked={analyticsEnabled}
-              onChange={toggleAnalytics}
+              label={t("settings.preferServer")}
+              desc={t("settings.preferServerDesc")}
+              checked={dlPrefs.preferServer}
+              onChange={(v) => setDlPrefs({ ...dlPrefs, preferServer: v })}
             />
+            <div className="h-px bg-border" />
+            <div className="flex items-center justify-between gap-4 py-3">
+              <div className="min-w-0">
+                <div className="text-[12.5px] text-foreground/85">
+                  {t("settings.preferredHost")}
+                </div>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {t("settings.preferredHostDesc")}
+                </p>
+              </div>
+              <Select
+                value={dlPrefs.preferredHost || "none"}
+                onValueChange={(v) =>
+                  setDlPrefs({ ...dlPrefs, preferredHost: v === "none" ? "" : v })
+                }
+              >
+                <SelectTrigger className="h-8 w-[180px] flex-none">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{t("settings.preferredHostNone")}</SelectItem>
+                  {KNOWN_HOSTS.map((h) => (
+                    <SelectItem key={h.id} value={h.id}>
+                      {h.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {secureAvailable && (
               <>
                 <div className="h-px bg-border" />
@@ -1728,6 +1765,30 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   {t(COLORWAY_LABEL[colorway])}
                 </span>
               </div>
+            </div>
+
+            {/* The webview's own zoom, so it moves type, spacing and icons together.
+                Scaling the root font instead would leave the app's 778 pixel-valued
+                type sizes exactly where they were. */}
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-[12.5px] text-foreground/85">
+                {t("settings.uiScale")}
+              </span>
+              <Select
+                value={String(scale)}
+                onValueChange={(v) => setScale(Number(v) as UiScale)}
+              >
+                <SelectTrigger className="h-8 w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {UI_SCALES.map((factor) => (
+                    <SelectItem key={factor} value={String(factor)}>
+                      {Math.round(factor * 100)}%
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* A Select, not a Segmented control — seven options don't fit the

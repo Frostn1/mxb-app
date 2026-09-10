@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -25,6 +26,18 @@ export const COLORWAYS = [
   "retro",
 ] as const;
 export type Colorway = (typeof COLORWAYS)[number];
+
+/**
+ * How big the interface is drawn, as a multiplier.
+ *
+ * This is the webview's own zoom, not a font size. The app writes 778 type sizes as
+ * arbitrary pixel values (`text-[13px]`), so scaling the root font would move the rem-based
+ * spacing and leave nearly all of the text where it was. Zoom scales the rendered page
+ * whole — type, spacing, icons and borders together — which is what "the font is too small
+ * on 1440p" is actually asking for.
+ */
+export const UI_SCALES = [0.9, 1, 1.1, 1.25, 1.4, 1.6] as const;
+export type UiScale = (typeof UI_SCALES)[number];
 
 /** `[accent, chrome]` — what a colorway's swatch is drawn from. */
 export const COLORWAY_SWATCH: Record<Colorway, [string, string]> = {
@@ -46,12 +59,19 @@ interface ThemeContextValue {
   /** The palette applied on top of light/dark. */
   colorway: Colorway;
   setColorway: (colorway: Colorway) => void;
+  /** How big the interface is drawn. 1 is the design size. */
+  scale: UiScale;
+  setScale: (scale: UiScale) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 const STORAGE_KEY = "frost-theme";
 const COLORWAY_KEY = "frost-colorway";
+const SCALE_KEY = "frost-ui-scale";
+
+/** The in-game overlay loads the same bundle with `?overlay=1` — see `main.tsx`. */
+const IS_OVERLAY = new URLSearchParams(window.location.search).has("overlay");
 
 function readStored(): ThemeMode {
   const v = localStorage.getItem(STORAGE_KEY);
@@ -65,6 +85,11 @@ function readStoredColorway(): Colorway {
   return COLORWAYS.includes(v as Colorway) ? (v as Colorway) : "frost";
 }
 
+function readStoredScale(): UiScale {
+  const v = Number(localStorage.getItem(SCALE_KEY));
+  return (UI_SCALES as readonly number[]).includes(v) ? (v as UiScale) : 1;
+}
+
 function systemPrefersDark() {
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
@@ -72,6 +97,7 @@ function systemPrefersDark() {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>(readStored);
   const [colorway, setColorwayState] = useState<Colorway>(readStoredColorway);
+  const [scale, setScaleState] = useState<UiScale>(readStoredScale);
   const [systemDark, setSystemDark] = useState(systemPrefersDark);
 
   // Track OS theme changes for `system`.
@@ -88,6 +114,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const onStorage = (e: StorageEvent) => {
       if (e.key === STORAGE_KEY) setThemeState(readStored());
       if (e.key === COLORWAY_KEY) setColorwayState(readStoredColorway());
+      if (e.key === SCALE_KEY) setScaleState(readStoredScale());
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
@@ -110,6 +137,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     document.documentElement.dataset.colorway = colorway;
   }, [colorway]);
 
+  // Zoom is per-webview and does not persist across launches, so it is applied on mount as
+  // well as on change. Never to the overlay: it is sized against the game's screen, not the
+  // desk this window sits on, and scaling it would push it over what it is meant to annotate.
+  useEffect(() => {
+    if (IS_OVERLAY) return;
+    getCurrentWebview()
+      .setZoom(scale)
+      .catch((e) => console.warn("could not set the interface scale", e));
+  }, [scale]);
+
   const setTheme = (mode: ThemeMode) => {
     localStorage.setItem(STORAGE_KEY, mode);
     setThemeState(mode);
@@ -120,9 +157,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setColorwayState(next);
   };
 
+  const setScale = (next: UiScale) => {
+    localStorage.setItem(SCALE_KEY, String(next));
+    setScaleState(next);
+  };
+
   const value = useMemo(
-    () => ({ theme, resolved, setTheme, colorway, setColorway }),
-    [theme, resolved, colorway],
+    () => ({ theme, resolved, setTheme, colorway, setColorway, scale, setScale }),
+    [theme, resolved, colorway, scale],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

@@ -3,6 +3,14 @@
 ## 2026-09-09
 
 ### Added
+- FrostMod's status sits in the top bar, on every screen, with Start, Stop and Reload behind
+  it. The dot says whether it is running and whether it actually reached the game.
+- Interface size in Settings, from 90% to 160%. It scales the whole interface, not just the
+  text, for a large or high-resolution monitor.
+- Two download preferences in Settings. "Prefer dedicated-server files" takes the server
+  build wherever a mod ships one, so a server machine can quick-install a whole selection
+  without opening each mod. "Preferred download host" takes MediaFire, or whichever host you
+  pick, ahead of the others when a mod is mirrored on several.
 - Random track in the Track Studio. It draws a whole track from a number — no brief to write
   and nothing to wait for — and you edit it like any other.
 

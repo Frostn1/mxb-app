@@ -119,8 +119,6 @@ export const es: Translation = {
   "welcome.intro.body":
     "Tu gestor de mods para MX Bikes. Mantén pistas, motos y gráficos organizados en un solo sitio — se acabaron los archivos zip repartidos por el escritorio. Te enseñamos todo en unos segundos.",
   "welcome.getStarted": "Empezar",
-  "welcome.analyticsNote":
-    "{{app}} cuenta de forma anónima qué páginas se usan. Sin nombres ni archivos — puedes desactivarlo en Ajustes.",
   "presets.missingMods":
     "Mods que faltan: {{mods}}. Instálalos para ver esas piezas.",
   "presets.help":
@@ -532,6 +530,7 @@ export const es: Translation = {
   "settings.themeDark": "Oscuro",
   "settings.themeSystem": "Sistema",
   "settings.colorway": "Paleta",
+  "settings.uiScale": "Tamaño de la interfaz",
   "settings.colorwayFrost": "Escarcha",
   "settings.colorwayEmber": "Brasa",
   "settings.colorwayMoss": "Musgo",
@@ -541,9 +540,11 @@ export const es: Translation = {
   "settings.colorwayRetro": "Retro",
   "settings.language": "Idioma",
   "settings.languageSystem": "Sistema",
-  "settings.analytics": "Compartir estadísticas de uso anónimas",
-  "settings.analyticsDesc":
-    "Envía un ID aleatorio, la versión de la app y cuántas veces usas cada página y función, para saber qué merece la pena construir. Nunca tu nombre, tus archivos ni tu dirección.",
+  "settings.preferServer": "Preferir archivos de servidor dedicado",
+  "settings.preferServerDesc": "Tomar la versión de servidor dedicado cuando un mod la ofrezca. Para una máquina que aloja un servidor en lugar de jugar.",
+  "settings.preferredHost": "Servidor de descarga preferido",
+  "settings.preferredHostDesc": "Cuando un mod está en varios servidores, tomar este primero.",
+  "settings.preferredHostNone": "Sin preferencia",
   "settings.runInBackground": "Seguir en segundo plano",
   "settings.runInBackgroundDesc":
     "Cerrar la ventana deja {{app}} en la bandeja del sistema para que FrostMod siga conectado. Sal desde el icono de la bandeja.",
