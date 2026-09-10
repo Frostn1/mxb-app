@@ -950,6 +950,21 @@ export const it: Translation = {
   "serverBrowser.region.asia": "Asia",
   "serverBrowser.region.other": "Altro",
 
+  // ── Server browser: azione di download tracciato (portato) ──
+  "serverBrowser.dl.queued": "In coda {{title}}",
+  "serverBrowser.dl.queuedShort": "In coda",
+  "serverBrowser.dl.install": "Installa",
+  "serverBrowser.dl.installTitle": "Installa {{title}} da mxb-mods",
+  "serverBrowser.dl.looking": "Ricerca…",
+  "serverBrowser.dl.lookingTitle": "Verifica se questo tracciato è scaricabile…",
+  "serverBrowser.dl.find": "Ottieni tracciato",
+  "serverBrowser.dl.findTitle": "Cerca questo tracciato su mxb-mods, l'Hub e lo shop",
+  "serverBrowser.dl.searching": "Ricerca…",
+  "serverBrowser.dl.search": "Cerca",
+  "serverBrowser.dl.searchTitle": "Cerca questo tracciato nel catalogo",
+  "serverBrowser.dl.onHub": "Sull'Hub",
+  "serverBrowser.dl.onShop": "Acquista {{title}} dallo shop",
+
   "sync.autoNote":
     "Il tuo look si pubblica da solo — ogni moto, ogni volta che lo cambi nell'app o nel garage del gioco. Quello degli altri arriva quando premi Gioca.",
 

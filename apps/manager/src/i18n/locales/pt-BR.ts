@@ -952,6 +952,21 @@ export const ptBR: Translation = {
   "serverBrowser.region.asia": "Ásia",
   "serverBrowser.region.other": "Outra",
 
+  // ── Navegador de servidores: ação de download de pista (portado) ──
+  "serverBrowser.dl.queued": "Na fila {{title}}",
+  "serverBrowser.dl.queuedShort": "Na fila",
+  "serverBrowser.dl.install": "Instalar",
+  "serverBrowser.dl.installTitle": "Instalar {{title}} do mxb-mods",
+  "serverBrowser.dl.looking": "Procurando…",
+  "serverBrowser.dl.lookingTitle": "Verificando se esta pista pode ser baixada…",
+  "serverBrowser.dl.find": "Obter pista",
+  "serverBrowser.dl.findTitle": "Procurar esta pista no mxb-mods, no Hub e na loja",
+  "serverBrowser.dl.searching": "Procurando…",
+  "serverBrowser.dl.search": "Procurar",
+  "serverBrowser.dl.searchTitle": "Procurar esta pista no catálogo",
+  "serverBrowser.dl.onHub": "No Hub",
+  "serverBrowser.dl.onShop": "Comprar {{title}} na loja",
+
   "sync.autoNote":
     "Seu visual se publica sozinho — cada moto, sempre que você muda no app ou na garagem do jogo. O dos outros chega quando você aperta Jogar.",
 

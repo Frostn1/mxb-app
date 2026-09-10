@@ -32,6 +32,7 @@ import {
   listMasterServers,
   joinServer,
   serversWithPaintSync,
+  installedTrackIds,
   type MasterServer,
 } from "@frost/shared/api/mods";
 import { useT } from "@/i18n";
@@ -42,6 +43,9 @@ import {
   canonicalRegion,
   type RegionKey,
 } from "@/lib/serverRegion";
+import { buildTrackIndex, matchTrack, type TrackIndex } from "@/lib/trackContent";
+import { useTrackCatalog } from "@/lib/useTrackCatalog";
+import TrackContentAction from "./TrackContentAction";
 import JoinServerDialog from "../Shell/JoinServerDialog";
 import ServerDetail from "./ServerDetail";
 
@@ -101,6 +105,17 @@ const Servers = () => {
   const [region, setRegion] = useState<string>("all");
   const [favesOnly, setFavesOnly] = useState(false);
   const favs = useFavourites(servers);
+
+  // Which tracks are on disk, so a row can say "you have this" or offer to fetch it. Scanned
+  // once on mount; a track that finishes downloading shows as installed on the next refresh.
+  const [trackIndex, setTrackIndex] = useState<TrackIndex>(() => buildTrackIndex([]));
+  useEffect(() => {
+    installedTrackIds()
+      .then((tracks) => setTrackIndex(buildTrackIndex(tracks)))
+      .catch(() => setTrackIndex(buildTrackIndex([])));
+  }, []);
+  // Which of the missing tracks can actually be downloaded, for the whole list in one call.
+  const catalog = useTrackCatalog(servers, trackIndex);
 
   // One fetch at a time. Two overlapping ones each sign in to Steam, and the loser's
   // failure used to replace the winner's list with an error.
@@ -481,15 +496,28 @@ const Servers = () => {
                       </span>
                     </td>
                     <td className="px-2 py-2.5 text-muted-foreground">
-                      <span
-                        className="block max-w-[220px] truncate"
-                        title={[s.track, s.trackLayout].filter(Boolean).join(" — ")}
-                      >
-                        {s.track || "—"}
-                        {s.trackLayout && (
-                          <span className="text-faint"> · {s.trackLayout}</span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="block max-w-[200px] truncate"
+                          title={[s.track, s.trackLayout].filter(Boolean).join(" — ")}
+                        >
+                          {s.track || "—"}
+                          {s.trackLayout && (
+                            <span className="text-faint"> · {s.trackLayout}</span>
+                          )}
+                        </span>
+                        {s.track && matchTrack(trackIndex, s.track).state === "missing" && (
+                          // The action opens the row's detail unless the click is stopped here.
+                          <span onClick={(e) => e.stopPropagation()}>
+                            <TrackContentAction
+                              track={s.track}
+                              known={catalog.found.get(s.track)}
+                              pending={catalog.pending.has(s.track)}
+                              compact
+                            />
+                          </span>
                         )}
-                      </span>
+                      </div>
                     </td>
                     <td className="px-2 py-2.5 text-muted-foreground">
                       <span className="block max-w-[140px] truncate" title={s.location}>

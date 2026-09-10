@@ -6333,6 +6333,8 @@ fn main() {
             server_riders,
             servers_with_paint_sync,
             guess_server_track,
+            installed_track_ids,
+            resolve_server_tracks,
             ranked_identity,
             ranked_profile,
             set_ranked_guid,
@@ -7691,6 +7693,46 @@ async fn scan_library(
     tauri::async_runtime::spawn_blocking(move || scan_library_blocking(app, subpath))
         .await
         .map_err(|e| format!("scan_library task failed: {e}"))?
+}
+
+/// One installed track, as the server browser matches it (see `lib/trackContent.ts`).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InstalledTrack {
+    /// The track's internal folder id — exactly the value a server reports as its track, so
+    /// the browser matches on it directly. This is the library scan's `name`.
+    id: String,
+    /// Absolute path of the `.pkz` (or track folder), for reading its preview.
+    path: String,
+}
+
+/// The internal ids of every installed track, so the server browser can say which servers'
+/// tracks the player already has. Reuses the same track scan `guess_server_track` trusts,
+/// mapped down to the id/path the matcher needs.
+#[tauri::command]
+async fn installed_track_ids(app: tauri::AppHandle) -> Result<Vec<InstalledTrack>, String> {
+    let entries = scan_library(app, "tracks".into()).await?;
+    Ok(entries
+        .into_iter()
+        .map(|e| InstalledTrack { id: e.name, path: e.path })
+        .collect())
+}
+
+/// Which of these track ids the mxb-mods catalog can supply (see [`mods::trackindex`]).
+///
+/// Ask with the tracks the browser is showing as missing, most-hosted first: what the index
+/// can't answer becomes its background queue, so the order is also the priority. Returns
+/// immediately from the index — the queue is worked behind it, and `track-index://updated`
+/// says when a later call would answer more. Asked without `with_clearance` for the same
+/// reason `guess_server_track` is: a background resolve must never pop a browser challenge.
+#[tauri::command]
+async fn resolve_server_tracks(
+    app: tauri::AppHandle,
+    tracks: Vec<String>,
+) -> Result<mods::trackindex::Resolution, String> {
+    mods::trackindex::resolve(&app, tracks)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]

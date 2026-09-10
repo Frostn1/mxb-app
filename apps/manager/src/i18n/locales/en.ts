@@ -936,6 +936,21 @@ export const en = {
   "serverBrowser.region.asia": "Asia",
   "serverBrowser.region.other": "Other",
 
+  // ── Server browser: track download action (ported) ──
+  "serverBrowser.dl.queued": "Queued {{title}}",
+  "serverBrowser.dl.queuedShort": "Queued",
+  "serverBrowser.dl.install": "Install",
+  "serverBrowser.dl.installTitle": "Install {{title}} from mxb-mods",
+  "serverBrowser.dl.looking": "Looking…",
+  "serverBrowser.dl.lookingTitle": "Checking whether this track can be downloaded…",
+  "serverBrowser.dl.find": "Get track",
+  "serverBrowser.dl.findTitle": "Look for this track across mxb-mods, the Hub and the shop",
+  "serverBrowser.dl.searching": "Searching…",
+  "serverBrowser.dl.search": "Search",
+  "serverBrowser.dl.searchTitle": "Search the catalog for this track",
+  "serverBrowser.dl.onHub": "On the Hub",
+  "serverBrowser.dl.onShop": "Buy {{title}} from the shop",
+
   "sync.autoNote":
     "Your look publishes itself — every bike, whenever you change it in the app or in the game's own garage. Everyone else's arrives when you press Play.",
 

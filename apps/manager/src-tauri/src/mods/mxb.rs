@@ -760,6 +760,104 @@ pub async fn ratings(ids: &[u64]) -> HashMap<u64, ModRating> {
     out
 }
 
+/// WP's own `per_page` ceiling. Asking for more is a 400, not a bigger page.
+const BULK_PER_PAGE: u32 = 100;
+
+/// One listing page of a category, as light post summaries — for building the track index
+/// ([`super::trackindex`]) rather than for a browse view.
+///
+/// The tracks category is ~1,600 posts; this pages it 100 at a time straight off the REST
+/// API, asking only for the fields the index keys on. A 400 means we've paged past the end,
+/// which is an empty page and not an error.
+pub async fn catalog_page(category_id: u32, page: u32) -> anyhow::Result<Vec<ModSummary>> {
+    let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-json/wp/v2/posts"));
+    let params = vec![
+        ("categories", category_id.to_string()),
+        ("page", page.to_string()),
+        ("per_page", BULK_PER_PAGE.to_string()),
+        ("_fields", "id,slug,title,link,date".to_string()),
+    ];
+    let resp = get_with_retry(&url, &params).await?;
+    if resp.status == 400 {
+        return Ok(vec![]);
+    }
+    if !resp.is_success() {
+        return Err(refusal("the catalog listing", &resp));
+    }
+    let posts: Vec<Value> = resp.json()?;
+    Ok(posts
+        .iter()
+        .filter_map(|p| summary_from_post(p, category_id))
+        .collect())
+}
+
+/// The download links on one mod page, without the metadata round-trip [`detail`] also makes.
+///
+/// [`detail`] exists to render a mod page and needs the post JSON for its description, images
+/// and categories; a caller that only wants to know which *files* a mod ships needs none of
+/// that, and the page HTML alone has the links. Half the requests, for the callers building an
+/// index over many mods at once.
+pub async fn downloads_at(link: &str) -> anyhow::Result<Vec<DownloadOption>> {
+    let resp = get_page(link).await?;
+    if !resp.is_success() {
+        return Err(refusal("the mod page", &resp));
+    }
+    let downloads = parse_downloads(&resp.body);
+    if downloads.is_empty() {
+        if let Some(marker) = challenge_marker(&resp.body) {
+            return Err(challenge_error(marker, resp.body.len()));
+        }
+    }
+    Ok(downloads)
+}
+
+/// The file name a download URL carries, when it carries one.
+///
+/// MediaFire puts the real name in the path (`/file/<id>/Farm14.pkz/file`); Google Drive and
+/// Mega use opaque ids and yield nothing here. That asymmetry is the whole reason this is
+/// best-effort rather than a guarantee — roughly half of catalog links name their file.
+pub fn download_file_name(url: &str) -> Option<String> {
+    let name = url_file_name(url);
+    let name = percent_decode(name);
+    let (stem, ext) = name.rsplit_once('.')?;
+    if !matches!(ext.to_ascii_lowercase().as_str(), "pkz" | "zip" | "rar" | "7z") {
+        return None;
+    }
+    let stem = stem.trim();
+    (!stem.is_empty()).then(|| stem.to_string())
+}
+
+/// Enough percent/plus decoding for a URL path segment. MediaFire encodes spaces as `+` in
+/// some links and `%20` in others, and both spellings have to fold to the same name.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b'%' if i + 2 < bytes.len() => match u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                Ok(b) => {
+                    out.push(b);
+                    i += 3;
+                }
+                Err(_) => {
+                    out.push(b'%');
+                    i += 1;
+                }
+            },
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// A poisoned rating cache is not worth taking the app down for — the worst case is one
 /// stale entry written by a thread that panicked mid-insert.
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

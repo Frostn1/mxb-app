@@ -958,6 +958,21 @@ export const de: Translation = {
   "serverBrowser.region.asia": "Asien",
   "serverBrowser.region.other": "Andere",
 
+  // ── Server-Browser: Strecken-Download-Aktion (portiert) ──
+  "serverBrowser.dl.queued": "In Warteschlange {{title}}",
+  "serverBrowser.dl.queuedShort": "In Warteschlange",
+  "serverBrowser.dl.install": "Installieren",
+  "serverBrowser.dl.installTitle": "{{title}} von mxb-mods installieren",
+  "serverBrowser.dl.looking": "Suche…",
+  "serverBrowser.dl.lookingTitle": "Prüfe, ob diese Strecke heruntergeladen werden kann…",
+  "serverBrowser.dl.find": "Strecke holen",
+  "serverBrowser.dl.findTitle": "Diese Strecke bei mxb-mods, im Hub und im Shop suchen",
+  "serverBrowser.dl.searching": "Suche…",
+  "serverBrowser.dl.search": "Suchen",
+  "serverBrowser.dl.searchTitle": "Diese Strecke im Katalog suchen",
+  "serverBrowser.dl.onHub": "Im Hub",
+  "serverBrowser.dl.onShop": "{{title}} im Shop kaufen",
+
   "sync.autoNote":
     "Dein Look veröffentlicht sich selbst — jedes Bike, sobald du ihn in der App oder in der Garage des Spiels änderst. Der der anderen kommt, wenn du auf Spielen drückst.",
 

@@ -952,6 +952,21 @@ export const es: Translation = {
   "serverBrowser.region.asia": "Asia",
   "serverBrowser.region.other": "Otra",
 
+  // ── Navegador de servidores: acción de descarga de circuito (portado) ──
+  "serverBrowser.dl.queued": "En cola {{title}}",
+  "serverBrowser.dl.queuedShort": "En cola",
+  "serverBrowser.dl.install": "Instalar",
+  "serverBrowser.dl.installTitle": "Instalar {{title}} desde mxb-mods",
+  "serverBrowser.dl.looking": "Buscando…",
+  "serverBrowser.dl.lookingTitle": "Comprobando si este circuito se puede descargar…",
+  "serverBrowser.dl.find": "Obtener circuito",
+  "serverBrowser.dl.findTitle": "Busca este circuito en mxb-mods, el Hub y la tienda",
+  "serverBrowser.dl.searching": "Buscando…",
+  "serverBrowser.dl.search": "Buscar",
+  "serverBrowser.dl.searchTitle": "Buscar este circuito en el catálogo",
+  "serverBrowser.dl.onHub": "En el Hub",
+  "serverBrowser.dl.onShop": "Comprar {{title}} en la tienda",
+
   "sync.autoNote":
     "Tu look se publica solo — cada moto, cada vez que lo cambias en la app o en el garaje del juego. El de los demás llega cuando pulsas Jugar.",
 

@@ -3235,6 +3235,59 @@ export function guessServerTrack(track: string): Promise<TrackGuess> {
   return invoke<TrackGuess>("guess_server_track", { track });
 }
 
+/** One installed track, as the server browser matches it (see `lib/trackContent`). */
+export interface InstalledTrack {
+  /** The track's internal folder id — exactly the value a server reports as its track. */
+  id: string;
+  /** Absolute path of the `.pkz` (or folder), for reading its preview. */
+  path: string;
+}
+
+/** The internal ids of every installed track, so the browser can badge which servers' tracks
+ *  the player already has. */
+export function installedTrackIds(): Promise<InstalledTrack[]> {
+  return invoke<InstalledTrack[]>("installed_track_ids");
+}
+
+/** How a track id was matched to a catalog post — by an exact file name it ships, or by its
+ *  title/slug. The UI shows both the same way. */
+export type TrackVia = "file" | "title";
+
+/** A track the mxb-mods catalog can supply, as the browser shows it. */
+export interface TrackHit {
+  slug: string;
+  title: string;
+  link: string;
+  via: TrackVia;
+}
+
+/** What {@link resolveServerTracks} found, plus whether the backend index is still filling
+ *  itself in — `pending` ids are "still looking", not "not available". */
+export interface TrackResolution {
+  /** Track id (exactly as asked) → the catalog post that has it. */
+  found: Record<string, TrackHit>;
+  /** Track ids the backend is still reading candidate pages for. */
+  pending: string[];
+  /** Unix ms of the listing crawl, or `null` when the index has never loaded. */
+  fetchedAt: number | null;
+}
+
+/**
+ * Which of these track ids the mxb-mods catalog can supply, resolved for the whole list at
+ * once (see the Rust `mods::trackindex`). Ask with missing tracks ranked most-hosted first:
+ * what the index can't answer becomes its background queue, so the order is its priority.
+ * The queue is worked behind the call, and {@link onTrackIndexUpdated} says when a later call
+ * would answer more.
+ */
+export function resolveServerTracks(tracks: string[]): Promise<TrackResolution> {
+  return invoke<TrackResolution>("resolve_server_tracks", { tracks });
+}
+
+/** Fires when the backend track index has learned more, so a re-resolve is worth it. */
+export function onTrackIndexUpdated(cb: () => void): Promise<UnlistenFn> {
+  return listen("track-index://updated", () => cb());
+}
+
 export type ServerAction = "start" | "stop" | "restart";
 
 export function listServers(): Promise<ServerRef[]> {

@@ -3,6 +3,7 @@ pub mod hubaccount;
 pub mod mxb;
 pub mod mxbshop;
 pub mod shop_catalog;
+pub mod trackindex;
 
 use serde::{Deserialize, Serialize};
 
