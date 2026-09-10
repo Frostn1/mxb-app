@@ -130,7 +130,7 @@ fn is_dir(path: &Path) -> bool {
 }
 
 /// Every entry name in a track, without inflating any of them.
-pub(crate) fn entry_names(path: &Path) -> Result<Vec<String>> {
+pub fn entry_names(path: &Path) -> Result<Vec<String>> {
     if is_dir(path) {
         let mut out = Vec::new();
         for entry in crate::linkwalk::walk_depth(path, 6)
@@ -150,7 +150,7 @@ pub(crate) fn entry_names(path: &Path) -> Result<Vec<String>> {
 }
 
 /// Pull one named entry's bytes out of a track.
-pub(crate) fn read_entry(path: &Path, name: &str) -> Result<Vec<u8>> {
+pub fn read_entry(path: &Path, name: &str) -> Result<Vec<u8>> {
     if is_dir(path) {
         return std::fs::read(path.join(name)).with_context(|| format!("read {name}"));
     }
@@ -164,7 +164,7 @@ pub(crate) fn read_entry(path: &Path, name: &str) -> Result<Vec<u8>> {
 }
 
 /// The entries that could hold a terrain grid, best-looking first.
-pub(crate) fn heightfield_entries(names: &[String]) -> Vec<String> {
+pub fn heightfield_entries(names: &[String]) -> Vec<String> {
     let mut out: Vec<String> = names
         .iter()
         .filter(|n| {
@@ -301,7 +301,7 @@ pub fn load_master(app: &tauri::AppHandle, path: &str) -> Result<Master> {
 }
 
 /// The expensive path: inflate a heightfield, work out its layout, reduce it.
-pub(crate) fn decode_master(path: &Path) -> Result<Master> {
+pub fn decode_master(path: &Path) -> Result<Master> {
     let names = entry_names(path)?;
     let candidates = heightfield_entries(&names);
     if candidates.is_empty() {
@@ -460,7 +460,7 @@ fn surface_colour(id: u32) -> [u8; 3] {
 /// Found by the table's own first entry rather than by walking: mask bytes are arbitrary and
 /// contain plenty of values that read as a plausible record header, so a walk with no end in
 /// sight runs off into the data. With the end known, the walk is bounded and exact.
-pub(crate) fn material_table_offset(block: &[u8]) -> Option<usize> {
+pub fn material_table_offset(block: &[u8]) -> Option<usize> {
     block
         .windows(8)
         .position(|w| w == b"asphalt\0")
@@ -468,11 +468,11 @@ pub(crate) fn material_table_offset(block: &[u8]) -> Option<usize> {
 }
 
 /// One painted surface: which id it is, and a byte of coverage per cell.
-pub(crate) struct Coverage {
-    pub(crate) id: u32,
-    pub(crate) width: u32,
-    pub(crate) height: u32,
-    pub(crate) at: usize,
+pub struct Coverage {
+    pub id: u32,
+    pub width: u32,
+    pub height: u32,
+    pub at: usize,
 }
 
 /// The coverage masks in a height file's trailing block.
@@ -480,7 +480,7 @@ pub(crate) struct Coverage {
 /// Records start at 44 and are `id, value, width, height` then `width * height` bytes —
 /// except that some carry no `value`, so a header is twelve bytes as often as sixteen and
 /// each has to be tried. A record with zero dimensions is a surface named but never painted.
-pub(crate) fn coverage_masks(block: &[u8]) -> Vec<Coverage> {
+pub fn coverage_masks(block: &[u8]) -> Vec<Coverage> {
     let Some(end) = material_table_offset(block) else {
         return Vec::new();
     };
@@ -1478,48 +1478,5 @@ mod tests {
             "a short grid must be re-decoded, not read past",
         );
         let _ = std::fs::remove_dir_all(&dir);
-    }
-}
-
-#[cfg(test)]
-mod our_own_trh {
-    use super::*;
-
-    /// A track we built reads back the way we wrote it.
-    ///
-    /// The scenery is placed from the synthesis and the terrain comes from the `.trh`
-    /// TerrainEd baked out of our own heightmap. If the two disagree about which way round
-    /// the ground goes, the props land mirrored against it — trees on the riding line.
-    #[test]
-    #[ignore = "needs a built track — set FROST_TRACK and FROST_PROGRAM"]
-    fn a_built_track_reads_back_the_way_we_wrote_it() {
-        let track = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
-        let prog_path = std::env::var("FROST_PROGRAM").expect("set FROST_PROGRAM");
-        let prog: crate::trackprog::TrackProgram =
-            serde_json::from_str(&std::fs::read_to_string(&prog_path).unwrap()).unwrap();
-        let m = decode_master(Path::new(&track)).expect("terrain");
-        let (gw, gh) = (m.info.width as usize, m.info.height as usize);
-        let mpp = m.info.metres_per_sample;
-        // On the track the ground is graded and rutted; off it, it is not. The reading that
-        // puts the lap on the rougher ground is the one that matches.
-        let rough = |flip: bool| -> f64 {
-            let (mut total, mut n) = (0.0f64, 0.0f64);
-            for st in prog.stations(6.0) {
-                let gx = (st.x / mpp).clamp(1.0, gw as f32 - 2.0) as usize;
-                let raw = (st.z / mpp).clamp(1.0, gh as f32 - 2.0) as usize;
-                let gz = if flip { gh - 1 - raw } else { raw };
-                let h = |a: usize, b: usize| m.heights[b.min(gh - 1) * gw + a.min(gw - 1)];
-                total += ((h(gx + 1, gz) - h(gx - 1, gz)).abs()
-                    + (h(gx, gz + 1) - h(gx, gz - 1)).abs()) as f64;
-                n += 1.0;
-            }
-            total / n.max(1.0)
-        };
-        let (straight, flipped) = (rough(false), rough(true));
-        println!("  as written {straight:.4}   flipped {flipped:.4}");
-        assert!(
-            straight > flipped,
-            "the built terrain is mirrored against the synthesis that placed its scenery"
-        );
     }
 }

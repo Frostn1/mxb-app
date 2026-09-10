@@ -37,8 +37,15 @@ pub fn base() -> &'static str {
 }
 
 /// The `Site` for the active game.
+///
+/// The mapping lives here rather than as a field on the game profile: a `Site` carries a
+/// cookie jar and a timeout, which is HTTP business, and the profile table is shared with a
+/// binary that never browses a catalog.
 pub fn site() -> &'static Site {
-    crate::game::active().catalog
+    match crate::game::active_game() {
+        crate::game::Game::Mxb => &MXB_SITE,
+        crate::game::Game::Gpb => &GPB_SITE,
+    }
 }
 
 /// A full four-part version, unlike the `Chrome/126.0` form [`crate::shop_session::UA`]

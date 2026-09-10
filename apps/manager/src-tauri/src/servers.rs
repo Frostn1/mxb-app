@@ -8,24 +8,10 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-/// A dedicated server the player administers, as stored in the app config.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase", default)]
-pub struct ServerRef {
-    /// Stable handle for the UI; the agent never sees it.
-    pub id: String,
-    /// Display label, free text.
-    pub name: String,
-    /// Base URL of the agent, e.g. `http://203.0.113.10:8787`.
-    pub url: String,
-    /// Bearer token from the host's `agent.json`.
-    pub token: String,
-    /// The control plane's id for this server once it has been put in the public list.
-    /// Empty until published — and it has to be persisted, because it is the only handle
-    /// that can take the row back out again after a restart.
-    #[serde(default)]
-    pub registry_id: String,
-}
+// `ServerRef` is part of what `AppConfig` persists, so it lives with the rest of that
+// shape in `config` and is re-exported here — this module is where everything else about
+// talking to an agent lives, and its callers were written against `servers::ServerRef`.
+pub use crate::config::ServerRef;
 
 /// What `mxb-agent` prints at startup for the operator to paste in.
 ///

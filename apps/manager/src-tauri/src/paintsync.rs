@@ -15,38 +15,10 @@ use crate::presets;
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
 
-/// Where the control plane lives. A constant rather than a setting: pointing the app at
-/// another host would let anything served there write files into the mods folder.
-pub const CONTROL_PLANE: &str = "https://mxb-control-plane.aui-svi.workers.dev";
-
-/// Set to a base URL to talk to a control plane other than the real one. **Debug builds
-/// only** — see [`control_plane`].
-pub const CONTROL_PLANE_ENV: &str = "MXB_CONTROL_PLANE";
-
-/// The control plane to talk to.
-///
-/// A shipped build always uses [`CONTROL_PLANE`] and there is no way to change it. That is
-/// the security property this feature rests on: the responses become files written into the
-/// game's mods folder, so anything that could redirect them is a way to put arbitrary
-/// content on a player's disk. An environment variable is not a defence against anyone who
-/// can already set environment variables, but it *is* one more way to end up pointed
-/// somewhere unexpected — a stray value in a shell profile, a launcher, a shortcut — and
-/// there is no reason a player would ever need it.
-///
-/// The override exists so the loop can be exercised against `wrangler dev` without pointing
-/// a test run at the live accounts, and `cfg!(debug_assertions)` is what keeps it out of
-/// anything anyone is handed.
-pub fn control_plane() -> String {
-    if cfg!(debug_assertions) {
-        if let Ok(base) = std::env::var(CONTROL_PLANE_ENV) {
-            let base = base.trim().trim_end_matches('/');
-            if !base.is_empty() {
-                return base.to_string();
-            }
-        }
-    }
-    CONTROL_PLANE.to_string()
-}
+// The control-plane address moved to `mxb_core::names` when a second binary needed it.
+// Re-exported here because seven modules already say `paintsync::control_plane`, and the
+// address is a paint-sync fact as much as anyone's.
+pub use mxb_core::names::{control_plane, CONTROL_PLANE, CONTROL_PLANE_ENV};
 
 /// Only `.pnt` files are shared. Models are directories and often large, and none of the
 /// non-paint slots carry a file a receiver could use.

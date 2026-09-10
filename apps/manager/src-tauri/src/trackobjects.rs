@@ -671,7 +671,7 @@ mod edge_marking {
     ///
     /// ```text
     /// FROST_TRACK=~/Projects/pkz/tracks/2024_ARLMX_RD11_INDIANA_PRO.pkz \
-    /// FROST_DUMP=/tmp/sheets cargo test --bin mxb-app -- --ignored --nocapture edge_marking
+    /// FROST_DUMP=/tmp/sheets cargo test -p mxb-app --bin mxb-app -- --ignored --nocapture edge_marking
     /// ```
     ///
     /// `FROST_DUMP` writes every sheet out as a PNG — the only way to read what a banner
@@ -1017,7 +1017,7 @@ mod banner_facing {
     ///
     /// ```text
     /// FROST_TRACK=~/Projects/pkz/tracks/2024_ARLMX_RD11_INDIANA_PRO.pkz \
-    /// cargo test --bin mxb-app -- --ignored --nocapture which_way_a_banner_faces
+    /// cargo test -p mxb-app --bin mxb-app -- --ignored --nocapture which_way_a_banner_faces
     /// ```
     #[test]
     #[ignore = "needs a real track — set FROST_TRACK"]

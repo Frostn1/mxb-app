@@ -2,41 +2,41 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod antidebug;
-mod bikefiles;
+pub(crate) use mxb_core::bikefiles;
 mod bikeswap;
 mod bundle;
 mod cancel;
-mod cfg;
+pub(crate) use mxb_core::cfg;
 mod cloudfiles;
-mod config;
+pub(crate) use mxb_core::config;
 mod cookie_session;
 mod downloads;
 mod dropzone;
-mod edf;
+pub(crate) use mxb_core::edf;
 mod edfwrite;
 mod feel;
 mod fileshare;
 mod firstpaint;
 mod frostmod;
 mod frostmod_manage;
-mod game;
+pub(crate) use mxb_core::game;
 mod fileinfo;
 mod gameproc;
-mod gate;
+pub(crate) use mxb_core::gate;
 mod gearrepair;
-mod heightfield;
+pub(crate) use mxb_core::heightfield;
 mod hub_clearance;
 mod hub_session;
 mod identity;
 mod imgcache;
 mod install;
 mod ledger;
-mod library;
+pub(crate) use mxb_core::library;
 mod liveshare;
-mod linkwalk;
+pub(crate) use mxb_core::linkwalk;
 mod logs;
-mod lru;
-mod map;
+pub(crate) use mxb_core::lru;
+pub(crate) use mxb_core::map;
 mod memwatch;
 mod modelswap;
 mod mods;
@@ -46,20 +46,20 @@ mod profilewatch;
 mod mxb_fetch;
 mod mxb_session;
 mod overlay;
-mod paint;
+pub(crate) use mxb_core::paint;
 mod paintstudio;
-mod paintwatch;
+pub(crate) use mxb_core::paintwatch;
 mod peident;
-mod pkz;
+pub(crate) use mxb_core::pkz;
 /// Paid plugins: what this install may run, and how it proves it offline.
 mod plugins;
 /// What the running game has loaded, reported for diagnostics.
 mod procmods;
 /// Linux only: the Proton prefix the game runs in, and how to put a Windows program in it.
 #[cfg(target_os = "linux")]
-mod proton;
+pub(crate) use mxb_core::proton;
 #[cfg(sidecar)]
-mod sidecar;
+pub(crate) use mxb_core::sidecar;
 #[cfg(sidecar)]
 mod sidecar_lock;
 /// The world-server browser: speaks the master-server protocol to list live servers.
@@ -125,11 +125,11 @@ mod offline_flow_test {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-mod presets;
+pub(crate) use mxb_core::presets;
 mod paintsync;
 mod ranked;
 mod reshade;
-mod scenery;
+pub(crate) use mxb_core::scenery;
 mod serverbook;
 mod serverfilter;
 mod servers;
@@ -140,8 +140,8 @@ mod shop_fetch;
 mod shop_installed;
 mod shop_session;
 mod soundmods;
-mod texstore;
-mod track;
+pub(crate) use mxb_core::texstore;
+pub(crate) use mxb_core::track;
 mod trackbuild;
 mod trackline;
 mod tracklayout;
@@ -155,10 +155,10 @@ mod trackspeed;
 mod trackstats;
 mod tracksynth;
 mod upload;
-mod usage;
+pub(crate) use mxb_core::usage;
 mod vcruntime;
 mod voice;
-mod winehost;
+pub(crate) use mxb_core::winehost;
 
 use config::AppConfig;
 use frostmod::ReloadOutcome;

@@ -53,7 +53,7 @@ fn is_allowed(host: &str) -> bool {
     let under = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
     crate::game::Game::ALL
         .iter()
-        .any(|g| under(g.profile().catalog.domain))
+        .any(|g| under(g.profile().catalog_domain))
         || SHOP_HOSTS.iter().any(|h| under(h))
 }
 
@@ -710,14 +710,14 @@ mod tests {
         for game in crate::game::Game::ALL {
             let url = format!(
                 "https://{}/wp-content/uploads/2026/01/thumb.jpg",
-                game.profile().catalog.domain,
+                game.profile().catalog_domain,
             );
             assert_eq!(
                 source_url(&encoded(&url)).as_deref(),
                 Some(url.as_str()),
                 "{} browses {} — its images must load",
                 game.id(),
-                game.profile().catalog.domain,
+                game.profile().catalog_domain,
             );
         }
     }

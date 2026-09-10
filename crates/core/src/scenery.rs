@@ -1530,7 +1530,7 @@ source1
     ///
     /// ```text
     /// FROST_TRACK="…/Millville.pkz" \
-    ///   cargo test --bin mxb-app -- --ignored --nocapture placements_stand_on_the_terrain
+    ///   cargo test -p mxb-core --lib -- --ignored --nocapture placements_stand_on_the_terrain
     /// ```
     ///
     /// `marshals.cfg` states each post's height, and the terrain grid states the ground's.
@@ -1590,7 +1590,7 @@ source1
     ///
     /// ```text
     /// FROST_TRACK="…/track.pkz" \
-    ///   cargo test --bin mxb-app -- --ignored --nocapture ground_sheet_of_a_real_track
+    ///   cargo test -p mxb-core --lib -- --ignored --nocapture ground_sheet_of_a_real_track
     /// ```
     #[test]
     #[ignore = "needs a real track — set FROST_TRACK"]
@@ -1647,7 +1647,7 @@ source1
     ///
     /// ```text
     /// FROST_TRACK="…/Millville" \
-    ///   cargo test --bin mxb-app -- --ignored --nocapture backdrop_of_a_real_track
+    ///   cargo test -p mxb-core --lib -- --ignored --nocapture backdrop_of_a_real_track
     /// ```
     #[test]
     #[ignore = "needs a real track — set FROST_TRACK"]
@@ -1812,7 +1812,7 @@ overcast\n{\nsky = my_own_dome.edf\n}\n";
     ///
     /// ```text
     /// FROST_TRACK="…/Millville.pkz" \
-    ///   cargo test --bin mxb-app -- --ignored --nocapture placeable_props_of_a_real_track
+    ///   cargo test -p mxb-core --lib -- --ignored --nocapture placeable_props_of_a_real_track
     /// ```
     #[test]
     #[ignore = "needs a real track — set FROST_TRACK"]
@@ -1844,7 +1844,7 @@ overcast\n{\nsky = my_own_dome.edf\n}\n";
     ///
     /// ```text
     /// FROST_TRACKS="…/mods/tracks" \
-    ///   cargo test --bin mxb-app -- --ignored --nocapture survey_every_track
+    ///   cargo test -p mxb-core --lib -- --ignored --nocapture survey_every_track
     /// ```
     ///
     /// The two timings are the point of the split: `mesh` is what the viewer waits for
@@ -1926,7 +1926,7 @@ overcast\n{\nsky = my_own_dome.edf\n}\n";
     ///
     /// ```text
     /// FROST_TRACK="…/Farm14.pkz" FROST_PNG=/tmp/farm14.png \
-    ///   cargo test --bin mxb-app -- --ignored --nocapture render_a_real_track
+    ///   cargo test -p mxb-core --lib -- --ignored --nocapture render_a_real_track
     /// ```
     ///
     /// `FROST_COLOR=pieces` gives every separable piece its own hue, which is the only way to
@@ -2104,7 +2104,7 @@ overcast\n{\nsky = my_own_dome.edf\n}\n";
     ///
     /// ```text
     /// FROST_TRACK="…/Millville" \
-    ///   cargo test --bin mxb-app -- --ignored --nocapture decode_a_real_track
+    ///   cargo test -p mxb-core --lib -- --ignored --nocapture decode_a_real_track
     /// ```
     #[test]
     #[ignore = "needs a real track — set FROST_TRACK"]

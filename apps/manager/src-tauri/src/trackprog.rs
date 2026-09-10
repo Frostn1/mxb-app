@@ -2614,3 +2614,48 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod our_own_trh {
+    use crate::track::decode_master;
+    use crate::trackprog::TrackProgram;
+    use std::path::Path;
+
+    /// A track we built reads back the way we wrote it.
+    ///
+    /// The scenery is placed from the synthesis and the terrain comes from the `.trh`
+    /// TerrainEd baked out of our own heightmap. If the two disagree about which way round
+    /// the ground goes, the props land mirrored against it — trees on the riding line.
+    #[test]
+    #[ignore = "needs a built track — set FROST_TRACK and FROST_PROGRAM"]
+    fn a_built_track_reads_back_the_way_we_wrote_it() {
+        let track = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let prog_path = std::env::var("FROST_PROGRAM").expect("set FROST_PROGRAM");
+        let prog: TrackProgram =
+            serde_json::from_str(&std::fs::read_to_string(&prog_path).unwrap()).unwrap();
+        let m = decode_master(Path::new(&track)).expect("terrain");
+        let (gw, gh) = (m.info.width as usize, m.info.height as usize);
+        let mpp = m.info.metres_per_sample;
+        // On the track the ground is graded and rutted; off it, it is not. The reading that
+        // puts the lap on the rougher ground is the one that matches.
+        let rough = |flip: bool| -> f64 {
+            let (mut total, mut n) = (0.0f64, 0.0f64);
+            for st in prog.stations(6.0) {
+                let gx = (st.x / mpp).clamp(1.0, gw as f32 - 2.0) as usize;
+                let raw = (st.z / mpp).clamp(1.0, gh as f32 - 2.0) as usize;
+                let gz = if flip { gh - 1 - raw } else { raw };
+                let h = |a: usize, b: usize| m.heights[b.min(gh - 1) * gw + a.min(gw - 1)];
+                total += ((h(gx + 1, gz) - h(gx - 1, gz)).abs()
+                    + (h(gx, gz + 1) - h(gx, gz - 1)).abs()) as f64;
+                n += 1.0;
+            }
+            total / n.max(1.0)
+        };
+        let (straight, flipped) = (rough(false), rough(true));
+        println!("  as written {straight:.4}   flipped {flipped:.4}");
+        assert!(
+            straight > flipped,
+            "the built terrain is mirrored against the synthesis that placed its scenery"
+        );
+    }
+}

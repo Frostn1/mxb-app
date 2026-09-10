@@ -3644,6 +3644,7 @@ dependencies = [
  "md-5",
  "mega",
  "memory-stats",
+ "mxb-core",
  "notify",
  "notify-debouncer-mini",
  "obfstr",
@@ -3677,6 +3678,35 @@ dependencies = [
  "trash",
  "tungstenite",
  "unrar",
+ "uuid",
+ "walkdir",
+ "zip 2.4.2",
+]
+
+[[package]]
+name = "mxb-core"
+version = "0.14.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chacha20poly1305",
+ "dirs-next",
+ "flate2",
+ "getrandom 0.2.17",
+ "image",
+ "log",
+ "md-5",
+ "notify",
+ "notify-debouncer-mini",
+ "objc2",
+ "objc2-foundation",
+ "rayon",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tokio",
+ "trash",
  "uuid",
  "walkdir",
  "zip 2.4.2",

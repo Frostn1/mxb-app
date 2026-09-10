@@ -506,7 +506,7 @@ mod tests {
 
     /// What opening a paint in the viewer actually costs, against a real one. Run under the
     /// `dev` profile — that's what `tauri dev` builds, and it's where this was ever slow:
-    /// `MXB_PNT=<paint.pnt> cargo test --bins unpack_file_timing -- --ignored --nocapture`
+    /// `MXB_PNT=<paint.pnt> cargo test -p mxb-core --lib unpack_file_timing -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn unpack_file_timing() {
