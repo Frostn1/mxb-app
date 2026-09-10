@@ -2281,7 +2281,17 @@ export function ModelViewer({
             position={look.key.at}
             intensity={look.key.intensity}
             castShadow
-            shadow-mapSize={[1024, 1024]}
+            shadow-mapSize={[2048, 2048]}
+            // Without a bias the bodywork shadows ITSELF: every shadow-map texel
+            // that quantises just under the surface reads as occluded, and the
+            // result is regular evenly-spaced stripes across the panels — shadow
+            // acne. It reads as a defect in the paint, but it is there on the
+            // stock bike and survives turning off both the normal map and the
+            // specular lobe, because it is the shadow pass drawing it.
+            // normalBias is what clears acne on curved panels; the small
+            // negative depth bias handles faces nearly parallel to the light.
+            shadow-normalBias={0.03}
+            shadow-bias={-0.0004}
           />
           <directionalLight position={[-4, 2, -3]} intensity={look.back} />
           {/* Front fill from the camera side so the front of the kit isn't in shadow. */}
