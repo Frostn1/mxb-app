@@ -67,15 +67,21 @@
   Pop $0 ; 0 = closed it, 128 = wasn't running. Either is the state we want.
 !macroend
 
-; The manufacturer key the previous product name was filed under. The bundler defines
-; MANUFACTURER from tauri.conf.json's `publisher` before including this file; the guard is
-; there so a future template that stops doing so fails visibly at the registry read rather
-; than silently expanding to an empty path and matching the wrong key.
-!ifndef MANUFACTURER
-  !define MANUFACTURER "Frost"
-!endif
+; The manufacturer key the previous product name was filed under.
+;
+; MANUFACTURER is emphatically NOT available here, and must not be defined here either. The
+; bundler's template includes this file (line 29) *before* it runs its own
+; `!define MANUFACTURER` (line 34) — so a `!ifndef MANUFACTURER / !define` guard does fire,
+; and then makes the template's own line a fatal `!define: "MANUFACTURER" already defined!`.
+; That failed the Windows leg of v0.14.0-beta.1 and beta.2 at `makensis`, after a clean
+; fifteen-minute compile, and it can only ever show up in a real release build.
+;
+; Hence a name of our own for the legacy paths. `${MANUFACTURER}` is still usable *inside* a
+; macro below, because a macro body is expanded where it is inserted — which is after the
+; template has defined it.
+!define LEGACY_MANUFACTURER   "Frost"
 !define LEGACY_PRODUCTNAME    "MXB App"
-!define LEGACY_MANUPRODUCTKEY "Software\${MANUFACTURER}\${LEGACY_PRODUCTNAME}"
+!define LEGACY_MANUPRODUCTKEY "Software\${LEGACY_MANUFACTURER}\${LEGACY_PRODUCTNAME}"
 !define LEGACY_UNINSTKEY      "Software\Microsoft\Windows\CurrentVersion\Uninstall\${LEGACY_PRODUCTNAME}"
 
 ; Retire the install the rename orphaned.
