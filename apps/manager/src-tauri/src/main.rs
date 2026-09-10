@@ -60,12 +60,12 @@ mod procmods;
 pub(crate) use mxb_core::proton;
 #[cfg(sidecar)]
 pub(crate) use mxb_core::sidecar;
+#[cfg(mxbsecure)]
+pub(crate) use mxb_core::mxbsecure;
 /// The world-server browser: speaks the master-server protocol to list live servers.
 /// Local-only, like [`sidecar`] — the public tree neither has the file nor the feature.
 #[cfg(worldnet)]
 mod worldnet;
-#[cfg(mxbsecure)]
-mod mxbsecure;
 mod steamid;
 mod secure_launch;
 
@@ -1641,7 +1641,7 @@ async fn mxbsecure_lock(
         let mut rnd = [0u8; 6];
         getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
         let suffix: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
-        let asset_id = format!("{}-{suffix}", sanitize_asset_id(&name));
+        let asset_id = format!("{}-{suffix}", mxb_core::names::sanitize_asset_id(&name));
 
         let plaintext = tokio::fs::read(&src_path).await.map_err(|e| format!("read {src}: {e}"))?;
         let locked = mxbsecure::lock(&plaintext, &asset_id, "k1");
@@ -1782,16 +1782,6 @@ async fn mxbsecure_open_offline(
     }
 }
 
-/// Keep an asset id to the characters a header and a URL are both happy with.
-#[cfg(mxbsecure)]
-fn sanitize_asset_id(name: &str) -> String {
-    let cleaned: String = name
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
-        .collect();
-    let trimmed = cleaned.trim_matches('_');
-    if trimmed.is_empty() { "asset".to_string() } else { trimmed.to_string() }
-}
 
 #[tauri::command]
 fn local_guid() -> Option<String> {

@@ -45,6 +45,17 @@ fn main() {
     // Delivered as DEP_MXBCORE_SIDECAR, which the `links` key in Cargo.toml enables.
     println!("cargo::metadata=sidecar={}", if have { "1" } else { "0" });
 
+    // The secure-content packer, gated independently. Both binaries need it — the manager
+    // injects the client at launch, the studio seals a track to a buyer — so like `sidecar`
+    // it lives here and the decision is published rather than made twice.
+    println!("cargo::rustc-check-cfg=cfg(mxbsecure)");
+    let secure = Path::new("src/mxbsecure.rs").exists();
+    if secure {
+        println!("cargo::rustc-cfg=mxbsecure");
+    }
+    println!("cargo::rerun-if-changed=src/mxbsecure.rs");
+    println!("cargo::metadata=mxbsecure={}", if secure { "1" } else { "0" });
+
     // `rustc-link-arg` and not `-tests`: Cargo has no such key, whatever the shape of the
     // others suggests — it rejects the whole build script with "invalid instruction". The
     // plain form covers benchmarks, binaries, cdylibs, examples and tests, which for a crate
