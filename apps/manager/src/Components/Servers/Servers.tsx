@@ -57,6 +57,18 @@ import ServerDetail from "./ServerDetail";
 
 type ViewMode = "cards" | "list";
 const VIEW_KEY = "mxb:serversView:v1";
+const HIDE_EMPTY_KEY = "mxb:serversHideEmpty:v1";
+const INSTALLED_ONLY_KEY = "mxb:serversInstalledOnly:v1";
+
+/** Read a sticky boolean, treating a missing/blocked value as `fallback`. */
+function readFlag(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === "1";
+  } catch {
+    return fallback;
+  }
+}
 
 /**
  * The live MX Bikes server list, read straight from PiBoSo's master server — the same
@@ -114,9 +126,25 @@ const Servers = () => {
   const [region, setRegion] = useState<string>("all");
   const [favesOnly, setFavesOnly] = useState(false);
   // Hide servers running a track the player doesn't have — no point joining one you can't load.
-  const [installedOnly, setInstalledOnly] = useState(false);
-  // Hide empty servers — an empty one is rarely what someone opening the browser is after.
-  const [hideEmpty, setHideEmpty] = useState(false);
+  // Sticky, default off.
+  const [installedOnly, setInstalledOnly] = useState(() => readFlag(INSTALLED_ONLY_KEY, false));
+  // Hide empty servers — an empty one is rarely what someone opening the browser is after, so
+  // this defaults on and is remembered, opening the browser straight to servers with riders.
+  const [hideEmpty, setHideEmpty] = useState(() => readFlag(HIDE_EMPTY_KEY, true));
+  useEffect(() => {
+    try {
+      localStorage.setItem(INSTALLED_ONLY_KEY, installedOnly ? "1" : "0");
+    } catch {
+      // Storage disabled; the choice still holds for this session.
+    }
+  }, [installedOnly]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(HIDE_EMPTY_KEY, hideEmpty ? "1" : "0");
+    } catch {
+      // Storage disabled; the choice still holds for this session.
+    }
+  }, [hideEmpty]);
   const favs = useFavourites(servers);
 
   // Picture grid or dense table — a sticky per-machine preference.
