@@ -6,7 +6,11 @@
 # will have schema files for capabilities auto-completion
 /gen/schemas
 
-# Local-only module (not part of the public tree)
+# Proprietary, local-only — see crates/core/.gitignore. The studio's list has always
+# carried these; this one had not, so a synced sidecar_lock.rs sat here committable.
+/src/sidecar.rs
+/src/sidecar_lock.rs
+/src/mxbsecure.rs
 /src/worldnet.rs
 /src/mxbsecure.dll
 /resources/*.dll

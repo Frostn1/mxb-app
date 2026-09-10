@@ -35,7 +35,7 @@ pub(crate) use mxb_core::linkwalk;
 mod logs;
 pub(crate) use mxb_core::map;
 mod memwatch;
-mod modelswap;
+pub(crate) use mxb_core::modelswap;
 mod mods;
 mod modstate;
 mod modwatch;
@@ -132,7 +132,7 @@ mod shop_credentials;
 mod shop_fetch;
 mod shop_installed;
 mod shop_session;
-mod soundmods;
+pub(crate) use mxb_core::soundmods;
 pub(crate) use mxb_core::texstore;
 /// The tracks that came with the game — the ones no scan of the mods tree can see.
 pub(crate) use mxb_core::trackstock;
@@ -695,7 +695,7 @@ async fn delete_model_swap(
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        modelswap::delete_model_swap(&cfg.mods_path, &bike, &variant)
+        modelswap::delete_model_swap(&cfg.mods_path, &bike, &variant, trashbin::move_to_trash)
             .map(|_| ())
             .map_err(|e| format!("{e:#}"))
     })

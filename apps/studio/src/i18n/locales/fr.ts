@@ -15,7 +15,7 @@ export const fr: Translation = {
   "common.remove": "Retirer",
   "nav.pose": "Posture",
   "nav.settings": "Réglages",
-  "nav.designer": "Designer",
+  "nav.designer": "Éditeur Designer",
   "nav.paints": "Décos",
 
 
@@ -400,6 +400,11 @@ export const fr: Translation = {
   "paints.model": "Pour",
   "paints.profile": "Profil de pilote",
   "designer.sheetsSwitched": "Passé aux planches utilisées par {{dest}}.",
+  "designer.back": "Retour",
+  "designer.leaveTitle": "Quitter cette peinture ?",
+  "designer.leaveBody": "Elle contient des modifications non enregistrées.",
+  "designer.leaveDiscard": "Quitter sans enregistrer",
+  "designer.leaveSave": "Enregistrer et quitter",
   "designer.switchSheetsTitle": "Ces planches sont celles d'un autre modèle",
   "designer.switchSheetsBody": "{{dest}} utilise {{names}}. Changer remplace toutes les planches ouvertes.",
   "designer.switchSheets": "Changer de planches",

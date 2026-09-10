@@ -230,10 +230,13 @@ function Shell() {
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel disabled={saving}>{t("common.cancel")}</AlertDialogCancel>
-                <Button variant="outline" disabled={saving} onClick={() => void leave()}>
+                {/* `size="sm"` on both: `AlertDialogCancel` and `AlertDialogAction` are
+                    `buttonVariants({ size: "sm" })`, so a plain `Button` beside them stands
+                    a row of h-9 next to an h-8 and reads as a mistake. */}
+                <Button variant="outline" size="sm" disabled={saving} onClick={() => void leave()}>
                   {t("quit.discard")}
                 </Button>
-                <Button disabled={saving} onClick={() => void saveAndLeave()}>
+                <Button size="sm" disabled={saving} onClick={() => void saveAndLeave()}>
                   {t("quit.save")}
                 </Button>
               </AlertDialogFooter>

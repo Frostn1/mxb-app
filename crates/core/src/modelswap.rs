@@ -778,7 +778,7 @@ pub fn apply_model_swap_reporting(
 // viewer in mxb-core is what turns it into a model. Built here, because working out which
 // files a variant would park is swap business; consumed there, because assembling a bike
 // out of layers is not.
-pub use mxb_core::viewer::PreviewSet;
+pub use crate::viewer::PreviewSet;
 
 
 /// The file accounting `apply_model_swap` would do, without doing it. Same rules on
@@ -972,13 +972,18 @@ pub fn move_model_swap(
     Ok(())
 }
 
-/// Send a model set to the Trash. Its liveries stay on the bike, unclaimed — a livery is the
-/// player's work and outlives whichever model happened to claim it.
-pub fn delete_model_swap(
+/// Retire a model set. Its liveries stay on the bike, unclaimed — a livery is the player's
+/// work and outlives whichever model happened to claim it.
+///
+/// `remove` is handed the variant's folder and decides what "retire" means. The manager
+/// passes its Trash bin, which is macOS-specific and pulls in `objc2`; a binary that only
+/// paints has no business linking that, and the bookkeeping either way is identical.
+pub fn delete_model_swap<T>(
     mods_path: &str,
     bike: &str,
     variant: &str,
-) -> anyhow::Result<crate::trashbin::TrashedAt> {
+    remove: impl FnOnce(&Path) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
     if !is_simple_name(bike) || !is_simple_name(variant) {
         anyhow::bail!("invalid bike or model name");
     }
@@ -989,12 +994,12 @@ pub fn delete_model_swap(
     if !dir_exists(&dir) {
         anyhow::bail!("model '{variant}' not found");
     }
-    let trashed = crate::trashbin::move_to_trash(&dir)?;
+    let removed = remove(&dir)?;
     let mut assign = load_paint_assignments(mods_path, bike);
     assign.retain(|v, _| !v.eq_ignore_ascii_case(variant));
     save_paint_assignments(mods_path, bike, &assign)?;
     reconcile_paints(mods_path, bike);
-    Ok(trashed)
+    Ok(removed)
 }
 
 /// A bike whose setup files (`.hrc`/`.cfg`/`.geom`) were carried off into a swap folder
@@ -1369,6 +1374,13 @@ pub fn register_loose_swaps(mods_path: &str, move_files: bool) -> anyhow::Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What `delete_model_swap` is handed here. The manager passes its Trash bin; a test
+    /// wants the folder gone and no dependency on the host's Trash.
+    fn remove_dir(dir: &Path) -> anyhow::Result<()> {
+        fs::remove_dir_all(dir)?;
+        Ok(())
+    }
 
     fn tmp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("frost-ms-{name}-{}", std::process::id()));
@@ -1837,8 +1849,8 @@ mod tests {
         apply_model_swap(mp, "KTM450", "Factory").unwrap();
 
         assert!(move_model_swap(mp, "KTM450", "Factory", "YZ450", &[]).is_err());
-        assert!(delete_model_swap(mp, "KTM450", "Factory").is_err());
-        assert!(delete_model_swap(mp, "KTM450", STOCK).is_err(), "Stock is not a folder");
+        assert!(delete_model_swap(mp, "KTM450", "Factory", remove_dir).is_err());
+        assert!(delete_model_swap(mp, "KTM450", STOCK, remove_dir).is_err(), "Stock is not a folder");
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1894,7 +1906,7 @@ mod tests {
         touch(&paints_dir(mp, "KTM450").join("Redbud.pnt"));
         assign(mp, "KTM450", "Factory", &["Redbud"]);
 
-        delete_model_swap(mp, "KTM450", "Factory").unwrap();
+        delete_model_swap(mp, "KTM450", "Factory", remove_dir).unwrap();
 
         assert!(!variant_dir(mp, "KTM450", "Factory").exists(), "the set is gone");
         assert!(
@@ -2316,7 +2328,7 @@ mod tests {
 
         let before = names_at(&dst);
         eprintln!("root before: {before:?}");
-        let nodes_before = mxb_core::viewer::load_bike_model_blocking(dst.to_string_lossy().to_string(), None)
+        let nodes_before = crate::viewer::load_bike_model_blocking(dst.to_string_lossy().to_string(), None)
             .expect("the bike loads before the swap")
             .nodes
             .len();
@@ -2330,7 +2342,7 @@ mod tests {
             assert!(after.contains(f), "{f} must still be at the bike root after a swap");
         }
         let model =
-            mxb_core::viewer::load_bike_model_blocking(dst.to_string_lossy().to_string(), None)
+            crate::viewer::load_bike_model_blocking(dst.to_string_lossy().to_string(), None)
                 .expect("the bike still loads after the swap");
         assert_eq!(model.nodes.len(), nodes_before, "same parts resolve after the swap");
 
