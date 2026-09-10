@@ -15,7 +15,7 @@ export const ptBR: Translation = {
   "common.remove": "Remover",
   "nav.pose": "Pose",
   "nav.settings": "Configurações",
-  "nav.designer": "Designer",
+  "nav.designer": "Editor Designer",
   "nav.paints": "Pinturas",
 
 
@@ -399,6 +399,11 @@ export const ptBR: Translation = {
   "paints.model": "Para",
   "paints.profile": "Perfil do piloto",
   "designer.sheetsSwitched": "Trocado para as folhas que {{dest}} usa.",
+  "designer.back": "Voltar",
+  "designer.leaveTitle": "Sair desta pintura?",
+  "designer.leaveBody": "Ela tem alterações que ainda não foram salvas.",
+  "designer.leaveDiscard": "Sair sem salvar",
+  "designer.leaveSave": "Salvar e sair",
   "designer.switchSheetsTitle": "Estas folhas são de outro modelo",
   "designer.switchSheetsBody": "{{dest}} usa {{names}}. Trocar substitui todas as folhas abertas.",
   "designer.switchSheets": "Trocar folhas",

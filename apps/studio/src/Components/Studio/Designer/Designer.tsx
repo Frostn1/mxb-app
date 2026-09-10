@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   Bike,
+  ChevronLeft,
   ClipboardPaste,
   Copy,
   CopyPlus,
@@ -41,6 +42,16 @@ import { Button } from "@frost/shared/Components/ui/button";
 import { Input } from "@frost/shared/Components/ui/input";
 import { Progress } from "@frost/shared/Components/ui/progress";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@frost/shared/Components/ui/alert-dialog";
+import {
   Card,
   CardAction,
   CardContent,
@@ -63,7 +74,7 @@ import {
 } from "@frost/shared/api/mods";
 import { useT } from "@/i18n";
 import StartScreen from "./StartScreen";
-import { IMAGE_EXTS, isBikeKind, usePaintDest } from "../paintDest";
+import { IMAGE_EXTS, isBikeKind, PaintDestBar, usePaintDest } from "../paintDest";
 const PREVIEW_OPEN_KEY = "mxb:designer:preview:v1";
 
 import { CanvasStage } from "./CanvasStage";
@@ -251,6 +262,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // Set by every edit, cleared by a save that lands. `pristine` cannot answer this: it stays
   // false after a save, and a paint you have just written is not work you would lose.
   const [unsaved, setUnsaved] = useState(false);
+  // Asking before the way out throws work away. Same three answers the shell gives on quit,
+  // because it is the same question.
+  const [leaving, setLeaving] = useState(false);
+  const [leavingSaving, setLeavingSaving] = useState(false);
   useEffect(() => {
     setBare(!started);
     return () => setBare(false);
@@ -1267,6 +1282,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * layer is the first thing that isn't.
    */
   const pristine = useMemo(() => sheets.every((s) => !s.base && !s.layers.length), [sheets]);
+  // Read by `leave`, which is registered once and must not re-subscribe on every stroke.
+  const pristineRef = useRef(true);
+  pristineRef.current = pristine;
 
   /**
    * Keep the sheet list on the model that's chosen.
@@ -2294,9 +2312,28 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * beside the canvas end up in one place, so they cannot drift. Registered once — the
    * handlers are read off refs so this never has to re-subscribe.
    */
+  /**
+   * Back to the start screen.
+   *
+   * The only way out used to be the `New paint` menu item, which both took some finding and
+   * dropped whatever was on the canvas without a word. Everything that leaves the editor
+   * goes through here now, so neither can happen.
+   */
+  const leave = useCallback(() => {
+    // `pristine` as well as `unsaved`: opening the editor fills in the model's sheet names,
+    // which counts as an edit and would otherwise make every way out ask about a paint
+    // nobody has drawn on. Blank sheets with the right names are a fact about the model,
+    // not somebody's work — the same reasoning the sheet auto-fill is built on.
+    if (unsavedRef.current && !pristineRef.current) {
+      setLeaving(true);
+      return;
+    }
+    setStarted(false);
+  }, []);
+
   const menuRef = useRef<Record<string, () => void>>({});
   menuRef.current = {
-    "new-paint": () => setStarted(false),
+    "new-paint": leave,
     "open-paint": () => void startFromPaint(),
     "open-psd": () => void startFromPsd(),
     "add-sheet": addBlankSheet,
@@ -2348,10 +2385,27 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           own strip rather than a row of their own, so the sheet and the model get the whole
           window below it. */}
       <ContextBarLeft>
-        <span className="flex min-w-0 items-baseline gap-2 pl-1 text-[12.5px] text-faint">
-          <span className="flex-none font-medium">{t(destState.kind.label)}</span>
-          <span className="min-w-0 truncate">{destState.folder ?? destState.model}</span>
-        </span>
+        {/* The way back. The destination is chosen on the start screen and cannot be changed
+            from in here, so leaving is how you paint for a different model — and until now
+            the only route was a menu item that also threw the canvas away. */}
+        <button
+          type="button"
+          onClick={leave}
+          title={t("designer.back")}
+          className="flex flex-none items-center gap-0.5 rounded-md py-1 pl-0.5 pr-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <ChevronLeft className="size-4" />
+          {t("designer.back")}
+        </button>
+        {/* The picker, not a label of it.
+            This was read-only text, on the reasoning that the destination is chosen on the
+            start screen. But only *one* of the three ways in goes past that question:
+            opening a `.pnt` or a `.psd` starts the editor directly, so those paints inherited
+            whatever the picker happened to default to, and there was no way to correct it
+            without losing the work. Same control Paint Studio uses. Changing it while sheets
+            are open is already handled: the auto-fill asks before replacing anything that
+            isn't blank. */}
+        <PaintDestBar state={destState} className="max-w-[340px]" />
         {/* The paint's title, in the middle of the window and not in either group of
             controls — it names what is on screen rather than doing anything to it. It was a
             text box in the toolbar from the moment the tab opened: a question asked before
@@ -2683,6 +2737,48 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           </div>
         )}
       </div>
+
+      {/* Asked on the way out, not on the way in. Three answers, the same three the shell
+          gives when the window is closed on unsaved work — leaving is the same loss. */}
+      <AlertDialog open={leaving} onOpenChange={(o) => !o && setLeaving(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("designer.leaveTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("designer.leaveBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={leavingSaving}>{t("common.cancel")}</AlertDialogCancel>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={leavingSaving}
+              onClick={() => {
+                setLeaving(false);
+                setStarted(false);
+              }}
+            >
+              {t("designer.leaveDiscard")}
+            </Button>
+            <AlertDialogAction
+              disabled={leavingSaving}
+              onClick={(e) => {
+                // Held open while it writes: a save that needs a name puts the user back in
+                // the editor to give one, and closing this first would hide that.
+                e.preventDefault();
+                setLeavingSaving(true);
+                void saveRef.current?.().then((ok) => {
+                  setLeavingSaving(false);
+                  setLeaving(false);
+                  if (ok) setStarted(false);
+                });
+              }}
+            >
+              {leavingSaving && <Loader2 className="size-3.5 animate-spin" />}
+              {t("designer.leaveSave")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

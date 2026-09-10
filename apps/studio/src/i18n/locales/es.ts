@@ -15,7 +15,7 @@ export const es: Translation = {
   "common.remove": "Quitar",
   "nav.pose": "Postura",
   "nav.settings": "Ajustes",
-  "nav.designer": "Designer",
+  "nav.designer": "Editor Designer",
   "nav.paints": "Pinturas",
 
 
@@ -400,6 +400,11 @@ export const es: Translation = {
   "paints.model": "Para",
   "paints.profile": "Perfil de piloto",
   "designer.sheetsSwitched": "Cambiado a las hojas que usa {{dest}}.",
+  "designer.back": "Atrás",
+  "designer.leaveTitle": "¿Salir de esta pintura?",
+  "designer.leaveBody": "Tiene cambios que aún no se han guardado.",
+  "designer.leaveDiscard": "Salir sin guardar",
+  "designer.leaveSave": "Guardar y salir",
   "designer.switchSheetsTitle": "Estas hojas son de otro modelo",
   "designer.switchSheetsBody": "{{dest}} usa {{names}}. Cambiar sustituye todas las hojas abiertas.",
   "designer.switchSheets": "Cambiar hojas",

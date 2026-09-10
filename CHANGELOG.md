@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-09-09
+
+### Added
+- A Back button in the Designer. It returns to the start screen, which is where you pick what
+  you are painting for, and it asks first if there is anything unsaved.
+
+### Changed
+- The Designer is called Designer editor in the tool list.
+- The destination in the Designer's top bar is the picker itself, not a label of it. Starting
+  from a paint or a PSD goes straight into the editor, so those never got asked where the
+  paint was going — now you can say, and change it, without losing the work.
+
+### Fixed
+- New paint in the Designer's menu threw away whatever was on the canvas without asking.
+- The buttons in the unsaved-work dialogs were three different sizes.
+
 ## 2026-09-09 — v0.14.0 — A new name, and a Studio of its own
 
 ### Added

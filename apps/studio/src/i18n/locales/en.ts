@@ -19,7 +19,7 @@ export const en = {
   "common.remove": "Remove",
   "nav.pose": "Pose",
   "nav.settings": "Settings",
-  "nav.designer": "Designer",
+  "nav.designer": "Designer editor",
   "nav.paints": "Paints",
 
 
@@ -403,6 +403,11 @@ export const en = {
   "paints.model": "For",
   "paints.profile": "Rider profile",
   "designer.sheetsSwitched": "Switched to the sheets {{dest}} uses.",
+  "designer.back": "Back",
+  "designer.leaveTitle": "Leave this paint?",
+  "designer.leaveBody": "It has changes that aren't saved yet.",
+  "designer.leaveDiscard": "Leave without saving",
+  "designer.leaveSave": "Save and leave",
   "designer.switchSheetsTitle": "These sheets are for another model",
   "designer.switchSheetsBody": "{{dest}} uses {{names}}. Switching replaces every sheet you have open.",
   "designer.switchSheets": "Switch sheets",

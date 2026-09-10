@@ -15,7 +15,7 @@ export const de: Translation = {
   "common.remove": "Entfernen",
   "nav.pose": "Pose",
   "nav.settings": "Einstellungen",
-  "nav.designer": "Designer",
+  "nav.designer": "Designer-Editor",
   "nav.paints": "Designs",
 
 
@@ -400,6 +400,11 @@ export const de: Translation = {
   "paints.model": "Für",
   "paints.profile": "Fahrerprofil",
   "designer.sheetsSwitched": "Auf die Bahnen von {{dest}} gewechselt.",
+  "designer.back": "Zurück",
+  "designer.leaveTitle": "Dieses Paint verlassen?",
+  "designer.leaveBody": "Es hat Änderungen, die noch nicht gespeichert sind.",
+  "designer.leaveDiscard": "Ohne Speichern verlassen",
+  "designer.leaveSave": "Speichern und verlassen",
   "designer.switchSheetsTitle": "Diese Bahnen gehören zu einem anderen Modell",
   "designer.switchSheetsBody": "{{dest}} nutzt {{names}}. Beim Wechseln werden alle offenen Bahnen ersetzt.",
   "designer.switchSheets": "Bahnen wechseln",

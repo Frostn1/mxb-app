@@ -15,7 +15,7 @@ export const it: Translation = {
   "common.remove": "Rimuovi",
   "nav.pose": "Posa",
   "nav.settings": "Impostazioni",
-  "nav.designer": "Designer",
+  "nav.designer": "Editor Designer",
   "nav.paints": "Livree",
 
 
@@ -400,6 +400,11 @@ export const it: Translation = {
   "paints.model": "Per",
   "paints.profile": "Profilo pilota",
   "designer.sheetsSwitched": "Passato ai fogli usati da {{dest}}.",
+  "designer.back": "Indietro",
+  "designer.leaveTitle": "Uscire da questa verniciatura?",
+  "designer.leaveBody": "Ha modifiche non ancora salvate.",
+  "designer.leaveDiscard": "Esci senza salvare",
+  "designer.leaveSave": "Salva ed esci",
   "designer.switchSheetsTitle": "Questi fogli sono di un altro modello",
   "designer.switchSheetsBody": "{{dest}} usa {{names}}. Cambiando sostituisci tutti i fogli aperti.",
   "designer.switchSheets": "Cambia fogli",
