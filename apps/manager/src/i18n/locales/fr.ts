@@ -972,6 +972,16 @@ export const fr: Translation = {
   "serverBrowser.dl.onHub": "Sur le Hub",
   "serverBrowser.dl.onShop": "Acheter {{title}} dans la boutique",
 
+  // ── Navigateur de serveurs : vue en cartes (porté) ──
+  "serverBrowser.missingContent": "Contenu manquant",
+  "serverBrowser.unnamed": "Serveur sans nom",
+  "serverBrowser.full": "Serveur plein",
+  "serverBrowser.copyFailed": "Impossible de copier l'adresse",
+  "serverBrowser.ping.title": "{{ms}} ms aller-retour",
+  "serverBrowser.ping.ms": "{{ms}} ms",
+  "serverBrowser.viewCards": "Cartes",
+  "serverBrowser.viewList": "Liste",
+
   "sync.autoNote":
     "Votre look se publie tout seul — chaque moto, dès que vous le changez dans l'app ou dans le garage du jeu. Celui des autres arrive quand vous appuyez sur Jouer.",
 

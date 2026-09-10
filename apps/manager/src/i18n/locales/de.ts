@@ -973,6 +973,16 @@ export const de: Translation = {
   "serverBrowser.dl.onHub": "Im Hub",
   "serverBrowser.dl.onShop": "{{title}} im Shop kaufen",
 
+  // ── Server-Browser: Kartenansicht (portiert) ──
+  "serverBrowser.missingContent": "Fehlender Inhalt",
+  "serverBrowser.unnamed": "Unbenannter Server",
+  "serverBrowser.full": "Server voll",
+  "serverBrowser.copyFailed": "Adresse konnte nicht kopiert werden",
+  "serverBrowser.ping.title": "{{ms}} ms Round-Trip",
+  "serverBrowser.ping.ms": "{{ms}} ms",
+  "serverBrowser.viewCards": "Karten",
+  "serverBrowser.viewList": "Liste",
+
   "sync.autoNote":
     "Dein Look veröffentlicht sich selbst — jedes Bike, sobald du ihn in der App oder in der Garage des Spiels änderst. Der der anderen kommt, wenn du auf Spielen drückst.",
 

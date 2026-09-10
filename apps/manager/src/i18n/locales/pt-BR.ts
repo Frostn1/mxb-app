@@ -967,6 +967,16 @@ export const ptBR: Translation = {
   "serverBrowser.dl.onHub": "No Hub",
   "serverBrowser.dl.onShop": "Comprar {{title}} na loja",
 
+  // ── Navegador de servidores: visualização em cartões (portado) ──
+  "serverBrowser.missingContent": "Conteúdo ausente",
+  "serverBrowser.unnamed": "Servidor sem nome",
+  "serverBrowser.full": "Servidor cheio",
+  "serverBrowser.copyFailed": "Não foi possível copiar o endereço",
+  "serverBrowser.ping.title": "{{ms}} ms de ida e volta",
+  "serverBrowser.ping.ms": "{{ms}} ms",
+  "serverBrowser.viewCards": "Cartões",
+  "serverBrowser.viewList": "Lista",
+
   "sync.autoNote":
     "Seu visual se publica sozinho — cada moto, sempre que você muda no app ou na garagem do jogo. O dos outros chega quando você aperta Jogar.",
 

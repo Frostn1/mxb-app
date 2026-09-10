@@ -15,10 +15,13 @@ import {
   ChevronUp,
   ChevronDown,
   Globe,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
+import { Segmented } from "@frost/shared/Components/ui/segmented";
 import {
   Select,
   SelectTrigger,
@@ -46,8 +49,12 @@ import {
 import { buildTrackIndex, matchTrack, type TrackIndex } from "@/lib/trackContent";
 import { useTrackCatalog } from "@/lib/useTrackCatalog";
 import TrackContentAction from "./TrackContentAction";
+import ServerCard from "./ServerCard";
 import JoinServerDialog from "../Shell/JoinServerDialog";
 import ServerDetail from "./ServerDetail";
+
+type ViewMode = "cards" | "list";
+const VIEW_KEY = "mxb:serversView:v1";
 
 /**
  * The live MX Bikes server list, read straight from PiBoSo's master server — the same
@@ -105,6 +112,22 @@ const Servers = () => {
   const [region, setRegion] = useState<string>("all");
   const [favesOnly, setFavesOnly] = useState(false);
   const favs = useFavourites(servers);
+
+  // Picture grid or dense table — a sticky per-machine preference.
+  const [view, setView] = useState<ViewMode>(() => {
+    try {
+      return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "cards";
+    } catch {
+      return "cards";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_KEY, view);
+    } catch {
+      // Storage disabled; the choice still holds for this session.
+    }
+  }, [view]);
 
   // Which tracks are on disk, so a row can say "you have this" or offer to fetch it. Scanned
   // once on mount; a track that finishes downloading shows as installed on the next refresh.
@@ -301,6 +324,15 @@ const Servers = () => {
             {t("serverBrowser.count", { count: servers.length - (showHidden ? 0 : hiddenCount) })}
           </span>
         )}
+        <Segmented<ViewMode>
+          size="sm"
+          value={view}
+          onChange={setView}
+          options={[
+            { value: "cards", label: <LayoutGrid className="size-3.5" /> },
+            { value: "list", label: <List className="size-3.5" /> },
+          ]}
+        />
         {favs.count > 0 && (
           <button
             type="button"
@@ -408,6 +440,24 @@ const Servers = () => {
               {favesOnly ? t("serverBrowser.favesEmpty") : t("serverBrowser.empty")}
             </p>
           </Centered>
+        ) : view === "cards" ? (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
+            {shown.map((s, i) => (
+              <ServerCard
+                key={`${s.address}-${i}`}
+                server={s}
+                match={matchTrack(trackIndex, s.track)}
+                known={catalog.found.get(s.track)}
+                pending={catalog.pending.has(s.track)}
+                joining={joining === s.address}
+                onJoin={() => join(s.address)}
+                favourite={favs.has(s.address)}
+                onToggleFavourite={() =>
+                  favs.toggle({ address: s.address, name: s.name, track: s.track })
+                }
+              />
+            ))}
+          </div>
         ) : (
           <div className="overflow-hidden rounded-xl border border-input">
             <table className="w-full border-collapse text-[13px]">

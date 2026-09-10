@@ -951,6 +951,16 @@ export const en = {
   "serverBrowser.dl.onHub": "On the Hub",
   "serverBrowser.dl.onShop": "Buy {{title}} from the shop",
 
+  // ── Server browser: card view (ported) ──
+  "serverBrowser.missingContent": "Missing content",
+  "serverBrowser.unnamed": "Unnamed server",
+  "serverBrowser.full": "Server full",
+  "serverBrowser.copyFailed": "Couldn't copy the address",
+  "serverBrowser.ping.title": "{{ms}} ms round-trip",
+  "serverBrowser.ping.ms": "{{ms}} ms",
+  "serverBrowser.viewCards": "Cards",
+  "serverBrowser.viewList": "List",
+
   "sync.autoNote":
     "Your look publishes itself — every bike, whenever you change it in the app or in the game's own garage. Everyone else's arrives when you press Play.",
 

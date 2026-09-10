@@ -967,6 +967,16 @@ export const es: Translation = {
   "serverBrowser.dl.onHub": "En el Hub",
   "serverBrowser.dl.onShop": "Comprar {{title}} en la tienda",
 
+  // ── Navegador de servidores: vista de tarjetas (portado) ──
+  "serverBrowser.missingContent": "Contenido no instalado",
+  "serverBrowser.unnamed": "Servidor sin nombre",
+  "serverBrowser.full": "Servidor lleno",
+  "serverBrowser.copyFailed": "No se pudo copiar la dirección",
+  "serverBrowser.ping.title": "{{ms}} ms de ida y vuelta",
+  "serverBrowser.ping.ms": "{{ms}} ms",
+  "serverBrowser.viewCards": "Tarjetas",
+  "serverBrowser.viewList": "Lista",
+
   "sync.autoNote":
     "Tu look se publica solo — cada moto, cada vez que lo cambias en la app o en el garaje del juego. El de los demás llega cuando pulsas Jugar.",
 
