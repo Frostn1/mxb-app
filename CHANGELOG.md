@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-09
+
+### Fixed
+- The 3D bike view no longer draws faint diagonal banding across the bodywork.
+
 ## 2026-09-08
 
 ### Changed
