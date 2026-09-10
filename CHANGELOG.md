@@ -43,6 +43,7 @@
   wider than 14 m get them.
 
 ### Fixed
+- The 3D bike view no longer draws faint diagonal banding across the bodywork.
 - Trackside scenery in the 3D viewer no longer stands in slabs of flat grey. A track whose
   textures the viewer can't read now leaves its banners and foliage out rather than drawing
   them blank.
