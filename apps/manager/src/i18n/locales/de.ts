@@ -982,6 +982,8 @@ export const de: Translation = {
   "serverBrowser.ping.ms": "{{ms}} ms",
   "serverBrowser.viewCards": "Karten",
   "serverBrowser.viewList": "Liste",
+  "serverBrowser.installedOnly": "Nur installierte",
+  "serverBrowser.installedOnlyHelp": "Nur Server mit einer Strecke anzeigen, die du hast",
 
   "sync.autoNote":
     "Dein Look veröffentlicht sich selbst — jedes Bike, sobald du ihn in der App oder in der Garage des Spiels änderst. Der der anderen kommt, wenn du auf Spielen drückst.",

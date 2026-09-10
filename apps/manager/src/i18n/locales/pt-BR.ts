@@ -976,6 +976,8 @@ export const ptBR: Translation = {
   "serverBrowser.ping.ms": "{{ms}} ms",
   "serverBrowser.viewCards": "Cartões",
   "serverBrowser.viewList": "Lista",
+  "serverBrowser.installedOnly": "Somente instalados",
+  "serverBrowser.installedOnlyHelp": "Mostrar apenas servidores com uma pista que você tem",
 
   "sync.autoNote":
     "Seu visual se publica sozinho — cada moto, sempre que você muda no app ou na garagem do jogo. O dos outros chega quando você aperta Jogar.",

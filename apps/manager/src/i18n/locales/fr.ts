@@ -981,6 +981,8 @@ export const fr: Translation = {
   "serverBrowser.ping.ms": "{{ms}} ms",
   "serverBrowser.viewCards": "Cartes",
   "serverBrowser.viewList": "Liste",
+  "serverBrowser.installedOnly": "Installés seulement",
+  "serverBrowser.installedOnlyHelp": "N'afficher que les serveurs avec un circuit que vous avez",
 
   "sync.autoNote":
     "Votre look se publie tout seul — chaque moto, dès que vous le changez dans l'app ou dans le garage du jeu. Celui des autres arrive quand vous appuyez sur Jouer.",

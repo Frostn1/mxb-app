@@ -17,6 +17,7 @@ import {
   Globe,
   LayoutGrid,
   List,
+  PackageCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
@@ -111,6 +112,8 @@ const Servers = () => {
   const [dir, setDir] = useState<SortDir>(DEFAULT_DIR.players);
   const [region, setRegion] = useState<string>("all");
   const [favesOnly, setFavesOnly] = useState(false);
+  // Hide servers running a track the player doesn't have — no point joining one you can't load.
+  const [installedOnly, setInstalledOnly] = useState(false);
   const favs = useFavourites(servers);
 
   // Picture grid or dense table — a sticky per-machine preference.
@@ -225,6 +228,10 @@ const Servers = () => {
     } else if (region !== "all") {
       list = list.filter((s) => canonicalRegion(s.location) === region);
     }
+    // Content filter, orthogonal to the scope above: drop anything whose track isn't on disk.
+    if (installedOnly) {
+      list = list.filter((s) => matchTrack(trackIndex, s.track).state !== "missing");
+    }
 
     const flip = dir === "desc" ? -1 : 1;
     const sorted = [...list];
@@ -257,7 +264,7 @@ const Servers = () => {
       }
     });
     return sorted;
-  }, [servers, query, showHidden, favesOnly, region, favs, sort, dir]);
+  }, [servers, query, showHidden, favesOnly, region, installedOnly, trackIndex, favs, sort, dir]);
 
   const join = useCallback(
     async (address: string) => {
@@ -347,6 +354,18 @@ const Servers = () => {
             {t("serverBrowser.favesOnly")}
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => setInstalledOnly((v) => !v)}
+          title={t("serverBrowser.installedOnlyHelp")}
+          className={cn(
+            "flex h-7 items-center gap-1.5 border border-input px-2.5 text-[12px]",
+            installedOnly ? "bg-card text-muted-foreground" : "text-faint hover:text-muted-foreground",
+          )}
+        >
+          <PackageCheck className="size-3.5" />
+          {t("serverBrowser.installedOnly")}
+        </button>
         {!favesOnly && regions.length > 1 && (
           <Select value={region} onValueChange={setRegion}>
             <SelectTrigger className="h-7 w-[150px] bg-card text-[12px]">

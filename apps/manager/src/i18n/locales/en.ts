@@ -960,6 +960,8 @@ export const en = {
   "serverBrowser.ping.ms": "{{ms}} ms",
   "serverBrowser.viewCards": "Cards",
   "serverBrowser.viewList": "List",
+  "serverBrowser.installedOnly": "Installed only",
+  "serverBrowser.installedOnlyHelp": "Show only servers running a track you have",
 
   "sync.autoNote":
     "Your look publishes itself — every bike, whenever you change it in the app or in the game's own garage. Everyone else's arrives when you press Play.",
