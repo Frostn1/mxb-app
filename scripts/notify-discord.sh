@@ -39,7 +39,13 @@ if [ -z "$TAG" ]; then
 fi
 
 REPO="${REPO:-${GITHUB_REPOSITORY:-Frostn1/mxb-app}}"
-APP_NAME="${APP_NAME:-Frost's Mod Manager}"
+# Not `${APP_NAME:-Frost's Mod Manager}`: inside `${...}` bash honours that apostrophe as an
+# opening quote, scans the rest of the file for its partner and dies with
+# `unexpected EOF while looking for matching \''` — pointing at whatever line it gave up on,
+# nowhere near this one. The name grew its apostrophe in the rename, and this ran on every
+# release from then on, so v0.14.0-beta.3 published its assets and then announced nothing.
+APP_NAME="${APP_NAME-}"
+[ -n "$APP_NAME" ] || APP_NAME="Frost's Mod Manager"
 
 # A suffixed tag (`v0.8.0-beta.2`) is a beta build of the version it names — the same test
 # release.yml uses to publish it as a pre-release, and release-notes.sh to head the release
