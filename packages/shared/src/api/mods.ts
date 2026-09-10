@@ -65,6 +65,7 @@ import type {
   LockProgress,
 } from "../types";
 import type { BaseTKey } from "../i18n/core";
+import { isHost, readDownloadPrefs, type DownloadPrefs } from "../lib/downloadPrefs";
 
 /** Results per page (mirrors `PER_PAGE` in the Rust backend). */
 export const SEARCH_PAGE_SIZE = 24;
@@ -1683,12 +1684,28 @@ export function isBlockedDownload(opt: { url: string; host: string }): boolean {
  * off the page, and a server build the parser missed was silently preselected instead.
  * Ranked below even a browser-only mirror, since that at least installs something playable.
  */
-export function sortMirrors(detail: ModDetail): DownloadOption[] {
+export function sortMirrors(
+  detail: ModDetail,
+  prefs: DownloadPrefs = readDownloadPrefs(),
+): DownloadOption[] {
   return [...(detail.downloads ?? [])].sort((a, b) => {
-    if (a.isServer !== b.isServer) return Number(a.isServer) - Number(b.isServer);
+    // Server builds last, unless someone has said they want them — a dedicated-server rig
+    // installs nothing else, and picking it by hand on every mod is the thing being fixed.
+    if (a.isServer !== b.isServer) {
+      const rank = (m: DownloadOption) =>
+        prefs.preferServer ? Number(!m.isServer) : Number(m.isServer);
+      return rank(a) - rank(b);
+    }
     const ab = isBlockedDownload(a) ? 1 : 0;
     const bb = isBlockedDownload(b) ? 1 : 0;
     if (ab !== bb) return ab - bb;
+    // Then the preferred host, above even the author's own "Default" — a Drive link that
+    // answers "too many downloads" is marked default just as often as one that works.
+    if (prefs.preferredHost) {
+      const ah = isHost(a, prefs.preferredHost) ? 0 : 1;
+      const bh = isHost(b, prefs.preferredHost) ? 0 : 1;
+      if (ah !== bh) return ah - bh;
+    }
     return Number(b.isDefault) - Number(a.isDefault);
   });
 }
@@ -1702,7 +1719,14 @@ export function playableMirrors(mirrors: DownloadOption[]): DownloadOption[] {
  * Which of `mirrors` (in {@link sortMirrors} order) a picker should start on: the best
  * playable file, never a server build while anything else is on offer.
  */
-export function defaultMirrorIndex(mirrors: DownloadOption[]): number {
+export function defaultMirrorIndex(
+  mirrors: DownloadOption[],
+  prefs: DownloadPrefs = readDownloadPrefs(),
+): number {
+  if (prefs.preferServer) {
+    const server = mirrors.findIndex((m) => m.isServer);
+    if (server >= 0) return server;
+  }
   const i = mirrors.findIndex((m) => !m.isServer);
   return i >= 0 ? i : 0;
 }
@@ -1940,14 +1964,17 @@ export async function resolveQuickInstall(
   game: GameInfo,
   categoryId: number | null | undefined,
 ): Promise<QuickInstallResult> {
+  const prefs = readDownloadPrefs();
   const detail = await getModDetail(slug);
-  const mirrors = sortMirrors(detail);
-  const primary = mirrors[defaultMirrorIndex(mirrors)];
+  const mirrors = sortMirrors(detail, prefs);
+  const primary = mirrors[defaultMirrorIndex(mirrors, prefs)];
   if (!primary) return { ok: false, reason: "none", title: detail.title };
   // One click can't ask which build was meant, and a dedicated-server file installed by
   // mistake looks installed while the game shows nothing. Send them to the mod's page,
-  // where every download is spelled out.
-  if (primary.isServer) return { ok: false, reason: "serverOnly", title: detail.title };
+  // where every download is spelled out — unless they have said server builds are what
+  // they want, which is exactly the answer this refusal could not guess.
+  if (primary.isServer && !prefs.preferServer)
+    return { ok: false, reason: "serverOnly", title: detail.title };
   if (isBlockedDownload(primary))
     return { ok: false, reason: "blocked", title: detail.title, host: primary.host };
 
