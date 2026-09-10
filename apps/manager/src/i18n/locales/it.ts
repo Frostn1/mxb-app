@@ -976,6 +976,8 @@ export const it: Translation = {
   "serverBrowser.viewList": "Elenco",
   "serverBrowser.installedOnly": "Solo installati",
   "serverBrowser.installedOnlyHelp": "Mostra solo i server con un tracciato che possiedi",
+  "serverBrowser.hideEmpty": "Nascondi vuoti",
+  "serverBrowser.hideEmptyHelp": "Nascondi i server senza piloti",
 
   "sync.autoNote":
     "Il tuo look si pubblica da solo — ogni moto, ogni volta che lo cambi nell'app o nel garage del gioco. Quello degli altri arriva quando premi Gioca.",

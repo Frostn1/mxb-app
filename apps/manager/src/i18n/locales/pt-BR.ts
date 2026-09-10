@@ -978,6 +978,8 @@ export const ptBR: Translation = {
   "serverBrowser.viewList": "Lista",
   "serverBrowser.installedOnly": "Somente instalados",
   "serverBrowser.installedOnlyHelp": "Mostrar apenas servidores com uma pista que você tem",
+  "serverBrowser.hideEmpty": "Ocultar vazios",
+  "serverBrowser.hideEmptyHelp": "Ocultar servidores sem pilotos",
 
   "sync.autoNote":
     "Seu visual se publica sozinho — cada moto, sempre que você muda no app ou na garagem do jogo. O dos outros chega quando você aperta Jogar.",

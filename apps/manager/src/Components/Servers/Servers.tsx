@@ -18,6 +18,7 @@ import {
   LayoutGrid,
   List,
   PackageCheck,
+  UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
@@ -114,6 +115,8 @@ const Servers = () => {
   const [favesOnly, setFavesOnly] = useState(false);
   // Hide servers running a track the player doesn't have — no point joining one you can't load.
   const [installedOnly, setInstalledOnly] = useState(false);
+  // Hide empty servers — an empty one is rarely what someone opening the browser is after.
+  const [hideEmpty, setHideEmpty] = useState(false);
   const favs = useFavourites(servers);
 
   // Picture grid or dense table — a sticky per-machine preference.
@@ -232,6 +235,9 @@ const Servers = () => {
     if (installedOnly) {
       list = list.filter((s) => matchTrack(trackIndex, s.track).state !== "missing");
     }
+    if (hideEmpty) {
+      list = list.filter((s) => s.players > 0);
+    }
 
     const flip = dir === "desc" ? -1 : 1;
     const sorted = [...list];
@@ -264,7 +270,7 @@ const Servers = () => {
       }
     });
     return sorted;
-  }, [servers, query, showHidden, favesOnly, region, installedOnly, trackIndex, favs, sort, dir]);
+  }, [servers, query, showHidden, favesOnly, region, installedOnly, hideEmpty, trackIndex, favs, sort, dir]);
 
   const join = useCallback(
     async (address: string) => {
@@ -365,6 +371,18 @@ const Servers = () => {
         >
           <PackageCheck className="size-3.5" />
           {t("serverBrowser.installedOnly")}
+        </button>
+        <button
+          type="button"
+          onClick={() => setHideEmpty((v) => !v)}
+          title={t("serverBrowser.hideEmptyHelp")}
+          className={cn(
+            "flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap border border-input px-2.5 text-[12px]",
+            hideEmpty ? "bg-card text-muted-foreground" : "text-faint hover:text-muted-foreground",
+          )}
+        >
+          <UserCheck className="size-3.5" />
+          {t("serverBrowser.hideEmpty")}
         </button>
         {!favesOnly && regions.length > 1 && (
           <Select value={region} onValueChange={setRegion}>
