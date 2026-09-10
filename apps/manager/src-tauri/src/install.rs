@@ -8,6 +8,11 @@ use scraper::{Html, Selector};
 use serde::Serialize;
 use std::fs::File;
 use std::io::{Read, Write};
+// `has_ext`, `is_junk` and `sanitize` are filename predicates every binary needs, so they
+// live in `mxb_core::names` and are re-exported here — this module's own call sites, and
+// the two hundred others across the app, were written against `install::`.
+pub use mxb_core::names::{has_ext, is_junk, sanitize, staging_dir};
+
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
@@ -121,18 +126,6 @@ pub(crate) fn notify_frostmod(app: &AppHandle, slug: &str) {
 /// This used to be one path per process, wiped on entry — fine while installs were strictly
 /// serial, fatal the moment two can be alive at once: a dropzone plan sits staged while the
 /// user reviews it, and a second drop would delete the first one's files out from under it.
-pub(crate) fn staging_dir(tag: &str) -> PathBuf {
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    std::env::temp_dir().join(format!(
-        "frost-{tag}-{}-{stamp:x}-{n}",
-        std::process::id()
-    ))
-}
 
 fn client_builder() -> reqwest::ClientBuilder {
     Client::builder()
@@ -2756,13 +2749,6 @@ pub(crate) fn contains_paints_bundle(base: &Path) -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) fn has_ext(p: &Path, ext: &str) -> bool {
-    p.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case(ext))
-        .unwrap_or(false)
-}
-
 /// Whether a `.pkz` sits at the top of `dir` — i.e. whether this placement is installing a
 /// finished package rather than a mod's loose files.
 ///
@@ -2777,24 +2763,6 @@ fn has_root_pkz(dir: &Path) -> bool {
                 .any(|e| has_ext(&e.path(), "pkz"))
         })
         .unwrap_or(false)
-}
-
-pub(crate) fn is_junk(name: &str) -> bool {
-    let n = name.to_lowercase();
-    n.starts_with("readme")
-        || n.ends_with(".txt")
-        || n.ends_with(".url")
-        || n.ends_with(".nfo")
-        || n.ends_with(".md")
-}
-
-pub(crate) fn sanitize(name: &str) -> String {
-    name.chars()
-        .map(|c| match c {
-            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-            c => c,
-        })
-        .collect()
 }
 
 #[cfg(test)]

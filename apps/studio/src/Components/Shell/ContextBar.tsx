@@ -1,11 +1,14 @@
-import { createContext, useContext, type ReactNode, type Ref } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@frost/shared/lib/utils";
-import { useT } from "@/i18n";
-import type { DashboardView, RailItem } from "./nav";
 
 /**
  * The two ends of the context bar, handed to whichever screen is mounted.
+ *
+ * A near-copy of the manager's. The two apps' chrome is genuinely different — the manager
+ * has a rail of places, the studio a row of tools — so only the portal slots and the tab
+ * are shared in shape, and sharing them for real would mean a component parameterised on
+ * a nav model neither app would recognise.
  *
  * A screen's own toolbar belongs in this row, not in a third row of its own — that stacking
  * is what made the old shell feel like a dashboard. Screens fill the ends by portalling
@@ -49,56 +52,5 @@ export function ContextTab({
       {children}
       {active && <span className="u-skew absolute inset-x-[-3px] bottom-0 h-[2px] bg-primary" />}
     </button>
-  );
-}
-
-interface ContextBarProps {
-  item?: RailItem;
-  view: DashboardView;
-  onNavigate: (view: DashboardView) => void;
-  leftRef: Ref<HTMLDivElement>;
-  rightRef: Ref<HTMLDivElement>;
-}
-
-/**
- * The row under the rail: the active rail item's tabs, then whatever the screen adds.
- *
- * Always rendered, even when there is nothing in it — the chrome is a fixed height, and a
- * bar that appears and disappears would shift every screen by 44px as you navigate.
- */
-export default function ContextBar({
-  item,
-  view,
-    onNavigate,
-  leftRef,
-  rightRef,
-}: ContextBarProps) {
-  const t = useT();
-  const tabs = item?.tabs ?? [];
-
-  return (
-    <div className="flex h-11 flex-none items-stretch gap-[22px] border-b border-border bg-window px-7">
-      {/* A lone tab is a label, not a choice. */}
-      {tabs.length > 1 &&
-        tabs.map((tab) => (
-          <ContextTab
-            key={tab.view}
-            active={view === tab.view}
-            onSelect={() => onNavigate(tab.view)}
-          >
-            {tab.rawLabel ?? t(tab.label)}
-          </ContextTab>
-        ))}
-      <div
-        ref={leftRef}
-        className={cn(
-          "flex items-stretch gap-[22px]",
-          // Only divide when there is something on both sides of the line.
-          tabs.length > 1 && "ctx-divider",
-        )}
-      />
-      <div className="flex-1" />
-      <div ref={rightRef} className="flex items-center gap-3 self-center" />
-    </div>
   );
 }

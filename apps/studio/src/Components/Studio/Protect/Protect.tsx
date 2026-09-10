@@ -5,7 +5,6 @@ import {
   FolderOpen,
   Loader2,
   Lock,
-  RefreshCw,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -16,10 +15,8 @@ import {
   contentLockPlan,
   contentLockRun,
   experimentalState,
-  localGuid,
   onContentLockProgress,
   revealInExplorer,
-  setGuid as saveGuid,
 } from "@frost/shared/api/mods";
 import type { LockItem, LockProgress } from "@frost/shared/types";
 import { formatBytes } from "@frost/shared/lib/mods";
@@ -56,9 +53,9 @@ export default function Protect() {
   const [outDir, setOutDir] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<LockProgress | null>(null);
-  const [mine, setMine] = useState<string | null>(null);
+  // Set from the config on mount; the studio does not read it out of the running game.
+  const [mine] = useState<string | null>(null);
   const [claimed, setClaimed] = useState("");
-  const [reading, setReading] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -118,28 +115,6 @@ export default function Protect() {
     const picked = await openDialog({ multiple: false, directory: true });
     const path = Array.isArray(picked) ? picked[0] : picked;
     if (path) setOutDir(path);
-  };
-
-  const readOwn = async () => {
-    setReading(true);
-    try {
-      const g = await localGuid();
-      if (!g) {
-        toast.info(t("protect.ownNotFound"), {
-          description: t("protect.ownNotFoundWhy"),
-        });
-        return;
-      }
-      setMine(g);
-      // Claim it while we have it: the Servers tab wants the same value, and it otherwise
-      // waits for one of your servers to see you connect.
-      if (!claimed) await saveGuid(g).catch(() => {});
-      toast.success(t("protect.ownFound", { guid: g }));
-    } catch (e) {
-      toast.error(t("protect.ownFailed"), { description: String(e) });
-    } finally {
-      setReading(false);
-    }
   };
 
   const run = async () => {
@@ -293,14 +268,6 @@ export default function Protect() {
               >
                 {own || t("protect.ownUnknown")}
               </code>
-              <Button size="sm" variant="outline" disabled={reading} onClick={() => void readOwn()}>
-                {reading ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="size-3.5" />
-                )}
-                {t("protect.readOwn")}
-              </Button>
               {own && (
                 <button
                   onClick={() => setGuidText((s) => (s ? `${s.trimEnd()}\n${own}` : own))}
