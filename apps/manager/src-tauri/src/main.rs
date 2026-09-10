@@ -162,7 +162,7 @@ mod voice;
 pub(crate) use mxb_core::winehost;
 
 use config::AppConfig;
-use mxb_core::viewer::{BikeModel, PreviewSet};
+use mxb_core::viewer::BikeModel;
 use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
@@ -170,7 +170,6 @@ use modwatch::ModWatcher;
 use paintwatch::{LookWatcher, PaintWatcher};
 // Decoding a paint's textures is per-texture CPU work over no shared state, and every path
 // that does it wants the same treatment — so this sits here rather than in one function.
-use rayon::prelude::*;
 use profilewatch::ProfileWatcher;
 use mods::mxb::WpModsSource;
 use mods::{ModDetail, ModRating, ModSort, ModSource, ModSummary};
@@ -9080,6 +9079,33 @@ mod viewer_crossing_tests {
         .expect("stock preview builds");
         assert!(!m.nodes.is_empty(), "the packed model didn't come through");
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod shared_data_dir_tests {
+    /// `mxb_core::config::DATA_ID` names the folder every binary reads its config from, and
+    /// it has to keep naming *this* app's bundle identifier — that folder already exists on
+    /// every install, holding the mods path, the logs and the installed FrostMod.
+    ///
+    /// The two are deliberately not the same constant: the studio ships under its own
+    /// identifier and still reads this folder, so they cannot be wired together. That is
+    /// exactly why they can drift, and why this reads the shipped config rather than
+    /// trusting a second copy of the string.
+    #[test]
+    fn data_id_still_names_this_app_s_bundle_identifier() {
+        let conf = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json"),
+        )
+        .expect("tauri.conf.json");
+        let v: serde_json::Value = serde_json::from_str(&conf).expect("valid json");
+        let identifier = v["identifier"].as_str().expect("identifier");
+        assert_eq!(
+            identifier,
+            mxb_core::config::DATA_ID,
+            "the bundle identifier moved without DATA_ID following it — every install's \
+             config, logs and FrostMod are under the old one",
+        );
     }
 }
 

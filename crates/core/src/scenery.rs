@@ -1174,8 +1174,7 @@ fn cache_key(path: &str) -> Result<String> {
 }
 
 fn cache_file(app: &tauri::AppHandle, key: &str, dir_name: &str) -> Option<PathBuf> {
-    use tauri::Manager;
-    let dir = app.path().app_cache_dir().ok()?.join(dir_name);
+    let dir = crate::config::cache_dir(app)?.join(dir_name);
     let safe: String = key
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
@@ -1303,8 +1302,7 @@ fn read_cache(file: &Path) -> Option<Scenery> {
 }
 
 fn prune_cache(app: &tauri::AppHandle, dir_name: &str) {
-    use tauri::Manager;
-    let Ok(base) = app.path().app_cache_dir() else {
+    let Some(base) = crate::config::cache_dir(app) else {
         return;
     };
     let Ok(rd) = std::fs::read_dir(base.join(dir_name)) else {

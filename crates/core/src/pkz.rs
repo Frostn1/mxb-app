@@ -7,7 +7,6 @@ use std::hash::{Hash, Hasher};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex, Once, OnceLock};
-use tauri::Manager;
 
 /// ZIP local-file-header magic ("PK\x03\x04").
 const ZIP_MAGIC: [u8; 4] = [0x50, 0x4b, 0x03, 0x04];
@@ -199,7 +198,7 @@ fn write_cache(cache_file: &Path, path: &str, stamp: Stamp, meta: &PkzMeta) {
 const CACHE_DIR: &str = "pkz-meta-v3";
 
 fn cache_path(app: &tauri::AppHandle, source: &str, stamp: Stamp) -> Option<PathBuf> {
-    let cache_root = app.path().app_cache_dir().ok()?;
+    let cache_root = crate::config::cache_dir(app)?;
     drop_stale_cache(&cache_root);
 
     let mut hasher = DefaultHasher::new();
