@@ -7,6 +7,8 @@ mod bikeswap;
 mod bundle;
 mod cancel;
 pub(crate) use mxb_core::cfg;
+mod trashbin;
+
 pub(crate) use mxb_core::cloudfiles;
 pub(crate) use mxb_core::viewer;
 pub(crate) use mxb_core::config;
@@ -1295,7 +1297,7 @@ async fn uninstall_mod(app: tauri::AppHandle, from_path: String, subpath: String
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
         let landed =
-            library::uninstall_mod(&cfg.mods_path, &from_path, &subpath).map_err(|e| format!("{e:#}"))?;
+            trashbin::uninstall_mod(&cfg.mods_path, &from_path, &subpath).map_err(|e| format!("{e:#}"))?;
         // Remember where the Trash put it, while we still know: that is what makes the
         // ledger row able to offer Restore rather than only a name to go hunting with.
         ledger_note_trashed(&app, &cfg, &from_path, landed);
@@ -4760,7 +4762,7 @@ fn ledger_note_trashed(
     app: &tauri::AppHandle,
     cfg: &config::AppConfig,
     from_path: &str,
-    landed: library::TrashedAt,
+    landed: trashbin::TrashedAt,
 ) {
     let Ok(dir) = app.path().app_local_data_dir() else {
         return;
@@ -4788,7 +4790,7 @@ async fn restore_ledger_entry(app: tauri::AppHandle, key: String) -> Result<(), 
             .ok_or_else(|| "no such entry".to_string())?;
         let original = library::mods_subdir(&cfg.mods_path, &entry.rel);
 
-        library::restore_from_trash(&original, entry.trashed_at.as_deref())
+        trashbin::restore_from_trash(&original, entry.trashed_at.as_deref())
             .map_err(|e| format!("{e:#}"))?;
 
         // Straight back to the truth rather than patching the row by hand: the mod is on disk

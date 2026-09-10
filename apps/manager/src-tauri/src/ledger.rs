@@ -718,19 +718,19 @@ mod restore_tests {
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(&file, b"a mod").unwrap();
 
-        let landed = library::move_to_trash(&file).unwrap();
+        let landed = crate::trashbin::move_to_trash(&file).unwrap();
         println!("trashed to: {landed:?}");
         assert!(!file.exists(), "gone from the mods folder");
         assert!(landed.is_some(), "and we know where it went");
 
-        library::restore_from_trash(&file, landed.as_deref()).unwrap();
+        crate::trashbin::restore_from_trash(&file, landed.as_deref()).unwrap();
         assert!(file.exists(), "and back again");
         assert_eq!(fs::read(&file).unwrap(), b"a mod", "with its contents intact");
 
         // Restoring over something already there must refuse rather than clobber.
-        let landed2 = library::move_to_trash(&file).unwrap();
+        let landed2 = crate::trashbin::move_to_trash(&file).unwrap();
         fs::write(&file, b"newer copy").unwrap();
-        let err = library::restore_from_trash(&file, landed2.as_deref()).unwrap_err();
+        let err = crate::trashbin::restore_from_trash(&file, landed2.as_deref()).unwrap_err();
         println!("refused as expected: {err}");
         assert_eq!(fs::read(&file).unwrap(), b"newer copy", "the newer copy survived");
 
