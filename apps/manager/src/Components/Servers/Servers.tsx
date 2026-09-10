@@ -346,7 +346,7 @@ const Servers = () => {
             onClick={() => setFavesOnly((v) => !v)}
             title={t("serverBrowser.favesOnly")}
             className={cn(
-              "flex h-7 items-center gap-1.5 border border-input px-2.5 text-[12px]",
+              "flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap border border-input px-2.5 text-[12px]",
               favesOnly ? "bg-card text-muted-foreground" : "text-faint hover:text-muted-foreground",
             )}
           >
@@ -359,7 +359,7 @@ const Servers = () => {
           onClick={() => setInstalledOnly((v) => !v)}
           title={t("serverBrowser.installedOnlyHelp")}
           className={cn(
-            "flex h-7 items-center gap-1.5 border border-input px-2.5 text-[12px]",
+            "flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap border border-input px-2.5 text-[12px]",
             installedOnly ? "bg-card text-muted-foreground" : "text-faint hover:text-muted-foreground",
           )}
         >
@@ -388,7 +388,7 @@ const Servers = () => {
             onClick={() => setShowHidden((v) => !v)}
             title={t("serverBrowser.hiddenHelp")}
             className={cn(
-              "flex h-7 items-center gap-1.5 border border-input px-2.5 text-[12px]",
+              "flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap border border-input px-2.5 text-[12px]",
               showHidden ? "bg-card text-muted-foreground" : "text-faint hover:text-muted-foreground",
             )}
           >
