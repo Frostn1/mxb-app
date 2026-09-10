@@ -9,15 +9,15 @@
     "apps/studio"
   ],
   "scripts": {
-    "dev": "npm run dev -w apps/manager",
-    "start-dev": "npm run start-dev -w apps/manager",
-    "build-prod": "npm run build-prod -w apps/manager",
-    "tauri": "npm run tauri -w apps/manager",
+    "dev": "cd apps/manager && npm run dev",
+    "start-dev": "cd apps/manager && npm run start-dev",
+    "build-prod": "cd apps/manager && npm run build-prod",
+    "tauri": "cd apps/manager && npm run tauri",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
-    "dev:studio": "npm run dev -w apps/studio",
-    "tauri:studio": "npm run tauri -w apps/studio"
+    "dev:studio": "cd apps/studio && npm run dev",
+    "tauri:studio": "cd apps/studio && npm run tauri"
   },
   "overrides": {
     "postcss": "^8.5.25"
