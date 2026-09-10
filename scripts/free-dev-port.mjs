@@ -5,8 +5,12 @@
 // die. This clears it so `tauri dev` reliably starts on the first try.
 import { execSync } from "node:child_process";
 
-// Kept in step with `vite.config.ts`, which reads the same variable.
-const PORT = Number(process.env.MXB_DEV_PORT) || 1420;
+// Which app's port to free is passed in, because each app has its own: the
+// manager on 1420, the studio on 1430. Args are `<env var name> <default>`
+// rather than a shell expansion so the script behaves the same on Windows.
+// Kept in step with each app's `vite.config.ts`, which reads the same variable.
+const [ENV_NAME = "MXB_DEV_PORT", FALLBACK = "1420"] = process.argv.slice(2);
+const PORT = Number(process.env[ENV_NAME]) || Number(FALLBACK);
 
 function pidsOnPort(port) {
   try {
