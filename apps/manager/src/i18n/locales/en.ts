@@ -1444,6 +1444,20 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0140.hero.title":
+    "Frost's Mod Manager, and a Studio of its own",
+  "showcase.v0140.hero.body":
+    "The app has a new name and a new mark. Installing this version retires the old one for you — your settings, your disabled mods, your paint templates and your Launch at startup choice all carry over untouched. If you pinned the old app to your taskbar or Start menu, pin it again from the new one.",
+  "showcase.v0140.studio":
+    "The Designer, the Paint and Track Studios, the Rider and the content tools are now Frost's Studio, an app of their own. The Studio tab opens it, or gets it for you. Both apps read the same folders, so nothing moves.",
+  "showcase.v0140.frostmod":
+    "FrostMod's status sits in the top bar on every screen, with Start, Stop and Reload behind it. The dot says whether it is running and whether it actually reached the game.",
+  "showcase.v0140.stocktracks":
+    "The Servers tab knows the tracks that come with MX Bikes. A server on Forest Raceway or Nevada says you have it, with the track's own picture, and it looks on mxb-mods for the ones you don't.",
+  "showcase.v0140.downloads":
+    "Two download preferences. Take the dedicated-server file wherever a mod ships one, and take your preferred host when a mod is mirrored on several.",
+  "showcase.v0140.uiscale":
+    "Interface size in Settings, from 90% to 160%. It scales the whole interface, not just the text, for a large or high-resolution monitor.",
   "showcase.v0137.hero.title":
     "Every MX Bikes server, live, while you ride",
   "showcase.v0137.hero.body":

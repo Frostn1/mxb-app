@@ -1484,6 +1484,20 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0140.hero.title":
+    "Frost's Mod Manager, und ein eigenes Studio",
+  "showcase.v0140.hero.body":
+    "Die App hat einen neuen Namen und ein neues Zeichen. Diese Version löst die alte für dich ab — deine Einstellungen, deaktivierten Mods, Paint-Vorlagen und die Autostart-Option werden unverändert übernommen. Wenn du die alte App an die Taskleiste oder das Startmenü angeheftet hast, hefte sie von der neuen aus erneut an.",
+  "showcase.v0140.studio":
+    "Designer, Paint- und Track-Studio, der Fahrer und die Content-Tools sind jetzt Frost's Studio, eine eigene App. Der Studio-Tab öffnet sie oder holt sie für dich. Beide Apps lesen dieselben Ordner, es wird nichts verschoben.",
+  "showcase.v0140.frostmod":
+    "FrostMods Status sitzt auf jedem Bildschirm in der oberen Leiste, mit Start, Stopp und Neu laden dahinter. Der Punkt zeigt, ob es läuft und ob es das Spiel wirklich erreicht hat.",
+  "showcase.v0140.stocktracks":
+    "Der Server-Tab kennt die Strecken, die MX Bikes mitbringt. Bei einem Server auf Forest Raceway oder Nevada heißt es jetzt, dass du sie hast — mit dem Bild der Strecke — und für die anderen wird auf mxb-mods gesucht.",
+  "showcase.v0140.downloads":
+    "Zwei Download-Einstellungen. Nimm die Dedicated-Server-Datei, wo ein Mod eine mitliefert, und deinen bevorzugten Host, wenn ein Mod mehrfach gespiegelt ist.",
+  "showcase.v0140.uiscale":
+    "Oberflächengröße in den Einstellungen, von 90% bis 160%. Skaliert die ganze Oberfläche, nicht nur den Text — für große oder hochauflösende Monitore.",
   "showcase.v0137.hero.title":
     "Jeder MX-Bikes-Server, live, während du fährst",
   "showcase.v0137.hero.body":

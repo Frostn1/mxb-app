@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-09-09
+## 2026-09-09 — v0.14.0 — Frost's Mod Manager, and a Studio of its own
 
 ### Added
 - FrostMod's status sits in the top bar, on every screen, with Start, Stop and Reload behind

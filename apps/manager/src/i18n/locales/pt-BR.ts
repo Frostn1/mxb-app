@@ -1466,6 +1466,20 @@ export const ptBR: Translation = {
   "showcase.supporters.title_one": "Possível graças a {{count}} apoiador",
   "showcase.supporters.title_other": "Possível graças a {{count}} apoiadores",
   "showcase.supporters.more": "+{{count}} outros",
+  "showcase.v0140.hero.title":
+    "Frost's Mod Manager, e um Studio só dele",
+  "showcase.v0140.hero.body":
+    "O app tem um nome novo e uma marca nova. Instalar esta versão aposenta a anterior para você: suas configurações, seus mods desativados, seus modelos de pintura e sua opção de iniciar com o sistema passam intactos. Se você fixou o app antigo na barra de tarefas ou no menu Iniciar, fixe de novo a partir do novo.",
+  "showcase.v0140.studio":
+    "O Designer, os Studios de pintura e de pistas, o Piloto e as ferramentas de conteúdo agora são o Frost's Studio, um app próprio. A aba Studio abre ele, ou baixa pra você. Os dois leem as mesmas pastas, então nada sai do lugar.",
+  "showcase.v0140.frostmod":
+    "O status do FrostMod fica na barra de cima, em todas as telas, com Iniciar, Parar e Recarregar atrás. O ponto diz se está rodando e se realmente chegou ao jogo.",
+  "showcase.v0140.stocktracks":
+    "A aba Servidores conhece as pistas que vêm com o MX Bikes. Um servidor em Forest Raceway ou Nevada agora diz que você tem, com a imagem da própria pista, e procura no mxb-mods as que você não tem.",
+  "showcase.v0140.downloads":
+    "Duas preferências de download. Pegue o arquivo de servidor dedicado quando um mod trouxer um, e o host que você preferir quando um mod estiver em vários.",
+  "showcase.v0140.uiscale":
+    "Tamanho da interface nas Configurações, de 90% a 160%. Escala a interface toda, não só o texto, para um monitor grande ou de alta resolução.",
   "showcase.v0137.hero.title":
     "Todos os servidores de MX Bikes, ao vivo, enquanto você pilota",
   "showcase.v0137.hero.body":
