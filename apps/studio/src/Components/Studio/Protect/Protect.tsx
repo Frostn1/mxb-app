@@ -143,9 +143,8 @@ export default function Protect() {
   const ready = lockable.length > 0 && valid.length > 0 && outDir.length > 0;
 
   const head = (label: string) => (
-    <div className="flex flex-none items-center gap-2.5 px-6 pb-2.5 pt-4">
-      <span className="u-skew h-3 w-1 bg-primary" />
-      <h2 className="font-cond text-[13px] font-bold uppercase tracking-[0.2em] text-foreground">
+    <div className="flex flex-none items-center gap-2 px-6 pb-2.5 pt-4">
+      <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
         {label}
       </h2>
     </div>
@@ -256,7 +255,7 @@ export default function Protect() {
           {/* Your own GUID lives with the others: this is the box it gets pasted into,
               and locking a test copy to yourself is how you check a mod before sending it. */}
           <div className="mt-4 flex-none border-t border-border px-6 pt-4">
-            <div className="font-cond text-[10.5px] font-semibold uppercase tracking-[0.2em] text-faint">
+            <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
               {t("protect.ownTitle")}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -280,7 +279,7 @@ export default function Protect() {
           </div>
 
           <div className="mt-4 flex-none border-t border-border px-6 pb-5 pt-4">
-            <div className="font-cond text-[10.5px] font-semibold uppercase tracking-[0.2em] text-faint">
+            <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
               {t("protect.outTitle")}
             </div>
             <div className="mt-2 flex items-center gap-2">

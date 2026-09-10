@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-08
+
+### Changed
+- Frost's Studio has a look of its own, and it is light. A dark surround pushes every colour
+  you are judging lighter than it really is, which is the wrong way round for an app you pick
+  paint in.
+- The Designer uses the whole window. The sheet runs edge to edge, the setup row moved into
+  the bar at the top, and the panels sit flat against the sides instead of boxing the work in.
+- The tools are named down the left rather than drawn as icons.
+- Frost's Studio has its own mark: the snowflake, split into two paints.
+
+## 2026-09-07
 ## 2026-09-09
 
 ### Added

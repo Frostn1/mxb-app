@@ -21,7 +21,7 @@
   "app": {
     "windows": [
       {
-        "title": "Frost Studio",
+        "title": "Frost's Studio",
         "width": 1400,
         "height": 900,
         "minWidth": 1100,

@@ -60,10 +60,11 @@ export const EMPTY_GHOST: Ghost = {
   // keyed on the *active* sheet's name, so opening a paint with twenty sheets rasterises the
   // one on screen, not twenty.
   showTemplate: true,
-  // Same reasoning again, and it lands hardest here: someone starting a livery from blank
-  // has no template, and the bike's own plastics are the only picture of where the vents
-  // and shut lines fall. Fetched for the sheet on screen and no other — see `Designer`.
-  showStock: true,
+  // Off, unlike the UV map. A sheet that comes up already showing the bike's own artwork
+  // looks like the paint you are about to make already has something on it — and for a sheet
+  // whose stock is a normal map, what it shows is a picture of a normal map. It is one press
+  // away, on the cluster over the sheet.
+  showStock: false,
   showWire: true,
   opacity: 0.35,
 };

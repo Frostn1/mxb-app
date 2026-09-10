@@ -5275,3 +5275,61 @@ mod no_mesh_tests {
         assert!(!crate::edf::is_edf(&[0xfe, 0x9c, 0xa5, 0x6a, 0, 0, 0, 0]));
     }
 }
+
+
+#[tauri::command]
+pub async fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, String> {
+    tauri::async_runtime::spawn_blocking(move || unpack_paint_blocking(path))
+        .await
+        .map_err(|e| format!("unpack_paint task failed: {e}"))?
+}
+
+/// Paints decoded for the viewer, so re-opening one doesn't inflate it a second time.
+///
+/// The picker re-runs this on every selection change and on every re-open, and a gear paint is
+/// tens of megabytes of DEFLATE — the pixels behind an entry, on the other hand, are small,
+/// because each is downscaled to 1024² before it is stored.
+const PAINT_CACHE_CAP: usize = 4;
+
+fn paint_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(PAINT_CACHE_CAP)))
+}
+
+/// As [`cached_bike`], for the paints: looked up and released without holding the lock.
+pub fn cached_paint(key: &str) -> Option<Vec<paint::PaintTexture>> {
+    paint_cache().lock().ok().and_then(|mut c| c.get(key).cloned())
+}
+
+pub fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, String> {
+    let t0 = std::time::Instant::now();
+    // Path *and* mtime, as the bike cache does, so a paint re-saved under the same name misses.
+    let key = bike_cache_key(&path);
+    if let Some(t) = cached_paint(&key) {
+        log::info!("unpack_paint {path}: cache hit ({:?})", t0.elapsed());
+        return Ok(t);
+    }
+    let _gate = gate::enter(&key);
+    if let Some(t) = cached_paint(&key) {
+        log::info!("unpack_paint {path}: cache hit, waited ({:?})", t0.elapsed());
+        return Ok(t);
+    }
+
+    let textures = paint::unpack_file(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))?;
+    log::info!(
+        "unpack_paint {path}: {} texture(s) in {:?} | {:.1} MB resident in the texture store",
+        textures.len(),
+        t0.elapsed(),
+        texstore::resident_bytes() as f64 / (1024.0 * 1024.0),
+    );
+    if let Ok(mut c) = paint_cache().lock() {
+        // Cloning an entry copies names, sizes and tokens — never pixels, which stay in the
+        // texture store. The displaced paint's go with it; nothing else holds those tokens.
+        if let Some(dropped) = c.insert(key, textures.clone()) {
+            let tokens: Vec<String> = dropped.iter().map(|t| t.token.clone()).collect();
+            texstore::release(&tokens);
+        }
+    }
+    Ok(textures)
+}

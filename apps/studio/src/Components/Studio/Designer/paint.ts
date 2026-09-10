@@ -51,6 +51,27 @@ export const PAINT_TOOLS: PaintTool[] = [
 ];
 
 /**
+ * The same tools, grouped the way a paint program groups them.
+ *
+ * One block of eight glyphs said nothing about which of them draw a stroke, which fill an
+ * area and which place a shape you can move afterwards — a distinction that matters here,
+ * because the shapes become layers and the strokes do not.
+ */
+export const TOOL_GROUPS: { label: string; tools: PaintTool[] }[] = [
+  { label: "designer.toolGroup.paint", tools: ["brush", "eraser", "fill", "gradient"] },
+  { label: "designer.toolGroup.shapes", tools: ["rect", "ellipse", "line"] },
+];
+
+/**
+ * The pointer, which is not in a group.
+ *
+ * On its own it was a heading and a full-width button for one tool — two rows to say "stop
+ * painting". It belongs beside undo and redo at the top of the panel: it is the neutral state
+ * you come back to, not a fourth kind of brush.
+ */
+export const NEUTRAL_TOOL: PaintTool = "move";
+
+/**
  * Tools whose result is defined by a press-drag-release, rather than by the path dragged.
  *
  * Only the gradient, now that the shapes are layers. A gradient is a wash across whatever it
@@ -110,7 +131,7 @@ export interface PaintSettings {
   /** 0–1, applied once to the whole stroke rather than to each stamp. */
   opacity: number;
   gradient: GradientMode;
-  /** End the gradient at nothing instead of at colour B. */
+  /** End the gradient at nothing instead of at color B. */
   fade: boolean;
   shape: ShapeStyle;
   /** Outline and line width, in sheet pixels. */
@@ -226,14 +247,14 @@ function stampSegment(
 /* ── Gradients and shapes ───────────────────────────────────────────────────────────────── */
 
 /**
- * Fill the whole scratch with colour A carried into colour B along the drag.
+ * Fill the whole scratch with color A carried into color B along the drag.
  *
  * The drag is the axis, not the extent — canvas clamps a gradient to its end stops, so
  * everything before the press is solid A and everything past the release is solid B. That's
  * what makes it usable for a shroud that fades: you drag across the part of the sheet where
  * the transition should happen, not across the whole sheet.
  *
- * Fading ends at colour B with zero alpha rather than at `transparent`, which is transparent
+ * Fading ends at color B with zero alpha rather than at `transparent`, which is transparent
  * *black* and would drag a grey bruise through the middle of any light gradient.
  */
 function gradientFill(
@@ -365,7 +386,7 @@ export class Stroke {
     const ctx = this.scratch.getContext("2d");
     if (!ctx) return;
     const { size, hardness, colorA, tool } = this.settings;
-    // The eraser's colour never reaches the sheet — the scratch is punched out of the layer,
+    // The eraser's color never reaches the sheet — the scratch is punched out of the layer,
     // so only its alpha matters. Black keeps a soft edge from tinting what it half-erases.
     const tip = brushTip(size, hardness, tool === "eraser" ? "#000000" : colorA);
     stampSegment(ctx, tip, from, to);

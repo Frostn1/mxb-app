@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Card } from "@frost/shared/Components/ui/card";
 import { Camera, Image as ImageIcon, RotateCcw, User } from "lucide-react";
 import { save as pickSavePath } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
@@ -223,11 +224,11 @@ export default function PoseStudio() {
   ];
 
   return (
-    <div className="flex min-h-0 flex-1 gap-4 px-7 pb-6">
+    <div className="flex min-h-0 flex-1 gap-4 px-4 pb-4">
       <div className="flex min-w-[300px] flex-1 flex-col gap-4 overflow-y-auto">
         {/* What is being posed — whatever the Rider tab has. Read-only on purpose; see the
             note on the component. */}
-        <section className="rounded-lg border border-border bg-card/40 p-3">
+        <Card className="p-3">
           <header className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
             <User className="h-3.5 w-3.5" />
             {t("pose.showing")}
@@ -242,10 +243,10 @@ export default function PoseStudio() {
               </div>
             ))}
           </dl>
-        </section>
+        </Card>
 
         {/* Photo: what to stand the rider against, and how to get the frame out. */}
-        <section className="rounded-lg border border-border bg-card/40 p-3">
+        <Card className="p-3">
           <header className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
             <ImageIcon className="h-3.5 w-3.5" />
             {t("pose.photo")}
@@ -283,10 +284,7 @@ export default function PoseStudio() {
               {t("pose.savePhoto")}
             </Button>
           </div>
-          <p className="mt-1.5 text-[10px] leading-snug text-muted-foreground">
-            {t("pose.photoHint")}
-          </p>
-        </section>
+        </Card>
 
         <section>
           <header className="mb-2 flex items-center justify-between">
@@ -325,10 +323,6 @@ export default function PoseStudio() {
             {t(rig ? "pose.quickHint" : "pose.quickWaiting")}
           </p>
         </section>
-
-        <p className="-mb-1 text-[10px] leading-snug text-muted-foreground">
-          {t("pose.dragHint")}
-        </p>
 
         {BONE_GROUPS.map((g) => (
           <section

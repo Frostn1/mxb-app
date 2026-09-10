@@ -238,7 +238,7 @@ const GRAB_PX = 14;
  * instructions — which is the form you can take hold of. Drag a point to move it, click the
  * line to add one, double-click a point to take it away.
  *
- * The jumps are drawn along the bottom in their own colours, because "put a hill under the
+ * The jumps are drawn along the bottom in their own colors, because "put a hill under the
  * rhythm section" is the thing this is for, and it can't be done against an empty axis.
  */
 export default function ElevationCurve({

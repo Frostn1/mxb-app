@@ -19,16 +19,63 @@ export const ContextSlots = createContext<{ left: HTMLElement | null; right: HTM
   right: null,
 });
 
+/**
+ * Whether the tool doing the portalling is the one on screen.
+ *
+ * The Studio hides sub-views rather than unmounting them, so they keep their work — which
+ * means every tool anyone has opened is still mounted, and every one of their portals still
+ * renders. Without this gate the second tool you visit puts its toolbar in the bar beside
+ * the first one's and neither leaves. Default true, so a tool used outside a `Pane` needs
+ * no provider.
+ */
+export const PaneActive = createContext(true);
+
+/**
+ * A tool saying it is showing something that owns the window.
+ *
+ * The Designer's start screen is a page, not a document with chrome around it — and the
+ * strip above it held one question mark. A tool sets `bare` while that is true and the shell
+ * drops the strip; nothing else in the app has to know why.
+ */
+/**
+ * Work that would be lost by closing the window.
+ *
+ * A tool registers what it is holding and how to save it; the shell asks on the way out. Kept
+ * as a registry rather than a boolean so the answer comes from whichever tool actually has the
+ * work, and so "save" means that tool's save rather than something the shell has to know how
+ * to do.
+ */
+export interface UnsavedWork {
+  /** True when closing now would lose something. */
+  dirty: () => boolean;
+  /**
+   * Save it. Returns false when it could not — including when it needs the user first, in
+   * which case the tool has put them where they need to be and the close should be dropped.
+   */
+  save: () => Promise<boolean>;
+}
+
+export const UnsavedRegistry = createContext<{
+  register: (w: UnsavedWork | null) => void;
+}>({ register: () => {} });
+
+export const ShellChrome = createContext<{ bare: boolean; setBare: (v: boolean) => void }>({
+  bare: false,
+  setBare: () => {},
+});
+
 /** Tabs or filters, beside the rail item's own tabs. */
 export function ContextBarLeft({ children }: { children: ReactNode }) {
   const { left } = useContext(ContextSlots);
-  return left ? createPortal(children, left) : null;
+  const on = useContext(PaneActive);
+  return left && on ? createPortal(children, left) : null;
 }
 
 /** Search, sort, a primary action — pinned right. */
 export function ContextBarRight({ children }: { children: ReactNode }) {
   const { right } = useContext(ContextSlots);
-  return right ? createPortal(children, right) : null;
+  const on = useContext(PaneActive);
+  return right && on ? createPortal(children, right) : null;
 }
 
 /** One tab, so a screen's own tabs are indistinguishable from the rail item's. */

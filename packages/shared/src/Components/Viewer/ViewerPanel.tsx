@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Card } from "../ui/card";
 import {
   Maximize2,
   Bike,
@@ -399,12 +400,7 @@ export function ViewerPanel({
 
   return (
     <>
-      <div
-        className={cn(
-          "flex flex-col overflow-hidden rounded-lg border border-border bg-card",
-          className,
-        )}
-      >
+      <Card className={cn("overflow-hidden", className)}>
         {/* Wraps rather than clips: this header carries a title plus up to four pickers,
             and the Rider tab's preview column is narrow enough that the last one used to
             sit half outside the panel. The title itself never breaks. */}
@@ -449,7 +445,7 @@ export function ViewerPanel({
           />
           {overlay}
         </div>
-      </div>
+      </Card>
 
       <Dialog open={expanded} onOpenChange={setExpanded}>
         {/* `flex flex-col`, because a dialog is a grid by default: its two rows then stretch

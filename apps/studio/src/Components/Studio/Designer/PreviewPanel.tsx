@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Box, Loader2, Maximize2, Minimize2, TriangleAlert } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Card } from "@frost/shared/Components/ui/card";
+import { Maximize2, Minimize2, Moon, Sun, TriangleAlert } from "lucide-react";
 import type * as THREE from "three";
 import { cn } from "@frost/shared/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@frost/shared/Components/ui/dialog";
@@ -102,7 +103,10 @@ export function PreviewPanel({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [hidden, setHidden] = useState<RiderPart["part"][]>([]);
-  const [soloGear, setSoloGear] = useState(false);
+  const [soloGear, setSoloGear] = useState(true);
+  // Light by default — most bikes and most helmets are black. A white livery has the opposite
+  // problem, so it is a switch rather than a decision made once for everybody.
+  const [lit, setLit] = useState(true);
   // The same panel, drawn over the editor rather than beside it — see the render below.
   const [full, setFull] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -139,9 +143,11 @@ export function PreviewPanel({
    */
   useEffect(() => {
     setHidden(HIDEABLE.filter((h) => h.part !== gearPart).map((h) => h.part));
-    // Back to the rider whenever what's being painted changes: kit and gloves have no piece
-    // to show on its own, so a toggle left on would be a control over nothing.
-    setSoloGear(false);
+    // Back to the piece on its own whenever what's being painted changes. `solo` is already
+    // gated on there being a piece and a model, so this is inert for kit and gloves — and it
+    // runs on mount, which is why setting it the other way here left Full body on despite the
+    // initial value.
+    setSoloGear(true);
   }, [gearPart]);
 
   /** The rider slots to fill so the piece being painted is the piece on screen. */
@@ -255,8 +261,16 @@ export function PreviewPanel({
       nodes ? assembled : false,
     );
     // Through the same effect, so the mesh and the textures said to be its own can never
-    // describe two different models. Gated on `nodes` because that is the bike branch.
-    onStock?.(nodes ? stock : NO_STOCK);
+    // describe two different models.
+    //
+    // Gear was sending `NO_STOCK` unconditionally — `nodes` is the bike branch, and the test
+    // was reading as "is this a bike" when what it meant was "which loader answered". A
+    // helmet's own artwork therefore never reached the sheet: Stock texture and Stock as base
+    // were permanently greyed for every piece of gear, and a paint drawn on it had nothing to
+    // trace. `RiderPart` has carried its textures all along.
+    onStock?.(
+      nodes ? stock : riderParts ? riderParts.flatMap((p) => p.textures) : NO_STOCK,
+    );
   }, [nodes, assembled, riderParts, stock, onGeometry, onStock]);
 
   // Toggled-off gear is dropped before it reaches the viewer, which is what makes hiding it
@@ -287,53 +301,58 @@ export function PreviewPanel({
      fullscreen view that couldn't take the helmet off would be the smaller view. */
   const controls = (
     <>
-      {isBike && <TyresPicker pick={tyresPick} className="ml-auto" />}
-      {!isBike && (
-        <div className="ml-auto flex items-center gap-1">
-          {/* A helmet on a rider is a small thing across the canvas with half of it turned
-              away. This takes it off and fills the frame with it. The hide toggles go while
-              it's on — they'd be controls over a rider that isn't on screen. */}
-          {!!gearPart && !!model && (
-            <Chip
-              on={solo}
-              onClick={() => setSoloGear((s) => !s)}
-              title={t("designer.gearOnlyHint")}
-            >
-              {t("designer.gearOnly")}
-            </Chip>
-          )}
-          {!solo &&
-            HIDEABLE.map(({ part, label }) => (
-              <Chip
-                key={part}
-                on={!hidden.includes(part)}
-                onClick={() =>
-                  setHidden((h) =>
-                    h.includes(part) ? h.filter((p) => p !== part) : [...h, part],
-                  )
-                }
-                title={t(label)}
-              >
-                {t(label)}
-              </Chip>
-            ))}
-        </div>
-      )}
-      {loading && <Loader2 className="ml-1 size-3.5 animate-spin text-muted-foreground" />}
-      {/* Not offered when there is nothing to draw: filling the window with the sentence
-          explaining why there's no preview is a bigger version of nothing. */}
-      {!unavailable && (
-        <button
-          type="button"
-          onClick={() => setFull((f) => !f)}
-          title={t(full ? "viewer.exitFullscreen" : "viewer.fullscreen")}
-          aria-label={t(full ? "viewer.exitFullscreen" : "viewer.fullscreen")}
-          className="ml-0.5 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-        >
-          {full ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-        </button>
-      )}
+      {isBike && full && <TyresPicker pick={tyresPick} className="ml-auto" />}
     </>
+  );
+
+  /**
+   * The expand control, over the picture rather than in the header.
+   *
+   * Not offered when there is nothing to draw: filling the window with the sentence
+   * explaining why there's no preview is a bigger version of nothing.
+   */
+  /* Opposite "Hide model", on the picture rather than in the header: both are about how much
+     of the thing you are looking at, and the header is for what the picture is of. */
+  const fullBody =
+    !isBike && !!gearPart && !!model ? (
+      <button
+        type="button"
+        onClick={() => setSoloGear((v) => !v)}
+        title={t("designer.fullBodyHint")}
+        className={cn(
+          "absolute bottom-1.5 left-1.5 z-10 cursor-default rounded-md px-1.5 py-0.5 text-[11px] backdrop-blur-[2px] transition-colors",
+          solo
+            ? "bg-black/30 text-white/80 hover:bg-black/55 hover:text-white"
+            : "bg-white/85 text-black/80",
+        )}
+      >
+        {t("designer.fullBody")}
+      </button>
+    ) : null;
+
+  /** Light or dark behind the model, beside the control that makes it bigger. */
+  const relight = unavailable ? null : (
+    <button
+      type="button"
+      onClick={() => setLit((v) => !v)}
+      title={t(lit ? "designer.backdropDark" : "designer.backdropLight")}
+      aria-label={t(lit ? "designer.backdropDark" : "designer.backdropLight")}
+      className="absolute left-1.5 top-1.5 z-10 cursor-default rounded-md bg-black/30 p-1 text-white/80 backdrop-blur-[2px] transition-colors hover:bg-black/55 hover:text-white"
+    >
+      {lit ? <Moon className="size-3.5" /> : <Sun className="size-3.5" />}
+    </button>
+  );
+
+  const expand = unavailable ? null : (
+    <button
+      type="button"
+      onClick={() => setFull((f) => !f)}
+      title={t(full ? "viewer.exitFullscreen" : "viewer.fullscreen")}
+      aria-label={t(full ? "viewer.exitFullscreen" : "viewer.fullscreen")}
+      className="absolute right-1.5 top-1.5 z-10 cursor-default rounded-md p-1 text-foreground/45 transition-colors hover:bg-foreground/10 hover:text-foreground"
+    >
+      {full ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+    </button>
   );
 
   /** A black bike on a black panel has no silhouette — the case you hit the moment you
@@ -357,6 +376,14 @@ export function PreviewPanel({
     <>
       {backdrop}
       <ModelViewer
+        // Light, not the near-black default. Most bikes and most helmets are black, and a
+        // black object on a black backdrop has no silhouette — which is the one thing a
+        // preview beside a flat sheet exists to give you.
+        scene={lit ? "white" : "studio"}
+        // No floor: this panel exists to judge a paint, and the ground is scenery that takes
+        // contrast away from the thing being judged. It also means a solo helmet is not half
+        // sunk into it — `Center` puts a model's middle at the origin.
+        grounded={false}
         hideHints={compact}
         mode={isBike ? "bike" : "rider"}
         nodes={nodes}
@@ -386,34 +413,26 @@ export function PreviewPanel({
     </>
   );
 
-  // Only true of the rider view.
-  const note = !!gearPart && !solo && (
-    <p className="flex-none border-t border-border px-3 py-1.5 text-[11px] leading-snug text-faint">
-      {t("designer.gearNote")}
-    </p>
-  );
-
   return (
     <>
-      <div
-        ref={panelRef}
-        className={cn(
-          "flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card",
-          className,
-        )}
-      >
-        <div className="flex items-center gap-2 overflow-x-auto border-b border-border px-3 py-1.5 text-[12.5px] font-medium">
-          <Box className="size-3.5 flex-none text-muted-foreground" />
-          <span className="flex-none whitespace-nowrap">{t("viewer.preview3d")}</span>
+      <Card ref={panelRef} className={cn("min-h-0 overflow-hidden", className)}>
+        <div className="flex items-center gap-2 overflow-x-auto px-1 py-1.5 text-[12.5px] font-medium">
           {controls}
         </div>
         {/* Empty while the fullscreen view has it: the canvas is moved rather than copied, so
             there is only ever one model on a GPU and one camera to have turned. */}
-        <div className={cn("relative flex-1", compact ? "min-h-0" : "min-h-[240px]")}>
+        <div
+          className={cn(
+            "relative flex-1 overflow-hidden rounded-lg",
+            compact ? "min-h-0" : "min-h-[240px]",
+          )}
+        >
           {!full && body}
+          {!full && expand}
+          {!full && relight}
+          {!full && fullBody}
         </div>
-        {note}
-      </div>
+      </Card>
 
       <Dialog open={full} onOpenChange={setFull}>
         {/* Everything below the title bar rather than the whole screen: the window's own
@@ -424,49 +443,22 @@ export function PreviewPanel({
           // Nothing in here is typed into, so the focus ring the dialog would otherwise put
           // on the first control reads as a stray selection over a picture.
           onOpenAutoFocus={(e) => e.preventDefault()}
-          className="left-0 top-[42px] flex h-[calc(100vh-42px)] w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-none"
+          className="left-0 top-[52px] flex h-[calc(100vh-52px)] w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-none"
         >
           <div className="flex flex-none items-center gap-2 border-b border-border px-3 py-2 text-[12.5px] font-medium">
-            <Box className="size-3.5 text-muted-foreground" />
             <DialogTitle className="text-[12.5px] font-medium">
               {t("viewer.preview3d")}
             </DialogTitle>
             {controls}
           </div>
           <div className="relative min-h-0 flex-1">{full && body}</div>
-          {note}
-        </DialogContent>
+          </DialogContent>
       </Dialog>
     </>
   );
 }
 
 /** A header toggle: lit when what it names is on. */
-function Chip({
-  on,
-  onClick,
-  title,
-  children,
-}: {
-  on: boolean;
-  onClick: () => void;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className={cn(
-        "rounded border px-1.5 py-0.5 text-[10.5px] font-medium transition-colors",
-        on ? "border-primary/60 bg-primary/10 text-foreground" : "border-border text-faint",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
 
 function Message({ text }: { text: string }) {
   return (

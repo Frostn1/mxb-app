@@ -495,9 +495,9 @@ export function onBuildProgress(
 }
 
 /**
- * The colours the preview paints each feature kind with.
+ * The colors the preview paints each feature kind with.
  *
- * The same values as `surface_colour` in `src-tauri/src/track.rs`, ids 200–206. They have to
+ * The same values as `surface_color` in `src-tauri/src/track.rs`, ids 200–206. They have to
  * match: the point of both is that a row in the list and a lump on the ground are obviously
  * the same thing.
  */

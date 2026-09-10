@@ -1,4 +1,5 @@
 import { Crop, FlipHorizontal2, FlipVertical2, Group, Link2Off, Maximize2, Ungroup } from "lucide-react";
+import { Card } from "@frost/shared/Components/ui/card";
 import { Input } from "@frost/shared/Components/ui/input";
 import { useT } from "@/i18n";
 import { NumberField, Row, Slider } from "./controls";
@@ -70,7 +71,7 @@ export function LayerInspector({
   const editable = movable && !linked;
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card/40 p-3.5">
+    <Card className="gap-2 bg-card/40 p-3.5">
       <h2 className="text-[13px] font-semibold">
         {layer ? t("designer.layerTitle") : t("designer.layersSelected", { count: String(layers.length) })}
       </h2>
@@ -290,12 +291,12 @@ export function LayerInspector({
         </select>
       </Row>
 
-      {/* A shape is geometry, so it keeps its colour and its pen editable for as long as the
+      {/* A shape is geometry, so it keeps its color and its pen editable for as long as the
           paint is open — which is the whole point of it not being pixels. Size and angle are
           the shared controls above; only what it is drawn *with* is particular to it. */}
       {layer?.kind === "shape" && !linked && (
         <>
-          <Row label={t("designer.colour")}>
+          <Row label={t("designer.color")}>
             <input
               type="color"
               value={layer.color}
@@ -378,7 +379,7 @@ export function LayerInspector({
             />
           </Row>
 
-          <Row label={t("designer.colour")}>
+          <Row label={t("designer.color")}>
             <input
               type="color"
               value={layer.color}
@@ -407,6 +408,6 @@ export function LayerInspector({
           </Row>
         </>
       )}
-    </div>
+    </Card>
   );
 }
