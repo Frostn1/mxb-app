@@ -198,6 +198,13 @@ pub struct GameProfile {
     /// host here rather than holding the `Site` is what keeps this table of constants free
     /// of the HTTP layer, so it can be shared by a binary that does no browsing at all.
     pub catalog_domain: &'static str,
+    /// The catalog's own WordPress category for tracks. The two sites numbered their
+    /// taxonomies independently, so this is per-title and neither value is a default.
+    ///
+    /// Here rather than only in the frontend's browse tree because the server browser
+    /// identifies a track in Rust: an unfiltered search for `forest` comes back full of
+    /// bike liveries, and a track is the one thing it could possibly be.
+    pub catalog_tracks_category: u32,
     pub caps: Caps,
 }
 
@@ -261,6 +268,8 @@ pub static MXB: GameProfile = GameProfile {
         stock_profiles: &["default_mx", "default_sm"],
     },
     catalog_domain: "mxb-mods.com",
+    // mxb-mods.com "Tracks". 29 is its Bikes category, which is what every livery carries.
+    catalog_tracks_category: 22,
     caps: Caps {
         frostmod: true,
         instant_refresh: true,
@@ -312,6 +321,8 @@ pub static GPB: GameProfile = GameProfile {
         stock_profiles: &[],
     },
     catalog_domain: "gpb-mods.com",
+    // gpb-mods.com numbered its own taxonomy; 29 is Tracks there.
+    catalog_tracks_category: 29,
     caps: Caps {
         frostmod: true,
         instant_refresh: false,

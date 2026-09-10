@@ -228,6 +228,26 @@ pub fn read_preview(path: &Path) -> Result<Option<String>> {
     Ok(image.and_then(|(name, bytes)| make_thumbnail(&name, &bytes, PREVIEW_MAX)))
 }
 
+/// The metadata and full-size preview for **one folder** inside a plain-zip archive.
+///
+/// [`read_meta`] and [`read_preview`] answer about a whole archive, which is right for a mod:
+/// one `.pkz` is one thing. The game's own content is packed the other way round — every stock
+/// track sits in a single `tracks.pkz` under `tracks/<category>/<id>/` — so asking those two
+/// about it would return whichever track happened to sort first. Scoping the name list to a
+/// prefix lets the same `.ini`-and-image logic answer about the track actually wanted.
+///
+/// `prefix` is matched case-insensitively and needs no trailing slash. Only plain zips are
+/// handled: this exists for the game's archives, which are plain zips.
+pub fn read_meta_and_preview_under(
+    path: &Path,
+    prefix: &str,
+) -> Result<(PkzMeta, Option<String>)> {
+    let _permit = acquire();
+    let (meta, image) = inspect_zip_under(path, Some(prefix))?;
+    let preview = image.and_then(|(name, bytes)| make_thumbnail(&name, &bytes, PREVIEW_MAX));
+    Ok((meta, preview))
+}
+
 /// Top-level `.ini`: fewest path segments, then shortest.
 fn top_ini_index(names: &[String]) -> Option<usize> {
     names
@@ -253,6 +273,18 @@ fn inspect(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
 }
 
 fn inspect_zip(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
+    inspect_zip_under(path, None)
+}
+
+/// `inspect_zip`, optionally narrowed to one folder inside the archive.
+///
+/// The entry indices are carried alongside the names rather than assumed to line up with
+/// them: a name list built by dropping unreadable entries no longer indexes the archive,
+/// and a filtered one never did.
+fn inspect_zip_under(
+    path: &Path,
+    prefix: Option<&str>,
+) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
     let mut file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
 
     // Plain `.pkz` starts with the ZIP local-file magic; else it's a non-plain
@@ -260,7 +292,11 @@ fn inspect_zip(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
     // preview (see `inspect_locked`); otherwise it stays an anonymous locked entry.
     let mut magic = [0u8; 4];
     if file.read(&mut magic).unwrap_or(0) < 4 || magic != ZIP_MAGIC {
-        return inspect_locked(path);
+        // A prefix only ever addresses the game's own archives, which are plain zips.
+        return match prefix {
+            None => inspect_locked(path),
+            Some(_) => Ok((locked(), None)),
+        };
     }
     file.seek(SeekFrom::Start(0))?;
 
@@ -270,9 +306,21 @@ fn inspect_zip(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
         Err(_) => return Ok((locked(), None)),
     };
 
-    let names: Vec<String> = (0..archive.len())
-        .filter_map(|i| archive.by_index(i).ok().map(|f| f.name().to_string()))
+    // The prefix is compared against the entry with its separators normalised, so an
+    // archive written with backslashes matches too.
+    let keep = prefix.map(|p| {
+        let p = p.replace('\\', "/").trim_matches('/').to_ascii_lowercase();
+        format!("{p}/")
+    });
+    let entries: Vec<(usize, String)> = (0..archive.len())
+        .filter_map(|i| archive.by_index(i).ok().map(|f| (i, f.name().replace('\\', "/"))))
+        .filter(|(_, n)| match &keep {
+            None => true,
+            Some(k) => n.to_ascii_lowercase().starts_with(k),
+        })
         .collect();
+    let names: Vec<String> = entries.iter().map(|(_, n)| n.clone()).collect();
+    let at = |i: usize| entries[i].0;
 
     let mut meta = PkzMeta::default();
     let mut pic: Option<String> = None;
@@ -280,7 +328,7 @@ fn inspect_zip(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
 
     if let Some(idx) = top_ini_index(&names) {
         ini_dir = dir_of(&names[idx]);
-        if let Ok(mut f) = archive.by_index(idx) {
+        if let Ok(mut f) = archive.by_index(at(idx)) {
             let mut bytes = Vec::new();
             if f.read_to_end(&mut bytes).is_ok() {
                 parse_ini(&String::from_utf8_lossy(&bytes), &mut meta, &mut pic);
@@ -290,7 +338,7 @@ fn inspect_zip(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
 
     let mut image = None;
     if let Some(img_idx) = pick_image(&names, &ini_dir, pic.as_deref()) {
-        if let Ok(mut f) = archive.by_index(img_idx) {
+        if let Ok(mut f) = archive.by_index(at(img_idx)) {
             let mut bytes = Vec::new();
             if f.read_to_end(&mut bytes).is_ok() {
                 meta.thumbnail = make_thumbnail(&names[img_idx], &bytes, THUMB_MAX);

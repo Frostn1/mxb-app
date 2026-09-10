@@ -27,6 +27,11 @@
   and nothing to wait for — and you edit it like any other.
 
 ### Changed
+- The Servers tab knows the tracks that come with MX Bikes. A server on Forest Raceway, Nevada
+  or Holjes now says you have it, with the track's own picture, instead of pointing you at a
+  download.
+- It looks on mxb-mods for a track it doesn't recognise, ahead of the paid catalogues, and only
+  offers something whose name actually matches the track the server named.
 - A new base track. It is a walked lap now, and it measures like a published national: 1966 m,
   nineteen corners, and the corner shape and spacing read off Indiana and Southwick.
 - Straw bales stand off the track edge rather than a fixed distance from the line, so tracks

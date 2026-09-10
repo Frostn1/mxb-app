@@ -929,8 +929,10 @@ export const it: Translation = {
   "serverBrowser.trackTitle": "Pista",
   "serverBrowser.trackChecking": "Sto capendo di quale pista si tratta…",
   "serverBrowser.trackInstalled": "Hai questa pista — {{name}}",
+  "serverBrowser.trackStock": "È inclusa nel gioco — {{name}}",
   "serverBrowser.trackMaybe": "Pensiamo sia {{name}}",
   "serverBrowser.trackGetShop": "Prendila dallo shop",
+  "serverBrowser.trackGetMods": "Prendila da mxb-mods",
   "serverBrowser.trackGetHub": "Prendila da MXB Hub",
 
   "sync.autoNote":

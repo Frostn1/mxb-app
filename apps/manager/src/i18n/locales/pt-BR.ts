@@ -931,8 +931,10 @@ export const ptBR: Translation = {
   "serverBrowser.trackTitle": "Pista",
   "serverBrowser.trackChecking": "Descobrindo qual pista é essa…",
   "serverBrowser.trackInstalled": "Você tem esta pista — {{name}}",
+  "serverBrowser.trackStock": "Vem com o jogo — {{name}}",
   "serverBrowser.trackMaybe": "Achamos que é {{name}}",
   "serverBrowser.trackGetShop": "Pegar na loja",
+  "serverBrowser.trackGetMods": "Pegar no mxb-mods",
   "serverBrowser.trackGetHub": "Pegar no MXB Hub",
 
   "sync.autoNote":

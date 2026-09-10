@@ -118,9 +118,10 @@ const Riders = ({
  * Which track this actually is.
  *
  * A server publishes an internal id — `mmx_supercross` — which is not a title, not a folder
- * name and not something anyone can search for. Installed is the best answer and shows the
- * track's own artwork; otherwise this offers where to get it, and says plainly when the name
- * only resembles a product rather than matching it.
+ * name and not something anyone can search for. Having it is the best answer and shows the
+ * track's own artwork, whether it is installed or came with the game; otherwise this offers
+ * where to get it, and says plainly when the name only resembles a product rather than
+ * matching it.
  */
 const Track = ({ guess, loading }: { guess: TrackGuess | null; loading: boolean }) => {
   const t = useT();
@@ -153,7 +154,9 @@ const Track = ({ guess, loading }: { guess: TrackGuess | null; loading: boolean 
             <p className="flex items-center gap-1.5 text-[13px]">
               <CheckCircle2 className="size-3.5 shrink-0 text-faint" />
               <span className="truncate">
-                {t("serverBrowser.trackInstalled", { name: guess.installed })}
+                {guess.stock
+                  ? t("serverBrowser.trackStock", { name: guess.installed })
+                  : t("serverBrowser.trackInstalled", { name: guess.installed })}
               </span>
             </p>
           ) : (
@@ -171,9 +174,11 @@ const Track = ({ guess, loading }: { guess: TrackGuess | null; loading: boolean 
                   onClick={() => void openUrl(guess.productUrl)}
                 >
                   <Download className="size-3.5" />
-                  {guess.source === "hub"
-                    ? t("serverBrowser.trackGetHub")
-                    : t("serverBrowser.trackGetShop")}
+                  {guess.source === "mods"
+                    ? t("serverBrowser.trackGetMods")
+                    : guess.source === "hub"
+                      ? t("serverBrowser.trackGetHub")
+                      : t("serverBrowser.trackGetShop")}
                 </Button>
               )}
             </>
