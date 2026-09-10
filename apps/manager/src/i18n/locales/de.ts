@@ -124,8 +124,6 @@ export const de: Translation = {
   "welcome.intro.body":
     "Dein Mod-Manager für MX Bikes. Halte Strecken, Motorräder und Lackierungen an einem Ort organisiert — keine ZIP-Dateien mehr über den ganzen Desktop verstreut. Wir zeigen dir das Wichtigste in ein paar Sekunden.",
   "welcome.getStarted": "Los geht's",
-  "welcome.analyticsNote":
-    "{{app}} zählt anonym, welche Seiten genutzt werden. Keine Namen, keine Dateien — in den Einstellungen abschaltbar.",
   "presets.missingMods":
     "Fehlende Mods: {{mods}}. Installiere sie, damit diese Teile angezeigt werden.",
   "presets.help":
@@ -539,6 +537,7 @@ export const de: Translation = {
   "settings.themeDark": "Dunkel",
   "settings.themeSystem": "System",
   "settings.colorway": "Farbwelt",
+  "settings.uiScale": "Oberflächengröße",
   "settings.colorwayFrost": "Frost",
   "settings.colorwayEmber": "Glut",
   "settings.colorwayMoss": "Moos",
@@ -548,9 +547,11 @@ export const de: Translation = {
   "settings.colorwayRetro": "Retro",
   "settings.language": "Sprache",
   "settings.languageSystem": "System",
-  "settings.analytics": "Anonyme Nutzungsstatistik teilen",
-  "settings.analyticsDesc":
-    "Sendet eine zufällige ID, die App-Version und Zähler dazu, welche Seiten und Funktionen du nutzt — damit klar wird, was sich zu bauen lohnt. Niemals dein Name, deine Dateien oder deine Adresse.",
+  "settings.preferServer": "Dateien für dedizierte Server bevorzugen",
+  "settings.preferServerDesc": "Die Dedicated-Server-Version nehmen, wenn ein Mod eine anbietet. Für einen Rechner, der einen Server betreibt statt zu spielen.",
+  "settings.preferredHost": "Bevorzugter Download-Anbieter",
+  "settings.preferredHostDesc": "Wenn ein Mod bei mehreren Anbietern liegt, diesen zuerst nehmen.",
+  "settings.preferredHostNone": "Keine Präferenz",
   "settings.runInBackground": "Im Hintergrund weiterlaufen",
   "settings.runInBackgroundDesc":
     "Beim Schließen des Fensters läuft {{app}} im Infobereich weiter, damit FrostMod verbunden bleibt. Beenden über das Symbol im Infobereich.",
