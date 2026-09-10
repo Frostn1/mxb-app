@@ -39,15 +39,30 @@ pub(crate) use mxb_core::{
 };
 #[cfg(sidecar)]
 pub(crate) use mxb_core::sidecar;
+#[cfg(mxbsecure)]
+pub(crate) use mxb_core::mxbsecure;
 
 fn main() {
     tauri::Builder::default()
+        .manage(PsdWatcher::default())
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             mxb_core::viewer::app_platform,
             // The studio's own: making a track, packing a paint, sealing content.
+            preview_model_swap,
+            log_client,
+            set_preview_tyres,
+            scan_model_swaps,
+            designer_recents,
+            psd_watch,
+            psd_unwatch,
+            designer_recent_note,
+            designer_recent_forget,
+            mxb_core::viewer::unpack_paint,
             get_config,
             list_games,
             bike_preview_available,
@@ -115,6 +130,15 @@ fn main() {
             mxb_core::viewer::unpack_pkz,
             mxb_core::viewer::watch_paint_files,
         ])
+        .setup(|app| {
+            app.set_menu(app_menu(app.handle())?)?;
+            Ok(())
+        })
+        // Every item is a request the frontend answers, because everything a menu here can do
+        // is something a tool already knows how to do. The id travels as-is.
+        .on_menu_event(|app, event| {
+            let _ = tauri::Emitter::emit(app, "menu", event.id().0.as_str());
+        })
         .run(tauri::generate_context!())
         .expect("error while running Frost's Studio");
 }
@@ -1626,7 +1650,7 @@ async fn mxbsecure_generate(
         let mut rnd = [0u8; 6];
         getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
         let suffix: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
-        let asset_id = format!("{}-{suffix}", sanitize_asset_id(&name));
+        let asset_id = format!("{}-{suffix}", mxb_core::names::sanitize_asset_id(&name));
 
         let locked = mxbsecure::lock(&plaintext, &asset_id, "k1");
         let sealed = mxbsecure::seal_key_to_identity(&locked.content_key, &steam_id, "");
@@ -1780,3 +1804,239 @@ fn set_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Draw a bike for the shared viewer.
+///
+/// The viewer asks for "this bike as variant X" because in the mod manager a bike can have
+/// model swaps parked beside it, and Stock is one variant among several. Nothing here parks
+/// anything: the studio paints the bike that is installed, so the variant is always Stock and
+/// the honest answer is the bike itself. Resolving a real swap needs `modelswap`, which is
+/// the manager's — a studio that could answer for it would be a studio that could disagree.
+#[tauri::command]
+async fn preview_model_swap(
+    app: tauri::AppHandle,
+    bike: String,
+    variant: String,
+    tyres: Option<String>,
+) -> Result<mxb_core::viewer::BikeModel, String> {
+    let _ = variant;
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let dir = library::mods_subdir(&cfg.mods_path, "mods/bikes").join(&bike);
+        viewer::load_bike_model_blocking(dir.to_string_lossy().into_owned(), tyres)
+    })
+    .await
+    .map_err(|e| format!("preview_model_swap task failed: {e}"))?
+}
+
+/// Frontend log lines, into the same file the Rust side writes.
+#[tauri::command]
+fn log_client(level: String, message: String) {
+    // A log line is not a transport for arbitrary payloads. Trim rather than reject: a
+    // truncated fact still reads, and a dropped one is a support thread that goes nowhere.
+    let msg: String = message.chars().take(2000).collect();
+    match level.as_str() {
+        "error" => log::error!("[webview] {msg}"),
+        "warn" => log::warn!("[webview] {msg}"),
+        _ => log::info!("[webview] {msg}"),
+    }
+}
+
+/// Remember which tyres the 3D preview should wear.
+#[tauri::command]
+fn set_preview_tyres(app: tauri::AppHandle, tyres: String) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.preview_tyres = tyres;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// The model swaps parked beside a bike — always none here.
+///
+/// Parking a mesh so the game loads a different one is the mod manager's Locker, and doing
+/// it needs `modelswap`, which is its module. The shared viewer asks every host this so it
+/// can offer a variant picker; the honest answer from the studio is that there are none, and
+/// the picker then does not appear.
+#[tauri::command]
+fn scan_model_swaps(_mods_path: String) -> Vec<serde_json::Value> {
+    Vec::new()
+}
+
+
+/* ── Recent paints ──────────────────────────────────────────────────────────────────────
+ *
+ * The Designer's front door. Opening it used to mean choosing a bike from a popover in the
+ * toolbar and then adding sheets by hand — the flow gave no way back to something you were
+ * working on last week except the OS file picker.
+ *
+ * A list of what you have saved, kept here rather than in `config.json`: both apps write
+ * that file, and a studio-only list is not worth the chance of one process landing on the
+ * other's write. Entries whose file has since been deleted are dropped on read, so the list
+ * cannot offer something that would fail to open.
+ */
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentPaint {
+    /// The `.pnt` on disk. Also the identity: saving over one moves it up rather than
+    /// adding a second entry.
+    pub path: String,
+    pub name: String,
+    /// What it paints, already translated — the label the picker showed when it was made.
+    pub kind: String,
+    /// The bike or gear folder it was made for.
+    pub model: String,
+    /// Unix seconds. Written by the app so the ordering survives a file being touched.
+    pub saved_at: i64,
+}
+
+const RECENTS_CAP: usize = 12;
+
+fn recents_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    mxb_core::config::data_dir(app).map(|d| d.join("designer-recents.json"))
+}
+
+#[tauri::command]
+fn designer_recents(app: tauri::AppHandle) -> Vec<RecentPaint> {
+    let Some(p) = recents_path(&app) else {
+        return Vec::new();
+    };
+    let Ok(raw) = std::fs::read_to_string(&p) else {
+        return Vec::new();
+    };
+    let all: Vec<RecentPaint> = serde_json::from_str(&raw).unwrap_or_default();
+    all.into_iter()
+        .filter(|r| std::path::Path::new(&r.path).is_file())
+        .collect()
+}
+
+#[tauri::command]
+fn designer_recent_note(app: tauri::AppHandle, entry: RecentPaint) -> Result<(), String> {
+    let Some(p) = recents_path(&app) else {
+        return Ok(());
+    };
+    let mut all = designer_recents(app);
+    all.retain(|r| !r.path.eq_ignore_ascii_case(&entry.path));
+    all.insert(0, entry);
+    all.truncate(RECENTS_CAP);
+    if let Some(dir) = p.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let body = serde_json::to_string_pretty(&all).map_err(|e| e.to_string())?;
+    std::fs::write(&p, body).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn designer_recent_forget(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let Some(p) = recents_path(&app) else {
+        return Ok(());
+    };
+    let mut all = designer_recents(app);
+    all.retain(|r| !r.path.eq_ignore_ascii_case(&path));
+    let body = serde_json::to_string_pretty(&all).map_err(|e| e.to_string())?;
+    std::fs::write(&p, body).map_err(|e| e.to_string())
+}
+
+/* ── The Photoshop round trip ───────────────────────────────────────────────────────────
+ *
+ * Export a sheet, edit it in Photoshop, hit save, and have the Designer pick it up. The
+ * export and the re-import already existed; what was missing was anything noticing the file
+ * had changed, so a round trip meant exporting, editing, and then finding the file again
+ * through a picker.
+ *
+ * Its own watch set rather than the viewer's: they answer different questions and are turned
+ * on and off at different times, and sharing one would mean exporting a PSD stopped the
+ * preview watching the paint.
+ */
+
+#[derive(Default)]
+pub struct PsdWatcher(mxb_core::paintwatch::WatchSet);
+
+/// Emitted with the caller's own spelling of the path, so the frontend can match it against
+/// the sheet it exported.
+const PSD_EVENT: &str = "psd-changed";
+
+#[derive(Clone, serde::Serialize)]
+struct PsdChanged {
+    path: String,
+}
+
+#[tauri::command]
+fn psd_watch(app: tauri::AppHandle, state: tauri::State<'_, PsdWatcher>, paths: Vec<String>) {
+    let handle = app.clone();
+    mxb_core::paintwatch::start_with(&state.0, "psd watcher", &paths, move |changed| {
+        for path in changed {
+            let _ = tauri::Emitter::emit(&handle, PSD_EVENT, PsdChanged { path });
+        }
+    });
+}
+
+#[tauri::command]
+fn psd_unwatch(state: tauri::State<'_, PsdWatcher>) {
+    mxb_core::paintwatch::stop(&state.0);
+}
+
+/// The application menu.
+///
+/// The same items on both platforms: macOS puts them in the menu bar and Windows draws them
+/// across the top of the window, which is the answer to wanting a File menu that exists on
+/// Windows too. Nothing here does any work — each item emits its id and the frontend routes
+/// it to whichever tool is open, so a menu entry and the button beside the canvas are always
+/// the same code path.
+///
+/// The macOS app submenu has to be built by hand: setting a menu at all replaces the default
+/// one, and without it there would be no Quit.
+fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+
+    let item = |id: &str, text: &str, accel: &str| {
+        MenuItemBuilder::with_id(id, text).accelerator(accel).build(app)
+    };
+
+    let file = SubmenuBuilder::new(app, "File")
+        .item(&item("new-paint", "New Paint", "CmdOrCtrl+N")?)
+        .item(&item("open-paint", "Open a Paint…", "CmdOrCtrl+O")?)
+        .item(&item("open-psd", "Open a Photoshop File…", "CmdOrCtrl+Shift+O")?)
+        .separator()
+        .item(&item("add-sheet", "Add a Sheet", "CmdOrCtrl+Shift+N")?)
+        .item(&item("sheet-from-image", "Add a Sheet from an Image…", "CmdOrCtrl+I")?)
+        .separator()
+        .item(&item("save", "Save Paint", "CmdOrCtrl+S")?)
+        .item(&item("export-psd", "Export PSD…", "CmdOrCtrl+E")?)
+        .separator()
+        .close_window()
+        .build()?;
+
+    let edit = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+
+    let view = SubmenuBuilder::new(app, "View")
+        .item(&item("toggle-model", "Show the Model", "CmdOrCtrl+M")?)
+        .item(&item("reset-view", "Reset the View", "CmdOrCtrl+0")?)
+        .separator()
+        .fullscreen()
+        .build()?;
+
+    let window = SubmenuBuilder::new(app, "Window").minimize().maximize().build()?;
+
+    let mut menu = MenuBuilder::new(app);
+    #[cfg(target_os = "macos")]
+    {
+        let about = SubmenuBuilder::new(app, "Frost's Studio")
+            .about(None)
+            .separator()
+            .hide()
+            .hide_others()
+            .show_all()
+            .separator()
+            .quit()
+            .build()?;
+        menu = menu.item(&about);
+    }
+    menu.item(&file).item(&edit).item(&view).item(&window).build()
+}

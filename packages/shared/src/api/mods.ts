@@ -816,6 +816,53 @@ export function paintStudioExtract(path: string, dest?: string): Promise<PaintTe
   return invoke<PaintTemplate>("paint_studio_extract", { path, dest: dest ?? null });
 }
 
+/**
+ * A paint the Designer has opened or saved.
+ *
+ * Kept by Frost's Studio alone, in its own file beside the config rather than inside it —
+ * both apps write `config.json`, and a studio-only list is not worth the chance of one
+ * process landing on the other's write.
+ */
+export interface RecentPaint {
+  path: string;
+  name: string;
+  /** Already translated: the label the destination picker showed when it was made. */
+  kind: string;
+  model: string;
+  /** Unix seconds. */
+  savedAt: number;
+}
+
+/**
+ * Watch exported `.psd` files and announce each save as a `psd-changed` event.
+ *
+ * One set at a time: calling this again replaces what is being watched, which is what you
+ * want when a second export supersedes the first.
+ */
+export function psdWatch(paths: string[]): Promise<void> {
+  return invoke<void>("psd_watch", { paths });
+}
+
+/** Stop watching. */
+export function psdUnwatch(): Promise<void> {
+  return invoke<void>("psd_unwatch");
+}
+
+/** What the Designer offers to reopen. Entries whose file is gone are dropped on read. */
+export function designerRecents(): Promise<RecentPaint[]> {
+  return invoke<RecentPaint[]>("designer_recents");
+}
+
+/** Record a paint as opened or saved. Saving over one moves it up rather than adding a second. */
+export function designerRecentNote(entry: RecentPaint): Promise<void> {
+  return invoke<void>("designer_recent_note", { entry });
+}
+
+/** Drop one from the list without touching the file it points at. */
+export function designerRecentForget(path: string): Promise<void> {
+  return invoke<void>("designer_recent_forget", { path });
+}
+
 /** The texture names the paints already installed at `rel` supply — what to call yours. */
 export function paintStudioHints(rel: string): Promise<string[]> {
   return invoke<string[]>("paint_studio_hints", { rel });

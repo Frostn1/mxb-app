@@ -616,7 +616,7 @@ export function mirrorLayer(
 /**
  * A follower brought back into step with the layer it reflects.
  *
- * Everything but the placement is copied outright — the artwork, the colours, the blend, the
+ * Everything but the placement is copied outright — the artwork, the colors, the blend, the
  * part it is clipped to, whether it is hidden. A follower is not a variant of its source; it is
  * the same artwork seen from the other side of the bike, and every field that could drift is a
  * way for it to stop being that.

@@ -4,22 +4,22 @@ import {
   Brush,
   Circle,
   Eraser,
-  ImagePlus,
   Minus,
   MousePointer2,
   PaintBucket,
   Redo2,
   Square,
-  Type as TypeIcon,
   Undo2,
 } from "lucide-react";
+import { Card } from "@frost/shared/Components/ui/card";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useT } from "@/i18n";
 import type { TKey } from "@/i18n";
 import { Row, Slider } from "./controls";
 import {
-  PAINT_TOOLS,
+  NEUTRAL_TOOL,
+  TOOL_GROUPS,
   TOOL_KEYS,
   hasTip,
   type GradientMode,
@@ -61,7 +61,7 @@ interface PaintToolsProps {
  * The tool kit: what the pointer does on the sheet, and what it does it with.
  *
  * Rows appear with the tool that needs them rather than all at once — hardness means nothing to
- * a gradient and an end colour means nothing to a brush, and a panel of controls that don't
+ * a gradient and an end color means nothing to a brush, and a panel of controls that don't
  * apply is a panel nobody reads.
  */
 export function PaintTools({
@@ -82,10 +82,28 @@ export function PaintTools({
   const shaped = SHAPES.has(tool);
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card/40 p-3.5">
+    <Card className="gap-2 bg-card/40 p-3.5">
       <div className="flex items-center justify-between">
         <h2 className="text-[13px] font-semibold">{t("designer.paint")}</h2>
         <div className="flex items-center gap-0.5">
+          {/* The pointer sits with undo and redo: it is the neutral state you come back to,
+              not a fourth kind of brush, and on its own below it cost a heading and a
+              full-width button to say "stop painting". */}
+          <button
+            type="button"
+            onClick={() => onTool(NEUTRAL_TOOL)}
+            title={`${t("designer.tool.move")} (${TOOL_KEYS[NEUTRAL_TOOL].toUpperCase()})`}
+            aria-label={t("designer.tool.move")}
+            aria-pressed={tool === NEUTRAL_TOOL}
+            className={cn(
+              "mr-1 rounded p-1 transition-colors",
+              tool === NEUTRAL_TOOL
+                ? "bg-primary/15 text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <MousePointer2 className="size-3.5" />
+          </button>
           <button
             type="button"
             disabled={!canUndo}
@@ -109,76 +127,81 @@ export function PaintTools({
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-1">
-        {PAINT_TOOLS.map((id) => {
-          const Icon = ICONS[id];
-          const label = t(`designer.tool.${id}` as TKey);
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => onTool(id)}
-              title={`${label} (${TOOL_KEYS[id].toUpperCase()})`}
-              aria-label={label}
-              aria-pressed={id === tool}
-              className={cn(
-                "flex h-7 items-center justify-center rounded-md border transition-colors",
-                id === tool
-                  ? "border-primary bg-primary/15 text-foreground"
-                  : "border-border text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon className="size-3.5" />
-            </button>
-          );
-        })}
-      </div>
+      {/* Grouped, because eight unlabelled glyphs in one 4×2 block is a puzzle: nothing
+          says which of them draw and which of them place a shape, and the only way to find
+          out is to try one. Three named groups is how every editor lays this out. */}
+      {TOOL_GROUPS.map((group) => (
+        <div key={group.label} className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-faint">
+            {t(group.label as TKey)}
+          </span>
+          <div className="flex flex-wrap gap-1">
+            {group.tools.map((id) => {
+              const Icon = ICONS[id];
+              const label = t(`designer.tool.${id}` as TKey);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => onTool(id)}
+                  title={`${label} (${TOOL_KEYS[id].toUpperCase()})`}
+                  aria-label={label}
+                  aria-pressed={id === tool}
+                  className={cn(
+                    "flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md border px-2 text-[11.5px] transition-colors",
+                    id === tool
+                      ? "border-primary bg-primary/15 text-foreground"
+                      : "border-border text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-3.5 flex-none" />
+                  <span className="truncate">{label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
 
-      {/* Full width and truncating, like everything else in a 224px rail — a label is a
-          translation away from being too long for half of it. */}
       <div className="grid grid-cols-2 gap-1">
         <Button
           variant="outline"
           size="sm"
-          className="w-full min-w-0 justify-start"
+          className="w-full min-w-0"
           disabled={busy}
           onClick={onAddImage}
           title={t("designer.addImage")}
         >
-          <ImagePlus className="size-3.5" />
           <span className="truncate">{t("designer.addImage")}</span>
         </Button>
         <Button
           variant="outline"
           size="sm"
-          className="w-full min-w-0 justify-start"
+          className="w-full min-w-0"
           onClick={onAddText}
           title={t("designer.addText")}
         >
-          <TypeIcon className="size-3.5" />
           <span className="truncate">{t("designer.addText")}</span>
         </Button>
       </div>
 
-      {tool === "move" ? (
-        <p className="text-[11px] leading-snug text-faint">{t("designer.moveHint")}</p>
-      ) : (
+      {tool === "move" ? null : (
         <>
-          <Row label={t("designer.colour")}>
+          <Row label={t("designer.color")}>
             <input
               type="color"
               value={settings.colorA}
               onChange={(e) => onChange({ colorA: e.target.value })}
-              className="h-6 w-9 flex-none rounded border border-input bg-background"
-              title={t("designer.colourFrom")}
+              className="h-6 w-8 flex-none"
+              title={t("designer.colorFrom")}
             />
             {tool === "gradient" && (
               <>
                 <button
                   type="button"
                   onClick={() => onChange({ colorA: settings.colorB, colorB: settings.colorA })}
-                  title={t("designer.swapColours")}
-                  aria-label={t("designer.swapColours")}
+                  title={t("designer.swapColors")}
+                  aria-label={t("designer.swapColors")}
                   className="flex-none rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
                 >
                   <ArrowLeftRight className="size-3" />
@@ -187,8 +210,8 @@ export function PaintTools({
                   type="color"
                   value={settings.colorB}
                   onChange={(e) => onChange({ colorB: e.target.value })}
-                  className="h-6 w-9 flex-none rounded border border-input bg-background"
-                  title={t("designer.colourTo")}
+                  className="h-6 w-8 flex-none"
+                  title={t("designer.colorTo")}
                 />
               </>
             )}
@@ -290,20 +313,8 @@ export function PaintTools({
               />
             </Row>
           )}
-
-          {/* The gradient and the fill cover the whole layer, which is the one thing about
-              them worth saying out loud — a brush stroke made first is underneath it. */}
-          <p className="text-[11px] leading-snug text-faint">
-            {t(
-              tool === "fill"
-                ? "designer.fillHint"
-                : tool === "gradient"
-                  ? "designer.gradientHint"
-                  : "designer.paintHint",
-            )}
-          </p>
         </>
       )}
-    </div>
+    </Card>
   );
 }

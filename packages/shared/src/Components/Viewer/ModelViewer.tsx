@@ -2126,6 +2126,8 @@ export interface ModelViewerProps {
   onPoseGrab?: (bone: string) => void;
   /** Which backdrop to stand the model against. Absent is the studio the viewer always drew. */
   scene?: SceneId;
+  /** Draw the floor and the contact shadow. Off for a piece that doesn't stand on anything. */
+  grounded?: boolean;
   /**
    * Photo mode: the model and the backdrop, and nothing else.
    *
@@ -2176,6 +2178,7 @@ export function ModelViewer({
   loading = false,
   noStandIn = false,
   className,
+  grounded = true,
 }: ModelViewerProps) {
   // Photo mode takes the dots away by not handing the rider anything to write a pose back
   // through — the handles exist only where a caller asked to edit one.
@@ -2339,16 +2342,21 @@ export function ModelViewer({
               <RiderBody suit={map} gloves={null} showHead />
             )}
           </Center>
-          <ContactShadows
-            position={[0, -0.01, 0]}
-            opacity={look.shadow}
-            scale={8}
-            blur={2.4}
-            far={4}
-          />
+          {/* A floor is only right for something that stands on one. `Center` puts a model's
+              middle at the origin, so a bike sits on it and a helmet on its own sinks halfway
+              into it — and a contact shadow under a floating object is a shadow of nothing. */}
+          {grounded && (
+            <ContactShadows
+              position={[0, -0.01, 0]}
+              opacity={look.shadow}
+              scale={8}
+              blur={2.4}
+              far={4}
+            />
+          )}
           {/* Below the contact shadow, which is what keeps it out of the shadow's own render:
               that camera looks up from its plane, so anything under it isn't in the shot. */}
-          {look.ground && (
+          {grounded && look.ground && (
             <mesh position={[0, -0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
               <circleGeometry args={[9, 64]} />
               <meshStandardMaterial color={look.ground} roughness={0.95} metalness={0} />

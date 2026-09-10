@@ -461,7 +461,7 @@ export function CanvasStage({
     const top = originY - h / 2;
 
     // Checkerboard first, so transparent parts of the sheet read as transparent rather than
-    // as black — which on a livery is a real colour and would be badly misleading.
+    // as black — which on a livery is a real color and would be badly misleading.
     ctx.save();
     ctx.beginPath();
     ctx.rect(left, top, w, h);
@@ -1051,12 +1051,12 @@ export function CanvasStage({
         )}
       />
       {/* What the wash over the islands means. Only while the islands are showing, and only on
-          a model that can say — a legend for a colour nobody can see is furniture. It sits
+          a model that can say — a legend for a color nobody can see is furniture. It sits
           here rather than in the readout below because the wash is on screen whether or not
           the pointer is over anything, and that is exactly when it needs explaining. */}
       {washed && (
         <div
-          className="pointer-events-auto absolute left-2 top-2 flex items-center gap-2 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45"
+          className="pointer-events-auto absolute left-4 top-4 flex items-center gap-2 rounded-md bg-foreground/[0.05] px-2 py-1 text-[11px] leading-none text-muted-foreground"
           title={t("designer.flankWashHint")}
         >
           <span className="flex items-center gap-1">
@@ -1069,7 +1069,7 @@ export function CanvasStage({
           </span>
         </div>
       )}
-      <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-2 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45">
+      <div className="pointer-events-none absolute bottom-4 left-4 flex items-center gap-2 rounded-md bg-foreground/[0.05] px-2 py-1 text-[11px] leading-none text-muted-foreground">
         <span>
           {sheet.width}×{sheet.height}
         </span>
@@ -1091,12 +1091,12 @@ export function CanvasStage({
                 afternoon: it means this island is worn by each side of the bike. */}
             {overSide && overSide !== "centre" && (
               <span
-                // The same colours the sheet is washed with, so the word and the region under
+                // The same colors the sheet is washed with, so the word and the region under
                 // the pointer are recognisably the same answer.
                 className={cn(
                   overSide === "left" && "text-[hsl(28_95%_62%)]",
                   overSide === "right" && "text-[hsl(205_95%_66%)]",
-                  overSide === "both" && "text-white/45",
+                  overSide === "both" && "text-muted-foreground",
                 )}
                 title={overSide === "both" ? t("designer.flankSharedHint") : undefined}
               >
@@ -1119,7 +1119,7 @@ export function CanvasStage({
       <button
         type="button"
         onClick={reset}
-        className="absolute bottom-2 right-2 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45 transition-colors hover:text-white/80"
+        className="absolute bottom-4 right-4 cursor-default rounded-md bg-foreground/[0.05] px-2 py-1 text-[11px] leading-none text-muted-foreground transition-colors hover:text-foreground"
       >
         {t("designer.resetView")}
       </button>

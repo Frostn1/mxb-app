@@ -10,10 +10,18 @@
     "devUrl": "http://localhost:1430",
     "frontendDist": "../dist"
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/Frostn1/frost-studio/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU5QTRCRkUxODc2NjUzMkIKUldRclUyYUg0YitrV1dUQkhWTGdCYlRjTFJrK2xlMHpsRE5tSjFMdFhDTmtkazBneVlPajNMazUK"
+    }
+  },
   "app": {
     "windows": [
       {
-        "title": "Frost Studio",
+        "title": "Frost's Studio",
         "width": 1400,
         "height": 900,
         "minWidth": 1100,
@@ -29,7 +37,7 @@
     "active": true,
     "targets": ["nsis", "app", "dmg", "appimage", "deb", "rpm"],
     "category": "Game",
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "licenseFile": "../../../LICENSE",
     "publisher": "Frost",
     "copyright": "Copyright © 2026 Frost",

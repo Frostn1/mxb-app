@@ -15,7 +15,6 @@ pub(crate) use mxb_core::config;
 mod cookie_session;
 mod downloads;
 mod dropzone;
-pub(crate) use mxb_core::edf;
 mod feel;
 mod fileshare;
 mod firstpaint;
@@ -24,8 +23,6 @@ mod frostmod_manage;
 pub(crate) use mxb_core::game;
 mod fileinfo;
 mod gameproc;
-pub(crate) use mxb_core::gate;
-pub(crate) use mxb_core::heightfield;
 mod hub_clearance;
 mod hub_session;
 mod identity;
@@ -36,7 +33,6 @@ pub(crate) use mxb_core::library;
 mod liveshare;
 pub(crate) use mxb_core::linkwalk;
 mod logs;
-pub(crate) use mxb_core::lru;
 pub(crate) use mxb_core::map;
 mod memwatch;
 mod modelswap;
@@ -59,13 +55,12 @@ mod procmods;
 #[cfg(target_os = "linux")]
 pub(crate) use mxb_core::proton;
 #[cfg(sidecar)]
-pub(crate) use mxb_core::sidecar;
+#[cfg(mxbsecure)]
+pub(crate) use mxb_core::mxbsecure;
 /// The world-server browser: speaks the master-server protocol to list live servers.
 /// Local-only, like [`sidecar`] — the public tree neither has the file nor the feature.
 #[cfg(worldnet)]
 mod worldnet;
-#[cfg(mxbsecure)]
-mod mxbsecure;
 mod steamid;
 mod secure_launch;
 
@@ -139,7 +134,6 @@ mod shop_installed;
 mod shop_session;
 mod soundmods;
 pub(crate) use mxb_core::texstore;
-pub(crate) use mxb_core::track;
 /// The tracks that came with the game — the ones no scan of the mods tree can see.
 pub(crate) use mxb_core::trackstock;
 mod upload;
@@ -1013,63 +1007,6 @@ async fn save_track_props(
     .map_err(|e| format!("save_track_props task failed: {e}"))?
 }
 
-#[tauri::command]
-async fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, String> {
-    tauri::async_runtime::spawn_blocking(move || unpack_paint_blocking(path))
-        .await
-        .map_err(|e| format!("unpack_paint task failed: {e}"))?
-}
-
-/// Paints decoded for the viewer, so re-opening one doesn't inflate it a second time.
-///
-/// The picker re-runs this on every selection change and on every re-open, and a gear paint is
-/// tens of megabytes of DEFLATE — the pixels behind an entry, on the other hand, are small,
-/// because each is downscaled to 1024² before it is stored.
-const PAINT_CACHE_CAP: usize = 4;
-
-fn paint_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>> {
-    static CACHE: std::sync::OnceLock<std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>>> =
-        std::sync::OnceLock::new();
-    CACHE.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(PAINT_CACHE_CAP)))
-}
-
-/// As [`cached_bike`], for the paints: looked up and released without holding the lock.
-fn cached_paint(key: &str) -> Option<Vec<paint::PaintTexture>> {
-    paint_cache().lock().ok().and_then(|mut c| c.get(key).cloned())
-}
-
-fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, String> {
-    let t0 = std::time::Instant::now();
-    // Path *and* mtime, as the bike cache does, so a paint re-saved under the same name misses.
-    let key = viewer::bike_cache_key(&path);
-    if let Some(t) = cached_paint(&key) {
-        log::info!("unpack_paint {path}: cache hit ({:?})", t0.elapsed());
-        return Ok(t);
-    }
-    let _gate = gate::enter(&key);
-    if let Some(t) = cached_paint(&key) {
-        log::info!("unpack_paint {path}: cache hit, waited ({:?})", t0.elapsed());
-        return Ok(t);
-    }
-
-    let textures = paint::unpack_file(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))?;
-    log::info!(
-        "unpack_paint {path}: {} texture(s) in {:?} | {:.1} MB resident in the texture store",
-        textures.len(),
-        t0.elapsed(),
-        texstore::resident_bytes() as f64 / (1024.0 * 1024.0),
-    );
-    if let Ok(mut c) = paint_cache().lock() {
-        // Cloning an entry copies names, sizes and tokens — never pixels, which stay in the
-        // texture store. The displaced paint's go with it; nothing else holds those tokens.
-        if let Some(dropped) = c.insert(key, textures.clone()) {
-            let tokens: Vec<String> = dropped.iter().map(|t| t.token.clone()).collect();
-            texstore::release(&tokens);
-        }
-    }
-    Ok(textures)
-}
-
 // ── Paint studio ────────────────────────────────────────────────────────────────────
 //
 // A `.pnt` is a packed container no image editor can write, so a livery drawn in GIMP has
@@ -1643,7 +1580,7 @@ async fn mxbsecure_lock(
         let mut rnd = [0u8; 6];
         getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
         let suffix: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
-        let asset_id = format!("{}-{suffix}", sanitize_asset_id(&name));
+        let asset_id = format!("{}-{suffix}", mxb_core::names::sanitize_asset_id(&name));
 
         let plaintext = tokio::fs::read(&src_path).await.map_err(|e| format!("read {src}: {e}"))?;
         let locked = mxbsecure::lock(&plaintext, &asset_id, "k1");
@@ -1784,16 +1721,6 @@ async fn mxbsecure_open_offline(
     }
 }
 
-/// Keep an asset id to the characters a header and a URL are both happy with.
-#[cfg(mxbsecure)]
-fn sanitize_asset_id(name: &str) -> String {
-    let cleaned: String = name
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
-        .collect();
-    let trimmed = cleaned.trim_matches('_');
-    if trimmed.is_empty() { "asset".to_string() } else { trimmed.to_string() }
-}
 
 #[tauri::command]
 fn local_guid() -> Option<String> {
@@ -6291,7 +6218,7 @@ fn main() {
             mxb_core::trackview::load_track_ground,
             mxb_core::trackview::load_track_ground_layers,
             mxb_core::trackview::diagnose_track,
-            unpack_paint,
+            mxb_core::viewer::unpack_paint,
             mxb_core::viewer::texture_bytes,
             mxb_core::viewer::watch_paint_files,
             mxb_core::viewer::unpack_pkz,
@@ -7961,13 +7888,17 @@ fn studio_install(app: tauri::AppHandle) -> Option<StudioInstall> {
         }
         roots.push(std::path::PathBuf::from("/usr/bin"));
         roots.push(std::path::PathBuf::from("/usr/local/bin"));
+        // Several names, because the one on PATH depends on how it was installed: the deb
+        // and the AppImage take `mainBinaryName`, a `cargo install` takes the crate name.
         for r in roots {
-            let p = r.join("mxb-studio");
-            if p.is_file() {
-                return Some(StudioInstall {
-                    path: p.to_string_lossy().into_owned(),
-                    version: String::new(),
-                });
+            for stem in ["Frost Studio", "frost-studio", "frost_studio"] {
+                let p = r.join(stem);
+                if p.is_file() {
+                    return Some(StudioInstall {
+                        path: p.to_string_lossy().into_owned(),
+                        version: String::new(),
+                    });
+                }
             }
         }
         None

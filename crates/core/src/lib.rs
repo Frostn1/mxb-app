@@ -39,3 +39,7 @@ pub mod viewer;
 /// when the file is there and publishes that decision to dependent crates.
 #[cfg(sidecar)]
 pub mod sidecar;
+
+/// The secure-content packer. Absent from the public tree, like `sidecar`.
+#[cfg(mxbsecure)]
+pub mod mxbsecure;

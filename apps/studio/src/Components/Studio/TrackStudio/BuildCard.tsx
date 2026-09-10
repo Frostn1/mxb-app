@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { Card } from "@frost/shared/Components/ui/card";
 import { Progress } from "@frost/shared/Components/ui/progress";
 import { isRunning, PHASE_KEY, useTrackBuild } from "../../../Context/TrackBuild";
 import { useT } from "@/i18n";
@@ -20,7 +21,7 @@ export default function BuildCard() {
   const pct = Math.round(build.progress * 100);
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-input p-3">
+    <Card className="flex flex-col gap-2 p-3">
       <div className="flex items-baseline justify-between gap-2">
         <span
           className={cn(
@@ -80,6 +81,6 @@ export default function BuildCard() {
           {build.error}
         </span>
       )}
-    </div>
+    </Card>
   );
 }

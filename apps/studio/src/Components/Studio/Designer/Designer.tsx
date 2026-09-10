@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Bike,
   ClipboardPaste,
@@ -11,43 +19,55 @@ import {
   FlipHorizontal2,
   FlipVertical2,
   Grid3x3,
+  GripVertical,
   Group,
-  Box,
   Layers as LayersIcon,
   Link2,
   Link2Off,
   Loader2,
-  PackageOpen,
   PaintBucket,
-  PanelLeftClose,
-  PanelLeftOpen,
   Plus,
   Save,
+  Shirt,
   Trash2,
   Ungroup,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import * as THREE from "three";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Input } from "@frost/shared/Components/ui/input";
+import { Progress } from "@frost/shared/Components/ui/progress";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@frost/shared/Components/ui/card";
+import { ContextBarLeft, ShellChrome, UnsavedRegistry } from "../../Shell/ContextBar";
 import {
   paintStudioExtract,
   paintStudioPixels,
   paintStudioSave,
   paintStudioStage,
   paintStudioTarget,
+  designerRecentNote,
   psdRead,
+  psdUnwatch,
+  psdWatch,
   psdSave,
   textureBytes,
 } from "@frost/shared/api/mods";
 import { useT } from "@/i18n";
-import { IMAGE_EXTS, PaintDestBar, isBikeKind, usePaintDest } from "../paintDest";
+import StartScreen from "./StartScreen";
+import { IMAGE_EXTS, isBikeKind, usePaintDest } from "../paintDest";
 const PREVIEW_OPEN_KEY = "mxb:designer:preview:v1";
 
 import { CanvasStage } from "./CanvasStage";
-import { Row, Slider } from "./controls";
+import { Slider } from "./controls";
 import { PreviewPanel } from "./PreviewPanel";
 import { LayerInspector } from "./LayerInspector";
 import { PaintTools } from "./PaintTools";
@@ -131,6 +151,15 @@ const BLANK_SIZE = 2048;
  * Null covers both ends of it: the store evicts, and a rejected read is the same nothing to
  * draw as a name that matched no texture at all.
  */
+/** A square of one colour, for a companion map with no stock texture to copy. */
+async function flatBitmap(color: string, size: number): Promise<ImageBitmap> {
+  const canvas = new OffscreenCanvas(size, size);
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, size, size);
+  return createImageBitmap(canvas);
+}
+
 function stockBitmap(tex: PaintTexture): Promise<ImageBitmap | null> {
   return textureBytes(tex.token)
     .then((buf) => bitmapFromRgba(buf, tex.width, tex.height))
@@ -202,10 +231,51 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // Where the canvas's right-click menu is, in client coordinates, or null for closed.
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [name, setName] = useState("");
+  /**
+   * Whether the user has started something.
+   *
+   * The tab used to open straight into a bike: a destination is picked for you, and the
+   * effect below fills in that model's sheet names as soon as it knows them, so there was
+   * never a moment where nothing was open. That is why the empty state was effectively
+   * unreachable — and why there was nowhere to put "carry on with what you were doing".
+   * Nothing is filled in until this is true.
+   */
+  const [started, setStarted] = useState(
+    // A development escape hatch, off unless it is asked for: set
+    // `VITE_DESIGNER_AUTOSTART=1` in `apps/studio/.env.local` and the tab opens straight into
+    // the editor on whatever destination is chosen by default, rather than the start screen.
+    // Working on the Designer otherwise means clicking through the front door every reload.
+    () => import.meta.env.VITE_DESIGNER_AUTOSTART === "1",
+  );
+  const { setBare } = useContext(ShellChrome);
+  // Set by every edit, cleared by a save that lands. `pristine` cannot answer this: it stays
+  // false after a save, and a paint you have just written is not work you would lose.
+  const [unsaved, setUnsaved] = useState(false);
+  useEffect(() => {
+    setBare(!started);
+    return () => setBare(false);
+  }, [setBare, started]);
+
+  const { register } = useContext(UnsavedRegistry);
+  const saveRef = useRef<(() => Promise<boolean>) | null>(null);
+  const unsavedRef = useRef(false);
+  unsavedRef.current = unsaved && started;
+  useEffect(() => {
+    register({
+      dirty: () => unsavedRef.current,
+      save: async () => saveRef.current?.() ?? false,
+    });
+    return () => register(null);
+  }, [register]);
+  // The title is editable in place: open when it is clicked, or when a save needs a name.
+  const [naming, setNaming] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const nameRef = useRef<HTMLInputElement>(null);
+  // Set when Save asked for the name, so Enter in the title finishes that save.
+  const saveAfterName = useRef(false);
   const [busy, setBusy] = useState(false);
   // The sheets/layers rail folds away, because once a paint is set up the thing worth the
   // width is the canvas and the model — not the list of what you already chose.
-  const [railOpen, setRailOpen] = useState(true);
   // Remembered: someone who paints with it hidden wants it hidden next session too.
   const [previewOpen, setPreviewOpen] = useState(
     () => localStorage.getItem(PREVIEW_OPEN_KEY) !== "0",
@@ -292,7 +362,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   sheetsRef.current = sheets;
 
   const active = sheets.find((s) => s.id === activeId) ?? null;
-  const bump = useCallback(() => setVersion((v) => v + 1), []);
+  const bump = useCallback(() => {
+    setVersion((v) => v + 1);
+    setUnsaved(true);
+  }, []);
 
   /**
    * The one selected layer, where "one" is what the question means.
@@ -892,13 +965,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     [installSheets, readImage, t],
   );
 
-  const startFromPaint = useCallback(async () => {
-    const picked = await openDialog({
-      multiple: false,
-      filters: [{ name: "MX Bikes paint", extensions: ["pnt"] }],
-    });
-    const path = Array.isArray(picked) ? picked[0] : picked;
-    if (!path) return;
+  const openPaint = useCallback(
+    async (path: string) => {
     // Busy from here, not from inside `loadSheets`: unpacking the `.pnt` is the slow half —
     // it reads the file, inflates every sheet and writes them out — and leaving it outside the
     // spinner is why picking a paint looked like nothing had happened.
@@ -914,7 +982,21 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     } finally {
       setBusy(false);
     }
-  }, [loadSheets]);
+    },
+    [loadSheets],
+  );
+
+  /** The same act with the path still to be chosen. */
+  const startFromPaint = useCallback(async () => {
+    const picked = await openDialog({
+      multiple: false,
+      filters: [{ name: "MX Bikes paint", extensions: ["pnt"] }],
+    });
+    const path = Array.isArray(picked) ? picked[0] : picked;
+    if (!path) return;
+    setStarted(true);
+    await openPaint(path);
+  }, [openPaint]);
 
   /**
    * Start from a Photoshop file — one sheet per document.
@@ -935,6 +1017,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     });
     const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
     if (!paths.length) return;
+    setStarted(true);
     setBusy(true);
     try {
       // Loaded on demand, here and in the export below. The PSD codec is a quarter of a
@@ -965,6 +1048,41 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * canvases until something asks, and asking here is what stops an export shipping a frame
    * older than the screen.
    */
+  /**
+   * The `.psd` files this session exported, and which sheet each came from.
+   *
+   * A ref because the listener below is registered once and must see the current map — and
+   * because nothing on screen depends on it until a file actually changes.
+   */
+  const watched = useRef(new Map<string, string>());
+
+  useEffect(() => {
+    const un = listen<{ path: string }>("psd-changed", async (e) => {
+      const sheetId = watched.current.get(e.payload.path);
+      if (!sheetId) return;
+      try {
+        const { psdToSheet } = await import("./psd");
+        const stem = (e.payload.path.replace(/\\/g, "/").split("/").pop() ?? "").replace(
+          /\.psb?d$/i,
+          "",
+        );
+        const made = await psdToSheet(await psdRead(e.payload.path), stem);
+        // The sheet keeps its name and its place: it is the same sheet, redrawn. Replacing
+        // the name would rebind it to different bodywork on the next save.
+        remember();
+        patchSheet(sheetId, (sheet) => ({ ...sheet, ...made, id: sheet.id, name: sheet.name }));
+        bump();
+        toast.success(t("designer.psdReloaded", { name: stem }));
+      } catch (err) {
+        toast.error(String(err).replace(/^Error:\s*/, ""));
+      }
+    });
+    return () => {
+      void un.then((f) => f());
+      void psdUnwatch().catch(() => {});
+    };
+  }, [bump, patchSheet, remember, t]);
+
   const exportPsd = useCallback(async () => {
     if (!sheets.length) return;
     const picked = await openDialog({ directory: true });
@@ -978,16 +1096,25 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       const sep = dir.includes("\\") ? "\\" : "/";
       const prefix = name.trim() ? `${name.trim()} - ` : "";
       let written = 0;
+      const exported = new Map<string, string>();
       for (const sheet of sheets) {
         const canvas = canvasFor(sheet);
         composite(canvas, sheet);
         // A sheet is named after a texture, and a texture name is not obliged to be a legal
         // file name. Nothing is renamed on the sheet — only on the file it is written to.
         const label = (sheet.name.trim() || `sheet-${written + 1}`).replace(/[\\/:*?"<>|]/g, "_");
-        await psdSave(`${dir}${sep}${prefix}${label}.psd`, sheetToPsd(sheet, canvas));
+        const at = `${dir}${sep}${prefix}${label}.psd`;
+        await psdSave(at, sheetToPsd(sheet, canvas));
+        exported.set(at, sheet.id);
         written += 1;
       }
-      toast.success(t("designer.exportedPsd", { count: written, dir }));
+      // Watched from here, which is what makes this a round trip rather than an export:
+      // save in Photoshop and the sheet it came from is replaced in place.
+      watched.current = exported;
+      await psdWatch([...exported.keys()]).catch(() => {});
+      toast.success(t("designer.exportedPsd", { count: written, dir }), {
+        description: t("designer.psdWatching"),
+      });
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
     } finally {
@@ -999,6 +1126,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // same thing — that tab has already done the unpacking.
   useEffect(() => {
     if (!incoming?.length) return;
+    // Sheets handed over by Paint Studio are a start like any other.
+    setStarted(true);
     setBusy(true);
     void loadSheets(incoming)
       .catch((e) => toast.error(String(e).replace(/^Error:\s*/, "")))
@@ -1012,13 +1141,19 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * Texture names this model wants that have no sheet yet — what the create button offers,
    * and the name a new blank sheet is given.
    *
-   * Colour sheets only. The hint line lists the companion maps too, because knowing the bike
+   * Color sheets only. The hint line lists the companion maps too, because knowing the bike
    * has a `plastics_n` is worth knowing, but an *empty* one is worse than none: a paint
    * replaces textures by name, so saving a blank normal map strips the bike's real one.
    */
   const missingHints = useMemo(() => {
     const taken = new Set(sheets.map((s) => s.name.trim().toLowerCase()));
     return hints.filter((h) => !taken.has(h.trim().toLowerCase()) && !isCompanionMap(h));
+  }, [hints, sheets]);
+
+  /** The companion maps the model asks for that aren't on the list — normals, mostly. */
+  const missingCompanions = useMemo(() => {
+    const taken = new Set(sheets.map((s) => s.name.trim().toLowerCase()));
+    return hints.filter((h) => !taken.has(h.trim().toLowerCase()) && isCompanionMap(h));
   }, [hints, sheets]);
 
   const addBlankSheet = useCallback(() => {
@@ -1034,7 +1169,66 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   }, [bump, missingHints, remember]);
 
   /**
-   * One sheet per colour texture the model asks for that isn't on the list yet.
+   * Start a new paint for the destination that is chosen.
+   *
+   * The sheets themselves come from the effect above, which knows what the model binds. When
+   * a model offers no names — a loose folder, mostly — one blank sheet is a better editor to
+   * be dropped into than none at all.
+   */
+  const beginNew = useCallback(() => {
+    setStarted(true);
+    if (!hints.some((h) => !isCompanionMap(h))) addBlankSheet();
+  }, [addBlankSheet, hints]);
+
+  /**
+   * Add a sheet from an image on disk.
+   *
+   * Not the same act as "Start from a paint", which is the template step and *replaces*
+   * everything. This adds one sheet beside the others — the answer to having a `.tga` for one
+   * piece of bodywork and nothing else, which until now meant making a blank sheet, adding the
+   * image as a layer and resizing the sheet to match by hand.
+   *
+   * The file name becomes the sheet name, because the name is the entire binding and the file
+   * is usually already called what the model asks for. The image lands as the sheet's base
+   * rather than as a layer: it is the sheet, not something placed on it.
+   */
+  const addSheetFromImage = useCallback(async () => {
+    const picked = await openDialog({
+      multiple: true,
+      filters: [{ name: "Images", extensions: IMAGE_EXTS }],
+    });
+    const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
+    if (!paths.length) return;
+    setBusy(true);
+    try {
+      const made: Sheet[] = [];
+      for (const path of paths) {
+        const { name: fileName, bitmap } = await readImage(path);
+        const stem = (fileName.replace(/\\/g, "/").split("/").pop() ?? fileName).replace(
+          /\.[^.]+$/,
+          "",
+        );
+        made.push({
+          ...blankSheet(stem, bitmap.width),
+          width: bitmap.width,
+          height: bitmap.height,
+          base: bitmap,
+        });
+      }
+      remember();
+      setSheets((prev) => [...prev, ...made]);
+      setActiveId(made[0].id);
+      setSelection([]);
+      bump();
+    } catch (e) {
+      toast.error(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(false);
+    }
+  }, [bump, readImage, remember]);
+
+  /**
+   * One sheet per color texture the model asks for that isn't on the list yet.
    *
    * The names are the whole binding — a sheet called anything else paints nothing — and until
    * now the only way to get them right without an installed paint to start from was to read
@@ -1090,6 +1284,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   useEffect(() => {
     // Not until the hints are about the destination that's actually chosen: they're fetched,
     // and acting on the last model's list would fill a KTM with a Yamaha's sheet names.
+    if (!started) return;
     if (!destKey || hintsFor !== destKey || filled.current === destKey) return;
     const wanted = hints.filter((h) => !isCompanionMap(h));
     if (!wanted.length) return;
@@ -1114,7 +1309,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         onClick: () => installSheets(make()),
       },
     });
-  }, [destKey, hints, hintsFor, installSheets, pristine, sheets.length, t]);
+  }, [destKey, hints, hintsFor, installSheets, pristine, sheets.length, started, t]);
 
   const addImage = useCallback(async () => {
     if (!active) return;
@@ -1132,6 +1327,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       );
       patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, ...added] }));
       setSelection(added.length ? [added[added.length - 1].id] : []);
+      // Straight into the pointer, with the new layer selected: what you do with an image you
+      // have just placed is move it, and any paint tool would have painted over it instead.
+      setPaint((p) => ({ ...p, tool: "move" }));
       bump();
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
@@ -1145,6 +1343,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     const layer = textLayer(t("designer.newTextValue"), active);
     patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, layer] }));
     setSelection([layer.id]);
+    setPaint((p) => ({ ...p, tool: "move" }));
     bump();
   }, [active, bump, patchSheet, t]);
 
@@ -1648,29 +1847,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * be saved into the paint, which is the thing somebody asking to trace is trying to avoid;
    * and keeping the bitmap on the other side is what lets this be undone by pressing it again.
    */
-  const toggleTrace = useCallback(
-    (sheetId: string) => {
-      const sheet = sheets.find((s) => s.id === sheetId);
-      if (!sheet) return;
-      const ghost = ghostOf(sheetId);
-      // Not recorded by the history, either way: the bitmap moves between the sheet and the
-      // ghost, and the ghost isn't part of the document — an undo would put the template back
-      // on the sheet while the ghost still held it, which is the copy this is careful not to
-      // make. Pressing the button again is the way back, as it always was.
-      if (sheet.base) {
-        const template = sheet.base;
-        patchSheet(sheetId, (s) => ({ ...s, base: null }), false);
-        patchGhost(sheetId, (g) => ({ ...g, template, showTemplate: true }));
-      } else if (ghost.template) {
-        const base = ghost.template;
-        patchSheet(sheetId, (s) => ({ ...s, base }), false);
-        patchGhost(sheetId, (g) => ({ ...g, template: null }));
-      }
-      bump();
-    },
-    [bump, ghostOf, patchGhost, patchSheet, sheets],
-  );
-
   /**
    * Build the active sheet's UV map, once the user has asked for one.
    *
@@ -1715,7 +1891,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   /**
    * Give a companion sheet something correct to start from.
    *
-   * A colour sheet starts blank because blank is where a livery starts. A companion map is the
+   * A color sheet starts blank because blank is where a livery starts. A companion map is the
    * opposite: a paint replaces the model's textures *by name*, so saving an empty `plastics_n`
    * does not add a normal map — it throws the bike's real one away and puts black in its
    * place, which decodes to a surface pointing back into itself. That is why these are kept
@@ -1810,6 +1986,76 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * the same store; the fetch is for the sheet whose ghost is switched off, since the button
    * has to work without asking anyone to turn a guide on first.
    */
+  /** Take the base back out. `stockAsBase` had no counterpart, so it was a one-way door. */
+  const clearBase = useCallback(
+    (sheetId: string) => {
+      remember();
+      patchSheet(sheetId, (sheet) => ({ ...sheet, base: null }));
+      bump();
+    },
+    [bump, patchSheet, remember],
+  );
+
+  /**
+   * Add the companion maps, seeded rather than blank.
+   *
+   * These are kept out of the automatic fill for a good reason: a `.pnt` replaces the model's
+   * textures by name, so shipping an empty `plastics_n` throws away the bike's real normal
+   * map. Offered separately, and never empty — each one starts as the model's own texture, or
+   * for a normal map with no stock to copy, as the flat value that says "exactly as the mesh
+   * says". Both are a correct sheet; a blank one is a hole in the bike.
+   */
+  const addCompanionSheets = useCallback(async () => {
+    if (!missingCompanions.length) return;
+    setBusy(true);
+    try {
+      const made: Sheet[] = [];
+      for (const wanted of missingCompanions) {
+        const tex = stockFor(wanted);
+        const base = tex ? await stockBitmap(tex) : null;
+        const size = tex?.width ?? BLANK_SIZE;
+        const sheet = blankSheet(wanted, size);
+        made.push(
+          base
+            ? { ...sheet, width: tex?.width ?? size, height: tex?.height ?? size, base }
+            : { ...sheet, base: await flatBitmap(FLAT_NORMAL, size) },
+        );
+      }
+      remember();
+      setSheets((prev) => [...prev, ...made]);
+      setActiveId(made[0].id);
+      setSelection([]);
+      bump();
+    } catch (e) {
+      toast.error(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(false);
+    }
+  }, [bump, missingCompanions, remember, stockFor]);
+
+  const toggleTrace = useCallback(
+    (sheetId: string) => {
+      const sheet = sheets.find((s) => s.id === sheetId);
+      if (!sheet) return;
+      const ghost = ghostOf(sheetId);
+      // Not recorded by the history, either way: the bitmap moves between the sheet and the
+      // ghost, and the ghost isn't part of the document — an undo would put the template back
+      // on the sheet while the ghost still held it, which is the copy this is careful not to
+      // make. Pressing the button again is the way back, as it always was.
+      if (sheet.base) {
+        const template = sheet.base;
+        patchSheet(sheetId, (s) => ({ ...s, base: null }), false);
+        patchGhost(sheetId, (g) => ({ ...g, template, showTemplate: true }));
+      } else if (ghost.template) {
+        const base = ghost.template;
+        patchSheet(sheetId, (s) => ({ ...s, base }), false);
+        patchGhost(sheetId, (g) => ({ ...g, template: null }));
+      }
+      bump();
+    },
+    [bump, ghostOf, patchGhost, patchSheet, sheets],
+  );
+
   const stockAsBase = useCallback(
     async (sheetId: string) => {
       const sheet = sheetsRef.current.find((s) => s.id === sheetId);
@@ -1819,6 +2065,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         toast.error(t("designer.stockNoMatch", { name: sheet.name.trim() }));
         return;
       }
+      remember();
       const held = ghostOf(sheetId);
       const ready = held.stockFor === sheet.name ? held.stock : null;
       setBusy(true);
@@ -1842,7 +2089,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       bump();
       toast.success(t("designer.stockAsBaseDone", { name: sheet.name.trim() }));
     },
-    [bump, ghostOf, patchGhost, patchSheet, stockFor, t],
+    [bump, ghostOf, patchGhost, patchSheet, remember, stockFor, t],
   );
 
   // Ghosts of sheets that are gone. Each holds a decoded bitmap and a raster the size of the
@@ -1858,40 +2105,46 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   }, [sheetIdKey]);
 
   /** Reorder within the stack. `delta` of -1 is one step down (further back). */
-  const reorder = useCallback(
-    (id: string, delta: number) => {
+  /**
+   * Drop `id` where `before` sits in the stack.
+   *
+   * The list is drawn top-of-stack first while the array is bottom-first, so both indices are
+   * read from the array and the reversal in the panel takes care of itself.
+   */
+  const moveLayer = useCallback(
+    (id: string, before: string) => {
       if (!activeId) return;
+      remember(`layer-order:${id}`);
       patchSheet(activeId, (s) => {
-        const at = s.layers.findIndex((l) => l.id === id);
-        const to = at + delta;
-        if (at < 0 || to < 0 || to >= s.layers.length) return s;
+        const from = s.layers.findIndex((l) => l.id === id);
+        const to = s.layers.findIndex((l) => l.id === before);
+        if (from < 0 || to < 0 || from === to) return s;
         const layers = [...s.layers];
-        const [moved] = layers.splice(at, 1);
+        const [moved] = layers.splice(from, 1);
         layers.splice(to, 0, moved);
         return { ...s, layers };
       });
       bump();
     },
-    [activeId, bump, patchSheet],
+    [activeId, bump, patchSheet, remember],
   );
 
   /**
-   * Move a sheet within the list.
+   * Drop `id` where `before` sits.
    *
-   * Not cosmetic: `write` packs the sheets in this order, so it is the order they end up in
-   * the `.pnt`. The mesh binds by name either way, but a paint whose sheets are ordered the
-   * way its author expects is easier to diff and to hand to somebody else.
+   * The list order is the order `write` packs them in, so this is not cosmetic. It replaced a
+   * pair of arrows on every row — six controls to move a list of five things, each disabled
+   * at one end — with the gesture people already try first.
    */
-  const reorderSheet = useCallback(
-    (id: string, delta: number) => {
-      // Keyed, so walking a sheet three places up is one step back rather than three.
+  const moveSheet = useCallback(
+    (id: string, before: string) => {
       remember(`sheet-order:${id}`);
       setSheets((prev) => {
-        const at = prev.findIndex((s) => s.id === id);
-        const to = at + delta;
-        if (at < 0 || to < 0 || to >= prev.length) return prev;
+        const from = prev.findIndex((s) => s.id === id);
+        const to = prev.findIndex((s) => s.id === before);
+        if (from < 0 || to < 0 || from === to) return prev;
         const next = [...prev];
-        const [moved] = next.splice(at, 1);
+        const [moved] = next.splice(from, 1);
         next.splice(to, 0, moved);
         return next;
       });
@@ -1928,11 +2181,11 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     return null;
   }, [sheets, name, dest, t]);
 
-  const canSave = sheets.length > 0 && !blocked;
 
   const write = useCallback(
-    async (overwrite: boolean) => {
+    async (overwrite: boolean, as?: string) => {
       if (!dest) return;
+      const title = (as ?? name).trim();
       setBusy(true);
       try {
         // Composite every sheet first: they only exist as canvases until now, and doing it on
@@ -1960,8 +2213,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           }),
         );
         const outcome = await paintStudioSave({
-          name: name.trim(),
-          fileName: name.trim(),
+          name: title,
+          fileName: title,
           textures: staged,
           dest,
           overwrite,
@@ -1971,28 +2224,46 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         toast.success(t("paints.saved", { path: outcome.path }), {
           description: blank ? t("designer.blankSheetsSkipped", { count: blank }) : undefined,
         });
+        setUnsaved(false);
+        // Best effort: failing to note a recent must never look like a failed save.
+        void designerRecentNote({
+          path: outcome.path,
+          name: title,
+          kind: t(destState.kind.label),
+          model: destState.folder ?? destState.model,
+          savedAt: Math.round(Date.now() / 1000),
+        }).catch(() => {});
       } catch (e) {
         toast.error(String(e).replace(/^Error:\s*/, ""));
       } finally {
         setBusy(false);
       }
     },
-    [canvasFor, dest, name, sheets, t],
+    [canvasFor, dest, destState, name, sheets, t],
   );
 
-  const save = useCallback(async () => {
-    if (!canSave || !dest) {
-      if (blocked) toast.error(blocked);
+  const save = useCallback(
+    async (as?: string) => {
+    const title = (as ?? name).trim();
+    // `blocked` covers the name too, so a save started from the dialog has to be judged
+    // against the name being handed in rather than the one in state.
+    const stop = as ? blocked && blocked !== t("paints.needName") : blocked;
+    if (!sheets.length || !dest || !title) {
+      if (stop) toast.error(stop);
+      return;
+    }
+    if (stop) {
+      toast.error(stop);
       return;
     }
     try {
-      const target = await paintStudioTarget(name.trim(), dest);
+      const target = await paintStudioTarget(title, dest);
       // Overwriting is the normal case here — you save, look, adjust, save again — so this
       // asks with a toast action rather than a modal that would interrupt that rhythm.
       if (target.exists) {
         toast.warning(t("paints.replaceTitle"), {
           description: t("paints.replaceBody", { path: target.path }),
-          action: { label: t("paints.replace"), onClick: () => void write(true) },
+          action: { label: t("paints.replace"), onClick: () => void write(true, title) },
         });
         return;
       }
@@ -2000,8 +2271,46 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       toast.error(String(e).replace(/^Error:\s*/, ""));
       return;
     }
-    await write(false);
-  }, [blocked, canSave, dest, name, t, write]);
+    await write(false, title);
+    },
+    [blocked, dest, name, sheets.length, t, write],
+  );
+
+  saveRef.current = async () => {
+    if (!name.trim()) {
+      setDraftName(name);
+      saveAfterName.current = true;
+      setNaming(true);
+      return false;
+    }
+    await save();
+    return !unsavedRef.current;
+  };
+
+  /**
+   * The menu, routed to the same handlers the buttons use.
+   *
+   * Every item is a request rather than an action of its own: a menu entry and the control
+   * beside the canvas end up in one place, so they cannot drift. Registered once — the
+   * handlers are read off refs so this never has to re-subscribe.
+   */
+  const menuRef = useRef<Record<string, () => void>>({});
+  menuRef.current = {
+    "new-paint": () => setStarted(false),
+    "open-paint": () => void startFromPaint(),
+    "open-psd": () => void startFromPsd(),
+    "add-sheet": addBlankSheet,
+    "sheet-from-image": () => void addSheetFromImage(),
+    save: () => void saveRef.current?.(),
+    "export-psd": () => void exportPsd(),
+    "toggle-model": () => togglePreview(),
+  };
+  useEffect(() => {
+    const un = listen<string>("menu", (e) => menuRef.current[e.payload]?.());
+    return () => {
+      void un.then((f) => f());
+    };
+  }, []);
 
   // Whether the model can say where the far flank is at all, for the controls that need it.
   const mirrorReady = mirrorRef.current.ready && mirrorRef.current.sheetId === activeId;
@@ -2009,69 +2318,139 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const canUngroup = chosen.some((l) => l.group);
   const canUnlink = chosen.some((l) => l.mirror);
 
-  return (
-    <div
-      ref={rootRef}
-      className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-7 pb-6"
-    >
-      {/* The decisions made once — where it goes, what it's called, save — on one row, so
-          the two things looked at continuously get the rest of the window. */}
-      <div className="flex flex-none flex-wrap items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 flex-none"
-          title={t(railOpen ? "designer.hideRail" : "designer.showRail")}
-          aria-label={t(railOpen ? "designer.hideRail" : "designer.showRail")}
-          onClick={() => setRailOpen((o) => !o)}
-        >
-          {railOpen ? (
-            <PanelLeftClose className="size-4" />
-          ) : (
-            <PanelLeftOpen className="size-4" />
-          )}
-        </Button>
-        <PaintDestBar state={destState} className="w-[290px]" />
-        <Input
-          value={name}
-          placeholder={t("paints.namePlaceholder")}
-          className="h-8 w-[168px]"
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && void save()}
+  if (!started) {
+    return (
+      <div ref={rootRef} className="relative min-h-0 flex-1 overflow-hidden">
+        <StartScreen
+          dest={destState}
+          busy={busy}
+          onBlank={beginNew}
+          onFromPaint={() => void startFromPaint()}
+          onFromPsd={() => void startFromPsd()}
+          onOpenRecent={(r) => {
+            setName(r.name);
+            setStarted(true);
+            void openPaint(r.path);
+          }}
         />
-        <Button
-          size="sm"
-          disabled={busy || !canSave}
-          title={blocked ?? undefined}
-          onClick={() => void save()}
-        >
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-          {t("paints.save")}
-        </Button>
-        {/* Beside Save rather than buried in a menu: it is the other way out of here, and the
-            one somebody finishing a job in Photoshop is looking for. */}
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy || !sheets.length}
-          title={t("designer.exportPsdHint")}
-          onClick={() => void exportPsd()}
-        >
-          <FileImage className="size-3.5" />
-          {t("designer.exportPsd")}
-        </Button>
       </div>
+    );
+  }
 
-      <div
-        className={cn(
-          "grid min-h-0 flex-1 gap-3",
-          railOpen
-            ? "xl:grid-cols-[224px_minmax(0,1fr)_300px]"
-            : "xl:grid-cols-[minmax(0,1fr)_300px]",
-        )}
-      >
-        {/* ── Sheets, layers, and the selected layer ───────────────────────────── */}
-        <section className={cn("min-h-0 flex-col gap-3 overflow-y-auto", railOpen ? "flex" : "hidden")}>
+  return (
+    <div ref={rootRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* Something on screen while it works: unpacking a `.pnt` reads the file, inflates
+          every sheet and writes them out, and before this the window simply sat there. */}
+      {busy && (
+        <Progress className="absolute inset-x-0 top-0 z-30 h-[2px] rounded-none bg-transparent" />
+      )}
+      {/* The decisions made once — where it goes, what it's called, save — go in the shell's
+          own strip rather than a row of their own, so the sheet and the model get the whole
+          window below it. */}
+      <ContextBarLeft>
+        <span className="flex min-w-0 items-baseline gap-2 pl-1 text-[12.5px] text-faint">
+          <span className="flex-none font-medium">{t(destState.kind.label)}</span>
+          <span className="min-w-0 truncate">{destState.folder ?? destState.model}</span>
+        </span>
+        {/* The paint's title, in the middle of the window and not in either group of
+            controls — it names what is on screen rather than doing anything to it. It was a
+            text box in the toolbar from the moment the tab opened: a question asked before
+            there was anything to name. */}
+        <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 w-[240px] -translate-x-1/2 -translate-y-1/2 text-center">
+          {naming ? (
+            <Input
+              ref={nameRef}
+              autoFocus
+              value={draftName}
+              placeholder={t("paints.namePlaceholder")}
+              className="pointer-events-auto h-8 text-center text-[13px]"
+              onChange={(e) => setDraftName(e.target.value)}
+              onBlur={() => {
+                setNaming(false);
+                if (draftName.trim()) setName(draftName.trim());
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setNaming(false);
+                  return;
+                }
+                if (e.key !== "Enter" || !draftName.trim()) return;
+                const next = draftName.trim();
+                setName(next);
+                setNaming(false);
+                // Enter from the field a save asked for finishes the save it interrupted.
+                if (saveAfterName.current) {
+                  saveAfterName.current = false;
+                  void save(next);
+                }
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setDraftName(name);
+                setNaming(true);
+              }}
+              className="pointer-events-auto max-w-full cursor-default truncate rounded-md px-2 py-1 text-[13px] transition-colors hover:bg-foreground/[0.06]"
+              title={t("paints.nameTitle")}
+            >
+              {name.trim() ? (
+                <span className="font-medium text-foreground">{name.trim()}</span>
+              ) : (
+                <span className="text-faint">{t("paints.untitled")}</span>
+              )}
+            </button>
+          )}
+        </div>
+        {/* The two ways out of the screen, pushed to the far end away from the setup that
+            precedes them. Export sits beside Save rather than in a menu: it is what somebody
+            finishing a job in Photoshop is looking for. */}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-border text-muted-foreground hover:text-foreground"
+            disabled={busy || !sheets.length}
+            title={t("designer.exportPsdHint")}
+            onClick={() => void exportPsd()}
+          >
+            {t("designer.exportPsd")}
+          </Button>
+          <Button
+            size="sm"
+            disabled={busy || !sheets.length}
+            title={blocked ?? undefined}
+            onClick={() => {
+              // An unnamed paint puts the cursor in the title instead of refusing to save.
+              // Enter there finishes what this click started.
+              if (!name.trim()) {
+                setDraftName(name);
+                saveAfterName.current = true;
+                setNaming(true);
+                return;
+              }
+              void save();
+            }}
+          >
+            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+            {t("paints.save")}
+          </Button>
+        </div>
+      </ContextBarLeft>
+
+      {/* No dialog: naming is a two-word edit, and dimming the app to collect it is
+          heavier than the thing being collected. The title edits where it sits. */}
+
+      {/* The sheet is the window; everything else floats on it.
+          Three columns side by side is still a dashboard — the thing being worked on is
+          boxed in by chrome on both sides and never gets the room. An editor puts the work
+          underneath and the tools on top of it, so the canvas is the full width of the app
+          and the panels are things you can put away. */}
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        {/* ── Sheets, and the tracing ghost under them ─────────────────────────── */}
+        {(
+          <div data-dock="left" className="absolute inset-y-0 left-0 z-10 flex w-[264px] flex-col gap-3 overflow-y-auto p-3">
           <SheetList
             sheets={sheets}
             activeId={activeId}
@@ -2085,19 +2464,40 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               bump();
             }}
             onRemove={removeSheet}
-            onReorder={reorderSheet}
+            onMove={moveSheet}
             missingHints={missingHints}
             onAddBlank={addBlankSheet}
             onAddHintSheets={addHintSheets}
-            onStartFromPaint={() => void startFromPaint()}
-            onStartFromPsd={() => void startFromPsd()}
-            pristine={pristine}
-            busy={busy}
+            missingCompanions={missingCompanions}
+            onAddCompanions={() => void addCompanionSheets()}
+            onAddFromImage={() => void addSheetFromImage()}
           />
-
           {active && (
+            <LayerList
+              layers={active.layers}
+              selection={selection}
+              onSelect={select}
+              onToggle={(id, visible) => {
+                patchLayer(id, (l) => ({ ...l, visible }));
+                bump();
+              }}
+              onRemove={(id) => removeLayers([id])}
+              onMove={moveLayer}
+              onAdd={addPaintLayer}
+            />
+          )}
+          </div>
+        )}
+
+        {/* ── The sheet, the whole window ──────────────────────────────────────── */}
+          {/* Held to the sheet's own area: the cluster positions itself from the top right,
+              and the panes container runs under the docks, so without this it would sit on
+              top of the tools column. */}
+          {active && (
+            <div className="pointer-events-none absolute inset-y-0 left-[264px] right-[312px] z-10">
             <GhostPanel
               ghost={ghostOf(active.id)}
+              isBike={isBikeKind(destState.kind)}
               sheetName={active.name}
               hasBase={!!active.base}
               hasGeometry={!!geometry}
@@ -2106,17 +2506,14 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               busy={busy}
               onTrace={() => toggleTrace(active.id)}
               onStockBase={() => void stockAsBase(active.id)}
+              onClearBase={() => clearBase(active.id)}
               onChange={(fn) => patchGhost(active.id, fn)}
             />
+            </div>
           )}
-
-        </section>
-
-        {/* ── The sheet ────────────────────────────────────────────────────────── */}
-        <section className="flex min-h-0 flex-col">
           {active ? (
             <CanvasStage
-              className="flex-1"
+              className="absolute inset-y-0 left-[264px] right-[312px] rounded-none border-0 bg-canvas"
               sheet={active}
               source={canvases.current.get(active.id) ?? null}
               version={version}
@@ -2135,29 +2532,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               onPaintMove={movePaint}
               onPaintEnd={endPaint}
             />
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border text-center">
-              <p className="max-w-sm text-[12.5px] leading-relaxed text-muted-foreground">
-                {t("designer.empty")}
-              </p>
-              <div className="flex gap-2">
-                <Button size="sm" disabled={busy} onClick={() => void startFromPaint()}>
-                  <PackageOpen className="size-3.5" /> {t("designer.startFromPaint")}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => void startFromPsd()}
-                >
-                  <FileImage className="size-3.5" /> {t("designer.startFromPsd")}
-                </Button>
-                <Button variant="outline" size="sm" onClick={addBlankSheet}>
-                  <FilePlus2 className="size-3.5" /> {t("designer.blankSheet")}
-                </Button>
-            </div>
-          </div>
-        )}
+          ) : null}
 
         {/* The canvas's own menu. Anchored to a point rather than to the canvas, because what
             it is about is whatever was under the pointer — and opened from the *release* of a
@@ -2235,12 +2610,14 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             />
           </DropdownMenuContent>
         </DropdownMenu>
-      </section>
 
-      {/* ── The model and the tools, beside the sheet they act on ────────────── */}
-      <section className="flex min-h-0 flex-col gap-3 overflow-y-auto">
-        {previewOpen ? (
-          <div className="h-[240px] flex-none overflow-hidden border border-border">
+        {/* ── The model and the tools, over the sheet they act on ──────────────── */}
+        {(
+          <div data-dock="right" className="absolute inset-y-0 right-0 z-10 flex w-[312px] flex-col px-3 pb-3 pt-1.5">
+        {/* Hidden rather than unmounted. Unmounting dropped the WebGL context and the model
+            with it, so putting the preview away and bringing it back re-read the mesh, re-framed
+            the camera, and left the UV map and the stock textures unavailable in between. */}
+        <div className={cn("relative h-[260px] flex-none", !previewOpen && "hidden")}>
             <PreviewPanel
               compact
               state={destState}
@@ -2251,15 +2628,25 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               highlight={hoverIsland}
               className="h-full"
             />
-          </div>
-        ) : null}
-        <button
-          onClick={() => togglePreview()}
-          className="flex flex-none cursor-default items-center justify-center gap-2 border border-border py-1.5 font-cond text-[11.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <Box className="size-3.5" />
-          {t(previewOpen ? "designer.hideModel" : "designer.showModel")}
-        </button>
+            <button
+              onClick={() => togglePreview()}
+              className="absolute bottom-1.5 right-1.5 z-10 cursor-default rounded-md bg-black/30 px-1.5 py-0.5 text-[11px] text-white/80 backdrop-blur-[2px] transition-colors hover:bg-black/55 hover:text-white"
+            >
+              {t("designer.hideModel")}
+            </button>
+        </div>
+        {!previewOpen && (
+          <button
+            onClick={() => togglePreview()}
+            className="flex flex-none cursor-default items-center justify-center rounded-md py-1.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+          >
+            {t("designer.showModel")}
+          </button>
+        )}
+          {/* The model stays put and everything under it scrolls. Scrolling the whole column
+              meant the bike slid off the top the moment the tool panel grew — which it does
+              every time you pick a brush. */}
+          <div className="mt-10 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
           {active && (
             <PaintTools
               settings={paint}
@@ -2272,21 +2659,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               onAddImage={() => void addImage()}
               onAddText={addText}
               busy={busy}
-            />
-          )}
-
-          {active && (
-            <LayerList
-              layers={active.layers}
-              selection={selection}
-              onSelect={select}
-              onToggle={(id, visible) => {
-                patchLayer(id, (l) => ({ ...l, visible }));
-                bump();
-              }}
-              onRemove={(id) => removeLayers([id])}
-              onReorder={reorder}
-              onAdd={addPaintLayer}
             />
           )}
           {!!chosen.length && active && (
@@ -2307,13 +2679,16 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               onChange={(fn) => patchSelection(fn, `layer:${selection.join(",")}`)}
             />
           )}
-      </section>
+          </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 function SheetList({
+  className,
   sheets,
   activeId,
   hints,
@@ -2321,98 +2696,146 @@ function SheetList({
   onPick,
   onRename,
   onRemove,
-  onReorder,
+  onMove,
   onAddBlank,
   onAddHintSheets,
-  onStartFromPaint,
-  onStartFromPsd,
-  pristine,
-  busy,
+  missingCompanions,
+  onAddCompanions,
+  onAddFromImage,
 }: {
+  className?: string;
   sheets: Sheet[];
   activeId: string | null;
   /** Every texture name the model's paints use — shown in full, companion maps included. */
   hints: string[];
-  /** The colour sheets among them that don't exist yet: what the create button would make. */
+  /** The color sheets among them that don't exist yet: what the create button would make. */
   missingHints: string[];
   onPick: (id: string) => void;
   onRename: (id: string, value: string) => void;
   onRemove: (id: string) => void;
-  onReorder: (id: string, delta: number) => void;
+  onMove: (id: string, before: string) => void;
   onAddBlank: () => void;
   onAddHintSheets: () => void;
-  onStartFromPaint: () => void;
-  onStartFromPsd: () => void;
-  /** Nothing has been drawn yet — see the Designer's own `pristine`. */
-  pristine: boolean;
-  busy: boolean;
+  /** The companion maps — normals, mostly — the model asks for that aren't on the list. */
+  missingCompanions: string[];
+  onAddCompanions: () => void;
+  onAddFromImage: () => void;
 }) {
   const t = useT();
+  // Which row is being dragged. A ref, not state: it changes on every dragover and nothing
+  // on screen depends on it until the drop.
+  const drag = useRef<string | null>(null);
+  // The names the model actually binds, for the mark on each row.
+  const bound = useMemo(
+    () => new Set(hints.map((h) => h.trim().toLowerCase())),
+    [hints],
+  );
   return (
-    <div className="rounded-lg border border-border bg-card/40 p-3.5">
-      <div className="mb-2.5 flex items-center gap-2">
-        <h2 className="text-[13px] font-semibold">{t("designer.sheets")}</h2>
-        <button
-          type="button"
-          className="ml-auto text-muted-foreground transition-colors hover:text-foreground"
-          onClick={onAddBlank}
-          title={t("designer.addSheet")}
-        >
-          <Plus className="size-4" />
-        </button>
-      </div>
+    <Card className={cn("bg-card/40", className)}>
+      <CardHeader>
+        <CardTitle>{t("designer.sheets")}</CardTitle>
+        <CardAction>
+          {/* Two ways to add one, behind the one control that means "add one". */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="cursor-default rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+              title={t("designer.addSheet")}
+            >
+              <Plus className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <MenuRow icon={FilePlus2} label={t("designer.blankSheet")} onPick={onAddBlank} />
+              <MenuRow
+                icon={FileImage}
+                label={t("designer.sheetFromImage")}
+                onPick={onAddFromImage}
+              />
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex min-h-0 flex-col">
       {/* Scrolls rather than growing: a bike's paint runs to two dozen sheets, and a list that
           long pushed the hint line and every button below the fold of the rail. */}
-      <div className="flex max-h-[40vh] flex-col gap-1.5 overflow-y-auto pr-0.5">
-        {sheets.map((sheet, i) => (
+      <div className="flex max-h-[46vh] flex-col gap-1.5 overflow-y-auto pr-0.5">
+        {sheets.map((sheet) => (
+          /* The row picks the sheet. It used to be the size label that did — a `2048²` that
+             was secretly the button — while the name was a text field and reorder and delete
+             sat beside it, so five sheets meant five text fields and fifteen buttons on a
+             264px column. Reorder and delete are now on the row you are touching, and the
+             size is what it always looked like: a label. */
           <div
             key={sheet.id}
+            draggable
+            onDragStart={(e) => {
+              drag.current = sheet.id;
+              e.dataTransfer.effectAllowed = "move";
+            }}
+            onDragOver={(e) => {
+              if (drag.current && drag.current !== sheet.id) e.preventDefault();
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (drag.current && drag.current !== sheet.id) onMove(drag.current, sheet.id);
+              drag.current = null;
+            }}
+            onDragEnd={() => (drag.current = null)}
+            onClick={() => onPick(sheet.id)}
             className={cn(
-              "flex items-center gap-1.5 rounded-md border px-1.5 py-1 transition-colors",
-              sheet.id === activeId ? "border-primary bg-primary/10" : "border-border",
+              "group flex cursor-default items-center gap-1 rounded-md border px-1.5 py-1 transition-colors",
+              sheet.id === activeId
+                ? "border-primary bg-primary/10"
+                : "border-transparent hover:bg-foreground/[0.04]",
             )}
           >
-            <button
-              type="button"
-              className="flex-none text-[11px] text-muted-foreground hover:text-foreground"
-              onClick={() => onPick(sheet.id)}
-              title={t("designer.editSheet")}
+            <span
+              className={cn(
+                "flex-none cursor-grab text-faint transition-opacity",
+                sheet.id === activeId
+                  ? "opacity-100"
+                  : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+              )}
+              title={t("designer.dragToOrder")}
             >
-              {sheet.width}²
-            </button>
+              <GripVertical className="size-3.5" />
+            </span>
             <Input
               value={sheet.name}
               placeholder={t("designer.sheetName")}
-              className="h-6 min-w-0 flex-1 border-0 bg-transparent px-1 text-[11.5px] shadow-none focus-visible:ring-0"
+              title={
+                bound.size && !bound.has(sheet.name.trim().toLowerCase())
+                  ? t("designer.sheetUnbound")
+                  : undefined
+              }
+              className={cn(
+                "h-6 min-w-0 flex-1 border-0 bg-transparent px-1 text-[12px] shadow-none focus-visible:ring-0",
+                bound.size &&
+                  !bound.has(sheet.name.trim().toLowerCase()) &&
+                  "text-warning decoration-warning/40 decoration-dotted underline-offset-4 [text-decoration-line:underline]",
+              )}
               onFocus={() => onPick(sheet.id)}
               onChange={(e) => onRename(sheet.id, e.target.value)}
             />
-            <button
-              type="button"
-              className="flex-none px-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-              disabled={i === 0}
-              onClick={() => onReorder(sheet.id, -1)}
-              title={t("designer.moveUp")}
+            <span className="flex-none px-0.5 text-[10.5px] tabular-nums text-faint">
+              {sheet.width}²
+            </span>
+            <div
+              className={cn(
+                "flex flex-none items-center transition-opacity",
+                sheet.id === activeId
+                  ? "opacity-100"
+                  : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+              )}
             >
-              ↑
-            </button>
-            <button
-              type="button"
-              className="flex-none px-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-              disabled={i === sheets.length - 1}
-              onClick={() => onReorder(sheet.id, 1)}
-              title={t("designer.moveDown")}
-            >
-              ↓
-            </button>
-            <button
-              type="button"
-              className="flex-none text-muted-foreground hover:text-destructive"
-              onClick={() => onRemove(sheet.id)}
-              title={t("common.remove")}
-            >
-              <Trash2 className="size-3.5" />
-            </button>
+              <button
+                type="button"
+                className="px-0.5 text-muted-foreground hover:text-destructive"
+                onClick={() => onRemove(sheet.id)}
+                title={t("common.remove")}
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -2423,9 +2846,6 @@ function SheetList({
           leaving the list to be copied out by hand. */}
       {!!hints.length && (
         <div className="mt-2 flex flex-col items-start gap-1.5">
-          <p className="text-[11px] leading-snug text-faint">
-            {t("paints.expected")} {hints.join(", ")}
-          </p>
           {/* Full width and clipping, not sized to its label: the rail is 224px, a bike can
               want two dozen sheets, and `Button` is `whitespace-nowrap` — so a count in the
               label, or a longer word for it in another language, ran straight out of the rail. */}
@@ -2443,33 +2863,31 @@ function SheetList({
               </span>
             </Button>
           )}
+          {/* Separate from the colour sheets on purpose. Adding these is the less common job
+              and the riskier one — see `addCompanionSheets`. */}
+          {!!missingCompanions.length && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full min-w-0 justify-start"
+              onClick={onAddCompanions}
+              title={missingCompanions.join(", ")}
+            >
+              <FilePlus2 className="size-3.5" />
+              <span className="truncate">
+                {t("designer.createCompanions", { count: missingCompanions.length })}
+              </span>
+            </Button>
+          )}
         </div>
       )}
 
-      {/* Only while there is nothing to lose. Starting from a paint or a `.psd` *replaces*
-          every sheet — that's what makes it a template step — so offering it beside work in
-          progress is offering to throw that work away. The blank sheets a model arrives with
-          are not work, which is why this reaches past "the list is empty" to "nothing has been
-          drawn on it". Adding another sheet is the ＋ above. */}
-      {pristine && (
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
-          <Button variant="outline" size="sm" disabled={busy} onClick={onStartFromPaint}>
-            {busy ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <PackageOpen className="size-3.5" />
-            )}
-            {t("designer.startFromPaint")}
-          </Button>
-          <Button variant="outline" size="sm" disabled={busy} onClick={onStartFromPsd}>
-            <FileImage className="size-3.5" /> {t("designer.startFromPsd")}
-          </Button>
-          <Button variant="outline" size="sm" onClick={onAddBlank}>
-            <FilePlus2 className="size-3.5" /> {t("designer.blankSheet")}
-          </Button>
-        </div>
-      )}
-    </div>
+      {/* The three ways to start used to sit here as well, offered while the editor was
+          still pristine. The start screen asks that question now, and asking it twice — once
+          at the front door and again in a panel beside the work — is how you end up throwing
+          away a sheet you had just made. Adding another sheet is the ＋ above. */}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2482,6 +2900,7 @@ function SheetList({
  */
 function GhostPanel({
   ghost,
+  isBike,
   sheetName,
   hasBase,
   hasGeometry,
@@ -2490,9 +2909,12 @@ function GhostPanel({
   busy,
   onTrace,
   onStockBase,
+  onClearBase,
   onChange,
 }: {
   ghost: Ghost;
+  /** What is being painted, for the glyph on the stock toggle. */
+  isBike: boolean;
   sheetName: string;
   /** Whether the sheet still holds a template that tracing could lift out of it. */
   hasBase: boolean;
@@ -2505,6 +2927,7 @@ function GhostPanel({
   onTrace: () => void;
   /** Put that texture into the sheet for real, rather than faintly underneath it. */
   onStockBase: () => void;
+  onClearBase: () => void;
   onChange: (fn: (g: Ghost) => Ghost) => void;
 }) {
   const t = useT();
@@ -2523,56 +2946,35 @@ function GhostPanel({
   // reference draws underneath, so this is showing nothing until the template is lifted out.
   const buried = showing && hasBase;
 
-  return (
-    <div className="rounded-lg border border-border bg-card/40 p-3.5">
-      <div className="mb-2.5 flex items-center gap-2">
-        <h2 className="text-[13px] font-semibold">{t("designer.reference")}</h2>
-        <button
-          type="button"
-          className="ml-auto text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
-          disabled={!ghost.template && !ghost.stock && !ghost.wire}
-          onClick={() =>
-            onChange((g) => {
-              // One eye over both, and it turns them off together rather than remembering
-              // which was on — coming back to a "reference" that shows half of what it did
-              // is the kind of state nobody is keeping track of.
-              const off = ghostShows(g);
-              return {
-                ...g,
-                showTemplate: !off,
-                // Not gated on already having one, unlike the wire below: the stock texture is
-                // fetched *because* this is on, so requiring it first would be a switch that
-                // could never be turned back on.
-                showStock: !off,
-                showWire: !off && !!g.wire,
-                // Faded all the way out counts as hidden, so switching back on has to undo
-                // that too. Otherwise the eye says "showing" over a reference at zero.
-                opacity: !off && g.opacity <= 0 ? EMPTY_GHOST.opacity : g.opacity,
-              };
-            })
-          }
-          title={t(showing ? "designer.hide" : "designer.show")}
-        >
-          {showing ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
-        </button>
-      </div>
+  // Nothing to reference and nothing to put in the sheet — no cluster at all rather than a
+  // row of controls that can only be greyed out.
+  if (!canTrace && !hasStock && !hasGeometry) return null;
 
-      <div className="mb-2 flex flex-wrap gap-1.5">
+  return (
+    /* On the picture rather than in a panel. What these switch is drawn on the sheet you are
+       looking at, and a control for that belongs on the thing it changes — the left column was
+       an inch of dead panel that existed to hold three toggles and a slider.
+       The opacity comes out on hover: it is the adjustment you make after deciding *what* to
+       show, and having it up permanently made a four-control cluster out of a three-control
+       decision. */
+    <div className="group pointer-events-auto absolute right-4 top-4 z-10 flex flex-col items-end gap-1">
+      <div className="flex items-center gap-1 rounded-lg bg-background/55 p-1 opacity-80 shadow-sm backdrop-blur transition-opacity hover:opacity-100 group-hover:opacity-100">
+        {canTrace && (
+          <GhostToggle
+            icon={<LayersIcon className="size-3.5" />}
+            label={t("designer.traceTemplate")}
+            title={t("designer.traceHint")}
+            on={tracing && ghost.showTemplate}
+            onClick={() => {
+              // Already lifted and visible — this press is asking to see it in the paint
+              // again, so put it back. Otherwise lift it, or show what has been lifted.
+              if (!tracing || ghost.showTemplate) onTrace();
+              else onChange((g) => ({ ...g, showTemplate: true }));
+            }}
+          />
+        )}
         <GhostToggle
-          icon={<LayersIcon className="size-3.5" />}
-          label={t("designer.traceTemplate")}
-          title={t(canTrace ? "designer.traceHint" : "designer.noTemplate")}
-          on={tracing && ghost.showTemplate}
-          disabled={!canTrace}
-          onClick={() => {
-            // Already lifted and visible — this press is asking to see it in the paint again,
-            // so put it back. Otherwise lift it, or just show what has already been lifted.
-            if (!tracing || ghost.showTemplate) onTrace();
-            else onChange((g) => ({ ...g, showTemplate: true }));
-          }}
-        />
-        <GhostToggle
-          icon={<Bike className="size-3.5" />}
+          icon={isBike ? <Bike className="size-3.5" /> : <Shirt className="size-3.5" />}
           label={t("designer.stockTexture")}
           title={t(hasStock ? "designer.stockHint" : "designer.noStock")}
           on={ghost.showStock}
@@ -2587,67 +2989,64 @@ function GhostPanel({
           disabled={!hasGeometry}
           onClick={() => onChange((g) => ({ ...g, showWire: !g.showWire }))}
         />
+        {hasStock && (
+          <button
+            type="button"
+            disabled={(!stockSheet && !hasBase) || busy}
+            title={t(
+              hasBase
+                ? "designer.clearBase"
+                : stockSheet
+                  ? "designer.stockAsBaseHint"
+                  : "designer.stockNoMatch",
+              { name: sheetName.trim() },
+            )}
+            onClick={hasBase ? onClearBase : onStockBase}
+            className={cn(
+              "ml-0.5 cursor-default rounded-md px-1.5 py-1 transition-colors disabled:opacity-30",
+              hasBase
+                ? "bg-primary/15 text-foreground"
+                : "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
+            )}
+          >
+            {busy ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <PaintBucket className="size-3.5" />
+            )}
+          </button>
+        )}
       </div>
 
-      {/* Not a toggle and not part of the reference — what it puts in is the sheet itself, and
-          stays there through the save. It sits here because the picture it puts in is the one
-          the button above shows faintly, and wanting that at full strength with a number over
-          it is what a good half of the people who turn the reference on came for. */}
-      {hasStock && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="mb-2 w-full min-w-0 justify-start"
-          disabled={!stockSheet || busy}
-          title={t(stockSheet ? "designer.stockAsBaseHint" : "designer.stockNoMatch", {
-            name: sheetName.trim(),
-          })}
-          onClick={onStockBase}
-        >
-          {busy ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <PaintBucket className="size-3.5" />
+      {showing && (
+        <div className="flex w-[190px] items-center gap-2 rounded-lg bg-background/85 px-2.5 py-1.5 opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100">
+          <span className="flex-none text-[10.5px] uppercase tracking-[0.09em] text-faint">
+            {t("designer.opacity")}
+          </span>
+          <Slider
+            value={ghost.opacity}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(v) => onChange((g) => ({ ...g, opacity: v }))}
+            format={(v) => `${Math.round(v * 100)}%`}
+          />
+        </div>
+      )}
+
+      {/* The three ways this shows nothing, said where the thing itself is. */}
+      {(buried || noMatch || (noStock && !noMatch)) && (
+        <p
+          className={cn(
+            "max-w-[260px] rounded-lg bg-background/85 px-2.5 py-1.5 text-right text-[11px] leading-snug shadow-sm backdrop-blur",
+            buried ? "text-warning" : noMatch ? "text-destructive" : "text-faint",
           )}
-          <span className="truncate">{t("designer.stockAsBase")}</span>
-        </Button>
-      )}
-
-      <Row label={t("designer.opacity")}>
-        <Slider
-          value={ghost.opacity}
-          min={0}
-          max={1}
-          step={0.01}
-          onChange={(v) => onChange((g) => ({ ...g, opacity: v }))}
-          format={(v) => `${Math.round(v * 100)}%`}
-        />
-      </Row>
-
-      {/* The reference is underneath, so an opaque sheet hides it completely. Saying so is
-          the difference between a feature that looks broken and one that tells you the next
-          move — which is the button directly above this line. */}
-      {buried && (
-        <p className="mt-1.5 text-[11px] leading-snug text-amber-500/90">
-          {t("designer.ghostBuried")}
-        </p>
-      )}
-
-      {/* The name binds the sheet to the mesh, so a name nothing asks for is worth saying
-          plainly — it is the same mistake that makes a paint load and show nothing. */}
-      {noMatch && (
-        <p className="mt-1.5 text-[11px] leading-snug text-destructive">
-          {t("designer.uvNoMatch", { name: sheetName.trim() })}
-        </p>
-      )}
-
-      {/* Not the same miss as the one above, and worth saying separately: a model can draw a
-          texture without shipping one of its own, so a sheet every paint replaces has islands
-          to show and no stock artwork behind them. Said without claiming which of the two it
-          is — with the UV map off there is nothing here that knows. */}
-      {noStock && !noMatch && (
-        <p className="mt-1.5 text-[11px] leading-snug text-faint">
-          {t("designer.stockNoMatch", { name: sheetName.trim() })}
+        >
+          {buried
+            ? t("designer.ghostBuried")
+            : noMatch
+              ? t("designer.uvNoMatch", { name: sheetName.trim() })
+              : t("designer.stockNoMatch", { name: sheetName.trim() })}
         </p>
       )}
     </div>
@@ -2666,7 +3065,7 @@ function GhostToggle({
   label: string;
   title: string;
   on: boolean;
-  disabled: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -2694,23 +3093,28 @@ function GhostToggle({
  * this list included, gets to stay flat.
  */
 function LayerList({
+  className,
   layers,
   selection,
   onSelect,
   onToggle,
   onRemove,
-  onReorder,
+  onMove,
   onAdd,
 }: {
+  className?: string;
   layers: Layer[];
   selection: string[];
   onSelect: (ids: string[], mode: "replace" | "toggle" | "isolate") => void;
   onToggle: (id: string, visible: boolean) => void;
   onRemove: (id: string) => void;
-  onReorder: (id: string, delta: number) => void;
+  onMove: (id: string, before: string) => void;
   onAdd: () => void;
 }) {
   const t = useT();
+  // Which row is being dragged. A ref, not state: it changes on every dragover and nothing
+  // on screen depends on it until the drop.
+  const drag = useRef<string | null>(null);
   // Top of the list is the top of the stack, which is how a layer panel reads — the array
   // itself is bottom-first because that's the order it's drawn in.
   const shown = [...layers].reverse();
@@ -2727,21 +3131,41 @@ function LayerList({
   }
 
   const row = (layer: Layer) => (
+    /* The same shape as a sheet row: grab it on the left, and what you can do to it on the
+       right. Two arrows per row, each disabled at one end, was the old way of saying "move
+       this" — and a layer stack is the one list where dragging is the obvious gesture. */
     <div
       key={layer.id}
+      draggable
+      onDragStart={(e) => {
+        drag.current = layer.id;
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onDragOver={(e) => {
+        if (drag.current && drag.current !== layer.id) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        if (drag.current && drag.current !== layer.id) onMove(drag.current, layer.id);
+        drag.current = null;
+      }}
+      onDragEnd={() => (drag.current = null)}
       className={cn(
-        "flex items-center gap-1.5 rounded-md border px-1.5 py-1 text-[11.5px] transition-colors",
-        selection.includes(layer.id) ? "border-primary bg-primary/10" : "border-border",
+        "group flex shrink-0 items-center gap-1.5 rounded-md border px-1.5 py-1 text-[11.5px] transition-colors",
+        selection.includes(layer.id) ? "border-primary bg-primary/10" : "border-transparent",
       )}
     >
-      <button
-        type="button"
-        className="flex-none text-muted-foreground hover:text-foreground"
-        onClick={() => onToggle(layer.id, !layer.visible)}
-        title={t(layer.visible ? "designer.hide" : "designer.show")}
+      <span
+        className={cn(
+          "flex-none cursor-grab text-faint transition-opacity",
+          selection.includes(layer.id)
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+        )}
+        title={t("designer.dragToOrder")}
       >
-        {layer.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
-      </button>
+        <GripVertical className="size-3.5" />
+      </span>
       {/* A follower says so here as well as in the inspector: this is the list you scan when
           you can't work out why a layer won't move. */}
       {layer.mirror && (
@@ -2758,21 +3182,16 @@ function LayerList({
       >
         {layer.kind === "text" ? layer.text || layer.name : layer.name}
       </button>
+      {/* Showing and removing, together at the end: both are about the layer as a whole
+          rather than about what it is, and the rule keeps them out of the name. */}
+      <span className="ml-1 h-3.5 w-px flex-none bg-border" />
       <button
         type="button"
-        className="flex-none px-0.5 text-muted-foreground hover:text-foreground"
-        onClick={() => onReorder(layer.id, 1)}
-        title={t("designer.raise")}
+        className="flex-none text-muted-foreground hover:text-foreground"
+        onClick={() => onToggle(layer.id, !layer.visible)}
+        title={t(layer.visible ? "designer.hide" : "designer.show")}
       >
-        ↑
-      </button>
-      <button
-        type="button"
-        className="flex-none px-0.5 text-muted-foreground hover:text-foreground"
-        onClick={() => onReorder(layer.id, -1)}
-        title={t("designer.lower")}
-      >
-        ↓
+        {layer.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
       </button>
       <button
         type="button"
@@ -2786,22 +3205,25 @@ function LayerList({
   );
 
   return (
-    <div className="rounded-lg border border-border bg-card/40 p-3.5">
-      <div className="mb-2.5 flex items-center gap-2">
-        <h2 className="text-[13px] font-semibold">{t("designer.layers")}</h2>
-        <button
-          type="button"
-          className="ml-auto text-muted-foreground transition-colors hover:text-foreground"
-          onClick={onAdd}
-          title={t("designer.addPaint")}
-        >
-          <Plus className="size-4" />
-        </button>
-      </div>
+    <Card className={cn("bg-card/40", className)}>
+      <CardHeader>
+        <CardTitle>{t("designer.layers")}</CardTitle>
+        <CardAction>
+          <button
+            type="button"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+            onClick={onAdd}
+            title={t("designer.addPaint")}
+          >
+            <Plus className="size-4" />
+          </button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex min-h-0 flex-1 flex-col">
       {!layers.length ? (
         <p className="text-[11px] leading-snug text-faint">{t("designer.noLayers")}</p>
       ) : (
-        <div className="flex flex-col gap-1">
+        <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-0.5">
           {rows.map((block) =>
             block.tag === null ? (
               row(block.members[0])
@@ -2842,6 +3264,7 @@ function LayerList({
           )}
         </div>
       )}
-    </div>
+      </CardContent>
+    </Card>
   );
 }

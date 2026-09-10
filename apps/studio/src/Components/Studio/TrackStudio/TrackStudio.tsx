@@ -575,11 +575,10 @@ export default function TrackStudio() {
       {!program ? (
         /* Nothing loaded yet. One line describes a track and the schema does the rest, and
            two starting points sit beside it for when the model isn't the answer. */
-        <div className="flex min-h-0 flex-1 items-center justify-center px-7">
+        <div className="flex min-h-0 flex-1 items-center justify-center px-4">
           <div className="w-full max-w-[560px]">
-            <div className="flex items-center gap-2.5">
-              <span className="u-skew h-3 w-1 bg-primary" />
-              <h2 className="font-cond text-[13px] font-bold uppercase tracking-[0.2em] text-foreground">
+            <div className="flex items-center">
+              <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
                 {t("track.briefTitle")}
               </h2>
             </div>
@@ -634,9 +633,8 @@ export default function TrackStudio() {
               Corners and jumps live in different lists in the program, but nobody rides
               them that way, so here they are one numbered sequence. */}
           <aside className="flex w-[268px] flex-none flex-col border-r border-border">
-            <div className="flex flex-none items-center gap-2.5 px-4 pb-2.5 pt-4">
-              <span className="u-skew h-3 w-1 bg-primary" />
-              <h2 className="flex-1 font-cond text-[13px] font-bold uppercase tracking-[0.2em] text-foreground">
+            <div className="flex flex-none items-center gap-2 px-4 pb-2.5 pt-4">
+              <h2 className="flex-1 text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
                 {t("track.program")}
               </h2>
               <span className="tabular-figures font-cond text-[11px] text-faint">
@@ -923,8 +921,8 @@ export default function TrackStudio() {
                 <div className="absolute left-4 top-4 flex items-center gap-2">
                   {rebuilding ? (
                     <span className="flex items-center gap-2 bg-black/55 px-2.5 py-1 backdrop-blur">
-                      <RefreshCw className="size-3 animate-spin text-white/90" />
-                      <span className="font-cond text-[10.5px] font-semibold uppercase tracking-[0.16em] text-white/90">
+                      <RefreshCw className="size-3 animate-spin text-foreground" />
+                      <span className="font-cond text-[10.5px] font-semibold uppercase tracking-[0.16em] text-foreground">
                         {t("track.building")}
                       </span>
                     </span>
@@ -944,7 +942,7 @@ export default function TrackStudio() {
                 </div>
               )}
 
-              {/* What the colours on the map mean. */}
+              {/* What the colors on the map mean. */}
               {stage === "plan" && !full && (
                 <div className="pointer-events-none absolute left-4 top-4 flex items-center gap-4">
                   <Legend className="bg-primary" label={t("track.legendSelected")} />
@@ -981,7 +979,7 @@ export default function TrackStudio() {
                     onClick={() => setFull((v) => !v)}
                     title={t(full ? "track.exitFullscreen" : "track.fullscreen")}
                     aria-label={t(full ? "track.exitFullscreen" : "track.fullscreen")}
-                    className="size-8 bg-black/45 text-white/90 backdrop-blur hover:bg-black/65"
+                    className="size-8 bg-black/45 text-foreground backdrop-blur hover:bg-black/65"
                   >
                     {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
                   </Button>
@@ -992,9 +990,8 @@ export default function TrackStudio() {
             {/* The lap's own height, as a line you can pull about — the same shape the
                 segment rises describe, in the form you can take hold of. */}
             <div className="flex-none border-t border-border bg-card/40 px-4 pb-2 pt-2.5">
-              <div className="flex items-center gap-2.5">
-                <span className="u-skew h-2.5 w-1 bg-primary" />
-                <span className="font-cond text-[11px] font-bold uppercase tracking-[0.2em] text-foreground">
+              <div className="flex items-center">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
                   {t("track.elevation")}
                 </span>
                 {selected ? (
@@ -1092,7 +1089,7 @@ export default function TrackStudio() {
           <aside className="flex w-[300px] flex-none flex-col overflow-y-auto border-l border-border">
             {selected ? (
               <div className="flex-none px-4 pb-4 pt-4">
-                <div className="font-cond text-[13px] font-bold uppercase tracking-[0.2em] text-foreground">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
                   {t("track.stepNumber", { n: String((scope ?? 0) + 1).padStart(2, "0") })} —{" "}
                   {stepName(selected, t)}
                 </div>
@@ -1142,7 +1139,7 @@ export default function TrackStudio() {
               /* Nothing picked: the track's own settings, which are the other half of what
                  this panel is for and have to live somewhere. */
               <div className="flex-none px-4 pb-4 pt-4">
-                <div className="font-cond text-[13px] font-bold uppercase tracking-[0.2em] text-foreground">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
                   {t("track.trackSettings")}
                 </div>
                 <div className="mt-1 font-mono text-[10.5px] leading-snug text-faint">
@@ -1301,14 +1298,14 @@ export default function TrackStudio() {
                 Problems block the build; notes only say the track is unlike a published
                 one, which a blank lap always is. */}
             <div className="mt-auto flex-none border-t border-border px-4 pb-4 pt-3.5">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center">
                 <span
                   className={cn(
                     "u-skew h-3 w-1",
                     problems.length > 0 ? "bg-destructive" : notes.length > 0 ? "bg-warning" : "bg-success",
                   )}
                 />
-                <h3 className="flex-1 font-cond text-[11.5px] font-bold uppercase tracking-[0.2em] text-foreground">
+                <h3 className="flex-1 text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
                   {t("track.checks")}
                 </h3>
                 <span
@@ -1682,7 +1679,7 @@ function climbOf(program: TrackProgram): number {
   return Number.isFinite(hi - lo) ? hi - lo : 0;
 }
 
-/** One key of the plan's colour code. */
+/** One key of the plan's color code. */
 function Legend({ className, label }: { className: string; label: string }) {
   return (
     <span className="flex items-center gap-2">
@@ -1702,7 +1699,7 @@ function Stat({ value, unit, label }: { value: string; unit?: string; label: str
         {value}
         {unit && <span className="text-[13px]"> {unit}</span>}
       </div>
-      <div className="mt-[5px] font-cond text-[10px] font-semibold uppercase tracking-[0.2em] text-faint">
+      <div className="mt-[5px] text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
         {label}
       </div>
     </div>

@@ -133,7 +133,7 @@ export default function LapPlan({
         fill="none"
       />
 
-      {/* Every jump, in the colour its row carries, so a lump on the map and a line in the
+      {/* Every jump, in the color its row carries, so a lump on the map and a line in the
           list are obviously the same thing. */}
       {program.features.map((f, i) => {
         const span = featureSpan(f);

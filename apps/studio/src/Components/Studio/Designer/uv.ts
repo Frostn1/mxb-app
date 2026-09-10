@@ -202,7 +202,7 @@ export function faceAt(parts: UvPart[], u: number, v: number): Face | null {
  * Which sheet's uv layout to read for `sheetName`.
  *
  * Normally itself. But a companion map — `plastics_n` beside `plastics`, and the `_r`/`_s`
- * maps with it — is never bound to any geometry: the material names the colour sheet, and the
+ * maps with it — is never bound to any geometry: the material names the color sheet, and the
  * companion rides along on the *same* uv, which is the whole reason it can be a separate
  * image at all. Asked for one by name, nothing matched and the editor put up a blank sheet
  * with no parts on it — every island, every clip and every hover gone, for a sheet whose
@@ -757,7 +757,7 @@ const MAX_WIRE = 1024;
  * not into a word in the corner that has to be hunted for one texel at a time.
  *
  * Amber and blue rather than a red/green pair, so the two stay apart for the ~8% of riders who
- * can't tell those two colours from each other. Kept faint: this washes over somebody's
+ * can't tell those two colors from each other. Kept faint: this washes over somebody's
  * livery, and a guide that drowns the artwork is one they turn off.
  */
 const FLANK_WASH: Record<number, string> = {

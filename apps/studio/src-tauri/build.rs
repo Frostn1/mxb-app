@@ -19,5 +19,11 @@ fn main() {
     }
     println!("cargo::rerun-if-changed=src/sidecar_lock.rs");
 
+    // Same mirror for the secure-content packer, which mxb-core also owns.
+    println!("cargo::rustc-check-cfg=cfg(mxbsecure)");
+    if std::env::var("DEP_MXBCORE_MXBSECURE").as_deref() == Ok("1") {
+        println!("cargo::rustc-cfg=mxbsecure");
+    }
+
     tauri_build::build()
 }

@@ -11,6 +11,7 @@ function Progress({ value, className, barClassName }: ProgressProps) {
   const indeterminate = value === undefined;
   return (
     <div
+      data-slot="progress"
       className={cn(
         "relative h-1 overflow-hidden bg-foreground/[0.08]",
         className,
