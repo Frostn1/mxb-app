@@ -946,7 +946,7 @@ export const fr: Translation = {
   "serverBrowser.favesOnly": "Favoris",
   "serverBrowser.star": "Ajouter aux favoris",
   "serverBrowser.unstar": "Retirer des favoris",
-  "serverBrowser.favesEmpty": "Aucun favori — ajoutez un serveur en étoile pour le garder ici.",
+  "serverBrowser.favesEmpty": "Aucun favori - ajoutez un serveur en étoile pour le garder ici.",
   "serverBrowser.region.all": "Toutes les régions",
   "serverBrowser.region.naEast": "Amérique du Nord (Est)",
   "serverBrowser.region.naWest": "Amérique du Nord (Ouest)",

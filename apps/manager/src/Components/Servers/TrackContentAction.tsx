@@ -16,7 +16,7 @@ interface Props {
   track: string;
   /** The catalog post the backend's index already matched this track to, when it has one
    *  (see {@link useTrackCatalog}). Its presence is what turns this control from "look for
-   *  it" into "install it" — no search, no click spent finding out. */
+   *  it" into "install it" - no search, no click spent finding out. */
   known?: TrackHit;
   /** The index is still reading candidate pages for this track: neither found nor ruled out
    *  yet, so the control waits rather than offering a search that may be about to be
@@ -29,11 +29,11 @@ interface Props {
 }
 
 /**
- * The "this track isn't installed — get it" control.
+ * The "this track isn't installed - get it" control.
  *
  * The best case costs nothing: when the track index has already matched this track to an
  * mxb-mods post ({@link Props.known}), the button installs it directly. That covers the
- * tracks servers actually run, including the ones no title match would find — a post titled
+ * tracks servers actually run, including the ones no title match would find - a post titled
  * "Farm14 v0.1" ships `Farm14.pkz`, and the index knows it.
  *
  * Otherwise it falls back to the per-track search across the three catalogs ({@link

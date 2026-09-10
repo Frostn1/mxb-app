@@ -3237,7 +3237,7 @@ export function guessServerTrack(track: string): Promise<TrackGuess> {
 
 /** One installed track, as the server browser matches it (see `lib/trackContent`). */
 export interface InstalledTrack {
-  /** The track's internal folder id — exactly the value a server reports as its track. */
+  /** The track's internal folder id - exactly the value a server reports as its track. */
   id: string;
   /** Absolute path of the `.pkz` (or folder), for reading its preview. */
   path: string;
@@ -3249,7 +3249,7 @@ export function installedTrackIds(): Promise<InstalledTrack[]> {
   return invoke<InstalledTrack[]>("installed_track_ids");
 }
 
-/** How a track id was matched to a catalog post — by an exact file name it ships, or by its
+/** How a track id was matched to a catalog post - by an exact file name it ships, or by its
  *  title/slug. The UI shows both the same way. */
 export type TrackVia = "file" | "title";
 
@@ -3262,7 +3262,7 @@ export interface TrackHit {
 }
 
 /** What {@link resolveServerTracks} found, plus whether the backend index is still filling
- *  itself in — `pending` ids are "still looking", not "not available". */
+ *  itself in - `pending` ids are "still looking", not "not available". */
 export interface TrackResolution {
   /** Track id (exactly as asked) → the catalog post that has it. */
   found: Record<string, TrackHit>;

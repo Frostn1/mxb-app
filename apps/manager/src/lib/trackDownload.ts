@@ -2,11 +2,11 @@
  * Finding a missing track for download.
  *
  * When a server names a track that isn't on disk, we look for it across the three catalogs the
- * app already knows — mxb-mods (free), MXB Hub, and mxbikes-shop (paid) — in that order, and
+ * app already knows - mxb-mods (free), MXB Hub, and mxbikes-shop (paid) - in that order, and
  * return the first confident match. Free/owned matches can be queued straight into the install
  * pipeline; a paid match comes back with a price tag and a link to buy, never an auto-purchase.
  *
- * Matching an internal track id (`2026_ARLSX_RD14`) to a prose catalog title ("2026 ARL SX —
+ * Matching an internal track id (`2026_ARLSX_RD14`) to a prose catalog title ("2026 ARL SX -
  * Round 14") is fuzzy, so it reuses the same token scorer the Library uses to badge installed
  * mods ({@link buildInstalledIndex}): we index the track name and ask whether each catalog
  * title "is" it. Below that bar we return `none` rather than guess, and the UI offers a manual
@@ -18,7 +18,7 @@ import { shopCatalogSearch, formatPrice } from "@/api/shop";
 import type { HubMod, ModSummary, ShopMod } from "@frost/shared/types";
 import { buildInstalledIndex } from "./installedMatch";
 
-/** mxb-mods' "Tracks" category — `MOD_TYPES`' tracks `categoryId`. Not 29: that is the
+/** mxb-mods' "Tracks" category - `MOD_TYPES`' tracks `categoryId`. Not 29: that is the
  *  *bikes* category, and searching it for a track name matched liveries or nothing at all. */
 const TRACKS_CATEGORY = 22;
 
@@ -47,7 +47,7 @@ function looseTrackQuery(trackId: string): string | null {
   return kept.join(" ");
 }
 
-/** A readable label for the internal track id — the id itself, since that's what hosts and
+/** A readable label for the internal track id - the id itself, since that's what hosts and
  *  catalogs both derive from and it's what the player will recognize in a search box. */
 export function trackQuery(trackId: string): string {
   // Internal ids are often `Snake_Or-Dashed`; a space-separated form searches far better.
@@ -89,7 +89,7 @@ export async function resolveMissingTrack(
     return null;
   };
 
-  // 1. mxb-mods — free. The best outcome: one click and it's queued.
+  // 1. mxb-mods - free. The best outcome: one click and it's queued.
   {
     const hit = await firstMatch(
       (q) => searchMods(q, TRACKS_CATEGORY, 1),
@@ -98,7 +98,7 @@ export async function resolveMissingTrack(
     if (hit) return { kind: "mxbMods", title: hit.title, mod: hit };
   }
 
-  // 2. MXB Hub — may be free or paid.
+  // 2. MXB Hub - may be free or paid.
   {
     let currency = "USD";
     const hit = await firstMatch(
@@ -122,7 +122,7 @@ export async function resolveMissingTrack(
     }
   }
 
-  // 3. mxbikes-shop — paid. We can't download it, but we can show the price and link out.
+  // 3. mxbikes-shop - paid. We can't download it, but we can show the price and link out.
   //
   // Searched, not looked up by name. This used `shopMatchCatalog`, which is the *exact*
   // title matcher the purchases page needs to map a scraped product name onto its catalog

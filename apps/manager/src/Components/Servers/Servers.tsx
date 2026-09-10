@@ -82,7 +82,7 @@ function readFlag(key: string, fallback: boolean): boolean {
  *
  * On top of the fetch: any column sorts (click its header to flip), servers can be starred
  * to a favourites-only view, and the host's own `location` text is grouped into a small set
- * of regions for the filter (see `lib/serverRegion`) — three conveniences ported from the
+ * of regions for the filter (see `lib/serverRegion`) - three conveniences ported from the
  * standalone browser.
  */
 
@@ -92,7 +92,7 @@ type SortDir = "asc" | "desc";
 
 /**
  * Which way a column runs when first clicked. Descending for "more is what I want" (players),
- * ascending for everything else — clicking Players and landing on the empty servers reads as
+ * ascending for everything else - clicking Players and landing on the empty servers reads as
  * a bug, not a default.
  */
 const DEFAULT_DIR: Record<SortMode, SortDir> = {
@@ -125,10 +125,10 @@ const Servers = () => {
   const [dir, setDir] = useState<SortDir>(DEFAULT_DIR.players);
   const [region, setRegion] = useState<string>("all");
   const [favesOnly, setFavesOnly] = useState(false);
-  // Hide servers running a track the player doesn't have — no point joining one you can't load.
+  // Hide servers running a track the player doesn't have - no point joining one you can't load.
   // Sticky, default off.
   const [installedOnly, setInstalledOnly] = useState(() => readFlag(INSTALLED_ONLY_KEY, false));
-  // Hide empty servers — an empty one is rarely what someone opening the browser is after, so
+  // Hide empty servers - an empty one is rarely what someone opening the browser is after, so
   // this defaults on and is remembered, opening the browser straight to servers with riders.
   const [hideEmpty, setHideEmpty] = useState(() => readFlag(HIDE_EMPTY_KEY, true));
   useEffect(() => {
@@ -147,7 +147,7 @@ const Servers = () => {
   }, [hideEmpty]);
   const favs = useFavourites(servers);
 
-  // Picture grid or dense table — a sticky per-machine preference.
+  // Picture grid or dense table - a sticky per-machine preference.
   const [view, setView] = useState<ViewMode>(() => {
     try {
       return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "cards";
@@ -224,7 +224,7 @@ const Servers = () => {
     [servers],
   );
 
-  /** The region buckets actually present, in a fixed order — not the raw host strings. */
+  /** The region buckets actually present, in a fixed order - not the raw host strings. */
   const regions = useMemo(() => {
     const present = new Set<RegionKey>();
     for (const s of servers ?? []) present.add(canonicalRegion(s.location));
@@ -614,9 +614,9 @@ const Servers = () => {
                       <div className="flex items-center gap-2">
                         <span
                           className="block max-w-[200px] truncate"
-                          title={[s.track, s.trackLayout].filter(Boolean).join(" — ")}
+                          title={[s.track, s.trackLayout].filter(Boolean).join(" - ")}
                         >
-                          {s.track || "—"}
+                          {s.track || "-"}
                           {s.trackLayout && (
                             <span className="text-faint"> · {s.trackLayout}</span>
                           )}

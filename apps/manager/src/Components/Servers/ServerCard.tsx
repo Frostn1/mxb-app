@@ -57,7 +57,7 @@ export default function ServerCard({
 
   // The archive to read art out of, or null when there is nothing installed to read. A plain
   // string, deliberately: `matchTrack` builds a fresh object every render, so keying the
-  // effect on `match` itself would re-run it — an IPC call per card, per render. The path is
+  // effect on `match` itself would re-run it - an IPC call per card, per render. The path is
   // stable, so the preview is fetched once per track and survives every refresh.
   const previewPath = match.state === "installed" ? (match.installed?.path ?? null) : null;
 
@@ -141,7 +141,7 @@ export default function ServerCard({
           )}
         </span>
 
-        {/* Latency, bottom-left — the other number people pick a server on. */}
+        {/* Latency, bottom-left - the other number people pick a server on. */}
         {server.pingMs !== null && (
           <span
             className={cn(
@@ -162,7 +162,7 @@ export default function ServerCard({
         </span>
         <div className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
           <span className="truncate" title={server.track}>
-            {server.track || "—"}
+            {server.track || "-"}
           </span>
           {cat && (
             <>
@@ -204,7 +204,7 @@ export default function ServerCard({
             {joining ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
             {t("serverBrowser.join")}
           </button>
-          {/* The `ip:port` the master gave us — the one thing someone needs to hand a server
+          {/* The `ip:port` the master gave us - the one thing someone needs to hand a server
               to a friend, or to reconnect from the game's own address box. */}
           <button
             onClick={() => {

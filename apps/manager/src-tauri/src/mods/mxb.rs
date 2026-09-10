@@ -763,7 +763,7 @@ pub async fn ratings(ids: &[u64]) -> HashMap<u64, ModRating> {
 /// WP's own `per_page` ceiling. Asking for more is a 400, not a bigger page.
 const BULK_PER_PAGE: u32 = 100;
 
-/// One listing page of a category, as light post summaries — for building the track index
+/// One listing page of a category, as light post summaries - for building the track index
 /// ([`super::trackindex`]) rather than for a browse view.
 ///
 /// The tracks category is ~1,600 posts; this pages it 100 at a time straight off the REST
@@ -815,7 +815,7 @@ pub async fn downloads_at(link: &str) -> anyhow::Result<Vec<DownloadOption>> {
 ///
 /// MediaFire puts the real name in the path (`/file/<id>/Farm14.pkz/file`); Google Drive and
 /// Mega use opaque ids and yield nothing here. That asymmetry is the whole reason this is
-/// best-effort rather than a guarantee — roughly half of catalog links name their file.
+/// best-effort rather than a guarantee - roughly half of catalog links name their file.
 pub fn download_file_name(url: &str) -> Option<String> {
     let name = url_file_name(url);
     let name = percent_decode(name);

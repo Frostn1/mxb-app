@@ -941,7 +941,7 @@ export const ptBR: Translation = {
   "serverBrowser.favesOnly": "Favoritos",
   "serverBrowser.star": "Adicionar aos favoritos",
   "serverBrowser.unstar": "Remover dos favoritos",
-  "serverBrowser.favesEmpty": "Nenhum favorito ainda — marque um servidor com a estrela para mantê-lo aqui.",
+  "serverBrowser.favesEmpty": "Nenhum favorito ainda - marque um servidor com a estrela para mantê-lo aqui.",
   "serverBrowser.region.all": "Todas as regiões",
   "serverBrowser.region.naEast": "América do Norte (Leste)",
   "serverBrowser.region.naWest": "América do Norte (Oeste)",

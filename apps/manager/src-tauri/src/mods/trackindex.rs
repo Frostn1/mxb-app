@@ -1,14 +1,14 @@
 //! Knowing, before the user asks, whether a server's track can be downloaded.
 //!
-//! The server browser gets a track as an internal id — `Farm14`, `Highland-Mx`,
-//! `2026_ARLMX_RD11_INDIANA_Pro` — and needs to say one of three things about it: installed,
+//! The server browser gets a track as an internal id - `Farm14`, `Highland-Mx`,
+//! `2026_ARLMX_RD11_INDIANA_Pro` - and needs to say one of three things about it: installed,
 //! downloadable from here, or not something we can get. The first is a disk scan. This module
 //! is the second.
 //!
 //! ## Why an index, and why two halves
 //!
 //! Answering per-track over the network ([`crate::mods::mxb::search`] then a page fetch) is
-//! what the app did before, and it can only run *after* the user clicks — so the browser can't
+//! what the app did before, and it can only run *after* the user clicks - so the browser can't
 //! badge anything ahead of time, and every click pays a search. An index inverts that, but the
 //! catalog only gives up half of what matching needs cheaply:
 //!
@@ -17,13 +17,13 @@
 //!   front, refreshed daily. Exact title/slug matching resolves about a third of live servers.
 //!
 //! * **File names are not.** A mod's download links live only in its *rendered page*, one
-//!   fetch each — and even then only MediaFire puts the real name in the URL; Drive and Mega
+//!   fetch each - and even then only MediaFire puts the real name in the URL; Drive and Mega
 //!   use opaque ids. Roughly half of catalog links name their file.
 //!
 //! File names are worth the fetches because they catch exactly what titles cannot: a post
 //! titled "Farm14 v0.1" ships `Farm14.pkz`, "Five-Two SMX" ships `SMX.pkz`, and "Rail MX"
 //! ships `Motoland_MX_Park.pkz`. A version suffix or a rename defeats title matching outright,
-//! and the file name is the author's own statement of what the track is called on disk — which
+//! and the file name is the author's own statement of what the track is called on disk - which
 //! is precisely the id a server reports.
 //!
 //! ## The drip
@@ -32,8 +32,8 @@
 //! would be ~1,600 requests per user against a Cloudflare-fronted site, to learn about tracks
 //! nobody is hosting. Instead [`resolve`] queues the track ids live servers are actually
 //! running that titles didn't resolve, and the drip behind it works the busiest first and stops at
-//! [`MAX_PAGES_PER_SESSION`]. Results are permanent — a file name is a fact about a published
-//! mod, not a cache of a changing value — so the index converges over a few sessions and
+//! [`MAX_PAGES_PER_SESSION`]. Results are permanent - a file name is a fact about a published
+//! mod, not a cache of a changing value - so the index converges over a few sessions and
 //! costs nothing thereafter.
 
 use super::ModSummary;
@@ -43,7 +43,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// mxb-mods' "Tracks" category — the `tracks` entry of `MOD_TYPES` in `src/api/mods.ts`.
+/// mxb-mods' "Tracks" category - the `tracks` entry of `MOD_TYPES` in `src/api/mods.ts`.
 const TRACKS_CATEGORY: u32 = 22;
 
 /// How long the title listing is served before a refresh is spawned behind it. Daily: new
@@ -64,10 +64,10 @@ const MAX_LISTING_PAGES: u32 = 40;
 /// budget has to span the cascade, so it lives in [`pages_read`] rather than in a loop bound.
 ///
 /// What the cap doesn't spend this session it spends the next, because what the drip learns
-/// is kept — so a low ceiling costs convergence time, never coverage.
+/// is kept - so a low ceiling costs convergence time, never coverage.
 const SESSION_PAGE_BUDGET: usize = 60;
 
-/// Pages in flight at once. Low on purpose — this is background work nobody is waiting on,
+/// Pages in flight at once. Low on purpose - this is background work nobody is waiting on,
 /// and it shares a Cloudflare budget with the browsing the user *is* waiting on.
 const ENRICH_CONCURRENCY: usize = 3;
 
@@ -90,7 +90,7 @@ pub struct Entry {
     pub link: String,
     pub date: String,
     /// File name stems the mod's downloads carry, e.g. `["Farm14"]`. Empty after enrichment
-    /// means the page was read and named nothing — a Drive-only mod — which is different from
+    /// means the page was read and named nothing - a Drive-only mod - which is different from
     /// never having been read; `enriched_at` is what tells those apart.
     #[serde(default)]
     pub files: Vec<String>,
@@ -136,7 +136,7 @@ pub struct Hit {
     pub via: Via,
 }
 
-/// What [`resolve`] found, plus whether the index is still filling itself in — the browser
+/// What [`resolve`] found, plus whether the index is still filling itself in - the browser
 /// uses `pending` to say "still looking" rather than "not available" for a track the drip
 /// hasn't reached yet.
 #[derive(Debug, Clone, Serialize)]
@@ -213,20 +213,20 @@ fn find(lookup: &Lookup, entries: &[Entry], track: &str) -> Option<Hit> {
 /// The shortest title allowed to claim a track id it is merely *contained in*, and the
 /// largest multiple of that title's length the id may be.
 ///
-/// These guard one arm of [`candidates`] only — the "post title appears inside the track id"
-/// case — and they exist because that arm is what made rounds 2-5 of the first live run spend
+/// These guard one arm of [`candidates`] only - the "post title appears inside the track id"
+/// case - and they exist because that arm is what made rounds 2-5 of the first live run spend
 /// 32 pages to resolve 3 tracks. A league id like `2026arlmxrd11indianapro` contains
 /// `indiana` and `pro`, so every generic short title in the catalog queued itself as a
 /// candidate for tracks that were never going to match. Requiring the title to be both
-/// substantial in itself and a real fraction of the id keeps the arm's actual wins —
-/// `outpost` inside `outpostprepped`, `islandsx` inside `ghptracksislandsx` — and drops the
+/// substantial in itself and a real fraction of the id keeps the arm's actual wins -
+/// `outpost` inside `outpostprepped`, `islandsx` inside `ghptracksislandsx` - and drops the
 /// rest.
 const MIN_CONTAINED_TITLE: usize = 5;
 const MAX_CONTAINED_RATIO: usize = 3;
 
 /// Posts worth reading a page for, when looking for `track`.
 ///
-/// Purely local — it decides which pages to spend fetches on, never what matches. The rule is
+/// Purely local - it decides which pages to spend fetches on, never what matches. The rule is
 /// containment either way round on the folded key, which is what the real misses look like:
 /// `Farm14` inside `farm14v01` ("Farm14 v0.1"), `smx` inside `fivetwosmx` ("Five-Two SMX").
 /// Shorter titles rank first, since a title that is barely longer than the id is far likelier
@@ -248,7 +248,7 @@ fn candidates(entries: &[Entry], track: &str) -> Vec<usize> {
             // version, an author prefix), in its title or its slug.
             let widened = t.contains(&key) || s.contains(&key);
             // The narrow arm: the track id is the post's title plus a suffix the author
-            // didn't publish under. Guarded — see the two constants above.
+            // didn't publish under. Guarded - see the two constants above.
             let contained = key.contains(&t)
                 && t.len() >= MIN_CONTAINED_TITLE
                 && t.len() * MAX_CONTAINED_RATIO >= key.len();
@@ -288,7 +288,7 @@ fn in_flight() -> &'static Mutex<HashSet<String>> {
 /// Track ids the drip has already been through this session and could not place.
 ///
 /// The terminal state the index was missing. Without it "we haven't looked yet" and "we looked
-/// and there is nothing" are the same answer, so the browser can only ever say "Looking…" —
+/// and there is nothing" are the same answer, so the browser can only ever say "Looking…" -
 /// and the queue re-reads the same dead ends every time the list refreshes.
 ///
 /// Session-scoped on purpose: a restart is cheap and the catalog does gain posts. It is not
@@ -451,8 +451,8 @@ fn spawn_listing_refresh(app: &tauri::AppHandle) {
 
 // ───────────────────────────────── the drip ─────────────────────────────────
 
-/// Read one mod page and record what it ships. Failures are recorded too — as an enrichment
-/// with no files — so a page that 404s or is Cloudflare-blocked isn't retried on every open.
+/// Read one mod page and record what it ships. Failures are recorded too - as an enrichment
+/// with no files - so a page that 404s or is Cloudflare-blocked isn't retried on every open.
 async fn enrich_one(entry: &Entry) -> (u64, Vec<String>) {
     let files = match super::mxb::downloads_at(&entry.link).await {
         Ok(downloads) => downloads
@@ -467,13 +467,13 @@ async fn enrich_one(entry: &Entry) -> (u64, Vec<String>) {
     (entry.id, files)
 }
 
-/// Work through `wanted` — track ids the index couldn't resolve — reading pages for the
+/// Work through `wanted` - track ids the index couldn't resolve - reading pages for the
 /// candidates each one suggests, busiest track first.
 ///
 /// `wanted` arrives already ordered by how many servers are running each track, so the drip
 /// spends its budget where it will change what the most people see.
 async fn drip(app: tauri::AppHandle, wanted: Vec<String>) {
-    // Whatever [`round`] does — finish, give up early, or panic — these ids come back and are
+    // Whatever [`round`] does - finish, give up early, or panic - these ids come back and are
     // marked settled (see [`Claim`]), and the browser is told to ask again. A round that
     // learned nothing still has to say so: "Looking…" is a state the UI cannot leave on its
     // own, because the only thing that moves it is this event.
@@ -539,7 +539,7 @@ async fn round(app: &tauri::AppHandle, wanted: &[String]) {
         }
     }
 
-    // Fold the results into the index as it stands *now* — a listing refresh may have landed
+    // Fold the results into the index as it stands *now* - a listing refresh may have landed
     // while we were fetching, and rebuilding from the copy we started with would lose it.
     let base = current().unwrap_or(index);
     let mut next = Index {
@@ -563,8 +563,8 @@ async fn round(app: &tauri::AppHandle, wanted: &[String]) {
 /// The track ids one drip round has claimed, released on drop and marked [`settled`].
 ///
 /// Deliberately a guard rather than a call at the end of the round. Every early return in
-/// [`round`] is a path where nothing was learned — the listing wouldn't load, the session's
-/// page budget was already spent, no candidate pages to read — and a claim left behind on one
+/// [`round`] is a path where nothing was learned - the listing wouldn't load, the session's
+/// page budget was already spent, no candidate pages to read - and a claim left behind on one
 /// of those is **permanent**: [`resolve`] goes on reporting that track as pending, so the
 /// browser shows "Looking…" and never stops, *and* the same claim filters it out of the queue,
 /// so nothing ever looks again. It is stuck in both directions at once.
@@ -574,7 +574,7 @@ async fn round(app: &tauri::AppHandle, wanted: &[String]) {
 ///
 /// Settling them is the other half, and it is what makes the notification in [`drip`] safe:
 /// without it, the re-resolve that event triggers would queue the same unanswerable ids, drip
-/// again, learn nothing again, and notify again — forever. A track the drip has already been
+/// again, learn nothing again, and notify again - forever. A track the drip has already been
 /// through is not asked about twice.
 struct Claim(Vec<String>);
 
@@ -611,7 +611,7 @@ pub async fn resolve(app: &tauri::AppHandle, tracks: Vec<String>) -> anyhow::Res
     }
 
     // Queue whatever is left, minus anything already being worked on and anything the drip has
-    // already been through without finding — see [`settled`].
+    // already been through without finding - see [`settled`].
     let queue: Vec<String> = {
         let mut f = lock(in_flight());
         let s = lock(settled());
@@ -765,7 +765,7 @@ mod tests {
         assert!(candidates(&entries, "2026_ARLMX_RD11_INDIANA_Pro").is_empty());
     }
 
-    /// Tightening one arm must not touch the other two — these are the round-one wins.
+    /// Tightening one arm must not touch the other two - these are the round-one wins.
     #[test]
     fn candidates_still_widen_on_title_and_slug() {
         let entries = vec![

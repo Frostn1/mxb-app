@@ -939,7 +939,7 @@ export const it: Translation = {
   "serverBrowser.favesOnly": "Preferiti",
   "serverBrowser.star": "Aggiungi ai preferiti",
   "serverBrowser.unstar": "Rimuovi dai preferiti",
-  "serverBrowser.favesEmpty": "Nessun preferito — aggiungi un server con la stella per tenerlo qui.",
+  "serverBrowser.favesEmpty": "Nessun preferito - aggiungi un server con la stella per tenerlo qui.",
   "serverBrowser.region.all": "Tutte le regioni",
   "serverBrowser.region.naEast": "Nord America (Est)",
   "serverBrowser.region.naWest": "Nord America (Ovest)",

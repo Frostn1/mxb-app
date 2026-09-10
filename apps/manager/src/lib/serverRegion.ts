@@ -3,15 +3,15 @@
  *
  * The field is free text the host typed into their own config, and it shows: across one live
  * list of 604 servers, 371 left it blank and the rest spelled the same handful of places a
- * dozen ways — `USA (East)`, `US East`, `North Carolina`; `Europe (Germany)`, `Europe /
- * Germany`, `Frankfurt, Germany`, `de` — alongside entries that name no place at all
+ * dozen ways - `USA (East)`, `US East`, `North Carolina`; `Europe (Germany)`, `Europe /
+ * Germany`, `Frankfurt, Germany`, `de` - alongside entries that name no place at all
  * (`forest`, `redbud mx`, `123`, `YOUR MOMS`). Listing those raw in a filter gives a dropdown
  * of nonsense with the real regions scattered through it.
  *
  * So the filter groups by {@link canonicalRegion}: a small fixed set of buckets, matched on
  * keywords, with everything unrecognised falling into `other`. The *row* still shows what the
  * host wrote when it means something, because "Europe (Germany)" tells a player more than
- * "Europe" does — {@link regionLabel} is the one that decides that.
+ * "Europe" does - {@link regionLabel} is the one that decides that.
  *
  * The upstream `MasterServer` carries the host's text as `location`, so callers pass that in.
  *
@@ -44,7 +44,7 @@ export const REGION_LABEL_KEY: Record<RegionKey, TKey> = {
   other: "serverBrowser.region.other",
 };
 
-/** The order the dropdown lists them in — busiest regions first, `other` last. */
+/** The order the dropdown lists them in - busiest regions first, `other` last. */
 export const REGION_ORDER: RegionKey[] = [
   "na-east",
   "na-west",
@@ -103,7 +103,7 @@ export function canonicalRegion(raw: string): RegionKey {
  * What to print on a row: the host's own text when it names a place we recognised, and
  * nothing at all when it doesn't.
  *
- * Keeping the raw string is the point — `Europe (Germany)` and `Australia (Sydney)` are more
+ * Keeping the raw string is the point - `Europe (Germany)` and `Australia (Sydney)` are more
  * use to a player than the bucket they fall in. But a server whose region is `YOUR MOMS` has
  * told us nothing, and printing it is worse than printing nothing.
  */

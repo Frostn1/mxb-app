@@ -1,8 +1,8 @@
 /**
  * Deciding whether a server's track is already on disk.
  *
- * A server reports its track by internal id — the top folder inside the track's `.pkz`, e.g.
- * `2026_ARLSX_RD14` or `walnut` — and {@link installedTrackIds} returns exactly those ids for
+ * A server reports its track by internal id - the top folder inside the track's `.pkz`, e.g.
+ * `2026_ARLSX_RD14` or `walnut` - and {@link installedTrackIds} returns exactly those ids for
  * everything installed. So the match is, at heart, an equality check; the only wrinkle is that
  * authors are inconsistent with case, spaces, dashes and underscores between the packaged folder
  * and how a host typed it, so we compare on a normalized form as well.
@@ -31,7 +31,7 @@ export function buildTrackIndex(installed: InstalledTrack[]): TrackIndex {
 }
 
 /** Whether a server's track content is present. `unknown` is for servers that name no track
- *  (practice/free-roam lobbies) — there is nothing to download and nothing missing. */
+ *  (practice/free-roam lobbies) - there is nothing to download and nothing missing. */
 export type TrackContentState = "installed" | "missing" | "unknown";
 
 export interface TrackMatch {

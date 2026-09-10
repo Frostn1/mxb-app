@@ -925,7 +925,7 @@ export const en = {
   "serverBrowser.favesOnly": "Favourites",
   "serverBrowser.star": "Star this server",
   "serverBrowser.unstar": "Remove from favourites",
-  "serverBrowser.favesEmpty": "No favourites yet — star a server to keep it here.",
+  "serverBrowser.favesEmpty": "No favourites yet - star a server to keep it here.",
   "serverBrowser.region.all": "All regions",
   "serverBrowser.region.naEast": "North America (East)",
   "serverBrowser.region.naWest": "North America (West)",

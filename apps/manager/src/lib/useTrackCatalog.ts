@@ -8,7 +8,7 @@ import {
 import { matchTrack, type TrackIndex } from "./trackContent";
 
 /**
- * Which of the browser's missing tracks can actually be downloaded — worked out up front,
+ * Which of the browser's missing tracks can actually be downloaded - worked out up front,
  * for every server on screen at once.
  *
  * The old flow could only answer this *after* a click: each "get this track" button ran its
@@ -20,7 +20,7 @@ import { matchTrack, type TrackIndex } from "./trackContent";
  * Two things it is careful about:
  *
  * * **Order is priority.** Ids go out ranked by how many servers are running them, because
- *   whatever the index can't answer becomes its background queue — so the tracks the most
+ *   whatever the index can't answer becomes its background queue - so the tracks the most
  *   people are looking at are the ones it reads pages for first.
  * * **It re-asks, but only when there is a reason to.** The queue fills in behind us, so
  *   `track-index://updated` triggers another resolve; the set of ids is otherwise compared by
@@ -78,7 +78,7 @@ export function useTrackCatalog(
         });
       })
       // A failed resolve leaves every track looking un-gettable, which is the same thing the
-      // browser showed before this existed — the per-track search is still there behind the
+      // browser showed before this existed - the per-track search is still there behind the
       // button. Not worth a toast.
       .catch(() => {
         if (runId.current === id) setCatalog(EMPTY);

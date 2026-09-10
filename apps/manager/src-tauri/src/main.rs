@@ -7699,7 +7699,7 @@ async fn scan_library(
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InstalledTrack {
-    /// The track's internal folder id — the top-level directory inside its `.pkz`, which is
+    /// The track's internal folder id - the top-level directory inside its `.pkz`, which is
     /// exactly the value a server reports as its track. Deliberately not the file name: a pkz
     /// named `Farm14.pkz` holds a folder `Farm14`, and the master names the folder.
     id: String,
@@ -7710,8 +7710,8 @@ struct InstalledTrack {
 /// The internal ids of every installed track, so the browser can say which servers' tracks the
 /// player already has.
 ///
-/// Walks `<mods>/mods/tracks` — tracks sit in category subfolders (`motocross/`, `supercross/`…)
-/// under it — and reads each pkz's own top folder. That, not the file name, is what the master
+/// Walks `<mods>/mods/tracks` - tracks sit in category subfolders (`motocross/`, `supercross/`…)
+/// under it - and reads each pkz's own top folder. That, not the file name, is what the master
 /// reports and what a match has to line up against: a `scan_library` shortcut keyed on the file
 /// name (extension and all, in the wrong directory) matched nothing.
 #[tauri::command]
@@ -7750,7 +7750,7 @@ fn track_id_of(path: &std::path::Path) -> Option<String> {
     (!stem.is_empty()).then_some(stem)
 }
 
-/// The most common top-level directory across archive entry names — a track `.pkz` has exactly
+/// The most common top-level directory across archive entry names - a track `.pkz` has exactly
 /// one, its track folder. `None` when the archive has no directoried entries.
 fn top_folder(names: &[String]) -> Option<String> {
     use std::collections::HashMap;
@@ -7769,7 +7769,7 @@ fn top_folder(names: &[String]) -> Option<String> {
 ///
 /// Ask with the tracks the browser is showing as missing, most-hosted first: what the index
 /// can't answer becomes its background queue, so the order is also the priority. Returns
-/// immediately from the index — the queue is worked behind it, and `track-index://updated`
+/// immediately from the index - the queue is worked behind it, and `track-index://updated`
 /// says when a later call would answer more. Asked without `with_clearance` for the same
 /// reason `guess_server_track` is: a background resolve must never pop a browser challenge.
 #[tauri::command]
