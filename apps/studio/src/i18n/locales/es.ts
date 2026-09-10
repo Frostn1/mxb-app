@@ -432,6 +432,7 @@ export const es: Translation = {
   "protect.showFolder": "Mostrar carpeta",
   "track.gap": "de hueco",
   "track.deep": "de profundidad",
+  "track.phase.preparing": "Preparando los compiladores",
   "track.phase.synthesising": "Modelando el terreno",
   "track.phase.writing": "Escribiendo las fuentes",
   "track.phase.map": "Compilando los gráficos",

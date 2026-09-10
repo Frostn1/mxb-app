@@ -435,6 +435,7 @@ export const en = {
   "protect.showFolder": "Show folder",
   "track.gap": "gap",
   "track.deep": "deep",
+  "track.phase.preparing": "Getting the compilers ready",
   "track.phase.synthesising": "Shaping the ground",
   "track.phase.writing": "Writing the source",
   "track.phase.map": "Building the graphics",

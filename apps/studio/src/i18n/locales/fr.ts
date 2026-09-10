@@ -432,6 +432,7 @@ export const fr: Translation = {
   "protect.showFolder": "Afficher le dossier",
   "track.gap": "d'écart",
   "track.deep": "de profondeur",
+  "track.phase.preparing": "Préparation des compilateurs",
   "track.phase.synthesising": "Modelage du terrain",
   "track.phase.writing": "Écriture des sources",
   "track.phase.map": "Compilation des graphismes",

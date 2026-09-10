@@ -24,6 +24,7 @@ mod trackshot;
 mod trackspeed;
 mod trackstats;
 mod tracksynth;
+mod winefetch;
 
 /// Sealing content to a buyer. Gitignored, like the module it builds on.
 #[cfg(sidecar)]
@@ -499,6 +500,31 @@ async fn ensure_track_tools(app: &tauri::AppHandle) -> Result<String, String> {
     Ok(got.path)
 }
 
+/// What the compilers will be run with, got ready if this machine isn't.
+///
+/// On Windows there is nothing to do. Anywhere else they are Windows binaries: this finds a
+/// Wine host — a bottle already here, or one of ours — and fetches a Wine build if the
+/// machine has none. Same bargain as [`ensure_track_tools`]: the setup belongs to the build,
+/// not to a step someone has to know to take first.
+async fn prepare_host(
+    app: &tauri::AppHandle,
+    cfg: &AppConfig,
+) -> Result<trackbuild::Host, String> {
+    let runner = winefetch::ensure_runner(app, cfg.wine_runner.clone()).await?;
+    let prefix = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("no data directory: {e}"))?
+        .join("wine")
+        .join("prefix");
+    let game = cfg.game_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        trackbuild::host(&game, &prefix, &runner).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("preparing the compilers failed: {e}"))?
+}
+
 /// How far a track build has got.
 ///
 /// A build is minutes of work with nothing to look at, so it reports where it is rather than
@@ -541,9 +567,18 @@ async fn build_track(
     install: bool,
 ) -> Result<BuildResult, String> {
     let prog = track_program(program)?;
+    let slug = tracksynth::slug(&prog.name);
+
+    // Getting the machine ready is on the bar rather than in front of it: the first build on
+    // a machine fetches the compilers, and on a Mac with no Wine it fetches that too and lays
+    // down a prefix. A window doing nothing for a minute reads as a build that hung.
+    let _ = app.emit(
+        BUILD_EVENT,
+        BuildProgress { slug: slug.clone(), at: trackbuild::PREPARING },
+    );
     let tools_at = ensure_track_tools(&app).await?;
     let cfg = config::load_or_detect(&app).unwrap_or_default();
-    let slug = tracksynth::slug(&prog.name);
+    let host = prepare_host(&app, &cfg).await?;
     // Somewhere of its own when nobody picked a folder, so building is one press.
     let root = match dir {
         Some(d) if !d.trim().is_empty() => std::path::PathBuf::from(d),
@@ -579,7 +614,7 @@ async fn build_track(
         std::fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
         tracksynth::write_source(&prog, &syn, &root).map_err(|e| format!("{e:#}"))?;
 
-        let steps = trackbuild::compile(&tools, &root, &slug, &cfg.game_path, &mut |phase| {
+        let steps = trackbuild::compile(&tools, &root, &slug, &host, &mut |phase| {
             say(plan.start(phase))
         })
         .map_err(|e| format!("{e:#}"))?;
