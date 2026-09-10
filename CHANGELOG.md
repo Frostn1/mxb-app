@@ -1,21 +1,5 @@
 # Changelog
 
-## 2026-09-09
-
-### Added
-- A Back button in the Designer. It returns to the start screen, which is where you pick what
-  you are painting for, and it asks first if there is anything unsaved.
-
-### Changed
-- The Designer is called Designer editor in the tool list.
-- The destination in the Designer's top bar is the picker itself, not a label of it. Starting
-  from a paint or a PSD goes straight into the editor, so those never got asked where the
-  paint was going — now you can say, and change it, without losing the work.
-
-### Fixed
-- New paint in the Designer's menu threw away whatever was on the canvas without asking.
-- The buttons in the unsaved-work dialogs were three different sizes.
-
 ## 2026-09-09 — v0.14.0 — A new name, and a Studio of its own
 
 ### Added
@@ -29,6 +13,8 @@
   pick, ahead of the others when a mod is mirrored on several.
 - Random track in the Track Studio. It draws a whole track from a number — no brief to write
   and nothing to wait for — and you edit it like any other.
+- A Back button in the Designer. It returns to the start screen, which is where you pick what
+  you are painting for, and it asks first if there is anything unsaved.
 
 ### Changed
 - Building a track on a Mac no longer asks you to put the game inside a Wine prefix. The
@@ -47,6 +33,10 @@
 - The Designer uses the whole window. The sheet runs edge to edge, the setup row moved into
   the bar at the top, and the panels sit flat against the sides instead of boxing the work in.
 - The tools are named down the left rather than drawn as icons.
+- The Designer is called Designer editor in the tool list.
+- The destination in the Designer's top bar is the picker itself, not a label of it. Starting
+  from a paint or a PSD goes straight into the editor, so those never got asked where the
+  paint was going — now you can say, and change it, without losing the work.
 - Frost's Studio has its own mark: the snowflake, split into two paints.
 - The Servers tab knows the tracks that come with MX Bikes. A server on Forest Raceway, Nevada
   or Holjes now says you have it, with the track's own picture, instead of pointing you at a
@@ -74,6 +64,8 @@
   part way through a track's ground.
 - The Settings descriptions for the profiles folder and the game install folder name the
   game you are set up for.
+- New paint in the Designer's menu threw away whatever was on the canvas without asking.
+- The buttons in the unsaved-work dialogs were three different sizes.
 
 ## 2026-09-08 — v0.13.7 — Servers, live share codes and a new 3D view
 
