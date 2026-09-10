@@ -7699,23 +7699,70 @@ async fn scan_library(
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InstalledTrack {
-    /// The track's internal folder id — exactly the value a server reports as its track, so
-    /// the browser matches on it directly. This is the library scan's `name`.
+    /// The track's internal folder id — the top-level directory inside its `.pkz`, which is
+    /// exactly the value a server reports as its track. Deliberately not the file name: a pkz
+    /// named `Farm14.pkz` holds a folder `Farm14`, and the master names the folder.
     id: String,
-    /// Absolute path of the `.pkz` (or track folder), for reading its preview.
+    /// Absolute path of the `.pkz`, for reading its preview.
     path: String,
 }
 
-/// The internal ids of every installed track, so the server browser can say which servers'
-/// tracks the player already has. Reuses the same track scan `guess_server_track` trusts,
-/// mapped down to the id/path the matcher needs.
+/// The internal ids of every installed track, so the browser can say which servers' tracks the
+/// player already has.
+///
+/// Walks `<mods>/mods/tracks` — tracks sit in category subfolders (`motocross/`, `supercross/`…)
+/// under it — and reads each pkz's own top folder. That, not the file name, is what the master
+/// reports and what a match has to line up against: a `scan_library` shortcut keyed on the file
+/// name (extension and all, in the wrong directory) matched nothing.
 #[tauri::command]
 async fn installed_track_ids(app: tauri::AppHandle) -> Result<Vec<InstalledTrack>, String> {
-    let entries = scan_library(app, "tracks".into()).await?;
-    Ok(entries
-        .into_iter()
-        .map(|e| InstalledTrack { id: e.name, path: e.path })
-        .collect())
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let root = library::mods_subdir(&cfg.mods_path, "mods/tracks");
+        let mut out: Vec<InstalledTrack> = Vec::new();
+        for entry in walkdir::WalkDir::new(&root).max_depth(3).into_iter().flatten() {
+            let path = entry.path();
+            if path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("pkz"))
+            {
+                if let Some(id) = track_id_of(path) {
+                    out.push(InstalledTrack { id, path: path.to_string_lossy().into_owned() });
+                }
+            }
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| format!("track scan failed: {e}"))?
+}
+
+/// A track's internal id: the top-level folder inside its `.pkz` (what a server reports),
+/// falling back to the file stem when the archive can't be read.
+fn track_id_of(path: &std::path::Path) -> Option<String> {
+    if let Ok(names) = pkz::entry_names(path) {
+        if let Some(id) = top_folder(&names) {
+            return Some(id);
+        }
+    }
+    let stem = path.file_stem()?.to_string_lossy().trim().to_string();
+    (!stem.is_empty()).then_some(stem)
+}
+
+/// The most common top-level directory across archive entry names — a track `.pkz` has exactly
+/// one, its track folder. `None` when the archive has no directoried entries.
+fn top_folder(names: &[String]) -> Option<String> {
+    use std::collections::HashMap;
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for n in names {
+        if let Some((top, _)) = n.split_once('/') {
+            if !top.is_empty() {
+                *counts.entry(top).or_default() += 1;
+            }
+        }
+    }
+    counts.into_iter().max_by_key(|(_, c)| *c).map(|(t, _)| t.to_string())
 }
 
 /// Which of these track ids the mxb-mods catalog can supply (see [`mods::trackindex`]).
