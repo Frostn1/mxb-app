@@ -590,7 +590,10 @@ mod tests {
     /// A bottle CrossOver or Whisky built is theirs. Running our own Wine in it would
     /// upgrade the prefix in place — someone's game broken by a track compile — so a
     /// prefix we can't drive properly is skipped for one of ours.
+    ///
+    /// macOS only: `bottle_roots` is empty elsewhere, so no prefix has a wrapper to leave it to.
     #[test]
+    #[cfg(target_os = "macos")]
     fn a_wrappers_bottle_is_left_to_its_wrapper() {
         let home = dirs_next::home_dir().expect("a home directory");
         let whisky = home.join("Library/Containers/com.isaacmarovitz.Whisky/Bottles/theirs");
