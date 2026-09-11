@@ -36,7 +36,7 @@ use mxb_core::config::AppConfig;
 use tauri::{Emitter, Manager};
 
 pub(crate) use mxb_core::{
-    bikefiles, presets, cloudfiles, config, edf, game, heightfield, library, linkwalk, map, paint, pkz, texstore, track, usage, viewer, winehost,
+    bikefiles, presets, cloudfiles, config, edf, game, heightfield, library, linkwalk, map, modelswap, paint, pkz, texstore, track, usage, viewer, winehost,
 };
 #[cfg(sidecar)]
 pub(crate) use mxb_core::sidecar;
@@ -58,6 +58,7 @@ fn main() {
             log_client,
             set_preview_tyres,
             scan_model_swaps,
+            model_swap_lineup,
             designer_recents,
             psd_watch,
             psd_unwatch,
@@ -1839,13 +1840,10 @@ fn set_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
-/// Draw a bike for the shared viewer.
+/// Draw a bike as one of its model swaps, for the shared viewer.
 ///
-/// The viewer asks for "this bike as variant X" because in the mod manager a bike can have
-/// model swaps parked beside it, and Stock is one variant among several. Nothing here parks
-/// anything: the studio paints the bike that is installed, so the variant is always Stock and
-/// the honest answer is the bike itself. Resolving a real swap needs `modelswap`, which is
-/// the manager's — a studio that could answer for it would be a studio that could disagree.
+/// Same resolution as the manager's, from the same `modelswap` in core. Nothing on disk
+/// moves: `preview_set` only works out which files the variant would put on the bike.
 #[tauri::command]
 async fn preview_model_swap(
     app: tauri::AppHandle,
@@ -1853,11 +1851,13 @@ async fn preview_model_swap(
     variant: String,
     tyres: Option<String>,
 ) -> Result<mxb_core::viewer::BikeModel, String> {
-    let _ = variant;
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        let dir = library::mods_subdir(&cfg.mods_path, "mods/bikes").join(&bike);
-        viewer::load_bike_model_blocking(dir.to_string_lossy().into_owned(), tyres)
+        let set = modelswap::preview_set(&cfg.mods_path, &bike, &variant)
+            .map_err(|e| format!("{e:#}"))?;
+        let label = format!("{bike} · {variant}");
+        let tyre_dir = library::mods_subdir(&cfg.mods_path, "mods/tyres");
+        viewer::load_preview_blocking(&set, &label, tyre_dir, tyres)
     })
     .await
     .map_err(|e| format!("preview_model_swap task failed: {e}"))?
@@ -1884,15 +1884,28 @@ fn set_preview_tyres(app: tauri::AppHandle, tyres: String) -> Result<(), String>
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
-/// The model swaps parked beside a bike — always none here.
-///
-/// Parking a mesh so the game loads a different one is the mod manager's Locker, and doing
-/// it needs `modelswap`, which is its module. The shared viewer asks every host this so it
-/// can offer a variant picker; the honest answer from the studio is that there are none, and
-/// the picker then does not appear.
+/// The model swaps parked beside each bike. Read-only: applying one stays the manager's
+/// Locker. The studio lists them so the Rider screen can offer and preview them.
 #[tauri::command]
-fn scan_model_swaps(_mods_path: String) -> Vec<serde_json::Value> {
-    Vec::new()
+async fn scan_model_swaps(app: tauri::AppHandle) -> Result<Vec<modelswap::BikeModels>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        Ok(modelswap::scan_model_swaps(&cfg.mods_path))
+    })
+    .await
+    .map_err(|e| format!("scan_model_swaps task failed: {e}"))?
+}
+
+/// The bikes a model swap parked under `bike` lines up with — every bike whose `.geom`
+/// mount points match `bike`'s. See `modelswap::lined_up_bikes`.
+#[tauri::command]
+async fn model_swap_lineup(app: tauri::AppHandle, bike: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        Ok(modelswap::lined_up_bikes(&cfg.mods_path, &bike))
+    })
+    .await
+    .map_err(|e| format!("model_swap_lineup task failed: {e}"))?
 }
 
 

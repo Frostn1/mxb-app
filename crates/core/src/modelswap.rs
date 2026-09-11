@@ -879,6 +879,61 @@ pub fn bike_folders(mods_path: &str) -> Vec<String> {
     out
 }
 
+/// The `.geom` points a model's parts hang off: steering head, swingarm pivot, fork, axles.
+const LINEUP_MOUNTS: [&str; 8] = [
+    "chassis_steer",
+    "chassis_rsusp_min",
+    "steer_joint",
+    "rsusp_joint",
+    "front_upper",
+    "fwheel",
+    "rwheel_min",
+    "rwheel_max",
+];
+
+/// How far two bikes' mounts may differ and still be one frame. On the OEM set KTM,
+/// Husqvarna and GasGas agree within 4.3 mm; the next bike is 34 mm off.
+const LINEUP_TOLERANCE: f32 = 0.010;
+
+/// A bike's `.geom` mount points — loose beside it, else inside its `.pkz`.
+fn bike_geom(mods_path: &str, bike: &str) -> Option<std::collections::HashMap<String, [f32; 3]>> {
+    let root = bikes_root(mods_path);
+    let is_geom = |n: &str| n.to_ascii_lowercase().ends_with(".geom");
+    if let Ok(rd) = fs::read_dir(root.join(bike)) {
+        for e in rd.flatten() {
+            if e.file_name().to_str().is_some_and(is_geom) {
+                if let Ok(b) = fs::read(e.path()) {
+                    return Some(crate::edf::parse_geom(&b));
+                }
+            }
+        }
+    }
+    let files = crate::pkz::read_selected(&root.join(format!("{bike}.pkz")), is_geom).ok()?;
+    files.first().map(|(_, b)| crate::edf::parse_geom(b))
+}
+
+/// The other bikes a model built for `bike` lines up with: every bike whose `.geom` puts
+/// the same mounts in the same place, so the model's parts land where they belong.
+pub fn lined_up_bikes(mods_path: &str, bike: &str) -> Vec<String> {
+    let Some(host) = bike_geom(mods_path, bike) else {
+        return Vec::new();
+    };
+    let same_frame = |g: &std::collections::HashMap<String, [f32; 3]>| {
+        LINEUP_MOUNTS.iter().all(|k| match (host.get(*k), g.get(*k)) {
+            (Some(a), Some(b)) => {
+                let d = (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f32>().sqrt();
+                d <= LINEUP_TOLERANCE
+            }
+            _ => false,
+        })
+    };
+    bike_folders(mods_path)
+        .into_iter()
+        .filter(|b| !b.eq_ignore_ascii_case(bike))
+        .filter(|b| bike_geom(mods_path, b).is_some_and(|g| same_frame(&g)))
+        .collect()
+}
+
 /// Why a variant can't be moved or deleted, or `None` when it can.
 ///
 /// The active set is the one case that matters: its files are loose at the bike root, not in
@@ -1428,6 +1483,29 @@ mod tests {
     }
     fn shelved_liveries(mp: &str, bike: &str) -> Vec<String> {
         liveries_in(&shelf_dir(mp, bike))
+    }
+
+    #[test]
+    fn a_model_lines_up_with_bikes_sharing_its_mounts() {
+        let root = tmp("lineup");
+        let mp = root.to_str().unwrap();
+        let geom = |shift: f32| {
+            let mut g = String::new();
+            for (i, k) in LINEUP_MOUNTS.iter().enumerate() {
+                g.push_str(&format!("{k} = 0, {}, {}\n", i as f32 * 0.1 + shift, -0.2));
+            }
+            g
+        };
+        for (bike, shift) in [("KTM", 0.0), ("GasGas", 0.004), ("Honda", 0.034)] {
+            fs::create_dir_all(bike_dir(mp, bike)).unwrap();
+            fs::write(bike_dir(mp, bike).join("bike.geom"), geom(shift)).unwrap();
+        }
+        // A bike with no .geom at all can't be said to line up with anything.
+        fs::create_dir_all(bike_dir(mp, "Bare")).unwrap();
+
+        assert_eq!(lined_up_bikes(mp, "KTM"), ["GasGas"]);
+        assert!(lined_up_bikes(mp, "Bare").is_empty());
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

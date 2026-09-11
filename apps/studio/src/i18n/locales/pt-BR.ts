@@ -42,6 +42,8 @@ export const ptBR: Translation = {
     "Vista o modelo do piloto — capacete, óculos, uniforme e botas de uma vez.",
   "rider.namePlaceholder": "Dê um nome a este piloto…",
   "rider.showOnModel": "Mostrar no modelo",
+  "rider.swapLinesUp": "Encaixa em {{bikes}}",
+  "rider.swapLinesUpNone": "Não encaixa em nenhuma outra moto instalada",
   "rider.repairTitle": "Um mod de {{area}} foi instalado solto",
   "rider.repairBody":
     "Os arquivos dele estão direto em {{area}} em vez de numa pasta, então nem o jogo nem este app conseguem carregá-lo. Juntar tudo em “{{model}}”?",

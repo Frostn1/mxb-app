@@ -42,6 +42,8 @@ export const de: Translation = {
     "Kleide das Fahrermodell ein — Helm, Brille, Outfit und Stiefel zusammen.",
   "rider.namePlaceholder": "Diesem Fahrer einen Namen geben…",
   "rider.showOnModel": "Am Modell zeigen",
+  "rider.swapLinesUp": "Passt auf {{bikes}}",
+  "rider.swapLinesUpNone": "Passt auf kein anderes installiertes Bike",
   "rider.repairTitle": "Ein {{area}}-Mod wurde lose installiert",
   "rider.repairBody":
     "Seine Dateien liegen direkt in {{area}} statt in einem Ordner — weder das Spiel noch diese App können ihn so laden. In „{{model}}“ zusammenfassen?",
