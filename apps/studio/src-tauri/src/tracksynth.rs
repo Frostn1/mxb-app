@@ -1357,7 +1357,12 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // the ramp from there, so a face wears a fan of scuffs rather than the single
             // groove a straight does. Cut here as well as painted, because a mark you can only
             // see is a decal.
-            let marks = if focus > 0.0 {
+            // Up the takeoff only, eased in from its foot as the ground starts to climb: the deck
+            // and the landing are not scuffed.
+            let rise = smoothstep(
+                ((feat.at(s + 1.0) - feat.at(s - 1.0)) * 0.5 / 0.25).clamp(0.0, 1.0),
+            );
+            let marks = if focus * rise > 0.0 {
                 let span = feel.groove + RUT_MARK_FAN_M * focus;
                 let d = (t - on_line) / span;
                 if d.abs() < 1.0 {
@@ -1368,7 +1373,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                             * ((t - on_line) / TYRE_MARK_SPACING_M * std::f32::consts::TAU).cos())
                     .max(0.0)
                     .powf(0.6);
-                    (1.0 - d * d * d * d) * comb * TYRE_MARK_DEPTH * focus
+                    (1.0 - d * d * d * d) * comb * TYRE_MARK_DEPTH * focus * rise
                 } else {
                     0.0
                 }
@@ -1433,7 +1438,10 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 } else {
                     knee(r, RUT_BANK_KNEE_M)
                 };
-                rut[i] = relief;
+                // What the paint reads: a face's scuffs at half strength and nothing past a full
+                // floor, or the whole face paints as one dark block.
+                let painted = main.max(second).max(marks * 0.5);
+                rut[i] = if painted > 0.0 { spread.min(-painted) } else { spread }.max(-1.0);
             }
         }
 
@@ -2293,6 +2301,9 @@ fn rut_profile(
 /// grooves spread four metres either side of the line and no line among them, which is the
 /// opposite of how a face wears: everyone hits it in the same place, packs that hard, and
 /// leaves the ground beside it soft.
+/// How far a jump's hold on the ruts eases in and out, metres.
+const FOCUS_EASE_M: f32 = 4.0;
+
 fn built_ground(features: &[Feature], lap: f32) -> (Profile, Profile) {
     let mut focus = Profile::blank(lap);
     let mut damp = Profile::blank(lap);
@@ -2312,9 +2323,10 @@ fn built_ground(features: &[Feature], lap: f32) -> (Profile, Profile) {
             if s < from || s > to {
                 continue;
             }
-            // Eased at both ends over a metre, so a face does not step from a bundle to a
-            // single groove between two samples.
-            let e = smoothstep(((s - from) / 1.0).min((to - s) / 1.0).clamp(0.0, 1.0));
+            // Eased at both ends, so a face does not step from a bundle to a single groove.
+            // Over a metre it did, and every takeoff painted a block with a hard front edge.
+            let ease = FOCUS_EASE_M.min((to - from) * 0.5).max(1e-3);
+            let e = smoothstep(((s - from) / ease).min((to - s) / ease).clamp(0.0, 1.0));
             focus.v[i] = focus.v[i].max(f * e);
             damp.v[i] = damp.v[i].min(1.0 - (1.0 - d) * e);
         }
