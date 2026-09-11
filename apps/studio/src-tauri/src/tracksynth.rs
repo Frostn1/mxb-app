@@ -206,7 +206,9 @@ const TEXTURE_GAIN: f32 = 0.34;
 /// across-line figure by half before it arrived.
 const CHOP_WAVELENGTH_M: f32 = 0.55;
 const CHOP_ACROSS_M: f32 = 3.0;
-const CHOP_M: f32 = 0.30;
+// 0.30 rode as small bumps packed everywhere: 4x Indiana's chatter and 15x its bumps per 10 m
+// (`trackstats::tests::zone_roughness`). At 0.06 both sit on Indiana's.
+const CHOP_M: f32 = 0.06;
 
 /// The same, for the field that lays out where the grooves go.
 const RUT_FIELD_OCTAVES: u32 = 2;
@@ -245,8 +247,10 @@ const RUT_RADIUS_M: (f32, f32) = (40.0, 14.0);
 // Measured against Indiana on the same statistic the corpus survey prints, which is the only
 // way to compare: at 0.38 a built lap came back with corner grooves at p50 0.13 and p90 0.24
 // against Indiana's 0.21 and 0.44 — half the depth, and a corner you can see but not sit in.
-const RUT_DEPTH_M: f32 = 1.8;
-const RUT_DEPTH_STRAIGHT_M: f32 = 0.15;
+// Lowered from 1.8 / 0.15 after riding Corpus Venue: holes too deep, walls 55 deg against
+// Indiana's 42. Both by the same factor, so a corner still fades out to its straight.
+const RUT_DEPTH_M: f32 = 1.35;
+const RUT_DEPTH_STRAIGHT_M: f32 = 0.11;
 
 /// The material the cut displaced, which does not disappear.
 ///
@@ -263,7 +267,9 @@ const RUT_LIP_OFFSET_M: f32 = 1.05;
 /// floor is packed down over a day and the bank is loose material piled on undisturbed ground.
 // Raised so a groove comes with something to lean on. What was asked for from the seat is a
 // "mini berm" — the bank is the half you use, and at parity with the cut it was barely there.
-const RUT_LIP_GAIN: f32 = 1.45;
+// 1.45 overshot the other way — reported as walls too tall and spiky. 0.94 keeps the bank at
+// Indiana's wall angle.
+const RUT_LIP_GAIN: f32 = 0.94;
 
 /// Where the field stops being ground and starts being wall, and where the wall tops out.
 ///
@@ -2070,11 +2076,13 @@ fn trough_at(t: f32, centre: f32, width: f32) -> f32 {
 /// Shallow on purpose. These are not ruts — nothing sits in them — they are the record of a
 /// hundred riders dragging a back wheel up the same ramp from slightly different places, and
 /// on a real face you read them long before you feel them.
-const TYRE_MARK_SPACING_M: f32 = 0.62;
+// Wider than 0.62 so each scuff is a rounded trough rather than a ridge.
+const TYRE_MARK_SPACING_M: f32 = 0.9;
 /// As a multiple of the ground's rut depth — and a jump sits on a straight, where that is
 /// `rut_straight`, about nine centimetres. At 0.34 the scuffs cut three: real enough, and far
 /// too little to see from the seat. A face that has been ridden all day is visibly combed.
-const TYRE_MARK_DEPTH: f32 = 1.15;
+// 1.15 combed a face with 17 cm ridges every 0.62 m — ridden as jump ruts too big and spiky.
+const TYRE_MARK_DEPTH: f32 = 0.45;
 
 /// Half the width of one carved groove, metres.
 ///

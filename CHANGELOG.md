@@ -9,6 +9,10 @@
   up with (a KTM swap fits the Husqvarna and GasGas too), or add protected files to see the
   GUID each one is locked to.
 
+### Changed
+- Generated tracks ride smoother. Much less small chop on the straights and jump faces,
+  shallower corner ruts with lower, rounder walls, and lighter tyre scuffs up the jumps.
+
 ## 2026-09-09 — v0.14.0 — A new name, and a Studio of its own
 
 ### Added

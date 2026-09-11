@@ -2581,4 +2581,139 @@ mod tests {
         }
     }
 
+    /// Roughness split by where on the lap it is — straights, corners, jump faces — read the
+    /// same way off a published track and a generated one.
+    ///
+    /// Sampled along the lap at an eighth of a metre: the chop a wheel feels runs at about
+    /// half a metre, which a half-metre station step aliases away.
+    ///
+    /// ```text
+    /// FROST_TRACK=…/indiana.pkz cargo test -p frost-studio -- --ignored --nocapture zone_roughness
+    /// cargo test -p frost-studio -- --ignored --nocapture zone_roughness   # the base track
+    /// ```
+    #[test]
+    #[ignore = "slow — reads or synthesises a lap"]
+    fn zone_roughness() {
+        use std::f32::consts::{PI, TAU};
+        let step = 0.5f32;
+        let (stations, g): (Vec<(f32, f32, f32)>, Grid) = match std::env::var("FROST_TRACK") {
+            Ok(var) => {
+                let path = std::path::Path::new(&var);
+                let names = track::entry_names(path).unwrap();
+                let entry = track::heightfield_entries(&names).into_iter().next().expect("a heightfield");
+                let bytes = track::read_entry(path, &entry).unwrap();
+                let layout = heightfield::probe(&bytes, None).expect("a terrain grid");
+                let mps_src = layout.metres_per_sample.expect("a stated footprint");
+                let size_x = mps_src * (layout.width.max(2) - 1) as f32;
+                let size_z = mps_src * (layout.height.max(2) - 1) as f32;
+                let block_at = layout.offset
+                    + layout.width as usize * layout.height as usize * layout.sample.size();
+                let lap = crate::trackline::read(bytes.get(block_at..).unwrap_or(&[])).expect("a centreline");
+                let (fw, fh, v) = heightfield::read_grid(&bytes, &layout, layout.width.max(layout.height));
+                let st = lap.stations(step).into_iter().map(|q| (q.x, q.z, q.heading)).collect();
+                (st, Grid { w: fw as usize, h: fh as usize, size_x, size_z, v })
+            }
+            Err(_) => {
+                let p: crate::trackprog::TrackProgram = match std::env::var("FROST_PROGRAM") {
+                    Ok(f) => serde_json::from_str(&std::fs::read_to_string(f).unwrap()).unwrap(),
+                    Err(_) => serde_json::from_str(crate::trackprog::EXAMPLE).unwrap(),
+                };
+                let s = crate::tracksynth::synthesise(&p).unwrap();
+                let st = s.stations.iter().map(|q| (q.x, q.z, q.heading)).collect();
+                let (size_x, size_z) = (p.terrain.size_x, p.terrain.size_z);
+                (st, Grid { w: s.gw, h: s.gh, size_x, size_z, v: s.heights })
+            }
+        };
+        let n = stations.len();
+
+        // Straight, corner (under 40 m radius), or a jump face (climbing or falling over 13%).
+        let (k, m) = ((5.0 / step) as usize, (1.5 / step) as usize);
+        let h0: Vec<f32> = stations.iter().map(|&(x, z, _)| g.at(x, z)).collect();
+        let zone: Vec<usize> = (0..n)
+            .map(|i| {
+                let mut d = stations[(i + k) % n].2 - stations[(i + n - k) % n].2;
+                while d > PI { d -= TAU; }
+                while d < -PI { d += TAU; }
+                let curv = d.abs() / (2.0 * k as f32 * step);
+                let grade = (h0[(i + m) % n] - h0[(i + n - m) % n]) / (2.0 * m as f32 * step);
+                if grade.abs() > 0.13 { 2 } else if curv > 1.0 / 40.0 { 1 } else { 0 }
+            })
+            .collect();
+
+        // Along the line, an eighth of a metre at a time, 1.5 m either side of the centre.
+        const SUB: usize = 4;
+        let fine_step = step / SUB as f32;
+        let half = ((0.5 / fine_step) as usize).max(1);
+        let mut chat: [Vec<f32>; 3] = Default::default();
+        let mut bumps = [0usize; 3];
+        let cols = 13;
+        for j in 0..cols {
+            let u = -1.5 + j as f32 * 0.25;
+            let mut col = Vec::with_capacity(n * SUB);
+            let mut zs = Vec::with_capacity(n * SUB);
+            for i in 0..n {
+                let (a, b) = (stations[i], stations[(i + 1) % n]);
+                for t in 0..SUB {
+                    let f = t as f32 / SUB as f32;
+                    let (x, z, h) = (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f, a.2);
+                    let (rx, rz) = crate::trackprog::right_vector(h);
+                    col.push(g.at(x + u * rx, z + u * rz));
+                    zs.push(zone[i]);
+                }
+            }
+            let fine = detrend(&col, half);
+            for i in 0..fine.len() {
+                chat[zs[i]].push(fine[i]);
+            }
+            // A bump: the highest point within a quarter metre, standing 1.5 cm proud.
+            for i in 2..fine.len().saturating_sub(2) {
+                let v = fine[i];
+                if v > 0.015 && (i - 2..=i + 2).all(|q| q == i || fine[q] < v) {
+                    bumps[zs[i]] += 1;
+                }
+            }
+        }
+
+        // Across, six metres detrended, 5.5 m either side.
+        let lat = RIDDEN_LATERAL_M;
+        let w = (2.0 * RIDDEN_HALF_M / lat) as usize + 1;
+        let half_across = ((3.0 / lat) as usize).max(1);
+        let mut p2p: [Vec<f32>; 3] = Default::default();
+        let mut walls: [Vec<f32>; 3] = Default::default();
+        for (i, &(x, z, h)) in stations.iter().enumerate() {
+            let (rx, rz) = crate::trackprog::right_vector(h);
+            let row: Vec<f32> = (0..w)
+                .map(|q| {
+                    let u = q as f32 * lat - RIDDEN_HALF_M;
+                    g.at(x + u * rx, z + u * rz)
+                })
+                .collect();
+            let d = detrend(&row, half_across);
+            let (lo, hi) = d.iter().fold((f32::MAX, f32::MIN), |(l, h), &v| (l.min(v), h.max(v)));
+            p2p[zone[i]].push(hi - lo);
+            for q in 1..d.len() {
+                walls[zone[i]].push(((d[q] - d[q - 1]).abs() / lat).atan().to_degrees());
+            }
+        }
+        let pct = |v: &mut Vec<f32>, p: f32| -> f32 {
+            if v.is_empty() {
+                return 0.0;
+            }
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            v[((v.len() - 1) as f32 * p) as usize]
+        };
+        println!("  zone      metres  chatter  bumps/10m  across p2p p50/p90/max   wall p98");
+        for (z, name) in ["straight", "corner", "jump face"].iter().enumerate() {
+            let metres = zone.iter().filter(|&&q| q == z).count() as f32 * step;
+            let per10 = bumps[z] as f32 / (metres * cols as f32).max(1e-3) * 10.0;
+            println!(
+                "  {name:<9} {metres:>6.0}  {:>7.3}  {per10:>9.1}  {:>6.2} {:>5.2} {:>5.2}        {:>4.0}°",
+                rms(&chat[z]),
+                pct(&mut p2p[z], 0.5),
+                pct(&mut p2p[z], 0.9),
+                pct(&mut p2p[z], 1.0),
+                pct(&mut walls[z], 0.98),
+            );
+        }
+    }
 }
