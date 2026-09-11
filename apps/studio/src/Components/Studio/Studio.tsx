@@ -9,6 +9,7 @@ import PaintStudio from "../PaintStudio/PaintStudio";
 import RiderStudio from "../Rider/RiderStudio";
 import PoseStudio from "../Rider/PoseStudio";
 import Protect from "./Protect/Protect";
+import Diagnose from "./Diagnose/Diagnose";
 import TrackStudio from "./TrackStudio/TrackStudio";
 import RiderKitProvider from "../Rider/RiderKit";
 
@@ -25,7 +26,14 @@ import RiderKitProvider from "../Rider/RiderKit";
  * first-run tour both need to open the Studio *at* a particular one.
  */
 
-export type StudioTab = "designer" | "paints" | "rider" | "pose" | "track" | "protect";
+export type StudioTab =
+  | "designer"
+  | "paints"
+  | "rider"
+  | "pose"
+  | "track"
+  | "protect"
+  | "diagnose";
 
 interface StudioProps {
   tab: StudioTab;
@@ -94,6 +102,11 @@ export default function Studio({
       {visited.has("protect") && hasLock && (
         <Pane active={tab === "protect"}>
           <Protect />
+        </Pane>
+      )}
+      {visited.has("diagnose") && (
+        <Pane active={tab === "diagnose"}>
+          <Diagnose />
         </Pane>
       )}
       {visited.has("paints") && (

@@ -5,8 +5,9 @@
 ### Added
 - Protect in Frost's Studio shows who a file is already locked to. Add a protected file
   and its row names the GUID it is bound to.
-- The Studio's Rider screen shows which bikes a model swap lines up with: every bike that
-  shares its frame's mount points, like a KTM swap fitting the Husqvarna and GasGas too.
+- A Diagnose tab in Frost's Studio. Pick a bike to see which other bikes a model swap lines
+  up with (a KTM swap fits the Husqvarna and GasGas too), or add protected files to see the
+  GUID each one is locked to.
 
 ## 2026-09-09 — v0.14.0 — A new name, and a Studio of its own
 
