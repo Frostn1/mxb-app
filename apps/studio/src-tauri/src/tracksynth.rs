@@ -655,10 +655,9 @@ const NORMAL_STRENGTH: f32 = 6.0;
 /// Gentler, because there the whole normal is written rather than just its direction. Two
 /// lands on the example track's own sheet: blue averaging 235 against its 241, and red
 /// spread across [19, 236] against its [9, 246].
-// Raised from 2.0 when the ground rode as too flat. At 2.0 — and still at 2.6 — our sheets'
-// normals came out far flatter than the example's (blue 245-252 against 235-241, red spread
-// 75..179 against 9..246): the tone darkening the ground shrinks the luma this is derived from.
-const SHEET_NORMAL_STRENGTH: f32 = 5.0;
+// Only for a band drawn rather than photographed now: every photographed sheet takes the
+// published normal it came with (see `photo_normal`).
+const SHEET_NORMAL_STRENGTH: f32 = 2.0;
 
 /// The ground textures' edge, in pixels. A power of two, as MX Bikes requires.
 ///
@@ -3332,11 +3331,11 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
             rgba_tga(GROUND_TEXTURE_DIM, &px),
             &mut wrote,
         )?;
-        put(
-            &format!("maps/{name}_n.tga"),
-            normal_tga(&px, GROUND_TEXTURE_DIM, SHEET_NORMAL_STRENGTH, l.spec),
-            &mut wrote,
-        )?;
+        let normal = match photo_normal(&l.look, GROUND_TEXTURE_DIM) {
+            Some(n) => published_normal_tga(&n, &px, GROUND_TEXTURE_DIM, l.spec),
+            None => normal_tga(&px, GROUND_TEXTURE_DIM, SHEET_NORMAL_STRENGTH, l.spec),
+        };
+        put(&format!("maps/{name}_n.tga"), normal, &mut wrote)?;
         put(
             &format!("maps/{name}.shd"),
             crlf(&shd(&format!("{name}_n.tga"), rx, l.shininess, None)),
@@ -4504,7 +4503,11 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
         for w in [0u32, 0, 1, 0] {
             out.extend_from_slice(&u(w));
         }
-        let nrm = normal_pixels(&rgba, dim, NORMAL_STRENGTH);
+        let nrm = match photo_normal(look, dim) {
+            // The published normal's direction, in this format's two channels.
+            Some(n) => n.chunks_exact(4).flat_map(|p| [p[0], p[1], 255, 3]).collect(),
+            None => normal_pixels(&rgba, dim, NORMAL_STRENGTH),
+        };
         let packed = deflate_raw(&nrm);
         // Name, dimensions, hash, a zero, and the length: 132 bytes, then the eight the
         // length counts, then the pixels. Every offset off the trace of Spain's own.
@@ -5510,8 +5513,26 @@ fn photo(name: &str) -> Option<&'static (usize, Vec<u8>)> {
         "soil_dark" => sheet_of!(B, "../assets/ground/soil_dark_c.jpg"),
         "packed" => sheet_of!(C, "../assets/ground/sand_bottom.jpg"),
         "grass" => sheet_of!(D, "../assets/ground/hm_grass.jpg"),
+        // Their normal maps, lifted the same way: the soil's and the grass's.
+        "soil_normal" => sheet_of!(E, "../assets/ground/soil_n_s.jpg"),
+        "grass_normal" => sheet_of!(F, "../assets/ground/grass_n_s.jpg"),
         _ => None,
     }
+}
+
+/// Indiana's own normal map for a band's photograph, RGBA at `dim`: the soil's under every
+/// soil sheet — a published map's `soil_light_c` carries `soil_white_n_s` — and the grass's
+/// under the grass. `None` for a band drawn rather than photographed.
+///
+/// Used rather than a normal derived from the sheet's luma, which came out far flatter than
+/// a published track's and rode as "texture too flat".
+fn photo_normal(look: &GroundLook, dim: usize) -> Option<Vec<u8>> {
+    let name = match look.photo? {
+        "grass" => "grass_normal",
+        _ => "soil_normal",
+    };
+    let (d, src) = photo(name)?;
+    Some(resample_sheet(src, *d, dim))
 }
 
 /// One band's sheet at `dim`: the photograph it names, toned and resampled.
@@ -5721,6 +5742,19 @@ fn normal_tga(rgba: &[u8], dim: usize, strength: f32, spec: u8) -> Vec<u8> {
             // The container is BGRA, so the normal's z goes down first.
             px.extend_from_slice(&[enc(nz), enc(ny), enc(nx), a]);
         }
+    }
+    tga_bgra(dim, dim, &px)
+}
+
+/// A published normal map as a sheet's `_n.tga`: its direction as it is, and the specular in
+/// the alpha set the way [`normal_tga`] sets it, off the colour sheet's own luma.
+fn published_normal_tga(normal: &[u8], colour: &[u8], dim: usize, spec: u8) -> Vec<u8> {
+    let mut px = Vec::with_capacity(dim * dim * 4);
+    for (n, c) in normal.chunks_exact(4).zip(colour.chunks_exact(4)) {
+        let luma = (0.299 * c[0] as f32 + 0.587 * c[1] as f32 + 0.114 * c[2] as f32) / 255.0;
+        let a = (spec as f32 * (0.35 + 0.65 * luma)).clamp(0.0, 255.0) as u8;
+        // The container is BGRA: the normal's z first.
+        px.extend_from_slice(&[n[2], n[1], n[0], a]);
     }
     tga_bgra(dim, dim, &px)
 }
@@ -9778,6 +9812,18 @@ mod tests {
     /// (50, 36, 24), and those two numbers are what the base colours here were solved for.
     /// A change to the shading that quietly moves the result is a change to how every
     /// generated track looks, so it is worth a test rather than a comment.
+    #[test]
+    fn photographed_bands_carry_the_published_normal() {
+        // Normals derived from a sheet's luma rode as "texture too flat". The soil and the
+        // grass take Indiana's own: blue about 223 on the soil and 243 on the grass.
+        let g = ground_looks(Surface::Soil);
+        for look in [&g.field, &g.turf] {
+            let n = photo_normal(look, 256).expect("a photographed band has a published normal");
+            let blue = n.chunks_exact(4).map(|p| p[2] as f32).sum::<f32>() / (n.len() / 4) as f32;
+            assert!((210.0..250.0).contains(&blue), "blue averages {blue:.0}");
+        }
+    }
+
     #[test]
     fn the_soil_lands_where_the_published_sheets_do() {
         let g = ground_looks(Surface::Soil);
