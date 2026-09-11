@@ -15,8 +15,8 @@
 - Braking bumps build up on the way into corners instead of noise all over the track.
 - Jumps on generated tracks are three quarters of their old height. The finish jump keeps
   its full height, with a longer deck and a longer, gentler face.
-- Jump faces get steeper right up to the lip and meet the deck flush, with no rounded hump
-  before the edge.
+- Jump faces curve up from the ground and run straight to the lip, meeting the deck flush.
+  No rounded hump before the edge, and no sudden steep kick at the top.
 - Jump faces carry wide, spread-out tyre scuffs instead of thin grooves down the middle.
 - Generated tracks paint the light dirt on the track only, with dark tyre lines and rut
   floors showing through it, so the ruts are easy to see. The rest of the site is dark soil,

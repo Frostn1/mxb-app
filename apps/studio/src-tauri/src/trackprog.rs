@@ -413,6 +413,27 @@ pub fn face_arc(t: f32, sweep: f32) -> f32 {
 /// shape was a smoothstep and carried a 1.5 for the same reason — a smoothstep peaks at half
 /// again its average — and this replaces that fudge rather than joining it. Faces come out
 /// about 44% longer, which is the length a built one actually is.
+/// How much of a take-off is the transition; the rest is a straight ramp to the lip.
+///
+/// A built take-off is a curve at the bottom and a straight run to the lip, and it leaves at not
+/// much more than the ramp's mean angle. The arc that was here left at twice it, and at 77
+/// degrees at least once a minimum sweep was put on it; ridden with the lip's rounding taken
+/// off, every jump "just launches you into oblivion".
+pub const TAKEOFF_TRANSITION: f32 = 0.7;
+
+/// A take-off's height at `t`, foot (0) to lip (1), as a share of its rise: tangent to the
+/// ground at the foot, curving up through the transition, straight from there to the lip.
+pub fn takeoff_profile(t: f32) -> f32 {
+    let (t, k) = (t.clamp(0.0, 1.0), TAKEOFF_TRANSITION.clamp(1e-3, 1.0));
+    let y = if t < k { t * t / (2.0 * k) } else { k / 2.0 + (t - k) };
+    y / (1.0 - k / 2.0)
+}
+
+/// The angle a take-off of this rise and run leaves the lip at, degrees.
+pub fn takeoff_lip_deg(height: f32, run: f32) -> f32 {
+    (height.abs() / (run.max(1e-3) * (1.0 - TAKEOFF_TRANSITION / 2.0))).atan().to_degrees()
+}
+
 pub fn face_run(height: f32, deg: f32, min_m: f32) -> f32 {
     let half = (deg * 0.5).to_radians().tan().max(1e-4);
     (height.abs() / half).max(min_m)

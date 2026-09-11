@@ -1481,6 +1481,9 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         if r.texture > 0.0 && w > 0.0 {
             let (wx, wz) = ((i % gw) as f32 * mps_x, (i / gw) as f32 * mps_z);
             let gain = chop.rough.at(s);
+            // Built ground is groomed: no chop, braking bumps or drive-out chop on a jump. Up a
+            // take-off face they stepped the ramp every two metres, a launcher of their own.
+            let groomed = 1.0 - ruts.focus.at(s);
             heights[i] += fbm_of(
                 wx / TEXTURE_WAVELENGTH_M,
                 wz / TEXTURE_WAVELENGTH_M,
@@ -1502,6 +1505,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 0.5,
             ) * CHOP_M
                 * gain
+                * groomed
                 * (0.45 + 0.55 * polished)
                 * w;
 
@@ -1518,14 +1522,14 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let ripple =
                     ((s / feel.brake.0 + drift) * std::f32::consts::TAU).sin();
                 // Not polished: braking bumps are worst on the line, where everyone brakes.
-                heights[i] += ripple * feel.brake.1 * 0.5 * brake * across;
+                heights[i] += ripple * feel.brake.1 * 0.5 * brake * across * groomed;
             }
             // And the longer, lower chop everybody's rear wheel leaves on the way out.
             let out = chop.accel.at(s);
             if out > 0.0 && across > 0.0 {
                 let drift = 0.4 * fbm(s / 31.0, 13.0, r.seed ^ 0xACCE);
                 let ripple = ((s / feel.accel.0 + drift) * std::f32::consts::TAU).sin();
-                heights[i] += ripple * feel.accel.1 * 0.5 * out * across * polished;
+                heights[i] += ripple * feel.accel.1 * 0.5 * out * across * polished * groomed;
             }
         }
     }
@@ -2347,6 +2351,9 @@ fn built_ground(features: &[Feature], lap: f32) -> (Profile, Profile) {
         match *feat {
             Feature::Tabletop { height, length, lip, .. } => {
                 let (up, top, down) = crate::trackprog::tabletop_faces(height, length, lip);
+                // The whole footprint held as one, so the hold does not dip where the face hands
+                // to the deck — the rut field came back in there and flattened the top of the face.
+                mark(at, at + up + top + down, 1.0, 1.0);
                 // One line up the face and one off the landing.
                 mark(at, at + up, 1.0, 1.0);
                 // The top is maintained ground: swept flat between motos, and a lip nobody
@@ -2357,6 +2364,7 @@ fn built_ground(features: &[Feature], lap: f32) -> (Profile, Profile) {
             Feature::Double { height, gap, lip, .. } => {
                 let f = crate::trackprog::double_faces(height, lip);
                 let crest = at + f.ramp + f.back;
+                mark(at, crest + gap + f.face + f.run, 1.0, 1.0);
                 mark(at, at + f.ramp, 1.0, 1.0);
                 // The back of the lip and the gap floor: a cut face and ground nobody's
                 // wheels touch on a jump that works.
@@ -2600,14 +2608,18 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
         let Some((lip, face)) = takeoff_of(f) else {
             continue;
         };
-        let from = lip - 0.75 * face;
+        // From the foot of the face, where the drawn shape and the smoothed one still agree.
+        // Handing over part way up put a steep band in the middle of the face where the
+        // smoothed ground climbed back to the drawn one, and a flatter metre before the lip.
+        let foot = lip - face;
+        let from = foot - 1.0;
         let to = lip + blend + 2.0;
         let lo = (from / PROFILE_STEP).floor().max(0.0) as usize;
         let hi = ((to / PROFILE_STEP).ceil() as usize).min(out.v.len() - 1);
         for i in lo..=hi {
             let s = i as f32 * PROFILE_STEP;
             let w = if s <= lip {
-                smoothstep(((s - from) / (0.5 * face).max(1e-3)).clamp(0.0, 1.0))
+                smoothstep(((s - from) / (1.0 + 0.3 * face)).clamp(0.0, 1.0))
             } else {
                 1.0 - smoothstep(((s - lip - blend) / 2.0).clamp(0.0, 1.0))
             };
@@ -2910,25 +2922,6 @@ fn apply_step_ups(along: &mut [f32], st: &[Station], features: &[Feature]) {
 }
 
 /// A feature's shape along the track. `t` runs 0–1 across it, `u` is metres from its start.
-/// A jump face's own shape, at `t` from its foot to its lip.
-///
-/// The sweep comes from the face's real run and rise rather than from the angle it was sized
-/// against, so a face lengthened by [`crate::trackprog::JUMP_FACE_MIN_M`] or by a programme's
-/// own `lip` is a shallower arc rather than the same arc stretched over more ground. Either
-/// way it leaves the ground tangent and arrives at the lip steepest.
-fn arc_up(t: f32, height: f32, run: f32) -> f32 {
-    // A quarter pipe, not a ramp. The sweep a face gets from its own height and run is
-    // gentle — a tenth at the foot and a third at the lip, which rides as a hill. A built
-    // takeoff starts almost flat and finishes steep, and its lip is an edge you leave rather
-    // than a curve you roll over. "No snapped end, just big rollers" and "like a quarter half
-    // pipe" ask for the same shape.
-    let sweep = crate::trackprog::face_sweep(height, run).max(FACE_SWEEP_MIN);
-    crate::trackprog::face_arc(t, sweep)
-}
-
-/// How far round its own curve a face turns, at least, in radians.
-const FACE_SWEEP_MIN: f32 = 1.35;
-
 /// A landing's shape, at `t` from the crest of the jump to the ground that catches you.
 /// Returns 1 at the crest and 0 at the foot.
 ///
@@ -2947,16 +2940,14 @@ fn arc_down(t: f32) -> f32 {
 fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
     // Drawn by hand: eased between the points it was given, which is the same easing the lap's
     // own height curve uses. Nothing else here has a shape someone chose point by point.
-    if let Feature::Custom { shape, length, .. } = f {
+    if let Feature::Custom { shape, .. } = f {
         // The take-off is concave to its crest, the way a tabletop's is. The cubic arrives at a
         // crest flat, which rounds the top of the face over into a knuckle.
         if let Some((a_u, a_h, c_u, c_h)) = custom_takeoff(shape) {
             if t >= a_u && t <= c_u {
-                let (run, rise) = ((c_u - a_u) * length, c_h - a_h);
+                let rise = c_h - a_h;
                 let x = (t - a_u) / (c_u - a_u);
-                return a_h
-                    + rise
-                        * crate::trackprog::face_arc(x, crate::trackprog::face_sweep(rise, run));
+                return a_h + rise * crate::trackprog::takeoff_profile(x);
             }
         }
         return along_points(shape, t);
@@ -2972,7 +2963,7 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
             if u <= up {
                 // Concave: tangent to the ground at the foot and steepest at the lip, which
                 // is the edge the rider leaves the ground over.
-                height * arc_up(u / up, height, up)
+                height * crate::trackprog::takeoff_profile(u / up)
             } else if u <= up + top {
                 height
             } else {
@@ -10818,20 +10809,36 @@ mod tests {
 
     #[test]
     fn a_takeoff_steepens_to_its_lip_and_meets_the_deck_flush() {
-        // Ridden: a face that rounds over before the lip is a knuckle. It should be concave
-        // right to the edge and meet the deck there, with nothing standing up past it.
+        // Ridden: a face that rounds over before the lip is a knuckle. It should run up to the
+        // edge and meet the deck there, with nothing standing up past it.
         let s = synthesise(&with_a_tabletop()).unwrap();
         let (up, _, _) = crate::trackprog::tabletop_faces(2.4, 36.0, 0.0);
         let lip = 40.0 + up;
+        // At the exact distance and between the cells. `across` snaps to a station and reads the
+        // nearest cell, which on this 0.39 m grid turns a straight ramp into uneven steps and
+        // makes a one-metre slope ±20% noise.
         let h = |at: f32| {
-            let v = across(&s, at);
-            let m = &v[v.len() / 3..2 * v.len() / 3];
-            m.iter().sum::<f32>() / m.len() as f32
+            let k = s.stations.iter().position(|st| st.s >= at).unwrap_or(1).max(1);
+            let (a, b) = (s.stations[k - 1], s.stations[k]);
+            let f = ((at - a.s) / (b.s - a.s).max(1e-6)).clamp(0.0, 1.0);
+            let (x, z) = (a.x + (b.x - a.x) * f, a.z + (b.z - a.z) * f);
+            let (rx, rz) = crate::trackprog::right_vector(a.heading);
+            let n = 41;
+            (0..n)
+                .map(|i| {
+                    let t = (i as f32 / (n - 1) as f32 - 0.5) * 3.6;
+                    sample_smooth(&s.heights, s.gw, s.gh, (x + rx * t) / s.mps, (z + rz * t) / s.mps)
+                })
+                .sum::<f32>()
+                / n as f32
         };
-        let (lower, last) = (h(lip - 2.0) - h(lip - 3.0), h(lip) - h(lip - 1.0));
+        // Straight to the lip: the last metre keeps the ramp's own slope. A knuckle is the face
+        // flattening off before the edge, which loses far more than a tenth of it.
+        let ramp = crate::trackprog::takeoff_lip_deg(2.4, up).to_radians().tan();
+        let last = h(lip) - h(lip - 1.0);
         assert!(
-            last > lower,
-            "the face rounds over before its lip: {lower:.3} then {last:.3} per metre"
+            last > ramp * 0.9,
+            "the face rounds over before its lip: {last:.3} per metre against a {ramp:.3} ramp"
         );
         let deck = [h(lip + 1.0), h(lip + 2.0), h(lip + 3.0)];
         let spread = deck.iter().fold(f32::MIN, |a, &b| a.max(b)) - deck.iter().fold(f32::MAX, |a, &b| a.min(b));

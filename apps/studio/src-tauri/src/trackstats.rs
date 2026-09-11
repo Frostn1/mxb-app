@@ -2752,5 +2752,19 @@ mod tests {
                 100.0 * rutted[z].0 as f32 / rutted[z].1.max(1) as f32,
             );
         }
+        // How steep the jump faces stand along the line: a metre of climb, uphill only.
+        let one = ((1.0 / step) as usize).max(1);
+        let mut up_deg: Vec<f32> = (0..n)
+            .filter(|&i| zone[i] == 2)
+            .map(|i| (h0[(i + one) % n] - h0[i]).atan().to_degrees())
+            .filter(|d| *d > 0.0)
+            .collect();
+        println!(
+            "  jump faces uphill, per metre: p50 {:.0}°  p90 {:.0}°  p99 {:.0}°  max {:.0}°",
+            pct(&mut up_deg, 0.5),
+            pct(&mut up_deg, 0.9),
+            pct(&mut up_deg, 0.99),
+            pct(&mut up_deg, 1.0)
+        );
     }
 }

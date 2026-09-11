@@ -583,7 +583,7 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
                 crate::trackprog::JUMP_FACE_MIN_M,
             )
             .max(crate::trackprog::FINISH_FACE_M);
-            let deg = crate::trackprog::face_sweep(height, ramp).to_degrees();
+            let deg = crate::trackprog::takeoff_lip_deg(height, ramp);
             // A deck no longer than the run at it carries: a tabletop nobody can get over the
             // top of is a hill with a flat bit on it, and this is the one everybody lands on.
             let deck = speed.carry(lip_at, deg).clamp(
