@@ -206,9 +206,9 @@ const TEXTURE_GAIN: f32 = 0.34;
 /// across-line figure by half before it arrived.
 const CHOP_WAVELENGTH_M: f32 = 0.55;
 const CHOP_ACROSS_M: f32 = 3.0;
-// 0.30 rode as small bumps packed everywhere (4x Indiana's chatter, 15x its bumps per 10 m,
-// `trackstats::tests::zone_roughness`) and 0.06 as far too smooth. Between the two.
-const CHOP_M: f32 = 0.13;
+// 0.30 rode as small bumps packed everywhere (`trackstats::tests::zone_roughness`), and at 0.13
+// the ridges it stands across the track still rode as "cross ruts". The ruts carry the texture.
+const CHOP_M: f32 = 0.05;
 
 /// The same, for the field that lays out where the grooves go.
 const RUT_FIELD_OCTAVES: u32 = 2;
@@ -256,6 +256,9 @@ const RUT_DEPTH_STRAIGHT_M: f32 = 0.13;
 /// towards, metres. Below the knee nothing changes. Indiana's deepest corner groove is 0.47 m;
 /// ours reached 0.94 on the outside line.
 const RUT_CUT_KNEE_M: (f32, f32) = (0.25, 0.35);
+
+/// How soft the blend over the ruts is: one box radius, three passes.
+const RUT_BLEND_M: f32 = 0.25;
 const RUT_BANK_KNEE_M: (f32, f32) = (0.15, 0.25);
 
 /// The material the cut displaced, which does not disappear.
@@ -406,7 +409,8 @@ const RUT_LIP_SHARP: f32 = 2.2;
 /// How steep the ground has to climb before it counts as a face worth marking. Lower, so the
 /// whole ramp is marked rather than only its steepest third.
 const RUT_MARK_FACE: f32 = 0.13;
-const RUT_MARK_FAN_M: f32 = 3.6;
+// Wide, so the scuffs spread across the face instead of bunching on the line.
+const RUT_MARK_FAN_M: f32 = 5.0;
 const RUT_MARK_LEAN: f32 = 0.55;
 const RUT_MARK_LOOKBACK_M: f32 = 60.0;
 
@@ -442,7 +446,8 @@ const RUT_BUNDLE: (f32, f32) = (0.30, 0.7);
 /// still driving out of it a long way down the following straight, so the grooves taper away
 /// rather than ending — and cutting them off at the arc leaves a corner that looks stencilled
 /// onto the track.
-const RUT_CARRY_EXIT_M: f32 = 55.0;
+// 55 carried a corner's ruts too far down the next straight once the ruts were blended.
+const RUT_CARRY_EXIT_M: f32 = 48.0;
 const RUT_CARRY_ENTRY_M: f32 = 22.0;
 
 /// How far the bundle sits towards the inside of the corner, as a fraction of the half-width.
@@ -500,13 +505,14 @@ const CORNER_ROUGHNESS: f32 = 1.0;
 /// feature of their own — a washboard laid across the track, deep enough to move a bike —
 /// and tying their height to the fine grain meant a track with a smooth surface got no
 /// braking bumps either, which is backwards.
-const BRAKING_HEIGHT_M: f32 = 0.13;
+// Ripples across the track, ridden as "cross ruts" at 0.13 and 0.09.
+const BRAKING_HEIGHT_M: f32 = 0.06;
 
 /// How far apart the chop everyone's rear wheel leaves on the way out of a corner is, and how
 /// tall it stands. Longer and lower than braking: acceleration bumps are stretched out by the
 /// wheel spinning across them.
 const ACCEL_WAVELENGTH_M: f32 = 3.4;
-const ACCEL_HEIGHT_M: f32 = 0.07;
+const ACCEL_HEIGHT_M: f32 = 0.04;
 
 /// How much the edge of the riding line wanders in and out, metres, and over what length of
 /// lap.
@@ -616,13 +622,6 @@ const FIELD_DETAIL_HEIGHT_M: f32 = 0.045;
 const JUMP_HOLLOW: f32 = 0.30;
 const JUMP_HOLLOW_M: f32 = 22.0;
 
-/// The kick at a takeoff's lip: how far back up the face it starts, how far past the lip it
-/// settles into what follows, and how proud it stands — a share of the jump's height, held
-/// between a floor and a ceiling in metres. Asked for after riding: a face ends in a kick.
-const KICK_M: f32 = 2.0;
-const KICK_BACK_M: f32 = 1.2;
-const KICK_RISE: f32 = 0.06;
-const KICK_RISE_M: (f32, f32) = (0.08, 0.18);
 
 /// Metres between samples of the profiles that run along the lap.
 ///
@@ -1147,6 +1146,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     // 3. Bench the corridor in, then build on it.
     let mut corridor = vec![false; gw * gh];
     let mut rut = vec![0.0f32; gw * gh];
+    // The height the ruts add, kept apart so it can be blended before it joins the ground.
+    let mut rut_h = vec![0.0f32; gw * gh];
     // How ridden each cell is, and which way the track runs there — read by the pass that
     // smooths the ground along its own direction.
     let mut ridden_at = vec![0.0f32; gw * gh];
@@ -1367,7 +1368,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                             * ((t - on_line) / TYRE_MARK_SPACING_M * std::f32::consts::TAU).cos())
                     .max(0.0)
                     .powf(0.6);
-                    (1.0 - d * d) * comb * TYRE_MARK_DEPTH * focus
+                    (1.0 - d * d * d * d) * comb * TYRE_MARK_DEPTH * focus
                 } else {
                     0.0
                 }
@@ -1427,7 +1428,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let relief = if carved > 0.0 { spread.min(-carved) } else { spread };
                 // Capped past a knee, so the deepest grooves round off and the rest are untouched.
                 let r = depth * relief;
-                heights[i] += if r < 0.0 {
+                rut_h[i] = if r < 0.0 {
                     -knee(-r, RUT_CUT_KNEE_M)
                 } else {
                     knee(r, RUT_BANK_KNEE_M)
@@ -1508,6 +1509,20 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let ripple = ((s / feel.accel.0 + drift) * std::f32::consts::TAU).sin();
                 heights[i] += ripple * feel.accel.1 * 0.5 * out * across * polished;
             }
+        }
+    }
+
+    // The ruts, blended in: every groove, bank and scuff softened as one layer before it touches
+    // the ground — the fade a hand would take over it — so floors and walls blend rather than
+    // meeting at an edge. Ridden without it as "every rut is a sharp wall".
+    {
+        let r = ((RUT_BLEND_M / mps_x).round() as usize).max(1);
+        let mut soft = rut_h;
+        for _ in 0..3 {
+            soft = crate::trackstats::box_blur(&soft, gw, gh, r);
+        }
+        for (h, s) in heights.iter_mut().zip(&soft) {
+            *h += s;
         }
     }
 
@@ -2106,13 +2121,13 @@ fn trough_at(t: f32, centre: f32, width: f32) -> f32 {
 /// on a real face you read them long before you feel them.
 // Asked for further apart, more of them and wider: 1.3 m apart across a wider fan
 // ([`RUT_MARK_FAN_M`]), each a broad trough rather than a ridge.
-const TYRE_MARK_SPACING_M: f32 = 1.3;
+const TYRE_MARK_SPACING_M: f32 = 2.0;
 /// As a multiple of the ground's rut depth — and a jump sits on a straight, where that is
 /// `rut_straight`, about nine centimetres. At 0.34 the scuffs cut three: real enough, and far
 /// too little to see from the seat. A face that has been ridden all day is visibly combed.
 // 1.15 combed a face with 17 cm ridges every 0.62 m, ridden as too big and spiky; 0.45 as too
 // faint.
-const TYRE_MARK_DEPTH: f32 = 0.7;
+const TYRE_MARK_DEPTH: f32 = 1.3;
 
 /// Half the width of one carved groove, metres.
 ///
@@ -2584,39 +2599,6 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
         }
     }
 
-    // A kick at every lip: the last of the takeoff steepens and the lip stands a little proud of
-    // the deck behind it. After the smoothing and the pass above, or either takes it back out.
-    // The larger of two where they overlap, like the jumps themselves.
-    let mut kick = vec![0.0f32; out.v.len()];
-    for f in features {
-        let Some((lip, h)) = lip_of(f) else {
-            continue;
-        };
-        // Where the smoothed face actually stops climbing — past the nominal lip by however far
-        // the rounding carried it.
-        let from = ((lip - KICK_M) / PROFILE_STEP).max(0.0) as usize;
-        let to = (((lip + blend + 4.0) / PROFILE_STEP) as usize).min(out.v.len().saturating_sub(2));
-        let Some(top) = (from..to).find(|&i| out.v[i + 1] - out.v[i] < 0.02 * PROFILE_STEP) else {
-            continue;
-        };
-        let lip = top as f32 * PROFILE_STEP;
-        let rise = (KICK_RISE * h).clamp(KICK_RISE_M.0, KICK_RISE_M.1);
-        let lo = ((lip - KICK_M) / PROFILE_STEP).floor().max(0.0) as usize;
-        let hi = (((lip + KICK_BACK_M) / PROFILE_STEP).ceil() as usize).min(out.v.len() - 1);
-        for i in lo..=hi {
-            let s = i as f32 * PROFILE_STEP;
-            let add = if s <= lip {
-                let x = ((s - (lip - KICK_M)) / KICK_M).clamp(0.0, 1.0);
-                x * x
-            } else {
-                1.0 - smoothstep(((s - lip) / KICK_BACK_M).clamp(0.0, 1.0))
-            };
-            kick[i] = kick[i].max(rise * add);
-        }
-    }
-    for i in 0..out.v.len() {
-        out.v[i] += kick[i];
-    }
     out
 }
 
@@ -2626,29 +2608,6 @@ fn knee(x: f32, k: (f32, f32)) -> f32 {
         x
     } else {
         k.0 + (k.1 - k.0) * ((x - k.0) / (k.1 - k.0)).tanh()
-    }
-}
-
-/// Where a feature's takeoff lip is, metres round the lap, and how tall the jump is. `None` for
-/// anything without a lip to kick.
-fn lip_of(f: &Feature) -> Option<(f32, f32)> {
-    match f {
-        Feature::Tabletop { at, length, height } => {
-            let (up, _, _) = crate::trackprog::tabletop_faces(*height, *length);
-            Some((at + up, height.abs()))
-        }
-        Feature::Double { at, height, lip, .. } => {
-            Some((at + crate::trackprog::double_faces(*height, *lip).ramp, height.abs()))
-        }
-        Feature::Custom { at, length, shape } => {
-            // The first crest the shape climbs to.
-            let top = shape.iter().map(|p| p.h).fold(0.0f32, f32::max);
-            let i = (1..shape.len()).find(|&i| {
-                shape[i].h >= top * 0.9 && shape.get(i + 1).map_or(true, |n| n.h <= shape[i].h)
-            })?;
-            Some((at + shape[i].u * length, top))
-        }
-        _ => None,
     }
 }
 
@@ -3195,7 +3154,9 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         let l = bands.iter().find(|l| l.name == name).expect("a band by that name");
         band_of(l.band)
     };
-    let dirt = band_named("soil_dark_c");
+    // The light riding surface's own band. This was "soil_dark_c" — the everywhere mask — so in
+    // the game the palest soil covered the whole site, not the track.
+    let dirt = band_named("soil_light_c");
     let line = band_named("soil_dark_c");
     let grass = band_named("hm_grass");
     // Off-track starts where the graded shoulder ends: the rider is on the track, or in the
@@ -4872,6 +4833,9 @@ struct Where {
 /// Which cells a band of the preview map covers.
 #[derive(Clone, Copy)]
 enum BandMask {
+    /// The riding surface, with the dark ground showing through it wherever it is worn: the
+    /// floor of every groove and the tyre lines between them. See [`streak_mask`].
+    Riding,
     /// The base band: everything, and so no mask at all.
     Everywhere,
     /// Out to the riding line's own width, plus this many metres. Not a fixed distance: the
@@ -4950,6 +4914,16 @@ fn band_mask(
         BandMask::Out(extra) => mask_rect_outside(syn, mw, mh, half, move |e, x, z| {
             band_edge(e, x, z, extra, seed ^ 0xB3ED)
         }),
+        BandMask::Riding => {
+            let mut base = mask_rect_outside(syn, mw, mh, half, move |e, x, z| {
+                band_edge(e, x, z, 0.0, seed ^ 0xB3ED)
+            });
+            let holes = streak_mask(syn, half, seed, mw, mh);
+            for (b, h) in base.iter_mut().zip(&holes) {
+                *b = (*b as u32 * (255 - *h as u32) / 255) as u8;
+            }
+            base
+        }
         BandMask::Line(w) => line_mask(syn, half, w, seed, mw, mh),
         BandMask::Grooves => {
             // How far to average the rut field over, in cells: about one groove's width.
@@ -5086,6 +5060,42 @@ fn line_mask(syn: &Synth, half: f32, w: f32, seed: u32, mw: usize, mh: usize) ->
         // somebody rode rather than as a stripe somebody painted.
         let patchy = (0.72 + 0.40 * fbm(c.x * 0.07, c.z * 0.07, seed ^ 0x51A9)).clamp(0.55, 1.0);
         (255.0 * strip * corridor * patchy) as u8
+    })
+}
+
+/// Tyre lines through the riding surface: how far apart, how narrow, how far they meander, how
+/// far out from the racing line they reach as a share of the half width, and how much of the
+/// light soil they take away.
+const STREAK_SPACING_M: f32 = 0.9;
+const STREAK_SHARP: f32 = 6.0;
+const STREAK_WANDER_M: f32 = 0.6;
+const STREAK_REACH: f32 = 0.85;
+const STREAK_DEPTH: f32 = 0.8;
+
+/// Where the dark ground shows through the riding surface: every groove's floor, and the tyre
+/// lines worn along the lap between them.
+///
+/// Indiana lays its light soil over 60% of its site and the gaps in it are what make the track
+/// readable — dark streaks running with the lap, the dark soil underneath showing through. Ours
+/// covered the corridor solid, so the ruts had nothing to show through.
+fn streak_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
+    mask_across(syn, mw, mh, |c| {
+        if c.lat.abs() > half + RUT_CORRIDOR_FADE_M {
+            return 0;
+        }
+        let s = syn.arc[c.i];
+        // Worn hardest where the wheels go, fading towards the edges.
+        let ridden = (1.0 - (c.off.abs() / (half * STREAK_REACH)).min(1.0).powi(2)).max(0.0);
+        // Narrow, meandering, and broken along their length.
+        let u = c.off + STREAK_WANDER_M * fbm(s / 30.0, c.off * 0.15, seed ^ 0x57A1);
+        let comb = (0.5 + 0.5 * (u / STREAK_SPACING_M * std::f32::consts::TAU).cos())
+            .powf(STREAK_SHARP);
+        let broken = smoothstep(
+            ((fbm(s / 11.0, u / STREAK_SPACING_M, seed ^ 0x57A2) + 0.1) * 2.5).clamp(0.0, 1.0),
+        );
+        let lines = comb * broken * ridden;
+        let floor = ((-c.rut - 0.1) / 0.5).clamp(0.0, 1.0);
+        (255.0 * (lines.max(floor) * STREAK_DEPTH).clamp(0.0, 1.0)) as u8
     })
 }
 
@@ -6576,7 +6586,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         Layer {
             name: "soil_light_c",
             sheet: "ground_c",
-            band: BandMask::Out(0.0),
+            band: BandMask::Riding,
             look: field,
             salt: 0x9A0D,
             tile_m: TILE_FIELD_M,
@@ -10722,31 +10732,6 @@ mod tests {
             .max()
             .unwrap_or(0);
         assert!(most >= 2, "the corner never grew a second line — {most} at best");
-    }
-
-    #[test]
-    fn a_takeoff_ends_in_a_kick() {
-        // Ridden: a face usually ends in a kick — a lip standing a little proud of the deck.
-        let s = synthesise(&with_a_tabletop()).unwrap();
-        let (up, _, _) = crate::trackprog::tabletop_faces(2.4, 36.0);
-        // Averaged across the middle of the track, so the scuffs on the line don't read as shape.
-        let h = |at: f32| {
-            let v = across(&s, at);
-            let m = &v[v.len() / 3..2 * v.len() / 3];
-            m.iter().sum::<f32>() / m.len() as f32
-        };
-        let xs: Vec<f32> = (0..80).map(|k| 40.0 + up - 3.0 + k as f32 * 0.25).collect();
-        let v: Vec<f32> = xs.iter().map(|&x| h(x)).collect();
-        let crest = (1..v.len() - 1)
-            .find(|&i| v[i] >= v[i - 1] && v[i] > v[i + 1])
-            .expect("the face never tops out");
-        let after = v[crest..(crest + 12).min(v.len())].iter().copied().fold(f32::MAX, f32::min);
-        assert!(
-            v[crest] > after + 0.03,
-            "no kick: the lip at {:.1} m stands {:.3} m over the deck behind it",
-            xs[crest],
-            v[crest] - after
-        );
     }
 
     #[test]

@@ -2625,6 +2625,19 @@ mod tests {
             }
         };
         let n = stations.len();
+        // FROST_DUMP=<prefix> also writes the heights and the lap, to draw pictures from.
+        if let Ok(out) = std::env::var("FROST_DUMP") {
+            let mut b = Vec::with_capacity(g.v.len() * 4 + 16);
+            for v in [g.w as f32, g.h as f32, g.size_x, g.size_z] {
+                b.extend_from_slice(&v.to_le_bytes());
+            }
+            for v in &g.v {
+                b.extend_from_slice(&v.to_le_bytes());
+            }
+            std::fs::write(format!("{out}.heights"), b).unwrap();
+            let csv: String = stations.iter().map(|(x, z, h)| format!("{x},{z},{h}\n")).collect();
+            std::fs::write(format!("{out}.stations.csv"), csv).unwrap();
+        }
 
         // Straight, corner (under 40 m radius), or a jump face (climbing or falling over 13%).
         let (k, m) = ((5.0 / step) as usize, (1.5 / step) as usize);
