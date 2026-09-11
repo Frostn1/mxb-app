@@ -680,7 +680,7 @@ impl DoubleShape {
 /// The stated length is what the *top* is measured against: the ramps are added to it, so a
 /// tabletop's footprint is longer than the number asked for and [`Feature::length`] reports
 /// the whole thing.
-pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
+pub fn tabletop_faces(height: f32, length: f32, lip: f32) -> (f32, f32, f32) {
     // Whichever is longer: the angle's, or the fraction of the stated length the ramps used
     // to be. The angle alone makes a *short* jump steeper than it was — at 30° a one-metre
     // tabletop gets a 2.6 m ramp where 27% of a 22 m length gave it 5.9 m — which is the same
@@ -691,7 +691,7 @@ pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
     // a 3.6 m tabletop asked for at 49 m got 35 m of ramp and a 14 m top, which from the
     // seat is a long rounded hill with a crest on it and not a table at all. A table's size
     // is its deck.
-    let up = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M);
+    let up = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M).max(lip);
     let down = face_run(height, JUMP_LANDING_DEG, JUMP_LANDING_MIN_M);
     // Whatever the asked-for length has left once the faces are in it — but never less than a
     // deck. The deck wins and the footprint grows; the other way round, keeping the length by
@@ -713,7 +713,11 @@ pub const FINISH_JUMP_M: (f32, f32) = (2.4, 3.0);
 /// and the finish one is at the long end because it is the one everybody lands on.
 // Past the published twelve: at 3 m, the regulated ceiling, the finish jump still rode small, and
 // a longer deck is the way to make it bigger without making it taller.
-pub const FINISH_DECK_MAX_M: f32 = 16.0;
+pub const FINISH_DECK_MAX_M: f32 = 20.0;
+
+/// How far the finish jump's take-off runs, metres. Longer and gentler than the angle gives a
+/// 3 m face on its own (9 m, 37 degrees at the lip): at 13 it leaves at 26.
+pub const FINISH_FACE_M: f32 = 13.0;
 
 /// Bare ground off the last corner before the finish jump's face, metres. A takeoff at the
 /// corner exit is a takeoff nobody has any drive at.
@@ -736,7 +740,7 @@ pub fn finish_jump_length(height: f32, deck: f32) -> f32 {
     let deck = deck.max(TABLETOP_DECK_M);
     let mut len = height.abs() + deck;
     for _ in 0..8 {
-        let (up, _, down) = tabletop_faces(height, len);
+        let (up, _, down) = tabletop_faces(height, len, FINISH_FACE_M);
         len = up + deck + down;
     }
     len
@@ -946,7 +950,15 @@ impl Segment {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Feature {
     /// Up, along, down. The safe jump, and the commonest thing on a track.
-    Tabletop { at: f32, length: f32, height: f32 },
+    Tabletop {
+        at: f32,
+        length: f32,
+        height: f32,
+        /// How far the take-off runs, metres, when the program wants it longer and gentler
+        /// than the angle would make it. Zero leaves it to the angle.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        lip: f32,
+    },
     /// Two lips with air between them. `gap` is ground the rider must clear.
     Double {
         at: f32,
@@ -1001,6 +1013,10 @@ fn default_lip() -> f32 {
     10.0
 }
 
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
+}
+
 impl Feature {
     pub fn at(&self) -> f32 {
         match self {
@@ -1036,8 +1052,8 @@ impl Feature {
             // The ramps are sized from the height, so the footprint is longer than the
             // stated length and this has to say so — the profile is only written as far as
             // `at + length`, and anything past it is cut off into a step.
-            Feature::Tabletop { height, length, .. } => {
-                let (up, top, down) = tabletop_faces(*height, *length);
+            Feature::Tabletop { height, length, lip, .. } => {
+                let (up, top, down) = tabletop_faces(*height, *length, *lip);
                 up + top + down
             }
             Feature::Roller { length, .. }
@@ -2116,7 +2132,7 @@ mod tests {
     #[test]
     fn rotating_carries_the_features_round() {
         let mut p = oval();
-        p.features = vec![Feature::Tabletop { at: 150.0, length: 20.0, height: 1.5 }];
+        p.features = vec![Feature::Tabletop { at: 150.0, length: 20.0, height: 1.5, lip: 0.0 }];
         p.elevation = vec![Knot { at: 150.0, height: 2.0 }];
         let shift = p.rotate_start(1);
         assert!((p.features[0].at() - (150.0 - shift)).abs() < 0.01, "{:?}", p.features[0]);
@@ -2130,7 +2146,7 @@ mod tests {
         // Sits over the point the lap is about to start at, which after the rotation would
         // put it half before the start and half past the finish.
         let at = 40.0 * std::f32::consts::PI - 5.0;
-        p.features = vec![Feature::Tabletop { at, length: 20.0, height: 1.5 }];
+        p.features = vec![Feature::Tabletop { at, length: 20.0, height: 1.5, lip: 0.0 }];
         p.rotate_start(1);
         p.check().expect("nothing hangs off the end of the lap");
     }
@@ -2351,7 +2367,7 @@ mod tests {
         p.features.push(Feature::Tabletop {
             at: 90.0,
             length: 20.0,
-            height: 2.0,
+            height: 2.0, lip: 0.0
         });
         let err = p.check().unwrap_err().to_string();
         assert!(err.contains("past the"), "{err}");

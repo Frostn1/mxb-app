@@ -1614,8 +1614,8 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         let takeoff = match f {
             // The top of the takeoff face, which is where a rider needs it — a marker before
             // the ramp is a marker for the ground in front of the jump.
-            crate::trackprog::Feature::Tabletop { at, height, length, .. } => {
-                let (up, top, _) = crate::trackprog::tabletop_faces(*height, *length);
+            crate::trackprog::Feature::Tabletop { at, height, length, lip, .. } => {
+                let (up, top, _) = crate::trackprog::tabletop_faces(*height, *length, *lip);
                 Some((at + up + top * 0.15, *height))
             }
             crate::trackprog::Feature::Double { at, height, lip, .. } => {

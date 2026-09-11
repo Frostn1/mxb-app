@@ -247,15 +247,15 @@ const RUT_RADIUS_M: (f32, f32) = (40.0, 14.0);
 // Measured against Indiana on the same statistic the corpus survey prints, which is the only
 // way to compare: at 0.38 a built lap came back with corner grooves at p50 0.13 and p90 0.24
 // against Indiana's 0.21 and 0.44 — half the depth, and a corner you can see but not sit in.
-// Ridden at 1.8 / 0.15 as holes too deep, at 1.35 / 0.11 as no ruts at all. Between the two,
-// both by the same factor so a corner still fades out to its straight.
-const RUT_DEPTH_M: f32 = 1.55;
-const RUT_DEPTH_STRAIGHT_M: f32 = 0.13;
+// Ridden at 1.8 / 0.15 as holes too deep, at 1.35 / 0.11 as no ruts at all, and blended at
+// 1.55 / 0.13 as a tiny bit shallow. Both by the same factor so a corner still fades out.
+const RUT_DEPTH_M: f32 = 1.7;
+const RUT_DEPTH_STRAIGHT_M: f32 = 0.143;
 
 /// Where a groove's cut and its bank start to be held back, and the ceiling each rounds off
 /// towards, metres. Below the knee nothing changes. Indiana's deepest corner groove is 0.47 m;
 /// ours reached 0.94 on the outside line.
-const RUT_CUT_KNEE_M: (f32, f32) = (0.25, 0.35);
+const RUT_CUT_KNEE_M: (f32, f32) = (0.28, 0.4);
 
 /// How soft the blend over the ruts is: one box radius, three passes.
 const RUT_BLEND_M: f32 = 0.25;
@@ -436,8 +436,9 @@ const RUT_SPACING_M: f32 = 2.75;
 
 /// How much of the half-width the bundle covers, at the loosest corner that ruts at all and
 /// at the tightest.
-// 0.92 spread a tight corner's grooves across nearly the whole track: too many ruts per turn.
-const RUT_BUNDLE: (f32, f32) = (0.30, 0.7);
+// 0.30 / 0.92 was too many ruts per turn; blended, 0.30 / 0.7 rode as one line with clean ground
+// either side of it to ride round the ruts on.
+const RUT_BUNDLE: (f32, f32) = (0.4, 0.85);
 
 /// How far a corner's ruts run past the corner, out onto the straight and back up the
 /// approach, metres.
@@ -505,14 +506,16 @@ const CORNER_ROUGHNESS: f32 = 1.0;
 /// feature of their own — a washboard laid across the track, deep enough to move a bike —
 /// and tying their height to the fine grain meant a track with a smooth surface got no
 /// braking bumps either, which is backwards.
-// Ripples across the track, ridden as "cross ruts" at 0.13 and 0.09.
-const BRAKING_HEIGHT_M: f32 = 0.06;
+// Only where the speed model has the rider braking. 0.13 with the chop on top rode as "cross
+// ruts"; with the chop gone, 0.06 rode as no bumps at all. Asked for: bumps mainly before the
+// ruts, which is braking bumps.
+const BRAKING_HEIGHT_M: f32 = 0.16;
 
 /// How far apart the chop everyone's rear wheel leaves on the way out of a corner is, and how
 /// tall it stands. Longer and lower than braking: acceleration bumps are stretched out by the
 /// wheel spinning across them.
 const ACCEL_WAVELENGTH_M: f32 = 3.4;
-const ACCEL_HEIGHT_M: f32 = 0.04;
+const ACCEL_HEIGHT_M: f32 = 0.06;
 
 /// How much the edge of the riding line wanders in and out, metres, and over what length of
 /// lap.
@@ -1346,8 +1349,14 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 // Two lines and the field, not four. Three carved plus the field's own put
                 // grooves across the whole width and a rider reported, plainly, too many.
                 let outer = extra(on_line + side * RUT_SECOND_M, RUT_SECOND_DEPTH, 0x5EC0, 17.0);
-                // The inside one is gone too: ridden, too many ruts per turn.
-                outer
+                // Both, again: with the ruts blended, the outer line alone rode as the only line.
+                let inner = extra(
+                    on_line - side * RUT_SECOND_M * 0.9,
+                    RUT_SECOND_DEPTH * 0.62,
+                    0x5EC2,
+                    29.0,
+                );
+                outer.max(inner)
             } else {
                 0.0
             };
@@ -1508,7 +1517,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let drift = 0.35 * fbm(s / 26.0, 7.0, r.seed ^ 0xB4AE);
                 let ripple =
                     ((s / feel.brake.0 + drift) * std::f32::consts::TAU).sin();
-                heights[i] += ripple * feel.brake.1 * 0.5 * brake * across * polished;
+                // Not polished: braking bumps are worst on the line, where everyone brakes.
+                heights[i] += ripple * feel.brake.1 * 0.5 * brake * across;
             }
             // And the longer, lower chop everybody's rear wheel leaves on the way out.
             let out = chop.accel.at(s);
@@ -2335,8 +2345,8 @@ fn built_ground(features: &[Feature], lap: f32) -> (Profile, Profile) {
     for feat in features {
         let at = feat.at();
         match *feat {
-            Feature::Tabletop { height, length, .. } => {
-                let (up, top, down) = crate::trackprog::tabletop_faces(height, length);
+            Feature::Tabletop { height, length, lip, .. } => {
+                let (up, top, down) = crate::trackprog::tabletop_faces(height, length, lip);
                 // One line up the face and one off the landing.
                 mark(at, at + up, 1.0, 1.0);
                 // The top is maintained ground: swept flat between motos, and a lip nobody
@@ -2957,8 +2967,8 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
         // Up, along the top, and down — with the two ramps sized from the height and an
         // angle rather than as fractions of the length, so a short tabletop is not a steep
         // one. Shared with `Feature::length`, which has to agree about where it ends.
-        Feature::Tabletop { height, length, .. } => {
-            let (up, top, down) = crate::trackprog::tabletop_faces(height, length);
+        Feature::Tabletop { height, length, lip, .. } => {
+            let (up, top, down) = crate::trackprog::tabletop_faces(height, length, lip);
             if u <= up {
                 // Concave: tangent to the ground at the foot and steepest at the lip, which
                 // is the edge the rider leaves the ground over.
@@ -3007,8 +3017,8 @@ fn custom_takeoff(points: &[crate::trackprog::ShapePoint]) -> Option<(f32, f32, 
 /// Where a feature's take-off lip is, metres round the lap, and how long its face is.
 fn takeoff_of(f: &Feature) -> Option<(f32, f32)> {
     match f {
-        Feature::Tabletop { at, length, height } => {
-            let (up, _, _) = crate::trackprog::tabletop_faces(*height, *length);
+        Feature::Tabletop { at, length, height, lip } => {
+            let (up, _, _) = crate::trackprog::tabletop_faces(*height, *length, *lip);
             Some((at + up, up))
         }
         Feature::Custom { at, length, shape } => {
@@ -7651,7 +7661,7 @@ mod tests {
         let mut by_kind: std::collections::BTreeMap<&str, Vec<(f32, f32)>> = Default::default();
         for f in &p.features {
             let (kind, from, len, asked) = match f {
-                crate::trackprog::Feature::Tabletop { at, length, height } => {
+                crate::trackprog::Feature::Tabletop { at, length, height, .. } => {
                     ("tabletop", *at, *length, *height)
                 }
                 crate::trackprog::Feature::Double { at, height, gap, .. } => {
@@ -8054,7 +8064,7 @@ mod tests {
             blend: crate::trackprog::default_blend(),
             elevation: Vec::new(),
             features: vec![
-                Feature::Tabletop { at: 30.0, length: 22.0, height: 2.4 },
+                Feature::Tabletop { at: 30.0, length: 22.0, height: 2.4, lip: 0.0 },
                 Feature::Double { at: 70.0, height: 2.0, gap: 9.0, lip: 6.0 },
                 Feature::Whoops { at: 105.0, count: 6, spacing: 4.5, height: 0.7 },
                 Feature::Berm { at: 165.0, length: 80.0, height: 1.6 },
@@ -8331,8 +8341,8 @@ mod tests {
         // Overlapping where both are at full height, which is the only place summing shows
         // itself — two jumps that meet ramp-to-ramp barely overlap at all.
         p.features = vec![
-            Feature::Tabletop { at: 30.0, length: 24.0, height: 2.0 },
-            Feature::Tabletop { at: 33.0, length: 24.0, height: 2.0 },
+            Feature::Tabletop { at: 30.0, length: 24.0, height: 2.0, lip: 0.0 },
+            Feature::Tabletop { at: 33.0, length: 24.0, height: 2.0, lip: 0.0 },
         ];
         let s = synthesise(&p).unwrap();
         let base = height_at_arc(&s, 10.0);
@@ -10460,7 +10470,7 @@ mod tests {
         // a grade against the ramp's own rather than against level: a jump is built on a pad
         // that is cut roughly level and not perfectly, so a deck on a hillside slopes a little
         // and should.
-        let (up, deck, _) = crate::trackprog::tabletop_faces(height, len);
+        let (up, deck, _) = crate::trackprog::tabletop_faces(height, len, crate::trackprog::FINISH_FACE_M);
         assert!(deck >= crate::trackprog::TABLETOP_DECK_M, "the deck is {deck:.1} m");
         let h = |u: f32| profile[(u.round() as usize).min(profile.len() - 1)];
         let (a, b) = (up + deck * 0.2, up + deck * 0.8);
@@ -10604,7 +10614,7 @@ mod tests {
     /// the ruts over it.
     fn with_a_tabletop() -> TrackProgram {
         let mut p = hairpins();
-        p.features = vec![Feature::Tabletop { at: 40.0, length: 36.0, height: 2.4 }];
+        p.features = vec![Feature::Tabletop { at: 40.0, length: 36.0, height: 2.4, lip: 0.0 }];
         p
     }
 
@@ -10811,7 +10821,7 @@ mod tests {
         // Ridden: a face that rounds over before the lip is a knuckle. It should be concave
         // right to the edge and meet the deck there, with nothing standing up past it.
         let s = synthesise(&with_a_tabletop()).unwrap();
-        let (up, _, _) = crate::trackprog::tabletop_faces(2.4, 36.0);
+        let (up, _, _) = crate::trackprog::tabletop_faces(2.4, 36.0, 0.0);
         let lip = 40.0 + up;
         let h = |at: f32| {
             let v = across(&s, at);
@@ -10839,7 +10849,7 @@ mod tests {
         // place, packs that hard, and leaves the ground beside it alone.
         let p = with_a_tabletop();
         let s = synthesise(&p).unwrap();
-        let (up, top, _) = crate::trackprog::tabletop_faces(2.4, 36.0);
+        let (up, top, _) = crate::trackprog::tabletop_faces(2.4, 36.0, 0.0);
         let face = lines_across(&across(&s, 40.0 + up * 0.6), 0.02);
         let plain = lines_across(&across(&s, 100.0), 0.02);
         // A comb, not a single groove and not the open ground's spread. Everybody arrives at a
@@ -11086,8 +11096,8 @@ mod tests {
         let s = synthesise(&p).unwrap();
         for f in p.features.iter().filter(|f| f.height().abs() > 1.0).take(4) {
             let up = match f {
-                Feature::Tabletop { height, length, .. } =>
-                    crate::trackprog::tabletop_faces(*height, *length).0,
+                Feature::Tabletop { height, length, lip, .. } =>
+                    crate::trackprog::tabletop_faces(*height, *length, *lip).0,
                 Feature::Double { height, lip, .. } =>
                     crate::trackprog::double_faces(*height, *lip).ramp,
                 _ => continue,

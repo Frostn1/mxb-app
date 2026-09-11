@@ -10,10 +10,11 @@
   GUID each one is locked to.
 
 ### Changed
-- Generated tracks ride smoother: blended ruts with soft walls, fewer ruts per corner, far
-  fewer bumps and ripples across the track, and no rut deeper than about 35 cm.
-- Jumps on generated tracks are a little smaller, about 85% of their old height. The finish
-  jump keeps its full height and gets a longer deck.
+- Generated tracks ride smoother: blended ruts with soft walls, spread across more of each
+  corner, and no rut deeper than about 40 cm.
+- Braking bumps build up on the way into corners instead of noise all over the track.
+- Jumps on generated tracks are three quarters of their old height. The finish jump keeps
+  its full height, with a longer deck and a longer, gentler face.
 - Jump faces get steeper right up to the lip and meet the deck flush, with no rounded hump
   before the edge.
 - Jump faces carry wide, spread-out tyre scuffs instead of thin grooves down the middle.

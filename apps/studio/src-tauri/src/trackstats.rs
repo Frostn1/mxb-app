@@ -2652,13 +2652,23 @@ mod tests {
                 if grade.abs() > 0.13 { 2 } else if curv > 1.0 / 40.0 { 1 } else { 0 }
             })
             .collect();
+        // Straight ground in the 25 m before a corner: where the braking bumps are.
+        let ahead = (25.0 / step) as usize;
+        let zone: Vec<usize> = (0..n)
+            .map(|i| {
+                if zone[i] == 0 && (1..=ahead).any(|a| zone[(i + a) % n] == 1) { 3 } else { zone[i] }
+            })
+            .collect();
 
         // Along the line, an eighth of a metre at a time, 1.5 m either side of the centre.
         const SUB: usize = 4;
         let fine_step = step / SUB as f32;
         let half = ((0.5 / fine_step) as usize).max(1);
-        let mut chat: [Vec<f32>; 3] = Default::default();
-        let mut bumps = [0usize; 3];
+        let mut chat: [Vec<f32>; 4] = Default::default();
+        let mut bumps = [0usize; 4];
+        // Swells: bumps a braking wheel feels, 2 m and up, against a 3 m mean, 3 cm proud.
+        let mut swells = [0usize; 4];
+        let wide = ((1.5 / fine_step) as usize).max(1);
         let cols = 13;
         for j in 0..cols {
             let u = -1.5 + j as f32 * 0.25;
@@ -2685,14 +2695,24 @@ mod tests {
                     bumps[zs[i]] += 1;
                 }
             }
+            let broad = detrend(&col, wide);
+            for i in 4..broad.len().saturating_sub(4) {
+                let v = broad[i];
+                if v > 0.03 && (i - 4..=i + 4).all(|q| q == i || broad[q] < v) {
+                    swells[zs[i]] += 1;
+                }
+            }
         }
 
         // Across, six metres detrended, 5.5 m either side.
         let lat = RIDDEN_LATERAL_M;
         let w = (2.0 * RIDDEN_HALF_M / lat) as usize + 1;
         let half_across = ((3.0 / lat) as usize).max(1);
-        let mut p2p: [Vec<f32>; 3] = Default::default();
-        let mut walls: [Vec<f32>; 3] = Default::default();
+        // How much of the ridden width is in a rut: across samples 5 cm or more below the ground
+        // around them, inside 5.5 m of the line. The share a rider cannot ride round.
+        let mut rutted = [(0usize, 0usize); 4];
+        let mut p2p: [Vec<f32>; 4] = Default::default();
+        let mut walls: [Vec<f32>; 4] = Default::default();
         for (i, &(x, z, h)) in stations.iter().enumerate() {
             let (rx, rz) = crate::trackprog::right_vector(h);
             let row: Vec<f32> = (0..w)
@@ -2704,6 +2724,8 @@ mod tests {
             let d = detrend(&row, half_across);
             let (lo, hi) = d.iter().fold((f32::MAX, f32::MIN), |(l, h), &v| (l.min(v), h.max(v)));
             p2p[zone[i]].push(hi - lo);
+            rutted[zone[i]].1 += d.len();
+            rutted[zone[i]].0 += d.iter().filter(|&&v| v < -0.05).count();
             for q in 1..d.len() {
                 walls[zone[i]].push(((d[q] - d[q - 1]).abs() / lat).atan().to_degrees());
             }
@@ -2715,17 +2737,19 @@ mod tests {
             v.sort_by(|a, b| a.partial_cmp(b).unwrap());
             v[((v.len() - 1) as f32 * p) as usize]
         };
-        println!("  zone      metres  chatter  bumps/10m  across p2p p50/p90/max   wall p98");
-        for (z, name) in ["straight", "corner", "jump face"].iter().enumerate() {
+        println!("  zone      metres  chatter  bumps/10m  across p2p p50/p90/max   wall p98  swells/10m  rutted");
+        for (z, name) in ["straight", "corner", "jump face", "approach"].iter().enumerate() {
             let metres = zone.iter().filter(|&&q| q == z).count() as f32 * step;
             let per10 = bumps[z] as f32 / (metres * cols as f32).max(1e-3) * 10.0;
             println!(
-                "  {name:<9} {metres:>6.0}  {:>7.3}  {per10:>9.1}  {:>6.2} {:>5.2} {:>5.2}        {:>4.0}°",
+                "  {name:<9} {metres:>6.0}  {:>7.3}  {per10:>9.1}  {:>6.2} {:>5.2} {:>5.2}        {:>4.0}°  {:>9.1}  {:>5.0}%",
                 rms(&chat[z]),
                 pct(&mut p2p[z], 0.5),
                 pct(&mut p2p[z], 0.9),
                 pct(&mut p2p[z], 1.0),
                 pct(&mut walls[z], 0.98),
+                swells[z] as f32 / (metres * cols as f32).max(1e-3) * 10.0,
+                100.0 * rutted[z].0 as f32 / rutted[z].1.max(1) as f32,
             );
         }
     }
