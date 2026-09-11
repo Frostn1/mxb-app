@@ -263,6 +263,8 @@ export const ptBR: Translation = {
   "protect.skipJunk": "Ignorado",
   "protect.skipEmpty": "Vazio",
   "protect.skipProtected": "Já protegido",
+  "protect.lockedTo": "Bloqueado para {{guid}}",
+  "protect.lockedToNobody": "Protegido, sem GUID",
   "protect.guidsTitle": "Travar para",
   "protect.guidsDesc": "Um GUID por linha — sai uma pasta por GUID. Cada cópia leva a própria chave, então dois compradores não conseguem perceber que têm o mesmo arquivo.",
   "protect.guidsPlaceholder": "FF0110000108D7CFE3",

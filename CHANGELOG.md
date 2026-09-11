@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-10
+
+### Added
+- Protect in Frost's Studio shows who a file is already locked to. Add a protected file
+  and its row names the GUID it is bound to.
+
 ## 2026-09-09 — v0.14.0 — A new name, and a Studio of its own
 
 ### Added

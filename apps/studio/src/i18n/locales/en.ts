@@ -267,6 +267,8 @@ export const en = {
   "protect.skipJunk": "Skipped",
   "protect.skipEmpty": "Empty",
   "protect.skipProtected": "Already protected",
+  "protect.lockedTo": "Locked to {{guid}}",
+  "protect.lockedToNobody": "Protected, no GUID",
   "protect.guidsTitle": "Lock to",
   "protect.guidsDesc": "One GUID per line — one folder comes out per GUID. Every copy gets its own key, so two buyers can't tell they hold the same file.",
   "protect.guidsPlaceholder": "FF0110000108D7CFE3",
