@@ -206,9 +206,9 @@ const TEXTURE_GAIN: f32 = 0.34;
 /// across-line figure by half before it arrived.
 const CHOP_WAVELENGTH_M: f32 = 0.55;
 const CHOP_ACROSS_M: f32 = 3.0;
-// 0.30 rode as small bumps packed everywhere: 4x Indiana's chatter and 15x its bumps per 10 m
-// (`trackstats::tests::zone_roughness`). At 0.06 both sit on Indiana's.
-const CHOP_M: f32 = 0.06;
+// 0.30 rode as small bumps packed everywhere (4x Indiana's chatter, 15x its bumps per 10 m,
+// `trackstats::tests::zone_roughness`) and 0.06 as far too smooth. Between the two.
+const CHOP_M: f32 = 0.16;
 
 /// The same, for the field that lays out where the grooves go.
 const RUT_FIELD_OCTAVES: u32 = 2;
@@ -247,10 +247,10 @@ const RUT_RADIUS_M: (f32, f32) = (40.0, 14.0);
 // Measured against Indiana on the same statistic the corpus survey prints, which is the only
 // way to compare: at 0.38 a built lap came back with corner grooves at p50 0.13 and p90 0.24
 // against Indiana's 0.21 and 0.44 — half the depth, and a corner you can see but not sit in.
-// Lowered from 1.8 / 0.15 after riding Corpus Venue: holes too deep, walls 55 deg against
-// Indiana's 42. Both by the same factor, so a corner still fades out to its straight.
-const RUT_DEPTH_M: f32 = 1.35;
-const RUT_DEPTH_STRAIGHT_M: f32 = 0.11;
+// Ridden at 1.8 / 0.15 as holes too deep, at 1.35 / 0.11 as no ruts at all. Between the two,
+// both by the same factor so a corner still fades out to its straight.
+const RUT_DEPTH_M: f32 = 1.55;
+const RUT_DEPTH_STRAIGHT_M: f32 = 0.13;
 
 /// The material the cut displaced, which does not disappear.
 ///
@@ -267,9 +267,8 @@ const RUT_LIP_OFFSET_M: f32 = 1.05;
 /// floor is packed down over a day and the bank is loose material piled on undisturbed ground.
 // Raised so a groove comes with something to lean on. What was asked for from the seat is a
 // "mini berm" — the bank is the half you use, and at parity with the cut it was barely there.
-// 1.45 overshot the other way — reported as walls too tall and spiky. 0.94 keeps the bank at
-// Indiana's wall angle.
-const RUT_LIP_GAIN: f32 = 0.94;
+// 1.45 rode as walls too tall and spiky, 0.94 as no wall at all.
+const RUT_LIP_GAIN: f32 = 1.2;
 
 /// Where the field stops being ground and starts being wall, and where the wall tops out.
 ///
@@ -327,7 +326,9 @@ const RUT_WALL_HOLD: f32 = 1.8;
 // (25, 19, 14) — half the luma of the darkest thing either of them lays on a track, and with
 // it a pixel-to-pixel grain of 1.6 against their 3.8-18. Dark and flat is the one combination
 // that reads as the texture having failed rather than as polished dirt.
-const RUT_FLOOR_DARKEN: f32 = 1.14;
+// Under 1, so a groove's floor is darker than the soil around it; at 1.14 it was lighter and
+// the ruts were ridden as very hard to see.
+const RUT_FLOOR_DARKEN: f32 = 0.95;
 // The dry stuff thrown off the line. Their brightest dry surfaces reach (171, 134, 99) and
 // (220, 185, 150); at 0.85 ours reached (145, 113, 84), darker than either.
 const LOOSE_DRY: f32 = 1.10;
@@ -339,7 +340,9 @@ const LOOSE_DRY: f32 = 1.10;
 /// ours topped out at (123, 95, 71) — no bright end at all, which is most of why our ground
 /// read as mud rather than as dry dirt. Lands on (162, 125, 94), inside Indiana's range and
 /// short of Southwick's sand.
-const FIELD_DARKEN: f32 = 0.95;
+// Down from 0.95, which painted the riding surface Indiana's palest dirt and was ridden as "all
+// the very light ugly dirt", with the ruts lost in it.
+const FIELD_DARKEN: f32 = 0.85;
 
 /// How much lighter the worked corridor is than the line worn down the middle of it.
 ///
@@ -380,6 +383,11 @@ const LINE_FADE_M: f32 = 0.8;
 /// quickly it gets there. A bank is loose over all of itself, not in proportion to how tall it
 /// happens to be, so the signal saturates well before its own peak.
 const RUT_LIP_LOOSE: f32 = 1.0;
+
+/// How far in from each side of the corridor the loose dry dirt reaches, metres. It used to start
+/// 2.45 m off the racing line, which painted most of the riding width the palest sheet and was
+/// ridden as "all very light ugly dirt" with the ruts lost in it.
+const LOOSE_EDGE_M: f32 = 2.5;
 const RUT_LIP_SHARP: f32 = 2.2;
 
 /// Tyre marks up the face of a jump: the grade at which a face is fully marked, how much wider
@@ -392,7 +400,7 @@ const RUT_LIP_SHARP: f32 = 2.2;
 /// How steep the ground has to climb before it counts as a face worth marking. Lower, so the
 /// whole ramp is marked rather than only its steepest third.
 const RUT_MARK_FACE: f32 = 0.13;
-const RUT_MARK_FAN_M: f32 = 2.4;
+const RUT_MARK_FAN_M: f32 = 3.6;
 const RUT_MARK_LEAN: f32 = 0.55;
 const RUT_MARK_LOOKBACK_M: f32 = 60.0;
 
@@ -600,6 +608,14 @@ const FIELD_DETAIL_HEIGHT_M: f32 = 0.045;
 /// at +0.97: the jump is a hump between two scoops.
 const JUMP_HOLLOW: f32 = 0.30;
 const JUMP_HOLLOW_M: f32 = 22.0;
+
+/// The kick at a takeoff's lip: how far back up the face it starts, how far past the lip it
+/// settles into what follows, and how proud it stands — a share of the jump's height, held
+/// between a floor and a ceiling in metres. Asked for after riding: a face ends in a kick.
+const KICK_M: f32 = 2.0;
+const KICK_BACK_M: f32 = 1.2;
+const KICK_RISE: f32 = 0.06;
+const KICK_RISE_M: (f32, f32) = (0.08, 0.18);
 
 /// Metres between samples of the profiles that run along the lap.
 ///
@@ -1342,9 +1358,13 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let span = feel.groove + RUT_MARK_FAN_M * focus;
                 let d = (t - on_line) / span;
                 if d.abs() < 1.0 {
-                    let comb = 0.5
+                    // Under a power, so each scuff is a broad trough and the ridge between two
+                    // is the narrow part.
+                    let comb = (0.5
                         + 0.5
-                            * ((t - on_line) / TYRE_MARK_SPACING_M * std::f32::consts::TAU).cos();
+                            * ((t - on_line) / TYRE_MARK_SPACING_M * std::f32::consts::TAU).cos())
+                    .max(0.0)
+                    .powf(0.6);
                     (1.0 - d * d) * comb * TYRE_MARK_DEPTH * focus
                 } else {
                     0.0
@@ -2076,13 +2096,15 @@ fn trough_at(t: f32, centre: f32, width: f32) -> f32 {
 /// Shallow on purpose. These are not ruts — nothing sits in them — they are the record of a
 /// hundred riders dragging a back wheel up the same ramp from slightly different places, and
 /// on a real face you read them long before you feel them.
-// Wider than 0.62 so each scuff is a rounded trough rather than a ridge.
-const TYRE_MARK_SPACING_M: f32 = 0.9;
+// Asked for further apart, more of them and wider: 1.3 m apart across a wider fan
+// ([`RUT_MARK_FAN_M`]), each a broad trough rather than a ridge.
+const TYRE_MARK_SPACING_M: f32 = 1.3;
 /// As a multiple of the ground's rut depth — and a jump sits on a straight, where that is
 /// `rut_straight`, about nine centimetres. At 0.34 the scuffs cut three: real enough, and far
 /// too little to see from the seat. A face that has been ridden all day is visibly combed.
-// 1.15 combed a face with 17 cm ridges every 0.62 m — ridden as jump ruts too big and spiky.
-const TYRE_MARK_DEPTH: f32 = 0.45;
+// 1.15 combed a face with 17 cm ridges every 0.62 m, ridden as too big and spiky; 0.45 as too
+// faint.
+const TYRE_MARK_DEPTH: f32 = 0.7;
 
 /// Half the width of one carved groove, metres.
 ///
@@ -2553,7 +2575,64 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
             out.v[i] = out.v[i].max(out.v[i + 1]);
         }
     }
+
+    // A kick at every lip: the last of the takeoff steepens and the lip stands a little proud of
+    // the deck behind it. After the smoothing and the pass above, or either takes it back out.
+    // The larger of two where they overlap, like the jumps themselves.
+    let mut kick = vec![0.0f32; out.v.len()];
+    for f in features {
+        let Some((lip, h)) = lip_of(f) else {
+            continue;
+        };
+        // Where the smoothed face actually stops climbing — past the nominal lip by however far
+        // the rounding carried it.
+        let from = ((lip - KICK_M) / PROFILE_STEP).max(0.0) as usize;
+        let to = (((lip + blend + 4.0) / PROFILE_STEP) as usize).min(out.v.len().saturating_sub(2));
+        let Some(top) = (from..to).find(|&i| out.v[i + 1] - out.v[i] < 0.02 * PROFILE_STEP) else {
+            continue;
+        };
+        let lip = top as f32 * PROFILE_STEP;
+        let rise = (KICK_RISE * h).clamp(KICK_RISE_M.0, KICK_RISE_M.1);
+        let lo = ((lip - KICK_M) / PROFILE_STEP).floor().max(0.0) as usize;
+        let hi = (((lip + KICK_BACK_M) / PROFILE_STEP).ceil() as usize).min(out.v.len() - 1);
+        for i in lo..=hi {
+            let s = i as f32 * PROFILE_STEP;
+            let add = if s <= lip {
+                let x = ((s - (lip - KICK_M)) / KICK_M).clamp(0.0, 1.0);
+                x * x
+            } else {
+                1.0 - smoothstep(((s - lip) / KICK_BACK_M).clamp(0.0, 1.0))
+            };
+            kick[i] = kick[i].max(rise * add);
+        }
+    }
+    for i in 0..out.v.len() {
+        out.v[i] += kick[i];
+    }
     out
+}
+
+/// Where a feature's takeoff lip is, metres round the lap, and how tall the jump is. `None` for
+/// anything without a lip to kick.
+fn lip_of(f: &Feature) -> Option<(f32, f32)> {
+    match f {
+        Feature::Tabletop { at, length, height } => {
+            let (up, _, _) = crate::trackprog::tabletop_faces(*height, *length);
+            Some((at + up, height.abs()))
+        }
+        Feature::Double { at, height, lip, .. } => {
+            Some((at + crate::trackprog::double_faces(*height, *lip).ramp, height.abs()))
+        }
+        Feature::Custom { at, length, shape } => {
+            // The first crest the shape climbs to.
+            let top = shape.iter().map(|p| p.h).fold(0.0f32, f32::max);
+            let i = (1..shape.len()).find(|&i| {
+                shape[i].h >= top * 0.9 && shape.get(i + 1).map_or(true, |n| n.h <= shape[i].h)
+            })?;
+            Some((at + shape[i].u * length, top))
+        }
+        _ => None,
+    }
 }
 
 /// Berm height along the lap, signed by which way the corner turns — so one number carries
@@ -5087,8 +5166,9 @@ fn loose_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8
             return 0;
         }
         let bend = (c.k.abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
-        let outside = (-c.k.signum() * c.lat / half.max(0.1)).clamp(0.0, 1.0) * bend;
-        let edge = ((c.off.abs() - RUT_HALF_WIDTH_M - 1.1) / 2.0).clamp(0.0, 1.0);
+        // Squared, so the roost gathers at the very outside of a bend rather than across half of it.
+        let outside = (-c.k.signum() * c.lat / half.max(0.1)).clamp(0.0, 1.0).powi(2) * bend;
+        let edge = ((c.lat.abs() - (half - LOOSE_EDGE_M)) / LOOSE_EDGE_M).clamp(0.0, 1.0);
         // And the wall beside every groove, which is the loosest ground on the track: material
         // a tyre threw there this morning and nothing has driven on since. It is also the half
         // of a rut that catches the light, so painting it the dry colour is what turns a
@@ -10625,6 +10705,31 @@ mod tests {
             .max()
             .unwrap_or(0);
         assert!(most >= 2, "the corner never grew a second line — {most} at best");
+    }
+
+    #[test]
+    fn a_takeoff_ends_in_a_kick() {
+        // Ridden: a face usually ends in a kick — a lip standing a little proud of the deck.
+        let s = synthesise(&with_a_tabletop()).unwrap();
+        let (up, _, _) = crate::trackprog::tabletop_faces(2.4, 36.0);
+        // Averaged across the middle of the track, so the scuffs on the line don't read as shape.
+        let h = |at: f32| {
+            let v = across(&s, at);
+            let m = &v[v.len() / 3..2 * v.len() / 3];
+            m.iter().sum::<f32>() / m.len() as f32
+        };
+        let xs: Vec<f32> = (0..80).map(|k| 40.0 + up - 3.0 + k as f32 * 0.25).collect();
+        let v: Vec<f32> = xs.iter().map(|&x| h(x)).collect();
+        let crest = (1..v.len() - 1)
+            .find(|&i| v[i] >= v[i - 1] && v[i] > v[i + 1])
+            .expect("the face never tops out");
+        let after = v[crest..(crest + 12).min(v.len())].iter().copied().fold(f32::MAX, f32::min);
+        assert!(
+            v[crest] > after + 0.03,
+            "no kick: the lip at {:.1} m stands {:.3} m over the deck behind it",
+            xs[crest],
+            v[crest] - after
+        );
     }
 
     #[test]

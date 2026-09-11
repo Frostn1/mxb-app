@@ -10,8 +10,13 @@
   GUID each one is locked to.
 
 ### Changed
-- Generated tracks ride smoother. Much less small chop on the straights and jump faces,
-  shallower corner ruts with lower, rounder walls, and lighter tyre scuffs up the jumps.
+- Generated tracks ride smoother: less small chop on the straights and jump faces, and
+  corner ruts with lower, rounder walls.
+- Jumps on generated tracks are three quarters of their old height, and every takeoff ends
+  in a kick at the lip.
+- Jump faces carry wider, more spread-out tyre scuffs.
+- The riding surface on generated tracks is a darker brown, with darker rut floors, so the
+  ruts are easier to see.
 
 ## 2026-09-09 — v0.14.0 — A new name, and a Studio of its own
 

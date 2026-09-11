@@ -706,7 +706,7 @@ pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
 /// track — a long tabletop on the main straight with the line painted past its landing. The
 /// range is the top of the published spread rather than the middle of it: this is the one
 /// jump a track is photographed on.
-pub const FINISH_JUMP_M: (f32, f32) = (2.4, 3.0);
+pub const FINISH_JUMP_M: (f32, f32) = (1.8, 2.25);
 
 /// The longest deck a finish jump gets, metres. Published tabletop decks run six to twelve,
 /// and the finish one is at the long end because it is the one everybody lands on.
