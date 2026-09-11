@@ -587,6 +587,11 @@ export function previewModelSwap(
   }).then(reviveMesh);
 }
 
+/** The other bikes a model swap parked under `bike` lines up with — same `.geom` mounts. */
+export function modelSwapLineup(bike: string): Promise<string[]> {
+  return invoke<string[]>("model_swap_lineup", { bike });
+}
+
 /**
  * Every livery the bike has, wherever it currently sits — including the ones shelved
  * because the model that claims them isn't on the bike. The assignment picker needs all of

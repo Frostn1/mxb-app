@@ -46,6 +46,8 @@ export const en = {
     "Dress the player model — helmet, goggles, outfit and boots together.",
   "rider.namePlaceholder": "Name this rider…",
   "rider.showOnModel": "Show on model",
+  "rider.swapLinesUp": "Lines up with {{bikes}}",
+  "rider.swapLinesUpNone": "Lines up with no other installed bike",
   "rider.repairTitle": "A {{area}} mod was installed loose",
   "rider.repairBody":
     "Its files sit directly in {{area}} instead of in a folder, so neither the game nor this app can load it. Gather them into “{{model}}”?",

@@ -42,6 +42,8 @@ export const fr: Translation = {
     "Habillez le modèle du pilote — casque, masque, tenue et bottes d'un seul coup.",
   "rider.namePlaceholder": "Nommez ce pilote…",
   "rider.showOnModel": "Afficher sur le modèle",
+  "rider.swapLinesUp": "S'aligne sur {{bikes}}",
+  "rider.swapLinesUpNone": "Ne s'aligne sur aucune autre moto installée",
   "rider.repairTitle": "Un mod {{area}} a été installé en vrac",
   "rider.repairBody":
     "Ses fichiers sont directement dans {{area}} au lieu d'un dossier, donc ni le jeu ni cette app ne peuvent le charger. Les rassembler dans « {{model}} » ?",
