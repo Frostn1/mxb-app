@@ -6826,9 +6826,11 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
     Some(tcl_of(line.start.x, line.start.z, line.start.angle, &segs))
 }
 
-/// Which version of the track generator made a track. Bump it whenever a change alters what
-/// a program builds into, so a track in the wild can be matched to the code that made it.
-pub const GENERATOR_VERSION: u32 = 1;
+/// Which version of the track generator made a track, as major.minor.patch, so a track in the
+/// wild can be matched to the code that made it. Bump it whenever a program builds into
+/// something different: major when older tracks are no longer comparable, minor for a new
+/// feature, patch for a fix.
+pub const GENERATOR_VERSION: &str = "1.0.0";
 
 /// The stamp every built track carries in `<slug>/generator.ini`.
 ///
@@ -8535,6 +8537,11 @@ mod tests {
         let slug = slug(&p.name);
         let rel = format!("{slug}/generator.ini");
         let want = format!("version = {GENERATOR_VERSION}");
+        let parts: Vec<&str> = GENERATOR_VERSION.split('.').collect();
+        assert!(
+            parts.len() == 3 && parts.iter().all(|n| n.parse::<u32>().is_ok()),
+            "{GENERATOR_VERSION} is not major.minor.patch"
+        );
 
         let wrote = write_source(&p, &s, &dir).unwrap();
         assert!(wrote.contains(&rel), "write_source never wrote {rel}");
