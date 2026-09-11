@@ -208,7 +208,7 @@ const CHOP_WAVELENGTH_M: f32 = 0.55;
 const CHOP_ACROSS_M: f32 = 3.0;
 // 0.30 rode as small bumps packed everywhere (4x Indiana's chatter, 15x its bumps per 10 m,
 // `trackstats::tests::zone_roughness`) and 0.06 as far too smooth. Between the two.
-const CHOP_M: f32 = 0.16;
+const CHOP_M: f32 = 0.13;
 
 /// The same, for the field that lays out where the grooves go.
 const RUT_FIELD_OCTAVES: u32 = 2;
@@ -251,6 +251,12 @@ const RUT_RADIUS_M: (f32, f32) = (40.0, 14.0);
 // both by the same factor so a corner still fades out to its straight.
 const RUT_DEPTH_M: f32 = 1.55;
 const RUT_DEPTH_STRAIGHT_M: f32 = 0.13;
+
+/// Where a groove's cut and its bank start to be held back, and the ceiling each rounds off
+/// towards, metres. Below the knee nothing changes. Indiana's deepest corner groove is 0.47 m;
+/// ours reached 0.94 on the outside line.
+const RUT_CUT_KNEE_M: (f32, f32) = (0.25, 0.35);
+const RUT_BANK_KNEE_M: (f32, f32) = (0.15, 0.25);
 
 /// The material the cut displaced, which does not disappear.
 ///
@@ -426,7 +432,8 @@ const RUT_SPACING_M: f32 = 2.75;
 
 /// How much of the half-width the bundle covers, at the loosest corner that ruts at all and
 /// at the tightest.
-const RUT_BUNDLE: (f32, f32) = (0.30, 0.92);
+// 0.92 spread a tight corner's grooves across nearly the whole track: too many ruts per turn.
+const RUT_BUNDLE: (f32, f32) = (0.30, 0.7);
 
 /// How far a corner's ruts run past the corner, out onto the straight and back up the
 /// approach, metres.
@@ -1338,13 +1345,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 // Two lines and the field, not four. Three carved plus the field's own put
                 // grooves across the whole width and a rider reported, plainly, too many.
                 let outer = extra(on_line + side * RUT_SECOND_M, RUT_SECOND_DEPTH, 0x5EC0, 17.0);
-                let inner = extra(
-                    on_line - side * RUT_SECOND_M * 0.9,
-                    RUT_SECOND_DEPTH * 0.62,
-                    0x5EC2,
-                    29.0,
-                );
-                outer.max(inner)
+                // The inside one is gone too: ridden, too many ruts per turn.
+                outer
             } else {
                 0.0
             };
@@ -1423,7 +1425,13 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 // cannot follow a groove it has no way of knowing is there. The carved lines
                 // go into the same signal, or the paint would follow the field and miss them.
                 let relief = if carved > 0.0 { spread.min(-carved) } else { spread };
-                heights[i] += depth * relief;
+                // Capped past a knee, so the deepest grooves round off and the rest are untouched.
+                let r = depth * relief;
+                heights[i] += if r < 0.0 {
+                    -knee(-r, RUT_CUT_KNEE_M)
+                } else {
+                    knee(r, RUT_BANK_KNEE_M)
+                };
                 rut[i] = relief;
             }
         }
@@ -2610,6 +2618,15 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
         out.v[i] += kick[i];
     }
     out
+}
+
+/// `x` unchanged up to `k.0`, then easing towards `k.1` and never past it.
+fn knee(x: f32, k: (f32, f32)) -> f32 {
+    if x <= k.0 {
+        x
+    } else {
+        k.0 + (k.1 - k.0) * ((x - k.0) / (k.1 - k.0)).tanh()
+    }
 }
 
 /// Where a feature's takeoff lip is, metres round the lap, and how tall the jump is. `None` for
