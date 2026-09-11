@@ -3332,7 +3332,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
             &mut wrote,
         )?;
         let normal = match photo_normal(&l.look, GROUND_TEXTURE_DIM) {
-            Some(n) => published_normal_tga(&n, &px, GROUND_TEXTURE_DIM, l.spec),
+            Some(n) => published_normal_tga(&n, GROUND_TEXTURE_DIM),
             None => normal_tga(&px, GROUND_TEXTURE_DIM, SHEET_NORMAL_STRENGTH, l.spec),
         };
         put(&format!("maps/{name}_n.tga"), normal, &mut wrote)?;
@@ -5516,6 +5516,9 @@ fn photo(name: &str) -> Option<&'static (usize, Vec<u8>)> {
         // Their normal maps, lifted the same way: the soil's and the grass's.
         "soil_normal" => sheet_of!(E, "../assets/ground/soil_n_s.jpg"),
         "grass_normal" => sheet_of!(F, "../assets/ground/grass_n_s.jpg"),
+        // And their specular, which is the normal map's alpha and so cannot ride in its JPEG.
+        "soil_spec" => sheet_of!(G, "../assets/ground/soil_n_s_spec.jpg"),
+        "grass_spec" => sheet_of!(H, "../assets/ground/grass_n_s_spec.jpg"),
         _ => None,
     }
 }
@@ -5527,12 +5530,20 @@ fn photo(name: &str) -> Option<&'static (usize, Vec<u8>)> {
 /// Used rather than a normal derived from the sheet's luma, which came out far flatter than
 /// a published track's and rode as "texture too flat".
 fn photo_normal(look: &GroundLook, dim: usize) -> Option<Vec<u8>> {
-    let name = match look.photo? {
-        "grass" => "grass_normal",
-        _ => "soil_normal",
+    let (name, spec) = match look.photo? {
+        "grass" => ("grass_normal", "grass_spec"),
+        _ => ("soil_normal", "soil_spec"),
     };
     let (d, src) = photo(name)?;
-    Some(resample_sheet(src, *d, dim))
+    let mut n = resample_sheet(src, *d, dim);
+    // Indiana's own specular in the alpha, where the published sheet carries it.
+    if let Some((sd, s)) = photo(spec) {
+        let s = resample_sheet(s, *sd, dim);
+        for (p, q) in n.chunks_exact_mut(4).zip(s.chunks_exact(4)) {
+            p[3] = q[0];
+        }
+    }
+    Some(n)
 }
 
 /// One band's sheet at `dim`: the photograph it names, toned and resampled.
@@ -5746,16 +5757,10 @@ fn normal_tga(rgba: &[u8], dim: usize, strength: f32, spec: u8) -> Vec<u8> {
     tga_bgra(dim, dim, &px)
 }
 
-/// A published normal map as a sheet's `_n.tga`: its direction as it is, and the specular in
-/// the alpha set the way [`normal_tga`] sets it, off the colour sheet's own luma.
-fn published_normal_tga(normal: &[u8], colour: &[u8], dim: usize, spec: u8) -> Vec<u8> {
-    let mut px = Vec::with_capacity(dim * dim * 4);
-    for (n, c) in normal.chunks_exact(4).zip(colour.chunks_exact(4)) {
-        let luma = (0.299 * c[0] as f32 + 0.587 * c[1] as f32 + 0.114 * c[2] as f32) / 255.0;
-        let a = (spec as f32 * (0.35 + 0.65 * luma)).clamp(0.0, 255.0) as u8;
-        // The container is BGRA: the normal's z first.
-        px.extend_from_slice(&[n[2], n[1], n[0], a]);
-    }
+/// A published normal map as a sheet's `_n.tga`, as it is: direction and specular both.
+fn published_normal_tga(normal: &[u8], dim: usize) -> Vec<u8> {
+    // The container is BGRA: the normal's z first.
+    let px: Vec<u8> = normal.chunks_exact(4).flat_map(|n| [n[2], n[1], n[0], n[3]]).collect();
     tga_bgra(dim, dim, &px)
 }
 
@@ -9819,8 +9824,10 @@ mod tests {
         let g = ground_looks(Surface::Soil);
         for look in [&g.field, &g.turf] {
             let n = photo_normal(look, 256).expect("a photographed band has a published normal");
-            let blue = n.chunks_exact(4).map(|p| p[2] as f32).sum::<f32>() / (n.len() / 4) as f32;
-            assert!((210.0..250.0).contains(&blue), "blue averages {blue:.0}");
+            let mean = |c: usize| n.chunks_exact(4).map(|p| p[c] as f32).sum::<f32>() / (n.len() / 4) as f32;
+            assert!((210.0..250.0).contains(&mean(2)), "blue averages {:.0}", mean(2));
+            // And its specular: Indiana's soil averages 19.6 and its grass 30.4.
+            assert!((15.0..35.0).contains(&mean(3)), "the specular averages {:.1}", mean(3));
         }
     }
 
