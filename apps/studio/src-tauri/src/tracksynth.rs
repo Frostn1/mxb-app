@@ -5067,7 +5067,7 @@ fn line_mask(syn: &Synth, half: f32, w: f32, seed: u32, mw: usize, mh: usize) ->
 /// far out from the racing line they reach as a share of the half width, and how much of the
 /// light soil they take away.
 const STREAK_SPACING_M: f32 = 0.9;
-const STREAK_SHARP: f32 = 6.0;
+const STREAK_SHARP: f32 = 4.0;
 const STREAK_WANDER_M: f32 = 0.6;
 const STREAK_REACH: f32 = 0.85;
 const STREAK_DEPTH: f32 = 0.8;
@@ -5122,7 +5122,9 @@ fn rut_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> 
         // a face after a corner that runs you wide is black on the outside and clean on the
         // inside — which is a thing a rider reads the approach off, and the reason the marks
         // are worth having at all rather than being a texture detail.
-        let up = (c.face / RUT_MARK_FACE).clamp(0.0, 1.0);
+        // Eased in over a wide range of grade: clamped at the face threshold, every takeoff got a
+        // dark block with a hard front edge.
+        let up = smoothstep((c.face / (RUT_MARK_FACE * 2.5)).clamp(0.0, 1.0));
         let w = RUT_HALF_WIDTH_M
             + edge_noise(c.x, c.z, seed ^ 0x51C7, 1.5, 0.7)
             + RUT_MARK_FAN_M * up;
