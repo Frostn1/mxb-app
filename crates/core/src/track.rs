@@ -37,7 +37,9 @@ const MASTER_DIM: u32 = 2048;
 // holds the ground below a track standing as a wall around it.
 // v5: masters are kept at the source's own resolution; a v4 entry would pin a track to half
 // of it for as long as it stayed cached.
-const CACHE_DIR: &str = "track-terrain-v5";
+// v6: grids are read in file order, no longer flipped; a v5 entry holds the terrain mirrored
+// under its own scenery, so objects float and stand on the riding line.
+const CACHE_DIR: &str = "track-terrain-v6";
 
 /// How many cached masters to keep. Sixteen megabytes each at [`MASTER_DIM`], so this is kept
 /// small deliberately — the cache saves a second of archive reading, not a scarce resource.

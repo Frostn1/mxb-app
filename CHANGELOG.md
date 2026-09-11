@@ -17,6 +17,10 @@
 - Picking a track's ground changes what it is made of, not its shape. Corners, berms and ruts
   stay as they are when you switch between soil, sand and grass.
 
+### Fixed
+- Objects in the 3D track view stand on the ground where the game puts them, on tracks you
+  opened in an earlier version too.
+
 ## 2026-09-09 — v0.14.0 — A new name, and a Studio of its own
 
 ### Added
