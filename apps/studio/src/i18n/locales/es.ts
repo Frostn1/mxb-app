@@ -347,6 +347,8 @@ export const es: Translation = {
   "track.hills": "colinas",
   "track.surface": "suelo",
   "track.soil": "Tierra",
+  "track.sand": "Arena",
+  "track.grass": "Hierba",
   "track.smoothing": "fundido",
   "track.live": "En vivo",
   "track.wholeLap": "vuelta entera",

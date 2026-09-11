@@ -11,6 +11,12 @@
 - Tracks built in Frost's Studio record which version of the track generator made them, in
   a `generator.ini` inside the track folder.
 
+### Changed
+- The Track Studio's ground picker reads Soil, Sand and Grass, and the 3D preview paints the
+  riding line in the ground you pick.
+- Picking a track's ground changes what it is made of, not its shape. Corners, berms and ruts
+  stay as they are when you switch between soil, sand and grass.
+
 ## 2026-09-09 — v0.14.0 — A new name, and a Studio of its own
 
 ### Added

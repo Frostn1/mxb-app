@@ -408,7 +408,7 @@ pub const TEXTURE_HEADER: usize = 16;
 
 /// Bump when [`surface_colour`] changes, so cached textures drawn with the old palette are
 /// retired rather than kept.
-const SURFACE_SCHEME: u32 = 2;
+const SURFACE_SCHEME: u32 = 3;
 
 /// The colour of a surface, by the id the track states for it.
 ///
@@ -450,6 +450,8 @@ fn surface_colour(id: u32) -> [u8; 3] {
         205 => [150, 110, 200], // berm
         206 => [90, 90, 110],   // rut
         207 => [200, 200, 210], // a shape drawn by hand
+        208 => [178, 150, 110], // the riding line on a sand track
+        209 => [104, 96, 64],   // the riding line on a grasstrack
         12 => [124, 126, 102], // olive, so it parts from both grass and soil
         _ => [138, 126, 106],
     }

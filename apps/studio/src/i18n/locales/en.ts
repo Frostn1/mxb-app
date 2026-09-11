@@ -350,6 +350,8 @@ export const en = {
   "track.hills": "hills",
   "track.surface": "ground",
   "track.soil": "Soil",
+  "track.sand": "Sand",
+  "track.grass": "Grass",
   "track.smoothing": "blend",
   "track.live": "Live",
   "track.wholeLap": "whole lap",
