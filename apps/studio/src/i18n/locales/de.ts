@@ -264,6 +264,8 @@ export const de: Translation = {
   "protect.skipJunk": "Übersprungen",
   "protect.skipEmpty": "Leer",
   "protect.skipProtected": "Bereits geschützt",
+  "protect.lockedTo": "Gesperrt für {{guid}}",
+  "protect.lockedToNobody": "Geschützt, keine GUID",
   "protect.guidsTitle": "Sperren auf",
   "protect.guidsDesc": "Eine GUID pro Zeile — pro GUID kommt ein Ordner heraus. Jede Kopie bekommt ihren eigenen Schlüssel, damit zwei Käufer nicht erkennen können, dass sie dieselbe Datei haben.",
   "protect.guidsPlaceholder": "FF0110000108D7CFE3",

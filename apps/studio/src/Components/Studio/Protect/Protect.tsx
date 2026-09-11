@@ -196,8 +196,14 @@ export default function Protect() {
                     )}
                   >
                     <span className="truncate font-mono">{it.rel}</span>
-                    <span className="flex-none tabular-figures text-[11px] text-muted-foreground">
-                      {it.skip ? t(SKIP_LABEL[it.skip]) : formatBytes(it.bytes)}
+                    <span className="flex-none select-text tabular-figures text-[11px] text-muted-foreground">
+                      {it.guid
+                        ? /^0+$/.test(it.guid)
+                          ? t("protect.lockedToNobody")
+                          : t("protect.lockedTo", { guid: it.guid })
+                        : it.skip
+                          ? t(SKIP_LABEL[it.skip])
+                          : formatBytes(it.bytes)}
                     </span>
                   </li>
                 ))}

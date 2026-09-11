@@ -1616,6 +1616,8 @@ export interface LockItem {
   kind: "archive" | "file";
   /** `null` when the file will be locked. */
   skip: "junk" | "empty" | "protected" | null;
+  /** The GUID an already-protected file is bound to; all zeros means bound to nobody. */
+  guid: string | null;
 }
 
 export interface LockOutcome {

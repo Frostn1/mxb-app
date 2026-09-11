@@ -264,6 +264,8 @@ export const es: Translation = {
   "protect.skipJunk": "Omitido",
   "protect.skipEmpty": "Vacío",
   "protect.skipProtected": "Ya protegido",
+  "protect.lockedTo": "Bloqueado para {{guid}}",
+  "protect.lockedToNobody": "Protegido, sin GUID",
   "protect.guidsTitle": "Bloquear para",
   "protect.guidsDesc": "Un GUID por línea — sale una carpeta por GUID. Cada copia lleva su propia clave, así que dos compradores no pueden saber que tienen el mismo archivo.",
   "protect.guidsPlaceholder": "FF0110000108D7CFE3",
