@@ -257,8 +257,10 @@ const RUT_DEPTH_STRAIGHT_M: f32 = 0.143;
 /// ours reached 0.94 on the outside line.
 const RUT_CUT_KNEE_M: (f32, f32) = (0.28, 0.4);
 
-/// How soft the blend over the ruts is: one box radius, three passes.
+/// How soft the blend over the ruts is: a box radius, and how many passes of it. Three merged the
+/// grooves of a corner into two or three broad dips.
 const RUT_BLEND_M: f32 = 0.25;
+const RUT_BLEND_PASSES: u32 = 2;
 const RUT_BANK_KNEE_M: (f32, f32) = (0.15, 0.25);
 
 /// The material the cut displaced, which does not disappear.
@@ -432,7 +434,10 @@ const FACE_STEP_M: f32 = 1.5;
 ///
 /// Two metres, counted off ten published tracks: they carry one to three grooves deep enough
 /// to find at a time, 1.75–4.0 m apart, spanning six or seven metres of an eleven-metre line.
-const RUT_SPACING_M: f32 = 2.75;
+// Closer than 2.75, which blended out to two or three broad dips per corner against Indiana's
+// five or six grooves. Measured on corner cross-sections, not the lap-wide average, which the
+// straights swamp.
+const RUT_SPACING_M: f32 = 1.65;
 
 /// How much of the half-width the bundle covers, at the loosest corner that ruts at all and
 /// at the tightest.
@@ -650,7 +655,10 @@ const NORMAL_STRENGTH: f32 = 6.0;
 /// Gentler, because there the whole normal is written rather than just its direction. Two
 /// lands on the example track's own sheet: blue averaging 235 against its 241, and red
 /// spread across [19, 236] against its [9, 246].
-const SHEET_NORMAL_STRENGTH: f32 = 2.0;
+// Raised from 2.0 when the ground rode as too flat. At 2.0 — and still at 2.6 — our sheets'
+// normals came out far flatter than the example's (blue 245-252 against 235-241, red spread
+// 75..179 against 9..246): the tone darkening the ground shrinks the luma this is derived from.
+const SHEET_NORMAL_STRENGTH: f32 = 5.0;
 
 /// The ground textures' edge, in pixels. A power of two, as MX Bikes requires.
 ///
@@ -658,21 +666,22 @@ const SHEET_NORMAL_STRENGTH: f32 = 2.0;
 /// once it is stretched over a few metres of ground, which is the scale a rider sees it at.
 const GROUND_TEXTURE_DIM: usize = 1024;
 
-/// How many metres of ground one tile of each sheet covers.
+/// How many metres of ground one tile of each sheet covers. Indiana's run 2.6-2.9; at 3.0 ours
+/// were a fifth coarser at riding distance, which read as flat.
 ///
 /// Stated in metres and turned into a repetition count against the terrain's own size, so a
 /// 400 m track and a 900 m one get soil of the same grain. A fixed repetition count does not:
 /// the old 60 put a tile every 4.6 m on the example track and every 11.7 m on ours, which is
 /// most of why the ground looked out of scale.
-const TILE_FIELD_M: f32 = 3.0;
-const TILE_LINE_M: f32 = 3.0;
-const TILE_SHOULDER_M: f32 = 3.0;
-const TILE_GRASS_M: f32 = 2.8;
+const TILE_FIELD_M: f32 = 2.6;
+const TILE_LINE_M: f32 = 2.6;
+const TILE_SHOULDER_M: f32 = 2.6;
+const TILE_GRASS_M: f32 = 2.4;
 /// The loose dirt tiles coarser than the line it sits on, so the two read as different ground
 /// and not as one sheet at two brightnesses.
-const TILE_LOOSE_M: f32 = 3.0;
+const TILE_LOOSE_M: f32 = 2.6;
 /// And the packed line finer, which is what being driven over does to it.
-const TILE_RUT_M: f32 = 2.8;
+const TILE_RUT_M: f32 = 2.4;
 
 /// The cube a wet layer reflects, per face. Small on purpose: it is seen smeared across a
 /// film of water and never in focus. The example track's own faces are 128 too.
@@ -1327,8 +1336,12 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // whole lap; kept in the corners it was a groove down the middle of every turn
             // "for no reason". What a corner carries is the comb — grooves worn between banks
             // of material thrown up beside them — and that is the field's doing.
-            let main = 0.0f32;
-            let _ = (carve, on_line);
+            // Back in, corners only and as one groove of the comb: with a corner's grooves packed
+            // closer, the deepest one otherwise lands wherever the field put it, not under the
+            // line a rider steers by.
+            let in_turn = (turn.at(s).abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
+            let main = trough(on_line, feel.groove * 0.9) * in_turn * RUT_LINE_DEPTH;
+            let _ = carve;
             // And the corner's other way through: outside the first, shallower, and only
             // where the turn has run long enough to have grown one. Its own variation, or it
             // is the same groove drawn twice.
@@ -1540,7 +1553,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     {
         let r = ((RUT_BLEND_M / mps_x).round() as usize).max(1);
         let mut soft = rut_h;
-        for _ in 0..3 {
+        for _ in 0..RUT_BLEND_PASSES {
             soft = crate::trackstats::box_blur(&soft, gw, gh, r);
         }
         for (h, s) in heights.iter_mut().zip(&soft) {
@@ -2174,6 +2187,9 @@ const RUT_GROOVE_M: f32 = 0.55;
 /// field typically reaches, not what it peaks at.
 const RUT_SECOND_M: f32 = 2.9;
 const RUT_SECOND_DEPTH: f32 = 0.66;
+
+/// How deep the line under the paint is cut through a corner, against the corner's rut depth.
+const RUT_LINE_DEPTH: f32 = 0.5;
 
 /// How far a second line is carried back up the approach and out onto the exit, metres.
 ///

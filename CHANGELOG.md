@@ -10,8 +10,10 @@
   GUID each one is locked to.
 
 ### Changed
-- Generated tracks ride smoother: blended ruts with soft walls, spread across more of each
-  corner, and no rut deeper than about 40 cm.
+- Corners on generated tracks carry more ruts, closer together, with soft walls and none
+  deeper than about 40 cm.
+- Ground textures on generated tracks carry more light and dark variation and catch more
+  light, so the dirt reads less flat.
 - Braking bumps build up on the way into corners instead of noise all over the track.
 - Jumps on generated tracks are three quarters of their old height. The finish jump keeps
   its full height, with a longer deck and a longer, gentler face.
