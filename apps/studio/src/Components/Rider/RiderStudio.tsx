@@ -11,7 +11,6 @@ import {
   presetsSave,
   scanGearRepairs,
   repairGear,
-  modelSwapLineup,
   type GearRepair,
 } from "@frost/shared/api/mods";
 import { ViewerPanel } from "@frost/shared/Components/Viewer/ViewerPanel";
@@ -153,21 +152,6 @@ export default function RiderStudio() {
       .catch(() => setRepairs([]));
   }, []);
 
-  // The bikes a swap on this bike lines up with — the ones sharing its .geom mount points.
-  const hasSwaps = !!(bike && scans?.modelSwaps[bike]?.length);
-  const [lineup, setLineup] = useState<string[] | null>(null);
-  useEffect(() => {
-    setLineup(null);
-    if (!hasSwaps) return;
-    let alive = true;
-    void modelSwapLineup(bike)
-      .then((b) => alive && setLineup(b))
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [bike, hasSwaps]);
-
   const onRepair = useCallback(
     async (r: GearRepair) => {
       setRepairing(r.id);
@@ -209,16 +193,6 @@ export default function RiderStudio() {
   );
   const bikeVariant =
     loadout.modelSwap || (offersStock ? "Stock" : pickedModel(bike, loadout, scans));
-  const lineupNames = lineup?.map((b) => b.replace(/^MX[0-9E]OEM_/i, "").replace(/_/g, " "));
-  const lineupHint =
-    lineupNames &&
-    (lineupNames.length ? (
-      <span className="line-clamp-3" title={lineupNames.join(", ")}>
-        {t("rider.swapLinesUp", { bikes: lineupNames.join(", ") })}
-      </span>
-    ) : (
-      t("rider.swapLinesUpNone")
-    ));
   const showBike = bikePreview && !!bike;
   // A bike handed over by Presets comes from the profile's own list, which the target scan
   // should already cover — but if it doesn't, keep it pickable rather than showing an empty
@@ -352,7 +326,6 @@ export default function RiderStudio() {
                     value={loadout[slot.key]}
                     options={optionsFor(slot, bike, scans)}
                     missing={missingFor(slot, bike, scans)}
-                    hint={slot.key === "modelSwap" ? lineupHint : undefined}
                     compact
                     onChange={(v) => setSlot(slot.key, v)}
                   />

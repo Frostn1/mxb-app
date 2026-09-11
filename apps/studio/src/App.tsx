@@ -131,6 +131,7 @@ function Shell() {
       { id: "track", label: t("nav.track"), group: "make" },
       { id: "protect", label: t("nav.protect"), group: "sell", when: hasLock },
       { id: "secure", label: t("nav.secure"), group: "sell", when: hasLock },
+      { id: "diagnose", label: t("nav.diagnose"), group: "check" },
     ];
     return all.filter((e) => e.when !== false);
   }, [t, game.caps.viewer, hasLock]);
