@@ -12,7 +12,8 @@
 ### Changed
 - Generated tracks ride smoother: blended ruts with soft walls, fewer ruts per corner, far
   fewer bumps and ripples across the track, and no rut deeper than about 35 cm.
-- Jumps on generated tracks are three quarters of their old height.
+- Jumps on generated tracks are a little smaller, about 85% of their old height. The finish
+  jump keeps its full size.
 - Jump faces carry wide, spread-out tyre scuffs instead of thin grooves down the middle.
 - Generated tracks paint the light dirt on the track only, with dark tyre lines and rut
   floors showing through it, so the ruts are easy to see. The rest of the site is dark soil,
