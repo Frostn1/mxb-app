@@ -2580,7 +2580,30 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
     // Then round the whole thing off over the blend distance. That is what turns two jumps
     // that merely touch into one shape, and it is the same control that decides how long a
     // single jump's ramps are — they are the same question asked twice.
+    let raw = out.v.clone();
     smooth_along(&mut out.v, (blend / PROFILE_STEP).round() as usize);
+
+    // Except at the top of a take-off. Smoothed over the blend distance a lip becomes a rounded
+    // crown, and a rounded crown is a knuckle: the face flattens before the edge. Near a lip the
+    // drawn shape takes over — concave all the way up, and flush with the deck.
+    for f in features {
+        let Some((lip, face)) = takeoff_of(f) else {
+            continue;
+        };
+        let from = lip - 0.75 * face;
+        let to = lip + blend + 2.0;
+        let lo = (from / PROFILE_STEP).floor().max(0.0) as usize;
+        let hi = ((to / PROFILE_STEP).ceil() as usize).min(out.v.len() - 1);
+        for i in lo..=hi {
+            let s = i as f32 * PROFILE_STEP;
+            let w = if s <= lip {
+                smoothstep(((s - from) / (0.5 * face).max(1e-3)).clamp(0.0, 1.0))
+            } else {
+                1.0 - smoothstep(((s - lip - blend) / 2.0).clamp(0.0, 1.0))
+            };
+            out.v[i] += (raw[i] - out.v[i]) * w;
+        }
+    }
 
     // And no knuckle before the lip.
     //
@@ -2914,7 +2937,18 @@ fn arc_down(t: f32) -> f32 {
 fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
     // Drawn by hand: eased between the points it was given, which is the same easing the lap's
     // own height curve uses. Nothing else here has a shape someone chose point by point.
-    if let Feature::Custom { shape, .. } = f {
+    if let Feature::Custom { shape, length, .. } = f {
+        // The take-off is concave to its crest, the way a tabletop's is. The cubic arrives at a
+        // crest flat, which rounds the top of the face over into a knuckle.
+        if let Some((a_u, a_h, c_u, c_h)) = custom_takeoff(shape) {
+            if t >= a_u && t <= c_u {
+                let (run, rise) = ((c_u - a_u) * length, c_h - a_h);
+                let x = (t - a_u) / (c_u - a_u);
+                return a_h
+                    + rise
+                        * crate::trackprog::face_arc(x, crate::trackprog::face_sweep(rise, run));
+            }
+        }
         return along_points(shape, t);
     }
     match *f {
@@ -2958,6 +2992,30 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
         // and a rut are shaped across the track rather than along it.
         Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Rut { .. } => 0.0,
         Feature::Custom { .. } => unreachable!("handled above"),
+    }
+}
+
+/// A hand-drawn shape's take-off: the span into its first crest, as (u, h) at each end.
+fn custom_takeoff(points: &[crate::trackprog::ShapePoint]) -> Option<(f32, f32, f32, f32)> {
+    let mut p: Vec<(f32, f32)> = points.iter().map(|q| (q.u, q.h)).collect();
+    p.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let c = (1..p.len()).find(|&i| p[i].1 > p[i - 1].1 && p.get(i + 1).map_or(true, |n| n.1 <= p[i].1))?;
+    let (a, top) = (p[c - 1], p[c]);
+    (top.0 > a.0).then_some((a.0, a.1, top.0, top.1))
+}
+
+/// Where a feature's take-off lip is, metres round the lap, and how long its face is.
+fn takeoff_of(f: &Feature) -> Option<(f32, f32)> {
+    match f {
+        Feature::Tabletop { at, length, height } => {
+            let (up, _, _) = crate::trackprog::tabletop_faces(*height, *length);
+            Some((at + up, up))
+        }
+        Feature::Custom { at, length, shape } => {
+            let (a_u, _, c_u, _) = custom_takeoff(shape)?;
+            Some((at + c_u * length, (c_u - a_u) * length))
+        }
+        _ => None,
     }
 }
 
@@ -10746,6 +10804,31 @@ mod tests {
             .max()
             .unwrap_or(0);
         assert!(most >= 2, "the corner never grew a second line — {most} at best");
+    }
+
+    #[test]
+    fn a_takeoff_steepens_to_its_lip_and_meets_the_deck_flush() {
+        // Ridden: a face that rounds over before the lip is a knuckle. It should be concave
+        // right to the edge and meet the deck there, with nothing standing up past it.
+        let s = synthesise(&with_a_tabletop()).unwrap();
+        let (up, _, _) = crate::trackprog::tabletop_faces(2.4, 36.0);
+        let lip = 40.0 + up;
+        let h = |at: f32| {
+            let v = across(&s, at);
+            let m = &v[v.len() / 3..2 * v.len() / 3];
+            m.iter().sum::<f32>() / m.len() as f32
+        };
+        let (lower, last) = (h(lip - 2.0) - h(lip - 3.0), h(lip) - h(lip - 1.0));
+        assert!(
+            last > lower,
+            "the face rounds over before its lip: {lower:.3} then {last:.3} per metre"
+        );
+        let deck = [h(lip + 1.0), h(lip + 2.0), h(lip + 3.0)];
+        let spread = deck.iter().fold(f32::MIN, |a, &b| a.max(b)) - deck.iter().fold(f32::MAX, |a, &b| a.min(b));
+        assert!(spread < 0.06, "the deck past the lip is not flush: {deck:.2?}");
+        // And nothing past the lip stands above the deck: no wall, no kick.
+        let past = (0..=12).map(|k| h(lip + k as f32 * 0.25)).fold(f32::MIN, f32::max);
+        assert!(past < deck[2] + 0.04, "something stands up past the lip: {past:.2} over a deck of {:.2}", deck[2]);
     }
 
     #[test]

@@ -711,7 +711,9 @@ pub const FINISH_JUMP_M: (f32, f32) = (2.4, 3.0);
 
 /// The longest deck a finish jump gets, metres. Published tabletop decks run six to twelve,
 /// and the finish one is at the long end because it is the one everybody lands on.
-pub const FINISH_DECK_MAX_M: f32 = 12.0;
+// Past the published twelve: at 3 m, the regulated ceiling, the finish jump still rode small, and
+// a longer deck is the way to make it bigger without making it taller.
+pub const FINISH_DECK_MAX_M: f32 = 16.0;
 
 /// Bare ground off the last corner before the finish jump's face, metres. A takeoff at the
 /// corner exit is a takeoff nobody has any drive at.
