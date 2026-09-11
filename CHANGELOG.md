@@ -8,6 +8,8 @@
 - A Diagnose tab in Frost's Studio. Pick a bike to see which other bikes a model swap lines
   up with (a KTM swap fits the Husqvarna and GasGas too), or add protected files to see the
   GUID each one is locked to.
+- Tracks built in Frost's Studio record which version of the track generator made them, in
+  a `generator.ini` inside the track folder.
 
 ## 2026-09-09 — v0.14.0 — A new name, and a Studio of its own
 
