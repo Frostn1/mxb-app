@@ -1199,6 +1199,28 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         carry(&mut p, LANE_LEAD_IN_M, 0.0);
         p
     };
+    // How far the lanes have bent from their spread into the corner's fan, eased over the
+    // approach: bent over the corner's blend alone, every lane jogged sideways at the entry.
+    let lane_bend = {
+        let mut p = Profile::blank(lap);
+        for (i, v) in p.v.iter_mut().enumerate() {
+            *v = (turn.at(i as f32 * PROFILE_STEP).abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
+        }
+        carry(&mut p, LANE_BEND_M, LANE_CARRY_EXIT_M);
+        smooth_along(&mut p.v, (LANE_BEND_M * 0.5 / PROFILE_STEP) as usize);
+        p
+    };
+    // How much of a take-off face this is, carried on past the lip so the face's ruts run out
+    // over it: stopped at the lip, the uncut last metre kicked.
+    let face_rise = {
+        let mut p = Profile::blank(lap);
+        for (i, v) in p.v.iter_mut().enumerate() {
+            let s = i as f32 * PROFILE_STEP;
+            *v = smoothstep(((feat.at(s + 1.0) - feat.at(s - 1.0)) * 0.5 / 0.25).clamp(0.0, 1.0));
+        }
+        carry(&mut p, 0.0, FACE_RUNOUT_M);
+        p
+    };
     let widths = width_profile(prog.width * 0.5, lap, r.seed);
     // The start straight: its own line off to the side of the lap, cut to the height of the
     // lap beside it. Built here because it takes that deck, and used twice below — to bench
@@ -1465,9 +1487,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // see is a decal.
             // Up the takeoff only, eased in from its foot as the ground starts to climb: the deck
             // and the landing are not scuffed.
-            let rise = smoothstep(
-                ((feat.at(s + 1.0) - feat.at(s - 1.0)) * 0.5 / 0.25).clamp(0.0, 1.0),
-            );
+            let rise = face_rise.at(s);
             let marks = if focus * rise > 0.0 {
                 // Each jump its own: how far apart its scuffs lie, how wide they fan, and where
                 // the comb falls. Slow along the lap, so a face keeps one pattern and the next
@@ -1512,7 +1532,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 // Up the approach the same lanes, in the same order, spread across the width,
                 // bending into their own grooves as the corner tightens.
                 let w = half - 0.8;
-                let bend = smoothstep(in_turn);
+                let bend = smoothstep(lane_bend.at(s).clamp(0.0, 1.0));
                 // More lanes rather than wider gaps: as many as fit, a lane apart, from the line
                 // out to a metre off the outside edge.
                 for k in -1..=RUT_LANES_OUT_MAX {
@@ -2537,7 +2557,11 @@ const LANE_CARRY_ENTRY_M: f32 = 10.0;
 const LANE_CARRY_EXIT_M: f32 = 16.0;
 /// How far up a corner's approach its lanes lead in, and how deep they are there.
 const LANE_LEAD_IN_M: f32 = 30.0;
-const LANE_LEAD_DEPTH: f32 = 0.55;
+const LANE_LEAD_DEPTH: f32 = 0.75;
+/// Over how much approach the lanes bend into a corner's fan.
+const LANE_BEND_M: f32 = 30.0;
+/// How far past a lip a face's ruts run out.
+const FACE_RUNOUT_M: f32 = 6.0;
 const RUT_LANES: i32 = 3;
 /// Most lanes a corner fans out toward its outside edge, a lane's width apart.
 const RUT_LANES_OUT_MAX: i32 = 6;
@@ -11173,9 +11197,9 @@ mod tests {
         let flat = (h(b) - h(a)).abs() / (b - a);
         let ramp = (h(up) - h(0.0)) / up;
         assert!(
-            // Over 15%, not 20: the faces were lengthened to ride gentler, and a 3 m jump on a
-            // 13 m face averages 23% before its foot is rounded in.
-            ramp > 0.15 && flat * 3.0 < ramp,
+            // Over 13%: the faces were lengthened to ride gentler, and the face's ruts now run
+            // out through the lip, so the line's lip sits a groove lower than the ramp's.
+            ramp > 0.13 && flat * 3.0 < ramp,
             "the deck runs at {:.0}% and the ramp at {:.0}% — that is a point, not a top",
             flat * 100.0,
             ramp * 100.0
@@ -12151,6 +12175,73 @@ mod ground_preview {
     /// worn line lands on the line, the corridor on the corridor and the turf off the track.
     ///
     /// ```text
+    /// The ground's own relief, lit low from the side and turned so travel runs up the picture:
+    /// what a rider sees of the ruts, which the paint composite does not show.
+    #[test]
+    #[ignore = "writes PNGs — FROST_PROGRAM (seed:N!), FROST_PNG prefix"]
+    fn relief_close_up() {
+        let prog: crate::trackprog::TrackProgram = {
+            let p = std::env::var("FROST_PROGRAM").expect("FROST_PROGRAM");
+            match crate::tracklayout::search(p[5..].trim_end_matches('!').parse().unwrap(), 1) {
+                Ok(m) => m.program,
+                Err(r) => r[0].program.clone(),
+            }
+        };
+        let out = std::env::var("FROST_PNG").expect("FROST_PNG");
+        let syn = synthesise(&prog).unwrap();
+        let (gw, gh, mps) = (syn.gw, syn.gh, syn.mps);
+        let h = |x: f32, z: f32| -> f32 {
+            let (fx, fz) = ((x / mps).clamp(0.0, (gw - 2) as f32), (z / mps).clamp(0.0, (gh - 2) as f32));
+            let (x0, z0) = (fx as usize, fz as usize);
+            let (tx, tz) = (fx - x0 as f32, fz - z0 as f32);
+            let at = |x: usize, z: usize| syn.heights[z * gw + x];
+            let a = at(x0, z0) * (1.0 - tx) + at(x0 + 1, z0) * tx;
+            let b = at(x0, z0 + 1) * (1.0 - tx) + at(x0 + 1, z0 + 1) * tx;
+            a * (1.0 - tz) + b * tz
+        };
+        // The first three tight corners' entries.
+        let mut entries = Vec::new();
+        let mut was = false;
+        for st in &syn.stations {
+            let tight = st.curvature.abs() * FULL_LEAN_RADIUS_M > 0.8;
+            if tight && !was && st.s > 60.0 {
+                entries.push(st.s);
+            }
+            was = tight;
+        }
+        let mut views: Vec<f32> = entries.iter().take(3).map(|at| (at - 12.0).max(0.0)).collect();
+        views.extend(prog.features.iter().filter(|f| f.height() > 1.5).take(2).map(|f| f.at() + 18.0));
+        for (n, centre) in views.iter().copied().enumerate() {
+            let st = syn.stations[((centre / STATION_STEP) as usize).min(syn.stations.len() - 1)];
+            let (fx, fz) = crate::trackprog::heading_vector(st.heading);
+            let (rx, rz) = crate::trackprog::right_vector(st.heading);
+            const P: usize = 800;
+            let span = 64.0f32;
+            let mut img = vec![0u8; P * P * 3];
+            for py in 0..P {
+                for px in 0..P {
+                    let u = (px as f32 / P as f32 - 0.5) * span;
+                    let v = (0.5 - py as f32 / P as f32) * span;
+                    let (x, z) = (st.x + rx * u + fx * v, st.z + rz * u + fz * v);
+                    let d = 0.08;
+                    let (dx, dz) = ((h(x + d, z) - h(x - d, z)) / (2.0 * d), (h(x, z + d) - h(x, z - d)) / (2.0 * d));
+                    let nlen = (dx * dx + 1.0 + dz * dz).sqrt();
+                    let (nx, ny, nz) = (-dx / nlen, 1.0 / nlen, -dz / nlen);
+                    // Low, from the right of travel, so grooves along the track show.
+                    let (lx, ly, lz) = (rx * 0.85 + fx * 0.2, 0.45, rz * 0.85 + fz * 0.2);
+                    let ll = (lx * lx + ly * ly + lz * lz).sqrt();
+                    let lit = ((nx * lx + ny * ly + nz * lz) / ll).clamp(0.0, 1.0);
+                    let g = (lit * 300.0 - 40.0).clamp(0.0, 255.0) as u8;
+                    let i = (py * P + px) * 3;
+                    img[i..i + 3].copy_from_slice(&[g, g, g]);
+                }
+            }
+            let path = format!("{out}{n}.png");
+            image::RgbImage::from_raw(P as u32, P as u32, img).unwrap().save(&path).unwrap();
+            println!("RELIEF {path} centred at {centre:.0} m, travel up");
+        }
+    }
+
     /// FROST_PROGRAM=/tmp/prog.json FROST_PNG=/tmp/close.png FROST_SPAN=120 \
     ///   cargo test --bin mxb-app -- --ignored --nocapture ground_close_up
     /// ```
