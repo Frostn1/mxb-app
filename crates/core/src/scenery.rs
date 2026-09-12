@@ -30,8 +30,11 @@ use crate::map::{self, Group, MapMesh, MapTexture};
 // v7: the binding is read out of the material records rather than walked positionally, which
 // moves most of a track's materials by one and its trees by two. Every earlier entry holds a
 // guess, and the guess put an 80%-transparent sheet on Indiana's banners.
-const MESH_CACHE: &str = "track-scenery-v7";
-const SURFACE_CACHE: &str = "track-surfaces-v7";
+// v8: sheets follow the materials in table order again, and a material numbered 0 owns none.
+// v7 entries carry the word-11 guess, which put every tree on our own tracks on its
+// neighbour's sheet; the key is the track's bytes, so without the bump they stay.
+const MESH_CACHE: &str = "track-scenery-v8";
+const SURFACE_CACHE: &str = "track-surfaces-v8";
 /// The ground sheet and its normal map, cached apart again — two 512×512 sheets against the
 /// surfaces' hundreds of megabytes, and finding them means reading the archive a third time.
 // v3: 8192-wide sheets are read now, so the pick has records to consider that v2 never saw.
