@@ -1841,6 +1841,7 @@ pub fn blocks(scenes: &[Scene]) -> String {
 mod tests {
     use super::*;
 
+
     /// Tear-offs lie in patches at the corners, on or beside the track, and never on the start.
     #[test]
     fn tear_offs_lie_in_the_corners() {
@@ -2674,6 +2675,26 @@ const LIFT_REACH_SLACK_M: f32 = 0.5;
 
 /// Whether a lifted prop is one object. A mesh reaching past its own box was lifted with its
 /// neighbours' triangles (a library baked before `trackprops::lift` was fixed): a donor's run.
+/// Whether a donor piece belongs on ours. Arches, gantries and towers stood over or beside the
+/// donor's track, and replayed on ours they stand in a field; near the track only small
+/// furniture is copied. Thin tall pieces (cables, bare poles) float as lines, and a raised
+/// camera lift is no venue's scenery.
+fn venue_piece(p: &crate::trackprops::Prop, offset: f32) -> bool {
+    use crate::trackobjects::Class;
+    if matches!(p.class, Class::Tree | Class::Crowd) {
+        return true;
+    }
+    let big = p.height > LIFT_FURNITURE_H_M || p.span > LIFT_FURNITURE_SPAN_M;
+    let wire = p.span < 0.6 && p.height > 3.0;
+    let tall_vehicle = p.class == Class::Vehicle && p.height > 6.0;
+    !((offset.abs() < LIFT_FURNITURE_OFF_M && big) || wire || tall_vehicle)
+}
+
+/// How far from the donor's line only furniture is copied, and how big furniture is.
+const LIFT_FURNITURE_OFF_M: f32 = 25.0;
+const LIFT_FURNITURE_H_M: f32 = 2.5;
+const LIFT_FURNITURE_SPAN_M: f32 = 4.0;
+
 fn whole(p: &crate::trackprops::Prop) -> bool {
     p.reach <= p.span * std::f32::consts::FRAC_1_SQRT_2 + LIFT_REACH_SLACK_M
 }
@@ -2701,7 +2722,7 @@ pub fn lifted(
         if prop.span > LIFT_RUN_SPAN_M && prop.height < LIFT_RUN_HEIGHT_M {
             continue;
         }
-        if !whole(prop) {
+        if !whole(prop) || !venue_piece(prop, inst.offset) {
             continue;
         }
         let st = at((inst.along * lap).clamp(0.0, lap));

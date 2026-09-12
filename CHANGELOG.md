@@ -15,6 +15,8 @@
   shading.
 
 ### Changed
+- Generated tracks keep big venue pieces (arches, gantries, tall poles, camera lifts) away
+  from the track; only small trackside items stand near it.
 - Every rut in a corner now leads in up the approach, lined up with its groove in the turn.
   Straights carry a few light ruts across the width instead of one dark groove.
 - Generated tracks sit at ground level: the land rises to meet the track rather than the track
