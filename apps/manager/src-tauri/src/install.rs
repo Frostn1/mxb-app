@@ -1363,6 +1363,11 @@ async fn open_body(client: &Client, url: &str) -> anyhow::Result<reqwest::Respon
     let mut resp = get_with_retry(client, url).await?;
     let is_gdrive = url.contains("google");
 
+    // filebin puts a cookie page in front of a file; the jar holds the cookie now.
+    if !is_gdrive && is_cookie_gate(&resp) {
+        resp = get_with_retry(client, url).await?;
+    }
+
     // Large Google Drive files return a virus-scan HTML page with a confirm form; submit it.
     if content_type(&resp).starts_with("text/html") && is_gdrive {
         let html = resp.text().await?;
@@ -1753,6 +1758,18 @@ fn content_type(resp: &reqwest::Response) -> String {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_lowercase()
+}
+
+pub(crate) fn is_web_page(resp: &reqwest::Response) -> bool {
+    content_type(resp).starts_with("text/html")
+}
+
+/// A 200 page that sets a cookie: filebin's gate in front of a download. A client with a
+/// cookie store holds the cookie once it has seen this, so asking again gets the file.
+pub(crate) fn is_cookie_gate(resp: &reqwest::Response) -> bool {
+    resp.status() == reqwest::StatusCode::OK
+        && is_web_page(resp)
+        && resp.headers().contains_key(reqwest::header::SET_COOKIE)
 }
 
 /// Drive serves its refusals as ordinary 200 HTML pages whose `<title>` names the
@@ -3010,6 +3027,31 @@ mod tests {
         .await
         .expect_err("HTML is not the rest of the file");
         assert!(format!("{err:#}").contains("web page"), "{err:#}");
+    }
+
+    /// filebin answers a first GET with a page that sets a cookie; the second GET is the file.
+    #[tokio::test]
+    async fn a_cookie_gate_is_passed_not_refused() {
+        use std::io::{Read as _, Write as _};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let replies: [&[u8]; 2] = [
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nSet-Cookie: verified=1; Path=/\r\nContent-Length: 6\r\nConnection: close\r\n\r\n<html>",
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\nContent-Length: 3\r\nConnection: close\r\n\r\nzip",
+            ];
+            for reply in replies {
+                let Ok((mut sock, _)) = listener.accept() else { return };
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf);
+                let _ = sock.write_all(reply);
+            }
+        });
+        let client = build_client().unwrap();
+        let resp = open_body(&client, &format!("http://127.0.0.1:{port}/bin/p.zip"))
+            .await
+            .expect("the second ask is the file");
+        assert_eq!(resp.text().await.unwrap(), "zip");
     }
 
     /// A Proton Drive share is end-to-end encrypted, so there is no direct URL to hand
