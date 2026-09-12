@@ -523,7 +523,8 @@ const CORNER_ROUGHNESS: f32 = 1.0;
 // ruts"; with the chop gone, 0.06 rode as no bumps at all. Asked for: bumps mainly before the
 // ruts, which is braking bumps.
 // Measured over an 8 m window, 0.32 put the tallest tenth at 0.15 m against Indiana's 0.20.
-const BRAKING_HEIGHT_M: f32 = 0.6;
+// Raised with the bumps going into lines, one at a time, each its own size.
+const BRAKING_HEIGHT_M: f32 = 0.75;
 
 /// How long a set of braking bumps runs before it breaks, near enough.
 const BRAKE_SET_M: f32 = 14.0;
@@ -1617,16 +1618,29 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                         continue;
                     }
                     let wave = feel.brake.0 * (0.85 + 0.3 * (0.5 + 0.5 * fbm(kf * 9.7, 1.3, r.seed ^ 0xB4C1)));
-                    // A crest is not a straight line, and it does not keep its height.
+                    // A crest is not a straight line.
                     let bend = 0.35 * fbm(t / 2.0, s / 10.0, r.seed ^ 0xB4C2);
-                    let phase = (s / wave
+                    let cycles = s / wave
                         + kf * 0.37
                         + 0.6 * fbm(s / 14.0, kf * 2.9, r.seed ^ 0xB4C3)
-                        + bend)
-                        * std::f32::consts::TAU;
-                    let size = 0.55 + 0.45 * fbm(s / 6.0, kf * 5.3, r.seed ^ 0xB4C4);
-                    rise += phase.sin() * band * size;
-                    back = back.max((-phase.cos()).max(0.0) * band * size);
+                        + bend;
+                    // One bump at a time, each its own: where its crest sits along it, how tall it
+                    // stands, and now and then none at all. A sine made every one the same size
+                    // and shape, which is what it rode — and looked — like.
+                    let n = cycles.floor();
+                    let x = cycles - n;
+                    let pick = |salt: i32| hash2(n as i32, k * 131 + salt, r.seed ^ 0xB4C5) * 0.5 + 0.5;
+                    let peak = 0.3 + 0.4 * pick(1);
+                    let size = if pick(2) < 0.15 { 0.0 } else { 0.5 + 0.7 * pick(3) };
+                    let (prof, falling) = if x < peak {
+                        (smoothstep(x / peak), false)
+                    } else {
+                        (smoothstep((1.0 - x) / (1.0 - peak)), true)
+                    };
+                    rise += (prof * 2.0 - 1.0) * band * size;
+                    if falling {
+                        back = back.max(prof * band * size);
+                    }
                 }
                 // Not polished: braking bumps are worst on the line, where everyone brakes.
                 let w = brake * sets * clear * groomed;
