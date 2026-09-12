@@ -108,6 +108,8 @@ import { useFrostmod } from "../../Context/FrostmodContext";
 import { prettyHotkey } from "../../lib/hotkey";
 import { formatBytes, formatDateShort } from "@frost/shared/lib/mods";
 import { copyText } from "../../lib/clipboard";
+import { UploadBar } from "../Share/UploadBar";
+import type { BundleProgress } from "@frost/shared/types";
 import { useTour } from "../Tour/Tour";
 import { Button } from "@frost/shared/Components/ui/button";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
@@ -385,6 +387,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // something else is the one way an uploaded bundle is lost for good.
   const [sharedLogs, setSharedLogs] = useState<LogsShare | null>(null);
   const [sharingLogs, setSharingLogs] = useState<string | null>(null);
+  const [logsProgress, setLogsProgress] = useState<BundleProgress | null>(null);
   const [copiedLogsLink, setCopiedLogsLink] = useState(false);
   const refreshLogs = useCallback(() => {
     logsInfo()
@@ -439,6 +442,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       // "done" arrives just before the call returns; letting it through would flash the
       // button back to "Packing…" for a frame on the way out.
       if (p.phase === "done") return;
+      setLogsProgress(p);
       setSharingLogs(
         p.phase === "uploading" ? p.message || t("logs.sharing") : t("logs.sharePacking"),
       );
@@ -463,6 +467,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     } finally {
       unlisten();
       setSharingLogs(null);
+      setLogsProgress(null);
     }
   };
 
@@ -2149,6 +2154,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 <RefreshCw className="size-3.5" /> {t("logs.refresh")}
               </Button>
             </div>
+            {sharingLogs && <UploadBar progress={logsProgress} />}
             {sharedLogs && (
               <div className="flex flex-col gap-1.5">
                 <div className="flex gap-2">

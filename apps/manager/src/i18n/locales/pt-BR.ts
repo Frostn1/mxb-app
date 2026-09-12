@@ -1145,6 +1145,7 @@ export const ptBR: Translation = {
   "share.installed_other": "{{count}} arquivos instalados.",
   "share.phasePacking": "Empacotando arquivos…",
   "share.phaseUploading": "Enviando…",
+  "share.partsUploaded": "{{done}} de {{total}} partes enviadas",
   "share.phaseDownloading": "Baixando…",
   "share.phaseInstalling": "Instalando…",
 
