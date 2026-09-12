@@ -3,6 +3,8 @@
 ## 2026-09-12
 
 ### Added
+- Beta updates in Settings → About. Turn it on to get test builds in the app before the full
+  release.
 - Sharing a track, files, a preset bundle or your logs — and installing one from a share
   code — shows a progress bar with about how long is left. The upload bar moves steadily
   instead of a part at a time.

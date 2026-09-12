@@ -768,6 +768,9 @@ export const en = {
   "settings.experimentalForced":
     "Turned on for this run by MXB_EXPERIMENTAL — the setting has no effect until you unset it.",
   "settings.betaBadge": "Beta",
+  "settings.betaUpdates": "Beta updates",
+  "settings.betaUpdatesDesc":
+    "Get test builds in the app before the full release. They can have rough edges. Turned off, you stay on your version until the next full release.",
 
   "sync.title": "Paint sync",
   "sync.desc":

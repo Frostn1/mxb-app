@@ -136,6 +136,7 @@ pub(crate) use mxb_core::soundmods;
 pub(crate) use mxb_core::texstore;
 /// The tracks that came with the game — the ones no scan of the mods tree can see.
 pub(crate) use mxb_core::trackstock;
+mod update_channel;
 mod upload;
 pub(crate) use mxb_core::usage;
 mod vcruntime;
@@ -4054,6 +4055,14 @@ fn set_watch_mods_reload(
     Ok(())
 }
 
+/// Offer beta builds through the in-app updater. Read on each check, so nothing to restart.
+#[tauri::command]
+fn set_beta_updates(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.beta_updates = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 /// Turn injecting `mxbsecure.dll` into the running game on or off.
 ///
 /// Takes effect on the next game session: the watcher decides once per run, so a change made
@@ -6330,6 +6339,8 @@ fn main() {
             voice_meter_stop,
             voice_test_output,
             set_watch_mods_reload,
+            set_beta_updates,
+            update_channel::check_beta_update,
             set_secure_content_inject,
             frostmod_reload,
             frostmod_running,

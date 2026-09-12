@@ -785,6 +785,9 @@ export const es: Translation = {
   "settings.experimentalForced":
     "Activado en esta sesión por MXB_EXPERIMENTAL — el ajuste no hace nada hasta que lo quites.",
   "settings.betaBadge": "Beta",
+  "settings.betaUpdates": "Actualizaciones beta",
+  "settings.betaUpdatesDesc":
+    "Recibe versiones de prueba en la app antes de la versión completa. Pueden tener fallos. Si lo desactivas, te quedas en tu versión hasta la próxima versión completa.",
 
   "sync.title": "Sincronización de pinturas",
   "sync.desc":

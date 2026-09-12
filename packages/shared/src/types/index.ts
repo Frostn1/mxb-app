@@ -107,6 +107,8 @@ export interface Config {
    * Frost's Mod Manager (e.g. a manual download dropped into the folder). Default true.
    */
   watchModsReload?: boolean;
+  /** Offer beta builds through the in-app updater, not only full releases. Default false. */
+  betaUpdates?: boolean;
   /**
    * Inject `mxbsecure.dll` into the running game so locked content can be opened.
    *

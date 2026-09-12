@@ -106,6 +106,8 @@ pub struct AppConfig {
     /// Watch `<mods_path>/mods` and signal FrostMod to reload when tracks/bikes are
     /// added outside the app (e.g. a manual download dropped into the folder).
     pub watch_mods_reload: bool,
+    /// Offer beta builds through the in-app updater, not only full releases.
+    pub beta_updates: bool,
     /// Inject `mxbsecure.dll` into the running game so locked content can be opened.
     ///
     /// **Off by default, deliberately.** This reaches into a process the app usually did not
@@ -367,6 +369,7 @@ impl Default for AppConfig {
             frostmod_args: String::new(),
             instant_refresh: true,
             watch_mods_reload: true,
+            beta_updates: false,
             secure_content_inject: false,
             welcome_seen: false,
             tour_done: false,
