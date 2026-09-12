@@ -3,6 +3,7 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Center, ContactShadows } from "@react-three/drei";
 import { ChevronDown, Move, Move3d, Rotate3d, SlidersHorizontal, ZoomIn } from "lucide-react";
 import * as THREE from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { cn } from "../../lib/utils";
 import { Row, Slider } from "../ui/controls";
 import type { BikeRig, Bone, EdfNode, PaintTexture, RiderPart, Skin, Vec3 } from "../../types";
@@ -1130,10 +1131,37 @@ function RiderComposite({
   );
 }
 
+/**
+ * A room for the bike to reflect, baked once per renderer.
+ *
+ * Bike sheets are authored for the game's reflection pass: an exhaust is dark titanium on the
+ * sheet and only reads as metal once the game lays its sheen over it. Lights alone light the
+ * albedo, so without this the pipe came out near-black. Procedural, so nothing is fetched.
+ */
+const reflections = new WeakMap<THREE.WebGLRenderer, THREE.Texture>();
+function roomReflection(gl: THREE.WebGLRenderer) {
+  let env = reflections.get(gl);
+  if (!env) {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    // Given the renderer, the room sizes its lights for physical units — without it they
+    // are ~180x too dim and the reflection is black.
+    const room = new RoomEnvironment(gl);
+    env = pmrem.fromScene(room, 0.04).texture;
+    room.dispose();
+    pmrem.dispose();
+    reflections.set(gl, env);
+  }
+  return env;
+}
+
+// Low: the room also adds diffuse light, and the viewer's own lights are tuned to the paint.
+const BIKE_REFLECTION = 0.5;
+
 function makeEdfMaterial(
   name: string | null | undefined,
   t: THREE.Texture | null,
   tex: Map<string, THREE.Texture>,
+  envMap: THREE.Texture,
 ) {
   // The number-plate planes are the game's to draw on, not ours — see `isDecalPlane`.
   if (isDecalPlane(name)) {
@@ -1154,6 +1182,8 @@ function makeEdfMaterial(
     color: t ? 0xffffff : 0xb7bcc4,
     metalness: 0.2,
     roughness: 0.55,
+    envMap,
+    envMapIntensity: BIKE_REFLECTION,
     // Cut the mask out where a sheet carries one (see `hasMaskedAlpha`) — a brake disc and a
     // sprocket are a masked square on a flat quad, and the square is what shows otherwise.
     // Tested rather than blended: the mask is hard-edged, and `transparent` would drag the
@@ -1170,6 +1200,8 @@ function useEdfMeshes(
 ) {
   const list = useMemo(() => nodes ?? [], [nodes]);
   const geoms = useNodeGeometries(list);
+  const gl = useThree((s) => s.gl);
+  const env = useMemo(() => roomReflection(gl), [gl]);
 
   // Only the materials know about the paint. Building them alongside the geometry meant
   // every livery switch tore down and rebuilt the bike's vertex buffers to change a map.
@@ -1178,12 +1210,12 @@ function useEdfMeshes(
       list.map((n) =>
         n.submeshes.length
           ? n.submeshes.map((sm) =>
-              makeEdfMaterial(sm.texture, submeshTexture(sm.texture, tex), tex),
+              makeEdfMaterial(sm.texture, submeshTexture(sm.texture, tex), tex, env),
             )
           : // No submesh table → whole-node binding (the model's primary body texture).
-            [makeEdfMaterial(n.texture, submeshTexture(n.texture, tex), tex)],
+            [makeEdfMaterial(n.texture, submeshTexture(n.texture, tex), tex, env)],
       ),
-    [list, tex],
+    [list, tex, env],
   );
   useEffect(
     () => () => materials.forEach((a) => a.forEach((m) => m.dispose())),
