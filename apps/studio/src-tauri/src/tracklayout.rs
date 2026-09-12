@@ -1038,6 +1038,19 @@ pub struct Measured {
 /// synthesises to — which is why this is worth the two seconds it costs.
 pub fn ground_notes(prog: &TrackProgram) -> Vec<String> {
     let mut notes = Vec::new();
+    // A start straight with no room beside the opening straight is laid across the lap's own
+    // return leg: a tester found the gate row standing in the middle of the track. A drawn lap
+    // like that is passed over rather than built.
+    if let Some(line) = prog.start_line() {
+        let need = crate::trackprog::StartLine::room_needed(prog.width);
+        if line.room < need {
+            notes.push(format!(
+                "the start straight has {:.0} m beside the opening straight and needs {need:.0}: \
+                 its gate row would stand on the lap",
+                line.room
+            ));
+        }
+    }
     let Ok(syn) = crate::tracksynth::synthesise(prog) else {
         notes.push("the lap doesn't synthesise".into());
         return notes;

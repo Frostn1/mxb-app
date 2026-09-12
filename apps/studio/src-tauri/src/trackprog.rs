@@ -832,9 +832,17 @@ pub struct StartLine {
     pub joins_at: f32,
     /// Which side of the lap it stands on: +1 is the rider's right.
     pub side: f32,
+    /// Metres clear beside the opening straight on that side, before the lap comes back past.
+    pub room: f32,
 }
 
 impl StartLine {
+    /// The room its gate row needs beside the opening straight: the offset out, the fan's half
+    /// width, and the lap's own half width on the far side.
+    pub fn room_needed(width: f32) -> f32 {
+        START_OFFSET_M + crate::tracksynth::START_FAN_HALF_M + width * 0.5
+    }
+
     pub fn length(&self) -> f32 {
         self.segments.iter().map(|s| s.length()).sum()
     }
@@ -1642,6 +1650,7 @@ impl TrackProgram {
         } else {
             -1.0
         };
+        let room = if side > 0.0 { room_r } else { room_l };
 
         // The gate row: beside the lap's own start, far enough out that the lap never runs
         // through it.
@@ -1813,7 +1822,7 @@ impl TrackProgram {
             .or_else(|| search(false, false))?;
         let mut segments = vec![Segment::Straight { length: START_SPRINT_M, rise: 0.0 }];
         segments.extend(merge.into_iter().filter(|s| s.length() > 0.5));
-        Some(StartLine { start, segments, joins_at, side })
+        Some(StartLine { start, segments, joins_at, side, room })
     }
 
     /// The stretch of the main straight a finish jump may stand on: metres round the lap,

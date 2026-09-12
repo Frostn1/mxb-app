@@ -15,6 +15,8 @@
   one can run into the rut outside it or split in two, the way a ridden corner does.
 - Braking bumps come in sets of rolling waves on the way into corners, big enough to feel, to
   one side or the other, never inside a rut, with darker packed soil on their back faces.
+- New track layouts always leave room beside the opening straight for the start, so the
+  starting gate never stands on another part of the lap.
 - Scenery lifted from a published track keeps each part's own texture: no more black watch
   tower, and banner boards with scrambled textures are left out.
 - Generated tracks carry pebbles: patches of stones over the ridden ground and its edges,
