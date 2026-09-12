@@ -33,8 +33,6 @@
   and banner boards with scrambled textures are left out. Pines are green from the trunk up.
 - Scenery in the Studio's 3D view shows each object's own texture, on published and
   generated tracks alike.
-- Generated tracks carry pebbles: patches of stones over the ridden ground and its edges,
-  thinner on the racing line and never in a rut's floor.
 - Jumps on generated tracks are smaller than before, about 70% of their old height, with longer, gentler faces and clear ground in front of them to build speed. The
   finish jump keeps its full height, with a long deck and a long, gentle face.
 - Jump faces curve up from the ground and run straight to the lip, meeting the deck flush.
