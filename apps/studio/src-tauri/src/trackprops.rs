@@ -363,7 +363,18 @@ fn lift(mesh: &map::MapMesh, obj: &Object) -> (Mesh, [f32; 3], f32) {
     let mut remap: HashMap<u32, u32> = HashMap::new();
     for &isl in &obj.islands {
         let o = &mesh.objects[isl];
-        for t in o.tri_start..o.tri_start + o.tri_count {
+        // An island's triangles are not contiguous: `tri_start` is its first and `tri_count` how
+        // many. Reading the range took the next pieces in draw order — a donor's whole run.
+        let mut left = o.tri_count;
+        let mut t = o.tri_start as usize;
+        while left > 0 && t < mesh.object_of_tri.len() {
+            let owned = mesh.object_of_tri[t] as usize == isl;
+            t += 1;
+            if !owned {
+                continue;
+            }
+            left -= 1;
+            let t = t - 1;
             for k in 0..3 {
                 let vi = mesh.indices[t as usize * 3 + k];
                 let next = remap.len() as u32;
@@ -1087,6 +1098,39 @@ mod tests {
             let got = principal_axis(&turned) - principal_axis(&base);
             let err = wrap_pi(got - want).abs().min(wrap_pi(got - want + std::f32::consts::PI).abs());
             assert!(err < 0.02, "{deg}°: recovered {got}, wanted {want}, err {err}");
+        }
+    }
+
+    /// Islands' triangles interleave in draw order; lifting one takes only its own.
+    #[test]
+    fn lifting_an_island_takes_only_its_own_triangles() {
+        let quad = |x: f32| vec![x, 0., 0., x + 1., 0., 0., x + 1., 1., 0., x, 1., 0.];
+        let mut positions = quad(0.0);
+        positions.extend(quad(20.0));
+        let n = positions.len() / 3;
+        let mesh = map::MapMesh {
+            positions,
+            normals: [0.0f32, 0.0, 1.0].repeat(n),
+            uvs: vec![0.5; n * 2],
+            indices: vec![0, 1, 2, 4, 5, 6, 0, 2, 3, 4, 6, 7],
+            groups: vec![map::Group { material: 0, tri_start: 0, tri_count: 4 }],
+            objects: vec![
+                map::MapObject { tri_start: 0, tri_count: 2, material: 0, min: [0., 0., 0.], max: [1., 1., 0.] },
+                map::MapObject { tri_start: 1, tri_count: 2, material: 0, min: [20., 0., 0.], max: [21., 1., 0.] },
+            ],
+            object_of_tri: vec![0, 1, 0, 1],
+            materials: 1,
+        };
+        for (isl, x0) in [(0usize, 0.0f32), (1, 20.0)] {
+            let o = &mesh.objects[isl];
+            let obj = Object { class: Class::Structure, sheet: "a_c".into(), islands: vec![isl], min: o.min, max: o.max };
+            let (m, at, _) = lift(&mesh, &obj);
+            assert_eq!(m.triangle_count(), 2, "island {isl}");
+            assert!((at[0] - (x0 + 0.5)).abs() < 1e-5);
+            assert!(
+                m.positions.chunks_exact(3).all(|v| v[0].abs() <= 0.5 + 1e-5),
+                "island {isl} took another island's triangles"
+            );
         }
     }
 
