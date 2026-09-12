@@ -327,8 +327,8 @@ pub async fn share(
     let total = crate::bundle::human_size(size);
     crate::bundle::emit(app, SHARE_EVENT, "uploading", Some(format!("Uploading {total}…")));
     let client = crate::install::build_client()?;
-    let up = crate::upload::upload_file(&client, &zip_path, |done, n| {
-        crate::bundle::emit_upload(app, SHARE_EVENT, &total, done, n)
+    let up = crate::upload::upload_file(&client, &zip_path, |p| {
+        crate::bundle::emit_upload(app, SHARE_EVENT, &total, p)
     })
     .await?;
 

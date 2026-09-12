@@ -1156,6 +1156,8 @@ export const de: Translation = {
   "share.phasePacking": "Dateien werden gepackt…",
   "share.phaseUploading": "Wird hochgeladen…",
   "share.partsUploaded": "{{done}} von {{total}} Teilen hochgeladen",
+  "share.secondsLeft": "Noch etwa {{n}} s",
+  "share.minutesLeft": "Noch etwa {{n}} Min.",
   "share.phaseDownloading": "Wird heruntergeladen…",
   "share.phaseInstalling": "Wird installiert…",
 

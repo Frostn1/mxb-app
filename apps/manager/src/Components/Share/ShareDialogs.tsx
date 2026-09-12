@@ -29,7 +29,7 @@ import {
 } from "@frost/shared/api/mods";
 import type { BundlePhase, BundleProgress, SharePlan, SharePreview } from "@frost/shared/types";
 import { isLiveCode } from "../../lib/liveshare";
-import { UploadBar } from "./UploadBar";
+import { DownloadBar, FILE_SHARE_SLUG, UploadBar } from "./TransferBar";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import { formatBytes } from "@frost/shared/lib/mods";
 import { copyText } from "../../lib/clipboard";
@@ -413,6 +413,8 @@ export function ImportShareDialog({
             )}
           </>
         )}
+
+        {busy && phase === "downloading" && <DownloadBar slug={FILE_SHARE_SLUG} />}
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={busy}>

@@ -108,7 +108,7 @@ import { useFrostmod } from "../../Context/FrostmodContext";
 import { prettyHotkey } from "../../lib/hotkey";
 import { formatBytes, formatDateShort } from "@frost/shared/lib/mods";
 import { copyText } from "../../lib/clipboard";
-import { UploadBar } from "../Share/UploadBar";
+import { UploadBar } from "../Share/TransferBar";
 import type { BundleProgress } from "@frost/shared/types";
 import { useTour } from "../Tour/Tour";
 import { Button } from "@frost/shared/Components/ui/button";

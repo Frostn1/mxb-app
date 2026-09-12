@@ -1392,6 +1392,8 @@ export interface BundleProgress {
   /** Upload parts stored so far, and of how many — only on `uploading`. */
   done?: number;
   total?: number;
+  /** How far the upload is, 0–1 — only on `uploading`. */
+  fraction?: number;
 }
 
 /** Where a shared file goes back on the importer's machine. */

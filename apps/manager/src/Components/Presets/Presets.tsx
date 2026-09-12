@@ -82,7 +82,7 @@ import {
 } from "@frost/shared/lib/presets";
 import { useGearPaints } from "@frost/shared/lib/useGearPaints";
 import { copyText } from "../../lib/clipboard";
-import { UploadBar } from "../Share/UploadBar";
+import { DownloadBar, PRESET_BUNDLE_SLUG, UploadBar } from "../Share/TransferBar";
 
 function humanSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -1261,6 +1261,7 @@ function ImportDialog({
             )}
           </div>
         )}
+        {busy && phase === "downloading" && <DownloadBar slug={PRESET_BUNDLE_SLUG} />}
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel

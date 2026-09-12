@@ -3,6 +3,9 @@
 ## 2026-09-12
 
 ### Added
+- Sharing a track, files, a preset bundle or your logs — and installing one from a share
+  code — shows a progress bar with about how long is left. The upload bar moves steadily
+  instead of a part at a time.
 - Generated tracks have goggle tear-offs dropped in the corners, the way riders leave them on
   a raced track.
 - A Game view switch in the 3D track view draws the ground the way the game does: its
