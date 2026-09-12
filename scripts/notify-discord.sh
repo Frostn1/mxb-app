@@ -116,7 +116,7 @@ more="
 # so the two can't drift. It spends part of the cap, so the ladder below measures what's left.
 lede=""
 if [ "$IS_BETA" -eq 1 ]; then
-  lede="**Beta build of ${TAG%%-*} — for testing.** Installed copies won't be offered it by the updater; grab an installer below to try it. Tell us what breaks, and the full release follows.
+  lede="**Beta build of ${TAG%%-*} — for testing.** To get it in the app, turn on Beta updates in Settings → About, or grab an installer below. Tell us what breaks, and the full release follows.
 
 "
   limit=$(( limit - ${#lede} ))

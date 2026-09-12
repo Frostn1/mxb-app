@@ -25,8 +25,8 @@ case "$TAG" in
   *-*)
     cat <<EOF
 > [!NOTE]
-> **This is a beta build of ${TAG%%-*}, for testing.** Installed copies of Frost's Mod Manager won't
-> be offered it by the updater — download the installer below to try it. The full release
+> **This is a beta build of ${TAG%%-*}, for testing.** To get it in Frost's Mod Manager, turn on
+> Beta updates in Settings → About, or download the installer below. The full release
 > follows once it's been checked over.
 
 EOF

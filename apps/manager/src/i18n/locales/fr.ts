@@ -790,6 +790,9 @@ export const fr: Translation = {
   "settings.experimentalForced":
     "Activé pour cette session par MXB_EXPERIMENTAL — le réglage reste sans effet tant qu'il est défini.",
   "settings.betaBadge": "Bêta",
+  "settings.betaUpdates": "Mises à jour bêta",
+  "settings.betaUpdatesDesc":
+    "Recevoir les versions de test dans l'app avant la version finale. Elles peuvent avoir des défauts. Désactivé, vous gardez votre version jusqu'à la prochaine version finale.",
 
   "sync.title": "Synchronisation des décos",
   "sync.desc":

@@ -783,6 +783,9 @@ export const it: Translation = {
   "settings.experimentalForced":
     "Attivato per questa sessione da MXB_EXPERIMENTAL — l'impostazione non ha effetto finché non lo rimuovi.",
   "settings.betaBadge": "Beta",
+  "settings.betaUpdates": "Aggiornamenti beta",
+  "settings.betaUpdatesDesc":
+    "Ricevi le versioni di prova nell'app prima della versione completa. Possono avere qualche difetto. Se lo disattivi, resti sulla tua versione fino alla prossima versione completa.",
 
   "sync.title": "Sincronizzazione livree",
   "sync.desc":

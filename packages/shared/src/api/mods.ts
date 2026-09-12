@@ -2602,6 +2602,11 @@ export function setWatchModsReload(enabled: boolean): Promise<void> {
   return invoke<void>("set_watch_mods_reload", { enabled });
 }
 
+/** Offer beta builds through the in-app updater, not only full releases. */
+export function setBetaUpdates(enabled: boolean): Promise<void> {
+  return invoke<void>("set_beta_updates", { enabled });
+}
+
 /**
  * Toggle injecting `mxbsecure.dll` into the running game for locked content.
  *

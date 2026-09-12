@@ -49,6 +49,7 @@ import {
   setProfilesPath,
   setRunInBackground,
   setWatchModsReload,
+  setBetaUpdates,
   setSecureContentInject,
   setWineRunner,
   wineHostInfo,
@@ -495,6 +496,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const frostmodArgs = frostmodArgsDraft ?? config.frostmodArgs ?? "";
   const instantRefresh = config.instantRefresh ?? true;
   const watchModsReload = config.watchModsReload ?? true;
+  const betaUpdates = config.betaUpdates ?? false;
   const secureContentInject = config.secureContentInject ?? false;
 
   const overlayEnabled = config.overlayEnabled ?? true;
@@ -785,6 +787,17 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     try {
       await setWatchModsReload(v);
       await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const toggleBetaUpdates = async (v: boolean) => {
+    try {
+      await setBetaUpdates(v);
+      await reloadConfig();
+      // Turning it on is asking for a beta: look now, not at the next poll.
+      if (v) void checkForUpdates();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
     }
@@ -2259,6 +2272,12 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 <MessagesSquare className="size-3.5" /> Join the Discord
               </Button>
             </div>
+            <ToggleRow
+              label={t("settings.betaUpdates")}
+              desc={t("settings.betaUpdatesDesc")}
+              checked={betaUpdates}
+              onChange={toggleBetaUpdates}
+            />
             <div className="flex flex-col gap-1 pt-1 text-[11.5px] text-faint">
               <div className="flex items-center gap-1.5">
                 <span>{t("settings.madeWith")}</span>

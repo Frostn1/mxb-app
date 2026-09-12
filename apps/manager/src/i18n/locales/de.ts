@@ -791,6 +791,9 @@ export const de: Translation = {
   "settings.experimentalForced":
     "Für diesen Lauf durch MXB_EXPERIMENTAL aktiviert — die Einstellung wirkt erst, wenn du die Variable entfernst.",
   "settings.betaBadge": "Beta",
+  "settings.betaUpdates": "Beta-Updates",
+  "settings.betaUpdatesDesc":
+    "Testversionen schon vor dem vollen Release in der App bekommen. Sie können noch Ecken und Kanten haben. Ausgeschaltet bleibst du bis zum nächsten vollen Release auf deiner Version.",
 
   "sync.title": "Paint-Sync",
   "sync.desc":
