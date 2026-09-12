@@ -34,7 +34,8 @@ use crate::map::{self, Group, MapMesh, MapTexture};
 // v7 entries carry the word-11 guess, which put every tree on our own tracks on its
 // neighbour's sheet; the key is the track's bytes, so without the bump they stay.
 const MESH_CACHE: &str = "track-scenery-v8";
-const SURFACE_CACHE: &str = "track-surfaces-v8";
+// v9: sheets keep their stored row order, so every cached sheet is upside down.
+const SURFACE_CACHE: &str = "track-surfaces-v9";
 /// The ground sheet and its normal map, cached apart again — two 512×512 sheets against the
 /// surfaces' hundreds of megabytes, and finding them means reading the archive a third time.
 // v3: 8192-wide sheets are read now, so the pick has records to consider that v2 never saw.

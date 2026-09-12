@@ -696,10 +696,8 @@ fn short(sheet: &str) -> String {
 ///
 /// Two things worth stating, because both are silent when wrong.
 ///
-/// **Orientation.** [`map::textures`] flips rows on the way out, because a viewer wants row 0
-/// at the top. A lifted prop keeps the donor's own UVs, which address the sheet the way the
-/// `.map` stored it, so the flip has to be undone or every wordmark ships upside-down — the
-/// same trap [`crate::tracksynth`]'s generated sheets hit from the other side.
+/// **Orientation.** [`map::textures`] hands rows back as the `.map` stored them, which is how a
+/// lifted prop's own UVs address them. Flip one and every wordmark and tree ships upside down.
 ///
 /// **Size.** Indiana's venue sheets are 72 MB inflated and seven of them are most of it:
 /// `semi_trailers_c` is 4096² for two trailers. `max_dim` is the knob that makes a library
@@ -714,23 +712,7 @@ pub fn sheets_for(donor: &Donor, lib: &mut PropLibrary, max_dim: u32) {
         if !want.contains(&name) || !seen.insert(name.clone()) {
             continue;
         }
-        let mut rgba = t.rgba;
-        flip_rows(&mut rgba, t.width, t.height);
-        lib.sheets.push((name, t.width, t.height, rgba));
-    }
-}
-
-/// Turn an RGBA image upside-down, in place.
-fn flip_rows(rgba: &mut [u8], w: u32, h: u32) {
-    let stride = w as usize * 4;
-    if stride == 0 || rgba.len() < stride * h as usize {
-        return;
-    }
-    for y in 0..(h as usize / 2) {
-        let (a, b) = (y * stride, (h as usize - 1 - y) * stride);
-        for i in 0..stride {
-            rgba.swap(a + i, b + i);
-        }
+        lib.sheets.push((name, t.width, t.height, t.rgba));
     }
 }
 

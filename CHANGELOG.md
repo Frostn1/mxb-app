@@ -34,6 +34,9 @@
 - The riding surface carries a relief map baked from the track's own ground, so ruts, bumps and
   tyre lines catch the light in game the way they do in the studio's 3D view.
 
+### Fixed
+- Trees, signs and other scenery in the 3D track view stand the right way up.
+
 ## 2026-09-11
 
 ### Added
