@@ -1149,6 +1149,17 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     feel.accel.1 *= worn;
     let worked = worked_profile(lap, r.seed);
     let ruts = rut_profile(&prog.features, &turn, lap, r.seed, &feel);
+    // Where a corner's lanes are: the tight part of the turn, carried a little way back up the
+    // approach and out along the exit, so a lane eases out rather than stopping at the turn's
+    // edge — ridden as a bump at a corner's entry and exit, then the rut again.
+    let lane_turn = {
+        let mut p = Profile::blank(lap);
+        for (i, v) in p.v.iter_mut().enumerate() {
+            *v = (turn.at(i as f32 * PROFILE_STEP).abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
+        }
+        carry(&mut p, LANE_CARRY_ENTRY_M, LANE_CARRY_EXIT_M);
+        p
+    };
     let widths = width_profile(prog.width * 0.5, lap, r.seed);
     // The start straight: its own line off to the side of the lap, cut to the height of the
     // lap beside it. Built here because it takes that deck, and used twice below — to bench
@@ -1410,14 +1421,21 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 ((feat.at(s + 1.0) - feat.at(s - 1.0)) * 0.5 / 0.25).clamp(0.0, 1.0),
             );
             let marks = if focus * rise > 0.0 {
-                let span = feel.groove + RUT_MARK_FAN_M * focus;
+                // Each jump its own: how far apart its scuffs lie, how wide they fan, and where
+                // the comb falls. Slow along the lap, so a face keeps one pattern and the next
+                // jump has another — every face wore the same one.
+                let vary = |salt: f32| 0.5 + 0.5 * fbm(s / 80.0, salt, r.seed ^ 0xFACE);
+                let spacing = TYRE_MARK_SPACING_M * (0.7 + 0.6 * vary(1.0));
+                let fan = RUT_MARK_FAN_M * (0.6 + 0.8 * vary(2.0));
+                let shift = 1.2 * fbm(s / 80.0, 7.0, r.seed ^ 0xFAC1);
+                let span = feel.groove + fan * focus;
                 let d = (t - on_line) / span;
                 if d.abs() < 1.0 {
                     // Under a power, so each scuff is a broad trough and the ridge between two
                     // is the narrow part.
                     let comb = (0.5
                         + 0.5
-                            * ((t - on_line) / TYRE_MARK_SPACING_M * std::f32::consts::TAU).cos())
+                            * ((t - on_line + shift) / spacing * std::f32::consts::TAU).cos())
                     .max(0.0)
                     .powf(0.6);
                     (1.0 - d * d * d * d) * comb * TYRE_MARK_DEPTH * focus * rise
@@ -1434,7 +1452,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             let lane_presence = ((ruts.spread.at(s) - RUT_BUNDLE.0) / (RUT_BUNDLE.1 - RUT_BUNDLE.0))
                 .clamp(0.0, 1.0)
                 * (1.0 - focus)
-                * in_turn;
+                * lane_turn.at(s);
             let lanes = if lane_presence > 0.0 {
                 let mut best = 0.0f32;
                 for k in -RUT_LANES..=RUT_LANES {
@@ -1510,13 +1528,20 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 // carved line stays.
                 let spread = (lip * RUT_LIP_GAIN - cut)
                     * fade
-                    * (1.0 - focus)
+                    // Up a take-off the approach's grooves carry on, part of them, so the ruts line up
+                    // with the face instead of stopping at its foot; the deck and landing stay swept.
+                    * (1.0 - focus * (1.0 - FACE_FIELD_KEEP * rise))
                     * (1.0 - RUT_LANE_TAKEOVER * lane_presence);
                 // Held as a signal of its own as well as added to the ground: what a rider
                 // reads off a rut is half its shape and half the paint on it, and the paint
                 // cannot follow a groove it has no way of knowing is there. The carved lines
                 // go into the same signal, or the paint would follow the field and miss them.
-                let relief = if carved > 0.0 { spread.min(-carved) } else { spread };
+                // Blended in by depth. A hard `min` let the faintest carve — a lane's carried tail —
+                // flatten every bank under it, which is how a straight lost all its grooves.
+                let relief = {
+                    let w = smoothstep((carved / 0.15).clamp(0.0, 1.0));
+                    (spread - carved) + (spread.min(-carved) - (spread - carved)) * w
+                };
                 // Capped past a knee, so the deepest grooves round off and the rest are untouched.
                 let r = depth * relief;
                 // The ceiling moves with the wear, like the depth under it: calibrated at the
@@ -2270,6 +2295,9 @@ fn trough_at(t: f32, centre: f32, width: f32) -> f32 {
 // Asked for further apart, more of them and wider: 1.3 m apart across a wider fan
 // ([`RUT_MARK_FAN_M`]), each a broad trough rather than a ridge.
 const TYRE_MARK_SPACING_M: f32 = 2.0;
+
+/// How much of the approach's grooves carry up a take-off face.
+const FACE_FIELD_KEEP: f32 = 0.45;
 /// As a multiple of the ground's rut depth — and a jump sits on a straight, where that is
 /// `rut_straight`, about nine centimetres. At 0.34 the scuffs cut three: real enough, and far
 /// too little to see from the seat. A face that has been ridden all day is visibly combed.
@@ -2312,6 +2340,9 @@ const RUT_SECOND_DEPTH: f32 = 0.66;
 /// paint; so the lanes are stated, and the field only roughens the ground between them.
 /// On the eight tightest corners of Corpus Venue: 4.6 grooves a cross-section at a median
 /// 0.13 m, against Indiana's 4.5 at 0.15 and the noise field's 3.2.
+/// How far a corner's lanes carry back up the approach and out along the exit, metres.
+const LANE_CARRY_ENTRY_M: f32 = 10.0;
+const LANE_CARRY_EXIT_M: f32 = 16.0;
 const RUT_LANES: i32 = 3;
 const RUT_LANE_M: f32 = 1.9;
 // Far enough that neighbours meet and part: a rut joins the one outside it, or splits in two.
@@ -3424,10 +3455,10 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     let loose = loose_mask(syn, half, seed, MASK_DIM, MASK_DIM);
     put("mask_dirt.tga", tga_alpha(RIDING_MASK_DIM, RIDING_MASK_DIM, &dirt), &mut wrote)?;
     put("mask_gravel.tga", tga_alpha(MASK_DIM, MASK_DIM, &gravel), &mut wrote)?;
+    put("mask_loose.tga", tga_alpha(MASK_DIM, MASK_DIM, &loose), &mut wrote)?;
     let patches = band_of(BandMask::Patches);
     put("mask_patches.tga", tga_alpha(MASK_DIM, MASK_DIM, &patches), &mut wrote)?;
     put("mask_line.tga", tga_alpha(MASK_DIM, MASK_DIM, &line), &mut wrote)?;
-    put("mask_loose.tga", tga_alpha(MASK_DIM, MASK_DIM, &loose), &mut wrote)?;
     put("mask_rut.tga", tga_alpha(MASK_DIM, MASK_DIM, &rut), &mut wrote)?;
     // The pit lane, in the same place the race data puts its stalls. It runs along the
     // opening straight, so the straight's own frame gives the side the lane is on — the
@@ -5963,7 +5994,7 @@ const RELIEF_HIGHPASS_M: f32 = 2.0;
 // Indiana's is drawn well past the true slope: 40 levels at the median where it has relief
 // against our 12.7 at 1.0, and 87.5 at the ninetieth. 3.2 lands both.
 const RELIEF_STRENGTH: f32 = 3.2;
-// Pending the in-game A/B (7A this sign, 7B the second axis flipped).
+// Not yet settled in game; the 7A/7B comparison did not decide it.
 const RELIEF_SIGN: (f32, f32) = (1.0, 1.0);
 
 /// The ground's fine relief as one normal map over the whole terrain, laid out as the masks are:

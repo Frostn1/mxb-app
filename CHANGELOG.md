@@ -15,6 +15,8 @@
   one can run into the rut outside it or split in two, the way a ridden corner does.
 - Braking bumps come in sets of rolling waves on the way into corners, big enough to feel, to
   one side or the other, never inside a rut, with darker packed soil on their back faces.
+- Scenery lifted from a published track keeps each part's own texture: no more black watch
+  tower, and banner boards with scrambled textures are left out.
 - Generated tracks carry pebbles: patches of stones over the ridden ground and its edges,
   thinner on the racing line and never in a rut's floor.
 - Jumps on generated tracks are smaller than before, about 70% of their old height, with longer, gentler faces and clear ground in front of them to build speed. The

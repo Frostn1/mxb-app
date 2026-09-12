@@ -420,7 +420,9 @@ pub fn face_arc(t: f32, sweep: f32) -> f32 {
 /// much more than the ramp's mean angle. The arc that was here left at twice it, and at 77
 /// degrees at least once a minimum sweep was put on it; ridden with the lip's rounding taken
 /// off, every jump "just launches you into oblivion".
-pub const TAKEOFF_TRANSITION: f32 = 0.7;
+// 0.8 rather than 0.7: a tester on a 250 found one or two faces could be "lipped up a smidge";
+// a longer transition leaves a shorter, steeper straight to the lip.
+pub const TAKEOFF_TRANSITION: f32 = 0.8;
 
 /// A take-off's height at `t`, foot (0) to lip (1), as a share of its rise: tangent to the
 /// ground at the foot, curving up through the transition, straight from there to the lip.
