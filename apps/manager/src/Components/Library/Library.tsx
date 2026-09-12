@@ -50,6 +50,8 @@ import {
   restoreLedgerEntry,
   downloadHistory,
   scanModelSwaps,
+  onFrostmodReload,
+  MODS_WATCH_SLUG,
   type ModType,
 } from "@frost/shared/api/mods";
 import type {
@@ -609,6 +611,19 @@ export default function Library({
     setLoading(false);
     if (!hit.fresh) void load({ quiet: true });
   }, [load, refreshKey, modType]);
+
+  // A mod dropped into the folder by hand, caught by the watcher: every remembered scan is
+  // stale, and the list on screen refreshes behind itself. In-app changes bump `refreshKey`.
+  useEffect(() => {
+    const un = onFrostmodReload((p) => {
+      if (p.slug !== MODS_WATCH_SLUG) return;
+      dropScans();
+      void load({ quiet: true });
+    });
+    return () => {
+      void un.then((f) => f());
+    };
+  }, [load]);
 
   // Model swaps, for the bikes tab only — one scan of the whole tree, indexed by bike
   // folder. Installing a mod or editing the folder changes what's swappable, so it rides
