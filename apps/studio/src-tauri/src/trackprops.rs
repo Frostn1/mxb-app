@@ -692,6 +692,10 @@ fn short(sheet: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// Sheets a library carries for scenery placed by rule rather than lifted: goggle tear-offs,
+/// 1,452 flat quads on Indiana, too small to lift as props.
+pub const SCATTER_SHEETS: [&str; 1] = ["tearoffs_c_a"];
+
 /// Inflate just the sheets the library's props wear, at or below `max_dim`.
 ///
 /// Two things worth stating, because both are silent when wrong.
@@ -704,8 +708,10 @@ fn short(sheet: &str) -> String {
 /// shippable, and it is applied here rather than later so the full-size RGBA never has to be
 /// held for every sheet at once.
 pub fn sheets_for(donor: &Donor, lib: &mut PropLibrary, max_dim: u32) {
-    let want: std::collections::HashSet<String> =
+    let mut want: std::collections::HashSet<String> =
         lib.props.iter().map(|p| p.sheet.to_ascii_lowercase()).collect();
+    // Sheets laid by a rule rather than lifted as props: see `trackscenery::tearoffs`.
+    want.extend(SCATTER_SHEETS.iter().map(|s| s.to_string()));
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     for t in map::textures(&donor.map_bytes, max_dim) {
         let name = t.name.to_ascii_lowercase();

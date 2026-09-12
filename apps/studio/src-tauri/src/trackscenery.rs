@@ -187,7 +187,7 @@ const TREE_H_M: f32 = 8.0;
 
 /// How high the sky band reaches, in degrees above the horizon — below the sun, which stands
 /// at 54°. See `dome_mesh`.
-const SKY_TOP_DEG: f32 = 34.0;
+pub(crate) const SKY_TOP_DEG: f32 = 34.0;
 
 /// How tall a feature has to be before it is worth marking.
 ///
@@ -747,7 +747,7 @@ fn gate_sheet() -> Texture {
 ///
 /// A closed dome is what a track ships — Mt Morris carries `dome_R26.edf` — but a closed dome
 /// built here came out *dark*: TerrainEd bakes shadow volumes from every scene in the file,
-/// the sun stands 54° up, and a lid over the whole plot puts the entire track in its shadow.
+/// the sun stands 40° up, and a lid over the whole plot puts the entire track in its shadow.
 /// The riding line went from dark brown to unreadable.
 ///
 /// Open above [`SKY_TOP_DEG`] and the sun comes through, while the part a rider actually sees
@@ -1992,6 +1992,15 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let mut kinds = kinds;
     if let Some(lib) = crate::trackprops::load() {
         let from = kinds.len();
+        if let Some((name, w, h, rgba)) =
+            lib.sheets.iter().find(|s| crate::trackprops::SCATTER_SHEETS.contains(&s.0.as_str()))
+        {
+            let mesh = tearoffs(prog, syn, seed);
+            tally.push(("tearoffs", mesh.triangle_count() / 4));
+            let tex = Texture { name: name.clone(), width: *w, height: *h, rgba: rgba.clone() };
+            // Drawn, never solid: a strip of film in the dirt.
+            kinds.push(("tearoffs".into(), mesh, tex, false));
+        }
         for (name, mesh, tex, is_solid) in lifted(&lib, prog, syn) {
             tally.push(("lifted", mesh.triangle_count()));
             kinds.push((name, mesh, tex, is_solid));
@@ -2041,6 +2050,25 @@ pub fn blocks(scenes: &[Scene]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Tear-offs lie in patches at the corners, on or beside the track, and never on the start.
+    #[test]
+    fn tear_offs_lie_in_the_corners() {
+        let prog: TrackProgram = serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();
+        let syn = crate::tracksynth::synthesise(&prog).unwrap();
+        let m = tearoffs(&prog, &syn, 7);
+        let strips = m.vertex_count() / 4;
+        assert!(strips > 200, "only {strips} tear-offs");
+        let st = prog.stations(1.0);
+        for v in m.positions.chunks_exact(3).step_by(4) {
+            let near = st.iter().map(|q| (q.x - v[0]).hypot(q.z - v[2])).fold(f32::INFINITY, f32::min);
+            assert!(near < TEAROFF_OUT_M + 1.0, "a tear-off {near:.1} m from the lap");
+            assert!(
+                syn.outside_the_start(v[0], v[2]).map(|e| e > OFF_THE_START_M - 0.5).unwrap_or(true),
+                "a tear-off on the start"
+            );
+        }
+    }
 
     /// A pine's needles sample the foliage half of `tree_sheet`, and only its trunk the bark.
     #[test]
@@ -2902,6 +2930,79 @@ pub fn lifted(
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
+}
+
+/// Tear-off patches per 2 km of lap, and strips in each. Indiana: 1,452 in about ten patches.
+const TEAROFF_PATCHES_PER_2KM: f32 = 10.0;
+const TEAROFFS_PER_PATCH: u32 = 150;
+/// One strip, and how far a patch spreads along the lap and out from the centreline.
+const TEAROFF_M: f32 = 0.3;
+const TEAROFF_SPREAD_M: f32 = 14.0;
+const TEAROFF_OUT_M: f32 = 10.0;
+
+/// Goggle tear-offs: the strips riders peel off and drop where they brake and turn.
+///
+/// Indiana lays them as flat 0.3 m quads on the dirt, each one of three strips of
+/// `tearoffs_c_a` at a random yaw, in patches at the corners, median 4.8 m off the centreline.
+/// Double-sided, so the winding can't bury them; the under face is never seen.
+fn tearoffs(prog: &TrackProgram, syn: &Synth, seed: u32) -> Mesh {
+    let lap = prog.lap_length();
+    let stations = prog.stations(2.0);
+    let mut m = Mesh::default();
+    if stations.len() < 8 {
+        return m;
+    }
+    // The tightest corners, at least 40 m apart.
+    let want = ((lap / 2000.0) * TEAROFF_PATCHES_PER_2KM).round().max(1.0) as usize;
+    let mut order: Vec<usize> = (0..stations.len()).collect();
+    order.sort_by(|&a, &b| stations[b].curvature.abs().total_cmp(&stations[a].curvature.abs()));
+    let mut centres: Vec<usize> = Vec::new();
+    for i in order {
+        if centres.len() >= want || stations[i].curvature.abs() < 1.0 / 60.0 {
+            break;
+        }
+        let gap = |a: usize, b: usize| {
+            let d = (a as f32 - b as f32).abs() * 2.0;
+            d.min(lap - d)
+        };
+        if centres.iter().all(|&c| gap(c, i) > 40.0) {
+            centres.push(i);
+        }
+    }
+    for (p, &c) in centres.iter().enumerate() {
+        for k in 0..TEAROFFS_PER_PATCH {
+            let key = p as u32 * 1000 + k;
+            let along = (rnd(seed ^ 0x7E01, key) - 0.5) * 2.0 * TEAROFF_SPREAD_M;
+            let i = ((c as f32 + along / 2.0).round() as isize).rem_euclid(stations.len() as isize) as usize;
+            let st = stations[i];
+            // Mostly on the track and its edge: a skew toward the middle of the band.
+            let r = rnd(seed ^ 0x7E02, key);
+            let out = TEAROFF_OUT_M * r * r.sqrt();
+            let side = if rnd(seed ^ 0x7E03, key) < 0.5 { -1.0 } else { 1.0 };
+            let (rx, rz) = crate::trackprog::right_vector(st.heading);
+            let (x, z) = (st.x + rx * out * side, st.z + rz * out * side);
+            if !inside(prog, x, z, 1.0)
+                || syn.outside_the_start(x, z).map(|e| e <= OFF_THE_START_M).unwrap_or(false)
+            {
+                continue;
+            }
+            let yaw = rnd(seed ^ 0x7E04, key) * std::f32::consts::TAU;
+            let strip = ((rnd(seed ^ 0x7E05, key) * 3.0) as u32).min(2) as f32;
+            let (c0, s0) = (yaw.cos() * TEAROFF_M * 0.5, yaw.sin() * TEAROFF_M * 0.5);
+            let corners = [(-1.0f32, -1.0f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)];
+            let base = m.vertex_count() as u32;
+            for (cu, cv) in corners {
+                let (px, pz) = (x + c0 * cu - s0 * cv, z + s0 * cu + c0 * cv);
+                m.positions.extend_from_slice(&[px, ground(syn, px, pz) + 0.015, pz]);
+                m.normals.extend_from_slice(&[0.0, 1.0, 0.0]);
+                let u = (strip + (cu + 1.0) * 0.5) / 3.0;
+                m.uvs.extend_from_slice(&[u, (cv + 1.0) * 0.5]);
+            }
+            m.indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            m.indices.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+        }
+    }
+    m
 }
 
 /// A sheet name cut down to a model name.
