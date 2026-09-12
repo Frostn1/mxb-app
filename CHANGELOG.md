@@ -10,6 +10,7 @@
 ### Changed
 - The 3D viewer shows paints at full resolution, so logos and lettering on bikes and gear
   read sharply.
+- Bikes with many paints open faster in the 3D viewer and use far less memory.
 
 ### Fixed
 - A server's track panel recognizes tracks you have installed as a `.pkz`, even when the
