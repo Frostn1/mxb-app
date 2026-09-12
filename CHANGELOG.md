@@ -11,8 +11,8 @@
 
 ### Changed
 - Tight corners on generated tracks carry a comb of ruts, one for each line riders take,
-  with a ridge between each. Every rut runs through the turn and starts back where the tyre
-  marks lead into it.
+  with a ridge between each. They vary in width, some start part way through the turn, and
+  one can run into the rut outside it or split in two, the way a ridden corner does.
 - Braking bumps come in sets of long, rolling waves on the way into corners, to one side or
   the other, never inside a rut, with darker packed soil on their back faces.
 - Jumps on generated tracks are a little smaller than before, about 85% of their old

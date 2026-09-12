@@ -521,7 +521,8 @@ const CORNER_ROUGHNESS: f32 = 1.0;
 // Only where the speed model has the rider braking. 0.13 with the chop on top rode as "cross
 // ruts"; with the chop gone, 0.06 rode as no bumps at all. Asked for: bumps mainly before the
 // ruts, which is braking bumps.
-const BRAKING_HEIGHT_M: f32 = 0.32;
+// Measured over an 8 m window, 0.32 put the tallest tenth at 0.15 m against Indiana's 0.20.
+const BRAKING_HEIGHT_M: f32 = 0.42;
 
 /// How long a set of braking bumps runs before it breaks, near enough.
 const BRAKE_SET_M: f32 = 14.0;
@@ -1434,7 +1435,18 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     let fall = 1.0 - (kf.abs() / (RUT_LANES as f32 + 1.0)).powi(2);
                     // Slowly, so a lane that is in the corner at its entry is still there at its exit.
                     let along = 0.55 + 0.45 * fbm(s / 40.0, kf * 3.1 + 11.0, r.seed ^ 0x1A7F);
-                    best = best.max(trough(at, feel.groove * RUT_LANE_WIDTH) * fall * along);
+                    // Some lanes start part way through the turn and fade out again; the line under
+                    // the paint never does.
+                    let exists = if k == 0 {
+                        1.0
+                    } else {
+                        smoothstep(((fbm(s / 22.0, kf * 5.7, r.seed ^ 0x1A80) + RUT_LANE_GATE) * 3.0).clamp(0.0, 1.0))
+                    };
+                    // Wider here, narrower there.
+                    let width = feel.groove
+                        * RUT_LANE_WIDTH
+                        * (1.0 + RUT_LANE_WIDTH_VARY * fbm(s / 14.0, kf * 2.3, r.seed ^ 0x1A81));
+                    best = best.max(trough(at, width) * fall * along * exists);
                 }
                 best * lane_presence * RUT_LANE_DEPTH
             } else {
@@ -2257,7 +2269,14 @@ const RUT_SECOND_DEPTH: f32 = 0.66;
 /// 0.13 m, against Indiana's 4.5 at 0.15 and the noise field's 3.2.
 const RUT_LANES: i32 = 3;
 const RUT_LANE_M: f32 = 1.9;
-const RUT_LANE_WANDER_M: f32 = 0.35;
+// Far enough that neighbours meet and part: a rut joins the one outside it, or splits in two.
+// At 0.35 every corner came out as a perfect set of concentric grooves.
+const RUT_LANE_WANDER_M: f32 = 0.8;
+/// How often a lane other than the racing line is there at all: some start part way through a
+/// turn and fade out again. Higher is more often.
+const RUT_LANE_GATE: f32 = 0.28;
+/// How much a lane's width wanders along it, as a share.
+const RUT_LANE_WIDTH_VARY: f32 = 0.35;
 const RUT_LANE_DEPTH: f32 = 1.2;
 const RUT_LANE_TAKEOVER: f32 = 0.9;
 /// A lane's trough, against [`RUT_GROOVE_M`]: wide, so the ground left between two lanes stands
@@ -5233,8 +5252,9 @@ fn line_mask(syn: &Synth, half: f32, w: f32, seed: u32, mw: usize, mh: usize) ->
 /// Tyre lines through the riding surface: how far apart, how narrow, how far they meander, how
 /// far out from the racing line they reach as a share of the half width, and how much of the
 /// light soil they take away.
-const STREAK_SPACING_M: f32 = 0.9;
-const STREAK_SHARP: f32 = 4.0;
+// Closer and wider: Indiana's riding surface reads darker because more of its dark soil shows.
+const STREAK_SPACING_M: f32 = 0.7;
+const STREAK_SHARP: f32 = 3.0;
 const STREAK_WANDER_M: f32 = 0.6;
 const STREAK_REACH: f32 = 1.0;
 const STREAK_DEPTH: f32 = 0.8;
