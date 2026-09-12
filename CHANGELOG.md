@@ -10,6 +10,8 @@
   shading.
 
 ### Changed
+- Shared tracks, paints, preset bundles and logs are hosted on filebin.net. A share code
+  downloads for 6 days after it is made.
 - The 3D track view draws the ground at its true height and in the game's own light and
   colours, so jumps look the size they ride. Game view only leaves out the darkened hollows.
 - Generated tracks are lit like published ones: a lower sun and softer light, so ruts, bumps
