@@ -15,6 +15,9 @@
   shading.
 
 ### Changed
+- Arches over the track stand on both legs.
+- Every rut in a corner leads in up the approach, all of them as deep as each other.
+- Jump take-off faces are a little steeper, to allow for the ruts cut through the lip.
 - Ruts leading into a corner bend smoothly into its grooves, and more of them lead in.
 - Ruts on a jump face run on through the lip instead of stopping just short of it.
 - Arches and gantries on generated tracks stand across the track on straights, like on a

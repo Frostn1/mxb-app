@@ -1551,8 +1551,11 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                         continue;
                     }
                     // Deepest on the line everyone rides, shallower out toward the edge.
-                    let fall = room
-                        * if k < 0 { 0.75 } else { 1.0 - 0.5 * kf / (RUT_LANES_OUT_MAX as f32 + 1.0) };
+                    // Up the approach every lane is as deep as the next and all of them are
+                    // there; they differ once the corner bends them into its fan. Weighted there
+                    // too, the line's lane was the only lead-in anyone could see.
+                    let taper = if k < 0 { 0.75 } else { 1.0 - 0.5 * kf / (RUT_LANES_OUT_MAX as f32 + 1.0) };
+                    let fall = room * (1.0 + (taper - 1.0) * bend);
                     // Slowly, so a lane that is in the corner at its entry is still there at its exit.
                     let along = 0.55 + 0.45 * fbm(s / 40.0, kf * 3.1 + 11.0, r.seed ^ 0x1A7F);
                     // Some lanes start part way through the turn and fade out again; the line under
@@ -1562,6 +1565,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     } else {
                         smoothstep(((fbm(s / 22.0, kf * 5.7, r.seed ^ 0x1A80) + RUT_LANE_GATE) * 3.0).clamp(0.0, 1.0))
                     };
+                    let exists = exists + (1.0 - exists) * (1.0 - bend);
                     // Wider here, narrower there.
                     // How much this lane is used: the line everyone rides, then the outer main
                     // line, then the inside one; the rest of the fan is the odd rider's. The used
@@ -1572,6 +1576,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                         -1 => 0.55,
                         _ => 0.3,
                     };
+                    let usage = 1.0 + (usage - 1.0) * bend;
                     let width = feel.groove
                         * RUT_LANE_WIDTH
                         * (1.0 + 0.35 * usage)
@@ -2557,7 +2562,7 @@ const LANE_CARRY_ENTRY_M: f32 = 10.0;
 const LANE_CARRY_EXIT_M: f32 = 16.0;
 /// How far up a corner's approach its lanes lead in, and how deep they are there.
 const LANE_LEAD_IN_M: f32 = 30.0;
-const LANE_LEAD_DEPTH: f32 = 0.75;
+const LANE_LEAD_DEPTH: f32 = 1.0;
 /// Over how much approach the lanes bend into a corner's fan.
 const LANE_BEND_M: f32 = 30.0;
 /// How far past a lip a face's ruts run out.

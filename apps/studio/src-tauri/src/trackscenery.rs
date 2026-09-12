@@ -2259,6 +2259,20 @@ mod tests {
 
     /// A lifted prop whose mesh reaches past its own box is a donor's run: never replayed.
     #[test]
+    fn a_one_legged_arch_gets_its_other_leg() {
+        let at = |c: Mesh, x: f32, y: f32| {
+            let (lo, hi) = c.bounds();
+            edfwrite::moved(&c, [x - (lo[0] + hi[0]) * 0.5, y - lo[1], -(lo[2] + hi[2]) * 0.5])
+        };
+        let mut arch = at(edfwrite::cuboid(0.5, 6.0, 0.5), -7.0, 0.0);
+        arch.append(&at(edfwrite::cuboid(14.5, 0.5, 0.5), 0.0, 5.5));
+        let both = with_both_legs(&arch).expect("an arch");
+        let low: Vec<f32> = both.positions.chunks_exact(3).filter(|v| v[1] < 0.4).map(|v| v[0]).collect();
+        assert!(low.iter().any(|&x| x < -6.0), "lost its own leg");
+        assert!(low.iter().any(|&x| x > 6.0), "no leg at the far end: {low:?}");
+    }
+
+    #[test]
     fn an_arch_that_spanned_the_donor_track_spans_ours() {
         let (p, s) = demo();
         let span = 2.0 * DONOR_HALF_M + 2.0;
@@ -2720,6 +2734,56 @@ const LIFT_REACH_SLACK_M: f32 = 0.5;
 
 /// Whether a lifted prop is one object. A mesh reaching past its own box was lifted with its
 /// neighbours' triangles (a library baked before `trackprops::lift` was fixed): a donor's run.
+/// A spanning piece that touches the ground at one end only: its own leg, mirrored to the far
+/// end, stands it. `None` if it touches the ground nowhere.
+fn with_both_legs(m: &Mesh) -> Option<Mesh> {
+    let (lo, hi) = m.bounds();
+    let ax = if hi[0] - lo[0] >= hi[2] - lo[2] { 0 } else { 2 };
+    let (a0, a1) = (lo[ax], hi[ax]);
+    let len = a1 - a0;
+    let low: Vec<f32> = m.positions.chunks_exact(3).filter(|v| v[1] < lo[1] + 0.4).map(|v| v[ax]).collect();
+    if low.is_empty() || len <= 0.0 {
+        return None;
+    }
+    let near0 = low.iter().any(|&t| t < a0 + len * 0.25);
+    let near1 = low.iter().any(|&t| t > a1 - len * 0.25);
+    if near0 && near1 {
+        return Some(m.clone());
+    }
+    // The leg: every triangle standing inside the grounded end's footprint.
+    let band = if near0 {
+        low.iter().copied().filter(|&t| t < a0 + len * 0.25).fold(f32::MIN, f32::max) - a0
+    } else {
+        a1 - low.iter().copied().filter(|&t| t > a1 - len * 0.25).fold(f32::MAX, f32::min)
+    } + 0.3;
+    let within = |t: f32| if near0 { t <= a0 + band } else { t >= a1 - band };
+    let mut leg = Mesh::default();
+    for tri in m.indices.chunks_exact(3) {
+        if !tri.iter().all(|&i| within(m.positions[i as usize * 3 + ax])) {
+            continue;
+        }
+        let base = leg.vertex_count() as u32;
+        // Reversed, because a mirror turns the winding inside out.
+        for &i in tri.iter().rev() {
+            let i = i as usize;
+            let mut p = [m.positions[i * 3], m.positions[i * 3 + 1], m.positions[i * 3 + 2]];
+            p[ax] = a0 + a1 - p[ax];
+            let mut n = [m.normals[i * 3], m.normals[i * 3 + 1], m.normals[i * 3 + 2]];
+            n[ax] = -n[ax];
+            leg.positions.extend_from_slice(&p);
+            leg.normals.extend_from_slice(&n);
+            leg.uvs.extend_from_slice(&m.uvs[i * 2..i * 2 + 2]);
+        }
+        leg.indices.extend([base, base + 1, base + 2]);
+    }
+    if leg.indices.is_empty() {
+        return None;
+    }
+    let mut out = m.clone();
+    out.append(&leg);
+    Some(out)
+}
+
 /// A thin tall piece near the donor's track: a cable or bare pole, which floats as a line.
 fn thin_near(p: &crate::trackprops::Prop, offset: f32) -> bool {
     use crate::trackobjects::Class;
@@ -2822,6 +2886,10 @@ pub fn lifted(
             if k > 1.6 {
                 continue;
             }
+            // Stood on two legs: the donor built the far one as a separate pole, left out above.
+            let Some(standing) = with_both_legs(&prop.mesh) else {
+                continue;
+            };
             let reach = prop.reach * k;
             let Some(s) = over_track((inst.along * lap).clamp(0.0, lap), reach, &arches_at) else {
                 continue;
@@ -2831,7 +2899,7 @@ pub fn lifted(
             let (rx, rz) = crate::trackprog::right_vector(st.heading);
             let off = inst.offset.clamp(-1.0, 1.0);
             let (x, z) = (st.x + rx * off, st.z + rz * off);
-            let mut mesh = prop.mesh.clone();
+            let mut mesh = standing;
             for v in mesh.positions.iter_mut() {
                 *v *= k;
             }
