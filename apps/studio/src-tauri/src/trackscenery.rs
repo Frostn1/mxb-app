@@ -1263,7 +1263,7 @@ fn pine_mesh(h: f32, seed: u32, i: u32) -> Mesh {
     let trunk_h = h * 0.22;
     let r_trunk = (h * 0.028).max(0.05);
 
-    let ring = |mesh: &mut Mesh, y: f32, r: f32, v: f32| -> u32 {
+    let ring = |mesh: &mut Mesh, y: f32, r: f32, u: f32, v: f32| -> u32 {
         let start = mesh.vertex_count() as u32;
         for s in 0..SIDES {
             let a = std::f32::consts::TAU * s as f32 / SIDES as f32;
@@ -1271,7 +1271,7 @@ fn pine_mesh(h: f32, seed: u32, i: u32) -> Mesh {
             mesh.positions.extend_from_slice(&[sx, y, sz]);
             let l = (sx * sx + sz * sz).sqrt().max(1e-4);
             mesh.normals.extend_from_slice(&[sx / l, 0.0, sz / l]);
-            mesh.uvs.extend_from_slice(&[0.06 + 0.10 * (s as f32 / SIDES as f32), v]);
+            mesh.uvs.extend_from_slice(&[u + 0.10 * (s as f32 / SIDES as f32), v]);
         }
         start
     };
@@ -1284,8 +1284,8 @@ fn pine_mesh(h: f32, seed: u32, i: u32) -> Mesh {
             mesh.indices.extend_from_slice(&[hi + n, lo + n, hi + s]);
         }
     };
-    let base = ring(&mut m, 0.0, r_trunk, 0.02);
-    let top = ring(&mut m, trunk_h, r_trunk * 0.8, 0.22);
+    let base = ring(&mut m, 0.0, r_trunk, 0.06, 0.02);
+    let top = ring(&mut m, trunk_h, r_trunk * 0.8, 0.06, 0.22);
     band(&mut m, base, top);
 
     // Three skirts, each narrower and higher than the last.
@@ -1295,7 +1295,8 @@ fn pine_mesh(h: f32, seed: u32, i: u32) -> Mesh {
         let y0 = trunk_h + (h - trunk_h) * f * 0.62;
         let y1 = y0 + (h - y0) * 0.78;
         let r = (h * 0.30 * (1.0 - f * 0.55) * spread).max(0.3);
-        let skirt = ring(&mut m, y0, r, 0.45 + 0.15 * f);
+        // Needles on the foliage half: at the bark's u the skirts faded brown into the tip.
+        let skirt = ring(&mut m, y0, r, 0.56, 0.45 + 0.15 * f);
         let tip = m.vertex_count() as u32;
         m.positions.extend_from_slice(&[0.0, y1, 0.0]);
         m.normals.extend_from_slice(&[0.0, 1.0, 0.0]);
@@ -2040,6 +2041,19 @@ pub fn blocks(scenes: &[Scene]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pine's needles sample the foliage half of `tree_sheet`, and only its trunk the bark.
+    #[test]
+    fn a_pine_is_green_above_its_trunk() {
+        let h = 12.0;
+        let m = pine_mesh(h, 7, 3);
+        for (p, uv) in m.positions.chunks_exact(3).zip(m.uvs.chunks_exact(2)) {
+            // The trunk is the only thing near the axis below its top; the first skirt starts
+            // at that same height, but a metre or more out.
+            let trunk = p[1] <= h * 0.22 + 1e-3 && p[0].hypot(p[2]) < h * 0.05;
+            assert_eq!(uv[0] < 0.5, trunk, "vertex at {:.2} m samples u {:.2}", p[1], uv[0]);
+        }
+    }
 
     fn demo() -> (TrackProgram, Synth) {
         let p: TrackProgram = serde_json::from_str(crate::trackprog::EXAMPLE).unwrap();

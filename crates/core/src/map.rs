@@ -41,13 +41,19 @@ const MAGIC: &[u8; 4] = b"MP2\0";
 /// Where the material records start, and how big one is. Geometry follows the last of them.
 const MATERIALS_AT: usize = 0x0C;
 const MATERIAL_RECORD: usize = 56;
-/// Which word of a material record holds the index of the sheet that paints it.
+/// Which word of a material record holds the index of the sheet that paints it, and which
+/// holds the index of a companion beside it.
 ///
-/// The one field in the file that states the binding outright. Everything before this read
-/// the sheets positionally and guessed, which is off by one for most of Indiana and by two
-/// for its trees: material 45 takes sheet 0 and material 38 takes sheet 40, skipping 39, so
-/// the order is genuinely the file's rather than an offset anyone could have inferred.
+/// One-based, with a slot ahead of the first colour sheet: 0 is no sheet at all, and 2 is the
+/// first. A companion a material names in word 13 takes a slot of its own, so every index past
+/// it is one further on. That is the same scheme `edfwrite` writes and the bike reader uses.
+/// Read as a zero-based index it put every lifted object on its neighbour's sheet — Indiana's
+/// vans on a bridge grate, its tower on a 16-square glass tint, its tree cards on soil — which
+/// is what rendered black. Checked on Indiana against seven objects whose sheet the geometry
+/// settles (vans, bales, water, fence, main building, both tree cards), and on Millville,
+/// where the two cut-out materials land on its tree and crowd cards rather than a fence.
 const MATERIAL_TEX_WORD: usize = 11;
+const MATERIAL_COMPANION_WORD: usize = 13;
 
 /// Bytes per vertex, and where each attribute's array begins within the block — every one
 /// of them a count of vertices from the block's start, not a stride.
@@ -906,10 +912,11 @@ pub fn primaries(b: &[u8]) -> Vec<(String, u32, u32)> {
         .collect()
 }
 
-/// The surfaces a map declares, named and sized but not inflated.
+/// The surfaces a map declares, named and sized but not inflated, one entry per material.
 ///
 /// What the viewer needs to size its material slots before any pixels exist — and cheap,
-/// because it stops at each record's header and steps over the payload.
+/// because it stops at each record's header and steps over the payload. Indexed by material,
+/// so a material with no sheet holds an empty name rather than shifting the rest along.
 pub fn declared(b: &[u8]) -> Vec<(String, u32, u32)> {
     let Some((from, count)) = texture_table(b) else {
         return Vec::new();
@@ -919,11 +926,15 @@ pub fn declared(b: &[u8]) -> Vec<(String, u32, u32)> {
     if !covers(painting.len(), count) {
         return Vec::new();
     }
-    bindings(b, count, painting.len())
-        .into_iter()
-        .filter_map(|(_, sheet)| painting.get(sheet))
-        .map(|(n, w, h, ..)| (n.clone(), *w, *h))
-        .collect()
+    let bound = bindings(b, count, painting.len());
+    let len = bound.iter().map(|&(m, _)| m + 1).max().unwrap_or(0);
+    let mut out = vec![(String::new(), 0, 0); len];
+    for (m, sheet) in bound {
+        if let Some((n, w, h, ..)) = painting.get(sheet) {
+            out[m] = (n.clone(), *w, *h);
+        }
+    }
+    out
 }
 
 /// A sheet that looks like ground, for tiling over the terrain as detail.
@@ -1246,18 +1257,18 @@ fn covers(painting: usize, materials: usize) -> bool {
     materials > 0 && painting * 4 >= materials * 3
 }
 
-/// How many materials a map will actually bind a sheet to.
-///
-/// [`textures`] hands back one entry per `_c`-named record, capped at the material count, so
-/// every material at or past this has no sheet and is drawn in flat grey.
-pub fn bound_count(b: &[u8]) -> usize {
+/// The materials a map actually binds a sheet to. Every other one is drawn in flat grey.
+pub fn bound_materials(b: &[u8]) -> std::collections::HashSet<u32> {
     let Some((from, count)) = texture_table(b) else {
-        return 0;
+        return Default::default();
     };
     if !binds(b) {
-        return 0;
+        return Default::default();
     }
-    bindings(b, count, painting_records(colour_records(b, from)).len()).len()
+    bindings(b, count, painting_records(colour_records(b, from)).len())
+        .into_iter()
+        .map(|(m, _)| m as u32)
+        .collect()
 }
 
 /// Which sheet paints each material, as `(material, sheet)` pairs.
@@ -1271,27 +1282,45 @@ pub fn bound_count(b: &[u8]) -> usize {
 /// Falls back to the positional walk when the field doesn't read as an index, so a map built
 /// by something that leaves it empty is no worse off than before.
 fn bindings(b: &[u8], materials: usize, sheets: usize) -> Vec<(usize, usize)> {
+    let positional = || (0..materials.min(sheets)).map(|i| (i, i)).collect::<Vec<_>>();
+    let word = |m: usize, k: usize| -> Option<u32> {
+        let at = MATERIALS_AT + m * MATERIAL_RECORD + k * 4;
+        (at + 4 <= b.len()).then(|| u32le(b, at))
+    };
+    let mut raw = Vec::with_capacity(materials);
+    let mut companions = Vec::new();
+    for m in 0..materials {
+        let (Some(t), Some(c)) = (word(m, MATERIAL_TEX_WORD), word(m, MATERIAL_COMPANION_WORD)) else {
+            return positional();
+        };
+        if c > 0 {
+            companions.push(c);
+        }
+        raw.push(t);
+    }
     let mut out = Vec::with_capacity(materials);
     let mut distinct = std::collections::HashSet::new();
-    for m in 0..materials {
-        let at = MATERIALS_AT + m * MATERIAL_RECORD + MATERIAL_TEX_WORD * 4;
-        if at + 4 > b.len() {
-            out.clear();
-            break;
+    for (m, &t) in raw.iter().enumerate() {
+        // 0 is no sheet, and 1 the slot ahead of the first.
+        if t < 2 {
+            continue;
         }
-        let sheet = u32le(b, at) as usize;
-        if sheet >= sheets {
-            out.clear();
-            break;
+        let below = companions.iter().filter(|&&c| c < t).count() as u32;
+        let Some(i) = (t - 2).checked_sub(below) else {
+            return positional();
+        };
+        let i = i as usize;
+        if i >= sheets {
+            return positional();
         }
-        distinct.insert(sheet);
-        out.push((m, sheet));
+        distinct.insert(i);
+        out.push((m, i));
     }
     // A column holding one value throughout is a constant, not an index.
-    if out.len() == materials && distinct.len() > 1 {
-        return out;
+    if out.is_empty() || (out.len() > 1 && distinct.len() == 1) {
+        return positional();
     }
-    (0..materials.min(sheets)).map(|i| (i, i)).collect()
+    out
 }
 
 pub fn textures(b: &[u8], max_dim: u32) -> Vec<MapTexture> {
@@ -1922,6 +1951,33 @@ pub const SURFACES_HEADER: usize = 16;
 
 #[cfg(test)]
 mod tests {
+    /// Each material's texture and companion words against the file's records: how the binding
+    /// rule in [`bindings`] was found, and the first thing to run on a map that binds wrong.
+    #[test]
+    #[ignore = "needs a real .map — set FROST_MAP"]
+    fn binding_candidates() {
+        let path = std::env::var("FROST_MAP").expect("set FROST_MAP");
+        let b = std::fs::read(&path).unwrap();
+        let (from, count) = texture_table(&b).unwrap();
+        let all = colour_records(&b, from);
+        let painting = painting_records(all.clone());
+        println!("records {} (painting {}), materials {}", all.len(), painting.len(), count);
+        for (i, (n, w, h, ..)) in all.iter().enumerate() {
+            println!("  rec {i:3} {n} {w}x{h}{}", if is_companion_name(n) { "  [companion]" } else { "" });
+        }
+        let name = |v: &Vec<(String, u32, u32, usize, usize)>, i: isize| -> String {
+            if i < 0 { return "-".into(); }
+            v.get(i as usize).map(|r| r.0.clone()).unwrap_or_else(|| "?".into())
+        };
+        for m in 0..count {
+            let w = |k: usize| u32le(&b, MATERIALS_AT + m * MATERIAL_RECORD + k * 4) as isize;
+            println!(
+                "  mat {m:3} w0 {} w11 {:3} w13 {:3} | old painting[w11] {:28} | all[w11-1] {:28} | all[w13-1] {}",
+                w(0), w(11), w(13), name(&painting, w(11)), name(&all, w(11) - 1), name(&all, w(13) - 1)
+            );
+        }
+    }
+
     /// Each ground layer's mask size, as compiled: fine paint only reaches the game at the
     /// resolution its mask is kept at.
     ///
@@ -2616,34 +2672,33 @@ mod tests {
 
     /// A material names its own sheet, and the walk that guessed is only the fallback.
     ///
-    /// Built as Indiana's records are: the index is not the material's own number, it is not
-    /// a fixed offset from it, and it does not stay in order — Indiana's material 45 takes
-    /// sheet 0 and its 38 takes sheet 40, skipping 39. Nothing positional reproduces that.
+    /// Built as Indiana's records are: one-based with a slot ahead of the first sheet, zero for
+    /// none, and a companion named in word 13 taking a slot of its own so every index past it
+    /// is one further on. Nothing positional reproduces that.
     #[test]
     fn a_material_names_the_sheet_that_paints_it() {
-        // Four materials, and a header long enough to hold their records.
-        let mut b = vec![0u8; MATERIALS_AT + 4 * MATERIAL_RECORD];
-        let put = |b: &mut Vec<u8>, m: usize, sheet: u32| {
-            let at = MATERIALS_AT + m * MATERIAL_RECORD + MATERIAL_TEX_WORD * 4;
-            b[at..at + 4].copy_from_slice(&sheet.to_le_bytes());
+        let mut b = vec![0u8; MATERIALS_AT + 5 * MATERIAL_RECORD];
+        let put = |b: &mut Vec<u8>, m: usize, word: usize, v: u32| {
+            let at = MATERIALS_AT + m * MATERIAL_RECORD + word * 4;
+            b[at..at + 4].copy_from_slice(&v.to_le_bytes());
         };
-        // Out of order, and one sheet shared by two materials — both of which a positional
-        // walk gets wrong by construction.
-        put(&mut b, 0, 3);
-        put(&mut b, 1, 0);
-        put(&mut b, 2, 2);
-        put(&mut b, 3, 2);
-        assert_eq!(bindings(&b, 4, 4), vec![(0, 3), (1, 0), (2, 2), (3, 2)]);
+        put(&mut b, 0, MATERIAL_TEX_WORD, 3);
+        put(&mut b, 1, MATERIAL_TEX_WORD, 2);
+        put(&mut b, 2, MATERIAL_TEX_WORD, 4);
+        put(&mut b, 2, MATERIAL_COMPANION_WORD, 5);
+        put(&mut b, 3, MATERIAL_TEX_WORD, 6);
+        // Material 4 is left at zero: it has no sheet.
+        assert_eq!(bindings(&b, 5, 4), vec![(0, 1), (1, 0), (2, 2), (3, 3)]);
 
         // An index past the end of the sheets is not an index, so the walk takes over.
         let mut bad = b.clone();
-        put(&mut bad, 2, 99);
-        assert_eq!(bindings(&bad, 4, 4), vec![(0, 0), (1, 1), (2, 2), (3, 3)]);
+        put(&mut bad, 3, MATERIAL_TEX_WORD, 99);
+        assert_eq!(bindings(&bad, 5, 4), vec![(0, 0), (1, 1), (2, 2), (3, 3)]);
 
         // Neither is a column holding one value throughout.
         let mut flat = vec![0u8; MATERIALS_AT + 4 * MATERIAL_RECORD];
         for m in 0..4 {
-            put(&mut flat, m, 1);
+            put(&mut flat, m, MATERIAL_TEX_WORD, 2);
         }
         assert_eq!(bindings(&flat, 4, 4), vec![(0, 0), (1, 1), (2, 2), (3, 3)]);
 
