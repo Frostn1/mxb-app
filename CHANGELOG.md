@@ -1,123 +1,10 @@
 # Changelog
 
-## 2026-09-12
+## 2026-09-12 — v0.14.0 — A new name, and a Studio of its own
 
 ### Added
-- Sharing a track, files, a preset bundle or your logs — and installing one from a share
-  code — shows a progress bar with about how long is left. The upload bar moves steadily
-  instead of a part at a time.
-- Generated tracks have goggle tear-offs dropped in the corners, the way riders leave them on
-  a raced track.
-- A Game view switch in the 3D track view draws the ground the way the game does: its
-  own sun and ambient light, relief from the track's normal maps, true height and no extra
-  shading.
-
-### Changed
-- The start straight is shorter and funnels into a tight first turn you have to brake for,
-  with ruts, braking bumps and worn dirt the whole way like the rest of the track.
-- Generated tracks use real objects only: trees from published tracks, and Indiana's own
-  start/finish arch, edge stakes and barrier in place of the drawn ones.
-- The finish line and its arch stand at the top of the finish jump's take-off, high enough to
-  jump under, and the arch reads FINISH in white on black and gold.
-- Braking bumps come one or two at a time and are longer, with ground between them.
-- Corners carry more ruts, across to the outside of the turn, not only on the inside line.
-- Jumps come in more kinds: singles, doubles, triples, a table with a single after it, wave
-  sections and step-downs, and the lap climbs and drops along its straights.
-- Generated tracks no longer have large patches of dark shadow.
-- Shared tracks, paints, preset bundles and logs are hosted on filebin.net. A share code
-  downloads for 6 days after it is made.
-- The 3D track view draws the ground at its true height and in the game's own light and
-  colours, so jumps look the size they ride. Game view only leaves out the darkened hollows.
-- Generated tracks are lit like published ones: a lower sun and softer light, so ruts, bumps
-  and jump faces show their shape in game instead of washing out.
-- Sharing files, a full preset bundle or your logs shows a progress bar while it uploads,
-  counting the parts sent so far.
-- Bikes in the 3D viewer catch a soft reflection, so exhausts and other metal parts look like
-  metal instead of near-black, and the plastics show their true colour.
-- The 3D viewer redraws a bike or track when its files change on disk, and new paints show up
-  in the paint list without reopening it.
-- Tight corners on generated tracks carry a comb of ruts, one for each line riders take,
-  with a ridge between each. They vary in width, some start part way through the turn, and
-  one can run into the rut outside it or split in two, the way a ridden corner does.
-- Braking bumps come in sets of rolling waves on the way into corners, big enough to feel, to
-  one side or the other, never inside a rut, with darker packed soil on their back faces.
-- Generated tracks have a backdrop: a wooded bank rising beyond the edge of the site, a
-  thicker wood behind the track, fewer lone trees beside it, and more poles and banners at
-  the distance published tracks place them.
-- New track layouts always leave room beside the opening straight for the start, so the
-  starting gate never stands on another part of the lap.
-- Scenery lifted from a published track keeps each part's own texture: trucks, vans, trees
-  and the watch tower show their real colours, tree leaves are see-through around the edges,
-  and banner boards with scrambled textures are left out. Pines are green from the trunk up.
-- Scenery in the Studio's 3D view shows each object's own texture, on published and
-  generated tracks alike.
-- Jumps on generated tracks are smaller than before, about 70% of their old height, with longer, gentler faces and clear ground in front of them to build speed. The
-  finish jump keeps its full height, with a long deck and a long, gentle face.
-- Jump faces curve up from the ground and run straight to the lip, meeting the deck flush.
-- Jump faces carry wide, spread-out tyre scuffs instead of thin grooves down the middle.
-- Generated tracks paint a darker dirt on the track only, with dark tyre lines and rut
-  floors showing through it, so the ruts are easy to see. The rest of the site is dark soil,
-  dry patches and grass.
-- The dirt and grass on generated tracks use the relief maps of a published track and are
-  sharper up close.
-- The riding surface carries a relief map baked from the track's own ground, so ruts, bumps and
-  tyre lines catch the light in game the way they do in the studio's 3D view.
-
-### Fixed
-- Braking bumps roll across the lane instead of standing up as spikes between the ruts.
-- The start straight no longer has a single groove down its middle.
-- Banner boards no longer stand off the track in another track's corner shape.
-- Ruts no longer spike where they start in a corner.
-- Trees no longer stand on the track.
-- The finish arch stands on the ground instead of floating.
-- Trees, signs and other scenery in the 3D track view stand the right way up.
-- Sharing checks that every part of the upload was actually kept, and sends it again
-  otherwise, so a share code always downloads in full.
-
-## 2026-09-11
-
-### Added
-- Sort the server list by any column. Click a header again to reverse it.
-- Star servers and switch the list to just your favorites.
-- Star bikes, tracks and other mods in the Library to keep them at the top.
-- Filter the server list by region, and hide servers with no riders (on by default).
-
-### Changed
-- The 3D viewer shows paints at full resolution, so logos and lettering on bikes and gear
-  read sharply.
-- Bikes with many paints open faster in the 3D viewer and use far less memory.
-- Race mode is now a tab under Garage, next to Locker and Presets.
-- The Library picks up tracks and other mods you add to the mods folder yourself, without
-  pressing Refresh.
-
-### Fixed
-- A server's track panel recognizes tracks you have installed as a `.pkz`, even when the
-  file is named differently from the track.
-
-## 2026-09-10
-
-### Added
-- Protect in Frost's Studio shows who a file is already locked to. Add a protected file
-  and its row names the GUID it is bound to.
-- A Diagnose tab in Frost's Studio. Pick a bike to see which other bikes a model swap lines
-  up with (a KTM swap fits the Husqvarna and GasGas too), or add protected files to see the
-  GUID each one is locked to.
-- Tracks built in Frost's Studio record which version of the track generator made them, in
-  a `generator.ini` inside the track folder.
-
-### Changed
-- The Track Studio's ground picker reads Soil, Sand and Grass, and the 3D preview paints the
-  riding line in the ground you pick.
-- Picking a track's ground changes what it is made of, not its shape. Corners, berms and ruts
-  stay as they are when you switch between soil, sand and grass.
-
-### Fixed
-- Objects in the 3D track view stand on the ground where the game puts them, on tracks you
-  opened in an earlier version too.
-
-## 2026-09-09 — v0.14.0 — A new name, and a Studio of its own
-
-### Added
+- Beta updates in Settings → About. Turn it on to get test builds in the app before the full
+  release.
 - FrostMod's status sits in the top bar, on every screen, with Start, Stop and Reload behind
   it. The dot says whether it is running and whether it actually reached the game.
 - Interface size in Settings, from 90% to 160%. It scales the whole interface, not just the
@@ -130,6 +17,23 @@
   and nothing to wait for — and you edit it like any other.
 - A Back button in the Designer. It returns to the start screen, which is where you pick what
   you are painting for, and it asks first if there is anything unsaved.
+- Sort the server list by any column. Click a header again to reverse it.
+- Star servers and switch the list to just your favorites.
+- Filter the server list by region, and hide servers with no riders (on by default).
+- Star bikes, tracks and other mods in the Library to keep them at the top.
+- Sharing a track, files, a preset bundle or your logs — and installing one from a share
+  code — shows a progress bar with about how long is left.
+- A Game view switch in the 3D track view draws the ground exactly the way the game does,
+  without the darkened hollows.
+- Protect in Frost's Studio shows who a file is already locked to. Add a protected file
+  and its row names the GUID it is bound to.
+- A Diagnose tab in Frost's Studio. Pick a bike to see which other bikes a model swap lines
+  up with (a KTM swap fits the Husqvarna and GasGas too), or add protected files to see the
+  GUID each one is locked to.
+- Tracks built in Frost's Studio record which version of the track generator made them, in
+  a `generator.ini` inside the track folder.
+- Generated tracks have goggle tear-offs dropped in the corners, the way riders leave them on
+  a raced track.
 
 ### Changed
 - Building a track on a Mac no longer asks you to put the game inside a Wine prefix. The
@@ -164,6 +68,66 @@
   nineteen corners, and the corner shape and spacing read off Indiana and Southwick.
 - Straw bales stand off the track edge rather than a fixed distance from the line, so tracks
   wider than 14 m get them.
+- Race mode is now a tab under Garage, next to Locker and Presets.
+- The Library picks up tracks and other mods you add to the mods folder yourself, without
+  pressing Refresh.
+- Shared tracks, paints, preset bundles and logs are hosted on filebin.net. A share code
+  downloads for 6 days after it is made.
+- The 3D viewer shows paints at full resolution, so logos and lettering on bikes and gear
+  read sharply.
+- Bikes with many paints open faster in the 3D viewer and use far less memory.
+- Bikes in the 3D viewer catch a soft reflection, so exhausts and other metal parts look like
+  metal instead of near-black, and the plastics show their true colour.
+- The 3D viewer redraws a bike or track when its files change on disk, and new paints show up
+  in the paint list without reopening it.
+- The 3D track view draws the ground at its true height and in the game's own light and
+  colours, so jumps look the size they ride.
+- Scenery in the Studio's 3D view shows each object's own texture, on published and
+  generated tracks alike.
+- The Track Studio's ground picker reads Soil, Sand and Grass, and the 3D preview paints the
+  riding line in the ground you pick.
+- Picking a track's ground changes what it is made of, not its shape. Corners, berms and ruts
+  stay as they are when you switch between soil, sand and grass.
+- Generated tracks use real objects only: trees from published tracks, and Indiana's own
+  start/finish arch, edge stakes and barrier in place of the drawn ones.
+- Generated tracks have a backdrop: a wooded bank rising beyond the edge of the site, a
+  thicker wood behind the track, fewer lone trees beside it, and more poles and banners at
+  the distance published tracks place them.
+- Scenery lifted from a published track keeps each part's own texture: trucks, vans, trees
+  and the watch tower show their real colours, tree leaves are see-through around the edges,
+  and banner boards with scrambled textures are left out. Pines are green from the trunk up.
+- New track layouts always leave room beside the opening straight for the start, so the
+  starting gate never stands on another part of the lap.
+- The start straight is shorter and funnels into a tight first turn you have to brake for,
+  with ruts, braking bumps and worn dirt the whole way like the rest of the track.
+- The finish line and its arch stand at the top of the finish jump's take-off, high enough to
+  jump under, and the arch reads FINISH in white on black and gold.
+- Jumps come in more kinds: singles, doubles, triples, a table with a single after it, wave
+  sections and step-downs, and the lap climbs and drops along its straights.
+- Jumps on generated tracks are about 70% of their old height, with longer, gentler faces and
+  clear ground in front of them to build speed. The finish jump keeps its full height, with a
+  long deck and a long, gentle face.
+- Jump faces curve up from the ground and run straight to the lip, meeting the deck flush.
+- Jump faces carry wide, spread-out tyre scuffs instead of thin grooves down the middle.
+- Corners carry more ruts, across to the outside of the turn, not only on the inside line.
+- Tight corners carry a comb of ruts, one for each line riders take, with a ridge between
+  each. They vary in width, some start part way through the turn, and one can run into the
+  rut outside it or split in two, the way a ridden corner does.
+- Generated corners are cut deeper and carry the chop a wheel feels, so a turn has a rut
+  wall to lean on.
+- Generated tracks are cambered across their width, so a corner leans the way a built one does.
+- Braking bumps come one or two at a time on the way into corners: long rolling waves, big
+  enough to feel, never inside a rut, with darker packed soil on their back faces.
+- Generated tracks paint a darker dirt on the track only, with dark tyre lines and rut
+  floors showing through it, so the ruts are easy to see. The rest of the site is dark soil,
+  dry patches and grass.
+- The dirt and grass on generated tracks use the relief maps of a published track and are
+  sharper up close.
+- The riding surface carries a relief map baked from the track's own ground, so ruts, bumps and
+  tyre lines catch the light in game the way they do in the studio's 3D view.
+- Generated tracks are lit like published ones: a lower sun and softer light, so ruts, bumps
+  and jump faces show their shape in game.
+- Generated tracks no longer have large patches of dark shadow.
 
 ### Fixed
 - The 3D bike view no longer draws faint diagonal banding across the bodywork.
@@ -181,6 +145,13 @@
   game you are set up for.
 - New paint in the Designer's menu threw away whatever was on the canvas without asking.
 - The buttons in the unsaved-work dialogs were three different sizes.
+- Objects in the 3D track view stand on the ground where the game puts them, on tracks you
+  opened in an earlier version too.
+- Trees, signs and other scenery in the 3D track view stand the right way up.
+- A server's track panel recognizes tracks you have installed as a `.pkz`, even when the
+  file is named differently from the track.
+- Sharing checks that every part of the upload was actually kept, and sends it again
+  otherwise, so a share code always downloads in full.
 
 ## 2026-09-08 — v0.13.7 — Servers, live share codes and a new 3D view
 
@@ -220,13 +191,7 @@
   Slate move the whole window, not just the buttons. Plus Retro, which goes further: amber
   phosphor, monospaced type, square corners and a scanline over the window.
 
-## 2026-09-06
-
 ### Changed
-- Tracks in the 3D viewer are drawn with the ground the game draws: each layer's own sheet,
-- Generated corners are cut deeper and carry the chop a wheel feels, so a turn has a rut
-  wall to lean on instead of a shallow saucer.
-- Generated tracks are cambered across their width, so a corner leans the way a built one does.
 - A new look. Navigation moved out of the sidebar into a bar across the top, so mod artwork
   gets the full width of the window — seven mods to a row instead of five. Locker and Presets
   sit together under Garage, Race mode has its own place, and every page puts its filters,
