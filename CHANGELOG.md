@@ -12,6 +12,8 @@
 ### Changed
 - Generated tracks are lit like published ones: a lower sun and softer light, so ruts, bumps
   and jump faces show their shape in game instead of washing out.
+- Sharing files, a full preset bundle or your logs shows a progress bar while it uploads,
+  counting the parts sent so far.
 - Bikes in the 3D viewer catch a soft reflection, so exhausts and other metal parts look like
   metal instead of near-black, and the plastics show their true colour.
 - The 3D viewer redraws a bike or track when its files change on disk, and new paints show up

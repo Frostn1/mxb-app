@@ -1143,6 +1143,7 @@ export const it: Translation = {
   "share.installed_other": "Installati {{count}} file.",
   "share.phasePacking": "Preparazione dei file…",
   "share.phaseUploading": "Caricamento…",
+  "share.partsUploaded": "{{done}} di {{total}} parti caricate",
   "share.phaseDownloading": "Download…",
   "share.phaseInstalling": "Installazione…",
 

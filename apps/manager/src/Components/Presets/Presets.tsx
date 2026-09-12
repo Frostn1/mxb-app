@@ -60,6 +60,7 @@ import {
 } from "@frost/shared/api/mods";
 import type {
   BundlePhase,
+  BundleProgress,
   BundlePlan,
   Loadout,
   Preset,
@@ -81,6 +82,7 @@ import {
 } from "@frost/shared/lib/presets";
 import { useGearPaints } from "@frost/shared/lib/useGearPaints";
 import { copyText } from "../../lib/clipboard";
+import { UploadBar } from "../Share/UploadBar";
 
 function humanSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -974,6 +976,7 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
   const [plan, setPlan] = useState<BundlePlan | null>(null);
   const [creating, setCreating] = useState(false);
   const [phase, setPhase] = useState<BundlePhase | null>(null);
+  const [progress, setProgress] = useState<BundleProgress | null>(null);
 
   useEffect(() => {
     if (!preset) return;
@@ -1001,7 +1004,10 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
     if (!preset) return;
     setCreating(true);
     setPhase("bundling");
-    const unlisten = await onPresetBundleProgress((p) => setPhase(p.phase));
+    const unlisten = await onPresetBundleProgress((p) => {
+      setPhase(p.phase);
+      setProgress(p);
+    });
     try {
       const c = await presetBundleCreate(preset.name);
       setFullCode(c);
@@ -1016,6 +1022,7 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
       unlisten();
       setCreating(false);
       setPhase(null);
+      setProgress(null);
     }
   }, [preset, t]);
 
@@ -1077,6 +1084,11 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
                   : t("settings.working")
                 : t("presets.createFullBundle")}
             </Button>
+            {creating && (
+              <div className="mt-2">
+                <UploadBar progress={progress} />
+              </div>
+            )}
           </div>
         )}
 
