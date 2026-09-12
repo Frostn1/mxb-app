@@ -276,7 +276,9 @@ fn cluster(mesh: &map::MapMesh, sheet_of: &dyn Fn(u32) -> String) -> Vec<Object>
 
     // Grid-hash so this stays linear in the island count rather than quadratic.
     let cell = LINK_M;
-    let mut grid: HashMap<(i32, i32, u8), Vec<usize>> = HashMap::new();
+    // Keyed on the material as well as the class: an object is one sheet. A tower grouped with
+    // its glass took the glass's 16-square tint over all its walls, and rendered black.
+    let mut grid: HashMap<(i32, i32, u8, u32), Vec<usize>> = HashMap::new();
     for (i, o) in mesh.objects.iter().enumerate() {
         if !class[i].is_object() {
             continue;
@@ -287,14 +289,15 @@ fn cluster(mesh: &map::MapMesh, sheet_of: &dyn Fn(u32) -> String) -> Vec<Object>
             (cx / cell).floor() as i32,
             (cz / cell).floor() as i32,
             class[i] as u8,
+            o.material,
         ))
         .or_default()
         .push(i);
     }
-    for (&(gx, gz, k), here) in &grid {
+    for (&(gx, gz, k, m), here) in &grid {
         for dx in -1..=1 {
             for dz in -1..=1 {
-                let Some(there) = grid.get(&(gx + dx, gz + dz, k)) else {
+                let Some(there) = grid.get(&(gx + dx, gz + dz, k, m)) else {
                     continue;
                 };
                 for &a in here {
@@ -589,6 +592,12 @@ pub fn extract(donor: &Donor, keep: &[Class]) -> PropLibrary {
 
     for o in objects.iter().filter(|o| keep.contains(&o.class)) {
         let (mesh, at, axis) = lift(&donor.mesh, o);
+        // Texture coordinates far outside the sheet are a mis-read vertex block, not a design:
+        // Indiana's banner boards came back spanning u -4..7, their sheet ten times across a board.
+        let (lo, hi) = mesh.uvs.iter().fold((f32::MAX, f32::MIN), |(l, h), &v| (l.min(v), h.max(v)));
+        if lo < -1.0 || hi > 2.0 {
+            continue;
+        }
         if mesh.triangle_count() == 0 {
             continue;
         }

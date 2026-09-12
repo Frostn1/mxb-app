@@ -679,7 +679,7 @@ mod build_one {
         // A seed goes through the Rust layout generator, which is the one that measures the
         // lap it drew against the corpus and rejects what does not pass. A path still reads a
         // program from disk, for a shape that came from somewhere else.
-        let prog: crate::trackprog::TrackProgram = if prog_path.starts_with("seed:") {
+        let mut prog: crate::trackprog::TrackProgram = if prog_path.starts_with("seed:") {
             let from: u64 = prog_path[5..].parse().expect("seed:<number>");
             match crate::tracklayout::search(from, 400) {
                 Ok(m) => {
@@ -701,6 +701,12 @@ mod build_one {
         } else {
             serde_json::from_str(&std::fs::read_to_string(&prog_path).unwrap()).unwrap()
         };
+        // FROST_SURFACE=soil|sand|grass overrides the drawn one: a seed rolls its surface, and a
+        // layout worth riding again can come up on the wrong ground.
+        if let Ok(sf) = std::env::var("FROST_SURFACE") {
+            prog.terrain.surface = serde_json::from_str(&format!("\"{sf}\"")).expect("soil, sand or grass");
+        }
+        println!("  {} on {:?}", prog.name, prog.terrain.surface);
         let prog = crate::tracksynth::with_fitted_budget(&prog).expect("a height budget");
         let syn = crate::tracksynth::synthesise(&prog).expect("synthesise");
 

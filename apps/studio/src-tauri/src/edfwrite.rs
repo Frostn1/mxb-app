@@ -260,7 +260,9 @@ pub fn write(name: &str, parts: &[Part], textures: &[Texture]) -> Vec<u8> {
     put_u32(&mut out, parts.len() as u32);
     for p in parts {
         let start = out.len();
-        put_u32(&mut out, 0);
+        // w0: a cut-out. Published maps set it on their tree cards and nothing else; written
+        // zero, a lifted tree's transparent texels were drawn solid.
+        put_u32(&mut out, u32::from(textures.get(p.texture).is_some_and(is_cutout)));
         for _ in 0..6 {
             put_f32(&mut out, 1.0);
         }
@@ -283,9 +285,27 @@ pub fn write(name: &str, parts: &[Part], textures: &[Texture]) -> Vec<u8> {
     // four sheets, where the one-sheet models write 1.
     put_u32(&mut out, textures.len() as u32);
     for t in textures {
-        write_texture(&mut out, t);
+        // A cut-out is also named as one: a published tree card's sheet can be called
+        // `CK_TREE_Ironman`, with nothing in the name to say it is see-through.
+        if is_cutout(t) && !t.name.to_ascii_lowercase().ends_with("_a") {
+            let named = Texture {
+                name: format!("{}_c_a", t.name.trim_end_matches("_c").trim_end_matches("_C")),
+                width: t.width,
+                height: t.height,
+                rgba: t.rgba.clone(),
+            };
+            write_texture(&mut out, &named);
+        } else {
+            write_texture(&mut out, t);
+        }
     }
     out
+}
+
+/// Whether a sheet is a cut-out: more than one texel in twenty see-through.
+fn is_cutout(t: &Texture) -> bool {
+    let n = t.rgba.len() / 4;
+    n > 0 && t.rgba.chunks_exact(4).filter(|p| p[3] < 128).count() * 20 > n
 }
 
 /// One group of a node: which material paints which run of triangles.

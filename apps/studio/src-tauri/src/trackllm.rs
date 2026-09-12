@@ -581,8 +581,9 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
                 height,
                 crate::trackprog::JUMP_FACE_DEG,
                 crate::trackprog::JUMP_FACE_MIN_M,
-            );
-            let deg = crate::trackprog::face_sweep(height, ramp).to_degrees();
+            )
+            .max(crate::trackprog::FINISH_FACE_M);
+            let deg = crate::trackprog::takeoff_lip_deg(height, ramp);
             // A deck no longer than the run at it carries: a tabletop nobody can get over the
             // top of is a hill with a flat bit on it, and this is the one everybody lands on.
             let deck = speed.carry(lip_at, deg).clamp(
@@ -608,7 +609,12 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
                 .join(", ");
             prog.features
                 .retain(|f| f.at() + f.length() <= at || f.at() >= at + length);
-            prog.features.push(Feature::Tabletop { at, length, height });
+            prog.features.push(Feature::Tabletop {
+                at,
+                length,
+                height,
+                lip: crate::trackprog::FINISH_FACE_M,
+            });
             prog.features.sort_by(|a, b| a.at().total_cmp(&b.at()));
             done.push(format!(
                 "built the finish jump at {at:.0} m: a {height:.1} m tabletop {length:.0} m \
@@ -1026,8 +1032,8 @@ pub fn review(prog: &TrackProgram) -> Review {
                 Feature::Double { height, lip, .. } => {
                     f.at() + crate::trackprog::double_faces(*height, *lip).ramp
                 }
-                Feature::Tabletop { height, length, .. } => {
-                    f.at() + crate::trackprog::tabletop_faces(*height, *length).0
+                Feature::Tabletop { height, length, lip, .. } => {
+                    f.at() + crate::trackprog::tabletop_faces(*height, *length, *lip).0
                 }
                 _ => f.at(),
             };
@@ -1325,7 +1331,7 @@ mod tests {
         // names to go unchecked.
         use crate::trackprog::{Feature, ShapePoint};
         let one_of_each = [
-            Feature::Tabletop { at: 0.0, length: 30.0, height: 2.0 },
+            Feature::Tabletop { at: 0.0, length: 30.0, height: 2.0, lip: 0.0 },
             Feature::Double { at: 0.0, height: 1.0, gap: 3.0, lip: 5.0 },
             Feature::Roller { at: 0.0, length: 12.0, height: 0.8 },
             Feature::Whoops { at: 0.0, count: 6, spacing: 4.0, height: 0.6 },

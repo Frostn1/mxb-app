@@ -1012,10 +1012,9 @@ fn decode_with_key(path: &Path, want_surfaces: bool, key: Option<&str>) -> Resul
                 // rendered as a forest of grey slabs standing over the ground.
                 let bindable = map::binds(&bytes);
                 mesh = if bindable {
-                    // Bound, but rarely all of it. The materials past the end of the surface
-                    // list have no sheet, so their cards come out too.
-                    let bound = map::bound_count(&bytes) as u32;
-                    map::without_cards_for(&m, |mat| mat >= bound)
+                    // Bound, but rarely all of it. A material with no sheet loses its cards too.
+                    let bound = map::bound_materials(&bytes);
+                    map::without_cards_for(&m, |mat| !bound.contains(&mat))
                 } else {
                     map::without_cards(&m)
                 };
@@ -1032,6 +1031,7 @@ fn decode_with_key(path: &Path, want_surfaces: bool, key: Option<&str>) -> Resul
                     info.textures = map::declared(&bytes)
                         .into_iter()
                         .enumerate()
+                        .filter(|(_, (name, ..))| !name.is_empty())
                         .map(|(i, (name, width, height))| TextureInfo {
                             material: i as u32,
                             name,

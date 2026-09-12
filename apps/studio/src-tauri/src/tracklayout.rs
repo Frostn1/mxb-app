@@ -869,6 +869,9 @@ fn landing_run(height: f32) -> f32 {
     )
 }
 
+/// Clear ground a jump wants before its face, off the last tight corner, metres: a run-up.
+const JUMP_RUNUP_M: f32 = 20.0;
+
 /// Jumps, placed by distance round the lap rather than by which segment they land on.
 ///
 /// Published tracks put them everywhere: Indiana is 109 arcs to 11 straights and still carries
@@ -888,8 +891,10 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
     let mut pos = START_CLEAR_M;
     while pos < total - 40.0 {
         let room = total - 20.0 - pos;
-        if tight(pos, 34.0) {
-            pos += 12.0;
+        if tight(pos - JUMP_RUNUP_M, JUMP_RUNUP_M + 34.0) {
+            // A short step, so a jump lands as soon as the run-up is clear rather than up to
+            // twelve metres past it.
+            pos += 4.0;
             continue;
         }
         // No whoops. Asked for outright, after riding a lap with them: they are the one thing
@@ -904,9 +909,10 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             // Capped at three metres: Motorcycling Australia and Motorcycling New Zealand both
             // write "jumps must not exceed 3m in height", and `corpus::FEATURE_HEIGHT_M` holds
             // a program to it. This used to draw up to 3.4 and every table was outside it.
-            let height = rng.range(2.4, 3.0);
-            length = (rng.range(16.0, 27.0) + faces(height)).min(room);
-            out.push(Feature::Tabletop { at: pos, length, height });
+            // 70% of the 2.4-3.0 m drawn here before: 85% rode too big again.
+            let height = rng.range(1.68, 2.1);
+            length = (rng.range(11.2, 18.9) + faces(height)).min(room);
+            out.push(Feature::Tabletop { at: pos, length, height, lip: 0.0 });
         } else if pick < 0.55 && room > 30.0 {
             // A table is not always flat end to end. A whale tail rises, dips over its middle
             // and rises again before the landing — two crests a rider can either double or
@@ -915,18 +921,18 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             // Drawn in metres and normalised afterwards, so the take-off gets the same run a
             // tabletop of this height gets. Drawn as fractions it had 3.6 m of lip in 8.5 m of
             // ground, and from the seat that is a wall.
-            let h = rng.range(2.4, 3.0);
+            let h = rng.range(1.68, 2.1);
             let dip = rng.range(0.30, 0.40);
             let (up, down) = (lip_run(h), landing_run(h));
-            let near = up + 4.0 + down * 0.55;
+            let near = up + 2.8 + down * 0.55;
             let marks = [
                 (0.0, 0.0),
                 (up, h),
-                (up + 4.0, h),
+                (up + 2.8, h),
                 (near, h * dip),
-                (near + 11.0, h * 0.66),
-                (near + 11.0 + down * 0.7, h * 0.16),
-                (near + 11.0 + down, 0.0),
+                (near + 7.7, h * 0.66),
+                (near + 7.7 + down * 0.7, h * 0.16),
+                (near + 7.7 + down, 0.0),
             ];
             let span = marks[marks.len() - 1].0;
             length = span.min(room);
@@ -942,15 +948,17 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
         } else if pick < 0.82 && room > 24.0 {
             // A climb rather than a wall with a ramp on it.
             length = rng.range(34.0, 48.0).min(room);
-            out.push(Feature::StepUp { at: pos, length, height: rng.range(1.2, 2.0) });
+            out.push(Feature::StepUp { at: pos, length, height: rng.range(0.84, 1.4) });
         } else {
             length = rng.range(10.0, 16.0).min(room);
             if length < 8.0 {
                 break;
             }
-            out.push(Feature::Roller { at: pos, length, height: rng.range(0.7, 1.2) });
+            out.push(Feature::Roller { at: pos, length, height: rng.range(0.49, 0.84) });
         }
-        pos += length + rng.range(6.0, 15.0);
+        // Closer than 6-15 m, so the run-up a jump now keeps off a corner does not thin the lap
+        // below the published twelve lips a kilometre.
+        pos += length + rng.range(4.0, 11.0);
     }
     out
 }
@@ -1030,6 +1038,19 @@ pub struct Measured {
 /// synthesises to — which is why this is worth the two seconds it costs.
 pub fn ground_notes(prog: &TrackProgram) -> Vec<String> {
     let mut notes = Vec::new();
+    // A start straight with no room beside the opening straight is laid across the lap's own
+    // return leg: a tester found the gate row standing in the middle of the track. A drawn lap
+    // like that is passed over rather than built.
+    if let Some(line) = prog.start_line() {
+        let need = crate::trackprog::StartLine::room_needed(prog.width);
+        if line.room < need {
+            notes.push(format!(
+                "the start straight has {:.0} m beside the opening straight and needs {need:.0}: \
+                 its gate row would stand on the lap",
+                line.room
+            ));
+        }
+    }
     let Ok(syn) = crate::tracksynth::synthesise(prog) else {
         notes.push("the lap doesn't synthesise".into());
         return notes;
