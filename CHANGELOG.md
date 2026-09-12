@@ -10,8 +10,9 @@
   GUID each one is locked to.
 
 ### Changed
-- Corners on generated tracks carry more ruts, closer together, that run through the turn
-  and start back where the tyre marks lead into it, with soft walls.
+- Tight corners on generated tracks carry a comb of ruts, one for each line riders take,
+  with a ridge between each. Every rut runs through the turn and starts back where the tyre
+  marks lead into it.
 - Braking bumps build up on the way into corners instead of noise all over the track.
 - Jumps on generated tracks are a little smaller than before, about 85% of their old
   height, with longer, gentler faces and clear ground in front of them to build speed. The
