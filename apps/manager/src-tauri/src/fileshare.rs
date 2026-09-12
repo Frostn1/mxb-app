@@ -316,13 +316,8 @@ pub async fn pack(
     let total = bundle::human_size(size);
     bundle::emit(app, EVENT, "uploading", Some(format!("Uploading {total}…")));
     let client = install::build_client()?;
-    let up = upload::upload_file(&client, &zip_path, |i, n| {
-        let msg = if n > 1 {
-            format!("Uploading part {i} of {n} ({total})…")
-        } else {
-            format!("Uploading {total}…")
-        };
-        bundle::emit(app, EVENT, "uploading", Some(msg));
+    let up = upload::upload_file(&client, &zip_path, |done, n| {
+        bundle::emit_upload(app, EVENT, &total, done, n)
     })
     .await?;
 

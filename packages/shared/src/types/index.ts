@@ -1384,6 +1384,9 @@ export type BundlePhase =
 export interface BundleProgress {
   phase: BundlePhase;
   message?: string;
+  /** Upload parts stored so far, and of how many — only on `uploading`. */
+  done?: number;
+  total?: number;
 }
 
 /** Where a shared file goes back on the importer's machine. */

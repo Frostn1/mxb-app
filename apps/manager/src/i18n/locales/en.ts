@@ -1129,6 +1129,7 @@ export const en = {
   "share.installed_other": "Installed {{count}} files.",
   "share.phasePacking": "Packing files…",
   "share.phaseUploading": "Uploading…",
+  "share.partsUploaded": "{{done}} of {{total}} parts uploaded",
   "share.phaseDownloading": "Downloading…",
   "share.phaseInstalling": "Installing…",
 

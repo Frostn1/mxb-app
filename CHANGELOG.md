@@ -3,6 +3,8 @@
 ## 2026-09-12
 
 ### Changed
+- Sharing files, a full preset bundle or your logs shows a progress bar while it uploads,
+  counting the parts sent so far.
 - The 3D viewer redraws a bike or track when its files change on disk, and new paints show up
   in the paint list without reopening it.
 - Tight corners on generated tracks carry a comb of ruts, one for each line riders take,

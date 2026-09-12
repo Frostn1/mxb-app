@@ -46,8 +46,9 @@ const RETRY_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 /// on enough separate files staying alive, that sharing the plain code is the better answer.
 const MAX_TOTAL_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
-/// Upload `file`, slicing it if it's over one part. `on_part(index, total)` is called before
-/// each slice goes up, so the caller can say which part is in flight.
+/// Upload `file`, slicing it if it's over one part. `on_part(done, total)` reports how many
+/// parts are stored — `0` before the first — so the caller can draw a bar. A recut starts
+/// the count again at `0` of the new total.
 pub async fn upload_file(
     client: &Client,
     file: &Path,
@@ -137,9 +138,9 @@ async fn upload_sliced(
         .unwrap_or_else(|| "preset-bundle".to_string());
 
     // Counted rather than indexed: with several in flight the useful number is how many are
-    // behind us, so the dialog names the slice being waited on and never jumps backwards.
+    // behind us, so the bar never jumps backwards.
     let done = std::sync::atomic::AtomicUsize::new(0);
-    on_part(1, n);
+    on_part(0, n);
 
     let jobs: Vec<_> = plan
         .iter()
@@ -174,7 +175,7 @@ async fn upload_sliced(
                     started.elapsed().as_secs_f32()
                 );
                 let behind = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                on_part((behind + 1).min(n), n);
+                on_part(behind, n);
                 Ok::<(String, u64), UploadFail>((url, len))
             }
         })
@@ -421,7 +422,7 @@ mod tests {
                     .unwrap(),
                 Err(_) => crate::install::build_client().expect("a client"),
             };
-            let up = upload_file(&client, &path, |i, n| println!("  uploading part {i} of {n}…"))
+            let up = upload_file(&client, &path, |i, n| println!("  {i} of {n} part(s) stored"))
                 .await
                 .expect("the upload goes through");
             println!("  host says {} bytes total across {:?}", up.size, up.part_sizes);

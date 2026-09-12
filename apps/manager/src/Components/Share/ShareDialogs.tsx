@@ -27,8 +27,9 @@ import {
   liveShareSubscribe,
   onFileShareProgress,
 } from "@frost/shared/api/mods";
-import type { BundlePhase, SharePlan, SharePreview } from "@frost/shared/types";
+import type { BundlePhase, BundleProgress, SharePlan, SharePreview } from "@frost/shared/types";
 import { isLiveCode } from "../../lib/liveshare";
+import { UploadBar } from "./UploadBar";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import { formatBytes } from "@frost/shared/lib/mods";
 import { copyText } from "../../lib/clipboard";
@@ -112,6 +113,7 @@ export function ShareDialog({
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<BundlePhase | null>(null);
+  const [progress, setProgress] = useState<BundleProgress | null>(null);
   // Off by default: a plain code needs no server and keeps working if ours is down, so it
   // stays the thing that happens when nobody asked for anything else.
   const [live, setLive] = useState(false);
@@ -135,7 +137,10 @@ export function ShareDialog({
     if (!paths) return;
     setBusy(true);
     setPhase("bundling");
-    const unlisten = await onFileShareProgress((p) => setPhase(p.phase));
+    const unlisten = await onFileShareProgress((p) => {
+      setPhase(p.phase);
+      setProgress(p);
+    });
     try {
       const c = live ? (await liveSharePublish(paths)).code : await fileShareCreate(paths);
       setCode(c);
@@ -154,6 +159,7 @@ export function ShareDialog({
       unlisten();
       setBusy(false);
       setPhase(null);
+      setProgress(null);
     }
   }, [paths, live, t]);
 
@@ -224,6 +230,8 @@ export function ShareDialog({
             </span>
           </label>
         )}
+
+        {busy && <UploadBar progress={progress} />}
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
