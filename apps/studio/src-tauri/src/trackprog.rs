@@ -360,7 +360,8 @@ pub const TABLETOP_DECK_M: f32 = 6.0;
 /// Nine metres puts the crossover at 2.16 m. Under it the floor governs and the lip angle
 /// falls with the height — 12.7° at a metre, 18.9° at a metre and a half, 24.9° at two — and
 /// over it the angle takes over at 27. That is the published spread, from the same two numbers.
-pub const JUMP_FACE_MIN_M: f32 = 9.0;
+// Ridden at 9 as still too steep once the faces ran straight to the lip.
+pub const JUMP_FACE_MIN_M: f32 = 13.0;
 
 /// The shortest a landing may be, metres. Longer than a takeoff, for the reason
 /// [`JUMP_LANDING_DEG`] is gentler than [`JUMP_FACE_DEG`]: it is the side that catches you.
@@ -413,6 +414,29 @@ pub fn face_arc(t: f32, sweep: f32) -> f32 {
 /// shape was a smoothstep and carried a 1.5 for the same reason — a smoothstep peaks at half
 /// again its average — and this replaces that fudge rather than joining it. Faces come out
 /// about 44% longer, which is the length a built one actually is.
+/// How much of a take-off is the transition; the rest is a straight ramp to the lip.
+///
+/// A built take-off is a curve at the bottom and a straight run to the lip, and it leaves at not
+/// much more than the ramp's mean angle. The arc that was here left at twice it, and at 77
+/// degrees at least once a minimum sweep was put on it; ridden with the lip's rounding taken
+/// off, every jump "just launches you into oblivion".
+// 0.8 rather than 0.7: a tester on a 250 found one or two faces could be "lipped up a smidge";
+// a longer transition leaves a shorter, steeper straight to the lip.
+pub const TAKEOFF_TRANSITION: f32 = 0.8;
+
+/// A take-off's height at `t`, foot (0) to lip (1), as a share of its rise: tangent to the
+/// ground at the foot, curving up through the transition, straight from there to the lip.
+pub fn takeoff_profile(t: f32) -> f32 {
+    let (t, k) = (t.clamp(0.0, 1.0), TAKEOFF_TRANSITION.clamp(1e-3, 1.0));
+    let y = if t < k { t * t / (2.0 * k) } else { k / 2.0 + (t - k) };
+    y / (1.0 - k / 2.0)
+}
+
+/// The angle a take-off of this rise and run leaves the lip at, degrees.
+pub fn takeoff_lip_deg(height: f32, run: f32) -> f32 {
+    (height.abs() / (run.max(1e-3) * (1.0 - TAKEOFF_TRANSITION / 2.0))).atan().to_degrees()
+}
+
 pub fn face_run(height: f32, deg: f32, min_m: f32) -> f32 {
     let half = (deg * 0.5).to_radians().tan().max(1e-4);
     (height.abs() / half).max(min_m)
@@ -680,7 +704,7 @@ impl DoubleShape {
 /// The stated length is what the *top* is measured against: the ramps are added to it, so a
 /// tabletop's footprint is longer than the number asked for and [`Feature::length`] reports
 /// the whole thing.
-pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
+pub fn tabletop_faces(height: f32, length: f32, lip: f32) -> (f32, f32, f32) {
     // Whichever is longer: the angle's, or the fraction of the stated length the ramps used
     // to be. The angle alone makes a *short* jump steeper than it was — at 30° a one-metre
     // tabletop gets a 2.6 m ramp where 27% of a 22 m length gave it 5.9 m — which is the same
@@ -691,7 +715,7 @@ pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
     // a 3.6 m tabletop asked for at 49 m got 35 m of ramp and a 14 m top, which from the
     // seat is a long rounded hill with a crest on it and not a table at all. A table's size
     // is its deck.
-    let up = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M);
+    let up = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M).max(lip);
     let down = face_run(height, JUMP_LANDING_DEG, JUMP_LANDING_MIN_M);
     // Whatever the asked-for length has left once the faces are in it — but never less than a
     // deck. The deck wins and the footprint grows; the other way round, keeping the length by
@@ -706,11 +730,18 @@ pub fn tabletop_faces(height: f32, length: f32) -> (f32, f32, f32) {
 /// track — a long tabletop on the main straight with the line painted past its landing. The
 /// range is the top of the published spread rather than the middle of it: this is the one
 /// jump a track is photographed on.
+// Full size: at three quarters it rode too small for the one jump a track is known by.
 pub const FINISH_JUMP_M: (f32, f32) = (2.4, 3.0);
 
 /// The longest deck a finish jump gets, metres. Published tabletop decks run six to twelve,
 /// and the finish one is at the long end because it is the one everybody lands on.
-pub const FINISH_DECK_MAX_M: f32 = 12.0;
+// Past the published twelve: at 3 m, the regulated ceiling, the finish jump still rode small, and
+// a longer deck is the way to make it bigger without making it taller.
+pub const FINISH_DECK_MAX_M: f32 = 20.0;
+
+/// How far the finish jump's take-off runs, metres. Longer and gentler than the angle gives a
+/// 3 m face on its own (9 m, 37 degrees at the lip): at 13 it leaves at 26.
+pub const FINISH_FACE_M: f32 = 16.0;
 
 /// Bare ground off the last corner before the finish jump's face, metres. A takeoff at the
 /// corner exit is a takeoff nobody has any drive at.
@@ -733,7 +764,7 @@ pub fn finish_jump_length(height: f32, deck: f32) -> f32 {
     let deck = deck.max(TABLETOP_DECK_M);
     let mut len = height.abs() + deck;
     for _ in 0..8 {
-        let (up, _, down) = tabletop_faces(height, len);
+        let (up, _, down) = tabletop_faces(height, len, FINISH_FACE_M);
         len = up + deck + down;
     }
     len
@@ -801,9 +832,17 @@ pub struct StartLine {
     pub joins_at: f32,
     /// Which side of the lap it stands on: +1 is the rider's right.
     pub side: f32,
+    /// Metres clear beside the opening straight on that side, before the lap comes back past.
+    pub room: f32,
 }
 
 impl StartLine {
+    /// The room its gate row needs beside the opening straight: the offset out, the fan's half
+    /// width, and the lap's own half width on the far side.
+    pub fn room_needed(width: f32) -> f32 {
+        START_OFFSET_M + crate::tracksynth::START_FAN_HALF_M + width * 0.5
+    }
+
     pub fn length(&self) -> f32 {
         self.segments.iter().map(|s| s.length()).sum()
     }
@@ -943,7 +982,15 @@ impl Segment {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Feature {
     /// Up, along, down. The safe jump, and the commonest thing on a track.
-    Tabletop { at: f32, length: f32, height: f32 },
+    Tabletop {
+        at: f32,
+        length: f32,
+        height: f32,
+        /// How far the take-off runs, metres, when the program wants it longer and gentler
+        /// than the angle would make it. Zero leaves it to the angle.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        lip: f32,
+    },
     /// Two lips with air between them. `gap` is ground the rider must clear.
     Double {
         at: f32,
@@ -998,6 +1045,10 @@ fn default_lip() -> f32 {
     10.0
 }
 
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
+}
+
 impl Feature {
     pub fn at(&self) -> f32 {
         match self {
@@ -1033,8 +1084,8 @@ impl Feature {
             // The ramps are sized from the height, so the footprint is longer than the
             // stated length and this has to say so — the profile is only written as far as
             // `at + length`, and anything past it is cut off into a step.
-            Feature::Tabletop { height, length, .. } => {
-                let (up, top, down) = tabletop_faces(*height, *length);
+            Feature::Tabletop { height, length, lip, .. } => {
+                let (up, top, down) = tabletop_faces(*height, *length, *lip);
                 up + top + down
             }
             Feature::Roller { length, .. }
@@ -1599,6 +1650,7 @@ impl TrackProgram {
         } else {
             -1.0
         };
+        let room = if side > 0.0 { room_r } else { room_l };
 
         // The gate row: beside the lap's own start, far enough out that the lap never runs
         // through it.
@@ -1770,7 +1822,7 @@ impl TrackProgram {
             .or_else(|| search(false, false))?;
         let mut segments = vec![Segment::Straight { length: START_SPRINT_M, rise: 0.0 }];
         segments.extend(merge.into_iter().filter(|s| s.length() > 0.5));
-        Some(StartLine { start, segments, joins_at, side })
+        Some(StartLine { start, segments, joins_at, side, room })
     }
 
     /// The stretch of the main straight a finish jump may stand on: metres round the lap,
@@ -2113,7 +2165,7 @@ mod tests {
     #[test]
     fn rotating_carries_the_features_round() {
         let mut p = oval();
-        p.features = vec![Feature::Tabletop { at: 150.0, length: 20.0, height: 1.5 }];
+        p.features = vec![Feature::Tabletop { at: 150.0, length: 20.0, height: 1.5, lip: 0.0 }];
         p.elevation = vec![Knot { at: 150.0, height: 2.0 }];
         let shift = p.rotate_start(1);
         assert!((p.features[0].at() - (150.0 - shift)).abs() < 0.01, "{:?}", p.features[0]);
@@ -2127,7 +2179,7 @@ mod tests {
         // Sits over the point the lap is about to start at, which after the rotation would
         // put it half before the start and half past the finish.
         let at = 40.0 * std::f32::consts::PI - 5.0;
-        p.features = vec![Feature::Tabletop { at, length: 20.0, height: 1.5 }];
+        p.features = vec![Feature::Tabletop { at, length: 20.0, height: 1.5, lip: 0.0 }];
         p.rotate_start(1);
         p.check().expect("nothing hangs off the end of the lap");
     }
@@ -2348,7 +2400,7 @@ mod tests {
         p.features.push(Feature::Tabletop {
             at: 90.0,
             length: 20.0,
-            height: 2.0,
+            height: 2.0, lip: 0.0
         });
         let err = p.check().unwrap_err().to_string();
         assert!(err.contains("past the"), "{err}");

@@ -5,6 +5,34 @@
 ### Changed
 - The 3D viewer redraws a bike or track when its files change on disk, and new paints show up
   in the paint list without reopening it.
+- Tight corners on generated tracks carry a comb of ruts, one for each line riders take,
+  with a ridge between each. They vary in width, some start part way through the turn, and
+  one can run into the rut outside it or split in two, the way a ridden corner does.
+- Braking bumps come in sets of rolling waves on the way into corners, big enough to feel, to
+  one side or the other, never inside a rut, with darker packed soil on their back faces.
+- Generated tracks have a backdrop: a wooded bank rising beyond the edge of the site, a
+  thicker wood behind the track, fewer lone trees beside it, and more poles and banners at
+  the distance published tracks place them.
+- New track layouts always leave room beside the opening straight for the start, so the
+  starting gate never stands on another part of the lap.
+- Scenery lifted from a published track keeps each part's own texture: trucks, vans, trees
+  and the watch tower show their real colours, tree leaves are see-through around the edges,
+  and banner boards with scrambled textures are left out. Pines are green from the trunk up.
+- Scenery in the Studio's 3D view shows each object's own texture, on published and
+  generated tracks alike.
+- Generated tracks carry pebbles: patches of stones over the ridden ground and its edges,
+  thinner on the racing line and never in a rut's floor.
+- Jumps on generated tracks are smaller than before, about 70% of their old height, with longer, gentler faces and clear ground in front of them to build speed. The
+  finish jump keeps its full height, with a long deck and a long, gentle face.
+- Jump faces curve up from the ground and run straight to the lip, meeting the deck flush.
+- Jump faces carry wide, spread-out tyre scuffs instead of thin grooves down the middle.
+- Generated tracks paint a darker dirt on the track only, with dark tyre lines and rut
+  floors showing through it, so the ruts are easy to see. The rest of the site is dark soil,
+  dry patches and grass.
+- The dirt and grass on generated tracks use the relief maps of a published track and are
+  sharper up close.
+- The riding surface carries a relief map baked from the track's own ground, so ruts, bumps and
+  tyre lines catch the light in game the way they do in the studio's 3D view.
 
 ## 2026-09-11
 
