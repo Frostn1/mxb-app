@@ -13,6 +13,8 @@
   shading.
 
 ### Changed
+- The 3D track view draws the ground at its true height and in the game's own light and
+  colours, so jumps look the size they ride. Game view only leaves out the darkened hollows.
 - Generated tracks are lit like published ones: a lower sun and softer light, so ruts, bumps
   and jump faces show their shape in game instead of washing out.
 - Sharing files, a full preset bundle or your logs shows a progress bar while it uploads,
@@ -36,8 +38,6 @@
   and banner boards with scrambled textures are left out. Pines are green from the trunk up.
 - Scenery in the Studio's 3D view shows each object's own texture, on published and
   generated tracks alike.
-- Generated tracks carry pebbles: patches of stones over the ridden ground and its edges,
-  thinner on the racing line and never in a rut's floor.
 - Jumps on generated tracks are smaller than before, about 70% of their old height, with longer, gentler faces and clear ground in front of them to build speed. The
   finish jump keeps its full height, with a long deck and a long, gentle face.
 - Jump faces curve up from the ground and run straight to the lip, meeting the deck flush.
@@ -52,6 +52,8 @@
 
 ### Fixed
 - Trees, signs and other scenery in the 3D track view stand the right way up.
+- Sharing checks that every part of the upload was actually kept, and sends it again
+  otherwise, so a share code always downloads in full.
 
 ## 2026-09-11
 

@@ -133,7 +133,7 @@ export function TrackViewerDialog({
   // On by default: the scenery is the difference between a shape and a place, and a track
   // that carries none simply has nothing to switch off.
   const [showObjects, setShowObjects] = useState(true);
-  // Off by default: the viewer's own shading reads relief better; this shows what the game shows.
+  // Off by default: the view darkens the hollows so relief reads; this shows exactly the game.
   const [gameView, setGameView] = useState(false);
   // True only until the *coarse* pass lands — the refine that follows happens under a
   // terrain that is already up, and covering it with a spinner would be a step backwards.

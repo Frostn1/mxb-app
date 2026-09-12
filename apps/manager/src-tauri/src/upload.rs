@@ -317,8 +317,11 @@ pub(crate) async fn hosted_len(client: &Client, url: &str) -> Option<u64> {
         }
     }
     // A host that ignored the range and sent the whole thing has still answered the question.
-    match resp.content_length() {
-        Some(n) if n > 1 => Some(n),
+    // So has an empty 200: that is how catbox serves a part it kept none of, and reading it as
+    // "won't say" let an upload of eight empty parts through as a working code.
+    match (resp.status(), resp.content_length()) {
+        (_, Some(n)) if n > 1 => Some(n),
+        (reqwest::StatusCode::OK, Some(0)) => Some(0),
         _ => None,
     }
 }
@@ -633,6 +636,16 @@ mod tests {
         assert_eq!(at(100, 0, 100).fraction(), 0.5, "all sent, nothing stored yet");
         assert_eq!(at(100, 100, 100).fraction(), 1.0);
         assert_eq!(at(0, 0, 0).fraction(), 0.0, "an empty file is not a divide by zero");
+    }
+
+    /// An empty 200 is the host holding nothing, not the host declining to say — so the part
+    /// is short and gets recut, instead of going out in a code that downloads as 0 B.
+    #[tokio::test(start_paused = true)]
+    async fn an_empty_200_is_a_part_holding_nothing() {
+        let empty: &'static str = Box::leak(reply("200 OK", "").into_boxed_str());
+        let (url, _) = serve_counting(vec![empty]);
+        let client = Client::builder().build().unwrap();
+        assert_eq!(settled_len(&client, &url, 100).await, Some(0));
     }
 
     fn reply(status: &str, body: &str) -> String {
