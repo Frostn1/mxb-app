@@ -1485,6 +1485,13 @@ pub struct GroundLayer {
     /// whole stack is a few hundred kilobytes rather than the hundreds of megabytes the sheets
     /// themselves come to.
     pub mask: Option<GroundMask>,
+    /// The layer's bump map, where it carries one, in stored row order so it lines up with the
+    /// masks. The game lights a bumped layer per pixel from it — Indiana's `normals_pro`.
+    pub bump: Option<MapTexture>,
+    /// How many times the bump map repeats across the ground, per axis. 1 for a whole-ground
+    /// map; otherwise the sheet's own tiling, which the record doesn't state separately.
+    pub bump_tile_u: f32,
+    pub bump_tile_v: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -1499,6 +1506,14 @@ pub struct GroundMask {
 /// the same reasoning as [`ground_sheet`], and it keeps a six-layer stack inside a few
 /// megabytes rather than the ninety a map's own 1024² sheets would cost.
 const LAYER_SHEET_DIM: u32 = 256;
+
+/// A bump map at least this wide is laid across the whole ground once rather than tiled:
+/// Indiana's `normals_pro` is 8192², the relief we bake is 4096².
+const WHOLE_GROUND_BUMP: u32 = 4096;
+/// How far a whole-ground bump map is reduced; it needs extent, so it keeps more.
+const WHOLE_BUMP_DIM: u32 = 2048;
+/// How far a tiling bump map is reduced.
+const LAYER_BUMP_DIM: u32 = 512;
 
 /// A sheet record, in either of the two shapes the format uses.
 ///
@@ -1743,11 +1758,16 @@ fn march_layers(b: &[u8], start: usize, decode: bool) -> Vec<GroundLayer> {
         // carry one sheet a layer and found their trailer either way — this only ever showed
         // up on the tracks we compile ourselves.
         let mut end = end;
+        let mut bump_at = None;
         for _ in 0..4 {
-            let Some(next) = (0..48).find_map(|d| layer_sheet_at(b, end + d).map(|s| s.4)) else {
+            let Some(s) = (0..48).find_map(|d| layer_sheet_at(b, end + d)) else {
                 break;
             };
-            end = next;
+            let lower = s.0.to_ascii_lowercase();
+            if bump_at.is_none() && lower != "env" && !lower.ends_with("_wet") && is_layer_normal(&s.0) {
+                bump_at = Some(s.clone());
+            }
+            end = s.4;
         }
         let Some(t) = trailer_after(b, end, end + TRAILER_REACH) else {
             break;
@@ -1766,6 +1786,23 @@ fn march_layers(b: &[u8], start: usize, decode: bool) -> Vec<GroundLayer> {
             } else {
                 Some((Vec::new(), w, h))
             };
+            // Rows as stored, like the masks it has to line up with. Alpha is the game's
+            // specular mask; set opaque so `reduce` averages the directions plainly.
+            let bump = bump_at.filter(|_| decode).and_then(|(bname, bw, bh, bdata, bend)| {
+                let mut rgba = inflate(b, bdata, bend - bdata, bw, bh)?;
+                rgba.chunks_exact_mut(4).for_each(|p| p[3] = 255);
+                let whole = bw.max(bh) >= WHOLE_GROUND_BUMP;
+                let (rgba, rw, rh) =
+                    reduce(rgba, bw, bh, if whole { WHOLE_BUMP_DIM } else { LAYER_BUMP_DIM });
+                Some((
+                    MapTexture { material: 0, name: bname, width: rw, height: rh, alpha: false, rgba },
+                    whole,
+                ))
+            });
+            let (bump_tile_u, bump_tile_v) = match &bump {
+                Some((_, true)) => (1.0, 1.0),
+                _ => (t.tile_u, t.tile_v),
+            };
             if let Some((rgba, rw, rh)) = sheet {
                 out.push(GroundLayer {
                     sheet: MapTexture {
@@ -1779,6 +1816,9 @@ fn march_layers(b: &[u8], start: usize, decode: bool) -> Vec<GroundLayer> {
                     tile_u: t.tile_u,
                     tile_v: t.tile_v,
                     mask: t.mask,
+                    bump: bump.map(|(m, _)| m),
+                    bump_tile_u,
+                    bump_tile_v,
                 });
             }
         }
@@ -1868,11 +1908,16 @@ pub fn ground_layers_blob(layers: &[GroundLayer]) -> Vec<u8> {
             + layers.len() * GROUND_LAYER_ENTRY
             + layers
                 .iter()
-                .map(|l| l.sheet.rgba.len() + l.mask.as_ref().map_or(0, |m| m.coverage.len()))
+                .map(|l| {
+                    l.sheet.rgba.len()
+                        + l.mask.as_ref().map_or(0, |m| m.coverage.len())
+                        + l.bump.as_ref().map_or(0, |m| m.rgba.len())
+                })
                 .sum::<usize>(),
     );
     out.extend_from_slice(b"FGLY");
-    out.extend_from_slice(&1u16.to_le_bytes());
+    // v2: each entry also states a bump map, whose pixels follow the masks.
+    out.extend_from_slice(&2u16.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes());
     out.extend_from_slice(&(layers.len() as u32).to_le_bytes());
     out.extend_from_slice(&0u32.to_le_bytes());
@@ -1889,6 +1934,15 @@ pub fn ground_layers_blob(layers: &[GroundLayer]) -> Vec<u8> {
         out.extend_from_slice(&mw.to_le_bytes());
         out.extend_from_slice(&mh.to_le_bytes());
         out.extend_from_slice(&ml.to_le_bytes());
+        let (bw, bh, bl) = l
+            .bump
+            .as_ref()
+            .map_or((0, 0, 0), |m| (m.width, m.height, m.rgba.len() as u32));
+        out.extend_from_slice(&bw.to_le_bytes());
+        out.extend_from_slice(&bh.to_le_bytes());
+        out.extend_from_slice(&bl.to_le_bytes());
+        out.extend_from_slice(&l.bump_tile_u.to_le_bytes());
+        out.extend_from_slice(&l.bump_tile_v.to_le_bytes());
     }
     for l in layers {
         out.extend_from_slice(&l.sheet.rgba);
@@ -1898,13 +1952,18 @@ pub fn ground_layers_blob(layers: &[GroundLayer]) -> Vec<u8> {
             out.extend_from_slice(&m.coverage);
         }
     }
+    for l in layers {
+        if let Some(m) = &l.bump {
+            out.extend_from_slice(&m.rgba);
+        }
+    }
     out
 }
 
 /// Bytes before the layer table.
 pub const GROUND_LAYERS_HEADER: usize = 16;
 /// Bytes per layer in that table.
-pub const GROUND_LAYER_ENTRY: usize = 32;
+pub const GROUND_LAYER_ENTRY: usize = 52;
 
 /// Bytes before the surface table. Four-byte aligned, same reasoning as [`SCENERY_HEADER`].
 pub const SURFACES_HEADER: usize = 16;
@@ -2722,6 +2781,47 @@ mod tests {
             .collect();
         let kept: Vec<String> = painting_records(recs).into_iter().map(|(n, ..)| n).collect();
         assert_eq!(kept, ["a_c", "b_c", "a_c", "c_c"]);
+    }
+
+    /// Each layer's bump map rides after the masks, with its own size and tiling in the table.
+    #[test]
+    fn the_layer_blob_carries_each_bump_map() {
+        let sheet = |n: &str, px: u8| MapTexture {
+            material: 0,
+            name: n.into(),
+            width: 2,
+            height: 1,
+            alpha: false,
+            rgba: vec![px; 8],
+        };
+        let layers = vec![
+            GroundLayer {
+                sheet: sheet("base", 1),
+                tile_u: 4.0,
+                tile_v: 4.0,
+                mask: None,
+                bump: None,
+                bump_tile_u: 4.0,
+                bump_tile_v: 4.0,
+            },
+            GroundLayer {
+                sheet: sheet("soil", 2),
+                tile_u: 2.0,
+                tile_v: 2.0,
+                mask: Some(GroundMask { width: 1, height: 1, coverage: vec![9] }),
+                bump: Some(sheet("normals", 7)),
+                bump_tile_u: 1.0,
+                bump_tile_v: 1.0,
+            },
+        ];
+        let b = ground_layers_blob(&layers);
+        assert_eq!(u16::from_le_bytes([b[4], b[5]]), 2);
+        let second = GROUND_LAYERS_HEADER + GROUND_LAYER_ENTRY;
+        assert_eq!(u32le(&b, second + 40), 8, "bump bytes");
+        assert_eq!(f32le(&b, second + 44), 1.0, "a whole-ground bump is laid once");
+        assert_eq!(u32le(&b, GROUND_LAYERS_HEADER + 40), 0, "the base carries none");
+        assert_eq!(b.len(), GROUND_LAYERS_HEADER + 2 * GROUND_LAYER_ENTRY + 8 + 8 + 1 + 8);
+        assert_eq!(&b[b.len() - 8..], &[7u8; 8]);
     }
 
     /// Sheets follow the materials in order, and a material numbered 0 owns none.
