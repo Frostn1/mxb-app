@@ -64,6 +64,7 @@ export const es: Record<keyof typeof en, string> = {
   "viewer.scrollToZoom": "Desplaza para hacer zoom",
   "viewer.rightDragToPan": "Arrastra con el botón derecho para mover",
   "viewer.paintReloaded": "Pintura recargada",
+  "viewer.bikeReloaded": "Moto recargada",
   "viewer.pose": "Postura",
   "viewer.poseRear": "Trasera",
   "viewer.poseFront": "Delantera",

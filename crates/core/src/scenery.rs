@@ -1170,7 +1170,13 @@ fn cache_key(path: &str) -> Result<String> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    Ok(format!("{name}:{}:{mtime}", m.len()))
+    // An unpacked track's own size says nothing about its files — see `track::stamp`.
+    let size = if m.is_dir() {
+        crate::viewer::tree_stamp(Path::new(path))
+    } else {
+        m.len()
+    };
+    Ok(format!("{name}:{size}:{mtime}"))
 }
 
 fn cache_file(app: &tauri::AppHandle, key: &str, dir_name: &str) -> Option<PathBuf> {

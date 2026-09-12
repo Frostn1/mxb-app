@@ -64,6 +64,7 @@ export const ptBR: Record<keyof typeof en, string> = {
   "viewer.scrollToZoom": "Role para dar zoom",
   "viewer.rightDragToPan": "Arraste com o botão direito para mover",
   "viewer.paintReloaded": "Pintura recarregada",
+  "viewer.bikeReloaded": "Moto recarregada",
   "viewer.pose": "Postura",
   "viewer.poseRear": "Traseira",
   "viewer.poseFront": "Dianteira",

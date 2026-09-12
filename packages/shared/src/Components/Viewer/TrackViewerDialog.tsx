@@ -15,6 +15,7 @@ import {
   readTrackInfo,
   readTrackPlacements,
 } from "../../api/tracks";
+import { onViewerSourceChanged, watchViewerSource } from "../../api/mods";
 import type {
   TrackInfo,
   TrackOverview,
@@ -152,6 +153,22 @@ export function TrackViewerDialog({
   // Only fetched when a track fails, and only when asked for — it re-reads the archive.
   const [diagnosis, setDiagnosis] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // Ticks when the track changes on disk, to load it again.
+  const [generation, setGeneration] = useState(0);
+
+  // Redraw when the track is rebuilt on disk — a regenerated track, a re-export — rather
+  // than leaving the old one up until the viewer is closed and opened again.
+  useEffect(() => {
+    if (!open) return;
+    void watchViewerSource(path);
+    const pending = onViewerSourceChanged((e) => {
+      if (e.source === path) setGeneration((g) => g + 1);
+    });
+    return () => {
+      void pending.then((un) => un());
+      void watchViewerSource(null);
+    };
+  }, [open, path]);
 
   useEffect(() => {
     if (!open) return;
@@ -293,7 +310,7 @@ export function TrackViewerDialog({
     return () => {
       alive = false;
     };
-  }, [open, path]);
+  }, [open, path, generation]);
 
   // Every pass has an answer — done, empty or failed. Nothing is still running.
   const settled = STEPS.every((s) => steps[s] !== "waiting" && steps[s] !== "running");

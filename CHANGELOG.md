@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-12
+
+### Changed
+- The 3D viewer redraws a bike or track when its files change on disk, and new paints show up
+  in the paint list without reopening it.
+
 ## 2026-09-11
 
 ### Added

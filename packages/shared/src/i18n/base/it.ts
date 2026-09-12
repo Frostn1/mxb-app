@@ -64,6 +64,7 @@ export const it: Record<keyof typeof en, string> = {
   "viewer.scrollToZoom": "Scorri per zoomare",
   "viewer.rightDragToPan": "Trascina col destro per spostare",
   "viewer.paintReloaded": "Livrea ricaricata",
+  "viewer.bikeReloaded": "Moto ricaricata",
   "viewer.pose": "Posa",
   "viewer.poseRear": "Posteriore",
   "viewer.poseFront": "Anteriore",

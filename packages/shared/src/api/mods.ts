@@ -737,6 +737,34 @@ export function onPaintChanged(cb: (path: string) => void): Promise<UnlistenFn> 
   return listen<{ path: string }>("paint-changed", (e) => cb(e.payload.path));
 }
 
+/** Serialises {@link watchViewerSource}, for the same reason as `watchTurn`. */
+let sourceTurn: Promise<unknown> = Promise.resolve();
+
+/**
+ * Watch the bike or track the viewer is drawing, replacing whatever was watched. `null`
+ * stops. Changes arrive through {@link onViewerSourceChanged}.
+ */
+export function watchViewerSource(source: string | null): Promise<void> {
+  sourceTurn = sourceTurn
+    .catch(() => {})
+    .then(() => invoke<void>("watch_viewer_source", { source }));
+  return sourceTurn as Promise<void>;
+}
+
+export interface ViewerSourceChanged {
+  /** The string passed to {@link watchViewerSource}. */
+  source: string;
+  /** What changed, in the OS's spelling — match on file names, never whole paths. */
+  paths: string[];
+}
+
+/** Fires when something behind the watched bike or track changes on disk. */
+export function onViewerSourceChanged(
+  cb: (e: ViewerSourceChanged) => void,
+): Promise<UnlistenFn> {
+  return listen<ViewerSourceChanged>("viewer-source-changed", (e) => cb(e.payload));
+}
+
 /* ── Paint studio ──────────────────────────────────────────────────────────────────── */
 
 /** Read image files as textures — non-power-of-two sizes come back resized, flagged. */

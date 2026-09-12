@@ -148,7 +148,7 @@ use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
-use paintwatch::{LookWatcher, PaintWatcher};
+use paintwatch::{LookWatcher, PaintWatcher, SourceWatcher};
 // Decoding a paint's textures is per-texture CPU work over no shared state, and every path
 // that does it wants the same treatment — so this sits here rather than in one function.
 use profilewatch::ProfileWatcher;
@@ -5864,6 +5864,7 @@ fn main() {
         .manage(ProfileWatcher::default())
         .manage(PaintWatcher::default())
         .manage(LookWatcher::default())
+        .manage(SourceWatcher::default())
         .manage(CloudServers::default())
         .manage(shop_session::ShopSession::default())
         .manage(hub_session::HubSession::default())
@@ -6237,6 +6238,7 @@ fn main() {
             mxb_core::viewer::unpack_paint,
             mxb_core::viewer::texture_bytes,
             mxb_core::viewer::watch_paint_files,
+            mxb_core::viewer::watch_viewer_source,
             mxb_core::viewer::unpack_pkz,
             content_secure_available,
             set_mxbsecure_enabled,

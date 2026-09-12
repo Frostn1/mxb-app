@@ -68,6 +68,7 @@ export const en = {
   "viewer.scrollToZoom": "Scroll to zoom",
   "viewer.rightDragToPan": "Right-drag to pan",
   "viewer.paintReloaded": "Paint reloaded",
+  "viewer.bikeReloaded": "Bike reloaded",
   "viewer.pose": "Pose",
   "viewer.poseRear": "Rear",
   "viewer.poseFront": "Front",
