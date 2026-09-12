@@ -1062,6 +1062,9 @@ export const fr: Translation = {
   "library.empty":
     "Aucun mod {{type}} installé — allez dans Parcourir pour en ajouter un.",
   "library.quick3d": "Voir en 3D",
+  "library.star": "Ajouter aux favoris",
+  "library.unstar": "Retirer des favoris",
+  "library.starred": "Favoris",
   "swapActions.menu": "Déplacer ou supprimer ce modèle",
   "swapActions.move": "Déplacer vers une autre moto…",
   "swapActions.delete": "Supprimer le modèle…",

@@ -1063,6 +1063,9 @@ export const de: Translation = {
   "library.empty":
     "Noch keine {{type}} installiert — geh zu Entdecken und füge etwas hinzu.",
   "library.quick3d": "In 3D ansehen",
+  "library.star": "Zu Favoriten hinzufügen",
+  "library.unstar": "Aus Favoriten entfernen",
+  "library.starred": "Favoriten",
   "swapActions.menu": "Dieses Modell verschieben oder löschen",
   "swapActions.move": "Auf ein anderes Bike verschieben…",
   "swapActions.delete": "Modell löschen…",

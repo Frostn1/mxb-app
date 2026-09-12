@@ -1057,6 +1057,9 @@ export const ptBR: Translation = {
   "library.empty":
     "Nenhuma mod de {{type}} instalada — vá em Explorar e adicione uma.",
   "library.quick3d": "Ver em 3D",
+  "library.star": "Adicionar aos favoritos",
+  "library.unstar": "Remover dos favoritos",
+  "library.starred": "Favoritos",
   "swapActions.menu": "Mover ou excluir este modelo",
   "swapActions.move": "Mover para outra moto…",
   "swapActions.delete": "Excluir modelo…",

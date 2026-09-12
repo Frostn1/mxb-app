@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 /** Starred servers, by `ip:port`. Per machine, so `localStorage` rather than the app config. */
-const KEY = "mxb:serversFavorites:v1";
+const SERVERS_KEY = "mxb:serversFavorites:v1";
 
-function read(): Set<string> {
+function read(key: string): Set<string> {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(KEY) ?? "[]");
+    const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
     return new Set(Array.isArray(parsed) ? parsed.filter((a) => typeof a === "string") : []);
   } catch {
     return new Set();
@@ -18,16 +18,16 @@ export interface Favorites {
   count: number;
 }
 
-export function useFavorites(): Favorites {
-  const [starred, setStarred] = useState(read);
+export function useFavorites(key: string = SERVERS_KEY): Favorites {
+  const [starred, setStarred] = useState(() => read(key));
 
   useEffect(() => {
     try {
-      localStorage.setItem(KEY, JSON.stringify([...starred]));
+      localStorage.setItem(key, JSON.stringify([...starred]));
     } catch {
       // Storage disabled; the star still holds for this session.
     }
-  }, [starred]);
+  }, [key, starred]);
 
   const toggle = useCallback((address: string) => {
     setStarred((prev) => {

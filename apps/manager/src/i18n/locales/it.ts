@@ -1055,6 +1055,9 @@ export const it: Translation = {
   "library.empty":
     "Nessuna mod {{type}} installata — vai su Esplora e aggiungine una.",
   "library.quick3d": "Vedi in 3D",
+  "library.star": "Aggiungi ai preferiti",
+  "library.unstar": "Rimuovi dai preferiti",
+  "library.starred": "Preferiti",
   "swapActions.menu": "Sposta o elimina questo modello",
   "swapActions.move": "Sposta su un'altra moto…",
   "swapActions.delete": "Elimina modello…",

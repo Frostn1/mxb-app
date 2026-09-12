@@ -1057,6 +1057,9 @@ export const es: Translation = {
   "library.empty":
     "Aún no hay {{type}} instaladas — ve a Explorar y añade alguna.",
   "library.quick3d": "Ver en 3D",
+  "library.star": "Añadir a favoritos",
+  "library.unstar": "Quitar de favoritos",
+  "library.starred": "Favoritos",
   "swapActions.menu": "Mover o eliminar este modelo",
   "swapActions.move": "Mover a otra moto…",
   "swapActions.delete": "Eliminar modelo…",
