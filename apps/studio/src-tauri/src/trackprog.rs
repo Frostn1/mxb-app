@@ -795,7 +795,8 @@ pub const START_SPRINT_M: f32 = 80.0;
 
 /// How far the start straight is angled towards the lap, degrees. Over the sprint it closes
 /// about a fifth of the offset, which leaves one corner to do the rest.
-pub const START_CONVERGE_DEG: f32 = 10.0;
+// 10° laid the back half of a 54 m pad over the main straight; the corner does the closing.
+pub const START_CONVERGE_DEG: f32 = 3.0;
 
 /// Tighter than this and an arc is turn one rather than a bend the straight is drifting
 /// through. Published first corners run 10–46 m; this sits above them so it catches the whole
@@ -816,7 +817,8 @@ pub const TURN_ONE_SWEEP_DEG: f32 = 110.0;
 /// The tightest the merge back onto the lap may turn, metres. Published start lines join
 /// through 10–46 m radii; this is the floor, and a tight one keeps turn one close to the
 /// gates rather than a long sweep away from them.
-pub const START_MERGE_RADIUS_M: f32 = 15.0;
+// 15 m folded a pad still 27 m half-wide round the inside of the turn into a blob.
+pub const START_MERGE_RADIUS_M: f32 = 30.0;
 
 /// The start straight: where the gate row stands, and the line from it into the lap.
 ///

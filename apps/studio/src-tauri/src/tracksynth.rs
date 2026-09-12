@@ -4063,8 +4063,19 @@ const GATE_RUT_DEPTH_M: f32 = 0.09;
 /// How much of the start straight's last stretch is already the width of the lap it joins.
 const MERGE_TAIL_M: f32 = 12.0;
 
+/// How wide the start pad is `s` metres along the start line, as a half-width.
+///
+/// The whole gate row until its grooves run out, then narrowing to the track by the end of the
+/// sprint, so it meets turn one the width of the lap it joins. Held full width for the whole
+/// sprint, the pad's back half lay over the main straight and folded into a blob in the turn.
+fn pad_half(half: f32, line_half: f32, s: f32) -> f32 {
+    let (from, to) = (GATE_INSET_M + GATE_RUT_M, crate::trackprog::START_SPRINT_M);
+    let u = ((s - from) / (to - from).max(1.0)).clamp(0.0, 1.0);
+    half + (line_half - half) * smoothstep(u)
+}
+
 /// How much further the start pad's cut and fill reach than a track's shoulder does.
-const START_BANK: f32 = 2.0;
+const START_BANK: f32 = 1.3;
 
 /// Over how much of the wedge the start pad hands the ground back to the lap.
 ///
@@ -4072,7 +4083,7 @@ const START_BANK: f32 = 2.0;
 /// about twice as fast as the ground does — so this is roughly half as wide on the dirt. At a
 /// shoulder's six metres the pad's fill fell three metres of ground from its own height to the
 /// field's, and where the pad is cut ten metres proud that is a wall you can stand under.
-const START_FADE_M: f32 = 26.0;
+const START_FADE_M: f32 = 15.0;
 
 /// How near the lap the start straight has to come before it is cut to the lap's height
 /// rather than to the ground's, and how far away it stops caring. Inside the first figure the
@@ -4170,15 +4181,9 @@ impl StartSpur {
                 / n as f32
         };
         let half = START_FAN_HALF_M.max(prog.width * 0.5);
-        let funnel = crate::trackprog::START_SPRINT_M;
-        let len_all = stations.last().map(|q| q.s).unwrap_or(1.0).max(1.0);
         // The same width the pad comes out — see `at`, which this has to agree with or the
         // level is taken across ground the start does not cover.
-        let wide_at = |s: f32| {
-            let (from, to) = (funnel, (len_all - MERGE_TAIL_M).max(funnel + 1.0));
-            let u = ((s - from) / (to - from)).clamp(0.0, 1.0);
-            half + (prog.width * 0.5 - half) * smoothstep(u)
-        };
+        let wide_at = |s: f32| pad_half(half, prog.width * 0.5, s);
         let mut deck: Vec<f32> = stations.iter().map(|q| across(q, wide_at(q.s))).collect();
         smooth_along(&mut deck, (BENCH_SMOOTH_M * 2.0 / STATION_STEP) as usize);
         // And where it comes near the lap, it takes the lap's height rather than the ground's.
@@ -4244,11 +4249,7 @@ impl StartSpur {
     /// is why a start straight reads as a wide slab with a funnel on the end of it rather than
     /// as a wedge.
     pub fn at(&self, s: f32) -> f32 {
-        // The turn: from where the sprint ends to a little short of the merge, so the last
-        // few metres are already the width of the track they join.
-        let (from, to) = (self.funnel, (self.len - MERGE_TAIL_M).max(self.funnel + 1.0));
-        let u = ((s - from) / (to - from)).clamp(0.0, 1.0);
-        self.half + (self.line_half - self.half) * smoothstep(u)
+        pad_half(self.half, self.line_half, s)
     }
 
     pub fn length(&self) -> f32 {
@@ -5336,10 +5337,17 @@ fn start_rut(syn: &Synth, i: usize, seed: u32) -> Option<u8> {
     Some((255.0 * (groove * along * wobble).clamp(0.0, 1.0)) as u8)
 }
 
-/// Churned ground over the pad, thinner where the grooves packed it down.
+/// Churned ground over the pad, thinner where the grooves packed it down, and only on the pad:
+/// where it overlaps the lap, the lap's own paint stands.
 fn start_loose(syn: &Synth, i: usize, seed: u32) -> Option<u8> {
     let (across, from_gate, d) = on_start_pad(syn, i)?;
-    let patchy = (0.45 + 0.55 * fbm(d * 0.05, from_gate * 0.05, seed ^ 0x2D19)).clamp(0.0, 1.0);
+    if syn.corridor[i] {
+        return None;
+    }
+    // Keyed on the ground, not on the pad's own frame: keyed on it, the pattern came out the
+    // same both sides of the centreline.
+    let (x, z) = ((i % syn.gw) as f32 * syn.mps, (i / syn.gw) as f32 * syn.mps);
+    let patchy = (0.35 + 0.65 * fbm(x * 0.08, z * 0.08, seed ^ 0x2D19)).clamp(0.0, 1.0);
     let packed = if (-1.0..GATE_RUT_M).contains(&from_gate) {
         let lane = (d / GRID_LANE_M) * std::f32::consts::TAU;
         1.0 - 0.55 * (0.5 - 0.5 * lane.cos())
@@ -5348,7 +5356,7 @@ fn start_loose(syn: &Synth, i: usize, seed: u32) -> Option<u8> {
     };
     // Fading out at the edges, where the pad meets ground nothing has driven on.
     let edge = smoothstep((across * 3.0).clamp(0.0, 1.0));
-    Some((255.0 * (patchy * packed * edge * 0.8).clamp(0.0, 1.0)) as u8)
+    Some((255.0 * (patchy * packed * edge * 0.35).clamp(0.0, 1.0)) as u8)
 }
 
 /// The ridden line: the strip of the corridor people actually ride, worn dark.
@@ -5391,8 +5399,17 @@ const STREAK_DEPTH: f32 = 0.8;
 /// Indiana lays its light soil over 60% of its site and the gaps in it are what make the track
 /// readable — dark streaks running with the lap, the dark soil underneath showing through. Ours
 /// covered the corridor solid, so the ruts had nothing to show through.
-fn streak_mask(syn: &Synth, half: f32, _seed: u32, mw: usize, mh: usize) -> Vec<u8> {
+fn streak_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
     mask_across(syn, mw, mh, |c| {
+        // The start pad: packed dark where forty bikes sit and pull out, each stall's groove
+        // darker again, like a rut. Not on the lap's cells, which keep their own.
+        if !syn.corridor[c.i] {
+            if let Some((across, _, _)) = on_start_pad(syn, c.i) {
+                let groove = start_rut(syn, c.i, seed).map_or(0.0, |v| v as f32 / 255.0);
+                let edge = smoothstep((across * 3.0).clamp(0.0, 1.0));
+                return (255.0 * ((0.3 + 0.6 * groove) * edge * STREAK_DEPTH).clamp(0.0, 1.0)) as u8;
+            }
+        }
         if c.lat.abs() > half + RUT_CORRIDOR_FADE_M {
             return 0;
         }

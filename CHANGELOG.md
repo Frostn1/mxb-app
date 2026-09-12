@@ -13,6 +13,8 @@
   shading.
 
 ### Changed
+- The start straight narrows after the gate row and curves into turn one instead of lying
+  across the main straight, with packed dirt and gate grooves like the rest of the track.
 - Generated tracks use real objects only: trees from published tracks, and Indiana's own
   start/finish arch, edge stakes and barrier in place of the drawn ones.
 - The finish line and its arch stand at the top of the finish jump's take-off, high enough to
