@@ -10,6 +10,8 @@
   shading.
 
 ### Changed
+- The 3D track view draws the ground at its true height and in the game's own light and
+  colours, so jumps look the size they ride. Game view only leaves out the darkened hollows.
 - Generated tracks are lit like published ones: a lower sun and softer light, so ruts, bumps
   and jump faces show their shape in game instead of washing out.
 - Sharing files, a full preset bundle or your logs shows a progress bar while it uploads,
