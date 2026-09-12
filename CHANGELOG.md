@@ -13,7 +13,8 @@
 - Tight corners on generated tracks carry a comb of ruts, one for each line riders take,
   with a ridge between each. Every rut runs through the turn and starts back where the tyre
   marks lead into it.
-- Braking bumps build up on the way into corners instead of noise all over the track.
+- Braking bumps come in sets of long, rolling waves on the way into corners, to one side or
+  the other, never inside a rut, with darker packed soil on their back faces.
 - Jumps on generated tracks are a little smaller than before, about 85% of their old
   height, with longer, gentler faces and clear ground in front of them to build speed. The
   finish jump keeps its full height, with a long deck and a long, gentle face.

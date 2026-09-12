@@ -496,7 +496,8 @@ const RUT_ALONG_M: f32 = 70.0;
 /// forty-metre radius, which gave a 90 km/h approach to a hairpin and a 40 km/h approach to a
 /// flat left the same washboard. A braking zone is as long as the braking is, and
 /// [`crate::trackspeed`] is what knows that.
-const BRAKING_WAVELENGTH_M: f32 = 2.2;
+// Longer than 2.2, which rode as stripes; a braking bump is a wave a bike rolls over.
+const BRAKING_WAVELENGTH_M: f32 = 4.0;
 
 /// How much rougher the surface gets in and around a corner, as a multiplier on the texture.
 ///
@@ -520,12 +521,16 @@ const CORNER_ROUGHNESS: f32 = 1.0;
 // Only where the speed model has the rider braking. 0.13 with the chop on top rode as "cross
 // ruts"; with the chop gone, 0.06 rode as no bumps at all. Asked for: bumps mainly before the
 // ruts, which is braking bumps.
-const BRAKING_HEIGHT_M: f32 = 0.26;
+const BRAKING_HEIGHT_M: f32 = 0.32;
+
+/// How long a set of braking bumps runs before it breaks, near enough.
+const BRAKE_SET_M: f32 = 14.0;
 
 /// How far apart the chop everyone's rear wheel leaves on the way out of a corner is, and how
 /// tall it stands. Longer and lower than braking: acceleration bumps are stretched out by the
 /// wheel spinning across them.
-const ACCEL_WAVELENGTH_M: f32 = 3.4;
+// Longer than the braking bumps, which went to 4 m; drive-out chop is the longer, lower of the two.
+const ACCEL_WAVELENGTH_M: f32 = 5.0;
 const ACCEL_HEIGHT_M: f32 = 0.10;
 
 /// How much the edge of the riding line wanders in and out, metres, and over what length of
@@ -736,6 +741,8 @@ pub struct Synth {
     /// other half is being able to see it, and a mask keyed off the racing line alone has no
     /// way of knowing where inside that line the grooves actually fell.
     pub rut: Vec<f32>,
+    /// The back face of a braking bump, 0 to 1: where the paint lets the packed soil show.
+    pub bump: Vec<f32>,
     /// How steeply the built ground climbs along the lap at each station — the grade of a
     /// jump's face, positive up a takeoff and negative down a landing.
     pub face: Vec<f32>,
@@ -1165,6 +1172,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     let mut rut = vec![0.0f32; gw * gh];
     // The height the ruts add, kept apart so it can be blended before it joins the ground.
     let mut rut_h = vec![0.0f32; gw * gh];
+    let mut bump = vec![0.0f32; gw * gh];
     // How ridden each cell is, and which way the track runs there — read by the pass that
     // smooths the ground along its own direction.
     let mut ridden_at = vec![0.0f32; gw * gh];
@@ -1564,12 +1572,25 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // Braking bumps on the way into a corner, which is the direction they form in.
             // The phase drifts, because bumps that are a perfect sine read as corrugated iron.
             let brake = chop.braking.at(s);
-            if brake > 0.0 && across > 0.0 {
-                let drift = 0.35 * fbm(s / 26.0, 7.0, r.seed ^ 0xB4AE);
-                let ripple =
-                    ((s / feel.brake.0 + drift) * std::f32::consts::TAU).sin();
+            if brake > 0.0 {
+                // In sets, not a washboard: ridden as "just stripes" when they ran unbroken the
+                // whole way into every corner.
+                let sets = smoothstep(
+                    ((fbm(s / BRAKE_SET_M, 3.3, r.seed ^ 0xB4B0) + 0.15) * 2.2).clamp(0.0, 1.0),
+                );
+                // To one side or the other, wandering across, rather than the whole width.
+                let side = smoothstep(
+                    ((fbm(t / 3.5, s / 22.0, r.seed ^ 0xB4B1) + 0.2) * 2.0).clamp(0.0, 1.0),
+                );
+                // Never inside a rut: a tyre in a groove rides its floor, not the bumps.
+                let clear = 1.0 - (-rut[i]).clamp(0.0, 1.0);
+                let drift = 0.5 * fbm(s / 26.0, 7.0, r.seed ^ 0xB4AE);
+                let phase = (s / feel.brake.0 + drift) * std::f32::consts::TAU;
                 // Not polished: braking bumps are worst on the line, where everyone brakes.
-                heights[i] += ripple * feel.brake.1 * 0.5 * brake * across * groomed;
+                let w = brake * sets * side * clear * groomed * (0.35 + 0.65 * across);
+                heights[i] += phase.sin() * feel.brake.1 * 0.5 * w;
+                // The back of each bump, where the packed soil shows through the paint.
+                bump[i] = (-phase.cos()).max(0.0) * w.min(1.0);
             }
             // And the longer, lower chop everybody's rear wheel leaves on the way out.
             let out = chop.accel.at(s);
@@ -1846,6 +1867,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         heights,
         corridor,
         rut,
+        bump,
         face,
         dist,
         arc,
@@ -5240,7 +5262,9 @@ fn streak_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u
         );
         let lines = comb * broken * ridden;
         let floor = ((-c.rut - 0.1) / 0.5).clamp(0.0, 1.0);
-        (255.0 * (lines.max(floor) * STREAK_DEPTH).clamp(0.0, 1.0)) as u8
+        // And the back of every braking bump, packed by the tyres that climbed it.
+        let back = syn.bump[c.i];
+        (255.0 * (lines.max(floor).max(back) * STREAK_DEPTH).clamp(0.0, 1.0)) as u8
     })
 }
 
