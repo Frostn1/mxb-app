@@ -1465,18 +1465,21 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let outward = if on_line >= 0.0 { -1.0 } else { 1.0 };
                 // More lanes rather than wider gaps: as many as fit, a lane apart, from the line
                 // out to a metre off the outside edge.
-                let out_n = (((half + on_line.abs() - 1.0) / RUT_LANE_M).floor() as i32)
-                    .clamp(1, RUT_LANES_OUT_MAX);
-                for k in -1..=out_n {
+                for k in -1..=RUT_LANES_OUT_MAX {
                     let kf = k as f32;
                     let at = on_line
                         + outward * kf * RUT_LANE_M
                         + RUT_LANE_WANDER_M * fbm(s / 30.0, kf * 7.3, r.seed ^ 0x1A7E);
-                    if at.abs() > half - 0.8 {
+                    // Faded out toward the edge rather than dropped at it: a lane cut off where
+                    // it crosses a line, or a count that jumps a lane at a time, is a step in
+                    // the ground, and it rode as a spike at the entrance of a rut.
+                    let room = smoothstep(((half - 0.8 - at.abs()) / 1.5).clamp(0.0, 1.0));
+                    if room <= 0.0 {
                         continue;
                     }
                     // Deepest on the line everyone rides, shallower out toward the edge.
-                    let fall = if k < 0 { 0.75 } else { 1.0 - 0.5 * kf / (out_n as f32 + 1.0) };
+                    let fall = room
+                        * if k < 0 { 0.75 } else { 1.0 - 0.5 * kf / (RUT_LANES_OUT_MAX as f32 + 1.0) };
                     // Slowly, so a lane that is in the corner at its entry is still there at its exit.
                     let along = 0.55 + 0.45 * fbm(s / 40.0, kf * 3.1 + 11.0, r.seed ^ 0x1A7F);
                     // Some lanes start part way through the turn and fade out again; the line under
@@ -1857,6 +1860,49 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let lane = (t / GRID_LANE_M) * std::f32::consts::TAU;
                 let groove = 0.5 - 0.5 * lane.cos();
                 heights[i] -= GATE_RUT_DEPTH_M * along * groove * claim;
+            }
+            // And the ground on the way into turn one, worked like the lap's: lanes that close
+            // up as the pad narrows and deepen towards the corner, and a set or two of braking
+            // bumps before it. Only the gate's comb was cut here, so past it the start was
+            // smooth and unmarked.
+            let len = spur.length();
+            let rut_from = (len - START_RUT_M).max(spur.gate_at() + 10.0);
+            let mut in_rut = 0.0f32;
+            if s > rut_from {
+                let grow = smoothstep(((s - rut_from) / (len - rut_from).max(1.0)).clamp(0.0, 1.0));
+                let spacing = (wide * 1.6 / START_RUT_LANES as f32).max(1.2);
+                for k in 0..START_RUT_LANES {
+                    let at = (k as f32 - (START_RUT_LANES as f32 - 1.0) * 0.5) * spacing
+                        + 0.5 * fbm(s / 20.0, k as f32 * 3.7, r.seed ^ 0x57C0);
+                    let x = (t - at) / 0.6;
+                    in_rut = in_rut.max((-x * x).exp() * (0.7 + 0.3 * fbm(s / 15.0, k as f32, r.seed ^ 0x57C1)));
+                }
+                let cut = START_RUT_DEPTH_M * grow * in_rut * claim;
+                heights[i] -= cut;
+                rut[i] = rut[i].min(-cut);
+            }
+            let into = len - s;
+            if (4.0..START_BRAKE_M).contains(&into) {
+                let wave = BRAKING_WAVELENGTH_M;
+                let cycles = s / wave + 0.3 * fbm(t / 3.0, s / 12.0, r.seed ^ 0x57C2);
+                let n = cycles.floor();
+                let x = cycles - n;
+                let g = (n / BRAKE_GROUP).floor();
+                let count = if hash2(g as i32, 17, r.seed ^ 0x57C3) > 0.0 { 2.0 } else { 1.0 };
+                if n - g * BRAKE_GROUP < count {
+                    let peak = 0.4;
+                    let (prof, falling) = if x < peak {
+                        (smoothstep(x / peak), false)
+                    } else {
+                        (smoothstep((1.0 - x) / (1.0 - peak)), true)
+                    };
+                    let ease = smoothstep(((START_BRAKE_M - into) / 6.0).clamp(0.0, 1.0));
+                    let h = prof * BRAKING_HEIGHT_M * 0.6 * ease * (1.0 - in_rut) * claim;
+                    heights[i] += h;
+                    if falling {
+                        bump[i] = bump[i].max(prof * ease * (1.0 - in_rut));
+                    }
+                }
             }
         }
     }
@@ -4069,7 +4115,7 @@ const MERGE_TAIL_M: f32 = 12.0;
 /// sprint, so it meets turn one the width of the lap it joins. Held full width for the whole
 /// sprint, the pad's back half lay over the main straight and folded into a blob in the turn.
 fn pad_half(half: f32, line_half: f32, s: f32) -> f32 {
-    let (from, to) = (GATE_INSET_M + GATE_RUT_M, crate::trackprog::START_SPRINT_M);
+    let (from, to) = (GATE_INSET_M + 15.0, crate::trackprog::START_SPRINT_M);
     let u = ((s - from) / (to - from).max(1.0)).clamp(0.0, 1.0);
     half + (line_half - half) * smoothstep(u)
 }
@@ -5339,9 +5385,9 @@ fn start_rut(syn: &Synth, i: usize, seed: u32) -> Option<u8> {
 
 /// Churned ground over the pad, thinner where the grooves packed it down, and only on the pad:
 /// where it overlaps the lap, the lap's own paint stands.
-fn start_loose(syn: &Synth, i: usize, seed: u32) -> Option<u8> {
+fn start_loose(syn: &Synth, i: usize, seed: u32, half: f32) -> Option<u8> {
     let (across, from_gate, d) = on_start_pad(syn, i)?;
-    if syn.corridor[i] {
+    if syn.dist[i] <= half {
         return None;
     }
     // Keyed on the ground, not on the pad's own frame: keyed on it, the pattern came out the
@@ -5367,7 +5413,7 @@ fn start_loose(syn: &Synth, i: usize, seed: u32) -> Option<u8> {
 fn line_mask(syn: &Synth, half: f32, w: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
     mask_across(syn, mw, mh, |c| {
         // The start pad is ridden ground too — forty bikes leave it dark.
-        if let Some(v) = start_loose(syn, c.i, seed) {
+        if let Some(v) = start_loose(syn, c.i, seed, half) {
             return (v as f32 * 0.85) as u8;
         }
         if c.lat.abs() > half + RUT_CORRIDOR_FADE_M + 0.1 {
@@ -5390,11 +5436,22 @@ fn line_mask(syn: &Synth, half: f32, w: f32, seed: u32, mw: usize, mh: usize) ->
 /// far out from the racing line they reach as a share of the half width, and how much of the
 /// light soil they take away.
 // Closer and wider: Indiana's riding surface reads darker because more of its dark soil shows.
+const STREAK_SPACING_M: f32 = 0.7;
+const STREAK_SHARP: f32 = 3.0;
+const STREAK_WANDER_M: f32 = 0.6;
+const STREAK_REACH: f32 = 1.0;
 const STREAK_DEPTH: f32 = 0.8;
 
-/// Where the dark ground shows through the riding surface: every groove's floor and the back of
-/// every braking bump. No painted tyre lines between them — ridden as ugly, and a published
-/// track's marks are its relief, not paint.
+/// How far before turn one the start straight is rutted and bumped, how deep its ruts get and
+/// how many lanes it carries into the corner.
+const START_RUT_M: f32 = 45.0;
+const START_RUT_DEPTH_M: f32 = 0.28;
+const START_RUT_LANES: i32 = 5;
+const START_BRAKE_M: f32 = 22.0;
+
+/// Where the dark ground shows through the riding surface: every groove's floor, the back of
+/// every braking bump, and the tyre lines worn along the lap between them. Taken out once and
+/// ridden as "so flat", so they stay.
 ///
 /// Indiana lays its light soil over 60% of its site and the gaps in it are what make the track
 /// readable — dark streaks running with the lap, the dark soil underneath showing through. Ours
@@ -5403,20 +5460,45 @@ fn streak_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u
     mask_across(syn, mw, mh, |c| {
         // The start pad: packed dark where forty bikes sit and pull out, each stall's groove
         // darker again, like a rut. Not on the lap's cells, which keep their own.
-        if !syn.corridor[c.i] {
-            if let Some((across, _, _)) = on_start_pad(syn, c.i) {
+        // Tested against the lap, not the corridor: the pad marks itself as corridor, so a
+        // corridor test skipped the whole of it and it went out bare.
+        if c.lat.abs() > half + 1.0 {
+            if let Some((across, from_gate, d)) = on_start_pad(syn, c.i) {
                 let groove = start_rut(syn, c.i, seed).map_or(0.0, |v| v as f32 / 255.0);
                 let edge = smoothstep((across * 3.0).clamp(0.0, 1.0));
-                return (255.0 * ((0.3 + 0.6 * groove) * edge * STREAK_DEPTH).clamp(0.0, 1.0)) as u8;
+                // Tyre lines down the start as well as round the lap.
+                let u = d + STREAK_WANDER_M * fbm(from_gate / 30.0, d * 0.15, seed ^ 0x57A3);
+                let comb = (0.5 + 0.5 * (u / STREAK_SPACING_M * std::f32::consts::TAU).cos())
+                    .powf(STREAK_SHARP);
+                let broken = smoothstep(
+                    ((fbm(from_gate / 11.0, u / STREAK_SPACING_M, seed ^ 0x57A4) + 0.35) * 2.5)
+                        .clamp(0.0, 1.0),
+                );
+                let lines = comb * broken * across;
+                let floor = ((-c.rut - 0.1) / 0.5).clamp(0.0, 1.0);
+                let back = syn.bump[c.i];
+                let v = (0.2 + 0.6 * groove).max(lines).max(floor).max(back) * edge;
+                return (255.0 * (v * STREAK_DEPTH).clamp(0.0, 1.0)) as u8;
             }
         }
         if c.lat.abs() > half + RUT_CORRIDOR_FADE_M {
             return 0;
         }
+        let s = syn.arc[c.i];
+        // Worn hardest where the wheels go, fading towards the edges.
+        let ridden = (1.0 - (c.off.abs() / (half * STREAK_REACH)).min(1.0).powi(2)).max(0.0);
+        // Narrow, meandering, and broken along their length.
+        let u = c.off + STREAK_WANDER_M * fbm(s / 30.0, c.off * 0.15, seed ^ 0x57A1);
+        let comb = (0.5 + 0.5 * (u / STREAK_SPACING_M * std::f32::consts::TAU).cos())
+            .powf(STREAK_SHARP);
+        let broken = smoothstep(
+            ((fbm(s / 11.0, u / STREAK_SPACING_M, seed ^ 0x57A2) + 0.35) * 2.5).clamp(0.0, 1.0),
+        );
+        let lines = comb * broken * ridden;
         let floor = ((-c.rut - 0.1) / 0.5).clamp(0.0, 1.0);
         // And the back of every braking bump, packed by the tyres that climbed it.
         let back = syn.bump[c.i];
-        (255.0 * (floor.max(back) * STREAK_DEPTH).clamp(0.0, 1.0)) as u8
+        (255.0 * (lines.max(floor).max(back) * STREAK_DEPTH).clamp(0.0, 1.0)) as u8
     })
 }
 
@@ -5509,7 +5591,7 @@ fn loose_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8
         // The pad is churned ground: forty bikes stand on it once and tear it up, and nothing
         // rides it again. Patchy loose dirt over the whole of it, thinner where the grooves
         // are because that is where the tyres packed it.
-        if let Some(v) = start_loose(syn, c.i, seed) {
+        if let Some(v) = start_loose(syn, c.i, seed, half) {
             return v;
         }
         if c.lat.abs() > half + RUT_CORRIDOR_FADE_M + 0.1 {

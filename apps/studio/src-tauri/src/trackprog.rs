@@ -791,7 +791,9 @@ pub const START_OFFSET_M: f32 = 40.0;
 /// told. Shorter than the middle of that on purpose: ridden, 85 m of sprint and 90 m of
 /// turn-in is a long way to the first corner, and the whole point of a start straight is that
 /// it ends at one.
-pub const START_SPRINT_M: f32 = 80.0;
+// Ridden at 80 m as a long drag with nothing to do; shorter, so the pack arrives at turn one
+// still bunched and has to brake for it.
+pub const START_SPRINT_M: f32 = 55.0;
 
 /// How far the start straight is angled towards the lap, degrees. Over the sprint it closes
 /// about a fifth of the offset, which leaves one corner to do the rest.
@@ -817,8 +819,9 @@ pub const TURN_ONE_SWEEP_DEG: f32 = 110.0;
 /// The tightest the merge back onto the lap may turn, metres. Published start lines join
 /// through 10–46 m radii; this is the floor, and a tight one keeps turn one close to the
 /// gates rather than a long sweep away from them.
-// 15 m folded a pad still 27 m half-wide round the inside of the turn into a blob.
-pub const START_MERGE_RADIUS_M: f32 = 30.0;
+// A real turn one, which the pack has to brake for. The pad is track width by the time it
+// gets there (see `tracksynth::pad_half`), so a tight one no longer folds it into a blob.
+pub const START_MERGE_RADIUS_M: f32 = 18.0;
 
 /// The start straight: where the gate row stands, and the line from it into the lap.
 ///

@@ -1695,7 +1695,8 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             [-1.0f32, 1.0]
                 .iter()
                 .map(|side| ground(syn, st.x + rx * post * side, st.z + rz * post * side))
-                .fold(f32::NEG_INFINITY, f32::max)
+                // The lower post's ground: on the higher, the other post hung in the air.
+                .fold(f32::INFINITY, f32::min)
         };
         // Wide enough to clear the track, and tall enough that the header stands 5 m over the
         // lip it straddles: the line is on the take-off, and riders leave the ground under it.
@@ -2585,6 +2586,12 @@ mod built {
 /// an optimisation for the export folder's size, not for the track's.
 ///
 /// Props are merged by sheet, because a model carries one sheet and one only.
+/// A lifted object this long and this low is a run of boards or fence, not a prop: the lifter
+/// groups a run by proximity, so it comes out bent to the donor's corner, and replayed it stood
+/// near our track in that shape instead of along it. Our edge is laid by rule (`lift_edge`).
+const LIFT_RUN_SPAN_M: f32 = 8.0;
+const LIFT_RUN_HEIGHT_M: f32 = 3.5;
+
 pub fn lifted(
     lib: &crate::trackprops::PropLibrary,
     prog: &TrackProgram,
@@ -2605,6 +2612,9 @@ pub fn lifted(
 
     for inst in &lib.instances {
         let prop = &lib.props[inst.prop];
+        if prop.span > LIFT_RUN_SPAN_M && prop.height < LIFT_RUN_HEIGHT_M {
+            continue;
+        }
         let st = at((inst.along * lap).clamp(0.0, lap));
         let (rx, rz) = crate::trackprog::right_vector(st.heading);
 
@@ -2763,6 +2773,9 @@ struct Plant {
 /// it a whole treeline baked as one object.
 const TREE_REAL_MIN_M: f32 = 4.0;
 const TREE_REAL_MAX_M: f32 = 40.0;
+/// How far a library tree may reach from its own trunk. Some lifted "trees" are whole clumps
+/// baked as one object, 40 m across; planted at a point they stood over the track.
+const TREE_REAL_REACH_M: f32 = 5.0;
 
 /// Every tree the lap and the backdrop asked for, each a real one out of the library — the
 /// donor's own and whatever other tracks were baked in beside it. One model a sheet.
@@ -2774,6 +2787,7 @@ fn plant_trees(lib: &crate::trackprops::PropLibrary, plants: &[Plant]) -> Vec<(S
             p.class == crate::trackobjects::Class::Tree
                 && (TREE_REAL_MIN_M..=TREE_REAL_MAX_M).contains(&p.height)
                 && !crate::trackprops::is_crowd(&p.sheet)
+                && p.reach <= TREE_REAL_REACH_M
         })
         .collect();
     if trees.is_empty() {
