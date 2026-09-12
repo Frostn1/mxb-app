@@ -2668,6 +2668,7 @@ mod tests {
         let mut bumps = [0usize; 4];
         // Swells: bumps a braking wheel feels, 2 m and up, against a 3 m mean, 3 cm proud.
         let mut swells = [0usize; 4];
+        let mut sw: [Vec<f32>; 4] = Default::default();
         let wide = ((1.5 / fine_step) as usize).max(1);
         let cols = 13;
         for j in 0..cols {
@@ -2696,6 +2697,9 @@ mod tests {
                 }
             }
             let broad = detrend(&col, wide);
+            for i in 0..broad.len() {
+                sw[zs[i]].push(broad[i]);
+            }
             for i in 4..broad.len().saturating_sub(4) {
                 let v = broad[i];
                 if v > 0.03 && (i - 4..=i + 4).all(|q| q == i || broad[q] < v) {
@@ -2737,12 +2741,12 @@ mod tests {
             v.sort_by(|a, b| a.partial_cmp(b).unwrap());
             v[((v.len() - 1) as f32 * p) as usize]
         };
-        println!("  zone      metres  chatter  bumps/10m  across p2p p50/p90/max   wall p98  swells/10m  rutted");
+        println!("  zone      metres  chatter  bumps/10m  across p2p p50/p90/max   wall p98  swells/10m  rutted  swell rms");
         for (z, name) in ["straight", "corner", "jump face", "approach"].iter().enumerate() {
             let metres = zone.iter().filter(|&&q| q == z).count() as f32 * step;
             let per10 = bumps[z] as f32 / (metres * cols as f32).max(1e-3) * 10.0;
             println!(
-                "  {name:<9} {metres:>6.0}  {:>7.3}  {per10:>9.1}  {:>6.2} {:>5.2} {:>5.2}        {:>4.0}°  {:>9.1}  {:>5.0}%",
+                "  {name:<9} {metres:>6.0}  {:>7.3}  {per10:>9.1}  {:>6.2} {:>5.2} {:>5.2}        {:>4.0}°  {:>9.1}  {:>5.0}%  {:>9.3}",
                 rms(&chat[z]),
                 pct(&mut p2p[z], 0.5),
                 pct(&mut p2p[z], 0.9),
@@ -2750,6 +2754,7 @@ mod tests {
                 pct(&mut walls[z], 0.98),
                 swells[z] as f32 / (metres * cols as f32).max(1e-3) * 10.0,
                 100.0 * rutted[z].0 as f32 / rutted[z].1.max(1) as f32,
+                rms(&sw[z]),
             );
         }
         // How steep the jump faces stand along the line: a metre of climb, uphill only.

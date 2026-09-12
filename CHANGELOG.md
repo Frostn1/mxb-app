@@ -10,19 +10,19 @@
   GUID each one is locked to.
 
 ### Changed
-- Corners on generated tracks carry more ruts, closer together, with soft walls and none
-  deeper than about 40 cm.
-- The dirt and grass on generated tracks use the relief maps of a published track and are
-  sharper up close, so the ground reads less flat.
+- Corners on generated tracks carry more ruts, closer together, that run through the turn
+  and start back where the tyre marks lead into it, with soft walls.
 - Braking bumps build up on the way into corners instead of noise all over the track.
-- Jumps on generated tracks are three quarters of their old height. The finish jump keeps
-  its full height, with a longer deck and a longer, gentler face.
+- Jumps on generated tracks are a little smaller than before, about 85% of their old
+  height, with longer, gentler faces and clear ground in front of them to build speed. The
+  finish jump keeps its full height, with a long deck and a long, gentle face.
 - Jump faces curve up from the ground and run straight to the lip, meeting the deck flush.
-  No rounded hump before the edge, and no sudden steep kick at the top.
 - Jump faces carry wide, spread-out tyre scuffs instead of thin grooves down the middle.
-- Generated tracks paint the light dirt on the track only, with dark tyre lines and rut
+- Generated tracks paint a darker dirt on the track only, with dark tyre lines and rut
   floors showing through it, so the ruts are easy to see. The rest of the site is dark soil,
   dry patches and grass.
+- The dirt and grass on generated tracks use the relief maps of a published track and are
+  sharper up close.
 
 ## 2026-09-09 — v0.14.0 — A new name, and a Studio of its own
 

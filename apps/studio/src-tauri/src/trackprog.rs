@@ -360,7 +360,8 @@ pub const TABLETOP_DECK_M: f32 = 6.0;
 /// Nine metres puts the crossover at 2.16 m. Under it the floor governs and the lip angle
 /// falls with the height — 12.7° at a metre, 18.9° at a metre and a half, 24.9° at two — and
 /// over it the angle takes over at 27. That is the published spread, from the same two numbers.
-pub const JUMP_FACE_MIN_M: f32 = 9.0;
+// Ridden at 9 as still too steep once the faces ran straight to the lip.
+pub const JUMP_FACE_MIN_M: f32 = 13.0;
 
 /// The shortest a landing may be, metres. Longer than a takeoff, for the reason
 /// [`JUMP_LANDING_DEG`] is gentler than [`JUMP_FACE_DEG`]: it is the side that catches you.
@@ -738,7 +739,7 @@ pub const FINISH_DECK_MAX_M: f32 = 20.0;
 
 /// How far the finish jump's take-off runs, metres. Longer and gentler than the angle gives a
 /// 3 m face on its own (9 m, 37 degrees at the lip): at 13 it leaves at 26.
-pub const FINISH_FACE_M: f32 = 13.0;
+pub const FINISH_FACE_M: f32 = 16.0;
 
 /// Bare ground off the last corner before the finish jump's face, metres. A takeoff at the
 /// corner exit is a takeoff nobody has any drive at.

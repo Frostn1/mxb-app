@@ -342,7 +342,8 @@ const RUT_WALL_HOLD: f32 = 1.8;
 const RUT_FLOOR_DARKEN: f32 = 0.95;
 // The dry stuff thrown off the line. Their brightest dry surfaces reach (171, 134, 99) and
 // (220, 185, 150); at 0.85 ours reached (145, 113, 84), darker than either.
-const LOOSE_DRY: f32 = 1.10;
+// Darker than 1.10 with the rest of the dirt: the base colour rode as too light.
+const LOOSE_DRY: f32 = 0.85;
 
 /// How much of its brightness the field's soil keeps.
 ///
@@ -353,7 +354,7 @@ const LOOSE_DRY: f32 = 1.10;
 /// short of Southwick's sand.
 // Down from 0.95, which painted the riding surface Indiana's palest dirt and was ridden as "all
 // the very light ugly dirt", with the ruts lost in it.
-const FIELD_DARKEN: f32 = 0.85;
+const FIELD_DARKEN: f32 = 0.68;
 
 /// How much lighter the worked corridor is than the line worn down the middle of it.
 ///
@@ -437,7 +438,9 @@ const FACE_STEP_M: f32 = 1.5;
 // Closer than 2.75, which blended out to two or three broad dips per corner against Indiana's
 // five or six grooves. Measured on corner cross-sections, not the lap-wide average, which the
 // straights swamp.
-const RUT_SPACING_M: f32 = 1.65;
+// Not under a groove's own width (`RUT_GROOVE_M` either side), or neighbouring grooves merge;
+// and at 1.25 the deepest groove down a straight settled under the paint, a channel again.
+const RUT_SPACING_M: f32 = 1.35;
 
 /// How much of the half-width the bundle covers, at the loosest corner that ruts at all and
 /// at the tightest.
@@ -454,7 +457,8 @@ const RUT_BUNDLE: (f32, f32) = (0.4, 0.85);
 /// onto the track.
 // 55 carried a corner's ruts too far down the next straight once the ruts were blended.
 const RUT_CARRY_EXIT_M: f32 = 48.0;
-const RUT_CARRY_ENTRY_M: f32 = 22.0;
+// Back far enough to meet the tyre lines painted on the approach, so they lead into a rut.
+const RUT_CARRY_ENTRY_M: f32 = 36.0;
 
 /// How far the bundle sits towards the inside of the corner, as a fraction of the half-width.
 ///
@@ -482,7 +486,9 @@ const RUT_INSIDE: f32 = -0.022;
 /// So ten is right for a corner and wrong for the rest of the lap, and the change this wants
 /// is a length that varies with the corner rather than a smaller constant. Changed to ten and
 /// committed once without running the suite; this is the revert.
-const RUT_ALONG_M: f32 = 34.0;
+// Longer than 34, where a groove came and went inside a single corner; a rut that starts in a
+// turn should run through it.
+const RUT_ALONG_M: f32 = 70.0;
 
 /// Metres between braking bumps.
 ///
@@ -514,13 +520,13 @@ const CORNER_ROUGHNESS: f32 = 1.0;
 // Only where the speed model has the rider braking. 0.13 with the chop on top rode as "cross
 // ruts"; with the chop gone, 0.06 rode as no bumps at all. Asked for: bumps mainly before the
 // ruts, which is braking bumps.
-const BRAKING_HEIGHT_M: f32 = 0.16;
+const BRAKING_HEIGHT_M: f32 = 0.26;
 
 /// How far apart the chop everyone's rear wheel leaves on the way out of a corner is, and how
 /// tall it stands. Longer and lower than braking: acceleration bumps are stretched out by the
 /// wheel spinning across them.
 const ACCEL_WAVELENGTH_M: f32 = 3.4;
-const ACCEL_HEIGHT_M: f32 = 0.06;
+const ACCEL_HEIGHT_M: f32 = 0.10;
 
 /// How much the edge of the riding line wanders in and out, metres, and over what length of
 /// lap.
@@ -1454,11 +1460,12 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let relief = if carved > 0.0 { spread.min(-carved) } else { spread };
                 // Capped past a knee, so the deepest grooves round off and the rest are untouched.
                 let r = depth * relief;
-                rut_h[i] = if r < 0.0 {
-                    -knee(-r, RUT_CUT_KNEE_M)
-                } else {
-                    knee(r, RUT_BANK_KNEE_M)
-                };
+                // The ceiling moves with the wear, like the depth under it: calibrated at the
+                // default, deeper on a raced track and shallower on a prepped one. Fixed, it held a
+                // raced track to a prepped one's ruts.
+                let cut_knee = (RUT_CUT_KNEE_M.0 * worn, RUT_CUT_KNEE_M.1 * worn);
+                let bank_knee = (RUT_BANK_KNEE_M.0 * worn, RUT_BANK_KNEE_M.1 * worn);
+                rut_h[i] = if r < 0.0 { -knee(-r, cut_knee) } else { knee(r, bank_knee) };
                 // What the paint reads: a face's scuffs at half strength and nothing past a full
                 // floor, or the whole face paints as one dark block.
                 let painted = main.max(second).max(marks * 0.5);
@@ -2254,7 +2261,7 @@ fn rut_profile(
             if radius < start_r {
                 let t = smoothstep(((start_r - radius) / (start_r - full_r)).clamp(0.0, 1.0));
                 // Not evenly: a rut wanders in depth down the length of a corner.
-                let vary = 0.75 + 0.25 * fbm(s / 9.0, 3.5, seed ^ 0x2117);
+                let vary = 0.75 + 0.25 * fbm(s / 20.0, 3.5, seed ^ 0x2117);
                 depth.v[i] = feel.rut_depth * t * vary * worked.at(s);
                 tight.v[i] = t;
                 // Positive curvature turns right, and the corner's inside is the rider's
@@ -5159,7 +5166,7 @@ fn line_mask(syn: &Synth, half: f32, w: f32, seed: u32, mw: usize, mh: usize) ->
 const STREAK_SPACING_M: f32 = 0.9;
 const STREAK_SHARP: f32 = 4.0;
 const STREAK_WANDER_M: f32 = 0.6;
-const STREAK_REACH: f32 = 0.85;
+const STREAK_REACH: f32 = 1.0;
 const STREAK_DEPTH: f32 = 0.8;
 
 /// Where the dark ground shows through the riding surface: every groove's floor, and the tyre
@@ -5181,7 +5188,7 @@ fn streak_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u
         let comb = (0.5 + 0.5 * (u / STREAK_SPACING_M * std::f32::consts::TAU).cos())
             .powf(STREAK_SHARP);
         let broken = smoothstep(
-            ((fbm(s / 11.0, u / STREAK_SPACING_M, seed ^ 0x57A2) + 0.1) * 2.5).clamp(0.0, 1.0),
+            ((fbm(s / 11.0, u / STREAK_SPACING_M, seed ^ 0x57A2) + 0.35) * 2.5).clamp(0.0, 1.0),
         );
         let lines = comb * broken * ridden;
         let floor = ((-c.rut - 0.1) / 0.5).clamp(0.0, 1.0);
@@ -9871,7 +9878,8 @@ mod tests {
         let (f, r) = (mean(&field), mean(&ridden));
         let gap = (f[0] - r[0] + f[1] - r[1] + f[2] - r[2]) / 3.0;
         assert!(
-            (60.0..130.0).contains(&gap),
+            // Down from 60 when the riding surface was darkened: its base colour rode as too light.
+            (45.0..130.0).contains(&gap),
             "the line stands {gap:.0} levels off the field: {:?} against {:?}",
             r.map(|v| v.round()),
             f.map(|v| v.round())
@@ -10530,14 +10538,21 @@ mod tests {
         // a grade against the ramp's own rather than against level: a jump is built on a pad
         // that is cut roughly level and not perfectly, so a deck on a hillside slopes a little
         // and should.
-        let (up, deck, _) = crate::trackprog::tabletop_faces(height, len, crate::trackprog::FINISH_FACE_M);
+        // The jump's own take-off: the worked example's finish states none, so the angle sizes it.
+        let lip = match &f {
+            Feature::Tabletop { lip, .. } => *lip,
+            _ => 0.0,
+        };
+        let (up, deck, _) = crate::trackprog::tabletop_faces(height, len, lip);
         assert!(deck >= crate::trackprog::TABLETOP_DECK_M, "the deck is {deck:.1} m");
         let h = |u: f32| profile[(u.round() as usize).min(profile.len() - 1)];
         let (a, b) = (up + deck * 0.2, up + deck * 0.8);
         let flat = (h(b) - h(a)).abs() / (b - a);
         let ramp = (h(up) - h(0.0)) / up;
         assert!(
-            ramp > 0.2 && flat * 3.0 < ramp,
+            // Over 15%, not 20: the faces were lengthened to ride gentler, and a 3 m jump on a
+            // 13 m face averages 23% before its foot is rounded in.
+            ramp > 0.15 && flat * 3.0 < ramp,
             "the deck runs at {:.0}% and the ramp at {:.0}% — that is a point, not a top",
             flat * 100.0,
             ramp * 100.0
