@@ -64,6 +64,8 @@
   tyre lines catch the light in game the way they do in the studio's 3D view.
 
 ### Fixed
+- Braking bumps roll across the lane instead of standing up as spikes between the ruts.
+- The start straight no longer has a single groove down its middle.
 - Banner boards no longer stand off the track in another track's corner shape.
 - Ruts no longer spike where they start in a corner.
 - Trees no longer stand on the track.

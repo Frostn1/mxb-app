@@ -537,8 +537,9 @@ const BRAKE_LINES: i32 = 2;
 /// Crest slots to a group of braking bumps, of which only the first one or two stand. Ridden
 /// as "super clamped together" with every slot filled.
 const BRAKE_GROUP: f32 = 4.0;
-const BRAKE_LINE_M: f32 = 2.2;
-const BRAKE_LINE_HALF_M: f32 = 1.1;
+const BRAKE_LINE_M: f32 = 2.8;
+// 1.1 m stood each lone bump up as a cone between the ruts — ridden and seen as shark fins.
+const BRAKE_LINE_HALF_M: f32 = 2.0;
 
 /// How far apart the chop everyone's rear wheel leaves on the way out of a corner is, and how
 /// tall it stands. Longer and lower than braking: acceleration bumps are stretched out by the
@@ -1693,7 +1694,9 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 }
                 // Not polished: braking bumps are worst on the line, where everyone brakes.
                 let w = brake * sets * clear * groomed;
-                heights[i] += rise.clamp(0.0, 1.0) * feel.brake.1 * w;
+                // Half: a crest used to swing half above grade and half below; rising from
+                // grade at full height it stood twice as tall as it ever did.
+                heights[i] += rise.clamp(0.0, 1.0) * feel.brake.1 * 0.5 * w;
                 // The back of each bump, where the packed soil shows through the paint.
                 bump[i] = (back * w).min(1.0);
             }
@@ -1870,12 +1873,21 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             let mut in_rut = 0.0f32;
             if s > rut_from {
                 let grow = smoothstep(((s - rut_from) / (len - rut_from).max(1.0)).clamp(0.0, 1.0));
-                let spacing = (wide * 1.6 / START_RUT_LANES as f32).max(1.2);
-                for k in 0..START_RUT_LANES {
-                    let at = (k as f32 - (START_RUT_LANES as f32 - 1.0) * 0.5) * spacing
-                        + 0.5 * fbm(s / 20.0, k as f32 * 3.7, r.seed ^ 0x57C0);
-                    let x = (t - at) / 0.6;
-                    in_rut = in_rut.max((-x * x).exp() * (0.7 + 0.3 * fbm(s / 15.0, k as f32, r.seed ^ 0x57C1)));
+                // A comb at the lap's own lane spacing across the whole width, half a lane off
+                // the centre and each lane coming and going like the lap's. Spaced by the pad's
+                // width, the middle lane was the only one near the middle, and it rode as one
+                // groove down the centre of the straight.
+                let n = ((wide - 1.0) / RUT_LANE_M).floor().max(0.0) as i32;
+                for k in -n..=n {
+                    let kf = k as f32;
+                    let at = (kf + 0.5) * RUT_LANE_M + 0.4 * fbm(s / 20.0, kf * 3.7, r.seed ^ 0x57C0);
+                    let exists = smoothstep(
+                        ((fbm(s / 18.0, kf * 5.1, r.seed ^ 0x57C4) + 0.2) * 3.0).clamp(0.0, 1.0),
+                    );
+                    let x = (t - at) / 0.55;
+                    in_rut = in_rut.max(
+                        (-x * x).exp() * exists * (0.7 + 0.3 * fbm(s / 15.0, kf, r.seed ^ 0x57C1)),
+                    );
                 }
                 let cut = START_RUT_DEPTH_M * grow * in_rut * claim;
                 heights[i] -= cut;
@@ -1897,7 +1909,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                         (smoothstep((1.0 - x) / (1.0 - peak)), true)
                     };
                     let ease = smoothstep(((START_BRAKE_M - into) / 6.0).clamp(0.0, 1.0));
-                    let h = prof * BRAKING_HEIGHT_M * 0.6 * ease * (1.0 - in_rut) * claim;
+                    let h = prof * BRAKING_HEIGHT_M * 0.35 * ease * (1.0 - in_rut) * claim;
                     heights[i] += h;
                     if falling {
                         bump[i] = bump[i].max(prof * ease * (1.0 - in_rut));
@@ -5442,11 +5454,9 @@ const STREAK_WANDER_M: f32 = 0.6;
 const STREAK_REACH: f32 = 1.0;
 const STREAK_DEPTH: f32 = 0.8;
 
-/// How far before turn one the start straight is rutted and bumped, how deep its ruts get and
-/// how many lanes it carries into the corner.
+/// How far before turn one the start straight is rutted and bumped, and how deep its ruts get.
 const START_RUT_M: f32 = 45.0;
-const START_RUT_DEPTH_M: f32 = 0.28;
-const START_RUT_LANES: i32 = 5;
+const START_RUT_DEPTH_M: f32 = 0.2;
 const START_BRAKE_M: f32 = 22.0;
 
 /// Where the dark ground shows through the riding surface: every groove's floor, the back of
