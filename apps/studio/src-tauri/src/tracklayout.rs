@@ -901,7 +901,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
         // on a track that has to be built right or not at all, and ours are not.
         let pick = rng.range(0.0, 1.0);
         let length;
-        if pick < 0.36 && room > 30.0 {
+        if pick < 0.22 && room > 30.0 {
             // A table's size is its *deck*, with the faces added on. The faces are set by the
             // published lip and landing angles and come to thirty-odd metres on their own, so
             // stating a 40 m table asks for a 6 m top and gets a long rounded hill.
@@ -913,7 +913,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             let height = rng.range(1.68, 2.1);
             length = (rng.range(11.2, 18.9) + faces(height)).min(room);
             out.push(Feature::Tabletop { at: pos, length, height, lip: 0.0 });
-        } else if pick < 0.55 && room > 30.0 {
+        } else if pick < 0.30 && room > 30.0 {
             // A table is not always flat end to end. A whale tail rises, dips over its middle
             // and rises again before the landing — two crests a rider can either double or
             // roll — which is a shape a tabletop's three numbers cannot describe.
@@ -945,10 +945,109 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
                     .map(|(m, v)| crate::trackprog::ShapePoint { u: m / span, h: v * scale })
                     .collect(),
             });
-        } else if pick < 0.82 && room > 24.0 {
-            // A climb rather than a wall with a ramp on it.
+        } else if pick < 0.40 && room > 30.0 {
+            // A single: one mound, jumped off its face and landed on its own back.
+            let h = rng.range(1.2, 1.8);
+            let (up, down) = (lip_run(h), landing_run(h));
+            let crest = 1.5;
+            let span = up + crest + down;
+            length = span.min(room);
+            let scale = length / span;
+            let marks = [(0.0, 0.0), (up, h), (up + crest, h), (span, 0.0)];
+            out.push(Feature::Custom {
+                at: pos,
+                length,
+                shape: marks
+                    .iter()
+                    .map(|(m, v)| crate::trackprog::ShapePoint { u: m / span, h: v * scale })
+                    .collect(),
+            });
+        } else if pick < 0.50 && room > 52.0 {
+            // A double: a take-off, a gap and a landing ramp, cleared in one.
+            let height = rng.range(1.4, 2.1);
+            let lip = if rng.range(0.0, 1.0) < 0.5 { 0.0 } else { 10.0 };
+            let gap = rng.range(5.0, 10.0);
+            length = crate::trackprog::double_faces(height, lip).total(gap);
+            out.push(Feature::Double { at: pos, height, gap, lip });
+        } else if pick < 0.57 && room > 60.0 {
+            // A triple: a take-off, a middle lump and a landing ramp. The fast clear it in one;
+            // everyone else jumps it as a double and a single.
+            let h = rng.range(1.6, 2.1);
+            let (up, down) = (lip_run(h), landing_run(h));
+            let (g1, g2) = (rng.range(6.0, 8.0), rng.range(6.0, 8.0));
+            let mut x = 0.0f32;
+            let mut marks = vec![(0.0f32, 0.0f32)];
+            for (run, v) in [(up, h), (1.2, h), (g1, 0.35 * h), (3.0, 0.8 * h), (g2, 0.35 * h), (3.0, 0.9 * h), (down, 0.0)] {
+                x += run;
+                marks.push((x, v));
+            }
+            length = x;
+            out.push(Feature::Custom {
+                at: pos,
+                length,
+                shape: marks
+                    .iter()
+                    .map(|(m, v)| crate::trackprog::ShapePoint { u: m / x, h: *v })
+                    .collect(),
+            });
+        } else if pick < 0.64 && room > 64.0 {
+            // A table with a single after it: roll the table and jump the single, clear the
+            // deck onto the single's back as a double, or go further still.
+            let h = rng.range(1.7, 2.0);
+            let h2 = rng.range(1.2, 1.6);
+            let (up, down) = (lip_run(h), landing_run(h));
+            let (up2, down2) = (lip_run(h2), landing_run(h2));
+            let deck = rng.range(8.0, 12.0);
+            let gap = rng.range(3.0, 6.0);
+            let mut x = 0.0f32;
+            let mut marks = vec![(0.0f32, 0.0f32)];
+            for (run, v) in [
+                (up, h),
+                (deck, h),
+                (down * 0.6, 0.2 * h),
+                (gap * 0.5, 0.15 * h),
+                (gap * 0.5, 0.2 * h),
+                (up2, h2),
+                (1.5, h2),
+                (down2, 0.0),
+            ] {
+                x += run;
+                marks.push((x, v));
+            }
+            length = x;
+            out.push(Feature::Custom {
+                at: pos,
+                length,
+                shape: marks
+                    .iter()
+                    .map(|(m, v)| crate::trackprog::ShapePoint { u: m / x, h: *v })
+                    .collect(),
+            });
+        } else if pick < 0.72 && room > 70.0 {
+            // A wave section: a run of long rolling waves, taller and further apart than
+            // whoops, drawn as one shape so no hollow is dug between them.
+            let waves = rng.range(3.0, 5.99) as usize;
+            let wave = rng.range(12.0, 15.0);
+            let h = rng.range(0.9, 1.3);
+            let span = wave * waves as f32;
+            length = span;
+            let n = (span / 1.0) as usize;
+            out.push(Feature::Custom {
+                at: pos,
+                length,
+                shape: (0..=n)
+                    .map(|i| {
+                        let x = span * i as f32 / n as f32;
+                        let v = h * 0.5 * (1.0 - (std::f32::consts::TAU * x / wave).cos());
+                        crate::trackprog::ShapePoint { u: x / span, h: v }
+                    })
+                    .collect(),
+            });
+        } else if pick < 0.86 && room > 24.0 {
+            // A climb rather than a wall with a ramp on it, or a drop down one.
             length = rng.range(34.0, 48.0).min(room);
-            out.push(Feature::StepUp { at: pos, length, height: rng.range(0.84, 1.4) });
+            let height = rng.range(0.84, 1.4) * if rng.range(0.0, 1.0) < 0.5 { -1.0 } else { 1.0 };
+            out.push(Feature::StepUp { at: pos, length, height });
         } else {
             length = rng.range(10.0, 16.0).min(room);
             if length < 8.0 {
@@ -978,8 +1077,24 @@ pub fn draw(seed: u64) -> Option<TrackProgram> {
             break;
         }
     }
-    let (segments, start) = grown?;
+    let (mut segments, start) = grown?;
     let features = features(&mut rng, &segments);
+    // Up and down: a climb on one long straight and a drop on another. Drawn after the jumps,
+    // so the lap's shape and what is built on it stay where they were; the lap hands any net
+    // rise back evenly.
+    let mut long: Vec<(u64, usize)> = segments
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, s)| matches!(s, Segment::Straight { length, .. } if *length >= 45.0))
+        .map(|(i, _)| ((rng.range(0.0, 1.0) * 1e6) as u64, i))
+        .collect();
+    long.sort();
+    for (j, &(_, i)) in long.iter().take(2).enumerate() {
+        if let Segment::Straight { rise, .. } = &mut segments[i] {
+            *rise = rng.range(2.5, 4.0) * if j == 0 { 1.0 } else { -1.0 };
+        }
+    }
     let surface = match rng.int(0, 9) {
         0..=6 => Surface::Soil,
         7..=8 => Surface::Sand,

@@ -692,6 +692,333 @@ fn short(sheet: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// A donor's start/finish arch, lifted whole as one prop.
+///
+/// The prop lifter breaks Indiana's into six pieces and stands the header on the ground, so it
+/// is taken here by position instead: every island of the arch's sheet in a box round the
+/// finish, less the low fence rail beside it and the guy wires, whose anchors stand below the
+/// posts' feet. Kept in the donor's own axes with its heading as `axis_ref`, the convention
+/// replayed instances use, so standing it on our lap is one turn.
+pub fn lift_arch(donor: &Donor) -> Option<Prop> {
+    const SHEET: &str = "main_track_objects_c";
+    let stations = donor.lap.stations(1.0);
+    let st = *stations.first()?;
+    let (fx, fz) = (st.heading.sin(), st.heading.cos());
+    let (rx, rz) = crate::trackprog::right_vector(st.heading);
+    let sheet_of = |m: u32| -> String {
+        donor.sheets.get(m as usize).map(|(n, ..)| n.to_ascii_lowercase()).unwrap_or_default()
+    };
+    let frame = |o: &map::MapObject| -> (f32, f32) {
+        let (cx, cz) = ((o.min[0] + o.max[0]) * 0.5 - st.x, (o.min[2] + o.max[2]) * 0.5 - st.z);
+        (cx * fx + cz * fz, cx * rx + cz * rz)
+    };
+    // Found by its header: the highest piece of the sheet that spans the track near the start
+    // of the lap. The arch stands in that one plane; its guy wires and the timing tower beside
+    // it do not, so a thin slab round the header takes the arch and nothing else.
+    let across_span = |o: &map::MapObject| -> f32 {
+        let (dx, dz) = (o.max[0] - o.min[0], o.max[2] - o.min[2]);
+        (dx * rx).abs() + (dz * rz).abs()
+    };
+    let header = donor
+        .mesh
+        .objects
+        .iter()
+        .filter(|o| sheet_of(o.material) == SHEET && across_span(o) >= 8.0)
+        .filter(|o| {
+            let (along, across) = frame(o);
+            (-5.0..=30.0).contains(&along) && across.abs() <= 12.0
+        })
+        .max_by(|a, b| a.max[1].total_cmp(&b.max[1]))?;
+    let plane = frame(header).0;
+    let near: Vec<usize> = donor
+        .mesh
+        .objects
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| sheet_of(o.material) == SHEET)
+        .filter(|(_, o)| {
+            let (along, across) = frame(o);
+            (along - plane).abs() <= 2.5 && across.abs() <= 9.0
+        })
+        .map(|(i, _)| i)
+        .collect();
+    // The posts are the tall pieces; their feet are the arch's ground.
+    let feet = near
+        .iter()
+        .map(|&i| &donor.mesh.objects[i])
+        .filter(|o| o.max[1] - o.min[1] >= 3.0)
+        .map(|o| o.min[1])
+        .fold(f32::INFINITY, f32::min);
+    if !feet.is_finite() {
+        return None;
+    }
+    let islands: Vec<usize> = near
+        .into_iter()
+        .filter(|&i| {
+            let o = &donor.mesh.objects[i];
+            o.min[1] >= feet - 0.3 && o.max[1] >= feet + 0.8
+        })
+        .collect();
+    if islands.len() < 3 {
+        return None;
+    }
+    let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for &i in &islands {
+        let o = &donor.mesh.objects[i];
+        for k in 0..3 {
+            min[k] = min[k].min(o.min[k]);
+            max[k] = max[k].max(o.max[k]);
+        }
+    }
+    let obj = Object { class: Class::Structure, sheet: SHEET.into(), islands, min, max };
+    let (mesh, _, _) = lift(&donor.mesh, &obj);
+    let height = max[1] - min[1];
+    if height < 4.0 {
+        return None;
+    }
+    let reach = mesh
+        .positions
+        .chunks_exact(3)
+        .map(|v| (v[0] * v[0] + v[2] * v[2]).sqrt())
+        .fold(0.0f32, f32::max);
+    Some(Prop {
+        id: "finish_arch".into(),
+        sheet: SHEET.into(),
+        class: Class::Structure,
+        mesh,
+        height,
+        span: (max[0] - min[0]).max(max[2] - min[2]),
+        reach,
+        axis_ref: st.heading,
+    })
+}
+
+/// A donor's edge pieces, one real model each: the stake that marks the track edge and one
+/// piece of the barrier that lines the lap further out.
+///
+/// Indiana's stakes are its light 0.76 m posts 5–7 m out, every 6.4 m; its barrier is netting,
+/// `ck_fence_c_a` panels 3.45 m long and 1.5 m tall about 12.5 m out, on thin posts. Each is the median of its kind, kept in the
+/// donor's axes with its heading as `axis_ref`, so it turns onto our lap like an instance.
+pub fn lift_edge(donor: &Donor) -> Vec<Prop> {
+    let stations = donor.lap.stations(1.0);
+    let sheet_of = |m: u32| -> String {
+        donor.sheets.get(m as usize).map(|(n, ..)| n.to_ascii_lowercase()).unwrap_or_default()
+    };
+    let mut stakes: Vec<(f32, usize, f32)> = Vec::new();
+    let mut barrier: Vec<(f32, usize, f32)> = Vec::new();
+    let mut posts: Vec<(f32, usize, f32)> = Vec::new();
+    for (i, o) in donor.mesh.objects.iter().enumerate() {
+        let (w, h, d) = (o.max[0] - o.min[0], o.max[1] - o.min[1], o.max[2] - o.min[2]);
+        let (cx, cz) = ((o.min[0] + o.max[0]) * 0.5, (o.min[2] + o.max[2]) * 0.5);
+        let (_, off, heading) = nearest(&stations, cx, cz);
+        if (0.5..=0.85).contains(&h) && w.max(d) < 0.12 && (6.0..=8.0).contains(&off.abs()) {
+            stakes.push((h, i, heading));
+        } else if (1.3..=1.7).contains(&h)
+            && (2.5..=4.5).contains(&w.max(d))
+            && (11.0..=14.5).contains(&off.abs())
+            // Not the roadside bushes, which stand just as tall and long and outnumber it.
+            && !matches!(crate::trackobjects::classify(&sheet_of(o.material)), Class::Tree | Class::Crowd)
+        {
+            // A netting panel between two posts, 3.45 m on Indiana.
+            barrier.push((w.max(d), i, heading));
+        } else if (1.3..=1.6).contains(&h) && w.max(d) < 0.2 && (11.0..=14.5).contains(&off.abs()) {
+            posts.push((h, i, heading));
+        }
+    }
+    // The barrier by shape, not by name: whichever sheet carries most of the pieces standing
+    // where Indiana's lines the lap. Its name was measured once under a binding that was off.
+    let mut by_sheet: HashMap<String, usize> = HashMap::new();
+    for &(_, i, _) in &barrier {
+        *by_sheet.entry(sheet_of(donor.mesh.objects[i].material)).or_default() += 1;
+    }
+    if let Some((top, _)) = by_sheet.iter().max_by_key(|(_, n)| **n).map(|(s, n)| (s.clone(), *n)) {
+        barrier.retain(|&(_, i, _)| sheet_of(donor.mesh.objects[i].material) == top);
+    }
+    let mut by_sheet: HashMap<String, usize> = HashMap::new();
+    for &(_, i, _) in &posts {
+        *by_sheet.entry(sheet_of(donor.mesh.objects[i].material)).or_default() += 1;
+    }
+    if let Some((top, _)) = by_sheet.iter().max_by_key(|(_, n)| **n).map(|(s, n)| (s.clone(), *n)) {
+        posts.retain(|&(_, i, _)| sheet_of(donor.mesh.objects[i].material) == top);
+    }
+    let mut out = Vec::new();
+    for (id, mut found) in [("edge_stake", stakes), ("edge_barrier", barrier), ("edge_post", posts)] {
+        if found.len() < 10 {
+            continue;
+        }
+        found.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (_, i, heading) = found[found.len() / 2];
+        let o = &donor.mesh.objects[i];
+        let sheet = sheet_of(o.material);
+        let obj = Object {
+            class: Class::Structure,
+            sheet: sheet.clone(),
+            islands: vec![i],
+            min: o.min,
+            max: o.max,
+        };
+        let (mesh, _, _) = lift(&donor.mesh, &obj);
+        let reach = mesh
+            .positions
+            .chunks_exact(3)
+            .map(|v| (v[0] * v[0] + v[2] * v[2]).sqrt())
+            .fold(0.0f32, f32::max);
+        out.push(Prop {
+            id: id.into(),
+            sheet,
+            class: Class::Structure,
+            mesh,
+            height: o.max[1] - o.min[1],
+            span: (o.max[0] - o.min[0]).max(o.max[2] - o.min[2]),
+            reach,
+            axis_ref: heading,
+        });
+    }
+    out
+}
+
+/// Whether a sheet is people rather than trees. `CK_TREE_cutout_people_atlas` says "tree" and
+/// is a crowd of cardboard spectators; planted in a wood, that is what stood there.
+pub fn is_crowd(sheet: &str) -> bool {
+    let s = sheet.to_ascii_lowercase();
+    ["people", "crowd", "spectator"].iter().any(|w| s.contains(w))
+}
+
+/// The arch's own sheet: a copy of the one it was lifted with, its parts painted near-black and
+/// its header black with a gold trim and FINISH in white. Indiana's says ARL a metre high, and
+/// the sheet is shared with the rest of Indiana's props, so the copy is the arch's alone.
+pub fn paint_arch(lib: &mut PropLibrary) -> bool {
+    let Some(ai) = lib.props.iter().position(|p| p.id == "finish_arch") else { return false };
+    let Some((_, w, h, src)) = lib.sheets.iter().find(|s| s.0 == lib.props[ai].sheet).cloned() else {
+        return false;
+    };
+    let (w, h) = (w as usize, h as usize);
+    let mut px = src;
+    let arch = &lib.props[ai];
+    let m = &arch.mesh;
+    let (rx, rz) = crate::trackprog::right_vector(arch.axis_ref);
+    let fill = |px: &mut Vec<u8>, tri: &[(f32, f32); 3], rgb: [u8; 3]| {
+        let (u0, v0) = (tri.iter().map(|t| t.0).fold(f32::MAX, f32::min), tri.iter().map(|t| t.1).fold(f32::MAX, f32::min));
+        let (bu, bv) = (u0.floor(), v0.floor());
+        let p: Vec<(f32, f32)> = tri.iter().map(|t| ((t.0 - bu) * w as f32, (t.1 - bv) * h as f32)).collect();
+        let (x0, x1) = (p.iter().map(|q| q.0).fold(f32::MAX, f32::min), p.iter().map(|q| q.0).fold(f32::MIN, f32::max));
+        let (y0, y1) = (p.iter().map(|q| q.1).fold(f32::MAX, f32::min), p.iter().map(|q| q.1).fold(f32::MIN, f32::max));
+        let area = (p[1].0 - p[0].0) * (p[2].1 - p[0].1) - (p[2].0 - p[0].0) * (p[1].1 - p[0].1);
+        for y in (y0.floor().max(0.0) as usize)..=(y1.ceil().min(h as f32 - 1.0) as usize) {
+            for x in (x0.floor().max(0.0) as usize)..=(x1.ceil().min(w as f32 - 1.0) as usize) {
+                let (qx, qy) = (x as f32 + 0.5, y as f32 + 0.5);
+                let e = |a: (f32, f32), b: (f32, f32)| (b.0 - a.0) * (qy - a.1) - (qx - a.0) * (b.1 - a.1);
+                let (a, b, c) = (e(p[1], p[2]), e(p[2], p[0]), e(p[0], p[1]));
+                let inside = if area >= 0.0 { a >= -1.0 && b >= -1.0 && c >= -1.0 } else { a <= 1.0 && b <= 1.0 && c <= 1.0 };
+                if inside {
+                    let o = (y * w + x) * 4;
+                    px[o..o + 3].copy_from_slice(&rgb);
+                }
+            }
+        }
+    };
+    // Every part near-black; the header is found as what stands in the top fifth.
+    let mut hdr = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    let (mut cua, mut cvy) = (0f64, 0f64);
+    for t in m.indices.chunks_exact(3) {
+        let uv = [0, 1, 2].map(|k| {
+            let i = t[k] as usize;
+            (m.uvs[i * 2], m.uvs[i * 2 + 1])
+        });
+        let su = uv.iter().map(|q| q.0).fold(f32::MIN, f32::max) - uv.iter().map(|q| q.0).fold(f32::MAX, f32::min);
+        let sv = uv.iter().map(|q| q.1).fold(f32::MIN, f32::max) - uv.iter().map(|q| q.1).fold(f32::MAX, f32::min);
+        if su > 0.5 || sv > 0.5 {
+            continue;
+        }
+        fill(&mut px, &uv, [14, 14, 16]);
+        let top = t.iter().all(|&i| m.positions[i as usize * 3 + 1] >= arch.height * 0.8);
+        if top {
+            for &(u, v) in &uv {
+                hdr = (hdr.0.min(u), hdr.1.min(v), hdr.2.max(u), hdr.3.max(v));
+            }
+            // Which way u runs across the track and v runs up, so the letters read right.
+            for k in 0..3 {
+                let i = t[k] as usize;
+                let (x, y, z) = (m.positions[i * 3], m.positions[i * 3 + 1], m.positions[i * 3 + 2]);
+                let (u, v) = uv[k];
+                cua += (u as f64) * ((x * rx + z * rz) as f64);
+                cvy += (v as f64) * (y as f64);
+            }
+        }
+    }
+    if hdr.0 < hdr.2 && hdr.1 < hdr.3 {
+        let (bu, bv) = (hdr.0.floor(), hdr.1.floor());
+        let (x0, x1) = (((hdr.0 - bu) * w as f32) as usize, (((hdr.2 - bu) * w as f32) as usize).min(w - 1));
+        let (y0, y1) = (((hdr.1 - bv) * h as f32) as usize, (((hdr.3 - bv) * h as f32) as usize).min(h - 1));
+        let (rw, rh) = ((x1 - x0).max(1) as f32, (y1 - y0).max(1) as f32);
+        let gold = [212u8, 170, 58];
+        for y in y0..=y1 {
+            let band = ((y - y0) as f32 / rh).min((y1 - y) as f32 / rh) < 0.1;
+            for x in x0..=x1 {
+                let o = (y * w + x) * 4;
+                px[o..o + 3].copy_from_slice(if band { &gold } else { &[10, 10, 12] });
+            }
+        }
+        // FINISH in block letters, 5 by 7 cells each.
+        const GLYPHS: [[&str; 7]; 6] = [
+            ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
+            ["11111", "00100", "00100", "00100", "00100", "00100", "11111"],
+            ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
+            ["11111", "00100", "00100", "00100", "00100", "00100", "11111"],
+            ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+            ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
+        ];
+        let cols = 6.0 * 5.0 + 5.0;
+        let cell = (rh * 0.62 / 7.0).min(rw * 0.9 / cols);
+        let (ox, oy) = ((rw - cols * cell) * 0.5, (rh - 7.0 * cell) * 0.5);
+        let (u_right, v_up) = (cua >= 0.0, cvy >= 0.0);
+        for (g, glyph) in GLYPHS.iter().enumerate() {
+            for (gy, row) in glyph.iter().enumerate() {
+                for (gx, c) in row.chars().enumerate() {
+                    if c != '1' {
+                        continue;
+                    }
+                    let tx = ox + (g as f32 * 6.0 + gx as f32) * cell;
+                    let ty = oy + gy as f32 * cell;
+                    for dy in 0..(cell.ceil() as usize) {
+                        for dx in 0..(cell.ceil() as usize) {
+                            let lx = tx + dx as f32;
+                            let ly = ty + dy as f32;
+                            let x = if u_right { x0 as f32 + lx } else { x1 as f32 - lx };
+                            let y = if v_up { y1 as f32 - ly } else { y0 as f32 + ly };
+                            let (x, y) = (x as usize, y as usize);
+                            if x >= w || y >= h {
+                                continue;
+                            }
+                            let o = (y * w + x) * 4;
+                            px[o..o + 3].copy_from_slice(&[245, 245, 245]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    lib.sheets.push(("finish_arch_c".into(), w as u32, h as u32, px));
+    lib.props[ai].sheet = "finish_arch_c".into();
+    true
+}
+
+/// Trees from another track, added as models to plant by rule. They carry no instances: where
+/// they stood on their own track means nothing on ours. Returns how many were added.
+pub fn add_trees(lib: &mut PropLibrary, donor: &Donor, max_dim: u32) -> usize {
+    let other = extract(donor, &[Class::Tree]);
+    let before = lib.props.len();
+    lib.props.extend(
+        other
+            .props
+            .into_iter()
+            .filter(|p| p.class == Class::Tree && (4.0..=40.0).contains(&p.height) && !is_crowd(&p.sheet)),
+    );
+    let added = lib.props.len() - before;
+    sheets_for(donor, lib, max_dim);
+    added
+}
+
 /// Sheets a library carries for scenery placed by rule rather than lifted: goggle tear-offs,
 /// 1,452 flat quads on Indiana, too small to lift as props.
 pub const SCATTER_SHEETS: [&str; 1] = ["tearoffs_c_a"];
@@ -713,9 +1040,11 @@ pub fn sheets_for(donor: &Donor, lib: &mut PropLibrary, max_dim: u32) {
     // Sheets laid by a rule rather than lifted as props: see `trackscenery::tearoffs`.
     want.extend(SCATTER_SHEETS.iter().map(|s| s.to_string()));
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // A second donor adds its own sheets and none it shares a name with.
+    let have: std::collections::HashSet<String> = lib.sheets.iter().map(|s| s.0.clone()).collect();
     for t in map::textures(&donor.map_bytes, max_dim) {
         let name = t.name.to_ascii_lowercase();
-        if !want.contains(&name) || !seen.insert(name.clone()) {
+        if !want.contains(&name) || have.contains(&name) || !seen.insert(name.clone()) {
             continue;
         }
         lib.sheets.push((name, t.width, t.height, t.rgba));
@@ -1310,7 +1639,32 @@ mod baked {
             &donor,
             &[Class::Structure, Class::Vehicle, Class::Tree, Class::Bale, Class::Pole],
         );
+        // The start/finish arch, whole, placed by rule at our finish line.
+        if let Some(arch) = lift_arch(&donor) {
+            eprintln!("  finish arch: {:.1} m tall, {:.1} m across", arch.height, arch.span);
+            lib.props.push(arch);
+        }
+        for piece in lift_edge(&donor) {
+            eprintln!("  {}: {:.2} m tall, {:.2} m long, on {}", piece.id, piece.height, piece.span, piece.sheet);
+            lib.props.push(piece);
+        }
         sheets_for(&donor, &mut lib, cap);
+        // Trees from other tracks beside the donor's own: FROST_TREES=a.pkz,b.pkz.
+        for extra in std::env::var("FROST_TREES").unwrap_or_default().split(',').filter(|p| !p.is_empty()) {
+            let d = open(&std::path::PathBuf::from(extra)).expect("opens");
+            let n = add_trees(&mut lib, &d, cap);
+            eprintln!("  +{n} trees from {}", d.stem);
+        }
+        if paint_arch(&mut lib) {
+            eprintln!("  finish arch repainted: black and gold, FINISH in white");
+            // FROST_ARCH_PNG=path writes the repainted sheet, to check the lettering reads.
+            if let (Ok(path), Some((_, w, h, rgba))) = (
+                std::env::var("FROST_ARCH_PNG"),
+                lib.sheets.iter().find(|s| s.0 == "finish_arch_c"),
+            ) {
+                image::RgbaImage::from_raw(*w, *h, rgba.clone()).unwrap().save(path).unwrap();
+            }
+        }
         let bytes = lib.encode();
 
         let path = std::path::PathBuf::from(&out);

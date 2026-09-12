@@ -665,60 +665,6 @@ fn fence_sheet() -> Texture {
     })
 }
 
-/// A block: a white body on a dark base, which is what stops it reading as a paper cube.
-fn bale_mesh() -> Mesh {
-    let mut m = edfwrite::moved(
-        &edfwrite::cuboid(BALE_W_M, BALE_H_M * 0.82, BALE_D_M),
-        [0.0, BALE_H_M * 0.09, 0.0],
-    );
-    m.append(&edfwrite::moved(
-        &edfwrite::cuboid(BALE_W_M * 1.04, BALE_H_M * 0.18, BALE_D_M * 1.04),
-        [0.0, -BALE_H_M * 0.41, 0.0],
-    ));
-    m
-}
-
-fn bale_sheet() -> Texture {
-    sheet("bale_c", 64, |u, v| {
-        let g = grain(u, v, 0x51A7, 32.0);
-        // White, the way a modern track's blocks are — hay-coloured ones read as a yellow lump
-        // from any distance — over a dark foot, which is what gives it an edge to see.
-        let base = if v > 0.86 {
-            [58, 60, 64]
-        } else if v < 0.06 {
-            [206, 208, 210]
-        } else {
-            [238, 240, 242]
-        };
-        [
-            (base[0] as f32 * (0.86 + 0.2 * g)) as u8,
-            (base[1] as f32 * (0.86 + 0.2 * g)) as u8,
-            (base[2] as f32 * (0.86 + 0.2 * g)) as u8,
-            255,
-        ]
-    })
-}
-
-/// A tree's sheet, in two halves: bark on the left, foliage on the right.
-///
-/// The tree is solid geometry now rather than crossed cards, so nothing here is cut out — a
-/// canopy built as a shape does not need an alpha channel to stop being a slab.
-fn tree_sheet() -> Texture {
-    sheet("tree_c", 128, |u, v| {
-        if u < 0.5 {
-            // Bark: vertical grain, because that is the one thing that makes a trunk read.
-            let streak = grain(u * 6.0, v, 0x77B1, 30.0);
-            let s = 0.72 + 0.46 * streak;
-            [(96.0 * s) as u8, (72.0 * s) as u8, (52.0 * s) as u8, 255]
-        } else {
-            let g = grain(u, v, 0x3D19, 34.0);
-            let h = grain(u, v, 0x1A55, 9.0);
-            let s = 0.58 + 0.34 * g + 0.16 * h;
-            [(62.0 * s) as u8, (112.0 * s) as u8, (50.0 * s) as u8, 255]
-        }
-    })
-}
-
 fn gate_sheet() -> Texture {
     sheet("gate_c", 64, |u, v| {
         let g = grain(u, v, 0x9E11, 24.0);
@@ -901,27 +847,6 @@ fn dome_sheet() -> Texture {
     })
 }
 
-/// The yellow post that stands beside a jump's takeoff.
-///
-/// A post and not a board: every track marks its jumps, and what it marks them with is a
-/// stake — a rider coming at a blind crest reads the line of colour, not a sign.
-fn jumpmark_mesh(h: f32) -> Mesh {
-    let mut m = edfwrite::cuboid(JUMPMARK_W_M, h, JUMPMARK_W_M);
-    // A pennant at the top: a triangle off one side of the post, doubled so it reads from
-    // both. It is the flag a rider picks up out of the corner of an eye, not the post.
-    let (w, flag_h) = (JUMPMARK_FLAG_M, JUMPMARK_FLAG_M * 0.62);
-    let y = h * 0.5 - flag_h * 0.5;
-    let mut flag = Mesh::default();
-    for (px, py) in [(0.0, y + flag_h * 0.5), (0.0, y - flag_h * 0.5), (w, y)] {
-        flag.positions.extend_from_slice(&[px, py, 0.0]);
-        flag.normals.extend_from_slice(&[0.0, 0.0, 1.0]);
-        flag.uvs.extend_from_slice(&[px / w, 0.5 - py * 0.1]);
-    }
-    flag.indices.extend_from_slice(&[0, 1, 2]);
-    m.append(&edfwrite::double_sided(&flag));
-    m
-}
-
 /// What a tyre leaves, as a texture: the print of a knobbly.
 ///
 /// Asked for outright after two rides — "tyre marks don't mean grooves everywhere, I meant
@@ -968,14 +893,6 @@ fn tyre_sheet() -> Texture {
             (22.0 * g) as u8,
             (215.0 * a) as u8,
         ]
-    })
-}
-
-fn jumpmark_sheet() -> Texture {
-    sheet("jumpmark_c", 32, |u, v| {
-        let g = grain(u, v * 0.3, 0x8B31, 24.0);
-        let k = 0.90 + 0.16 * g;
-        [(242.0 * k) as u8, (198.0 * k) as u8, (28.0 * k) as u8, 255]
     })
 }
 
@@ -1095,21 +1012,13 @@ const TYRE_W_M: f32 = 0.34;
 const TYRE_TREAD_M: f32 = 0.42;
 const TYRE_LIFT_M: f32 = 0.035;
 
-/// A pole: a post with a crossbar near the top. Power, floodlight or flag — at the distance
-/// these stand it is a vertical, and what it does is break up the skyline.
-fn pole_mesh(h: f32) -> Mesh {
-    let mut m = edfwrite::cuboid(0.22, h, 0.22);
-    m.append(&edfwrite::moved(&edfwrite::cuboid(1.8, 0.14, 0.14), [0.0, h * 0.86, 0.0]));
-    m
-}
-
 /// The ground beyond the plot, and the pines standing on it.
 ///
 /// Built outward from the plot's centre, one ray at a time: each ray leaves the square exactly
 /// at its edge, at the edge's own height, and climbs from there, so the bank meets the terrain
 /// with no seam and no gap at the corners. The rise varies round the ring, so the horizon is a
 /// line of hills rather than a wall.
-fn backdrop(prog: &TrackProgram, syn: &Synth, seed: u32) -> (Mesh, Mesh, usize) {
+fn backdrop(prog: &TrackProgram, syn: &Synth, seed: u32) -> (Mesh, Vec<Plant>) {
     let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
     let (cx, cz) = (sx * 0.5, sz * 0.5);
     const OUT: [f32; 7] = [0.0, 8.0, 20.0, 38.0, 60.0, 85.0, BACKDROP_REACH_M];
@@ -1165,8 +1074,7 @@ fn backdrop(prog: &TrackProgram, syn: &Synth, seed: u32) -> (Mesh, Mesh, usize) 
     }
 
     // Pines on it, jittered off a grid in (angle, distance) so they read as a wood.
-    let mut trees = Mesh::default();
-    let mut n = 0usize;
+    let mut plants = Vec::new();
     let mut d = 6.0f32;
     while d < BACKDROP_REACH_M - 4.0 {
         let (ex, ez, _, _) = exit(0.0);
@@ -1180,16 +1088,18 @@ fn backdrop(prog: &TrackProgram, syn: &Synth, seed: u32) -> (Mesh, Mesh, usize) 
             let a = std::f32::consts::TAU * (k as f32 + rnd(seed ^ 0xBAC2, key) - 0.5) / steps as f32;
             let dd = d + (rnd(seed ^ 0xBAC3, key) - 0.5) * BACKDROP_TREE_M;
             let p = point(a, dd.clamp(2.0, BACKDROP_REACH_M));
-            let h = TREE_H_M * (0.9 + 0.8 * rnd(seed ^ 0xBAC4, key));
-            trees.append(&edfwrite::moved(
-                &edfwrite::turned(&pine_mesh(h * 1.25, seed, key), 360.0 * rnd(seed ^ 0xBAC5, key)),
-                [p[0], p[1] - 0.1, p[2]],
-            ));
-            n += 1;
+            plants.push(Plant {
+                x: p[0],
+                z: p[2],
+                foot: p[1] - 0.1,
+                yaw: 360.0 * rnd(seed ^ 0xBAC5, key),
+                key: key ^ 0x6000_0000,
+                far: true,
+            });
         }
         d += BACKDROP_TREE_M;
     }
-    (ground_mesh, trees, n)
+    (ground_mesh, plants)
 }
 
 /// A smooth wander in one dimension, -1 to 1.
@@ -1219,14 +1129,6 @@ fn van_mesh() -> Mesh {
     m
 }
 
-fn pole_sheet() -> Texture {
-    sheet("pole_c", 32, |u, v| {
-        let g = grain(u, v * 0.3, 0x71B3, 24.0);
-        let s = 0.82 + 0.24 * g;
-        [(142.0 * s) as u8, (140.0 * s) as u8, (134.0 * s) as u8, 255]
-    })
-}
-
 /// A van's paint: white with a band of colour through it, which is what a team truck is
 /// without being anybody's actual livery.
 fn van_sheet() -> Texture {
@@ -1242,129 +1144,6 @@ fn van_sheet() -> Texture {
         let s = 0.90 + 0.12 * g;
         [(base[0] * s) as u8, (base[1] * s) as u8, (base[2] * s) as u8, 255]
     })
-}
-
-/// A tree of one kind or the other, so the wood comes out mixed.
-fn stand(h: f32, seed: u32, key: u32) -> Mesh {
-    if rnd(seed ^ 0x46, key) < PINE_SHARE {
-        pine_mesh(h * 1.25, seed, key)
-    } else {
-        tree_mesh(h, seed, key)
-    }
-}
-
-/// A conifer: a straight trunk and three skirts of needles narrowing to a point.
-///
-/// Its own mesh rather than a taller broadleaf, because at a distance a tree is a silhouette
-/// and nothing else — a ridge of pines behind a track is most of what tells you where it is.
-fn pine_mesh(h: f32, seed: u32, i: u32) -> Mesh {
-    const SIDES: usize = 6;
-    let mut m = Mesh::default();
-    let trunk_h = h * 0.22;
-    let r_trunk = (h * 0.028).max(0.05);
-
-    let ring = |mesh: &mut Mesh, y: f32, r: f32, u: f32, v: f32| -> u32 {
-        let start = mesh.vertex_count() as u32;
-        for s in 0..SIDES {
-            let a = std::f32::consts::TAU * s as f32 / SIDES as f32;
-            let (sx, sz) = (a.sin() * r, a.cos() * r);
-            mesh.positions.extend_from_slice(&[sx, y, sz]);
-            let l = (sx * sx + sz * sz).sqrt().max(1e-4);
-            mesh.normals.extend_from_slice(&[sx / l, 0.0, sz / l]);
-            mesh.uvs.extend_from_slice(&[u + 0.10 * (s as f32 / SIDES as f32), v]);
-        }
-        start
-    };
-    let mut band = |mesh: &mut Mesh, lo: u32, hi: u32| {
-        for s in 0..SIDES as u32 {
-            let n = (s + 1) % SIDES as u32;
-            mesh.indices.extend_from_slice(&[lo + s, lo + n, hi + s]);
-            mesh.indices.extend_from_slice(&[hi + s, lo + n, hi + n]);
-            mesh.indices.extend_from_slice(&[hi + s, lo + n, lo + s]);
-            mesh.indices.extend_from_slice(&[hi + n, lo + n, hi + s]);
-        }
-    };
-    let base = ring(&mut m, 0.0, r_trunk, 0.06, 0.02);
-    let top = ring(&mut m, trunk_h, r_trunk * 0.8, 0.06, 0.22);
-    band(&mut m, base, top);
-
-    // Three skirts, each narrower and higher than the last.
-    let spread = 0.85 + 0.30 * rnd(seed ^ 0xC1, i);
-    for k in 0..3u32 {
-        let f = k as f32 / 3.0;
-        let y0 = trunk_h + (h - trunk_h) * f * 0.62;
-        let y1 = y0 + (h - y0) * 0.78;
-        let r = (h * 0.30 * (1.0 - f * 0.55) * spread).max(0.3);
-        // Needles on the foliage half: at the bark's u the skirts faded brown into the tip.
-        let skirt = ring(&mut m, y0, r, 0.56, 0.45 + 0.15 * f);
-        let tip = m.vertex_count() as u32;
-        m.positions.extend_from_slice(&[0.0, y1, 0.0]);
-        m.normals.extend_from_slice(&[0.0, 1.0, 0.0]);
-        m.uvs.extend_from_slice(&[0.62, 0.95]);
-        for sd in 0..SIDES as u32 {
-            let n = (sd + 1) % SIDES as u32;
-            m.indices.extend_from_slice(&[skirt + sd, skirt + n, tip]);
-            m.indices.extend_from_slice(&[tip, skirt + n, skirt + sd]);
-        }
-    }
-    m
-}
-
-fn tree_mesh(h: f32, seed: u32, i: u32) -> Mesh {
-    const SIDES: usize = 7;
-    let mut m = Mesh::default();
-    let trunk_h = h * 0.42;
-    let r_base = (h * 0.045).max(0.06);
-
-    let ring = |mesh: &mut Mesh, y: f32, r: f32, u: f32, v: f32, wobble: f32, k: u32| -> u32 {
-        let start = mesh.vertex_count() as u32;
-        for s in 0..SIDES {
-            let a = std::f32::consts::TAU * s as f32 / SIDES as f32;
-            let rr = r * (1.0 - wobble * 0.5 + wobble * rnd(seed ^ 0xB1, k * 31 + s as u32));
-            let (sx, sz) = (a.sin() * rr, a.cos() * rr);
-            mesh.positions.extend_from_slice(&[sx, y, sz]);
-            // Unit length, and not merely pointing the right way: `map::parse` rejects a
-            // whole `.map` whose normals aren't unit, because that is its one cheap check
-            // that a block really is a vertex block. Tilted outward-and-up by eye and left
-            // un-normalised, these came out 1.031 long and TerrainEd's output — which was
-            // otherwise perfect — would not read back at all.
-            let (ox, oy, oz) = (sx, 0.25 * rr.max(0.01), sz);
-            let l = (ox * ox + oy * oy + oz * oz).sqrt().max(1e-4);
-            mesh.normals.extend_from_slice(&[ox / l, oy / l, oz / l]);
-            mesh.uvs.extend_from_slice(&[u + 0.18 * (s as f32 / SIDES as f32), v]);
-        }
-        start
-    };
-    // Wound the way `cuboid` is — see its note. Outward faces come after the reverse.
-    let mut band = |mesh: &mut Mesh, lo: u32, hi: u32| {
-        for s in 0..SIDES as u32 {
-            let n = (s + 1) % SIDES as u32;
-            mesh.indices.extend_from_slice(&[lo + s, lo + n, hi + s]);
-            mesh.indices.extend_from_slice(&[hi + s, lo + n, hi + n]);
-        }
-    };
-
-    // Trunk: two rings, tapering.
-    let t0 = ring(&mut m, 0.0, r_base, 0.04, 0.95, 0.15, i * 3);
-    let t1 = ring(&mut m, trunk_h, r_base * 0.72, 0.04, 0.05, 0.15, i * 3 + 1);
-    band(&mut m, t0, t1);
-
-    // Canopy: three rings and a cap, widest a third of the way up.
-    let cw = h * 0.34;
-    let c0 = ring(&mut m, trunk_h * 0.82, cw * 0.55, 0.55, 0.96, 0.30, i * 3 + 2);
-    let c1 = ring(&mut m, trunk_h + (h - trunk_h) * 0.30, cw, 0.55, 0.62, 0.30, i * 5);
-    let c2 = ring(&mut m, trunk_h + (h - trunk_h) * 0.68, cw * 0.74, 0.55, 0.30, 0.30, i * 5 + 1);
-    band(&mut m, c0, c1);
-    band(&mut m, c1, c2);
-    let apex = m.vertex_count() as u32;
-    m.positions.extend_from_slice(&[0.0, h, 0.0]);
-    m.normals.extend_from_slice(&[0.0, 1.0, 0.0]);
-    m.uvs.extend_from_slice(&[0.72, 0.04]);
-    for s in 0..SIDES as u32 {
-        let n = (s + 1) % SIDES as u32;
-        m.indices.extend_from_slice(&[c2 + s, c2 + n, apex]);
-    }
-    m
 }
 
 /// Squeeze a mesh's `v` into one band of the atlas, leaving `u` alone.
@@ -1517,10 +1296,19 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let mut stakes = Mesh::default();
     let mut banners = Mesh::default();
     let mut fence = Mesh::default();
-    let mut bales = Mesh::default();
-    let mut trees = Mesh::default();
-    let mut poles = Mesh::default();
-    let mut jumpmarks = Mesh::default();
+    let mut plants: Vec<Plant> = Vec::new();
+    // A lifted venue, if one is installed — and with it a real start/finish arch, which
+    // replaces the two box gantries this used to draw.
+    let lib = crate::trackprops::load();
+    let arch = lib.as_ref().and_then(|l| l.props.iter().find(|p| p.id == "finish_arch"));
+    let mut arch_kind: Option<(String, Mesh, Texture, bool)> = None;
+    // Indiana's own edge pieces, when the library carries them: its stake, and one piece of
+    // the barrier that lines its lap, repeated where ours drew boxes and printed boards.
+    let edge_stake = lib.as_ref().and_then(|l| l.props.iter().find(|p| p.id == "edge_stake"));
+    let edge_barrier = lib.as_ref().and_then(|l| l.props.iter().find(|p| p.id == "edge_barrier"));
+    let edge_post = lib.as_ref().and_then(|l| l.props.iter().find(|p| p.id == "edge_post"));
+    let mut barrier_kind: Option<(String, Mesh, Texture, bool)> = None;
+    let mut posts_kind: Option<(String, Mesh, Texture, bool)> = None;
     let mut vans = Mesh::default();
     let mut gate = Mesh::default();
     let mut tally = Vec::new();
@@ -1548,7 +1336,10 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             // line of stakes actually looks like once a meeting has been run on it. Wider than
             // it was, because a shorter stake needs more of it to read as knocked about.
             let lean = (rnd(seed ^ 0x13, key) - 0.5) * 26.0;
-            let post = edfwrite::cuboid(STAKE_W_M, h, STAKE_W_M);
+            let post = match edge_stake {
+                Some(p) => p.mesh.clone(),
+                None => edfwrite::cuboid(STAKE_W_M, h, STAKE_W_M),
+            };
             stakes.append(&edfwrite::moved(
                 &edfwrite::turned(&post, lean),
                 [x, ground(syn, x, z) - 0.03, z],
@@ -1559,6 +1350,60 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     }
     tally.push(("stakes", n));
 
+    if let (Some(piece), Some(lib)) = (edge_barrier, lib.as_ref()) {
+        // The real barrier, one piece after another along both sides, where the printed
+        // boards ran. Turned by our heading less the piece's own, like any lifted instance.
+        let off = BANNER_OFF_M.max(half + 2.5);
+        let step = piece.span.max(0.5);
+        let mut mesh = Mesh::default();
+        let mut post_mesh = Mesh::default();
+        let mut n = 0usize;
+        for side in [-1.0f32, 1.0] {
+            let line: Vec<(f32, f32)> = stations
+                .iter()
+                .map(|st| {
+                    let (rx, rz) = crate::trackprog::right_vector(st.heading);
+                    (st.x + rx * off * side, st.z + rz * off * side)
+                })
+                .collect();
+            let mut acc = Vec::with_capacity(line.len());
+            acc.push(0.0f32);
+            for w in line.windows(2) {
+                let d = ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt();
+                acc.push(acc.last().unwrap() + d);
+            }
+            let total = *acc.last().unwrap();
+            let (mut cursor, mut s) = (0usize, 0.0f32);
+            while s < total {
+                // A post where the panel starts, then the panel.
+                let (qx, qz, qdeg) = along_line(&line, &acc, &mut cursor, s);
+                let (x, z, deg) = along_line(&line, &acc, &mut cursor, s + step * 0.5);
+                s += step;
+                if !inside(prog, x, z, 3.0)
+                    || clearance(&coarse, x, z) < off - 1.5
+                    || !clear_of_the_start(x, z)
+                {
+                    continue;
+                }
+                let yaw = deg - 90.0 - piece.axis_ref.to_degrees();
+                mesh.append(&edfwrite::moved(&edfwrite::turned(&piece.mesh, yaw), [x, ground(syn, x, z), z]));
+                if let Some(p) = edge_post {
+                    let yaw = qdeg - 90.0 - p.axis_ref.to_degrees();
+                    post_mesh.append(&edfwrite::moved(&edfwrite::turned(&p.mesh, yaw), [qx, ground(syn, qx, qz), qz]));
+                }
+                n += 1;
+            }
+        }
+        if let Some((name, w, h, rgba)) = lib.sheets.iter().find(|s| s.0 == piece.sheet) {
+            let tex = Texture { name: name.clone(), width: *w, height: *h, rgba: rgba.clone() };
+            barrier_kind = Some(("barrier".into(), mesh, tex, true));
+        }
+        if let Some((name, w, h, rgba)) = edge_post.and_then(|p| lib.sheets.iter().find(|s| s.0 == p.sheet)) {
+            let tex = Texture { name: name.clone(), width: *w, height: *h, rgba: rgba.clone() };
+            posts_kind = Some(("barrier_posts".into(), post_mesh, tex, true));
+        }
+        tally.push(("barrier pieces", n));
+    } else {
     // 2. The printed line down both sides, in runs, of the two kinds a track carries: a
     //    hoarding of sponsors' boards bolted edge to edge, and a tiled banner — see [`Print`].
     //
@@ -1673,6 +1518,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     tally.push(("banner boards", n));
     tally.push(("banner runs", runs));
     tally.push(("tiled runs", tiled));
+    }
 
 
 
@@ -1683,96 +1529,8 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let _ = &mut fence;
 
 
-    // 4. Bales where a rider leaves the track fastest: the outside of every corner. Their
-    // long side runs along the track edge, which is what `along` is for.
-    let mut n = 0usize;
-    let mut s = 0.0f32;
-    while s < lap {
-        let st = at(s);
-        if st.curvature.abs() > 1.0 / 45.0 {
-            let side = -st.curvature.signum();
-            let (rx, rz) = crate::trackprog::right_vector(st.heading);
-            // A fixed offset and no jitter: a row of blocks is a *row*, and a row that
-            // wanders reads as rubbish left at the edge of a corner rather than as something
-            // somebody laid out.
-            let off = half + BALE_OFF_M;
-            let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
-            // Just off the edge of the track — which is where a block goes, and it is also
-            // why the clearance bar is low: at seven and a half metres from the line, a bar of
-            // "a track's width plus two" threw every one of them away.
-            if inside(prog, x, z, 3.0)
-                && clearance(&coarse, x, z) > half + 0.5
-                && clear_of_the_start(x, z)
-            {
-                let deg = along(st.heading);
-                let (lo, hi) = ground_foot(syn, x, z, deg, BALE_W_M, BALE_D_M);
-                if hi - lo > 0.8 {
-                    s += BALE_W_M + 0.35;
-                    continue;
-                }
-                // One in three. Laid end to end they are a wall; what a corner has is a few
-                // blocks with ground between them, and a rider reads the line from the gaps.
-                if n % 3 == 0 {
-                    bales.append(&edfwrite::moved(
-                        &edfwrite::turned(&bale_mesh(), deg),
-                        [x, (lo + hi) * 0.5, z],
-                    ));
-                }
-                n += 1;
-            }
-        }
-        s += BALE_W_M + 0.35;
-    }
-    tally.push(("bales", n / 3));
 
 
-    // 4b. A yellow board either side of every jump, at the takeoff — which is where a rider
-    //     needs to know one is coming. Nothing on the small stuff: a roller with a sign on it
-    //     is a track that has run out of things to say.
-    let mut n = 0usize;
-    for f in &prog.features {
-        let takeoff = match f {
-            // The top of the takeoff face, which is where a rider needs it — a marker before
-            // the ramp is a marker for the ground in front of the jump.
-            crate::trackprog::Feature::Tabletop { at, height, length, lip, .. } => {
-                let (up, top, _) = crate::trackprog::tabletop_faces(*height, *length, *lip);
-                Some((at + up + top * 0.15, *height))
-            }
-            crate::trackprog::Feature::Double { at, height, lip, .. } => {
-                // The lip is where the rider leaves the ground, which is the end of the ramp.
-                let ramp = crate::trackprog::double_faces(*height, *lip).ramp;
-                Some((at + ramp, *height))
-            }
-            crate::trackprog::Feature::StepUp { at, length, height, .. } => {
-                Some((at + length * 0.8, *height))
-            }
-            _ => None,
-        };
-        let Some((crest, height)) = takeoff else { continue };
-        if height.abs() < JUMPMARK_FROM_M {
-            continue;
-        }
-        let st = at(crest % lap);
-        let (rx, rz) = crate::trackprog::right_vector(st.heading);
-        for side in [-1.0f32, 1.0] {
-            let off = half + 0.4;
-            let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
-            if !inside(prog, x, z, 2.0) || !clear_of_the_start(x, z) {
-                continue;
-            }
-            // Tall enough to reach the top of the face. A jump's shape fades out across the
-            // width of the track, so the ground a post stands on at the edge is the *foot* of
-            // the jump — and a flag down there is a flag on the run-up, which is what it
-            // looked like. The post grows with the jump so the pennant sits at the crest.
-            let h = JUMPMARK_H_M + height.abs() * 0.9;
-            jumpmarks.append(&edfwrite::moved(
-                &edfwrite::turned(&jumpmark_mesh(h), along(st.heading)),
-                [x, ground(syn, x, z) - 0.05, z],
-            ));
-            n += 1;
-        }
-    }
-    tally.push(("jump boards", n));
 
     // 5. Trees, out past the fence, thinned so they don't line up with the lap.
     let mut n = 0usize;
@@ -1809,11 +1567,14 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
                 continue;
             }
             placed.push((x, z));
-            let h = TREE_H_M * (0.7 + 0.6 * rnd(seed ^ 0x44, i));
-            trees.append(&edfwrite::moved(
-                &edfwrite::turned(&stand(h, seed, i), 360.0 * rnd(seed ^ 0x45, i)),
-                [x, ground_min(syn, x, z, h * 0.2) - 0.05, z],
-            ));
+            plants.push(Plant {
+                x,
+                z,
+                foot: ground_min(syn, x, z, 1.0) - 0.05,
+                yaw: 360.0 * rnd(seed ^ 0x45, i),
+                key: i,
+                far: false,
+            });
             n += 1;
         }
         s += TREE_SPACING_M;
@@ -1851,11 +1612,14 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             if room < WOOD_FROM_M && rnd(seed ^ 0x66, key) > INFIELD_TREE_SHARE {
                 continue;
             }
-            let h = TREE_H_M * (0.75 + 0.7 * rnd(seed ^ 0x64, key));
-            trees.append(&edfwrite::moved(
-                &edfwrite::turned(&stand(h, seed, key), 360.0 * rnd(seed ^ 0x65, key)),
-                [x, ground_min(syn, x, z, h * 0.2) - 0.05, z],
-            ));
+            plants.push(Plant {
+                x,
+                z,
+                foot: ground_min(syn, x, z, 1.0) - 0.05,
+                yaw: 360.0 * rnd(seed ^ 0x65, key),
+                key: key ^ 0x5000_0000,
+                far: false,
+            });
             n += 1;
         }
         gz += WOOD_STEP_M;
@@ -1866,30 +1630,11 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     //     it. The plot ends forty metres from the line in places, and past it there was only
     //     the sky — ridden as "scenery could use a backdrop and some more objects in the
     //     background". Drawn and never solid: nobody rides out there.
-    let (backdrop, backdrop_trees, n) = backdrop(prog, syn, seed);
+    let (backdrop, far) = backdrop(prog, syn, seed);
+    let n = far.len();
+    plants.extend(far);
     tally.push(("backdrop trees", n));
 
-    // 6. Poles and vans — twenty and twenty-five a kilometre on the tracks measured, standing
-    //    18–26 m and 15–25 m off the line. Neither is scenery you look at; together they are
-    //    what stops the ground beside a track reading as an empty field.
-    let mut n = 0usize;
-    let mut s = 0.0f32;
-    while s < lap {
-        let st = at(s);
-        let (rx, rz) = crate::trackprog::right_vector(st.heading);
-        let key = (s / POLE_GAP_M) as u32;
-        let side = if key % 2 == 0 { -1.0f32 } else { 1.0 };
-        let off = 18.0 + 8.0 * rnd(seed ^ 0x72, key);
-        let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
-        if inside(prog, x, z, 3.0) && clearance(&coarse, x, z) > off - 2.0 && clear_of_the_start(x, z)
-        {
-            let h = POLE_H_M * (0.85 + 0.4 * rnd(seed ^ 0x73, key));
-            poles.append(&edfwrite::moved(&pole_mesh(h), [x, ground(syn, x, z) - 0.1, z]));
-            n += 1;
-        }
-        s += POLE_GAP_M;
-    }
-    tally.push(("poles", n));
 
     // No parked vans. They are what a paddock is full of, but ours stood close enough to the
     // riding line to be something a rider hits — a white box with a stripe down it, solid, in
@@ -1902,14 +1647,8 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     // and no published track lays anything like it. Indiana carries none.
     let tyre = Mesh::default();
 
-    // 7. The sky over all of it.
-    let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
-    // Past the backdrop's far edge, or the bank stands through the sky at the plot's corners.
-    let sky = edfwrite::moved(
-        &dome_mesh((sx.max(sz) * 0.95).max(0.5 * sx.hypot(sz) + BACKDROP_REACH_M + 30.0)),
-        [sx * 0.5, ground(syn, sx * 0.5, sz * 0.5) - 2.0, sz * 0.5],
-    );
-    tally.push(("sky", 1));
+    // No sky among the scenery. It is `dome.edf`, which the `.amb` loads at run time; placed
+    // here as well, TerrainEd baked its shadow over a third of the plot at a 40° sun.
 
     // 6. The start gantry, over the gate row — which is on the start straight, off to the
     //    side of the lap, not on the lap itself. It spans the whole row, and the row is 54 m
@@ -1927,24 +1666,57 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         }
         None => (at(2.0), half + 3.0),
     };
-    let (rx, rz) = crate::trackprog::right_vector(st.heading);
-    let mut highest = f32::NEG_INFINITY;
-    for side in [-1.0f32, 1.0] {
-        let (x, z) = (st.x + rx * gate_span * side, st.z + rz * gate_span * side);
-        let foot = ground(syn, x, z);
-        highest = highest.max(foot);
-        gate.append(&edfwrite::moved(&edfwrite::cuboid(0.5, 5.0, 0.5), [x, foot, z]));
+    if arch.is_none() {
+        let (rx, rz) = crate::trackprog::right_vector(st.heading);
+        let mut highest = f32::NEG_INFINITY;
+        for side in [-1.0f32, 1.0] {
+            let (x, z) = (st.x + rx * gate_span * side, st.z + rz * gate_span * side);
+            let foot = ground(syn, x, z);
+            highest = highest.max(foot);
+            gate.append(&edfwrite::moved(&edfwrite::cuboid(0.5, 5.0, 0.5), [x, foot, z]));
+        }
+        let span = gate_span * 2.0;
+        let beam = edfwrite::turned(&edfwrite::cuboid(span, 1.2, 0.3), across(st.heading));
+        gate.append(&edfwrite::moved(&beam, [st.x, highest + 4.6, st.z]));
+        tally.push(("gate", 1));
     }
-    let span = gate_span * 2.0;
-    let beam = edfwrite::turned(&edfwrite::cuboid(span, 1.2, 0.3), across(st.heading));
-    gate.append(&edfwrite::moved(&beam, [st.x, highest + 4.6, st.z]));
-    tally.push(("gate", 1));
 
     // And one over the finish line itself, which is where the finish jump lands. The same
     // shape as the gate's, narrower — it spans the racing line rather than a row of forty
     // gates — and taller, because what comes under it has just come off a three-metre
     // tabletop.
-    {
+    if let (Some(arch), Some(lib)) = (arch, lib.as_ref()) {
+        // The real one, scaled evenly until its posts clear our track: Indiana's stand 11 m
+        // apart, and a national here is wider than that.
+        let st = at(crate::tracksynth::finish_at(prog));
+        let (rx, rz) = crate::trackprog::right_vector(st.heading);
+        let feet = |k: f32| {
+            let post = arch.span * 0.39 * k;
+            [-1.0f32, 1.0]
+                .iter()
+                .map(|side| ground(syn, st.x + rx * post * side, st.z + rz * post * side))
+                .fold(f32::NEG_INFINITY, f32::max)
+        };
+        // Wide enough to clear the track, and tall enough that the header stands 5 m over the
+        // lip it straddles: the line is on the take-off, and riders leave the ground under it.
+        // Indiana's header is 4.5 m clear on 6.6 m.
+        let lip = ground(syn, st.x, st.z);
+        let mut k = ((prog.width + 3.0) / (arch.span * 0.75)).max(1.0);
+        for _ in 0..2 {
+            k = k.max((lip - feet(k) + 5.0) / (arch.height * 0.68));
+        }
+        let foot = feet(k);
+        let mut scaled = arch.mesh.clone();
+        scaled.positions.iter_mut().for_each(|v| *v *= k);
+        let deg = (st.heading - arch.axis_ref).to_degrees();
+        let mesh = edfwrite::moved(&edfwrite::turned(&scaled, deg), [st.x, foot, st.z]);
+        if let Some((name, w, h, rgba)) = lib.sheets.iter().find(|s| s.0 == arch.sheet) {
+            let tex = Texture { name: name.clone(), width: *w, height: *h, rgba: rgba.clone() };
+            // Drawn, not solid: whoever is high off the lip should fly through, not into it.
+            arch_kind = Some(("finish_arch".into(), mesh, tex, false));
+            tally.push(("finish arch", 1));
+        }
+    } else {
         let st = at(crate::tracksynth::finish_at(prog));
         let (rx, rz) = crate::trackprog::right_vector(st.heading);
         let span = half + 4.0;
@@ -1973,16 +1745,8 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let kinds: Vec<(String, Mesh, Texture, bool)> = vec![
         ("stakes".into(), stakes, stake_sheet(), false),
         ("banners".into(), banners, banner_sheet(), true),
-        ("bales".into(), bales, bale_sheet(), true),
-        // Not solid: clipping a marker board should cost a rider nothing.
-        ("jumpmarks".into(), jumpmarks, jumpmark_sheet(), false),
-        ("trees".into(), trees, tree_sheet(), true),
-        ("poles".into(), poles, pole_sheet(), false),
-        // The sky is drawn and nothing else: a dome you can ride into is not a sky.
-        ("sky".into(), sky, dome_sheet(), false),
         // The bank beyond the plot and the wood on it: drawn, never solid.
         ("backdrop".into(), backdrop, backdrop_sheet(), false),
-        ("backdrop_trees".into(), backdrop_trees, tree_sheet(), false),
         ("gate".into(), gate, gate_sheet(), true),
         // Drawn, never solid: a mark is paint on the ground, not a kerb.
     ];
@@ -1990,7 +1754,18 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     // A lifted venue, if one is installed. Absence is ordinary: a library is baked from a
     // donor archive the user already has, so most builds have none and place nothing.
     let mut kinds = kinds;
-    if let Some(lib) = crate::trackprops::load() {
+    kinds.extend(arch_kind);
+    kinds.extend(barrier_kind);
+    kinds.extend(posts_kind);
+    // The stakes wear the real stake's sheet when that is what they are.
+    if let (Some(p), Some(lib)) = (edge_stake, lib.as_ref()) {
+        if let Some((name, w, h, rgba)) = lib.sheets.iter().find(|s| s.0 == p.sheet) {
+            if let Some(k) = kinds.iter_mut().find(|k| k.0 == "stakes") {
+                k.2 = Texture { name: name.clone(), width: *w, height: *h, rgba: rgba.clone() };
+            }
+        }
+    }
+    if let Some(lib) = lib.as_ref() {
         let from = kinds.len();
         if let Some((name, w, h, rgba)) =
             lib.sheets.iter().find(|s| crate::trackprops::SCATTER_SHEETS.contains(&s.0.as_str()))
@@ -2001,7 +1776,11 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             // Drawn, never solid: a strip of film in the dirt.
             kinds.push(("tearoffs".into(), mesh, tex, false));
         }
-        for (name, mesh, tex, is_solid) in lifted(&lib, prog, syn) {
+        for (name, mesh, tex, is_solid) in plant_trees(lib, &plants) {
+            tally.push(("real trees", mesh.triangle_count()));
+            kinds.push((name, mesh, tex, is_solid));
+        }
+        for (name, mesh, tex, is_solid) in lifted(lib, prog, syn) {
             tally.push(("lifted", mesh.triangle_count()));
             kinds.push((name, mesh, tex, is_solid));
         }
@@ -2067,19 +1846,6 @@ mod tests {
                 syn.outside_the_start(v[0], v[2]).map(|e| e > OFF_THE_START_M - 0.5).unwrap_or(true),
                 "a tear-off on the start"
             );
-        }
-    }
-
-    /// A pine's needles sample the foliage half of `tree_sheet`, and only its trunk the bark.
-    #[test]
-    fn a_pine_is_green_above_its_trunk() {
-        let h = 12.0;
-        let m = pine_mesh(h, 7, 3);
-        for (p, uv) in m.positions.chunks_exact(3).zip(m.uvs.chunks_exact(2)) {
-            // The trunk is the only thing near the axis below its top; the first skirt starts
-            // at that same height, but a metre or more out.
-            let trunk = p[1] <= h * 0.22 + 1e-3 && p[0].hypot(p[2]) < h * 0.05;
-            assert_eq!(uv[0] < 0.5, trunk, "vertex at {:.2} m samples u {:.2}", p[1], uv[0]);
         }
     }
 
@@ -2381,7 +2147,7 @@ mod tests {
     fn the_sheets() {
         let dir = std::env::var("FROST_SHEETS").expect("set FROST_SHEETS");
         std::fs::create_dir_all(&dir).unwrap();
-        for t in [banner_sheet(), stake_sheet(), jumpmark_sheet(), bale_sheet()] {
+        for t in [banner_sheet(), stake_sheet()] {
             let file = format!("{dir}/{}.png", t.name);
             image::RgbaImage::from_raw(t.width, t.height, t.rgba.clone())
                 .unwrap()
@@ -2418,32 +2184,6 @@ mod tests {
             bands.len() > BANNER_CELLS,
             "banners sample {} bands of the atlas — the lap is not cycling",
             bands.len()
-        );
-    }
-
-    #[test]
-    fn jumps_are_marked_and_rollers_are_not() {
-        let (p, s) = demo();
-        let sc = build(&p, &s);
-        let boards = sc.tally.iter().find(|(k, _)| *k == "jump boards").unwrap().1;
-        // Two boards a jump, and only for the ones worth marking.
-        let worth = p
-            .features
-            .iter()
-            .filter(|f| {
-                f.height().abs() >= JUMPMARK_FROM_M
-                    && matches!(
-                        f,
-                        crate::trackprog::Feature::Tabletop { .. }
-                            | crate::trackprog::Feature::Double { .. }
-                            | crate::trackprog::Feature::StepUp { .. }
-                    )
-            })
-            .count();
-        assert!(worth > 0, "the demo has jumps worth marking");
-        assert!(
-            boards >= worth && boards <= worth * 2,
-            "{boards} boards for {worth} jumps"
         );
     }
 
@@ -2601,11 +2341,12 @@ mod tests {
         let solid = named(&sc.solid);
         // No fence: it ran along the lap and closed the start straight off. See `build`.
         // No banners and no fence — see `build`.
-        for want in ["stakes.edf", "bales.edf", "trees.edf", "gate.edf"] {
+        // Trees and bales come from the prop library now, which the demo has none of.
+        for want in ["stakes.edf", "gate.edf"] {
             assert!(drawn.contains(&want.to_string()), "{want} not drawn: {drawn:?}");
         }
-        // A tree, a bale and the gantry stop a bike.
-        for want in ["bales.edf", "trees.edf", "gate.edf"] {
+        // The gantry stops a bike.
+        for want in ["gate.edf"] {
             assert!(solid.contains(&want.to_string()), "{want} should be solid: {solid:?}");
         }
         // A stake snaps rather than stopping you, and the fence run has gaps where the ground
@@ -3003,6 +2744,57 @@ fn tearoffs(prog: &TrackProgram, syn: &Synth, seed: u32) -> Mesh {
         }
     }
     m
+}
+
+/// Where a tree goes, before the library says which one.
+#[derive(Clone, Copy)]
+struct Plant {
+    x: f32,
+    z: f32,
+    foot: f32,
+    /// Degrees.
+    yaw: f32,
+    key: u32,
+    /// On the backdrop, where nobody rides: drawn and never solid.
+    far: bool,
+}
+
+/// How tall a library tree has to be to stand in for one: under this it is a bush card, over
+/// it a whole treeline baked as one object.
+const TREE_REAL_MIN_M: f32 = 4.0;
+const TREE_REAL_MAX_M: f32 = 40.0;
+
+/// Every tree the lap and the backdrop asked for, each a real one out of the library — the
+/// donor's own and whatever other tracks were baked in beside it. One model a sheet.
+fn plant_trees(lib: &crate::trackprops::PropLibrary, plants: &[Plant]) -> Vec<(String, Mesh, Texture, bool)> {
+    let trees: Vec<&crate::trackprops::Prop> = lib
+        .props
+        .iter()
+        .filter(|p| {
+            p.class == crate::trackobjects::Class::Tree
+                && (TREE_REAL_MIN_M..=TREE_REAL_MAX_M).contains(&p.height)
+                && !crate::trackprops::is_crowd(&p.sheet)
+        })
+        .collect();
+    if trees.is_empty() {
+        return Vec::new();
+    }
+    let mut by: std::collections::BTreeMap<(String, bool), Mesh> = Default::default();
+    for p in plants {
+        let pick = ((rnd(0x7A11, p.key) * trees.len() as f32) as usize).min(trees.len() - 1);
+        let prop = trees[pick];
+        by.entry((prop.sheet.clone(), p.far))
+            .or_default()
+            .append(&edfwrite::moved(&edfwrite::turned(&prop.mesh, p.yaw), [p.x, p.foot, p.z]));
+    }
+    by.into_iter()
+        .filter_map(|((sheet, far), mesh)| {
+            let (name, w, h, rgba) = lib.sheets.iter().find(|s| s.0 == sheet)?;
+            let tex = Texture { name: name.clone(), width: *w, height: *h, rgba: rgba.clone() };
+            let kind = format!("{}_{}", if far { "backdrop_trees" } else { "trees" }, short_sheet(&sheet));
+            Some((kind, mesh, tex, !far))
+        })
+        .collect()
 }
 
 /// A sheet name cut down to a model name.

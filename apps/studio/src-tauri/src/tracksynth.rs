@@ -458,7 +458,7 @@ const RUT_BUNDLE: (f32, f32) = (0.4, 0.85);
 /// onto the track.
 // 55 carried a corner's ruts too far down the next straight once the ruts were blended.
 const RUT_CARRY_EXIT_M: f32 = 48.0;
-// Back far enough to meet the tyre lines painted on the approach, so they lead into a rut.
+// Back far enough to meet the approach, so its grooves lead into a rut.
 const RUT_CARRY_ENTRY_M: f32 = 36.0;
 
 /// How far the bundle sits towards the inside of the corner, as a fraction of the half-width.
@@ -497,8 +497,9 @@ const RUT_ALONG_M: f32 = 70.0;
 /// forty-metre radius, which gave a 90 km/h approach to a hairpin and a 40 km/h approach to a
 /// flat left the same washboard. A braking zone is as long as the braking is, and
 /// [`crate::trackspeed`] is what knows that.
-// Between 2.2, which rode as stripes, and 4.0, which rode as nothing at all.
-const BRAKING_WAVELENGTH_M: f32 = 3.0;
+// Half as long again as the 3.0 that rode "super clamped together", with one or two to a set
+// (see [`BRAKE_GROUP`]) so there is ground between them.
+const BRAKING_WAVELENGTH_M: f32 = 4.5;
 
 /// How much rougher the surface gets in and around a corner, as a multiplier on the texture.
 ///
@@ -532,7 +533,10 @@ const BRAKE_SET_M: f32 = 14.0;
 
 /// The lines braking bumps form in: how many, how far apart about the racing line, and how wide
 /// each one's band is either side of it.
-const BRAKE_LINES: i32 = 3;
+const BRAKE_LINES: i32 = 2;
+/// Crest slots to a group of braking bumps, of which only the first one or two stand. Ridden
+/// as "super clamped together" with every slot filled.
+const BRAKE_GROUP: f32 = 4.0;
 const BRAKE_LINE_M: f32 = 2.2;
 const BRAKE_LINE_HALF_M: f32 = 1.1;
 
@@ -540,7 +544,7 @@ const BRAKE_LINE_HALF_M: f32 = 1.1;
 /// tall it stands. Longer and lower than braking: acceleration bumps are stretched out by the
 /// wheel spinning across them.
 // Longer than the braking bumps, which went to 4 m; drive-out chop is the longer, lower of the two.
-const ACCEL_WAVELENGTH_M: f32 = 5.0;
+const ACCEL_WAVELENGTH_M: f32 = 6.0;
 const ACCEL_HEIGHT_M: f32 = 0.10;
 
 /// How much the edge of the riding line wanders in and out, metres, and over what length of
@@ -1455,13 +1459,24 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 * lane_turn.at(s);
             let lanes = if lane_presence > 0.0 {
                 let mut best = 0.0f32;
-                for k in -RUT_LANES..=RUT_LANES {
+                // Fanned out from the line toward the outside of the turn, which is where the
+                // other lines go: centred on the line, which already hugs the inside, half the
+                // fan fell off the track there and the outside stayed bare.
+                let outward = if on_line >= 0.0 { -1.0 } else { 1.0 };
+                // More lanes rather than wider gaps: as many as fit, a lane apart, from the line
+                // out to a metre off the outside edge.
+                let out_n = (((half + on_line.abs() - 1.0) / RUT_LANE_M).floor() as i32)
+                    .clamp(1, RUT_LANES_OUT_MAX);
+                for k in -1..=out_n {
                     let kf = k as f32;
                     let at = on_line
-                        + kf * RUT_LANE_M
+                        + outward * kf * RUT_LANE_M
                         + RUT_LANE_WANDER_M * fbm(s / 30.0, kf * 7.3, r.seed ^ 0x1A7E);
-                    // Deepest on the line everyone rides, shallower out to either side.
-                    let fall = 1.0 - (kf.abs() / (RUT_LANES as f32 + 1.0)).powi(2);
+                    if at.abs() > half - 0.8 {
+                        continue;
+                    }
+                    // Deepest on the line everyone rides, shallower out toward the edge.
+                    let fall = if k < 0 { 0.75 } else { 1.0 - 0.5 * kf / (out_n as f32 + 1.0) };
                     // Slowly, so a lane that is in the corner at its entry is still there at its exit.
                     let along = 0.55 + 0.45 * fbm(s / 40.0, kf * 3.1 + 11.0, r.seed ^ 0x1A7F);
                     // Some lanes start part way through the turn and fade out again; the line under
@@ -1657,20 +1672,25 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     let x = cycles - n;
                     let pick = |salt: i32| hash2(n as i32, k * 131 + salt, r.seed ^ 0xB4C5) * 0.5 + 0.5;
                     let peak = 0.3 + 0.4 * pick(1);
-                    let size = if pick(2) < 0.15 { 0.0 } else { 0.5 + 0.7 * pick(3) };
+                    // One or two to a set: the first one or two slots of each group stand.
+                    let g = (n / BRAKE_GROUP).floor();
+                    let slot = n - g * BRAKE_GROUP;
+                    let count = if hash2(g as i32, k * 131 + 7, r.seed ^ 0xB4C6) > 0.0 { 2.0 } else { 1.0 };
+                    let size = if slot < count { 0.6 + 0.4 * pick(3) } else { 0.0 };
                     let (prof, falling) = if x < peak {
                         (smoothstep(x / peak), false)
                     } else {
                         (smoothstep((1.0 - x) / (1.0 - peak)), true)
                     };
-                    rise += (prof * 2.0 - 1.0) * band * size;
+                    // Up from the ground, so a slot with no bump in it is plain ground.
+                    rise += prof * band * size;
                     if falling {
                         back = back.max(prof * band * size);
                     }
                 }
                 // Not polished: braking bumps are worst on the line, where everyone brakes.
                 let w = brake * sets * clear * groomed;
-                heights[i] += rise.clamp(-1.0, 1.0) * feel.brake.1 * 0.5 * w;
+                heights[i] += rise.clamp(0.0, 1.0) * feel.brake.1 * w;
                 // The back of each bump, where the packed soil shows through the paint.
                 bump[i] = (back * w).min(1.0);
             }
@@ -2344,17 +2364,19 @@ const RUT_SECOND_DEPTH: f32 = 0.66;
 const LANE_CARRY_ENTRY_M: f32 = 10.0;
 const LANE_CARRY_EXIT_M: f32 = 16.0;
 const RUT_LANES: i32 = 3;
+/// Most lanes a corner fans out toward its outside edge, a lane's width apart.
+const RUT_LANES_OUT_MAX: i32 = 6;
 const RUT_LANE_M: f32 = 1.9;
 // Far enough that neighbours meet and part: a rut joins the one outside it, or splits in two.
 // At 0.35 every corner came out as a perfect set of concentric grooves.
 const RUT_LANE_WANDER_M: f32 = 0.8;
 /// How often a lane other than the racing line is there at all: some start part way through a
 /// turn and fade out again. Higher is more often.
-const RUT_LANE_GATE: f32 = 0.28;
+const RUT_LANE_GATE: f32 = 0.45;
 /// How much a lane's width wanders along it, as a share.
 const RUT_LANE_WIDTH_VARY: f32 = 0.35;
 const RUT_LANE_DEPTH: f32 = 1.2;
-const RUT_LANE_TAKEOVER: f32 = 0.9;
+const RUT_LANE_TAKEOVER: f32 = 0.6;
 /// A lane's trough, against [`RUT_GROOVE_M`]: wide, so the ground left between two lanes stands
 /// as a ridge rather than a flat.
 const RUT_LANE_WIDTH: f32 = 1.2;
@@ -3414,7 +3436,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     };
     // The light riding surface's own band. This was "soil_dark_c" — the everywhere mask — so in
     // the game the palest soil covered the whole site, not the track.
-    // At the resolution Indiana keeps its top layer's: the rut floors and tyre lines are cut
+    // At the resolution Indiana keeps its top layer's: the rut floors are cut
     // from this, and at 2048 a half-metre floor was two texels.
     let dirt = {
         let l = bands.iter().find(|l| l.name == "soil_light_c").expect("the riding surface");
@@ -3964,14 +3986,21 @@ const GRID_LANE_M: f32 = 1.2;
 /// The gate row is not here at all any more: it stands on the start straight, which is its
 /// own line beside the lap. See [`StartSpur`].
 ///
-/// Past the finish jump's landing when the lap has one, because that is what a finish line
-/// marks: the ground a rider comes down on. Anywhere else and the line is painted up the face
-/// of the jump it belongs to.
+/// At the top of the finish jump's take-off face when the lap has one, with the arch over it:
+/// where the rider asked for it, and where a national stands its finish arch.
 pub(crate) fn finish_at(prog: &TrackProgram) -> f32 {
     let run = prog.opening_straight();
     if let Some(f) = prog.finish_jump() {
-        let past = f.at() + f.length() + crate::trackprog::FINISH_LINE_PAST_M;
-        return past.clamp(10.0, (run - 2.0).max(10.0));
+        let face = match f {
+            crate::trackprog::Feature::Tabletop { height, length, lip, .. } => {
+                crate::trackprog::tabletop_faces(*height, *length, *lip).0
+            }
+            crate::trackprog::Feature::Double { height, lip, .. } => {
+                crate::trackprog::double_faces(*height, *lip).ramp
+            }
+            _ => 0.0,
+        };
+        return (f.at() + face).clamp(10.0, (run - 2.0).max(10.0));
     }
     if run < 20.0 {
         return (prog.lap_length() * 0.06).clamp(10.0, 40.0);
@@ -5120,7 +5149,7 @@ struct Where {
 #[derive(Clone, Copy)]
 enum BandMask {
     /// The riding surface, with the dark ground showing through it wherever it is worn: the
-    /// floor of every groove and the tyre lines between them. See [`streak_mask`].
+    /// floor of every groove and the back of every braking bump. See [`streak_mask`].
     Riding,
     /// The base band: everything, and so no mask at all.
     Everywhere,
@@ -5353,38 +5382,24 @@ fn line_mask(syn: &Synth, half: f32, w: f32, seed: u32, mw: usize, mh: usize) ->
 /// far out from the racing line they reach as a share of the half width, and how much of the
 /// light soil they take away.
 // Closer and wider: Indiana's riding surface reads darker because more of its dark soil shows.
-const STREAK_SPACING_M: f32 = 0.7;
-const STREAK_SHARP: f32 = 3.0;
-const STREAK_WANDER_M: f32 = 0.6;
-const STREAK_REACH: f32 = 1.0;
 const STREAK_DEPTH: f32 = 0.8;
 
-/// Where the dark ground shows through the riding surface: every groove's floor, and the tyre
-/// lines worn along the lap between them.
+/// Where the dark ground shows through the riding surface: every groove's floor and the back of
+/// every braking bump. No painted tyre lines between them — ridden as ugly, and a published
+/// track's marks are its relief, not paint.
 ///
 /// Indiana lays its light soil over 60% of its site and the gaps in it are what make the track
 /// readable — dark streaks running with the lap, the dark soil underneath showing through. Ours
 /// covered the corridor solid, so the ruts had nothing to show through.
-fn streak_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
+fn streak_mask(syn: &Synth, half: f32, _seed: u32, mw: usize, mh: usize) -> Vec<u8> {
     mask_across(syn, mw, mh, |c| {
         if c.lat.abs() > half + RUT_CORRIDOR_FADE_M {
             return 0;
         }
-        let s = syn.arc[c.i];
-        // Worn hardest where the wheels go, fading towards the edges.
-        let ridden = (1.0 - (c.off.abs() / (half * STREAK_REACH)).min(1.0).powi(2)).max(0.0);
-        // Narrow, meandering, and broken along their length.
-        let u = c.off + STREAK_WANDER_M * fbm(s / 30.0, c.off * 0.15, seed ^ 0x57A1);
-        let comb = (0.5 + 0.5 * (u / STREAK_SPACING_M * std::f32::consts::TAU).cos())
-            .powf(STREAK_SHARP);
-        let broken = smoothstep(
-            ((fbm(s / 11.0, u / STREAK_SPACING_M, seed ^ 0x57A2) + 0.35) * 2.5).clamp(0.0, 1.0),
-        );
-        let lines = comb * broken * ridden;
         let floor = ((-c.rut - 0.1) / 0.5).clamp(0.0, 1.0);
         // And the back of every braking bump, packed by the tyres that climbed it.
         let back = syn.bump[c.i];
-        (255.0 * (lines.max(floor).max(back) * STREAK_DEPTH).clamp(0.0, 1.0)) as u8
+        (255.0 * (floor.max(back) * STREAK_DEPTH).clamp(0.0, 1.0)) as u8
     })
 }
 
@@ -10771,7 +10786,7 @@ mod tests {
         let _ = std::fs::write(out, ppm);
     }
 
-    /// The finish jump is on the ground, and the line is past it.
+    /// The finish jump is on the ground, and the line is at the top of its take-off.
     ///
     /// The document is one thing and the terrain is another — a jump that exists only in the
     /// feature list is a jump nobody rides. Measured against the two feet rather than against
@@ -10817,16 +10832,15 @@ mod tests {
             flat * 100.0,
             ramp * 100.0
         );
-        // The line is painted on the ground a rider comes down on, not up the face. Measured
-        // as how far below the deck it is: the lap climbs, so "level with the foot" is not a
-        // thing the ground does anywhere near a jump.
+        // The line stands at the top of the take-off face, with the arch over it: measured as
+        // how far below the deck the ground there is, which up on the lip is next to nothing.
         let line = finish_at(&p);
         let below = (peak + foot) - height_at_arc(&s, line);
         assert!(
-            line > at + len && below > height * 0.6,
+            (line - (at + up)).abs() < 1.0 && below < height * 0.4,
             "the finish line is at {line:.0} m, {below:.2} m under the deck of a {height:.1} m \
-             jump that ends at {:.0}",
-            at + len
+             jump whose take-off tops out at {:.0}",
+            at + up
         );
     }
 
@@ -11938,6 +11952,29 @@ mod game_light {
             },
             None => serde_json::from_str(&std::fs::read_to_string(&spec).unwrap()).unwrap(),
         };
+        let names: Vec<String> = prog
+            .features
+            .iter()
+            .map(|f| match f {
+                crate::trackprog::Feature::Custom { shape, .. } if shape.len() > 12 => "waves".into(),
+                crate::trackprog::Feature::Custom { shape, .. } if shape.len() == 4 => "single".into(),
+                crate::trackprog::Feature::Custom { shape, .. } if shape.len() == 8 => "triple".into(),
+                crate::trackprog::Feature::Custom { shape, .. } if shape.len() == 9 => "table+single".into(),
+                crate::trackprog::Feature::Custom { .. } => "whale".into(),
+                crate::trackprog::Feature::StepUp { height, .. } if *height < 0.0 => "step-down".into(),
+                f => f.name().to_string(),
+            })
+            .collect();
+        println!("features: {}", names.join(", "));
+        let rises: Vec<f32> = prog
+            .segments
+            .iter()
+            .filter_map(|s| match s {
+                crate::trackprog::Segment::Straight { rise, .. } if *rise != 0.0 => Some(*rise),
+                _ => None,
+            })
+            .collect();
+        println!("straights with a climb or drop: {rises:?}");
         let syn = synthesise(&prog).unwrap();
         let st = &syn.stations;
         let wrap = |a: f32| (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
