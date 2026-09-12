@@ -118,7 +118,7 @@ jobs:
           releaseName: "Frost's Studio ${{ steps.tag.outputs.name }}"
           # Named here rather than renamed afterwards: this applies before latest.json is
           # written, so the manifest and the assets cannot disagree.
-          releaseAssetNamePattern: "Frost-Studio-[version]-[arch][ext]"
+          assetNamePattern: "Frost-Studio-[version]-[arch][ext]"
           releaseDraft: false
           prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
           args: ${{ matrix.args }}
