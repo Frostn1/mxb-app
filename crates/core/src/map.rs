@@ -760,11 +760,8 @@ fn inflate(b: &[u8], data_off: usize, data_len: usize, w: u32, h: u32) -> Option
     (buf.len() == expected).then_some(buf)
 }
 
-/// Turn a sheet the right way up.
-///
-/// PiBoSo stores these bottom-up, the same way it stores a `.pnt`: a card's UVs put V zero at
-/// the foot of the thing drawn, while the file's first row of pixels is its top. Left alone,
-/// every tree in a track hangs from its canopy.
+/// Reverse a sheet's rows. The ground sheets and layers are read this way; scenery sheets are
+/// not, because the game samples a scenery sheet's first stored row at V zero.
 fn flip_rows(rgba: &mut [u8], w: u32, h: u32) {
     let stride = w as usize * 4;
     let (mut top, mut bottom) = (0usize, h as usize - 1);
@@ -1302,7 +1299,8 @@ pub fn textures(b: &[u8], max_dim: u32) -> Vec<MapTexture> {
             // channel is the fact, and a sheet that is half see-through is a cut-out whatever
             // it is called.
             let alpha = cutout_fraction(&rgba) > CUTOUT_FRACTION;
-            flip_rows(&mut rgba, w, h);
+            // Rows as stored. The game samples the first stored row at V zero — a tree card's
+            // trunk — and so does a `DataTexture`; reversing them hung every tree by its crown.
             let (mut rgba, w, h) = reduce(rgba, w, h, max_dim.max(1));
             // After the reduce, and so before the only mips left to make are the GPU's.
             // `reduce` already weights colour by alpha, so an opaque texel keeps its leaf
@@ -1984,7 +1982,33 @@ mod tests {
                     println!("  BLANK mat {m} tris {}", tris[m]);
                 }
             }
+            // Per material: does v rise or fall with height inside each object? Tells which way
+            // up a card's sheet is addressed, without knowing the picture.
+            let mut acc = vec![(0f64, 0f64, 0f64, 0f64, 0f64, 0f64); count];
+            for o in &mesh.objects {
+                let span = (o.max[1] - o.min[1]).max(1e-3);
+                for t in o.tri_start..o.tri_start + o.tri_count {
+                    for k in 0..3 {
+                        let vi = mesh.indices[t as usize * 3 + k] as usize;
+                        let y = ((mesh.positions[vi * 3 + 1] - o.min[1]) / span) as f64;
+                        let v = mesh.uvs[vi * 2 + 1] as f64;
+                        if let Some(a) = acc.get_mut(o.material as usize) {
+                            *a = (a.0 + 1.0, a.1 + y, a.2 + v, a.3 + y * y, a.4 + v * v, a.5 + y * v);
+                        }
+                    }
+                }
+            }
+            let corr: Vec<f64> = acc
+                .iter()
+                .map(|&(n, sy, sv, syy, svv, syv)| {
+                    let cov = syv / n - (sy / n) * (sv / n);
+                    let vy = syy / n - (sy / n).powi(2);
+                    let vv = svv / n - (sv / n).powi(2);
+                    if n < 3.0 || vy <= 0.0 || vv <= 0.0 { 0.0 } else { cov / (vy * vv).sqrt() }
+                })
+                .collect();
             for (m, (n, w, h)) in declared(&b).into_iter().enumerate() {
+                println!("  vcorr mat {m:3} {:+.2} {n}", corr.get(m).copied().unwrap_or(0.0));
                 let w0 = u32le(&b, MATERIALS_AT + m * MATERIAL_RECORD);
                 println!(
                     "  bound mat {m:3} w0 {w0} tris {:7} -> {n} {w}x{h}",

@@ -704,8 +704,8 @@ mod edge_marking {
         let tex = map::textures(&bytes, 512);
         println!("{entry}: {} islands, {} sheets", mesh.objects.len(), sheets.len());
 
-        // Mean colour of a material over the UV box one piece uses. Sheets come back already
-        // row-flipped, so V maps straight to a row.
+        // Mean colour of a material over the UV box one piece uses. Sheets come back in stored
+        // row order, so V maps straight to a row.
         let colour = |mat: u32, u0: f32, u1: f32, v0: f32, v1: f32| -> Option<[f32; 3]> {
             let t = tex.iter().find(|t| t.material == mat)?;
             if t.width == 0 || t.height == 0 {
@@ -717,7 +717,7 @@ mod edge_marking {
                 for j in 0..12 {
                     let u = u0 + (u1 - u0) * i as f32 / 11.0;
                     let v = v0 + (v1 - v0) * j as f32 / 11.0;
-                    let o = ((px(1.0 - v, t.height) * t.width + px(u, t.width)) * 4) as usize;
+                    let o = ((px(v, t.height) * t.width + px(u, t.width)) * 4) as usize;
                     if t.rgba[o + 3] < 32 {
                         continue;
                     }
