@@ -13,15 +13,14 @@
   shading.
 
 ### Changed
-- The start straight narrows after the gate row and curves into turn one instead of lying
-  across the main straight, with packed dirt and gate grooves like the rest of the track.
+- The start straight is shorter and funnels into a tight first turn you have to brake for,
+  with ruts, braking bumps and worn dirt the whole way like the rest of the track.
 - Generated tracks use real objects only: trees from published tracks, and Indiana's own
   start/finish arch, edge stakes and barrier in place of the drawn ones.
 - The finish line and its arch stand at the top of the finish jump's take-off, high enough to
   jump under, and the arch reads FINISH in white on black and gold.
 - Braking bumps come one or two at a time and are longer, with ground between them.
 - Corners carry more ruts, across to the outside of the turn, not only on the inside line.
-- Generated tracks no longer paint tyre lines on the ground.
 - Jumps come in more kinds: singles, doubles, triples, a table with a single after it, wave
   sections and step-downs, and the lap climbs and drops along its straights.
 - Generated tracks no longer have large patches of dark shadow.
@@ -65,6 +64,10 @@
   tyre lines catch the light in game the way they do in the studio's 3D view.
 
 ### Fixed
+- Banner boards no longer stand off the track in another track's corner shape.
+- Ruts no longer spike where they start in a corner.
+- Trees no longer stand on the track.
+- The finish arch stands on the ground instead of floating.
 - Trees, signs and other scenery in the 3D track view stand the right way up.
 - Sharing checks that every part of the upload was actually kept, and sends it again
   otherwise, so a share code always downloads in full.
