@@ -13,6 +13,13 @@
   shading.
 
 ### Changed
+- Generated tracks have bigger jumps with longer, smoother faces and longer landings.
+- The main lines through each corner are darker and damp, with a wet shine, so you can see
+  which ruts everyone uses. The other ruts keep their colour. The used ruts are deeper, with
+  rounded floors.
+- Tyre marks on generated tracks are finer and softer, printed along the grooves instead of
+  drawn as sharp lines.
+- The track map in the game's track info points the right way.
 - The start straight is shorter and funnels into a tight first turn you have to brake for,
   with ruts, braking bumps and worn dirt the whole way like the rest of the track.
 - Generated tracks use real objects only: trees from published tracks, and Indiana's own

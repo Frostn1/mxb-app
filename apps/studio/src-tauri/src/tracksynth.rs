@@ -256,7 +256,8 @@ const RUT_DEPTH_STRAIGHT_M: f32 = 0.143;
 /// towards, metres. Below the knee nothing changes. Indiana's deepest corner groove is 0.47 m;
 /// ours reached 0.94 on the outside line.
 // Ridden at (0.28, 0.4) as a tad too shallow.
-const RUT_CUT_KNEE_M: (f32, f32) = (0.32, 0.46);
+// Deeper, asked for twice; still a knee, so deep is a rounded U rather than a hole.
+const RUT_CUT_KNEE_M: (f32, f32) = (0.40, 0.60);
 
 /// How soft the blend over the ruts is: a box radius, and how many passes of it. Three merged the
 /// grooves of a corner into two or three broad dips.
@@ -709,6 +710,8 @@ const TILE_GRASS_M: f32 = 2.4;
 const TILE_LOOSE_M: f32 = 2.6;
 /// And the packed line finer, which is what being driven over does to it.
 const TILE_RUT_M: f32 = 2.4;
+/// How much darker the main lines are than the other ruts.
+const WET_LINE_DARKEN: f32 = 0.68;
 
 /// The cube a wet layer reflects, per face. Small on purpose: it is seen smeared across a
 /// film of water and never in focus. The example track's own faces are 128 too.
@@ -760,6 +763,10 @@ pub struct Synth {
     pub rut: Vec<f32>,
     /// The back face of a braking bump, 0 to 1: where the paint lets the packed soil show.
     pub bump: Vec<f32>,
+    /// How used the ground is, 0 to 1: the line everyone rides, then the outer main line, then
+    /// the inside one. The paint darkens a rut floor by it, so a corner with ten ruts still
+    /// shows which of them are the lines.
+    pub wear: Vec<f32>,
     /// How steeply the built ground climbs along the lap at each station — the grade of a
     /// jump's face, positive up a takeoff and negative down a landing.
     pub face: Vec<f32>,
@@ -1201,6 +1208,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     // The height the ruts add, kept apart so it can be blended before it joins the ground.
     let mut rut_h = vec![0.0f32; gw * gh];
     let mut bump = vec![0.0f32; gw * gh];
+    let mut wear = vec![0.0f32; gw * gh];
     // How ridden each cell is, and which way the track runs there — read by the pass that
     // smooths the ground along its own direction.
     let mut ridden_at = vec![0.0f32; gw * gh];
@@ -1458,8 +1466,9 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 .clamp(0.0, 1.0)
                 * (1.0 - focus)
                 * lane_turn.at(s);
-            let lanes = if lane_presence > 0.0 {
+            let (lanes, lane_used) = if lane_presence > 0.0 {
                 let mut best = 0.0f32;
+                let mut used = 0.0f32;
                 // Fanned out from the line toward the outside of the turn, which is where the
                 // other lines go: centred on the line, which already hugs the inside, half the
                 // fan fell off the track there and the outside stayed bare.
@@ -1491,16 +1500,39 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                         smoothstep(((fbm(s / 22.0, kf * 5.7, r.seed ^ 0x1A80) + RUT_LANE_GATE) * 3.0).clamp(0.0, 1.0))
                     };
                     // Wider here, narrower there.
+                    // How much this lane is used: the line everyone rides, then the outer main
+                    // line, then the inside one; the rest of the fan is the odd rider's. The used
+                    // ones are cut deeper and wider together, so deep is a long U, not a hole.
+                    let usage = match k {
+                        0 => 1.0,
+                        3 => 0.85,
+                        -1 => 0.55,
+                        _ => 0.3,
+                    };
                     let width = feel.groove
                         * RUT_LANE_WIDTH
+                        * (1.0 + 0.35 * usage)
                         * (1.0 + RUT_LANE_WIDTH_VARY * fbm(s / 14.0, kf * 2.3, r.seed ^ 0x1A81));
-                    best = best.max(trough(at, width) * fall * along * exists);
+                    let v = trough(at, width) * exists;
+                    best = best.max(v * fall * along * (0.55 + 0.45 * usage));
+                    used = used.max(v * usage * room);
                 }
-                best * lane_presence * RUT_LANE_DEPTH
+                (best * lane_presence * RUT_LANE_DEPTH, used * lane_presence)
+            } else {
+                (0.0, 0.0)
+            };
+            let carved = main.max(second).max(marks).max(lanes);
+            // How used this ground is, for the paint: the line, the outer main line and the inside
+            // one, with the fan's other lanes light.
+            let main_used = trough(on_line, feel.groove * 0.9) * in_turn;
+            let second_used = if other > 0.0 {
+                (trough(on_line + side * RUT_SECOND_M, feel.groove * 0.9) * 0.85)
+                    .max(trough(on_line - side * RUT_SECOND_M * 0.9, feel.groove * 0.9) * 0.55)
+                    * other
             } else {
                 0.0
             };
-            let carved = main.max(second).max(marks).max(lanes);
+            wear[i] = main_used.max(second_used).max(lane_used).clamp(0.0, 1.0);
 
             let off = t - mid;
             if off.abs() <= reach || carved > 0.0 {
@@ -2028,6 +2060,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         corridor,
         rut,
         bump,
+        wear,
         face,
         dist,
         arc,
@@ -2433,14 +2466,14 @@ const RUT_LANE_WANDER_M: f32 = 0.8;
 const RUT_LANE_GATE: f32 = 0.45;
 /// How much a lane's width wanders along it, as a share.
 const RUT_LANE_WIDTH_VARY: f32 = 0.35;
-const RUT_LANE_DEPTH: f32 = 1.2;
+const RUT_LANE_DEPTH: f32 = 1.45;
 const RUT_LANE_TAKEOVER: f32 = 0.6;
 /// A lane's trough, against [`RUT_GROOVE_M`]: wide, so the ground left between two lanes stands
 /// as a ridge rather than a flat.
 const RUT_LANE_WIDTH: f32 = 1.2;
 
 /// How deep the line under the paint is cut through a corner, against the corner's rut depth.
-const RUT_LINE_DEPTH: f32 = 0.5;
+const RUT_LINE_DEPTH: f32 = 0.7;
 
 /// How far a second line is carried back up the approach and out onto the exit, metres.
 ///
@@ -3538,6 +3571,8 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     put("mask_patches.tga", tga_alpha(MASK_DIM, MASK_DIM, &patches), &mut wrote)?;
     put("mask_line.tga", tga_alpha(MASK_DIM, MASK_DIM, &line), &mut wrote)?;
     put("mask_rut.tga", tga_alpha(MASK_DIM, MASK_DIM, &rut), &mut wrote)?;
+    let worn = band_of(BandMask::Worn);
+    put("mask_worn.tga", tga_alpha(MASK_DIM, MASK_DIM, &worn), &mut wrote)?;
     // The pit lane, in the same place the race data puts its stalls. It runs along the
     // opening straight, so the straight's own frame gives the side the lane is on — the
     // distance the other masks read is unsigned and would paint a lane on both sides.
@@ -3594,7 +3629,12 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
             (relief_tga(syn, RELIEF_DIM, l.spec), 1)
         } else {
             let n = match photo_normal(&l.look, GROUND_TEXTURE_DIM) {
-                Some(n) => published_normal_tga(&n, GROUND_TEXTURE_DIM),
+                Some(mut n) => {
+                    for p in n.chunks_exact_mut(4) {
+                        p[3] = p[3].saturating_add(l.gloss);
+                    }
+                    published_normal_tga(&n, GROUND_TEXTURE_DIM)
+                }
                 None => normal_tga(&px, GROUND_TEXTURE_DIM, SHEET_NORMAL_STRENGTH, l.spec),
             };
             (n, rx)
@@ -3602,7 +3642,13 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         put(&format!("maps/{name}_n.tga"), normal, &mut wrote)?;
         put(
             &format!("maps/{name}.shd"),
-            crlf(&shd(&format!("{name}_n.tga"), rx, l.shininess, None)),
+            // A glossy band shines dry as well: a damp line throws a little sky back.
+            crlf(&shd(
+                &format!("{name}_n.tga"),
+                rx,
+                l.shininess,
+                (l.gloss > 0).then_some(Reflect { min: 0.0, max: 0.3, exp: 5.0 }),
+            )),
             &mut wrote,
         )?;
         if l.wet {
@@ -5152,13 +5198,17 @@ fn mask_across(syn: &Synth, mw: usize, mh: usize, f: impl Fn(Where) -> u8) -> Ve
     let n = syn.stations.len();
     let mut out = vec![0u8; mw * mh];
     for y in 0..mh {
-        let gy = (y * syn.gh / mh).min(syn.gh - 1);
+        // Each texel at its own place, not its nearest cell's: snapped to the grid, anything
+        // finer than a cell (a tyre line) came out as a staircase of scratches.
+        let fy = y as f32 * syn.gh as f32 / mh as f32;
+        let gy = (fy as usize).min(syn.gh - 1);
         for x in 0..mw {
-            let gx = (x * syn.gw / mw).min(syn.gw - 1);
+            let fx = x as f32 * syn.gw as f32 / mw as f32;
+            let gx = (fx as usize).min(syn.gw - 1);
             let i = gy * syn.gw + gx;
             let at = syn.station[i] as usize;
             let st = &syn.stations[at];
-            let (wx, wz) = (gx as f32 * syn.mps, gy as f32 * syn.mps);
+            let (wx, wz) = (fx * syn.mps, fy * syn.mps);
             let (rx, rz) = crate::trackprog::right_vector(st.heading);
             let lat = (wx - st.x) * rx + (wz - st.z) * rz;
             out[y * mw + x] = f(Where {
@@ -5169,13 +5219,24 @@ fn mask_across(syn: &Synth, mw: usize, mh: usize, f: impl Fn(Where) -> u8) -> Ve
                 s: syn.arc[i],
                 x: wx,
                 z: wz,
-                rut: syn.rut[i],
+                rut: cell_lerp(syn, &syn.rut, fx, fy),
+                wear: cell_lerp(syn, &syn.wear, fx, fy),
+                bump: cell_lerp(syn, &syn.bump, fx, fy),
                 face: syn.face[at],
                 lead: syn.line_lat[(at + n - back % n) % n] - syn.line_lat[at],
             });
         }
     }
     out
+}
+
+/// A per-cell field read between cells.
+fn cell_lerp(syn: &Synth, v: &[f32], fx: f32, fy: f32) -> f32 {
+    let (x0, y0) = ((fx as usize).min(syn.gw - 1), (fy as usize).min(syn.gh - 1));
+    let (x1, y1) = ((x0 + 1).min(syn.gw - 1), (y0 + 1).min(syn.gh - 1));
+    let (tx, ty) = ((fx - x0 as f32).clamp(0.0, 1.0), (fy - y0 as f32).clamp(0.0, 1.0));
+    let row = |y: usize| v[y * syn.gw + x0] * (1.0 - tx) + v[y * syn.gw + x1] * tx;
+    row(y0) * (1.0 - ty) + row(y1) * ty
 }
 
 /// One cell of the ground, as a mask sees it.
@@ -5202,6 +5263,9 @@ struct Where {
     /// Where the racing line was a corner's-length back, relative to where it is here, in the
     /// same frame as `off`. This is the side riders are arriving from.
     lead: f32,
+    /// How used the ground is, and the braking bumps' packed backs, read between cells.
+    wear: f32,
+    bump: f32,
 }
 
 /// Which cells a band of the preview map covers.
@@ -5245,6 +5309,8 @@ enum BandMask {
     /// here is keyed to the racing line, which is exactly why the ground off the track had
     /// nothing happening in it.
     Patches,
+    /// The main lines, by how used the ground is.
+    Worn,
 }
 
 /// How much of the plot [`BandMask::Patches`] covers, near enough — Indiana 59.9%,
@@ -5281,6 +5347,7 @@ fn band_mask(
         // Nothing to mask: it is the ground everything else is painted over.
         BandMask::Everywhere => vec![255; mw * mh],
         BandMask::Rut => rut_mask(syn, half, seed, mw, mh),
+        BandMask::Worn => worn_mask(syn, half, seed, mw, mh),
         BandMask::Loose => loose_mask(syn, half, seed, mw, mh),
         BandMask::Beyond => mask_rect_outside(syn, mw, mh, half, |e, x, z| {
             (band_beyond(e, x, z, SHOULDER_M, seed ^ 0xB3ED) as f32 * turf_cover(x, z, seed)) as u8
@@ -5453,6 +5520,8 @@ const STREAK_SHARP: f32 = 3.0;
 const STREAK_WANDER_M: f32 = 0.6;
 const STREAK_REACH: f32 = 1.0;
 const STREAK_DEPTH: f32 = 0.8;
+/// How wide one tyre print is, as the falloff of its band: about a rear tyre.
+const STREAK_TYRE_M: f32 = 0.11;
 
 /// How far before turn one the start straight is rutted and bumped, and how deep its ruts get.
 const START_RUT_M: f32 = 45.0;
@@ -5497,18 +5566,47 @@ fn streak_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u
         let s = syn.arc[c.i];
         // Worn hardest where the wheels go, fading towards the edges.
         let ridden = (1.0 - (c.off.abs() / (half * STREAK_REACH)).min(1.0).powi(2)).max(0.0);
-        // Narrow, meandering, and broken along their length.
-        let u = c.off + STREAK_WANDER_M * fbm(s / 30.0, c.off * 0.15, seed ^ 0x57A1);
-        let comb = (0.5 + 0.5 * (u / STREAK_SPACING_M * std::f32::consts::TAU).cos())
-            .powf(STREAK_SHARP);
-        let broken = smoothstep(
-            ((fbm(s / 11.0, u / STREAK_SPACING_M, seed ^ 0x57A2) + 0.35) * 2.5).clamp(0.0, 1.0),
-        );
-        let lines = comb * broken * ridden;
+        // Tyre prints, not a comb: two sets at different pitches that cross and merge the way
+        // many riders' lines do, each a soft tyre-wide band whose strength varies line to line.
+        let mut lines = 0.0f32;
+        for (pitch, salt) in [(STREAK_SPACING_M, 0x57A1u32), (STREAK_SPACING_M * 1.37, 0x57B1)] {
+            let u = c.off + STREAK_WANDER_M * fbm(s / 30.0, c.off * 0.15, seed ^ salt);
+            let lane = (u / pitch).round();
+            let d = u - lane * pitch;
+            let tyre = (-(d / STREAK_TYRE_M).powi(2)).exp();
+            let strength = (0.45 + 0.55 * fbm(lane * 3.1, s / 40.0, seed ^ salt ^ 0x11)).clamp(0.0, 1.0);
+            let broken = smoothstep(
+                ((fbm(s / 11.0, lane * 1.7, seed ^ salt ^ 0x22) + 0.35) * 2.5).clamp(0.0, 1.0),
+            );
+            lines = lines.max(tyre * strength * broken);
+        }
+        // Grain inside the print, so it reads as tread and clods rather than a pen stroke, and
+        // gathered into the grooves where the wheels run.
+        let grain = 0.7 + 0.3 * fbm(c.x * 2.5, c.z * 2.5, seed ^ 0x57C1);
+        let in_groove = 0.6 + 0.4 * (-c.rut).clamp(0.0, 1.0).sqrt();
+        let lines = lines * ridden * grain * in_groove;
         let floor = ((-c.rut - 0.1) / 0.5).clamp(0.0, 1.0);
         // And the back of every braking bump, packed by the tyres that climbed it.
-        let back = syn.bump[c.i];
+        let back = c.bump;
         (255.0 * (lines.max(floor).max(back) * STREAK_DEPTH).clamp(0.0, 1.0)) as u8
+    })
+}
+
+/// The lines everybody rides, dark and wet: the one line, the outer main line and the inside
+/// one, by how used the ground is. The other ruts keep the grooves' own paint.
+fn worn_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
+    mask_across(syn, mw, mh, |c| {
+        if c.lat.abs() > half + RUT_CORRIDOR_FADE_M {
+            return 0;
+        }
+        let used = smoothstep(((c.wear - 0.4) / 0.45).clamp(0.0, 1.0));
+        if used <= 0.0 {
+            return 0;
+        }
+        // Wettest in the floor, where the water sits, and damp up the sides.
+        let damp = 0.35 + 0.65 * (-c.rut).clamp(0.0, 1.0).powf(0.5);
+        let patchy = (0.62 + 0.45 * fbm(c.x * 0.09, c.z * 0.09, seed ^ 0x3E71)).clamp(0.4, 1.0);
+        (255.0 * used * damp * patchy) as u8
     })
 }
 
@@ -5731,6 +5829,7 @@ fn box_blur_wrap(v: &[f32], dim: usize, r: usize) -> Vec<f32> {
 }
 
 /// What a patch of ground is made of, for the generator below.
+#[derive(Clone)]
 struct GroundLook {
     /// The soil between everything else.
     base: [f32; 3],
@@ -6782,11 +6881,10 @@ rainy\n{\n\tambient\n\t{\n\t\tred = 0.6\n\t\tgreen = 0.6\n\t\tblue = 0.85\n\t}\n
 fn ui_images(prog: &TrackProgram, syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>) {
     let mut map = vec![0u8; dim * dim * 4];
     for y in 0..dim {
-        // Row zero of a TGA is the bottom of the picture, and row zero of the grid is `z = 0`,
-        // so the read runs from the far edge back. Get this wrong and the lap comes out
-        // mirrored against the route the game draws over it.
-        let row = dim - 1 - y;
-        let gy = (row * syn.gh / dim).min(syn.gh - 1);
+        // Row zero of this bottom-left TGA is the bottom of the picture and grid row zero is
+        // `z = 0`, so rows go in grid order and +z comes out on top, like the masks. Reversing
+        // them mirrored the map north-south against the track.
+        let gy = (y * syn.gh / dim).min(syn.gh - 1);
         for x in 0..dim {
             let gx = (x * syn.gw / dim).min(syn.gw - 1);
             let c: [u8; 3] = if syn.corridor[gy * syn.gw + gx] {
@@ -7032,6 +7130,8 @@ struct Layer {
     wet: bool,
     /// Whether the layer scatters 3D grass over itself.
     grass: bool,
+    /// Specular added over the photograph's own, for ground that is wet in the dry.
+    gloss: u8,
 }
 
 /// The four bands, bottom first.
@@ -7066,6 +7166,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             shininess: 12,
             wet: true,
             grass: false,
+            gloss: 0,
         },
         // Drier ground in broad patches, owing nothing to where the lap runs. Indiana covers
         // 59.9% of its site this way and Southwick 42.3%; without it the ground off the track
@@ -7083,6 +7184,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             shininess: 12,
             wet: true,
             grass: false,
+            gloss: 0,
         },
         // The riding surface: every metre of the corridor, opaque, and the light end of the
         // palette because that is what worked dry dirt looks like from above.
@@ -7099,6 +7201,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             shininess: 12,
             wet: true,
             grass: false,
+            gloss: 0,
         },
         // The grooves themselves, darker, inside the corridor and nowhere else. This is the
         // variation *within* the riding surface — a track is not one flat tone from edge to
@@ -7108,7 +7211,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             name: "soil_worn_c",
             sheet: "rut_c",
             band: BandMask::Grooves,
-            look: rut,
+            look: rut.clone(),
             salt: 0x5B93,
             tile_m: TILE_RUT_M,
             mask: Some("mask_rut.tga"),
@@ -7117,6 +7220,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             shininess: 20,
             wet: true,
             grass: false,
+            gloss: 0,
         },
         // Painted over the corridor's base, in the order the ground gets that way: the loose
         // stuff is thrown over the worked soil, and the line is worn back through it.
@@ -7124,6 +7228,30 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         // a black band on the ground; Indiana has nothing like it — its riding surface is the
         // *light* tan and the infield is what goes green. The worn tone is gone and the
         // corridor carries the mid soil instead.
+        // The main lines, darker again and wet: every corner has many ruts, and these are the
+        // ones everybody uses.
+        Layer {
+            name: "soil_wet_c",
+            sheet: "wet_c",
+            band: BandMask::Worn,
+            look: GroundLook {
+                tone: [
+                    rut.tone[0] * WET_LINE_DARKEN,
+                    rut.tone[1] * WET_LINE_DARKEN,
+                    rut.tone[2] * WET_LINE_DARKEN * 0.96,
+                ],
+                ..rut.clone()
+            },
+            salt: 0x3E77,
+            tile_m: TILE_RUT_M,
+            mask: Some("mask_worn.tga"),
+            thickness: Some(0.05),
+            spec: 60,
+            shininess: 45,
+            wet: true,
+            grass: false,
+            gloss: 70,
+        },
         Layer {
             // Painted over the line, not under it: with the dark strip laid on top, every
             // bank thrown up beside a groove was covered and a floor read the same as the
@@ -7140,6 +7268,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             shininess: 10,
             wet: true,
             grass: false,
+            gloss: 0,
         },
         // No band down the racing line. A strip keyed to the centreline paints a stripe
         // along the middle of the track, and no published track has one: Indiana lays its
@@ -7158,6 +7287,7 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             shininess: 8,
             wet: false,
             grass: true,
+            gloss: 0,
         },
     ]
 }
@@ -10794,6 +10924,25 @@ mod tests {
         }
     }
 
+    /// The map is a bottom-left TGA, so its rows run in grid order: +z on top, as the game
+    /// shows it. Reversed, the map came out mirrored north-south.
+    #[test]
+    fn the_map_runs_north_up() {
+        let p = hairpins();
+        let s = synthesise(&p).unwrap();
+        let (map, _) = ui_images(&p, &s, UI_IMAGE_DIM);
+        let dim = UI_IMAGE_DIM;
+        assert_eq!(map[17] & 0x20, 0, "origin must be bottom-left");
+        for y in 0..dim {
+            let gy = (y * s.gh / dim).min(s.gh - 1);
+            for x in 0..dim {
+                let gx = (x * s.gw / dim).min(s.gw - 1);
+                let blue = map[18 + (y * dim + x) * 4] == 150;
+                assert_eq!(blue, s.corridor[gy * s.gw + gx], "pixel ({x}, {y})");
+            }
+        }
+    }
+
     /// Look at the finish jump — the worked example's, or any track program's.
     ///
     /// ```text
@@ -11827,6 +11976,7 @@ mod ground_sheets {
                         "soil_light_c" => &g.field,
                         "soil_dark_c" => &g.ridden,
                         "soil_worn_c" => &g.line,
+                        "soil_wet_c" => &g.rut,
                         "sand_top_c" => &g.loose,
                         "sand_bottom" => &g.rut,
                         _ => &g.turf,
@@ -11946,6 +12096,7 @@ mod ground_preview {
                     "soil_light_c" => &looks.field,
                     "soil_dark_c" => &looks.ridden,
                     "soil_worn_c" => &looks.line,
+                    "soil_wet_c" => &looks.rut,
                     "sand_top_c" => &looks.loose,
                     "sand_bottom" => &looks.rut,
                     _ => &looks.turf,

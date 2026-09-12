@@ -901,7 +901,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
         // on a track that has to be built right or not at all, and ours are not.
         let pick = rng.range(0.0, 1.0);
         let length;
-        if pick < 0.22 && room > 30.0 {
+        if pick < 0.22 && room > 38.0 {
             // A table's size is its *deck*, with the faces added on. The faces are set by the
             // published lip and landing angles and come to thirty-odd metres on their own, so
             // stating a 40 m table asks for a 6 m top and gets a long rounded hill.
@@ -910,10 +910,10 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             // write "jumps must not exceed 3m in height", and `corpus::FEATURE_HEIGHT_M` holds
             // a program to it. This used to draw up to 3.4 and every table was outside it.
             // 70% of the 2.4-3.0 m drawn here before: 85% rode too big again.
-            let height = rng.range(1.68, 2.1);
+            let height = rng.range(2.0, 2.5);
             length = (rng.range(11.2, 18.9) + faces(height)).min(room);
             out.push(Feature::Tabletop { at: pos, length, height, lip: 0.0 });
-        } else if pick < 0.30 && room > 30.0 {
+        } else if pick < 0.30 && room > 40.0 {
             // A table is not always flat end to end. A whale tail rises, dips over its middle
             // and rises again before the landing — two crests a rider can either double or
             // roll — which is a shape a tabletop's three numbers cannot describe.
@@ -921,7 +921,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             // Drawn in metres and normalised afterwards, so the take-off gets the same run a
             // tabletop of this height gets. Drawn as fractions it had 3.6 m of lip in 8.5 m of
             // ground, and from the seat that is a wall.
-            let h = rng.range(1.68, 2.1);
+            let h = rng.range(2.0, 2.5);
             let dip = rng.range(0.30, 0.40);
             let (up, down) = (lip_run(h), landing_run(h));
             let near = up + 2.8 + down * 0.55;
@@ -942,12 +942,12 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
                 length,
                 shape: marks
                     .iter()
-                    .map(|(m, v)| crate::trackprog::ShapePoint { u: m / span, h: v * scale })
+                    .map(|(m, v)| crate::trackprog::ShapePoint { u: m / span, h: (v * scale).min(2.9) })
                     .collect(),
             });
-        } else if pick < 0.40 && room > 30.0 {
+        } else if pick < 0.40 && room > 32.0 {
             // A single: one mound, jumped off its face and landed on its own back.
-            let h = rng.range(1.2, 1.8);
+            let h = rng.range(1.5, 2.1);
             let (up, down) = (lip_run(h), landing_run(h));
             let crest = 1.5;
             let span = up + crest + down;
@@ -959,20 +959,20 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
                 length,
                 shape: marks
                     .iter()
-                    .map(|(m, v)| crate::trackprog::ShapePoint { u: m / span, h: v * scale })
+                    .map(|(m, v)| crate::trackprog::ShapePoint { u: m / span, h: (v * scale).min(2.9) })
                     .collect(),
             });
-        } else if pick < 0.50 && room > 52.0 {
+        } else if pick < 0.50 && room > 56.0 {
             // A double: a take-off, a gap and a landing ramp, cleared in one.
-            let height = rng.range(1.4, 2.1);
+            let height = rng.range(1.8, 2.4);
             let lip = if rng.range(0.0, 1.0) < 0.5 { 0.0 } else { 10.0 };
             let gap = rng.range(5.0, 10.0);
             length = crate::trackprog::double_faces(height, lip).total(gap);
             out.push(Feature::Double { at: pos, height, gap, lip });
-        } else if pick < 0.57 && room > 60.0 {
+        } else if pick < 0.57 && room > 64.0 {
             // A triple: a take-off, a middle lump and a landing ramp. The fast clear it in one;
             // everyone else jumps it as a double and a single.
-            let h = rng.range(1.6, 2.1);
+            let h = rng.range(1.9, 2.5);
             let (up, down) = (lip_run(h), landing_run(h));
             let (g1, g2) = (rng.range(6.0, 8.0), rng.range(6.0, 8.0));
             let mut x = 0.0f32;
@@ -990,11 +990,11 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
                     .map(|(m, v)| crate::trackprog::ShapePoint { u: m / x, h: *v })
                     .collect(),
             });
-        } else if pick < 0.64 && room > 64.0 {
+        } else if pick < 0.64 && room > 70.0 {
             // A table with a single after it: roll the table and jump the single, clear the
             // deck onto the single's back as a double, or go further still.
-            let h = rng.range(1.7, 2.0);
-            let h2 = rng.range(1.2, 1.6);
+            let h = rng.range(2.0, 2.4);
+            let h2 = rng.range(1.5, 1.9);
             let (up, down) = (lip_run(h), landing_run(h));
             let (up2, down2) = (lip_run(h2), landing_run(h2));
             let deck = rng.range(8.0, 12.0);
@@ -1028,7 +1028,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             // whoops, drawn as one shape so no hollow is dug between them.
             let waves = rng.range(3.0, 5.99) as usize;
             let wave = rng.range(12.0, 15.0);
-            let h = rng.range(0.9, 1.3);
+            let h = rng.range(1.0, 1.4);
             let span = wave * waves as f32;
             length = span;
             let n = (span / 1.0) as usize;
@@ -1057,7 +1057,8 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
         }
         // Closer than 6-15 m, so the run-up a jump now keeps off a corner does not thin the lap
         // below the published twelve lips a kilometre.
-        pos += length + rng.range(4.0, 11.0);
+        // Closer together now the jumps are bigger, or a lap falls short of the corpus's count.
+        pos += length + rng.range(3.0, 8.0);
     }
     out
 }
@@ -1382,7 +1383,7 @@ mod tests {
             let angle = median(cs.iter().map(|c| c.0).collect());
             let apex = median(cs.iter().map(|c| c.2).collect());
             let ground = median(cs.iter().map(|c| c.1).collect());
-            let jumps = p.features.len() as f32 / lap * 1000.0;
+            let jumps = p.features.iter().map(|f| f.lips()).sum::<usize>() as f32 / lap * 1000.0;
             let tallest = p
                 .features
                 .iter()

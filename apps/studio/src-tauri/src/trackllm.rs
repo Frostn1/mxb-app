@@ -967,7 +967,8 @@ pub fn review(prog: &TrackProgram) -> Review {
 
     // a starting point, and "0 features per km" is not news to whoever just asked for one.
     if !prog.features.is_empty() {
-        let per_km = prog.features.len() as f32 * 1000.0 / prog.lap_length().max(1.0);
+        let lips: usize = prog.features.iter().map(|f| f.lips()).sum();
+        let per_km = lips as f32 * 1000.0 / prog.lap_length().max(1.0);
         between("feature density", per_km, corpus::LIPS_PER_KM, " per km", &mut notes);
     }
 
@@ -1645,7 +1646,9 @@ mod tests {
 
         // And the same jump two hundred metres down the straight is nobody's business.
         let mut ok = hairpin_then_straight();
-        ok.features = vec![Feature::Double { at: 150.0, height: 2.5, gap: 16.0, lip: 10.0 }];
+        // Longer faces carry the landing's sweet spot further out, so a 16 m gap wants more air
+        // than the straight gives; ten is still a big double down it.
+        ok.features = vec![Feature::Double { at: 150.0, height: 2.5, gap: 10.0, lip: 10.0 }];
         assert!(
             !review(&ok).problems.iter().any(|c| c.contains("cannot be cleared")),
             "{:?}",
