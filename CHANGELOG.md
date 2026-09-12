@@ -10,6 +10,7 @@
 ### Changed
 - The 3D viewer shows paints at full resolution, so logos and lettering on bikes and gear
   read sharply.
+- Bikes with many paints open faster in the 3D viewer and use far less memory.
 - Race mode is now a tab under Garage, next to Locker and Presets.
 - The Library picks up tracks and other mods you add to the mods folder yourself, without
   pressing Refresh.
