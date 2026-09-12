@@ -5,6 +5,7 @@
 ### Added
 - Sort the server list by any column. Click a header again to reverse it.
 - Star servers and switch the list to just your favorites.
+- Star bikes, tracks and other mods in the Library to keep them at the top.
 - Filter the server list by region, and hide servers with no riders (on by default).
 
 ### Changed
