@@ -23,7 +23,8 @@
 - Scenery lifted from a published track keeps each part's own texture: trucks, vans, trees
   and the watch tower show their real colours, tree leaves are see-through around the edges,
   and banner boards with scrambled textures are left out. Pines are green from the trunk up.
-- Published tracks' scenery shows each object's own texture in the Studio's 3D view.
+- Scenery in the Studio's 3D view shows each object's own texture, on published and
+  generated tracks alike.
 - Generated tracks carry pebbles: patches of stones over the ridden ground and its edges,
   thinner on the racing line and never in a rut's floor.
 - Jumps on generated tracks are smaller than before, about 70% of their old height, with longer, gentler faces and clear ground in front of them to build speed. The

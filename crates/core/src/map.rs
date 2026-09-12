@@ -41,19 +41,9 @@ const MAGIC: &[u8; 4] = b"MP2\0";
 /// Where the material records start, and how big one is. Geometry follows the last of them.
 const MATERIALS_AT: usize = 0x0C;
 const MATERIAL_RECORD: usize = 56;
-/// Which word of a material record holds the index of the sheet that paints it, and which
-/// holds the index of a companion beside it.
-///
-/// One-based, with a slot ahead of the first colour sheet: 0 is no sheet at all, and 2 is the
-/// first. A companion a material names in word 13 takes a slot of its own, so every index past
-/// it is one further on. That is the same scheme `edfwrite` writes and the bike reader uses.
-/// Read as a zero-based index it put every lifted object on its neighbour's sheet — Indiana's
-/// vans on a bridge grate, its tower on a 16-square glass tint, its tree cards on soil — which
-/// is what rendered black. Checked on Indiana against seven objects whose sheet the geometry
-/// settles (vans, bales, water, fence, main building, both tree cards), and on Millville,
-/// where the two cut-out materials land on its tree and crowd cards rather than a fence.
+/// Word 11 of a material record: the material's own one-based sequence number, which
+/// TerrainEd renumbers. It does not point at a sheet; the sweep diagnostic still prints it.
 const MATERIAL_TEX_WORD: usize = 11;
-const MATERIAL_COMPANION_WORD: usize = 13;
 
 /// Bytes per vertex, and where each attribute's array begins within the block — every one
 /// of them a count of vertices from the block's start, not a stride.
@@ -651,15 +641,15 @@ fn tex_name(b: &[u8], o: usize) -> Option<String> {
         if c == 0 {
             break;
         }
-        if !(c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-')) {
+        // A space too: Indiana's `metal_beams_03_c_a ` ends in one, and missing that record
+        // put every material after it on its neighbour's sheet.
+        if !(c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-' | b' ')) {
             return None;
         }
         e += 1;
     }
-    let len = e - o;
-    (3..=95)
-        .contains(&len)
-        .then(|| String::from_utf8_lossy(&b[o..e]).into_owned())
+    let name = String::from_utf8_lossy(&b[o..e]).trim_end().to_owned();
+    (3..=95).contains(&name.len()).then_some(name)
 }
 
 /// Every colour surface in a map, in file order.
@@ -871,15 +861,12 @@ fn is_companion_name(name: &str) -> bool {
     l == "env" || l.starts_with("normals") || SUFFIXES.iter().any(|suf| l.ends_with(suf))
 }
 
-/// The records that paint a material, in table order: everything that is not a companion map,
-/// and each name only the first time it appears.
+/// The records that paint a material, in table order: everything that is not a companion map.
+/// Names repeat — two materials may each carry their own `tree_c` — so none is dropped.
 fn painting_records(
     all: Vec<(String, u32, u32, usize, usize)>,
 ) -> Vec<(String, u32, u32, usize, usize)> {
-    let mut seen = std::collections::HashSet::new();
-    all.into_iter()
-        .filter(|(n, ..)| !is_companion_name(n) && seen.insert(n.to_ascii_lowercase()))
-        .collect()
+    all.into_iter().filter(|(n, ..)| !is_companion_name(n)).collect()
 }
 
 /// Every surface record a map holds, as `(name, width, height)`, in table order.
@@ -1273,52 +1260,22 @@ pub fn bound_materials(b: &[u8]) -> std::collections::HashSet<u32> {
 
 /// Which sheet paints each material, as `(material, sheet)` pairs.
 ///
-/// Read out of the material records rather than guessed: see [`MATERIAL_TEX_WORD`]. Checked
-/// against 12 published tracks from 4 authors, every one of which reads as a legal index into
-/// the sheets, and on Indiana it is off by one from the positional walk for most materials
-/// and by two for its trees — which is the difference between a banner showing its sponsor
-/// and showing the 80%-transparent sheet of the object beside it.
-///
-/// Falls back to the positional walk when the field doesn't read as an index, so a map built
-/// by something that leaves it empty is no worse off than before.
+/// One sheet per material, in order; a material whose record is all zero is a blank and owns
+/// none. Checked by triangle count on Indiana, Millville and a compiled track of ours: the
+/// same 15,301-triangle castle is material 11, 12 and 24 and lands on its own sheet in each.
 fn bindings(b: &[u8], materials: usize, sheets: usize) -> Vec<(usize, usize)> {
-    let positional = || (0..materials.min(sheets)).map(|i| (i, i)).collect::<Vec<_>>();
-    let word = |m: usize, k: usize| -> Option<u32> {
-        let at = MATERIALS_AT + m * MATERIAL_RECORD + k * 4;
-        (at + 4 <= b.len()).then(|| u32le(b, at))
-    };
-    let mut raw = Vec::with_capacity(materials);
-    let mut companions = Vec::new();
-    for m in 0..materials {
-        let (Some(t), Some(c)) = (word(m, MATERIAL_TEX_WORD), word(m, MATERIAL_COMPANION_WORD)) else {
-            return positional();
-        };
-        if c > 0 {
-            companions.push(c);
-        }
-        raw.push(t);
-    }
     let mut out = Vec::with_capacity(materials);
-    let mut distinct = std::collections::HashSet::new();
-    for (m, &t) in raw.iter().enumerate() {
-        // 0 is no sheet, and 1 the slot ahead of the first.
-        if t < 2 {
+    let mut sheet = 0;
+    for m in 0..materials {
+        let at = MATERIALS_AT + m * MATERIAL_RECORD;
+        if b.get(at..at + MATERIAL_RECORD).is_some_and(|r| r.iter().all(|&x| x == 0)) {
             continue;
         }
-        let below = companions.iter().filter(|&&c| c < t).count() as u32;
-        let Some(i) = (t - 2).checked_sub(below) else {
-            return positional();
-        };
-        let i = i as usize;
-        if i >= sheets {
-            return positional();
+        if sheet >= sheets {
+            break;
         }
-        distinct.insert(i);
-        out.push((m, i));
-    }
-    // A column holding one value throughout is a constant, not an index.
-    if out.is_empty() || (out.len() > 1 && distinct.len() == 1) {
-        return positional();
+        out.push((m, sheet));
+        sheet += 1;
     }
     out
 }
@@ -1844,6 +1801,14 @@ fn march_layers(b: &[u8], start: usize, decode: bool) -> Vec<GroundLayer> {
 /// Sheets are not inflated while the phase is being searched for — only the winning march
 /// decodes anything. A map carries well over a hundred textures that are banners and foliage.
 pub fn ground_layers(b: &[u8]) -> Vec<GroundLayer> {
+    match layer_stack_start(b) {
+        Some(s) => march_layers(b, s, true),
+        None => Vec::new(),
+    }
+}
+
+/// Where the ground's layer stack starts, found without inflating a single sheet.
+fn layer_stack_start(b: &[u8]) -> Option<usize> {
     // Every sheet record is a candidate first layer; its material record sits 60 bytes back.
     let mut starts: Vec<usize> = Vec::new();
     let mut o = 0usize;
@@ -1872,10 +1837,7 @@ pub fn ground_layers(b: &[u8]) -> Vec<GroundLayer> {
             best = Some((n, s));
         }
     }
-    match best {
-        Some((_, s)) => march_layers(b, s, true),
-        None => Vec::new(),
-    }
+    best.map(|(_, s)| s)
 }
 
 /// The two tiling floats a layer keeps between the end of its sheet and the next record.
@@ -1962,6 +1924,74 @@ mod tests {
         let all = colour_records(&b, from);
         let painting = painting_records(all.clone());
         println!("records {} (painting {}), materials {}", all.len(), painting.len(), count);
+        let head: Vec<String> = b[from..(from + 64).min(b.len())].chunks(4).map(|c| format!("{:08x}", u32::from_le_bytes([c[0], c[1], c[2], c[3]]))).collect();
+        println!("table at {from:#x}: {}", head.join(" "));
+        let words = |a: usize, z: usize| -> String {
+            (a..z.min(b.len()))
+                .step_by(4)
+                .filter(|o| o + 4 <= b.len())
+                .map(|o| format!("{:x}", u32le(&b, o)))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let mut prev_end = from;
+        for (i, r) in all.iter().take(16).enumerate() {
+            let head = r.3 - 144;
+            println!(
+                "  rec {i:2} {:32} gap[{}] {} | head+100 {}",
+                r.0,
+                head.saturating_sub(prev_end),
+                if head > prev_end { words(prev_end, head) } else { String::new() },
+                words(head + 100, r.3)
+            );
+            prev_end = r.3 + r.4;
+        }
+        // Every run between records too long to be a trailer — a record the walk missed — and
+        // every colour sheet whose name has already appeared.
+        let mut prev_end = from;
+        let mut seen_at = std::collections::HashMap::new();
+        for (i, r) in all.iter().enumerate() {
+            let head = r.3.saturating_sub(144);
+            let gap = head.saturating_sub(prev_end);
+            if gap > 40 {
+                let txt: String = b[prev_end..head.min(prev_end + 240)]
+                    .iter()
+                    .map(|&c| if c.is_ascii_graphic() || c == b' ' { c as char } else { '.' })
+                    .collect();
+                println!("  GAP before rec {i} {} [{gap}] {txt}", r.0);
+            }
+            if b.get(head + r.0.len()) == Some(&b' ') {
+                println!("  SPACE rec {i} {:?}", r.0);
+            }
+            if !is_companion_name(&r.0) {
+                if let Some(p) = seen_at.insert(r.0.to_ascii_lowercase(), i) {
+                    println!("  DUP rec {i} {} (also rec {p})", r.0);
+                }
+            }
+            prev_end = r.3 + r.4;
+        }
+        if let Some(mesh) = parse(&b) {
+            let mut tris = vec![0u32; count];
+            for o in &mesh.objects {
+                if let Some(t) = tris.get_mut(o.material as usize) {
+                    *t += o.tri_count;
+                }
+            }
+            println!("tris per material: {:?}", tris);
+            for m in 0..count {
+                let at = MATERIALS_AT + m * MATERIAL_RECORD;
+                if b[at..at + MATERIAL_RECORD].iter().all(|&x| x == 0) {
+                    println!("  BLANK mat {m} tris {}", tris[m]);
+                }
+            }
+            for (m, (n, w, h)) in declared(&b).into_iter().enumerate() {
+                let w0 = u32le(&b, MATERIALS_AT + m * MATERIAL_RECORD);
+                println!(
+                    "  bound mat {m:3} w0 {w0} tris {:7} -> {n} {w}x{h}",
+                    tris.get(m).copied().unwrap_or(0)
+                );
+            }
+        }
         for (i, (n, w, h, ..)) in all.iter().enumerate() {
             println!("  rec {i:3} {n} {w}x{h}{}", if is_companion_name(n) { "  [companion]" } else { "" });
         }
@@ -2659,51 +2689,33 @@ mod tests {
         }
     }
 
-    /// A sheet shared by several materials is listed once, where it first appears.
+    /// Each material carries its own copy of a sheet, so a repeated name is kept every time.
     #[test]
-    fn a_repeated_sheet_takes_one_slot() {
-        let recs: Vec<(String, u32, u32, usize, usize)> = ["a_c", "b_c", "a_c", "c_c"]
+    fn a_repeated_sheet_is_kept_for_each_material() {
+        let recs: Vec<(String, u32, u32, usize, usize)> = ["a_c", "b_c", "a_c", "a_n_s", "c_c"]
             .iter()
             .map(|n| (n.to_string(), 64, 64, 0, 0))
             .collect();
         let kept: Vec<String> = painting_records(recs).into_iter().map(|(n, ..)| n).collect();
-        assert_eq!(kept, ["a_c", "b_c", "c_c"]);
+        assert_eq!(kept, ["a_c", "b_c", "a_c", "c_c"]);
     }
 
-    /// A material names its own sheet, and the walk that guessed is only the fallback.
-    ///
-    /// Built as Indiana's records are: one-based with a slot ahead of the first sheet, zero for
-    /// none, and a companion named in word 13 taking a slot of its own so every index past it
-    /// is one further on. Nothing positional reproduces that.
+    /// Sheets follow the materials in order, and a blank material owns none.
     #[test]
-    fn a_material_names_the_sheet_that_paints_it() {
-        let mut b = vec![0u8; MATERIALS_AT + 5 * MATERIAL_RECORD];
-        let put = |b: &mut Vec<u8>, m: usize, word: usize, v: u32| {
-            let at = MATERIALS_AT + m * MATERIAL_RECORD + word * 4;
-            b[at..at + 4].copy_from_slice(&v.to_le_bytes());
-        };
-        put(&mut b, 0, MATERIAL_TEX_WORD, 3);
-        put(&mut b, 1, MATERIAL_TEX_WORD, 2);
-        put(&mut b, 2, MATERIAL_TEX_WORD, 4);
-        put(&mut b, 2, MATERIAL_COMPANION_WORD, 5);
-        put(&mut b, 3, MATERIAL_TEX_WORD, 6);
-        // Material 4 is left at zero: it has no sheet.
-        assert_eq!(bindings(&b, 5, 4), vec![(0, 1), (1, 0), (2, 2), (3, 3)]);
-
-        // An index past the end of the sheets is not an index, so the walk takes over.
-        let mut bad = b.clone();
-        put(&mut bad, 3, MATERIAL_TEX_WORD, 99);
-        assert_eq!(bindings(&bad, 5, 4), vec![(0, 0), (1, 1), (2, 2), (3, 3)]);
-
-        // Neither is a column holding one value throughout.
-        let mut flat = vec![0u8; MATERIALS_AT + 4 * MATERIAL_RECORD];
-        for m in 0..4 {
-            put(&mut flat, m, MATERIAL_TEX_WORD, 2);
+    fn sheets_follow_the_materials_and_blanks_own_none() {
+        let mut b = vec![0u8; MATERIALS_AT + 4 * MATERIAL_RECORD];
+        for m in [0, 1, 3] {
+            b[MATERIALS_AT + m * MATERIAL_RECORD + 4] = 1;
         }
-        assert_eq!(bindings(&flat, 4, 4), vec![(0, 0), (1, 1), (2, 2), (3, 3)]);
+        assert_eq!(bindings(&b, 4, 5), vec![(0, 0), (1, 1), (3, 2)]);
+        // Never a sheet the map doesn't carry.
+        assert_eq!(bindings(&b, 4, 2), vec![(0, 0), (1, 1)]);
+    }
 
-        // And the fallback never invents a sheet a map doesn't carry.
-        assert_eq!(bindings(&flat, 4, 2), vec![(0, 0), (1, 1)]);
+    /// A sheet's name may end in a space, and is read without it.
+    #[test]
+    fn a_sheet_name_may_end_in_a_space() {
+        assert_eq!(tex_name(b"metal_beams_03_c_a \0", 0).as_deref(), Some("metal_beams_03_c_a"));
     }
 
     /// Composite a track's ground the way the shader does, as one PNG.
@@ -3029,15 +3041,29 @@ mod tests {
             }
             // A column of the same value is a constant, not an index.
             legal = legal && seen.len() > 1;
+            // Scenery sheets are the colour records ahead of the ground's layer stack; a
+            // material whose record is all zero is a blank that owns none.
+            let stack = layer_stack_start(&bytes).unwrap_or(usize::MAX);
+            let scenery = all
+                .iter()
+                .filter(|(n, _, _, off, _)| *off < stack && !is_companion_name(n))
+                .count();
+            let blank = (0..count)
+                .filter(|&m| {
+                    let at = MATERIALS_AT + m * MATERIAL_RECORD;
+                    at + MATERIAL_RECORD <= bytes.len()
+                        && bytes[at..at + MATERIAL_RECORD].iter().all(|&x| x == 0)
+                })
+                .count();
             println!(
-                "{:<44} {:>7} {:>7} {:>7} {:>7}   w11={}{}",
+                "{:<44} {:>7} {:>7} {:>7} {:>7}   w11={}  blank {blank}  scenery {scenery}  missing {}",
                 p.file_stem().unwrap_or_default().to_string_lossy(),
                 all.len(),
                 count,
                 named,
                 not_secondary,
                 if legal { "INDEX" } else { "no" },
-                if named < count { "   <- SLIDES" } else { "" }
+                count as isize - blank as isize - scenery as isize
             );
         }
     }
