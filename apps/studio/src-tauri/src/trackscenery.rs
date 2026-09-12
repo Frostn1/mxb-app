@@ -46,9 +46,14 @@ const STAKE_W_M: f32 = 0.045;
 /// 1.35 m tall at 10.8 m from the centreline, in ~1.1 m pieces, both sides, covering 99% of
 /// the lap — and it is the one object that lines the whole circuit.
 ///
-/// So the numbers here are its numbers: 10.5 m out, 1.35 m tall, panels butted with no gap.
-// Out where published tracks stand theirs (20-37 m); at 10.5 they crowded the track edge.
-const BANNER_OFF_M: f32 = 20.0;
+/// So the numbers here are its numbers: 1.35 m tall, panels butted with no gap.
+///
+/// How far past the track edge the line stands: Indiana's netting is ~12.5 m out from its ±7 m
+/// edge. Measured from our edge, so a wider track doesn't swallow it; at 20 m flat it stood
+/// 12 m back from a 16 m track.
+const EDGE_LINE_OUT_M: f32 = 5.5;
+/// Most ground a panel may cross end to end before it is left out rather than hung in the air.
+const EDGE_LINE_STEP_M: f32 = 0.6;
 const BANNER_W_M: f32 = 4.0;
 const BANNER_H_M: f32 = 1.35;
 /// How thick a board is.
@@ -1300,7 +1305,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     // A lifted venue, if one is installed — and with it a real start/finish arch, which
     // replaces the two box gantries this used to draw.
     let lib = crate::trackprops::load();
-    let arch = lib.as_ref().and_then(|l| l.props.iter().find(|p| p.id == "finish_arch"));
+    let arch = lib.as_ref().and_then(|l| l.props.iter().find(|p| p.id == "finish_arch" && whole(p)));
     let mut arch_kind: Option<(String, Mesh, Texture, bool)> = None;
     // Indiana's own edge pieces, when the library carries them: its stake, and one piece of
     // the barrier that lines its lap, repeated where ours drew boxes and printed boards.
@@ -1353,7 +1358,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     if let (Some(piece), Some(lib)) = (edge_barrier, lib.as_ref()) {
         // The real barrier, one piece after another along both sides, where the printed
         // boards ran. Turned by our heading less the piece's own, like any lifted instance.
-        let off = BANNER_OFF_M.max(half + 2.5);
+        let off = half + EDGE_LINE_OUT_M;
         let step = piece.span.max(0.5);
         let mut mesh = Mesh::default();
         let mut post_mesh = Mesh::default();
@@ -1385,8 +1390,13 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
                 {
                     continue;
                 }
+                // Seated along its length; a panel across a step would hang off one end.
+                let (lo, hi) = ground_span(syn, x, z, deg, step);
+                if hi - lo > EDGE_LINE_STEP_M {
+                    continue;
+                }
                 let yaw = deg - 90.0 - piece.axis_ref.to_degrees();
-                mesh.append(&edfwrite::moved(&edfwrite::turned(&piece.mesh, yaw), [x, ground(syn, x, z), z]));
+                mesh.append(&edfwrite::moved(&edfwrite::turned(&piece.mesh, yaw), [x, (lo + hi) * 0.5 - 0.05, z]));
                 if let Some(p) = edge_post {
                     let yaw = qdeg - 90.0 - p.axis_ref.to_degrees();
                     post_mesh.append(&edfwrite::moved(&edfwrite::turned(&p.mesh, yaw), [qx, ground(syn, qx, qz), qz]));
@@ -1419,7 +1429,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let mut n = 0usize;
     let mut runs = 0usize;
     let mut tiled = 0usize;
-    let banner_off = BANNER_OFF_M.max(half + 2.5);
+    let banner_off = half + EDGE_LINE_OUT_M;
     for side in [-1.0f32, 1.0] {
         let line: Vec<(f32, f32)> = stations
             .iter()
@@ -2246,6 +2256,74 @@ mod tests {
         );
     }
 
+    /// A lifted prop whose mesh reaches past its own box is a donor's run: never replayed.
+    #[test]
+    fn a_prop_that_reaches_past_its_box_is_not_replayed() {
+        let (p, s) = demo();
+        let board = |x: f32| edfwrite::moved(&edfwrite::cuboid(1.0, 1.0, 0.1), [x, 0.0, 0.0]);
+        let mut run = board(-15.0);
+        run.append(&board(15.0));
+        let prop = |id: &str, sheet: &str, mesh: Mesh| {
+            let reach = mesh.positions.chunks_exact(3).map(|v| v[0].hypot(v[2])).fold(0.0f32, f32::max);
+            crate::trackprops::Prop {
+                id: id.into(),
+                sheet: sheet.into(),
+                class: crate::trackobjects::Class::Structure,
+                mesh,
+                height: 1.0,
+                span: 1.0,
+                reach,
+                axis_ref: 0.0,
+            }
+        };
+        let lib = crate::trackprops::PropLibrary {
+            donor: "t".into(),
+            donor_lap_m: 1000.0,
+            props: vec![prop("one", "one_c", board(0.0)), prop("run", "run_c", run)],
+            instances: (0..20)
+                .flat_map(|i| {
+                    [0usize, 1].map(|k| crate::trackprops::Instance {
+                        prop: k,
+                        along: i as f32 / 20.0,
+                        offset: 30.0,
+                        yaw: 0.0,
+                        lift: 0.0,
+                        near: true,
+                    })
+                })
+                .collect(),
+            runs: vec![],
+            sheets: ["one_c", "run_c"].iter().map(|n| (n.to_string(), 2, 2, vec![200u8; 16])).collect(),
+        };
+        let names: Vec<String> = lifted(&lib, &p, &s).into_iter().map(|k| k.0).collect();
+        assert!(names.contains(&"one".to_string()), "a real prop was dropped: {names:?}");
+        assert!(!names.contains(&"run".to_string()), "a donor's run was replayed: {names:?}");
+    }
+
+    /// The edge line stands just past the track edge, the same distance out the whole way.
+    #[test]
+    fn the_edge_line_stands_just_past_the_track_edge() {
+        let (p, s) = demo();
+        let sc = build(&p, &s);
+        let (name, bytes) = sc
+            .files
+            .iter()
+            .find(|(f, _)| f == "barrier.edf" || f == "banners.edf")
+            .expect("an edge line");
+        let st = p.stations(1.0);
+        let mut d: Vec<f32> = crate::edf::parse_world(bytes)
+            .iter()
+            .flat_map(|n| n.positions.chunks_exact(3).map(|v| (v[0], v[2])).collect::<Vec<_>>())
+            .map(|(x, z)| st.iter().map(|q| (q.x - x).hypot(q.z - z)).fold(f32::INFINITY, f32::min))
+            .collect();
+        d.sort_by(|a, b| a.total_cmp(b));
+        let (half, want) = (p.width * 0.5, p.width * 0.5 + EDGE_LINE_OUT_M);
+        let med = d[d.len() / 2];
+        assert!((med - want).abs() < 0.75, "{name} stands {med:.1} m out, not {want:.1}");
+        assert!(d[0] > half + 2.5, "{name} comes {:.1} m from the centreline, at the track edge", d[0]);
+        assert!(d[d.len() * 95 / 100] < want + 2.5, "{name} strays {:.1} m out", d[d.len() * 95 / 100]);
+    }
+
     /// The finish line has a gantry over it, not only the gate row.
     #[test]
     fn a_gantry_stands_over_the_finish_line() {
@@ -2591,6 +2669,14 @@ mod built {
 /// near our track in that shape instead of along it. Our edge is laid by rule (`lift_edge`).
 const LIFT_RUN_SPAN_M: f32 = 8.0;
 const LIFT_RUN_HEIGHT_M: f32 = 3.5;
+/// A prop's mesh is centred on its box, so it reaches at most `span / √2`; this is float slack.
+const LIFT_REACH_SLACK_M: f32 = 0.5;
+
+/// Whether a lifted prop is one object. A mesh reaching past its own box was lifted with its
+/// neighbours' triangles (a library baked before `trackprops::lift` was fixed): a donor's run.
+fn whole(p: &crate::trackprops::Prop) -> bool {
+    p.reach <= p.span * std::f32::consts::FRAC_1_SQRT_2 + LIFT_REACH_SLACK_M
+}
 
 pub fn lifted(
     lib: &crate::trackprops::PropLibrary,
@@ -2613,6 +2699,9 @@ pub fn lifted(
     for inst in &lib.instances {
         let prop = &lib.props[inst.prop];
         if prop.span > LIFT_RUN_SPAN_M && prop.height < LIFT_RUN_HEIGHT_M {
+            continue;
+        }
+        if !whole(prop) {
             continue;
         }
         let st = at((inst.along * lap).clamp(0.0, lap));

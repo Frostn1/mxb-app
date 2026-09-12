@@ -680,8 +680,10 @@ mod build_one {
         // lap it drew against the corpus and rejects what does not pass. A path still reads a
         // program from disk, for a shape that came from somewhere else.
         let mut prog: crate::trackprog::TrackProgram = if prog_path.starts_with("seed:") {
-            let from: u64 = prog_path[5..].parse().expect("seed:<number>");
-            match crate::tracklayout::search(from, 400) {
+            // `seed:N!` builds that seed as it is, so a layout once picked keeps its shape.
+            let exact = prog_path.ends_with('!');
+            let from: u64 = prog_path[5..].trim_end_matches('!').parse().expect("seed:<number>");
+            match crate::tracklayout::search(from, if exact { 1 } else { 400 }) {
                 Ok(m) => {
                     println!("  seed {} passed review and ground notes", m.seed);
                     m.program

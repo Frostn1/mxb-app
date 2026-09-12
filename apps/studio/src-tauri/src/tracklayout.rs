@@ -878,6 +878,64 @@ const JUMP_RUNUP_M: f32 = 20.0;
 /// between twelve and forty-five lips per kilometre, so most of its jumps are in or beside
 /// corners. Placing them on straights only leaves a lap made of corners — which is what a lap
 /// is — with almost nothing built on it: five per kilometre, measured.
+/// Singles on one side of the track, in the stretches the draw left empty: a choice of line
+/// down a straight rather than nothing. They take nothing from the layout's own generator, so
+/// the rest of a seed's lap is the same with them.
+fn side_singles(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
+    let (total, spans) = spans(segs);
+    let tight = |at: f32, length: f32| {
+        spans
+            .iter()
+            .any(|(a, b, r)| r.is_some_and(|r| r < TIGHT_M) && *b > at && *a < at + length)
+    };
+    let mut taken: Vec<(f32, f32)> = out.iter().map(|f| (f.at(), f.at() + f.length())).collect();
+    taken.sort_by(|a, b| a.0.total_cmp(&b.0));
+    taken.push((total - 20.0, total));
+    let pick = |pos: f32| {
+        let x = (seed ^ ((pos * 8.0) as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15))
+            .wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        (((x >> 11) as f64 / (1u64 << 53) as f64) as f32, (x >> 7) & 1 == 1)
+    };
+    let mut added = Vec::new();
+    let mut from = START_CLEAR_M;
+    for (a, b) in taken {
+        let mut pos = from + SIDE_SINGLE_CLEAR_M;
+        loop {
+            let (frac, right) = pick(pos);
+            let h = SIDE_SINGLE_H.0 + (SIDE_SINGLE_H.1 - SIDE_SINGLE_H.0) * frac;
+            let (up, down) = (lip_run(h), landing_run(h));
+            let span = up + SIDE_SINGLE_CREST_M + down;
+            if pos + span + SIDE_SINGLE_CLEAR_M > a {
+                break;
+            }
+            if tight(pos - JUMP_RUNUP_M, JUMP_RUNUP_M + span + 10.0) {
+                pos += 4.0;
+                continue;
+            }
+            let marks = [(0.0, 0.0), (up, h), (up + SIDE_SINGLE_CREST_M, h), (span, 0.0)];
+            added.push(Feature::Custom {
+                at: pos,
+                length: span,
+                shape: marks
+                    .iter()
+                    .map(|(m, v)| crate::trackprog::ShapePoint { u: m / span, h: *v })
+                    .collect(),
+                side: if right { 1.0 } else { -1.0 },
+            });
+            pos += span + SIDE_SINGLE_GAP_M;
+        }
+        from = from.max(b);
+    }
+    out.extend(added);
+    out.sort_by(|x, y| x.at().total_cmp(&y.at()));
+}
+
+/// A side single: how tall, its crest, the clear ground either side, and the gap to the next.
+const SIDE_SINGLE_H: (f32, f32) = (1.1, 1.6);
+const SIDE_SINGLE_CREST_M: f32 = 1.2;
+const SIDE_SINGLE_CLEAR_M: f32 = 10.0;
+const SIDE_SINGLE_GAP_M: f32 = 30.0;
+
 fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
     let (total, spans) = spans(segs);
     let tight = |at: f32, length: f32| {
@@ -940,6 +998,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             out.push(Feature::Custom {
                 at: pos,
                 length,
+                side: 0.0,
                 shape: marks
                     .iter()
                     .map(|(m, v)| crate::trackprog::ShapePoint { u: m / span, h: (v * scale).min(2.9) })
@@ -957,6 +1016,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             out.push(Feature::Custom {
                 at: pos,
                 length,
+                side: 0.0,
                 shape: marks
                     .iter()
                     .map(|(m, v)| crate::trackprog::ShapePoint { u: m / span, h: (v * scale).min(2.9) })
@@ -985,6 +1045,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             out.push(Feature::Custom {
                 at: pos,
                 length,
+                side: 0.0,
                 shape: marks
                     .iter()
                     .map(|(m, v)| crate::trackprog::ShapePoint { u: m / x, h: *v })
@@ -1018,6 +1079,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             out.push(Feature::Custom {
                 at: pos,
                 length,
+                side: 0.0,
                 shape: marks
                     .iter()
                     .map(|(m, v)| crate::trackprog::ShapePoint { u: m / x, h: *v })
@@ -1035,6 +1097,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             out.push(Feature::Custom {
                 at: pos,
                 length,
+                side: 0.0,
                 shape: (0..=n)
                     .map(|i| {
                         let x = span * i as f32 / n as f32;
@@ -1079,7 +1142,8 @@ pub fn draw(seed: u64) -> Option<TrackProgram> {
         }
     }
     let (mut segments, start) = grown?;
-    let features = features(&mut rng, &segments);
+    let mut features = features(&mut rng, &segments);
+    side_singles(&mut features, &segments, seed);
     // Up and down: a climb on one long straight and a drop on another. Drawn after the jumps,
     // so the lap's shape and what is built on it stay where they were; the lap hands any net
     // rise back evenly.

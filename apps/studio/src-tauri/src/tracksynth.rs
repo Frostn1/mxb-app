@@ -93,7 +93,7 @@ const FEATURE_EDGE: f32 = 1.75;
 /// leaves a long shallow one. Grading both sides the same distance is the single clearest
 /// tell that nobody built this — real benching is never symmetrical.
 const CUT_SHOULDER: f32 = 0.5;
-const FILL_SHOULDER: f32 = 1.7;
+const FILL_SHOULDER: f32 = 3.0;
 
 /// Over how much height the one becomes the other.
 ///
@@ -108,7 +108,8 @@ const FILL_SHOULDER: f32 = 1.7;
 const BENCH_BLEND_M: f32 = 1.0;
 
 /// How far the riding surface stands above the ground it was graded out of.
-const DECK_LIFT_M: f32 = 1.35;
+// Low, and the fill slope long, so the ground meets the track rather than the track riding a bank.
+const DECK_LIFT_M: f32 = 0.45;
 
 /// How far either side of a station the deck looks for the ground it should sit on top of.
 ///
@@ -449,6 +450,10 @@ const RUT_SPACING_M: f32 = 1.35;
 // 0.30 / 0.92 was too many ruts per turn; blended, 0.30 / 0.7 rode as one line with clean ground
 // either side of it to ride round the ruts on.
 const RUT_BUNDLE: (f32, f32) = (0.4, 0.85);
+/// A straight's grooves: how far across the half-width they reach, and how dark they paint
+/// against a corner's.
+const RUT_STRAIGHT_SPREAD: f32 = 0.85;
+const RUT_STRAIGHT_PAINT: f32 = 0.4;
 
 /// How far a corner's ruts run past the corner, out onto the straight and back up the
 /// approach, metres.
@@ -1149,6 +1154,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         (prog.blend.max(0.0) / PROFILE_STEP).round() as usize,
     );
     let feat = feature_profile(&prog.features, lap, prog.blend.max(0.0));
+    let feat_side = side_profile(&prog.features, lap, prog.blend.max(0.0));
     let berms = berm_profile(&prog.features, &turn, lap);
     let mut feel = ride();
     // How raced the ground arrives. It thins the deformable stack in `tht` and deepens what
@@ -1170,6 +1176,27 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             *v = (turn.at(i as f32 * PROFILE_STEP).abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
         }
         carry(&mut p, LANE_CARRY_ENTRY_M, LANE_CARRY_EXIT_M);
+        p
+    };
+    // Which way the next corner turns, held up its approach. Taken off the racing line's own
+    // side, the lanes flipped wherever the line crossed the middle, so the ruts leading in did
+    // not meet the corner's.
+    let lane_side = {
+        let mut p = Profile::blank(lap);
+        for (i, v) in p.v.iter_mut().enumerate() {
+            *v = (turn.at(i as f32 * PROFILE_STEP) * FULL_LEAN_RADIUS_M).clamp(-1.0, 1.0);
+        }
+        carry(&mut p, LANE_LEAD_IN_M, LANE_CARRY_EXIT_M * 0.5);
+        p
+    };
+    // And the corner's lanes led back up its approach, shallower: a turn is entered on several
+    // ruts, not one.
+    let lane_lead = {
+        let mut p = Profile::blank(lap);
+        for (i, v) in p.v.iter_mut().enumerate() {
+            *v = (turn.at(i as f32 * PROFILE_STEP).abs() * FULL_LEAN_RADIUS_M).clamp(0.0, 1.0);
+        }
+        carry(&mut p, LANE_LEAD_IN_M, 0.0);
         p
     };
     let widths = width_profile(prog.width * 0.5, lap, r.seed);
@@ -1265,7 +1292,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         }
         let f = feat.at(s);
         if f != 0.0 {
-            heights[i] += f * lateral(d, half);
+            heights[i] += f * lateral(d, half) * one_side(t, feat_side.at(s));
         }
         // A berm stands on the outside of the corner, which is the side away from the turn.
         // Whatever the program asked for, plus what the corner would have grown on its own:
@@ -1346,7 +1373,13 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         if depth > 0.0 {
             let spread = ruts.spread.at(s);
             let mid = ruts.centre.at(s) * half;
-            let reach = (half * spread).max(feel.rut_spacing) + feel.rut_spacing;
+            // How much of a corner this is. On a straight the bundle reaches across the width, so
+            // it carries several light grooves: held to its middle, one long groove ran the
+            // whole straight after a landing.
+            let tightness = ((spread - RUT_BUNDLE.0) / (RUT_BUNDLE.1 - RUT_BUNDLE.0)).clamp(0.0, 1.0);
+            let reach = (half * spread.max(RUT_STRAIGHT_SPREAD * (1.0 - tightness)))
+                .max(feel.rut_spacing)
+                + feel.rut_spacing;
             let focus = ruts.focus.at(s);
             let on_line = line.at(s);
 
@@ -1399,8 +1432,10 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // a ridden corner has: there are three or four ways through it, people take all of
             // them, and which one is deepest changes down the length of the turn. The inside
             // one only exists where the turn is tight enough to have an inside.
-            let side = if on_line >= 0.0 { -1.0 } else { 1.0 };
-            let other = ruts.second.at(s) * (1.0 - focus);
+            let side = if lane_side.at(s) >= 0.0 { -1.0 } else { 1.0 };
+            // Kept to the corner: carried on out of it, the outer line ran down the next
+            // straight as one lone groove.
+            let other = ruts.second.at(s) * (1.0 - focus) * lane_turn.at(s);
             let extra = |at: f32, depth: f32, salt: u32, wave: f32| {
                 trough(at, feel.groove * 0.9)
                     * depth
@@ -1466,19 +1501,27 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 .clamp(0.0, 1.0)
                 * (1.0 - focus)
                 * lane_turn.at(s);
+            let lane_presence = lane_presence.max(lane_lead.at(s) * LANE_LEAD_DEPTH * (1.0 - focus));
             let (lanes, lane_used) = if lane_presence > 0.0 {
                 let mut best = 0.0f32;
                 let mut used = 0.0f32;
                 // Fanned out from the line toward the outside of the turn, which is where the
                 // other lines go: centred on the line, which already hugs the inside, half the
                 // fan fell off the track there and the outside stayed bare.
-                let outward = if on_line >= 0.0 { -1.0 } else { 1.0 };
+                let outward = if lane_side.at(s) >= 0.0 { -1.0 } else { 1.0 };
+                // Up the approach the same lanes, in the same order, spread across the width,
+                // bending into their own grooves as the corner tightens.
+                let w = half - 0.8;
+                let bend = smoothstep(in_turn);
                 // More lanes rather than wider gaps: as many as fit, a lane apart, from the line
                 // out to a metre off the outside edge.
                 for k in -1..=RUT_LANES_OUT_MAX {
                     let kf = k as f32;
-                    let at = on_line
-                        + outward * kf * RUT_LANE_M
+                    let at_corner = on_line + outward * kf * RUT_LANE_M;
+                    let at_spread =
+                        outward * (-w + (kf + 1.5) / (RUT_LANES_OUT_MAX as f32 + 2.0) * 2.0 * w);
+                    let at = at_spread
+                        + (at_corner - at_spread) * bend
                         + RUT_LANE_WANDER_M * fbm(s / 30.0, kf * 7.3, r.seed ^ 0x1A7E);
                     // Faded out toward the edge rather than dropped at it: a lane cut off where
                     // it crosses a line, or a count that jumps a lane at a time, is a step in
@@ -1532,6 +1575,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             } else {
                 0.0
             };
+            // Lighter up the approach: the lines lead in, they are not yet the corner's.
+            let lane_used = lane_used * (0.45 + 0.55 * in_turn);
             wear[i] = main_used.max(second_used).max(lane_used).clamp(0.0, 1.0);
 
             let off = t - mid;
@@ -1604,6 +1649,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 // What the paint reads: a face's scuffs at half strength and nothing past a full
                 // floor, or the whole face paints as one dark block.
                 let painted = main.max(second).max(lanes).max(marks * 0.5);
+                let spread = spread * (RUT_STRAIGHT_PAINT + (1.0 - RUT_STRAIGHT_PAINT) * tightness);
                 rut[i] = if painted > 0.0 { spread.min(-painted) } else { spread }.max(-1.0);
             }
         }
@@ -2311,6 +2357,41 @@ fn bench_weight(d: f32, half: f32, shoulder: f32) -> f32 {
     }
 }
 
+/// Which side a one-sided feature stands on, along the lap: 0 where it spans the width.
+fn side_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
+    let mut out = Profile::blank(lap);
+    for f in features {
+        let Feature::Custom { at, length, side, .. } = f else {
+            continue;
+        };
+        if *side == 0.0 {
+            continue;
+        }
+        // Past its ends as well, over the hollows and blend the profile adds there.
+        let (from, to) = (at - JUMP_HOLLOW_M - blend, at + length + JUMP_HOLLOW_M + blend);
+        let lo = (from / PROFILE_STEP).floor().max(0.0) as usize;
+        let hi = ((to / PROFILE_STEP).ceil() as usize).min(out.v.len() - 1);
+        for v in &mut out.v[lo..=hi] {
+            *v = *side;
+        }
+    }
+    out
+}
+
+/// How much of a one-sided feature reaches a cell `t` across: its half, eased out over the
+/// middle of the track. `side` 0 is the whole width.
+fn one_side(t: f32, side: f32) -> f32 {
+    if side.abs() < 1e-3 {
+        return 1.0;
+    }
+    let cover = smoothstep(((t * side.signum() + SIDE_SPLIT_M) / SIDE_FADE_M).clamp(0.0, 1.0));
+    1.0 - side.abs().min(1.0) * (1.0 - cover)
+}
+
+/// Where a one-sided feature stops short of the middle, and over how much ground it eases out.
+const SIDE_SPLIT_M: f32 = 0.5;
+const SIDE_FADE_M: f32 = 3.0;
+
 /// How much of a feature reaches a cell. Full height across most of the track, gone by the
 /// edge, so a jump doesn't run off into the field.
 fn lateral(d: f32, half: f32) -> f32 {
@@ -2454,6 +2535,9 @@ const RUT_SECOND_DEPTH: f32 = 0.66;
 /// How far a corner's lanes carry back up the approach and out along the exit, metres.
 const LANE_CARRY_ENTRY_M: f32 = 10.0;
 const LANE_CARRY_EXIT_M: f32 = 16.0;
+/// How far up a corner's approach its lanes lead in, and how deep they are there.
+const LANE_LEAD_IN_M: f32 = 30.0;
+const LANE_LEAD_DEPTH: f32 = 0.55;
 const RUT_LANES: i32 = 3;
 /// Most lanes a corner fans out toward its outside edge, a lane's width apart.
 const RUT_LANES_OUT_MAX: i32 = 6;
@@ -2678,7 +2762,10 @@ fn built_ground(features: &[Feature], lap: f32) -> (Profile, Profile) {
                 mark(at, at + count as f32 * spacing, 0.7, 1.0);
             }
             Feature::Roller { length, .. } => mark(at, at + length, 0.45, 1.0),
-            Feature::Custom { length, .. } => mark(at, at + length, 1.0, 1.0),
+            // One-sided, the other half keeps its ruts.
+            Feature::Custom { length, side, .. } => {
+                mark(at, at + length, if side == 0.0 { 1.0 } else { 0.4 }, 1.0)
+            }
             Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Rut { .. } => {}
         }
     }
@@ -3312,7 +3399,7 @@ fn takeoff_of(f: &Feature) -> Option<(f32, f32)> {
             let (up, _, _) = crate::trackprog::tabletop_faces(*height, *length, *lip);
             Some((at + up, up))
         }
-        Feature::Custom { at, length, shape } => {
+        Feature::Custom { at, length, shape, .. } => {
             let (a_u, _, c_u, _) = custom_takeoff(shape)?;
             Some((at + c_u * length, (c_u - a_u) * length))
         }
@@ -5521,7 +5608,8 @@ const STREAK_WANDER_M: f32 = 0.6;
 const STREAK_REACH: f32 = 1.0;
 const STREAK_DEPTH: f32 = 0.8;
 /// How wide one tyre print is, as the falloff of its band: about a rear tyre.
-const STREAK_TYRE_M: f32 = 0.11;
+const STREAK_TYRE_M: f32 = 0.13;
+const STREAK_PRINT_GAIN: f32 = 1.5;
 
 /// How far before turn one the start straight is rutted and bumped, and how deep its ruts get.
 const START_RUT_M: f32 = 45.0;
@@ -5574,7 +5662,7 @@ fn streak_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u
             let lane = (u / pitch).round();
             let d = u - lane * pitch;
             let tyre = (-(d / STREAK_TYRE_M).powi(2)).exp();
-            let strength = (0.45 + 0.55 * fbm(lane * 3.1, s / 40.0, seed ^ salt ^ 0x11)).clamp(0.0, 1.0);
+            let strength = (0.7 + 0.45 * fbm(lane * 3.1, s / 40.0, seed ^ salt ^ 0x11)).clamp(0.0, 1.0);
             let broken = smoothstep(
                 ((fbm(s / 11.0, lane * 1.7, seed ^ salt ^ 0x22) + 0.35) * 2.5).clamp(0.0, 1.0),
             );
@@ -5582,9 +5670,10 @@ fn streak_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u
         }
         // Grain inside the print, so it reads as tread and clods rather than a pen stroke, and
         // gathered into the grooves where the wheels run.
-        let grain = 0.7 + 0.3 * fbm(c.x * 2.5, c.z * 2.5, seed ^ 0x57C1);
-        let in_groove = 0.6 + 0.4 * (-c.rut).clamp(0.0, 1.0).sqrt();
-        let lines = lines * ridden * grain * in_groove;
+        let grain = 0.75 + 0.25 * fbm(c.x * 2.5, c.z * 2.5, seed ^ 0x57C1);
+        let in_groove = 0.5 + 0.5 * (-c.rut).clamp(0.0, 1.0).sqrt();
+        // Asked for bolder: a print reaches full dark rather than stopping at half.
+        let lines = (lines * ridden * grain * in_groove * STREAK_PRINT_GAIN).min(1.0);
         let floor = ((-c.rut - 0.1) / 0.5).clamp(0.0, 1.0);
         // And the back of every braking bump, packed by the tyres that climbed it.
         let back = c.bump;
@@ -8851,6 +8940,7 @@ mod tests {
         p.features = vec![Feature::Custom {
             at: 40.0,
             length: 40.0,
+            side: 0.0,
             shape: vec![
                 ShapePoint { u: 0.0, h: 0.0 },
                 ShapePoint { u: 0.3, h: 2.5 },
@@ -12068,9 +12158,23 @@ mod ground_preview {
     #[ignore = "writes a PNG — set FROST_PROGRAM and FROST_PNG"]
     fn ground_close_up() {
         let prog: crate::trackprog::TrackProgram = match std::env::var("FROST_PROGRAM") {
+            Ok(p) if p.starts_with("seed:") => match crate::tracklayout::search(
+                p[5..].trim_end_matches('!').parse().unwrap(),
+                if p.ends_with('!') { 1 } else { 400 },
+            ) {
+                Ok(m) => {
+                    println!("SEED {} {}", m.seed, m.program.name);
+                    m.program
+                }
+                Err(r) => {
+                    println!("SEED {} {} (as it is)", r[0].seed, r[0].program.name);
+                    r[0].program.clone()
+                }
+            },
             Ok(p) => serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap(),
             Err(_) => serde_json::from_str(crate::trackprog::EXAMPLE).unwrap(),
         };
+        println!("FINISH_AT {:?}", finish_at(&prog));
         let out = std::env::var("FROST_PNG").expect("set FROST_PNG");
         let span: f32 = std::env::var("FROST_SPAN")
             .ok()
@@ -12107,7 +12211,11 @@ mod ground_preview {
 
         // Centre the window on a piece of the lap rather than on the plot: the middle of a
         // plot is often infield, and infield is not what anyone is asking to look at.
-        let st = syn.stations[syn.stations.len() / 5];
+        // Or at a distance round the lap, with FROST_AT.
+        let st = match std::env::var("FROST_AT").ok().and_then(|v| v.parse::<f32>().ok()) {
+            Some(at) => syn.stations[((at / STATION_STEP) as usize).min(syn.stations.len() - 1)],
+            None => syn.stations[syn.stations.len() / 5],
+        };
         let (cx, cz) = (st.x, st.z);
 
         const P: usize = 900;

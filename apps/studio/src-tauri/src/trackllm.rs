@@ -1342,6 +1342,7 @@ mod tests {
             Feature::Custom {
                 at: 0.0,
                 length: 20.0,
+                side: 0.0,
                 shape: vec![ShapePoint { u: 0.0, h: 0.0 }, ShapePoint { u: 1.0, h: 0.0 }],
             },
         ];

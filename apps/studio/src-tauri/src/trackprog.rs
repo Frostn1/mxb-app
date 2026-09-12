@@ -1031,6 +1031,9 @@ pub enum Feature {
         at: f32,
         length: f32,
         shape: Vec<ShapePoint>,
+        /// 0 across the whole width; +1 or -1 stands it on the right or left half only.
+        #[serde(default)]
+        side: f32,
     },
 }
 

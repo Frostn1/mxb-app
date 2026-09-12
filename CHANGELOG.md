@@ -15,6 +15,13 @@
   shading.
 
 ### Changed
+- Every rut in a corner now leads in up the approach, lined up with its groove in the turn.
+  Straights carry a few light ruts across the width instead of one dark groove.
+- Generated tracks sit at ground level: the land rises to meet the track rather than the track
+  standing on a bank.
+- Straights have singles on one side of the track, so you can jump or go round.
+- Tyre marks are bolder and follow the ruts.
+- Banners and edge netting stand just outside the track edge, following it.
 - Generated tracks have bigger jumps with longer, smoother faces and longer landings.
 - The main lines through each corner are darker and damp, with a wet shine, so you can see
   which ruts everyone uses. The other ruts keep their colour. The used ruts are deeper, with
