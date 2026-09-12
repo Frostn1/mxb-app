@@ -19,10 +19,10 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// Ceiling on resident pixels. Comfortably above the working set — three cached bikes at
-/// ~10 textures each is ~120 MB — so the eviction below only ever reaps blobs whose owner
-/// is long gone.
-const CAP_BYTES: usize = 384 * 1024 * 1024;
+/// Ceiling on resident pixels. Comfortably above the working set — a livery at full size is
+/// 67 MB a sheet, and the bike and paint caches together hold a few hundred MB of them — so
+/// the eviction below only ever reaps blobs whose owner is long gone.
+const CAP_BYTES: usize = 1024 * 1024 * 1024;
 
 /// Stand-in for a token that has been evicted: the same grey an untextured part wears, so a
 /// stale reference reads as "no texture" rather than throwing in the viewer.
