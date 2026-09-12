@@ -2259,6 +2259,51 @@ mod tests {
 
     /// A lifted prop whose mesh reaches past its own box is a donor's run: never replayed.
     #[test]
+    fn an_arch_that_spanned_the_donor_track_spans_ours() {
+        let (p, s) = demo();
+        let span = 2.0 * DONOR_HALF_M + 2.0;
+        let c = edfwrite::cuboid(span, 6.0, 0.5);
+        let xs: Vec<f32> = c.positions.chunks_exact(3).map(|v| v[0]).collect();
+        let zs: Vec<f32> = c.positions.chunks_exact(3).map(|v| v[2]).collect();
+        let mid = |v: &[f32]| (v.iter().copied().fold(f32::MAX, f32::min) + v.iter().copied().fold(f32::MIN, f32::max)) * 0.5;
+        let arch = edfwrite::moved(&c, [-mid(&xs), 0.0, -mid(&zs)]);
+        let reach = arch.positions.chunks_exact(3).map(|v| v[0].hypot(v[2])).fold(0.0f32, f32::max);
+        let lib = crate::trackprops::PropLibrary {
+            donor: "t".into(),
+            donor_lap_m: 1000.0,
+            props: vec![crate::trackprops::Prop {
+                id: "arch".into(),
+                sheet: "arch_c".into(),
+                class: crate::trackobjects::Class::Structure,
+                mesh: arch,
+                height: 6.0,
+                span,
+                reach,
+                axis_ref: 0.0,
+            }],
+            instances: vec![crate::trackprops::Instance {
+                prop: 0,
+                along: 0.5,
+                offset: 0.0,
+                yaw: std::f32::consts::FRAC_PI_2,
+                lift: 0.0,
+                near: true,
+            }],
+            runs: vec![],
+            sheets: vec![("arch_c".into(), 2, 2, vec![200u8; 16])],
+        };
+        let placed = lifted(&lib, &p, &s);
+        let (_, mesh, _, _) = placed.iter().find(|k| k.0.contains("arch")).expect("the arch was placed");
+        let n = (mesh.positions.len() / 3) as f32;
+        let (cx, cz) = mesh
+            .positions
+            .chunks_exact(3)
+            .fold((0.0, 0.0), |a, v| (a.0 + v[0] / n, a.1 + v[2] / n));
+        let d = p.stations(1.0).iter().map(|q| (q.x - cx).hypot(q.z - cz)).fold(f32::INFINITY, f32::min);
+        assert!(d < 2.0, "the arch stands {d:.1} m off the centreline, not over the track");
+    }
+
+    #[test]
     fn a_prop_that_reaches_past_its_box_is_not_replayed() {
         let (p, s) = demo();
         let board = |x: f32| edfwrite::moved(&edfwrite::cuboid(1.0, 1.0, 0.1), [x, 0.0, 0.0]);
@@ -2675,25 +2720,31 @@ const LIFT_REACH_SLACK_M: f32 = 0.5;
 
 /// Whether a lifted prop is one object. A mesh reaching past its own box was lifted with its
 /// neighbours' triangles (a library baked before `trackprops::lift` was fixed): a donor's run.
-/// Whether a donor piece belongs on ours. Arches, gantries and towers stood over or beside the
-/// donor's track, and replayed on ours they stand in a field; near the track only small
-/// furniture is copied. Thin tall pieces (cables, bare poles) float as lines, and a raised
-/// camera lift is no venue's scenery.
-fn venue_piece(p: &crate::trackprops::Prop, offset: f32) -> bool {
+/// A thin tall piece near the donor's track: a cable or bare pole, which floats as a line.
+fn thin_near(p: &crate::trackprops::Prop, offset: f32) -> bool {
     use crate::trackobjects::Class;
-    if matches!(p.class, Class::Tree | Class::Crowd) {
-        return true;
-    }
-    let big = p.height > LIFT_FURNITURE_H_M || p.span > LIFT_FURNITURE_SPAN_M;
-    let wire = p.span < 0.6 && p.height > 3.0;
-    let tall_vehicle = p.class == Class::Vehicle && p.height > 6.0;
-    !((offset.abs() < LIFT_FURNITURE_OFF_M && big) || wire || tall_vehicle)
+    !matches!(p.class, Class::Tree | Class::Crowd)
+        && p.span < 0.6
+        && p.height > 3.0
+        && offset.abs() < THIN_NEAR_M
 }
+const THIN_NEAR_M: f32 = 25.0;
 
-/// How far from the donor's line only furniture is copied, and how big furniture is.
-const LIFT_FURNITURE_OFF_M: f32 = 25.0;
-const LIFT_FURNITURE_H_M: f32 = 2.5;
-const LIFT_FURNITURE_SPAN_M: f32 = 4.0;
+/// An arch or gantry that stood across the donor's track: tall, wide, and centred on its line.
+fn spans_track(p: &crate::trackprops::Prop, offset: f32) -> bool {
+    p.class == crate::trackobjects::Class::Structure
+        && p.height > 4.0
+        && p.span >= 2.0 * DONOR_HALF_M
+        && offset.abs() < p.span * 0.3
+}
+/// Half the donor's riding width, and how far an arch's legs stand clear of our edge.
+const DONOR_HALF_M: f32 = 7.0;
+const ARCH_LEG_CLEAR_M: f32 = 1.5;
+/// Where arches go: straight ground, off jumps, past the start and apart from each other.
+const ARCH_STRAIGHT_R_M: f32 = 40.0;
+const ARCH_OFF_FEATURE_M: f32 = 15.0;
+const ARCH_FROM_START_M: f32 = 110.0;
+const ARCH_APART_M: f32 = 50.0;
 
 fn whole(p: &crate::trackprops::Prop) -> bool {
     p.reach <= p.span * std::f32::consts::FRAC_1_SQRT_2 + LIFT_REACH_SLACK_M
@@ -2716,13 +2767,80 @@ pub fn lifted(
     let sheet_rgba: std::collections::HashMap<&str, &(String, u32, u32, Vec<u8>)> =
         lib.sheets.iter().map(|s| (s.0.as_str(), s)).collect();
     let mut by_sheet: std::collections::HashMap<String, Mesh> = std::collections::HashMap::new();
+    let wrap = |d: f32| {
+        let d = d.rem_euclid(lap);
+        d.min(lap - d)
+    };
+    // Where an arch can stand across our track, near `s0`: on a straight, off every jump, past
+    // the start, apart from the arches already up, and clear of any other leg of the lap.
+    let over_track = |s0: f32, reach: f32, placed: &[f32]| -> Option<f32> {
+        for k in 0..=(lap / 6.0) as usize {
+            for dir in [1.0f32, -1.0] {
+                let s = (s0 + dir * k as f32 * 3.0).rem_euclid(lap);
+                if s < ARCH_FROM_START_M || s > lap - 20.0 {
+                    continue;
+                }
+                let straight = (-2..=2).all(|j| {
+                    at((s + j as f32 * 5.0).rem_euclid(lap)).curvature.abs() < 1.0 / ARCH_STRAIGHT_R_M
+                });
+                let on_jump = prog.features.iter().any(|f| {
+                    s > f.at() - ARCH_OFF_FEATURE_M && s < f.at() + f.length() + ARCH_OFF_FEATURE_M
+                });
+                let crowded = placed.iter().any(|&q| wrap(q - s) < ARCH_APART_M);
+                if !straight || on_jump || crowded {
+                    continue;
+                }
+                let st = at(s);
+                let other_leg = coarse
+                    .iter()
+                    .any(|q| wrap(q.s - s) > reach * 3.0 && (q.x - st.x).hypot(q.z - st.z) < reach + half + 3.0);
+                let on_the_start = syn
+                    .outside_the_start(st.x, st.z)
+                    .is_some_and(|e| e < reach);
+                if !other_leg && !on_the_start && inside(prog, st.x, st.z, reach) {
+                    return Some(s);
+                }
+            }
+        }
+        None
+    };
+    let mut arches_at: Vec<f32> = Vec::new();
 
     for inst in &lib.instances {
         let prop = &lib.props[inst.prop];
         if prop.span > LIFT_RUN_SPAN_M && prop.height < LIFT_RUN_HEIGHT_M {
             continue;
         }
-        if !whole(prop) || !venue_piece(prop, inst.offset) {
+        if !whole(prop) || thin_near(prop, inst.offset) {
+            continue;
+        }
+        // An arch or gantry that spanned the donor's track spans ours: across it on a straight,
+        // centred, on its lower leg. Pushed out to the shoulder like the rest, it stood in a field.
+        if spans_track(prop, inst.offset) {
+            // Sized for the donor's narrower track: scaled so its legs clear our edges.
+            let k = (2.0 * (half + ARCH_LEG_CLEAR_M) / prop.span).max(1.0);
+            if k > 1.6 {
+                continue;
+            }
+            let reach = prop.reach * k;
+            let Some(s) = over_track((inst.along * lap).clamp(0.0, lap), reach, &arches_at) else {
+                continue;
+            };
+            arches_at.push(s);
+            let st = at(s);
+            let (rx, rz) = crate::trackprog::right_vector(st.heading);
+            let off = inst.offset.clamp(-1.0, 1.0);
+            let (x, z) = (st.x + rx * off, st.z + rz * off);
+            let mut mesh = prop.mesh.clone();
+            for v in mesh.positions.iter_mut() {
+                *v *= k;
+            }
+            let deg = (inst.yaw + st.heading).to_degrees();
+            let foot = ground_min(syn, x, z, prop.span * k * 0.5) + inst.lift * k;
+            by_sheet
+                .entry(prop.sheet.clone())
+                .or_default()
+                .append(&edfwrite::moved(&edfwrite::turned(&mesh, deg), [x, foot, z]));
             continue;
         }
         let st = at((inst.along * lap).clamp(0.0, lap));
