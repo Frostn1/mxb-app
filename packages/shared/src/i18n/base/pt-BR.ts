@@ -169,6 +169,7 @@ export const ptBR: Record<keyof typeof en, string> = {
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Desnível",
   "trackViewer.objects": "Objetos",
+  "trackViewer.gameView": "Visão do jogo",
   "trackViewer.painting": "Pintando…",
   "trackViewer.step.terrain": "Terreno",
   "trackViewer.step.sky": "Céu",

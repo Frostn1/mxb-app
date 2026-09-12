@@ -175,6 +175,7 @@ export const en = {
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Elevation range",
   "trackViewer.objects": "Objects",
+  "trackViewer.gameView": "Game view",
   "trackViewer.painting": "Painting…",
   "trackViewer.step.terrain": "Terrain",
   "trackViewer.step.sky": "Sky",

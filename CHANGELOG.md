@@ -2,6 +2,11 @@
 
 ## 2026-09-12
 
+### Added
+- A Game view switch in the 3D track view draws the ground the way the game does: its
+  own sun and ambient light, relief from the track's normal maps, true height and no extra
+  shading.
+
 ### Changed
 - Bikes in the 3D viewer catch a soft reflection, so exhausts and other metal parts look like
   metal instead of near-black, and the plastics show their true colour.
