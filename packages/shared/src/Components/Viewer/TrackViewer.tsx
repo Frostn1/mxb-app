@@ -23,14 +23,12 @@ import { reportRenderer } from "../../lib/glInfo";
 const VIEW_SPAN = 10;
 
 /**
- * Relief is drawn this much taller than life.
+ * Relief is drawn at its true height, the way the game draws it.
  *
- * A motocross track is a few metres of relief across a few hundred of ground, so at true
- * scale the shapes that matter — faces, lips, berms — are a fraction of a degree of slope and
- * read as flat. This is enough to give them a shadow to be seen by, and little enough that
- * the track still looks like ground rather than a mountain range.
+ * It used to be half as tall again, so faces and lips cast a shadow to be seen by, which made
+ * every jump look bigger than it rides. The hollows are darkened instead: see [`cavityShade`].
  */
-const RELIEF_EXAGGERATION = 1.5;
+const RELIEF_EXAGGERATION = 1;
 
 /**
  * Elevation ramp, low to high. Earth rather than atlas colours — a motocross track is dirt
@@ -679,18 +677,6 @@ const GROUND_TILE_METRES = 4;
 /** How far the grain is allowed to swing the ground's brightness. */
 const GROUND_STRENGTH = 0.5;
 
-/**
- * What the ground stack's average is lifted to, as linear albedo.
- *
- * A track's sheets are not albedo maps. They are photographs of dirt taken under their own
- * light, and several are very dark on purpose — Indiana's base is luma 47 and the dark soil
- * over it 35, which is 0.02 linear. Handed to a lit material raw, the whole track renders
- * black. So the stack is scaled to put its *average* here and its layers keep their distances
- * from each other, which is where the picture is: what the eye reads at any distance is the
- * masks, not the grain. The same reasoning as `groundMean` on the single-sheet path below,
- * which divides by the sheet's mean for exactly this reason.
- */
-const STACK_TARGET_ALBEDO = 0.19;
 
 /** Heights are drawn this much taller than they are; 1 in the game view. */
 const ReliefContext = createContext(RELIEF_EXAGGERATION);
@@ -715,12 +701,16 @@ interface StackLayer {
  * track's `.amb`, exponential fog, and no gamma or tone mapping: textures and light go
  * straight to the screen. Left out: the game's projected shadows and the bump layers'
  * specular, whose strength the `.map` records don't give us yet.
+ *
+ * With `aids` the hollows are darkened too (the view's cavity term, carried in the vertex
+ * colour), which the game doesn't do. It is the only difference from the game view.
  */
 function gameGroundMaterial(
   stack: StackLayer[],
   backdrop: TrackBackdrop | null,
   metresPerUnit: number,
   maxTextures: number,
+  aids: boolean,
 ): THREE.ShaderMaterial {
   const sun = backdrop?.sun ?? [8, 6, 4];
   // Into the view's frame: X is mirrored, like every vertex.
@@ -773,6 +763,7 @@ function gameGroundMaterial(
     fog: false,
     lights: false,
     toneMapped: false,
+    vertexColors: aids,
     vertexShader: `
       uniform vec3 uSunDir;
       uniform float uMetresPerUnit;
@@ -780,8 +771,14 @@ function gameGroundMaterial(
       varying vec3 vNormalW;
       varying float vDiffuse;
       varying float vDepth;
+      varying float vCavity;
       void main() {
         vUv = uv;
+        #ifdef USE_COLOR
+          vCavity = color.r;
+        #else
+          vCavity = 1.0;
+        #endif
         vec3 n = normalize(mat3(modelMatrix) * normal);
         vNormalW = n;
         // Plain layers are lit per vertex, as the game does, and interpolated.
@@ -800,6 +797,7 @@ function gameGroundMaterial(
       varying vec3 vNormalW;
       varying float vDiffuse;
       varying float vDepth;
+      varying float vCavity;
       ${decls.join("\n      ")}
       vec3 lit(vec3 col, float d) {
         return col * clamp(uAmbient + uSun * d, 0.0, 1.0);
@@ -815,6 +813,7 @@ function gameGroundMaterial(
       void main() {
         vec3 c = vec3(0.0);
       ${blend.join("\n      ")}
+        c *= vCavity;
         c = mix(uFogColour, c, exp(-uFogDensity * vDepth));
         gl_FragColor = vec4(c, 1.0);
       }`,
@@ -974,36 +973,6 @@ function TerrainMesh({
     });
   }, [layers]);
 
-  // The stack's own average, weighted by how much of the ground each layer actually covers —
-  // a layer masked to a tenth of the map should not pull the whole track's brightness to it.
-  const stackGamma = useMemo(() => {
-    if (layers.length === 0) return 1;
-    let total = 0;
-    let weight = 0;
-    for (const l of layers) {
-      const px = l.sheet.pixels;
-      let lum = 0;
-      let n = 0;
-      for (let i = 0; i < px.length; i += 64) {
-        // Linearised before averaging: the mean of a sheet's sRGB bytes is not the mean of
-        // the light it stands for, and it is the light the material is handed.
-        for (let k = 0; k < 3; k += 1) lum += ((px[i + k] / 255) ** 2.2) * [0.299, 0.587, 0.114][k];
-        n += 1;
-      }
-      if (n === 0) continue;
-      const cover = l.mask
-        ? l.mask.coverage.reduce((a, v, i) => (i % 16 === 0 ? a + v / 255 : a), 0) /
-          Math.ceil(l.mask.coverage.length / 16)
-        : 1;
-      total += (lum / n) * cover;
-      weight += cover;
-    }
-    const mean = total / weight;
-    if (weight === 0 || !(mean > 0) || mean >= 1) return 1;
-    // The exponent that puts the stack's mean on the target. Clamped so a stack that is
-    // already about right is left alone and one sheet read wrong cannot flatten the rest.
-    return Math.min(Math.max(Math.log(STACK_TARGET_ALBEDO) / Math.log(mean), 0.3), 1);
-  }, [layers]);
 
   useEffect(
     () => () =>
@@ -1017,12 +986,13 @@ function TerrainMesh({
 
   const maxTextures = useThree((s) => s.gl.capabilities.maxTextures);
   const gameMaterial = useMemo(() => {
-    if (!game || stack.length === 0) return null;
+    if (stack.length === 0) return null;
     return gameGroundMaterial(
       stack,
       backdrop,
       1 / viewFrame(terrain, lift).unitsPerMetre,
       maxTextures,
+      !game,
     );
   }, [game, stack, backdrop, terrain, lift, maxTextures]);
   useEffect(() => () => gameMaterial?.dispose(), [gameMaterial]);
@@ -1099,7 +1069,7 @@ function TerrainMesh({
       <meshStandardMaterial
         key={`${texture ? "textured" : "plain"}-${detail ? "grain" : "flat"}-${
           relief ? "relief" : "smooth"
-        }-${repeat}-stack${stack.length}-${stackGamma.toFixed(2)}`}
+        }-${repeat}-stack${stack.length}`}
         color={stacked ? "#ffffff" : tint}
         map={stacked ? undefined : (texture ?? undefined)}
         normalMap={relief ?? undefined}
@@ -1110,95 +1080,6 @@ function TerrainMesh({
         roughness={0.95}
         metalness={0}
         onBeforeCompile={(shader) => {
-          if (stacked) {
-            // The ground the game draws: the base sheet, then every layer above it mixed in
-            // by its own mask. This is what a track is actually painted with — the surface
-            // picture this replaces is built from the `.trh` coverage masks, which are the
-            // *physics* surfaces, and published tracks barely paint them. Indiana states one
-            // 256x256 patch of concrete over a 2049-square grid, so drawn that way it is a
-            // flat brown slab.
-            shader.uniforms.stackGamma = { value: stackGamma };
-            stack.forEach((l, i) => {
-              shader.uniforms[`stackSheet${i}`] = { value: l.sheet };
-              shader.uniforms[`stackTile${i}`] = {
-                value: new THREE.Vector2(l.tileU, l.tileV),
-              };
-              if (l.mask) shader.uniforms[`stackMask${i}`] = { value: l.mask };
-            });
-            shader.vertexShader = shader.vertexShader
-              .replace(
-                "#include <common>",
-                `#include <common>
-                 varying vec2 vGroundUv;`,
-              )
-              .replace(
-                "#include <begin_vertex>",
-                `#include <begin_vertex>
-                 vGroundUv = uv;`,
-              );
-            const decls = stack
-              .map(
-                (l, i) =>
-                  `uniform sampler2D stackSheet${i};
-                   uniform vec2 stackTile${i};` +
-                  (l.mask ? `\nuniform sampler2D stackMask${i};` : ""),
-              )
-              .join("\n");
-            // Each sheet is sampled at its own tiling — read from the track, not assumed. The
-            // viewer used to tile one sheet every four metres for every surface; Indiana's
-            // base repeats 200 times across 525 m and its dark soil 180, which is 2.6 m
-            // against 2.9 m. Wrong tiling reads as the wrong ground.
-            const blend = stack
-              .map((l, i) => {
-                const sample = `pow(texture2D(stackSheet${i}, vGroundUv * stackTile${i}).rgb, vec3(2.2))`;
-                // Sheets are handed over as raw bytes rather than tagged sRGB, so the decode
-                // is done here — three.js only converts the slots it compiled itself.
-                return i === 0 || !l.mask
-                  ? `  ground = ${sample};`
-                  : `  ground = mix(ground, ${sample}, texture2D(stackMask${i}, maskUv).r);`;
-              })
-              .join("\n");
-            shader.fragmentShader = shader.fragmentShader
-              .replace(
-                "#include <common>",
-                `#include <common>
-                 varying vec2 vGroundUv;
-                 uniform float stackGamma;
-                 ${decls}`,
-              )
-              .replace(
-                "#include <color_fragment>",
-                `#include <color_fragment>
-                 {
-                   // One mirror, in u only.
-                   //
-                   // A coverage mask is stored the same way up as the terrain grid, so v is
-                   // left alone — unlike the layer *sheets*, which are bottom-up and get
-                   // flipped as they are read. That difference is the trap: the mask looks
-                   // like it should follow the sheets and does not.
-                   //
-                   // u is mirrored because the mesh is. buildTerrainGeometry places a vertex
-                   // at originX minus x * step, since the game's frame is left-handed and
-                   // three.js's is not, so u runs the opposite way to the world the mask was
-                   // painted in.
-                   //
-                   // Settled on screen over five passes. Nothing in the file states where a
-                   // mask sits in the world, so there is no ground truth in the data to
-                   // measure against, and every overlay metric tried sat within noise of
-                   // chance. The lesson worth keeping: this correction is a reflection, and
-                   // no rotation ever fixes a reflection — turning it only moved the error
-                   // around.
-                   vec2 maskUv = vGroundUv;
-                   vec3 ground = vec3(0.5);
-                 ${blend}
-                   // Multiplied rather than assigned: what is already in diffuseColor is the
-                   // cavity shading the relief is read by, and dropping it flattens every
-                   // rut and berm the track has.
-                   diffuseColor.rgb *= pow(ground, vec3(stackGamma));
-                 }`,
-              );
-            return;
-          }
           if (!detail) return;
           shader.uniforms.groundMap = { value: detail };
           shader.uniforms.groundRepeat = { value: repeat };
@@ -1642,7 +1523,7 @@ export function TrackViewer({
   highlight = null,
   className,
 }: TrackViewerProps) {
-  const lift = gameView ? 1 : RELIEF_EXAGGERATION;
+  const lift = RELIEF_EXAGGERATION;
   return (
     <div className={cn("relative", className)}>
       <ErrorBoundary compact label="track-viewer">
