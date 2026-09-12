@@ -15,6 +15,8 @@
   shading.
 
 ### Changed
+- Ruts leading into a corner bend smoothly into its grooves, and more of them lead in.
+- Ruts on a jump face run on through the lip instead of stopping just short of it.
 - Generated tracks keep big venue pieces (arches, gantries, tall poles, camera lifts) away
   from the track; only small trackside items stand near it.
 - Every rut in a corner now leads in up the approach, lined up with its groove in the turn.
