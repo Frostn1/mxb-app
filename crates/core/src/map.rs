@@ -42,7 +42,7 @@ const MAGIC: &[u8; 4] = b"MP2\0";
 const MATERIALS_AT: usize = 0x0C;
 const MATERIAL_RECORD: usize = 56;
 /// Word 11 of a material record: the material's own one-based sequence number, which
-/// TerrainEd renumbers. It does not point at a sheet; the sweep diagnostic still prints it.
+/// TerrainEd renumbers. It does not point at a sheet, but 0 means the material has none.
 const MATERIAL_TEX_WORD: usize = 11;
 
 /// Bytes per vertex, and where each attribute's array begins within the block — every one
@@ -1260,15 +1260,15 @@ pub fn bound_materials(b: &[u8]) -> std::collections::HashSet<u32> {
 
 /// Which sheet paints each material, as `(material, sheet)` pairs.
 ///
-/// One sheet per material, in order; a material whose record is all zero is a blank and owns
-/// none. Checked by triangle count on Indiana, Millville and a compiled track of ours: the
+/// One sheet per material, in order; a material whose word 11 is 0 owns none — a blank record,
+/// or a colour-only one such as Maryland's black tyres. Checked by triangle count on Indiana, Millville and a compiled track of ours: the
 /// same 15,301-triangle castle is material 11, 12 and 24 and lands on its own sheet in each.
 fn bindings(b: &[u8], materials: usize, sheets: usize) -> Vec<(usize, usize)> {
     let mut out = Vec::with_capacity(materials);
     let mut sheet = 0;
     for m in 0..materials {
-        let at = MATERIALS_AT + m * MATERIAL_RECORD;
-        if b.get(at..at + MATERIAL_RECORD).is_some_and(|r| r.iter().all(|&x| x == 0)) {
+        let at = MATERIALS_AT + m * MATERIAL_RECORD + MATERIAL_TEX_WORD * 4;
+        if at + 4 > b.len() || u32le(b, at) == 0 {
             continue;
         }
         if sheet >= sheets {
@@ -1980,7 +1980,7 @@ mod tests {
             println!("tris per material: {:?}", tris);
             for m in 0..count {
                 let at = MATERIALS_AT + m * MATERIAL_RECORD;
-                if b[at..at + MATERIAL_RECORD].iter().all(|&x| x == 0) {
+                if u32le(&b, at + MATERIAL_TEX_WORD * 4) == 0 {
                     println!("  BLANK mat {m} tris {}", tris[m]);
                 }
             }
@@ -2700,12 +2700,13 @@ mod tests {
         assert_eq!(kept, ["a_c", "b_c", "a_c", "c_c"]);
     }
 
-    /// Sheets follow the materials in order, and a blank material owns none.
+    /// Sheets follow the materials in order, and a material numbered 0 owns none.
     #[test]
     fn sheets_follow_the_materials_and_blanks_own_none() {
         let mut b = vec![0u8; MATERIALS_AT + 4 * MATERIAL_RECORD];
         for m in [0, 1, 3] {
-            b[MATERIALS_AT + m * MATERIAL_RECORD + 4] = 1;
+            let at = MATERIALS_AT + m * MATERIAL_RECORD + MATERIAL_TEX_WORD * 4;
+            b[at] = m as u8 + 1;
         }
         assert_eq!(bindings(&b, 4, 5), vec![(0, 0), (1, 1), (3, 2)]);
         // Never a sheet the map doesn't carry.
@@ -3049,11 +3050,7 @@ mod tests {
                 .filter(|(n, _, _, off, _)| *off < stack && !is_companion_name(n))
                 .count();
             let blank = (0..count)
-                .filter(|&m| {
-                    let at = MATERIALS_AT + m * MATERIAL_RECORD;
-                    at + MATERIAL_RECORD <= bytes.len()
-                        && bytes[at..at + MATERIAL_RECORD].iter().all(|&x| x == 0)
-                })
+                .filter(|&m| u32le(&bytes, MATERIALS_AT + m * MATERIAL_RECORD + MATERIAL_TEX_WORD * 4) == 0)
                 .count();
             println!(
                 "{:<44} {:>7} {:>7} {:>7} {:>7}   w11={}  blank {blank}  scenery {scenery}  missing {}",
