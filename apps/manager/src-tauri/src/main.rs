@@ -3331,10 +3331,26 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
     }
 
     // Installed wins outright: nothing to buy, and the track's own artwork beats a shop photo.
+    // A server names the folder inside a track's `.pkz`, which is often not the file's name.
     if let Ok(entries) = scan_library(app.clone(), "tracks".into()).await {
         let want = fold_name(&id);
-        if let Some(hit) = entries.iter().find(|e| fold_name(&e.name) == want) {
-            guess.installed = hit.name.clone();
+        let by_name = entries
+            .iter()
+            .position(|e| fold_name(&mxb_core::library::strip_ext(&e.name)) == want);
+        let hit = match by_name {
+            Some(i) => entries.into_iter().nth(i),
+            None => tauri::async_runtime::spawn_blocking(move || {
+                entries.into_iter().find(|e| {
+                    mxb_core::track::folder_name(std::path::Path::new(&e.path))
+                        .is_some_and(|f| fold_name(&f) == want)
+                })
+            })
+            .await
+            .ok()
+            .flatten(),
+        };
+        if let Some(hit) = hit {
+            guess.installed = mxb_core::library::strip_ext(&hit.name);
             guess.exact = true;
             guess.preview = pkz::read_preview(std::path::Path::new(&hit.path))
                 .ok()
