@@ -1922,6 +1922,25 @@ pub const SURFACES_HEADER: usize = 16;
 
 #[cfg(test)]
 mod tests {
+    /// Each ground layer's mask size, as compiled: fine paint only reaches the game at the
+    /// resolution its mask is kept at.
+    ///
+    /// ```text
+    /// FROST_MAP="…/track.map" cargo test -p mxb-core --lib -- --ignored --nocapture ground_mask_sizes
+    /// ```
+    #[test]
+    #[ignore = "needs a real .map — set FROST_MAP"]
+    fn ground_mask_sizes() {
+        let path = std::env::var("FROST_MAP").expect("set FROST_MAP");
+        let b = std::fs::read(&path).unwrap();
+        for (i, l) in ground_layers(&b).iter().enumerate() {
+            match &l.mask {
+                Some(m) => println!("  layer {i}: mask {}x{}, tiles {:.0}", m.width, m.height, l.tile_u),
+                None => println!("  layer {i}: no mask (base), tiles {:.0}", l.tile_u),
+            }
+        }
+    }
+
     use super::*;
 
     /// Build a layer stack the way a compiled map holds one, so the walk can be tested

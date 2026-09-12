@@ -497,8 +497,8 @@ const RUT_ALONG_M: f32 = 70.0;
 /// forty-metre radius, which gave a 90 km/h approach to a hairpin and a 40 km/h approach to a
 /// flat left the same washboard. A braking zone is as long as the braking is, and
 /// [`crate::trackspeed`] is what knows that.
-// Longer than 2.2, which rode as stripes; a braking bump is a wave a bike rolls over.
-const BRAKING_WAVELENGTH_M: f32 = 4.0;
+// Between 2.2, which rode as stripes, and 4.0, which rode as nothing at all.
+const BRAKING_WAVELENGTH_M: f32 = 3.0;
 
 /// How much rougher the surface gets in and around a corner, as a multiplier on the texture.
 ///
@@ -523,7 +523,7 @@ const CORNER_ROUGHNESS: f32 = 1.0;
 // ruts"; with the chop gone, 0.06 rode as no bumps at all. Asked for: bumps mainly before the
 // ruts, which is braking bumps.
 // Measured over an 8 m window, 0.32 put the tallest tenth at 0.15 m against Indiana's 0.20.
-const BRAKING_HEIGHT_M: f32 = 0.42;
+const BRAKING_HEIGHT_M: f32 = 0.6;
 
 /// How long a set of braking bumps runs before it breaks, near enough.
 const BRAKE_SET_M: f32 = 14.0;
@@ -660,6 +660,8 @@ const PROFILE_STEP: f32 = 0.1;
 /// smudge. The `.map` the game actually reads has always written its masks at the grid's
 /// resolution — this only brings the TerrainEd source files up to the same ground.
 const MASK_DIM: usize = 2048;
+/// The riding surface's mask, finer: Indiana keeps its top layer's at 4096.
+const RIDING_MASK_DIM: usize = 4096;
 /// How hard the ground's own luma pushes its normals. Enough to catch light on ruts and
 /// chop without turning the soil grain into relief.
 const NORMAL_STRENGTH: f32 = 6.0;
@@ -1589,11 +1591,11 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 // In sets, not a washboard: ridden as "just stripes" when they ran unbroken the
                 // whole way into every corner.
                 let sets = smoothstep(
-                    ((fbm(s / BRAKE_SET_M, 3.3, r.seed ^ 0xB4B0) + 0.15) * 2.2).clamp(0.0, 1.0),
+                    ((fbm(s / BRAKE_SET_M, 3.3, r.seed ^ 0xB4B0) + 0.45) * 2.2).clamp(0.0, 1.0),
                 );
                 // To one side or the other, wandering across, rather than the whole width.
                 let side = smoothstep(
-                    ((fbm(t / 3.5, s / 22.0, r.seed ^ 0xB4B1) + 0.2) * 2.0).clamp(0.0, 1.0),
+                    ((fbm(t / 3.5, s / 22.0, r.seed ^ 0xB4B1) + 0.5) * 2.0).clamp(0.0, 1.0),
                 );
                 // Never inside a rut: a tyre in a groove rides its floor, not the bumps.
                 let clear = 1.0 - (-rut[i]).clamp(0.0, 1.0);
@@ -3339,7 +3341,13 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     };
     // The light riding surface's own band. This was "soil_dark_c" — the everywhere mask — so in
     // the game the palest soil covered the whole site, not the track.
-    let dirt = band_named("soil_light_c");
+    // At the resolution Indiana keeps its top layer's: the rut floors and tyre lines are cut
+    // from this, and at 2048 a half-metre floor was two texels.
+    let dirt = {
+        let l = bands.iter().find(|l| l.name == "soil_light_c").expect("the riding surface");
+        band_mask(syn, l.band, half, seed, RIDING_MASK_DIM, RIDING_MASK_DIM)
+    };
+    let gravel = band_named("gravel_c");
     let line = band_named("soil_dark_c");
     let grass = band_named("hm_grass");
     // Off-track starts where the graded shoulder ends: the rider is on the track, or in the
@@ -3372,7 +3380,8 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     // line and the loose stuff piles up beside it, and neither happens out on a start pad.
     let rut = band_of(BandMask::Grooves);
     let loose = loose_mask(syn, half, seed, MASK_DIM, MASK_DIM);
-    put("mask_dirt.tga", tga_alpha(MASK_DIM, MASK_DIM, &dirt), &mut wrote)?;
+    put("mask_dirt.tga", tga_alpha(RIDING_MASK_DIM, RIDING_MASK_DIM, &dirt), &mut wrote)?;
+    put("mask_gravel.tga", tga_alpha(MASK_DIM, MASK_DIM, &gravel), &mut wrote)?;
     let patches = band_of(BandMask::Patches);
     put("mask_patches.tga", tga_alpha(MASK_DIM, MASK_DIM, &patches), &mut wrote)?;
     put("mask_line.tga", tga_alpha(MASK_DIM, MASK_DIM, &line), &mut wrote)?;
@@ -5027,6 +5036,9 @@ struct Where {
 /// Which cells a band of the preview map covers.
 #[derive(Clone, Copy)]
 enum BandMask {
+    /// Stones lying on top: patches over the ridden ground and its edges, off the line and out
+    /// of the ruts. See [`gravel_mask`].
+    Gravel,
     /// The riding surface, with the dark ground showing through it wherever it is worn: the
     /// floor of every groove and the tyre lines between them. See [`streak_mask`].
     Riding,
@@ -5108,6 +5120,7 @@ fn band_mask(
         BandMask::Out(extra) => mask_rect_outside(syn, mw, mh, half, move |e, x, z| {
             band_edge(e, x, z, extra, seed ^ 0xB3ED)
         }),
+        BandMask::Gravel => gravel_mask(syn, half, seed, mw, mh),
         BandMask::Riding => {
             let mut base = mask_rect_outside(syn, mw, mh, half, move |e, x, z| {
                 band_edge(e, x, z, 0.0, seed ^ 0xB3ED)
@@ -5293,6 +5306,32 @@ fn streak_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u
         // And the back of every braking bump, packed by the tyres that climbed it.
         let back = syn.bump[c.i];
         (255.0 * (lines.max(floor).max(back) * STREAK_DEPTH).clamp(0.0, 1.0)) as u8
+    })
+}
+
+/// How big a patch of stones is, how much of the ground they reach, and how thick they lie.
+const GRAVEL_PATCH_M: f32 = 7.0;
+const GRAVEL_BIAS: f32 = -0.1;
+const GRAVEL_COVER: f32 = 0.75;
+
+/// Where stones lie on top of the dirt: in patches over the ridden ground and its edges, thinner
+/// on the racing line, where the tyres throw them off, and never in a rut's floor.
+///
+/// Asked for after seeing Indiana in the studio: its riding surface carries pebbles — its
+/// `gravel_c` layer, over 41% of the site — and ours was dirt and nothing else.
+fn gravel_mask(syn: &Synth, half: f32, seed: u32, mw: usize, mh: usize) -> Vec<u8> {
+    mask_across(syn, mw, mh, |c| {
+        if c.lat.abs() > half + SHOULDER_M {
+            return 0;
+        }
+        let patch = smoothstep(
+            ((fbm(c.x / GRAVEL_PATCH_M, c.z / GRAVEL_PATCH_M, seed ^ 0x6A7E) + GRAVEL_BIAS) * 2.5)
+                .clamp(0.0, 1.0),
+        );
+        let off_line = ((c.off.abs() - 0.8) / 1.5).clamp(0.0, 1.0);
+        let not_floor = 1.0 - (-c.rut * 2.0).clamp(0.0, 1.0);
+        let fade = soft_edge(half + SHOULDER_M * 0.5, 2.0, c.lat.abs()) as f32 / 255.0;
+        (255.0 * GRAVEL_COVER * patch * (0.4 + 0.6 * off_line) * not_floor * fade) as u8
     })
 }
 
@@ -5626,6 +5665,10 @@ fn photo(name: &str) -> Option<&'static (usize, Vec<u8>)> {
         // And their specular, which is the normal map's alpha and so cannot ride in its JPEG.
         "soil_spec" => sheet_of!(G, "../assets/ground/soil_n_s_spec.jpg"),
         "grass_spec" => sheet_of!(H, "../assets/ground/grass_n_s_spec.jpg"),
+        // Its gravel: the stones a published riding surface carries on top of the dirt.
+        "gravel" => sheet_of!(I, "../assets/ground/gravel_c.jpg"),
+        "gravel_normal" => sheet_of!(J, "../assets/ground/gravel_n_s.jpg"),
+        "gravel_spec" => sheet_of!(K, "../assets/ground/gravel_n_s_spec.jpg"),
         _ => None,
     }
 }
@@ -5639,6 +5682,7 @@ fn photo(name: &str) -> Option<&'static (usize, Vec<u8>)> {
 fn photo_normal(look: &GroundLook, dim: usize) -> Option<Vec<u8>> {
     let (name, spec) = match look.photo? {
         "grass" => ("grass_normal", "grass_spec"),
+        "gravel" => ("gravel_normal", "gravel_spec"),
         _ => ("soil_normal", "soil_spec"),
     };
     let (d, src) = photo(name)?;
@@ -6902,6 +6946,21 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
         // a black band on the ground; Indiana has nothing like it — its riding surface is the
         // *light* tan and the infield is what goes green. The worn tone is gone and the
         // corridor carries the mid soil instead.
+        // Stones, on top of the worked dirt.
+        Layer {
+            name: "gravel_c",
+            sheet: "gravel_c",
+            band: BandMask::Gravel,
+            look: GroundLook { photo: Some("gravel"), tone: [1.0, 1.0, 1.0], ..loose },
+            salt: 0x6A7F,
+            tile_m: TILE_LOOSE_M,
+            mask: Some("mask_gravel.tga"),
+            thickness: Some(0.03),
+            spec: 14,
+            shininess: 12,
+            wet: true,
+            grass: false,
+        },
         Layer {
             // Painted over the line, not under it: with the dark strip laid on top, every
             // bank thrown up beside a groove was covered and a floor read the same as the
@@ -9049,7 +9108,7 @@ mod tests {
         let hmf = std::fs::read_to_string(dir.join("track.hmf")).unwrap();
         assert_eq!(
             hmf.matches("frame1").count(),
-            5,
+            layers(&p).iter().filter(|l| l.wet).count(),
             "every soil band gets a wet sheet, the grass does not:\n{hmf}"
         );
         for l in layers(&p) {

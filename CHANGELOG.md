@@ -13,10 +13,11 @@
 - Tight corners on generated tracks carry a comb of ruts, one for each line riders take,
   with a ridge between each. They vary in width, some start part way through the turn, and
   one can run into the rut outside it or split in two, the way a ridden corner does.
-- Braking bumps come in sets of long, rolling waves on the way into corners, to one side or
-  the other, never inside a rut, with darker packed soil on their back faces.
-- Jumps on generated tracks are a little smaller than before, about 85% of their old
-  height, with longer, gentler faces and clear ground in front of them to build speed. The
+- Braking bumps come in sets of rolling waves on the way into corners, big enough to feel, to
+  one side or the other, never inside a rut, with darker packed soil on their back faces.
+- Generated tracks carry pebbles: patches of stones over the ridden ground and its edges,
+  thinner on the racing line and never in a rut's floor.
+- Jumps on generated tracks are smaller than before, about 70% of their old height, with longer, gentler faces and clear ground in front of them to build speed. The
   finish jump keeps its full height, with a long deck and a long, gentle face.
 - Jump faces curve up from the ground and run straight to the lip, meeting the deck flush.
 - Jump faces carry wide, spread-out tyre scuffs instead of thin grooves down the middle.

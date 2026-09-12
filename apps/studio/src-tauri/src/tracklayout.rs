@@ -909,10 +909,9 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             // Capped at three metres: Motorcycling Australia and Motorcycling New Zealand both
             // write "jumps must not exceed 3m in height", and `corpus::FEATURE_HEIGHT_M` holds
             // a program to it. This used to draw up to 3.4 and every table was outside it.
-            // 85% of the 2.4-3.0 m drawn here before. At 75% with gentler faces, ridden as able
-            // to be taller.
-            let height = rng.range(2.05, 2.55);
-            length = (rng.range(13.5, 23.0) + faces(height)).min(room);
+            // 70% of the 2.4-3.0 m drawn here before: 85% rode too big again.
+            let height = rng.range(1.68, 2.1);
+            length = (rng.range(11.2, 18.9) + faces(height)).min(room);
             out.push(Feature::Tabletop { at: pos, length, height, lip: 0.0 });
         } else if pick < 0.55 && room > 30.0 {
             // A table is not always flat end to end. A whale tail rises, dips over its middle
@@ -922,18 +921,18 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             // Drawn in metres and normalised afterwards, so the take-off gets the same run a
             // tabletop of this height gets. Drawn as fractions it had 3.6 m of lip in 8.5 m of
             // ground, and from the seat that is a wall.
-            let h = rng.range(2.05, 2.55);
+            let h = rng.range(1.68, 2.1);
             let dip = rng.range(0.30, 0.40);
             let (up, down) = (lip_run(h), landing_run(h));
-            let near = up + 3.4 + down * 0.55;
+            let near = up + 2.8 + down * 0.55;
             let marks = [
                 (0.0, 0.0),
                 (up, h),
-                (up + 3.4, h),
+                (up + 2.8, h),
                 (near, h * dip),
-                (near + 9.4, h * 0.66),
-                (near + 9.4 + down * 0.7, h * 0.16),
-                (near + 9.4 + down, 0.0),
+                (near + 7.7, h * 0.66),
+                (near + 7.7 + down * 0.7, h * 0.16),
+                (near + 7.7 + down, 0.0),
             ];
             let span = marks[marks.len() - 1].0;
             length = span.min(room);
@@ -949,13 +948,13 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
         } else if pick < 0.82 && room > 24.0 {
             // A climb rather than a wall with a ramp on it.
             length = rng.range(34.0, 48.0).min(room);
-            out.push(Feature::StepUp { at: pos, length, height: rng.range(1.0, 1.7) });
+            out.push(Feature::StepUp { at: pos, length, height: rng.range(0.84, 1.4) });
         } else {
             length = rng.range(10.0, 16.0).min(room);
             if length < 8.0 {
                 break;
             }
-            out.push(Feature::Roller { at: pos, length, height: rng.range(0.6, 1.0) });
+            out.push(Feature::Roller { at: pos, length, height: rng.range(0.49, 0.84) });
         }
         // Closer than 6-15 m, so the run-up a jump now keeps off a corner does not thin the lap
         // below the published twelve lips a kilometre.
