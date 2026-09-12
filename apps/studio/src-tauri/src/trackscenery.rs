@@ -47,7 +47,8 @@ const STAKE_W_M: f32 = 0.045;
 /// the lap — and it is the one object that lines the whole circuit.
 ///
 /// So the numbers here are its numbers: 10.5 m out, 1.35 m tall, panels butted with no gap.
-const BANNER_OFF_M: f32 = 10.5;
+// Out where published tracks stand theirs (20-37 m); at 10.5 they crowded the track edge.
+const BANNER_OFF_M: f32 = 20.0;
 const BANNER_W_M: f32 = 4.0;
 const BANNER_H_M: f32 = 1.35;
 /// How thick a board is.
@@ -178,9 +179,10 @@ const BALE_D_M: f32 = 0.8;
 /// Trackside trees are *rare* — five a kilometre at Lakewood. What that track has instead is
 /// **15,341 trees beyond 60 m**: the wood is a backdrop, not furniture, and a track with a few
 /// dozen trees dotted along it reads as a field with sticks in it.
-const TREE_FROM_M: f32 = 34.0;
+// Fewer and further: 32 a km within 60 m against the 2-5 published tracks carry.
+const TREE_FROM_M: f32 = 40.0;
 const TREE_TO_M: f32 = 58.0;
-const TREE_SPACING_M: f32 = 45.0;
+const TREE_SPACING_M: f32 = 110.0;
 const TREE_H_M: f32 = 8.0;
 
 /// How high the sky band reaches, in degrees above the horizon — below the sun, which stands
@@ -201,13 +203,22 @@ const JUMPMARK_H_M: f32 = 1.5;
 const JUMPMARK_FLAG_M: f32 = 0.42;
 
 /// How far apart the poles and the parked vans go, from the per-kilometre counts above.
-const POLE_GAP_M: f32 = 50.0;
+// Forty-odd a kilometre, alternating sides, as the published tracks carry them.
+const POLE_GAP_M: f32 = 25.0;
 const POLE_H_M: f32 = 7.5;
 const VAN_GAP_M: f32 = 40.0;
 
 /// The backdrop: where the wood starts, and how thickly it stands out to the edge of the plot.
 const WOOD_FROM_M: f32 = 64.0;
-const WOOD_STEP_M: f32 = 9.0;
+
+/// The backdrop beyond the plot: how far out it reaches, how high it rises at its tallest and
+/// least, how many rays make it round, and how far apart its trees stand.
+const BACKDROP_REACH_M: f32 = 110.0;
+const BACKDROP_RISE_M: (f32, f32) = (8.0, 20.0);
+const BACKDROP_RAYS: usize = 256;
+const BACKDROP_TREE_M: f32 = 8.0;
+// Denser than 9 m at 62%: Oakhanger's whole wood came to 250 trees.
+const WOOD_STEP_M: f32 = 6.0;
 
 /// How close to the track a tree may stand when it is inside the lap rather than behind it,
 /// and how few of the candidates there are taken.
@@ -1092,6 +1103,114 @@ fn pole_mesh(h: f32) -> Mesh {
     m
 }
 
+/// The ground beyond the plot, and the pines standing on it.
+///
+/// Built outward from the plot's centre, one ray at a time: each ray leaves the square exactly
+/// at its edge, at the edge's own height, and climbs from there, so the bank meets the terrain
+/// with no seam and no gap at the corners. The rise varies round the ring, so the horizon is a
+/// line of hills rather than a wall.
+fn backdrop(prog: &TrackProgram, syn: &Synth, seed: u32) -> (Mesh, Mesh, usize) {
+    let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
+    let (cx, cz) = (sx * 0.5, sz * 0.5);
+    const OUT: [f32; 7] = [0.0, 8.0, 20.0, 38.0, 60.0, 85.0, BACKDROP_REACH_M];
+    // Where a ray from the centre at angle `a` leaves the square.
+    let exit = |a: f32| -> (f32, f32, f32, f32) {
+        let (dx, dz) = (a.cos(), a.sin());
+        let tx = if dx.abs() > 1e-6 { (if dx > 0.0 { sx - cx } else { -cx }) / dx } else { f32::MAX };
+        let tz = if dz.abs() > 1e-6 { (if dz > 0.0 { sz - cz } else { -cz }) / dz } else { f32::MAX };
+        let t = tx.min(tz);
+        (cx + dx * t, cz + dz * t, dx, dz)
+    };
+    let rise = |a: f32| -> f32 {
+        let n = 0.5 + 0.5 * noise1(a * 3.0, seed ^ 0xBAC0);
+        BACKDROP_RISE_M.0 + (BACKDROP_RISE_M.1 - BACKDROP_RISE_M.0) * n
+    };
+    let height = |a: f32, d: f32| -> f32 {
+        let (ex, ez, dx, dz) = exit(a);
+        let edge = ground(syn, ex - dx, ez - dz);
+        let t = (d / BACKDROP_REACH_M).clamp(0.0, 1.0);
+        edge - 0.1 + rise(a) * t * t * (3.0 - 2.0 * t)
+    };
+    let point = |a: f32, d: f32| -> [f32; 3] {
+        let (ex, ez, dx, dz) = exit(a);
+        [ex + dx * d, height(a, d), ez + dz * d]
+    };
+
+    let mut ground_mesh = Mesh::default();
+    for k in 0..=BACKDROP_RAYS {
+        let a = std::f32::consts::TAU * k as f32 / BACKDROP_RAYS as f32;
+        for &d in &OUT {
+            let p = point(a, d);
+            // Lit off its own slope, from the neighbours round and out.
+            let da = std::f32::consts::TAU / BACKDROP_RAYS as f32;
+            let (pa, pb) = (point(a - da, d), point(a + da, d));
+            let (po, pi) = (point(a, d + 4.0), point(a, (d - 4.0).max(0.0)));
+            let (u, w) = ([pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]], [po[0] - pi[0], po[1] - pi[1], po[2] - pi[2]]);
+            let mut nrm = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+            if nrm[1] < 0.0 {
+                nrm = [-nrm[0], -nrm[1], -nrm[2]];
+            }
+            let l = (nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]).sqrt().max(1e-6);
+            ground_mesh.positions.extend_from_slice(&p);
+            ground_mesh.normals.extend_from_slice(&[nrm[0] / l, nrm[1] / l, nrm[2] / l]);
+            ground_mesh.uvs.extend_from_slice(&[p[0] / 12.0, p[2] / 12.0]);
+        }
+    }
+    let per = OUT.len() as u32;
+    for k in 0..BACKDROP_RAYS as u32 {
+        for j in 0..per - 1 {
+            let (a, b) = (k * per + j, (k + 1) * per + j);
+            ground_mesh.indices.extend_from_slice(&[a, b, a + 1, a + 1, b, b + 1]);
+        }
+    }
+
+    // Pines on it, jittered off a grid in (angle, distance) so they read as a wood.
+    let mut trees = Mesh::default();
+    let mut n = 0usize;
+    let mut d = 6.0f32;
+    while d < BACKDROP_REACH_M - 4.0 {
+        let (ex, ez, _, _) = exit(0.0);
+        let r = ((ex - cx).hypot(ez - cz) + d).max(1.0);
+        let steps = ((std::f32::consts::TAU * r) / BACKDROP_TREE_M) as u32;
+        for k in 0..steps {
+            let key = (d as u32) * 65536 + k;
+            if rnd(seed ^ 0xBAC1, key) > 0.8 {
+                continue;
+            }
+            let a = std::f32::consts::TAU * (k as f32 + rnd(seed ^ 0xBAC2, key) - 0.5) / steps as f32;
+            let dd = d + (rnd(seed ^ 0xBAC3, key) - 0.5) * BACKDROP_TREE_M;
+            let p = point(a, dd.clamp(2.0, BACKDROP_REACH_M));
+            let h = TREE_H_M * (0.9 + 0.8 * rnd(seed ^ 0xBAC4, key));
+            trees.append(&edfwrite::moved(
+                &edfwrite::turned(&pine_mesh(h * 1.25, seed, key), 360.0 * rnd(seed ^ 0xBAC5, key)),
+                [p[0], p[1] - 0.1, p[2]],
+            ));
+            n += 1;
+        }
+        d += BACKDROP_TREE_M;
+    }
+    (ground_mesh, trees, n)
+}
+
+/// A smooth wander in one dimension, -1 to 1.
+fn noise1(x: f32, seed: u32) -> f32 {
+    let i = x.floor();
+    let f = x - i;
+    let a = rnd(seed, i as i32 as u32) * 2.0 - 1.0;
+    let b = rnd(seed, (i as i32 + 1) as u32) * 2.0 - 1.0;
+    let t = f * f * (3.0 - 2.0 * f);
+    a + (b - a) * t
+}
+
+/// The backdrop's ground: grass going brown, so it sits behind the site's own turf.
+fn backdrop_sheet() -> Texture {
+    sheet("backdrop_c", 64, |u, v| {
+        let g = grain(u, v, 0x5AC7, 16.0);
+        let s = 0.78 + 0.3 * g;
+        [(70.0 * s) as u8, (84.0 * s) as u8, (44.0 * s) as u8, 255]
+    })
+}
+
 /// A box van, parked. Two boxes and nothing else: at twenty metres it is a white slab with a
 /// dark cab, and every paddock on every track is full of them.
 fn van_mesh() -> Mesh {
@@ -1714,7 +1833,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             let x = gx + (rnd(seed ^ 0x61, key) - 0.5) * WOOD_STEP_M * 0.9;
             let z = gz + (rnd(seed ^ 0x62, key) - 0.5) * WOOD_STEP_M * 0.9;
             gx += WOOD_STEP_M;
-            if rnd(seed ^ 0x63, key) > 0.62 || !inside(prog, x, z, 4.0) {
+            if rnd(seed ^ 0x63, key) > 0.8 || !inside(prog, x, z, 4.0) {
                 continue;
             }
             if !clear_of_the_start(x, z) {
@@ -1742,6 +1861,13 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     }
     tally.push(("wood", n));
 
+    // 5c. The backdrop: a bank of ground beyond the plot, rising away from it, with a wood on
+    //     it. The plot ends forty metres from the line in places, and past it there was only
+    //     the sky — ridden as "scenery could use a backdrop and some more objects in the
+    //     background". Drawn and never solid: nobody rides out there.
+    let (backdrop, backdrop_trees, n) = backdrop(prog, syn, seed);
+    tally.push(("backdrop trees", n));
+
     // 6. Poles and vans — twenty and twenty-five a kilometre on the tracks measured, standing
     //    18–26 m and 15–25 m off the line. Neither is scenery you look at; together they are
     //    what stops the ground beside a track reading as an empty field.
@@ -1751,7 +1877,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         let st = at(s);
         let (rx, rz) = crate::trackprog::right_vector(st.heading);
         let key = (s / POLE_GAP_M) as u32;
-        let side = if rnd(seed ^ 0x71, key) < 0.5 { -1.0f32 } else { 1.0 };
+        let side = if key % 2 == 0 { -1.0f32 } else { 1.0 };
         let off = 18.0 + 8.0 * rnd(seed ^ 0x72, key);
         let (x, z) = (st.x + rx * off * side, st.z + rz * off * side);
         if inside(prog, x, z, 3.0) && clearance(&coarse, x, z) > off - 2.0 && clear_of_the_start(x, z)
@@ -1777,8 +1903,9 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
 
     // 7. The sky over all of it.
     let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
+    // Past the backdrop's far edge, or the bank stands through the sky at the plot's corners.
     let sky = edfwrite::moved(
-        &dome_mesh(sx.max(sz) * 0.95),
+        &dome_mesh((sx.max(sz) * 0.95).max(0.5 * sx.hypot(sz) + BACKDROP_REACH_M + 30.0)),
         [sx * 0.5, ground(syn, sx * 0.5, sz * 0.5) - 2.0, sz * 0.5],
     );
     tally.push(("sky", 1));
@@ -1852,6 +1979,9 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         ("poles".into(), poles, pole_sheet(), false),
         // The sky is drawn and nothing else: a dome you can ride into is not a sky.
         ("sky".into(), sky, dome_sheet(), false),
+        // The bank beyond the plot and the wood on it: drawn, never solid.
+        ("backdrop".into(), backdrop, backdrop_sheet(), false),
+        ("backdrop_trees".into(), backdrop_trees, tree_sheet(), false),
         ("gate".into(), gate, gate_sheet(), true),
         // Drawn, never solid: a mark is paint on the ground, not a kerb.
     ];
