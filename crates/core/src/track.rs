@@ -849,7 +849,13 @@ struct Stamp {
 fn stamp(path: &str) -> Result<Stamp> {
     let m = std::fs::metadata(path).with_context(|| format!("stat {path}"))?;
     Ok(Stamp {
-        size: m.len(),
+        // A folder's own size says nothing about its files, so an unpacked track rebuilt in
+        // place would draw from the cache. Its files' stamp stands in.
+        size: if m.is_dir() {
+            crate::viewer::tree_stamp(Path::new(path))
+        } else {
+            m.len()
+        },
         mtime_ns: m
             .modified()
             .ok()

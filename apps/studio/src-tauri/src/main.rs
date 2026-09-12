@@ -46,6 +46,10 @@ pub(crate) use mxb_core::mxbsecure;
 fn main() {
     tauri::Builder::default()
         .manage(PsdWatcher::default())
+        // The viewer's own watches — without these its commands are refused, and a paint
+        // saved from here never re-dressed the bike on screen.
+        .manage(mxb_core::paintwatch::PaintWatcher::default())
+        .manage(mxb_core::paintwatch::SourceWatcher::default())
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -131,6 +135,7 @@ fn main() {
             mxb_core::viewer::texture_bytes,
             mxb_core::viewer::unpack_pkz,
             mxb_core::viewer::watch_paint_files,
+            mxb_core::viewer::watch_viewer_source,
         ])
         .setup(|app| {
             app.set_menu(app_menu(app.handle())?)?;

@@ -11,6 +11,9 @@
 //! * [`LookWatcher`] — the paints the *game* is wearing. `main` pushes those into the
 //!   running game by re-running its own look loader.
 //!
+//! A third set, [`SourceWatcher`], watches the bike or track itself rather than one paint:
+//! a paint added beside a bike, or a track rebuilt, redraws the viewer. See [`watch_source`].
+//!
 //! Both are the same machinery over a different question, which is why [`start_with`] takes
 //! what to do rather than doing it.
 //!
@@ -62,8 +65,8 @@ struct Changed {
 }
 
 pub struct Running {
-    /// Dropping the debouncer stops its background thread.
-    _debouncer: Debouncer<RecommendedWatcher>,
+    /// Dropping a debouncer stops its background thread.
+    _debouncers: Vec<Debouncer<RecommendedWatcher>>,
     /// Cleared on stop, so a callback already in flight doesn't announce a change for a
     /// watcher that has been retired.
     live: Arc<AtomicBool>,
@@ -196,7 +199,152 @@ where
         return;
     }
     *set.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(Running {
-        _debouncer: debouncer,
+        _debouncers: vec![debouncer],
+        live,
+    });
+}
+
+/// Emitted when something behind the bike or track the viewer is drawing changes on disk.
+pub const SOURCE_EVENT: &str = "viewer-source-changed";
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceChanged {
+    /// The caller's own spelling of what it asked to watch.
+    source: String,
+    /// What changed, in the OS's spelling — only ever matched on file name.
+    paths: Vec<String>,
+}
+
+/// Tauri-managed handle for the bike or track the viewer is drawing. `None` when closed.
+#[derive(Default)]
+pub struct SourceWatcher(pub WatchSet);
+
+/// Litter the OS and editors leave beside a mod. A save by rename writes one of these first,
+/// and reloading a whole bike for it would be a rebuild for nothing.
+fn is_litter(path: &Path) -> bool {
+    let Some(name) = file_key(path) else {
+        return true;
+    };
+    name.starts_with('.')
+        || name.ends_with(".tmp")
+        || name.ends_with('~')
+        || name == "thumbs.db"
+        || name == "desktop.ini"
+}
+
+/// A folder to watch, how deep, and — on a folder shared with other mods — the only names
+/// that count.
+type Root = (PathBuf, RecursiveMode, Option<Vec<String>>);
+
+/// What to watch to see `source` change.
+///
+/// A folder is the mod, so it is watched whole. An archive is watched through its parent,
+/// by name — along with the loose folder of the same name beside it, where a bike keeps its
+/// `paints/`. That folder is watched whole when it exists; when it doesn't, its name on the
+/// parent catches it appearing.
+fn source_roots(source: &Path) -> Vec<Root> {
+    if source.is_dir() {
+        return vec![(source.to_path_buf(), RecursiveMode::Recursive, None)];
+    }
+    let Some(parent) = source.parent().filter(|d| !d.as_os_str().is_empty()) else {
+        return Vec::new();
+    };
+    let loose = source.with_extension("");
+    let names = [file_key(source), file_key(&loose)].into_iter().flatten().collect();
+    let mut out = vec![(parent.to_path_buf(), RecursiveMode::NonRecursive, Some(names))];
+    if loose.is_dir() {
+        out.push((loose, RecursiveMode::Recursive, None));
+    }
+    out
+}
+
+/// The changed paths in a batch worth a reload, each once.
+///
+/// Inside a mod's own folder a folder event is dropped: Windows reports `paints/` itself as
+/// modified on every save into it, which would turn each re-save of the paint on screen into
+/// a full rebuild. The files that moved are reported on their own.
+fn source_changes(names: Option<&[String]>, events: impl IntoIterator<Item = PathBuf>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for path in events {
+        if is_litter(&path) {
+            continue;
+        }
+        match names {
+            Some(names) => {
+                if !file_key(&path).is_some_and(|k| names.contains(&k)) {
+                    continue;
+                }
+            }
+            None => {
+                if path.is_dir() {
+                    continue;
+                }
+            }
+        }
+        let s = path.to_string_lossy().into_owned();
+        if !out.contains(&s) {
+            out.push(s);
+        }
+    }
+    out
+}
+
+/// Watch the bike or track the viewer is drawing, replacing whatever it watched before.
+/// `None` stops.
+///
+/// One debouncer per root rather than one for all, so each knows which question it answers
+/// — "is this ours?" on the shared parent, "anything" inside the mod's own folder — without
+/// comparing event paths against ours, which the OS spells its own way.
+pub fn watch_source<R: Runtime>(app: &AppHandle<R>, state: &SourceWatcher, source: Option<&str>) {
+    stop(&state.0);
+    let Some(source) = source.filter(|s| !s.is_empty()) else {
+        return;
+    };
+    let live = Arc::new(AtomicBool::new(true));
+    let mut debouncers = Vec::new();
+    for (dir, mode, names) in source_roots(Path::new(source)) {
+        let alive = live.clone();
+        let handle = app.clone();
+        let owner = source.to_string();
+        let debouncer = new_debouncer(DEBOUNCE, move |res: DebounceEventResult| {
+            if !alive.load(Ordering::SeqCst) {
+                return;
+            }
+            let Ok(events) = res else { return };
+            let paths = source_changes(names.as_deref(), events.into_iter().map(|e| e.path));
+            if paths.is_empty() {
+                return;
+            }
+            log::info!("source watcher: {owner} changed on disk ({} files)", paths.len());
+            let _ = handle.emit(
+                SOURCE_EVENT,
+                SourceChanged {
+                    source: owner.clone(),
+                    paths,
+                },
+            );
+        });
+        let mut debouncer = match debouncer {
+            Ok(d) => d,
+            Err(e) => {
+                log::warn!("source watcher: couldn't start: {e}");
+                continue;
+            }
+        };
+        match debouncer.watcher().watch(&dir, mode) {
+            Ok(()) => {
+                log::info!("source watcher: watching {}", dir.display());
+                debouncers.push(debouncer);
+            }
+            Err(e) => log::warn!("source watcher: couldn't watch {}: {e}", dir.display()),
+        }
+    }
+    if debouncers.is_empty() {
+        return;
+    }
+    *state.0 .0.lock().unwrap_or_else(|e| e.into_inner()) = Some(Running {
+        _debouncers: debouncers,
         live,
     });
 }
@@ -328,6 +476,92 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         assert!(hits > 0, "a save must reach the callback the caller supplied");
+    }
+
+    #[test]
+    fn an_archive_is_watched_by_name_and_its_loose_folder_whole() {
+        let root = std::env::temp_dir().join(format!("frost-src-roots-{}", std::process::id()));
+        let loose = root.join("KTM 450");
+        std::fs::create_dir_all(loose.join("paints")).expect("make the loose folder");
+        let pkz = root.join("KTM 450.pkz");
+        std::fs::write(&pkz, b"pkz").expect("install an archive");
+
+        let roots = source_roots(&pkz);
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(roots.len(), 2, "the parent by name, the loose folder whole");
+        assert_eq!(roots[0].0, root);
+        assert_eq!(roots[0].1, RecursiveMode::NonRecursive);
+        assert_eq!(roots[0].2, Some(owned(&["ktm 450.pkz", "ktm 450"])));
+        assert_eq!(roots[1].0, loose);
+        assert_eq!(roots[1].1, RecursiveMode::Recursive);
+    }
+
+    #[test]
+    fn a_shared_folder_only_counts_our_names_and_litter_never_counts() {
+        let names = owned(&["ktm 450.pkz", "ktm 450"]);
+        let events = [
+            PathBuf::from("/mx/bikes/KTM 450.pkz"),
+            PathBuf::from("/mx/bikes/Honda.pkz"),
+            PathBuf::from("/mx/bikes/.DS_Store"),
+            PathBuf::from("/mx/bikes/KTM 450.pkz"),
+        ];
+        assert_eq!(source_changes(Some(&names), events), owned(&["/mx/bikes/KTM 450.pkz"]));
+
+        let inside = [
+            PathBuf::from("/mx/bikes/KTM 450/paints/Frost.pnt.tmp"),
+            PathBuf::from("/mx/bikes/KTM 450/paints/Frost.pnt"),
+        ];
+        assert_eq!(
+            source_changes(None, inside),
+            owned(&["/mx/bikes/KTM 450/paints/Frost.pnt"]),
+        );
+    }
+
+    /// The claim that matters: a paint dropped beside a packed bike reaches the viewer, so
+    /// the new paint shows up in its list without closing it.
+    #[test]
+    fn a_paint_added_beside_an_archive_reaches_the_viewer() {
+        use tauri::Listener;
+
+        let root = std::env::temp_dir().join(format!("frost-srcwatch-{}", std::process::id()));
+        let paints = root.join("KTM 450").join("paints");
+        std::fs::create_dir_all(&paints).expect("make the paints folder");
+        let pkz = root.join("KTM 450.pkz");
+        std::fs::write(&pkz, b"pkz").expect("install an archive");
+        let source = pkz.to_string_lossy().to_string();
+
+        let app = mock_app();
+        let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+        let heard = Arc::clone(&seen);
+        app.handle().listen(SOURCE_EVENT, move |e| {
+            heard.lock().unwrap().push(e.payload().to_string());
+        });
+
+        let state = SourceWatcher::default();
+        watch_source(app.handle(), &state, Some(&source));
+        std::thread::sleep(Duration::from_millis(300));
+        std::fs::write(paints.join("New.pnt"), b"paint").expect("add a paint");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let hit = loop {
+            if seen.lock().unwrap().iter().any(|p| p.contains("New.pnt")) {
+                break true;
+            }
+            if std::time::Instant::now() >= deadline {
+                break false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        stop(&state.0);
+        let payloads = seen.lock().unwrap().clone();
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert!(hit, "a new paint must be reported; saw {payloads:?}");
+        assert!(
+            payloads.iter().all(|p| p.contains(&*source.replace('\\', "\\\\"))),
+            "every event names the source the viewer asked about: {payloads:?}",
+        );
     }
 
     fn mock_app() -> tauri::App<tauri::test::MockRuntime> {

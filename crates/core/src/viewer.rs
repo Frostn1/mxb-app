@@ -23,7 +23,7 @@ pub fn app_platform() -> &'static str {
 use rayon::prelude::*;
 use tauri::State;
 
-use crate::paintwatch::PaintWatcher;
+use crate::paintwatch::{PaintWatcher, SourceWatcher};
 use crate::{
     bikefiles, cfg, cloudfiles, config, edf, game, gate, library, lru, paint, paintwatch,
     pkz, presets, texstore,
@@ -66,6 +66,17 @@ pub async fn texture_bytes(token: String) -> tauri::ipc::Response {
 #[tauri::command]
 pub fn watch_paint_files(app: tauri::AppHandle, watcher: State<PaintWatcher>, paths: Vec<String>) {
     paintwatch::start(&app, &watcher, &paths);
+}
+
+/// Watch the bike or track the viewer is drawing, so a paint added beside it or the archive
+/// rebuilt redraws it. Replaces whatever was watched before; `None` stops.
+#[tauri::command]
+pub fn watch_viewer_source(
+    app: tauri::AppHandle,
+    watcher: State<SourceWatcher>,
+    source: Option<String>,
+) {
+    paintwatch::watch_source(&app, &watcher, source.as_deref());
 }
 
 #[tauri::command]
@@ -180,7 +191,39 @@ pub fn mtime_nanos(path: &std::path::Path) -> u128 {
 pub fn bike_cache_key(source: &str) -> String {
     let path = std::path::Path::new(source);
     let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-    format!("{source}:{}:{size}{}", mtime_nanos(path), packed_stamp(path))
+    format!(
+        "{source}:{}:{size}{}{}",
+        mtime_nanos(path),
+        packed_stamp(path),
+        folder_stamp(path),
+    )
+}
+
+/// Every file under a loose folder, as a cache key fragment. A folder's own mtime only moves
+/// when an entry is added or removed, so a mesh re-saved in place inside it would otherwise
+/// be served from the cache. Empty for a file: its own size and mtime already cover it.
+pub fn folder_stamp(path: &std::path::Path) -> String {
+    if !path.is_dir() {
+        return String::new();
+    }
+    format!("#d{:x}", tree_stamp(path))
+}
+
+/// Name, length and mtime of every file under `dir`, hashed — sorted so walk order can't
+/// shuffle the answer.
+pub fn tree_stamp(dir: &std::path::Path) -> u64 {
+    let mut rows: Vec<String> = walkdir::WalkDir::new(dir)
+        .into_iter()
+        .flatten()
+        .filter(|e| e.file_type().is_file())
+        .map(|e| {
+            let len = e.metadata().map(|m| m.len()).unwrap_or(0);
+            let rel = e.path().strip_prefix(dir).unwrap_or(e.path());
+            format!("{}:{len}:{}", rel.display(), mtime_nanos(e.path()))
+        })
+        .collect();
+    rows.sort_unstable();
+    fnv1a(&rows)
 }
 
 /// The bike's packed archive, as a cache key fragment. It's a real input to every bike now

@@ -11,7 +11,9 @@ import {
   loadStockGearModel,
   listGearPaints,
   onPaintChanged,
+  onViewerSourceChanged,
   watchPaintFiles,
+  watchViewerSource,
 } from "../../api/mods";
 import type { PaintTexture, BikeModel, EdfNode, RiderPart, GearPaints } from "../../types";
 import { useT } from "../../i18n/context";
@@ -44,9 +46,12 @@ const EMPTY_GEAR_PAINTS: GearPaints = {
   hasStockGoggles: false,
 };
 
+function fileName(path: string): string {
+  return path.replace(/\\/g, "/").split("/").pop() ?? path;
+}
+
 function paintLabel(path: string): string {
-  const base = path.replace(/\\/g, "/").split("/").pop() ?? path;
-  return base.replace(/\.pnt$/i, "");
+  return fileName(path).replace(/\.pnt$/i, "");
 }
 
 /**
@@ -94,8 +99,9 @@ export function ViewerDialog({
   // Null until the player picks: the selection falls back to `initialPaint`, and the
   // names it matches against only arrive once the model (or its archive) has loaded.
   // Deriving it rather than storing it is what lets a late-arriving list still land on
-  // the right paint without ever overriding a pick made in the meantime.
-  const [paintPick, setPaintPick] = useState<number | null>(null);
+  // the right paint without ever overriding a pick made in the meantime. Held by name, so a
+  // reload that adds a paint ahead of it doesn't move the pick onto its neighbour.
+  const [paintPick, setPaintPick] = useState<string | null>(null);
   const tyresPick = useTyresPick();
   const [gogglesPick, setGogglesPick] = useState<number | null>(null);
   const [model, setModel] = useState<BikeModel | null>(null);
@@ -116,6 +122,12 @@ export function ViewerDialog({
   // Ticks on each reload, to raise the chip below. A counter and not a boolean: two saves
   // in a row have to raise it twice, and the second would find it already up.
   const [reloads, setReloads] = useState(0);
+  // What the chip says: a paint re-dressed, or the whole bike drawn again.
+  const [chip, setChip] = useState<"viewer.paintReloaded" | "viewer.bikeReloaded">(
+    "viewer.paintReloaded",
+  );
+  // Ticks when the bike changes on disk, to load it again.
+  const [generation, setGeneration] = useState(0);
 
   const nodes = model?.nodes ?? null;
   const rig = model?.rig ?? null;
@@ -131,7 +143,7 @@ export function ViewerDialog({
   const goggleNames = gearSource
     ? withStock(gearPaints.goggles, gearPaints.hasStockGoggles)
     : [];
-  const paintIdx = paintPick ?? indexOfName(paintNames, initialPaint);
+  const paintIdx = indexOfName(paintNames, paintPick ?? initialPaint);
   const gogglesIdx = gogglesPick ?? indexOfName(goggleNames, initialGoggles);
 
   // Load the real bike geometry + its paints once per open (cached backend-side). A swap
@@ -154,28 +166,43 @@ export function ViewerDialog({
       return;
     }
     let alive = true;
+    const reload = generation > 0;
     setLoadingModel(true);
     setModelErr(null);
     load
-      .then((m) => alive && setModel(m))
-      .catch((e) => {
-        if (alive) {
-          setModelErr(String(e).replace(/^Error:\s*/, ""));
-          setModel(null);
+      .then((m) => {
+        if (!alive) return;
+        setModel(m);
+        if (reload) {
+          setChip("viewer.bikeReloaded");
+          setReloads((n) => n + 1);
         }
+      })
+      .catch((e) => {
+        if (!alive) return;
+        // A reload caught mid-write fails where the one after the write's last event won't,
+        // so keep the bike on screen rather than blank it in between.
+        if (reload) {
+          console.warn("[viewer] bike changed but wouldn't load:", e);
+          return;
+        }
+        setModelErr(String(e).replace(/^Error:\s*/, ""));
+        setModel(null);
       })
       .finally(() => alive && setLoadingModel(false));
     return () => {
       alive = false;
     };
-  }, [open, modelSource, swapBike, swapVariant, tyresPick.tyres]);
+  }, [open, modelSource, swapBike, swapVariant, tyresPick.tyres, generation]);
 
   // Drop any pick each time it opens, so the next thing shown starts from its own paint
-  // rather than the index left behind by the last one.
+  // rather than the one left behind by the last.
   useEffect(() => {
     if (open) {
       setPaintPick(null);
       setGogglesPick(null);
+    } else {
+      setGeneration(0);
     }
   }, [open]);
 
@@ -258,6 +285,7 @@ export function ViewerDialog({
           if (isBike) setHot({ path: livePath, textures });
           else setGearTextures(textures);
           setErr(null);
+          setChip("viewer.paintReloaded");
           setReloads((n) => n + 1);
           return;
         } catch (e) {
@@ -278,6 +306,25 @@ export function ViewerDialog({
       void watchPaintFiles([]);
     };
   }, [open, isBike, livePath]);
+
+  // Draw the bike again when anything behind it changes on disk — a paint added or removed,
+  // the archive rebuilt — so a new paint shows up in the list. A save of the paint on screen
+  // is left to the hot reload above, which re-dresses the model without rebuilding it.
+  // Re-armed after each reload: a packed bike's loose folder may only just have appeared.
+  useEffect(() => {
+    if (!open || !modelSource) return;
+    const liveName = livePath ? fileName(livePath).toLowerCase() : null;
+    void watchViewerSource(modelSource);
+    const pending = onViewerSourceChanged((e) => {
+      if (e.source !== modelSource) return;
+      if (liveName && e.paths.every((p) => fileName(p).toLowerCase() === liveName)) return;
+      setGeneration((g) => g + 1);
+    });
+    return () => {
+      void pending.then((un) => un());
+      void watchViewerSource(null);
+    };
+  }, [open, modelSource, livePath, generation]);
 
   // The textures the mesh should wear: the selected bike paint, or the gear paint.
   const activeTextures = useMemo<PaintTexture[]>(() => {
@@ -423,7 +470,7 @@ export function ViewerDialog({
                 {t("viewer.paint")}
                 <select
                   value={paintIdx}
-                  onChange={(e) => setPaintPick(Number(e.target.value))}
+                  onChange={(e) => setPaintPick(paintNames[Number(e.target.value)] ?? null)}
                   className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
                 >
                   {paintOptions.map((name, i) => (
@@ -520,7 +567,7 @@ export function ViewerDialog({
           {flash && (
             <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-md bg-black/60 px-2 py-1 text-xs text-white/90">
               <RefreshCw className="h-3.5 w-3.5" />
-              {t("viewer.paintReloaded")}
+              {t(chip)}
             </div>
           )}
         </div>
