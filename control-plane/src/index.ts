@@ -661,12 +661,50 @@ async function grantKey(request: Request, account: Account, env: Env): Promise<R
     return json(503, { error: "content keys are unavailable" });
   }
 
+  // The per-provision secret the client folds into the .mxbkey seal. Entitlement was just
+  // confirmed, so `account.steam_id` is set and its entitlement row exists.
+  const provisionSecret = await provisionSecretFor(account.steam_id!, assetId, env);
+
   return json(200, {
     assetId,
     keyId: asset.key_id ?? null,
     contentKey: b64(key),
+    provisionSecret,
     ttlSeconds: KEY_GRANT_TTL_SECONDS,
   });
+}
+
+/**
+ * The stable per-(buyer, asset) secret, minted once and reused.
+ *
+ * Folded into the client's `.mxbkey` seal so a leaked key can't be re-derived from the buyer's
+ * public Steam ID alone. It must be *stable*: the same buyer re-provisioning on another of
+ * their machines has to arrive at the same key, so we return the secret already on the
+ * entitlement row and only mint one when the column is still null. Never rotated — rotating it
+ * would strand every `.mxbkey` already on a disk. Base64 of 32 random bytes.
+ */
+async function provisionSecretFor(steamId: string, assetId: string, env: Env): Promise<string> {
+  const row = await env.DB.prepare(
+    "SELECT provision_secret FROM entitlements WHERE steam_id = ? AND asset_id = ?",
+  )
+    .bind(steamId, assetId)
+    .first<{ provision_secret: string | null }>();
+  if (row?.provision_secret) return row.provision_secret;
+
+  const secret = b64(crypto.getRandomValues(new Uint8Array(32)));
+  // Only set it if it is still null, so two concurrent grants can't overwrite each other with
+  // different secrets; if the guard loses, re-read the winner rather than trusting our own.
+  await env.DB.prepare(
+    "UPDATE entitlements SET provision_secret = ? WHERE steam_id = ? AND asset_id = ? AND provision_secret IS NULL",
+  )
+    .bind(secret, steamId, assetId)
+    .run();
+  const after = await env.DB.prepare(
+    "SELECT provision_secret FROM entitlements WHERE steam_id = ? AND asset_id = ?",
+  )
+    .bind(steamId, assetId)
+    .first<{ provision_secret: string | null }>();
+  return after?.provision_secret ?? secret;
 }
 
 /** How briefly the DLL should cache a released key before re-checking entitlement. */

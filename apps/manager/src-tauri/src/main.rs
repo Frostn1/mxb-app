@@ -92,14 +92,17 @@ mod offline_flow_test {
         let blob_path = dir.join("track.pkz.mxbsecure");
         std::fs::write(&blob_path, &locked.blob).unwrap();
 
-        // Provision: seal the key to the (fake) live Steam ID, store the .mxbkey.
+        // Provision: seal the key to the (fake) live Steam ID and the per-provision secret,
+        // store the .mxbkey.
         write_vdf("76561198000000001");
         let steam = crate::steamid::current_steam_id64().expect("steam id");
         assert_eq!(steam, "76561198000000001");
-        let sealed = crate::mxbsecure::seal_key_to_identity(&locked.content_key, &steam, "");
+        let secret = b"a-server-minted-provision-secret";
+        let sealed = crate::mxbsecure::seal_key_to_identity(&locked.content_key, &steam, "", secret, true);
         std::fs::write(dir.join("track.pkz.mxbsecure.mxbkey"), &sealed).unwrap();
 
-        // Open offline as the same account: unseal, decrypt, compare.
+        // Open offline as the same account: unseal (the secret rides inside the envelope),
+        // decrypt, compare.
         let key = crate::mxbsecure::unseal_key(&sealed, &crate::steamid::current_steam_id64().unwrap(), "")
             .expect("unseals for the same account");
         let opened = crate::mxbsecure::open(&locked.blob, &key).unwrap();
@@ -1645,21 +1648,31 @@ struct SecureProvisionOutcome {
     steam_id: String,
 }
 
-/// Provision a content key for offline play: seal it to the live Steam ID and store it as a
-/// `.mxbkey` beside the blob. Called once, after the server has released the key (here the
-/// Lock tab supplies it). From then on the key opens offline for this account only.
+/// Provision a content key for offline play: seal it to the live Steam ID (and the
+/// per-provision secret) and store it as a `.mxbkey` beside the blob. Called once, after the
+/// server has released the key and minted the secret at `/v1/keys/grant`. From then on the key
+/// opens offline for this account, on this machine, only.
+///
+/// `secret_b64` is the base64 secret the grant returned; empty is allowed for the local
+/// Lock-tab test path (no server), where the binding is Steam ID + machine only.
 #[tauri::command]
 async fn mxbsecure_provision(
     app: tauri::AppHandle,
     blob_path: String,
     key: String,
+    secret_b64: Option<String>,
 ) -> Result<SecureProvisionOutcome, String> {
     #[cfg(mxbsecure)]
     {
         let steam_id = steamid::current_steam_id64()
             .ok_or("couldn't read your Steam ID — is Steam installed and signed in?")?;
         let content_key = mxbsecure::key_from_hex(&key).ok_or("the key isn't 32 bytes of hex")?;
-        let sealed = mxbsecure::seal_key_to_identity(&content_key, &steam_id, "");
+        let secret = match secret_b64.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(s) => mxbsecure::secret_from_b64(s).ok_or("the provision secret isn't valid base64")?,
+            None => Vec::new(),
+        };
+        // The buyer is provisioning on their own machine, so bind to it (DPAPI) as well.
+        let sealed = mxbsecure::seal_key_to_identity(&content_key, &steam_id, "", &secret, true);
         let out = std::path::PathBuf::from(format!("{blob_path}.mxbkey"));
         tokio::fs::write(&out, &sealed).await.map_err(|e| format!("write .mxbkey: {e}"))?;
 
@@ -1689,7 +1702,7 @@ async fn mxbsecure_provision(
     }
     #[cfg(not(mxbsecure))]
     {
-        let _ = (app, blob_path, key);
+        let _ = (app, blob_path, key, secret_b64);
         Err("this build can't provision mxbsecure content".into())
     }
 }
