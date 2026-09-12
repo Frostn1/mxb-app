@@ -1694,7 +1694,11 @@ async fn mxbsecure_generate(
         let asset_id = format!("{}-{suffix}", mxb_core::names::sanitize_asset_id(&name));
 
         let locked = mxbsecure::lock(&plaintext, &asset_id, "k1");
-        let sealed = mxbsecure::seal_key_to_identity(&locked.content_key, &steam_id, "");
+        // The creator seals here, on their own machine, for the *buyer's* Steam ID: no machine
+        // binding (DPAPI would tie it to the creator's box), and no per-provision secret — this
+        // offline hand-off flow has no server grant to mint one, so it binds to the Steam ID
+        // alone. The server-provisioned path (manager's mxbsecure_provision) adds both.
+        let sealed = mxbsecure::seal_key_to_identity(&locked.content_key, &steam_id, "", b"", false);
 
         // `<track>.mxbsecure` and `<track>.mxbsecure.mxbkey`, beside the original.
         let blob_path = format!("{track_path}.mxbsecure");

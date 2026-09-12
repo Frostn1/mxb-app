@@ -135,6 +135,13 @@ want "an entitled session is granted the key" "200" "$(grant_code trk_pinehill)"
 GOT_HEX="$(grant trk_pinehill | python3 -c 'import json,sys,base64; print(base64.b64decode(json.load(sys.stdin)["contentKey"]).hex())')"
 want "and it is the real content key"          "$CEK_HEX" "$GOT_HEX"
 
+# The per-provision secret is minted on first grant and stable across repeated grants — a
+# buyer re-provisioning on another machine must derive the same key.
+SECRET1="$(grant trk_pinehill | python3 -c 'import json,sys; print(json.load(sys.stdin).get("provisionSecret",""))')"
+want "a grant carries a provision secret"      "yes" "$([ -n "$SECRET1" ] && echo yes || echo no)"
+SECRET2="$(grant trk_pinehill | python3 -c 'import json,sys; print(json.load(sys.stdin).get("provisionSecret",""))')"
+want "and the secret is stable across grants"  "$SECRET1" "$SECRET2"
+
 want "an entitled asset with no key is a 409"  "409" "$(grant_code trk_nokey)"
 
 d1 "UPDATE entitlements SET revoked_at = 99 WHERE steam_id = '${STEAM_ID}' AND asset_id = 'trk_pinehill'"
