@@ -6666,10 +6666,15 @@ const SSC: &str = "numsources = 0\n";
 /// The sun direction has to agree with `params.ini` — TerrainEd bakes shadows from that one
 /// and the game lights from this one, so a mismatch is a track lit from one side with its
 /// shadows falling the other.
+///
+/// The game lights ground as `clamp(ambient + sun * diffuse, 0, 1)`. A 54° sun at full
+/// strength put flat ground at 1.2, so 97% of a corner sat at the clamp and every rut and bump
+/// lit the same. About 40° up with less light, as published tracks do, leaves flat ground at
+/// 0.89 and the relief room to show.
 const AMB: &str = "\
-sun_position\n{\n\tx = 2\n\ty = 10\n\tz = -7\n}\n\
-clear\n{\n\tambient\n\t{\n\t\tred = 0.40\n\t\tgreen = 0.45\n\t\tblue = 0.55\n\t}\n\
-\tsun_color\n\t{\n\t\tred = 1.10\n\t\tgreen = 0.95\n\t\tblue = 0.7\n\t}\n\
+sun_position\n{\n\tx = 2\n\ty = 6\n\tz = -7\n}\n\
+clear\n{\n\tambient\n\t{\n\t\tred = 0.40\n\t\tgreen = 0.43\n\t\tblue = 0.50\n\t}\n\
+\tsun_color\n\t{\n\t\tred = 0.78\n\t\tgreen = 0.72\n\t\tblue = 0.60\n\t}\n\
 \tfog\n\t{\n\t\tdensity = 0.0008\n\t\tred = 0.7\n\t\tgreen = 0.7\n\t\tblue = 0.85\n\t}\n\
 \tsky = dome.edf\n\tsky_rot = 0\n}\n\
 cloudy\n{\n\tambient\n\t{\n\t\tred = 0.65\n\t\tgreen = 0.65\n\t\tblue = 0.7\n\t}\n\
@@ -6743,7 +6748,7 @@ fn ui_shot(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<u8> {
     // Straight off the `.amb`: `sun_position`, and the `clear` condition's light. The picture
     // is of the track in the weather the game opens it in.
     let sun = {
-        let v = [2.0f32, 10.0, -7.0];
+        let v = [2.0f32, 6.0, -7.0];
         let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
         [v[0] / l, v[1] / l, v[2] / l]
     };
@@ -6756,8 +6761,8 @@ fn ui_shot(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<u8> {
         adim: dim,
         focus: &focus,
         sun,
-        sun_colour: [1.10, 0.95, 0.70],
-        ambient: [0.40, 0.45, 0.55],
+        sun_colour: [0.78, 0.72, 0.60],
+        ambient: [0.40, 0.43, 0.50],
         zenith: ZENITH,
         horizon: HORIZON,
         // The `.amb`'s own fog colour, which is what the distance goes to in the game too.
@@ -7375,7 +7380,7 @@ fn track_ini(prog: &TrackProgram) -> String {
     )
 }
 
-const PARAMS_INI: &str = "\n[params]\nlightdir_x = 2\nlightdir_y = 10\nlightdir_z = -7\n\
+const PARAMS_INI: &str = "\n[params]\nlightdir_x = 2\nlightdir_y = 6\nlightdir_z = -7\n\
                           shadowvolumes_create = 1\nshadowvolumes_supersampling = 1\n\
                           shadowmaps_create = 1\nshadowmaps_scale = 0.1\n\
                           shadowmaps_supersampling = 1\n";
@@ -11933,5 +11938,127 @@ mod ground_preview {
             .save(&out)
             .unwrap();
         println!("  {out}  {span:.0} m across, centred on the lap at ({cx:.0}, {cz:.0})");
+    }
+}
+
+#[cfg(test)]
+mod game_light {
+    use super::*;
+
+    /// Flat ground stays under the game's clamp in every weather, and the sun the game lights
+    /// by is the one TerrainEd bakes shadows from.
+    #[test]
+    fn flat_ground_is_lit_below_the_clamp() {
+        let num = |s: &str, key: &str| -> f32 {
+            let at = s.find(key).unwrap_or_else(|| panic!("no {key}")) + key.len();
+            let t = s[at..].trim_start_matches([' ', '=']);
+            t[..t.find(['\n', '\t', ' ']).unwrap_or(t.len())].parse().unwrap()
+        };
+        let sun = [num(AMB, "\tx = "), num(AMB, "\ty = "), num(AMB, "\tz = ")];
+        assert_eq!(
+            sun,
+            [num(PARAMS_INI, "lightdir_x"), num(PARAMS_INI, "lightdir_y"), num(PARAMS_INI, "lightdir_z")]
+        );
+        let up = sun[1] / (sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]).sqrt();
+        assert!(up.asin().to_degrees() > crate::trackscenery::SKY_TOP_DEG + 3.0, "the sky band would shade the track");
+        for weather in ["clear", "cloudy", "rainy"] {
+            let block = &AMB[AMB.find(&format!("{weather}\n")).unwrap()..];
+            let amb = &block[block.find("ambient").unwrap()..];
+            let col = &block[block.find("sun_color").unwrap()..];
+            for ch in ["red", "green", "blue"] {
+                let flat = num(amb, ch) + num(col, ch) * up;
+                assert!(flat < 0.95 || (weather == "rainy" && ch == "blue"), "{weather} {ch} flat ground at {flat:.2}");
+            }
+        }
+    }
+
+    /// The game lights ground as `clamp(ambient + sun * diffuse, 0, 1)`. How much of a
+    /// corner's riding surface an `.amb` pins at that clamp, and how much light it leaves to
+    /// show relief — for ours and for one lit like a published track.
+    ///
+    /// ```text
+    /// FROST_PROGRAM=seed:63 FROST_DUMP=/tmp/light cargo test --bins -- --ignored --nocapture game_light_on_a_corner
+    /// ```
+    #[test]
+    #[ignore]
+    fn game_light_on_a_corner() {
+        let spec = std::env::var("FROST_PROGRAM").unwrap_or_else(|_| "seed:63".into());
+        let prog: crate::trackprog::TrackProgram = match spec.strip_prefix("seed:") {
+            Some(n) => match crate::tracklayout::search(n.parse().unwrap(), 400) {
+                Ok(m) => m.program,
+                Err(r) => r.into_iter().next().expect("a layout").program,
+            },
+            None => serde_json::from_str(&std::fs::read_to_string(&spec).unwrap()).unwrap(),
+        };
+        let syn = synthesise(&prog).unwrap();
+        let st = &syn.stations;
+        let wrap = |a: f32| (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        let k = 40.min(st.len() / 4);
+        let c = (0..st.len() - k)
+            .max_by(|&a, &b| {
+                let ta = wrap(st[a + k].heading - st[a].heading).abs();
+                let tb = wrap(st[b + k].heading - st[b].heading).abs();
+                ta.total_cmp(&tb)
+            })
+            .unwrap()
+            + k / 2;
+        let (cx, cz) = (st[c].x, st[c].z);
+        let (span, px) = (40.0f32, 0.05f32);
+        let n = (span / px) as usize;
+        let half = prog.width * 0.5;
+        let near: Vec<_> = st[c.saturating_sub(400)..(c + 400).min(st.len())].to_vec();
+
+        // (label, sun direction, ambient, sun colour)
+        let lights: [(&str, [f32; 3], [f32; 3], [f32; 3]); 2] = [
+            ("54° sun", [2.0, 10.0, -7.0], [0.40, 0.45, 0.55], [1.10, 0.95, 0.70]),
+            ("40° sun", [2.0, 6.0, -7.0], [0.40, 0.43, 0.50], [0.78, 0.72, 0.60]),
+        ];
+        let mut img = vec![0u8; n * 2 * n * 3];
+        for (li, (label, sun, amb, col)) in lights.iter().enumerate() {
+            let l = (sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]).sqrt();
+            let s = [sun[0] / l, sun[1] / l, sun[2] / l];
+            let (mut sat, mut cnt, mut sum, mut sq) = (0usize, 0usize, 0f64, 0f64);
+            for py in 0..n {
+                for pxi in 0..n {
+                    let x = cx - span / 2.0 + pxi as f32 * px;
+                    let z = cz - span / 2.0 + py as f32 * px;
+                    let (gx, gy) = (x / syn.mps, z / syn.mps);
+                    let h = |ox: f32, oy: f32| sample_smooth(&syn.heights, syn.gw, syn.gh, gx + ox, gy + oy);
+                    let dx = (h(0.5, 0.0) - h(-0.5, 0.0)) / syn.mps;
+                    let dz = (h(0.0, 0.5) - h(0.0, -0.5)) / syn.mps;
+                    let nl = (dx * dx + dz * dz + 1.0).sqrt();
+                    let d = ((-dx * s[0] + s[1] - dz * s[2]) / nl).max(0.0);
+                    let lit: Vec<f32> = (0..3).map(|k| (amb[k] + col[k] * d).clamp(0.0, 1.0)).collect();
+                    let lum = (lit[0] + lit[1] + lit[2]) / 3.0;
+                    let on = near.iter().any(|q| (q.x - x).powi(2) + (q.z - z).powi(2) < half * half);
+                    if on {
+                        cnt += 1;
+                        sat += (lit.iter().all(|&v| v >= 0.999)) as usize;
+                        sum += lum as f64;
+                        sq += (lum * lum) as f64;
+                    }
+                    let alb = [0.62f32, 0.50, 0.38];
+                    let o = (py * n * 2 + li * n + pxi) * 3;
+                    for k in 0..3 {
+                        img[o + k] = (alb[k] * lit[k] * 255.0) as u8;
+                    }
+                }
+            }
+            let mean = sum / cnt.max(1) as f64;
+            let std = (sq / cnt.max(1) as f64 - mean * mean).max(0.0).sqrt();
+            println!(
+                "{label:10} sun {:.0}° up   riding surface at the clamp {:5.1}%   light mean {:.3}  spread {:.3}",
+                s[1].asin().to_degrees(),
+                100.0 * sat as f64 / cnt.max(1) as f64,
+                mean,
+                std
+            );
+        }
+        if let Ok(dir) = std::env::var("FROST_DUMP") {
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = format!("{dir}/game_light.png");
+            image::RgbImage::from_raw((n * 2) as u32, n as u32, img).unwrap().save(&path).unwrap();
+            println!("wrote {path}");
+        }
     }
 }

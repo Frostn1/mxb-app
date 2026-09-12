@@ -3,11 +3,15 @@
 ## 2026-09-12
 
 ### Added
+- Generated tracks have goggle tear-offs dropped in the corners, the way riders leave them on
+  a raced track.
 - A Game view switch in the 3D track view draws the ground the way the game does: its
   own sun and ambient light, relief from the track's normal maps, true height and no extra
   shading.
 
 ### Changed
+- Generated tracks are lit like published ones: a lower sun and softer light, so ruts, bumps
+  and jump faces show their shape in game instead of washing out.
 - Sharing files, a full preset bundle or your logs shows a progress bar while it uploads,
   counting the parts sent so far.
 - Bikes in the 3D viewer catch a soft reflection, so exhausts and other metal parts look like
