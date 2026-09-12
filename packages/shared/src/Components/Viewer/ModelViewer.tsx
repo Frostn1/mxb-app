@@ -67,7 +67,8 @@ async function loadTexture(t: PaintTexture): Promise<THREE.DataTexture | null> {
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.generateMipmaps = true;
-  tex.anisotropy = 4;
+  // three.js clamps this to what the GPU offers; lettering on a raked panel needs all of it.
+  tex.anisotropy = 16;
   tex.needsUpdate = true;
   return tex;
 }
@@ -2247,8 +2248,8 @@ export function ModelViewer({
           // time that page is open. On demand, a frame is drawn when React commits, when
           // OrbitControls moves, and when `CameraRig` reframes; otherwise the GPU idles.
           frameloop="demand"
-          // 2× on a retina panel quadruples the pixels for a preview-sized model.
-          dpr={[1, 1.5]}
+          // Full retina resolution: at 1.5× small logos smeared, and on demand a frame is cheap.
+          dpr={[1, 2]}
           camera={{ position: [2.6, 1.8, 3.2], fov: 42 }}
           // Kept so a photo can be read back off the canvas. Costs a buffer that isn't
           // discarded after compositing, which on a viewer that only draws on demand is

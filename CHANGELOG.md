@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-11
+
+### Changed
+- The 3D viewer shows paints at full resolution, so logos and lettering on bikes and gear
+  read sharply.
+
 ## 2026-09-10
 
 ### Added

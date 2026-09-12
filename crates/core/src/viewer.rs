@@ -5287,8 +5287,8 @@ pub async fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, Stri
 /// Paints decoded for the viewer, so re-opening one doesn't inflate it a second time.
 ///
 /// The picker re-runs this on every selection change and on every re-open, and a gear paint is
-/// tens of megabytes of DEFLATE — the pixels behind an entry, on the other hand, are small,
-/// because each is downscaled to 1024² before it is stored.
+/// tens of megabytes of DEFLATE — the pixels behind an entry, on the other hand, are far
+/// fewer, because only the sheets the viewer binds are kept.
 const PAINT_CACHE_CAP: usize = 4;
 
 fn paint_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>> {

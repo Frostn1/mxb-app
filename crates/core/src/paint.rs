@@ -362,7 +362,19 @@ fn store_rgba(name: &str, width: u32, height: u32, rgba: Vec<u8>) -> PaintTextur
     }
 }
 
-const MAX_EDGE: u32 = 1024;
+/// The largest edge a colour sheet reaches the viewer at — the game's own: liveries are
+/// authored at 4096², and at 1024² their sponsor logos were unreadable.
+const MAX_EDGE: u32 = 4096;
+/// Normal maps carry relief, not lettering, so half the edge costs nothing visible.
+const MAX_NORMAL_EDGE: u32 = 2048;
+
+fn max_edge(name: &str) -> u32 {
+    if name.to_ascii_lowercase().ends_with("_n") {
+        MAX_NORMAL_EDGE
+    } else {
+        MAX_EDGE
+    }
+}
 
 pub fn extract_edf_textures(edf: &[u8]) -> Vec<PaintTexture> {
     extract_edf_textures_where(edf, |_| true)
@@ -401,11 +413,12 @@ pub fn extract_edf_normal_maps(edf: &[u8], want: impl Fn(&str) -> bool) -> Vec<P
 /// Shared with [`extract_edf_textures_where`] so the two can't come to different views about
 /// how much memory a sheet is allowed to occupy.
 fn store_capped(name: &str, width: u32, height: u32, rgba: Vec<u8>) -> Option<PaintTexture> {
-    if width.max(height) <= MAX_EDGE {
+    let cap = max_edge(name);
+    if width.max(height) <= cap {
         return Some(store_rgba(name, width, height, rgba));
     }
     let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(width, height, rgba)?);
-    let scaled = img.thumbnail(MAX_EDGE, MAX_EDGE);
+    let scaled = img.thumbnail(cap, cap);
     Some(store_rgba(name, scaled.width(), scaled.height(), scaled.to_rgba8().into_raw()))
 }
 
@@ -428,7 +441,7 @@ pub fn extract_edf_textures_where(
                 return None;
             }
             // Already within the budget — store the pixels as they are. `thumbnail` resizes
-            // whatever it is given, and bike sheets are authored at exactly `MAX_EDGE`, so
+            // whatever it is given, and most bike sheets are authored at 1024², so
             // this used to resample 1024² to 1024² once per sheet: 78 ms of the 120 ms a
             // bike spent on textures, for pixels that came out identical. [`into_texture`]
             // has always had this guard; this path was missing it.
@@ -452,9 +465,10 @@ pub fn into_texture(t: PntTexture) -> PaintTexture {
     // `from_raw` takes the buffer and hands back nothing when it isn't `w*h*4`, so the length
     // is checked here instead — a truncated plane then goes through verbatim, exactly as
     // before, and the viewer renders it grey.
-    if width.max(height) > MAX_EDGE && rgba.len() == (width as usize) * (height as usize) * 4 {
+    let cap = max_edge(&name);
+    if width.max(height) > cap && rgba.len() == (width as usize) * (height as usize) * 4 {
         if let Some(img) = image::RgbaImage::from_raw(width, height, rgba) {
-            let scaled = image::DynamicImage::ImageRgba8(img).thumbnail(MAX_EDGE, MAX_EDGE);
+            let scaled = image::DynamicImage::ImageRgba8(img).thumbnail(cap, cap);
             return store_rgba(
                 &name,
                 scaled.width(),
@@ -554,6 +568,23 @@ mod tests {
             fixture_stored_pixels(),
             "pixels returned verbatim (no channel swap)"
         );
+    }
+
+    /// A livery keeps the resolution its lettering needs; only a normal map is shrunk.
+    #[test]
+    fn colour_sheets_keep_full_size_normals_are_capped() {
+        let sheet = |name: &str, w: u32, h: u32| PntTexture {
+            name: name.into(),
+            width: w,
+            height: h,
+            rgba: vec![0; (w * h * 4) as usize],
+        };
+        let colour = into_texture(sheet("plastics", 4096, 4));
+        assert_eq!((colour.width, colour.height), (4096, 4));
+        let normal = into_texture(sheet("plastics_N", 4096, 4));
+        assert_eq!((normal.width, normal.height), (2048, 2));
+        let huge = into_texture(sheet("plastics", 8192, 4));
+        assert_eq!((huge.width, huge.height), (4096, 2));
     }
 
     #[test]
