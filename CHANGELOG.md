@@ -25,6 +25,8 @@
   dry patches and grass.
 - The dirt and grass on generated tracks use the relief maps of a published track and are
   sharper up close.
+- The riding surface carries a relief map baked from the track's own ground, so ruts, bumps and
+  tyre lines catch the light in game the way they do in the studio's 3D view.
 
 ## 2026-09-09 — v0.14.0 — A new name, and a Studio of its own
 

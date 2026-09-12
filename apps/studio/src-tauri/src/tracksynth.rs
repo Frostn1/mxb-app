@@ -255,13 +255,14 @@ const RUT_DEPTH_STRAIGHT_M: f32 = 0.143;
 /// Where a groove's cut and its bank start to be held back, and the ceiling each rounds off
 /// towards, metres. Below the knee nothing changes. Indiana's deepest corner groove is 0.47 m;
 /// ours reached 0.94 on the outside line.
-const RUT_CUT_KNEE_M: (f32, f32) = (0.28, 0.4);
+// Ridden at (0.28, 0.4) as a tad too shallow.
+const RUT_CUT_KNEE_M: (f32, f32) = (0.32, 0.46);
 
 /// How soft the blend over the ruts is: a box radius, and how many passes of it. Three merged the
 /// grooves of a corner into two or three broad dips.
 const RUT_BLEND_M: f32 = 0.25;
 const RUT_BLEND_PASSES: u32 = 2;
-const RUT_BANK_KNEE_M: (f32, f32) = (0.15, 0.25);
+const RUT_BANK_KNEE_M: (f32, f32) = (0.17, 0.28);
 
 /// The material the cut displaced, which does not disappear.
 ///
@@ -3427,9 +3428,16 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
             rgba_tga(GROUND_TEXTURE_DIM, &px),
             &mut wrote,
         )?;
-        let normal = match photo_normal(&l.look, GROUND_TEXTURE_DIM) {
-            Some(n) => published_normal_tga(&n, GROUND_TEXTURE_DIM),
-            None => normal_tga(&px, GROUND_TEXTURE_DIM, SHEET_NORMAL_STRENGTH, l.spec),
+        // The riding surface takes the ground's own relief, baked across the whole terrain in
+        // one sheet, rather than a tiled soil normal. Everything else keeps its sheet's own.
+        let (normal, rx) = if name == RELIEF_LAYER {
+            (relief_tga(syn, RELIEF_DIM, l.spec), 1)
+        } else {
+            let n = match photo_normal(&l.look, GROUND_TEXTURE_DIM) {
+                Some(n) => published_normal_tga(&n, GROUND_TEXTURE_DIM),
+                None => normal_tga(&px, GROUND_TEXTURE_DIM, SHEET_NORMAL_STRENGTH, l.spec),
+            };
+            (n, rx)
         };
         put(&format!("maps/{name}_n.tga"), normal, &mut wrote)?;
         put(
@@ -5851,6 +5859,52 @@ fn normal_tga(rgba: &[u8], dim: usize, strength: f32, spec: u8) -> Vec<u8> {
             let a = (spec as f32 * (0.35 + 0.65 * luma(x, y))).clamp(0.0, 255.0) as u8;
             // The container is BGRA, so the normal's z goes down first.
             px.extend_from_slice(&[enc(nz), enc(ny), enc(nx), a]);
+        }
+    }
+    tga_bgra(dim, dim, &px)
+}
+
+/// The layer that carries the baked relief, its size, how much of the ground's broad shape is
+/// taken out first, how hard the slope is pushed, and which way each axis runs in the sheet.
+///
+/// Indiana ships exactly this: its `soil_light_c` names `normals_pro`, an 8192-square normal map
+/// of its whole terrain in which every rut, groove and tyre line is drawn and the hills are not.
+/// The game lights the ground's fine relief from it. Ours had none, so a rut that reads in a
+/// render of the heightfield showed in the game as little more than a darker patch.
+const RELIEF_LAYER: &str = "soil_light_c";
+const RELIEF_DIM: usize = 4096;
+const RELIEF_HIGHPASS_M: f32 = 2.0;
+// Indiana's is drawn well past the true slope: 40 levels at the median where it has relief
+// against our 12.7 at 1.0, and 87.5 at the ninetieth. 3.2 lands both.
+const RELIEF_STRENGTH: f32 = 3.2;
+// Pending the in-game A/B (7A this sign, 7B the second axis flipped).
+const RELIEF_SIGN: (f32, f32) = (1.0, 1.0);
+
+/// The ground's fine relief as one normal map over the whole terrain, laid out as the masks are:
+/// a texel per cell of the grid, row zero at the bottom.
+fn relief_tga(syn: &Synth, dim: usize, spec: u8) -> Vec<u8> {
+    let r = ((RELIEF_HIGHPASS_M / syn.mps).round() as usize).max(1);
+    let mut broad = syn.heights.clone();
+    for _ in 0..3 {
+        broad = crate::trackstats::box_blur(&broad, syn.gw, syn.gh, r);
+    }
+    let detail: Vec<f32> = syn.heights.iter().zip(&broad).map(|(h, b)| h - b).collect();
+    let mut px = Vec::with_capacity(dim * dim * 4);
+    for y in 0..dim {
+        let gy = (y as f32 + 0.5) * syn.gh as f32 / dim as f32;
+        for x in 0..dim {
+            let gx = (x as f32 + 0.5) * syn.gw as f32 / dim as f32;
+            let h = |ox: f32, oy: f32| sample_smooth(&detail, syn.gw, syn.gh, gx + ox, gy + oy);
+            let dx = (h(0.5, 0.0) - h(-0.5, 0.0)) / syn.mps;
+            let dz = (h(0.0, 0.5) - h(0.0, -0.5)) / syn.mps;
+            let (nx, nz) = (
+                -RELIEF_SIGN.0 * dx * RELIEF_STRENGTH,
+                -RELIEF_SIGN.1 * dz * RELIEF_STRENGTH,
+            );
+            let len = (nx * nx + nz * nz + 1.0).sqrt();
+            let enc = |v: f32| ((v / len * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0) as u8;
+            // BGRA: up first, then the second axis, then the first.
+            px.extend_from_slice(&[enc(1.0), enc(nz), enc(nx), spec]);
         }
     }
     tga_bgra(dim, dim, &px)
