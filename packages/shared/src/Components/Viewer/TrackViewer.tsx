@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { Move, Rotate3d, ZoomIn } from "lucide-react";
@@ -261,7 +261,7 @@ function gridNormal(
  * placed in the same world frame by the track itself, and the only way they stay in it is by
  * being scaled and shifted by the same numbers.
  */
-function viewFrame(terrain: TrackTerrain) {
+function viewFrame(terrain: TrackTerrain, lift = RELIEF_EXAGGERATION) {
   const { width, height, metresPerSample, minHeight, maxHeight } = terrain;
   // Metres across the widest edge, and the units-per-metre that fits it to the view.
   const spanMetres = Math.max(width - 1, height - 1) * metresPerSample;
@@ -272,7 +272,7 @@ function viewFrame(terrain: TrackTerrain) {
     step,
     midHeight: (minHeight + maxHeight) / 2,
     // The Y scale heights go through, needed again to slope normals by the same amount.
-    heightScale: unitsPerMetre * RELIEF_EXAGGERATION,
+    heightScale: unitsPerMetre * lift,
     originX: ((width - 1) * step) / 2,
     originZ: ((height - 1) * step) / 2,
   };
@@ -286,8 +286,9 @@ function Highlight({
   terrain: TrackTerrain;
   at: { path: { x: number; z: number }[]; width: number };
 }) {
+  const lift = useContext(ReliefContext);
   const geometry = useMemo(() => {
-    const frame = viewFrame(terrain);
+    const frame = viewFrame(terrain, lift);
     // Tall enough to clear any relief the terrain has, and reaching below it too, so the
     // ribbon is visible whether the ground there is high or low.
     const tall = (terrain.maxHeight - terrain.minHeight) * frame.heightScale + 4;
@@ -305,7 +306,7 @@ function Highlight({
     g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
     g.setIndex(index);
     return g;
-  }, [terrain, at]);
+  }, [terrain, at, lift]);
 
   if (at.path.length < 2) return null;
   return (
@@ -336,9 +337,10 @@ function FocusCamera({
   focus: { x: number; z: number } | null;
 }) {
   const { camera, controls, invalidate } = useThree();
+  const lift = useContext(ReliefContext);
   useEffect(() => {
     if (!focus) return;
-    const frame = viewFrame(terrain);
+    const frame = viewFrame(terrain, lift);
     const [x, , z] = toView(frame, focus.x, terrain.minHeight, focus.z);
     // The ground's own height at that point isn't known here, so aim at the middle of the
     // terrain's range: a jump is a metre of relief on ground that spans tens.
@@ -355,7 +357,7 @@ function FocusCamera({
     camera.lookAt(x, y, z);
     orbit?.update?.();
     invalidate();
-  }, [focus, terrain, camera, controls, invalidate]);
+  }, [focus, terrain, camera, controls, invalidate, lift]);
   return null;
 }
 
@@ -445,8 +447,9 @@ function Surrounds({
   backdrop: TrackBackdrop;
   terrain: TrackTerrain;
 }) {
+  const lift = useContext(ReliefContext);
   const geometries = useMemo(() => {
-    const frame = viewFrame(terrain);
+    const frame = viewFrame(terrain, lift);
     // The middle of the terrain in world metres, which is where a track centres its sky.
     const midX = ((terrain.width - 1) * terrain.metresPerSample) / 2;
     const midZ = ((terrain.height - 1) * terrain.metresPerSample) / 2;
@@ -511,7 +514,7 @@ function Surrounds({
       skyMap: picture(backdrop.sky),
       landMap: picture(backdrop.backdrop),
     };
-  }, [backdrop, terrain]);
+  }, [backdrop, terrain, lift]);
 
   useEffect(
     () => () => {
@@ -567,10 +570,14 @@ function Surrounds({
   );
 }
 
-function buildGeometry(terrain: TrackTerrain, textured: boolean): THREE.BufferGeometry {
+function buildGeometry(
+  terrain: TrackTerrain,
+  textured: boolean,
+  lift: number,
+): THREE.BufferGeometry {
   const { width, height, heights } = terrain;
 
-  const frame = viewFrame(terrain);
+  const frame = viewFrame(terrain, lift);
   const { step, midHeight } = frame;
 
   // The ramp is spread over where the ground actually is, not over its extremes. A track's
@@ -685,11 +692,142 @@ const GROUND_STRENGTH = 0.5;
  */
 const STACK_TARGET_ALBEDO = 0.19;
 
+/** Heights are drawn this much taller than they are; 1 in the game view. */
+const ReliefContext = createContext(RELIEF_EXAGGERATION);
+
+/** One layer of the ground stack, as the GPU takes it. */
+interface StackLayer {
+  sheet: THREE.DataTexture;
+  mask: THREE.DataTexture | null;
+  tileU: number;
+  tileV: number;
+  bump: THREE.DataTexture | null;
+  bumpTileU: number;
+  bumpTileV: number;
+}
+
+/**
+ * The ground the way the game's own shader draws it (GLSL in `mxbikes.exe`).
+ *
+ * Each layer is lit on its own, `sheet * clamp(ambient + sun * diffuse, 0, 1)`, and mixed in
+ * by its mask. Diffuse comes from the mesh normal per vertex, or per pixel from the layer's
+ * bump map where it has one (tangent space, `rgb * 2 - 1`). One sun and the ambient from the
+ * track's `.amb`, exponential fog, and no gamma or tone mapping: textures and light go
+ * straight to the screen. Left out: the game's projected shadows and the bump layers'
+ * specular, whose strength the `.map` records don't give us yet.
+ */
+function gameGroundMaterial(
+  stack: StackLayer[],
+  backdrop: TrackBackdrop | null,
+  metresPerUnit: number,
+  maxTextures: number,
+): THREE.ShaderMaterial {
+  const sun = backdrop?.sun ?? [8, 6, 4];
+  // Into the view's frame: X is mirrored, like every vertex.
+  const sunDir = new THREE.Vector3(-sun[0], sun[1], sun[2]).normalize();
+  const rgb = (c: [number, number, number] | null, d: [number, number, number]) =>
+    new THREE.Vector3(...(c ?? d));
+  const uniforms: Record<string, THREE.IUniform> = {
+    uSunDir: { value: sunDir },
+    uAmbient: { value: rgb(backdrop?.ambientColour ?? null, [0.4, 0.45, 0.55]) },
+    uSun: { value: rgb(backdrop?.sunColour ?? null, [1, 1, 1]) },
+    uFogColour: { value: rgb(backdrop?.fogColour ?? backdrop?.skyColour ?? null, [0.7, 0.7, 0.85]) },
+    uFogDensity: { value: backdrop?.fogDensity ?? 0 },
+    uMetresPerUnit: { value: metresPerUnit },
+  };
+  // Samplers are the budget: most GPUs give a fragment shader 16, and seven layers with masks
+  // and bump maps want twenty. A whole-ground bump map is kept first, since it carries the
+  // ruts, then tiling ones from the top layer down while any are left.
+  let spare = maxTextures - stack.length - stack.filter((l) => l.mask).length;
+  const keep = stack.map((l) => !!l.bump && l.bumpTileU <= 1.001 && l.bumpTileV <= 1.001);
+  spare -= keep.filter(Boolean).length;
+  for (let i = stack.length - 1; i >= 0 && spare > 0; i -= 1) {
+    if (stack[i].bump && !keep[i]) {
+      keep[i] = true;
+      spare -= 1;
+    }
+  }
+  const decls: string[] = [];
+  const blend: string[] = [];
+  stack.forEach((l, i) => {
+    uniforms[`uSheet${i}`] = { value: l.sheet };
+    uniforms[`uTile${i}`] = { value: new THREE.Vector2(l.tileU, l.tileV) };
+    decls.push(`uniform sampler2D uSheet${i};`, `uniform vec2 uTile${i};`);
+    if (l.mask) {
+      uniforms[`uMask${i}`] = { value: l.mask };
+      decls.push(`uniform sampler2D uMask${i};`);
+    }
+    if (l.bump && keep[i]) {
+      uniforms[`uBump${i}`] = { value: l.bump };
+      uniforms[`uBumpTile${i}`] = { value: new THREE.Vector2(l.bumpTileU, l.bumpTileV) };
+      decls.push(`uniform sampler2D uBump${i};`, `uniform vec2 uBumpTile${i};`);
+    }
+    const diffuse = l.bump && keep[i] ? `bumped(texture2D(uBump${i}, vUv * uBumpTile${i}))` : "vDiffuse";
+    const lit = `lit(texture2D(uSheet${i}, vUv * uTile${i}).rgb, ${diffuse})`;
+    blend.push(
+      i === 0 || !l.mask ? `  c = ${lit};` : `  c = mix(c, ${lit}, texture2D(uMask${i}, vUv).r);`,
+    );
+  });
+  return new THREE.ShaderMaterial({
+    uniforms,
+    fog: false,
+    lights: false,
+    toneMapped: false,
+    vertexShader: `
+      uniform vec3 uSunDir;
+      uniform float uMetresPerUnit;
+      varying vec2 vUv;
+      varying vec3 vNormalW;
+      varying float vDiffuse;
+      varying float vDepth;
+      void main() {
+        vUv = uv;
+        vec3 n = normalize(mat3(modelMatrix) * normal);
+        vNormalW = n;
+        // Plain layers are lit per vertex, as the game does, and interpolated.
+        vDiffuse = max(dot(uSunDir, n), 0.0);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vDepth = -mv.z * uMetresPerUnit;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      uniform vec3 uSunDir;
+      uniform vec3 uAmbient;
+      uniform vec3 uSun;
+      uniform vec3 uFogColour;
+      uniform float uFogDensity;
+      varying vec2 vUv;
+      varying vec3 vNormalW;
+      varying float vDiffuse;
+      varying float vDepth;
+      ${decls.join("\n      ")}
+      vec3 lit(vec3 col, float d) {
+        return col * clamp(uAmbient + uSun * d, 0.0, 1.0);
+      }
+      float bumped(vec4 tex) {
+        vec3 t = normalize(tex.xyz * 2.0 - 1.0);
+        vec3 N = normalize(vNormalW);
+        // Tangent along +u, which runs toward -X because the mesh is mirrored; bitangent +v.
+        vec3 T = normalize(vec3(-1.0, 0.0, 0.0) - N * dot(N, vec3(-1.0, 0.0, 0.0)));
+        vec3 B = cross(N, T);
+        return max(dot(uSunDir, normalize(T * t.x + B * t.y + N * t.z)), 0.0);
+      }
+      void main() {
+        vec3 c = vec3(0.0);
+      ${blend.join("\n      ")}
+        c = mix(uFogColour, c, exp(-uFogDensity * vDepth));
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  });
+}
+
 function TerrainMesh({
   terrain,
   overview,
   ground,
   layers,
+  game,
+  backdrop,
 }: {
   terrain: TrackTerrain;
   overview: TrackOverview | null;
@@ -697,6 +835,9 @@ function TerrainMesh({
   ground: TrackGround | null;
   /** The ground the game draws: the track's own sheets, through the track's own masks. */
   layers: TrackGroundLayer[];
+  /** Draw the ground the way the game's own shader does. */
+  game: boolean;
+  backdrop: TrackBackdrop | null;
 }) {
   // The stack is the ground when a track states one. Everything below — the surface picture
   // built from the physics masks, the single sheet tiled everywhere, the elevation ramp — is
@@ -705,7 +846,11 @@ function TerrainMesh({
   // A track with no surface data of its own still has ground: its sheet says what colour that
   // is, so the elevation ramp is only reached for when a track states neither.
   const tinted = overview != null || ground != null || stacked;
-  const geometry = useMemo(() => buildGeometry(terrain, tinted), [terrain, tinted]);
+  const lift = useContext(ReliefContext);
+  const geometry = useMemo(
+    () => buildGeometry(terrain, tinted, lift),
+    [terrain, tinted, lift],
+  );
 
   // Built once per picture and handed to the GPU as-is. `sRGB` because it's artwork rather
   // than measurements: skipping that draws the whole track washed out.
@@ -803,7 +948,29 @@ function TerrainMesh({
         mask.generateMipmaps = true;
         mask.needsUpdate = true;
       }
-      return { sheet, mask, tileU: l.tileU, tileV: l.tileV };
+      let bump: THREE.DataTexture | null = null;
+      if (l.bump) {
+        bump = new THREE.DataTexture(l.bump.pixels, l.bump.width, l.bump.height, THREE.RGBAFormat);
+        // Direction data, read linearly. A whole-ground map is laid once, so it is clamped.
+        const once = l.bumpTileU <= 1.001 && l.bumpTileV <= 1.001;
+        bump.wrapS = once ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
+        bump.wrapT = bump.wrapS;
+        bump.minFilter = THREE.LinearMipmapLinearFilter;
+        bump.magFilter = THREE.LinearFilter;
+        bump.generateMipmaps = true;
+        bump.anisotropy = 8;
+        bump.needsUpdate = true;
+      }
+      const layer: StackLayer = {
+        sheet,
+        mask,
+        tileU: l.tileU,
+        tileV: l.tileV,
+        bump,
+        bumpTileU: l.bumpTileU,
+        bumpTileV: l.bumpTileV,
+      };
+      return layer;
     });
   }, [layers]);
 
@@ -843,9 +1010,22 @@ function TerrainMesh({
       stack.forEach((l) => {
         l.sheet.dispose();
         l.mask?.dispose();
+        l.bump?.dispose();
       }),
     [stack],
   );
+
+  const maxTextures = useThree((s) => s.gl.capabilities.maxTextures);
+  const gameMaterial = useMemo(() => {
+    if (!game || stack.length === 0) return null;
+    return gameGroundMaterial(
+      stack,
+      backdrop,
+      1 / viewFrame(terrain, lift).unitsPerMetre,
+      maxTextures,
+    );
+  }, [game, stack, backdrop, terrain, lift, maxTextures]);
+  useEffect(() => () => gameMaterial?.dispose(), [gameMaterial]);
 
   // The sheet's own average brightness. Dividing by it is what makes this a *detail* layer:
   // the grain then averages to no change at all, so a dark sheet adds texture instead of
@@ -896,7 +1076,7 @@ function TerrainMesh({
   // The canvas only draws when asked, and the map arrives well after the terrain settled —
   // so without this the texture sits on a material nothing ever repaints.
   const invalidate = useThree((s) => s.invalidate);
-  useEffect(() => invalidate(), [texture, geometry, invalidate]);
+  useEffect(() => invalidate(), [texture, geometry, gameMaterial, invalidate]);
 
   return (
     // Both cast and receive: the terrain is the only thing in the scene, so every shadow it
@@ -913,6 +1093,9 @@ function TerrainMesh({
           three.js compiles, and assigning them to a live material leaves it running the
           program it was built with — the terrain keeps its elevation ramp and never shows the
           picture at all. */}
+      {gameMaterial ? (
+        <primitive key="game" object={gameMaterial} attach="material" />
+      ) : (
       <meshStandardMaterial
         key={`${texture ? "textured" : "plain"}-${detail ? "grain" : "flat"}-${
           relief ? "relief" : "smooth"
@@ -1062,6 +1245,7 @@ function TerrainMesh({
             );
         }}
       />
+      )}
     </mesh>
   );
 }
@@ -1082,8 +1266,9 @@ function buildSceneryGeometry(
   scenery: TrackScenery,
   terrain: TrackTerrain,
   slotOf: Map<number, number>,
+  lift: number,
 ): THREE.BufferGeometry {
-  const frame = viewFrame(terrain);
+  const frame = viewFrame(terrain, lift);
   const src = scenery.positions;
   const count = src.length / 3;
 
@@ -1146,6 +1331,7 @@ function SceneryMesh({
   onPick?: (piece: PickedPiece | null) => void;
 }) {
   const [picked, setPicked] = useState<number | null>(null);
+  const lift = useContext(ReliefContext);
   // A material slot per surface, plus one plain slot at the end for the groups no surface
   // covers — the `.scr` props, whose own sheets aren't read.
   const { materials, slotOf } = useMemo(() => {
@@ -1212,8 +1398,8 @@ function SceneryMesh({
   }, [scenery, surfaces]);
 
   const geometry = useMemo(
-    () => buildSceneryGeometry(scenery, terrain, slotOf),
-    [scenery, terrain, slotOf],
+    () => buildSceneryGeometry(scenery, terrain, slotOf, lift),
+    [scenery, terrain, slotOf, lift],
   );
 
   // Tens of megabytes of GPU buffers and surfaces, replaced whenever the terrain's detail
@@ -1341,8 +1527,9 @@ function PlacementMarkers({
   placements: TrackPlacement[];
   terrain: TrackTerrain;
 }) {
+  const lift = useContext(ReliefContext);
   const pins = useMemo(() => {
-    const frame = viewFrame(terrain);
+    const frame = viewFrame(terrain, lift);
     return placements
       .filter((p) => p.kind !== "prop")
       .map((p, i) => ({
@@ -1350,7 +1537,7 @@ function PlacementMarkers({
         colour: MARKER_COLOURS[p.kind] ?? MARKER_COLOURS.prop,
         at: toView(frame, p.pos[0], p.pos[1], p.pos[2]),
       }));
-  }, [placements, terrain]);
+  }, [placements, terrain, lift]);
 
   const invalidate = useThree((s) => s.invalidate);
   useEffect(() => invalidate(), [pins, invalidate]);
@@ -1404,6 +1591,8 @@ interface TrackViewerProps {
   placements?: TrackPlacement[];
   /** Whether to draw either of the two above. */
   showObjects?: boolean;
+  /** Draw the ground the way the game's own shader does, at its true height. */
+  gameView?: boolean;
   /** The sky and land a track wraps itself in, and the light it states. */
   backdrop?: TrackBackdrop | null;
   /** A tiling sheet of the track's own ground, for detail closer than its data carries. */
@@ -1444,6 +1633,7 @@ export function TrackViewer({
   surfaces = [],
   placements = [],
   showObjects = true,
+  gameView = false,
   backdrop = null,
   ground = null,
   groundLayers = [],
@@ -1452,6 +1642,7 @@ export function TrackViewer({
   highlight = null,
   className,
 }: TrackViewerProps) {
+  const lift = gameView ? 1 : RELIEF_EXAGGERATION;
   return (
     <div className={cn("relative", className)}>
       <ErrorBoundary compact label="track-viewer">
@@ -1488,6 +1679,9 @@ export function TrackViewer({
                 : "#0e0f13",
             ]}
           />
+          <ReliefContext.Provider value={lift}>
+          {/* Keyed on the height scale, so everything placed through it is rebuilt. */}
+          <group key={`lift-${lift}`}>
           {terrain && backdrop && <Surrounds backdrop={backdrop} terrain={terrain} />}
           {terrain && backdrop && <TrackHaze backdrop={backdrop} terrain={terrain} />}
           <ambientLight
@@ -1536,6 +1730,8 @@ export function TrackViewer({
               overview={overview}
               ground={ground}
               layers={groundLayers}
+              game={gameView}
+              backdrop={backdrop}
             />
           )}
           {terrain && showObjects && scenery && (
@@ -1551,6 +1747,8 @@ export function TrackViewer({
           )}
           {terrain && <FocusCamera terrain={terrain} focus={focus} />}
           {terrain && highlight && <Highlight terrain={terrain} at={highlight} />}
+          </group>
+          </ReliefContext.Provider>
           <OrbitControls
             makeDefault
             enablePan

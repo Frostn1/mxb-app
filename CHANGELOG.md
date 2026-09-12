@@ -2,6 +2,11 @@
 
 ## 2026-09-12
 
+### Added
+- A Game view switch in the 3D track view draws the ground the way the game does: its
+  own sun and ambient light, relief from the track's normal maps, true height and no extra
+  shading.
+
 ### Changed
 - Sharing files, a full preset bundle or your logs shows a progress bar while it uploads,
   counting the parts sent so far.

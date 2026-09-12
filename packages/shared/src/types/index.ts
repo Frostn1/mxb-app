@@ -765,6 +765,11 @@ export interface TrackGroundLayer {
   tileV: number;
   /** Coverage, one byte a texel. `null` on the base layer, which covers everything. */
   mask: { width: number; height: number; coverage: Uint8Array<ArrayBuffer> } | null;
+  /** The layer's bump map, in stored row order like the masks. `null` when it carries none. */
+  bump: { width: number; height: number; pixels: Uint8Array<ArrayBuffer> } | null;
+  /** How many times the bump map repeats across the ground. 1 for a whole-ground map. */
+  bumpTileU: number;
+  bumpTileV: number;
 }
 
 /** What a track pins to a point but ships no mesh for. Mirrors `scenery::Placement`. */

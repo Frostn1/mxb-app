@@ -343,8 +343,9 @@ export async function loadTrackGround(path: string): Promise<TrackGround | null>
 
 /** Header bytes before the layer table. Mirrors `map::GROUND_LAYERS_HEADER`. */
 const GROUND_LAYERS_HEADER = 16;
-/** Bytes per layer in that table. Mirrors `map::GROUND_LAYER_ENTRY`. */
-const GROUND_LAYER_ENTRY = 32;
+/** Bytes per layer in that table. Mirrors `map::GROUND_LAYER_ENTRY`; version 1 had 32. */
+const GROUND_LAYER_ENTRY = 52;
+const GROUND_LAYER_ENTRY_V1 = 32;
 /** "FGLY", little-endian. */
 const GROUND_LAYERS_MAGIC = 0x594c4746;
 
@@ -361,11 +362,14 @@ export async function loadTrackGroundLayers(path: string): Promise<TrackGroundLa
   if (buf.byteLength < GROUND_LAYERS_HEADER || view.getUint32(0, true) !== GROUND_LAYERS_MAGIC) {
     throw new Error("track ground layers are not in the expected format");
   }
+  const version = view.getUint16(4, true);
   const count = view.getUint32(8, true);
   const table = GROUND_LAYERS_HEADER;
+  const stride = version >= 2 ? GROUND_LAYER_ENTRY : GROUND_LAYER_ENTRY_V1;
   const entries = [];
   for (let i = 0; i < count; i += 1) {
-    const o = table + i * GROUND_LAYER_ENTRY;
+    const o = table + i * stride;
+    const bumped = version >= 2;
     entries.push({
       width: view.getUint32(o, true),
       height: view.getUint32(o + 4, true),
@@ -375,26 +379,43 @@ export async function loadTrackGroundLayers(path: string): Promise<TrackGroundLa
       maskW: view.getUint32(o + 20, true),
       maskH: view.getUint32(o + 24, true),
       maskBytes: view.getUint32(o + 28, true),
+      bumpW: bumped ? view.getUint32(o + 32, true) : 0,
+      bumpH: bumped ? view.getUint32(o + 36, true) : 0,
+      bumpBytes: bumped ? view.getUint32(o + 40, true) : 0,
+      bumpTileU: bumped ? view.getFloat32(o + 44, true) : 1,
+      bumpTileV: bumped ? view.getFloat32(o + 48, true) : 1,
     });
   }
-  // The sheets follow the table back to back, then every mask in the same order.
-  let at = table + count * GROUND_LAYER_ENTRY;
+  // The sheets follow the table back to back, then every mask, then every bump map, each in
+  // the same order.
+  let at = table + count * stride;
   const sheets = entries.map((e) => {
     const pixels = new Uint8Array(buf, at, e.bytes);
     at += e.bytes;
     return pixels;
   });
-  return entries.map((e, i) => {
+  const masks = entries.map((e) => {
     const mask =
       e.maskBytes > 0
         ? { width: e.maskW, height: e.maskH, coverage: new Uint8Array(buf, at, e.maskBytes) }
         : null;
     at += e.maskBytes;
+    return mask;
+  });
+  return entries.map((e, i) => {
+    const bump =
+      e.bumpBytes > 0
+        ? { width: e.bumpW, height: e.bumpH, pixels: new Uint8Array(buf, at, e.bumpBytes) }
+        : null;
+    at += e.bumpBytes;
     return {
       sheet: { width: e.width, height: e.height, pixels: sheets[i] },
       tileU: e.tileU,
       tileV: e.tileV,
-      mask,
+      mask: masks[i],
+      bump,
+      bumpTileU: e.bumpTileU,
+      bumpTileV: e.bumpTileV,
     };
   });
 }
