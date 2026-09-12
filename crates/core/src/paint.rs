@@ -141,26 +141,7 @@ pub fn decode_where(
         .enumerate()
         .filter(|(_, h)| want(&h.name))
         .map(|(i, h)| {
-            let expected = texture_bytes(h.width, h.height)?;
-            let mut rgba = Vec::with_capacity(expected.min(MAX_RESERVE));
-            // Stop one byte past what the header promised. Deflate expands ~1000:1, so a
-            // mis-framed payload inflates until it runs the machine out of memory otherwise —
-            // and the length check below turns the overrun into an error either way.
-            DeflateDecoder::new(&buf[h.data])
-                .take(expected as u64 + 1)
-                .read_to_end(&mut rgba)
-                .with_context(|| format!("inflate texture {i} '{}'", h.name))?;
-
-            if rgba.len() != expected {
-                bail!(
-                    "texture {i} '{}': inflated {} bytes, expected {expected} ({}x{} RGBA)",
-                    h.name,
-                    rgba.len(),
-                    h.width,
-                    h.height
-                );
-            }
-
+            let rgba = inflate_plane(buf, &h).with_context(|| format!("texture {i}"))?;
             Ok(PntTexture {
                 name: h.name,
                 width: h.width,
@@ -169,6 +150,30 @@ pub fn decode_where(
             })
         })
         .collect()
+}
+
+/// One plane's pixels, inflated and checked against the size its header states.
+fn inflate_plane(buf: &[u8], h: &ImageHeader) -> Result<Vec<u8>> {
+    let expected = texture_bytes(h.width, h.height)?;
+    let mut rgba = Vec::with_capacity(expected.min(MAX_RESERVE));
+    // Stop one byte past what the header promised. Deflate expands ~1000:1, so a
+    // mis-framed payload inflates until it runs the machine out of memory otherwise —
+    // and the length check below turns the overrun into an error either way.
+    DeflateDecoder::new(&buf[h.data.clone()])
+        .take(expected as u64 + 1)
+        .read_to_end(&mut rgba)
+        .with_context(|| format!("inflate '{}'", h.name))?;
+
+    if rgba.len() != expected {
+        bail!(
+            "'{}': inflated {} bytes, expected {expected} ({}x{} RGBA)",
+            h.name,
+            rgba.len(),
+            h.width,
+            h.height
+        );
+    }
+    Ok(rgba)
 }
 
 /// The texture names a `.pnt` supplies, read from the headers alone.
@@ -258,6 +263,30 @@ pub fn decode_any_where(
         return decode_where(&plain, want);
     }
     decode_where(buf, want)
+}
+
+/// [`decode_any`] into the texture store without inflating: each sheet is inflated when the
+/// viewer fetches it. A bike offers every paint it has and shows one, and holding them all
+/// inflated at full size ran past a gigabyte.
+pub fn store_lazy_any(buf: &[u8]) -> Result<Vec<PaintTexture>> {
+    let plain = if is_plain(buf) { None } else { crate::pkz::read_sidecar_blob(buf) };
+    let buf: std::sync::Arc<[u8]> = match plain {
+        Some(p) => p.into(),
+        None => buf.into(),
+    };
+    Ok(image_headers(&buf)?
+        .into_iter()
+        .map(|h| {
+            let (width, height) = capped_size(&h.name, h.width, h.height);
+            let name = h.name.clone();
+            let src = buf.clone();
+            let token = crate::texstore::put_lazy(h.data.len(), move || {
+                let rgba = inflate_plane(&src, &h).map_err(|e| log::warn!("{e:#}")).ok()?;
+                Some(cap_pixels(&h.name, h.width, h.height, rgba).2)
+            });
+            PaintTexture { name, width, height, token }
+        })
+        .collect())
 }
 
 /// Whether `buf` is a paint stored in the open format this module also writes.
@@ -362,7 +391,42 @@ fn store_rgba(name: &str, width: u32, height: u32, rgba: Vec<u8>) -> PaintTextur
     }
 }
 
-const MAX_EDGE: u32 = 1024;
+/// The largest edge a colour sheet reaches the viewer at — the game's own: liveries are
+/// authored at 4096², and at 1024² their sponsor logos were unreadable.
+const MAX_EDGE: u32 = 4096;
+/// Normal maps carry relief, not lettering, so half the edge costs nothing visible.
+const MAX_NORMAL_EDGE: u32 = 2048;
+
+fn max_edge(name: &str) -> u32 {
+    if name.to_ascii_lowercase().ends_with("_n") {
+        MAX_NORMAL_EDGE
+    } else {
+        MAX_EDGE
+    }
+}
+
+/// The size a sheet reaches the viewer at: its own, shrunk to fit [`max_edge`].
+fn capped_size(name: &str, width: u32, height: u32) -> (u32, u32) {
+    let (cap, long) = (max_edge(name) as u64, width.max(height) as u64);
+    if long <= cap {
+        return (width, height);
+    }
+    let scale = |d: u32| ((d as u64 * cap + long / 2) / long).max(1) as u32;
+    (scale(width), scale(height))
+}
+
+/// `rgba` resized to [`capped_size`] — or as it is when it fits, or isn't `w*h*4`, which the
+/// viewer then renders grey.
+fn cap_pixels(name: &str, width: u32, height: u32, rgba: Vec<u8>) -> (u32, u32, Vec<u8>) {
+    let (w, h) = capped_size(name, width, height);
+    if (w, h) == (width, height) || rgba.len() != (width as usize) * (height as usize) * 4 {
+        return (width, height, rgba);
+    }
+    match image::RgbaImage::from_raw(width, height, rgba) {
+        Some(img) => (w, h, image::imageops::thumbnail(&img, w, h).into_raw()),
+        None => (width, height, Vec::new()), // unreachable: the length is checked above
+    }
+}
 
 pub fn extract_edf_textures(edf: &[u8]) -> Vec<PaintTexture> {
     extract_edf_textures_where(edf, |_| true)
@@ -401,12 +465,8 @@ pub fn extract_edf_normal_maps(edf: &[u8], want: impl Fn(&str) -> bool) -> Vec<P
 /// Shared with [`extract_edf_textures_where`] so the two can't come to different views about
 /// how much memory a sheet is allowed to occupy.
 fn store_capped(name: &str, width: u32, height: u32, rgba: Vec<u8>) -> Option<PaintTexture> {
-    if width.max(height) <= MAX_EDGE {
-        return Some(store_rgba(name, width, height, rgba));
-    }
-    let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(width, height, rgba)?);
-    let scaled = img.thumbnail(MAX_EDGE, MAX_EDGE);
-    Some(store_rgba(name, scaled.width(), scaled.height(), scaled.to_rgba8().into_raw()))
+    let (w, h, rgba) = cap_pixels(name, width, height, rgba);
+    Some(store_rgba(name, w, h, rgba))
 }
 
 pub fn extract_edf_textures_where(
@@ -428,7 +488,7 @@ pub fn extract_edf_textures_where(
                 return None;
             }
             // Already within the budget — store the pixels as they are. `thumbnail` resizes
-            // whatever it is given, and bike sheets are authored at exactly `MAX_EDGE`, so
+            // whatever it is given, and most bike sheets are authored at 1024², so
             // this used to resample 1024² to 1024² once per sheet: 78 ms of the 120 ms a
             // bike spent on textures, for pixels that came out identical. [`into_texture`]
             // has always had this guard; this path was missing it.
@@ -449,23 +509,8 @@ pub fn into_texture(t: PntTexture) -> PaintTexture {
         height,
         rgba,
     } = t;
-    // `from_raw` takes the buffer and hands back nothing when it isn't `w*h*4`, so the length
-    // is checked here instead — a truncated plane then goes through verbatim, exactly as
-    // before, and the viewer renders it grey.
-    if width.max(height) > MAX_EDGE && rgba.len() == (width as usize) * (height as usize) * 4 {
-        if let Some(img) = image::RgbaImage::from_raw(width, height, rgba) {
-            let scaled = image::DynamicImage::ImageRgba8(img).thumbnail(MAX_EDGE, MAX_EDGE);
-            return store_rgba(
-                &name,
-                scaled.width(),
-                scaled.height(),
-                scaled.to_rgba8().into_raw(),
-            );
-        }
-        // Unreachable — the only thing `from_raw` rejects is the length checked above.
-        return store_rgba(&name, width, height, Vec::new());
-    }
-    store_rgba(&name, width, height, rgba)
+    let (w, h, rgba) = cap_pixels(&name, width, height, rgba);
+    store_rgba(&name, w, h, rgba)
 }
 
 pub fn decode_image(name: &str, bytes: &[u8]) -> Option<PaintTexture> {
@@ -554,6 +599,23 @@ mod tests {
             fixture_stored_pixels(),
             "pixels returned verbatim (no channel swap)"
         );
+    }
+
+    /// A livery keeps the resolution its lettering needs; only a normal map is shrunk.
+    #[test]
+    fn colour_sheets_keep_full_size_normals_are_capped() {
+        let sheet = |name: &str, w: u32, h: u32| PntTexture {
+            name: name.into(),
+            width: w,
+            height: h,
+            rgba: vec![0; (w * h * 4) as usize],
+        };
+        let colour = into_texture(sheet("plastics", 4096, 4));
+        assert_eq!((colour.width, colour.height), (4096, 4));
+        let normal = into_texture(sheet("plastics_N", 4096, 4));
+        assert_eq!((normal.width, normal.height), (2048, 2));
+        let huge = into_texture(sheet("plastics", 8192, 4));
+        assert_eq!((huge.width, huge.height), (4096, 2));
     }
 
     #[test]
@@ -758,6 +820,19 @@ mod tests {
         short.rgba.truncate(4);
         assert!(encode("p", &[short]).is_err(), "pixels that don't fill the dimensions");
         assert!(encode("p", &[tex("livery", 0, 4)]).is_err(), "a zero dimension");
+    }
+
+    /// The lazy path is the eager one deferred: same names, sizes and pixels.
+    #[test]
+    fn lazy_paints_serve_the_same_pixels() {
+        let bytes = encode("p", &[tex("livery", 4, 4), tex("livery_n", 2, 2)]).unwrap();
+        let lazy = store_lazy_any(&bytes).unwrap();
+        let eager: Vec<_> = decode(&bytes).unwrap().into_iter().map(into_texture).collect();
+        assert_eq!(lazy.len(), eager.len());
+        for (l, e) in lazy.iter().zip(&eager) {
+            assert_eq!((&l.name, l.width, l.height), (&e.name, e.width, e.height));
+            assert_eq!(crate::texstore::get(&l.token), crate::texstore::get(&e.token));
+        }
     }
 
     #[test]

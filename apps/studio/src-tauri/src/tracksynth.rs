@@ -1138,7 +1138,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     );
     let feat = feature_profile(&prog.features, lap, prog.blend.max(0.0));
     let berms = berm_profile(&prog.features, &turn, lap);
-    let mut feel = ride(prog.terrain.surface);
+    let mut feel = ride();
     // How raced the ground arrives. It thins the deformable stack in `tht` and deepens what
     // is already cut here, so the two move opposite ways and their sum stays near constant —
     // which is what stops a heavily raced track digging itself to pieces.
@@ -3589,6 +3589,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     put(&format!("{slug}/gfx.cfg"), crlf(&gfx_cfg(prog)), &mut wrote)?;
     put(&format!("{slug}/{slug}.rdf"), crlf(&rdf(prog, syn.spur.as_ref())), &mut wrote)?;
     put(&format!("{slug}/{slug}.ssc"), SSC.into(), &mut wrote)?;
+    put(&format!("{slug}/generator.ini"), crlf(&generator_ini()), &mut wrote)?;
     let (map_img, shot) = ui_images(prog, syn, UI_IMAGE_DIM);
     put(&format!("{slug}/{slug}_map.tga"), map_img, &mut wrote)?;
     put(&format!("{slug}/{slug}.tga"), shot, &mut wrote)?;
@@ -3709,7 +3710,7 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
     let mut masks: Vec<(u32, Vec<u8>)> = vec![
         // 10 is the riding line — the id published tracks paint their ribbon with.
         (
-            10,
+            line_id(prog.terrain.surface, paint_features),
             mask_outside(syn, dim, half, |e, x, z| u8::from(e <= line_at(x, z)) * 255),
         ),
         (
@@ -3750,7 +3751,7 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
         // How deep the layer is. Indiana 0.5, Millville 0.4, Lambretta Lynds 0.3/0.4/0.2/1.0
         // -- ours were zero, the same empty physics field the material table had.
         let depth: f32 = match id {
-            10 => 0.2,
+            10 | 208 | 209 => 0.2,
             4 => 0.4,
             _ => 0.3,
         };
@@ -3926,6 +3927,16 @@ fn ground(s: Surface) -> (u32, f32) {
         Surface::Sand => (2, 2.2),
         // Grass to the edge of the line, which is what an early-season circuit looks like.
         Surface::Grass => (1, 0.35),
+    }
+}
+
+/// The id the riding line is painted with. The game's file always says 10; the studio's
+/// preview colours by id, so it gets one per surface or a sand line would draw as dirt.
+fn line_id(s: Surface, preview: bool) -> u32 {
+    match (s, preview) {
+        (Surface::Sand, true) => 208,
+        (Surface::Grass, true) => 209,
+        _ => 10,
     }
 }
 
@@ -4886,6 +4897,7 @@ pub fn write_pkz(
         (format!("{slug}/gfx.cfg"), crlf(&gfx_cfg(prog))),
         // Empty on the reference track, and on every track that ships one.
         (format!("{slug}/{slug}.ssc"), SSC.into()),
+        (format!("{slug}/generator.ini"), crlf(&generator_ini())),
         (format!("{slug}/{slug}_map.tga"), map_img),
         (format!("{slug}/{slug}.tga"), shot),
     ] {
@@ -6430,7 +6442,8 @@ fn ground_looks(surface: Surface) -> Grounds {
         // more than a hundred levels.
         Surface::Soil => ([179.0, 140.0, 104.0], [86.0, 63.0, 44.0]),
         Surface::Sand => ([214.0, 193.0, 152.0], [176.0, 152.0, 114.0]),
-        Surface::Grass => ([174.0, 142.0, 100.0], [84.0, 62.0, 43.0]),
+        // Worn turf rather than soil, so a grasstrack's line is not a dirt one.
+        Surface::Grass => ([174.0, 142.0, 100.0], [86.0, 80.0, 50.0]),
     };
     // The sheets were shot on Indiana, which is soil, so a soil track takes them as they are
     // and a sand or grass one pulls them to its own palette by the ratio of the two bases.
@@ -7120,11 +7133,9 @@ fn hmf(prog: &TrackProgram, syn: &Synth) -> String {
 /// metres apart, the same half-metre berms, the same 2.2 m braking washboard, all tuned on
 /// worked loam.
 ///
-/// A sand track is a different physical object. Its ruts are deeper and further apart because
-/// the material moves rather than packs; its berms are enormous and soft; the sharp washboard
-/// a hard surface builds under braking becomes long low swells, because sand cannot hold a
-/// ridge that steep. Grass is the other way in every respect — root-bound ground barely cuts
-/// up at all.
+/// One for every surface. Picking sand or grass is a choice of ground, not of shape: baking
+/// deeper ruts and taller berms into a sand track reshaped it under the builder, and the game
+/// already digs sand deeper through the stack [`dig`] hands it.
 ///
 /// The face angles are deliberately not here. [`crate::trackprog::JUMP_FACE_DEG`] is read by
 /// `Feature::length`, which is asked how long a jump is in places that have no track to ask
@@ -7161,44 +7172,16 @@ fn worn(prog: &TrackProgram) -> f32 {
     (1.0 - crate::trackprog::default_wear() + w).max(0.05)
 }
 
-fn ride(s: Surface) -> Ride {
-    match s {
-        // The measured case. Every figure here is the one the corpus was read into and the
-        // rest of this module's comments explain; the other two surfaces are stated against
-        // it rather than measured separately, because nothing in the survey is a sand
-        // national or a grasstrack.
-        Surface::Soil => Ride {
-            rut_depth: RUT_DEPTH_M,
-            rut_straight: RUT_DEPTH_STRAIGHT_M,
-            rut_spacing: RUT_SPACING_M,
-            groove: RUT_GROOVE_M,
-            berm: CORNER_BERM_M,
-            brake: (BRAKING_WAVELENGTH_M, BRAKING_HEIGHT_M),
-            accel: (ACCEL_WAVELENGTH_M, ACCEL_HEIGHT_M),
-        },
-        // Deeper, wider, softer, and smoother between the ruts. Sand does not hold a
-        // two-metre washboard — under braking it builds long swells instead, and that is most
-        // of why a sand national rides nothing like a hardpack one however it is painted.
-        Surface::Sand => Ride {
-            rut_depth: RUT_DEPTH_M * 1.55,
-            rut_straight: RUT_DEPTH_STRAIGHT_M * 1.7,
-            rut_spacing: RUT_SPACING_M * 1.35,
-            groove: RUT_GROOVE_M * 1.4,
-            berm: CORNER_BERM_M * 1.9,
-            brake: (BRAKING_WAVELENGTH_M * 2.1, BRAKING_HEIGHT_M * 0.7),
-            accel: (ACCEL_WAVELENGTH_M * 1.8, ACCEL_HEIGHT_M * 0.8),
-        },
-        // Root-bound: it takes a season to wear a line into a grasstrack and it never grows a
-        // berm worth leaning on.
-        Surface::Grass => Ride {
-            rut_depth: RUT_DEPTH_M * 0.45,
-            rut_straight: RUT_DEPTH_STRAIGHT_M * 0.35,
-            rut_spacing: RUT_SPACING_M * 0.9,
-            groove: RUT_GROOVE_M * 0.85,
-            berm: CORNER_BERM_M * 0.4,
-            brake: (BRAKING_WAVELENGTH_M * 0.9, BRAKING_HEIGHT_M * 0.55),
-            accel: (ACCEL_WAVELENGTH_M * 0.9, ACCEL_HEIGHT_M * 0.5),
-        },
+/// The measured wear: every figure is the one the corpus was read into.
+fn ride() -> Ride {
+    Ride {
+        rut_depth: RUT_DEPTH_M,
+        rut_straight: RUT_DEPTH_STRAIGHT_M,
+        rut_spacing: RUT_SPACING_M,
+        groove: RUT_GROOVE_M,
+        berm: CORNER_BERM_M,
+        brake: (BRAKING_WAVELENGTH_M, BRAKING_HEIGHT_M),
+        accel: (ACCEL_WAVELENGTH_M, ACCEL_HEIGHT_M),
     }
 }
 
@@ -7352,6 +7335,20 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
     Some(tcl_of(line.start.x, line.start.z, line.start.angle, &segs))
 }
 
+/// Which version of the track generator made a track, as major.minor.patch, so a track in the
+/// wild can be matched to the code that made it. Bump it whenever a program builds into
+/// something different: major when older tracks are no longer comparable, minor for a new
+/// feature, patch for a fix.
+pub const GENERATOR_VERSION: &str = "1.0.0";
+
+/// The stamp every built track carries in `<slug>/generator.ini`.
+///
+/// A file of its own rather than a key in the track's `.ini`: the game never opens this one,
+/// so nothing it contains can upset the loader.
+fn generator_ini() -> String {
+    format!("[generator]\nname = Frost's Studio\nversion = {GENERATOR_VERSION}\n")
+}
+
 /// The track's own description, in the shape published tracks write it.
 ///
 /// `length` is the lap in whole metres, and published tracks really do state it — SFDR 1813,
@@ -7389,6 +7386,7 @@ fn readme(prog: &TrackProgram, syn: &Synth, slug: &str) -> String {
     format!(
         "{name}\n\nGenerated by Frost's Mod Manager. Everything here is source: run the two batch files to\n\
          compile it, in a folder that also has terrained.exe.\n\n\
+         Generator v{GENERATOR_VERSION}\n\
          Terrain   {gw} x {gh} samples over {sx:.0} x {sz:.0} m ({mps:.2} m a sample)\n\
          Height    {used:.1} m used of a {budget:.1} m budget\n\
          Lap       {lap:.0} m, {width:.0} m wide, {feats} features\n\n\
@@ -9034,6 +9032,37 @@ mod tests {
         for i in 0..zip.len() {
             let e = zip.by_index(i).unwrap();
             assert!(e.size() > 0, "{} is empty in the .pkz", e.name());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The stamp goes inside the track folder, so it survives packaging into the `.pkz`.
+    #[test]
+    fn a_built_track_carries_the_generator_version() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let dir = std::env::temp_dir().join(format!("mxb-genver-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let slug = slug(&p.name);
+        let rel = format!("{slug}/generator.ini");
+        let want = format!("version = {GENERATOR_VERSION}");
+        let parts: Vec<&str> = GENERATOR_VERSION.split('.').collect();
+        assert!(
+            parts.len() == 3 && parts.iter().all(|n| n.parse::<u32>().is_ok()),
+            "{GENERATOR_VERSION} is not major.minor.patch"
+        );
+
+        let wrote = write_source(&p, &s, &dir).unwrap();
+        assert!(wrote.contains(&rel), "write_source never wrote {rel}");
+        let pkz = dir.join("built.pkz");
+        crate::trackbuild::package(&dir, &slug, &pkz).unwrap();
+        write_pkz(&p, &s, &dir.join("preview.pkz"), false).unwrap();
+
+        for archive in [pkz, dir.join("preview.pkz")] {
+            let mut zip = zip::ZipArchive::new(std::fs::File::open(&archive).unwrap()).unwrap();
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut zip.by_name(&rel).unwrap(), &mut text).unwrap();
+            assert!(text.contains(&want), "{archive:?} says {text:?}");
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -11277,86 +11306,37 @@ mod tests {
     }
 
     #[test]
-    fn a_sand_track_rides_like_sand_and_not_only_looks_like_it() {
-        // Surface reached three things: the colour palettes, the shoulder's id and width, and
-        // the base material name. Every constant that decides how a track *wears* was a
-        // module-level const tuned on worked loam, so a sand national was a soil track with a
-        // sand palette.
-        // Differenced, because a peak-to-peak measurement cannot answer this. A section's
-        // relief is mostly things a surface does not change — the machine's passes, the
-        // windrow, the ground's own grain — so soil against sand came out 1.10x when the rut
-        // constants differ by 1.7. Two synths of the same lap with the same seed differ *only*
-        // by the surface, so the difference between them is exactly what the surface did.
+    fn the_surface_never_reshapes_the_track() {
+        // Picking sand in the builder rebuilt every corner with near-double berms. Same lap,
+        // same seed: the heights must not move at all.
         let ground = |surface: crate::trackprog::Surface| {
             let mut p = hairpins();
             p.terrain.surface = surface;
-            synthesise(&p).expect("synthesise")
+            synthesise(&p).expect("synthesise").heights
         };
-        let (soil, sand, grass) = (
-            ground(crate::trackprog::Surface::Soil),
-            ground(crate::trackprog::Surface::Sand),
-            ground(crate::trackprog::Surface::Grass),
-        );
-        // How far a surface moves the ground away from soil's, over ground anyone rides.
-        let moved = |other: &Synth| {
-            let mut worst = 0.0f32;
-            for at in (40..=200).step_by(10) {
-                let (a, b) = (across(&soil, at as f32), across(other, at as f32));
-                let w = ridden_window(a.len());
-                for i in w {
-                    worst = worst.max((a[i] - b[i]).abs());
-                }
-            }
-            worst
-        };
-        let (to_sand, to_grass) = (moved(&sand), moved(&grass));
-        assert!(
-            to_sand > 0.10,
-            "sand rides the same as soil: it moves the ground {to_sand:.3} m"
-        );
-        assert!(
-            to_grass > 0.05,
-            "a grasstrack rides the same as soil: it moves the ground {to_grass:.3} m"
-        );
-        // And which way each goes, which is the whole claim: sand cuts deeper than soil and
-        // a grasstrack barely cuts at all.
-        let cut = |s: &Synth| {
-            (40..=200)
-                .step_by(10)
-                .map(|at| {
-                    let v = across(s, at as f32);
-                    let w = ridden_window(v.len());
-                    let r = &v[w];
-                    r.iter().copied().fold(f32::MIN, f32::max)
-                        - r.iter().copied().fold(f32::MAX, f32::min)
-                })
-                .fold(0.0f32, f32::max)
-        };
-        assert!(cut(&sand) > cut(&soil), "{:.3} against {:.3}", cut(&sand), cut(&soil));
-        assert!(cut(&grass) < cut(&soil), "{:.3} against {:.3}", cut(&grass), cut(&soil));
-        assert!(
-            ride(crate::trackprog::Surface::Sand).rut_depth
-                > ride(crate::trackprog::Surface::Soil).rut_depth * 1.3,
-            "sand's own figures are not deeper than soil's"
-        );
+        let soil = ground(crate::trackprog::Surface::Soil);
+        assert_eq!(soil, ground(crate::trackprog::Surface::Sand), "sand moved the ground");
+        assert_eq!(soil, ground(crate::trackprog::Surface::Grass), "grass moved the ground");
     }
 
     #[test]
-    fn every_surface_states_a_whole_ride() {
-        // A surface added to the enum without a row here would fall through to soil's
-        // numbers, which is exactly the fault this replaced.
-        for s in [
-            crate::trackprog::Surface::Soil,
-            crate::trackprog::Surface::Sand,
-            crate::trackprog::Surface::Grass,
-        ] {
-            let r = ride(s);
-            assert!(r.rut_depth > 0.0 && r.rut_straight > 0.0, "{s:?} wears nothing");
-            assert!(r.rut_straight < r.rut_depth, "{s:?} wears its straights as hard as its corners");
-            assert!(r.rut_spacing > r.groove * 2.0, "{s:?} has grooves wider than the gap between them");
-            assert!(r.brake.0 < r.accel.0, "{s:?} brakes in longer waves than it drives in");
-            assert!(r.brake.1 > r.accel.1, "{s:?} builds taller bumps under power than under braking");
+    fn the_ride_is_a_whole_one() {
+        let r = ride();
+        assert!(r.rut_depth > 0.0 && r.rut_straight > 0.0, "wears nothing");
+        assert!(r.rut_straight < r.rut_depth, "wears its straights as hard as its corners");
+        assert!(r.rut_spacing > r.groove * 2.0, "grooves wider than the gap between them");
+        assert!(r.brake.0 < r.accel.0, "brakes in longer waves than it drives in");
+        assert!(r.brake.1 > r.accel.1, "taller bumps under power than under braking");
+    }
+
+    #[test]
+    fn only_the_preview_paints_the_line_by_surface() {
+        use crate::trackprog::Surface;
+        for s in [Surface::Soil, Surface::Sand, Surface::Grass] {
+            assert_eq!(line_id(s, false), 10, "{s:?} leaks a preview id into the game's file");
         }
+        assert_ne!(line_id(Surface::Sand, true), line_id(Surface::Soil, true));
+        assert_ne!(line_id(Surface::Grass, true), line_id(Surface::Soil, true));
     }
 
     #[test]

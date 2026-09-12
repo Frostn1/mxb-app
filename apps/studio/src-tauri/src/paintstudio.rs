@@ -179,7 +179,7 @@ pub fn inspect(path: &Path) -> Result<StudioImage> {
 /// Read `path` at its own size and its own shape, for the layer editor to draw with.
 ///
 /// Deliberately not [`inspect`], not [`paint::to_texture`], and not even [`load`]: the first
-/// shrinks to [`PREVIEW_EDGE`] for a thumbnail, the second caps at the viewer's 1024, and the
+/// shrinks to [`PREVIEW_EDGE`] for a thumbnail, the second caps at the viewer's 4096, and the
 /// third rounds both edges to powers of two. Each is right where it's used and wrong here.
 ///
 /// The power-of-two rounding is the one that would bite hardest: it's what the *game* needs of

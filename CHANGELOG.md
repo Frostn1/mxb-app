@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-09-11
+
+### Added
+- Sort the server list by any column. Click a header again to reverse it.
+- Star servers and switch the list to just your favorites.
+- Star bikes, tracks and other mods in the Library to keep them at the top.
+- Filter the server list by region, and hide servers with no riders (on by default).
+
+### Changed
+- The 3D viewer shows paints at full resolution, so logos and lettering on bikes and gear
+  read sharply.
+- Bikes with many paints open faster in the 3D viewer and use far less memory.
+- Race mode is now a tab under Garage, next to Locker and Presets.
+- The Library picks up tracks and other mods you add to the mods folder yourself, without
+  pressing Refresh.
+
+### Fixed
+- A server's track panel recognizes tracks you have installed as a `.pkz`, even when the
+  file is named differently from the track.
+
 ## 2026-09-10
 
 ### Added
@@ -8,6 +28,18 @@
 - A Diagnose tab in Frost's Studio. Pick a bike to see which other bikes a model swap lines
   up with (a KTM swap fits the Husqvarna and GasGas too), or add protected files to see the
   GUID each one is locked to.
+- Tracks built in Frost's Studio record which version of the track generator made them, in
+  a `generator.ini` inside the track folder.
+
+### Changed
+- The Track Studio's ground picker reads Soil, Sand and Grass, and the 3D preview paints the
+  riding line in the ground you pick.
+- Picking a track's ground changes what it is made of, not its shape. Corners, berms and ruts
+  stay as they are when you switch between soil, sand and grass.
+
+### Fixed
+- Objects in the 3D track view stand on the ground where the game puts them, on tracks you
+  opened in an earlier version too.
 
 ### Changed
 - Tight corners on generated tracks carry a comb of ruts, one for each line riders take,

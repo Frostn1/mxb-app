@@ -150,9 +150,14 @@ pub fn bike_cache() -> &'static std::sync::Mutex<lru::Lru<BikeModel>> {
 }
 
 /// The cached bike under `key`, if it's still resident. Taken and released in one step so
-/// no caller holds the cache lock while it waits on [`gate::enter`].
+/// no caller holds the cache lock while it waits on [`gate::enter`]. A hit whose pixels the
+/// texture store has since reaped is a miss: served, it would draw the bike grey.
 pub fn cached_bike(key: &str) -> Option<BikeModel> {
-    bike_cache().lock().ok().and_then(|mut c| c.get(key).cloned())
+    bike_cache()
+        .lock()
+        .ok()
+        .and_then(|mut c| c.get(key).cloned())
+        .filter(|m| texstore::all_resident(&m.tokens()))
 }
 
 pub fn mtime_nanos(path: &std::path::Path) -> u128 {
@@ -576,12 +581,13 @@ pub fn build_bike_model(
     let mut paints: Vec<(BikePaint, bool)> = pnt_jobs
         .par_iter()
         .filter_map(|(name, data, shipped, path)| {
-            paint::decode_any(data).ok().map(|pnt| {
+            // Uninflated: the viewer fetches the sheets of the paint it shows, not all of them.
+            paint::store_lazy_any(data).ok().map(|textures| {
                 (
                     BikePaint {
                         name: name.clone(),
                         path: path.map(str::to_string),
-                        textures: pnt.into_par_iter().map(paint::into_texture).collect(),
+                        textures,
                         changes_preview: false, // resolved below, once bindings are known
                     },
                     *shipped,
@@ -4234,6 +4240,21 @@ mod viewer_tests {
         let mut own: Vec<&str> = m.base.iter().map(|t| t.name.as_str()).collect();
         own.sort_unstable();
         eprintln!("the model's own textures: {}", own.join(", "));
+        // Every paint is offered, one is shown: the store must hold the list cheaply, and a
+        // bike's own sheets must still be there once all of its paints are in.
+        let base_bytes: u64 = m.base.iter().map(|t| t.width as u64 * t.height as u64 * 4).sum();
+        eprintln!(
+            "texture store: {:.1} MB resident, {:.1} MB of it the model's own sheets",
+            crate::texstore::resident_bytes() as f64 / (1024.0 * 1024.0),
+            base_bytes as f64 / (1024.0 * 1024.0)
+        );
+        for t in &m.base {
+            eprintln!("  base '{}' {}x{}", t.name, t.width, t.height);
+        }
+        for t in m.base.iter().chain(&m.paints[0].textures) {
+            let px = crate::texstore::get(&t.token).expect("token resolves");
+            assert_eq!(px.len() as u32, t.width * t.height * 4, "'{}' at its stated size", t.name);
+        }
         assert!(!m.nodes.is_empty(), "decoded the mesh");
         let have: std::collections::HashSet<String> = m.paints[0]
             .textures
@@ -5287,8 +5308,8 @@ pub async fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, Stri
 /// Paints decoded for the viewer, so re-opening one doesn't inflate it a second time.
 ///
 /// The picker re-runs this on every selection change and on every re-open, and a gear paint is
-/// tens of megabytes of DEFLATE — the pixels behind an entry, on the other hand, are small,
-/// because each is downscaled to 1024² before it is stored.
+/// tens of megabytes of DEFLATE — the pixels behind an entry, on the other hand, are far
+/// fewer, because only the sheets the viewer binds are kept.
 const PAINT_CACHE_CAP: usize = 4;
 
 fn paint_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>> {
@@ -5299,7 +5320,11 @@ fn paint_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>
 
 /// As [`cached_bike`], for the paints: looked up and released without holding the lock.
 pub fn cached_paint(key: &str) -> Option<Vec<paint::PaintTexture>> {
-    paint_cache().lock().ok().and_then(|mut c| c.get(key).cloned())
+    paint_cache()
+        .lock()
+        .ok()
+        .and_then(|mut c| c.get(key).cloned())
+        .filter(|t| texstore::all_resident(&t.iter().map(|x| x.token.clone()).collect::<Vec<_>>()))
 }
 
 pub fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, String> {

@@ -19,10 +19,10 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// Ceiling on resident pixels. Comfortably above the working set — three cached bikes at
-/// ~10 textures each is ~120 MB — so the eviction below only ever reaps blobs whose owner
-/// is long gone.
-const CAP_BYTES: usize = 384 * 1024 * 1024;
+/// Ceiling on resident pixels. Comfortably above the working set — a livery at full size is
+/// 67 MB a sheet, and the bike and paint caches together hold a few hundred MB of them — so
+/// the eviction below only ever reaps blobs whose owner is long gone.
+const CAP_BYTES: usize = 1024 * 1024 * 1024;
 
 /// Stand-in for a token that has been evicted: the same grey an untextured part wears, so a
 /// stale reference reads as "no texture" rather than throwing in the viewer.
@@ -32,9 +32,26 @@ const MISSING_RGBA: [u8; 4] = [0xb7, 0xbc, 0xc4, 0xff];
 /// here — the `PaintTexture` the frontend already holds is their single source of truth.
 type Blob = Vec<u8>;
 
+type Inflate = Arc<dyn Fn() -> Option<Blob> + Send + Sync>;
+
+/// A texture's pixels, held — or, see [`put_lazy`], made each time they are fetched.
+enum Entry {
+    Ready(Arc<Blob>),
+    Lazy { inflate: Inflate, bytes: usize },
+}
+
+impl Entry {
+    fn bytes(&self) -> usize {
+        match self {
+            Entry::Ready(b) => b.len(),
+            Entry::Lazy { bytes, .. } => *bytes,
+        }
+    }
+}
+
 #[derive(Default)]
 struct Store {
-    blobs: HashMap<String, Arc<Blob>>,
+    blobs: HashMap<String, Entry>,
     /// Insertion order, for the cap below.
     order: VecDeque<String>,
     bytes: usize,
@@ -52,13 +69,22 @@ fn next_token() -> String {
 
 /// Take ownership of a texture's pixels and return the token that names them.
 pub fn put(rgba: Vec<u8>) -> String {
+    insert(Entry::Ready(Arc::new(rgba)))
+}
+
+/// A token whose pixels `inflate` makes on every fetch, holding only what it captures —
+/// `bytes` of it, for the cap. For a paint the viewer may never show.
+pub fn put_lazy(bytes: usize, inflate: impl Fn() -> Option<Blob> + Send + Sync + 'static) -> String {
+    insert(Entry::Lazy { inflate: Arc::new(inflate), bytes })
+}
+
+fn insert(entry: Entry) -> String {
     let token = next_token();
-    let size = rgba.len();
     let Ok(mut s) = store().lock() else {
         return token; // poisoned — the token resolves to grey, which beats panicking
     };
-    s.bytes += size;
-    s.blobs.insert(token.clone(), Arc::new(rgba));
+    s.bytes += entry.bytes();
+    s.blobs.insert(token.clone(), entry);
     s.order.push_back(token.clone());
 
     while s.bytes > CAP_BYTES {
@@ -66,7 +92,7 @@ pub fn put(rgba: Vec<u8>) -> String {
             break;
         };
         if let Some(b) = s.blobs.remove(&oldest) {
-            s.bytes -= b.len();
+            s.bytes -= b.bytes();
             log::warn!(
                 "texture store over {CAP_BYTES} bytes — dropped {oldest}; a viewer still \
                  holding it will show grey"
@@ -77,7 +103,17 @@ pub fn put(rgba: Vec<u8>) -> String {
 }
 
 pub fn get(token: &str) -> Option<Arc<Blob>> {
-    store().lock().ok()?.blobs.get(token).cloned()
+    let inflate = match store().lock().ok()?.blobs.get(token)? {
+        Entry::Ready(b) => return Some(b.clone()),
+        Entry::Lazy { inflate, .. } => inflate.clone(),
+    };
+    // Outside the lock, so inflating a 4096² sheet doesn't stall every other fetch.
+    inflate().map(Arc::new)
+}
+
+/// Whether every one of `tokens` still names pixels — false once the cap has reaped any.
+pub fn all_resident(tokens: &[String]) -> bool {
+    store().lock().is_ok_and(|s| tokens.iter().all(|t| s.blobs.contains_key(t)))
 }
 
 /// Drop the pixels behind `tokens`, called when whatever owned them is evicted.
@@ -88,7 +124,7 @@ pub fn release(tokens: &[String]) {
     let s = &mut *guard;
     for t in tokens {
         if let Some(b) = s.blobs.remove(t) {
-            s.bytes -= b.len();
+            s.bytes -= b.bytes();
         }
     }
     let blobs = &s.blobs;
@@ -99,7 +135,8 @@ pub fn release(tokens: &[String]) {
 /// buffer that doesn't match the texture's declared size as "no texture" and renders grey.
 pub fn bytes_or_missing(token: &str) -> Vec<u8> {
     match get(token) {
-        Some(b) => b.as_ref().clone(),
+        // A lazy sheet's pixels are ours alone — move them rather than copy 67 MB.
+        Some(b) => Arc::try_unwrap(b).unwrap_or_else(|b| b.as_ref().clone()),
         None => {
             log::warn!("texture {token} is no longer resident — serving grey");
             MISSING_RGBA.to_vec()
@@ -122,6 +159,24 @@ mod tests {
         let token = put(px.clone());
         assert_eq!(*get(&token).expect("token resolves"), px);
         assert_eq!(bytes_or_missing(&token), px);
+    }
+
+    #[test]
+    fn lazy_tokens_inflate_on_fetch_and_count_what_they_hold() {
+        let before = resident_bytes();
+        let token = put_lazy(10, || Some(vec![1u8, 2, 3, 4]));
+        assert_eq!(resident_bytes(), before + 10);
+        assert_eq!(bytes_or_missing(&token), vec![1u8, 2, 3, 4]);
+        release(std::slice::from_ref(&token));
+        assert_eq!(resident_bytes(), before);
+    }
+
+    #[test]
+    fn residency_notices_a_reaped_token() {
+        let (a, b) = (put(vec![1u8; 4]), put(vec![2u8; 4]));
+        assert!(all_resident(&[a.clone(), b.clone()]));
+        release(std::slice::from_ref(&b));
+        assert!(!all_resident(&[a, b]));
     }
 
     #[test]

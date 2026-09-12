@@ -37,7 +37,9 @@ const MASTER_DIM: u32 = 2048;
 // holds the ground below a track standing as a wall around it.
 // v5: masters are kept at the source's own resolution; a v4 entry would pin a track to half
 // of it for as long as it stayed cached.
-const CACHE_DIR: &str = "track-terrain-v5";
+// v6: grids are read in file order, no longer flipped; a v5 entry holds the terrain mirrored
+// under its own scenery, so objects float and stand on the riding line.
+const CACHE_DIR: &str = "track-terrain-v6";
 
 /// How many cached masters to keep. Sixteen megabytes each at [`MASTER_DIM`], so this is kept
 /// small deliberately — the cache saves a second of archive reading, not a scarce resource.
@@ -127,6 +129,22 @@ pub struct Master {
 
 fn is_dir(path: &Path) -> bool {
     path.is_dir()
+}
+
+/// The name a server reports for this track: the folder its files sit under inside a `.pkz`,
+/// or the folder itself when unpacked. `None` when the archive can't be read.
+pub fn folder_name(path: &Path) -> Option<String> {
+    if is_dir(path) {
+        return path.file_name().map(|n| n.to_string_lossy().into_owned());
+    }
+    top_folder(&crate::pkz::entry_names(path).ok()?)
+}
+
+fn top_folder(names: &[String]) -> Option<String> {
+    names
+        .iter()
+        .find_map(|n| n.split_once('/').map(|(top, _)| top).filter(|t| !t.is_empty()))
+        .map(str::to_string)
 }
 
 /// Every entry name in a track, without inflating any of them.
@@ -408,7 +426,7 @@ pub const TEXTURE_HEADER: usize = 16;
 
 /// Bump when [`surface_colour`] changes, so cached textures drawn with the old palette are
 /// retired rather than kept.
-const SURFACE_SCHEME: u32 = 2;
+const SURFACE_SCHEME: u32 = 3;
 
 /// The colour of a surface, by the id the track states for it.
 ///
@@ -450,6 +468,8 @@ fn surface_colour(id: u32) -> [u8; 3] {
         205 => [150, 110, 200], // berm
         206 => [90, 90, 110],   // rut
         207 => [200, 200, 210], // a shape drawn by hand
+        208 => [178, 150, 110], // the riding line on a sand track
+        209 => [104, 96, 64],   // the riding line on a grasstrack
         12 => [124, 126, 102], // olive, so it parts from both grass and soil
         _ => [138, 126, 106],
     }
@@ -941,6 +961,22 @@ fn prune_cache(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pkz_track_is_named_by_its_folder() {
+        let names = ["Farm14/farm14.map", "Farm14/farm14.trh"].map(String::from);
+        assert_eq!(top_folder(&names).as_deref(), Some("Farm14"));
+        assert_eq!(top_folder(&["loose.map".to_string()]), None);
+    }
+
+    #[test]
+    fn an_unpacked_track_is_named_by_its_directory() {
+        let root = std::env::temp_dir().join(format!("track-folder-name-{}", std::process::id()));
+        let dir = root.join("Highland");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(folder_name(&dir).as_deref(), Some("Highland"));
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     /// Point this at a real track — `.pkz` or unpacked folder — to see whether its terrain
     /// reads, and if not, how close each candidate layout came:

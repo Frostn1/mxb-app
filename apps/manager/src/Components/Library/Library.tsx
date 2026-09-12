@@ -34,6 +34,7 @@ import {
   EyeOff,
   Undo2,
   Search as SearchIcon,
+  Star,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -50,6 +51,8 @@ import {
   restoreLedgerEntry,
   downloadHistory,
   scanModelSwaps,
+  onFrostmodReload,
+  MODS_WATCH_SLUG,
   type ModType,
 } from "@frost/shared/api/mods";
 import type {
@@ -85,6 +88,12 @@ import { useConfig } from "@frost/shared/Context/Config";
 import { useImport } from "../Dropzone/useImport";
 import { useShare } from "../../Context/Share";
 import { cachedScan, dropScans, putScan } from "./scanCache";
+import { useFavorites } from "../../lib/useFavorites";
+
+/** Starred mods, by tab and file name — a name survives a move between folders, a path doesn't. */
+const FAVORITES_KEY = "mxb:libraryFavorites:v1";
+const starId = (modType: ModType, item: LibraryEntry) =>
+  `${modType.id}/${item.name.toLowerCase()}`;
 
 /** Where the model-swap scan is remembered. Not a mods subpath, so it can't collide
  *  with one. */
@@ -439,6 +448,7 @@ function buildSections(
   entries: LibraryEntry[],
   search: string,
   sort: LibrarySort,
+  isStarred: (e: LibraryEntry) => boolean,
   t: TFunc<TKey>,
 ): Section[] {
   const q = search.trim().toLowerCase();
@@ -451,6 +461,27 @@ function buildSections(
       )
     : entries;
 
+  // Starred mods lead, whatever the sort, and leave their folder so none shows twice.
+  const starred = filtered
+    .filter(isStarred)
+    .sort((a, b) =>
+      sort === "recent"
+        ? b.modified - a.modified
+        : displayName(a.name).localeCompare(displayName(b.name)),
+    );
+  const rest = starred.length ? filtered.filter((e) => !isStarred(e)) : filtered;
+  const top: Section[] = starred.length
+    ? [{ key: "__starred__", label: t("library.starred"), items: starred }]
+    : [];
+  return [...top, ...groupSections(modType, rest, sort, t)];
+}
+
+function groupSections(
+  modType: ModType,
+  filtered: LibraryEntry[],
+  sort: LibrarySort,
+  t: TFunc<TKey>,
+): Section[] {
   // One flat list, newest first — grouping by folder would scatter the very thing being
   // looked for across half a dozen sections.
   if (sort === "recent") {
@@ -610,6 +641,19 @@ export default function Library({
     if (!hit.fresh) void load({ quiet: true });
   }, [load, refreshKey, modType]);
 
+  // A mod dropped into the folder by hand, caught by the watcher: every remembered scan is
+  // stale, and the list on screen refreshes behind itself. In-app changes bump `refreshKey`.
+  useEffect(() => {
+    const un = onFrostmodReload((p) => {
+      if (p.slug !== MODS_WATCH_SLUG) return;
+      dropScans();
+      void load({ quiet: true });
+    });
+    return () => {
+      void un.then((f) => f());
+    };
+  }, [load]);
+
   // Model swaps, for the bikes tab only — one scan of the whole tree, indexed by bike
   // folder. Installing a mod or editing the folder changes what's swappable, so it rides
   // the same `refreshKey` the library scan does. A failure leaves the map empty and the
@@ -658,9 +702,15 @@ export default function Library({
     [entries],
   );
 
+  const favs = useFavorites(FAVORITES_KEY);
+  const isStarred = useCallback(
+    (e: LibraryEntry) => favs.has(starId(modType, e)),
+    [favs, modType],
+  );
+
   const sections = useMemo(
-    () => buildSections(modType, entries, search, sort, t),
-    [modType, entries, search, sort, t],
+    () => buildSections(modType, entries, search, sort, isStarred, t),
+    [modType, entries, search, sort, isStarred, t],
   );
 
   // Installed items only — this feeds select-all and every bulk action, and a missing mod
@@ -802,6 +852,12 @@ export default function Library({
     );
 
   const rowActions = (item: LibraryEntry): RowAction[] => [
+    {
+      key: "star",
+      icon: Star,
+      label: isStarred(item) ? t("library.unstar") : t("library.star"),
+      onSelect: () => favs.toggle(starId(modType, item)),
+    },
     ...(item.kind === "pkz"
       ? [
           {
@@ -1105,6 +1161,7 @@ export default function Library({
                     const Icon = categoryIcon(item.category);
                     const canView3d = entryViewerProps(item, entries, bikePreview) !== null;
                     const isSel = selected.has(item.path);
+                    const starred = isStarred(item);
                     // A bike's model swaps. The Locker always lists the active set as a row
                     // of its own, so a bike with nothing to switch between still reports one
                     // variant — only two or more is a choice worth a badge.
@@ -1125,7 +1182,7 @@ export default function Library({
                               (selectMode ? toggleSelect(item.path) : setDetail(item))
                             }
                             className={cn(
-                              "flex cursor-pointer flex-col self-start rounded-xl border bg-card p-3 transition-colors",
+                              "group flex cursor-pointer flex-col self-start rounded-xl border bg-card p-3 transition-colors",
                               isSel
                                 ? "border-primary/60 bg-primary/[0.06]"
                                 : "border-white/[0.07] hover:border-white/15",
@@ -1174,6 +1231,25 @@ export default function Library({
                                 ) : undefined
                               }
                             />
+                            {!selectMode && (
+                              <button
+                                title={starred ? t("library.unstar") : t("library.star")}
+                                aria-label={starred ? t("library.unstar") : t("library.star")}
+                                aria-pressed={starred}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  favs.toggle(starId(modType, item));
+                                }}
+                                className={cn(
+                                  "flex-none cursor-default rounded-md p-1 transition-colors hover:bg-foreground/[0.06]",
+                                  starred
+                                    ? "text-amber-400"
+                                    : "text-faint opacity-0 hover:text-muted-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                                )}
+                              >
+                                <Star className={cn("size-3.5", starred && "fill-current")} />
+                              </button>
+                            )}
                             {!selectMode && canView3d && (
                               <button
                                 title={t("library.quick3d")}
