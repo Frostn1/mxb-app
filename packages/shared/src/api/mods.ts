@@ -358,9 +358,18 @@ export interface SecureProvisionOutcome {
   steamId: string;
 }
 
-/** Bind a content key to the live Steam account and store it as a .mxbkey for offline play. */
-export function mxbsecureProvision(blobPath: string, key: string): Promise<SecureProvisionOutcome> {
-  return invoke<SecureProvisionOutcome>("mxbsecure_provision", { blobPath, key });
+/**
+ * Bind a content key to the live Steam account (and the machine) and store it as a .mxbkey for
+ * offline play. `secretB64` is the per-provision secret from `/v1/keys/grant`, folded into the
+ * seal so a leaked .mxbkey can't be re-derived from the public Steam ID; omit it only on the
+ * local Lock-tab test path, which then binds to Steam ID + machine alone.
+ */
+export function mxbsecureProvision(
+  blobPath: string,
+  key: string,
+  secretB64?: string,
+): Promise<SecureProvisionOutcome> {
+  return invoke<SecureProvisionOutcome>("mxbsecure_provision", { blobPath, key, secretB64 });
 }
 
 /** Open the blob offline from its .mxbkey (no server), and check it matches the original. */
