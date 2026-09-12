@@ -364,6 +364,9 @@ struct BundleProgress {
     done: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     total: Option<usize>,
+    /// How far the upload is, `0..=1` — see [`upload::UploadProgress::fraction`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fraction: Option<f64>,
 }
 
 pub const BUNDLE_SLUG: &str = "__preset_bundle__";
@@ -374,14 +377,18 @@ pub const BUNDLE_EVENT: &str = "preset-bundle-progress";
 /// create/download machinery serves two flows — the preset bundle here and the file share
 /// in [`crate::fileshare`] — and each has its own dialog listening.
 pub(crate) fn emit(app: &AppHandle, event: &str, phase: &'static str, message: Option<String>) {
-    let _ = app.emit(event, BundleProgress { phase, message, done: None, total: None });
+    let _ = app.emit(
+        event,
+        BundleProgress { phase, message, done: None, total: None, fraction: None },
+    );
 }
 
-/// An `uploading` update: `done` of `n` parts stored, of a `size`-sized zip. Shared by every
-/// flow that hands [`crate::upload::upload_file`] a callback.
-pub(crate) fn emit_upload(app: &AppHandle, event: &str, size: &str, done: usize, n: usize) {
+/// An `uploading` update for a `size`-sized zip. Shared by every flow that hands
+/// [`crate::upload::upload_file`] a callback.
+pub(crate) fn emit_upload(app: &AppHandle, event: &str, size: &str, p: upload::UploadProgress) {
+    let n = p.parts;
     let message = if n > 1 {
-        format!("Uploading part {} of {n} ({size})…", (done + 1).min(n))
+        format!("Uploading part {} of {n} ({size})…", (p.done + 1).min(n))
     } else {
         format!("Uploading {size}…")
     };
@@ -390,8 +397,9 @@ pub(crate) fn emit_upload(app: &AppHandle, event: &str, size: &str, done: usize,
         BundleProgress {
             phase: "uploading",
             message: Some(message),
-            done: Some(done),
+            done: Some(p.done),
             total: Some(n),
+            fraction: Some(p.fraction()),
         },
     );
 }
@@ -440,10 +448,8 @@ pub async fn create(
     let total = human_size(file_size(&zip_path));
     phase(app, "uploading", Some(format!("Uploading {total}…")));
     let client = install::build_client()?;
-    let up = upload::upload_file(&client, &zip_path, |done, n| {
-        emit_upload(app, BUNDLE_EVENT, &total, done, n)
-    })
-    .await?;
+    let up = upload::upload_file(&client, &zip_path, |p| emit_upload(app, BUNDLE_EVENT, &total, p))
+        .await?;
 
     let _ = std::fs::remove_dir_all(&work);
 

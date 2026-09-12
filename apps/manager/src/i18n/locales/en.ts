@@ -1130,6 +1130,8 @@ export const en = {
   "share.phasePacking": "Packing files…",
   "share.phaseUploading": "Uploading…",
   "share.partsUploaded": "{{done}} of {{total}} parts uploaded",
+  "share.secondsLeft": "About {{n}}s left",
+  "share.minutesLeft": "About {{n}} min left",
   "share.phaseDownloading": "Downloading…",
   "share.phaseInstalling": "Installing…",
 

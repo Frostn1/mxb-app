@@ -5,6 +5,8 @@ use reqwest::multipart::{Form, Part};
 use reqwest::Client;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
+use std::sync::Arc;
 
 pub struct Upload {
     /// Direct download URLs, in order. One entry is the whole bundle; more than one means
@@ -46,13 +48,40 @@ const RETRY_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 /// on enough separate files staying alive, that sharing the plain code is the better answer.
 const MAX_TOTAL_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
-/// Upload `file`, slicing it if it's over one part. `on_part(done, total)` reports how many
-/// parts are stored — `0` before the first — so the caller can draw a bar. A recut starts
-/// the count again at `0` of the new total.
+/// How often a running upload reports, so the bar and the time left move between parts.
+const TICK: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Where an upload stands. A recut starts it again from nothing.
+#[derive(Clone, Copy, Debug)]
+pub struct UploadProgress {
+    /// Bytes handed to the connection so far, across every part of this cut.
+    pub sent: u64,
+    /// Bytes in parts the host has taken and we have checked.
+    pub stored: u64,
+    pub size: u64,
+    /// Parts stored, of how many.
+    pub done: usize,
+    pub parts: usize,
+}
+
+impl UploadProgress {
+    /// How far along, `0.0..=1.0`. A byte counts half when it is sent and half when its part
+    /// is stored: a good half of what a part costs is catbox writing it after the last byte
+    /// is out (see [`settled_len`]), and a bar on sent bytes alone would sit full through that.
+    pub fn fraction(&self) -> f64 {
+        if self.size == 0 {
+            return 0.0;
+        }
+        ((self.sent + self.stored) as f64 / (2 * self.size) as f64).min(1.0)
+    }
+}
+
+/// Upload `file`, slicing it if it's over one part. `on_progress` hears where it stands every
+/// [`TICK`] and whenever a part is stored, so the caller can draw a bar and a time left.
 pub async fn upload_file(
     client: &Client,
     file: &Path,
-    on_part: impl Fn(usize, usize),
+    on_progress: impl Fn(UploadProgress),
 ) -> anyhow::Result<Upload> {
     let size = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
     if size > MAX_TOTAL_BYTES {
@@ -80,7 +109,7 @@ pub async fn upload_file(
     let mut last: Option<anyhow::Error> = None;
     for part_bytes in PART_STEPS {
         let started = std::time::Instant::now();
-        match upload_sliced(client, file, size, part_bytes, &on_part).await {
+        match upload_sliced(client, file, size, part_bytes, &on_progress).await {
             Ok(up) => {
                 log::info!(
                     "share: uploaded {} in {} part(s) of {} in {:.1}s",
@@ -128,7 +157,7 @@ async fn upload_sliced(
     file: &Path,
     size: u64,
     part_bytes: u64,
-    on_part: &impl Fn(usize, usize),
+    on_progress: &impl Fn(UploadProgress),
 ) -> Result<Upload, UploadFail> {
     let plan = part_plan_of(size, part_bytes);
     let n = plan.len();
@@ -139,8 +168,20 @@ async fn upload_sliced(
 
     // Counted rather than indexed: with several in flight the useful number is how many are
     // behind us, so the bar never jumps backwards.
-    let done = std::sync::atomic::AtomicUsize::new(0);
-    on_part(0, n);
+    let done = AtomicUsize::new(0);
+    let stored = AtomicU64::new(0);
+    // One per part: how far into it the body has got — see [`counted_body`].
+    let sent: Vec<Arc<AtomicU64>> = plan.iter().map(|_| Arc::default()).collect();
+    let report = || {
+        on_progress(UploadProgress {
+            sent: sent.iter().map(|s| s.load(Relaxed)).sum(),
+            stored: stored.load(Relaxed),
+            size,
+            done: done.load(Relaxed),
+            parts: n,
+        })
+    };
+    report();
 
     let jobs: Vec<_> = plan
         .iter()
@@ -152,7 +193,8 @@ async fn upload_sliced(
             } else {
                 format!("{stem}.part{}of{}.zip", i + 1, n)
             };
-            let done = &done;
+            let (done, stored, report) = (&done, &stored, &report);
+            let sent = sent[i].clone();
             let src = file.to_path_buf();
             async move {
                 // Its own handle per slice, and off the runtime: the reads are interleaved
@@ -167,24 +209,37 @@ async fn upload_sliced(
                 .map_err(|e| Fatal(anyhow::anyhow!("reading {} failed: {e}", src.display())))?
                 .with_context(|| format!("reading {}", src.display()))
                 .map_err(Fatal)?;
-                let url = catbox_upload(client, endpoint(), &name, &bytes, len).await?;
+                let url = catbox_upload(client, endpoint(), &name, &bytes, len, &sent).await?;
                 log::info!(
                     "share: part {} of {n} ({}) took {:.1}s",
                     i + 1,
                     crate::bundle::human_size(len),
                     started.elapsed().as_secs_f32()
                 );
-                let behind = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                on_part(behind, n);
+                stored.fetch_add(len, Relaxed);
+                done.fetch_add(1, Relaxed);
+                report();
                 Ok::<(String, u64), UploadFail>((url, len))
             }
         })
         .collect();
 
-    let uploaded: Vec<(String, u64)> = futures_util::stream::iter(jobs)
+    let upload = futures_util::stream::iter(jobs)
         .buffered(UPLOAD_CONCURRENCY)
-        .try_collect()
-        .await?;
+        .try_collect::<Vec<(String, u64)>>();
+    // Reports between parts, so the bar and the time left keep moving while bytes go out.
+    let ticker = async {
+        loop {
+            tokio::time::sleep(TICK).await;
+            report();
+        }
+    };
+    let uploaded = match futures_util::future::select(std::pin::pin!(upload), std::pin::pin!(ticker))
+        .await
+    {
+        futures_util::future::Either::Left((r, _)) => r?,
+        futures_util::future::Either::Right(_) => unreachable!("the ticker never stops"),
+    };
 
     let (parts, sizes) = uploaded.into_iter().unzip();
     Ok(Upload { parts, host: HOST.to_string(), size, part_sizes: sizes })
@@ -318,9 +373,10 @@ async fn catbox_upload(
     name: &str,
     bytes: &[u8],
     expect: u64,
+    sent: &Arc<AtomicU64>,
 ) -> Result<String, UploadFail> {
     for attempt in 1..=ATTEMPTS {
-        let (status, body) = catbox_post(client, &url, name, bytes.to_vec())
+        let (status, body) = catbox_post(client, &url, name, bytes.to_vec(), sent.clone())
             .await
             .map_err(Fatal)?;
 
@@ -366,10 +422,13 @@ async fn catbox_post(
     url: &str,
     name: &str,
     bytes: Vec<u8>,
+    sent: Arc<AtomicU64>,
 ) -> anyhow::Result<(reqwest::StatusCode, String)> {
+    let len = bytes.len() as u64;
     let form = Form::new().text("reqtype", "fileupload").part(
         "fileToUpload",
-        Part::bytes(bytes)
+        // With its length, so the POST still goes with a Content-Length rather than chunked.
+        Part::stream_with_length(counted_body(bytes, sent), len)
             .file_name(name.to_string())
             .mime_str("application/zip")?,
     );
@@ -387,6 +446,21 @@ async fn catbox_post(
         .await
         .context("catbox returned an unreadable response")?;
     Ok((status, body.trim().to_string()))
+}
+
+/// `bytes` as a request body that records in `sent` how far into it the connection has got.
+/// Set, not added to: a retry sends the part again from the top, and the count should say so.
+fn counted_body(bytes: Vec<u8>, sent: Arc<AtomicU64>) -> reqwest::Body {
+    const CHUNK: usize = 64 * 1024;
+    sent.store(0, Relaxed);
+    let len = bytes.len();
+    let bytes = Arc::new(bytes);
+    let chunks = (0..len).step_by(CHUNK).map(move |at| {
+        let end = (at + CHUNK).min(len);
+        sent.store(end as u64, Relaxed);
+        Ok::<_, std::io::Error>(bytes[at..end].to_vec())
+    });
+    reqwest::Body::wrap_stream(futures_util::stream::iter(chunks))
 }
 
 #[cfg(test)]
@@ -422,7 +496,9 @@ mod tests {
                     .unwrap(),
                 Err(_) => crate::install::build_client().expect("a client"),
             };
-            let up = upload_file(&client, &path, |i, n| println!("  {i} of {n} part(s) stored"))
+            let up = upload_file(&client, &path, |p| {
+                println!("  {} of {} part(s) stored, {:.0}%", p.done, p.parts, p.fraction() * 100.0)
+            })
                 .await
                 .expect("the upload goes through");
             println!("  host says {} bytes total across {:?}", up.size, up.part_sizes);
@@ -548,6 +624,17 @@ mod tests {
         assert_eq!(hits.load(std::sync::atomic::Ordering::Relaxed), 3);
     }
 
+    /// Half a byte's worth for sending it, half for its part being stored.
+    #[test]
+    fn progress_counts_sending_and_storing() {
+        let at = |sent, stored, size| UploadProgress { sent, stored, size, done: 0, parts: 4 };
+        assert_eq!(at(0, 0, 100).fraction(), 0.0);
+        assert_eq!(at(50, 0, 100).fraction(), 0.25);
+        assert_eq!(at(100, 0, 100).fraction(), 0.5, "all sent, nothing stored yet");
+        assert_eq!(at(100, 100, 100).fraction(), 1.0);
+        assert_eq!(at(0, 0, 0).fraction(), 0.0, "an empty file is not a divide by zero");
+    }
+
     fn reply(status: &str, body: &str) -> String {
         format!(
             "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -558,7 +645,8 @@ mod tests {
     async fn upload_against(replies: Vec<&'static str>) -> anyhow::Result<String> {
         let url = serve_replies(replies);
         let client = Client::builder().build().unwrap();
-        catbox_upload(&client, url, "part.zip", b"zip bytes", b"zip bytes".len() as u64)
+        let sent = Arc::default();
+        catbox_upload(&client, url, "part.zip", b"zip bytes", b"zip bytes".len() as u64, &sent)
             .await
             .map_err(|e| match e {
                 Short(e) | Fatal(e) => e,
