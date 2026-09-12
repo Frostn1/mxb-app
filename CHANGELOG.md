@@ -15,6 +15,8 @@
   shading.
 
 ### Changed
+- Banners, flags and other venue pieces on generated tracks sit on the ground, following it,
+  instead of keeping the slope of the track they came from.
 - Arches over the track stand on both legs.
 - Every rut in a corner leads in up the approach, all of them as deep as each other.
 - Jump take-off faces are a little steeper, to allow for the ruts cut through the lip.

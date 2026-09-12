@@ -302,6 +302,18 @@ pub struct Scenery {
 }
 
 /// Height of the built ground at a world point, bilinear.
+/// A lifted piece set on our ground vertex by vertex: it is stored as height above the donor's.
+fn draped(mesh: &Mesh, x: f32, z: f32, lift: f32, syn: &Synth) -> Mesh {
+    let mut m = mesh.clone();
+    for v in m.positions.chunks_exact_mut(3) {
+        let (wx, wz) = (v[0] + x, v[2] + z);
+        v[1] += ground(syn, wx, wz) + lift;
+        v[0] = wx;
+        v[2] = wz;
+    }
+    m
+}
+
 fn ground(syn: &Synth, x: f32, z: f32) -> f32 {
     let (gx, gz) = (x / syn.mps, z / syn.mps);
     let (x0, z0) = (gx.floor() as isize, gz.floor() as isize);
@@ -2904,11 +2916,10 @@ pub fn lifted(
                 *v *= k;
             }
             let deg = (inst.yaw + st.heading).to_degrees();
-            let foot = ground_min(syn, x, z, prop.span * k * 0.5) + inst.lift * k;
             by_sheet
                 .entry(prop.sheet.clone())
                 .or_default()
-                .append(&edfwrite::moved(&edfwrite::turned(&mesh, deg), [x, foot, z]));
+                .append(&draped(&edfwrite::turned(&mesh, deg), x, z, inst.lift * k, syn));
             continue;
         }
         let st = at((inst.along * lap).clamp(0.0, lap));
@@ -2945,11 +2956,10 @@ pub fn lifted(
         // `edfwrite::turned` takes degrees and shares this convention — see `principal_axis`.
         let deg = (inst.yaw + st.heading).to_degrees();
         let turned = edfwrite::turned(&prop.mesh, deg);
-        let foot = ground(syn, x, z) + inst.lift;
         by_sheet
             .entry(prop.sheet.clone())
             .or_default()
-            .append(&edfwrite::moved(&turned, [x, foot, z]));
+            .append(&draped(&turned, x, z, inst.lift, syn));
     }
 
     let mut out = Vec::new();

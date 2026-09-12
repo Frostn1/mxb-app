@@ -174,6 +174,86 @@ pub struct Donor {
     pub binding: &'static str,
     /// The `.map` bytes, kept so the sheets can be inflated on demand.
     pub map_bytes: Vec<u8>,
+    /// The donor's ground, so a piece is lifted as height above it: taken above its own lowest
+    /// vertex, a banner run kept the hillside it climbed and floated on ours.
+    pub ground: Option<DonorGround>,
+}
+
+/// A donor's terrain grid in metres, and which way its rows run against the scenery.
+pub struct DonorGround {
+    pub w: usize,
+    pub h: usize,
+    pub mps: f32,
+    pub heights: Vec<f32>,
+    pub flip: bool,
+    /// Median gap between an island's foot and the ground under it, rows as read and flipped.
+    pub fit: (f32, f32),
+}
+
+impl DonorGround {
+    fn read(hb: &[u8], layout: &crate::heightfield::Layout) -> Option<DonorGround> {
+        let mps = layout.metres_per_sample?;
+        layout.height_scale?;
+        let (w, h, heights) = crate::heightfield::read_grid(hb, layout, layout.width.max(layout.height));
+        let (w, h) = (w as usize, h as usize);
+        let mps = mps * (layout.width.max(2) - 1) as f32 / (w.max(2) - 1) as f32;
+        Some(DonorGround { w, h, mps, heights, flip: false, fit: (0.0, 0.0) })
+    }
+
+    fn sample(&self, x: f32, z: f32, flip: bool) -> f32 {
+        let gx = (x / self.mps).clamp(0.0, (self.w - 1) as f32);
+        let mut gz = (z / self.mps).clamp(0.0, (self.h - 1) as f32);
+        if flip {
+            gz = (self.h - 1) as f32 - gz;
+        }
+        let (x0, z0) = (gx as usize, gz as usize);
+        let (x1, z1) = ((x0 + 1).min(self.w - 1), (z0 + 1).min(self.h - 1));
+        let (tx, tz) = (gx - x0 as f32, gz - z0 as f32);
+        let at = |x: usize, z: usize| self.heights[z * self.w + x];
+        let a = at(x0, z0) + (at(x1, z0) - at(x0, z0)) * tx;
+        let b = at(x0, z1) + (at(x1, z1) - at(x0, z1)) * tx;
+        a + (b - a) * tz
+    }
+
+    pub fn at(&self, x: f32, z: f32) -> f32 {
+        self.sample(x, z, self.flip)
+    }
+
+    /// Settle which way the rows run by where the scenery stands: most islands stand on the
+    /// ground, so the orientation under which their feet meet it is the right one.
+    fn calibrate(&mut self, mesh: &map::MapMesh) {
+        let n = mesh.objects.len();
+        let (mut lo, mut sx, mut sz, mut cnt) = (vec![f32::INFINITY; n], vec![0.0f64; n], vec![0.0f64; n], vec![0usize; n]);
+        for (t, &isl) in mesh.object_of_tri.iter().enumerate() {
+            let isl = isl as usize;
+            if isl >= n {
+                continue;
+            }
+            for k in 0..3 {
+                let v = mesh.indices[t * 3 + k] as usize;
+                lo[isl] = lo[isl].min(mesh.positions[v * 3 + 1]);
+                sx[isl] += mesh.positions[v * 3] as f64;
+                sz[isl] += mesh.positions[v * 3 + 2] as f64;
+                cnt[isl] += 1;
+            }
+        }
+        let mut gaps = [Vec::new(), Vec::new()];
+        for i in 0..n {
+            if cnt[i] == 0 {
+                continue;
+            }
+            let (cx, cz) = ((sx[i] / cnt[i] as f64) as f32, (sz[i] / cnt[i] as f64) as f32);
+            for (f, g) in gaps.iter_mut().enumerate() {
+                g.push((lo[i] - self.sample(cx, cz, f == 1)).abs());
+            }
+        }
+        let med = |v: &mut Vec<f32>| {
+            v.sort_by(|a, b| a.total_cmp(b));
+            v.get(v.len() / 2).copied().unwrap_or(f32::INFINITY)
+        };
+        self.fit = (med(&mut gaps[0]), med(&mut gaps[1]));
+        self.flip = self.fit.1 < self.fit.0;
+    }
 }
 
 /// Open a track's lap and scenery together.
@@ -236,6 +316,10 @@ pub fn open(path: &Path) -> Result<Donor> {
     }
     let (mesh, sheets, binding, map_bytes) =
         chosen.ok_or_else(|| anyhow!("no readable .map in {path:?}"))?;
+    let ground = DonorGround::read(&hb, &layout).map(|mut g| {
+        g.calibrate(&mesh);
+        g
+    });
 
     Ok(Donor {
         stem,
@@ -244,6 +328,7 @@ pub fn open(path: &Path) -> Result<Donor> {
         sheets,
         binding,
         map_bytes,
+        ground,
     })
 }
 
@@ -354,10 +439,12 @@ fn cluster(mesh: &map::MapMesh, sheet_of: &dyn Fn(u32) -> String) -> Vec<Object>
 /// X and Z are centred on the footprint and Y is zeroed at the foot, because that is the
 /// frame a `scene<N>` block's `pos` places a model in. The returned angle is the object's
 /// principal axis in the donor's world, which is what yaw is recovered against.
-fn lift(mesh: &map::MapMesh, obj: &Object) -> (Mesh, [f32; 3], f32) {
+fn lift(mesh: &map::MapMesh, obj: &Object, ground: Option<&DonorGround>) -> (Mesh, [f32; 3], f32) {
     let cx = (obj.min[0] + obj.max[0]) * 0.5;
     let cz = (obj.min[2] + obj.max[2]) * 0.5;
     let foot = obj.min[1];
+    // Height above the donor's ground under each vertex, where the donor has one.
+    let base = |x: f32, z: f32| ground.map_or(foot, |g| g.at(x, z));
 
     let mut out = Mesh::default();
     let mut remap: HashMap<u32, u32> = HashMap::new();
@@ -382,7 +469,7 @@ fn lift(mesh: &map::MapMesh, obj: &Object) -> (Mesh, [f32; 3], f32) {
                 if slot == next {
                     let v = vi as usize;
                     out.positions.push(mesh.positions[v * 3] - cx);
-                    out.positions.push(mesh.positions[v * 3 + 1] - foot);
+                    out.positions.push(mesh.positions[v * 3 + 1] - base(mesh.positions[v * 3], mesh.positions[v * 3 + 2]));
                     out.positions.push(mesh.positions[v * 3 + 2] - cz);
                     out.uvs.push(mesh.uvs[v * 2]);
                     out.uvs.push(mesh.uvs[v * 2 + 1]);
@@ -395,7 +482,7 @@ fn lift(mesh: &map::MapMesh, obj: &Object) -> (Mesh, [f32; 3], f32) {
         }
     }
     let axis = principal_axis(&out);
-    (out, [cx, foot, cz], axis)
+    (out, [cx, base(cx, cz), cz], axis)
 }
 
 /// The angle of an object's long axis in the XZ plane, radians.
@@ -602,7 +689,7 @@ pub fn extract(donor: &Donor, keep: &[Class]) -> PropLibrary {
     let mut instances: Vec<Instance> = Vec::new();
 
     for o in objects.iter().filter(|o| keep.contains(&o.class)) {
-        let (mesh, at, axis) = lift(&donor.mesh, o);
+        let (mesh, at, axis) = lift(&donor.mesh, o, donor.ground.as_ref());
         // Texture coordinates far outside the sheet are a mis-read vertex block, not a design:
         // Indiana's banner boards came back spanning u -4..7, their sheet ten times across a board.
         let (lo, hi) = mesh.uvs.iter().fold((f32::MAX, f32::MIN), |(l, h), &v| (l.min(v), h.max(v)));
@@ -782,7 +869,7 @@ pub fn lift_arch(donor: &Donor) -> Option<Prop> {
         }
     }
     let obj = Object { class: Class::Structure, sheet: SHEET.into(), islands, min, max };
-    let (mesh, _, _) = lift(&donor.mesh, &obj);
+    let (mesh, _, _) = lift(&donor.mesh, &obj, donor.ground.as_ref());
     let height = max[1] - min[1];
     if height < 4.0 {
         return None;
@@ -868,7 +955,7 @@ pub fn lift_edge(donor: &Donor) -> Vec<Prop> {
             min: o.min,
             max: o.max,
         };
-        let (mesh, _, _) = lift(&donor.mesh, &obj);
+        let (mesh, _, _) = lift(&donor.mesh, &obj, donor.ground.as_ref());
         let reach = mesh
             .positions
             .chunks_exact(3)
@@ -1124,7 +1211,7 @@ mod tests {
         for (isl, x0) in [(0usize, 0.0f32), (1, 20.0)] {
             let o = &mesh.objects[isl];
             let obj = Object { class: Class::Structure, sheet: "a_c".into(), islands: vec![isl], min: o.min, max: o.max };
-            let (m, at, _) = lift(&mesh, &obj);
+            let (m, at, _) = lift(&mesh, &obj, None);
             assert_eq!(m.triangle_count(), 2, "island {isl}");
             assert!((at[0] - (x0 + 0.5)).abs() < 1e-5);
             assert!(
@@ -1268,7 +1355,7 @@ mod folddiag {
                 min: o.min,
                 max: o.max,
             };
-            let (mesh, _, _) = lift(&donor.mesh, &one);
+            let (mesh, _, _) = lift(&donor.mesh, &one, None);
             if mesh.triangle_count() == 0 {
                 continue;
             }
@@ -1683,6 +1770,9 @@ mod baked {
             &donor,
             &[Class::Structure, Class::Vehicle, Class::Tree, Class::Bale, Class::Pole],
         );
+        if let Some(g) = &donor.ground {
+            eprintln!("  ground {}x{} at {:.3} m, feet off it by {:.2} m as read and {:.2} m flipped: flip {}", g.w, g.h, g.mps, g.fit.0, g.fit.1, g.flip);
+        }
         // The start/finish arch, whole, placed by rule at our finish line.
         if let Some(arch) = lift_arch(&donor) {
             eprintln!("  finish arch: {:.1} m tall, {:.1} m across", arch.height, arch.span);
