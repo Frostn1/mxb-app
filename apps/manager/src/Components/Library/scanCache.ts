@@ -8,7 +8,8 @@
  *
  * So a scan is remembered. A visit inside [`TTL_MS`] shows it and touches nothing; a later
  * one shows it *and* rescans behind it, replacing the list when the answer arrives. The app's
- * own installs and moves drop the cache outright, since those know the tree changed.
+ * own installs and moves drop the cache outright, since those know the tree changed, and so
+ * does the mods-folder watcher when something is dropped in by hand.
  *
  * `primeMetaCache` keeps archive metadata the same way, for the same reason.
  */

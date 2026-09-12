@@ -54,10 +54,8 @@ export interface RailItem extends Gated {
 /**
  * The rail, left to right.
  *
- * Seven items is the ceiling before the row stops scanning, which is why Locker and Presets
- * share GARAGE: they act on the same two things — a bike, and the look on it. The slot that
- * freed is what carries Race mode, which decides what the game mounts at startup and was too
- * big to leave as an icon.
+ * Seven items is the ceiling before the row stops scanning, which is why Locker, Presets and
+ * Race mode share GARAGE: they all decide what you take onto the track.
  */
 export const RAIL: RailItem[] = [
   { id: "browse", label: "nav.browse", view: "browse" },
@@ -79,11 +77,11 @@ export const RAIL: RailItem[] = [
     tabs: [
       { view: "locker", label: "nav.locker", cap: "viewer" },
       { view: "presets", label: "nav.presets" },
+      { view: "manage", label: "nav.manage", cap: "manage" },
     ],
   },
   // Not a group any more: the tools are their own app, and this is the way to it.
   { id: "studio", label: "nav.studio", view: "studio" },
-  { id: "manage", label: "nav.manage", view: "manage", cap: "manage" },
   {
     id: "servers",
     label: "nav.servers",
