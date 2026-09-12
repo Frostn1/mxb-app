@@ -523,8 +523,9 @@ const CORNER_ROUGHNESS: f32 = 1.0;
 // ruts"; with the chop gone, 0.06 rode as no bumps at all. Asked for: bumps mainly before the
 // ruts, which is braking bumps.
 // Measured over an 8 m window, 0.32 put the tallest tenth at 0.15 m against Indiana's 0.20.
-// Raised with the bumps going into lines, one at a time, each its own size.
-const BRAKING_HEIGHT_M: f32 = 0.75;
+// Raised with the bumps going into lines, one at a time, each its own size: at 0.75 their
+// tallest tenth measured 0.14 m over an 8 m window against Indiana's 0.19.
+const BRAKING_HEIGHT_M: f32 = 0.95;
 
 /// How long a set of braking bumps runs before it breaks, near enough.
 const BRAKE_SET_M: f32 = 14.0;
