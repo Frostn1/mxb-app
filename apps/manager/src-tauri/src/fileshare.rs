@@ -316,10 +316,8 @@ pub async fn pack(
     let total = bundle::human_size(size);
     bundle::emit(app, EVENT, "uploading", Some(format!("Uploading {total}…")));
     let client = install::build_client()?;
-    let up = upload::upload_file(&client, &zip_path, |done, n| {
-        bundle::emit_upload(app, EVENT, &total, done, n)
-    })
-    .await?;
+    let up = upload::upload_file(&client, &zip_path, |p| bundle::emit_upload(app, EVENT, &total, p))
+        .await?;
 
     let _ = std::fs::remove_dir_all(&work);
 
