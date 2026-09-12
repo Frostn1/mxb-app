@@ -1719,15 +1719,16 @@ mod tests {
         );
     }
 
-    /// The line goes where the rider comes down, not up the face of the jump.
+    /// The line stands at the top of the finish jump's take-off, with the arch over it.
     #[test]
-    fn the_finish_line_is_painted_past_the_landing() {
+    fn the_finish_line_is_at_the_top_of_the_take_off() {
         let p = tweaked(|_| {});
         let f = p.finish_jump().expect("the worked example ends on a jump");
         let line = crate::tracksynth::finish_at(&p);
         assert!(
-            line > f.at() + f.length(),
-            "the line is at {line:.0} m and the jump ends at {:.0}",
+            line > f.at() && line < f.at() + f.length(),
+            "the line is at {line:.0} m and the jump runs {:.0} to {:.0} m",
+            f.at(),
             f.at() + f.length()
         );
         assert!(

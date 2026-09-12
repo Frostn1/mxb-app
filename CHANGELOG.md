@@ -13,6 +13,16 @@
   shading.
 
 ### Changed
+- Generated tracks use real objects only: trees from published tracks, and Indiana's own
+  start/finish arch, edge stakes and barrier in place of the drawn ones.
+- The finish line and its arch stand at the top of the finish jump's take-off, high enough to
+  jump under, and the arch reads FINISH in white on black and gold.
+- Braking bumps come one or two at a time and are longer, with ground between them.
+- Corners carry more ruts, across to the outside of the turn, not only on the inside line.
+- Generated tracks no longer paint tyre lines on the ground.
+- Jumps come in more kinds: singles, doubles, triples, a table with a single after it, wave
+  sections and step-downs, and the lap climbs and drops along its straights.
+- Generated tracks no longer have large patches of dark shadow.
 - The 3D track view draws the ground at its true height and in the game's own light and
   colours, so jumps look the size they ride. Game view only leaves out the darkened hollows.
 - Generated tracks are lit like published ones: a lower sun and softer light, so ruts, bumps
