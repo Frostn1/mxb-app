@@ -131,6 +131,22 @@ fn is_dir(path: &Path) -> bool {
     path.is_dir()
 }
 
+/// The name a server reports for this track: the folder its files sit under inside a `.pkz`,
+/// or the folder itself when unpacked. `None` when the archive can't be read.
+pub fn folder_name(path: &Path) -> Option<String> {
+    if is_dir(path) {
+        return path.file_name().map(|n| n.to_string_lossy().into_owned());
+    }
+    top_folder(&crate::pkz::entry_names(path).ok()?)
+}
+
+fn top_folder(names: &[String]) -> Option<String> {
+    names
+        .iter()
+        .find_map(|n| n.split_once('/').map(|(top, _)| top).filter(|t| !t.is_empty()))
+        .map(str::to_string)
+}
+
 /// Every entry name in a track, without inflating any of them.
 pub fn entry_names(path: &Path) -> Result<Vec<String>> {
     if is_dir(path) {
@@ -945,6 +961,22 @@ fn prune_cache(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pkz_track_is_named_by_its_folder() {
+        let names = ["Farm14/farm14.map", "Farm14/farm14.trh"].map(String::from);
+        assert_eq!(top_folder(&names).as_deref(), Some("Farm14"));
+        assert_eq!(top_folder(&["loose.map".to_string()]), None);
+    }
+
+    #[test]
+    fn an_unpacked_track_is_named_by_its_directory() {
+        let root = std::env::temp_dir().join(format!("track-folder-name-{}", std::process::id()));
+        let dir = root.join("Highland");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(folder_name(&dir).as_deref(), Some("Highland"));
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     /// Point this at a real track — `.pkz` or unpacked folder — to see whether its terrain
     /// reads, and if not, how close each candidate layout came:

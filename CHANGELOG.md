@@ -2,9 +2,18 @@
 
 ## 2026-09-11
 
+### Added
+- Sort the server list by any column. Click a header again to reverse it.
+- Star servers and switch the list to just your favorites.
+- Filter the server list by region, and hide servers with no riders (on by default).
+
 ### Changed
 - The 3D viewer shows paints at full resolution, so logos and lettering on bikes and gear
   read sharply.
+
+### Fixed
+- A server's track panel recognizes tracks you have installed as a `.pkz`, even when the
+  file is named differently from the track.
 
 ## 2026-09-10
 
