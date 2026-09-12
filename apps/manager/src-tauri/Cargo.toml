@@ -31,6 +31,8 @@ tauri-plugin-clipboard-manager = "2"
 tauri-plugin-single-instance = "2"
 # Self-update: check GitHub Releases, download + install, then relaunch.
 tauri-plugin-updater = "2"
+# Ranking release tags for the beta update channel.
+semver = "1"
 tauri-plugin-process = "2"
 # Launch on login (Discord-style always-on companion).
 tauri-plugin-autostart = "2"

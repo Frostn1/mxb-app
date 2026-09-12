@@ -361,11 +361,12 @@ pub const TABLETOP_DECK_M: f32 = 6.0;
 /// falls with the height — 12.7° at a metre, 18.9° at a metre and a half, 24.9° at two — and
 /// over it the angle takes over at 27. That is the published spread, from the same two numbers.
 // Ridden at 9 as still too steep once the faces ran straight to the lip.
-pub const JUMP_FACE_MIN_M: f32 = 13.0;
+// Longer faces for the bigger jumps: 13 m rode steep once they grew.
+pub const JUMP_FACE_MIN_M: f32 = 17.0;
 
 /// The shortest a landing may be, metres. Longer than a takeoff, for the reason
 /// [`JUMP_LANDING_DEG`] is gentler than [`JUMP_FACE_DEG`]: it is the side that catches you.
-pub const JUMP_LANDING_MIN_M: f32 = 12.0;
+pub const JUMP_LANDING_MIN_M: f32 = 18.0;
 
 /// The shortest the back of a lip may be — the short face nobody lands on.
 ///
@@ -1141,6 +1142,21 @@ impl Feature {
                 .iter()
                 .map(|p| p.h)
                 .fold(0.0f32, |a, b| if b.abs() > a.abs() { b } else { a }),
+        }
+    }
+
+    /// How many lips it throws a rider off, which is what the corpus's jump density counts: a
+    /// triple is three, a table with a single after it two, a roller or a step one.
+    pub fn lips(&self) -> usize {
+        match self {
+            Feature::Rut { .. } | Feature::Berm { .. } => 0,
+            Feature::Whoops { count, .. } => *count as usize,
+            Feature::Custom { shape, .. } => shape
+                .windows(3)
+                .filter(|w| w[1].h > 0.3 && w[1].h >= w[0].h && w[1].h > w[2].h)
+                .count()
+                .max(1),
+            _ => 1,
         }
     }
 }

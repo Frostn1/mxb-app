@@ -785,6 +785,9 @@ export const ptBR: Translation = {
   "settings.experimentalForced":
     "Ativado nesta execução pelo MXB_EXPERIMENTAL — a opção não faz nada enquanto ele estiver definido.",
   "settings.betaBadge": "Beta",
+  "settings.betaUpdates": "Atualizações beta",
+  "settings.betaUpdatesDesc":
+    "Receba versões de teste no app antes da versão completa. Elas podem ter falhas. Desativado, você fica na sua versão até a próxima versão completa.",
 
   "sync.title": "Sincronização de pinturas",
   "sync.desc":

@@ -6,14 +6,25 @@ import {
   useRef,
   useState,
 } from "react";
-import { check as checkForUpdate, type Update } from "@tauri-apps/plugin-updater";
+import { invoke } from "@tauri-apps/api/core";
+import { check as checkForUpdate, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { toast } from "sonner";
+import { getConfig } from "@frost/shared/api/mods";
 import { useT } from "@/i18n";
 
 /** The updater only works inside the Tauri runtime (no-op in the browser). */
 function inTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+/** Beta channel: the app finds the newest release, pre-releases included, and the plugin
+ *  installs it. Stable stays on the plugin's own `releases/latest` check. */
+async function checkBeta(): Promise<Update | null> {
+  const meta = await invoke<ConstructorParameters<typeof Update>[0] | null>(
+    "check_beta_update",
+  );
+  return meta ? new Update(meta) : null;
 }
 
 /** localStorage key remembering the last update version the user dismissed. */
@@ -53,7 +64,9 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     if (!inTauri() || inFlight.current) return;
     inFlight.current = true;
     try {
-      const update = await checkForUpdate();
+      // A config that can't be read falls back to stable, never to no updates at all.
+      const beta = (await getConfig().catch(() => null))?.betaUpdates ?? false;
+      const update = beta ? await checkBeta() : await checkForUpdate();
       if (!update) {
         if (!silent) toast.success(t("update.onLatest"));
         setAvailable(null);
