@@ -49,6 +49,8 @@
 
 ### Fixed
 - Trees, signs and other scenery in the 3D track view stand the right way up.
+- Sharing checks that every part of the upload was actually kept, and sends it again
+  otherwise, so a share code always downloads in full.
 
 ## 2026-09-11
 
