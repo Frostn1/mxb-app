@@ -11,6 +11,8 @@
 - The 3D viewer shows paints at full resolution, so logos and lettering on bikes and gear
   read sharply.
 - Race mode is now a tab under Garage, next to Locker and Presets.
+- The Library picks up tracks and other mods you add to the mods folder yourself, without
+  pressing Refresh.
 
 ### Fixed
 - A server's track panel recognizes tracks you have installed as a `.pkz`, even when the
