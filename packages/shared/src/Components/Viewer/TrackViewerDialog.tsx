@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Boxes, Check, Copy, Loader2, Minus, Mountain, X } from "lucide-react";
+import { Boxes, Check, Copy, Gamepad2, Loader2, Minus, Mountain, X } from "lucide-react";
 import { Dialog, DialogClose, DialogContent } from "../ui/dialog";
 import { Button } from "../ui/button";
 import { TrackViewer, type PickedPiece } from "./TrackViewer";
@@ -133,6 +133,8 @@ export function TrackViewerDialog({
   // On by default: the scenery is the difference between a shape and a place, and a track
   // that carries none simply has nothing to switch off.
   const [showObjects, setShowObjects] = useState(true);
+  // Off by default: the viewer's own shading reads relief better; this shows what the game shows.
+  const [gameView, setGameView] = useState(false);
   // True only until the *coarse* pass lands — the refine that follows happens under a
   // terrain that is already up, and covering it with a spinner would be a step backwards.
   const [loading, setLoading] = useState(false);
@@ -408,6 +410,18 @@ export function TrackViewerDialog({
                 {t("trackViewer.objects")}
               </Button>
             )}
+            {groundLayers.length > 0 && (
+              <Button
+                variant={gameView ? "outline" : "ghost"}
+                size="sm"
+                className="h-7 gap-1.5 px-2 text-[12px]"
+                aria-pressed={gameView}
+                onClick={() => setGameView((v) => !v)}
+              >
+                <Gamepad2 className="size-3.5" />
+                {t("trackViewer.gameView")}
+              </Button>
+            )}
             <DialogClose className="rounded-md p-1 text-muted-foreground opacity-70 transition-opacity hover:opacity-100 focus:outline-none">
               <X className="size-4" />
               <span className="sr-only">{t("common.close")}</span>
@@ -427,6 +441,7 @@ export function TrackViewerDialog({
               groundLayers={groundLayers}
               placements={placements}
               showObjects={showObjects}
+              gameView={gameView}
               onPick={setPicked}
               className="absolute inset-0"
             />

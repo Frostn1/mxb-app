@@ -169,6 +169,7 @@ export const it: Record<keyof typeof en, string> = {
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Dislivello",
   "trackViewer.objects": "Oggetti",
+  "trackViewer.gameView": "Vista di gioco",
   "trackViewer.painting": "Texture…",
   "trackViewer.step.terrain": "Terreno",
   "trackViewer.step.sky": "Cielo",

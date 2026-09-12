@@ -2,6 +2,11 @@
 
 ## 2026-09-12
 
+### Added
+- A Game view switch in the 3D track view draws the ground the way the game does: its
+  own sun and ambient light, relief from the track's normal maps, true height and no extra
+  shading.
+
 ### Changed
 - The 3D viewer redraws a bike or track when its files change on disk, and new paints show up
   in the paint list without reopening it.
