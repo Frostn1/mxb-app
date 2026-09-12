@@ -528,6 +528,12 @@ const BRAKING_HEIGHT_M: f32 = 0.6;
 /// How long a set of braking bumps runs before it breaks, near enough.
 const BRAKE_SET_M: f32 = 14.0;
 
+/// The lines braking bumps form in: how many, how far apart about the racing line, and how wide
+/// each one's band is either side of it.
+const BRAKE_LINES: i32 = 3;
+const BRAKE_LINE_M: f32 = 2.2;
+const BRAKE_LINE_HALF_M: f32 = 1.1;
+
 /// How far apart the chop everyone's rear wheel leaves on the way out of a corner is, and how
 /// tall it stands. Longer and lower than braking: acceleration bumps are stretched out by the
 /// wheel spinning across them.
@@ -1591,21 +1597,42 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 // In sets, not a washboard: ridden as "just stripes" when they ran unbroken the
                 // whole way into every corner.
                 let sets = smoothstep(
-                    ((fbm(s / BRAKE_SET_M, 3.3, r.seed ^ 0xB4B0) + 0.45) * 2.2).clamp(0.0, 1.0),
-                );
-                // To one side or the other, wandering across, rather than the whole width.
-                let side = smoothstep(
-                    ((fbm(t / 3.5, s / 22.0, r.seed ^ 0xB4B1) + 0.5) * 2.0).clamp(0.0, 1.0),
+                    ((fbm(s / BRAKE_SET_M, 3.3, r.seed ^ 0xB4B0) + 0.25) * 2.2).clamp(0.0, 1.0),
                 );
                 // Never inside a rut: a tyre in a groove rides its floor, not the bumps.
                 let clear = 1.0 - (-rut[i]).clamp(0.0, 1.0);
-                let drift = 0.5 * fbm(s / 26.0, 7.0, r.seed ^ 0xB4AE);
-                let phase = (s / feel.brake.0 + drift) * std::f32::consts::TAU;
+                // In the lines riders brake in, each with its own spacing and phase, so the crests
+                // stagger from one line to the next instead of running straight across the track —
+                // ridden, from above, as "across the track and too uniform".
+                let on = line.at(s);
+                let (mut rise, mut back) = (0.0f32, 0.0f32);
+                for k in 0..BRAKE_LINES {
+                    let kf = k as f32;
+                    let at = on
+                        + (kf - (BRAKE_LINES as f32 - 1.0) * 0.5) * BRAKE_LINE_M
+                        + 0.8 * fbm(s / 25.0, kf * 4.1, r.seed ^ 0xB4C0);
+                    let d = ((t - at) / BRAKE_LINE_HALF_M).clamp(-1.0, 1.0);
+                    let band = (1.0 - d * d).powi(2);
+                    if band <= 0.0 {
+                        continue;
+                    }
+                    let wave = feel.brake.0 * (0.85 + 0.3 * (0.5 + 0.5 * fbm(kf * 9.7, 1.3, r.seed ^ 0xB4C1)));
+                    // A crest is not a straight line, and it does not keep its height.
+                    let bend = 0.35 * fbm(t / 2.0, s / 10.0, r.seed ^ 0xB4C2);
+                    let phase = (s / wave
+                        + kf * 0.37
+                        + 0.6 * fbm(s / 14.0, kf * 2.9, r.seed ^ 0xB4C3)
+                        + bend)
+                        * std::f32::consts::TAU;
+                    let size = 0.55 + 0.45 * fbm(s / 6.0, kf * 5.3, r.seed ^ 0xB4C4);
+                    rise += phase.sin() * band * size;
+                    back = back.max((-phase.cos()).max(0.0) * band * size);
+                }
                 // Not polished: braking bumps are worst on the line, where everyone brakes.
-                let w = brake * sets * side * clear * groomed * (0.35 + 0.65 * across);
-                heights[i] += phase.sin() * feel.brake.1 * 0.5 * w;
+                let w = brake * sets * clear * groomed;
+                heights[i] += rise.clamp(-1.0, 1.0) * feel.brake.1 * 0.5 * w;
                 // The back of each bump, where the packed soil shows through the paint.
-                bump[i] = (-phase.cos()).max(0.0) * w.min(1.0);
+                bump[i] = (back * w).min(1.0);
             }
             // And the longer, lower chop everybody's rear wheel leaves on the way out.
             let out = chop.accel.at(s);
