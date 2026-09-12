@@ -5,7 +5,7 @@
 //! someone the track you just rode still meant a Discord upload and a link in chat.
 //!
 //! This shares the files themselves. Anything the Library lists can go in a code — the same
-//! catbox upload, the same slicing for anything past one part, the same `mods/`-shaped zip
+//! hosted upload, the same slicing for anything past one part, the same `mods/`-shaped zip
 //! that [`crate::install::place_mod`] already knows how to lay back down. What a code
 //! carries is a list of `mods/`-relative paths, so a track picked out of `tracks/EU/` lands
 //! in `tracks/EU/` on the other machine.

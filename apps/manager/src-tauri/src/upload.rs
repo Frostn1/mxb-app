@@ -1,7 +1,6 @@
 use anyhow::Context;
 use futures_util::{StreamExt, TryStreamExt};
 use obfstr::obfstr;
-use reqwest::multipart::{Form, Part};
 use reqwest::Client;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -20,28 +19,21 @@ pub struct Upload {
     pub part_sizes: Vec<u64>,
 }
 
-const HOST: &str = "catbox";
+/// filebin.net keeps a bin for 6 days. catbox, the host before it, stopped storing uploads
+/// on 2026-09-12 — every POST, down to 1 MiB, answered 200 with no link.
+const HOST: &str = "filebin";
 
-/// catbox takes a 200 MB file in principle, but a POST that big comes back empty far more
-/// often than it succeeds. 48 MiB was the figure that used to hold and no longer does:
-/// measured again against the live endpoint on 2026-09-06, a 48 MiB upload answered with a
-/// perfectly good link and stored **nothing** through curl and 22.4 MB of 48 through ours,
-/// while 8, 16, 24 and 32 MiB all stored to the byte. A 68 MB track shared at 48 MiB came
-/// back half a megabyte short and there was nothing in the error to say why.
-///
-/// Twenty-four, not thirty-two: the same number of parts on the sizes that matter, and room
-/// underneath for wherever the host's real limit sits this month.
+/// Small parts, so a dropped transfer costs one slice rather than the whole bundle. 24 MiB
+/// round-trips to the byte on filebin in about five seconds.
 const PART_BYTES: u64 = 24 * 1024 * 1024;
 
-/// The slicings to try, in order. Each is a different cut of the same file, so each is
-/// content the host has not seen before — see `upload_file`.
+/// The slicings to try, in order — see `upload_file`.
 const PART_STEPS: [u64; 3] = [PART_BYTES, PART_BYTES * 3 / 4, PART_BYTES / 2];
 
-/// Attempts per part. An empty 200 is catbox dropping an upload it never refused, and the
-/// next attempt usually takes it.
+/// Attempts per part. A 5xx or 429 is the host busy, and the next attempt usually takes it.
 const ATTEMPTS: u32 = 3;
 
-/// Grows with each retry: whatever is throttling catbox wants a moment, not another POST.
+/// Grows with each retry: a busy host wants a moment, not another request.
 const RETRY_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// A ceiling on the bundle as a whole. Past this the upload takes long enough, and depends
@@ -66,7 +58,7 @@ pub struct UploadProgress {
 
 impl UploadProgress {
     /// How far along, `0.0..=1.0`. A byte counts half when it is sent and half when its part
-    /// is stored: a good half of what a part costs is catbox writing it after the last byte
+    /// is stored: a part can cost as much again in the host writing it after the last byte
     /// is out (see [`settled_len`]), and a bar on sent bytes alone would sit full through that.
     pub fn fraction(&self) -> f64 {
         if self.size == 0 {
@@ -93,19 +85,9 @@ pub async fn upload_file(
         );
     }
 
-    // Slicing the file differently on each go, and that is the point rather than a detail.
-    //
-    // catbox deduplicates by content: upload the same bytes twice and it hands back the same
-    // link both times, without storing anything again. So when it keeps only part of an
-    // upload — which it does, and then answers with a perfectly good URL — that truncated
-    // object is what every later upload of those exact bytes resolves to. Retrying is useless;
-    // measured against the live host, a slice that stored 2,908,160 of 21,472,742 bytes came
-    // back at exactly 2,908,160 on every attempt after it, through our client and through
-    // curl, under a different name and a different extension.
-    //
-    // Cutting the file at a different offset makes different bytes, which makes a different
-    // hash, which is a fresh upload the host has to actually store. It is also why a user who
-    // shares the same track twice gets the same broken bundle twice.
+    // A part the host keeps short is sent again at a different cut, into a fresh bin, before
+    // the share gives up. catbox needed this because it stored by content hash and handed a
+    // truncated copy back for ever; it costs nothing on a host that stores what it is sent.
     let mut last: Option<anyhow::Error> = None;
     for part_bytes in PART_STEPS {
         let started = std::time::Instant::now();
@@ -143,13 +125,8 @@ enum UploadFail {
 }
 use UploadFail::{Fatal, Short};
 
-/// Slices in flight at once.
-///
-/// The slices are independent — separate POSTs, separate links — and a good half of what one
-/// costs is not the transfer at all but the wait for catbox to finish writing it (see
-/// [`settled_len`]). Sending them one at a time spent that wait doing nothing. Three, not
-/// more: the drops this file exists to survive are catbox being busy, and there is no sense
-/// in being the reason it is.
+/// Slices in flight at once. They are independent files, so sending them one at a time left
+/// the link idle; three, not more, so we are never the reason the host is busy.
 const UPLOAD_CONCURRENCY: usize = 3;
 
 async fn upload_sliced(
@@ -165,6 +142,9 @@ async fn upload_sliced(
         .file_stem()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "preset-bundle".to_string());
+    // One bin per cut, so a recut never lands beside the parts of the cut it replaces.
+    let bin = format!("mxb{}", uuid::Uuid::new_v4().simple());
+    let base = endpoint();
 
     // Counted rather than indexed: with several in flight the useful number is how many are
     // behind us, so the bar never jumps backwards.
@@ -187,7 +167,6 @@ async fn upload_sliced(
         .iter()
         .enumerate()
         .map(|(i, &(offset, len))| {
-            // Keep the .zip extension on every slice — catbox screens uploads by extension.
             let name = if n == 1 {
                 format!("{stem}.zip")
             } else {
@@ -196,6 +175,7 @@ async fn upload_sliced(
             let (done, stored, report) = (&done, &stored, &report);
             let sent = sent[i].clone();
             let src = file.to_path_buf();
+            let (base, bin) = (&base, &bin);
             async move {
                 // Its own handle per slice, and off the runtime: the reads are interleaved
                 // now, so a shared cursor would have them seeking over each other — and a
@@ -209,7 +189,8 @@ async fn upload_sliced(
                 .map_err(|e| Fatal(anyhow::anyhow!("reading {} failed: {e}", src.display())))?
                 .with_context(|| format!("reading {}", src.display()))
                 .map_err(Fatal)?;
-                let url = catbox_upload(client, endpoint(), &name, &bytes, len, &sent).await?;
+                let url = part_url(base, bin, &name).map_err(Fatal)?;
+                let url = put_part(client, &url, &bytes, len, &sent).await?;
                 log::info!(
                     "share: part {} of {n} ({}) took {:.1}s",
                     i + 1,
@@ -246,7 +227,7 @@ async fn upload_sliced(
 }
 
 /// Slice `size` bytes into `(offset, len)` spans no bigger than one part. A zero-byte file
-/// still gets one span, so an empty upload fails at catbox rather than silently succeeding
+/// still gets one span, so an empty upload fails at the host rather than silently succeeding
 /// with no parts at all.
 fn part_plan(size: u64) -> Vec<(u64, u64)> {
     part_plan_of(size, PART_BYTES)
@@ -282,27 +263,41 @@ fn read_slice(file: &mut std::fs::File, offset: u64, len: u64) -> std::io::Resul
 
 /// Split out so a test can point the upload at a local server.
 fn endpoint() -> String {
-    obfstr!("https://catbox.moe/user/api.php").to_string()
+    obfstr!("https://filebin.net").to_string()
+}
+
+/// `{base}/{bin}/{name}` — both where a part is PUT and where it downloads from. Built as
+/// path segments so a track name with spaces in it is escaped rather than cut short.
+fn part_url(base: &str, bin: &str, name: &str) -> anyhow::Result<String> {
+    let mut url = reqwest::Url::parse(base).context("the upload host's address is malformed")?;
+    url.path_segments_mut()
+        .map_err(|_| anyhow::anyhow!("the upload host's address can't take a path"))?
+        .pop_if_empty()
+        .push(bin)
+        .push(name);
+    Ok(url.into())
 }
 
 /// What the host says it is holding at `url`, if it will say.
 ///
 /// `None` means the question could not be answered, and a caller must not read that as zero.
 ///
-/// It asks for the first byte rather than sending a HEAD, because **catbox answers HEAD with
-/// `content-length: 0`** for a file it is holding perfectly well — measured against the live
-/// host: HEAD on a 2,000,000-byte upload says nought, a plain GET brings back all two million,
-/// and a `Range: bytes=0-0` answers `206` with `content-range: bytes 0-0/2000000`. Trusting
-/// the HEAD made every upload look like a file the host had dropped, and every part of a
-/// shared bundle look short.
+/// It asks for the first byte rather than sending a HEAD, because catbox — still behind every
+/// code made before filebin — answers HEAD with `content-length: 0` for a file it holds fine.
+/// A `Range: bytes=0-0` answers `206` with `content-range: bytes 0-0/<total>`.
 pub(crate) async fn hosted_len(client: &Client, url: &str) -> Option<u64> {
-    let resp = client
-        .get(url)
-        .header(reqwest::header::RANGE, "bytes=0-0")
-        .send()
-        .await
-        .ok()?;
-    if !resp.status().is_success() {
+    let ask = || {
+        client
+            .get(url)
+            .header(reqwest::header::RANGE, "bytes=0-0")
+            .send()
+    };
+    let mut resp = ask().await.ok()?;
+    if crate::install::is_cookie_gate(&resp) {
+        resp = ask().await.ok()?;
+    }
+    // A web page is not the file, whatever length it is.
+    if !resp.status().is_success() || crate::install::is_web_page(&resp) {
         return None;
     }
     // `content-range: bytes 0-0/2000000` — the size is what follows the slash.
@@ -329,23 +324,16 @@ pub(crate) async fn hosted_len(client: &Client, url: &str) -> Option<u64> {
 /// The gaps between asking the host what it is holding, in seconds — and so how many times
 /// it is asked before we believe the answer.
 ///
-/// catbox answers with the link the moment it has taken the POST and keeps writing the file
-/// afterwards: ask straight away and a 20 MB part reads as 2.8 MB, then reads as 20 MB a few
-/// seconds later. Without this the upload check condemned every part that was merely still
-/// being stored, retried all three attempts, and gave up on a bundle that was fine.
-///
-/// The gaps used to be a flat three seconds, which every part that had already finished
-/// storing paid in full. The last look still lands around twenty seconds in, so a slow store
-/// has the room it always had.
+/// A host can hand back the link before it has finished writing the part: catbox did, and a
+/// 20 MB part read as 2.8 MB, then as 20 MB a few seconds later. A part that is already whole
+/// answers on the first ask and waits for none of these.
 const SETTLE_WAITS: [u64; 7] = [1, 2, 3, 3, 4, 4, 5];
 
 /// How many times running the host may decline to answer before we stop asking.
 ///
-/// A `None` is not a short part — it is the host not saying, and [`catbox_upload`] accepts
-/// the part on `None` however long we wait for it. So sitting out the whole ladder on an
-/// unanswerable probe bought nothing and cost twenty-two seconds a part, which on a
-/// four-part track is most of a minute of an upload that had already finished. Two, not one:
-/// a 404 straight after the POST is catbox still registering the file, and that one clears.
+/// A `None` is not a short part — it is the host not saying, and [`put_part`] accepts the
+/// part on `None` however long we wait for it, so sitting out the whole ladder bought nothing.
+/// Two, not one: a 404 straight after the upload can be the host still registering the file.
 const NONE_PROBES: usize = 2;
 
 /// What the host is holding, once it has stopped growing — or the last thing it said.
@@ -363,92 +351,64 @@ async fn settled_len(client: &Client, url: &str, expect: u64) -> Option<u64> {
     last
 }
 
-/// Upload one part, retrying the drops. Refusals — anything catbox puts prose behind — are
+/// PUT one part to `url`, retrying while the host is busy. Anything else it refuses is
 /// final: the request itself is what it objected to, so sending it again says nothing new.
 ///
-/// A link coming back is not proof the part is *there*. catbox can take a large POST, answer
-/// with a perfectly good URL, and keep only some of the file behind it — which is a bundle
-/// that downloads without a single error and then does not add up. So the link is checked
-/// before it is trusted, and a short one is retried like any other drop.
-async fn catbox_upload(
+/// A `201` is not proof the part is *there*, so the link is checked before it is trusted, and
+/// a short one is sent again like any other drop.
+async fn put_part(
     client: &Client,
-    url: String,
-    name: &str,
+    url: &str,
     bytes: &[u8],
     expect: u64,
     sent: &Arc<AtomicU64>,
 ) -> Result<String, UploadFail> {
     for attempt in 1..=ATTEMPTS {
-        let (status, body) = catbox_post(client, &url, name, bytes.to_vec(), sent.clone())
+        let resp = client
+            .put(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            // With its length, so the PUT goes with a Content-Length rather than chunked.
+            .header(reqwest::header::CONTENT_LENGTH, bytes.len())
+            .body(counted_body(bytes.to_vec(), sent.clone()))
+            .send()
             .await
+            .context("couldn't reach filebin to upload the bundle")
             .map_err(Fatal)?;
+        let status = resp.status();
 
-        // Failures come back as plain prose, sometimes under a 200, so the URL is the only tell.
-        if body.starts_with("https://") {
-            match settled_len(client, &body, expect).await {
+        if status.is_success() {
+            match settled_len(client, url, expect).await {
                 Some(got) if got != expect => {
                     if attempt == ATTEMPTS {
                         return Err(Short(anyhow::anyhow!(
-                            "catbox is holding {} of a {} part and hands back the same \
-                             truncated copy however many times it is sent — it stores by \
-                             content, so the only way past is a different cut of the file.",
+                            "filebin is holding {} of a {} part after {ATTEMPTS} tries.",
                             crate::bundle::human_size(got),
                             crate::bundle::human_size(expect)
                         )));
                     }
-                    tokio::time::sleep(RETRY_WAIT * attempt).await;
-                    continue;
                 }
                 // The right size, or the host would not say — nothing to act on either way.
-                _ => return Ok(body),
+                _ => return Ok(url.to_string()),
             }
-        }
-
-        let dropped = body.is_empty() || status.is_server_error();
-        if !dropped || attempt == ATTEMPTS {
-            if body.is_empty() {
-                return Err(Short(anyhow::anyhow!(
-                    "catbox took the upload but returned no link (HTTP {status}) — it drops \
-                     large uploads when it's busy."
+        } else {
+            let body = resp.text().await.unwrap_or_default();
+            // 429 is filebin's "storage limit reached, retry later".
+            let busy = status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS;
+            if !busy {
+                return Err(Fatal(anyhow::anyhow!(
+                    "filebin refused the upload (HTTP {status}): {}",
+                    body.trim()
                 )));
             }
-            return Err(Fatal(anyhow::anyhow!("catbox upload failed: {body}")));
+            if attempt == ATTEMPTS {
+                return Err(Fatal(anyhow::anyhow!(
+                    "filebin is busy (HTTP {status}) — try sharing again in a few minutes."
+                )));
+            }
         }
         tokio::time::sleep(RETRY_WAIT * attempt).await;
     }
     unreachable!("the loop returns or bails on its last attempt")
-}
-
-/// One anonymous multipart POST. On success catbox's response body *is* the download URL.
-async fn catbox_post(
-    client: &Client,
-    url: &str,
-    name: &str,
-    bytes: Vec<u8>,
-    sent: Arc<AtomicU64>,
-) -> anyhow::Result<(reqwest::StatusCode, String)> {
-    let len = bytes.len() as u64;
-    let form = Form::new().text("reqtype", "fileupload").part(
-        "fileToUpload",
-        // With its length, so the POST still goes with a Content-Length rather than chunked.
-        Part::stream_with_length(counted_body(bytes, sent), len)
-            .file_name(name.to_string())
-            .mime_str("application/zip")?,
-    );
-
-    let resp = client
-        .post(url)
-        .multipart(form)
-        .send()
-        .await
-        .context("couldn't reach catbox to upload the bundle")?;
-
-    let status = resp.status();
-    let body = resp
-        .text()
-        .await
-        .context("catbox returned an unreadable response")?;
-    Ok((status, body.trim().to_string()))
 }
 
 /// `bytes` as a request body that records in `sent` how far into it the connection has got.
@@ -495,6 +455,7 @@ mod tests {
                 Ok(_) => Client::builder()
                     .user_agent(crate::frostmod_manage::UA)
                     .http1_only()
+                    .cookie_store(true)
                     .build()
                     .unwrap(),
                 Err(_) => crate::install::build_client().expect("a client"),
@@ -512,7 +473,7 @@ mod tests {
                 let body = client.get(url).send().await.expect("a part downloads");
                 let len = body.bytes().await.expect("its bytes").len() as u64;
                 println!(
-                    "  part {}: uploaded {}, HEAD says {:?}, GET gave {} — {}",
+                    "  part {}: uploaded {}, host says {:?}, GET gave {} — {}",
                     i + 1,
                     up.part_sizes[i],
                     head,
@@ -531,7 +492,7 @@ mod tests {
         });
     }
 
-    /// A stand-in catbox that hands back `replies` in order, one per request.
+    /// A stand-in host that hands back `replies` in order, one per request, then hangs up.
     fn serve_replies(replies: Vec<&'static str>) -> String {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -545,7 +506,7 @@ mod tests {
                 let _ = sock.flush();
             }
         });
-        format!("http://127.0.0.1:{port}/user/api.php")
+        format!("http://127.0.0.1:{port}")
     }
 
     fn drain_request(sock: &mut std::net::TcpStream) {
@@ -604,10 +565,23 @@ mod tests {
         )
     }
 
+    /// A 200 web page, with or without the cookie filebin gates its downloads behind.
+    fn page(cookie: bool) -> &'static str {
+        let body = "<html>verify</html>";
+        let set = if cookie { "Set-Cookie: verified=1; Path=/\r\n" } else { "" };
+        Box::leak(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n{set}\
+                 Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .into_boxed_str(),
+        )
+    }
+
     /// A host that will not say what it is holding is not a host holding a short part, and
-    /// [`catbox_upload`] takes the part either way. So the ladder must stop asking rather
-    /// than sit out all seven waits to reach the answer it had at the second one — on a
-    /// four-part track that dead wait was most of a minute of an upload already finished.
+    /// [`put_part`] takes the part either way. So the ladder must stop asking rather than sit
+    /// out all seven waits to reach the answer it had at the second one.
     #[tokio::test(start_paused = true)]
     async fn an_unanswerable_probe_stops_asking() {
         let missing: &'static str = Box::leak(reply("404 Not Found", "nope").into_boxed_str());
@@ -648,6 +622,24 @@ mod tests {
         assert_eq!(settled_len(&client, &url, 100).await, Some(0));
     }
 
+    /// filebin answers a first GET with a page that sets a cookie. Asking again gets the file —
+    /// read the page's length instead and every part looks short.
+    #[tokio::test(start_paused = true)]
+    async fn a_cookie_gate_is_asked_past() {
+        let (url, hits) = serve_counting(vec![page(true), ranged(100)]);
+        let client = Client::builder().cookie_store(true).build().unwrap();
+        assert_eq!(hosted_len(&client, &url).await, Some(100));
+        assert_eq!(hits.load(std::sync::atomic::Ordering::Relaxed), 2);
+    }
+
+    /// A page with no cookie is not a gate, and its length is not the part's.
+    #[tokio::test(start_paused = true)]
+    async fn a_web_page_is_not_a_size() {
+        let (url, _) = serve_counting(vec![page(false)]);
+        let client = Client::builder().build().unwrap();
+        assert_eq!(hosted_len(&client, &url).await, None);
+    }
+
     fn reply(status: &str, body: &str) -> String {
         format!(
             "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -656,50 +648,61 @@ mod tests {
     }
 
     async fn upload_against(replies: Vec<&'static str>) -> anyhow::Result<String> {
-        let url = serve_replies(replies);
+        let url = part_url(&serve_replies(replies), "bin", "part.zip").unwrap();
         let client = Client::builder().build().unwrap();
         let sent = Arc::default();
-        catbox_upload(&client, url, "part.zip", b"zip bytes", b"zip bytes".len() as u64, &sent)
+        put_part(&client, &url, b"zip bytes", b"zip bytes".len() as u64, &sent)
             .await
             .map_err(|e| match e {
                 Short(e) | Fatal(e) => e,
             })
     }
 
-    /// The reported failure: catbox answers 200 with nothing in it. That is a drop, not a
-    /// refusal, and the next attempt takes the file.
+    /// A 201 hands back the part's own address — filebin serves it where it was PUT.
     #[tokio::test(start_paused = true)]
-    async fn an_empty_200_is_retried() {
-        let good: &'static str =
-            Box::leak(reply("200 OK", "https://files.catbox.moe/ok.zip").into_boxed_str());
-        let empty: &'static str = Box::leak(reply("200 OK", "").into_boxed_str());
-        let url = upload_against(vec![empty, good]).await.expect("retry recovers");
-        assert_eq!(url, "https://files.catbox.moe/ok.zip");
+    async fn a_stored_part_is_its_own_link() {
+        let created: &'static str = Box::leak(reply("201 Created", "{}").into_boxed_str());
+        let url = upload_against(vec![created]).await.expect("a 201 is stored");
+        assert!(url.ends_with("/bin/part.zip"), "{url}");
     }
 
-    /// Out of attempts, the message has to say what to do — not just quote a 200.
+    /// A busy host is a drop, not a refusal, and the next attempt takes the file.
     #[tokio::test(start_paused = true)]
-    async fn every_attempt_empty_reports_a_drop() {
-        let empty: &'static str = Box::leak(reply("200 OK", "").into_boxed_str());
-        let err = upload_against(vec![empty; ATTEMPTS as usize])
+    async fn a_busy_host_is_retried() {
+        let busy: &'static str = Box::leak(reply("503 Service Unavailable", "busy").into_boxed_str());
+        let created: &'static str = Box::leak(reply("201 Created", "{}").into_boxed_str());
+        let url = upload_against(vec![busy, created]).await.expect("retry recovers");
+        assert!(url.ends_with("/bin/part.zip"), "{url}");
+    }
+
+    /// Out of attempts, the message has to say what to do — not just quote a status.
+    #[tokio::test(start_paused = true)]
+    async fn a_host_busy_every_time_says_so() {
+        let full: &'static str =
+            Box::leak(reply("429 Too Many Requests", "Storage limit reached").into_boxed_str());
+        let err = upload_against(vec![full; ATTEMPTS as usize])
             .await
             .expect_err("an upload that never lands fails");
         let msg = err.to_string();
-        assert!(msg.contains("returned no link"), "{msg}");
-        // No "try again" any more: the caller retries for us, with the file cut differently,
-        // because sending the same bytes to a host that stores by content changes nothing.
-        assert!(msg.contains("drops large uploads"), "{msg}");
+        assert!(msg.contains("busy") && msg.contains("try sharing again"), "{msg}");
     }
 
     /// A refusal is about the request, so it stands on the first answer and keeps its words.
+    /// The stand-in hangs up after one reply, so a retry would fail as "couldn't reach".
     #[tokio::test(start_paused = true)]
-    async fn prose_is_a_refusal_and_is_not_retried() {
-        let refused: &'static str =
-            Box::leak(reply("200 OK", "File too large, sorry.").into_boxed_str());
-        let err = upload_against(vec![refused]).await.expect_err("prose is fatal");
-        assert!(err.to_string().contains("File too large"), "{err}");
+    async fn a_refusal_is_not_retried() {
+        let locked: &'static str =
+            Box::leak(reply("405 Method Not Allowed", "The bin is locked").into_boxed_str());
+        let err = upload_against(vec![locked]).await.expect_err("a refusal is fatal");
+        assert!(err.to_string().contains("The bin is locked"), "{err}");
     }
 
+    /// A track name with a space in it is escaped, not cut off at the space.
+    #[test]
+    fn part_urls_escape_the_name() {
+        let url = part_url("https://filebin.net", "mxbabc", "Draycott Valley.part1of8.zip").unwrap();
+        assert_eq!(url, "https://filebin.net/mxbabc/Draycott%20Valley.part1of8.zip");
+    }
 
     #[test]
     fn one_part_up_to_the_ceiling() {
