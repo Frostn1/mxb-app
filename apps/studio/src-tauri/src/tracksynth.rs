@@ -6993,38 +6993,9 @@ rainy\n{\n\tambient\n\t{\n\t\tred = 0.6\n\t\tgreen = 0.6\n\t\tblue = 0.85\n\t}\n
 /// The two pictures the game's UI wants: an overhead of the lap, and something to show
 /// beside the track's name. Neither is optional — a track without them lists as a blank.
 ///
-/// They are not the same kind of picture and never were. The map is a diagram: the game draws
-/// the route and the riders over it, so it stays flat, north-up and unshaded. The other one is
-/// a photograph of the place, and it is rendered as one — see [`ui_shot`].
+/// Both are pictures of the same ground — the painted bands lit by the `.amb` — one straight
+/// down and one from a camera. See [`ui_map`] and [`ui_shot`].
 fn ui_images(prog: &TrackProgram, syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>) {
-    let mut map = vec![0u8; dim * dim * 4];
-    for y in 0..dim {
-        // Row zero of this bottom-left TGA is the bottom of the picture and grid row zero is
-        // `z = 0`, so rows go in grid order and +z comes out on top, like the masks. Reversing
-        // them mirrored the map north-south against the track.
-        let gy = (y * syn.gh / dim).min(syn.gh - 1);
-        for x in 0..dim {
-            let gx = (x * syn.gw / dim).min(syn.gw - 1);
-            let c: [u8; 3] = if syn.corridor[gy * syn.gw + gx] {
-                [60, 70, 150]
-            } else {
-                [232, 232, 236]
-            };
-            let at = (y * dim + x) * 4;
-            map[at..at + 4].copy_from_slice(&[c[2], c[1], c[0], 255]);
-        }
-    }
-    (tga_bgra(dim, dim, &map), ui_shot(prog, syn, dim))
-}
-
-/// The picture beside the track's name: the terrain rendered from above and off to one side.
-///
-/// It used to be a false-colour relief of the heightfield with the corridor tinted orange over
-/// it — the same plan view as the map, in worse colours, and it told a player nothing about
-/// the place they were about to ride. This is the ground as it will actually look: the six
-/// painted bands the `.map` ships, lit by the sun the `.amb` declares, seen from a camera that
-/// places itself to fit the lap and to keep the sun behind it.
-fn ui_shot(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<u8> {
     // The camera has to frame the lap, not the terrain — a track in one corner of a big
     // landscape would otherwise be a smudge in the middle of a field. Every eighth corridor
     // cell is plenty to bound a shape with.
@@ -7072,8 +7043,168 @@ fn ui_shot(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<u8> {
         haze: [179.0, 179.0, 217.0],
         tilt_deg: crate::trackshot::TILT_DEG,
     };
-    let rgb = crate::trackshot::render(&scene, dim);
-    // The renderer hands back rows from the top; a TGA's row zero is the bottom.
+    (ui_map(prog, syn, &scene, dim), ui_shot(&scene, dim))
+}
+
+/// The picture beside the track's name: the terrain from above and off to one side, from a
+/// camera that places itself to fit the lap and to keep the sun behind it.
+///
+/// It used to be a false-colour relief of the heightfield with the corridor tinted orange over
+/// it, which told a player nothing about the place they were about to ride.
+fn ui_shot(scene: &crate::trackshot::Scene, dim: usize) -> Vec<u8> {
+    tga_rows(&crate::trackshot::render(scene, dim), dim)
+}
+
+/// The track-info map: the ground straight down, with the lap drawn over it.
+///
+/// It was a blue corridor on grey, which said where the lap went and nothing else; Indiana's
+/// is an aerial photograph. This is the nearest thing to one, with what a player reads a map
+/// for on top: the edge of the riding line, the finish, the gate row and which way round.
+/// Same extent as before — the whole terrain, north-up.
+fn ui_map(
+    prog: &TrackProgram,
+    syn: &Synth,
+    scene: &crate::trackshot::Scene,
+    dim: usize,
+) -> Vec<u8> {
+    let mut px = crate::trackshot::plan(scene, dim);
+    let span = ((syn.gw - 1) as f32 * syn.mps, (syn.gh - 1) as f32 * syn.mps);
+    let n = dim as f32;
+    // World to pixel, row zero at the top; and a heading as a unit vector in pixels.
+    let at = |x: f32, z: f32| (x / span.0 * n, (1.0 - z / span.1) * n);
+    let dir = |heading: f32| {
+        let (hx, hz) = crate::trackprog::heading_vector(heading);
+        let (u, v) = (hx / span.0, -hz / span.1);
+        let l = (u * u + v * v).sqrt().max(1e-9);
+        (u / l, v / l)
+    };
+    let px_per_m = n / span.0.max(span.1);
+    let track_px = (prog.width * px_per_m).max(6.0);
+
+    // The riding line's edge, one pixel inside it. Dirt against grass alone goes to nothing
+    // on brown ground at this size.
+    let on: Vec<bool> = (0..dim * dim)
+        .map(|i| {
+            let wx = ((i % dim) as f32 + 0.5) / n * span.0;
+            let wz = (1.0 - ((i / dim) as f32 + 0.5) / n) * span.1;
+            let gx = (wx / syn.mps).round().clamp(0.0, (syn.gw - 1) as f32) as usize;
+            let gy = (wz / syn.mps).round().clamp(0.0, (syn.gh - 1) as f32) as usize;
+            syn.corridor[gy * syn.gw + gx]
+        })
+        .collect();
+    for y in 0..dim {
+        for x in 0..dim {
+            let edge = on[y * dim + x]
+                && [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    nx >= 0
+                        && ny >= 0
+                        && nx < dim as i32
+                        && ny < dim as i32
+                        && !on[ny as usize * dim + nx as usize]
+                });
+            if edge {
+                px[y * dim + x] = MAP_EDGE;
+            }
+        }
+    }
+
+    // Which way round: a chevron every tenth of the lap, clear of the finish.
+    let lap = prog.lap_length().max(1.0);
+    let finish = finish_at(prog);
+    let size = (track_px * 0.8).clamp(7.0, 14.0);
+    let mut next = 0.0f32;
+    for st in &syn.stations {
+        if st.s < next {
+            continue;
+        }
+        next = st.s + lap / 10.0;
+        let off = (st.s - finish).rem_euclid(lap);
+        if off < lap * 0.04 || off > lap * 0.96 {
+            continue;
+        }
+        let (cx, cy) = at(st.x, st.z);
+        let (dx, dy) = dir(st.heading);
+        let tip = (cx + dx * size * 0.45, cy + dy * size * 0.45);
+        for side in [1.0f32, -1.0] {
+            let back = (
+                cx - dx * size * 0.45 - dy * side * size * 0.5,
+                cy - dy * size * 0.45 + dx * side * size * 0.5,
+            );
+            stroke(&mut px, dim, tip, back, 2.2, MAP_MARK);
+        }
+    }
+
+    // The finish: a chequered bar across the lap, two squares deep.
+    if let Some(st) = syn
+        .stations
+        .iter()
+        .min_by(|a, b| (a.s - finish).abs().total_cmp(&(b.s - finish).abs()))
+    {
+        let half = track_px * 0.65;
+        let sq = (half / 3.0).max(2.0);
+        fill(&mut px, dim, at(st.x, st.z), dir(st.heading), sq, half, |a, b| {
+            let (r, c) = (((a + sq) / sq) as i32, ((b + half) / sq) as i32);
+            Some(if (r + c) % 2 == 0 { MAP_CHEQUER } else { MAP_MARK })
+        });
+    }
+
+    // The gate row, across the start straight where the gates stand.
+    if let Some(sp) = syn.spur.as_ref() {
+        if let Some(st) = sp.stations.first() {
+            let half = (sp.half * px_per_m).max(track_px * 0.6);
+            fill(&mut px, dim, at(st.x, st.z), dir(st.heading), 1.5, half, |_, _| {
+                Some(MAP_MARK)
+            });
+        }
+    }
+
+    tga_rows(&px, dim)
+}
+
+/// The map's markings: the riding line's edge, and the finish, gate and arrows over it.
+const MAP_EDGE: [u8; 3] = [236, 228, 208];
+const MAP_MARK: [u8; 3] = [250, 250, 250];
+const MAP_CHEQUER: [u8; 3] = [0, 0, 0];
+
+/// A box on a picture: centre `c` and unit vector `d` along it, in pixels, `along` and
+/// `across` its half sizes. `f` colours a point by where it sits along and across it.
+fn fill(
+    px: &mut [[u8; 3]],
+    dim: usize,
+    c: (f32, f32),
+    d: (f32, f32),
+    along: f32,
+    across: f32,
+    f: impl Fn(f32, f32) -> Option<[u8; 3]>,
+) {
+    let r = (along * along + across * across).sqrt() + 1.0;
+    let lo = |v: f32| (v - r).floor().clamp(0.0, dim as f32) as usize;
+    let hi = |v: f32| (v + r).ceil().clamp(0.0, dim as f32) as usize;
+    for y in lo(c.1)..hi(c.1) {
+        for x in lo(c.0)..hi(c.0) {
+            let (ox, oy) = (x as f32 + 0.5 - c.0, y as f32 + 0.5 - c.1);
+            let (a, b) = (ox * d.0 + oy * d.1, oy * d.0 - ox * d.1);
+            if a.abs() <= along && b.abs() <= across {
+                if let Some(col) = f(a, b) {
+                    px[y * dim + x] = col;
+                }
+            }
+        }
+    }
+}
+
+/// A line `w` pixels wide from `a` to `b`.
+fn stroke(px: &mut [[u8; 3]], dim: usize, a: (f32, f32), b: (f32, f32), w: f32, col: [u8; 3]) {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let l = (dx * dx + dy * dy).sqrt().max(1e-6);
+    let c = ((a.0 + b.0) * 0.5, (a.1 + b.1) * 0.5);
+    fill(px, dim, c, (dx / l, dy / l), l * 0.5 + w * 0.3, w * 0.5, |_, _| Some(col));
+}
+
+/// Rows from the top, as the renderers hand them back, into a bottom-left TGA: row zero of
+/// the file is the bottom of the picture, so +z comes out on top, like the masks.
+fn tga_rows(rgb: &[[u8; 3]], dim: usize) -> Vec<u8> {
     let mut px = Vec::with_capacity(dim * dim * 4);
     for y in (0..dim).rev() {
         for x in 0..dim {
@@ -10928,7 +11059,7 @@ mod tests {
     /// The picture the game lists a track by, as rows from the top.
     fn shot_rows(p: &TrackProgram, dim: usize) -> Vec<[u8; 3]> {
         let s = synthesise(p).unwrap();
-        let tga = ui_shot(p, &s, dim);
+        let (_, tga) = ui_images(p, &s, dim);
         let px = &tga[18..18 + dim * dim * 4];
         // A TGA's row zero is the bottom of the picture, and it is stored BGRA.
         let mut out = Vec::with_capacity(dim * dim);
@@ -11044,7 +11175,8 @@ mod tests {
     }
 
     /// The map is a bottom-left TGA, so its rows run in grid order: +z on top, as the game
-    /// shows it. Reversed, the map came out mirrored north-south.
+    /// shows it. Reversed, the map came out mirrored north-south. The finish is drawn at its
+    /// own station, so it has to turn up in that file row and not in the mirrored one.
     #[test]
     fn the_map_runs_north_up() {
         let p = hairpins();
@@ -11052,14 +11184,25 @@ mod tests {
         let (map, _) = ui_images(&p, &s, UI_IMAGE_DIM);
         let dim = UI_IMAGE_DIM;
         assert_eq!(map[17] & 0x20, 0, "origin must be bottom-left");
-        for y in 0..dim {
-            let gy = (y * s.gh / dim).min(s.gh - 1);
-            for x in 0..dim {
-                let gx = (x * s.gw / dim).min(s.gw - 1);
-                let blue = map[18 + (y * dim + x) * 4] == 150;
-                assert_eq!(blue, s.corridor[gy * s.gw + gx], "pixel ({x}, {y})");
-            }
-        }
+        let f = finish_at(&p);
+        let st = s
+            .stations
+            .iter()
+            .min_by(|a, b| (a.s - f).abs().total_cmp(&(b.s - f).abs()))
+            .unwrap();
+        let x = (st.x / ((s.gw - 1) as f32 * s.mps) * dim as f32) as usize;
+        let y = (st.z / ((s.gh - 1) as f32 * s.mps) * dim as f32) as usize;
+        assert!(y.abs_diff(dim - 1 - y) > 8, "the fixture's finish sits on the mid row");
+        let chequer = |y: usize| {
+            (y.saturating_sub(3)..=(y + 3).min(dim - 1)).any(|yy| {
+                (x.saturating_sub(3)..=(x + 3).min(dim - 1)).any(|xx| {
+                    let at = 18 + (yy * dim + xx) * 4;
+                    map[at..at + 3] == MAP_CHEQUER
+                })
+            })
+        };
+        assert!(chequer(y), "no finish line at its station");
+        assert!(!chequer(dim - 1 - y), "the finish line is mirrored");
     }
 
     /// Look at the finish jump — the worked example's, or any track program's.

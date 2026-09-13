@@ -15,6 +15,8 @@
   shading.
 
 ### Changed
+- The in-game map of a generated track shows the ground from above, with the track's edges,
+  the finish line, the start gate and arrows for the direction of travel.
 - Doubles, triples and singles on generated tracks have steeper take-offs and wider gaps, so
   they throw you and have to be jumped. Tabletops keep their long, gentle faces.
 - Banners, flags and other venue pieces on generated tracks sit on the ground, following it,
