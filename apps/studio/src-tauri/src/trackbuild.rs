@@ -708,6 +708,11 @@ mod build_one {
         if let Ok(sf) = std::env::var("FROST_SURFACE") {
             prog.terrain.surface = serde_json::from_str(&format!("\"{sf}\"")).expect("soil, sand or grass");
         }
+        // FROST_ROUGH=1.8 builds the same layout rougher, as its own track beside the first.
+        if let Some(r) = std::env::var("FROST_ROUGH").ok().and_then(|v| v.parse::<f32>().ok()) {
+            prog.terrain.roughness = r;
+            prog.name = format!("{} ARL", prog.name);
+        }
         println!("  {} on {:?}", prog.name, prog.terrain.surface);
         let prog = crate::tracksynth::with_fitted_budget(&prog).expect("a height budget");
         let syn = crate::tracksynth::synthesise(&prog).expect("synthesise");

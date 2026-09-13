@@ -128,11 +128,18 @@ pub struct Terrain {
     /// Defaults to a track that has seen a session rather than to either end.
     #[serde(default = "default_wear")]
     pub wear: f32,
+    /// How rough the ridden ground is: 1 is the default, higher toward a raced ARL track.
+    #[serde(default = "default_roughness")]
+    pub roughness: f32,
 }
 
 /// Half-worn: shapes settled, grooves started, most of the ground still to give.
 pub(crate) fn default_wear() -> f32 {
     0.55
+}
+
+pub(crate) fn default_roughness() -> f32 {
+    1.0
 }
 
 /// The ground a track is cut into.
@@ -332,7 +339,8 @@ pub const JUMP_LANDING_DEG: f32 = 19.0;
 ///
 /// Sizing them like ramps is what made a 3.6 m double 41 m of air across a 14.6 m gap, and
 /// the worked example's own jumps stopped being jumpable the moment the faces grew.
-pub const JUMP_CUT_DEG: f32 = 38.0;
+// A back and a front that are slopes, not walls: 38° stood as a wall either side of the gap.
+pub const JUMP_CUT_DEG: f32 = 30.0;
 
 /// The shortest deck a tabletop may have, metres.
 ///
@@ -372,7 +380,7 @@ pub const JUMP_LANDING_MIN_M: f32 = 18.0;
 ///
 /// Four, where it has always been. It is the one face a takeoff floor must not reach: the back
 /// of a lip is short on purpose, and stretching it to nine turns every double into a hump.
-pub const JUMP_CUT_MIN_M: f32 = 4.0;
+pub const JUMP_CUT_MIN_M: f32 = 5.0;
 
 /// The shape of a jump's face: a circle's quadrant, not a smoothstep.
 ///
@@ -2120,6 +2128,7 @@ mod tests {
                 relief: Relief::default(),
                 surface: Surface::default(),
                 wear: default_wear(),
+                roughness: crate::trackprog::default_roughness(),
             },
             start: Start {
                 x: 200.0,
@@ -2597,8 +2606,10 @@ mod tests {
                 "{height} m over {gap} m folds through {kink:.1}° in 5 cm"
             );
             let steepest = s.iter().copied().fold(f32::MIN, |a, b| a.max(b.abs()));
+            // Under the ceiling any face is held to: the take-off, not the cut, is now the
+            // steepest part of a double.
             assert!(
-                steepest <= JUMP_CUT_DEG + 0.5,
+                steepest <= JUMP_FACE_DEG + 0.5,
                 "{height} m over {gap} m stands at {steepest:.1}°"
             );
         }

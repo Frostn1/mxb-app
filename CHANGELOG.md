@@ -15,6 +15,16 @@
   shading.
 
 ### Changed
+- Ruts on jump faces are fainter and thinner, and follow the lanes coming out of the corner
+  before, so the jump can be closed along a rut.
+- The ground beside a generated track slopes gently down to it instead of leaving the track
+  in a trench.
+- Long straights on generated tracks are broken into sweeping bends, so none runs much past
+  50 m.
+- Wave sections are a normal size, with a small wave to flow in and one to flow out.
+- The back of a double's take-off and the front of its landing are slopes, not walls.
+- Braking bumps stay off the banks of ruts as well as their floors.
+- Generated tracks have a roughness setting; a rougher build sits near an ARL track.
 - Banners, boards and flags on generated tracks never stand on the track or the start
   straight. Arches span the track on straight ground, standing on their own legs, with
   nothing hanging low over the riding line.
