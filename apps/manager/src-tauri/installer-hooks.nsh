@@ -129,6 +129,52 @@
   ; anything could read it, and the app would switch itself back on.
 !macroend
 
+; Put the shortcuts in place once per install.
+;
+; The in-app updater runs this installer with `/UPDATE`, and the template never creates a
+; shortcut in update mode — it expects the old ones to still be there. After the rename they
+; aren't: `RetireLegacyInstall` just deleted `MXB App.lnk`, so an in-app update left the app
+; with no Start-menu or desktop entry, and Windows search found it under neither name.
+;
+; `MXB App.lnk` stays as a second Start-menu entry so players searching the old name still
+; find it. It carries no AppUserModelID on purpose: Start lists one entry per ID, and giving
+; it the bundle id would fold it into the Frost Mod Manager entry and lose the old name.
+;
+; The flag makes this one-shot, so a shortcut the player deletes stays deleted.
+!define SHORTCUTS_FLAG "ShortcutsPlaced"
+
+!macro PlaceShortcuts
+  ReadRegDWORD $0 SHCTX "${MANUPRODUCTKEY}" "${SHORTCUTS_FLAG}"
+  ${If} $0 <> 1
+  ${AndIf} $NoShortcutMode <> 1
+    ${IfNot} ${FileExists} "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+      CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+      !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+    ${EndIf}
+
+    ; A hand-run installer offers the desktop link on its finish page; only an update skips it.
+    ${If} $UpdateMode = 1
+    ${AndIfNot} ${FileExists} "$DESKTOP\${PRODUCTNAME}.lnk"
+      CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+      !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"
+    ${EndIf}
+
+    CreateShortcut "$SMPROGRAMS\${LEGACY_PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe" \
+      "" "$INSTDIR\${MAINBINARYNAME}.exe" 0 SW_SHOWNORMAL "" "Frost's Mod Manager (formerly MXB App)"
+
+    WriteRegDWORD SHCTX "${MANUPRODUCTKEY}" "${SHORTCUTS_FLAG}" 1
+  ${EndIf}
+!macroend
+
+; The template's uninstaller only knows the shortcuts named after the product. Skipped on
+; `/UPDATE`, where the uninstaller runs only to make way for the next build.
+!macro RemoveLegacyShortcut
+  ${If} $UpdateMode <> 1
+    Delete "$SMPROGRAMS\${LEGACY_PRODUCTNAME}.lnk"
+    DeleteRegValue SHCTX "${MANUPRODUCTKEY}" "${SHORTCUTS_FLAG}"
+  ${EndIf}
+!macroend
+
 ; Drop the images past installs moved aside. Plain `Delete`, not `/REBOOTOK`: a leftover
 ; here is an orphan file, not a broken install, and `/REBOOTOK` would raise the reboot flag
 ; and put a "restart your computer" choice on the finish page over it.
@@ -288,6 +334,7 @@
 !macro NSIS_HOOK_POSTINSTALL
   !insertmacro DropMovedBinaries
   !insertmacro DropLegacyBinaries
+  !insertmacro PlaceShortcuts
 !macroend
 
 ; The uninstaller's own `RMDir "$INSTDIR"` runs before its POSTUNINSTALL hook, so the
@@ -298,4 +345,5 @@
   !insertmacro CloseLegacyMxbApp
   !insertmacro FreeMainBinary
   !insertmacro DropLegacyBinaries
+  !insertmacro RemoveLegacyShortcut
 !macroend

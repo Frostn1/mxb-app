@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-13
+
+### Fixed
+- Updating from inside the app keeps Frost's Mod Manager in the Start menu and on the desktop.
+  Searching Windows for MXB App still finds it.
+
 ## 2026-09-12 — v0.14.0 — A new name, and a Studio of its own
 
 ### Added
