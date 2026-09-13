@@ -1920,6 +1920,9 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         );
     }
 
+    // The paddock, its road to the pits, and the sponsor wall behind the gates.
+    crate::trackvenue::dress(prog, syn, lib.as_ref(), &mut kinds, &mut tally);
+
     let mut files = Vec::new();
     let mut drawn = Vec::new();
     let mut solid = Vec::new();
@@ -2700,7 +2703,7 @@ mod tests {
             sheets: ["truck_c", "tent_sides_c"].iter().map(|n| (n.to_string(), 2, 2, vec![200u8; 16])).collect(),
         };
         let (placed, got) = lifted_counted(&lib, &p, &s);
-        assert!(got.pit_vehicles >= 4, "{} pit vehicles", got.pit_vehicles);
+        assert_eq!(got.pit_vehicles, 0, "the paddock parks them now: trackvenue");
         let half = p.width * 0.5;
         for (name, m, ..) in &placed {
             for v in edge_points(m, 0.5) {
@@ -3890,7 +3893,8 @@ pub fn lifted_counted(
     let bales = place_bales(lib, prog, syn, &mut by_sheet);
     let parked = place_parking(lib, prog, syn, &mut by_sheet);
     let turn_markers = place_markers(lib, prog, syn, &mut by_sheet);
-    let pit_vehicles = place_pits(lib, prog, syn, &mut by_sheet);
+    // Parked in the paddock now (`trackvenue`), not in a row behind the stalls.
+    let pit_vehicles = 0;
     let mut out = Vec::new();
     for (sheet, mesh) in by_sheet {
         if mesh.vertex_count() < 8 {

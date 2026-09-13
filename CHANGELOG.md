@@ -45,6 +45,10 @@
   shading.
 
 ### Changed
+- Generated tracks have a fenced paddock with a team area for each bike brand, a dirt road
+  to the pit lane, and the big sponsor wall behind the start gates.
+- The start straight is fenced off from the track up to where it joins, so the way to go is
+  clear.
 - Jumps on generated tracks are taller, and only some jumps have a dip before the face.
 - Braking bumps run the full width of the track, longer and each a different size.
 - Wave sections are rarer and longer, and each wave is a different length and height.
