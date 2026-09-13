@@ -92,7 +92,8 @@ const FEATURE_EDGE: f32 = 1.75;
 /// ground it leaves a short steep face; where it pushes the spoil out onto falling ground it
 /// leaves a long shallow one. Grading both sides the same distance is the single clearest
 /// tell that nobody built this — real benching is never symmetrical.
-const CUT_SHOULDER: f32 = 0.5;
+// As long as a fill: a short cut face left the track in a trench below the ground beside it.
+const CUT_SHOULDER: f32 = 3.0;
 const FILL_SHOULDER: f32 = 3.0;
 
 /// Over how much height the one becomes the other.
@@ -1173,6 +1174,11 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     feel.rut_straight *= worn;
     feel.brake.1 *= worn;
     feel.accel.1 *= worn;
+    // The roughness knob: taller braking bumps, more drive-out chop and bigger rollers.
+    let rough = prog.terrain.roughness.clamp(0.0, 3.0);
+    feel.brake.1 *= 0.6 + 0.4 * rough;
+    // More of them rather than only bigger: the spacing tightens below, the height by the root.
+    feel.accel.1 *= rough.sqrt();
     let worked = worked_profile(lap, r.seed);
     let ruts = rut_profile(&prog.features, &turn, lap, r.seed, &feel);
     // Where a corner's lanes are: the tight part of the turn, carried a little way back up the
@@ -1497,27 +1503,26 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // and the landing are not scuffed.
             let rise = face_rise.at(s);
             let marks = if focus * rise > 0.0 {
-                // Each jump its own: how far apart its scuffs lie, how wide they fan, and where
-                // the comb falls. Slow along the lap, so a face keeps one pattern and the next
-                // jump has another — every face wore the same one.
-                let vary = |salt: f32| 0.5 + 0.5 * fbm(s / 80.0, salt, r.seed ^ 0xFACE);
-                let spacing = TYRE_MARK_SPACING_M * (0.7 + 0.6 * vary(1.0));
-                let fan = RUT_MARK_FAN_M * (0.6 + 0.8 * vary(2.0));
-                let shift = 1.2 * fbm(s / 80.0, 7.0, r.seed ^ 0xFAC1);
-                let span = feel.groove + fan * focus;
-                let d = (t - on_line) / span;
-                if d.abs() < 1.0 {
-                    // Under a power, so each scuff is a broad trough and the ridge between two
-                    // is the narrow part.
-                    let comb = (0.5
-                        + 0.5
-                            * ((t - on_line + shift) / spacing * std::f32::consts::TAU).cos())
-                    .max(0.0)
-                    .powf(0.6);
-                    (1.0 - d * d * d * d) * comb * TYRE_MARK_DEPTH * focus * rise
-                } else {
-                    0.0
+                // In the lanes the approach carries, where they leave a corner spread across the
+                // width, so a face's ruts are the corner's carried up it: a triple could not be
+                // closed when the face's own comb ran somewhere else. Thin and shallow.
+                let outward = if lane_side.at(s) >= 0.0 { -1.0 } else { 1.0 };
+                let w = half - 0.8;
+                // Every other lane where they would crowd: packed a metre apart, they ran
+                // together into one lowered strip up the face.
+                let lanes = RUT_LANES_OUT_MAX as f32 + 2.0;
+                let step = if 2.0 * w / lanes < FACE_RUT_MIN_GAP_M { 2 } else { 1 };
+                let mut best = 0.0f32;
+                for k in (-1..=RUT_LANES_OUT_MAX).step_by(step) {
+                    let kf = k as f32;
+                    let at = outward * (-w + (kf + 1.5) / lanes * 2.0 * w)
+                        + RUT_LANE_WANDER_M * fbm(s / 30.0, kf * 7.3, r.seed ^ 0x1A7E);
+                    // Half a lane's width: thin, each a groove of its own.
+                    best = best.max(trough(at, feel.groove * RUT_LANE_WIDTH * 0.5));
                 }
+                // Not every face: roughly half the jumps carry ruts up them, the rest are clean.
+                let rutted = smoothstep(((fbm(s / 70.0, 5.5, r.seed ^ 0xFAC2) + 0.05) * 4.0).clamp(0.0, 1.0));
+                best * TYRE_MARK_DEPTH * focus * rise * rutted
             } else {
                 0.0
             };
@@ -1681,7 +1686,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 rut_h[i] = if r < 0.0 { -knee(-r, cut_knee) } else { knee(r, bank_knee) };
                 // What the paint reads: a face's scuffs at half strength and nothing past a full
                 // floor, or the whole face paints as one dark block.
-                let painted = main.max(second).max(lanes).max(marks * 0.5);
+                let painted = main.max(second).max(lanes).max(marks * 0.3);
                 let spread = spread * (RUT_STRAIGHT_PAINT + (1.0 - RUT_STRAIGHT_PAINT) * tightness);
                 rut[i] = if painted > 0.0 { spread.min(-painted) } else { spread }.max(-1.0);
             }
@@ -1754,10 +1759,11 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 // In sets, not a washboard: ridden as "just stripes" when they ran unbroken the
                 // whole way into every corner.
                 let sets = smoothstep(
-                    ((fbm(s / BRAKE_SET_M, 3.3, r.seed ^ 0xB4B0) + 0.6) * 2.2).clamp(0.0, 1.0),
+                    ((fbm(s / BRAKE_SET_M, 3.3, r.seed ^ 0xB4B0) + 0.6 + 0.3 * (rough - 1.0)) * 2.2).clamp(0.0, 1.0),
                 );
                 // Never inside a rut: a tyre in a groove rides its floor, not the bumps.
-                let clear = 1.0 - (-rut[i]).clamp(0.0, 1.0);
+                // Nor on a rut's bank: a crest there stood alone between two grooves, a shark fin.
+                let clear = 1.0 - rut[i].abs().clamp(0.0, 1.0);
                 // In the lines riders brake in, each with its own spacing and phase, so the crests
                 // stagger from one line to the next instead of running straight across the track —
                 // ridden, from above, as "across the track and too uniform".
@@ -1773,7 +1779,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     if band <= 0.0 {
                         continue;
                     }
-                    let wave = feel.brake.0 * (0.85 + 0.3 * (0.5 + 0.5 * fbm(kf * 9.7, 1.3, r.seed ^ 0xB4C1)));
+                    let wave = feel.brake.0 / rough.max(0.5).sqrt()
+                        * (0.85 + 0.3 * (0.5 + 0.5 * fbm(kf * 9.7, 1.3, r.seed ^ 0xB4C1)));
                     // A crest is not a straight line.
                     let bend = 0.35 * fbm(t / 2.0, s / 10.0, r.seed ^ 0xB4C2);
                     let cycles = s / wave
@@ -1791,7 +1798,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     let g = (n / BRAKE_GROUP).floor();
                     let slot = n - g * BRAKE_GROUP;
                     // Two or three: ARL's approaches run 1.1–1.9 swells per 10 m and ours ran 0.5.
-                    let count = if hash2(g as i32, k * 131 + 7, r.seed ^ 0xB4C6) > 0.0 { 3.0 } else { 3.0 };
+                    let count = if rough > 1.4 { 4.0 } else { 3.0 };
                     let size = if slot < count { 0.6 + 0.4 * pick(3) } else { 0.0 };
                     let (prof, falling) = if x < peak {
                         (smoothstep(x / peak), false)
@@ -1816,13 +1823,13 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             let out = chop.accel.at(s);
             if out > 0.0 && across > 0.0 {
                 let drift = 0.4 * fbm(s / 31.0, 13.0, r.seed ^ 0xACCE);
-                let ripple = ((s / feel.accel.0 + drift) * std::f32::consts::TAU).sin();
+                let ripple = ((s * rough.max(0.5) / feel.accel.0 + drift) * std::f32::consts::TAU).sin();
                 heights[i] += ripple * feel.accel.1 * 0.5 * out * across * polished * groomed;
             }
             // And the ground everybody rides rolls: irregular swells a few metres long, the most
             // of what ARL's straights carry (0.7–1.0 per 10 m against our 0.4).
-            let roll = fbm(s / SWELL_WAVELENGTH_M, t / SWELL_ACROSS_M, r.seed ^ 0x5E11);
-            heights[i] += roll * SWELL_M * across * groomed;
+            let roll = fbm(s * rough.max(0.5) / SWELL_WAVELENGTH_M, t / SWELL_ACROSS_M, r.seed ^ 0x5E11);
+            heights[i] += roll * SWELL_M * rough.sqrt() * across * groomed;
         }
     }
 
@@ -2533,7 +2540,10 @@ const FACE_FIELD_KEEP: f32 = 0.45;
 /// too little to see from the seat. A face that has been ridden all day is visibly combed.
 // 1.15 combed a face with 17 cm ridges every 0.62 m, ridden as too big and spiky; 0.45 as too
 // faint.
-const TYRE_MARK_DEPTH: f32 = 1.3;
+// Less of it, and thin: they read as a comb that did not line up.
+const TYRE_MARK_DEPTH: f32 = 0.9;
+/// The least room between two ruts up a face before every other one is left out.
+const FACE_RUT_MIN_GAP_M: f32 = 1.4;
 
 /// Half the width of one carved groove, metres.
 ///
@@ -9010,6 +9020,7 @@ mod tests {
                                 },
                 surface: crate::trackprog::Surface::Soil,
                 wear: crate::trackprog::default_wear(),
+                roughness: crate::trackprog::default_roughness(),
             },
             start: Start {
                 x: 140.0,

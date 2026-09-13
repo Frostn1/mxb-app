@@ -308,9 +308,13 @@ pub struct Scenery {
 /// A lifted piece set on our ground vertex by vertex: it is stored as height above the donor's.
 fn draped(mesh: &Mesh, x: f32, z: f32, lift: f32, syn: &Synth) -> Mesh {
     let mut m = mesh.clone();
+    // Never above the ground everywhere: a piece whose donor ground was misread came out
+    // floating by that much.
+    let low = m.positions.chunks_exact(3).map(|v| v[1]).fold(f32::INFINITY, f32::min);
+    let sink = if low.is_finite() { low.max(0.0) } else { 0.0 };
     for v in m.positions.chunks_exact_mut(3) {
         let (wx, wz) = (v[0] + x, v[2] + z);
-        v[1] += ground(syn, wx, wz) + lift;
+        v[1] += ground(syn, wx, wz) + lift - sink;
         v[0] = wx;
         v[2] = wz;
     }
@@ -1873,6 +1877,7 @@ pub fn blocks(scenes: &[Scene]) -> String {
 mod tests {
     use super::*;
 
+
     /// A library "tree" whose UVs sit on the clear part of its sheet is not planted — it
     /// would draw as nothing. One on the leaves is.
     #[test]
@@ -2329,10 +2334,96 @@ mod tests {
         };
         let mut arch = at(edfwrite::cuboid(0.5, 6.0, 0.5), -7.0, 0.0);
         arch.append(&at(edfwrite::cuboid(14.5, 0.5, 0.5), 0.0, 5.5));
-        let both = with_both_legs(&arch).expect("an arch");
+        let (both, _, _) = arch_on_legs(&arch).expect("an arch");
         let low: Vec<f32> = both.positions.chunks_exact(3).filter(|v| v[1] < 0.4).map(|v| v[0]).collect();
         assert!(low.iter().any(|&x| x < -6.0), "lost its own leg");
         assert!(low.iter().any(|&x| x > 6.0), "no leg at the far end: {low:?}");
+    }
+
+    /// A header wider than its legs still stands on them, and only what hangs low between the
+    /// legs goes: a banner hung under it, and a flag stood between them, whole.
+    #[test]
+    fn an_arch_with_a_wide_header_keeps_its_legs() {
+        let at = |c: Mesh, x: f32, y: f32| {
+            let (lo, hi) = c.bounds();
+            edfwrite::moved(&c, [x - (lo[0] + hi[0]) * 0.5, y - lo[1], -(lo[2] + hi[2]) * 0.5])
+        };
+        let mut gfx = at(edfwrite::cuboid(0.5, 6.0, 0.5), -8.5, 0.0);
+        gfx.append(&at(edfwrite::cuboid(0.5, 6.0, 0.5), 8.5, 0.0));
+        // The header overhangs each leg by three metres, as RaceGFX's does.
+        gfx.append(&at(edfwrite::cuboid(24.0, 1.0, 0.5), 0.0, 5.5));
+        gfx.append(&at(edfwrite::cuboid(14.0, 1.0, 0.1), 0.0, 0.3));
+        gfx.append(&at(edfwrite::cuboid(0.1, 4.0, 1.0), 2.0, 0.0));
+        let (m, gap, _) = arch_on_legs(&gfx).expect("an arch");
+        let feet: Vec<f32> = m.positions.chunks_exact(3).filter(|v| v[1] < 0.4).map(|v| v[0]).collect();
+        assert!(feet.iter().any(|&x| x < -8.0) && feet.iter().any(|&x| x > 8.0), "lost a leg: {feet:?}");
+        assert!(
+            m.positions.chunks_exact(3).all(|v| v[0].abs() > 8.0 || v[1] >= 5.5),
+            "a banner or flag still hangs between the legs"
+        );
+        assert!(m.positions.chunks_exact(3).any(|v| v[0].abs() > 11.0), "lost the header's overhang");
+        assert!((gap - (17.0 - 0.5)).abs() < 0.05, "gap {gap}");
+
+        // On our lap: a foot on the ground either side, clear of the edge, and nothing low over it.
+        let (p, s) = demo();
+        let reach = gfx.positions.chunks_exact(3).map(|v| v[0].hypot(v[2])).fold(0.0f32, f32::max);
+        let lib = crate::trackprops::PropLibrary {
+            donor: "t".into(),
+            donor_lap_m: 1000.0,
+            props: vec![crate::trackprops::Prop {
+                id: "gfx".into(),
+                sheet: "gfx_c".into(),
+                class: crate::trackobjects::Class::Structure,
+                mesh: gfx,
+                height: 6.5,
+                span: 24.0,
+                reach,
+                axis_ref: 0.0,
+            }],
+            instances: vec![crate::trackprops::Instance { prop: 0, along: 0.5, offset: 0.0, yaw: 0.0, lift: 0.0, near: true }],
+            runs: vec![],
+            sheets: vec![("gfx_c".into(), 2, 2, vec![200u8; 16])],
+        };
+        let placed = lifted(&lib, &p, &s);
+        let (_, mesh, ..) = placed.iter().find(|k| k.0 == "gfx").expect("the arch was placed");
+        let (st, half) = (p.stations(0.5), p.width * 0.5);
+        let mut sides = [false; 2];
+        for v in edge_points(mesh, 0.5) {
+            let up = v[1] - ground(&s, v[0], v[2]);
+            let q = st.iter().min_by(|a, b| (a.x - v[0]).hypot(a.z - v[2]).total_cmp(&(b.x - v[0]).hypot(b.z - v[2]))).unwrap();
+            let (rx, rz) = crate::trackprog::right_vector(q.heading);
+            let lat = (v[0] - q.x) * rx + (v[2] - q.z) * rz;
+            if up <= RIDE_H_M {
+                assert!(lat.abs() > half, "a piece {up:.1} m up stands {:.1} m from the centreline", lat.abs());
+            }
+            if up < 0.2 {
+                assert!(lat.abs() > half + ARCH_LEG_CLEAR_M - 0.3, "a foot {:.1} m out, inside the leg clearance", lat.abs());
+                sides[(lat > 0.0) as usize] = true;
+            }
+        }
+        assert!(sides[0] && sides[1], "not standing on a leg either side: {sides:?}");
+    }
+
+    /// A pole as tall as the frame, standing between the legs, is not a leg: the outer foot is,
+    /// its far twin is mirrored in, and the pole goes whole rather than leave its top in the air.
+    #[test]
+    fn a_pole_between_the_legs_is_not_a_leg() {
+        let at = |c: Mesh, x: f32, y: f32| {
+            let (lo, hi) = c.bounds();
+            edfwrite::moved(&c, [x - (lo[0] + hi[0]) * 0.5, y - lo[1], -(lo[2] + hi[2]) * 0.5])
+        };
+        let mut arch = at(edfwrite::cuboid(0.5, 6.0, 0.5), 6.6, 0.0);
+        arch.append(&at(edfwrite::cuboid(0.3, 5.5, 0.3), -2.3, 0.0));
+        arch.append(&at(edfwrite::cuboid(14.2, 1.0, 0.5), 0.0, 6.0));
+        let (m, gap, _) = arch_on_legs(&arch).expect("an arch");
+        let feet: Vec<f32> = m.positions.chunks_exact(3).filter(|v| v[1] < 0.4).map(|v| v[0]).collect();
+        assert!(feet.iter().any(|&x| x < -6.0) && feet.iter().any(|&x| x > 6.0), "not on two legs: {feet:?}");
+        assert!(feet.iter().all(|&x| x.abs() > 6.0), "the pole stood as a leg: {feet:?}");
+        assert!(
+            m.positions.chunks_exact(3).all(|v| v[0].abs() > 5.0 || v[1] >= 6.0),
+            "the pole's top was left in the air"
+        );
+        assert!((gap - 12.7).abs() < 0.05, "gap {gap}");
     }
 
     #[test]
@@ -2875,119 +2966,17 @@ const LIFT_RUN_HEIGHT_M: f32 = 3.5;
 /// A prop's mesh is centred on its box, so it reaches at most `span / √2`; this is float slack.
 const LIFT_REACH_SLACK_M: f32 = 0.5;
 
-/// Whether a lifted prop is one object. A mesh reaching past its own box was lifted with its
-/// neighbours' triangles (a library baked before `trackprops::lift` was fixed): a donor's run.
-/// A spanning piece that touches the ground at one end only: its own leg, mirrored to the far
-/// end, stands it. `None` if it touches the ground nowhere.
-fn with_both_legs(m: &Mesh) -> Option<Mesh> {
-    let (lo, hi) = m.bounds();
-    let ax = if hi[0] - lo[0] >= hi[2] - lo[2] { 0 } else { 2 };
-    let (a0, a1) = (lo[ax], hi[ax]);
-    let len = a1 - a0;
-    let low: Vec<f32> = m.positions.chunks_exact(3).filter(|v| v[1] < lo[1] + 0.4).map(|v| v[ax]).collect();
-    if low.is_empty() || len <= 0.0 {
-        return None;
-    }
-    let near0 = low.iter().any(|&t| t < a0 + len * 0.25);
-    let near1 = low.iter().any(|&t| t > a1 - len * 0.25);
-    if near0 && near1 {
-        return Some(m.clone());
-    }
-    // The leg: every triangle standing inside the grounded end's footprint.
-    let band = if near0 {
-        low.iter().copied().filter(|&t| t < a0 + len * 0.25).fold(f32::MIN, f32::max) - a0
-    } else {
-        a1 - low.iter().copied().filter(|&t| t > a1 - len * 0.25).fold(f32::MAX, f32::min)
-    } + 0.3;
-    let within = |t: f32| if near0 { t <= a0 + band } else { t >= a1 - band };
-    let mut leg = Mesh::default();
-    for tri in m.indices.chunks_exact(3) {
-        if !tri.iter().all(|&i| within(m.positions[i as usize * 3 + ax])) {
-            continue;
-        }
-        let base = leg.vertex_count() as u32;
-        // Reversed, because a mirror turns the winding inside out.
-        for &i in tri.iter().rev() {
-            let i = i as usize;
-            let mut p = [m.positions[i * 3], m.positions[i * 3 + 1], m.positions[i * 3 + 2]];
-            p[ax] = a0 + a1 - p[ax];
-            let mut n = [m.normals[i * 3], m.normals[i * 3 + 1], m.normals[i * 3 + 2]];
-            n[ax] = -n[ax];
-            leg.positions.extend_from_slice(&p);
-            leg.normals.extend_from_slice(&n);
-            leg.uvs.extend_from_slice(&m.uvs[i * 2..i * 2 + 2]);
-        }
-        leg.indices.extend([base, base + 1, base + 2]);
-    }
-    if leg.indices.is_empty() {
-        return None;
-    }
-    let mut out = m.clone();
-    out.append(&leg);
-    Some(out)
-}
-
-/// An arch with nothing below `low` between its legs: a triangle stays if it reaches above that
-/// or stands within `band` of either end of the arch's long axis.
-fn clear_between_legs(m: &Mesh, band: f32, low: f32) -> Mesh {
-    let (lo, hi) = m.bounds();
-    let ax = if hi[0] - lo[0] >= hi[2] - lo[2] { 0 } else { 2 };
-    let (a0, a1) = (lo[ax], hi[ax]);
-    let mut out = Mesh::default();
-    for t in m.indices.chunks_exact(3) {
-        let p = |i: u32| &m.positions[i as usize * 3..i as usize * 3 + 3];
-        // Wholly overhead: a panel from the ground up to the header still crosses the track.
-        let tall = t.iter().all(|&i| p(i)[1] > low);
-        let leg = t.iter().all(|&i| p(i)[ax] <= a0 + band) || t.iter().all(|&i| p(i)[ax] >= a1 - band);
-        if !(tall || leg) {
-            continue;
-        }
-        let base = out.vertex_count() as u32;
-        for &i in t {
-            let i = i as usize;
-            out.positions.extend_from_slice(&m.positions[i * 3..i * 3 + 3]);
-            out.uvs.extend_from_slice(&m.uvs[i * 2..i * 2 + 2]);
-            out.normals.extend_from_slice(&m.normals[i * 3..i * 3 + 3]);
-        }
-        out.indices.extend([base, base + 1, base + 2]);
-    }
-    out
-}
-/// How much of each end of an arch counts as its leg.
-const ARCH_LEG_BAND_M: f32 = 1.5;
 /// How far an arch sized for a narrower track may be scaled up to span ours.
-const ARCH_MAX_SCALE: f32 = 1.75;
+const ARCH_MAX_SCALE: f32 = 1.8;
 
 /// The parts of a piece taller than `min_h`, each part a connected run of triangles.
 fn tall_parts(m: &Mesh, min_h: f32) -> Mesh {
-    fn root(up: &mut [usize], mut i: usize) -> usize {
-        while up[i] != i {
-            up[i] = up[up[i]];
-            i = up[i];
-        }
-        i
-    }
-    let n = m.vertex_count();
-    let mut up: Vec<usize> = (0..n).collect();
-    for t in m.indices.chunks_exact(3) {
-        let a = root(&mut up, t[0] as usize);
-        for &j in &t[1..] {
-            let b = root(&mut up, j as usize);
-            if a != b {
-                up[b] = a;
-            }
-        }
-    }
-    let mut top = vec![f32::MIN; n];
-    for i in 0..n {
-        let r = root(&mut up, i);
-        top[r] = top[r].max(m.positions[i * 3 + 1]);
-    }
+    let part = part_of(m);
+    let top = part_tops(m, &part);
     let mut out = Mesh::default();
     let mut remap: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
     for t in m.indices.chunks_exact(3) {
-        let r = root(&mut up, t[0] as usize);
-        if top[r] < min_h {
+        if top[part[t[0] as usize]] < min_h {
             continue;
         }
         for &i in t {
@@ -3010,6 +2999,192 @@ fn tall_parts(m: &Mesh, min_h: f32) -> Mesh {
 }
 /// How tall a part of an arch piece must stand to be the arch rather than a run beside it.
 const ARCH_PART_MIN_H_M: f32 = 3.0;
+/// Which connected part each vertex belongs to, as the index of the part's root vertex.
+fn part_of(m: &Mesh) -> Vec<usize> {
+    fn root(up: &mut [usize], mut i: usize) -> usize {
+        while up[i] != i {
+            up[i] = up[up[i]];
+            i = up[i];
+        }
+        i
+    }
+    let n = m.vertex_count();
+    let mut up: Vec<usize> = (0..n).collect();
+    for t in m.indices.chunks_exact(3) {
+        let a = root(&mut up, t[0] as usize);
+        for &j in &t[1..] {
+            let b = root(&mut up, j as usize);
+            if a != b {
+                up[b] = a;
+            }
+        }
+    }
+    // Welded by position too: an exporter splits a mesh at every UV seam, and a box's faces
+    // share no vertex, so index links alone cut a leg off from its own top.
+    let mut seen: std::collections::HashMap<(i32, i32, i32), usize> = std::collections::HashMap::new();
+    for i in 0..n {
+        let q = |k: usize| (m.positions[i * 3 + k] / 0.01).round() as i32;
+        match seen.entry((q(0), q(1), q(2))) {
+            std::collections::hash_map::Entry::Occupied(e) => {
+                let (a, b) = (root(&mut up, *e.get()), root(&mut up, i));
+                if a != b {
+                    up[b] = a;
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(i);
+            }
+        }
+    }
+    (0..n).map(|i| root(&mut up, i)).collect()
+}
+
+/// The highest point of each part, indexed by root.
+fn part_tops(m: &Mesh, part: &[usize]) -> Vec<f32> {
+    let mut top = vec![f32::MIN; part.len()];
+    for (i, &r) in part.iter().enumerate() {
+        top[r] = top[r].max(m.positions[i * 3 + 1]);
+    }
+    top
+}
+
+/// How near its lowest point a vertex stands to be a foot, how far apart two feet are to be two
+/// legs, how wide a leg column is past its feet, and the narrowest gap that is an arch.
+const ARCH_FOOT_M: f32 = 0.4;
+const ARCH_LEG_GAP_M: f32 = 2.0;
+const ARCH_LEG_W_M: f32 = 0.75;
+const ARCH_MIN_GAP_M: f32 = 4.0;
+/// The arch's frame is the parts reaching this share of its height: legs and header. Boards and
+/// flags lifted with it stand lower.
+const ARCH_FRAME_SHARE: f32 = 0.7;
+/// How far apart two feet may stand from the header's middle and still be a pair of legs.
+const ARCH_LEG_SYM_M: f32 = 1.5;
+
+/// An arch stood on its own feet. Legs are found where its frame touches the ground, not at its
+/// box's ends: a header wider than its legs put them metres inside those. A lone leg is mirrored
+/// about the header's middle. Only what hangs low between the legs goes — a board or flag whole,
+/// so no top of one is left in the air. Centred between the legs, with the clear gap between
+/// their inner faces.
+fn arch_on_legs(m: &Mesh) -> Option<(Mesh, f32, f32)> {
+    let (lo, hi) = m.bounds();
+    let ax = if hi[0] - lo[0] >= hi[2] - lo[2] { 0 } else { 2 };
+    let other = 2 - ax;
+    let n = m.vertex_count();
+    let part = part_of(m);
+    let top = part_tops(m, &part);
+    let frame = |i: usize| top[part[i]] >= lo[1] + (hi[1] - lo[1]) * ARCH_FRAME_SHARE;
+    let mut feet: Vec<(f32, usize)> = (0..n)
+        .filter(|&i| frame(i) && m.positions[i * 3 + 1] < lo[1] + ARCH_FOOT_M)
+        .map(|i| (m.positions[i * 3 + ax], i))
+        .collect();
+    if feet.is_empty() {
+        return None;
+    }
+    feet.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut clusters: Vec<(f32, f32)> = vec![(feet[0].0, feet[0].0)];
+    for &(t, _) in &feet[1..] {
+        let c = clusters.last_mut().unwrap();
+        if t - c.1 > ARCH_LEG_GAP_M {
+            clusters.push((t, t));
+        } else {
+            c.1 = t;
+        }
+    }
+    // Legs stand either side of the header's middle, as far out as each other. Otherwise the
+    // outer foot is the leg, the far one was built apart, and anything nearer is a pole.
+    let mid = (lo[ax] + hi[ax]) * 0.5;
+    let off = |c: (f32, f32)| (c.0 + c.1) * 0.5 - mid;
+    let (l, r) = (clusters[0], *clusters.last().unwrap());
+    let paired = off(l) < 0.0 && off(r) > 0.0 && (off(r) + off(l)).abs() <= ARCH_LEG_SYM_M;
+    let legs: Vec<(f32, f32)> = if paired { vec![l, r] } else if -off(l) >= off(r) { vec![l] } else { vec![r] };
+    let mut is_leg = vec![false; n];
+    for &(t, i) in &feet {
+        if legs.iter().any(|c| t >= c.0 && t <= c.1) {
+            is_leg[part[i]] = true;
+        }
+    }
+    let mut mirror = Mesh::default();
+    let (a, b) = if paired {
+        (l, r)
+    } else {
+        // Its own column, mirrored about the header's middle, stands in for the far leg.
+        let one = legs[0];
+        let (c0, c1) = (one.0 - ARCH_LEG_W_M, one.1 + ARCH_LEG_W_M);
+        let within = |i: u32| is_leg[part[i as usize]] && (c0..=c1).contains(&m.positions[i as usize * 3 + ax]);
+        for tri in m.indices.chunks_exact(3).filter(|t| t.iter().all(|&i| within(i))) {
+            let base = mirror.vertex_count() as u32;
+            // Reversed, because a mirror turns the winding inside out.
+            for &i in tri.iter().rev() {
+                let i = i as usize;
+                let mut p = [m.positions[i * 3], m.positions[i * 3 + 1], m.positions[i * 3 + 2]];
+                p[ax] = 2.0 * mid - p[ax];
+                let mut nv = [m.normals[i * 3], m.normals[i * 3 + 1], m.normals[i * 3 + 2]];
+                nv[ax] = -nv[ax];
+                mirror.positions.extend_from_slice(&p);
+                mirror.normals.extend_from_slice(&nv);
+                mirror.uvs.extend_from_slice(&m.uvs[i * 2..i * 2 + 2]);
+            }
+            mirror.indices.extend([base, base + 1, base + 2]);
+        }
+        let far = (2.0 * mid - one.1, 2.0 * mid - one.0);
+        if far.0 > one.1 { (one, far) } else { (far, one) }
+    };
+    let gap = b.0 - a.1;
+    if gap < ARCH_MIN_GAP_M {
+        return None;
+    }
+    let low = lo[1] + RIDE_H_M;
+    let (inner0, inner1) = (a.1 + ARCH_LEG_W_M, b.0 - ARCH_LEG_W_M);
+    // A triangle hangs between the legs if any of it is low and it reaches in between them,
+    // even from outboard on both sides: a banner strung leg to leg has no vertex in between.
+    let hung = |t: &[u32]| {
+        let (mut t0, mut t1, mut y) = (f32::MAX, f32::MIN, f32::MAX);
+        for &i in t {
+            let v = &m.positions[i as usize * 3..i as usize * 3 + 3];
+            (t0, t1, y) = (t0.min(v[ax]), t1.max(v[ax]), y.min(v[1]));
+        }
+        y <= low && t1 > inner0 && t0 < inner1
+    };
+    // Anything but a leg goes whole if any of it hangs: a board, a flag, a pole.
+    let mut hangs = vec![false; n];
+    for t in m.indices.chunks_exact(3) {
+        let r = part[t[0] as usize];
+        if !is_leg[r] && hung(t) {
+            hangs[r] = true;
+        }
+    }
+    let mut out = Mesh::default();
+    for t in m.indices.chunks_exact(3) {
+        let p = |i: u32| &m.positions[i as usize * 3..i as usize * 3 + 3];
+        let r0 = part[t[0] as usize];
+        let keep = if is_leg[r0] { !hung(t) } else { !hangs[r0] };
+        if !keep {
+            continue;
+        }
+        let base = out.vertex_count() as u32;
+        for &i in t {
+            let i = i as usize;
+            out.positions.extend_from_slice(&m.positions[i * 3..i * 3 + 3]);
+            out.uvs.extend_from_slice(&m.uvs[i * 2..i * 2 + 2]);
+            out.normals.extend_from_slice(&m.normals[i * 3..i * 3 + 3]);
+        }
+        out.indices.extend([base, base + 1, base + 2]);
+    }
+    out.append(&mirror);
+    // Along the track, centred on the legs, so they stand at the station the arch is placed at.
+    let leg_feet: Vec<f32> = feet
+        .iter()
+        .filter(|(t, _)| legs.iter().any(|c| *t >= c.0 && *t <= c.1))
+        .map(|&(_, i)| m.positions[i * 3 + other])
+        .collect();
+    let depth = leg_feet.iter().sum::<f32>() / leg_feet.len().max(1) as f32;
+    let shift = (a.0 + b.1) * 0.5;
+    for v in out.positions.chunks_exact_mut(3) {
+        v[ax] -= shift;
+        v[other] -= depth;
+    }
+    Some((out, gap, (b.1 - a.0) * 0.5))
+}
 
 /// A thin tall piece near the donor's track: a cable or bare pole, which floats as a line.
 fn thin_near(p: &crate::trackprops::Prop, offset: f32) -> bool {
@@ -3028,7 +3203,7 @@ fn spans_track(p: &crate::trackprops::Prop, offset: f32) -> bool {
         && p.span >= 2.0 * DONOR_HALF_M
         && offset.abs() < p.span * 0.3
 }
-/// Real arches stand 5-10 m; taller is a tower or rigging, which `with_both_legs` doubles.
+/// Real arches stand 5-10 m; taller is a tower or rigging, which a mirrored leg doubles.
 const ARCH_MAX_H_M: f32 = 10.5;
 /// Half the donor's riding width, and how far an arch's legs stand clear of our edge.
 const DONOR_HALF_M: f32 = 7.0;
@@ -3036,10 +3211,16 @@ const DONOR_HALF_M: f32 = 7.0;
 const ARCH_LEG_CLEAR_M: f32 = 3.5;
 /// Where arches go: straight ground, off jumps, past the start and apart from each other.
 const ARCH_STRAIGHT_R_M: f32 = 40.0;
+/// How far along the lap either side of an arch the ground must be that straight.
+const ARCH_STRAIGHT_ALONG_M: f32 = 15.0;
 const ARCH_OFF_FEATURE_M: f32 = 15.0;
+/// The tallest feature an arch may stand over.
+const ARCH_OVER_FEATURE_H_M: f32 = 1.2;
 const ARCH_FROM_START_M: f32 = 110.0;
 const ARCH_APART_M: f32 = 50.0;
 
+/// Whether a lifted prop is one object. A mesh reaching past its own box was lifted with its
+/// neighbours' triangles (a library baked before `trackprops::lift` was fixed): a donor's run.
 fn whole(p: &crate::trackprops::Prop) -> bool {
     p.reach <= p.span * std::f32::consts::FRAC_1_SQRT_2 + LIFT_REACH_SLACK_M
 }
@@ -3129,12 +3310,14 @@ pub fn lifted(
                 if s < ARCH_FROM_START_M || s > lap - 20.0 {
                     continue;
                 }
-                // Straight under its whole footprint, not just at its centre.
-                let n = ((reach + 5.0) / 2.5).ceil() as i32;
+                // Straight along the lap either side of it. Its width across is `fits`' to judge.
+                let n = (ARCH_STRAIGHT_ALONG_M / 2.5).ceil() as i32;
                 let straight = (-n..=n).all(|j| {
                     at((s + j as f32 * 2.5).rem_euclid(lap)).curvature.abs() < 1.0 / ARCH_STRAIGHT_R_M
                 });
-                let on_jump = prog.features.iter().any(|f| {
+                // Off the jumps, not the rollers: with the bare stretches rolled, an arch found
+                // nowhere to stand.
+                let on_jump = prog.features.iter().filter(|f| f.height().abs() > ARCH_OVER_FEATURE_H_M).any(|f| {
                     s > f.at() - ARCH_OFF_FEATURE_M && s < f.at() + f.length() + ARCH_OFF_FEATURE_M
                 });
                 let crowded = placed.iter().any(|&q| wrap(q - s) < ARCH_APART_M);
@@ -3176,31 +3359,28 @@ pub fn lifted(
             // Its legs and header only: the lifter clusters an arch with the board and flag runs
             // beside it, and laid across our track those runs lay on the riding surface.
             let arch = tall_parts(&prop.mesh, ARCH_PART_MIN_H_M);
-            let (lo, hi) = arch.bounds();
-            let span = (hi[0] - lo[0]).max(hi[2] - lo[2]);
-            if !span.is_finite() || span < 2.0 * DONOR_HALF_M {
+            if arch.vertex_count() == 0 {
                 continue;
             }
-            let arch = edfwrite::moved(&arch, [-(lo[0] + hi[0]) * 0.5, 0.0, -(lo[2] + hi[2]) * 0.5]);
-            // Sized for the donor's narrower track: scaled so its legs clear our edges.
-            let k = (2.0 * (half + ARCH_LEG_CLEAR_M) / span).max(1.0);
+            // On its own two legs, centred between them, nothing low hung between them.
+            let Some((mut mesh, gap, legs_out)) = arch_on_legs(&arch) else {
+                continue;
+            };
+            // Sized by its legs, not its header: both stand ARCH_LEG_CLEAR_M past our edges.
+            let k = (2.0 * (half + ARCH_LEG_CLEAR_M) / gap).max(1.0);
             if k > ARCH_MAX_SCALE {
                 continue;
             }
-            // Stood on two legs: the donor built the far one as a separate pole, left out above.
-            let Some(mut mesh) = with_both_legs(&arch) else {
-                continue;
-            };
-            let arch_reach = mesh.positions.chunks_exact(3).map(|v| v[0].hypot(v[2])).fold(0.0f32, f32::max) * k;
+            // Its legs' reach, not its header's: the header is overhead, and `fits` has the rest.
+            let arch_reach = (legs_out + ARCH_LEG_W_M) * k;
             for v in mesh.positions.iter_mut() {
                 *v *= k;
             }
-            // Nothing low between the legs: boards hung under the header would lie on the track.
-            let mesh = clear_between_legs(&mesh, ARCH_LEG_BAND_M, RIDE_H_M);
             let place = |s: f32| -> Mesh {
                 let st = at(s);
                 let (rx, rz) = crate::trackprog::right_vector(st.heading);
-                let off = inst.offset.clamp(-1.0, 1.0);
+                // Centred on the line: the mesh is centred between its legs.
+                let off = 0.0;
                 // Across the track, whatever the donor's yaw says: that was measured against the
                 // piece with its runs, not the arch left once they are gone.
                 let across = |deg: f32| {
@@ -3443,9 +3623,12 @@ fn plant_trees(lib: &crate::trackprops::PropLibrary, plants: &[Plant]) -> Vec<(S
     for p in plants {
         let pick = ((rnd(0x7A11, p.key) * trees.len() as f32) as usize).min(trees.len() - 1);
         let prop = trees[pick];
+        // On its own base: stored above its donor's ground, a small tree whose ground was
+        // misread stood that far up in the sky.
+        let base = prop.mesh.positions.chunks_exact(3).map(|v| v[1]).fold(f32::INFINITY, f32::min).max(0.0);
         by.entry((prop.sheet.clone(), p.far))
             .or_default()
-            .append(&edfwrite::moved(&edfwrite::turned(&prop.mesh, p.yaw), [p.x, p.foot, p.z]));
+            .append(&edfwrite::moved(&edfwrite::turned(&prop.mesh, p.yaw), [p.x, p.foot - base, p.z]));
     }
     by.into_iter()
         .filter_map(|((sheet, far), mesh)| {

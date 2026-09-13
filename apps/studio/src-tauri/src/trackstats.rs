@@ -1688,6 +1688,7 @@ mod tests {
                 size_x: 1000.0, size_z: 1000.0, samples: 513, scale: 100.0,
                 relief: Default::default(), surface: Default::default(),
                 wear: crate::trackprog::default_wear(),
+                roughness: crate::trackprog::default_roughness(),
             },
             start: crate::trackprog::Start { x: lap.start.0, z: lap.start.1, angle: lap.heading },
             segments: lap.program_segments(), width: 12.0, features: Vec::new(),
@@ -1801,6 +1802,7 @@ mod tests {
                 samples: 513, scale: 100.0,
                 relief: Default::default(), surface: Default::default(),
                 wear: Default::default(),
+                roughness: crate::trackprog::default_roughness(),
             },
             start: crate::trackprog::Start { x: lap.start.0, z: lap.start.1, angle: lap.heading },
             segments: lap.program_segments(), width: 12.0, features: Vec::new(),
@@ -2625,6 +2627,10 @@ mod tests {
                     Ok(f) => serde_json::from_str(&std::fs::read_to_string(f).unwrap()).unwrap(),
                     Err(_) => serde_json::from_str(crate::trackprog::EXAMPLE).unwrap(),
                 };
+                let mut p = p;
+                if let Some(r) = std::env::var("FROST_ROUGH").ok().and_then(|v| v.parse().ok()) {
+                    p.terrain.roughness = r;
+                }
                 let s = crate::tracksynth::synthesise(&p).unwrap();
                 let st = s.stations.iter().map(|q| (q.x, q.z, q.heading)).collect();
                 let (size_x, size_z) = (p.terrain.size_x, p.terrain.size_z);

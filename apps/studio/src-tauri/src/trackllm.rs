@@ -513,13 +513,22 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
             if r.needs <= r.gives {
                 continue;
             }
-            let crate::trackprog::Feature::Double { at, gap, .. } = f else {
+            let crate::trackprog::Feature::Double { at, gap, height, .. } = *f else {
                 continue;
             };
             // A tenth off what it will just carry, because "just" is not a margin.
             let want = (r.gap_allowed * 0.9).max(0.0);
-            shrunk.push(format!("{:.0} m: {gap:.0} m gap becomes {want:.0}", *at));
-            *gap = want;
+            if want < 1.0 {
+                // No gap clears from here: a tabletop of the same ground, landed on either way.
+                shrunk.push(format!("{at:.0} m: a {gap:.0} m gap no run-up clears becomes a tabletop"));
+                let length = f.length();
+                *f = crate::trackprog::Feature::Tabletop { at, length, height, lip: 0.0 };
+                continue;
+            }
+            shrunk.push(format!("{at:.0} m: {gap:.0} m gap becomes {want:.0}"));
+            if let crate::trackprog::Feature::Double { gap, .. } = f {
+                *gap = want;
+            }
         }
         if !shrunk.is_empty() {
             done.push(format!(
@@ -1661,8 +1670,9 @@ mod tests {
     fn an_uncleavable_gap_is_shrunk_rather_than_sent_back() {
         // Arithmetic, not judgement: there is exactly one longest gap a given speed clears,
         // so asking the model to guess again costs an attempt and usually returns the same
-        // number.
-        let hairpin_exit = 250.0 + std::f32::consts::PI * 10.0 + 5.0;
+        // number. With a run-up: five metres out of a hairpin no gap clears at all, and that
+        // one becomes a tabletop instead.
+        let hairpin_exit = 250.0 + std::f32::consts::PI * 10.0 + 25.0;
         let mut p = hairpin_then_straight();
         p.features = vec![Feature::Double { at: hairpin_exit, height: 2.5, gap: 24.0, lip: 10.0 }];
         let done = repair(&mut p);

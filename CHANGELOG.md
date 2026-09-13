@@ -15,6 +15,24 @@
   shading.
 
 ### Changed
+- Small trees and venue pieces on generated tracks stand on the ground instead of floating.
+- Arches find a place again on laps with rollers on their sweepers.
+- The rough build of a track has more bumps, closer together, not only bigger ones.
+- Triples are a little smaller, and every jump lands with room before the next turn.
+- Only about half the jumps on a generated track carry ruts up their faces.
+- Singles on generated tracks come before a turn, not straight out of one.
+- Long sweepers that had nothing on them carry rollers, and bent straights sweep rather
+  than twist.
+- Ruts on jump faces are fainter and thinner, and follow the lanes coming out of the corner
+  before, so the jump can be closed along a rut.
+- The ground beside a generated track slopes gently down to it instead of leaving the track
+  in a trench.
+- Long straights on generated tracks are broken into sweeping bends, so none runs much past
+  50 m.
+- Wave sections are a normal size, with a small wave to flow in and one to flow out.
+- The back of a double's take-off and the front of its landing are slopes, not walls.
+- Braking bumps stay off the banks of ruts as well as their floors.
+- Generated tracks have a roughness setting; a rougher build sits near an ARL track.
 - The picture beside a generated track's name is a close-up of its biggest jump, with the
   trees, vehicles and banners around it and the track's name across the top.
 - Banners, boards and flags on generated tracks never stand on the track or the start
