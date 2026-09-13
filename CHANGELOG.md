@@ -21,6 +21,20 @@
   shading.
 
 ### Changed
+- Generated tracks have a proper pit area: trucks parked in a row behind the pit lane and a
+  stand at every spot riders start from.
+- Arches and big groups of venue pieces show up in the game again.
+- Haybales line the inside of corners and jump landings instead of sitting in the trees.
+- The yellow edge stakes run one to a spot down both sides of the track.
+- Jumps on generated tracks point where you land: a straight line off the lip lands on the
+  track, even where the lap bends under the jump.
+- The in-game track map shows the pit area and the bigger jumps.
+- Braking bumps roll across the ruts, floor and walls together, instead of standing between
+  them.
+- Long straights on generated tracks become real chicanes you turn through.
+- Jumps can land close to a turn again, which keeps more of them on the lap.
+- The rough (ARL) build has bumps everywhere, shallow packed ruts down the straights, and
+  taller, longer jumps.
 - Small trees and venue pieces on generated tracks stand on the ground instead of floating.
 - Arches find a place again on laps with rollers on their sweepers.
 - The rough build of a track has more bumps, closer together, not only bigger ones.

@@ -546,7 +546,8 @@ const BRAKE_LINES: i32 = 2;
 const BRAKE_GROUP: f32 = 4.0;
 const BRAKE_LINE_M: f32 = 2.8;
 // 1.1 m stood each lone bump up as a cone between the ruts — ridden and seen as shark fins.
-const BRAKE_LINE_HALF_M: f32 = 2.0;
+// Wide enough to carry the ruts across it: the whole groove rises and falls, not one wall.
+const BRAKE_LINE_HALF_M: f32 = 3.5;
 
 /// How far apart the chop everyone's rear wheel leaves on the way out of a corner is, and how
 /// tall it stands. Longer and lower than braking: acceleration bumps are stretched out by the
@@ -560,6 +561,13 @@ const SWELL_WAVELENGTH_M: f32 = 5.0;
 // Wide: a roller spans the track rather than shuffling which groove is lowest.
 const SWELL_ACROSS_M: f32 = 14.0;
 const SWELL_M: f32 = 0.15;
+
+/// A rough build's extra ground: bumps this long, this wide across, this tall per unit of
+/// roughness over one, and how deep its straights' lanes run against a corner's.
+const ARL_BUMP_M: f32 = 2.2;
+const ARL_BUMP_ACROSS_M: f32 = 3.0;
+const ARL_BUMP_H_M: f32 = 0.06;
+const ARL_STRAIGHT_LANES: f32 = 0.35;
 
 /// How much the edge of the riding line wanders in and out, metres, and over what length of
 /// lap.
@@ -1164,6 +1172,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     );
     let feat = feature_profile(&prog.features, lap, prog.blend.max(0.0));
     let feat_side = side_profile(&prog.features, lap, prog.blend.max(0.0));
+    let chords = jump_chords(&prog.features, &stations);
     let berms = berm_profile(&prog.features, &turn, lap);
     let mut feel = ride();
     // How raced the ground arrives. It thins the deformable stack in `tht` and deepens what
@@ -1326,9 +1335,25 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         if d <= half {
             corridor[i] = true;
         }
-        let f = feat.at(s);
+        // Along the jump's own straight line where it has one, eased in over its ends.
+        let (fs, fd, ft) = match chords.iter().find(|c| s > c.a - CHORD_EASE_M && s < c.b + CHORD_EASE_M) {
+            Some(c) => {
+                let (px, pz) = ((i % gw) as f32 * mps_x - c.x0, (i / gw) as f32 * mps_z - c.z0);
+                let along = px * c.ux + pz * c.uz;
+                let across = px * c.uz - pz * c.ux;
+                let s2 = c.a + along / c.len * (c.b - c.a);
+                let w = smoothstep(
+                    ((s - (c.a - CHORD_EASE_M)) / CHORD_EASE_M)
+                        .min((c.b + CHORD_EASE_M - s) / CHORD_EASE_M)
+                        .clamp(0.0, 1.0),
+                );
+                (s + (s2 - s) * w, d + (across.abs() - d) * w, t + (across - t) * w)
+            }
+            None => (s, d, t),
+        };
+        let f = feat.at(fs);
         if f != 0.0 {
-            heights[i] += f * lateral(d, half) * one_side(t, feat_side.at(s));
+            heights[i] += f * lateral(fd, half) * one_side(ft, feat_side.at(fs));
         }
         // A berm stands on the outside of the corner, which is the side away from the turn.
         // Whatever the program asked for, plus what the corner would have grown on its own:
@@ -1535,6 +1560,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 * (1.0 - focus)
                 * lane_turn.at(s);
             let lane_presence = lane_presence.max(lane_lead.at(s) * LANE_LEAD_DEPTH * (1.0 - focus));
+            // A raced straight carries shallow packed lanes too, rounded rather than sharp.
+            let lane_presence = lane_presence.max((rough - 1.0).clamp(0.0, 1.0) * ARL_STRAIGHT_LANES * (1.0 - focus));
             let (lanes, lane_used) = if lane_presence > 0.0 {
                 let mut best = 0.0f32;
                 let mut used = 0.0f32;
@@ -1762,8 +1789,9 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     ((fbm(s / BRAKE_SET_M, 3.3, r.seed ^ 0xB4B0) + 0.6 + 0.3 * (rough - 1.0)) * 2.2).clamp(0.0, 1.0),
                 );
                 // Never inside a rut: a tyre in a groove rides its floor, not the bumps.
-                // Nor on a rut's bank: a crest there stood alone between two grooves, a shark fin.
-                let clear = 1.0 - rut[i].abs().clamp(0.0, 1.0);
+                // Over the ruts as well, floor and walls together: kept off them, a crest stood
+                // alone between two grooves, a shark fin, every time.
+                let clear = 1.0;
                 // In the lines riders brake in, each with its own spacing and phase, so the crests
                 // stagger from one line to the next instead of running straight across the track —
                 // ridden, from above, as "across the track and too uniform".
@@ -1830,6 +1858,12 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // of what ARL's straights carry (0.7–1.0 per 10 m against our 0.4).
             let roll = fbm(s * rough.max(0.5) / SWELL_WAVELENGTH_M, t / SWELL_ACROSS_M, r.seed ^ 0x5E11);
             heights[i] += roll * SWELL_M * rough.sqrt() * across * groomed;
+            // And a raced track has bumps everywhere: small, close and irregular.
+            let extra = (rough - 1.0).max(0.0);
+            if extra > 0.0 {
+                let chatter = fbm(s / ARL_BUMP_M, t / ARL_BUMP_ACROSS_M, r.seed ^ 0xA21B);
+                heights[i] += chatter * ARL_BUMP_H_M * extra * across * groomed;
+            }
         }
     }
 
@@ -2401,6 +2435,63 @@ fn bench_weight(d: f32, half: f32, shoulder: f32) -> f32 {
         smoothstep(1.0 - (d - half) / shoulder)
     }
 }
+
+/// A jump laid along the straight line from its foot to its end rather than bent round the lap.
+/// A rider leaves a lip in a straight line; built along a bend, the jump landed them off the side.
+#[derive(Clone, Copy)]
+struct Chord {
+    a: f32,
+    b: f32,
+    x0: f32,
+    z0: f32,
+    ux: f32,
+    uz: f32,
+    len: f32,
+}
+
+/// Where the centreline is at `s` round the lap.
+fn centre_at(st: &[Station], s: f32) -> (f32, f32) {
+    let k = st.partition_point(|q| q.s < s).clamp(1, st.len() - 1);
+    let (p, q) = (st[k - 1], st[k]);
+    let f = ((s - p.s) / (q.s - p.s).max(1e-6)).clamp(0.0, 1.0);
+    (p.x + (q.x - p.x) * f, p.z + (q.z - p.z) * f)
+}
+
+/// Each jump's straight line, where the lap strays from it by no more than [`CHORD_MAX_SAG_M`];
+/// past that a straight jump would stand off the track, and it bends with the lap instead.
+fn jump_chords(features: &[Feature], st: &[Station]) -> Vec<Chord> {
+    features
+        .iter()
+        .filter(|f| {
+            f.height().abs() >= CHORD_MIN_H_M
+                && f.lips() > 0
+                && !matches!(f, Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Rut { .. })
+        })
+        .filter_map(|f| {
+            let (a, b) = (f.at(), f.at() + f.length());
+            let (x0, z0) = centre_at(st, a);
+            let (x1, z1) = centre_at(st, b);
+            let len = (x1 - x0).hypot(z1 - z0);
+            if len < 1.0 {
+                return None;
+            }
+            let (ux, uz) = ((x1 - x0) / len, (z1 - z0) / len);
+            let sag = (0..=10)
+                .map(|k| {
+                    let (x, z) = centre_at(st, a + (b - a) * k as f32 / 10.0);
+                    ((x - x0) * uz - (z - z0) * ux).abs()
+                })
+                .fold(0.0f32, f32::max);
+            (sag <= CHORD_MAX_SAG_M).then_some(Chord { a, b, x0, z0, ux, uz, len })
+        })
+        .collect()
+}
+
+/// Jumps shorter than this follow the lap; how far a lap may stray from a jump's line before it
+/// bends with the lap; and the ground over which the one hands to the other.
+const CHORD_MIN_H_M: f32 = 0.8;
+const CHORD_MAX_SAG_M: f32 = 4.0;
+const CHORD_EASE_M: f32 = 4.0;
 
 /// Which side a one-sided feature stands on, along the lap: 0 where it spans the width.
 fn side_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
@@ -7298,6 +7389,44 @@ fn ui_map(
 
     // Which way round: a chevron every tenth of the lap, clear of the finish.
     let lap = prog.lap_length().max(1.0);
+    let st_at = |s: f32| {
+        let k = syn.stations.partition_point(|q| q.s < s.rem_euclid(lap)).min(syn.stations.len() - 1);
+        syn.stations[k]
+    };
+    // The bigger jumps, so the map says where the air is.
+    for f in prog.features.iter().filter(|f| f.height() >= MAP_JUMP_H_M) {
+        let mut s = f.at();
+        while s <= f.at() + f.length() {
+            let st = st_at(s);
+            fill(&mut px, dim, at(st.x, st.z), dir(st.heading), px_per_m * 0.8, track_px * 0.3, |_, _| {
+                Some(MAP_JUMP)
+            });
+            s += 1.0;
+        }
+    }
+    // The pits: the stall strip riders spawn on, and the trucks' rows behind it, where the
+    // scenery parks them.
+    let pits = pit_lane(prog);
+    let side = if pits.lat < 0.0 { -1.0 } else { 1.0 };
+    let paddock = pits.lat + side * (pits.half_width + MAP_PADDOCK_M.0);
+    let mut s = pits.from - 3.0;
+    while s <= pits.to + 3.0 {
+        let st = st_at(s);
+        let (rx, rz) = crate::trackprog::right_vector(st.heading);
+        for (lat, half, colour) in [(pits.lat, pits.half_width, MAP_PIT), (paddock, MAP_PADDOCK_M.1, MAP_PADDOCK)] {
+            let c = at(st.x + rx * lat, st.z + rz * lat);
+            fill(&mut px, dim, c, dir(st.heading), px_per_m * 0.8, half * px_per_m, |_, _| Some(colour));
+        }
+        s += 1.0;
+    }
+    if let Ok(font) = ab_glyph::FontRef::try_from_slice(TITLE_FONT) {
+        let st = st_at((pits.from + pits.to) * 0.5);
+        let (rx, rz) = crate::trackprog::right_vector(st.heading);
+        let out = paddock + side * (MAP_PADDOCK_M.1 + 4.0);
+        let (x, y) = at(st.x + rx * out, st.z + rz * out);
+        let size = (n * 0.045).max(12.0);
+        text_at(&mut px, dim, &font, "PITS", size, (x - size, y + size * 0.35), MAP_MARK, 1.0);
+    }
     let finish = finish_at(prog);
     let size = (track_px * 0.8).clamp(7.0, 14.0);
     let mut next = 0.0f32;
@@ -7353,6 +7482,13 @@ fn ui_map(
 const MAP_EDGE: [u8; 3] = [236, 228, 208];
 const MAP_MARK: [u8; 3] = [250, 250, 250];
 const MAP_CHEQUER: [u8; 3] = [0, 0, 0];
+/// The pits' stall strip, the trucks' paddock behind it (metres beyond the strip, half-width),
+/// and the jumps worth marking and how.
+const MAP_PIT: [u8; 3] = [60, 120, 215];
+const MAP_PADDOCK: [u8; 3] = [150, 150, 150];
+const MAP_PADDOCK_M: (f32, f32) = (8.0, 3.5);
+const MAP_JUMP: [u8; 3] = [245, 150, 30];
+const MAP_JUMP_H_M: f32 = 1.5;
 
 /// A box on a picture: centre `c` and unit vector `d` along it, in pixels, `along` and
 /// `across` its half sizes. `f` colours a point by where it sits along and across it.
