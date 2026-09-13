@@ -552,7 +552,13 @@ const BRAKE_LINE_HALF_M: f32 = 2.0;
 /// wheel spinning across them.
 // Longer than the braking bumps, which went to 4 m; drive-out chop is the longer, lower of the two.
 const ACCEL_WAVELENGTH_M: f32 = 6.0;
-const ACCEL_HEIGHT_M: f32 = 0.10;
+const ACCEL_HEIGHT_M: f32 = 0.16;
+
+/// Rolling swells over all ridden ground: how long, how wide before they change, how tall.
+const SWELL_WAVELENGTH_M: f32 = 5.0;
+// Wide: a roller spans the track rather than shuffling which groove is lowest.
+const SWELL_ACROSS_M: f32 = 14.0;
+const SWELL_M: f32 = 0.15;
 
 /// How much the edge of the riding line wanders in and out, metres, and over what length of
 /// lap.
@@ -659,6 +665,8 @@ const FIELD_DETAIL_HEIGHT_M: f32 = 0.045;
 /// you can see where. Indiana's average jump profile, normalised against its own height, sits
 /// at −0.26 twenty metres before the crest and −0.32 twenty metres after, with the lip itself
 /// at +0.97: the jump is a hump between two scoops.
+/// How far below the highest point so far the profile must drop to end a crest.
+const CREST_DROP_M: f32 = 0.15;
 const JUMP_HOLLOW: f32 = 0.30;
 const JUMP_HOLLOW_M: f32 = 22.0;
 
@@ -1746,7 +1754,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 // In sets, not a washboard: ridden as "just stripes" when they ran unbroken the
                 // whole way into every corner.
                 let sets = smoothstep(
-                    ((fbm(s / BRAKE_SET_M, 3.3, r.seed ^ 0xB4B0) + 0.25) * 2.2).clamp(0.0, 1.0),
+                    ((fbm(s / BRAKE_SET_M, 3.3, r.seed ^ 0xB4B0) + 0.6) * 2.2).clamp(0.0, 1.0),
                 );
                 // Never inside a rut: a tyre in a groove rides its floor, not the bumps.
                 let clear = 1.0 - (-rut[i]).clamp(0.0, 1.0);
@@ -1782,7 +1790,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     // One or two to a set: the first one or two slots of each group stand.
                     let g = (n / BRAKE_GROUP).floor();
                     let slot = n - g * BRAKE_GROUP;
-                    let count = if hash2(g as i32, k * 131 + 7, r.seed ^ 0xB4C6) > 0.0 { 2.0 } else { 1.0 };
+                    // Two or three: ARL's approaches run 1.1–1.9 swells per 10 m and ours ran 0.5.
+                    let count = if hash2(g as i32, k * 131 + 7, r.seed ^ 0xB4C6) > 0.0 { 3.0 } else { 3.0 };
                     let size = if slot < count { 0.6 + 0.4 * pick(3) } else { 0.0 };
                     let (prof, falling) = if x < peak {
                         (smoothstep(x / peak), false)
@@ -1810,6 +1819,10 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let ripple = ((s / feel.accel.0 + drift) * std::f32::consts::TAU).sin();
                 heights[i] += ripple * feel.accel.1 * 0.5 * out * across * polished * groomed;
             }
+            // And the ground everybody rides rolls: irregular swells a few metres long, the most
+            // of what ARL's straights carry (0.7–1.0 per 10 m against our 0.4).
+            let roll = fbm(s / SWELL_WAVELENGTH_M, t / SWELL_ACROSS_M, r.seed ^ 0x5E11);
+            heights[i] += roll * SWELL_M * across * groomed;
         }
     }
 
@@ -3061,13 +3074,35 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
         if hi <= lo + 2 {
             continue;
         }
-        let crest = (lo..=hi)
-            .max_by(|a, b| out.v[*a].total_cmp(&out.v[*b]))
-            .unwrap_or(lo);
-        for i in lo + 1..=crest {
+        // Up to the first crest and down from the last, not the tallest: taken to the tallest,
+        // a double's gap and a triple's dips filled up to it and every one rode as a tabletop.
+        let first = {
+            let (mut best, mut i) = (lo, lo);
+            while i <= hi && out.v[i] >= out.v[best] - CREST_DROP_M {
+                if out.v[i] > out.v[best] {
+                    best = i;
+                }
+                i += 1;
+            }
+            best
+        };
+        let last = {
+            let (mut best, mut i) = (hi, hi);
+            while i >= first && out.v[i] >= out.v[best] - CREST_DROP_M {
+                if out.v[i] > out.v[best] {
+                    best = i;
+                }
+                if i == 0 {
+                    break;
+                }
+                i -= 1;
+            }
+            best
+        };
+        for i in lo + 1..=first {
             out.v[i] = out.v[i].max(out.v[i - 1]);
         }
-        for i in (crest..hi).rev() {
+        for i in (last..hi).rev() {
             out.v[i] = out.v[i].max(out.v[i + 1]);
         }
     }
@@ -11847,11 +11882,14 @@ mod tests {
         // flattening off before the edge, which loses far more than a tenth of it.
         let ramp = crate::trackprog::takeoff_lip_deg(2.4, up).to_radians().tan();
         let last = h(lip) - h(lip - 1.0);
+        // 0.85: a 24° lip's last metre is under three cells of this grid, and a knuckle loses
+        // far more than that.
         assert!(
-            last > ramp * 0.9,
+            last > ramp * 0.85,
             "the face rounds over before its lip: {last:.3} per metre against a {ramp:.3} ramp"
         );
-        let deck = [h(lip + 1.0), h(lip + 2.0), h(lip + 3.0)];
+        // Past the few metres where the face's ruts run out over the deck and shallow.
+        let deck = [h(lip + 5.0), h(lip + 6.0), h(lip + 7.0)];
         let spread = deck.iter().fold(f32::MIN, |a, &b| a.max(b)) - deck.iter().fold(f32::MAX, |a, &b| a.min(b));
         assert!(spread < 0.06, "the deck past the lip is not flush: {deck:.2?}");
         // And nothing past the lip stands above the deck: no wall, no kick.
