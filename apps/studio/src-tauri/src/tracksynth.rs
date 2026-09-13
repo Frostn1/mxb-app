@@ -733,10 +733,6 @@ const WET_DARKEN: f32 = 0.74;
 /// pixels and stored uncompressed.
 const UI_IMAGE_DIM: usize = 512;
 
-/// The ground sheet the pictures are painted from. Finer than the pictures themselves: the
-/// shot is a close-up, and at 512 across a whole terrain the ground under it is a blur.
-const UI_SHEET_DIM: usize = 1536;
-
 /// Coverage masks inside a `.trh`, which published tracks keep at half the grid — 2048
 /// against 2049. It is also the resolution anything reading the file will measure it at.
 const TRH_MASK_DIM: usize = 2048;
@@ -7013,7 +7009,10 @@ fn ui_images(
         .iter()
         .map(|(mesh, sheet)| crate::trackshot::Object { mesh, sheet })
         .collect();
-    let albedo = ground_sheet(prog, syn, UI_SHEET_DIM);
+    // At the grid's own resolution: the shot is a close-up, and anything coarser blurs the
+    // grooves and the worn lines — which are painted, not just shaped — into one brown.
+    let adim = (syn.gw.max(syn.gh) - 1).max(dim);
+    let albedo = ground_sheet(prog, syn, adim);
     // Straight off the `.amb`: `sun_position`, and the `clear` condition's light. The picture
     // is of the track in the weather the game opens it in.
     let sun = {
@@ -7027,7 +7026,7 @@ fn ui_images(
         mps: syn.mps,
         heights: &syn.heights,
         albedo: &albedo,
-        adim: UI_SHEET_DIM,
+        adim,
         focus: &focus,
         objects: &objects,
         sun,
@@ -7046,16 +7045,22 @@ fn ui_images(
 /// How much air above the line the shot keeps: enough for the arch over the finish.
 const HERO_HEADROOM_M: f32 = 7.0;
 
-/// What the shot frames: the finish jump with the arch over it, or failing one the finish
-/// line with its gantry — the one place every track has something built. A jump elsewhere
-/// is only a brown mound at this size. Both edges of the track and some air above it, so the
-/// arch and the banners beside it fit too.
+/// What the shot frames: the finish jump; failing one, the tallest jump on the lap; failing
+/// that, the finish line's stretch of straight. Both edges of the track and some air above
+/// it, so what stands beside it fits too.
 fn hero_focus(prog: &TrackProgram, syn: &Synth) -> Vec<[f32; 3]> {
-    let (from, to) = match prog.finish_jump() {
+    use crate::trackprog::Feature;
+    let jump = prog.finish_jump().or_else(|| {
+        prog.features
+            .iter()
+            .filter(|f| matches!(f, Feature::Tabletop { .. } | Feature::Double { .. }))
+            .max_by(|a, b| a.height().total_cmp(&b.height()))
+    });
+    let (from, to) = match jump {
         Some(f) => (f.at() - 10.0, f.at() + f.length() + 10.0),
         None => {
             let f = finish_at(prog);
-            (f - 35.0, f + 20.0)
+            (f - 30.0, f + 30.0)
         }
     };
     let lap = prog.lap_length().max(1.0);

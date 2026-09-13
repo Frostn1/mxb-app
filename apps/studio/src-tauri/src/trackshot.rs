@@ -597,6 +597,7 @@ fn draw_object(
         return;
     }
     let cutout = s.name.ends_with("_c_a");
+    let mips = mips(s, cutout);
     let normals = m.normals.len() >= n * 3;
     let mut sp = Vec::with_capacity(n);
     let mut lit = Vec::with_capacity(n);
@@ -628,15 +629,24 @@ fn draw_object(
         let p = v.map(|i| [sp[i][0], sp[i][1]]);
         let uv = v.map(|i| [m.uvs[i * 2], m.uvs[i * 2 + 1]]);
         let l = v.map(|i| lit[i]);
+        // Which level of the chain: as many texels to a pixel as near one as it gets.
+        let cross = |a: [f32; 2], b: [f32; 2], c: [f32; 2]| {
+            ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])).abs()
+        };
+        let texels = cross(uv[0], uv[1], uv[2]) * (tw * th) as f32;
+        let pixels = cross(p[0], p[1], p[2]).max(1e-6);
+        let lod = (0.5 * (texels / pixels).max(1.0).log2()).round() as usize;
+        let (lw, lh, lpx) = &mips[lod.min(mips.len() - 1)];
+        let (lw, lh) = (*lw, *lh);
         cover(p, z, sdim, |at, w, d| {
             if d >= zbuf[at] {
                 return;
             }
             let u = persp(w, z, d, [uv[0][0], uv[1][0], uv[2][0]]);
             let vv = persp(w, z, d, [uv[0][1], uv[1][1], uv[2][1]]);
-            let tx = (((u - u.floor()) * tw as f32) as usize).min(tw - 1);
-            let ty = (((vv - vv.floor()) * th as f32) as usize).min(th - 1);
-            let texel = &s.rgba[(ty * tw + tx) * 4..(ty * tw + tx) * 4 + 4];
+            let tx = (((u - u.floor()) * lw as f32) as usize).min(lw - 1);
+            let ty = (((vv - vv.floor()) * lh as f32) as usize).min(lh - 1);
+            let texel = &lpx[(ty * lw + tx) * 4..(ty * lw + tx) * 4 + 4];
             if texel[3] < 128 {
                 return;
             }
@@ -645,6 +655,66 @@ fn draw_object(
             px[at] = air(scene, cam, col, d);
         });
     }
+}
+
+/// A sheet and the levels under it, each half the last, as `(width, height, rgba)`.
+///
+/// A distant model sampled from the full sheet catches one texel in many, which sparkles on
+/// a banner and all but deletes a tree: a leaf card is nine tenths transparent, so most of its
+/// pixels land on nothing. Each level averages the one above — cut-outs weighting colour by
+/// alpha, so the clear texels do not bleed in — and then scales its alpha until as much of it
+/// passes the cut as did at the top, so a tree keeps its leaves as it shrinks.
+fn mips(s: &crate::edfwrite::Texture, cutout: bool) -> Vec<(usize, usize, Vec<u8>)> {
+    let cover = |px: &[u8], k: f32| {
+        px.chunks_exact(4).filter(|p| p[3] as f32 * k >= 128.0).count() as f32
+            / (px.len() / 4).max(1) as f32
+    };
+    let target = cover(&s.rgba, 1.0);
+    let mut out = vec![(s.width as usize, s.height as usize, s.rgba.clone())];
+    loop {
+        let (w, h, px) = out.last().expect("the top level");
+        let (w, h) = (*w, *h);
+        if w <= 1 && h <= 1 {
+            break;
+        }
+        let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+        let mut next = vec![0u8; nw * nh * 4];
+        for y in 0..nh {
+            for x in 0..nw {
+                let (mut rgb, mut a, mut wsum) = ([0.0f32; 3], 0.0f32, 0.0f32);
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let i = ((y * 2 + dy).min(h - 1) * w + (x * 2 + dx).min(w - 1)) * 4;
+                    let wt = if cutout { px[i + 3] as f32 } else { 1.0 };
+                    for k in 0..3 {
+                        rgb[k] += px[i + k] as f32 * wt;
+                    }
+                    a += px[i + 3] as f32;
+                    wsum += wt;
+                }
+                let o = (y * nw + x) * 4;
+                for k in 0..3 {
+                    next[o + k] = if wsum > 0.0 { (rgb[k] / wsum) as u8 } else { 0 };
+                }
+                next[o + 3] = (a / 4.0) as u8;
+            }
+        }
+        if cutout && target > 0.0 && cover(&next, 1.0) < target {
+            let (mut lo, mut hi) = (1.0f32, 16.0f32);
+            for _ in 0..14 {
+                let mid = 0.5 * (lo + hi);
+                if cover(&next, mid) < target {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            for p in next.chunks_exact_mut(4) {
+                p[3] = (p[3] as f32 * hi).min(255.0) as u8;
+            }
+        }
+        out.push((nw, nh, next));
+    }
+    out
 }
 
 /// Every pixel a projected triangle covers, with its barycentric weights and its depth.
@@ -689,8 +759,11 @@ fn persp(w: [f32; 3], z: [f32; 3], d: f32, a: [f32; 3]) -> f32 {
 
 /// Air. Measured against the camera's own reach rather than in absolute metres, so a 400 m
 /// track and a 900 m one come out with the same amount of it.
+///
+/// Starting well past the subject and never total: starting at it greyed the one thing the
+/// picture is of, and everything behind it went to a wash.
 fn air(scene: &Scene, cam: &Camera, col: [f32; 3], d: f32) -> [f32; 3] {
-    let t = smoothstep(((d - cam.reach) / (cam.reach * 2.0)).clamp(0.0, 1.0)) * 0.94;
+    let t = smoothstep(((d - cam.reach * 2.0) / (cam.reach * 6.0)).clamp(0.0, 1.0)) * 0.75;
     [0, 1, 2].map(|k| col[k] + (scene.haze[k] - col[k]) * t)
 }
 
