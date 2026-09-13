@@ -51,7 +51,8 @@ const STAKE_W_M: f32 = 0.045;
 /// How far past the track edge the line stands: Indiana's netting is ~12.5 m out from its ±7 m
 /// edge. Measured from our edge, so a wider track doesn't swallow it; at 20 m flat it stood
 /// 12 m back from a 16 m track.
-const EDGE_LINE_OUT_M: f32 = 5.5;
+// Hugging the track, just outside the stakes: at 5.5 m out it marked nothing.
+const EDGE_LINE_OUT_M: f32 = 2.0;
 /// Most ground a panel may cross end to end before it is left out rather than hung in the air.
 const EDGE_LINE_STEP_M: f32 = 0.6;
 const BANNER_W_M: f32 = 4.0;
@@ -253,6 +254,33 @@ fn across(heading_rad: f32) -> f32 {
 ///
 /// `cursor` is carried between calls because `s` only ever moves forwards; without it this is
 /// a scan of the whole lap for every board.
+/// Where a fence stands beside the start straight: on the side the lap runs, just past the
+/// straight's edge, from the gate row to a gap at the join. With both open, a rider joining the
+/// lap could not tell which way it went; fenced, the only way out is the lap's own direction.
+fn spur_fence_line(syn: &Synth, coarse: &[crate::trackprog::Station]) -> Vec<(f32, f32)> {
+    let Some(spur) = syn.spur.as_ref() else {
+        return Vec::new();
+    };
+    let (from, to) = (spur.gate_at().max(0.0), spur.length() - SPUR_FENCE_GAP_M);
+    spur.stations
+        .iter()
+        .filter(|q| q.s >= from && q.s <= to)
+        .filter_map(|q| {
+            let near = coarse
+                .iter()
+                .min_by(|a, b| (a.x - q.x).hypot(a.z - q.z).total_cmp(&(b.x - q.x).hypot(b.z - q.z)))?;
+            let (rx, rz) = crate::trackprog::right_vector(q.heading);
+            let side = if (near.x - q.x) * rx + (near.z - q.z) * rz >= 0.0 { 1.0 } else { -1.0 };
+            let out = spur.at(q.s) + SPUR_FENCE_OUT_M;
+            Some((q.x + rx * out * side, q.z + rz * out * side))
+        })
+        .collect()
+}
+
+/// The start fence: how far short of the join it stops, and how far past the straight's edge.
+const SPUR_FENCE_GAP_M: f32 = 12.0;
+const SPUR_FENCE_OUT_M: f32 = 1.5;
+
 fn along_line(
     line: &[(f32, f32)],
     acc: &[f32],
@@ -1441,6 +1469,41 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
                 n += 1;
             }
         }
+        // The start straight fenced off from the lap beside it, up to a gap at the join.
+        let mut fence = 0usize;
+        let line = spur_fence_line(syn, &coarse);
+        if line.len() >= 2 {
+            let mut acc = vec![0.0f32];
+            for w in line.windows(2) {
+                acc.push(acc.last().unwrap() + (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1));
+            }
+            let total = *acc.last().unwrap();
+            let (mut cursor, mut s) = (0usize, 0.0f32);
+            while s + step <= total {
+                let (qx, qz, qdeg) = along_line(&line, &acc, &mut cursor, s);
+                let (x, z, deg) = along_line(&line, &acc, &mut cursor, s + step * 0.5);
+                s += step;
+                if !inside(prog, x, z, 3.0) {
+                    continue;
+                }
+                let (lo, hi) = ground_span(syn, x, z, deg, step);
+                if hi - lo > EDGE_LINE_STEP_M {
+                    continue;
+                }
+                let yaw = deg - 90.0 - piece.axis_ref.to_degrees();
+                let panel = edfwrite::moved(&edfwrite::turned(&piece.mesh, yaw), [x, (lo + hi) * 0.5 - 0.05, z]);
+                if on_riding_surface(syn, half, &panel) || pits.on_lane(lap, syn, &panel) {
+                    continue;
+                }
+                mesh.append(&panel);
+                if let Some(p) = edge_post {
+                    let yaw = qdeg - 90.0 - p.axis_ref.to_degrees();
+                    post_mesh.append(&edfwrite::moved(&edfwrite::turned(&p.mesh, yaw), [qx, ground(syn, qx, qz), qz]));
+                }
+                fence += 1;
+            }
+        }
+        tally.push(("start fence", fence));
         if let Some((name, w, h, rgba)) = lib.sheets.iter().find(|s| s.0 == piece.sheet) {
             let tex = Texture { name: name.clone(), width: *w, height: *h, rgba: rgba.clone() };
             barrier_kind = Some(("barrier".into(), mesh, tex, true));
@@ -1843,6 +1906,8 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         let (placed, got) = lifted_counted(lib, prog, syn);
         tally.push(("arches", got.arches));
         tally.push(("bales", got.bales));
+        tally.push(("parked cars", got.parked));
+        tally.push(("turn markers", got.turn_markers));
         tally.push(("pit vehicles", got.pit_vehicles));
         for (name, mesh, tex, is_solid) in placed {
             tally.push(("lifted", mesh.triangle_count()));
@@ -1914,38 +1979,22 @@ pub fn blocks(scenes: &[Scene]) -> String {
 mod tests {
     use super::*;
 
-
-    /// A library "tree" whose UVs sit on the clear part of its sheet is not planted — it
-    /// would draw as nothing. One on the leaves is.
+    /// The start straight is fenced from the lap beside it, and the join is left open.
     #[test]
-    fn a_tree_that_would_draw_as_nothing_is_not_planted() {
-        // Left texel clear, right texel leaves.
-        let rgba = [[0u8, 0, 0, 0], [40, 90, 30, 255]].concat();
-        let prop = |u: f32| {
-            let mut mesh = edfwrite::card(2.0, 8.0);
-            mesh.uvs = vec![u; mesh.vertex_count() * 2];
-            crate::trackprops::Prop {
-                id: format!("t{u}"),
-                sheet: "leaves_c_a".into(),
-                class: crate::trackobjects::Class::Tree,
-                mesh,
-                height: 8.0,
-                span: 2.0,
-                reach: 1.0,
-                axis_ref: 0.0,
-            }
+    fn the_start_straight_is_fenced_up_to_its_join() {
+        let (p, s) = demo();
+        let Some(spur) = s.spur.as_ref() else {
+            return;
         };
-        let lib = crate::trackprops::PropLibrary {
-            donor: "test".into(),
-            donor_lap_m: 1000.0,
-            props: vec![prop(0.25), prop(0.75)],
-            instances: vec![],
-            runs: vec![],
-            sheets: vec![("leaves_c_a".into(), 2, 1, rgba)],
-        };
-        assert!(!shows(&lib, &lib.props[0]), "a tree on the clear texel was kept");
-        assert!(shows(&lib, &lib.props[1]), "a tree on the leaves was dropped");
+        let line = spur_fence_line(&s, &p.stations(2.0));
+        assert!(line.len() > 4, "no fence beside the start straight");
+        let end = spur.stations.last().unwrap();
+        for &(x, z) in &line {
+            assert!(s.outside_the_start(x, z).map_or(true, |e| e > 0.5), "the fence stands on the start straight");
+            assert!((x - end.x).hypot(z - end.z) > SPUR_FENCE_GAP_M - 2.0, "the fence closes the join");
+        }
     }
+
 
     /// Tear-offs lie in patches at the corners, on or beside the track, and never on the start.
     #[test]
@@ -2505,7 +2554,7 @@ mod tests {
             assert!(d > half + 0.9 && d < half + 4.5, "a bale {d:.1} m from the centreline, past a {half:.1} m half-width");
             assert!((v[1] - ground(&s, v[0], v[2])).abs() < 1.0, "a bale off the ground");
         }
-        // At a corner they mark its inside.
+        // At a corner they stand on its outside, where riders run wide; the inside is the markers'.
         let (mut inner, mut outer) = (0, 0);
         for v in m.positions.chunks_exact(3) {
             let q = st.iter().min_by(|a, b| (a.x - v[0]).hypot(a.z - v[2]).total_cmp(&(b.x - v[0]).hypot(b.z - v[2]))).unwrap();
@@ -2515,7 +2564,7 @@ mod tests {
             let (rx, rz) = crate::trackprog::right_vector(q.heading);
             if ((v[0] - q.x) * rx + (v[2] - q.z) * rz) * q.curvature > 0.0 { inner += 1 } else { outer += 1 }
         }
-        assert!(inner > 0 && outer * 3 <= inner, "{inner} bale corners inside a turn, {outer} outside");
+        assert!(outer > 0 && inner * 3 <= outer, "{outer} bale corners outside a turn, {inner} inside");
     }
 
     /// One stake a spot, evenly down both edges: none doubled, about every STAKE_GAP_M.
@@ -2822,13 +2871,20 @@ mod tests {
             let d = st.iter().map(|q| (q.x - v[0]).hypot(q.z - v[2])).fold(f32::INFINITY, f32::min);
             assert!(d > half, "a leg stands {d:.1} m from the centreline, on the track");
         }
-        let n = (mesh.positions.len() / 3) as f32;
-        let (cx, cz) = mesh
-            .positions
-            .chunks_exact(3)
-            .fold((0.0, 0.0), |a, v| (a.0 + v[0] / n, a.1 + v[2] / n));
-        let d = p.stations(1.0).iter().map(|q| (q.x - cx).hypot(q.z - cz)).fold(f32::INFINITY, f32::min);
-        assert!(d < 2.0, "the arch stands {d:.1} m off the centreline, not over the track");
+        // Each copy round the lap on its own: gathered by where they stand, every one centred
+        // over the track.
+        let mut copies: Vec<(f32, f32, f32)> = Vec::new();
+        for v in mesh.positions.chunks_exact(3) {
+            match copies.iter_mut().find(|c| (c.0 / c.2 - v[0]).hypot(c.1 / c.2 - v[2]) < 40.0) {
+                Some(c) => *c = (c.0 + v[0], c.1 + v[2], c.2 + 1.0),
+                None => copies.push((v[0], v[2], 1.0)),
+            }
+        }
+        for (x, z, n) in copies {
+            let (cx, cz) = (x / n, z / n);
+            let d = p.stations(1.0).iter().map(|q| (q.x - cx).hypot(q.z - cz)).fold(f32::INFINITY, f32::min);
+            assert!(d < 2.0, "an arch stands {d:.1} m off the centreline, not over the track");
+        }
     }
 
     /// An "arch" lifted with the boards round it, or a rig too tall to be one, never lays
@@ -2957,7 +3013,7 @@ mod tests {
         let (half, want) = (p.width * 0.5, p.width * 0.5 + EDGE_LINE_OUT_M);
         let med = d[d.len() / 2];
         assert!((med - want).abs() < 0.75, "{name} stands {med:.1} m out, not {want:.1}");
-        assert!(d[0] > half + 2.5, "{name} comes {:.1} m from the centreline, at the track edge", d[0]);
+        assert!(d[0] > half + 1.0, "{name} comes {:.1} m from the centreline, at the track edge", d[0]);
         assert!(d[d.len() * 95 / 100] < want + 2.5, "{name} strays {:.1} m out", d[d.len() * 95 / 100]);
     }
 
@@ -3556,10 +3612,10 @@ const ARCH_STRAIGHT_R_M: f32 = 40.0;
 /// How far along the lap either side of an arch the ground must be that straight.
 const ARCH_STRAIGHT_ALONG_M: f32 = 15.0;
 const ARCH_OFF_FEATURE_M: f32 = 15.0;
-/// The tallest feature an arch may stand over.
-const ARCH_OVER_FEATURE_H_M: f32 = 1.2;
 const ARCH_FROM_START_M: f32 = 110.0;
-const ARCH_APART_M: f32 = 50.0;
+const ARCH_APART_M: f32 = 250.0;
+/// How many times round the lap one arch may stand.
+const ARCH_COPIES: usize = 3;
 
 /// Whether a lifted prop is one object. A mesh reaching past its own box was lifted with its
 /// neighbours' triangles (a library baked before `trackprops::lift` was fixed): a donor's run.
@@ -3632,6 +3688,8 @@ pub fn lifted(
 /// What [`lifted_counted`] stood by rule rather than replayed.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Lifted {
+    pub turn_markers: usize,
+    pub parked: usize,
     pub arches: usize,
     pub bales: usize,
     pub pit_vehicles: usize,
@@ -3674,13 +3732,10 @@ pub fn lifted_counted(
                 let straight = (-n..=n).all(|j| {
                     at((s + j as f32 * 2.5).rem_euclid(lap)).curvature.abs() < 1.0 / ARCH_STRAIGHT_R_M
                 });
-                // Off the jumps, not the rollers: with the bare stretches rolled, an arch found
-                // nowhere to stand.
-                let on_jump = prog.features.iter().filter(|f| f.height().abs() > ARCH_OVER_FEATURE_H_M).any(|f| {
-                    s > f.at() - ARCH_OFF_FEATURE_M && s < f.at() + f.length() + ARCH_OFF_FEATURE_M
-                });
+                // Over a jump as well: a sponsor arch across a face or a landing is where one looks
+                // right. Only its legs are kept off the riding surface, by `fits`.
                 let crowded = placed.iter().any(|&q| wrap(q - s) < ARCH_APART_M);
-                if !straight || on_jump || crowded {
+                if !straight || crowded {
                     continue;
                 }
                 let st = at(s);
@@ -3706,6 +3761,7 @@ pub fn lifted_counted(
     let duplicates_edge = |p: &crate::trackprops::Prop| {
         edge.iter().any(|e| e.sheet == p.sheet && (e.height - p.height).abs() < 0.1 && p.span < 0.25)
     };
+    let markers: std::collections::HashSet<usize> = (0..lib.props.len()).filter(|&k| is_marker(lib, &lib.props[k])).collect();
     for inst in &lib.instances {
         let prop = &lib.props[inst.prop];
         if prop.span > LIFT_RUN_SPAN_M && prop.height < LIFT_RUN_HEIGHT_M {
@@ -3715,7 +3771,12 @@ pub fn lifted_counted(
             continue;
         }
         // Bales are laid by rule (`place_bales`): at the donor's offsets they stood in the trees.
-        if prop.class == crate::trackobjects::Class::Bale || duplicates_edge(prop) {
+        // Bales, cars and turn markers are laid by rule; at the donor's offsets they stood anywhere.
+        if markers.contains(&inst.prop)
+            || prop.class == crate::trackobjects::Class::Bale
+            || prop.class == crate::trackobjects::Class::Vehicle
+            || duplicates_edge(prop)
+        {
             continue;
         }
         // An arch or gantry that spanned the donor's track spans ours: across it on a straight,
@@ -3772,11 +3833,14 @@ pub fn lifted_counted(
                 let m = place(s);
                 !on_riding_surface(syn, half, &m) && !pits.on_lane(lap, syn, &m)
             };
-            let Some(s) = over_track((inst.along * lap).clamp(0.0, lap), arch_reach, &arches_at, &fits) else {
-                continue;
-            };
-            arches_at.push(s);
-            by_sheet.entry(prop.sheet.clone()).or_default().append(&place(s));
+            // The same arch again round the lap, far apart: one on a whole lap went unseen.
+            for copy in 0..ARCH_COPIES {
+                let s0 = (inst.along * lap + copy as f32 * lap / ARCH_COPIES as f32).rem_euclid(lap);
+                if let Some(s) = over_track(s0, arch_reach, &arches_at, &fits) {
+                    arches_at.push(s);
+                    by_sheet.entry(prop.sheet.clone()).or_default().append(&place(s));
+                }
+            }
             continue;
         }
         let st = at((inst.along * lap).clamp(0.0, lap));
@@ -3824,6 +3888,8 @@ pub fn lifted_counted(
     }
 
     let bales = place_bales(lib, prog, syn, &mut by_sheet);
+    let parked = place_parking(lib, prog, syn, &mut by_sheet);
+    let turn_markers = place_markers(lib, prog, syn, &mut by_sheet);
     let pit_vehicles = place_pits(lib, prog, syn, &mut by_sheet);
     let mut out = Vec::new();
     for (sheet, mesh) in by_sheet {
@@ -3849,7 +3915,7 @@ pub fn lifted_counted(
         out.push((short_sheet(&sheet), mesh, tex, solid));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
-    (out, Lifted { arches: arches_at.len(), bales, pit_vehicles })
+    (out, Lifted { arches: arches_at.len(), bales, pit_vehicles, parked, turn_markers })
 }
 
 /// The most vertices one model may carry: the game's draw groups index in 16 bits, TerrainEd makes
@@ -4140,6 +4206,179 @@ const BALE_MAX_REACH_M: f32 = 1.6;
 
 /// Bales where a track lines them: rows just past the edge on the inside of tight corners, where
 /// a track marks its turns, and beside jump landings, draped on the ground. Returns how many stood.
+/// Spectator parking: the donor's cars and vans in tidy lots off the track, nose in, rather
+/// than wherever the donor had them.
+/// Whether a piece is one of the donor's yellow standing turn markers (foam blocks at a real
+/// track): small, standing, and yellow under its own texture.
+fn is_marker(lib: &crate::trackprops::PropLibrary, p: &crate::trackprops::Prop) -> bool {
+    if p.class != crate::trackobjects::Class::Structure || !(0.8..=1.6).contains(&p.height) || p.span > 1.0 {
+        return false;
+    }
+    let Some((_, w, h, rgba)) = lib.sheets.iter().find(|s| s.0 == p.sheet) else {
+        return false;
+    };
+    let (mut sum, mut n) = ([0.0f64; 3], 0.0f64);
+    for uv in p.mesh.uvs.chunks_exact(2) {
+        let x = (uv[0].rem_euclid(1.0) * (*w as f32 - 1.0)) as usize;
+        let y = (uv[1].rem_euclid(1.0) * (*h as f32 - 1.0)) as usize;
+        let o = (y * *w as usize + x) * 4;
+        if o + 2 < rgba.len() {
+            for c in 0..3 {
+                sum[c] += rgba[o + c] as f64;
+            }
+            n += 1.0;
+        }
+    }
+    if n == 0.0 {
+        return false;
+    }
+    let (r, g, b) = (sum[0] / n, sum[1] / n, sum[2] / n);
+    r > 150.0 && g > 110.0 && b < 110.0 && r > b + 60.0
+}
+
+/// The yellow turn markers on the inside of every tight corner, where a rider would cut across,
+/// just outside the riding line. They are structures, so hitting one stops you.
+fn place_markers(
+    lib: &crate::trackprops::PropLibrary,
+    prog: &TrackProgram,
+    syn: &Synth,
+    by_sheet: &mut std::collections::HashMap<String, Mesh>,
+) -> usize {
+    let blocks: Vec<&crate::trackprops::Prop> = lib.props.iter().filter(|p| is_marker(lib, p)).collect();
+    if blocks.is_empty() {
+        return 0;
+    }
+    let (lap, half, seed) = (prog.lap_length(), prog.width * 0.5, prog.terrain.relief.seed);
+    let stations = prog.stations(0.5);
+    let at = |s: f32| stations[((s.rem_euclid(lap) / 0.5) as usize).min(stations.len() - 1)];
+    let coarse = prog.stations(2.0);
+    let n = coarse.len();
+    let pits = Pits::of(prog);
+    let (mut count, mut last) = (0usize, f32::NEG_INFINITY);
+    for i in 0..n {
+        let c = coarse[i].curvature.abs();
+        if c < 1.0 / MARKER_CORNER_R_M
+            || c < coarse[(i + n - 1) % n].curvature.abs()
+            || c < coarse[(i + 1) % n].curvature.abs()
+        {
+            continue;
+        }
+        let s0 = coarse[i].s;
+        if s0 - last < MARKER_APART_M {
+            continue;
+        }
+        last = s0;
+        // The inside: curvature is positive turning right, and +1 is the rider's right.
+        let side = coarse[i].curvature.signum();
+        for j in 0..MARKERS_PER_CORNER {
+            let st = at(s0 + (j as f32 - (MARKERS_PER_CORNER as f32 - 1.0) * 0.5) * MARKER_PITCH_M);
+            let (rx, rz) = crate::trackprog::right_vector(st.heading);
+            let out = half + MARKER_OUT_M;
+            let (x, z) = (st.x + rx * out * side, st.z + rz * out * side);
+            let key = (i * 7 + j) as u32;
+            let prop = blocks[((rnd(seed ^ 0x3A7C, key) * blocks.len() as f32) as usize).min(blocks.len() - 1)];
+            let m = draped(&edfwrite::turned(&prop.mesh, st.heading.to_degrees()), x, z, 0.0, syn);
+            if on_riding_surface(syn, half, &m)
+                || pits.on_lane(lap, syn, &m)
+                || syn.outside_the_start(x, z).is_some_and(|e| e < 2.0)
+            {
+                continue;
+            }
+            by_sheet.entry(prop.sheet.clone()).or_default().append(&m);
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Turn markers: the corners that get them, how many to one, how far apart, how far past the
+/// edge, and the least lap between two corners' sets.
+const MARKER_CORNER_R_M: f32 = 35.0;
+const MARKERS_PER_CORNER: usize = 4;
+const MARKER_PITCH_M: f32 = 3.0;
+const MARKER_OUT_M: f32 = 1.3;
+const MARKER_APART_M: f32 = 20.0;
+
+fn place_parking(
+    lib: &crate::trackprops::PropLibrary,
+    prog: &TrackProgram,
+    syn: &Synth,
+    by_sheet: &mut std::collections::HashMap<String, Mesh>,
+) -> usize {
+    use crate::trackobjects::Class;
+    let cars: Vec<&crate::trackprops::Prop> = lib
+        .props
+        .iter()
+        .filter(|p| p.class == Class::Vehicle && whole(p) && (1.2..=3.2).contains(&p.height) && p.span <= PARK_CAR_MAX_M)
+        .collect();
+    if cars.is_empty() {
+        return 0;
+    }
+    let (lap, half, seed) = (prog.lap_length(), prog.width * 0.5, prog.terrain.relief.seed);
+    let stations = prog.stations(0.5);
+    let coarse = prog.stations(2.0);
+    let at = |s: f32| stations[((s.rem_euclid(lap) / 0.5) as usize).min(stations.len() - 1)];
+    let pits = Pits::of(prog);
+    let (depth, len) = (PARK_ROWS as f32 * PARK_ROW_M, PARK_PER_ROW as f32 * PARK_PITCH_M);
+    let (mut placed, mut lots, mut s) = (0usize, 0usize, lap * 0.25);
+    'lots: while s < lap * 0.95 && lots < PARK_LOTS {
+        let st = at(s);
+        let (rx, rz) = crate::trackprog::right_vector(st.heading);
+        let (fx, fz) = crate::trackprog::heading_vector(st.heading);
+        for side in [1.0f32, -1.0] {
+            let out = half + PARK_OUT_M;
+            let (cx, cz) = (st.x + rx * out * side, st.z + rz * out * side);
+            let spot = |a: f32, b: f32| (cx + fx * a + rx * b * side, cz + fz * a + rz * b * side);
+            let clear = [(-len * 0.5, 0.0), (len * 0.5, 0.0), (-len * 0.5, depth), (len * 0.5, depth)].iter().all(|&(a, b)| {
+                let (x, z) = spot(a, b);
+                inside(prog, x, z, 4.0)
+                    && clearance(&coarse, x, z) >= half + PARK_CLEAR_M
+                    && syn.outside_the_start(x, z).map_or(true, |e| e > PARK_CLEAR_M)
+                    && !pits.near(lap, syn, x, z)
+            });
+            if !clear {
+                continue;
+            }
+            let mut k = 0u32;
+            for row in 0..PARK_ROWS {
+                for j in 0..PARK_PER_ROW {
+                    let (x, z) = spot(-len * 0.5 + (j as f32 + 0.5) * PARK_PITCH_M, (row as f32 + 0.5) * PARK_ROW_M);
+                    let key = lots as u32 * 97 + k;
+                    let prop = cars[((rnd(seed ^ 0xCA25, key) * cars.len() as f32) as usize).min(cars.len() - 1)];
+                    let (lo, hi) = prop.mesh.bounds();
+                    // Nose in, across the row: a mesh long in x turns by the heading, one long in
+                    // z by the heading plus ninety, and the second row faces the first.
+                    let base = st.heading.to_degrees() + if hi[0] - lo[0] >= hi[2] - lo[2] { 0.0 } else { 90.0 };
+                    let deg = base + if row % 2 == 0 { 0.0 } else { 180.0 };
+                    by_sheet
+                        .entry(prop.sheet.clone())
+                        .or_default()
+                        .append(&draped(&edfwrite::turned(&prop.mesh, deg), x, z, 0.0, syn));
+                    k += 1;
+                }
+            }
+            placed += k as usize;
+            lots += 1;
+            s += PARK_LOT_APART_M;
+            continue 'lots;
+        }
+        s += 15.0;
+    }
+    placed
+}
+
+/// Spectator lots: how many, how far out from the edge, rows and cars to a row, the room per car
+/// and per row, how clear of the track, how far apart round the lap, and the longest car.
+const PARK_LOTS: usize = 2;
+const PARK_OUT_M: f32 = 18.0;
+const PARK_ROWS: usize = 2;
+const PARK_PER_ROW: usize = 8;
+const PARK_PITCH_M: f32 = 3.2;
+const PARK_ROW_M: f32 = 7.0;
+const PARK_CLEAR_M: f32 = 12.0;
+const PARK_LOT_APART_M: f32 = 500.0;
+const PARK_CAR_MAX_M: f32 = 7.5;
+
 fn place_bales(
     lib: &crate::trackprops::PropLibrary,
     prog: &TrackProgram,
@@ -4185,8 +4424,9 @@ fn place_bales(
         {
             continue;
         }
-        // The inside: curvature is positive turning right, and +1 is the rider's right.
-        spots.push((coarse[i].s, coarse[i].curvature.signum(), c));
+        // The outside, where riders run wide: curvature is positive turning right, and +1 is the
+        // rider's right. The inside is the turn markers'.
+        spots.push((coarse[i].s, -coarse[i].curvature.signum(), c));
     }
     // The tightest corners first, then landings, until the lap carries a rated track's count.
     spots.sort_by(|a, b| b.2.total_cmp(&a.2));

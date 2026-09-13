@@ -45,6 +45,15 @@
   shading.
 
 ### Changed
+- Jumps on generated tracks are taller, and only some jumps have a dip before the face.
+- Braking bumps run the full width of the track, longer and each a different size.
+- Wave sections are rarer and longer, and each wave is a different length and height.
+- Empty stretches and chicanes carry rollers and small singles.
+- The rough (ARL) build has shallow ruts down its straights you can see.
+- Banners hug the track edge, arches stand over the course and its jumps, and parked
+  cars sit in tidy lots.
+- The yellow foam turn markers stand on the inside of corners, and haybales sit on the
+  outside of corners and at jump landings.
 - Generated tracks have a proper pit area: trucks parked in a row behind the pit lane and a
   stand at every spot riders start from.
 - Arches and big groups of venue pieces show up in the game again.

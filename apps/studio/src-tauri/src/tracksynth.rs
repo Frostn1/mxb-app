@@ -506,7 +506,8 @@ const RUT_ALONG_M: f32 = 70.0;
 /// [`crate::trackspeed`] is what knows that.
 // Half as long again as the 3.0 that rode "super clamped together", with one or two to a set
 // (see [`BRAKE_GROUP`]) so there is ground between them.
-const BRAKING_WAVELENGTH_M: f32 = 4.5;
+// Long enough for a bike to sit between two: at 4.5 they rode as a washboard.
+const BRAKING_WAVELENGTH_M: f32 = 6.5;
 
 /// How much rougher the surface gets in and around a corner, as a multiplier on the texture.
 ///
@@ -540,7 +541,8 @@ const BRAKE_SET_M: f32 = 14.0;
 
 /// The lines braking bumps form in: how many, how far apart about the racing line, and how wide
 /// each one's band is either side of it.
-const BRAKE_LINES: i32 = 2;
+// One line across the whole width: in two bands a rider rode round them.
+const BRAKE_LINES: i32 = 1;
 /// Crest slots to a group of braking bumps, of which only the first one or two stand. Ridden
 /// as "super clamped together" with every slot filled.
 const BRAKE_GROUP: f32 = 4.0;
@@ -553,7 +555,8 @@ const BRAKE_LINE_HALF_M: f32 = 3.5;
 /// tall it stands. Longer and lower than braking: acceleration bumps are stretched out by the
 /// wheel spinning across them.
 // Longer than the braking bumps, which went to 4 m; drive-out chop is the longer, lower of the two.
-const ACCEL_WAVELENGTH_M: f32 = 6.0;
+// Longer than the braking bumps, which went to 6.5 m.
+const ACCEL_WAVELENGTH_M: f32 = 8.0;
 const ACCEL_HEIGHT_M: f32 = 0.16;
 
 /// Rolling swells over all ridden ground: how long, how wide before they change, how tall.
@@ -567,7 +570,7 @@ const SWELL_M: f32 = 0.15;
 const ARL_BUMP_M: f32 = 2.2;
 const ARL_BUMP_ACROSS_M: f32 = 3.0;
 const ARL_BUMP_H_M: f32 = 0.06;
-const ARL_STRAIGHT_LANES: f32 = 0.35;
+const ARL_STRAIGHT_LANES: f32 = 0.9;
 
 /// How much the edge of the riding line wanders in and out, metres, and over what length of
 /// lap.
@@ -1185,6 +1188,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     feel.accel.1 *= worn;
     // The roughness knob: taller braking bumps, more drive-out chop and bigger rollers.
     let rough = prog.terrain.roughness.clamp(0.0, 3.0);
+    // A raced straight is rutted, shallow and packed.
+    feel.rut_straight *= 1.0 + 0.8 * (rough - 1.0).clamp(0.0, 1.5);
     feel.brake.1 *= 0.6 + 0.4 * rough;
     // More of them rather than only bigger: the spacing tightens below, the height by the root.
     feel.accel.1 *= rough.sqrt();
@@ -1802,8 +1807,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     let at = on
                         + (kf - (BRAKE_LINES as f32 - 1.0) * 0.5) * BRAKE_LINE_M
                         + 0.8 * fbm(s / 25.0, kf * 4.1, r.seed ^ 0xB4C0);
-                    let d = ((t - at) / BRAKE_LINE_HALF_M).clamp(-1.0, 1.0);
-                    let band = (1.0 - d * d).powi(2);
+                    let d = ((t - at) / (half + 1.0)).clamp(-1.0, 1.0);
+                    let band = 1.0 - d.powi(4);
                     if band <= 0.0 {
                         continue;
                     }
@@ -1813,7 +1818,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     let bend = 0.35 * fbm(t / 2.0, s / 10.0, r.seed ^ 0xB4C2);
                     let cycles = s / wave
                         + kf * 0.37
-                        + 0.6 * fbm(s / 14.0, kf * 2.9, r.seed ^ 0xB4C3)
+                        // Each its own length, like the waves.
+                        + 1.1 * fbm(s / 14.0, kf * 2.9, r.seed ^ 0xB4C3)
                         + bend;
                     // One bump at a time, each its own: where its crest sits along it, how tall it
                     // stands, and now and then none at all. A sine made every one the same size
@@ -3101,6 +3107,11 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
         }
         let (at, len) = (f.at(), f.length());
         for (side, edge) in [(-1.0f32, at), (1.0f32, at + len)] {
+            // A dip before a face on one jump in five: everywhere, every face was a wheelie
+            // into a wall.
+            if side < 0.0 && hash2((at * 4.0) as i32, 9, 0xD1B0) > -0.6 {
+                continue;
+            }
             let span = JUMP_HOLLOW_M;
             let steps = (span / PROFILE_STEP).ceil() as usize;
             for k in 0..=steps {
