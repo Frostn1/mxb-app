@@ -362,7 +362,7 @@ pub const TABLETOP_DECK_M: f32 = 6.0;
 /// over it the angle takes over at 27. That is the published spread, from the same two numbers.
 // Ridden at 9 as still too steep once the faces ran straight to the lip.
 // Longer faces for the bigger jumps: 13 m rode steep once they grew.
-pub const JUMP_FACE_MIN_M: f32 = 15.0;
+pub const JUMP_FACE_MIN_M: f32 = 9.0;
 
 /// The shortest a landing may be, metres. Longer than a takeoff, for the reason
 /// [`JUMP_LANDING_DEG`] is gentler than [`JUMP_FACE_DEG`]: it is the side that catches you.

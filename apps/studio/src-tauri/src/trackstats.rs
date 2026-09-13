@@ -2615,6 +2615,13 @@ mod tests {
             }
             Err(_) => {
                 let p: crate::trackprog::TrackProgram = match std::env::var("FROST_PROGRAM") {
+                    // `seed:N!` measures that seed's layout as drawn.
+                    Ok(f) if f.starts_with("seed:") => {
+                        match crate::tracklayout::search(f[5..].trim_end_matches('!').parse().unwrap(), 1) {
+                            Ok(m) => m.program,
+                            Err(v) => v[0].program.clone(),
+                        }
+                    }
                     Ok(f) => serde_json::from_str(&std::fs::read_to_string(f).unwrap()).unwrap(),
                     Err(_) => serde_json::from_str(crate::trackprog::EXAMPLE).unwrap(),
                 };
