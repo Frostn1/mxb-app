@@ -27,6 +27,8 @@
   gaps. Small bumps in the way make room for them.
 - The ARL build has ruts up jump faces and off landings, more and bigger braking bumps that
   start further out from corners, and lone bumps all over the lap.
+- Generated tracks are stamped with the Frost algorithm version (now 0.28.0) in
+  `frost-algorithm.ini`, replacing `generator.ini`.
 
 ## 2026-09-13 — v0.14.1 — Shortcuts under both names
 
