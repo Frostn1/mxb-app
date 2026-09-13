@@ -55,6 +55,8 @@ image = { version = "0.25", default-features = false, features = [
     "webp",
     "gif",
 ] }
+# The track's name on a generated track's picture.
+ab_glyph = "0.2"
 
 [features]
 # Matches the manager's. `tauri build` turns it on; a dev run leaves it off.

@@ -15,6 +15,8 @@
   shading.
 
 ### Changed
+- The picture beside a generated track's name is a close-up of its biggest jump, with the
+  trees, vehicles and banners around it and the track's name across the top.
 - Banners, boards and flags on generated tracks never stand on the track or the start
   straight. Arches span the track on straight ground, standing on their own legs, with
   nothing hanging low over the riding line.
