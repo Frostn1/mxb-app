@@ -299,6 +299,9 @@ pub struct Scenery {
     pub solid: Vec<Scene>,
     /// What went where, for the log and for measuring the result back.
     pub tally: Vec<(&'static str, usize)>,
+    /// Each model as built, world metres, with the sheet it wears — what the track's picture
+    /// draws, so it shows the scenery the game will.
+    pub models: Vec<(Mesh, edfwrite::Texture)>,
 }
 
 /// Height of the built ground at a world point, bilinear.
@@ -1830,13 +1833,17 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let mut files = Vec::new();
     let mut drawn = Vec::new();
     let mut solid = Vec::new();
+    let mut models = Vec::new();
     for (name, mesh, sheet, is_solid) in kinds {
         if mesh.vertex_count() < 8 {
             continue;
         }
         let file = format!("{name}.edf");
-        let bytes = edfwrite::write(&name, &[Part { name: name.clone(), mesh, texture: 0, normal: None }], &[sheet]);
+        let part = Part { name: name.clone(), mesh, texture: 0, normal: None };
+        let bytes =
+            edfwrite::write(&name, std::slice::from_ref(&part), std::slice::from_ref(&sheet));
         files.push((file.clone(), bytes));
+        models.push((part.mesh, sheet));
         let at = Scene { file, pos: [0.0, 0.0, 0.0], rot: [0.0, 0.0, 0.0] };
         // Collision only for what should stop a bike. A stake snaps and the fence is behind
         // the run-off, so neither is a wall; a tree, a bale and the gantry are.
@@ -1846,7 +1853,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         drawn.push(at);
     }
 
-    Scenery { files, drawn, solid, tally }
+    Scenery { files, drawn, solid, tally, models }
 }
 
 /// The `scene<N>` blocks, in the form TerrainEd reads them.
@@ -1866,6 +1873,37 @@ pub fn blocks(scenes: &[Scene]) -> String {
 mod tests {
     use super::*;
 
+    /// A library "tree" whose UVs sit on the clear part of its sheet is not planted — it
+    /// would draw as nothing. One on the leaves is.
+    #[test]
+    fn a_tree_that_would_draw_as_nothing_is_not_planted() {
+        // Left texel clear, right texel leaves.
+        let rgba = [[0u8, 0, 0, 0], [40, 90, 30, 255]].concat();
+        let prop = |u: f32| {
+            let mut mesh = edfwrite::card(2.0, 8.0);
+            mesh.uvs = vec![u; mesh.vertex_count() * 2];
+            crate::trackprops::Prop {
+                id: format!("t{u}"),
+                sheet: "leaves_c_a".into(),
+                class: crate::trackobjects::Class::Tree,
+                mesh,
+                height: 8.0,
+                span: 2.0,
+                reach: 1.0,
+                axis_ref: 0.0,
+            }
+        };
+        let lib = crate::trackprops::PropLibrary {
+            donor: "test".into(),
+            donor_lap_m: 1000.0,
+            props: vec![prop(0.25), prop(0.75)],
+            instances: vec![],
+            runs: vec![],
+            sheets: vec![("leaves_c_a".into(), 2, 1, rgba)],
+        };
+        assert!(!shows(&lib, &lib.props[0]), "a tree on the clear texel was kept");
+        assert!(shows(&lib, &lib.props[1]), "a tree on the leaves was dropped");
+    }
 
     /// Tear-offs lie in patches at the corners, on or beside the track, and never on the start.
     #[test]
@@ -3520,6 +3558,41 @@ const TREE_REAL_MAX_M: f32 = 40.0;
 /// baked as one object, 40 m across; planted at a point they stood over the track.
 const TREE_REAL_REACH_M: f32 = 5.0;
 
+/// How much of a library tree has to land on leaves rather than on the clear part of its sheet.
+const TREE_SHOWS_MIN: f32 = 0.25;
+
+/// Whether a library tree shows on its own sheet: enough of its triangles land on texels the
+/// cut-out keeps.
+///
+/// Not everything a donor gives up as a tree is one. Slivers of Indiana's leaf-litter ground
+/// sheet split off on hillsides stand 7–18 m tall and a few metres across, so they pass on
+/// size — but their UVs span less than a texel of a clear corner, and planted they draw as
+/// nothing at all.
+fn shows(lib: &crate::trackprops::PropLibrary, p: &crate::trackprops::Prop) -> bool {
+    let Some((_, w, h, rgba)) = lib.sheets.iter().find(|s| s.0 == p.sheet) else {
+        return false;
+    };
+    let (w, h, m) = (*w as usize, *h as usize, &p.mesh);
+    if w == 0 || h == 0 || m.triangle_count() == 0 || m.uvs.len() < m.vertex_count() * 2 {
+        return false;
+    }
+    let on = m
+        .indices
+        .chunks_exact(3)
+        .filter(|t| {
+            let (mut u, mut v) = (0.0f32, 0.0f32);
+            for &i in *t {
+                u += m.uvs[i as usize * 2] / 3.0;
+                v += m.uvs[i as usize * 2 + 1] / 3.0;
+            }
+            let x = (((u - u.floor()) * w as f32) as usize).min(w - 1);
+            let y = (((v - v.floor()) * h as f32) as usize).min(h - 1);
+            rgba.get((y * w + x) * 4 + 3).is_some_and(|&a| a >= 128)
+        })
+        .count();
+    on as f32 >= m.triangle_count() as f32 * TREE_SHOWS_MIN
+}
+
 /// Every tree the lap and the backdrop asked for, each a real one out of the library — the
 /// donor's own and whatever other tracks were baked in beside it. One model a sheet.
 fn plant_trees(lib: &crate::trackprops::PropLibrary, plants: &[Plant]) -> Vec<(String, Mesh, Texture, bool)> {
@@ -3531,6 +3604,7 @@ fn plant_trees(lib: &crate::trackprops::PropLibrary, plants: &[Plant]) -> Vec<(S
                 && (TREE_REAL_MIN_M..=TREE_REAL_MAX_M).contains(&p.height)
                 && !crate::trackprops::is_crowd(&p.sheet)
                 && p.reach <= TREE_REAL_REACH_M
+                && shows(lib, p)
         })
         .collect();
     if trees.is_empty() {

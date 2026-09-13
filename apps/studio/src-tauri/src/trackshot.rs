@@ -6,8 +6,9 @@
 //! a camera above and off to one side, the grid rasterised through a depth buffer, lit by the
 //! same sun the track's own `.amb` declares, and hazed with distance.
 //!
-//! Nothing here knows what a track is. It takes a heightfield, a sheet of ground colour and a
-//! set of points the frame has to hold, which is all a picture of one needs.
+//! Nothing here knows what a track is. It takes a heightfield, a sheet of ground colour, the
+//! models standing on it and a set of points the frame has to hold, which is all a picture of
+//! one needs.
 
 /// What to render, and what to light it with.
 pub struct Scene<'a> {
@@ -22,9 +23,12 @@ pub struct Scene<'a> {
     /// finer or coarser than the heightfield without either one caring.
     pub albedo: &'a [[f32; 3]],
     pub adim: usize,
-    /// World `(x, z)` the frame must hold. The camera is placed and pulled back to fit these
-    /// and nothing else, so a lap on a corner of a big terrain still fills the picture.
-    pub focus: &'a [(f32, f32)],
+    /// World points the frame must hold, metres. The camera is placed and pulled back to fit
+    /// these and nothing else, so a subject on a corner of a big terrain still fills the
+    /// picture. Around them the ground is drawn at full resolution.
+    pub focus: &'a [[f32; 3]],
+    /// Models standing on the ground, drawn with it.
+    pub objects: &'a [Object<'a>],
     /// Direction *to* the sun, and the light either side of it. Straight off the `.amb`, so
     /// the picture is lit the way the track is.
     pub sun: [f32; 3],
@@ -37,11 +41,33 @@ pub struct Scene<'a> {
     /// How far above the ground the camera sits, degrees. Low reads as a photograph and hides
     /// the lap behind its own hills; straight down reads as the map again. See [`TILT_DEG`].
     pub tilt_deg: f32,
+    /// How far the camera swings from square-on towards the first focus point, degrees. At
+    /// zero it looks across the subject; a three-quarter view looks along it, the way a
+    /// photographer beside a take-off sees the face.
+    pub yaw_deg: f32,
 }
 
 /// Bird's eye, tilted: high enough that the whole lap reads as a shape, shallow enough that
 /// the hills under it have a near side and a far side.
 pub const TILT_DEG: f32 = 36.0;
+
+/// Low, for a close-up: the subject stands against the sky and the ground behind it.
+pub const HERO_TILT_DEG: f32 = 14.0;
+
+/// And swung round towards the approach, so a jump shows its take-off face rather than its
+/// side, which from square-on reads as a bank.
+pub const HERO_YAW_DEG: f32 = 35.0;
+
+/// A model on the terrain: world metres, and the sheet it wears. An alpha under half is a
+/// cut-out, so a foliage card draws as leaves rather than as a sheet.
+pub struct Object<'a> {
+    pub mesh: &'a crate::edfwrite::Mesh,
+    pub sheet: &'a crate::edfwrite::Texture,
+}
+
+/// The most vertices the full-resolution patch round the subject may have across. Past it
+/// the patch is sampled down too, just less than the rest.
+const DETAIL_MAX: usize = 600;
 
 /// Fairly long, because a wide lens bends a lap into a bowl and puts the near corner of the
 /// terrain in your face.
@@ -90,27 +116,40 @@ pub fn render(scene: &Scene, dim: usize) -> Vec<[u8; 3]> {
     // the outermost band a track paints is the turf and not the soil under it.
     let country = border(scene);
     let flat = level(scene);
-    let stride = scene.gw.max(scene.gh).div_ceil(MESH_MAX).max(1);
+    let coarse = scene.gw.max(scene.gh).div_ceil(MESH_MAX).max(1) as f32 * scene.mps;
     let span_x = (scene.gw - 1) as f32 * scene.mps;
     let span_z = (scene.gh - 1) as f32 * scene.mps;
+    // Round the subject the mesh goes to full resolution, so a close-up shows the jump and not
+    // the quads it was sampled down to. Everywhere else stays coarse.
+    let (lo, hi, fine) = detail(scene);
+    let fine = fine.min(coarse);
     let reach = cam.reach * 2.5;
     // Spaced so they bunch up against the terrain, where the join has to be invisible, and
     // stretch out towards the horizon, where nothing is in focus anyway.
     let out = |k: usize| reach * (k as f32 / APRON as f32).powi(2);
-    let axis = |span: f32| -> Vec<f32> {
+    let axis = |span: f32, lo: f32, hi: f32| -> Vec<f32> {
         let mut v: Vec<f32> = (1..=APRON).rev().map(|k| -out(k)).collect();
-        let step = stride as f32 * scene.mps;
-        let n = (span / step).floor() as usize;
-        v.extend((0..=n).map(|i| i as f32 * step));
-        // The terrain's own far edge, so the apron starts exactly where the ground stops.
-        if v.last().is_some_and(|&x| x < span - 1e-3) {
-            v.push(span);
+        let mut x = 0.0f32;
+        loop {
+            v.push(x);
+            // The terrain's own far edge, so the apron starts exactly where the ground stops.
+            if x >= span - 1e-3 {
+                break;
+            }
+            let inside = x >= lo - 1e-3 && x < hi - 1e-3;
+            let mut next = x + if inside { fine } else { coarse };
+            if x < lo - 1e-3 {
+                next = next.min(lo);
+            } else if x < hi - 1e-3 {
+                next = next.min(hi);
+            }
+            x = next.min(span);
         }
         v.extend((1..=APRON).map(|k| span + out(k)));
         v
     };
-    let xs = axis(span_x);
-    let zs = axis(span_z);
+    let xs = axis(span_x, lo[0], hi[0]);
+    let zs = axis(span_z, lo[1], hi[1]);
     let (rw, rh) = (xs.len(), zs.len());
     let mut sx = vec![0.0f32; rw * rh];
     let mut sy = vec![0.0f32; rw * rh];
@@ -143,6 +182,10 @@ pub fn render(scene: &Scene, dim: usize) -> Vec<[u8; 3]> {
                 raster(&tri, &sx, &sy, &depth, &lit, scene, &cam, &mut px, &mut zbuf, sdim);
             }
         }
+    }
+    // What stands on the ground, into the same depth buffer.
+    for o in scene.objects {
+        draw_object(o, scene, &cam, &mut px, &mut zbuf, sdim);
     }
 
     // Down to the picture's own size.
@@ -382,20 +425,18 @@ impl Camera {
 /// Place the camera: above and off to one side, looking along the lap's short axis so its long
 /// one runs across the frame, and pulled back until the whole of it fits.
 fn fit(scene: &Scene) -> Camera {
-    let flat = level(scene);
-    let h = |x: f32, z: f32| height(scene, flat, x, z);
     // The subject: where the focus points are, and how far they spread.
     let n = scene.focus.len().max(1) as f32;
     let (mut cx, mut cz, mut cy) = (0.0f32, 0.0f32, 0.0f32);
-    for &(x, z) in scene.focus {
-        cx += x;
-        cz += z;
-        cy += h(x, z);
+    for p in scene.focus {
+        cx += p[0];
+        cy += p[1];
+        cz += p[2];
     }
     let (cx, cz, cy) = (cx / n, cz / n, cy / n);
     let (mut sxx, mut sxz, mut szz, mut extent) = (0.0f32, 0.0f32, 0.0f32, 1.0f32);
-    for &(x, z) in scene.focus {
-        let (dx, dz) = (x - cx, z - cz);
+    for p in scene.focus {
+        let (dx, dz) = (p[0] - cx, p[2] - cz);
         sxx += dx * dx;
         sxz += dx * dz;
         szz += dz * dz;
@@ -409,7 +450,18 @@ fn fit(scene: &Scene) -> Camera {
     // relief, and one lit from behind itself is a silhouette.
     let sun_h = (scene.sun[0], scene.sun[2]);
     let sign = if across.0 * sun_h.0 + across.1 * sun_h.1 >= 0.0 { 1.0 } else { -1.0 };
-    let dir = (across.0 * sign, across.1 * sign);
+    let mut dir = (across.0 * sign, across.1 * sign);
+    // Swung towards where the focus points start, if asked to be.
+    if let (Some(a), Some(b)) = (scene.focus.first(), scene.focus.last()) {
+        let (ux, uz) = (b[0] - a[0], b[2] - a[2]);
+        let l = (ux * ux + uz * uz).sqrt();
+        if l > 1e-3 && scene.yaw_deg != 0.0 {
+            let (s, c) = scene.yaw_deg.to_radians().sin_cos();
+            let (x, z) = (dir.0 * c - ux / l * s, dir.1 * c - uz / l * s);
+            let m = (x * x + z * z).sqrt().max(1e-6);
+            dir = (x / m, z / m);
+        }
+    }
 
     let el = scene.tilt_deg.to_radians();
     let tan_half = (FOV_DEG.to_radians() * 0.5).tan();
@@ -420,8 +472,8 @@ fn fit(scene: &Scene) -> Camera {
     // the distance, so scaling by how far over it is converges in a handful of passes.
     for _ in 0..40 {
         let mut m: f32 = 0.0;
-        for &(x, z) in scene.focus {
-            let (ndc, d) = cam.project([x, h(x, z), z]);
+        for &p in scene.focus {
+            let (ndc, d) = cam.project(p);
             if d <= NEAR_M {
                 m = m.max(4.0);
                 continue;
@@ -474,9 +526,26 @@ fn at(target: [f32; 3], dir: (f32, f32), el: f32, dist: f32, tan_half: f32) -> C
 // Drawing
 // ---------------------------------------------------------------------------
 
-/// One triangle into the depth buffer, perspective-correct, with the haze put back in per
-/// pixel — across a quad in the foreground it changes fast enough that doing it per vertex
-/// bands the ground.
+/// The ground round the focus points, as `(min, max)` in `(x, z)`, and the spacing the mesh
+/// takes inside it: the grid's own, unless that would be more than [`DETAIL_MAX`] across.
+fn detail(scene: &Scene) -> ([f32; 2], [f32; 2], f32) {
+    let (mut lo, mut hi) = ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]);
+    for p in scene.focus {
+        lo = [lo[0].min(p[0]), lo[1].min(p[2])];
+        hi = [hi[0].max(p[0]), hi[1].max(p[2])];
+    }
+    if !lo[0].is_finite() {
+        return ([0.0; 2], [0.0; 2], f32::MAX);
+    }
+    let pad = 0.5 * (hi[0] - lo[0]).max(hi[1] - lo[1]) + 30.0;
+    let (lo, hi) = ([lo[0] - pad, lo[1] - pad], [hi[0] + pad, hi[1] + pad]);
+    let fine = scene.mps.max((hi[0] - lo[0]).max(hi[1] - lo[1]) / DETAIL_MAX as f32);
+    (lo, hi, fine)
+}
+
+/// One triangle of ground into the depth buffer, perspective-correct, with the haze put back
+/// in per pixel — across a quad in the foreground it changes fast enough that doing it per
+/// vertex bands the ground.
 #[allow(clippy::too_many_arguments)]
 fn raster(
     tri: &[usize; 3],
@@ -491,14 +560,168 @@ fn raster(
     sdim: usize,
 ) {
     let z = [depth[tri[0]], depth[tri[1]], depth[tri[2]]];
-    if z.iter().any(|&d| d <= NEAR_M) {
-        return;
-    }
     let p = [
         [sx[tri[0]], sy[tri[0]]],
         [sx[tri[1]], sy[tri[1]]],
         [sx[tri[2]], sy[tri[2]]],
     ];
+    let c = [lit[tri[0]], lit[tri[1]], lit[tri[2]]];
+    cover(p, z, sdim, |at, w, d| {
+        if d >= zbuf[at] {
+            return;
+        }
+        zbuf[at] = d;
+        let col = [0, 1, 2].map(|k| persp(w, z, d, [c[0][k], c[1][k], c[2][k]]));
+        px[at] = air(scene, cam, col, d);
+    });
+}
+
+/// A model into the same depth buffer: its sheet sampled per pixel, lit the way the ground
+/// is and hazed the same.
+///
+/// Faces turned from the camera are skipped, which is what shows a banner printed on both
+/// sides the right way round. Cut-outs keep both: a foliage card has one side, seen from
+/// either.
+fn draw_object(
+    o: &Object,
+    scene: &Scene,
+    cam: &Camera,
+    px: &mut [[f32; 3]],
+    zbuf: &mut [f32],
+    sdim: usize,
+) {
+    let (m, s) = (o.mesh, o.sheet);
+    let (tw, th) = (s.width as usize, s.height as usize);
+    let n = m.vertex_count();
+    if tw == 0 || th == 0 || s.rgba.len() < tw * th * 4 || m.uvs.len() < n * 2 {
+        return;
+    }
+    let cutout = s.name.ends_with("_c_a");
+    let mips = mips(s, cutout);
+    let normals = m.normals.len() >= n * 3;
+    let mut sp = Vec::with_capacity(n);
+    let mut lit = Vec::with_capacity(n);
+    for i in 0..n {
+        let (ndc, d) = cam.project([m.positions[i * 3], m.positions[i * 3 + 1], m.positions[i * 3 + 2]]);
+        sp.push([(ndc[0] * 0.5 + 0.5) * sdim as f32, (0.5 - ndc[1] * 0.5) * sdim as f32, d]);
+        let nr = if normals { [m.normals[i * 3], m.normals[i * 3 + 1], m.normals[i * 3 + 2]] } else { [0.0, 1.0, 0.0] };
+        let sun = nr[0] * scene.sun[0] + nr[1] * scene.sun[1] + nr[2] * scene.sun[2];
+        let sun = if cutout { sun.abs() } else { sun.max(0.0) };
+        let sky = 0.55 + 0.45 * nr[1].max(0.0);
+        lit.push([0, 1, 2].map(|k| scene.ambient[k] * sky + scene.sun_colour[k] * sun));
+    }
+    for t in m.indices.chunks_exact(3) {
+        let v = [t[0] as usize, t[1] as usize, t[2] as usize];
+        if v.iter().any(|&i| i >= n) {
+            continue;
+        }
+        if normals && !cutout {
+            let a = v[0] * 3;
+            let facing: f32 = v
+                .iter()
+                .map(|&i| (0..3).map(|k| m.normals[i * 3 + k] * (cam.pos[k] - m.positions[a + k])).sum::<f32>())
+                .sum();
+            if facing < 0.0 {
+                continue;
+            }
+        }
+        let z = v.map(|i| sp[i][2]);
+        let p = v.map(|i| [sp[i][0], sp[i][1]]);
+        let uv = v.map(|i| [m.uvs[i * 2], m.uvs[i * 2 + 1]]);
+        let l = v.map(|i| lit[i]);
+        // Which level of the chain: as many texels to a pixel as near one as it gets.
+        let cross = |a: [f32; 2], b: [f32; 2], c: [f32; 2]| {
+            ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])).abs()
+        };
+        let texels = cross(uv[0], uv[1], uv[2]) * (tw * th) as f32;
+        let pixels = cross(p[0], p[1], p[2]).max(1e-6);
+        let lod = (0.5 * (texels / pixels).max(1.0).log2()).round() as usize;
+        let (lw, lh, lpx) = &mips[lod.min(mips.len() - 1)];
+        let (lw, lh) = (*lw, *lh);
+        cover(p, z, sdim, |at, w, d| {
+            if d >= zbuf[at] {
+                return;
+            }
+            let u = persp(w, z, d, [uv[0][0], uv[1][0], uv[2][0]]);
+            let vv = persp(w, z, d, [uv[0][1], uv[1][1], uv[2][1]]);
+            let tx = (((u - u.floor()) * lw as f32) as usize).min(lw - 1);
+            let ty = (((vv - vv.floor()) * lh as f32) as usize).min(lh - 1);
+            let texel = &lpx[(ty * lw + tx) * 4..(ty * lw + tx) * 4 + 4];
+            if texel[3] < 128 {
+                return;
+            }
+            zbuf[at] = d;
+            let col = [0, 1, 2].map(|k| texel[k] as f32 * persp(w, z, d, [l[0][k], l[1][k], l[2][k]]));
+            px[at] = air(scene, cam, col, d);
+        });
+    }
+}
+
+/// A sheet and the levels under it, each half the last, as `(width, height, rgba)`.
+///
+/// A distant model sampled from the full sheet catches one texel in many, which sparkles on
+/// a banner and all but deletes a tree: a leaf card is nine tenths transparent, so most of its
+/// pixels land on nothing. Each level averages the one above — cut-outs weighting colour by
+/// alpha, so the clear texels do not bleed in — and then scales its alpha until as much of it
+/// passes the cut as did at the top, so a tree keeps its leaves as it shrinks.
+fn mips(s: &crate::edfwrite::Texture, cutout: bool) -> Vec<(usize, usize, Vec<u8>)> {
+    let cover = |px: &[u8], k: f32| {
+        px.chunks_exact(4).filter(|p| p[3] as f32 * k >= 128.0).count() as f32
+            / (px.len() / 4).max(1) as f32
+    };
+    let target = cover(&s.rgba, 1.0);
+    let mut out = vec![(s.width as usize, s.height as usize, s.rgba.clone())];
+    loop {
+        let (w, h, px) = out.last().expect("the top level");
+        let (w, h) = (*w, *h);
+        if w <= 1 && h <= 1 {
+            break;
+        }
+        let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+        let mut next = vec![0u8; nw * nh * 4];
+        for y in 0..nh {
+            for x in 0..nw {
+                let (mut rgb, mut a, mut wsum) = ([0.0f32; 3], 0.0f32, 0.0f32);
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let i = ((y * 2 + dy).min(h - 1) * w + (x * 2 + dx).min(w - 1)) * 4;
+                    let wt = if cutout { px[i + 3] as f32 } else { 1.0 };
+                    for k in 0..3 {
+                        rgb[k] += px[i + k] as f32 * wt;
+                    }
+                    a += px[i + 3] as f32;
+                    wsum += wt;
+                }
+                let o = (y * nw + x) * 4;
+                for k in 0..3 {
+                    next[o + k] = if wsum > 0.0 { (rgb[k] / wsum) as u8 } else { 0 };
+                }
+                next[o + 3] = (a / 4.0) as u8;
+            }
+        }
+        if cutout && target > 0.0 && cover(&next, 1.0) < target {
+            let (mut lo, mut hi) = (1.0f32, 16.0f32);
+            for _ in 0..14 {
+                let mid = 0.5 * (lo + hi);
+                if cover(&next, mid) < target {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            for p in next.chunks_exact_mut(4) {
+                p[3] = (p[3] as f32 * hi).min(255.0) as u8;
+            }
+        }
+        out.push((nw, nh, next));
+    }
+    out
+}
+
+/// Every pixel a projected triangle covers, with its barycentric weights and its depth.
+fn cover(p: [[f32; 2]; 3], z: [f32; 3], sdim: usize, mut f: impl FnMut(usize, [f32; 3], f32)) {
+    if z.iter().any(|&d| d <= NEAR_M) {
+        return;
+    }
     let area = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
     if area.abs() < 1e-9 {
         return;
@@ -510,7 +733,6 @@ fn raster(
     if x0 >= x1 || y0 >= y1 {
         return;
     }
-    let c = [lit[tri[0]], lit[tri[1]], lit[tri[2]]];
     let inv = 1.0 / area;
     for y in y0..y1 {
         let py = y as f32 + 0.5;
@@ -525,24 +747,24 @@ fn raster(
             if iz <= 0.0 {
                 continue;
             }
-            let d = 1.0 / iz;
-            let at = y * sdim + x;
-            if d >= zbuf[at] {
-                continue;
-            }
-            zbuf[at] = d;
-            let mut col = [0.0f32; 3];
-            for k in 0..3 {
-                col[k] = (w[0] * c[0][k] / z[0] + w[1] * c[1][k] / z[1] + w[2] * c[2][k] / z[2]) * d;
-            }
-            // Air. Measured against the camera's own reach rather than in absolute metres, so
-            // a 400 m track and a 900 m one come out with the same amount of it.
-            let t = smoothstep(((d - cam.reach) / (cam.reach * 2.0)).clamp(0.0, 1.0)) * 0.94;
-            for k in 0..3 {
-                px[at][k] = col[k] + (scene.haze[k] - col[k]) * t;
-            }
+            f(y * sdim + x, w, 1.0 / iz);
         }
     }
+}
+
+/// A vertex attribute at a pixel, perspective-correct.
+fn persp(w: [f32; 3], z: [f32; 3], d: f32, a: [f32; 3]) -> f32 {
+    (w[0] * a[0] / z[0] + w[1] * a[1] / z[1] + w[2] * a[2] / z[2]) * d
+}
+
+/// Air. Measured against the camera's own reach rather than in absolute metres, so a 400 m
+/// track and a 900 m one come out with the same amount of it.
+///
+/// Starting well past the subject and never total: starting at it greyed the one thing the
+/// picture is of, and everything behind it went to a wash.
+fn air(scene: &Scene, cam: &Camera, col: [f32; 3], d: f32) -> [f32; 3] {
+    let t = smoothstep(((d - cam.reach * 2.0) / (cam.reach * 6.0)).clamp(0.0, 1.0)) * 0.75;
+    [0, 1, 2].map(|k| col[k] + (scene.haze[k] - col[k]) * t)
 }
 
 fn smoothstep(t: f32) -> f32 {
@@ -584,6 +806,7 @@ mod tests {
             albedo,
             adim: n,
             focus: &[],
+            objects: &[],
             sun: [0.0, 1.0, 0.0],
             sun_colour: [1.0, 1.0, 1.0],
             ambient: [0.0, 0.0, 0.0],
@@ -591,6 +814,7 @@ mod tests {
             horizon: [0.0, 0.0, 0.0],
             haze: [0.0, 0.0, 0.0],
             tilt_deg: TILT_DEG,
+            yaw_deg: 0.0,
         }
     }
 
@@ -643,5 +867,29 @@ mod tests {
         }
         // And on the terrain itself nothing has been touched.
         assert_eq!(height(&s, flat, 8.0, 8.0), heights[8 * n + 8]);
+    }
+
+    /// A model standing on the ground is in the picture.
+    #[test]
+    fn an_object_is_drawn_on_the_ground() {
+        let n = 64;
+        let heights = vec![0.0; n * n];
+        let albedo = vec![[40.0, 40.0, 40.0]; n * n];
+        let focus = [[20.0, 0.0, 20.0], [44.0, 0.0, 44.0], [20.0, 0.0, 44.0], [44.0, 0.0, 20.0]];
+        let mesh = crate::edfwrite::moved(&crate::edfwrite::cuboid(8.0, 8.0, 8.0), [32.0, 0.0, 32.0]);
+        let sheet = crate::edfwrite::Texture {
+            name: "white".into(),
+            width: 1,
+            height: 1,
+            rgba: vec![255; 4],
+        };
+        let objects = [Object { mesh: &mesh, sheet: &sheet }];
+        let mut s = of(&heights, &albedo, n);
+        s.focus = &focus;
+        let bare = render(&s, 64);
+        s.objects = &objects;
+        let with = render(&s, 64);
+        let changed = bare.iter().zip(&with).filter(|(a, b)| a != b).count();
+        assert!(changed > 64, "the cuboid changed {changed} pixels");
     }
 }
