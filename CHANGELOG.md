@@ -15,6 +15,8 @@
   shading.
 
 ### Changed
+- The in-game map of a generated track shows the ground from above, with the track's edges,
+  the finish line, the start gate and arrows for the direction of travel.
 - Banners, flags and other venue pieces on generated tracks sit on the ground, following it,
   instead of keeping the slope of the track they came from.
 - Arches over the track stand on both legs.

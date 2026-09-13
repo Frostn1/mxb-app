@@ -169,6 +169,37 @@ pub fn render(scene: &Scene, dim: usize) -> Vec<[u8; 3]> {
     out
 }
 
+/// The same ground seen straight down, `dim * dim` RGB, row zero at the top (+z).
+///
+/// No camera and no haze: each pixel is the terrain under it, lit the way the game lights it,
+/// so anything drawn over it by world position lands where it is on the ground. Spans the
+/// whole terrain, like the grid, and ignores `focus`.
+pub fn plan(scene: &Scene, dim: usize) -> Vec<[u8; 3]> {
+    let country = border(scene);
+    let flat = level(scene);
+    let span_x = (scene.gw - 1) as f32 * scene.mps;
+    let span_z = (scene.gh - 1) as f32 * scene.mps;
+    let n = (dim * SS) as f32;
+    let mut out = vec![[0u8; 3]; dim * dim];
+    for y in 0..dim {
+        for x in 0..dim {
+            let mut acc = [0.0f32; 3];
+            for sy in 0..SS {
+                for sx in 0..SS {
+                    let wx = ((x * SS + sx) as f32 + 0.5) / n * span_x;
+                    let wz = (1.0 - ((y * SS + sy) as f32 + 0.5) / n) * span_z;
+                    let c = shade(scene, country, flat, wx, wz);
+                    for k in 0..3 {
+                        acc[k] += c[k];
+                    }
+                }
+            }
+            out[y * dim + x] = acc.map(|v| (v / (SS * SS) as f32).clamp(0.0, 255.0) as u8);
+        }
+    }
+    out
+}
+
 /// One vertex's colour before the distance is put back in: the ground's own sheet, under the
 /// track's sun and its sky.
 fn shade(scene: &Scene, country: [f32; 3], flat: f32, x: f32, z: f32) -> [f32; 3] {
