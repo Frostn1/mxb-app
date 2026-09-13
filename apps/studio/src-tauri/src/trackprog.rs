@@ -438,6 +438,18 @@ pub fn takeoff_lip_deg(height: f32, run: f32) -> f32 {
     (height.abs() / (run.max(1e-3) * (1.0 - TAKEOFF_TRANSITION / 2.0))).atan().to_degrees()
 }
 
+/// A take-off built to be jumped rather than rolled: sized by the angle it leaves the lip at.
+/// The long faces the tabletops keep left doubles and triples at 10–15°, and they rode as rollers.
+pub fn air_face_run(height: f32) -> f32 {
+    let lip = JUMP_AIR_LIP_DEG.to_radians().tan() * (1.0 - TAKEOFF_TRANSITION / 2.0);
+    (height.abs() / lip.max(1e-4)).max(JUMP_AIR_FACE_MIN_M)
+}
+
+/// The lip angle a jump meant for air leaves at, and the shortest face it may have. Published
+/// take-offs measure 27° at the ninetieth.
+pub const JUMP_AIR_LIP_DEG: f32 = 24.0;
+pub const JUMP_AIR_FACE_MIN_M: f32 = 6.0;
+
 pub fn face_run(height: f32, deg: f32, min_m: f32) -> f32 {
     let half = (deg * 0.5).to_radians().tan().max(1e-4);
     (height.abs() / half).max(min_m)
@@ -487,7 +499,7 @@ impl DoubleFaces {
 }
 
 pub fn double_faces(height: f32, lip: f32) -> DoubleFaces {
-    let ramp = face_run(height, JUMP_FACE_DEG, JUMP_FACE_MIN_M);
+    let ramp = air_face_run(height);
     // Dumped, not bladed: a smoothstep rather than an arc, so the half-angle relation does
     // not apply and the run is `1.5 h / tan(deg)` — the smoothstep's own peak-to-average.
     let cut = (1.5 * height.abs() / JUMP_CUT_DEG.to_radians().tan()).max(JUMP_CUT_MIN_M);
