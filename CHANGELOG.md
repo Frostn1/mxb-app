@@ -15,6 +15,14 @@
   shading.
 
 ### Changed
+- Banners, boards and flags on generated tracks never stand on the track or the start
+  straight. Arches span the track on straight ground, standing on their own legs, with
+  nothing hanging low over the riding line.
+- Doubles and triples on generated tracks keep their gaps and dips, instead of filling in
+  and riding like tabletops.
+- Tabletop faces on generated tracks are steeper, so they lift you.
+- Generated tracks are rougher, closer to ARL tracks: more braking bumps into corners,
+  more drive-out chop, and rolling bumps down the straights.
 - The in-game map of a generated track shows the ground from above, with the track's edges,
   the finish line, the start gate and arrows for the direction of travel.
 - Doubles, triples and singles on generated tracks have steeper take-offs and wider gaps, so
