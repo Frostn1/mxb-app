@@ -733,6 +733,10 @@ const WET_DARKEN: f32 = 0.74;
 /// pixels and stored uncompressed.
 const UI_IMAGE_DIM: usize = 512;
 
+/// The ground sheet the pictures are painted from. Finer than the pictures themselves: the
+/// shot is a close-up, and at 512 across a whole terrain the ground under it is a blur.
+const UI_SHEET_DIM: usize = 1536;
+
 /// Coverage masks inside a `.trh`, which published tracks keep at half the grid — 2048
 /// against 2049. It is also the resolution anything reading the file will measure it at.
 const TRH_MASK_DIM: usize = 2048;
@@ -3830,7 +3834,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     put(&format!("{slug}/{slug}.rdf"), crlf(&rdf(prog, syn.spur.as_ref())), &mut wrote)?;
     put(&format!("{slug}/{slug}.ssc"), SSC.into(), &mut wrote)?;
     put(&format!("{slug}/generator.ini"), crlf(&generator_ini()), &mut wrote)?;
-    let (map_img, shot) = ui_images(prog, syn, UI_IMAGE_DIM);
+    let (map_img, shot) = ui_images(prog, syn, &scenery, UI_IMAGE_DIM);
     put(&format!("{slug}/{slug}_map.tga"), map_img, &mut wrote)?;
     put(&format!("{slug}/{slug}.tga"), shot, &mut wrote)?;
 
@@ -5133,7 +5137,8 @@ pub fn write_pkz(
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     use std::io::Write;
-    let (map_img, shot) = ui_images(prog, syn, UI_IMAGE_DIM);
+    let scenery = crate::trackscenery::build(prog, syn);
+    let (map_img, shot) = ui_images(prog, syn, &scenery, UI_IMAGE_DIM);
     // Every published track puts its files in a folder named after itself, and the game
     // looks for them there — flat at the archive root they are not found at all.
     for (name, bytes) in [
@@ -6994,31 +6999,21 @@ rainy\n{\n\tambient\n\t{\n\t\tred = 0.6\n\t\tgreen = 0.6\n\t\tblue = 0.85\n\t}\n
 /// beside the track's name. Neither is optional — a track without them lists as a blank.
 ///
 /// Both are pictures of the same ground — the painted bands lit by the `.amb` — one straight
-/// down and one from a camera. See [`ui_map`] and [`ui_shot`].
-fn ui_images(prog: &TrackProgram, syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>) {
-    // The camera has to frame the lap, not the terrain — a track in one corner of a big
-    // landscape would otherwise be a smudge in the middle of a field. Every eighth corridor
-    // cell is plenty to bound a shape with.
-    let mut focus = Vec::new();
-    for gy in (0..syn.gh).step_by(8) {
-        for gx in (0..syn.gw).step_by(8) {
-            if syn.corridor[gy * syn.gw + gx] {
-                focus.push((gx as f32 * syn.mps, gy as f32 * syn.mps));
-            }
-        }
-    }
-    // A track with no corridor at all is not one anybody asked for, but the camera still has
-    // to go somewhere: the terrain itself.
-    if focus.is_empty() {
-        focus = vec![
-            (0.0, 0.0),
-            (prog.terrain.size_x, 0.0),
-            (0.0, prog.terrain.size_z),
-            (prog.terrain.size_x, prog.terrain.size_z),
-        ];
-    }
-
-    let albedo = ground_sheet(prog, syn, dim);
+/// down and one from a camera, with the scenery standing on it. See [`ui_map`] and
+/// [`ui_shot`].
+fn ui_images(
+    prog: &TrackProgram,
+    syn: &Synth,
+    scenery: &crate::trackscenery::Scenery,
+    dim: usize,
+) -> (Vec<u8>, Vec<u8>) {
+    let focus = hero_focus(prog, syn);
+    let objects: Vec<crate::trackshot::Object> = scenery
+        .models
+        .iter()
+        .map(|(mesh, sheet)| crate::trackshot::Object { mesh, sheet })
+        .collect();
+    let albedo = ground_sheet(prog, syn, UI_SHEET_DIM);
     // Straight off the `.amb`: `sun_position`, and the `clear` condition's light. The picture
     // is of the track in the weather the game opens it in.
     let sun = {
@@ -7032,8 +7027,9 @@ fn ui_images(prog: &TrackProgram, syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>)
         mps: syn.mps,
         heights: &syn.heights,
         albedo: &albedo,
-        adim: dim,
+        adim: UI_SHEET_DIM,
         focus: &focus,
+        objects: &objects,
         sun,
         sun_colour: [0.78, 0.72, 0.60],
         ambient: [0.40, 0.43, 0.50],
@@ -7041,18 +7037,159 @@ fn ui_images(prog: &TrackProgram, syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>)
         horizon: HORIZON,
         // The `.amb`'s own fog colour, which is what the distance goes to in the game too.
         haze: [179.0, 179.0, 217.0],
-        tilt_deg: crate::trackshot::TILT_DEG,
+        tilt_deg: crate::trackshot::HERO_TILT_DEG,
+        yaw_deg: crate::trackshot::HERO_YAW_DEG,
     };
-    (ui_map(prog, syn, &scene, dim), ui_shot(&scene, dim))
+    (ui_map(prog, syn, &scene, dim), ui_shot(prog, &scene, dim))
 }
 
-/// The picture beside the track's name: the terrain from above and off to one side, from a
-/// camera that places itself to fit the lap and to keep the sun behind it.
+/// How much air above the line the shot keeps: enough for the arch over the finish.
+const HERO_HEADROOM_M: f32 = 7.0;
+
+/// What the shot frames: the finish jump with the arch over it, or failing one the finish
+/// line with its gantry — the one place every track has something built. A jump elsewhere
+/// is only a brown mound at this size. Both edges of the track and some air above it, so the
+/// arch and the banners beside it fit too.
+fn hero_focus(prog: &TrackProgram, syn: &Synth) -> Vec<[f32; 3]> {
+    let (from, to) = match prog.finish_jump() {
+        Some(f) => (f.at() - 10.0, f.at() + f.length() + 10.0),
+        None => {
+            let f = finish_at(prog);
+            (f - 35.0, f + 20.0)
+        }
+    };
+    let lap = prog.lap_length().max(1.0);
+    let ground = |x: f32, z: f32| {
+        let gx = (x / syn.mps).round().clamp(0.0, (syn.gw - 1) as f32) as usize;
+        let gz = (z / syn.mps).round().clamp(0.0, (syn.gh - 1) as f32) as usize;
+        syn.heights[gz * syn.gw + gx]
+    };
+    let half = prog.width * 0.5 + 3.0;
+    let mut out = Vec::new();
+    for st in &syn.stations {
+        if (st.s - from).rem_euclid(lap) > to - from {
+            continue;
+        }
+        let (hx, hz) = crate::trackprog::heading_vector(st.heading);
+        for side in [-1.0f32, 1.0] {
+            let (x, z) = (st.x - hz * side * half, st.z + hx * side * half);
+            out.push([x, ground(x, z), z]);
+        }
+        out.push([st.x, ground(st.x, st.z) + HERO_HEADROOM_M, st.z]);
+    }
+    // No lap at all is not a track anybody asked for, but the camera still has to go
+    // somewhere: the terrain itself.
+    if out.is_empty() {
+        let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
+        out = vec![[0.0, 0.0, 0.0], [sx, 0.0, 0.0], [0.0, 0.0, sz], [sx, 0.0, sz]];
+    }
+    out
+}
+
+/// The picture beside the track's name: a close-up of its best jump with the scenery standing
+/// round it, and the name across the top.
 ///
-/// It used to be a false-colour relief of the heightfield with the corridor tinted orange over
-/// it, which told a player nothing about the place they were about to ride.
-fn ui_shot(scene: &crate::trackshot::Scene, dim: usize) -> Vec<u8> {
-    tga_rows(&crate::trackshot::render(scene, dim), dim)
+/// It was the whole lap from high up, which at the size the game shows it is a brown ring on
+/// a field — what the map says, less clearly.
+fn ui_shot(prog: &TrackProgram, scene: &crate::trackshot::Scene, dim: usize) -> Vec<u8> {
+    let mut rgb = crate::trackshot::render(scene, dim);
+    let km = prog.lap_length() / 1000.0;
+    let sub = match prog.location.trim() {
+        "" | "Generated" => format!("{km:.1} km"),
+        at => format!("{at} · {km:.1} km"),
+    };
+    title(&mut rgb, dim, &prog.name, &sub);
+    tga_rows(&rgb, dim)
+}
+
+/// The face the name is set in: Barlow Condensed Bold, the app's own, under the SIL Open Font
+/// License (`assets/fonts/OFL.txt`).
+const TITLE_FONT: &[u8] = include_bytes!("../assets/fonts/BarlowCondensed-Bold.ttf");
+
+/// Extra space between letters, as a fraction of the size.
+const TITLE_TRACKING: f32 = 0.015;
+
+/// The track's name across the top of the shot, and a smaller line under it.
+fn title(rgb: &mut [[u8; 3]], dim: usize, name: &str, sub: &str) {
+    let Ok(font) = ab_glyph::FontRef::try_from_slice(TITLE_FONT) else {
+        return;
+    };
+    let n = dim as f32;
+    let margin = n * 0.055;
+    // Darkened down from the top edge, so white letters read against a pale sky.
+    let scrim = n * 0.36;
+    for y in 0..(scrim as usize).min(dim) {
+        let k = 1.0 - 0.45 * (1.0 - y as f32 / scrim).powf(1.5);
+        for c in &mut rgb[y * dim..(y + 1) * dim] {
+            *c = c.map(|v| (v as f32 * k) as u8);
+        }
+    }
+    let (name, sub) = (name.to_uppercase(), sub.to_uppercase());
+    let mut size = n * 0.15;
+    while size > n * 0.06 && set_line(&font, &name, size, 0.0, 0.0).1 > n - 2.0 * margin {
+        size *= 0.95;
+    }
+    let base = margin + size * 0.72;
+    let small = (size * 0.34).max(n * 0.04);
+    for (text, size, y) in [(&name, size, base), (&sub, small, base + small * 1.35)] {
+        let off = (size * 0.04).max(1.0);
+        text_at(rgb, dim, &font, text, size, (margin + off, y + off), [0, 0, 0], 0.55);
+        text_at(rgb, dim, &font, text, size, (margin, y), [255, 255, 255], 1.0);
+    }
+}
+
+/// A line's glyphs set from `x` along a baseline at `y`, and where the pen ends up.
+fn set_line(
+    font: &ab_glyph::FontRef,
+    text: &str,
+    size: f32,
+    x: f32,
+    y: f32,
+) -> (Vec<ab_glyph::Glyph>, f32) {
+    use ab_glyph::{Font, ScaleFont};
+    let sf = font.as_scaled(size);
+    let (mut pen, mut prev, mut out) = (x, None, Vec::new());
+    for ch in text.chars() {
+        let id = sf.glyph_id(ch);
+        if let Some(p) = prev {
+            pen += sf.kern(p, id) + size * TITLE_TRACKING;
+        }
+        out.push(id.with_scale_and_position(size, ab_glyph::point(pen, y)));
+        pen += sf.h_advance(id);
+        prev = Some(id);
+    }
+    (out, pen)
+}
+
+/// Draw a line of text over a picture, `at` its pen start on the baseline.
+fn text_at(
+    rgb: &mut [[u8; 3]],
+    dim: usize,
+    font: &ab_glyph::FontRef,
+    text: &str,
+    size: f32,
+    at: (f32, f32),
+    col: [u8; 3],
+    alpha: f32,
+) {
+    use ab_glyph::Font;
+    for g in set_line(font, text, size, at.0, at.1).0 {
+        let Some(og) = font.outline_glyph(g) else {
+            continue;
+        };
+        let b = og.px_bounds();
+        og.draw(|gx, gy, cov| {
+            let (x, y) = (b.min.x as i32 + gx as i32, b.min.y as i32 + gy as i32);
+            if x < 0 || y < 0 || x >= dim as i32 || y >= dim as i32 {
+                return;
+            }
+            let a = cov.clamp(0.0, 1.0) * alpha;
+            let c = &mut rgb[y as usize * dim + x as usize];
+            for k in 0..3 {
+                c[k] = (c[k] as f32 + (col[k] as f32 - c[k] as f32) * a).round() as u8;
+            }
+        });
+    }
 }
 
 /// The track-info map: the ground straight down, with the lap drawn over it.
@@ -11059,7 +11196,7 @@ mod tests {
     /// The picture the game lists a track by, as rows from the top.
     fn shot_rows(p: &TrackProgram, dim: usize) -> Vec<[u8; 3]> {
         let s = synthesise(p).unwrap();
-        let (_, tga) = ui_images(p, &s, dim);
+        let (_, tga) = ui_images(p, &s, &crate::trackscenery::build(p, &s), dim);
         let px = &tga[18..18 + dim * dim * 4];
         // A TGA's row zero is the bottom of the picture, and it is stored BGRA.
         let mut out = Vec::with_capacity(dim * dim);
@@ -11105,39 +11242,17 @@ mod tests {
         );
     }
 
-    /// And the lap is in it, across most of it.
-    ///
-    /// The camera places itself to fit the corridor rather than the terrain, so a track built
-    /// on one corner of a big landscape is still the subject. If the fit gives up, the lap
-    /// ends up a smudge in the middle of a field — which is what a picture framed on the
-    /// terrain looks like, and it is not obviously wrong until you measure it.
+    /// And the track's name is on it: white letters across the top, which nothing else in
+    /// the picture is — the sky tops out at 217 in blue, and the ground well under that.
     #[test]
-    fn the_lap_fills_the_track_picture() {
-        let dim = 160;
+    fn the_track_picture_carries_the_name() {
+        let dim = 256;
         let rows = shot_rows(&oval(), dim);
-        // The ridden line is far darker than the ground it is cut into — Indiana's own soil
-        // measures a mean of 39 against its field's 142 — so the darkest of the picture is
-        // the track and nothing else.
-        let luma = |c: [u8; 3]| 0.3 * c[0] as f32 + 0.6 * c[1] as f32 + 0.1 * c[2] as f32;
-        let mut sorted: Vec<f32> = rows.iter().map(|&c| luma(c)).collect();
-        sorted.sort_by(f32::total_cmp);
-        let dark = sorted[rows.len() / 25];
-        let (mut x0, mut x1, mut y0, mut y1) = (dim, 0usize, dim, 0usize);
-        for (i, &c) in rows.iter().enumerate() {
-            if luma(c) <= dark {
-                let (x, y) = (i % dim, i / dim);
-                x0 = x0.min(x);
-                x1 = x1.max(x);
-                y0 = y0.min(y);
-                y1 = y1.max(y);
-            }
-        }
-        let (w, h) = (x1 + 1 - x0, y1 + 1 - y0);
-        assert!(
-            w * 10 >= dim * 7,
-            "the lap spans {w} of {dim} across the picture"
-        );
-        assert!(h * 10 >= dim * 2, "the lap spans {h} of {dim} down the picture");
+        let white = rows[..dim * dim / 3]
+            .iter()
+            .filter(|c| c.iter().all(|&v| v >= 240))
+            .count();
+        assert!(white * 200 >= dim * dim, "{white} white pixels in the top third");
     }
 
     /// Look at the pictures the game lists a track by.
@@ -11146,7 +11261,8 @@ mod tests {
     /// them out as `.ppm` beside each other, for a couple of laps.
     ///
     /// ```text
-    /// FROST_SHOT=/tmp/shots cargo test -- --ignored --nocapture the_track_pictures
+    /// FROST_SHOT=/tmp/shots [FROST_PROGRAM=track.json] [FROST_PROPS=library.fpl] \
+    ///   cargo test -- --ignored --nocapture the_track_pictures
     /// ```
     #[test]
     #[ignore = "writes pictures to look at — set FROST_SHOT"]
@@ -11164,9 +11280,21 @@ mod tests {
             p.terrain.scale = 50.0;
             p
         };
-        for p in [oval(), hairpins(), rolling] {
+        let progs = match std::env::var("FROST_PROGRAM") {
+            Ok(path) => {
+                let p: TrackProgram =
+                    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+                vec![with_fitted_budget(&p).unwrap()]
+            }
+            Err(_) => vec![oval(), hairpins(), rolling],
+        };
+        for p in progs {
             let s = synthesise(&p).unwrap();
-            let (map, shot) = ui_images(&p, &s, UI_IMAGE_DIM);
+            let sc = crate::trackscenery::build(&p, &s);
+            let (map, shot) = ui_images(&p, &s, &sc, UI_IMAGE_DIM);
+            let jump = p.finish_jump().map(|f| (f.at(), f.length(), f.height()));
+            println!("{}: finish jump {jump:?}, line at {:.0} m", p.name, finish_at(&p));
+            println!("  scenery {:?}", sc.tally);
             let name = slug(&p.name);
             tga_to_ppm(&map, UI_IMAGE_DIM, &dir.join(format!("{name}_map.ppm")));
             tga_to_ppm(&shot, UI_IMAGE_DIM, &dir.join(format!("{name}.ppm")));
@@ -11181,7 +11309,7 @@ mod tests {
     fn the_map_runs_north_up() {
         let p = hairpins();
         let s = synthesise(&p).unwrap();
-        let (map, _) = ui_images(&p, &s, UI_IMAGE_DIM);
+        let (map, _) = ui_images(&p, &s, &crate::trackscenery::build(&p, &s), UI_IMAGE_DIM);
         let dim = UI_IMAGE_DIM;
         assert_eq!(map[17] & 0x20, 0, "origin must be bottom-left");
         let f = finish_at(&p);

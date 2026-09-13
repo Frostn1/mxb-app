@@ -15,6 +15,8 @@
   shading.
 
 ### Changed
+- The picture beside a generated track's name is a close-up of its finish jump, with the arch,
+  banners and bales around it and the track's name across the top.
 - The in-game map of a generated track shows the ground from above, with the track's edges,
   the finish line, the start gate and arrows for the direction of travel.
 - Doubles, triples and singles on generated tracks have steeper take-offs and wider gaps, so

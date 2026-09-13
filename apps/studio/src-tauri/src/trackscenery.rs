@@ -299,6 +299,9 @@ pub struct Scenery {
     pub solid: Vec<Scene>,
     /// What went where, for the log and for measuring the result back.
     pub tally: Vec<(&'static str, usize)>,
+    /// Each model as built, world metres, with the sheet it wears — what the track's picture
+    /// draws, so it shows the scenery the game will.
+    pub models: Vec<(Mesh, edfwrite::Texture)>,
 }
 
 /// Height of the built ground at a world point, bilinear.
@@ -1817,13 +1820,17 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let mut files = Vec::new();
     let mut drawn = Vec::new();
     let mut solid = Vec::new();
+    let mut models = Vec::new();
     for (name, mesh, sheet, is_solid) in kinds {
         if mesh.vertex_count() < 8 {
             continue;
         }
         let file = format!("{name}.edf");
-        let bytes = edfwrite::write(&name, &[Part { name: name.clone(), mesh, texture: 0, normal: None }], &[sheet]);
+        let part = Part { name: name.clone(), mesh, texture: 0, normal: None };
+        let bytes =
+            edfwrite::write(&name, std::slice::from_ref(&part), std::slice::from_ref(&sheet));
         files.push((file.clone(), bytes));
+        models.push((part.mesh, sheet));
         let at = Scene { file, pos: [0.0, 0.0, 0.0], rot: [0.0, 0.0, 0.0] };
         // Collision only for what should stop a bike. A stake snaps and the fence is behind
         // the run-off, so neither is a wall; a tree, a bale and the gantry are.
@@ -1833,7 +1840,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
         drawn.push(at);
     }
 
-    Scenery { files, drawn, solid, tally }
+    Scenery { files, drawn, solid, tally, models }
 }
 
 /// The `scene<N>` blocks, in the form TerrainEd reads them.
