@@ -24,6 +24,7 @@ mod trackshot;
 mod trackspeed;
 mod trackstats;
 mod tracksynth;
+mod trackvenue;
 mod winefetch;
 
 /// Sealing content to a buyer. Gitignored, like the module it builds on.

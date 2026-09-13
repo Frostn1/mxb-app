@@ -1043,6 +1043,23 @@ fn fill_gaps(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
                 let x = (seed ^ ((pos * 8.0) as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15))
                     .wrapping_mul(0xBF58_476D_1CE4_E5B9);
                 let frac = ((x >> 11) as f64 / (1u64 << 53) as f64) as f32;
+                // Rollers and, now and then, a small single: an empty chicane rode as nothing.
+                if frac > 0.55 {
+                    let h = 1.1 + 0.5 * frac;
+                    let (up, down) = (air_run(h), landing_run(h));
+                    let span = up + 1.2 + down;
+                    if pos + span + FILL_CLEAR_M <= a && !hairpin(pos, span) {
+                        let marks = [(0.0, 0.0), (up, h), (up + 1.2, h), (span, 0.0)];
+                        added.push(Feature::Custom {
+                            at: pos,
+                            length: span,
+                            shape: marks.iter().map(|(m, v)| crate::trackprog::ShapePoint { u: m / span, h: *v }).collect(),
+                            side: 0.0,
+                        });
+                        pos += span + FILL_SPACING_M;
+                        continue;
+                    }
+                }
                 added.push(Feature::Roller { at: pos, length: FILL_ROLLER_M, height: 0.5 + 0.3 * frac });
                 pos += FILL_ROLLER_M + FILL_SPACING_M;
             }
@@ -1055,10 +1072,12 @@ fn fill_gaps(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
 
 /// The bare stretch worth filling, the ground kept clear either end, a roller's length, the
 /// gap between two, and the tightest bend one may sit on.
-const FILL_GAP_M: f32 = 55.0;
+const FILL_GAP_M: f32 = 35.0;
+/// At most this many wave sections to a lap: they were everywhere.
+const MAX_WAVE_SECTIONS: usize = 2;
 const FILL_CLEAR_M: f32 = 8.0;
 const FILL_ROLLER_M: f32 = 12.0;
-const FILL_SPACING_M: f32 = 14.0;
+const FILL_SPACING_M: f32 = 10.0;
 const FILL_HAIRPIN_M: f32 = 15.0;
 
 /// Whether the lap turns little enough under a jump that one built along its straight line
@@ -1102,7 +1121,7 @@ const SINGLE_AFTER_TURN_M: f32 = 15.0;
 const SINGLE_NOMINAL_M: f32 = 28.0;
 
 /// A side single: how tall, its crest, the clear ground either side, and the gap to the next.
-const SIDE_SINGLE_H: (f32, f32) = (1.1, 1.6);
+const SIDE_SINGLE_H: (f32, f32) = (1.3, 1.8);
 const SIDE_SINGLE_CREST_M: f32 = 1.2;
 const SIDE_SINGLE_CLEAR_M: f32 = 10.0;
 const SIDE_SINGLE_GAP_M: f32 = 30.0;
@@ -1114,6 +1133,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             .iter()
             .any(|(a, b, r)| r.is_some_and(|r| r < TIGHT_M) && *b > at && *a < at + length)
     };
+    let mut waves_laid = 0usize;
     let mut out = Vec::new();
     // The first stretch is where the gate row goes, and forty riders arrive at the first jump
     // in a pack. Leave it bare.
@@ -1139,7 +1159,8 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             // write "jumps must not exceed 3m in height", and `corpus::FEATURE_HEIGHT_M` holds
             // a program to it. This used to draw up to 3.4 and every table was outside it.
             // 70% of the 2.4-3.0 m drawn here before: 85% rode too big again.
-            let height = rng.range(2.0, 2.5);
+            // Taller: ridden as "the jumps are still very small height-wise".
+            let height = rng.range(2.4, 3.0);
             length = (rng.range(11.2, 18.9) + faces(height)).min(room);
             out.push(Feature::Tabletop { at: pos, length, height, lip: 0.0 });
         } else if pick < 0.30 && room > 40.0 && flies_straight(&spans, pos, 55.0) {
@@ -1150,7 +1171,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             // Drawn in metres and normalised afterwards, so the take-off gets the same run a
             // tabletop of this height gets. Drawn as fractions it had 3.6 m of lip in 8.5 m of
             // ground, and from the seat that is a wall.
-            let h = rng.range(2.0, 2.5);
+            let h = rng.range(2.3, 2.9);
             let dip = rng.range(0.30, 0.40);
             let (up, down) = (lip_run(h), landing_run(h));
             let near = up + 2.8 + down * 0.55;
@@ -1177,7 +1198,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             });
         } else if pick < 0.40 && room > 32.0 && single_fits(&spans, pos, SINGLE_NOMINAL_M) && flies_straight(&spans, pos, SINGLE_NOMINAL_M) {
             // A single: one mound, jumped off its face and landed on its own back.
-            let h = rng.range(1.5, 2.1);
+            let h = rng.range(1.8, 2.5);
             let (up, down) = (air_run(h), landing_run(h));
             let crest = 1.5;
             let span = up + crest + down;
@@ -1195,7 +1216,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             });
         } else if pick < 0.50 && room > 56.0 && flies_straight(&spans, pos, 45.0) {
             // A double: a take-off, a gap and a landing ramp, cleared in one.
-            let height = rng.range(1.8, 2.4);
+            let height = rng.range(2.2, 2.8);
             let lip = if rng.range(0.0, 1.0) < 0.5 { 0.0 } else { 10.0 };
             // Crest to crest stays near what it was: the gentler back and front take the rest.
             let gap = rng.range(4.0, 9.0);
@@ -1204,8 +1225,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
         } else if pick < 0.57 && room > 64.0 && flies_straight(&spans, pos, 55.0) {
             // A triple: a take-off, a middle lump and a landing ramp. The fast clear it in one;
             // everyone else jumps it as a double and a single.
-            // Smaller: the first triple after the finish rode as very hard to close.
-            let h = rng.range(1.6, 2.1);
+            let h = rng.range(1.9, 2.5);
             let (up, down) = (air_run(h), landing_run(h));
             let (g1, g2) = (rng.range(7.0, 9.0), rng.range(7.0, 9.0));
             let mut x = 0.0f32;
@@ -1227,8 +1247,8 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
         } else if pick < 0.64 && room > 70.0 && flies_straight(&spans, pos, 68.0) {
             // A table with a single after it: roll the table and jump the single, clear the
             // deck onto the single's back as a double, or go further still.
-            let h = rng.range(2.0, 2.4);
-            let h2 = rng.range(1.5, 1.9);
+            let h = rng.range(2.3, 2.8);
+            let h2 = rng.range(1.8, 2.2);
             let (up, down) = (lip_run(h), landing_run(h));
             let (up2, down2) = (air_run(h2), landing_run(h2));
             let deck = rng.range(8.0, 12.0);
@@ -1258,14 +1278,18 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
                     .map(|(m, v)| crate::trackprog::ShapePoint { u: m / x, h: *v })
                     .collect(),
             });
-        } else if pick < 0.72 && room > 70.0 {
+        } else if pick < 0.68 && room > 90.0 && waves_laid < MAX_WAVE_SECTIONS {
+            waves_laid += 1;
             // A wave section, drawn as one shape so no hollow is dug between them: a small
             // kicker to flow in, the waves at one size, and a small one out.
+            // Long enough for a bike to sit in, and each one its own: they all rode the same.
             let waves = rng.range(3.0, 5.99) as usize;
-            let wave = rng.range(9.0, 11.0);
-            let h = rng.range(0.8, 1.1);
+            let wave = rng.range(12.0, 16.0);
+            let h = rng.range(0.8, 1.2);
             let mut bumps = vec![(wave * 0.7, h * 0.5)];
-            bumps.extend(std::iter::repeat((wave, h)).take(waves));
+            for _ in 0..waves {
+                bumps.push((wave * rng.range(0.8, 1.25), h * rng.range(0.8, 1.2)));
+            }
             bumps.push((wave * 0.7, h * 0.5));
             let span: f32 = bumps.iter().map(|b| b.0).sum();
             length = span;
