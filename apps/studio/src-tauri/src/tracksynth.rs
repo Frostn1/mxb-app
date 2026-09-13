@@ -571,6 +571,13 @@ const ARL_BUMP_M: f32 = 2.2;
 const ARL_BUMP_ACROSS_M: f32 = 3.0;
 const ARL_BUMP_H_M: f32 = 0.06;
 const ARL_STRAIGHT_LANES: f32 = 0.9;
+/// How much of a jump's hold on the lanes a raced build lets go: its faces and landings wear
+/// the approach's lanes too.
+const ARL_JUMP_LANES: f32 = 0.85;
+/// How much earlier a raced build's braking bumps start, metres.
+const ARL_BRAKE_REACH_M: f32 = 12.0;
+/// Lone bumps on a raced lap: one chance per cell, likelier where it brakes.
+const ARL_LUMP_CELL_M: f32 = 5.0;
 
 /// How much the edge of the riding line wanders in and out, metres, and over what length of
 /// lap.
@@ -1552,6 +1559,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 }
                 // Not every face: roughly half the jumps carry ruts up them, the rest are clean.
                 let rutted = smoothstep(((fbm(s / 70.0, 5.5, r.seed ^ 0xFAC2) + 0.05) * 4.0).clamp(0.0, 1.0));
+                // A raced build's are all rutted.
+                let rutted = rutted.max((rough - 1.0).clamp(0.0, 1.0));
                 best * TYRE_MARK_DEPTH * focus * rise * rutted
             } else {
                 0.0
@@ -1560,13 +1569,16 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // easing out with it, where the carried field grooves take over down the straight.
             // Carried out along the straight as well, their wide shallow troughs swallowed the
             // field's own grooves: a straight between two hairpins wore none.
+            // A raced build keeps them over its jumps as well, up the face and off the landing.
+            let arl = (rough - 1.0).clamp(0.0, 1.0);
+            let open = 1.0 - focus * (1.0 - ARL_JUMP_LANES * arl);
             let lane_presence = ((ruts.spread.at(s) - RUT_BUNDLE.0) / (RUT_BUNDLE.1 - RUT_BUNDLE.0))
                 .clamp(0.0, 1.0)
-                * (1.0 - focus)
+                * open
                 * lane_turn.at(s);
-            let lane_presence = lane_presence.max(lane_lead.at(s) * LANE_LEAD_DEPTH * (1.0 - focus));
+            let lane_presence = lane_presence.max(lane_lead.at(s) * LANE_LEAD_DEPTH * open);
             // A raced straight carries shallow packed lanes too, rounded rather than sharp.
-            let lane_presence = lane_presence.max((rough - 1.0).clamp(0.0, 1.0) * ARL_STRAIGHT_LANES * (1.0 - focus));
+            let lane_presence = lane_presence.max(arl * ARL_STRAIGHT_LANES * open);
             let (lanes, lane_used) = if lane_presence > 0.0 {
                 let mut best = 0.0f32;
                 let mut used = 0.0f32;
@@ -1786,7 +1798,9 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
 
             // Braking bumps on the way into a corner, which is the direction they form in.
             // The phase drifts, because bumps that are a perfect sine read as corrugated iron.
-            let brake = chop.braking.at(s);
+            let arl = (rough - 1.0).clamp(0.0, 1.0);
+            // A raced build starts braking earlier, so its bumps run further out from the turn.
+            let brake = chop.braking.at(s).max(chop.braking.at(s + ARL_BRAKE_REACH_M * arl) * 0.8 * arl);
             if brake > 0.0 {
                 // In sets, not a washboard: ridden as "just stripes" when they ran unbroken the
                 // whole way into every corner.
@@ -1812,7 +1826,9 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     if band <= 0.0 {
                         continue;
                     }
-                    let wave = feel.brake.0 / rough.max(0.5).sqrt()
+                    // Full length on a raced build too: shortened with roughness, a bike no longer
+                    // fit between them.
+                    let wave = feel.brake.0 / rough.clamp(0.5, 1.0).sqrt()
                         * (0.85 + 0.3 * (0.5 + 0.5 * fbm(kf * 9.7, 1.3, r.seed ^ 0xB4C1)));
                     // A crest is not a straight line.
                     let bend = 0.35 * fbm(t / 2.0, s / 10.0, r.seed ^ 0xB4C2);
@@ -1832,7 +1848,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     let g = (n / BRAKE_GROUP).floor();
                     let slot = n - g * BRAKE_GROUP;
                     // Two or three: ARL's approaches run 1.1–1.9 swells per 10 m and ours ran 0.5.
-                    let count = if rough > 1.4 { 4.0 } else { 3.0 };
+                    // Every slot on a raced build.
+                    let count = if rough > 1.4 { BRAKE_GROUP } else { 3.0 };
                     let size = if slot < count { 0.6 + 0.4 * pick(3) } else { 0.0 };
                     let (prof, falling) = if x < peak {
                         (smoothstep(x / peak), false)
@@ -1849,7 +1866,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let w = brake * sets * clear * groomed;
                 // Half: a crest used to swing half above grade and half below; rising from
                 // grade at full height it stood twice as tall as it ever did.
-                heights[i] += rise.clamp(0.0, 1.0) * feel.brake.1 * 0.5 * w;
+                heights[i] += rise.clamp(0.0, 1.0) * feel.brake.1 * 0.5 * (1.0 + 0.4 * arl) * w;
                 // The back of each bump, where the packed soil shows through the paint.
                 bump[i] = (back * w).min(1.0);
             }
@@ -1869,6 +1886,23 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             if extra > 0.0 {
                 let chatter = fbm(s / ARL_BUMP_M, t / ARL_BUMP_ACROSS_M, r.seed ^ 0xA21B);
                 heights[i] += chatter * ARL_BUMP_H_M * extra * across * groomed;
+                // And lone bumps, each its own length, height and place across the track, most
+                // of them on the way into a turn.
+                let cell = (s / ARL_LUMP_CELL_M).floor();
+                let pick = |salt: i32| hash2(cell as i32, salt, r.seed ^ 0x1B7A) * 0.5 + 0.5;
+                let mid_s = (cell + 0.5) * ARL_LUMP_CELL_M;
+                let braking = chop.braking.at(mid_s).max(chop.braking.at(mid_s + ARL_BRAKE_REACH_M)).min(1.0);
+                if pick(0) < 0.3 + 0.5 * braking {
+                    let len = 1.6 + 1.6 * pick(1);
+                    let mid = cell * ARL_LUMP_CELL_M + (ARL_LUMP_CELL_M - len) * pick(2) + len * 0.5;
+                    let u = ((s - mid) / (len * 0.5)).abs();
+                    let v = ((t - (pick(3) - 0.5) * 2.0 * (half - 1.0).max(0.0)) / (1.5 + 2.0 * pick(4))).abs();
+                    if u < 1.0 && v < 1.0 {
+                        let pi = std::f32::consts::PI;
+                        let shape = (0.5 + 0.5 * (u * pi).cos()) * (0.5 + 0.5 * (v * pi).cos());
+                        heights[i] += shape * (0.1 + 0.15 * pick(5)) * extra.min(1.0) * groomed;
+                    }
+                }
             }
         }
     }

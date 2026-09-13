@@ -1185,14 +1185,15 @@ impl Feature {
 }
 
 /// A jump `k` times taller, capped at [`BIG_JUMP_MAX_H_M`], with its length or gap grown the same.
-fn grow(f: &Feature, k: f32) -> Feature {
-    let h = |v: f32| (v * k).min(BIG_JUMP_MAX_H_M);
+/// Taller by `kh`, longer (a table's top, a double's gap, a single's run) by `kl`.
+fn grow(f: &Feature, kh: f32, kl: f32) -> Feature {
+    let h = |v: f32| (v * kh).min(BIG_JUMP_MAX_H_M);
     match f.clone() {
-        Feature::Tabletop { at, length, height, lip } => Feature::Tabletop { at, length: length * k, height: h(height), lip },
-        Feature::Double { at, height, gap, lip } => Feature::Double { at, height: h(height), gap: gap * k, lip },
+        Feature::Tabletop { at, length, height, lip } => Feature::Tabletop { at, length: length * kl, height: h(height), lip },
+        Feature::Double { at, height, gap, lip } => Feature::Double { at, height: h(height), gap: gap * kl, lip },
         Feature::Custom { at, length, shape, side } => Feature::Custom {
             at,
-            length: length * k,
+            length: length * kl,
             shape: shape.into_iter().map(|p| ShapePoint { u: p.u, h: h(p.h) }).collect(),
             side,
         },
@@ -1201,8 +1202,9 @@ fn grow(f: &Feature, k: f32) -> Feature {
 }
 
 /// The tallest a raced build's jump may grow to, and the ground it keeps clear before the next.
-pub const BIG_JUMP_MAX_H_M: f32 = 3.6;
+pub const BIG_JUMP_MAX_H_M: f32 = 4.0;
 const BIG_JUMP_CLEAR_M: f32 = 8.0;
+const BIG_JUMP_MAX_SAG_M: f32 = 4.0;
 
 /// A worked example of a track program: what a good one looks like.
 ///
@@ -1599,21 +1601,53 @@ impl TrackProgram {
     /// cool to whip."
     pub fn bigger_jumps(&mut self, k: f32) {
         self.features.sort_by(|a, b| a.at().total_cmp(&b.at()));
-        for i in 0..self.features.len() {
+        let lap = self.lap_length();
+        let mut spans = Vec::new();
+        let mut at = 0.0;
+        for seg in &self.segments {
+            let r = match seg { Segment::Arc { radius, .. } => Some(radius.abs()), _ => None };
+            spans.push((at, at + seg.length(), r));
+            at += seg.length();
+        }
+        // Still landing on the track when flown in a straight line, as the layout asks.
+        let straight = |from: f32, len: f32| {
+            let turning: f32 = spans
+                .iter()
+                .filter_map(|&(a, b, r): &(f32, f32, Option<f32>)| Some((b.min(from + len) - a.max(from)).max(0.0) / r?.max(1.0)))
+                .sum();
+            len * turning / 8.0 <= BIG_JUMP_MAX_SAG_M
+        };
+        let jump = |f: &Feature| f.lips() > 0 && f.height() >= 1.2;
+        let mut i = 0;
+        while i < self.features.len() {
             let f = self.features[i].clone();
-            if f.height() < 1.2 || f.lips() == 0 {
+            if !jump(&f) {
+                i += 1;
                 continue;
             }
-            let next = self.features.get(i + 1).map_or(f32::INFINITY, |n| n.at());
+            // Bounded by the next jump, not the next filler: a roller laid after every jump
+            // left room for almost none of them to grow.
+            let next = self.features[i + 1..].iter().find(|n| jump(n)).map_or(lap, |n| n.at());
             let room = next - f.at() - BIG_JUMP_CLEAR_M;
-            // The full step if it fits, half of it if that does, else as it stood.
-            let grown = [k, 1.0 + (k - 1.0) * 0.5]
+            // The full step if it fits, half of it if that does, then taller in the same
+            // ground, else as it stood.
+            let half = 1.0 + (k - 1.0) * 0.5;
+            let grown = [(k, k), (half, half), (half, 1.0)]
                 .into_iter()
-                .map(|k| grow(&f, k))
-                .find(|g| g.length() <= room);
+                .map(|(kh, kl)| grow(&f, kh, kl))
+                .find(|g| g.length() <= room && straight(g.at(), g.length()));
             if let Some(g) = grown {
+                let end = g.at() + g.length() + BIG_JUMP_CLEAR_M;
                 self.features[i] = g;
+                // Fillers under the grown jump give way to it.
+                let mut j = i + 1;
+                while j < self.features.len() && self.features[j].at() < end {
+                    let filler = matches!(self.features[j], Feature::Roller { .. } | Feature::Custom { .. })
+                        && !jump(&self.features[j]);
+                    if filler { self.features.remove(j); } else { j += 1; }
+                }
             }
+            i += 1;
         }
     }
 

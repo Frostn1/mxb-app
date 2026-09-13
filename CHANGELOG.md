@@ -23,6 +23,10 @@
   start gate and arrows for the direction of travel.
 - The picture beside a generated track's name is a close-up of its biggest jump, with the
   track's name across the top.
+- On the ARL build most jumps grow taller and longer, up to 4 m, and doubles get longer
+  gaps. Small bumps in the way make room for them.
+- The ARL build has ruts up jump faces and off landings, more and bigger braking bumps that
+  start further out from corners, and lone bumps all over the lap.
 
 ## 2026-09-13 — v0.14.1 — Shortcuts under both names
 
