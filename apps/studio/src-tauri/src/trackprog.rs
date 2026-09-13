@@ -1184,6 +1184,26 @@ impl Feature {
     }
 }
 
+/// A jump `k` times taller, capped at [`BIG_JUMP_MAX_H_M`], with its length or gap grown the same.
+fn grow(f: &Feature, k: f32) -> Feature {
+    let h = |v: f32| (v * k).min(BIG_JUMP_MAX_H_M);
+    match f.clone() {
+        Feature::Tabletop { at, length, height, lip } => Feature::Tabletop { at, length: length * k, height: h(height), lip },
+        Feature::Double { at, height, gap, lip } => Feature::Double { at, height: h(height), gap: gap * k, lip },
+        Feature::Custom { at, length, shape, side } => Feature::Custom {
+            at,
+            length: length * k,
+            shape: shape.into_iter().map(|p| ShapePoint { u: p.u, h: h(p.h) }).collect(),
+            side,
+        },
+        other => other,
+    }
+}
+
+/// The tallest a raced build's jump may grow to, and the ground it keeps clear before the next.
+pub const BIG_JUMP_MAX_H_M: f32 = 3.6;
+const BIG_JUMP_CLEAR_M: f32 = 8.0;
+
 /// A worked example of a track program: what a good one looks like.
 ///
 /// Walked, not written. [`crate::tracklayout::draw`] grows a lap piece by piece out of a 470 m
@@ -1574,6 +1594,29 @@ pub struct Station {
 }
 
 impl TrackProgram {
+    /// Bigger jumps for a raced build: taller by `k`, capped, and longer by it where the ground
+    /// before the next feature allows. "You can have bigger jumps, taller and longer, so it feels
+    /// cool to whip."
+    pub fn bigger_jumps(&mut self, k: f32) {
+        self.features.sort_by(|a, b| a.at().total_cmp(&b.at()));
+        for i in 0..self.features.len() {
+            let f = self.features[i].clone();
+            if f.height() < 1.2 || f.lips() == 0 {
+                continue;
+            }
+            let next = self.features.get(i + 1).map_or(f32::INFINITY, |n| n.at());
+            let room = next - f.at() - BIG_JUMP_CLEAR_M;
+            // The full step if it fits, half of it if that does, else as it stood.
+            let grown = [k, 1.0 + (k - 1.0) * 0.5]
+                .into_iter()
+                .map(|k| grow(&f, k))
+                .find(|g| g.length() <= room);
+            if let Some(g) = grown {
+                self.features[i] = g;
+            }
+        }
+    }
+
     pub fn lap_length(&self) -> f32 {
         self.segments.iter().map(|s| s.length()).sum()
     }
