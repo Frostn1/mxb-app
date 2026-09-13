@@ -45,6 +45,9 @@
   shading.
 
 ### Changed
+- Fewer yellow turn markers, further apart, only on the inside of the tightest corners.
+- Straights that carried only a gentle grade get rollers and small singles, and step-ups
+  are shorter and taller.
 - Generated tracks have a fenced paddock with a team area for each bike brand, a dirt road
   to the pit lane, and the big sponsor wall behind the start gates.
 - The start straight is fenced off from the track up to where it joins, so the way to go is
