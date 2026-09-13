@@ -15,6 +15,8 @@
   shading.
 
 ### Changed
+- Doubles, triples and singles on generated tracks have steeper take-offs and wider gaps, so
+  they throw you and have to be jumped. Tabletops keep their long, gentle faces.
 - Banners, flags and other venue pieces on generated tracks sit on the ground, following it,
   instead of keeping the slope of the track they came from.
 - Arches over the track stand on both legs.

@@ -861,6 +861,11 @@ fn lip_run(height: f32) -> f32 {
     )
 }
 
+/// A take-off meant to be jumped: see [`crate::trackprog::air_face_run`].
+fn air_run(height: f32) -> f32 {
+    crate::trackprog::air_face_run(height)
+}
+
 fn landing_run(height: f32) -> f32 {
     crate::trackprog::face_run(
         height,
@@ -903,7 +908,7 @@ fn side_singles(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
         loop {
             let (frac, right) = pick(pos);
             let h = SIDE_SINGLE_H.0 + (SIDE_SINGLE_H.1 - SIDE_SINGLE_H.0) * frac;
-            let (up, down) = (lip_run(h), landing_run(h));
+            let (up, down) = (air_run(h), landing_run(h));
             let span = up + SIDE_SINGLE_CREST_M + down;
             if pos + span + SIDE_SINGLE_CLEAR_M > a {
                 break;
@@ -1007,7 +1012,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
         } else if pick < 0.40 && room > 32.0 {
             // A single: one mound, jumped off its face and landed on its own back.
             let h = rng.range(1.5, 2.1);
-            let (up, down) = (lip_run(h), landing_run(h));
+            let (up, down) = (air_run(h), landing_run(h));
             let crest = 1.5;
             let span = up + crest + down;
             length = span.min(room);
@@ -1026,15 +1031,15 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             // A double: a take-off, a gap and a landing ramp, cleared in one.
             let height = rng.range(1.8, 2.4);
             let lip = if rng.range(0.0, 1.0) < 0.5 { 0.0 } else { 10.0 };
-            let gap = rng.range(5.0, 10.0);
+            let gap = rng.range(8.0, 13.0);
             length = crate::trackprog::double_faces(height, lip).total(gap);
             out.push(Feature::Double { at: pos, height, gap, lip });
         } else if pick < 0.57 && room > 64.0 {
             // A triple: a take-off, a middle lump and a landing ramp. The fast clear it in one;
             // everyone else jumps it as a double and a single.
             let h = rng.range(1.9, 2.5);
-            let (up, down) = (lip_run(h), landing_run(h));
-            let (g1, g2) = (rng.range(6.0, 8.0), rng.range(6.0, 8.0));
+            let (up, down) = (air_run(h), landing_run(h));
+            let (g1, g2) = (rng.range(8.0, 11.0), rng.range(8.0, 11.0));
             let mut x = 0.0f32;
             let mut marks = vec![(0.0f32, 0.0f32)];
             for (run, v) in [(up, h), (1.2, h), (g1, 0.35 * h), (3.0, 0.8 * h), (g2, 0.35 * h), (3.0, 0.9 * h), (down, 0.0)] {
@@ -1057,9 +1062,9 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             let h = rng.range(2.0, 2.4);
             let h2 = rng.range(1.5, 1.9);
             let (up, down) = (lip_run(h), landing_run(h));
-            let (up2, down2) = (lip_run(h2), landing_run(h2));
+            let (up2, down2) = (air_run(h2), landing_run(h2));
             let deck = rng.range(8.0, 12.0);
-            let gap = rng.range(3.0, 6.0);
+            let gap = rng.range(4.0, 8.0);
             let mut x = 0.0f32;
             let mut marks = vec![(0.0f32, 0.0f32)];
             for (run, v) in [
