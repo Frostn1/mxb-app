@@ -1177,7 +1177,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     // The roughness knob: taller braking bumps, more drive-out chop and bigger rollers.
     let rough = prog.terrain.roughness.clamp(0.0, 3.0);
     feel.brake.1 *= 0.6 + 0.4 * rough;
-    feel.accel.1 *= rough;
+    // More of them rather than only bigger: the spacing tightens below, the height by the root.
+    feel.accel.1 *= rough.sqrt();
     let worked = worked_profile(lap, r.seed);
     let ruts = rut_profile(&prog.features, &turn, lap, r.seed, &feel);
     // Where a corner's lanes are: the tight part of the turn, carried a little way back up the
@@ -1519,7 +1520,9 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     // Half a lane's width: thin, each a groove of its own.
                     best = best.max(trough(at, feel.groove * RUT_LANE_WIDTH * 0.5));
                 }
-                best * TYRE_MARK_DEPTH * focus * rise
+                // Not every face: roughly half the jumps carry ruts up them, the rest are clean.
+                let rutted = smoothstep(((fbm(s / 70.0, 5.5, r.seed ^ 0xFAC2) + 0.05) * 4.0).clamp(0.0, 1.0));
+                best * TYRE_MARK_DEPTH * focus * rise * rutted
             } else {
                 0.0
             };
@@ -1756,7 +1759,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 // In sets, not a washboard: ridden as "just stripes" when they ran unbroken the
                 // whole way into every corner.
                 let sets = smoothstep(
-                    ((fbm(s / BRAKE_SET_M, 3.3, r.seed ^ 0xB4B0) + 0.6) * 2.2).clamp(0.0, 1.0),
+                    ((fbm(s / BRAKE_SET_M, 3.3, r.seed ^ 0xB4B0) + 0.6 + 0.3 * (rough - 1.0)) * 2.2).clamp(0.0, 1.0),
                 );
                 // Never inside a rut: a tyre in a groove rides its floor, not the bumps.
                 // Nor on a rut's bank: a crest there stood alone between two grooves, a shark fin.
@@ -1776,7 +1779,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     if band <= 0.0 {
                         continue;
                     }
-                    let wave = feel.brake.0 * (0.85 + 0.3 * (0.5 + 0.5 * fbm(kf * 9.7, 1.3, r.seed ^ 0xB4C1)));
+                    let wave = feel.brake.0 / rough.max(0.5).sqrt()
+                        * (0.85 + 0.3 * (0.5 + 0.5 * fbm(kf * 9.7, 1.3, r.seed ^ 0xB4C1)));
                     // A crest is not a straight line.
                     let bend = 0.35 * fbm(t / 2.0, s / 10.0, r.seed ^ 0xB4C2);
                     let cycles = s / wave
@@ -1819,13 +1823,13 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             let out = chop.accel.at(s);
             if out > 0.0 && across > 0.0 {
                 let drift = 0.4 * fbm(s / 31.0, 13.0, r.seed ^ 0xACCE);
-                let ripple = ((s / feel.accel.0 + drift) * std::f32::consts::TAU).sin();
+                let ripple = ((s * rough.max(0.5) / feel.accel.0 + drift) * std::f32::consts::TAU).sin();
                 heights[i] += ripple * feel.accel.1 * 0.5 * out * across * polished * groomed;
             }
             // And the ground everybody rides rolls: irregular swells a few metres long, the most
             // of what ARL's straights carry (0.7–1.0 per 10 m against our 0.4).
-            let roll = fbm(s / SWELL_WAVELENGTH_M, t / SWELL_ACROSS_M, r.seed ^ 0x5E11);
-            heights[i] += roll * SWELL_M * rough * across * groomed;
+            let roll = fbm(s * rough.max(0.5) / SWELL_WAVELENGTH_M, t / SWELL_ACROSS_M, r.seed ^ 0x5E11);
+            heights[i] += roll * SWELL_M * rough.sqrt() * across * groomed;
         }
     }
 

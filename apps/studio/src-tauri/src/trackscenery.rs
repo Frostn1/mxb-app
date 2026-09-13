@@ -308,9 +308,13 @@ pub struct Scenery {
 /// A lifted piece set on our ground vertex by vertex: it is stored as height above the donor's.
 fn draped(mesh: &Mesh, x: f32, z: f32, lift: f32, syn: &Synth) -> Mesh {
     let mut m = mesh.clone();
+    // Never above the ground everywhere: a piece whose donor ground was misread came out
+    // floating by that much.
+    let low = m.positions.chunks_exact(3).map(|v| v[1]).fold(f32::INFINITY, f32::min);
+    let sink = if low.is_finite() { low.max(0.0) } else { 0.0 };
     for v in m.positions.chunks_exact_mut(3) {
         let (wx, wz) = (v[0] + x, v[2] + z);
-        v[1] += ground(syn, wx, wz) + lift;
+        v[1] += ground(syn, wx, wz) + lift - sink;
         v[0] = wx;
         v[2] = wz;
     }
@@ -1873,6 +1877,7 @@ pub fn blocks(scenes: &[Scene]) -> String {
 mod tests {
     use super::*;
 
+
     /// A library "tree" whose UVs sit on the clear part of its sheet is not planted — it
     /// would draw as nothing. One on the leaves is.
     #[test]
@@ -3209,6 +3214,8 @@ const ARCH_STRAIGHT_R_M: f32 = 40.0;
 /// How far along the lap either side of an arch the ground must be that straight.
 const ARCH_STRAIGHT_ALONG_M: f32 = 15.0;
 const ARCH_OFF_FEATURE_M: f32 = 15.0;
+/// The tallest feature an arch may stand over.
+const ARCH_OVER_FEATURE_H_M: f32 = 1.2;
 const ARCH_FROM_START_M: f32 = 110.0;
 const ARCH_APART_M: f32 = 50.0;
 
@@ -3308,7 +3315,9 @@ pub fn lifted(
                 let straight = (-n..=n).all(|j| {
                     at((s + j as f32 * 2.5).rem_euclid(lap)).curvature.abs() < 1.0 / ARCH_STRAIGHT_R_M
                 });
-                let on_jump = prog.features.iter().any(|f| {
+                // Off the jumps, not the rollers: with the bare stretches rolled, an arch found
+                // nowhere to stand.
+                let on_jump = prog.features.iter().filter(|f| f.height().abs() > ARCH_OVER_FEATURE_H_M).any(|f| {
                     s > f.at() - ARCH_OFF_FEATURE_M && s < f.at() + f.length() + ARCH_OFF_FEATURE_M
                 });
                 let crowded = placed.iter().any(|&q| wrap(q - s) < ARCH_APART_M);
@@ -3614,9 +3623,12 @@ fn plant_trees(lib: &crate::trackprops::PropLibrary, plants: &[Plant]) -> Vec<(S
     for p in plants {
         let pick = ((rnd(0x7A11, p.key) * trees.len() as f32) as usize).min(trees.len() - 1);
         let prop = trees[pick];
+        // On its own base: stored above its donor's ground, a small tree whose ground was
+        // misread stood that far up in the sky.
+        let base = prop.mesh.positions.chunks_exact(3).map(|v| v[1]).fold(f32::INFINITY, f32::min).max(0.0);
         by.entry((prop.sheet.clone(), p.far))
             .or_default()
-            .append(&edfwrite::moved(&edfwrite::turned(&prop.mesh, p.yaw), [p.x, p.foot, p.z]));
+            .append(&edfwrite::moved(&edfwrite::turned(&prop.mesh, p.yaw), [p.x, p.foot - base, p.z]));
     }
     by.into_iter()
         .filter_map(|((sheet, far), mesh)| {
