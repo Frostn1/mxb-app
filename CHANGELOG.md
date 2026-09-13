@@ -1,6 +1,30 @@
 # Changelog
 
-## 2026-09-13
+## Unreleased — Frost's Studio
+
+### Changed
+- Generated tracks are rougher, closer to an ARL track, and have a roughness setting to go
+  further.
+- Doubles, triples and singles have steeper take-offs and real gaps you have to jump.
+  Tabletop faces are steeper too.
+- Triples are a little smaller, every jump lands with room before the next turn, and singles
+  come before a turn instead of straight out of one.
+- Wave sections are a normal size, and the back of a double's take-off and the front of its
+  landing are slopes, not walls.
+- Long straights bend into sweepers, and sweepers that had nothing on them carry rollers.
+- The track sits at ground level, with the land sloping gently down to it.
+- Ruts lead into corners up the approach and bend into the turn. Ruts on jump faces are
+  fainter, run through the lip and follow the lanes out of the corner before.
+- Braking bumps stay off the banks and floors of ruts, and tyre marks are bolder and follow
+  the ruts.
+- Arches stand on both legs across straight track. Banners, flags and other venue pieces sit
+  on the ground just outside the track edge.
+- The in-game map shows the ground from above, with the track's edges, the finish line, the
+  start gate and arrows for the direction of travel.
+- The picture beside a generated track's name is a close-up of its biggest jump, with the
+  track's name across the top.
+
+## 2026-09-13 — v0.14.1 — Shortcuts under both names
 
 ### Fixed
 - Updating from inside the app keeps Frost's Mod Manager in the Start menu and on the desktop.

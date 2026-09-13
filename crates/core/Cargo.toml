@@ -1,6 +1,6 @@
 [package]
 name = "mxb-core"
-version = "0.14.0"
+version = "0.14.1"
 description = "Shared core: the game's file formats and the model pipeline both apps read."
 authors = ["Frost"]
 edition = "2021"
