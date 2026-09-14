@@ -74,6 +74,8 @@
 - More hay bales, in rows on the outside of corners and at landings where you can see them.
 - The yellow turn markers face the way riders come into the turn.
 - Paddock trucks sit level on the ground.
+- Track builds can come sealed with Frost Studio's GUID lock; an all-zero GUID locks a track
+  for everyone.
 - Generated tracks hold up to a long race with track deformation on: 35 cm of soft soil over
   the whole track, as ARL's own tracks carry, on a soil bed so it never digs to hardpack.
 

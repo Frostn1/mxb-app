@@ -254,6 +254,35 @@ pub fn compile(
     Ok(steps)
 }
 
+/// Seal a built `.pkz` in place with Studio's own locker. The all-zero GUID is sealed but bound
+/// to nobody, which is how public locked tracks ship. A file already sealed is left alone.
+#[cfg(sidecar)]
+pub fn lock_pkz(path: &Path, guid: &str) -> Result<()> {
+    use crate::sidecar::{KCOL_FOOTER_LEN, KCOL_MAGIC};
+    use sha2::{Digest, Sha256};
+    let guid = crate::sidecar_lock::normalize_guid(guid)?;
+    let mut buf = std::fs::read(path).with_context(|| format!("read {path:?}"))?;
+    if buf.len() >= KCOL_FOOTER_LEN && &buf[buf.len() - KCOL_FOOTER_LEN..][..4] == KCOL_MAGIC {
+        return Ok(());
+    }
+    // A fresh key per copy, as the locker's own runs do: the key is in the file anyway.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let d = Sha256::new()
+        .chain_update(path.to_string_lossy().as_bytes())
+        .chain_update(nanos.to_le_bytes())
+        .finalize();
+    let mut key = [0u8; 16];
+    key.copy_from_slice(&d[..16]);
+    let drop_base = u32::from_le_bytes([d[16], d[17], 0, 0]) & 0x3FF;
+    buf.reserve(KCOL_FOOTER_LEN);
+    crate::sidecar_lock::seal_pkz_in_place(&mut buf, &guid, &key, drop_base)?;
+    std::fs::write(path, &buf).with_context(|| format!("write {path:?}"))?;
+    Ok(())
+}
+
 /// The archive the game reads, from the folder the compilers just filled.
 ///
 /// Everything under `<dir>/<slug>/` and nothing else. The source beside it — the heightmap,
@@ -740,5 +769,51 @@ mod build_one {
         let pkz = out.join(format!("{slug}.pkz"));
         let n = package(&dir, &slug, &pkz).expect("package");
         println!("  {} -- {:.1} MB", pkz.display(), n as f64 / 1_048_576.0);
+        // FROST_LOCK=<GUID> seals it with Studio's locker; all zeros is public.
+        if let Ok(g) = std::env::var("FROST_LOCK") {
+            #[cfg(sidecar)]
+            {
+                lock_pkz(&pkz, &g).expect("lock");
+                println!("  locked to {g}");
+            }
+            #[cfg(not(sidecar))]
+            panic!("FROST_LOCK={g} needs the private sidecar in this checkout");
+        }
+    }
+
+    /// Seal tracks already built, in place: FROST_LOCK=<GUID> FROST_LOCK_PKZ=a.pkz,b.pkz.
+    #[cfg(sidecar)]
+    #[test]
+    #[ignore = "locks the files it's given"]
+    fn lock_built_tracks() {
+        let guid = std::env::var("FROST_LOCK").expect("set FROST_LOCK");
+        for p in std::env::var("FROST_LOCK_PKZ").expect("set FROST_LOCK_PKZ").split(',') {
+            lock_pkz(Path::new(p), &guid).expect("lock");
+            println!("  locked {p} to {guid}");
+        }
+    }
+}
+
+#[cfg(all(test, sidecar))]
+mod lock {
+    use super::*;
+
+    #[test]
+    fn a_track_locked_to_nobody_still_reads_back() {
+        let dir = std::env::temp_dir().join(format!("frost-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("mytrack")).unwrap();
+        std::fs::write(dir.join("mytrack/mytrack.ini"), b"[info]\nname = x\n").unwrap();
+        let pkz = dir.join("mytrack.pkz");
+        package(&dir, "mytrack", &pkz).unwrap();
+        lock_pkz(&pkz, "000000000000000000").unwrap();
+        assert!(!crate::pkz::is_plain_zip(&pkz), "still a plain zip");
+        let names = crate::pkz::entry_names(&pkz).unwrap();
+        assert!(names.iter().any(|n| n == "mytrack/mytrack.ini"), "{names:?}");
+        // Locking again leaves it as it is.
+        let once = std::fs::read(&pkz).unwrap();
+        lock_pkz(&pkz, "000000000000000000").unwrap();
+        assert_eq!(once, std::fs::read(&pkz).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
