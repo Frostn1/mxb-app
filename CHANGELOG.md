@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Frost's Studio
+## 2026-09-14 — Frost's Studio v0.1.5
 
 ### Fixed
 - Adding a part in the track creator now lands it where you're working and keeps it selected — the
