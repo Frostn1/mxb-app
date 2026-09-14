@@ -194,11 +194,18 @@ fn main() {
             mxb_core::viewer::watch_viewer_source,
         ])
         .setup(|app| {
+            // The window is frameless with a custom title bar (see `TitleBar.tsx`), so the app
+            // draws its own File menu. macOS keeps its global menu bar at the top of the screen —
+            // that's the native home there — so the native menu is set on macOS only; elsewhere
+            // the same actions run from the title bar's File menu and keyboard shortcuts.
+            #[cfg(target_os = "macos")]
             app.set_menu(app_menu(app.handle())?)?;
+            let _ = app;
             Ok(())
         })
         // Every item is a request the frontend answers, because everything a menu here can do
-        // is something a tool already knows how to do. The id travels as-is.
+        // is something a tool already knows how to do. The id travels as-is — the title bar's
+        // File menu and the frontend shortcuts emit the very same `menu` event off-macOS.
         .on_menu_event(|app, event| {
             let _ = tauri::Emitter::emit(app, "menu", event.id().0.as_str());
         })
@@ -2047,6 +2054,7 @@ fn psd_unwatch(state: tauri::State<'_, PsdWatcher>) {
 ///
 /// The macOS app submenu has to be built by hand: setting a menu at all replaces the default
 /// one, and without it there would be no Quit.
+#[cfg(target_os = "macos")]
 fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 
