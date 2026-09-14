@@ -12,7 +12,7 @@
  * — who would then be signed in as them.
  */
 
-import { allowedOrigin, assetOrigins, cors, refuseCrossSiteWrite } from "./assets";
+import { allowedOrigin, assetOrigins, cors, newCreatorsOpen, refuseCrossSiteWrite } from "./assets";
 import { tokenMatches } from "./auth";
 import { steamResult } from "./page";
 import { isVerified, loginUrl, steamPersonaName, verifyAssertion } from "./steam";
@@ -131,17 +131,16 @@ export async function webRoutes(
   if (method === "GET" && path === "/v1/web/me") {
     const session = await webSession(request, env);
     if (!session) return cors(json(401, { error: "not signed in" }), origin);
-    const account = await env.DB.prepare("SELECT rider_name, kind FROM accounts WHERE steam_id = ?")
+    const account = await env.DB.prepare("SELECT rider_name, kind, creator_at FROM accounts WHERE steam_id = ?")
       .bind(session.steamId)
-      .first<{ rider_name: string; kind: string }>();
+      .first<{ rider_name: string; kind: string; creator_at: number | null }>();
     // A web-only profile (made for a creator on the site) isn't an MXB App profile.
     const app = account && account.kind !== "web" ? account : null;
     return cors(
       json(200, {
         steamId: session.steamId,
         name: session.name || app?.rider_name || "",
-        // Anyone signed in with Steam can lock and sell.
-        creator: true,
+        creator: !!account?.creator_at || newCreatorsOpen(env),
         linked: !!app,
       }),
       origin,

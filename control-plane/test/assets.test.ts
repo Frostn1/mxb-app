@@ -635,7 +635,7 @@ describe("a creator who started on the site", () => {
   }
 
   it("brings their assets along when they link the same Steam account in the app", async () => {
-    const env = await deployment({ MXB_WEB_SESSION_KEY: "session-secret", MXB_SITE_ORIGIN: SITE });
+    const env = await deployment({ MXB_WEB_SESSION_KEY: "session-secret", MXB_SITE_ORIGIN: SITE, MXB_NEW_CREATORS: "open" });
     await addAccount(env.DB, "acc_app", "Rider");
     const made = await call(env, req("POST", "/admin/assets", { key: null, origin: SITE, body: { title: "Pine Hill" }, headers: { Cookie: await signedIn(STEAM) } }));
     expect(made.status).toBe(201);
