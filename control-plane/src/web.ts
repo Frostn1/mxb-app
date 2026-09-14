@@ -131,15 +131,18 @@ export async function webRoutes(
   if (method === "GET" && path === "/v1/web/me") {
     const session = await webSession(request, env);
     if (!session) return cors(json(401, { error: "not signed in" }), origin);
-    const account = await env.DB.prepare("SELECT rider_name, creator_at FROM accounts WHERE steam_id = ?")
+    const account = await env.DB.prepare("SELECT rider_name, kind FROM accounts WHERE steam_id = ?")
       .bind(session.steamId)
-      .first<{ rider_name: string; creator_at: number | null }>();
+      .first<{ rider_name: string; kind: string }>();
+    // A web-only profile (made for a creator on the site) isn't an MXB App profile.
+    const app = account && account.kind !== "web" ? account : null;
     return cors(
       json(200, {
         steamId: session.steamId,
-        name: session.name || account?.rider_name || "",
-        creator: !!account?.creator_at,
-        linked: !!account,
+        name: session.name || app?.rider_name || "",
+        // Anyone signed in with Steam can lock and sell.
+        creator: true,
+        linked: !!app,
       }),
       origin,
     );
