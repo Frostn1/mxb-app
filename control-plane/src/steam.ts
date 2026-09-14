@@ -169,3 +169,23 @@ export async function verifyAssertion(
 
   return { steamId };
 }
+
+/**
+ * A Steam profile's display name, best effort: blank if Steam is slow, private or down.
+ *
+ * Cached at Cloudflare's edge for a day, so a buyer list doesn't ask Steam every time it loads.
+ */
+export async function steamPersonaName(steamId: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+  if (!isSteamId64(steamId)) return "";
+  try {
+    const resp = await fetchImpl(`https://steamcommunity.com/profiles/${steamId}/?xml=1`, {
+      signal: AbortSignal.timeout(5_000),
+      cf: { cacheTtl: 86_400, cacheEverything: true },
+    } as RequestInit);
+    if (!resp.ok) return "";
+    const text = await resp.text();
+    return (/<steamID><!\[CDATA\[([\s\S]*?)\]\]><\/steamID>/.exec(text)?.[1] ?? "").trim().slice(0, 64);
+  } catch {
+    return "";
+  }
+}

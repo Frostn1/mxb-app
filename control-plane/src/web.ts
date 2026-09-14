@@ -8,7 +8,7 @@
  */
 
 import { allowedOrigin, ASSET_ORIGINS, cors } from "./assets";
-import { isVerified, loginUrl, verifyAssertion } from "./steam";
+import { isVerified, loginUrl, steamPersonaName, verifyAssertion } from "./steam";
 import {
   clearedSessionCookie,
   openToken,
@@ -21,8 +21,6 @@ import {
 
 /** A sign-in that hasn't come back from Steam in this long has to start again. */
 const STATE_TTL_MS = 10 * 60 * 1000;
-
-const NAME_TIMEOUT_MS = 5_000;
 
 export function isWebPath(path: string): boolean {
   return path.startsWith("/v1/web/");
@@ -80,7 +78,7 @@ export async function webRoutes(
     if (!state) return page(400, "That sign-in took too long or the link is broken. Go back and sign in again.");
     const result = await verifyAssertion(url.searchParams, `${url.origin}${url.pathname}`, fetchImpl);
     if (!isVerified(result)) return page(403, `Steam couldn't confirm that sign-in: ${result.error}.`);
-    const name = await personaName(result.steamId, fetchImpl);
+    const name = await steamPersonaName(result.steamId, fetchImpl);
     const token = await sealToken({ t: "session", steamId: result.steamId, name, exp: Date.now() + SESSION_TTL_MS }, key);
     return new Response(null, {
       status: 302,
@@ -114,20 +112,6 @@ export async function webRoutes(
   }
 
   return json(404, { error: "no such endpoint" });
-}
-
-/** The Steam profile's display name, best effort: blank if Steam is slow or private. */
-async function personaName(steamId: string, fetchImpl: typeof fetch): Promise<string> {
-  try {
-    const resp = await fetchImpl(`https://steamcommunity.com/profiles/${steamId}/?xml=1`, {
-      signal: AbortSignal.timeout(NAME_TIMEOUT_MS),
-    });
-    if (!resp.ok) return "";
-    const text = await resp.text();
-    return (/<steamID><!\[CDATA\[([\s\S]*?)\]\]><\/steamID>/.exec(text)?.[1] ?? "").trim().slice(0, 64);
-  } catch {
-    return "";
-  }
 }
 
 function page(status: number, message: string): Response {
