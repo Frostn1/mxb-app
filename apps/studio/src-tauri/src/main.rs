@@ -1680,21 +1680,31 @@ async fn mxbsecure_generate(
         if plaintext.starts_with(b"MXBSEC") {
             return Err("that file is already protected".into());
         }
-        let name = Path::new(&track_path)
+        let src = Path::new(&track_path);
+        // The original filename (e.g. `FarmSX.pkz`) is stored in the header so the blob can drop
+        // it; the output uses the stem, so it's `FarmSX.mxbsecure`, not `FarmSX.pkz.mxbsecure`.
+        let name = src
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .ok_or("not a file")?;
+        let stem = src
+            .file_stem()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| name.clone());
 
         let mut rnd = [0u8; 6];
         getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
         let suffix: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
         let asset_id = format!("{}-{suffix}", mxb_core::names::sanitize_asset_id(&name));
 
-        let locked = mxbsecure::lock(&plaintext, &asset_id, "k1");
+        let locked = mxbsecure::lock(&plaintext, &asset_id, "k1", &name);
 
-        // `<track>.mxbsecure` beside the original. Written to a temp and renamed, so a crash
+        // `<stem>.mxbsecure` beside the original. Written to a temp and renamed, so a crash
         // mid-write leaves no half file.
-        let blob_path = format!("{track_path}.mxbsecure");
+        let blob_path = src
+            .with_file_name(format!("{stem}.mxbsecure"))
+            .to_string_lossy()
+            .to_string();
         let tmp = format!("{blob_path}.writing");
         tokio::fs::write(&tmp, &locked.blob).await.map_err(|e| format!("write blob: {e}"))?;
         tokio::fs::rename(&tmp, &blob_path).await.map_err(|e| format!("finish blob: {e}"))?;

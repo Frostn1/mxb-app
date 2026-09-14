@@ -63,9 +63,9 @@ pub fn scan_secured(app: &AppHandle) -> Vec<SecureAsset> {
     found
 }
 
-/// Walk `dir` for `<name>.mxbsecure` blobs that have a `<name>.mxbsecure.mxbkey` beside them,
-/// pushing a [`SecureAsset`] for each. Recursive, because content lives in sub-folders (tracks,
-/// bikes and their paints, rider gear).
+/// Walk `dir` for `*.mxbsecure` blobs that have a key beside them, pushing a [`SecureAsset`] for
+/// each. Recursive, because content lives in sub-folders (tracks, bikes and their paints, rider
+/// gear).
 fn collect_mxbsecure(dir: &std::path::Path, out: &mut Vec<SecureAsset>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
@@ -76,18 +76,66 @@ fn collect_mxbsecure(dir: &std::path::Path, out: &mut Vec<SecureAsset>) {
         }
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
         if !name.ends_with(".mxbsecure") {
-            continue; // its `.mxbkey` sibling ends in .mxbkey, so it's skipped here
+            continue; // key siblings end in .mxbsecurekey / .mxbkey, so they're skipped here
         }
-        let mxbkey = format!("{}.mxbkey", path.to_string_lossy());
-        if !std::path::Path::new(&mxbkey).exists() {
+        let blob_path = path.to_string_lossy().to_string();
+        let Some(mxbkey) = existing_key_path(&blob_path) else {
             continue; // a blob with no key can't be opened — don't list it
-        }
+        };
         out.push(SecureAsset {
-            game_name: name.trim_end_matches(".mxbsecure").to_string(),
-            blob_path: path.to_string_lossy().to_string(),
+            game_name: game_name_of(&path, name),
+            blob_path,
             mxbkey_path: mxbkey,
         });
     }
+}
+
+/// The key file the app writes beside a new blob: `X.mxbsecure` → `X.mxbsecurekey`. Older blobs
+/// were named `X.pkz.mxbsecure` with a `X.pkz.mxbsecure.mxbkey` sibling; that legacy form is still
+/// read (see [`existing_key_path`]), but every fresh provision writes the short name.
+pub fn key_path_for(blob_path: &str) -> String {
+    match blob_path.strip_suffix(".mxbsecure") {
+        Some(stem) => format!("{stem}.mxbsecurekey"),
+        None => format!("{blob_path}.mxbkey"), // not a .mxbsecure name; keep the old shape
+    }
+}
+
+/// The key file that actually exists beside `blob_path`, preferring the new `.mxbsecurekey` name
+/// and falling back to the legacy `.mxbkey` sibling, or `None` if neither is present.
+pub fn existing_key_path(blob_path: &str) -> Option<String> {
+    let new = key_path_for(blob_path);
+    if std::path::Path::new(&new).exists() {
+        return Some(new);
+    }
+    let legacy = format!("{blob_path}.mxbkey");
+    std::path::Path::new(&legacy).exists().then_some(legacy)
+}
+
+/// The filename the game opens for a blob. New `X.mxbsecure` blobs carry the original name
+/// (`X.pkz`) in their v2 header; older `X.pkz.mxbsecure` blobs don't, so fall back to stripping the
+/// `.mxbsecure` suffix, which recovers `X.pkz` for them.
+pub fn game_name_of(path: &std::path::Path, file_name: &str) -> String {
+    #[cfg(mxbsecure)]
+    if let Some(orig) = header_orig_name(path) {
+        if !orig.is_empty() {
+            return orig;
+        }
+    }
+    let _ = path;
+    file_name.trim_end_matches(".mxbsecure").to_string()
+}
+
+/// The original game filename from a blob's v2 header, or `None` for a v1 blob (no name) or an
+/// unreadable file. Reads only the header prefix, not the whole blob.
+#[cfg(mxbsecure)]
+fn header_orig_name(path: &std::path::Path) -> Option<String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut head = vec![0u8; 8192];
+    let n = f.read(&mut head).ok()?;
+    head.truncate(n);
+    let (_asset, _key, _len, orig) = crate::mxbsecure::header_of(&head).ok()?;
+    Some(orig)
 }
 
 /// Every `*.mxbsecure` blob under the mods trees, whether or not it has a key beside it — what
