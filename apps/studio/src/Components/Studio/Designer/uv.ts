@@ -777,20 +777,30 @@ const FLANK_WASH: Record<number, string> = {
  * Coordinates outside 0–1 are drawn and clipped rather than wrapped: the tiled case is rare on
  * bodywork, and a guide that silently folded a decal back over itself would be worse than one
  * that stops at the edge.
+ *
+ * `template` draws the same thing as a standalone file — the painting proxy's per-sheet
+ * template — so it gets a white ground, dark edges and a `cap` of its own instead of the
+ * overlay's.
  */
 export function uvWireframe(
   parts: UvPart[],
   width: number,
   height: number,
+  opts?: { cap?: number; template?: boolean },
 ): HTMLCanvasElement | null {
   if (!parts.length) return null;
 
-  const k = Math.min(1, MAX_WIRE / Math.max(width, height));
+  const template = !!opts?.template;
+  const k = Math.min(1, (opts?.cap ?? MAX_WIRE) / Math.max(width, height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(width * k));
   canvas.height = Math.max(1, Math.round(height * k));
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
+  if (template) {
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
 
   const sx = canvas.width;
   const sy = canvas.height;
@@ -849,7 +859,9 @@ export function uvWireframe(
         edges.lineTo(tris[q] * sx, tris[q + 1] * sy);
       }
     }
-    ctx.strokeStyle = `hsla(${part.hue}, 85%, 72%, 0.85)`;
+    ctx.strokeStyle = template
+      ? `hsl(${part.hue}, 70%, 30%)`
+      : `hsla(${part.hue}, 85%, 72%, 0.85)`;
     ctx.stroke(edges);
   }
 

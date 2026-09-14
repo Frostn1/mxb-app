@@ -143,6 +143,11 @@ export const en = {
   "designer.hideModel": "Hide model",
   "designer.showModel": "Show model",
   "designer.exportPsdHint": "Write every sheet out as a layered .psd, into a folder you pick.",
+  "designer.exportProxy": "Export painting proxy",
+  "designer.exportProxyHint":
+    "A light stand-in of this bike with its real UV layout and a template for each sheet, for painting in Blender. The model itself stays with you.",
+  "designer.exportedProxy": "Wrote the painting proxy to {{dir}}",
+  "designer.exportedProxyDesc": "Kept {{kept}} of {{of}} triangles, with a template for each sheet.",
   "designer.psdWatching": "Watching for changes — save in Photoshop and the sheet updates here.",
   "designer.psdReloaded": "Reloaded “{{name}}” from Photoshop",
   "designer.blankSheet": "Blank sheet",

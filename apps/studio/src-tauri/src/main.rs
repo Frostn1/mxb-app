@@ -140,6 +140,7 @@ fn main() {
             photo_save,
             psd_read,
             psd_save,
+            export_paint_proxy,
             paint_studio_target,
             paint_studio_hints,
             set_track_tools,
@@ -1163,7 +1164,11 @@ async fn psd_save(request: tauri::ipc::Request<'_>) -> Result<String, String> {
     let psd = psd.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut path = std::path::PathBuf::from(&dest);
-        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("psd")) {
+        // A painting proxy's `.png` templates come through here too.
+        let known = path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("psd") || e.eq_ignore_ascii_case("png"));
+        if !known {
             path.set_extension("psd");
         }
         if let Some(dir) = path.parent() {
@@ -1174,6 +1179,63 @@ async fn psd_save(request: tauri::ipc::Request<'_>) -> Result<String, String> {
     })
     .await
     .map_err(|e| format!("psd_save task failed: {e}"))?
+}
+
+/// Write a bike's painting proxy into a folder the user picked: `<bike>_proxy.obj` and its
+/// `.mtl`. A cut-down stand-in with the real UV layout (see `mxb_core::paintproxy`), so a
+/// creator can hand painters something for Blender without handing over the model. The
+/// Designer writes the `.png` templates the `.mtl` names beside them.
+///
+/// The bike's own parts only: the wheels come from a tyres mod, not from its creator.
+#[tauri::command]
+async fn export_paint_proxy(source: String, out_dir: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let src = std::path::Path::new(&source);
+        if mxb_core::securesource::is_secured(src) {
+            return Err("A locked bike can't be exported. Export the proxy from your own copy.".to_string());
+        }
+        let model = mxb_core::viewer::load_bike_model_blocking(source.clone(), None)?;
+        let own = &model.nodes[..model.nodes.len() - model.wheels];
+        let proxy = mxb_core::paintproxy::build(own);
+        if proxy.parts.is_empty() {
+            return Err("This bike has no mesh to export.".to_string());
+        }
+        let name = src.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let stem = match mxb_core::paintproxy::template_stem(&name) {
+            s if s.is_empty() => "bike".to_string(),
+            s => s,
+        };
+        let dir = std::path::PathBuf::from(&out_dir);
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{dir:?}: {e}"))?;
+        let mtl_name = format!("{stem}_proxy.mtl");
+        let (obj, mtl) = mxb_core::paintproxy::to_obj(&proxy, &mtl_name);
+        let obj_path = dir.join(format!("{stem}_proxy.obj"));
+        std::fs::write(&obj_path, obj).map_err(|e| format!("{obj_path:?}: {e}"))?;
+        let mtl_path = dir.join(&mtl_name);
+        std::fs::write(&mtl_path, mtl).map_err(|e| format!("{mtl_path:?}: {e}"))?;
+        // The templates the `.mtl` names, for the Designer to draw — named here so the rule
+        // lives in one place.
+        let mut seen = std::collections::HashSet::new();
+        let templates: Vec<serde_json::Value> = proxy
+            .parts
+            .iter()
+            .flat_map(|p| &p.groups)
+            .filter_map(|(tex, _)| tex.as_deref())
+            .filter(|tex| seen.insert(mxb_core::paintproxy::template_stem(tex)))
+            .map(|tex| {
+                let file = format!("{}_template.png", mxb_core::paintproxy::template_stem(tex));
+                serde_json::json!({ "texture": tex, "file": file })
+            })
+            .collect();
+        Ok(serde_json::json!({
+            "obj": obj_path.to_string_lossy(),
+            "triangles": proxy.triangles(),
+            "sourceTriangles": proxy.source_triangles,
+            "templates": templates,
+        }))
+    })
+    .await
+    .map_err(|e| format!("export_paint_proxy task failed: {e}"))?
 }
 
 /// The file a save would write, resolved but not written — so the UI can ask before

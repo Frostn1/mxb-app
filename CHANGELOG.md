@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- The Studio Designer can export a painting proxy of a bike: a light stand-in with the bike's
+  real UV layout, plus a template for each sheet. Painters can work on it in Blender and the paint
+  lines up on the real bike, while the model itself stays with its creator.
 - Secured (`.mxbsecure`) files now show in the Library like any other mod — as their real type
   (track, bike, paint, gear), with a badge showing whether they're unlocked or still locked. An
   unlocked bike, paint or gear model opens in the 3D viewer too: it's decrypted **only in memory**

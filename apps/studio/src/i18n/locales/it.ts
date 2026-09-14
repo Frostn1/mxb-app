@@ -139,6 +139,11 @@ export const it: Translation = {
   "designer.hideModel": "Nascondi modello",
   "designer.showModel": "Mostra modello",
   "designer.exportPsdHint": "Salva ogni foglio come .psd a livelli, in una cartella scelta da te.",
+  "designer.exportProxy": "Esporta proxy per verniciare",
+  "designer.exportProxyHint":
+    "Una versione leggera di questa moto con il suo vero layout UV e un modello per foglio, per dipingere in Blender. Il modello vero resta a te.",
+  "designer.exportedProxy": "Proxy per verniciare salvato in {{dir}}",
+  "designer.exportedProxyDesc": "Tenuti {{kept}} triangoli su {{of}}, con un modello per foglio.",
   "designer.psdWatching": "In ascolto delle modifiche: salva in Photoshop e il foglio si aggiorna qui.",
   "designer.psdReloaded": "«{{name}}» ricaricato da Photoshop",
   "designer.blankSheet": "Foglio vuoto",
