@@ -377,25 +377,6 @@ export function mxbsecureOpenOffline(blobPath: string, original: string): Promis
   return invoke<boolean>("mxbsecure_open_offline", { blobPath, original });
 }
 
-/** What packing a track for distribution produced: the blob, plus the asset id and content key
- *  to register with the store so entitled buyers can be granted the key. */
-export interface SecureGenerateOutcome {
-  gameName: string;
-  blobPath: string;
-  assetId: string;
-  /** Content key as hex, shown once for registration. Never written to disk beside the blob. */
-  contentKey: string;
-  plainBytes: number;
-}
-
-/** Pack a track into a `.mxbsecure` blob for distribution, leaving the original untouched.
- *  No `.mxbkey` is sealed here — buyers provision on their own machine (the manager's unlock
- *  step), which DPAPI-binds the key so a copy is useless. Register the returned asset id and
- *  content key with the store. */
-export function mxbsecureGenerate(trackPath: string): Promise<SecureGenerateOutcome> {
-  return invoke<SecureGenerateOutcome>("mxbsecure_generate", { trackPath });
-}
-
 /** Where a provisioned `.mxbkey` was written, and the Steam account it opens for. */
 export interface SecureProvisionOutcome {
   mxbkeyPath: string;

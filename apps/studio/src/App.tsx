@@ -25,13 +25,12 @@ import {
 } from "./Components/Shell/ContextBar";
 import Settings from "./Components/Settings/Settings";
 import Studio, { type StudioTab } from "./Components/Studio/Studio";
-import Secure from "./Components/Secure/Secure";
 import { TrackBuildProvider } from "./Context/TrackBuild";
 import { UpdateProvider } from "./Context/Update";
 import UpdateBanner from "./Components/Shell/UpdateBanner";
 
-/** The rail's own view space: the Studio's six tools, plus two screens of its own. */
-type View = StudioTab | "secure" | "settings";
+/** The rail's own view space: the Studio's tools, plus Settings. */
+type View = StudioTab | "settings";
 
 function Shell() {
   const t = useT();
@@ -132,7 +131,6 @@ function Shell() {
       { id: "pose", label: t("nav.pose"), group: "make", when: game.caps.viewer },
       { id: "track", label: t("nav.track"), group: "make" },
       { id: "protect", label: t("nav.protect"), group: "sell", when: hasLock },
-      { id: "secure", label: t("nav.secure"), group: "sell", when: hasLock },
       { id: "diagnose", label: t("nav.diagnose"), group: "check" },
     ];
     return all.filter((e) => e.when !== false);
@@ -211,8 +209,6 @@ function Shell() {
               <div className="min-h-0 flex-1 bg-canvas">
                 {view === "settings" ? (
                   <Settings />
-                ) : view === "secure" ? (
-                  <Secure />
                 ) : (
                   <Studio
                     tab={view as StudioTab}
