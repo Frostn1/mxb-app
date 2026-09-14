@@ -2,28 +2,15 @@
 
 ## Unreleased
 
-### Changed
-- Frost's Studio's "Designer editor" tab is now just "Editor".
-
 ### Fixed
 - Helmets in the 3D preview sit cleanly over the rider's head, with no skin showing through at
   the visor, the goggles or the chin.
-- In Frost's Studio, the "What are you painting?" picker shows Helmet, Goggles, Boots,
-  Protection and Gloves in full when it opens from the paint bar, instead of cutting each to
-  one letter.
 
 ### Changed
 - A locked secured file's details now offer an **Unlock** button (and a note that it also unlocks
   on its own when you launch the game), instead of a dead-end "its name can't be read" message.
 
 ### Added
-- Frost's Studio has a dark mode. Pick Light, Dark or System under Settings → Theme. Light stays
-  the default, since it's the best ground for judging colour.
-- The Studio Designer can export a painting proxy of any model: a bike, a helmet, boots, or a
-  single part like a bar pad or a seat picked from a file. It's a light stand-in with the model's
-  real UV layout, as a `.glb` to drag into Blender and an `.obj`, plus a template and a layered
-  PSD for each sheet. Paint on it and the paint lines up on the real model, while the model itself
-  stays with its creator. You can choose to include the model's own shading as a reference layer.
 - Secured (`.mxbsecure`) files now show in the Library like any other mod — as their real type
   (track, bike, paint, gear), with a badge showing whether they're unlocked or still locked. An
   unlocked bike, paint or gear model opens in the 3D viewer too: it's decrypted **only in memory**
@@ -58,9 +45,6 @@
   the header and streams the hash instead of loading the whole file, so large secured content
   doesn't sit in memory or stutter a synced mods folder.
 
-### Removed
-- Frost's Studio no longer has the GUID Lock tab. Diagnose still shows which GUID a file is locked to.
-
 ### Added
 - Settings → General lists the secured files it found and each one's status — Unlocked,
   Unlocking, Not in your library, or Unavailable — with its store name, so a locked file you
@@ -83,6 +67,29 @@
 - The app and Steam sign-in now go through api.mxbsecure.com.
 - When Windows blocks a preset from changing `profile.ini`, the error says how to allow the
   app and has a button that opens Windows Security.
+
+## 2026-09-14 — Frost's Studio v0.1.3
+
+### Added
+- Dark mode. Pick Light, Dark or System under Settings → Theme. Light stays the default, since
+  it's the best ground for judging colour.
+- Export a painting proxy of any model from the Editor: a bike, a helmet, boots, or a single part
+  like a bar pad or a seat picked from a file. It's a light stand-in with the model's real UV
+  layout, as a `.glb` to drag into Blender and an `.obj`, plus a template and a layered PSD for
+  each sheet. Paint on it and the paint lines up on the real model, while the model itself stays
+  with its creator. You can choose to include the model's own shading as a reference layer.
+
+### Changed
+- The "Designer editor" tab is now just "Editor".
+
+### Fixed
+- Helmets in the 3D preview sit cleanly over the rider's head, with no skin showing through at
+  the visor, the goggles or the chin.
+- The "What are you painting?" picker shows Helmet, Goggles, Boots, Protection and Gloves in full
+  when it opens from the paint bar.
+
+### Removed
+- The GUID Lock tab. Diagnose still shows which GUID a file is locked to.
 
 ## 2026-09-14 — Frost's Studio v0.1.2
 
