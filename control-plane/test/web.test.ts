@@ -378,6 +378,15 @@ describe("creators on /admin/assets", () => {
     for (let i = 0; i < 11; i++) expect((await make(owner, cookie)).status).toBe(201);
   });
 
+  it("never lets a stale copy of who-you-are be reused", async () => {
+    const env = await deployment();
+    const res = await web(env, req("GET", "/v1/web/me", { cookie: await cookieFor(CREATOR) }));
+    expect(res.status).toBe(200);
+    // Creator status changes the instant an account is granted it; a cached "creator: false"
+    // outlives the grant and is indistinguishable from a real refusal.
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
   it("never makes a creator out of someone who merely signed in with Steam", async () => {
     const env = await deployment();
     const NEWCOMER = "76561198000000077";

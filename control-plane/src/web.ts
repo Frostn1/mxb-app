@@ -141,7 +141,7 @@ export async function webRoutes(
     const account = (await find()) ?? ((await repairBySteamId(env, session.steamId)) ? await find() : null);
     // A web-only profile (made for a creator on the site) isn't an MXB App profile.
     const app = account && account.kind !== "web" ? account : null;
-    return cors(
+    const me = cors(
       json(200, {
         steamId: session.steamId,
         name: session.name || app?.rider_name || "",
@@ -150,6 +150,11 @@ export async function webRoutes(
       }),
       origin,
     );
+    // Never cached, anywhere. This is the answer to "who am I and may I sell", and it changes
+    // the moment an account is made a creator — a reused copy tells someone they are not one
+    // long after they are, with nothing on the page to suggest the answer is old.
+    me.headers.set("Cache-Control", "no-store");
+    return me;
   }
 
   if (method === "POST" && path === "/v1/web/logout") {
