@@ -497,6 +497,38 @@ fn longest_straight(segs: &[Segment], opening: f32) -> f32 {
     runs.into_iter().fold(0.0f32, f32::max)
 }
 
+/// The most ground between two corners, metres: straight or gentler than [`GENTLE_R_M`]. The
+/// corpus runs 20-72 m (p50 27-30).
+const RUN_MAX_M: f32 = 55.0;
+const GENTLE_R_M: f32 = 60.0;
+/// The same on the way home, a little looser or most laps never close. Long enough for a jump,
+/// never long enough to be bent into a chicane (see [`STRAIGHT_MAX_M`]).
+const HOME_STRETCH_MAX_M: f32 = 70.0;
+
+/// The longest stretch between corners, metres, leaving out the start straight and the run into
+/// the finish that joins it.
+fn longest_stretch(segs: &[Segment]) -> f32 {
+    let gentle = |s: &Segment| match s {
+        Segment::Straight { .. } => true,
+        Segment::Arc { radius, .. } => radius.abs() >= GENTLE_R_M,
+    };
+    let mut runs = Vec::new();
+    let mut run = 0.0;
+    let mut leading = true;
+    for s in segs {
+        if gentle(s) {
+            run += seg_length(s);
+        } else {
+            if !leading && run > 0.0 {
+                runs.push(run);
+            }
+            leading = false;
+            run = 0.0;
+        }
+    }
+    runs.into_iter().fold(0.0f32, f32::max)
+}
+
 /// One move on the lap, and what it would take to undo it.
 struct Step {
     pose: (f32, f32, f32),
@@ -545,7 +577,8 @@ fn walk(rng: &mut Rng, plot: f32, width: f32, want_m: f32) -> Option<(Vec<Segmen
     let cap = (want_m * 1.25).min(LAP_MAX_M);
     let mut stack: Vec<Step> = Vec::new();
     let mut budget = 9000u32;
-    let (mut since_corner, mut corners_laid, mut tight_m) = (0.0f32, 0u32, 0.0f32);
+    // The start straight counts: it runs straight into turn one.
+    let (mut since_corner, mut corners_laid, mut tight_m) = (opening_m, 0u32, 0.0f32);
     let mut node: Option<(Vec<Vec<Segment>>, usize)> = None;
 
     while budget > 0 {
@@ -710,13 +743,19 @@ fn offers(
     let mut cand: Vec<Vec<Segment>> = Vec::new();
     // A straight, unless the lap is already on one long enough. Consecutive straights are
     // colinear, so the app's `straight_runs` reads a row of them as ONE straight.
-    let room = STRAIGHT_CAP_M - running;
-    if room > 30.0 {
-        cand.push(vec![Segment::Straight { length: rng.range(30.0, room.min(75.0)), rise: 0.0 }]);
+    // And never a long stretch between corners: straights and wanders chained with no limit
+    // rode as long straights, and the longer ones came back as big chicanes.
+    let left = RUN_MAX_M - since_corner;
+    let room = (STRAIGHT_CAP_M - running).min(left).min(STRAIGHT_MAX_M);
+    if room > 20.0 {
+        cand.push(vec![Segment::Straight { length: rng.range(20.0, room), rise: 0.0 }]);
     }
     // The lap's own wander, and most of the ground between corners.
     for _ in 0..7 {
-        cand.push(a_wander(rng));
+        let w = a_wander(rng);
+        if is_corner(&w) || chain_length(&w) <= left {
+            cand.push(w);
+        }
     }
     // And corners, whole — but only once the lap has run far enough since the last one for the
     // two to be told apart, or a same-handed pair reads as one corner of twice the angle. The
@@ -810,6 +849,10 @@ fn home_from(
         let mut all: Vec<Segment> = segs.to_vec();
         all.extend(home.iter().copied());
         if longest_straight(&all, opening) > STRAIGHT_CAP_M {
+            continue;
+        }
+        // Nor a long stretch on the way home: one became two big chicanes before the finish.
+        if longest_stretch(&all) > HOME_STRETCH_MAX_M {
             continue;
         }
         if home
@@ -906,8 +949,9 @@ fn break_long_straights(segs: &mut Vec<Segment>, start: (f32, f32, f32), width: 
     };
     // Either way round, whichever brings the lap no nearer another leg of itself; a straight
     // with no room to bend either way stays as it is.
+    // Not the last either: it runs into the finish and on down the start straight.
     let mut i = 1;
-    while i < segs.len() {
+    while i + 1 < segs.len() {
         if let Segment::Straight { length, rise } = segs[i] {
             if length > STRAIGHT_MAX_M {
                 let before = near_misses(segs, start, width);
@@ -959,7 +1003,7 @@ fn near_misses(segs: &[Segment], start: (f32, f32, f32), width: f32) -> usize {
 }
 
 /// The longest straight past the opening one, and the S a longer one is turned into.
-const STRAIGHT_MAX_M: f32 = 50.0;
+const STRAIGHT_MAX_M: f32 = HOME_STRETCH_MAX_M;
 // A real chicane, 45° each way: at 25° and a 45 m radius the S rode as the straight it was.
 const WIGGLE_DEG: f32 = 45.0;
 const WIGGLE_MIN_DEG: f32 = 8.0;
@@ -1001,7 +1045,11 @@ fn side_singles(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
             if pos + span + SIDE_SINGLE_CLEAR_M > a {
                 break;
             }
-            if tight(pos - 10.0, span + 15.0) || !single_fits(&spans, pos, span) {
+            if tight(pos - 10.0, span + 15.0)
+                || !single_fits(&spans, pos, span)
+                || single_near(out, pos, span)
+                || single_near(&added, pos, span)
+            {
                 pos += 4.0;
                 continue;
             }
@@ -1054,11 +1102,13 @@ fn fill_gaps(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
                     .wrapping_mul(0xBF58_476D_1CE4_E5B9);
                 let frac = ((x >> 11) as f64 / (1u64 << 53) as f64) as f32;
                 // Rollers and, now and then, a small single: an empty chicane rode as nothing.
+                // Never near another single: one every 10 m rode as "a lot of singles".
                 if frac > 0.55 {
                     let h = 1.1 + 0.5 * frac;
                     let (up, down) = (air_run(h), landing_run(h));
                     let span = up + 1.2 + down;
-                    if pos + span + FILL_CLEAR_M <= a && !hairpin(pos, span) {
+                    let lone = !single_near(out, pos, span) && !single_near(&added, pos, span);
+                    if lone && pos + span + FILL_CLEAR_M <= a && !hairpin(pos, span) {
                         let marks = [(0.0, 0.0), (up, h), (up + 1.2, h), (span, 0.0)];
                         added.push(Feature::Custom {
                             at: pos,
@@ -1070,7 +1120,8 @@ fn fill_gaps(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
                         continue;
                     }
                 }
-                added.push(Feature::Roller { at: pos, length: FILL_ROLLER_M, height: 0.5 + 0.3 * frac });
+                // Tall enough to ride: at 0.5–0.8 m a chicane full of them rode as empty.
+                added.push(Feature::Roller { at: pos, length: FILL_ROLLER_M, height: FILL_ROLLER_H.0 + (FILL_ROLLER_H.1 - FILL_ROLLER_H.0) * frac });
                 pos += FILL_ROLLER_M + FILL_SPACING_M;
             }
         }
@@ -1089,6 +1140,20 @@ const FILL_CLEAR_M: f32 = 8.0;
 const FILL_ROLLER_M: f32 = 12.0;
 const FILL_SPACING_M: f32 = 10.0;
 const FILL_HAIRPIN_M: f32 = 15.0;
+const FILL_ROLLER_H: (f32, f32) = (0.9, 1.19);
+
+/// The least clear ground between two singles, metres.
+const SINGLE_APART_M: f32 = 50.0;
+
+/// Whether a single (not a wave run) stands within [`SINGLE_APART_M`] of `at..at + len`.
+fn single_near(fs: &[Feature], at: f32, len: f32) -> bool {
+    fs.iter().any(|f| {
+        matches!(f, Feature::Custom { .. })
+            && f.height() >= 1.2
+            && f.at() < at + len + SINGLE_APART_M
+            && f.at() + f.length() > at - SINGLE_APART_M
+    })
+}
 
 /// Whether the lap turns little enough under a jump that one built along its straight line
 /// still lands on the track: the stray of an arc over it, `len × turning / 8`, stays under a
