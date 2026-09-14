@@ -8106,29 +8106,32 @@ struct Dig {
 fn dig(s: Surface) -> Dig {
     match s {
         // Worked loam: a hand's depth of workable ground over hardpack.
+        // ARL's own: its pro tracks (Indiana, Mt Morris, Lakewood, Rancho CO) all carry 0.33-0.35 m
+        // of soft soil over the whole plot. At 0.15 m in all a long race dug through to the
+        // hardpack and the track "just broke". A soil bed under it so it never bottoms out.
         Surface::Soil => Dig {
             base: "compact soil",
-            bed: ("soil", 0.10),
-            top: ("soft soil", 0.10),
-            loose: ("soft soil", 0.16),
-            packed: ("soil", 0.04),
+            bed: ("soil", 0.40),
+            top: ("soft soil", 0.35),
+            loose: ("soft soil", 0.20),
+            packed: ("soil", 0.02),
         },
         // Sand is deep everywhere, and that is the whole character of a sand national — the
         // ruts are what you ride, not what you avoid.
         Surface::Sand => Dig {
             base: "compact soil",
-            bed: ("soil", 0.10),
-            top: ("sand", 0.22),
-            loose: ("sand", 0.32),
-            packed: ("sand", 0.08),
+            bed: ("soil", 0.40),
+            top: ("sand", 0.35),
+            loose: ("sand", 0.45),
+            packed: ("sand", 0.05),
         },
         // A grasstrack barely cuts up at all: root-bound ground over firm soil.
         Surface::Grass => Dig {
             base: "compact soil",
-            bed: ("soil", 0.06),
-            top: ("soft soil", 0.05),
-            loose: ("soft soil", 0.09),
-            packed: ("soil", 0.03),
+            bed: ("soil", 0.30),
+            top: ("soft soil", 0.12),
+            loose: ("soft soil", 0.15),
+            packed: ("soil", 0.02),
         },
     }
 }
@@ -8144,15 +8147,11 @@ fn tht(prog: &TrackProgram, syn: &Synth) -> String {
     s.push_str("surface_layer2\n{\n\tsurface = start\n\tmask = area_start.tga\n}\n\n");
 
     let d = dig(prog.terrain.surface);
-    // Ground already cut into the terrain is ground the surface no longer has to give. A
-    // freshly prepped track carries its whole depth; a fully raced one has spent half of it,
-    // and the ruts baked into the heightmap are where it went. Without this the two add up:
-    // we would hand the game a surface already dug half a metre and then tell it there is
-    // another twenty centimetres underneath.
-    let left = 1.0 - 0.5 * prog.terrain.wear.clamp(0.0, 1.0);
+    // Not thinned by wear: the game digs from the surface as it is, so ruts baked into the
+    // heightmap don't spend any of it. Halved, the stack bottomed out mid-race.
     let layer = |n: usize, (material, thickness): (&str, f32), mask: Option<&str>| {
         let mut b = format!("material_layer{n}\n{{\n\tmaterial = {material}\n");
-        b.push_str(&format!("\tthickness = {:.3}\n", (thickness * left).max(0.005)));
+        b.push_str(&format!("\tthickness = {:.3}\n", thickness.max(0.005)));
         if let Some(m) = mask {
             b.push_str(&format!("\tmask = {m}\n"));
         }
@@ -8224,7 +8223,7 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
 /// the code that made it. Bump it with every change to what a program builds into: minor for
 /// a new feature, patch for a fix. 0.x until the generator is finished. History in
 /// `apps/studio/FROST_ALGORITHM.md`.
-pub const FROST_ALGORITHM_VERSION: &str = "0.31.0";
+pub const FROST_ALGORITHM_VERSION: &str = "0.31.1";
 
 /// The stamp every built track carries in `<slug>/frost-algorithm.ini`.
 ///
@@ -11878,20 +11877,22 @@ mod tests {
     }
 
     #[test]
-    fn a_raced_track_has_already_spent_half_its_depth() {
-        // The knob. Ground cut into the heightmap is ground the surface no longer has to
-        // give, so the two cannot both be at full depth — that is what would have made a
-        // heavily raced track dig itself to pieces once the stack got deeper.
+    fn the_ground_is_deep_enough_to_race_on() {
+        // Deformation digs from the surface as it is, so wear never thins the stack. At
+        // 0.15 m a long race dug through to hardpack and the track "just broke"; ARL's pro
+        // tracks carry 0.33-0.35 m of soft soil over the whole plot.
         let (fresh, raced) = (
-            dig_depth(&stack(crate::trackprog::Surface::Soil, 0.0)),
-            dig_depth(&stack(crate::trackprog::Surface::Soil, 1.0)),
+            stack(crate::trackprog::Surface::Soil, 0.0),
+            stack(crate::trackprog::Surface::Soil, 1.0),
         );
-        assert!(fresh > raced, "fresh {fresh:.3} m against raced {raced:.3}");
-        assert!(
-            (raced / fresh - 0.5).abs() < 0.02,
-            "a fully raced track keeps half of it: {:.3}",
-            raced / fresh
-        );
+        assert_eq!(dig_depth(&fresh), dig_depth(&raced), "wear thinned the stack");
+        let everywhere: f32 = fresh
+            .split("material_layer")
+            .filter(|b| !b.contains("mask ="))
+            .filter_map(|b| b.lines().find_map(|l| l.trim().strip_prefix("thickness = ")))
+            .filter_map(|v| v.parse::<f32>().ok())
+            .sum();
+        assert!(everywhere >= 0.5, "only {everywhere:.3} m to dig over the whole plot");
     }
 
 
@@ -12248,11 +12249,9 @@ mod tests {
     }
 
     #[test]
-    fn wear_moves_the_ground_and_the_stack_opposite_ways() {
-        // The dial's whole claim. Ground already cut into the heightmap is ground the surface
-        // no longer has to give, so a raced track arrives with deeper grooves and less left
-        // underneath — and a prepped one the other way round. Without both halves it is just
-        // a way to make a track shallower.
+    fn wear_moves_the_ground_not_the_stack() {
+        // A raced track arrives with deeper grooves. The stack under it stays whole: the game
+        // digs from the surface as it is, and a thinned stack bottomed out mid-race.
         let cut = |w: f32| {
             let mut p = hairpins();
             p.terrain.wear = w;
@@ -12272,7 +12271,7 @@ mod tests {
             dig_depth(&tht(&p, &s))
         };
         assert!(cut(1.0) > cut(0.0) * 1.5, "{:.3} against {:.3}", cut(1.0), cut(0.0));
-        assert!(stack(1.0) < stack(0.0), "{:.3} against {:.3}", stack(1.0), stack(0.0));
+        assert_eq!(stack(1.0), stack(0.0), "wear thinned the stack");
         // And the default is the point every rut figure in this module was measured at, so a
         // programme that says nothing about wear gets the corpus's own ground.
         let d = crate::trackprog::default_wear();
