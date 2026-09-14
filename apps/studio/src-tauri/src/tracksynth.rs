@@ -3622,7 +3622,7 @@ fn custom_takeoff(points: &[crate::trackprog::ShapePoint]) -> Option<(f32, f32, 
 /// Where a feature's take-off lip is, metres round the lap, and how long its face is.
 fn takeoff_of(f: &Feature) -> Option<(f32, f32)> {
     match f {
-        Feature::Tabletop { at, length, height, lip } => {
+        Feature::Tabletop { at, length, height, lip, .. } => {
             let (up, _, _) = crate::trackprog::tabletop_faces(*height, *length, *lip);
             Some((at + up, up))
         }
@@ -9278,8 +9278,8 @@ mod tests {
             blend: crate::trackprog::default_blend(),
             elevation: Vec::new(),
             features: vec![
-                Feature::Tabletop { at: 30.0, length: 22.0, height: 2.4, lip: 0.0 },
-                Feature::Double { at: 70.0, height: 2.0, gap: 9.0, lip: 6.0 },
+                Feature::Tabletop { at: 30.0, length: 22.0, height: 2.4, lip: 0.0, finish: false },
+                Feature::Double { at: 70.0, height: 2.0, gap: 9.0, lip: 6.0, finish: false },
                 Feature::Whoops { at: 105.0, count: 6, spacing: 4.5, height: 0.7 },
                 Feature::Berm { at: 165.0, length: 80.0, height: 1.6 },
             ],
@@ -9558,8 +9558,8 @@ mod tests {
         // Overlapping where both are at full height, which is the only place summing shows
         // itself — two jumps that meet ramp-to-ramp barely overlap at all.
         p.features = vec![
-            Feature::Tabletop { at: 30.0, length: 24.0, height: 2.0, lip: 0.0 },
-            Feature::Tabletop { at: 33.0, length: 24.0, height: 2.0, lip: 0.0 },
+            Feature::Tabletop { at: 30.0, length: 24.0, height: 2.0, lip: 0.0, finish: false },
+            Feature::Tabletop { at: 33.0, length: 24.0, height: 2.0, lip: 0.0, finish: false },
         ];
         let s = synthesise(&p).unwrap();
         let base = height_at_arc(&s, 10.0);
@@ -11902,7 +11902,7 @@ mod tests {
     /// the ruts over it.
     fn with_a_tabletop() -> TrackProgram {
         let mut p = hairpins();
-        p.features = vec![Feature::Tabletop { at: 40.0, length: 36.0, height: 2.4, lip: 0.0 }];
+        p.features = vec![Feature::Tabletop { at: 40.0, length: 36.0, height: 2.4, lip: 0.0, finish: false }];
         p
     }
 

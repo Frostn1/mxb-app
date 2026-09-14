@@ -104,12 +104,25 @@ export default function TrackStudio() {
     : working;
   const [program, setProgram] = useState<TrackProgram | null>(null);
   const [preview, setPreview] = useState<TrackPreview | null>(null);
+  // Three categories, not two. `fatal` is "there is nothing to build"; `problems` is "this
+  // builds and it is wrong", which is a judgement and therefore the rider's to overrule.
+  const [fatal, setFatal] = useState<string[]>([]);
   const [problems, setProblems] = useState<string[]>([]);
   const [notes, setNotes] = useState<string[]>([]);
+  // Undo. Every edit goes through `settle`, so one stack there covers all of them — and the
+  // elevation curve commits once on pointer-up, so a drag is already one step rather than a
+  // hundred. `current` mirrors `program` because the stack is written inside a callback that
+  // would otherwise close over a stale one.
+  const past = useRef<TrackProgram[]>([]);
+  const future = useRef<TrackProgram[]>([]);
+  const current = useRef<TrackProgram | null>(null);
   // Whether anything has been changed since it was loaded, so a starting point can't be
   // dropped on top of an afternoon's work by accident.
   const [touched, setTouched] = useState(false);
-  const [confirming, setConfirming] = useState<(() => Promise<void>) | null>(null);
+  const [confirming, setConfirming] = useState<{
+    kind: "replace" | "problems";
+    run: () => Promise<void>;
+  } | null>(null);
   const [terrain, setTerrain] = useState<TrackTerrain | null>(null);
   // Building a 2049-square terrain is seconds of work with nothing on screen to say so, and
   // with Live on it happened silently — you moved a number, the picture didn't change, and
@@ -167,7 +180,19 @@ export default function TrackStudio() {
 
   /** Re-check and re-measure. Called after every edit, so the numbers are never stale. */
   const settle = useCallback(
-    async (next: TrackProgram) => {
+    async (next: TrackProgram, how: { history?: boolean; fresh?: boolean } = {}) => {
+      if (how.fresh) {
+        // A different track is a different history. Undoing into the one before it would
+        // silently bring back work the "replace" prompt just said would be discarded.
+        past.current = [];
+        future.current = [];
+      } else if (how.history !== false && current.current) {
+        past.current.push(current.current);
+        if (past.current.length > UNDO_DEPTH) past.current.shift();
+        // A new edit is a new branch: whatever was undone away is not coming back.
+        future.current = [];
+      }
+      current.current = next;
       setProgram(next);
       setPreview(null);
       try {
@@ -177,23 +202,31 @@ export default function TrackStudio() {
         if (found.problems.some((p) => p.includes("budget"))) {
           try {
             next = await fitTrackBudget(next);
+            current.current = next;
             setProgram(next);
             found = await checkTrack(next);
           } catch {
             /* leave the original complaint standing */
           }
         }
+        setFatal(found.fatal);
         setProblems(found.problems);
         setNotes(found.notes);
-        if (live && found.problems.length === 0) {
+        // Fatal, not problems. A track with problems is exactly the one worth seeing — being
+        // shown the jump nobody can clear is how you decide whether you care.
+        if (live && found.fatal.length === 0) {
           // Debounced: a drag is a hundred edits, and only the last one is worth building.
           if (rebuild.current) clearTimeout(rebuild.current);
           const settled = next;
           rebuild.current = setTimeout(() => void showIn3d(settled).catch(() => {}), 500);
         }
-        return found.problems;
+        // What stops the caller, which is only ever what cannot be built.
+        return found.fatal;
       } catch (e) {
-        setProblems([String(e)]);
+        // The checker itself failed, so nothing is known about the program. Treat that as
+        // fatal rather than overrulable: there is no measurement to disagree with.
+        setFatal([String(e)]);
+        setProblems([]);
         setNotes([]);
         return [String(e)];
       }
@@ -201,14 +234,77 @@ export default function TrackStudio() {
     [live],
   );
 
+  /** Step back one edit. Re-settles, so the measurements match what is on screen again. */
+  const undo = useCallback(() => {
+    if (busy) return;
+    const previous = past.current.pop();
+    if (!previous) return;
+    if (current.current) future.current.push(current.current);
+    void settle(previous, { history: false });
+  }, [busy, settle]);
+
+  const redo = useCallback(() => {
+    if (busy) return;
+    const next = future.current.pop();
+    if (!next) return;
+    if (current.current) past.current.push(current.current);
+    void settle(next, { history: false });
+  }, [busy, settle]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "z") return;
+      // A text field has its own undo, and taking it over would make typing a name feel
+      // broken. Same for anything contenteditable.
+      const el = e.target as HTMLElement | null;
+      if (el?.isContentEditable || (el && /^(input|textarea|select)$/i.test(el.tagName))) return;
+      e.preventDefault();
+      // Ctrl+Shift+Z and Ctrl+Y both redo, because both are what people reach for.
+      if (e.shiftKey) redo();
+      else undo();
+    }
+    function onRedoKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "y") return;
+      const el = e.target as HTMLElement | null;
+      if (el?.isContentEditable || (el && /^(input|textarea|select)$/i.test(el.tagName))) return;
+      e.preventDefault();
+      redo();
+    }
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onRedoKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onRedoKey);
+    };
+  }, [undo, redo]);
+
+  /**
+   * Run something that builds, asking first when the track is merely wrong.
+   *
+   * Nothing is blocked here that can actually be built: `fatal` already disables the button,
+   * and everything else is a measurement against published tracks. Those are worth showing
+   * and worth being able to ignore — the person looking at the track knows things the corpus
+   * does not.
+   */
+  function guarded(run: () => Promise<void>): () => void {
+    return () => {
+      if (problems.length === 0) {
+        void run();
+        return;
+      }
+      setConfirming({ kind: "problems", run });
+    };
+  }
+
   async function onGenerate() {
     if (!brief.trim() || busy) return;
     setWorking("generate");
     setPreview(null);
+    setFatal([]);
     setProblems([]);
     try {
       const next = await generateTrack(brief.trim());
-      await settle(next);
+      await settle(next, { fresh: true });
       setAsking(false);
       toast.success(t("track.generated", { name: next.name }));
     } catch (e) {
@@ -224,7 +320,7 @@ export default function TrackStudio() {
     // Replacing a track you have been working on is the one action here that throws work
     // away, so it asks first — and only when there is work to throw away.
     if (touched) {
-      setConfirming(() => () => reallyLoad(load));
+      setConfirming({ kind: "replace", run: () => reallyLoad(load) });
       return;
     }
     await reallyLoad(load);
@@ -234,10 +330,11 @@ export default function TrackStudio() {
     if (busy) return;
     setWorking("generate");
     setPreview(null);
+    setFatal([]);
     setProblems([]);
     try {
       const next = await load();
-      const found = await settle(next);
+      const found = await settle(next, { fresh: true });
       setTouched(false);
       toast.success(t("track.baseLoaded", { name: next.name }));
       if (found.length === 0) await showIn3d(next);
@@ -326,6 +423,24 @@ export default function TrackStudio() {
     setTouched(true);
     const features = program.features.map((f, i) =>
       i === index ? ({ ...f, ...patch } as TrackFeature) : f,
+    );
+    void settle({ ...program, features });
+  }
+
+  /**
+   * Name this jump the finish, or stop it being one.
+   *
+   * Exclusive, and cleared on every other jump rather than only set here: two named finishes
+   * is a question with no answer, and leaving it to whichever the synthesiser met first would
+   * make the second tag look ignored rather than refused.
+   */
+  function setFinish(index: number, on: boolean) {
+    if (!program) return;
+    setTouched(true);
+    const features = program.features.map((f, i) =>
+      f.kind === "tabletop" || f.kind === "double"
+        ? ({ ...f, finish: on && i === index } as TrackFeature)
+        : f,
     );
     void settle({ ...program, features });
   }
@@ -565,7 +680,9 @@ export default function TrackStudio() {
       .catch(() => {});
   }, [buildState]);
 
-  const blocked = problems.length > 0;
+  // Only what cannot be built disables the buttons. A track with problems builds after a
+  // prompt — see `guarded`.
+  const blocked = fatal.length > 0;
   // The 3D view is a build, so it is only ever as new as the last one. Comparing the whole
   // program is cheap next to synthesising it, and nothing smaller is honest — every field
   // here changes the ground.
@@ -1152,6 +1269,21 @@ export default function TrackStudio() {
                     />
                   ))}
                 </div>
+                {selected.kind === "feature" &&
+                  (selected.feature.kind === "tabletop" || selected.feature.kind === "double") && (
+                    <label className="mt-4 flex cursor-default items-start justify-between gap-3">
+                      <span className="text-[12px]">
+                        {t("track.finishLine")}
+                        <span className="mt-0.5 block text-[10.5px] leading-snug text-faint">
+                          {t("track.finishLineHint")}
+                        </span>
+                      </span>
+                      <Switch
+                        checked={selected.feature.finish === true}
+                        onCheckedChange={(on) => setFinish(selected.index, on)}
+                      />
+                    </label>
+                  )}
                 <button
                   onClick={() => {
                     if (selected.kind === "feature") removeFeature(selected.index);
@@ -1323,14 +1455,19 @@ export default function TrackStudio() {
             )}
 
             {/* ── Checks ──────────────────────────────────────────────────────
-                Problems block the build; notes only say the track is unlike a published
-                one, which a blank lap always is. */}
+                Fatal means there is nothing to build. Problems mean it builds and it is
+                wrong, so they ask before building rather than refusing. Notes only say the
+                track is unlike a published one, which a blank lap always is. */}
             <div className="mt-auto flex-none border-t border-border px-4 pb-4 pt-3.5">
               <div className="flex items-center">
                 <span
                   className={cn(
                     "u-skew h-3 w-1",
-                    problems.length > 0 ? "bg-destructive" : notes.length > 0 ? "bg-warning" : "bg-success",
+                    fatal.length > 0
+                      ? "bg-destructive"
+                      : problems.length > 0 || notes.length > 0
+                      ? "bg-warning"
+                      : "bg-success",
                   )}
                 />
                 <h3 className="flex-1 text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
@@ -1339,10 +1476,12 @@ export default function TrackStudio() {
                 <span
                   className={cn(
                     "tabular-figures font-cond text-[10.5px]",
-                    problems.length > 0 ? "text-destructive" : "text-faint",
+                    fatal.length > 0 ? "text-destructive" : problems.length > 0 ? "text-warning" : "text-faint",
                   )}
                 >
-                  {problems.length > 0
+                  {fatal.length > 0
+                    ? t("track.problemCount", { count: fatal.length })
+                    : problems.length > 0
                     ? t("track.problemCount", { count: problems.length })
                     : notes.length > 0
                     ? t("track.noteCount", { count: notes.length })
@@ -1351,15 +1490,26 @@ export default function TrackStudio() {
               </div>
 
               <div className="mt-2.5 space-y-1.5">
+                {fatal.map((f, i) => (
+                  <p
+                    key={`f${i}`}
+                    className="border-l-2 border-destructive bg-destructive/[0.07] px-2.5 py-2 text-[11.5px] leading-snug text-foreground/90"
+                  >
+                    {f}
+                  </p>
+                ))}
                 {problems.map((p, i) => (
+                  // Amber, not red: this one builds. The colour is the difference between
+                  // "you cannot" and "are you sure".
                   <p
                     key={`p${i}`}
-                    className="border-l-2 border-destructive bg-destructive/[0.07] px-2.5 py-2 text-[11.5px] leading-snug text-foreground/90"
+                    className="border-l-2 border-warning bg-warning/[0.07] px-2.5 py-2 text-[11.5px] leading-snug text-foreground/90"
                   >
                     {p}
                   </p>
                 ))}
-                {problems.length === 0 &&
+                {fatal.length === 0 &&
+                  problems.length === 0 &&
                   notes.map((n, i) => (
                     <p
                       key={`n${i}`}
@@ -1370,7 +1520,7 @@ export default function TrackStudio() {
                   ))}
               </div>
 
-              {problems.some((p) => p.includes("doesn't close")) && (
+              {[...fatal, ...problems].some((p) => p.includes("doesn't close")) && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -1400,12 +1550,16 @@ export default function TrackStudio() {
           <span
             className={cn(
               "font-cond text-[11px] font-semibold uppercase tracking-[0.18em]",
-              blocked ? "text-destructive" : "text-success",
+              blocked ? "text-destructive" : problems.length > 0 ? "text-warning" : "text-success",
             )}
           >
-            {blocked ? t("track.problemCount", { count: problems.length }) : t("track.valid")}
+            {blocked
+              ? t("track.problemCount", { count: fatal.length })
+              : problems.length > 0
+              ? t("track.problemCount", { count: problems.length })
+              : t("track.valid")}
           </span>
-          {!blocked && notes.length > 0 && (
+          {!blocked && problems.length === 0 && notes.length > 0 && (
             <>
               <span className="text-faint">/</span>
               <span className="font-cond text-[11px] font-semibold uppercase tracking-[0.18em] text-warning">
@@ -1429,20 +1583,20 @@ export default function TrackStudio() {
           </label>
           <Button
             variant="ghost"
-            onClick={() => void onExport()}
+            onClick={guarded(onExport)}
             disabled={blocked || busy !== null}
           >
             {t("track.export")}
           </Button>
           <Button
             variant="outline"
-            onClick={() => void onPreview()}
+            onClick={guarded(onPreview)}
             disabled={blocked || busy !== null}
           >
             <RefreshCw className={cn("size-3.5", busy === "preview" && "animate-spin")} />
             {t("track.preview")}
           </Button>
-          <Button onClick={onBuild} disabled={blocked || busy !== null}>
+          <Button onClick={guarded(async () => onBuild())} disabled={blocked || busy !== null}>
             {building ? t("track.compiling") : t("track.compile")}
           </Button>
         </div>
@@ -1451,19 +1605,32 @@ export default function TrackStudio() {
       <AlertDialog open={confirming !== null} onOpenChange={(o) => !o && setConfirming(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("track.replaceTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("track.replaceBody")}</AlertDialogDescription>
+            <AlertDialogTitle>
+              {confirming?.kind === "problems" ? t("track.anywayTitle") : t("track.replaceTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirming?.kind === "problems" ? t("track.anywayBody") : t("track.replaceBody")}
+            </AlertDialogDescription>
           </AlertDialogHeader>
+          {confirming?.kind === "problems" && (
+            // The list, not just the count: "3 problems" is a number to dismiss, and the
+            // sentences are what tell you whether you meant to do this.
+            <ul className="max-h-48 list-disc space-y-1.5 overflow-y-auto pl-5 text-[12.5px] text-muted-foreground">
+              {problems.map((p, i) => (
+                <li key={i}>{p}</li>
+              ))}
+            </ul>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 const go = confirming;
                 setConfirming(null);
-                void go?.();
+                void go?.run();
               }}
             >
-              {t("track.replaceConfirm")}
+              {confirming?.kind === "problems" ? t("track.anywayConfirm") : t("track.replaceConfirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1471,6 +1638,9 @@ export default function TrackStudio() {
     </div>
   );
 }
+
+/** How far back undo reaches. A program is small; a hundred of them is still nothing. */
+const UNDO_DEPTH = 100;
 
 const KIND_KEY = {
   tabletop: "track.kind.tabletop",

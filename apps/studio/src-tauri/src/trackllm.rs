@@ -181,7 +181,7 @@ struct Rhythm {
 const LANDS_ON_THE_FACE: f32 = 0.25;
 
 fn rhythm(f: &Feature, speed: &crate::trackspeed::Speed) -> Option<Rhythm> {
-    let Feature::Double { at, height, gap, lip } = *f else {
+    let Feature::Double { at, height, gap, lip, .. } = *f else {
         return None;
     };
     let faces = crate::trackprog::double_faces(height, lip);
@@ -522,7 +522,10 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
                 // No gap clears from here: a tabletop of the same ground, landed on either way.
                 shrunk.push(format!("{at:.0} m: a {gap:.0} m gap no run-up clears becomes a tabletop"));
                 let length = f.length();
-                *f = crate::trackprog::Feature::Tabletop { at, length, height, lip: 0.0 };
+                // If this double was the named finish, the tabletop it becomes still is: the
+                // rider chose this spot on the lap, not this shape of jump.
+                let finish = f.is_finish();
+                *f = crate::trackprog::Feature::Tabletop { at, length, height, lip: 0.0, finish };
                 continue;
             }
             shrunk.push(format!("{at:.0} m: {gap:.0} m gap becomes {want:.0}"));
@@ -623,6 +626,10 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
                 length,
                 height,
                 lip: crate::trackprog::FINISH_FACE_M,
+                // Left untagged on purpose. This is the automatic placement, and it should
+                // keep being found by measurement — tagging is what a person does to overrule
+                // it, and a tag nobody asked for is one they would have to find and undo.
+                finish: false,
             });
             prog.features.sort_by(|a, b| a.at().total_cmp(&b.at()));
             done.push(format!(
@@ -788,7 +795,13 @@ pub async fn generate(brief: &str, ask: &impl Ask, tries: usize) -> Result<Track
 #[derive(serde::Serialize, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Review {
-    /// Structural: it won't build, or it isn't a lap, or a feature does nothing where it is.
+    /// There is nothing to build. The program does not describe ground the synthesiser can
+    /// make — the lap leaves the terrain, or synthesis itself failed. Nothing downstream can
+    /// proceed, and no amount of willingness on the rider's part changes that.
+    pub fatal: Vec<String>,
+    /// It builds, and it is wrong. A jump nobody can clear, a berm on a straight, a lap that
+    /// closes badly. Worth refusing by default and worth letting someone overrule, because
+    /// "unlike published tracks" is a judgement and it is not always the right one.
     pub problems: Vec<String>,
     /// It builds and it is a lap — it just doesn't measure like the tracks people ride.
     pub notes: Vec<String>,
@@ -801,7 +814,10 @@ pub struct Review {
 /// is an instruction.
 pub fn validate(prog: &TrackProgram) -> Vec<String> {
     let r = review(prog);
-    r.problems.into_iter().chain(r.notes).collect()
+    // Every category, deliberately. A person may overrule a problem; the model asking for
+    // another attempt should not, because a better answer costs one more round and is free
+    // of the judgement call.
+    r.fatal.into_iter().chain(r.problems).chain(r.notes).collect()
 }
 
 pub fn review(prog: &TrackProgram) -> Review {
@@ -818,8 +834,7 @@ pub fn review(prog: &TrackProgram) -> Review {
     // The structural checks come first and stop everything: a lap that leaves the terrain
     // can't be synthesised, so there would be nothing to measure.
     if let Err(e) = prog.check() {
-        out.push(e.to_string());
-        return Review { problems: out, notes };
+        return Review { fatal: vec![e.to_string()], problems: out, notes };
     }
 
     let closure = prog.closure_error();
@@ -1141,8 +1156,9 @@ pub fn review(prog: &TrackProgram) -> Review {
     let syn = match tracksynth::synthesise(&coarse) {
         Ok(s) => s,
         Err(e) => {
-            out.push(e.to_string());
-            return Review { problems: out, notes };
+            // Synthesis is what a build is. If it will not run here on a coarse grid it will
+            // not run on a fine one either.
+            return Review { fatal: vec![e.to_string()], problems: out, notes };
         }
     };
     let c = crate::trackstats::measure("synth", &syn.corridor, &syn.heights, syn.gw, syn.gh, syn.mps);
@@ -1159,7 +1175,7 @@ pub fn review(prog: &TrackProgram) -> Review {
             (1.0 - c.largest_component_fraction) * 100.0
         ));
     }
-    Review { problems: out, notes }
+    Review { fatal: Vec::new(), problems: out, notes }
 }
 
 /// The brief, as the app sends it. Kept small on purpose: everything that shapes the output
@@ -1341,8 +1357,8 @@ mod tests {
         // names to go unchecked.
         use crate::trackprog::{Feature, ShapePoint};
         let one_of_each = [
-            Feature::Tabletop { at: 0.0, length: 30.0, height: 2.0, lip: 0.0 },
-            Feature::Double { at: 0.0, height: 1.0, gap: 3.0, lip: 5.0 },
+            Feature::Tabletop { at: 0.0, length: 30.0, height: 2.0, lip: 0.0, finish: false },
+            Feature::Double { at: 0.0, height: 1.0, gap: 3.0, lip: 5.0, finish: false },
             Feature::Roller { at: 0.0, length: 12.0, height: 0.8 },
             Feature::Whoops { at: 0.0, count: 6, spacing: 4.0, height: 0.6 },
             Feature::StepUp { at: 0.0, length: 25.0, height: 1.5 },
@@ -1483,6 +1499,70 @@ mod tests {
             problems.iter().any(|s| s.contains("berm at 60 m is on a straight")),
             "{problems:?}"
         );
+    }
+
+    #[test]
+    fn a_named_jump_is_the_finish_whatever_its_size_or_place() {
+        // Small, and deliberately nowhere near the window the automatic placement looks in.
+        // It is the finish because someone said so, and that is the whole of the rule.
+        let named = tweaked(|p| {
+            p.features.push(Feature::Tabletop {
+                at: p.lap_length() * 0.5,
+                length: 14.0,
+                height: 0.9,
+                lip: 0.0,
+                finish: true,
+            });
+        });
+        let picked = named.finish_jump().expect("a named jump is the finish");
+        assert!(picked.is_finish(), "the named one was not picked: {picked:?}");
+        assert!((picked.height() - 0.9).abs() < 0.001, "{picked:?}");
+    }
+
+    #[test]
+    fn nothing_named_still_finds_the_finish_by_measuring() {
+        // The automatic path is untouched: an untagged program behaves exactly as before.
+        let p = tweaked(|_| {});
+        let found = p.finish_jump().expect("the worked example ends on a jump");
+        assert!(!found.is_finish(), "the example should not be tagged: {found:?}");
+    }
+
+    #[test]
+    fn whoops_a_metre_apart_block_but_do_not_stop_a_build() {
+        // The distinction the studio leans on: this track compiles. It is a bad track, and a
+        // person is allowed to build a bad track. Only `fatal` may take that choice away.
+        let p = tweaked(|p| {
+            p.features.push(Feature::Whoops {
+                at: 60.0,
+                count: 6,
+                spacing: 1.0,
+                height: 0.7,
+            })
+        });
+        let r = review(&p);
+        assert!(
+            r.problems.iter().any(|s| s.contains("1.0 m apart")),
+            "{:?}",
+            r.problems
+        );
+        assert!(r.fatal.is_empty(), "nothing here stops it being built: {:?}", r.fatal);
+    }
+
+    #[test]
+    fn a_lap_that_cannot_be_synthesised_is_fatal() {
+        // No room for the lap on the ground it was given. There is no program to build, so
+        // this is not a judgement a person can overrule.
+        let mut p = tweaked(|_| {});
+        p.terrain.size_x = 40.0;
+        p.terrain.size_z = 40.0;
+        let r = review(&p);
+        assert!(!r.fatal.is_empty(), "a lap off the terrain should be fatal");
+    }
+
+    #[test]
+    fn a_clean_program_is_clean_in_every_category() {
+        let r = review(&tweaked(|_| {}));
+        assert!(r.fatal.is_empty() && r.problems.is_empty(), "{r:?}");
     }
 
     #[test]
@@ -1646,7 +1726,7 @@ mod tests {
         // twenty-four metre gap wants far more than that.
         let hairpin_exit = 250.0 + std::f32::consts::PI * 10.0 + 5.0;
         let mut p = hairpin_then_straight();
-        p.features = vec![Feature::Double { at: hairpin_exit, height: 2.5, gap: 24.0, lip: 10.0 }];
+        p.features = vec![Feature::Double { at: hairpin_exit, height: 2.5, gap: 24.0, lip: 10.0, finish: false }];
         let complaint = review(&p)
             .problems
             .into_iter()
@@ -1658,7 +1738,7 @@ mod tests {
         let mut ok = hairpin_then_straight();
         // Longer faces carry the landing's sweet spot further out, so a 16 m gap wants more air
         // than the straight gives; ten is still a big double down it.
-        ok.features = vec![Feature::Double { at: 150.0, height: 2.5, gap: 10.0, lip: 10.0 }];
+        ok.features = vec![Feature::Double { at: 150.0, height: 2.5, gap: 10.0, lip: 10.0, finish: false }];
         assert!(
             !review(&ok).problems.iter().any(|c| c.contains("cannot be cleared")),
             "{:?}",
@@ -1674,7 +1754,7 @@ mod tests {
         // one becomes a tabletop instead.
         let hairpin_exit = 250.0 + std::f32::consts::PI * 10.0 + 25.0;
         let mut p = hairpin_then_straight();
-        p.features = vec![Feature::Double { at: hairpin_exit, height: 2.5, gap: 24.0, lip: 10.0 }];
+        p.features = vec![Feature::Double { at: hairpin_exit, height: 2.5, gap: 24.0, lip: 10.0, finish: false }];
         let done = repair(&mut p);
         assert!(done.iter().any(|d| d.contains("shrank")), "{done:?}");
         // By kind rather than by index: the lap gains a finish jump on its main straight, and

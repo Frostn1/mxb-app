@@ -1237,7 +1237,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             // Taller: ridden as "the jumps are still very small height-wise".
             let height = rng.range(2.4, 3.0);
             length = (rng.range(11.2, 18.9) + faces(height)).min(room);
-            out.push(Feature::Tabletop { at: pos, length, height, lip: 0.0 });
+            out.push(Feature::Tabletop { at: pos, length, height, lip: 0.0, finish: false });
         } else if pick < 0.30 && room > 40.0 && flies_straight(&spans, pos, 55.0) {
             // A table is not always flat end to end. A whale tail rises, dips over its middle
             // and rises again before the landing — two crests a rider can either double or
@@ -1296,7 +1296,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             // Crest to crest stays near what it was: the gentler back and front take the rest.
             let gap = rng.range(4.0, 9.0);
             length = crate::trackprog::double_faces(height, lip).total(gap);
-            out.push(Feature::Double { at: pos, height, gap, lip });
+            out.push(Feature::Double { at: pos, height, gap, lip, finish: false });
         } else if pick < 0.57 && room > 64.0 && flies_straight(&spans, pos, 55.0) {
             // A triple: a take-off, a middle lump and a landing ramp. The fast clear it in one;
             // everyone else jumps it as a double and a single.

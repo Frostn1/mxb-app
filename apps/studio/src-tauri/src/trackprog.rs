@@ -1016,6 +1016,9 @@ pub enum Feature {
         /// than the angle would make it. Zero leaves it to the angle.
         #[serde(default, skip_serializing_if = "is_zero")]
         lip: f32,
+        /// This is the finish jump, because someone said so. See [`Feature::is_finish`].
+        #[serde(default, skip_serializing_if = "is_false")]
+        finish: bool,
     },
     /// Two lips with air between them. `gap` is ground the rider must clear.
     Double {
@@ -1024,6 +1027,9 @@ pub enum Feature {
         gap: f32,
         #[serde(default = "default_lip")]
         lip: f32,
+        /// This is the finish jump, because someone said so. See [`Feature::is_finish`].
+        #[serde(default, skip_serializing_if = "is_false")]
+        finish: bool,
     },
     /// One smooth rise, small enough to roll.
     Roller { at: f32, length: f32, height: f32 },
@@ -1076,6 +1082,10 @@ fn default_lip() -> f32 {
 
 fn is_zero(v: &f32) -> bool {
     *v == 0.0
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 impl Feature {
@@ -1150,6 +1160,17 @@ impl Feature {
         }
     }
 
+    /// Whether this was named the finish jump by hand.
+    ///
+    /// Only a tabletop or a double can be: the finish line is drawn at the top of a take-off
+    /// face, and the other kinds have none to stand on.
+    pub fn is_finish(&self) -> bool {
+        matches!(
+            self,
+            Feature::Tabletop { finish: true, .. } | Feature::Double { finish: true, .. }
+        )
+    }
+
     pub fn height(&self) -> f32 {
         match self {
             Feature::Tabletop { height, .. }
@@ -1190,11 +1211,11 @@ fn grow(f: &Feature, kh: f32, kl: f32) -> Feature {
     let h = |v: f32| (v * kh).min(BIG_JUMP_MAX_H_M);
     match f.clone() {
         // Tables and doubles at 80% of that: grown in full they rode too big on a 250.
-        Feature::Tabletop { at, length, height, lip } => {
-            Feature::Tabletop { at, length: length * kl * BIG_TABLE_SHARE, height: h(height) * BIG_TABLE_SHARE, lip }
+        Feature::Tabletop { at, length, height, lip, finish } => {
+            Feature::Tabletop { at, length: length * kl * BIG_TABLE_SHARE, height: h(height) * BIG_TABLE_SHARE, lip, finish }
         }
-        Feature::Double { at, height, gap, lip } => {
-            Feature::Double { at, height: h(height) * BIG_TABLE_SHARE, gap: gap * kl * BIG_TABLE_SHARE, lip }
+        Feature::Double { at, height, gap, lip, finish } => {
+            Feature::Double { at, height: h(height) * BIG_TABLE_SHARE, gap: gap * kl * BIG_TABLE_SHARE, lip, finish }
         }
         // A single barely longer: stretched with the rest, its crest became a fake table.
         Feature::Custom { at, length, shape, side } => {
@@ -1981,12 +2002,22 @@ impl TrackProgram {
         (to - from >= finish_jump_length(FINISH_JUMP_M.0, TABLETOP_DECK_M)).then_some((from, to))
     }
 
-    /// The finish jump, if the lap has one: the tallest jump standing in that window.
+    /// The finish jump: the one that was named, or failing that the tallest jump standing in
+    /// the window.
     ///
-    /// Found rather than recorded. A jump is the finish jump because of where it is and how
-    /// big it is, and asking the ground is what keeps the answer true after an edit moves
-    /// something — there is no flag to go stale.
+    /// Naming wins outright, wherever it stands and whatever size it is. The measurements
+    /// below are how the *automatic* placement finds a jump on a lap nobody has chosen one
+    /// for — a heuristic for a program that arrived without an opinion, not a rule a person
+    /// has to satisfy. Someone who points at a table and says "that one" has said everything
+    /// there is to know, and a track whose finish moves because a jump elsewhere grew taller
+    /// is a track fighting its author.
+    ///
+    /// Derived when nothing is named, so an untagged program behaves exactly as it did and
+    /// there is no flag to go stale.
     pub fn finish_jump(&self) -> Option<&Feature> {
+        if let Some(named) = self.features.iter().find(|f| f.is_finish()) {
+            return Some(named);
+        }
         let (from, to) = self.finish_window()?;
         self.features
             .iter()
@@ -2304,7 +2335,7 @@ mod tests {
     #[test]
     fn rotating_carries_the_features_round() {
         let mut p = oval();
-        p.features = vec![Feature::Tabletop { at: 150.0, length: 20.0, height: 1.5, lip: 0.0 }];
+        p.features = vec![Feature::Tabletop { at: 150.0, length: 20.0, height: 1.5, lip: 0.0, finish: false }];
         p.elevation = vec![Knot { at: 150.0, height: 2.0 }];
         let shift = p.rotate_start(1);
         assert!((p.features[0].at() - (150.0 - shift)).abs() < 0.01, "{:?}", p.features[0]);
@@ -2318,7 +2349,7 @@ mod tests {
         // Sits over the point the lap is about to start at, which after the rotation would
         // put it half before the start and half past the finish.
         let at = 40.0 * std::f32::consts::PI - 5.0;
-        p.features = vec![Feature::Tabletop { at, length: 20.0, height: 1.5, lip: 0.0 }];
+        p.features = vec![Feature::Tabletop { at, length: 20.0, height: 1.5, lip: 0.0, finish: false }];
         p.rotate_start(1);
         p.check().expect("nothing hangs off the end of the lap");
     }
@@ -2539,8 +2570,7 @@ mod tests {
         p.features.push(Feature::Tabletop {
             at: 90.0,
             length: 20.0,
-            height: 2.0, lip: 0.0
-        });
+            height: 2.0, lip: 0.0, finish: false });
         let err = p.check().unwrap_err().to_string();
         assert!(err.contains("past the"), "{err}");
     }
@@ -2798,7 +2828,7 @@ mod tests {
         // ramp off into a step. Now `total` is the only statement of it.
         for (height, gap, lip) in [(2.5f32, 8.0f32, 10.0f32), (1.2, 4.0, 6.0), (4.0, 14.0, 12.0)] {
             let f = double_faces(height, lip);
-            let stated = Feature::Double { at: 0.0, height, gap, lip }.length();
+            let stated = Feature::Double { at: 0.0, height, gap, lip, finish: false }.length();
             assert!(
                 (stated - f.total(gap)).abs() < 1e-3,
                 "{stated} against {}",
