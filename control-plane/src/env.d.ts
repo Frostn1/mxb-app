@@ -47,6 +47,9 @@ declare global {
      *  leak yields wrapped keys and no way to unwrap them. Absent means secured content is
      *  off: `/v1/keys/grant` answers 503 rather than serving a key from nothing. */
     MXB_ASSET_MASTER_KEY?: string;
+    /** The account assets made through `/admin/assets` are created under. Not a secret — a
+     *  var in `wrangler.jsonc`. Empty means `/admin/assets` answers 503. */
+    MXB_OWNER_ACCOUNT_ID?: string;
   }
 }
 

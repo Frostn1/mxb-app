@@ -32,7 +32,10 @@
     // is inside this, and the bootstrap runs it with `-extract` to unpack it. Pointing at
     // the official URL means nothing of theirs is rehosted, at the cost of a 2 GB download
     // on every launch. Baking an AMI is the obvious way to remove that later.
-    "MXB_GAME_DOWNLOAD_URL": "https://mx-bikes.com/downloads/mxbikes-beta21e.exe"
+    "MXB_GAME_DOWNLOAD_URL": "https://mx-bikes.com/downloads/mxbikes-beta21e.exe",
+    // The account every asset made from mxbsecure.com is created under. Empty disables
+    // `/admin/assets`.
+    "MXB_OWNER_ACCOUNT_ID": "f72db68a-9541-4814-ae09-6096b497abc9"
   },
 
   // The idle reaper. Every five minutes it asks each running server who is connected and
