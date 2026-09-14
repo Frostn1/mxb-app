@@ -1763,6 +1763,46 @@ async fn mxbsecure_unlock(
     }
 }
 
+/// Read only a blob's header (asset id, key id, plaintext length) without pulling the whole file
+/// into memory — the header is tiny and lives at the front. For the status view, which touches
+/// every secured file.
+#[cfg(mxbsecure)]
+async fn read_blob_header(path: &str) -> Result<(String, String, u64), String> {
+    use tokio::io::AsyncReadExt;
+    let mut f = tokio::fs::File::open(path).await.map_err(|e| format!("read blob: {e}"))?;
+    let mut head = vec![0u8; 8192];
+    let n = f.read(&mut head).await.map_err(|e| format!("read blob: {e}"))?;
+    head.truncate(n);
+    mxbsecure::header_of(&head).map_err(|e| format!("not a secured blob: {e}"))
+}
+
+/// Stream a blob once for both its header and its SHA-256, keeping only a 64 KB buffer and the
+/// header prefix in memory rather than the whole (often ~200 MB) file.
+#[cfg(mxbsecure)]
+async fn blob_header_and_hash(path: &str) -> Result<(String, String, u64, String), String> {
+    use sha2::{Digest, Sha256};
+    use tokio::io::AsyncReadExt;
+    let mut f = tokio::fs::File::open(path).await.map_err(|e| format!("read blob: {e}"))?;
+    let mut hasher = Sha256::new();
+    let mut head: Vec<u8> = Vec::with_capacity(8192);
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = f.read(&mut buf).await.map_err(|e| format!("read blob: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        if head.len() < 8192 {
+            let take = (8192 - head.len()).min(n);
+            head.extend_from_slice(&buf[..take]);
+        }
+    }
+    let (asset, key, len) =
+        mxbsecure::header_of(&head).map_err(|e| format!("not a secured blob: {e}"))?;
+    let hash: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    Ok((asset, key, len, hash))
+}
+
 /// The grant→provision core, shared by the manual unlock and auto-unlock. Reads the asset id from
 /// the blob's authenticated header, checks entitlement at `/v1/keys/grant`, and seals the released
 /// key to this machine via [`provision_and_record`].
@@ -1775,18 +1815,10 @@ async fn unlock_one(
     app: &tauri::AppHandle,
     blob_path: &str,
 ) -> Result<SecureProvisionOutcome, String> {
-    let blob = tokio::fs::read(blob_path).await.map_err(|e| format!("read blob: {e}"))?;
-    let (asset_id, _key_id, _len) =
-        mxbsecure::header_of(&blob).map_err(|e| format!("not a secured blob: {e}"))?;
-
-    // The blob's SHA-256, sent to the grant so it releases the key only for the exact registered
-    // file — a stale or mismatched blob is refused server-side.
-    let blob_sha256 = {
-        use sha2::{Digest, Sha256};
-        let mut h = Sha256::new();
-        h.update(&blob);
-        h.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()
-    };
+    // Stream the file once for its header (the asset id) and its SHA-256 — the hash is sent to the
+    // grant so the key is released only for this exact file. Streaming keeps a ~200 MB blob out of
+    // memory.
+    let (asset_id, _key_id, _len, blob_sha256) = blob_header_and_hash(blob_path).await?;
 
     // Already unlocked? A .mxbkey beside it that opens for the live Steam ID means we're done.
     if let Some(id) = steamid::current_steam_id64() {
@@ -1938,8 +1970,7 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
         let live = steamid::current_steam_id64();
         let mut items: Vec<SecureStatusItem> = Vec::new();
         for blob_path in secure_launch::scan_blobs(&app) {
-            let Ok(blob) = std::fs::read(&blob_path) else { continue };
-            let Ok((asset_id, _k, _l)) = mxbsecure::header_of(&blob) else { continue };
+            let Ok((asset_id, _k, _l)) = read_blob_header(&blob_path).await else { continue };
             let game_name = std::path::Path::new(&blob_path)
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())

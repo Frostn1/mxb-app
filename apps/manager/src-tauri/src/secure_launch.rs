@@ -209,12 +209,6 @@ fn write_manifest(assets: &[SecureAsset], dir: &std::path::Path) -> Result<(), S
     std::fs::write(dir.join("manifest.tsv"), out).map_err(|e| e.to_string())
 }
 
-/// Is injecting into the running game allowed on this install? Off unless the player turned
-/// it on — see [`crate::config::AppConfig::secure_content_inject`].
-fn injection_enabled(app: &AppHandle) -> bool {
-    crate::config::load(app).map(|c| c.secure_content_inject).unwrap_or(false)
-}
-
 /// Watch for the game and, if this install has opted in, inject shortly after it appears —
 /// early matters, because MX Bikes reads a track's content to list it, so the hook has to be
 /// live before the track browser opens or a protected track won't show.
@@ -245,13 +239,9 @@ pub fn watch(app: &AppHandle) {
             // decision, and none of them should be retried on a two-second timer.
             decided_this_run = true;
 
-            // The setting is checked before anything touches the disk, so the default path
-            // costs a config read and nothing else.
-            if !injection_enabled(&app) {
-                continue;
-            }
-            // However the game was started — Play or Steam — like FrostMod. The setting is
-            // the player's consent; how they launched isn't.
+            // Always arm when there is secured content to serve — `arm` is a no-op when the scan
+            // finds nothing, so a player with no locked content pays only a config + scan and
+            // never sees an injection. However the game was started — Play or Steam — like FrostMod.
             arm(&app);
         }
     });
@@ -307,7 +297,7 @@ pub fn arm(app: &AppHandle) {
 /// game is running with injection on — otherwise `arm` picks the new asset up at the next launch.
 #[cfg_attr(not(mxbsecure), allow(dead_code))]
 pub fn refresh_running(app: &AppHandle) {
-    if !crate::gameproc::is_game_running() || !injection_enabled(app) {
+    if !crate::gameproc::is_game_running() {
         return;
     }
     let Some(dir) = run_dir(app) else { return };

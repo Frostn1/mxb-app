@@ -511,7 +511,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const voiceEnabled = config.voiceEnabled ?? false;
   // Off unless it was turned on, matching the backend's default.
   const paintSyncEnabled = config.paintSyncEnabled ?? false;
-  const mxbsecureEnabled = config.mxbsecureEnabled ?? false;
+  const mxbsecureEnabled = config.mxbsecureEnabled ?? true;
   const [secureAvailable, setSecureAvailable] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [linkedSteam, setLinkedSteam] = useState<string | null>(null);

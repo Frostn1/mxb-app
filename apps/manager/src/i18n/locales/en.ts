@@ -548,7 +548,7 @@ export const en = {
   "settings.instantRefresh": "Instant preset refresh",
   "settings.instantRefreshDesc":
     "When you apply a preset while {{game}} is running, refresh the look in-game instantly — no restart or profile reselect. If it can't, you'll be told to reselect your profile.",
-  "settings.mxbsecure": "Content locking (mxbsecure)",
+  "settings.mxbsecure": "mxbsecure",
   "settings.mxbsecureDesc":
     "Experimental. Adds a Secure tab that locks a file so owning it isn't enough to use it. Only creators packing paid content need this.",
   "settings.mxbsecureUnlock": "Unlock purchased content",

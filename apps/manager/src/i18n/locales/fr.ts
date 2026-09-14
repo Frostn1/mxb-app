@@ -559,7 +559,7 @@ export const fr: Translation = {
   "settings.instantRefresh": "Actualisation instantanée des presets",
   "settings.instantRefreshDesc":
     "Quand vous appliquez un preset pendant que {{game}} tourne, actualise le look en jeu instantanément — sans redémarrage ni resélection de profil. Si ce n'est pas possible, il vous sera demandé de resélectionner votre profil.",
-  "settings.mxbsecure": "Verrouillage de contenu (mxbsecure)",
+  "settings.mxbsecure": "mxbsecure",
   "settings.mxbsecureDesc":
     "Expérimental. Ajoute un onglet Sécuriser qui verrouille un fichier pour que le posséder ne suffise pas à l'utiliser. Réservé aux créateurs qui empaquettent du contenu payant.",
   "settings.mxbsecureUnlock": "Déverrouiller un contenu acheté",
