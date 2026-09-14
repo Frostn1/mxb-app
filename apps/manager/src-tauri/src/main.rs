@@ -1811,6 +1811,61 @@ async fn mxbsecure_unlock(
     }
 }
 
+/// Start linking this account to a Steam identity: ask the control plane for a Steam OpenID
+/// sign-in URL. The frontend opens it in the browser; the browser half lands on
+/// `/v1/steam/return`, which sets `accounts.steam_id`. Returns the URL to open.
+#[tauri::command]
+async fn steam_link_start(app: tauri::AppHandle) -> Result<String, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let tok = cfg.cp_token.trim().to_string();
+    if tok.is_empty() {
+        return Err("Enroll with an invite code first — sign-in is tied to your account.".into());
+    }
+    let resp = reqwest::Client::new()
+        .post(format!("{}/v1/steam/login", crate::paintsync::control_plane()))
+        .bearer_auth(&tok)
+        .send()
+        .await
+        .map_err(|e| format!("couldn't reach the control plane: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("control plane refused the sign-in ({})", resp.status()));
+    }
+    #[derive(serde::Deserialize)]
+    struct Login {
+        url: String,
+    }
+    let login: Login = resp.json().await.map_err(|e| format!("bad response: {e}"))?;
+    Ok(login.url)
+}
+
+/// The Steam ID this account is currently linked to on the control plane, or `None` if it is
+/// not linked yet. Reflects sign-in state and lets the UI poll for completion after the
+/// browser half.
+#[tauri::command]
+async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let tok = cfg.cp_token.trim().to_string();
+    if tok.is_empty() {
+        return Ok(None);
+    }
+    let resp = reqwest::Client::new()
+        .get(format!("{}/v1/entitlements", crate::paintsync::control_plane()))
+        .bearer_auth(&tok)
+        .send()
+        .await
+        .map_err(|e| format!("couldn't reach the control plane: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("control plane error ({})", resp.status()));
+    }
+    #[derive(serde::Deserialize)]
+    struct Ent {
+        #[serde(rename = "steamId")]
+        steam_id: Option<String>,
+    }
+    let ent: Ent = resp.json().await.map_err(|e| format!("bad response: {e}"))?;
+    Ok(ent.steam_id)
+}
+
 /// Open a blob offline using its provisioned `.mxbkey`: read the live Steam ID, unseal the
 /// key, decrypt, and confirm it matches `original`. This is the offline "does it still
 /// unlock for me, with no server" proof — a different account gets nothing.
@@ -6373,6 +6428,8 @@ fn main() {
             secure_steam_id,
             mxbsecure_provision,
             mxbsecure_unlock,
+            steam_link_start,
+            steam_link_status,
             mxbsecure_open_offline,
             local_guid,
             mxb_core::viewer::load_bike_model,

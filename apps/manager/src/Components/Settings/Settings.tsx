@@ -66,6 +66,8 @@ import {
   setMxbsecureEnabled,
   contentSecureAvailable,
   mxbsecureUnlock,
+  steamLinkStart,
+  steamLinkStatus,
   setVoiceInputDevice,
   setVoiceOutputDevice,
   setVoicePttHotkey,
@@ -510,6 +512,8 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const mxbsecureEnabled = config.mxbsecureEnabled ?? false;
   const [secureAvailable, setSecureAvailable] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
+  const [linkedSteam, setLinkedSteam] = useState<string | null>(null);
+  const [linking, setLinking] = useState(false);
   const voiceInput = config.voiceInputDevice ?? "";
   const voiceOutput = config.voiceOutputDevice ?? "";
   const voicePtt = config.voicePttHotkey || FALLBACK_PTT_HOTKEY;
@@ -797,6 +801,37 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     }
   };
 
+  // Sign in with Steam: the control plane returns an OpenID URL, we open it in the browser,
+  // and the browser half links the account. Poll until it lands (or the window closes).
+  const linkSteam = async () => {
+    setLinking(true);
+    try {
+      const url = await steamLinkStart();
+      await openUrl(url);
+      toast.info(t("settings.steamLinkOpened"));
+      const started = Date.now();
+      while (Date.now() - started < 150_000) {
+        await new Promise((r) => setTimeout(r, 2500));
+        let id: string | null = null;
+        try {
+          id = await steamLinkStatus();
+        } catch {
+          // keep polling
+        }
+        if (id) {
+          setLinkedSteam(id);
+          toast.success(t("settings.steamLinkOk", { id }));
+          return;
+        }
+      }
+      toast.info(t("settings.steamLinkPending"));
+    } catch (e) {
+      toast.error(t("settings.steamLinkFail"), { description: String(e) });
+    } finally {
+      setLinking(false);
+    }
+  };
+
   const toggleInstantRefresh = async (v: boolean) => {
     try {
       await setInstantRefresh(v);
@@ -879,6 +914,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     getVersion().then(setVersion).catch(() => setVersion(""));
     experimentalStateApi().then(setExperimentalState).catch(() => {});
     contentSecureAvailable().then(setSecureAvailable).catch(() => {});
+    steamLinkStatus().then(setLinkedSteam).catch(() => {});
     // Re-check FrostMod against GitHub whenever Settings opens — the provider
     // only fetches once at launch, so this catches releases cut since then.
     void refreshStatus();
@@ -1386,23 +1422,48 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   onChange={toggleMxbsecure}
                 />
                 {mxbsecureEnabled && (
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="text-[13px] font-medium">{t("settings.mxbsecureUnlock")}</p>
-                      <p className="mt-0.5 text-[12px] text-muted-foreground">
-                        {t("settings.mxbsecureUnlockDesc")}
-                      </p>
+                  <>
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-medium">{t("settings.steamLink")}</p>
+                        <p className="mt-0.5 text-[12px] text-muted-foreground">
+                          {linkedSteam
+                            ? t("settings.steamLinkedAs", { id: linkedSteam })
+                            : t("settings.steamLinkDesc")}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-none"
+                        disabled={linking}
+                        onClick={() => void linkSteam()}
+                      >
+                        {linking
+                          ? t("settings.steamLinking")
+                          : linkedSteam
+                            ? t("settings.steamRelink")
+                            : t("settings.steamLinkBtn")}
+                      </Button>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="flex-none"
-                      disabled={unlocking}
-                      onClick={() => void unlockSecured()}
-                    >
-                      {t("settings.mxbsecureUnlockBtn")}
-                    </Button>
-                  </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-medium">{t("settings.mxbsecureUnlock")}</p>
+                        <p className="mt-0.5 text-[12px] text-muted-foreground">
+                          {t("settings.mxbsecureUnlockDesc")}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-none"
+                        disabled={unlocking}
+                        onClick={() => void unlockSecured()}
+                      >
+                        {t("settings.mxbsecureUnlockBtn")}
+                      </Button>
+                    </div>
+                  </>
                 )}
               </>
             )}
