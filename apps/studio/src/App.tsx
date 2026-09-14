@@ -11,7 +11,7 @@ import {
   AlertDialogTitle,
 } from "@frost/shared/Components/ui/alert-dialog";
 import { Button } from "@frost/shared/Components/ui/button";
-import { appPlatform, contentLockAvailable, getConfig, listGames } from "@frost/shared/api/mods";
+import { appPlatform, getConfig, listGames } from "@frost/shared/api/mods";
 import type { Config, GameInfo } from "@frost/shared/types";
 import { cn } from "@frost/shared/lib/utils";
 import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
@@ -37,7 +37,6 @@ function Shell() {
   const [config, setConfig] = useState<Config>({ modsPath: "" });
   const [games, setGames] = useState<GameInfo[]>([MXB_FALLBACK]);
   const [view, setView] = useState<View>("designer");
-  const [hasLock, setHasLock] = useState(false);
   const [left, setLeft] = useState<HTMLElement | null>(null);
   const [right, setRight] = useState<HTMLElement | null>(null);
   // A tool can say it is showing something that owns the window — the Designer's start
@@ -93,7 +92,6 @@ function Shell() {
   useEffect(() => {
     void reloadConfig();
     listGames().then(setGames).catch(() => {});
-    contentLockAvailable().then(setHasLock).catch(() => {});
     void appPlatform().catch(() => {});
   }, [reloadConfig]);
 
@@ -119,22 +117,20 @@ function Shell() {
   const slots = useMemo(() => ({ left, right }), [left, right]);
   const chrome = useMemo(() => ({ bare, setBare }), [bare]);
 
-  // The rider rig is MX Bikes only — GP Bikes' has no part bindings — and locking needs the
-  // optional local module. A tool that could only ever fail is not offered.
+  // The rider rig is MX Bikes only — GP Bikes' has no part bindings. A tool that could only
+  // ever fail is not offered.
   const entries = useMemo(() => {
     const all: (RailEntry<View> & { when?: boolean })[] = [
-      // Two errands, not one list of seven: making something, and locking something you
-      // have already made.
+      // Two errands: making something, and checking something already on disk.
       { id: "designer", label: t("nav.designer"), group: "make" },
       { id: "paints", label: t("nav.paints"), group: "make" },
       { id: "rider", label: t("nav.rider"), group: "make", when: game.caps.viewer },
       { id: "pose", label: t("nav.pose"), group: "make", when: game.caps.viewer },
       { id: "track", label: t("nav.track"), group: "make" },
-      { id: "protect", label: t("nav.protect"), group: "sell", when: hasLock },
       { id: "diagnose", label: t("nav.diagnose"), group: "check" },
     ];
     return all.filter((e) => e.when !== false);
-  }, [t, game.caps.viewer, hasLock]);
+  }, [t, game.caps.viewer]);
 
   useEffect(() => {
     if (!entries.some((e) => e.id === view) && view !== "settings") setView("designer");

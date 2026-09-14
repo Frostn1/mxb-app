@@ -41,6 +41,9 @@
   the header and streams the hash instead of loading the whole file, so large secured content
   doesn't sit in memory or stutter a synced mods folder.
 
+### Removed
+- Frost's Studio no longer has the GUID Lock tab. Diagnose still shows which GUID a file is locked to.
+
 ### Added
 - Settings → General lists the secured files it found and each one's status — Unlocked,
   Unlocking, Not in your library, or Unavailable — with its store name, so a locked file you
