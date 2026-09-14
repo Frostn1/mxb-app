@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-13 — v0.14.2 — Locked tracks from Steam
+
+### Changed
+- Locked tracks show in the track list however you start the game — from the app or from
+  Steam — once "Use locked content in game" is on.
+
 ## Unreleased — Frost's Studio
 
 ### Changed

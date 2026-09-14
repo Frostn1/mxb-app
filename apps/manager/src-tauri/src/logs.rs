@@ -70,6 +70,8 @@ pub struct LogsInfo {
     pub frostmod: LogGroup,
     /// The active game's logs.
     pub game: LogGroup,
+    /// The locked-content DLL's run folder: its log and the manifest it read.
+    pub secure: LogGroup,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -120,6 +122,13 @@ fn is_frostmod_log(name: &str) -> bool {
         // `frostmod.dll.in-use-1723…`, swept on the next start.
         || lower.contains(".in-use-");
     !ours
+}
+
+/// Whether a file in the locked-content folder goes in the bundle: the DLL's log, and the
+/// manifest (paths only — keys stay in their `.mxbkey`), never the DLL itself.
+fn is_secure_log(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower == "mxbsecure.log" || lower == "manifest.tsv"
 }
 
 fn describe(path: &Path) -> Option<LogFile> {
@@ -210,11 +219,12 @@ fn game_group(cfg: &AppConfig) -> LogGroup {
     fallback.unwrap_or_else(|| LogGroup::missing(first))
 }
 
-pub fn info(app_log_dir: &Path, frostmod_dir: &Path, cfg: &AppConfig) -> LogsInfo {
+pub fn info(app_log_dir: &Path, frostmod_dir: &Path, secure_dir: &Path, cfg: &AppConfig) -> LogsInfo {
     LogsInfo {
         app: scan_all(app_log_dir),
         frostmod: scan(frostmod_dir, is_frostmod_log),
         game: game_group(cfg),
+        secure: scan(secure_dir, is_secure_log),
     }
 }
 
@@ -268,11 +278,11 @@ pub fn export(dest: &Path, info: &LogsInfo, summary: &str) -> anyhow::Result<Exp
     Ok(ExportResult { path: dest.to_string_lossy().into_owned(), files: written, bytes })
 }
 
-/// The three groups in the order they're written, paired with the folder each takes
-/// inside an exported zip. Named once so the archive's layout and the summary listing it
-/// can't drift apart.
-fn groups(info: &LogsInfo) -> [(&'static str, &LogGroup); 3] {
-    [("app", &info.app), ("frostmod", &info.frostmod), ("game", &info.game)]
+/// The groups in the order they're written, paired with the folder each takes inside an
+/// exported zip. Named once so the archive's layout and the summary listing it can't drift
+/// apart.
+fn groups(info: &LogsInfo) -> [(&'static str, &LogGroup); 4] {
+    [("app", &info.app), ("frostmod", &info.frostmod), ("game", &info.game), ("secure", &info.secure)]
 }
 
 /// A log bundle that went up to the file host, and the link that came back.
@@ -516,7 +526,7 @@ mod tests {
         write(&frostmod_dir, "frostmod.log", "loader side");
 
         let cfg = AppConfig::default();
-        let info = info(&app_dir, &frostmod_dir, &cfg);
+        let info = info(&app_dir, &frostmod_dir, &root.join("secure"), &cfg);
 
         let text = summary("9.9.9", Some("v0.13.0"), &cfg, &info);
         assert!(text.contains("Frost's Mod Manager 9.9.9"), "{text}");
@@ -534,7 +544,8 @@ mod tests {
         let app_dir = root.join("applogs");
         let frostmod_dir = root.join("frostmod");
         let game_dir = root.join("game");
-        for d in [&app_dir, &frostmod_dir, &game_dir] {
+        let secure_dir = root.join("secure");
+        for d in [&app_dir, &frostmod_dir, &game_dir, &secure_dir] {
             std::fs::create_dir_all(d).unwrap();
         }
         write(&app_dir, "frost.log", "app side");
@@ -542,19 +553,22 @@ mod tests {
         write(&frostmod_dir, "frostmod.exe", "not a log");
         write(&game_dir, "log.txt", "game side");
         write(&game_dir, "mxbikes.ini", "not a log");
+        write(&secure_dir, "mxbsecure.log", "dll side");
+        write(&secure_dir, "mxbsecure.dll", "not a log");
 
         let cfg = AppConfig {
             game_path: game_dir.to_string_lossy().into_owned(),
             ..Default::default()
         };
-        let info = info(&app_dir, &frostmod_dir, &cfg);
+        let info = info(&app_dir, &frostmod_dir, &secure_dir, &cfg);
         assert_eq!(info.app.files.len(), 1);
         assert_eq!(info.frostmod.files.len(), 1);
         assert_eq!(info.game.files.len(), 1);
+        assert_eq!(info.secure.files.len(), 1);
 
         let dest = root.join("out").join("logs.zip");
         let result = export(&dest, &info, &summary("9.9.9", Some("v0.13.0"), &cfg, &info)).unwrap();
-        assert_eq!(result.files, 3);
+        assert_eq!(result.files, 4);
 
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
         let names: Vec<String> = zip.file_names().map(str::to_string).collect();
@@ -562,9 +576,11 @@ mod tests {
         assert!(names.contains(&"app/frost.log".to_string()));
         assert!(names.contains(&"frostmod/frostmod.log".to_string()));
         assert!(names.contains(&"game/log.txt".to_string()));
-        // Neither folder's non-log contents came along.
+        assert!(names.contains(&"secure/mxbsecure.log".to_string()));
+        // No folder's non-log contents came along.
         assert!(!names.iter().any(|n| n.ends_with("mxbikes.ini")));
         assert!(!names.iter().any(|n| n.ends_with("frostmod.exe")));
+        assert!(!names.iter().any(|n| n.ends_with("mxbsecure.dll")));
 
         let mut body = String::new();
         std::io::Read::read_to_string(&mut zip.by_name("game/log.txt").unwrap(), &mut body).unwrap();

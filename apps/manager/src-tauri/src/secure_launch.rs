@@ -129,9 +129,15 @@ fn source_dll(app: &AppHandle) -> Option<PathBuf> {
 /// in a read-only place (a packaged app's resource dir under Program Files), and the DLL needs
 /// to read a `manifest.tsv` written beside it, so it is staged here where both can live.
 fn run_dir(app: &AppHandle) -> Option<PathBuf> {
-    let dir = app.path().app_local_data_dir().ok()?.join("secure");
+    let dir = secure_dir(app)?;
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
+}
+
+/// `<app-data>/secure/`, without creating it — where the DLL writes `mxbsecure.log`, so the
+/// log bundle can pick it up.
+pub fn secure_dir(app: &AppHandle) -> Option<PathBuf> {
+    Some(app.path().app_local_data_dir().ok()?.join("secure"))
 }
 
 /// Stage the DLL into the run dir, copying it only when it isn't already the same bytes — so a
@@ -202,16 +208,8 @@ pub fn watch(app: &AppHandle) {
             if !injection_enabled(&app) {
                 continue;
             }
-            // Don't reach into a process the app had no hand in starting. Locked content is
-            // worth a DLL in *our* game; it is not worth one in a game the player started
-            // themselves while the app happened to be open in the tray.
-            if !crate::gameproc::launched_by_app() {
-                log::info!(
-                    "[secure] the game wasn't launched from the app — not injecting. \
-                     Start it with Play to use locked content."
-                );
-                continue;
-            }
+            // However the game was started — Play or Steam — like FrostMod. The setting is
+            // the player's consent; how they launched isn't.
             arm(&app);
         }
     });
@@ -240,10 +238,53 @@ pub fn arm(app: &AppHandle) {
         log::warn!("[secure] couldn't write the manifest: {e}");
         return;
     }
+    // Where the DLL's log is now, so we only read what this injection adds.
+    let dll_log = dir.join("mxbsecure.log");
+    let log_from = std::fs::metadata(&dll_log).map(|m| m.len()).unwrap_or(0);
     match inject(&dll) {
-        Ok(()) => log::info!("[secure] injected mxbsecure.dll for {} asset(s)", assets.len()),
+        Ok(()) => {
+            log::info!("[secure] injected mxbsecure.dll for {} asset(s)", assets.len());
+            // The game lists its tracks at startup, usually before the DLL is in, so a
+            // locked track never shows. Once the hooks are live, have FrostMod re-run the
+            // content load so the scan sees it. Off-thread: the wait can take seconds.
+            std::thread::spawn(move || {
+                if !wait_for_hooks(&dll_log, log_from, std::time::Duration::from_secs(15)) {
+                    log::warn!("[secure] the DLL never reported its hooks — see {}", dll_log.display());
+                    return;
+                }
+                let outcome = crate::frostmod::signal_reload();
+                log::info!("[secure] hooks live; asked FrostMod to rescan: {outcome:?}");
+            });
+        }
         Err(e) => log::warn!("[secure] injection failed: {e}"),
     }
+}
+
+/// Wait for the DLL to finish installing its hooks. It sets up on its own thread, so
+/// `LoadLibraryW` returns first; it says when it's done in its log, past `from`. `false` on
+/// a failed install or a timeout.
+fn wait_for_hooks(log: &std::path::Path, from: u64, timeout: std::time::Duration) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        // Bytes, not a String: a path in the log needn't be UTF-8, and one bad byte would
+        // hide the line we're waiting for.
+        let mut bytes = Vec::new();
+        if let Ok(mut f) = std::fs::File::open(log) {
+            if f.seek(SeekFrom::Start(from)).is_ok() {
+                let _ = f.read_to_end(&mut bytes);
+            }
+        }
+        let tail = String::from_utf8_lossy(&bytes);
+        if tail.contains("[dll] hooks installed") {
+            return true;
+        }
+        if tail.contains("[dll] install failed") {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    false
 }
 
 /// Inject `dll` into the running game.
@@ -320,5 +361,36 @@ mod win {
             CloseHandle(proc);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn waits_for_this_injections_hooks_only() {
+        let dir = std::env::temp_dir().join(format!("frost-secure-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("mxbsecure.log");
+        // A previous session's success is already in the file; it mustn't count.
+        std::fs::write(&log, "[dll] hooks installed — secured reads now served from RAM\n").unwrap();
+        let from = std::fs::metadata(&log).unwrap().len();
+        assert!(!wait_for_hooks(&log, from, Duration::from_millis(300)));
+
+        let mut body = std::fs::read_to_string(&log).unwrap();
+        body.push_str("[dll] attached\n[dll] hooks installed — secured reads now served from RAM\n");
+        std::fs::write(&log, &body).unwrap();
+        assert!(wait_for_hooks(&log, from, Duration::from_millis(300)));
+
+        // A failed install stops the wait at once rather than running out the clock.
+        let from = std::fs::metadata(&log).unwrap().len();
+        body.push_str("[dll] install failed: nope\n");
+        std::fs::write(&log, &body).unwrap();
+        let started = std::time::Instant::now();
+        assert!(!wait_for_hooks(&log, from, Duration::from_secs(5)));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
