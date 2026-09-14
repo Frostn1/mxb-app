@@ -33,6 +33,14 @@ async function deployment(overrides: Record<string, string> = {}): Promise<Env> 
   await DB.prepare("UPDATE accounts SET creator_at = 1 WHERE id IN ('acc_frost', 'acc_other')").run();
   return {
     DB,
+    // Enough R2 for the locker route: `get` returns something with a body, or null.
+    LOCKWEB: {
+      objects: new Map<string, string>(),
+      async get(name: string) {
+        const body = (this as { objects: Map<string, string> }).objects.get(name);
+        return body === undefined ? null : { body };
+      },
+    },
     MXB_WEB_SESSION_KEY: KEY,
     MXB_ASSET_MASTER_KEY: masterKey(),
     MXB_OWNER_ACCOUNT_ID: "acc_owner",
@@ -370,38 +378,46 @@ describe("creators on /admin/assets", () => {
     for (let i = 0; i < 11; i++) expect((await make(owner, cookie)).status).toBe(201);
   });
 
-  it("while new creators are open, makes anyone signed in with Steam a creator, on a web profile made with their first asset", async () => {
-    const env = await deployment({ MXB_NEW_CREATORS: "open" });
+  it("never makes a creator out of someone who merely signed in with Steam", async () => {
+    const env = await deployment();
     const NEWCOMER = "76561198000000077";
     const cookie = await cookieFor(NEWCOMER);
     const profile = () =>
-      env.DB.prepare("SELECT id, kind, creator_at IS NOT NULL AS creator FROM accounts WHERE steam_id = ?")
-        .bind(NEWCOMER)
-        .first<{ id: string; kind: string; creator: number }>();
+      env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ?").bind(NEWCOMER).first<{ id: string }>();
 
-    // Signing in and looking around makes nothing.
-    const empty = await assets(env, req("GET", "/admin/assets", { cookie }));
-    expect(empty.status).toBe(200);
-    expect(await empty.json()).toEqual({ assets: [] });
-    expect(await profile()).toBeNull();
-    expect(await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()).toMatchObject({ creator: true, linked: false });
-
+    // Signing in is proof of who they are, never of what they may sell.
+    expect((await assets(env, req("GET", "/admin/assets", { cookie }))).status).toBe(403);
     const made = await assets(env, req("POST", "/admin/assets", { cookie, body: { title: "First" } }));
-    expect(made.status).toBe(201);
-    const { assetId } = (await made.json()) as { assetId: string };
-    expect(await profile()).toMatchObject({ kind: "web", creator: 1 });
-    const again = await assets(env, req("POST", "/admin/assets", { cookie, body: { title: "Second" } }));
-    expect(again.status).toBe(201);
-    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts WHERE steam_id = ?").bind(NEWCOMER).first<{ n: number }>())?.n).toBe(1);
+    expect(made.status).toBe(403);
+    expect(((await made.json()) as { error: string }).error).toBe("mxbsecure is invite only, for affiliated creators");
+    expect(await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()).toMatchObject({ creator: false });
+    // No profile is conjured on the way past, so nothing accretes creator status later.
+    expect(await profile()).toBeNull();
+  });
 
-    // Theirs to manage, and nobody else's.
-    const mine = (await (await assets(env, req("GET", "/admin/assets", { cookie }))).json()) as { assets: unknown[] };
-    expect(mine.assets).toHaveLength(2);
+  it("hands the locker to a creator, and to nobody else", async () => {
+    const env = await deployment();
+    // Not signed in.
+    expect((await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js"))).status).toBe(401);
+    // Signed in, not a creator.
+    const stranger = await cookieFor("76561198000000077");
+    expect((await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: stranger }))).status).toBe(403);
+    // A creator, but nothing uploaded: a configuration problem, not a missing page.
     const frost = await cookieFor(CREATOR);
-    expect((await assets(env, req("GET", `/admin/assets/${assetId}/grants`, { cookie: frost }))).status).toBe(404);
-    // A web profile's placeholder name never shows, and it isn't an app profile.
-    const me = (await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()) as { name: string; linked: boolean };
-    expect(me).toMatchObject({ name: "Frost", linked: false });
+    expect((await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: frost }))).status).toBe(503);
+    // A name that was never servable, whoever asks.
+    expect((await web(env, req("GET", "/v1/web/lockweb/../secrets", { cookie: frost }))).status).toBe(404);
+    expect((await web(env, req("GET", "/v1/web/lockweb/anything.txt", { cookie: frost }))).status).toBe(404);
+
+    // Uploaded: the creator gets it, served as a module and never at a shared cache.
+    (env as unknown as { LOCKWEB: { objects: Map<string, string> } }).LOCKWEB.objects.set("mxb_lockweb.js", "export default 1");
+    const got = await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: frost }));
+    expect(got.status).toBe(200);
+    expect(got.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+    expect(got.headers.get("cache-control")).toBe("private, max-age=3600");
+    expect(await got.text()).toBe("export default 1");
+    // Still nobody else's, now that there is something to hand over.
+    expect((await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: stranger }))).status).toBe(403);
   });
 
   it("refuses an expired session", async () => {

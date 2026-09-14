@@ -56,7 +56,9 @@ export function refuseCrossSiteWrite(request: Request, env: Env): Response | nul
  */
 type Scope =
   | { kind: "admin" }
-  | { kind: "creator"; accountId: string | null; steamId: string; via: "cookie" }
+  // `accountId` is never null: a cookie scope exists only for an account that is already a
+  // creator, and a key scope is the account the key belongs to.
+  | { kind: "creator"; accountId: string; steamId: string; via: "cookie" }
   | { kind: "creator"; accountId: string; steamId: string | null; via: "key" };
 
 /** Most inputs one grants change may carry, adds and removes together. */
@@ -163,8 +165,8 @@ async function authorize(request: Request, url: URL, env: Env): Promise<Scope | 
   }
   const session = await webSession(request, env);
   if (session) {
-    // Creators can lock and sell. While new creators are open, so can anyone signed in with
-    // Steam: a profile is made with their first asset (see `creatorAccount`).
+    // Creators can lock and sell, and only creators: `creator_at` is set by hand for an
+    // affiliated creator, so a Steam sign-in on its own opens nothing here.
     const find = () =>
       env.DB.prepare("SELECT id, creator_at FROM accounts WHERE steam_id = ?")
         .bind(session.steamId)
@@ -172,10 +174,13 @@ async function authorize(request: Request, url: URL, env: Env): Promise<Scope | 
     // A creator whose `steam_id` has been lost looks exactly like a stranger here, and would be
     // turned away from their own dashboard. Retried once against the link log before that.
     const account = (await find()) ?? ((await repairBySteamId(env, session.steamId)) ? await find() : null);
-    if (!account?.creator_at && !newCreatorsOpen(env)) {
+    // A Steam sign-in proves who someone is, never that they may sell. `creator_at` is set by
+    // hand, for an affiliated creator, and is the only thing that opens this: there is
+    // deliberately no path where signing in is enough.
+    if (!account?.creator_at) {
       return json(403, { error: "mxbsecure is invite only, for affiliated creators" });
     }
-    return { kind: "creator", accountId: account?.id ?? null, steamId: session.steamId, via: "cookie" };
+    return { kind: "creator", accountId: account.id, steamId: session.steamId, via: "cookie" };
   }
   if (admin === "unset" && !env.MXB_ASSETS_KEY && !env.MXB_WEB_SESSION_KEY) {
     return json(503, { error: "no admin key is configured" });
@@ -218,7 +223,7 @@ async function handle(
     if (method === "GET") return listAssets(env, scope);
     if (method === "POST") {
       if (scope.kind === "admin") return createAsset(request, env, env.MXB_OWNER_ACCOUNT_ID!);
-      const owner = scope.via === "key" ? scope.accountId : await creatorAccount(env, scope.steamId);
+      const owner = scope.accountId;
       if (owner !== env.MXB_OWNER_ACCOUNT_ID) {
         const limit = assetsPerDay(env);
         const made = await env.DB.prepare("SELECT COUNT(*) AS n FROM assets WHERE creator_id = ? AND created_at > ?")
@@ -254,43 +259,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 function assetsPerDay(env: Env): number {
   const n = Number(env.MXB_ASSETS_PER_DAY);
   return Number.isInteger(n) && n > 0 ? n : 10;
-}
-
-/** Whether a Steam account that isn't a creator may start: `MXB_NEW_CREATORS = "open"`. Closed
- *  when unset; creators who already joined keep working either way. */
-export function newCreatorsOpen(env: Env): boolean {
-  return env.MXB_NEW_CREATORS === "open";
-}
-
-/**
- * The account a creator's assets belong to: their MXB App profile if Steam is linked to one,
- * else a web-only profile made now. A web profile has a token nobody is ever shown, so it can't
- * sign in to the app, and `kind = 'web'` keeps it out of invite-only routes. Linking the same
- * Steam account in the app later moves its assets over (see `steamReturn`).
- */
-async function creatorAccount(env: Env, steamId: string): Promise<string> {
-  const find = () => env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ?").bind(steamId).first<{ id: string }>();
-  const found = await find();
-  if (found) {
-    // An app profile that starts selling becomes a creator, so it stays one if joining closes.
-    await env.DB.prepare("UPDATE accounts SET creator_at = ? WHERE id = ? AND creator_at IS NULL").bind(Date.now(), found.id).run();
-    return found.id;
-  }
-  const id = crypto.randomUUID();
-  const now = Date.now();
-  try {
-    await env.DB.prepare(
-      "INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at, kind, creator_at) VALUES (?, ?, ?, ?, ?, 'web', ?)",
-    )
-      .bind(id, `web:${steamId}`, steamId, await hashToken(newToken()), now, now)
-      .run();
-    return id;
-  } catch (err) {
-    // Two first requests at once: the other one made it.
-    const again = await find();
-    if (again) return again.id;
-    throw err;
-  }
 }
 
 /** A creator API key in the Authorization header, else null. */
@@ -351,7 +319,7 @@ async function apiKeys(request: Request, url: URL, env: Env, scope: Scope): Prom
     if (typeof label !== "string" || !label.trim() || label.trim().length > 60) {
       return json(400, { error: "label must be 1 to 60 characters" });
     }
-    const owner = scope.accountId ?? (await creatorAccount(env, scope.steamId));
+    const owner = scope.accountId;
     const live = await env.DB.prepare("SELECT COUNT(*) AS n FROM creator_keys WHERE account_id = ? AND revoked_at IS NULL")
       .bind(owner)
       .first<{ n: number }>();
