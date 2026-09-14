@@ -552,9 +552,9 @@ export const en = {
     "Experimental. Adds a Secure tab that locks a file so owning it isn't enough to use it. Only creators packing paid content need this.",
   "settings.mxbsecureUnlock": "Unlock purchased content",
   "settings.mxbsecureUnlockDesc":
-    "Pick a .mxbsecure track you own. It's unlocked for this account on this machine, then lists and rides offline.",
-  "settings.mxbsecureUnlockBtn": "Unlock a track…",
-  "settings.mxbsecureUnlockOk": "Unlocked — the track will list and ride offline.",
+    "Pick a .mxbsecure file you own — a track, paint, gear or bike. It's unlocked for this account on this machine, then appears in the game offline.",
+  "settings.mxbsecureUnlockBtn": "Unlock content…",
+  "settings.mxbsecureUnlockOk": "Unlocked — it'll appear in the game offline.",
   "settings.mxbsecureUnlockFail": "Couldn't unlock this content",
   "settings.steamLink": "Sign in with Steam",
   "settings.steamLinkDesc": "Required to unlock purchased content — links this account to your Steam ID.",

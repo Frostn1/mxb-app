@@ -566,9 +566,9 @@ export const de: Translation = {
     "Experimentell. Fügt einen Schützen-Tab hinzu, der eine Datei so sperrt, dass ihr Besitz allein nicht zur Nutzung reicht. Nur für Creator, die bezahlte Inhalte packen.",
   "settings.mxbsecureUnlock": "Gekaufte Inhalte freischalten",
   "settings.mxbsecureUnlockDesc":
-    "Wähle eine .mxbsecure-Strecke, die dir gehört. Sie wird für dieses Konto auf diesem Rechner freigeschaltet, erscheint dann und ist offline fahrbar.",
-  "settings.mxbsecureUnlockBtn": "Strecke freischalten…",
-  "settings.mxbsecureUnlockOk": "Freigeschaltet — die Strecke erscheint und ist offline fahrbar.",
+    "Wähle eine .mxbsecure-Datei, die dir gehört — Strecke, Lackierung, Ausrüstung oder Motorrad. Sie wird für dieses Konto auf diesem Rechner freigeschaltet und erscheint dann offline im Spiel.",
+  "settings.mxbsecureUnlockBtn": "Inhalt freischalten…",
+  "settings.mxbsecureUnlockOk": "Freigeschaltet — erscheint offline im Spiel.",
   "settings.mxbsecureUnlockFail": "Dieser Inhalt konnte nicht freigeschaltet werden",
   "settings.steamLink": "Mit Steam anmelden",
   "settings.steamLinkDesc": "Nötig, um gekaufte Inhalte freizuschalten — verknüpft dieses Konto mit deiner Steam-ID.",

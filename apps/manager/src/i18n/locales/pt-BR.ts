@@ -561,9 +561,9 @@ export const ptBR: Translation = {
     "Experimental. Adiciona uma aba Proteger que bloqueia um arquivo para que tê-lo não baste para usá-lo. Só criadores que empacotam conteúdo pago precisam disso.",
   "settings.mxbsecureUnlock": "Desbloquear conteúdo comprado",
   "settings.mxbsecureUnlockDesc":
-    "Escolha uma pista .mxbsecure que você possui. Ela é desbloqueada para esta conta neste computador e depois aparece e roda offline.",
-  "settings.mxbsecureUnlockBtn": "Desbloquear uma pista…",
-  "settings.mxbsecureUnlockOk": "Desbloqueado — a pista vai aparecer e rodar offline.",
+    "Escolha um arquivo .mxbsecure que você possui — pista, pintura, equipamento ou moto. Ele é desbloqueado para esta conta neste computador e depois aparece no jogo offline.",
+  "settings.mxbsecureUnlockBtn": "Desbloquear conteúdo…",
+  "settings.mxbsecureUnlockOk": "Desbloqueado — vai aparecer no jogo offline.",
   "settings.mxbsecureUnlockFail": "Não foi possível desbloquear este conteúdo",
   "settings.steamLink": "Entrar com a Steam",
   "settings.steamLinkDesc": "Necessário para desbloquear conteúdo comprado — vincula esta conta ao seu Steam ID.",

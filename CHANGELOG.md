@@ -5,8 +5,9 @@
 ### Added
 - Sign in with Steam from Settings → General, linking your account so you can unlock content
   you own.
-- Unlock a purchased secured track from Settings → General: pick the `.mxbsecure` file, and it's
-  tied to your account on your machine, then lists and rides offline.
+- Unlock purchased secured content — tracks, bike paints, gear or bikes — from Settings →
+  General: pick the `.mxbsecure` file, and it's tied to your account on your machine, then
+  appears in the game offline.
 
 ### Changed
 - The app and Steam sign-in now go through api.mxbsecure.com.
