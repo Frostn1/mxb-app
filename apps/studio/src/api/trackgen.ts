@@ -129,12 +129,15 @@ export function closeTrackLap(program: TrackProgram): Promise<TrackProgram> {
 }
 
 /**
- * What is wrong with a program, and what is merely unlike a published one.
+ * What is wrong with a program, in three grades of wrong.
  *
- * `problems` block: it won't build, or it isn't a lap, or a feature does nothing where it
- * sits. `notes` don't: a blank lap is empty, not broken.
+ * `fatal` means there is nothing to build — the lap leaves the terrain, or synthesis failed.
+ * `problems` mean it builds and it is wrong, which is a judgement against published tracks
+ * and so one a person may overrule. `notes` don't block at all: a blank lap is empty, not
+ * broken.
  */
 export interface TrackReview {
+  fatal: string[];
   problems: string[];
   notes: string[];
 }
