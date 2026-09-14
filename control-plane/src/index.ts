@@ -28,7 +28,7 @@ import {
 import { adminSearch } from "./adminsearch";
 import { adminAssets, isAssetsPath } from "./assets";
 import { isWebPath, landingSite, webRoutes } from "./web";
-import { steamResult } from "./page";
+import { steamResult, redirectPage } from "./page";
 import { bmacWebhook } from "./bmac";
 import { pruneReports, putReport } from "./diagnostics";
 import {
@@ -168,6 +168,10 @@ async function route(request: Request, env: Env): Promise<Response> {
   // return URL is what identifies the sign-in, and it is single-use. Above the account
   // gate for that reason, not because it is unprotected.
   if (method === "GET" && path === "/v1/steam/return") return steamReturn(request, url, env);
+
+  // The branded hop the app opens: a mxbsecure page that bounces on to Steam. Single-use like
+  // the return, and above the account gate for the same reason — the login id is the credential.
+  if (method === "GET" && path === "/v1/steam/start") return steamStart(url, env);
 
   // Steam sign-in for mxbsecure.com. Its session is a signed cookie, checked where it's used.
   if (isWebPath(path)) return webRoutes(request, url, env);
@@ -473,9 +477,37 @@ async function steamLogin(request: Request, account: Account, env: Env): Promise
     .bind(id, account.id, Date.now())
     .run();
 
+  // The app opens the branded interstitial, not the Steam URL directly, so the player sees a
+  // mxbsecure page for a beat before Steam rather than being thrown straight to a Steam login.
   const origin = new URL(request.url).origin;
-  const returnTo = `${origin}/v1/steam/return?login=${id}`;
-  return json(200, { url: loginUrl(returnTo, `${origin}/`), loginId: id });
+  return json(200, { url: `${origin}/v1/steam/start?login=${id}`, loginId: id });
+}
+
+/**
+ * The branded hop into Steam. The app opens this; it rebuilds the Steam OpenID URL for the
+ * pending login and shows a mxbsecure card that redirects on to Steam. The login row is still
+ * consumed only by [`steamReturn`], so this can be reloaded harmlessly.
+ */
+async function steamStart(url: URL, env: Env): Promise<Response> {
+  const site = landingSite(null, env);
+  const loginId = url.searchParams.get("login");
+  if (!loginId) return steamResult(site, "expired");
+
+  const login = await env.DB.prepare(
+    "SELECT consumed_at FROM steam_logins WHERE id = ?",
+  )
+    .bind(loginId)
+    .first<{ consumed_at: number | null }>();
+  if (!login) return steamResult(site, "expired");
+  if (login.consumed_at !== null) return steamResult(site, "already-linked");
+
+  const origin = url.origin;
+  const returnTo = `${origin}/v1/steam/return?login=${loginId}`;
+  return redirectPage(
+    loginUrl(returnTo, `${origin}/`),
+    "Signing you in…",
+    "Taking you to Steam to confirm it's you.",
+  );
 }
 
 /**
@@ -522,10 +554,22 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
       .bind(result.steamId, login.account_id)
       .run();
   } catch (err) {
-    if (String(err).includes("UNIQUE")) {
-      return steamResult(site, "already-linked");
-    }
-    throw err;
+    if (!String(err).includes("UNIQUE")) throw err;
+    // Held by a web-only profile made when this person locked something on mxbsecure.com. Steam
+    // just confirmed it's them, so the app profile takes over the Steam link and their assets.
+    const held = await env.DB.prepare("SELECT id, kind, creator_at FROM accounts WHERE steam_id = ?")
+      .bind(result.steamId)
+      .first<{ id: string; kind: string; creator_at: number | null }>();
+    if (held?.kind !== "web") return steamResult(site, "already-linked");
+    await env.DB.batch([
+      env.DB.prepare("UPDATE assets SET creator_id = ? WHERE creator_id = ?").bind(login.account_id, held.id),
+      env.DB.prepare("UPDATE accounts SET steam_id = NULL WHERE id = ?").bind(held.id),
+      env.DB.prepare("UPDATE accounts SET steam_id = ?, creator_at = COALESCE(creator_at, ?) WHERE id = ?").bind(
+        result.steamId,
+        held.creator_at ?? Date.now(),
+        login.account_id,
+      ),
+    ]);
   }
 
   return steamResult(site, "linked");

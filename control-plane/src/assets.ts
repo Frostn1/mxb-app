@@ -13,7 +13,7 @@
  */
 
 import { currentMasterVersion, wrapContentKey } from "./assetkey";
-import { tokenMatches } from "./auth";
+import { hashToken, newToken, tokenMatches } from "./auth";
 import { isSteamId64, steamPersonaName } from "./steam";
 import { adminAllowed } from "./usage";
 import { webSession } from "./websession";
@@ -49,8 +49,14 @@ export function refuseCrossSiteWrite(request: Request, env: Env): Response | nul
   return json(403, { error: "that request didn't come from mxbsecure.com" });
 }
 
-/** A key (every asset) or a signed-in creator (only their own). */
-type Scope = { kind: "admin" } | { kind: "creator"; accountId: string };
+/**
+ * Who's asking: a key (every asset), a creator signed in on the site (only their own; no account
+ * until their first), or a creator's API key (their own assets, and only the list and buyers).
+ */
+type Scope =
+  | { kind: "admin" }
+  | { kind: "creator"; accountId: string | null; steamId: string; via: "cookie" }
+  | { kind: "creator"; accountId: string; steamId: string | null; via: "key" };
 
 /** Most inputs one grants change may carry, adds and removes together. */
 export const MAX_GRANT_CHANGES = 100;
@@ -78,7 +84,12 @@ const VANITY = /^[A-Za-z0-9_-]{2,32}$/;
 
 /** Is this one of the routes below? */
 export function isAssetsPath(path: string): boolean {
-  return path === "/admin/assets" || path.startsWith("/admin/assets/");
+  return (
+    path === "/admin/assets" ||
+    path.startsWith("/admin/assets/") ||
+    path === "/admin/api-keys" ||
+    path.startsWith("/admin/api-keys/")
+  );
 }
 
 /**
@@ -132,12 +143,34 @@ async function authorize(request: Request, url: URL, env: Env): Promise<Scope | 
   if (assetsKeyMatches(request, env)) return { kind: "admin" };
   const admin = adminAllowed(request, url, env);
   if (admin === "ok") return { kind: "admin" };
+  const apiKey = creatorKeyIn(request);
+  if (apiKey) {
+    // Live, and its creator still is one.
+    const row = await env.DB.prepare(
+      "SELECT k.id, k.account_id, k.last_used_at, a.steam_id FROM creator_keys k JOIN accounts a ON a.id = k.account_id" +
+        " WHERE k.token_hash = ? AND k.revoked_at IS NULL AND a.creator_at IS NOT NULL",
+    )
+      .bind(await hashToken(apiKey))
+      .first<{ id: string; account_id: string; last_used_at: number | null; steam_id: string | null }>();
+    if (!row) return json(401, { error: "that API key isn't valid" });
+    const now = Date.now();
+    // At most one write an hour per key: enough for the dashboard's "last used".
+    if (!row.last_used_at || now - row.last_used_at > 60 * 60 * 1000) {
+      await env.DB.prepare("UPDATE creator_keys SET last_used_at = ? WHERE id = ?").bind(now, row.id).run();
+    }
+    return { kind: "creator", accountId: row.account_id, steamId: row.steam_id, via: "key" };
+  }
   const session = await webSession(request, env);
   if (session) {
-    const account = await env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ? AND creator_at IS NOT NULL")
+    // Creators can lock and sell. While new creators are open, so can anyone signed in with
+    // Steam: a profile is made with their first asset (see `creatorAccount`).
+    const account = await env.DB.prepare("SELECT id, creator_at FROM accounts WHERE steam_id = ?")
       .bind(session.steamId)
-      .first<{ id: string }>();
-    return account ? { kind: "creator", accountId: account.id } : json(403, { error: "this Steam account isn't a creator" });
+      .first<{ id: string; creator_at: number | null }>();
+    if (!account?.creator_at && !newCreatorsOpen(env)) {
+      return json(403, { error: "mxbsecure is invite only, for affiliated creators" });
+    }
+    return { kind: "creator", accountId: account?.id ?? null, steamId: session.steamId, via: "cookie" };
   }
   if (admin === "unset" && !env.MXB_ASSETS_KEY && !env.MXB_WEB_SESSION_KEY) {
     return json(503, { error: "no admin key is configured" });
@@ -153,10 +186,17 @@ async function handle(
 ): Promise<Response> {
   const scope = await authorize(request, url, env);
   if (scope instanceof Response) return scope;
-  // A key is presented on purpose, from curl or the site; only the cookie arrives on its own.
+  // A key is presented on purpose, from curl or a shop's server; only the cookie arrives on its own.
   if (scope.kind === "creator") {
-    const refused = refuseCrossSiteWrite(request, env);
-    if (refused) return refused;
+    if (scope.via === "cookie") {
+      const refused = refuseCrossSiteWrite(request, env);
+      if (refused) return refused;
+    } else if (!keyMayDo(request.method, url.pathname)) {
+      return json(403, { error: "an API key can only list assets and change their buyers" });
+    }
+  }
+  if (url.pathname === "/admin/api-keys" || url.pathname.startsWith("/admin/api-keys/")) {
+    return apiKeys(request, url, env, scope);
   }
   if (!currentMasterVersion(env) || (scope.kind === "admin" && !env.MXB_OWNER_ACCOUNT_ID)) {
     return json(503, { error: "secured assets are not configured" });
@@ -172,12 +212,23 @@ async function handle(
   if (!assetId) {
     if (method === "GET") return listAssets(env, scope);
     if (method === "POST") {
-      return createAsset(request, env, scope.kind === "creator" ? scope.accountId : env.MXB_OWNER_ACCOUNT_ID!);
+      if (scope.kind === "admin") return createAsset(request, env, env.MXB_OWNER_ACCOUNT_ID!);
+      const owner = scope.via === "key" ? scope.accountId : await creatorAccount(env, scope.steamId);
+      if (owner !== env.MXB_OWNER_ACCOUNT_ID) {
+        const limit = assetsPerDay(env);
+        const made = await env.DB.prepare("SELECT COUNT(*) AS n FROM assets WHERE creator_id = ? AND created_at > ?")
+          .bind(owner, Date.now() - DAY_MS)
+          .first<{ n: number }>();
+        if ((made?.n ?? 0) >= limit) {
+          return json(429, { error: `You can lock ${limit} new files a day. Try again tomorrow.` });
+        }
+      }
+      return createAsset(request, env, owner);
     }
     return json(405, { error: "method not allowed" });
   }
   // A creator's view stops at their own assets: anyone else's looks like it doesn't exist.
-  if (scope.kind === "creator" && !(await ownedBy(assetId, scope.accountId, env))) {
+  if (scope.kind === "creator" && !(scope.accountId && (await ownedBy(assetId, scope.accountId, env)))) {
     return json(404, { error: "no such asset" });
   }
   if (sub === "grants") {
@@ -188,6 +239,129 @@ async function handle(
   } else if (method === "PATCH") {
     return updateAsset(request, assetId, env, scope);
   }
+  return json(405, { error: "method not allowed" });
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** New assets a creator may make a day (batch locking makes one per file): `MXB_ASSETS_PER_DAY`,
+ *  10 when unset. The owner account has no ceiling. */
+function assetsPerDay(env: Env): number {
+  const n = Number(env.MXB_ASSETS_PER_DAY);
+  return Number.isInteger(n) && n > 0 ? n : 10;
+}
+
+/** Whether a Steam account that isn't a creator may start: `MXB_NEW_CREATORS = "open"`. Closed
+ *  when unset; creators who already joined keep working either way. */
+export function newCreatorsOpen(env: Env): boolean {
+  return env.MXB_NEW_CREATORS === "open";
+}
+
+/**
+ * The account a creator's assets belong to: their MXB App profile if Steam is linked to one,
+ * else a web-only profile made now. A web profile has a token nobody is ever shown, so it can't
+ * sign in to the app, and `kind = 'web'` keeps it out of invite-only routes. Linking the same
+ * Steam account in the app later moves its assets over (see `steamReturn`).
+ */
+async function creatorAccount(env: Env, steamId: string): Promise<string> {
+  const find = () => env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ?").bind(steamId).first<{ id: string }>();
+  const found = await find();
+  if (found) {
+    // An app profile that starts selling becomes a creator, so it stays one if joining closes.
+    await env.DB.prepare("UPDATE accounts SET creator_at = ? WHERE id = ? AND creator_at IS NULL").bind(Date.now(), found.id).run();
+    return found.id;
+  }
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  try {
+    await env.DB.prepare(
+      "INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at, kind, creator_at) VALUES (?, ?, ?, ?, ?, 'web', ?)",
+    )
+      .bind(id, `web:${steamId}`, steamId, await hashToken(newToken()), now, now)
+      .run();
+    return id;
+  } catch (err) {
+    // Two first requests at once: the other one made it.
+    const again = await find();
+    if (again) return again.id;
+    throw err;
+  }
+}
+
+/** A creator API key in the Authorization header, else null. */
+function creatorKeyIn(request: Request): string | null {
+  return /^Bearer\s+(mxbs_[A-Za-z0-9_-]{20,100})$/i.exec(request.headers.get("Authorization")?.trim() ?? "")?.[1] ?? null;
+}
+
+/** What a creator's API key may do: read the asset list, and read or change an asset's buyers. */
+function keyMayDo(method: string, path: string): boolean {
+  if (path === "/admin/assets" || path === "/admin/assets/") return method === "GET";
+  if (/^\/admin\/assets\/[A-Za-z0-9_-]{1,64}\/grants\/?$/.test(path)) return method === "GET" || method === "POST";
+  return false;
+}
+
+/** Most live API keys a creator may hold. */
+const MAX_API_KEYS = 10;
+
+/**
+ * `/admin/api-keys`: a signed-in creator's API keys, for a shop's server to add and remove
+ * buyers. `GET` lists them, `POST {label}` makes one (the secret is in that response and
+ * nowhere else), `POST /admin/api-keys/:id/revoke` ends one. Only from the site, never with a key.
+ */
+async function apiKeys(request: Request, url: URL, env: Env, scope: Scope): Promise<Response> {
+  if (scope.kind !== "creator" || scope.via !== "cookie") {
+    return json(403, { error: "sign in on mxbsecure.com to manage API keys" });
+  }
+  const match = /^\/admin\/api-keys(?:\/(ck_[A-Za-z0-9_-]{1,32})\/revoke)?\/?$/.exec(url.pathname);
+  if (!match) return json(404, { error: "no such endpoint" });
+  const [, keyId] = match;
+  const method = request.method;
+
+  if (keyId) {
+    if (method !== "POST") return json(405, { error: "method not allowed" });
+    const live = scope.accountId
+      ? await env.DB.prepare("SELECT id FROM creator_keys WHERE id = ? AND account_id = ? AND revoked_at IS NULL")
+          .bind(keyId, scope.accountId)
+          .first()
+      : null;
+    if (!live) return json(404, { error: "no such key" });
+    await env.DB.prepare("UPDATE creator_keys SET revoked_at = ? WHERE id = ?").bind(Date.now(), keyId).run();
+    return json(200, { revoked: keyId });
+  }
+
+  if (method === "GET") {
+    if (!scope.accountId) return json(200, { keys: [] });
+    const rows = await env.DB.prepare(
+      "SELECT id, label, created_at, last_used_at FROM creator_keys WHERE account_id = ? AND revoked_at IS NULL ORDER BY created_at DESC",
+    )
+      .bind(scope.accountId)
+      .all<{ id: string; label: string; created_at: number; last_used_at: number | null }>();
+    return json(200, {
+      keys: (rows.results ?? []).map((r) => ({ id: r.id, label: r.label, createdAt: r.created_at, lastUsedAt: r.last_used_at })),
+    });
+  }
+
+  if (method === "POST") {
+    const label = ((await readJson(request)) as { label?: unknown } | null)?.label;
+    if (typeof label !== "string" || !label.trim() || label.trim().length > 60) {
+      return json(400, { error: "label must be 1 to 60 characters" });
+    }
+    const owner = scope.accountId ?? (await creatorAccount(env, scope.steamId));
+    const live = await env.DB.prepare("SELECT COUNT(*) AS n FROM creator_keys WHERE account_id = ? AND revoked_at IS NULL")
+      .bind(owner)
+      .first<{ n: number }>();
+    if ((live?.n ?? 0) >= MAX_API_KEYS) {
+      return json(409, { error: `You can have ${MAX_API_KEYS} API keys. Revoke one first.` });
+    }
+    const id = `ck_${base64url(crypto.getRandomValues(new Uint8Array(9)))}`;
+    const key = `mxbs_${base64url(crypto.getRandomValues(new Uint8Array(32)))}`;
+    const now = Date.now();
+    await env.DB.prepare("INSERT INTO creator_keys (id, account_id, label, token_hash, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(id, owner, label.trim(), await hashToken(key), now)
+      .run();
+    return json(201, { id, label: label.trim(), key, createdAt: now });
+  }
+
   return json(405, { error: "method not allowed" });
 }
 
@@ -296,6 +470,7 @@ async function createAsset(request: Request, env: Env, owner: string): Promise<R
  */
 async function listAssets(env: Env, scope: Scope): Promise<Response> {
   const mine = scope.kind === "creator";
+  if (mine && !scope.accountId) return json(200, { assets: [] });
   const statement = env.DB.prepare(
     "SELECT a.id, a.title, a.created_at, a.withdrawn_at, a.taken_down_at, a.blob_sha256 IS NOT NULL AS hashed," +
       " (SELECT COUNT(*) FROM entitlements e WHERE e.asset_id = a.id AND e.revoked_at IS NULL) AS buyers," +
