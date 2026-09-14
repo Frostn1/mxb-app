@@ -37,12 +37,62 @@ use mxb_core::config::AppConfig;
 use tauri::{Emitter, Manager};
 
 pub(crate) use mxb_core::{
-    bikefiles, presets, cloudfiles, config, edf, game, heightfield, library, linkwalk, map, modelswap, paint, pkz, texstore, track, usage, viewer, winehost,
+    bikefiles, presets, cloudfiles, config, edf, game, heightfield, library, linkwalk, map, modelswap, paint, pkz, scenery, texstore, track, usage, viewer, winehost,
 };
 #[cfg(sidecar)]
 pub(crate) use mxb_core::sidecar;
 #[cfg(mxbsecure)]
 pub(crate) use mxb_core::mxbsecure;
+
+// ── Track prop placement ─────────────────────────────────────────────────────
+// Placing scenery on a track and writing it to the `.scr` the game loads. A creator action,
+// so it lives here rather than in the player app.
+
+/// The prop names a track can place.
+#[tauri::command]
+async fn read_track_placeable(path: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scenery::placeable(&path).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("read_track_placeable task failed: {e}"))?
+}
+
+/// One prop's mesh, so it can be drawn where it is about to go.
+#[tauri::command]
+async fn load_track_prop(
+    path: String,
+    name: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::prop_mesh(&path, &name) {
+        Ok(m) => tauri::ipc::Response::new(map::scenery_blob(&m, &[])),
+        Err(e) => {
+            log::debug!("[scenery] prop {name}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_prop task failed: {e}"))
+}
+
+/// Save a track's props to a `.scr` the game will load.
+///
+/// The `.scr` is the one part of a track that states where a thing goes in plain text, so it
+/// is where anything placed in the app has to end up. Writes only where it is told, never
+/// inside an archive, and refuses to replace a file unless asked — a track's own `.scr` is
+/// the record of however long someone spent placing things.
+#[tauri::command]
+async fn save_track_props(
+    target: String,
+    props: Vec<scenery::Placement>,
+    overwrite: bool,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scenery::save_scr(&target, &props, overwrite).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("save_track_props task failed: {e}"))?
+}
 
 fn main() {
     tauri::Builder::default()
@@ -110,6 +160,9 @@ fn main() {
             paint_studio_extract,
             content_lock_plan,
             content_lock_run,
+            read_track_placeable,
+            load_track_prop,
+            save_track_props,
             // Reading a track, and the archive metadata behind it. The studio previews the
             // track it is building with the same code the manager shows one with.
             mxb_core::trackview::read_track_info,
