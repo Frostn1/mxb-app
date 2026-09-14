@@ -1,12 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Changed
-- Presets and Manage open on the profile you were last playing, instead of whichever
-  profile happened to sort first. "Save current" then captures the profile you were
-  actually tuning.
-
 ## Unreleased — Frost's Studio
 
 ### Fixed
@@ -71,6 +64,9 @@
   folder (a `mxbsecure` sub-folder of your own included), and each locked one shows a short reason.
 
 ### Changed
+- Presets and Manage open on the profile you were last playing, instead of whichever
+  profile happened to sort first. "Save current" then captures the profile you were
+  actually tuning.
 - Locked tracks show in the track list however you start the game — from the app or from Steam —
   once secured content is on.
 - Content you own unlocks on its own — no experimental setting to turn on. Install a `.mxbsecure`
