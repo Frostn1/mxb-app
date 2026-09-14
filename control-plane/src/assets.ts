@@ -375,6 +375,12 @@ async function listGrants(assetId: string, env: Env, names: typeof fetch | null)
  * Every request from a linked Steam account is logged, refusals included. A buyer's app asks
  * once per PC; after that the file opens offline, so later plays don't show up here. Rows from
  * before accounts had to be linked (`steam_id` "unlinked") are left out.
+ *
+ * This names who unlocked the asset and when — the "theft has a name on it" ledger, now with
+ * the exact blob hash per event. It is NOT a watermark on the content: a leaked *decrypted*
+ * file carries no buyer identity, and no client-side scheme can add one that the file's owner
+ * can't strip. Attribution deters sharing the `.mxbsecure`/`.mxbkey`; it does not fingerprint
+ * plaintext.
  */
 async function assetUsage(assetId: string, env: Env, names: typeof fetch | null): Promise<Response> {
   const asset = await env.DB.prepare("SELECT taken_down_at FROM assets WHERE id = ?")
@@ -382,15 +388,16 @@ async function assetUsage(assetId: string, env: Env, names: typeof fetch | null)
     .first<{ taken_down_at: number | null }>();
   if (!asset) return json(404, { error: "no such asset" });
   const rows = await env.DB.prepare(
-    "SELECT steam_id, decision, reason, issued_at FROM entitlement_grants" +
+    "SELECT steam_id, decision, reason, blob_sha256, issued_at FROM entitlement_grants" +
       ` WHERE asset_id = ? AND ${isSteamIdSql("steam_id")} ORDER BY issued_at DESC LIMIT 500`,
   )
     .bind(assetId)
-    .all<{ steam_id: string; decision: string; reason: string | null; issued_at: number }>();
+    .all<{ steam_id: string; decision: string; reason: string | null; blob_sha256: string | null; issued_at: number }>();
   const events = (rows.results ?? []).map((r) => ({
     steamId: r.steam_id,
     allowed: r.decision === "allow",
     reason: r.reason,
+    blobSha256: r.blob_sha256,
     at: r.issued_at,
   }));
   const byBuyer = new Map<string, { steamId: string; unlocks: number; refused: number; lastAt: number }>();

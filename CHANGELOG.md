@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Changed
+- Secured content is harder to pull apart, and its key is tied more tightly to your PC. If a key
+  needs refreshing, the app does it for you the next time you unlock — nothing to redo.
 - The Settings list of secured content now finds files anywhere under your mods folder (a
   `mxbsecure` sub-folder of your own included), not just the top of tracks/bikes/rider, and lists
   every one it finds — each with a clear status and, when it's locked, a short reason (not in your
