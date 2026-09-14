@@ -7,6 +7,8 @@
   on its own when you launch the game), instead of a dead-end "its name can't be read" message.
 
 ### Added
+- Frost's Studio has a dark mode. Pick Light, Dark or System under Settings → Theme. Light stays
+  the default, since it's the best ground for judging colour.
 - The Studio Designer can export a painting proxy of any model: a bike, a helmet, boots, or a
   single part like a bar pad or a seat picked from a file. It's a light stand-in with the model's
   real UV layout, as a `.glb` to drag into Blender and an `.obj`, plus a template and a layered

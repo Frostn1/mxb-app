@@ -481,4 +481,9 @@ export const de: Translation = {
   "studioSettings.foldersWhy": "Werden aus derselben Konfiguration gelesen, die MXB App schreibt — sie findet das Spiel und übernimmt die Ersteinrichtung, damit es nur eine Antwort darauf gibt, wo MX Bikes liegt.",
   "studioSettings.getManager": "MXB App holen",
   "studioSettings.language": "Sprache",
+  "studioSettings.theme": "Design",
+  "studioSettings.themeHint": "Hell eignet sich am besten, um Farben zu beurteilen. Dunkel schont die Augen.",
+  "studioSettings.themeLight": "Hell",
+  "studioSettings.themeDark": "Dunkel",
+  "studioSettings.themeSystem": "System",
 };

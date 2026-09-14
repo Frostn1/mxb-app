@@ -484,4 +484,9 @@ export const en = {
   "studioSettings.foldersWhy": "These are read from the same config MXB App writes — it finds the game and owns first-run setup, so there is only ever one answer to where MX Bikes lives.",
   "studioSettings.getManager": "Get MXB App",
   "studioSettings.language": "Language",
+  "studioSettings.theme": "Theme",
+  "studioSettings.themeHint": "Light is best for judging colour. Dark is easier on the eyes.",
+  "studioSettings.themeLight": "Light",
+  "studioSettings.themeDark": "Dark",
+  "studioSettings.themeSystem": "System",
 } as const;

@@ -15,6 +15,7 @@ import { appPlatform, getConfig, listGames } from "@frost/shared/api/mods";
 import type { Config, GameInfo } from "@frost/shared/types";
 import { cn } from "@frost/shared/lib/utils";
 import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
+import { ThemeProvider, useTheme } from "@frost/shared/Context/Theme";
 import { I18nProvider, setAmbientVars, useT } from "@/i18n";
 import Rail, { RailButton, type RailEntry } from "./Components/Shell/Rail";
 import {
@@ -217,7 +218,7 @@ function Shell() {
               </div>
             </div>
           </div>
-          <Toaster position="bottom-right" theme="light" richColors />
+          <ThemedToaster />
 
           <AlertDialog open={asking} onOpenChange={(o) => !o && setAsking(false)}>
             <AlertDialogContent>
@@ -247,12 +248,22 @@ function Shell() {
   );
 }
 
+/** Toasts in whichever theme the app is in, rather than a light card on a dark window. */
+function ThemedToaster() {
+  const { resolved } = useTheme();
+  return <Toaster position="bottom-right" theme={resolved} richColors />;
+}
+
 export default function App() {
   return (
-    <I18nProvider>
-      <UpdateProvider>
-        <Shell />
-      </UpdateProvider>
-    </I18nProvider>
+    // Light unless the user picks otherwise — the reason is in `studio.css`. No interface
+    // scale here, so the provider leaves the webview's zoom alone.
+    <ThemeProvider defaultTheme="light" scalable={false}>
+      <I18nProvider>
+        <UpdateProvider>
+          <Shell />
+        </UpdateProvider>
+      </I18nProvider>
+    </ThemeProvider>
   );
 }

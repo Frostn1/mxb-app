@@ -101,7 +101,7 @@ import {
   type UiScale,
   type Colorway,
   type ThemeMode,
-} from "../../Context/Theme";
+} from "@frost/shared/Context/Theme";
 import { Trans, APP_NAME } from "@/i18n";
 import { useI18n, type LocalePref, type TKey } from "@/i18n";
 import { getLocale, LOCALE_OPTIONS } from "@/i18n";

@@ -2,7 +2,9 @@ import { ExternalLink, FolderOpen } from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { revealInExplorer } from "@frost/shared/api/mods";
 import { Button } from "@frost/shared/Components/ui/button";
+import { Segmented } from "@frost/shared/Components/ui/segmented";
 import { useConfig } from "@frost/shared/Context/Config";
+import { useTheme, type ThemeMode } from "@frost/shared/Context/Theme";
 import { APP_NAME, LOCALE_OPTIONS, useI18n, useT } from "@/i18n";
 
 const MANAGER_RELEASES = "https://github.com/Frostn1/mxb-app/releases/latest";
@@ -39,6 +41,7 @@ export default function Settings() {
   const t = useT();
   const { config, game } = useConfig();
   const { locale, setLocale } = useI18n();
+  const { theme, setTheme } = useTheme();
 
   return (
     <div className="h-full overflow-y-auto">
@@ -69,6 +72,27 @@ export default function Settings() {
           <ExternalLink className="size-3.5" />
           {t("studioSettings.getManager")}
         </Button>
+
+        <div className="mt-10">
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
+            {t("studioSettings.theme")}
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-4">
+            <span className="text-[12px] leading-relaxed text-muted-foreground">
+              {t("studioSettings.themeHint")}
+            </span>
+            <Segmented
+              size="sm"
+              value={theme}
+              onChange={(v) => setTheme(v as ThemeMode)}
+              options={[
+                { value: "light", label: t("studioSettings.themeLight") },
+                { value: "dark", label: t("studioSettings.themeDark") },
+                { value: "system", label: t("studioSettings.themeSystem") },
+              ]}
+            />
+          </div>
+        </div>
 
         <div className="mt-10">
           <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
