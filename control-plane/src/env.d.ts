@@ -57,6 +57,9 @@ declare global {
     /** The account assets made through `/admin/assets` are created under. Not a secret — a
      *  var in `wrangler.jsonc`. Empty means `/admin/assets` answers 503. */
     MXB_OWNER_ACCOUNT_ID?: string;
+    /** mxbsecure.com's own key: opens `/admin/assets*` and nothing else under `/admin`. A
+     *  secret. `ADMIN_KEY` still works on those routes too. */
+    MXB_ASSETS_KEY?: string;
   }
 }
 

@@ -13,6 +13,7 @@
  */
 
 import { currentMasterVersion, wrapContentKey } from "./assetkey";
+import { tokenMatches } from "./auth";
 import { isSteamId64 } from "./steam";
 import { adminAllowed } from "./usage";
 
@@ -75,15 +76,25 @@ export async function adminAssets(
   return cors(response, allowed);
 }
 
+/**
+ * The site's own key. It opens these routes and nothing else in `/admin`, so the key a browser
+ * keeps can't read the dashboards. Bearer only — it is never typed into a URL.
+ */
+function assetsKeyMatches(request: Request, env: Env): boolean {
+  const expected = env.MXB_ASSETS_KEY;
+  const presented = /^Bearer\s+(.+)$/i.exec(request.headers.get("Authorization")?.trim() ?? "")?.[1];
+  return !!expected && !!presented && tokenMatches(expected, presented);
+}
+
 async function handle(
   request: Request,
   url: URL,
   env: Env,
   fetchImpl: typeof fetch,
 ): Promise<Response> {
-  const allowed = adminAllowed(request, url, env);
-  if (allowed === "unset") return json(503, { error: "no admin key is configured" });
-  if (allowed === "denied") return json(401, { error: "unauthorized" });
+  const allowed = assetsKeyMatches(request, env) ? "ok" : adminAllowed(request, url, env);
+  if (allowed === "unset" && !env.MXB_ASSETS_KEY) return json(503, { error: "no admin key is configured" });
+  if (allowed !== "ok") return json(401, { error: "unauthorized" });
   if (!currentMasterVersion(env) || !env.MXB_OWNER_ACCOUNT_ID) {
     return json(503, { error: "secured assets are not configured" });
   }

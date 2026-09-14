@@ -127,6 +127,18 @@ describe("auth", () => {
     expect((await call(env, req("POST", "/admin/assets", { key: "guess", body: { title: "x" } }))).status).toBe(401);
   });
 
+  it("takes the site's own key here, and nowhere else in /admin", async () => {
+    const env = await deployment({ MXB_ASSETS_KEY: "site-key" });
+    expect((await call(env, req("GET", "/admin/assets", { key: "site-key" }))).status).toBe(200);
+    expect((await call(env, req("GET", "/admin/assets"))).status).toBe(200);
+    expect((await call(env, req("GET", "/v1/usage/stats", { key: "site-key" }))).status).not.toBe(200);
+    expect((await call(env, req("GET", "/admin/plugins", { key: "site-key" }))).status).not.toBe(200);
+
+    const siteOnly = await deployment({ ADMIN_KEY: undefined, MXB_ASSETS_KEY: "site-key" });
+    expect((await call(siteOnly, req("GET", "/admin/assets", { key: "site-key" }))).status).toBe(200);
+    expect((await call(siteOnly, req("GET", "/admin/assets", { key: "guess" }))).status).toBe(401);
+  });
+
   it("503s when the admin key, master key or owner is unset", async () => {
     for (const unset of ["ADMIN_KEY", "MXB_ASSET_MASTER_KEY", "MXB_OWNER_ACCOUNT_ID"]) {
       const env = await deployment({ [unset]: undefined });
