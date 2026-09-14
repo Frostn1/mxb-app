@@ -14,7 +14,7 @@
 
 import { currentMasterVersion, wrapContentKey } from "./assetkey";
 import { tokenMatches } from "./auth";
-import { isSteamId64 } from "./steam";
+import { isSteamId64, steamPersonaName } from "./steam";
 import { adminAllowed } from "./usage";
 import { webSession } from "./websession";
 
@@ -131,6 +131,8 @@ async function handle(
   if (!match) return json(404, { error: "no such endpoint" });
   const [, assetId, sub] = match;
   const method = request.method;
+  // Steam display names for the lists, only when the page asks: they cost a lookup per buyer.
+  const names = url.searchParams.get("names") === "1" ? fetchImpl : null;
 
   if (!assetId) {
     if (method === "GET") return listAssets(env, scope);
@@ -144,10 +146,10 @@ async function handle(
     return json(404, { error: "no such asset" });
   }
   if (sub === "grants") {
-    if (method === "GET") return listGrants(assetId, env);
+    if (method === "GET") return listGrants(assetId, env, names);
     if (method === "POST") return changeGrants(request, assetId, env, fetchImpl);
   } else if (sub === "usage") {
-    if (method === "GET") return assetUsage(assetId, env);
+    if (method === "GET") return assetUsage(assetId, env, names);
   } else if (method === "PATCH") {
     return updateAsset(request, assetId, env);
   }
@@ -265,8 +267,23 @@ async function listAssets(env: Env, scope: Scope): Promise<Response> {
   });
 }
 
-/** `GET /admin/assets/:id/grants` — who holds it, revoked rows included. */
-async function listGrants(assetId: string, env: Env): Promise<Response> {
+/** Steam display names for a set of accounts, a few lookups at a time. */
+async function namesFor(ids: string[], fetchImpl: typeof fetch): Promise<Map<string, string>> {
+  const todo = [...new Set(ids)];
+  const out = new Map<string, string>();
+  let next = 0;
+  const worker = async () => {
+    while (next < todo.length) {
+      const id = todo[next++];
+      out.set(id, await steamPersonaName(id, fetchImpl));
+    }
+  };
+  await Promise.all(Array.from({ length: VANITY_CONCURRENCY }, worker));
+  return out;
+}
+
+/** `GET /admin/assets/:id/grants` — who holds it, revoked rows included. `?names=1` adds names. */
+async function listGrants(assetId: string, env: Env, names: typeof fetch | null): Promise<Response> {
   if (!(await assetExists(assetId, env))) return json(404, { error: "no such asset" });
   const rows = await env.DB.prepare(
     "SELECT steam_id, source, granted_at, revoked_at FROM entitlements" +
@@ -274,9 +291,12 @@ async function listGrants(assetId: string, env: Env): Promise<Response> {
   )
     .bind(assetId)
     .all<{ steam_id: string; source: string; granted_at: number; revoked_at: number | null }>();
+  const list = rows.results ?? [];
+  const named = names ? await namesFor(list.map((r) => r.steam_id), names) : null;
   return json(200, {
-    grants: (rows.results ?? []).map((r) => ({
+    grants: list.map((r) => ({
       steamId: r.steam_id,
+      ...(named ? { name: named.get(r.steam_id) ?? "" } : {}),
       source: r.source,
       grantedAt: r.granted_at,
       revokedAt: r.revoked_at,
@@ -290,7 +310,7 @@ async function listGrants(assetId: string, env: Env): Promise<Response> {
  * Every request is logged, refusals included. A buyer's app asks once per PC; after that the
  * file opens offline, so later plays don't show up here.
  */
-async function assetUsage(assetId: string, env: Env): Promise<Response> {
+async function assetUsage(assetId: string, env: Env, names: typeof fetch | null): Promise<Response> {
   if (!(await assetExists(assetId, env))) return json(404, { error: "no such asset" });
   const rows = await env.DB.prepare(
     "SELECT steam_id, decision, reason, issued_at FROM entitlement_grants" +
@@ -312,8 +332,10 @@ async function assetUsage(assetId: string, env: Env): Promise<Response> {
     b.lastAt = Math.max(b.lastAt, e.at);
     byBuyer.set(e.steamId, b);
   }
+  const buyers = [...byBuyer.values()].sort((a, b) => b.lastAt - a.lastAt);
+  const named = names ? await namesFor(buyers.map((b) => b.steamId), names) : null;
   return json(200, {
-    buyers: [...byBuyer.values()].sort((a, b) => b.lastAt - a.lastAt),
+    buyers: named ? buyers.map((b) => ({ ...b, name: named.get(b.steamId) ?? "" })) : buyers,
     events: events.slice(0, 100),
   });
 }

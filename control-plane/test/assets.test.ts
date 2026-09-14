@@ -72,6 +72,7 @@ async function create(env: Env, title = "Pro Circuit Livery") {
 /** Steam's profile XML for known names, its error page for the rest. */
 const steamStub = vi.fn(async (input: RequestInfo | URL) => {
   const url = String(input);
+  if (url.includes("/profiles/")) return new Response("<profile><steamID><![CDATA[Buyer One]]></steamID></profile>");
   const name = /\/id\/([^/]+)\/\?xml=1$/.exec(url)?.[1];
   if (name === "frostn1") {
     return new Response(`<?xml version="1.0"?><profile><steamID64>${BUYER}</steamID64></profile>`);
@@ -379,5 +380,23 @@ describe("POST /v1/keys/grant after an admin grant", () => {
     expect((await ask(hash)).status).toBe(200);
     expect((await ask("cd".repeat(32))).status).not.toBe(200);
     expect((await ask()).status).not.toBe(200);
+  });
+});
+
+describe("buyer names", () => {
+  it("adds Steam names to the buyer list and the usage log when asked", async () => {
+    const env = await deployment();
+    const created = await create(env);
+    await call(env, req("POST", `/admin/assets/${created.assetId}/grants`, { body: { add: [BUYER] } }));
+    const plain = (await (await direct(env, req("GET", `/admin/assets/${created.assetId}/grants`), steamStub)).json()) as {
+      grants: { name?: string }[];
+    };
+    expect(plain.grants[0].name).toBeUndefined();
+    const named = (await (await direct(env, req("GET", `/admin/assets/${created.assetId}/grants?names=1`), steamStub)).json()) as {
+      grants: { steamId: string; name?: string }[];
+    };
+    expect(named.grants[0]).toMatchObject({ steamId: BUYER, name: "Buyer One" });
+    const usage = await direct(env, req("GET", `/admin/assets/${created.assetId}/usage?names=1`), steamStub);
+    expect(usage.status).toBe(200);
   });
 });
