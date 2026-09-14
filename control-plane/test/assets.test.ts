@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { unwrapContentKey } from "../src/assetkey";
 import { adminAssets, parseSteamInput } from "../src/assets";
 import { hashToken } from "../src/auth";
+import { sealToken, SESSION_COOKIE } from "../src/websession";
 import { addAccount, d1 } from "./d1sqlite";
 
 // The entry module exports the voice Durable Object, whose base class only exists in workerd.
@@ -429,7 +430,7 @@ describe("POST /v1/keys/grant after an admin grant", () => {
     expect((await patch("ast_missing", hash)).status).toBe(404);
     const set = await patch(created.assetId, hash.toUpperCase());
     expect(set.status).toBe(200);
-    expect(await set.json()).toEqual({ assetId: created.assetId, blobSha256: hash, withdrawnAt: null });
+    expect(await set.json()).toEqual({ assetId: created.assetId, blobSha256: hash, withdrawnAt: null, takenDownAt: null });
 
     const ask = (blobSha256?: string) =>
       call(env, req("POST", "/v1/keys/grant", { key: token, body: { assetId: created.assetId, sessionId: "s1", blobSha256 } }));
@@ -476,6 +477,61 @@ describe("POST /v1/keys/grant after an admin grant", () => {
       { steam_id: BUYER, asset_id: created.assetId, session_id: "s1" },
       { steam_id: BUYER, asset_id: created.assetId, session_id: "none" },
     ]);
+  });
+});
+
+describe("takedown", () => {
+  it("is set and cleared only with a key, and a creator's restore doesn't lift it", async () => {
+    const CREATOR = "76561198174305985";
+    const env = await deployment({ MXB_WEB_SESSION_KEY: "session-secret" });
+    await addAccount(env.DB, "acc_creator", "Creator", CREATOR);
+    await env.DB.prepare("UPDATE accounts SET creator_at = 1 WHERE id = 'acc_creator'").run();
+    await env.DB.prepare(
+      "INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind("acc_buyer", "Buyer", BUYER, await hashToken("buyer-token"), Date.now())
+      .run();
+    const cookie = `${SESSION_COOKIE}=${await sealToken({ t: "session", steamId: CREATOR, name: "C", exp: Date.now() + 60_000 }, "session-secret")}`;
+    const asCreator = (method: string, path: string, body?: unknown) =>
+      call(env, req(method, path, { key: null, origin: SITE, body, headers: { Cookie: cookie } }));
+
+    const made = await asCreator("POST", "/admin/assets", { title: "Pine Hill" });
+    const { assetId } = (await made.json()) as { assetId: string };
+    await asCreator("POST", `/admin/assets/${assetId}/grants`, { add: [BUYER] });
+    const ask = () => call(env, req("POST", "/v1/keys/grant", { key: "buyer-token", body: { assetId, sessionId: "s1" } }));
+    const status = async () =>
+      ((await (await call(env, req("POST", "/v1/assets/status", { key: "buyer-token", body: { assetIds: [assetId] } }))).json()) as {
+        assets: { available: boolean }[];
+      }).assets[0].available;
+    expect((await ask()).status).toBe(200);
+
+    const down = await call(env, req("PATCH", `/admin/assets/${assetId}`, { body: { takenDown: true } }));
+    expect(down.status).toBe(200);
+    expect(((await down.json()) as { takenDownAt: number | null }).takenDownAt).toBeTypeOf("number");
+    expect(await (await ask()).json()).toEqual({ error: "taken down" });
+    expect(await status()).toBe(false);
+
+    // The creator can't clear it, directly or by toggling their own withdrawal.
+    expect((await asCreator("PATCH", `/admin/assets/${assetId}`, { takenDown: false })).status).toBe(403);
+    expect((await asCreator("PATCH", `/admin/assets/${assetId}`, { withdrawn: true })).status).toBe(200);
+    expect((await asCreator("PATCH", `/admin/assets/${assetId}`, { withdrawn: false })).status).toBe(200);
+    expect(await (await ask()).json()).toEqual({ error: "taken down" });
+
+    // The creator sees it, on the list and the usage log.
+    const listed = (await (await asCreator("GET", "/admin/assets")).json()) as { assets: { takenDownAt: number | null }[] };
+    expect(listed.assets[0].takenDownAt).toBeTypeOf("number");
+    const usage = (await (await asCreator("GET", `/admin/assets/${assetId}/usage`)).json()) as {
+      takenDownAt: number | null;
+      events: { reason: string }[];
+    };
+    expect(usage.takenDownAt).toBeTypeOf("number");
+    expect(usage.events[0].reason).toBe("taken down");
+
+    expect((await call(env, req("PATCH", `/admin/assets/${assetId}`, { body: { takenDown: "yes" } }))).status).toBe(400);
+    const up = await call(env, req("PATCH", `/admin/assets/${assetId}`, { body: { takenDown: false } }));
+    expect(((await up.json()) as { takenDownAt: number | null }).takenDownAt).toBeNull();
+    expect((await ask()).status).toBe(200);
+    expect(await status()).toBe(true);
   });
 });
 

@@ -543,7 +543,7 @@ async function listEntitlements(account: Account, env: Env): Promise<Response> {
   const rows = await env.DB.prepare(
     "SELECT e.asset_id, a.title, e.source, e.granted_at" +
       " FROM entitlements e JOIN assets a ON a.id = e.asset_id" +
-      " WHERE e.steam_id = ? AND e.revoked_at IS NULL AND a.withdrawn_at IS NULL" +
+      " WHERE e.steam_id = ? AND e.revoked_at IS NULL AND a.withdrawn_at IS NULL AND a.taken_down_at IS NULL" +
       " ORDER BY e.granted_at DESC",
   )
     .bind(account.steam_id)
@@ -584,7 +584,8 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
 
   const placeholders = assetIds.map(() => "?").join(",");
   const known = await env.DB.prepare(
-    `SELECT id, title, wrapped_key IS NOT NULL AS has_key, withdrawn_at IS NOT NULL AS withdrawn` +
+    `SELECT id, title, wrapped_key IS NOT NULL AS has_key,` +
+      ` (withdrawn_at IS NOT NULL OR taken_down_at IS NOT NULL) AS withdrawn` +
       ` FROM assets WHERE id IN (${placeholders})`,
   )
     .bind(...assetIds)
@@ -647,10 +648,12 @@ async function decideEntitlement(
   // account token could otherwise write rows forever, and bury the creator's usage log in them.
   const decide = async (): Promise<{ allowed: boolean; reason: string; log: boolean }> => {
     if (!account.steam_id) return { allowed: false, reason: "no Steam account linked", log: false };
-    const asset = await env.DB.prepare("SELECT withdrawn_at FROM assets WHERE id = ?")
+    const asset = await env.DB.prepare("SELECT withdrawn_at, taken_down_at FROM assets WHERE id = ?")
       .bind(assetId)
-      .first<{ withdrawn_at: number | null }>();
+      .first<{ withdrawn_at: number | null; taken_down_at: number | null }>();
     if (!asset) return { allowed: false, reason: "no such asset", log: false };
+    // Ours, and checked first: a creator restoring a withdrawal doesn't lift it.
+    if (asset.taken_down_at !== null) return { allowed: false, reason: "taken down", log: true };
     if (asset.withdrawn_at !== null) return { allowed: false, reason: "withdrawn", log: true };
 
     const row = await env.DB.prepare(

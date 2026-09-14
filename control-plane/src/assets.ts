@@ -186,7 +186,7 @@ async function handle(
   } else if (sub === "usage") {
     if (method === "GET") return assetUsage(assetId, env, names);
   } else if (method === "PATCH") {
-    return updateAsset(request, assetId, env);
+    return updateAsset(request, assetId, env, scope);
   }
   return json(405, { error: "method not allowed" });
 }
@@ -197,22 +197,32 @@ async function ownedBy(assetId: string, accountId: string, env: Env): Promise<bo
 }
 
 /**
- * `PATCH /admin/assets/:id` — `{ blobSha256?, withdrawn? }`.
+ * `PATCH /admin/assets/:id` — `{ blobSha256?, withdrawn?, takenDown? }`.
  *
  * `blobSha256` is the packed file's hash. The site packs in the browser, so it's the only thing
  * that sees the finished file; once stored, `/v1/keys/grant` releases the key only for it.
  * `withdrawn: true` stops every new key release for the asset, `false` undoes that.
+ * `takenDown` is the operator's own switch, apart from `withdrawn` so a creator can't undo it:
+ * a key only, never the sign-in cookie.
  */
-async function updateAsset(request: Request, assetId: string, env: Env): Promise<Response> {
-  const body = (await readJson(request)) as { blobSha256?: unknown; withdrawn?: unknown } | null;
+async function updateAsset(request: Request, assetId: string, env: Env, scope: Scope): Promise<Response> {
+  const body = (await readJson(request)) as { blobSha256?: unknown; withdrawn?: unknown; takenDown?: unknown } | null;
   if (!body || typeof body !== "object") return json(400, { error: "expected a JSON body" });
-  const { blobSha256, withdrawn } = body;
-  if (blobSha256 === undefined && withdrawn === undefined) return json(400, { error: "nothing to change" });
+  const { blobSha256, withdrawn, takenDown } = body;
+  if (blobSha256 === undefined && withdrawn === undefined && takenDown === undefined) {
+    return json(400, { error: "nothing to change" });
+  }
   if (blobSha256 !== undefined && (typeof blobSha256 !== "string" || !/^[0-9a-f]{64}$/i.test(blobSha256.trim()))) {
     return json(400, { error: "blobSha256 must be 64 hex characters" });
   }
   if (withdrawn !== undefined && typeof withdrawn !== "boolean") {
     return json(400, { error: "withdrawn must be true or false" });
+  }
+  if (takenDown !== undefined && scope.kind !== "admin") {
+    return json(403, { error: "only mxbsecure can take an asset down or restore it" });
+  }
+  if (takenDown !== undefined && typeof takenDown !== "boolean") {
+    return json(400, { error: "takenDown must be true or false" });
   }
   if (!(await assetExists(assetId, env))) return json(404, { error: "no such asset" });
 
@@ -227,11 +237,23 @@ async function updateAsset(request: Request, assetId: string, env: Env): Promise
   } else if (withdrawn === false) {
     statements.push(env.DB.prepare("UPDATE assets SET withdrawn_at = NULL WHERE id = ?").bind(assetId));
   }
+  if (takenDown === true) {
+    statements.push(
+      env.DB.prepare("UPDATE assets SET taken_down_at = COALESCE(taken_down_at, ?) WHERE id = ?").bind(Date.now(), assetId),
+    );
+  } else if (takenDown === false) {
+    statements.push(env.DB.prepare("UPDATE assets SET taken_down_at = NULL WHERE id = ?").bind(assetId));
+  }
   await env.DB.batch(statements);
-  const row = await env.DB.prepare("SELECT blob_sha256, withdrawn_at FROM assets WHERE id = ?")
+  const row = await env.DB.prepare("SELECT blob_sha256, withdrawn_at, taken_down_at FROM assets WHERE id = ?")
     .bind(assetId)
-    .first<{ blob_sha256: string | null; withdrawn_at: number | null }>();
-  return json(200, { assetId, blobSha256: row?.blob_sha256 ?? null, withdrawnAt: row?.withdrawn_at ?? null });
+    .first<{ blob_sha256: string | null; withdrawn_at: number | null; taken_down_at: number | null }>();
+  return json(200, {
+    assetId,
+    blobSha256: row?.blob_sha256 ?? null,
+    withdrawnAt: row?.withdrawn_at ?? null,
+    takenDownAt: row?.taken_down_at ?? null,
+  });
 }
 
 /**
@@ -275,7 +297,7 @@ async function createAsset(request: Request, env: Env, owner: string): Promise<R
 async function listAssets(env: Env, scope: Scope): Promise<Response> {
   const mine = scope.kind === "creator";
   const statement = env.DB.prepare(
-    "SELECT a.id, a.title, a.created_at, a.withdrawn_at, a.blob_sha256 IS NOT NULL AS hashed," +
+    "SELECT a.id, a.title, a.created_at, a.withdrawn_at, a.taken_down_at, a.blob_sha256 IS NOT NULL AS hashed," +
       " (SELECT COUNT(*) FROM entitlements e WHERE e.asset_id = a.id AND e.revoked_at IS NULL) AS buyers," +
       ` (SELECT MAX(g.issued_at) FROM entitlement_grants g WHERE g.asset_id = a.id AND ${isSteamIdSql("g.steam_id")})` +
       " AS last_request_at" +
@@ -286,6 +308,7 @@ async function listAssets(env: Env, scope: Scope): Promise<Response> {
     title: string;
     created_at: number;
     withdrawn_at: number | null;
+    taken_down_at: number | null;
     hashed: number;
     buyers: number;
     last_request_at: number | null;
@@ -296,6 +319,7 @@ async function listAssets(env: Env, scope: Scope): Promise<Response> {
       title: r.title,
       createdAt: r.created_at,
       withdrawnAt: r.withdrawn_at,
+      takenDownAt: r.taken_down_at,
       buyers: r.buyers,
       hashed: !!r.hashed,
       lastRequestAt: r.last_request_at,
@@ -353,7 +377,10 @@ async function listGrants(assetId: string, env: Env, names: typeof fetch | null)
  * before accounts had to be linked (`steam_id` "unlinked") are left out.
  */
 async function assetUsage(assetId: string, env: Env, names: typeof fetch | null): Promise<Response> {
-  if (!(await assetExists(assetId, env))) return json(404, { error: "no such asset" });
+  const asset = await env.DB.prepare("SELECT taken_down_at FROM assets WHERE id = ?")
+    .bind(assetId)
+    .first<{ taken_down_at: number | null }>();
+  if (!asset) return json(404, { error: "no such asset" });
   const rows = await env.DB.prepare(
     "SELECT steam_id, decision, reason, issued_at FROM entitlement_grants" +
       ` WHERE asset_id = ? AND ${isSteamIdSql("steam_id")} ORDER BY issued_at DESC LIMIT 500`,
@@ -377,6 +404,7 @@ async function assetUsage(assetId: string, env: Env, names: typeof fetch | null)
   const buyers = [...byBuyer.values()].sort((a, b) => b.lastAt - a.lastAt);
   const named = names ? await namesFor(buyers.map((b) => b.steamId), names) : null;
   return json(200, {
+    takenDownAt: asset.taken_down_at,
     buyers: named ? buyers.map((b) => ({ ...b, name: named.get(b.steamId) ?? "" })) : buyers,
     events: events.slice(0, 100),
   });
