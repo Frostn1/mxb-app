@@ -1523,6 +1523,67 @@ pub fn grade(prog: &TrackProgram, syn: &mut Synth) {
     syn.heights = out;
 }
 
+/// A rig lifted off the donor's slope keeps the slope: its wheels touch a tilted plane, and
+/// stood on our level pad one end floated. Sheared level on the plane its lowest points make.
+fn level(m: &Mesh) -> Mesh {
+    let mut low: std::collections::HashMap<(i32, i32), [f32; 3]> = Default::default();
+    for v in m.positions.chunks_exact(3) {
+        let e = low.entry((v[0].floor() as i32, v[2].floor() as i32)).or_insert([v[0], v[1], v[2]]);
+        if v[1] < e[1] {
+            *e = [v[0], v[1], v[2]];
+        }
+    }
+    // y = a x + b z + c through `pts`, least squares.
+    let fit = |pts: &[[f32; 3]]| -> Option<(f32, f32, f32)> {
+        let (mut s, mut n) = ([0.0f64; 9], 0.0f64);
+        for p in pts {
+            let (x, y, z) = (p[0] as f64, p[1] as f64, p[2] as f64);
+            s = [s[0] + x * x, s[1] + x * z, s[2] + x, s[3] + z * z, s[4] + z, s[5] + x * y, s[6] + z * y, s[7] + y, 0.0];
+            n += 1.0;
+        }
+        let m = [[s[0], s[1], s[2]], [s[1], s[3], s[4]], [s[2], s[4], n]];
+        let r = [s[5], s[6], s[7]];
+        let det = |m: [[f64; 3]; 3]| {
+            m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+        };
+        let d = det(m);
+        if d.abs() < 1e-9 {
+            return None;
+        }
+        let col = |k: usize| {
+            let mut c = m;
+            for i in 0..3 {
+                c[i][k] = r[i];
+            }
+            det(c) / d
+        };
+        Some((col(0) as f32, col(1) as f32, col(2) as f32))
+    };
+    let mut pts: Vec<[f32; 3]> = low.into_values().collect();
+    let Some(mut plane) = fit(&pts) else { return m.clone() };
+    // Down onto the lower envelope: keep what lies at or under the plane, and fit again.
+    for _ in 0..8 {
+        let under: Vec<[f32; 3]> = pts.iter().copied().filter(|p| p[1] <= plane.0 * p[0] + plane.1 * p[2] + plane.2 + 0.02).collect();
+        if under.len() < 8 || under.len() == pts.len() {
+            break;
+        }
+        pts = under;
+        match fit(&pts) {
+            Some(f) => plane = f,
+            None => break,
+        }
+    }
+    // More than a few degrees is not a slope it was parked on.
+    if plane.0.hypot(plane.1) > 0.08 {
+        return m.clone();
+    }
+    let mut out = m.clone();
+    for v in out.positions.chunks_exact_mut(3) {
+        v[1] -= plane.0 * v[0] + plane.1 * v[2];
+    }
+    out
+}
+
 /// A group of rigid parts turned by `deg` and stood together at `(x, z)` on the lowest ground
 /// under all of them.
 fn stand_parts(parts: &[&Mesh], x: f32, z: f32, deg: f32, syn: &Synth) -> Vec<Mesh> {
@@ -1588,14 +1649,14 @@ fn dress_paddock(prog: &TrackProgram, syn: &Synth, lib: Option<&crate::trackprop
             let p = team[i * team.len() / BRANDS.len()];
             let (lo, hi) = p.mesh.bounds();
             let at = area.at(bx, row * (hz - PAD_MARGIN_M - RIG_DEPTH_M * 0.5));
-            rigs.append(&stand(&p.mesh, at.0, at.1, deg, syn));
+            rigs.append(&stand(&level(&p.mesh), at.0, at.1, deg, syn));
             rig_sheet = Some(p.sheet.clone());
             (hi[0] - lo[0], hi[2] - lo[2], at)
         } else if !semis.is_empty() {
             let (p, m) = &semis[i * semis.len() / BRANDS.len()];
             let (lo, hi) = m.bounds();
             let at = area.at(bx, row * (hz - PAD_MARGIN_M - (hi[2] - lo[2]) * 0.5 - 0.5));
-            rigs.append(&stand(m, at.0, at.1, deg, syn));
+            rigs.append(&stand(&level(m), at.0, at.1, deg, syn));
             rig_sheet = Some(p.sheet.clone());
             (hi[0] - lo[0], hi[2] - lo[2], at)
         } else {
@@ -2014,6 +2075,32 @@ mod tests {
     }
 
     /// Eight teams, each a whole rig backing onto the fence, its pop-up and its board, apart.
+    #[test]
+    fn a_rig_lifted_off_a_slope_stands_level() {
+        let at = |c: Mesh, x: f32, y: f32| {
+            let (lo, hi) = c.bounds();
+            edfwrite::moved(&c, [x - (lo[0] + hi[0]) * 0.5, y - lo[1], -(lo[2] + hi[2]) * 0.5])
+        };
+        // A trailer on four wheels, and an awning's thin leg standing off its side.
+        let mut rig = at(edfwrite::cuboid(26.0, 3.0, 3.0), 0.0, 1.0);
+        for x in [-11.0, -9.5, 9.5, 11.0] {
+            rig.append(&at(edfwrite::cuboid(1.0, 1.0, 3.0), x, 0.0));
+        }
+        rig.append(&at(edfwrite::cuboid(0.1, 3.5, 0.1), 3.0, 0.4));
+        // Parked on the donor's 1.7° slope, along its length and a little across.
+        rig.positions.chunks_exact_mut(3).for_each(|v| v[1] += 0.03 * v[0] + 0.01 * v[2]);
+        let flat = level(&rig);
+        let feet: Vec<f32> = flat
+            .positions
+            .chunks_exact(3)
+            .filter(|v| v[0].abs() > 9.0 && v[1] < flat.bounds().0[1] + 0.3)
+            .map(|v| v[0])
+            .collect();
+        assert!(feet.iter().any(|&x| x < -9.0) && feet.iter().any(|&x| x > 9.0), "a wheel end still off the ground: {feet:?}");
+        let (lo, hi) = flat.bounds();
+        assert!(hi[1] - lo[1] < 4.0 + 0.05, "still tilted: {:.2} m tall", hi[1] - lo[1]);
+    }
+
     #[test]
     fn a_rig_and_a_popup_per_brand() {
         let v = venue();
