@@ -15,7 +15,20 @@
  * surface here, which is the same default `ADMIN_KEY` takes.
  */
 
-import { cors } from "./assets";
+import { cors, refuseCrossSiteWrite } from "./assets";
+import { addRule, collectAdminView, deleteRule } from "./diagnostics";
+import {
+  clampDays,
+  fileDetail,
+  parseFileQuery,
+  parsePage,
+  parseRiderQuery,
+  parseSightingQuery,
+  riderDetail,
+  searchFiles,
+  searchRiders,
+  totals,
+} from "./diagnosticssearch";
 import { isSteamId64 } from "./steam";
 import { collectStats, windowDays } from "./usage";
 import { webSession } from "./websession";
@@ -44,13 +57,72 @@ export async function webAdminRoutes(request: Request, url: URL, env: Env, origi
   if (!session) return cors(json(401, { error: "not signed in" }), origin);
   if (!isWebAdmin(session.steamId, env)) return cors(json(403, { error: "not an admin" }), origin);
 
-  if (request.method === "GET" && url.pathname === "/v1/web/admin/usage") {
-    const res = cors(json(200, await collectStats(env, windowDays(url))), origin);
-    // Numbers about people: never held by anything in between, as on the rendered page.
+  const said = (status: number, body: unknown) => {
+    const res = cors(json(status, body), origin);
+    // Numbers about people: never held by anything in between, as on the rendered pages.
     res.headers.set("Cache-Control", "no-store");
     return res;
+  };
+
+  const path = url.pathname;
+  if (request.method === "GET") {
+    switch (path) {
+      case "/v1/web/admin/usage":
+        return said(200, await collectStats(env, windowDays(url)));
+
+      // The overview carries the rules as well: they are four rows in the same read, and a
+      // second endpoint for them would be a second round trip for a tab switch.
+      case "/v1/web/admin/diagnostics": {
+        const days = clampDays(url.searchParams.get("days"));
+        const [view, counts] = await Promise.all([collectAdminView(env), totals(env, days)]);
+        return said(200, { days, totals: counts, ...view });
+      }
+      case "/v1/web/admin/diagnostics/riders": {
+        const query = parseRiderQuery(url);
+        return said(200, { query, ...(await searchRiders(env, query)) });
+      }
+      case "/v1/web/admin/diagnostics/rider": {
+        const who = url.searchParams.get("who") ?? "";
+        const query = parseSightingQuery(url);
+        const detail = who ? await riderDetail(env, who, query) : null;
+        return detail ? said(200, { query, ...detail }) : said(404, { error: "no such rider" });
+      }
+      case "/v1/web/admin/diagnostics/files": {
+        const query = parseFileQuery(url);
+        return said(200, { query, ...(await searchFiles(env, query)) });
+      }
+      case "/v1/web/admin/diagnostics/file": {
+        const name = url.searchParams.get("name") ?? "";
+        const sha256 = url.searchParams.get("sha256") ?? "";
+        const detail = name ? await fileDetail(env, name, sha256, parsePage(url.searchParams.get("page"))) : null;
+        return detail ? said(200, detail) : said(404, { error: "no such file" });
+      }
+    }
   }
-  return cors(json(404, { error: "no such endpoint" }), origin);
+
+  // The one write here. A rule takes effect on the next report from every install, so it is
+  // held to the same cross-site check as the rest of the site's writes.
+  if (request.method === "POST" && path === "/v1/web/admin/diagnostics/rules") {
+    const refused = refuseCrossSiteWrite(request, env);
+    if (refused) return cors(refused, origin);
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return said(400, { error: "that was not JSON" });
+    }
+    const field = (name: string) => String(body[name] ?? "");
+    if (field("action") === "delete") {
+      const id = Number(body.id);
+      if (!Number.isInteger(id) || id <= 0) return said(400, { error: "that is not a rule id" });
+      await deleteRule(env, id);
+      return said(200, { ok: true });
+    }
+    const result = await addRule(env, field("kind"), field("pattern"), field("sha256"), field("label"), field("note"));
+    return result.ok ? said(200, { ok: true }) : said(400, { error: result.error ?? "that rule was not usable" });
+  }
+
+  return said(404, { error: "no such endpoint" });
 }
 
 function json(status: number, body: unknown): Response {

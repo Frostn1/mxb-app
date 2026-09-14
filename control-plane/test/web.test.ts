@@ -568,6 +568,53 @@ describe("the dashboards on the site", () => {
     expect(Array.isArray(stats.daily)).toBe(true);
   });
 
+  it("serves the diagnostics views the rendered pages serve", async () => {
+    const env = await deployment(ADMINS);
+    const frost = await cookieFor(CREATOR);
+    const get = async (path: string) => {
+      const res = await web(env, req("GET", path, { cookie: frost }));
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
+
+    const overview = await get("/v1/web/admin/diagnostics?days=7");
+    expect(overview.status).toBe(200);
+    // The rules ride along with the overview rather than costing a second round trip.
+    expect(overview.body).toMatchObject({ days: 7, live: [], rules: [], reporting: 0 });
+    expect(overview.body.totals).toMatchObject({ accounts: 3 });
+
+    expect(await get("/v1/web/admin/diagnostics/riders?q=frost")).toMatchObject({
+      status: 200,
+      body: { rows: [{ riderName: "Frost" }], page: 1 },
+    });
+    expect((await get("/v1/web/admin/diagnostics/files")).body).toMatchObject({ rows: [], total: 0 });
+
+    // A name nobody has is a 404, not an empty detail page.
+    expect((await get("/v1/web/admin/diagnostics/rider?who=nobody")).status).toBe(404);
+    expect((await get("/v1/web/admin/diagnostics/rider")).status).toBe(404);
+    expect((await get("/v1/web/admin/diagnostics/file?name=nothing.dll")).status).toBe(404);
+  });
+
+  it("writes a rule only from the site, and only a usable one", async () => {
+    const env = await deployment(ADMINS);
+    const frost = await cookieFor(CREATOR);
+    const post = (body: unknown, opts: Record<string, unknown> = {}) =>
+      web(env, req("POST", "/v1/web/admin/diagnostics/rules", { cookie: frost, body, ...opts }));
+
+    // A form post from somewhere else is refused before the rule is read.
+    expect((await post({ kind: "deny", pattern: "x.dll" }, { origin: "https://evil.example" })).status).toBe(403);
+    expect((await post({ kind: "sideways", pattern: "x.dll" })).status).toBe(400);
+    // A name *and* a hash reads two different ways; `addRule` refuses it and so does this.
+    expect((await post({ kind: "deny", pattern: "x.dll", sha256: "a".repeat(64) })).status).toBe(400);
+
+    expect((await post({ kind: "deny", pattern: "cheat.dll", label: "Known cheat" })).status).toBe(200);
+    const after = await web(env, req("GET", "/v1/web/admin/diagnostics", { cookie: frost }));
+    const { rules } = (await after.json()) as { rules: { id: number; pattern: string }[] };
+    expect(rules).toMatchObject([{ pattern: "cheat.dll" }]);
+
+    expect((await post({ action: "delete", id: rules[0].id })).status).toBe(200);
+    expect((await post({ action: "delete", id: 0 })).status).toBe(400);
+  });
+
   it("clamps the window and refuses a path it doesn't serve", async () => {
     const env = await deployment(ADMINS);
     const frost = await cookieFor(CREATOR);

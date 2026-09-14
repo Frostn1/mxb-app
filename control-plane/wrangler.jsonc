@@ -42,7 +42,7 @@
     // separated. Empty means nobody, which is the right default: this is the credential that
     // reads everybody's numbers, so granting it should be a diff. `ADMIN_KEY` still opens the
     // rendered /admin pages on this host either way.
-    "MXB_ADMIN_STEAM_IDS": ""
+    "MXB_ADMIN_STEAM_IDS": "76561198174305985"
   },
 
   // The idle reaper. Every five minutes it asks each running server who is connected and
