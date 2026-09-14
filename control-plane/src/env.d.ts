@@ -45,8 +45,15 @@ declare global {
     IP_HASH_SECRET?: string;
     /** Base64 of 32 random bytes. Wraps every secured asset's content key, so a database
      *  leak yields wrapped keys and no way to unwrap them. Absent means secured content is
-     *  off: `/v1/keys/grant` answers 503 rather than serving a key from nothing. */
+     *  off: `/v1/keys/grant` answers 503 rather than serving a key from nothing. Treated as
+     *  master-key version "1" when the versioned map below is not set. */
     MXB_ASSET_MASTER_KEY?: string;
+    /** The general form for rotation: a JSON map of master-key version to base64-of-32-bytes,
+     *  e.g. `{"1":"…","2":"…"}`. Both an old and a new key live here during a rotation. */
+    MXB_ASSET_MASTER_KEYS?: string;
+    /** Which master-key version new wraps use (a key in `MXB_ASSET_MASTER_KEYS`). Defaults to
+     *  "1". Point it at a new version, deploy, then POST `/admin/keys/rewrap` to rotate. */
+    MXB_ASSET_MASTER_KEY_VERSION?: string;
     /** The account assets made through `/admin/assets` are created under. Not a secret — a
      *  var in `wrangler.jsonc`. Empty means `/admin/assets` answers 503. */
     MXB_OWNER_ACCOUNT_ID?: string;

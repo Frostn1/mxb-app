@@ -12,7 +12,7 @@
  * headers — the other admin pages are opened by typing a URL, not called cross-origin.
  */
 
-import { wrapContentKey } from "./assetkey";
+import { currentMasterVersion, wrapContentKey } from "./assetkey";
 import { isSteamId64 } from "./steam";
 import { adminAllowed } from "./usage";
 
@@ -84,7 +84,7 @@ async function handle(
   const allowed = adminAllowed(request, url, env);
   if (allowed === "unset") return json(503, { error: "no admin key is configured" });
   if (allowed === "denied") return json(401, { error: "unauthorized" });
-  if (!env.MXB_ASSET_MASTER_KEY || !env.MXB_OWNER_ACCOUNT_ID) {
+  if (!currentMasterVersion(env) || !env.MXB_OWNER_ACCOUNT_ID) {
     return json(503, { error: "secured assets are not configured" });
   }
 
@@ -123,7 +123,7 @@ async function createAsset(request: Request, env: Env): Promise<Response> {
   if (!account) return json(503, { error: "the owner account does not exist" });
 
   const key = crypto.getRandomValues(new Uint8Array(32));
-  const wrapped = await wrapContentKey(key, env.MXB_ASSET_MASTER_KEY);
+  const wrapped = await wrapContentKey(key, env);
   // Set but malformed: refuse rather than store the key some other way.
   if (!wrapped) return json(503, { error: "content keys are unavailable" });
 

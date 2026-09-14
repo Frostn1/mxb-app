@@ -7,7 +7,8 @@
   you own.
 - Unlock purchased secured content — tracks, bike paints, gear or bikes — from Settings →
   General: pick the `.mxbsecure` file, and it's tied to your account on your machine, then
-  appears in the game offline.
+  appears in the game offline. Unlocking while the game is open now shows the content without a
+  restart.
 
 ### Changed
 - The app and Steam sign-in now go through api.mxbsecure.com.

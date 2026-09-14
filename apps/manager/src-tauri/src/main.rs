@@ -1728,6 +1728,10 @@ async fn provision_and_record(
         log::warn!("[secure] couldn't record the provisioned asset: {e}");
     }
 
+    // If the game is already running, pick this up without a restart: rewrite the manifest the
+    // DLL watches and ask FrostMod to rescan.
+    secure_launch::refresh_running(app);
+
     Ok(SecureProvisionOutcome {
         mxbkey_path: out.to_string_lossy().to_string(),
         steam_id,

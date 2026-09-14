@@ -102,7 +102,7 @@ describe("POST /admin/assets", () => {
     });
     expect(typeof row!.created_at).toBe("number");
     expect(row!.wrapped_key).not.toBe(created.key);
-    const unwrapped = await unwrapContentKey(row!.wrapped_key as string, env.MXB_ASSET_MASTER_KEY);
+    const unwrapped = await unwrapContentKey(row!.wrapped_key as string, env);
     expect(unwrapped).toEqual(key);
   });
 
