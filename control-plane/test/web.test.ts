@@ -189,7 +189,8 @@ describe("Steam sign-in", () => {
 
     for (const cookie of [undefined, someoneElses, `${LOGIN_COOKIE}=`]) {
       const res = await web(env, comeBack(returnTo, CREATOR, cookie), steam as unknown as typeof fetch);
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(303);
+      expect(res.headers.get("Location")).toBe(`${SITE}/steam?r=other-browser`);
       expect(setCookie(res, SESSION_COOKIE)).toBeUndefined();
       // Left alone, so a sign-in this browser really has in flight still completes.
       expect(setCookie(res, LOGIN_COOKIE)).toBeUndefined();
@@ -209,11 +210,10 @@ describe("Steam sign-in", () => {
     const from = (ip: string, path: string) => new Request(`${API}${path}`, { headers: { "CF-Connecting-IP": ip } });
 
     expect((await web(env, from("1.2.3.4", "/v1/web/steam/login"))).status).toBe(302);
-    expect((await web(env, from("1.2.3.4", "/v1/web/steam/return?state=junk"))).status).toBe(400);
+    expect((await web(env, from("1.2.3.4", "/v1/web/steam/return?state=junk"))).headers.get("Location")).toBe(`${SITE}/steam?r=expired`);
     const slow = await web(env, from("1.2.3.4", "/v1/web/steam/login"));
-    expect(slow.status).toBe(429);
-    expect(slow.headers.get("Retry-After")).toBe("60");
-    expect(await slow.text()).toContain("Too many sign-in attempts");
+    expect(slow.status).toBe(303);
+    expect(slow.headers.get("Location")).toBe(`${SITE}/steam?r=busy`);
     expect((await web(env, from("5.6.7.8", "/v1/web/steam/login"))).status).toBe(302);
     // /me and logout aren't counted.
     expect((await web(env, from("1.2.3.4", "/v1/web/me"))).status).toBe(401);
@@ -238,10 +238,10 @@ describe("Steam sign-in", () => {
 
   it("refuses a broken state, and an assertion Steam won't confirm", async () => {
     const env = await deployment();
-    expect((await web(env, req("GET", "/v1/web/steam/return?state=junk", { origin: null }))).status).toBe(400);
+    expect((await web(env, req("GET", "/v1/web/steam/return?state=junk", { origin: null }))).headers.get("Location")).toBe(`${SITE}/steam?r=expired`);
     const no = vi.fn(async () => new Response("is_valid:false\n")) as unknown as typeof fetch;
     const res = await web(env, await steamComesBack(env, CREATOR), no);
-    expect(res.status).toBe(403);
+    expect(res.headers.get("Location")).toBe(`${SITE}/steam?r=unconfirmed`);
     expect(setCookie(res, SESSION_COOKIE)).toBeUndefined();
     expect(setCookie(res, LOGIN_COOKIE)).toContain("Max-Age=0");
   });
