@@ -97,9 +97,10 @@ jobs:
         # Tests needing a real MX Bikes asset are `#[ignore]`d and stay skipped here.
         run: cargo test --workspace --locked
 
-  # The two things paint sync depends on that nothing was checking. Both ship separately
-  # from the app — the Worker is deployed by hand and the agent runs on someone else's
-  # machine — so a break in either surfaced only when a player hit it.
+  # The two things paint sync depends on that nothing was checking. Both ship separately from
+  # the app — the agent runs on someone else's machine, and the Worker used to be deployed by
+  # hand — so a break in either surfaced only when a player hit it. The Worker half is now
+  # `deploy-control-plane` below, which is gated on this job.
   control-plane:
     name: Control plane (typecheck, test)
     runs-on: ubuntu-latest
@@ -132,6 +133,73 @@ jobs:
 
       - name: Test
         run: npx vitest run
+
+  # The deploy the comment above used to describe as "by hand".
+  #
+  # Gated on the job above, so nothing reaches api.mxbsecure.com that has not typechecked and
+  # passed its tests, and restricted to `main`: a pull request builds and tests, it does not
+  # ship. Every app in the field talks to this Worker, so the ordering is the safety.
+  #
+  # Code only -- migrations stay manual, deliberately. `wrangler d1 migrations apply` decides
+  # what to run from the `d1_migrations` table, and that table is empty on the production
+  # database while all 28 migrations are in fact applied. An automatic apply would therefore
+  # start at 0001 and fail on `table accounts already exists`, on every deploy, until someone
+  # backfilled the bookkeeping. Adding a new table is also the one step that must happen
+  # *before* the code that reads it, which is an ordering a single job cannot express.
+  deploy-control-plane:
+    name: Control plane (deploy)
+    needs: control-plane
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    # Named so branch protection can require a reviewer before a deploy, and so the Cloudflare
+    # token can be scoped to this environment rather than the whole repository.
+    environment: production
+    # Not `cancel-in-progress`: a superseded test run is waste, a superseded deploy is a
+    # half-finished release. Queue them instead.
+    concurrency:
+      group: deploy-control-plane
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: ./control-plane
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: control-plane/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Said plainly here rather than as whatever wrangler reports three minutes later: a
+      # missing secret is the one failure of this job that is not about the code.
+      - name: Check credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing. Add them under"\
+                 "Settings -> Environments -> production. The token needs the"\
+                 "'Edit Cloudflare Workers' template."
+            exit 1
+          fi
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy
 
   bootstrap-script:
     # The one part of this repo that runs somewhere nobody can watch.

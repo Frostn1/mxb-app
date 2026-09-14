@@ -12,8 +12,9 @@
  * — who would then be signed in as them.
  */
 
-import { allowedOrigin, assetOrigins, cors, newCreatorsOpen, refuseCrossSiteWrite } from "./assets";
+import { allowedOrigin, assetOrigins, cors, refuseCrossSiteWrite } from "./assets";
 import { tokenMatches } from "./auth";
+import { repairBySteamId } from "./steamlink";
 import { steamResult } from "./page";
 import { isVerified, loginUrl, steamPersonaName, verifyAssertion } from "./steam";
 import {
@@ -131,16 +132,20 @@ export async function webRoutes(
   if (method === "GET" && path === "/v1/web/me") {
     const session = await webSession(request, env);
     if (!session) return cors(json(401, { error: "not signed in" }), origin);
-    const account = await env.DB.prepare("SELECT rider_name, kind, creator_at FROM accounts WHERE steam_id = ?")
-      .bind(session.steamId)
-      .first<{ rider_name: string; kind: string; creator_at: number | null }>();
+    const find = () =>
+      env.DB.prepare("SELECT rider_name, kind, creator_at FROM accounts WHERE steam_id = ?")
+        .bind(session.steamId)
+        .first<{ rider_name: string; kind: string; creator_at: number | null }>();
+    // Same retry as `/admin/assets`: a lost `steam_id` would otherwise report a linked creator
+    // as neither linked nor a creator, which is the confusing half of the failure.
+    const account = (await find()) ?? ((await repairBySteamId(env, session.steamId)) ? await find() : null);
     // A web-only profile (made for a creator on the site) isn't an MXB App profile.
     const app = account && account.kind !== "web" ? account : null;
     return cors(
       json(200, {
         steamId: session.steamId,
         name: session.name || app?.rider_name || "",
-        creator: !!account?.creator_at || newCreatorsOpen(env),
+        creator: !!account?.creator_at,
         linked: !!app,
       }),
       origin,
@@ -156,7 +161,67 @@ export async function webRoutes(
     return cors(new Response(null, { status: 204, headers }), origin);
   }
 
+  if (method === "GET" && path.startsWith("/v1/web/lockweb/")) {
+    return lockweb(request, url, env, origin);
+  }
+
   return json(404, { error: "no such endpoint" });
+}
+
+/**
+ * The files the locker is. A closed list, so a name can never wander out of the bucket.
+ */
+const LOCKWEB_FILES: Record<string, string> = {
+  "mxb_lockweb.js": "text/javascript; charset=utf-8",
+  "mxb_lockweb_bg.wasm": "application/wasm",
+};
+
+/**
+ * The in-browser locker, handed to affiliated creators and to nobody else.
+ *
+ * It cannot live on the site. mxbsecure.com is static assets, so everything it serves is
+ * public — committing the locker there would publish the packer to anyone who guessed the
+ * URL, gate or no gate, because the gate only decides what the page draws. It is served from
+ * here because this is the host the `__Host-` session cookie is bound to: mxbsecure.com never
+ * receives that cookie and so could not check a creator even if it wanted to.
+ *
+ * Being a creator is `creator_at`, set by hand for an affiliated creator. A Steam sign-in
+ * alone gets a 403 here, exactly as it does on `/admin/assets`.
+ */
+async function lockweb(request: Request, url: URL, env: Env, origin: string | null): Promise<Response> {
+  const name = url.pathname.slice("/v1/web/lockweb/".length);
+  const type = LOCKWEB_FILES[name];
+  if (!type) return cors(json(404, { error: "no such file" }), origin);
+
+  const session = await webSession(request, env);
+  if (!session) return cors(json(401, { error: "not signed in" }), origin);
+
+  const find = () =>
+    env.DB.prepare("SELECT creator_at FROM accounts WHERE steam_id = ?")
+      .bind(session.steamId)
+      .first<{ creator_at: number | null }>();
+  const account = (await find()) ?? ((await repairBySteamId(env, session.steamId)) ? await find() : null);
+  if (!account?.creator_at) {
+    return cors(json(403, { error: "mxbsecure is invite only, for affiliated creators" }), origin);
+  }
+
+  const object = await env.LOCKWEB.get(name);
+  // Nothing uploaded yet is a configuration problem, not a missing page: say so as 503 so it
+  // reads differently from a name that was never servable.
+  if (!object) return cors(json(503, { error: "the locker isn't available right now" }), origin);
+
+  return cors(
+    new Response(object.body, {
+      headers: {
+        "Content-Type": type,
+        // The creator's own browser may keep it; no shared cache may, because this response
+        // is the one thing on this host that is large, static and not public.
+        "Cache-Control": "private, max-age=3600",
+        "X-Content-Type-Options": "nosniff",
+      },
+    }),
+    origin,
+  );
 }
 
 function json(status: number, body: unknown): Response {

@@ -635,12 +635,22 @@ describe("a creator who started on the site", () => {
   }
 
   it("brings their assets along when they link the same Steam account in the app", async () => {
-    const env = await deployment({ MXB_WEB_SESSION_KEY: "session-secret", MXB_SITE_ORIGIN: SITE, MXB_NEW_CREATORS: "open" });
+    const env = await deployment({ MXB_WEB_SESSION_KEY: "session-secret", MXB_SITE_ORIGIN: SITE });
     await addAccount(env.DB, "acc_app", "Rider");
-    const made = await call(env, req("POST", "/admin/assets", { key: null, origin: SITE, body: { title: "Pine Hill" }, headers: { Cookie: await signedIn(STEAM) } }));
-    expect(made.status).toBe(201);
-    const { assetId } = (await made.json()) as { assetId: string };
-    const web = await env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ?").bind(STEAM).first<{ id: string }>();
+    // A `kind = 'web'` profile from when the site could mint one. Nothing creates these now,
+    // but the ones that exist still have to hand their assets over on a real link.
+    await env.DB.prepare(
+      "INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at, kind, creator_at)" +
+        " VALUES ('acc_web', ?, ?, 'hash_web', 1, 'web', 1)",
+    )
+      .bind(`web:${STEAM}`, STEAM)
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO assets (id, creator_id, title, blob_key, key_id, created_at, wrapped_key)" +
+        " VALUES ('ast_pine', 'acc_web', 'Pine Hill', NULL, 'k1', 1, 'x')",
+    ).run();
+    const assetId = "ast_pine";
+    const web = { id: "acc_web" };
 
     const res = await linkInApp(env, "acc_app", STEAM);
     expect(res.headers.get("Location")).toBe(`${SITE}/steam?r=linked`);

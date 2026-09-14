@@ -29,6 +29,7 @@ import { adminSearch } from "./adminsearch";
 import { adminAssets, isAssetsPath } from "./assets";
 import { isWebPath, landingSite, webRoutes } from "./web";
 import { steamResult, redirectPage } from "./page";
+import { rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
 import { pruneReports, putReport } from "./diagnostics";
 import {
@@ -550,9 +551,12 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
   // `accounts.steam_id` is UNIQUE: one Steam account is one identity here, and a second
   // community account cannot quietly claim an identity that is already spoken for.
   try {
-    await env.DB.prepare("UPDATE accounts SET steam_id = ? WHERE id = ?")
-      .bind(result.steamId, login.account_id)
-      .run();
+    // One batch: the column and the log must not be able to disagree because the second of
+    // two writes failed. The log is what makes a lost `steam_id` recoverable later.
+    await env.DB.batch([
+      env.DB.prepare("UPDATE accounts SET steam_id = ? WHERE id = ?").bind(result.steamId, login.account_id),
+      rememberLink(env, login.account_id, result.steamId),
+    ]);
   } catch (err) {
     if (!String(err).includes("UNIQUE")) throw err;
     // Held by a web-only profile made when this person locked something on mxbsecure.com. Steam
@@ -569,6 +573,7 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
         held.creator_at ?? Date.now(),
         login.account_id,
       ),
+      rememberLink(env, login.account_id, result.steamId),
     ]);
   }
 
@@ -583,7 +588,8 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
  * more useful than a failure the app has to interpret.
  */
 async function listEntitlements(account: Account, env: Env): Promise<Response> {
-  if (!account.steam_id) return json(200, { steamId: null, assets: [] });
+  const steamId = await steamIdFor(env, account);
+  if (!steamId) return json(200, { steamId: null, assets: [] });
 
   const rows = await env.DB.prepare(
     "SELECT e.asset_id, a.title, e.source, e.granted_at" +
@@ -591,11 +597,11 @@ async function listEntitlements(account: Account, env: Env): Promise<Response> {
       " WHERE e.steam_id = ? AND e.revoked_at IS NULL AND a.withdrawn_at IS NULL AND a.taken_down_at IS NULL" +
       " ORDER BY e.granted_at DESC",
   )
-    .bind(account.steam_id)
+    .bind(steamId)
     .all<{ asset_id: string; title: string; source: string; granted_at: number }>();
 
   return json(200, {
-    steamId: account.steam_id,
+    steamId,
     assets: (rows.results ?? []).map((r) => ({
       assetId: r.asset_id,
       title: r.title,
@@ -692,8 +698,13 @@ async function decideEntitlement(
 ): Promise<{ allowed: boolean; reason: string }> {
   // `log` is false for the two answers that say nothing about a real buyer and a real asset: any
   // account token could otherwise write rows forever, and bury the creator's usage log in them.
+  // Resolved once, before the decision: through `steamIdFor` rather than `account.steam_id` so
+  // that a link Valve has already confirmed is put back instead of refused, and so the audit row
+  // below is written against the same identity the decision was made on.
+  const steamId = await steamIdFor(env, account);
+
   const decide = async (): Promise<{ allowed: boolean; reason: string; log: boolean }> => {
-    if (!account.steam_id) return { allowed: false, reason: "no Steam account linked", log: false };
+    if (!steamId) return { allowed: false, reason: "no Steam account linked", log: false };
     const asset = await env.DB.prepare("SELECT withdrawn_at, taken_down_at FROM assets WHERE id = ?")
       .bind(assetId)
       .first<{ withdrawn_at: number | null; taken_down_at: number | null }>();
@@ -705,7 +716,7 @@ async function decideEntitlement(
     const row = await env.DB.prepare(
       "SELECT revoked_at FROM entitlements WHERE steam_id = ? AND asset_id = ?",
     )
-      .bind(account.steam_id, assetId)
+      .bind(steamId, assetId)
       .first<{ revoked_at: number | null }>();
     if (!row) return { allowed: false, reason: "not entitled", log: true };
     if (row.revoked_at !== null) return { allowed: false, reason: "revoked", log: true };
@@ -718,7 +729,7 @@ async function decideEntitlement(
       "INSERT INTO entitlement_grants (steam_id, asset_id, session_id, decision, reason, blob_sha256, issued_at)" +
         " VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
-      .bind(account.steam_id, assetId, session, allowed ? "allow" : "deny", reason, blobSha256, Date.now())
+      .bind(steamId, assetId, session, allowed ? "allow" : "deny", reason, blobSha256, Date.now())
       .run();
   }
   return { allowed, reason };

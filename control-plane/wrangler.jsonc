@@ -76,6 +76,13 @@
     {
       "binding": "PAINTS",
       "bucket_name": "mxb-paints"
+    },
+    // The in-browser locker. Not on the site: mxbsecure.com is static assets, so anything it
+    // serves is public, and this is the packer. It is handed out by `/v1/web/lockweb/*` to a
+    // signed-in creator and nobody else — see `src/web.ts`.
+    {
+      "binding": "LOCKWEB",
+      "bucket_name": "mxb-lockweb"
     }
   ],
 

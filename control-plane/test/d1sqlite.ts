@@ -54,8 +54,11 @@ export function d1(): Env["DB"] {
       return { results: rows(sql, args) as T[], success: true };
     },
     async run() {
-      rows(sql, args);
-      return { success: true };
+      // `run` rather than `all` here only to get the row count: D1 reports it as `meta.changes`,
+      // and a conditional UPDATE that writes nothing is indistinguishable from one that did
+      // without it.
+      const { changes } = db.prepare(sql).run(...(args as never[])) as { changes: number | bigint };
+      return { success: true, meta: { changes: Number(changes) } };
     },
   });
 
