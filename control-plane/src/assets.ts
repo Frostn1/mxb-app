@@ -14,6 +14,7 @@
 
 import { currentMasterVersion, wrapContentKey } from "./assetkey";
 import { hashToken, newToken, tokenMatches } from "./auth";
+import { repairBySteamId } from "./steamlink";
 import { isSteamId64, steamPersonaName } from "./steam";
 import { adminAllowed } from "./usage";
 import { webSession } from "./websession";
@@ -164,9 +165,13 @@ async function authorize(request: Request, url: URL, env: Env): Promise<Scope | 
   if (session) {
     // Creators can lock and sell. While new creators are open, so can anyone signed in with
     // Steam: a profile is made with their first asset (see `creatorAccount`).
-    const account = await env.DB.prepare("SELECT id, creator_at FROM accounts WHERE steam_id = ?")
-      .bind(session.steamId)
-      .first<{ id: string; creator_at: number | null }>();
+    const find = () =>
+      env.DB.prepare("SELECT id, creator_at FROM accounts WHERE steam_id = ?")
+        .bind(session.steamId)
+        .first<{ id: string; creator_at: number | null }>();
+    // A creator whose `steam_id` has been lost looks exactly like a stranger here, and would be
+    // turned away from their own dashboard. Retried once against the link log before that.
+    const account = (await find()) ?? ((await repairBySteamId(env, session.steamId)) ? await find() : null);
     if (!account?.creator_at && !newCreatorsOpen(env)) {
       return json(403, { error: "mxbsecure is invite only, for affiliated creators" });
     }

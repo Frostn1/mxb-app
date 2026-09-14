@@ -330,6 +330,34 @@ describe("creators on /admin/assets", () => {
     expect((await assets(env, req("GET", "/admin/assets", { cookie: await cookieFor(CREATOR) }))).status).toBe(200);
   });
 
+  it("still knows a creator whose steam_id has been lost, and puts it back", async () => {
+    const env = await deployment();
+    await env.DB.prepare("INSERT INTO steam_links (account_id, steam_id, linked_at) VALUES ('acc_frost', ?, 1)")
+      .bind(CREATOR)
+      .run();
+    // The failure this guards: the column cleared under a creator who is still linked as far as
+    // Valve is concerned. Without the link log they are a stranger to their own dashboard.
+    await env.DB.prepare("UPDATE accounts SET steam_id = NULL WHERE id = 'acc_frost'").run();
+    const cookie = await cookieFor(CREATOR);
+
+    expect(await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()).toMatchObject({
+      creator: true,
+      linked: true,
+    });
+    expect((await assets(env, req("GET", "/admin/assets", { cookie }))).status).toBe(200);
+    const back = await env.DB.prepare("SELECT steam_id FROM accounts WHERE id = 'acc_frost'").first<{
+      steam_id: string | null;
+    }>();
+    expect(back?.steam_id).toBe(CREATOR);
+  });
+
+  it("does not invent a creator out of a Steam account that never linked", async () => {
+    const env = await deployment();
+    const cookie = await cookieFor("76561198000000077");
+    expect((await assets(env, req("GET", "/admin/assets", { cookie }))).status).toBe(403);
+    expect(await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()).toMatchObject({ creator: false });
+  });
+
   it("lets a creator lock 10 new files a day, and the owner any number", async () => {
     const make = (env: Env, cookie: string) => assets(env, req("POST", "/admin/assets", { cookie, body: { title: "T" } }));
     const cookie = await cookieFor(CREATOR);

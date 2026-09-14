@@ -14,6 +14,7 @@
 
 import { allowedOrigin, assetOrigins, cors, newCreatorsOpen, refuseCrossSiteWrite } from "./assets";
 import { tokenMatches } from "./auth";
+import { repairBySteamId } from "./steamlink";
 import { steamResult } from "./page";
 import { isVerified, loginUrl, steamPersonaName, verifyAssertion } from "./steam";
 import {
@@ -131,9 +132,13 @@ export async function webRoutes(
   if (method === "GET" && path === "/v1/web/me") {
     const session = await webSession(request, env);
     if (!session) return cors(json(401, { error: "not signed in" }), origin);
-    const account = await env.DB.prepare("SELECT rider_name, kind, creator_at FROM accounts WHERE steam_id = ?")
-      .bind(session.steamId)
-      .first<{ rider_name: string; kind: string; creator_at: number | null }>();
+    const find = () =>
+      env.DB.prepare("SELECT rider_name, kind, creator_at FROM accounts WHERE steam_id = ?")
+        .bind(session.steamId)
+        .first<{ rider_name: string; kind: string; creator_at: number | null }>();
+    // Same retry as `/admin/assets`: a lost `steam_id` would otherwise report a linked creator
+    // as neither linked nor a creator, which is the confusing half of the failure.
+    const account = (await find()) ?? ((await repairBySteamId(env, session.steamId)) ? await find() : null);
     // A web-only profile (made for a creator on the site) isn't an MXB App profile.
     const app = account && account.kind !== "web" ? account : null;
     return cors(
