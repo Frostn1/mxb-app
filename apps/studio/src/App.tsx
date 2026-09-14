@@ -18,6 +18,7 @@ import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
 import { ThemeProvider, useTheme } from "@frost/shared/Context/Theme";
 import { I18nProvider, setAmbientVars, useT } from "@/i18n";
 import Rail, { RailButton, type RailEntry } from "./Components/Shell/Rail";
+import TitleBar from "./Components/Shell/TitleBar";
 import {
   ContextSlots,
   ShellChrome,
@@ -145,7 +146,9 @@ function Shell() {
         <ContextSlots.Provider value={slots}>
         <ShellChrome.Provider value={chrome}>
         <UnsavedRegistry.Provider value={registry}>
-          <div className="flex h-screen bg-background text-foreground">
+          <div className="flex h-screen flex-col bg-background text-foreground">
+            <TitleBar />
+            <div className="flex min-h-0 flex-1">
             <Rail
               entries={entries}
               active={view}
@@ -216,6 +219,7 @@ function Shell() {
                   />
                 )}
               </div>
+            </div>
             </div>
           </div>
           <ThemedToaster />

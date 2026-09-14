@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed
+- Frost's Studio now has its own title bar instead of the default Windows one — a compact File
+  menu and window buttons on a frameless window, matching the app's look. All the File shortcuts
+  (Ctrl+N/O/S/E, and the rest) keep working; macOS keeps its usual menu bar.
+
 ### Fixed
 - Helmets in the 3D preview sit cleanly over the rider's head, with no skin showing through at
   the visor, the goggles or the chin.
