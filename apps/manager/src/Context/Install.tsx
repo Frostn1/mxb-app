@@ -14,6 +14,7 @@ import {
   addToLibrary,
   cancelInstall,
   importFile,
+  mxbsecureAutoUnlock,
   onFrostmodReload,
   onInstallProgress,
   shopInstall,
@@ -394,6 +395,24 @@ export function InstallProvider({
       unlistenFrost();
     }
   }, [patch]);
+
+  // Auto-unlock secured content: try any `.mxbsecure` that has no key yet, at startup and after
+  // each install/reload (both emit `frostmod-reload`). Quiet — a no-op unless you're enrolled and
+  // own the file, so it never nags. The backend dedupes failures so a not-entitled file isn't
+  // re-granted on every reload.
+  useEffect(() => {
+    let alive = true;
+    const run = () => void mxbsecureAutoUnlock().catch(() => {});
+    run();
+    let off: (() => void) | undefined;
+    void onFrostmodReload(() => {
+      if (alive) run();
+    }).then((u) => (alive ? (off = u) : u()));
+    return () => {
+      alive = false;
+      off?.();
+    };
+  }, []);
 
   /**
    * Start resolving the next few pending jobs before their turn comes.

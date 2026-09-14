@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- Secured content you own unlocks on its own: install a `.mxbsecure` file and, once you're signed
+  in, it unlocks in the background — no need to pick it and press unlock. Content you don't own is
+  left locked and never nags.
 - Sign in with Steam from Settings → General, linking your account so you can unlock content
   you own.
 - Unlock purchased secured content — tracks, bike paints, gear or bikes — from Settings →

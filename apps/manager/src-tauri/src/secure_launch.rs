@@ -90,6 +90,37 @@ fn collect_mxbsecure(dir: &std::path::Path, out: &mut Vec<SecureAsset>) {
     }
 }
 
+/// Every `*.mxbsecure` blob under the mods trees, whether or not it has a key beside it — what
+/// auto-unlock walks to find files that still need a key. ([`scan_secured`] lists only ones that
+/// already have one.)
+#[cfg_attr(not(mxbsecure), allow(dead_code))]
+pub fn scan_blobs(app: &AppHandle) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(cfg) = crate::config::load(app) {
+        for sub in ["mods/tracks", "mods/bikes", "mods/rider"] {
+            let root = crate::library::mods_subdir(&cfg.mods_path, sub);
+            collect_blobs(&root, &mut out);
+        }
+    }
+    out
+}
+
+fn collect_blobs(dir: &std::path::Path, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_blobs(&path, out);
+            continue;
+        }
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if name.ends_with(".mxbsecure") {
+                out.push(path.to_string_lossy().to_string());
+            }
+        }
+    }
+}
+
 /// Record a newly provisioned asset, replacing any earlier entry for the same game name so a
 /// re-lock doesn't leave two. Only the full (mxbsecure) build provisions, so it is otherwise
 /// unused.

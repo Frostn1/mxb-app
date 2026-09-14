@@ -1754,64 +1754,150 @@ async fn mxbsecure_unlock(
 ) -> Result<SecureProvisionOutcome, String> {
     #[cfg(mxbsecure)]
     {
-        // Which asset is this? Read it from the blob's authenticated header — no key needed.
-        let blob = tokio::fs::read(&blob_path)
-            .await
-            .map_err(|e| format!("read blob: {e}"))?;
-        let (asset_id, _key_id, _len) =
-            mxbsecure::header_of(&blob).map_err(|e| format!("not a secured blob: {e}"))?;
-
-        // Entitlement is checked server-side; the key is tied to the caller's account, so this
-        // needs the enrolled control-plane token.
-        let cfg = config::load_or_detect(&app).unwrap_or_default();
-        let cp_token = cfg.cp_token.trim().to_string();
-        if cp_token.is_empty() {
-            return Err("Enroll with an invite code first — secured content is tied to your account.".into());
-        }
-
-        // A one-off session id for the grant's audit log.
-        let mut sid = [0u8; 16];
-        getrandom::getrandom(&mut sid).map_err(|e| e.to_string())?;
-        let session: String = sid.iter().map(|b| format!("{b:02x}")).collect();
-
-        let resp = reqwest::Client::new()
-            .post(format!("{}/v1/keys/grant", crate::paintsync::control_plane()))
-            .bearer_auth(&cp_token)
-            .json(&serde_json::json!({ "assetId": asset_id, "sessionId": session }))
-            .send()
-            .await
-            .map_err(|e| format!("couldn't reach the control plane: {e}"))?;
-        if !resp.status().is_success() {
-            // The control plane answers `{error}`; surface it (403 not entitled, 409 no key…).
-            let detail = resp.text().await.unwrap_or_default();
-            let msg = serde_json::from_str::<serde_json::Value>(&detail)
-                .ok()
-                .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
-                .unwrap_or(detail);
-            return Err(format!("couldn't unlock this content: {msg}"));
-        }
-
-        #[derive(serde::Deserialize)]
-        struct Grant {
-            #[serde(rename = "contentKey")]
-            content_key: String,
-            #[serde(rename = "provisionSecret")]
-            provision_secret: Option<String>,
-        }
-        let grant: Grant = resp.json().await.map_err(|e| format!("bad grant response: {e}"))?;
-        let content_key =
-            mxbsecure::key_from_b64(&grant.content_key).ok_or("the released key isn't 32 bytes")?;
-        let secret = match grant.provision_secret.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            Some(s) => mxbsecure::secret_from_b64(s).ok_or("the provision secret isn't valid base64")?,
-            None => Vec::new(),
-        };
-
-        provision_and_record(&app, &blob_path, &content_key, &secret).await
+        unlock_one(&app, &blob_path).await
     }
     #[cfg(not(mxbsecure))]
     {
         let _ = (app, blob_path);
         Err("this build can't unlock secured content".into())
+    }
+}
+
+/// The grant→provision core, shared by the manual unlock and auto-unlock. Reads the asset id from
+/// the blob's authenticated header, checks entitlement at `/v1/keys/grant`, and seals the released
+/// key to this machine via [`provision_and_record`].
+///
+/// Prechecks first, so a bad file or an already-unlocked one never touches the server: the header
+/// must parse as a `.mxbsecure`, and if a `.mxbkey` beside it already opens for the live Steam ID
+/// that is returned — no grant.
+#[cfg(mxbsecure)]
+async fn unlock_one(
+    app: &tauri::AppHandle,
+    blob_path: &str,
+) -> Result<SecureProvisionOutcome, String> {
+    let blob = tokio::fs::read(blob_path).await.map_err(|e| format!("read blob: {e}"))?;
+    let (asset_id, _key_id, _len) =
+        mxbsecure::header_of(&blob).map_err(|e| format!("not a secured blob: {e}"))?;
+
+    // Already unlocked? A .mxbkey beside it that opens for the live Steam ID means we're done.
+    if let Some(id) = steamid::current_steam_id64() {
+        if has_valid_key(blob_path, &id) {
+            return Ok(SecureProvisionOutcome {
+                mxbkey_path: format!("{blob_path}.mxbkey"),
+                steam_id: id,
+            });
+        }
+    }
+
+    let cfg = config::load_or_detect(app).unwrap_or_default();
+    let cp_token = cfg.cp_token.trim().to_string();
+    if cp_token.is_empty() {
+        return Err("Enroll with an invite code first — secured content is tied to your account.".into());
+    }
+
+    // A one-off session id for the grant's audit log.
+    let mut sid = [0u8; 16];
+    getrandom::getrandom(&mut sid).map_err(|e| e.to_string())?;
+    let session: String = sid.iter().map(|b| format!("{b:02x}")).collect();
+
+    let resp = reqwest::Client::new()
+        .post(format!("{}/v1/keys/grant", crate::paintsync::control_plane()))
+        .bearer_auth(&cp_token)
+        .json(&serde_json::json!({ "assetId": asset_id, "sessionId": session }))
+        .send()
+        .await
+        .map_err(|e| format!("couldn't reach the control plane: {e}"))?;
+    if !resp.status().is_success() {
+        // The control plane answers `{error}`; surface it (403 not entitled, 409 no key…).
+        let detail = resp.text().await.unwrap_or_default();
+        let msg = serde_json::from_str::<serde_json::Value>(&detail)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+            .unwrap_or(detail);
+        return Err(format!("couldn't unlock this content: {msg}"));
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Grant {
+        #[serde(rename = "contentKey")]
+        content_key: String,
+        #[serde(rename = "provisionSecret")]
+        provision_secret: Option<String>,
+    }
+    let grant: Grant = resp.json().await.map_err(|e| format!("bad grant response: {e}"))?;
+    let content_key =
+        mxbsecure::key_from_b64(&grant.content_key).ok_or("the released key isn't 32 bytes")?;
+    let secret = match grant.provision_secret.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) => mxbsecure::secret_from_b64(s).ok_or("the provision secret isn't valid base64")?,
+        None => Vec::new(),
+    };
+
+    provision_and_record(app, blob_path, &content_key, &secret).await
+}
+
+/// Whether a `.mxbkey` beside `blob_path` already opens for `steam_id` — i.e. it's unlocked on
+/// this account and machine, so there is nothing to grant.
+#[cfg(mxbsecure)]
+fn has_valid_key(blob_path: &str, steam_id: &str) -> bool {
+    std::fs::read(format!("{blob_path}.mxbkey"))
+        .ok()
+        .and_then(|sealed| mxbsecure::unseal_key(&sealed, steam_id, ""))
+        .is_some()
+}
+
+/// Blobs auto-unlock has already failed on this run, so a not-entitled file isn't re-granted on
+/// every install signal. Cleared on restart — a purchase since then gets a fresh try.
+#[cfg(mxbsecure)]
+static AUTO_UNLOCK_TRIED: std::sync::Mutex<std::collections::BTreeSet<String>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+/// Try to unlock every secured blob that doesn't have a key yet — after an install or at startup,
+/// so content the buyer owns "just works" without a manual step. Quiet: not enrolled leaves
+/// everything untouched, and a file you're not entitled to is left locked and not retried this
+/// run. Returns how many were newly unlocked.
+#[tauri::command]
+async fn mxbsecure_auto_unlock(app: tauri::AppHandle) -> Result<usize, String> {
+    #[cfg(mxbsecure)]
+    {
+        let cfg = config::load_or_detect(&app).unwrap_or_default();
+        if cfg.cp_token.trim().is_empty() {
+            return Ok(0);
+        }
+        let live = steamid::current_steam_id64();
+        let mut unlocked = 0usize;
+        for blob in secure_launch::scan_blobs(&app) {
+            if let Some(id) = &live {
+                if has_valid_key(&blob, id) {
+                    continue;
+                }
+            }
+            if AUTO_UNLOCK_TRIED
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains(&blob)
+            {
+                continue;
+            }
+            match unlock_one(&app, &blob).await {
+                Ok(_) => unlocked += 1,
+                Err(e) => {
+                    log::info!("[secure] auto-unlock skipped {blob}: {e}");
+                    AUTO_UNLOCK_TRIED
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(blob);
+                }
+            }
+        }
+        if unlocked > 0 {
+            secure_launch::refresh_running(&app);
+        }
+        Ok(unlocked)
+    }
+    #[cfg(not(mxbsecure))]
+    {
+        let _ = app;
+        Ok(0)
     }
 }
 
@@ -6432,6 +6518,7 @@ fn main() {
             secure_steam_id,
             mxbsecure_provision,
             mxbsecure_unlock,
+            mxbsecure_auto_unlock,
             steam_link_start,
             steam_link_status,
             mxbsecure_open_offline,
