@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { adminAssets } from "../src/assets";
 import { landingSite, safeNext, webRoutes } from "../src/web";
+import { adminSteamIds } from "../src/webadmin";
 import {
   LEGACY_SESSION_COOKIE,
   LOGIN_COOKIE,
@@ -186,7 +187,7 @@ describe("Steam sign-in", () => {
     expect(me.status).toBe(200);
     expect(me.headers.get("Access-Control-Allow-Origin")).toBe(SITE);
     expect(me.headers.get("Access-Control-Allow-Credentials")).toBe("true");
-    expect(await me.json()).toEqual({ steamId: CREATOR, name: "Frost", creator: true, linked: true });
+    expect(await me.json()).toEqual({ steamId: CREATOR, name: "Frost", creator: true, linked: true, admin: false });
   });
 
   it("refuses a return that didn't start in this browser, before asking Steam", async () => {
@@ -527,5 +528,63 @@ describe("creator API keys", () => {
     expect((await assets(env, withKey(key, "GET", "/admin/assets"))).status).toBe(200);
     await env.DB.prepare("UPDATE accounts SET creator_at = NULL WHERE id = 'acc_frost'").run();
     expect((await assets(env, withKey(key, "GET", "/admin/assets"))).status).toBe(401);
+  });
+});
+
+describe("the dashboards on the site", () => {
+  const ADMINS = { MXB_ADMIN_STEAM_IDS: CREATOR };
+
+  it("is nobody's until the deployment names them", async () => {
+    const env = await deployment();
+    expect(adminSteamIds(env)).toEqual([]);
+    // Being a creator is not being an admin: one sells through the site, the other reads
+    // everybody's numbers.
+    expect((await web(env, req("GET", "/v1/web/admin/usage", { cookie: await cookieFor(CREATOR) }))).status).toBe(403);
+  });
+
+  it("drops anything in the list that isn't a SteamID64", async () => {
+    const env = await deployment({ MXB_ADMIN_STEAM_IDS: `nonsense, ${CREATOR} ${OTHER}, 12` });
+    expect(adminSteamIds(env)).toEqual([CREATOR, OTHER]);
+  });
+
+  it("asks for a sign-in, then for the right one", async () => {
+    const env = await deployment(ADMINS);
+    expect((await web(env, req("GET", "/v1/web/admin/usage"))).status).toBe(401);
+    expect((await web(env, req("GET", "/v1/web/admin/usage", { cookie: await cookieFor(OTHER) }))).status).toBe(403);
+    // Expired reads as signed out, not as refused: the fix is to sign in again.
+    const stale = await cookieFor(CREATOR, Date.now() - 1000);
+    expect((await web(env, req("GET", "/v1/web/admin/usage", { cookie: stale }))).status).toBe(401);
+  });
+
+  it("hands an admin the same numbers the rendered page draws", async () => {
+    const env = await deployment(ADMINS);
+    const res = await web(env, req("GET", "/v1/web/admin/usage?days=7", { cookie: await cookieFor(CREATOR) }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(SITE);
+    const stats = (await res.json()) as { days: number; daily: unknown[]; active: { day: number } };
+    expect(stats.days).toBe(7);
+    expect(stats.active.day).toBe(0);
+    expect(Array.isArray(stats.daily)).toBe(true);
+  });
+
+  it("clamps the window and refuses a path it doesn't serve", async () => {
+    const env = await deployment(ADMINS);
+    const frost = await cookieFor(CREATOR);
+    const res = await web(env, req("GET", "/v1/web/admin/usage?days=9000", { cookie: frost }));
+    expect(((await res.json()) as { days: number }).days).toBe(365);
+    expect((await web(env, req("GET", "/v1/web/admin/nothing", { cookie: frost }))).status).toBe(404);
+  });
+
+  it("tells the site whether to offer them at all", async () => {
+    const admin = await deployment(ADMINS);
+    const me = async (env: Env, steamId: string) =>
+      (await (await web(env, req("GET", "/v1/web/me", { cookie: await cookieFor(steamId) }))).json()) as {
+        admin: boolean;
+        creator: boolean;
+      };
+    expect(await me(admin, CREATOR)).toMatchObject({ admin: true, creator: true });
+    expect(await me(admin, OTHER)).toMatchObject({ admin: false, creator: true });
+    expect(await me(await deployment(), CREATOR)).toMatchObject({ admin: false });
   });
 });
