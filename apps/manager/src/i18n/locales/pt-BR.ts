@@ -557,7 +557,7 @@ export const ptBR: Translation = {
   "settings.instantRefresh": "Atualização instantânea de presets",
   "settings.instantRefreshDesc":
     "Quando você aplica um preset com o {{game}} aberto, atualiza o visual no jogo na hora — sem reiniciar nem reselecionar o perfil. Se não der, você será avisado para selecionar o perfil de novo.",
-  "settings.mxbsecure": "Bloqueio de conteúdo (mxbsecure)",
+  "settings.mxbsecure": "mxbsecure",
   "settings.mxbsecureDesc":
     "Experimental. Adiciona uma aba Proteger que bloqueia um arquivo para que tê-lo não baste para usá-lo. Só criadores que empacotam conteúdo pago precisam disso.",
   "settings.mxbsecureUnlock": "Desbloquear conteúdo comprado",

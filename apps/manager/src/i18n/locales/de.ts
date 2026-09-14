@@ -562,7 +562,7 @@ export const de: Translation = {
   "settings.instantRefresh": "Sofortige Preset-Aktualisierung",
   "settings.instantRefreshDesc":
     "Wenn du ein Preset anwendest, während {{game}} läuft, wird der Look sofort im Spiel aktualisiert — ohne Neustart und ohne das Profil neu auszuwählen. Falls das nicht klappt, wirst du gebeten, dein Profil neu auszuwählen.",
-  "settings.mxbsecure": "Inhaltssperre (mxbsecure)",
+  "settings.mxbsecure": "mxbsecure",
   "settings.mxbsecureDesc":
     "Experimentell. Fügt einen Schützen-Tab hinzu, der eine Datei so sperrt, dass ihr Besitz allein nicht zur Nutzung reicht. Nur für Creator, die bezahlte Inhalte packen.",
   "settings.mxbsecureUnlock": "Gekaufte Inhalte freischalten",

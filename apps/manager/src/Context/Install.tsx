@@ -399,10 +399,17 @@ export function InstallProvider({
   // Auto-unlock secured content: try any `.mxbsecure` that has no key yet, at startup and after
   // each install/reload (both emit `frostmod-reload`). Quiet — a no-op unless you're enrolled and
   // own the file, so it never nags. The backend dedupes failures so a not-entitled file isn't
-  // re-granted on every reload.
+  // re-granted on every reload. Debounced so a multi-file install (many reload events, and a
+  // recursive mods-tree scan that can be slow on a synced folder) coalesces into one pass.
   useEffect(() => {
     let alive = true;
-    const run = () => void mxbsecureAutoUnlock().catch(() => {});
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const run = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (alive) void mxbsecureAutoUnlock().catch(() => {});
+      }, 3000);
+    };
     run();
     let off: (() => void) | undefined;
     void onFrostmodReload(() => {
@@ -410,6 +417,7 @@ export function InstallProvider({
     }).then((u) => (alive ? (off = u) : u()));
     return () => {
       alive = false;
+      if (timer) clearTimeout(timer);
       off?.();
     };
   }, []);

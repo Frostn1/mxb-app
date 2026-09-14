@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Changed
+- Secured content just works: it injects and auto-unlocks when you own it, without turning on an
+  experimental setting first. Reading a secured file's status is lighter too — the app reads only
+  the header and streams the hash instead of loading the whole file, so large secured content
+  doesn't sit in memory or stutter a synced mods folder.
+
 ### Added
 - Settings → General lists the secured files it found and each one's status — Unlocked,
   Unlocking, Not in your library, or Unavailable — with its store name, so a locked file you
