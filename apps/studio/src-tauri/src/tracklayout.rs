@@ -976,7 +976,12 @@ fn side_singles(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
             .iter()
             .any(|(a, b, r)| r.is_some_and(|r| r < TIGHT_M) && *b > at && *a < at + length)
     };
-    let mut taken: Vec<(f32, f32)> = out.iter().map(|f| (f.at(), f.at() + f.length())).collect();
+    // A grade is ground, not a feature: straights carrying only a step rode as empty.
+    let mut taken: Vec<(f32, f32)> = out
+        .iter()
+        .filter(|f| !matches!(f, Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Rut { .. }))
+        .map(|f| (f.at(), f.at() + f.length()))
+        .collect();
     taken.sort_by(|a, b| a.0.total_cmp(&b.0));
     taken.push((total - 20.0, total));
     let pick = |pos: f32| {
@@ -1027,7 +1032,12 @@ fn fill_gaps(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
             .iter()
             .any(|(a, b, r)| r.is_some_and(|r| r.abs() < FILL_HAIRPIN_M) && *b > at && *a < at + len)
     };
-    let mut taken: Vec<(f32, f32)> = out.iter().map(|f| (f.at(), f.at() + f.length())).collect();
+    // A grade is ground, not a feature: straights carrying only a step rode as empty.
+    let mut taken: Vec<(f32, f32)> = out
+        .iter()
+        .filter(|f| !matches!(f, Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Rut { .. }))
+        .map(|f| (f.at(), f.at() + f.length()))
+        .collect();
     taken.sort_by(|a, b| a.0.total_cmp(&b.0));
     taken.push((total - 20.0, total));
     let mut added = Vec::new();
@@ -1308,8 +1318,9 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             out.push(Feature::Custom { at: pos, length, side: 0.0, shape });
         } else if pick < 0.86 && room > 24.0 {
             // A climb rather than a wall with a ramp on it, or a drop down one.
-            length = rng.range(34.0, 48.0).min(room);
-            let height = rng.range(0.84, 1.4) * if rng.range(0.0, 1.0) < 0.5 { -1.0 } else { 1.0 };
+            // Shorter and taller: at under a metre over forty the step rode as a flat straight.
+            length = rng.range(20.0, 28.0).min(room);
+            let height = rng.range(1.2, 1.9) * if rng.range(0.0, 1.0) < 0.5 { -1.0 } else { 1.0 };
             out.push(Feature::StepUp { at: pos, length, height });
         } else {
             length = rng.range(10.0, 16.0).min(room);

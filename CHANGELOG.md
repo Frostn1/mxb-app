@@ -29,6 +29,18 @@
   start gate and arrows for the direction of travel.
 - The picture beside a generated track's name is a close-up of its biggest jump, with the
   track's name across the top.
+- On the ARL build most jumps grow taller and longer, up to 4 m, and doubles get longer
+  gaps. Small bumps in the way make room for them.
+- The ARL build has ruts up jump faces and off landings, more and bigger braking bumps that
+  start further out from corners, and lone bumps all over the lap.
+- Generated tracks are stamped with the Frost algorithm version (now 0.29.0) in
+  `frost-algorithm.ini`, replacing `generator.ini`.
+- Riders spawn in the paddock, five bikes to a team, instead of beside the track.
+- The pit road is worn into the ground, runs from the paddock gate to the start gates and
+  never crosses the track.
+- Each team in the paddock has a whole rig (cab, trailer and awning) and a pop-up in its
+  colour.
+- Fewer yellow turn markers, spaced further apart, only on the inside of tight corners.
 
 ## 2026-09-13 — v0.14.1 — Shortcuts under both names
 
@@ -51,6 +63,9 @@
   shading.
 
 ### Changed
+- Fewer yellow turn markers, further apart, only on the inside of the tightest corners.
+- Straights that carried only a gentle grade get rollers and small singles, and step-ups
+  are shorter and taller.
 - Generated tracks have a fenced paddock with a team area for each bike brand, a dirt road
   to the pit lane, and the big sponsor wall behind the start gates.
 - The start straight is fenced off from the track up to where it joins, so the way to go is

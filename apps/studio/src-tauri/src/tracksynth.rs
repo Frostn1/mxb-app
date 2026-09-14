@@ -571,6 +571,13 @@ const ARL_BUMP_M: f32 = 2.2;
 const ARL_BUMP_ACROSS_M: f32 = 3.0;
 const ARL_BUMP_H_M: f32 = 0.06;
 const ARL_STRAIGHT_LANES: f32 = 0.9;
+/// How much of a jump's hold on the lanes a raced build lets go: its faces and landings wear
+/// the approach's lanes too.
+const ARL_JUMP_LANES: f32 = 0.85;
+/// How much earlier a raced build's braking bumps start, metres.
+const ARL_BRAKE_REACH_M: f32 = 12.0;
+/// Lone bumps on a raced lap: one chance per cell, likelier where it brakes.
+const ARL_LUMP_CELL_M: f32 = 5.0;
 
 /// How much the edge of the riding line wanders in and out, metres, and over what length of
 /// lap.
@@ -1552,6 +1559,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 }
                 // Not every face: roughly half the jumps carry ruts up them, the rest are clean.
                 let rutted = smoothstep(((fbm(s / 70.0, 5.5, r.seed ^ 0xFAC2) + 0.05) * 4.0).clamp(0.0, 1.0));
+                // A raced build's are all rutted.
+                let rutted = rutted.max((rough - 1.0).clamp(0.0, 1.0));
                 best * TYRE_MARK_DEPTH * focus * rise * rutted
             } else {
                 0.0
@@ -1560,13 +1569,16 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // easing out with it, where the carried field grooves take over down the straight.
             // Carried out along the straight as well, their wide shallow troughs swallowed the
             // field's own grooves: a straight between two hairpins wore none.
+            // A raced build keeps them over its jumps as well, up the face and off the landing.
+            let arl = (rough - 1.0).clamp(0.0, 1.0);
+            let open = 1.0 - focus * (1.0 - ARL_JUMP_LANES * arl);
             let lane_presence = ((ruts.spread.at(s) - RUT_BUNDLE.0) / (RUT_BUNDLE.1 - RUT_BUNDLE.0))
                 .clamp(0.0, 1.0)
-                * (1.0 - focus)
+                * open
                 * lane_turn.at(s);
-            let lane_presence = lane_presence.max(lane_lead.at(s) * LANE_LEAD_DEPTH * (1.0 - focus));
+            let lane_presence = lane_presence.max(lane_lead.at(s) * LANE_LEAD_DEPTH * open);
             // A raced straight carries shallow packed lanes too, rounded rather than sharp.
-            let lane_presence = lane_presence.max((rough - 1.0).clamp(0.0, 1.0) * ARL_STRAIGHT_LANES * (1.0 - focus));
+            let lane_presence = lane_presence.max(arl * ARL_STRAIGHT_LANES * open);
             let (lanes, lane_used) = if lane_presence > 0.0 {
                 let mut best = 0.0f32;
                 let mut used = 0.0f32;
@@ -1786,7 +1798,9 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
 
             // Braking bumps on the way into a corner, which is the direction they form in.
             // The phase drifts, because bumps that are a perfect sine read as corrugated iron.
-            let brake = chop.braking.at(s);
+            let arl = (rough - 1.0).clamp(0.0, 1.0);
+            // A raced build starts braking earlier, so its bumps run further out from the turn.
+            let brake = chop.braking.at(s).max(chop.braking.at(s + ARL_BRAKE_REACH_M * arl) * 0.8 * arl);
             if brake > 0.0 {
                 // In sets, not a washboard: ridden as "just stripes" when they ran unbroken the
                 // whole way into every corner.
@@ -1812,7 +1826,9 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     if band <= 0.0 {
                         continue;
                     }
-                    let wave = feel.brake.0 / rough.max(0.5).sqrt()
+                    // Full length on a raced build too: shortened with roughness, a bike no longer
+                    // fit between them.
+                    let wave = feel.brake.0 / rough.clamp(0.5, 1.0).sqrt()
                         * (0.85 + 0.3 * (0.5 + 0.5 * fbm(kf * 9.7, 1.3, r.seed ^ 0xB4C1)));
                     // A crest is not a straight line.
                     let bend = 0.35 * fbm(t / 2.0, s / 10.0, r.seed ^ 0xB4C2);
@@ -1832,7 +1848,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     let g = (n / BRAKE_GROUP).floor();
                     let slot = n - g * BRAKE_GROUP;
                     // Two or three: ARL's approaches run 1.1–1.9 swells per 10 m and ours ran 0.5.
-                    let count = if rough > 1.4 { 4.0 } else { 3.0 };
+                    // Every slot on a raced build.
+                    let count = if rough > 1.4 { BRAKE_GROUP } else { 3.0 };
                     let size = if slot < count { 0.6 + 0.4 * pick(3) } else { 0.0 };
                     let (prof, falling) = if x < peak {
                         (smoothstep(x / peak), false)
@@ -1849,7 +1866,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let w = brake * sets * clear * groomed;
                 // Half: a crest used to swing half above grade and half below; rising from
                 // grade at full height it stood twice as tall as it ever did.
-                heights[i] += rise.clamp(0.0, 1.0) * feel.brake.1 * 0.5 * w;
+                heights[i] += rise.clamp(0.0, 1.0) * feel.brake.1 * 0.5 * (1.0 + 0.4 * arl) * w;
                 // The back of each bump, where the packed soil shows through the paint.
                 bump[i] = (back * w).min(1.0);
             }
@@ -1869,6 +1886,23 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             if extra > 0.0 {
                 let chatter = fbm(s / ARL_BUMP_M, t / ARL_BUMP_ACROSS_M, r.seed ^ 0xA21B);
                 heights[i] += chatter * ARL_BUMP_H_M * extra * across * groomed;
+                // And lone bumps, each its own length, height and place across the track, most
+                // of them on the way into a turn.
+                let cell = (s / ARL_LUMP_CELL_M).floor();
+                let pick = |salt: i32| hash2(cell as i32, salt, r.seed ^ 0x1B7A) * 0.5 + 0.5;
+                let mid_s = (cell + 0.5) * ARL_LUMP_CELL_M;
+                let braking = chop.braking.at(mid_s).max(chop.braking.at(mid_s + ARL_BRAKE_REACH_M)).min(1.0);
+                if pick(0) < 0.3 + 0.5 * braking {
+                    let len = 1.6 + 1.6 * pick(1);
+                    let mid = cell * ARL_LUMP_CELL_M + (ARL_LUMP_CELL_M - len) * pick(2) + len * 0.5;
+                    let u = ((s - mid) / (len * 0.5)).abs();
+                    let v = ((t - (pick(3) - 0.5) * 2.0 * (half - 1.0).max(0.0)) / (1.5 + 2.0 * pick(4))).abs();
+                    if u < 1.0 && v < 1.0 {
+                        let pi = std::f32::consts::PI;
+                        let shape = (0.5 + 0.5 * (u * pi).cos()) * (0.5 + 0.5 * (v * pi).cos());
+                        heights[i] += shape * (0.1 + 0.15 * pick(5)) * extra.min(1.0) * groomed;
+                    }
+                }
             }
         }
     }
@@ -2183,7 +2217,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         })
         .collect();
 
-    Ok(Synth {
+    let mut syn = Synth {
         gw,
         gh,
         mps,
@@ -2203,7 +2237,10 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         spur_arc,
         used_m: used,
         budget_m: budget,
-    })
+    };
+    // The paddock floor levelled and the pit road's bed graded, before anything stands on them.
+    crate::trackvenue::grade(prog, &mut syn);
+    Ok(syn)
 }
 
 /// How much height a programme actually needs, in metres.
@@ -3792,12 +3829,12 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     // the game the palest soil covered the whole site, not the track.
     // At the resolution Indiana keeps its top layer's: the rut floors are cut
     // from this, and at 2048 a half-metre floor was two texels.
-    let dirt = {
+    let mut dirt = {
         let l = bands.iter().find(|l| l.name == "soil_light_c").expect("the riding surface");
         band_mask(syn, l.band, half, seed, RIDING_MASK_DIM, RIDING_MASK_DIM)
     };
     let line = band_named("soil_dark_c");
-    let grass = band_named("hm_grass");
+    let mut grass = band_named("hm_grass");
     // Off-track starts where the graded shoulder ends: the rider is on the track, or in the
     // field, with the shoulder belonging to neither. This one decides where the game says a
     // rider has gone off, so it is the one boundary that stays smooth.
@@ -3826,8 +3863,11 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     };
     // These two keep the riding line's own width: a rut is worn by everyone taking the same
     // line and the loose stuff piles up beside it, and neither happens out on a start pad.
-    let rut = band_of(BandMask::Grooves);
-    let loose = loose_mask(syn, half, seed, MASK_DIM, MASK_DIM);
+    let mut rut = band_of(BandMask::Grooves);
+    let mut loose = loose_mask(syn, half, seed, MASK_DIM, MASK_DIM);
+    // The pit road and the paddock floor, painted into the ground: `trackvenue`.
+    let venue = crate::trackvenue::plan(prog, syn);
+    crate::trackvenue::paint_ground(&venue, syn, &mut dirt, RIDING_MASK_DIM, &mut grass, &mut rut, &mut loose, MASK_DIM);
     put("mask_dirt.tga", tga_alpha(RIDING_MASK_DIM, RIDING_MASK_DIM, &dirt), &mut wrote)?;
     put("mask_loose.tga", tga_alpha(MASK_DIM, MASK_DIM, &loose), &mut wrote)?;
     let patches = band_of(BandMask::Patches);
@@ -3842,16 +3882,20 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     let pits = pit_lane(prog);
     let (fx, fz) = crate::trackprog::heading_vector(prog.start.angle.to_radians());
     let (rx, rz) = crate::trackprog::right_vector(prog.start.angle.to_radians());
-    let pit_area = mask_from(syn, MASK_DIM, |_, _, x, z| {
-        let (dx, dz) = (x - prog.start.x, z - prog.start.z);
-        let along = dx * fx + dz * fz;
-        let lat = dx * rx + dz * rz;
-        u8::from(
-            along >= pits.from - 6.0
-                && along <= pits.to + 6.0
-                && (lat - pits.lat).abs() <= pits.half_width,
-        ) * 255
-    });
+    let pit_area = match venue.paddock {
+        // Where the race data spawns riders now: inside the paddock.
+        Some(a) => mask_from(syn, MASK_DIM, |_, _, x, z| u8::from(a.covers(x, z, -1.0)) * 255),
+        None => mask_from(syn, MASK_DIM, |_, _, x, z| {
+            let (dx, dz) = (x - prog.start.x, z - prog.start.z);
+            let along = dx * fx + dz * fz;
+            let lat = dx * rx + dz * rz;
+            u8::from(
+                along >= pits.from - 6.0
+                    && along <= pits.to + 6.0
+                    && (lat - pits.lat).abs() <= pits.half_width,
+            ) * 255
+        }),
+    };
     // What the 3D grass is coloured by. Terrain-wide, like the density map it sits beside in
     // the same block, rather than tiled like the blade sprite: the two `*map` keys are
     // siblings and read the ground the same way.
@@ -3974,9 +4018,9 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         &mut wrote,
     )?;
     put(&format!("{slug}/gfx.cfg"), crlf(&gfx_cfg(prog)), &mut wrote)?;
-    put(&format!("{slug}/{slug}.rdf"), crlf(&rdf(prog, syn.spur.as_ref())), &mut wrote)?;
+    put(&format!("{slug}/{slug}.rdf"), crlf(&rdf(prog, syn)), &mut wrote)?;
     put(&format!("{slug}/{slug}.ssc"), SSC.into(), &mut wrote)?;
-    put(&format!("{slug}/generator.ini"), crlf(&generator_ini()), &mut wrote)?;
+    put(&format!("{slug}/frost-algorithm.ini"), crlf(&frost_algorithm_ini()), &mut wrote)?;
     let (map_img, shot) = ui_images(prog, syn, &scenery, UI_IMAGE_DIM);
     put(&format!("{slug}/{slug}_map.tga"), map_img, &mut wrote)?;
     put(&format!("{slug}/{slug}.tga"), shot, &mut wrote)?;
@@ -4672,7 +4716,8 @@ fn pit_lane(prog: &TrackProgram) -> PitLane {
     }
 }
 
-fn rdf(prog: &TrackProgram, spur: Option<&StartSpur>) -> String {
+fn rdf(prog: &TrackProgram, syn: &Synth) -> String {
+    let spur = syn.spur.as_ref();
     let lap = prog.lap_length();
     let half = prog.width * 0.5;
     let line = finish_at(prog);
@@ -4727,20 +4772,24 @@ fn rdf(prog: &TrackProgram, spur: Option<&StartSpur>) -> String {
     mark(&mut s, "split2", (line + lap * 2.0 / 3.0) % lap, half);
 
     let pits = pit_lane(prog);
-    let (stalls, lane_lat) = (pits.stalls, pits.lat);
+    let lane_lat = pits.lat;
+    // Where riders spawn: the paddock's bays (`trackvenue`), stated on the lap like every other
+    // `long`/`lat` here — published tracks put theirs as far as 123 m off it (Millville) — or the
+    // old stalls beside the lap when there is no paddock.
+    let spawns = crate::trackvenue::spawns(prog, syn);
+    let stalls = spawns.len();
+    let (sx, sz, sa) = spawns.first().map_or((prog.start.x, prog.start.z, prog.start.angle), |p| (p.x, p.z, p.heading.to_degrees()));
     s.push_str(&format!(
         "pit_lane\n{{\n\tnumstalls = {stalls}\n\tstarttype = 1\n\tstartstartlong = 0.000000\n\
          \tstartdifflong = 0.000000\n\tstartstartlat = 0.000000\n\tstartendlat = 0.000000\n\
-         \tstartanglerel = 0.000000\n\tstartposx = {:.6}\n\tstartposz = {:.6}\n\
-         \tstartspacingx = -4.000000\n\tstartspacingz = 6.000000\n\tstartangleabs = {:.6}\n\
+         \tstartanglerel = 0.000000\n\tstartposx = {sx:.6}\n\tstartposz = {sz:.6}\n\
+         \tstartspacingx = -4.000000\n\tstartspacingz = 6.000000\n\tstartangleabs = {sa:.6}\n\
          \tstartcolumns = 8\n",
-        prog.start.x, prog.start.z, prog.start.angle
     ));
-    for i in 0..stalls {
+    for (i, p) in spawns.iter().enumerate() {
         s.push_str(&format!(
-            "\tstart_stall{i}\n\t{{\n\t\tlong = {:.6}\n\t\tlat = {lane_lat:.6}\n\
-             \t\tangle = 0.000000\n\t}}\n",
-            pits.from + i as f32 * 5.0
+            "\tstart_stall{i}\n\t{{\n\t\tlong = {:.6}\n\t\tlat = {:.6}\n\t\tangle = {:.6}\n\t}}\n",
+            p.long, p.lat, p.angle
         ));
     }
     s.push_str("}\n");
@@ -5288,12 +5337,12 @@ pub fn write_pkz(
         (format!("{slug}/{slug}.trh"), trh(prog, syn, paint_features)),
         (format!("{slug}/{slug}.map"), map(prog, syn)),
         (format!("{slug}/{slug}.ini"), crlf(&track_ini(prog))),
-        (format!("{slug}/{slug}.rdf"), crlf(&rdf(prog, syn.spur.as_ref()))),
+        (format!("{slug}/{slug}.rdf"), crlf(&rdf(prog, syn))),
         (format!("{slug}/{slug}.amb"), crlf(AMB)),
         (format!("{slug}/gfx.cfg"), crlf(&gfx_cfg(prog))),
         // Empty on the reference track, and on every track that ships one.
         (format!("{slug}/{slug}.ssc"), SSC.into()),
-        (format!("{slug}/generator.ini"), crlf(&generator_ini())),
+        (format!("{slug}/frost-algorithm.ini"), crlf(&frost_algorithm_ini())),
         (format!("{slug}/{slug}_map.tga"), map_img),
         (format!("{slug}/{slug}.tga"), shot),
     ] {
@@ -7415,28 +7464,60 @@ fn ui_map(
             s += 1.0;
         }
     }
-    // The pits: the stall strip riders spawn on, and the trucks' rows behind it, where the
-    // scenery parks them.
-    let pits = pit_lane(prog);
-    let side = if pits.lat < 0.0 { -1.0 } else { 1.0 };
-    let paddock = pits.lat + side * (pits.half_width + MAP_PADDOCK_M.0);
-    let mut s = pits.from - 3.0;
-    while s <= pits.to + 3.0 {
-        let st = st_at(s);
-        let (rx, rz) = crate::trackprog::right_vector(st.heading);
-        for (lat, half, colour) in [(pits.lat, pits.half_width, MAP_PIT), (paddock, MAP_PADDOCK_M.1, MAP_PADDOCK)] {
-            let c = at(st.x + rx * lat, st.z + rz * lat);
-            fill(&mut px, dim, c, dir(st.heading), px_per_m * 0.8, half * px_per_m, |_, _| Some(colour));
+    // The pits: the paddock riders spawn in, its road to the gates and the spawns (`trackvenue`);
+    // or, with no paddock, the stall strip beside the lap and the rows behind it.
+    let venue = crate::trackvenue::plan(prog, syn);
+    let label = if let Some(area) = venue.paddock {
+        let mut dot = |c: (f32, f32), r: f32, colour: [u8; 3]| {
+            let (x0, x1) = ((c.0 - r).floor().max(0.0) as usize, ((c.0 + r).ceil().max(0.0) as usize).min(dim));
+            let (y0, y1) = ((c.1 - r).floor().max(0.0) as usize, ((c.1 + r).ceil().max(0.0) as usize).min(dim));
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    if (x as f32 + 0.5 - c.0).hypot(y as f32 + 0.5 - c.1) <= r {
+                        px[y * dim + x] = colour;
+                    }
+                }
+            }
+        };
+        for w in venue.road.windows(2) {
+            let steps = (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1).ceil().max(1.0) as usize;
+            for k in 0..=steps {
+                let t = k as f32 / steps as f32;
+                dot(at(w[0].0 + (w[1].0 - w[0].0) * t, w[0].1 + (w[1].1 - w[0].1) * t), (px_per_m * 3.0).max(1.0), MAP_PADDOCK);
+            }
         }
-        s += 1.0;
-    }
-    if let Ok(font) = ab_glyph::FontRef::try_from_slice(TITLE_FONT) {
+        for i in 0..=(area.hx * 2.0) as i32 {
+            for j in 0..=(area.hz * 2.0) as i32 {
+                let (x, z) = area.at(-area.hx + i as f32, -area.hz + j as f32);
+                dot(at(x, z), (px_per_m * 0.8).max(0.8), MAP_PADDOCK);
+            }
+        }
+        for sp in &venue.spawns {
+            dot(at(sp.x, sp.z), (px_per_m * 1.2).max(1.5), MAP_PIT);
+        }
+        at(area.c.0, area.c.1)
+    } else {
+        let pits = pit_lane(prog);
+        let side = if pits.lat < 0.0 { -1.0 } else { 1.0 };
+        let paddock = pits.lat + side * (pits.half_width + MAP_PADDOCK_M.0);
+        let mut s = pits.from - 3.0;
+        while s <= pits.to + 3.0 {
+            let st = st_at(s);
+            let (rx, rz) = crate::trackprog::right_vector(st.heading);
+            for (lat, half, colour) in [(pits.lat, pits.half_width, MAP_PIT), (paddock, MAP_PADDOCK_M.1, MAP_PADDOCK)] {
+                let c = at(st.x + rx * lat, st.z + rz * lat);
+                fill(&mut px, dim, c, dir(st.heading), px_per_m * 0.8, half * px_per_m, |_, _| Some(colour));
+            }
+            s += 1.0;
+        }
         let st = st_at((pits.from + pits.to) * 0.5);
         let (rx, rz) = crate::trackprog::right_vector(st.heading);
         let out = paddock + side * (MAP_PADDOCK_M.1 + 4.0);
-        let (x, y) = at(st.x + rx * out, st.z + rz * out);
+        at(st.x + rx * out, st.z + rz * out)
+    };
+    if let Ok(font) = ab_glyph::FontRef::try_from_slice(TITLE_FONT) {
         let size = (n * 0.045).max(12.0);
-        text_at(&mut px, dim, &font, "PITS", size, (x - size, y + size * 0.35), MAP_MARK, 1.0);
+        text_at(&mut px, dim, &font, "PITS", size, (label.0 - size, label.1 + size * 0.35), MAP_MARK, 1.0);
     }
     let finish = finish_at(prog);
     let size = (track_px * 0.8).clamp(7.0, 14.0);
@@ -8125,18 +8206,18 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
     Some(tcl_of(line.start.x, line.start.z, line.start.angle, &segs))
 }
 
-/// Which version of the track generator made a track, as major.minor.patch, so a track in the
-/// wild can be matched to the code that made it. Bump it whenever a program builds into
-/// something different: major when older tracks are no longer comparable, minor for a new
-/// feature, patch for a fix.
-pub const GENERATOR_VERSION: &str = "1.0.0";
+/// Which version of the Frost algorithm made a track, so a track in the wild can be matched to
+/// the code that made it. Bump it with every change to what a program builds into: minor for
+/// a new feature, patch for a fix. 0.x until the generator is finished. History in
+/// `apps/studio/FROST_ALGORITHM.md`.
+pub const FROST_ALGORITHM_VERSION: &str = "0.29.0";
 
-/// The stamp every built track carries in `<slug>/generator.ini`.
+/// The stamp every built track carries in `<slug>/frost-algorithm.ini`.
 ///
 /// A file of its own rather than a key in the track's `.ini`: the game never opens this one,
 /// so nothing it contains can upset the loader.
-fn generator_ini() -> String {
-    format!("[generator]\nname = Frost's Studio\nversion = {GENERATOR_VERSION}\n")
+fn frost_algorithm_ini() -> String {
+    format!("[frost-algorithm]\nname = Frost's Studio\nversion = {FROST_ALGORITHM_VERSION}\n")
 }
 
 /// The track's own description, in the shape published tracks write it.
@@ -8176,7 +8257,7 @@ fn readme(prog: &TrackProgram, syn: &Synth, slug: &str) -> String {
     format!(
         "{name}\n\nGenerated by Frost's Mod Manager. Everything here is source: run the two batch files to\n\
          compile it, in a folder that also has terrained.exe.\n\n\
-         Generator v{GENERATOR_VERSION}\n\
+         Frost algorithm v{FROST_ALGORITHM_VERSION}\n\
          Terrain   {gw} x {gh} samples over {sx:.0} x {sz:.0} m ({mps:.2} m a sample)\n\
          Height    {used:.1} m used of a {budget:.1} m budget\n\
          Lap       {lap:.0} m, {width:.0} m wide, {feats} features\n\n\
@@ -9294,7 +9375,8 @@ mod tests {
         let p = oval();
         let s = synthesise(&p).unwrap();
         let spur = s.spur.as_ref().expect("a start straight");
-        let text = rdf(&p, Some(spur));
+        let _ = spur;
+        let text = rdf(&p, &s);
 
         let st = p.stations(0.5);
         let block = &text[text.find("starting_grid").expect("a grid")..];
@@ -9354,7 +9436,8 @@ mod tests {
         let p = oval();
         let s = synthesise(&p).unwrap();
         let spur = s.spur.as_ref().expect("a start straight");
-        let text = rdf(&p, Some(spur));
+        let _ = spur;
+        let text = rdf(&p, &s);
 
         // Read the stalls back the way the game does: a distance round the lap and an offset
         // across it.
@@ -9637,8 +9720,9 @@ mod tests {
     fn the_race_data_has_the_blocks_the_game_looks_for() {
         let p: TrackProgram = serde_json::from_str(DEMO).unwrap();
         let st = p.stations(STATION_STEP);
-        let spur = StartSpur::of(&p, &st, &vec![0.0; st.len()], &Landscape::of(&p));
-        let text = rdf(&p, spur.as_ref());
+        let _ = StartSpur::of(&p, &st, &vec![0.0; st.len()], &Landscape::of(&p));
+        let s = synthesise(&p).unwrap();
+        let text = rdf(&p, &s);
         for block in [
             "finish_line",
             "split1",
@@ -9830,18 +9914,18 @@ mod tests {
 
     /// The stamp goes inside the track folder, so it survives packaging into the `.pkz`.
     #[test]
-    fn a_built_track_carries_the_generator_version() {
+    fn a_built_track_carries_the_frost_algorithm_version() {
         let p = oval();
         let s = synthesise(&p).unwrap();
         let dir = std::env::temp_dir().join(format!("mxb-genver-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let slug = slug(&p.name);
-        let rel = format!("{slug}/generator.ini");
-        let want = format!("version = {GENERATOR_VERSION}");
-        let parts: Vec<&str> = GENERATOR_VERSION.split('.').collect();
+        let rel = format!("{slug}/frost-algorithm.ini");
+        let want = format!("version = {FROST_ALGORITHM_VERSION}");
+        let parts: Vec<&str> = FROST_ALGORITHM_VERSION.split('.').collect();
         assert!(
             parts.len() == 3 && parts.iter().all(|n| n.parse::<u32>().is_ok()),
-            "{GENERATOR_VERSION} is not major.minor.patch"
+            "{FROST_ALGORITHM_VERSION} is not major.minor.patch"
         );
 
         let wrote = write_source(&p, &s, &dir).unwrap();
@@ -10079,36 +10163,30 @@ mod tests {
 
         let tga = std::fs::read(dir.join("area_pits.tga")).unwrap();
         let px = &tga[18..18 + MASK_DIM * MASK_DIM * 4];
-        let pits = pit_lane(&p);
-        let (fx, fz) = crate::trackprog::heading_vector(p.start.angle.to_radians());
-        let (rx, rz) = crate::trackprog::right_vector(p.start.angle.to_radians());
-
-        let (mut n, mut lat, mut along) = (0u32, 0.0f64, 0.0f64);
+        // Where the race data spawns riders: the paddock, or the stalls beside the lap.
+        let spawns = crate::trackvenue::spawns(&p, &s);
+        let (mut n, mut cx, mut cz) = (0u32, 0.0f64, 0.0f64);
         for y in 0..MASK_DIM {
             for x in 0..MASK_DIM {
                 if px[(y * MASK_DIM + x) * 4 + 3] < 128 {
                     continue;
                 }
                 // The mask is stretched over the terrain, so a texel is a fraction of it.
-                let wx = x as f32 / MASK_DIM as f32 * p.terrain.size_x - p.start.x;
-                let wz = y as f32 / MASK_DIM as f32 * p.terrain.size_z - p.start.z;
-                lat += (wx * rx + wz * rz) as f64;
-                along += (wx * fx + wz * fz) as f64;
+                cx += (x as f32 / MASK_DIM as f32 * p.terrain.size_x) as f64;
+                cz += (y as f32 / MASK_DIM as f32 * p.terrain.size_z) as f64;
                 n += 1;
             }
         }
-        assert!(n > 200, "the pit strip is {n} texels, which is nothing");
-        let (lat, along) = (lat / n as f64, along / n as f64);
-        assert!(
-            (lat - pits.lat as f64).abs() < 2.0,
-            "the strip sits at {lat:.1} m across, the stalls at {:.1}",
-            pits.lat
-        );
-        let middle = (pits.from + pits.to) as f64 / 2.0;
-        assert!(
-            (along - middle).abs() < 8.0,
-            "the strip sits at {along:.1} m round, the stalls at {middle:.1}"
-        );
+        assert!(n > 200, "the pit surface is {n} texels, which is nothing");
+        let (cx, cz) = (cx / n as f64, cz / n as f64);
+        let k = spawns.len() as f64;
+        let (sx, sz) = (spawns.iter().map(|q| q.x as f64).sum::<f64>() / k, spawns.iter().map(|q| q.z as f64).sum::<f64>() / k);
+        let off = (cx - sx).hypot(cz - sz);
+        assert!(off < 12.0, "the pit surface centres {off:.1} m from where the riders spawn");
+        for q in &spawns {
+            let (x, y) = ((q.x / p.terrain.size_x * MASK_DIM as f32) as usize, (q.z / p.terrain.size_z * MASK_DIM as f32) as usize);
+            assert!(px[(y.min(MASK_DIM - 1) * MASK_DIM + x.min(MASK_DIM - 1)) * 4 + 3] >= 128, "a spawn off the pit surface");
+        }
         assert!(
             std::fs::read_to_string(dir.join("track.tht"))
                 .unwrap()

@@ -2653,20 +2653,24 @@ mod tests {
             if let Some(v) = line.strip_prefix("long = ") { longs.push(v.parse::<f32>().unwrap()); }
             if let Some(v) = line.strip_prefix("lat = ") { lats.push(v.parse::<f32>().unwrap()); }
         }
-        let pits = Pits::of(&p);
-        assert_eq!(longs.len(), pits.stalls.len(), "the .rdf spawns {} riders, we mark {}", longs.len(), pits.stalls.len());
-        for ((l, a), &(sl, sa)) in longs.iter().zip(&lats).zip(&pits.stalls) {
-            assert!((l - sl).abs() < 0.01 && (a - sa).abs() < 0.01, "stall at {l}/{a} in the .rdf, {sl}/{sa} here");
+        let spawns = crate::trackvenue::spawns(&p, &s);
+        assert_eq!(longs.len(), spawns.len(), "the .rdf spawns {} riders, we mark {}", longs.len(), spawns.len());
+        for ((l, a), sp) in longs.iter().zip(&lats).zip(&spawns) {
+            assert!((l - sp.long).abs() < 0.01 && (a - sp.lat).abs() < 0.01, "stall at {l}/{a} in the .rdf, {}/{} here", sp.long, sp.lat);
         }
         let sc = build(&p, &s);
-        assert_eq!(sc.tally.iter().find(|(k, _)| *k == "pit stands").map(|x| x.1), Some(pits.stalls.len()));
+        assert_eq!(sc.tally.iter().find(|(k, _)| *k == "pit stands").map(|x| x.1), Some(spawns.len()));
         let (_, bytes) = sc.files.iter().find(|(f, _)| f == "pit_stands.edf").expect("stands written");
         let verts: Vec<[f32; 3]> = crate::edf::parse_world(bytes).iter().flat_map(|n| n.positions.chunks_exact(3).map(|v| [v[0], v[1], v[2]]).collect::<Vec<_>>()).collect();
         let (st, half) = (p.stations(0.5), p.width * 0.5);
-        for &(long, lat) in &pits.stalls {
-            let q = st[((long / 0.5) as usize).min(st.len() - 1)];
-            let (rx, rz) = crate::trackprog::right_vector(q.heading);
-            let (x, z) = (q.x + rx * lat, q.z + rz * lat);
+        for (&long, &lat) in longs.iter().zip(&lats) {
+            // The centreline's point at that distance round, between stations, as the game reads it.
+            let k = st.partition_point(|q| q.s <= long).clamp(1, st.len() - 1);
+            let (a, b) = (st[k - 1], st[k]);
+            let t = ((long - a.s) / (b.s - a.s).max(1e-6)).clamp(0.0, 1.0);
+            let h = a.heading + ((b.heading - a.heading + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI) * t;
+            let (rx, rz) = crate::trackprog::right_vector(h);
+            let (x, z) = (a.x + (b.x - a.x) * t + rx * lat, a.z + (b.z - a.z) * t + rz * lat);
             assert!(verts.iter().any(|v| (v[0] - x).hypot(v[2] - z) < 1.5), "no mat at the stall {long:.0} m round");
         }
         for v in &verts {
@@ -4165,21 +4169,21 @@ fn place_pits(
 /// A mat under every spawn spot and a stand beside it, out toward the parking. Returns the mesh
 /// and how many stalls it marks.
 fn pit_stands(pits: &Pits, prog: &TrackProgram, syn: &Synth) -> (Mesh, usize) {
-    let (lap, stations) = (prog.lap_length(), prog.stations(0.5));
+    // Where the `.rdf` spawns riders: the paddock's bays (`trackvenue`), or beside the lap.
+    let _ = pits;
+    let spawns = crate::trackvenue::spawns(prog, syn);
     let mut m = Mesh::default();
-    for &(long, lat) in &pits.stalls {
-        let st = stations[((long.rem_euclid(lap) / 0.5) as usize).min(stations.len() - 1)];
-        let (rx, rz) = crate::trackprog::right_vector(st.heading);
-        let (x, z) = (st.x + rx * lat, st.z + rz * lat);
-        // Long side along the lap, as the bike stands.
-        let deg = st.heading.to_degrees() + 90.0;
+    for sp in &spawns {
+        let (rx, rz) = crate::trackprog::right_vector(sp.heading);
+        // Long side along the bike, and the stand at its right.
+        let deg = sp.heading.to_degrees() + 90.0;
         let mat = in_cell(&edfwrite::cuboid(PIT_MAT_M.0, 0.02, PIT_MAT_M.1), (0.0, 1.0), (0.0, 0.5));
-        m.append(&draped(&edfwrite::turned(&mat, deg), x, z, 0.0, syn));
-        let (sx, sz) = (x + rx * pits.side * PIT_STAND_OUT_M, z + rz * pits.side * PIT_STAND_OUT_M);
+        m.append(&draped(&edfwrite::turned(&mat, deg), sp.x, sp.z, 0.0, syn));
+        let (sx, sz) = (sp.x + rx * PIT_STAND_OUT_M, sp.z + rz * PIT_STAND_OUT_M);
         let stand = in_cell(&edfwrite::cuboid(PIT_STAND_M.0, PIT_STAND_M.1, PIT_STAND_M.2), (0.0, 1.0), (0.5, 1.0));
         m.append(&draped(&edfwrite::turned(&stand, deg), sx, sz, 0.0, syn));
     }
-    (m, pits.stalls.len())
+    (m, spawns.len())
 }
 
 /// The mat's and stand's sheet: a rubber mat framed in the stall's yellow, and a red stand.
@@ -4267,6 +4271,22 @@ fn place_markers(
         {
             continue;
         }
+        // Only a corner that turns a long way: walked out from its apex while it keeps bending
+        // the same way.
+        let turned = |dir: i32| {
+            let (mut a, mut k) = (0.0f32, i as i32);
+            loop {
+                k += dir;
+                let q = &coarse[k.rem_euclid(n as i32) as usize];
+                if q.curvature.abs() < 1.0 / 80.0 || q.curvature.signum() != coarse[i].curvature.signum() || (k - i as i32).abs() > 80 {
+                    break a;
+                }
+                a += q.curvature.abs() * 2.0;
+            }
+        };
+        if (turned(1) + turned(-1) + c * 2.0).to_degrees() < MARKER_MIN_TURN_DEG {
+            continue;
+        }
         let s0 = coarse[i].s;
         if s0 - last < MARKER_APART_M {
             continue;
@@ -4297,11 +4317,13 @@ fn place_markers(
 
 /// Turn markers: the corners that get them, how many to one, how far apart, how far past the
 /// edge, and the least lap between two corners' sets.
-const MARKER_CORNER_R_M: f32 = 35.0;
-const MARKERS_PER_CORNER: usize = 4;
-const MARKER_PITCH_M: f32 = 3.0;
+// A third as many, further apart, and only where a corner turns a long way.
+const MARKER_CORNER_R_M: f32 = 25.0;
+const MARKER_MIN_TURN_DEG: f32 = 70.0;
+const MARKERS_PER_CORNER: usize = 2;
+const MARKER_PITCH_M: f32 = 7.0;
 const MARKER_OUT_M: f32 = 1.3;
-const MARKER_APART_M: f32 = 20.0;
+const MARKER_APART_M: f32 = 45.0;
 
 fn place_parking(
     lib: &crate::trackprops::PropLibrary,

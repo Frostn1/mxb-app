@@ -165,6 +165,189 @@ fn fine(m: &Mesh) -> Mesh {
     o
 }
 
+/// Islands of a donor's map as one mesh, in a frame centred on `(cx, cz)` with `foot` at y 0,
+/// donor world axes.
+pub fn lift_islands(m: &crate::map::MapMesh, isls: &[usize], (cx, foot, cz): (f32, f32, f32)) -> Mesh {
+    let mut mesh = Mesh::default();
+    for &isl in isls {
+        for t in island_tris(m, isl) {
+            let base = mesh.vertex_count() as u32;
+            for j in 0..3 {
+                let v = m.indices[t * 3 + j] as usize;
+                mesh.positions.extend_from_slice(&[m.positions[v * 3] - cx, m.positions[v * 3 + 1] - foot, m.positions[v * 3 + 2] - cz]);
+                mesh.normals.extend_from_slice(&m.normals[v * 3..v * 3 + 3]);
+                mesh.uvs.extend_from_slice(&m.uvs[v * 2..v * 2 + 2]);
+            }
+            mesh.indices.extend([base, base + 1, base + 2]);
+        }
+    }
+    mesh
+}
+
+/// Islands of one sheet grouped where their boxes come within `gap` metres: a cab coupled to
+/// its trailer touches it, and two rigs parked side by side stand apart.
+pub fn touching(d: &crate::trackprops::Donor, sheet: &str, gap: f32) -> Vec<Vec<usize>> {
+    let m = &d.mesh;
+    let of = |i: usize| d.sheets.get(m.objects[i].material as usize).map(|s| s.0.to_ascii_lowercase()).unwrap_or_default();
+    let isl: Vec<usize> = (0..m.objects.len()).filter(|&i| of(i) == sheet).collect();
+    let mut up: Vec<usize> = (0..isl.len()).collect();
+    fn root(up: &mut [usize], mut i: usize) -> usize {
+        while up[i] != i {
+            up[i] = up[up[i]];
+            i = up[i];
+        }
+        i
+    }
+    for a in 0..isl.len() {
+        for b in a + 1..isl.len() {
+            let (p, q) = (&m.objects[isl[a]], &m.objects[isl[b]]);
+            let g = (0..3).map(|k| (p.min[k] - q.max[k]).max(q.min[k] - p.max[k]).max(0.0)).fold(0.0f32, f32::max);
+            if g <= gap {
+                let (ra, rb) = (root(&mut up, a), root(&mut up, b));
+                if ra != rb {
+                    up[rb] = ra;
+                }
+            }
+        }
+    }
+    let mut groups: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
+    for k in 0..isl.len() {
+        let r = root(&mut up, k);
+        groups.entry(r).or_default().push(isl[k]);
+    }
+    groups.into_values().collect()
+}
+
+/// Pop-up roof colours, and which one each team in [`BRANDS`] puts up.
+pub const POPUP_COLOURS: [(&str, [f32; 3]); 7] = [
+    ("orange", [230.0, 110.0, 20.0]),
+    ("red", [200.0, 30.0, 30.0]),
+    ("blue", [25.0, 70.0, 190.0]),
+    ("green", [40.0, 150.0, 45.0]),
+    ("white", [230.0, 230.0, 230.0]),
+    ("black", [25.0, 25.0, 28.0]),
+    ("yellow", [240.0, 200.0, 20.0]),
+];
+pub const BRAND_POPUP: [&str; 8] = ["orange", "red", "blue", "green", "white", "red", "yellow", "black"];
+
+fn prop_of(id: String, sheet: &str, class: crate::trackobjects::Class, mesh: Mesh) -> crate::trackprops::Prop {
+    let (lo, hi) = mesh.bounds();
+    let reach = mesh.positions.chunks_exact(3).map(|v| v[0].hypot(v[2])).fold(0.0f32, f32::max);
+    crate::trackprops::Prop { id, sheet: sheet.into(), class, height: hi[1] - lo[1].min(0.0), span: (hi[0] - lo[0]).max(hi[2] - lo[2]), reach, axis_ref: 0.0, mesh }
+}
+
+/// A donor's whole team rigs: cab, trailer and the team's awning, touching pieces of
+/// `semi_trailers_c`. Long along x, trailer to −z, awning to +z, centred, foot at y 0.
+pub fn lift_team_rigs(d: &crate::trackprops::Donor) -> Vec<crate::trackprops::Prop> {
+    let m = &d.mesh;
+    let mut out: Vec<crate::trackprops::Prop> = Vec::new();
+    for g in touching(d, "semi_trailers_c", 0.5) {
+        let (lo, hi) = group_box(m, &g);
+        let mut a = aligned(&lift_islands(m, &g, ((lo[0] + hi[0]) * 0.5, lo[1], (lo[2] + hi[2]) * 0.5)));
+        let (b0, b1) = a.bounds();
+        let (l, w, h) = (b1[0] - b0[0], b1[2] - b0[2], b1[1] - b0[1]);
+        if !(25.0..=27.5).contains(&l) || !(12.5..=15.5).contains(&w) || !(4.2..=6.0).contains(&h) {
+            continue;
+        }
+        // The trailer's wheels and body are most of what stands low; the awning is legs.
+        let low: Vec<f32> = a.positions.chunks_exact(3).filter(|v| v[1] < 1.2).map(|v| v[2]).collect();
+        if low.iter().sum::<f32>() / low.len().max(1) as f32 > 0.0 {
+            a = edfwrite::turned(&a, 180.0);
+        }
+        // One model in many liveries: the livery is in the UVs.
+        let key = |m: &Mesh| (m.triangle_count(), (m.uvs.iter().sum::<f32>() * 10.0).round() as i64);
+        if out.iter().any(|p| key(&p.mesh) == key(&a)) {
+            continue;
+        }
+        out.push(prop_of(format!("team_rig_{:02}", out.len()), "semi_trailers_c", crate::trackobjects::Class::Vehicle, a));
+    }
+    out
+}
+
+/// A donor's pop-ups, one a roof colour: the `easy_ups` roof and the frame of legs under it,
+/// as two props sharing one frame, centred, foot at y 0.
+pub fn lift_popups(d: &crate::trackprops::Donor, tex: &[crate::map::MapTexture]) -> Vec<crate::trackprops::Prop> {
+    let m = &d.mesh;
+    let sheet_of = |i: usize| d.sheets.get(m.objects[i].material as usize).map(|s| s.0.to_ascii_lowercase()).unwrap_or_default();
+    let mut out = Vec::new();
+    let mut seen: Vec<&str> = Vec::new();
+    for g in touching(d, "easy_ups_roof_c", 0.3) {
+        let (lo, hi) = group_box(m, &g);
+        let (dx, dz) = (hi[0] - lo[0], hi[2] - lo[2]);
+        if !(3.0..=4.7).contains(&dx) || (dx - dz).abs() > 0.4 {
+            continue;
+        }
+        let frame: Vec<usize> = (0..m.objects.len())
+            .filter(|&i| {
+                let o = &m.objects[i];
+                sheet_of(i) == "main_track_objects_c" && o.min[0] >= lo[0] - 0.4 && o.max[0] <= hi[0] + 0.4 && o.min[2] >= lo[2] - 0.4 && o.max[2] <= hi[2] + 0.4 && o.max[1] <= hi[1] + 0.2 && o.min[1] >= lo[1] - 4.0
+            })
+            .collect();
+        if frame.len() < 20 {
+            continue;
+        }
+        let foot = frame.iter().map(|&i| m.objects[i].min[1]).fold(f32::INFINITY, f32::min);
+        if !(2.8..=4.0).contains(&(hi[1] - foot)) {
+            continue;
+        }
+        // The roof's colour, read through its own UVs.
+        let Some(t) = tex.iter().find(|t| t.material == m.objects[g[0]].material) else { continue };
+        let (mut sum, mut n) = ([0.0f32; 3], 0.0f32);
+        for &isl in &g {
+            for tri in island_tris(m, isl) {
+                let (mut u, mut v) = (0.0, 0.0);
+                for k in 0..3 {
+                    let vi = m.indices[tri * 3 + k] as usize;
+                    u += m.uvs[vi * 2] / 3.0;
+                    v += m.uvs[vi * 2 + 1] / 3.0;
+                }
+                let x = (((u - u.floor()) * t.width as f32) as u32).min(t.width - 1);
+                let y = (((v - v.floor()) * t.height as f32) as u32).min(t.height - 1);
+                let i = ((y * t.width + x) * 4) as usize;
+                for k in 0..3 {
+                    sum[k] += t.rgba[i + k] as f32;
+                }
+                n += 1.0;
+            }
+        }
+        let c = sum.map(|s| s / n.max(1.0));
+        let (name, _) = POPUP_COLOURS
+            .iter()
+            .min_by(|a, b| {
+                let e = |p: &[f32; 3]| (0..3).map(|k| (p[k] - c[k]).powi(2)).sum::<f32>();
+                e(&a.1).total_cmp(&e(&b.1))
+            })
+            .unwrap();
+        if seen.contains(name) {
+            continue;
+        }
+        seen.push(name);
+        let at = ((lo[0] + hi[0]) * 0.5, foot, (lo[2] + hi[2]) * 0.5);
+        // Square to the axes by its roof, both parts by the same turn.
+        let roof = lift_islands(m, &g, at);
+        let area = |m: &Mesh| {
+            let (a, b) = m.bounds();
+            (b[0] - a[0]) * (b[2] - a[2])
+        };
+        let deg = (0..180).map(|d| d as f32 * 0.5).min_by(|a, b| area(&edfwrite::turned(&roof, *a)).total_cmp(&area(&edfwrite::turned(&roof, *b)))).unwrap_or(0.0);
+        out.push(prop_of(format!("team_popup_{name}_roof"), "easy_ups_roof_c", crate::trackobjects::Class::Structure, edfwrite::turned(&roof, deg)));
+        out.push(prop_of(format!("team_popup_{name}_frame"), "main_track_objects_c", crate::trackobjects::Class::Structure, edfwrite::turned(&lift_islands(m, &frame, at), deg)));
+    }
+    out
+}
+
+/// A group's box, over its islands.
+pub fn group_box(m: &crate::map::MapMesh, g: &[usize]) -> ([f32; 3], [f32; 3]) {
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for &i in g {
+        for k in 0..3 {
+            lo[k] = lo[k].min(m.objects[i].min[k]);
+            hi[k] = hi[k].max(m.objects[i].max[k]);
+        }
+    }
+    (lo, hi)
+}
+
 /// A mesh turned so its long axis runs along x, centred on its footprint.
 fn aligned(m: &Mesh) -> Mesh {
     let width = |th: f32| {
@@ -291,14 +474,14 @@ const LANE_OUT_M: f32 = 6.0;
 const LANE_HALF_M: f32 = 4.0;
 
 /// Paddock: margin inside the fence, gap between neighbouring spots, the aisle, the gate.
-const PAD_MARGIN_M: f32 = 3.0;
+const PAD_MARGIN_M: f32 = 2.0;
 const SPOT_GAP_M: f32 = 5.0;
 const AISLE_M: f32 = 10.0;
-const GATE_M: f32 = 12.0;
+const GATE_M: f32 = 14.0;
 /// How far every part of the paddock keeps from any leg of the lap, past the half-width.
 const PAD_CLEAR_M: f32 = 8.0;
 /// The most the ground may fall across the paddock.
-const PAD_FALL_M: f32 = 4.0;
+const PAD_FALL_M: f32 = 3.0;
 /// Road widths: the approach, and the aisle between the rows.
 const ROAD_W_M: f32 = 6.0;
 const AISLE_ROAD_W_M: f32 = 7.0;
@@ -380,6 +563,8 @@ pub struct Wall {
     pub foot: Rect,
     pub faces: f32,
     pub lifted: bool,
+    /// Metres behind the gate row.
+    pub back: f32,
 }
 
 /// What the venue adds to a track.
@@ -397,7 +582,7 @@ impl Venue {
     pub fn covers(&self, x: f32, z: f32, m: f32) -> bool {
         self.paddock.as_ref().is_some_and(|p| p.area.covers(x, z, m + 1.0))
             || self.wall.is_some_and(|w| w.foot.covers(x, z, m + 1.0))
-            || self.road.windows(2).any(|s| seg_dist(s[0], s[1], (x, z)) <= ROAD_W_M * 0.5 + 1.0 + m)
+            || self.road.windows(2).any(|s| seg_dist(s[0], s[1], (x, z)) <= ROAD_W_M * 0.5 + ROAD_FADE_M + 1.0 + m)
     }
 }
 
@@ -659,136 +844,368 @@ pub fn own_wall_sheet() -> Texture {
     Texture { name: "sponsor_wall_c".into(), width: w, height: h, rgba: px }
 }
 
-/// A draped strip along a polyline, `w` wide, three vertices across, both windings; no quad
-/// with a corner where `skip` says.
-fn strip(pts: &[(f32, f32)], w: f32, syn: &Synth, skip: &dyn Fn(f32, f32) -> bool) -> Mesh {
-    let mut line = vec![pts[0]];
-    for s in pts.windows(2) {
-        let len = (s[1].0 - s[0].0).hypot(s[1].1 - s[0].1);
-        let n = (len / 1.0).ceil().max(1.0) as usize;
-        for k in 1..=n {
-            let t = k as f32 / n as f32;
-            line.push((s[0].0 + (s[1].0 - s[0].0) * t, s[0].1 + (s[1].1 - s[0].1) * t));
-        }
-    }
-    let mut m = Mesh::default();
-    let side = |i: usize| {
-        let (a, b) = (line[i.saturating_sub(1)], line[(i + 1).min(line.len() - 1)]);
-        let (dx, dz) = (b.0 - a.0, b.1 - a.1);
-        let l = dx.hypot(dz).max(1e-6);
-        (-dz / l, dx / l)
+/// The paddock: four bays a side of its aisle, the gate in the middle of the near side. Fixed,
+/// not sized to the library's models, so the `.rdf` and the scenery agree on every bay.
+const BAY_W_M: f32 = 30.0;
+const RIG_DEPTH_M: f32 = 15.0;
+const FRONT_M: f32 = 6.0;
+/// Five bikes a bay: forty, a full gate.
+const SPAWNS_PER_BAY: usize = 5;
+const SPAWN_GAP_M: f32 = 2.5;
+/// How far the road's middle keeps from any leg of the lap past its half-width: its own half,
+/// its soft edge and room to spare, so its paint never reaches the riding surface.
+const ROAD_CLEAR_M: f32 = 7.0;
+const ROAD_FADE_M: f32 = 2.5;
+/// The road's route is found on a grid this fine.
+const ROUTE_CELL_M: f32 = 2.0;
+/// How far off the start pad the road runs until it meets the pad beside the gate row.
+const ROAD_OFF_PAD_M: f32 = 4.0;
+/// The room the wall is given behind the gate row, across and deep: it stands inside this.
+const WALL_ENV_M: (f32, f32) = (52.0, 8.0);
+/// The paddock floor is levelled, fading into the field over this; the road's bed over this.
+const LEVEL_FADE_M: f32 = 5.0;
+const BED_FADE_M: f32 = 3.0;
+const PAINT_CELL_M: f32 = 0.25;
+
+fn smooth(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn hash01(x: i32, z: i32, seed: u32) -> f32 {
+    let mut h = (x as u32).wrapping_mul(0x8DA6_B343) ^ (z as u32).wrapping_mul(0xD816_3841) ^ seed.wrapping_mul(0xCB1A_B31F);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0x5BD1_E995);
+    h ^= h >> 15;
+    (h & 0xFFFF) as f32 / 65535.0
+}
+
+/// Smooth value noise, 0..1.
+fn vnoise(x: f32, z: f32, seed: u32) -> f32 {
+    let (x0, z0) = (x.floor(), z.floor());
+    let (tx, tz) = (smooth(x - x0), smooth(z - z0));
+    let (i, j) = (x0 as i32, z0 as i32);
+    let a = hash01(i, j, seed) + (hash01(i + 1, j, seed) - hash01(i, j, seed)) * tx;
+    let b = hash01(i, j + 1, seed) + (hash01(i + 1, j + 1, seed) - hash01(i, j + 1, seed)) * tx;
+    a + (b - a) * tz
+}
+
+fn pad_half() -> (f32, f32) {
+    ((4.0 * BAY_W_M + GATE_M + 2.0 * PAD_MARGIN_M) * 0.5, AISLE_M * 0.5 + FRONT_M + RIG_DEPTH_M + PAD_MARGIN_M)
+}
+
+/// Bay `i`'s middle along the paddock, and its row: +1 the far side, −1 the gate's.
+fn bay(i: usize) -> (f32, f32) {
+    let (hx, _) = pad_half();
+    let k = i % 4;
+    let x = if k < 2 { -hx + PAD_MARGIN_M + BAY_W_M * (k as f32 + 0.5) } else { hx - PAD_MARGIN_M - BAY_W_M * ((3 - k) as f32 + 0.5) };
+    (x, if i < 4 { 1.0 } else { -1.0 })
+}
+
+/// Where the game spawns a rider: world position and heading (compass, radians), and the same
+/// as the `.rdf` states it — metres round the lap, signed lateral, degrees off the lap's heading.
+#[derive(Clone, Copy, Debug)]
+pub struct Spawn {
+    pub x: f32,
+    pub z: f32,
+    pub heading: f32,
+    pub long: f32,
+    pub lat: f32,
+    pub angle: f32,
+}
+
+/// The venue's layout, from the lap alone: the same for the `.rdf`, the ground and the scenery.
+pub struct Plan {
+    pub paddock: Option<Rect>,
+    /// From the aisle's middle, out through the gate, to the start pad beside the gate row.
+    pub road: Vec<(f32, f32)>,
+    pub aisle: Option<((f32, f32), (f32, f32))>,
+    pub wall: Option<Wall>,
+    pub spawns: Vec<Spawn>,
+}
+
+/// A world point as the `.rdf` states one: round the lap from its nearest station, signed
+/// lateral, and a heading as degrees off the lap's there.
+fn on_lap(st: &[crate::trackprog::Station], lap: f32, x: f32, z: f32, heading: f32) -> (f32, f32, f32) {
+    // Against a station the spot stands square to, and of those the one where the lap is
+    // straightest: a spot a hundred metres out swings two metres for every degree the lap turns
+    // between one station and the next, so a `long` read a station off on a bend lands wrong.
+    // Stated at the station itself, not projected past it, and clear of the lap's seam.
+    // The point on the centreline square to the spot, between stations: a hundred metres off a
+    // bend, the lines square to two neighbouring stations land metres apart, so snapping to one
+    // puts the spot metres wrong. Of the legs near the nearest, the straightest wins: there a
+    // `long` read a little off still lands where it should.
+    let near = |q: &crate::trackprog::Station| (q.x - x).hypot(q.z - z);
+    let wrap = |a: f32| (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+    let at = |i: usize, t: f32| {
+        let (a, b) = (&st[i], &st[i + 1]);
+        (a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t, a.heading + wrap(b.heading - a.heading) * t, a.s + (b.s - a.s) * t)
     };
-    for i in 0..line.len() - 1 {
-        let corners = [i, i + 1].into_iter().flat_map(|j| {
-            let (nx, nz) = side(j);
-            [-1.0f32, 1.0].map(|k| (line[j].0 + nx * k * w * 0.5, line[j].1 + nz * k * w * 0.5))
-        });
-        if corners.chain([line[i]]).any(|(x, z)| skip(x, z)) {
+    let along = |i: usize, t: f32| {
+        let (px, pz, h, _) = at(i, t);
+        let (fx, fz) = crate::trackprog::heading_vector(h);
+        (x - px) * fx + (z - pz) * fz
+    };
+    // Only as far out as the lap's nearest leg, give or take: past that it is another leg, and a
+    // lateral hundreds of metres long is further than any published track states.
+    let d0 = st.iter().map(near).fold(f32::INFINITY, f32::min);
+    let mut best: Option<(f32, f32, usize, f32)> = None;
+    for i in 0..st.len().saturating_sub(1) {
+        let (a, b) = (&st[i], &st[i + 1]);
+        if b.s - a.s < 0.05 || near(a) > d0 + 20.0 || along(i, 0.0) * along(i, 1.0) > 0.0 {
             continue;
         }
-        let base = m.vertex_count() as u32;
-        let v0 = (i % 4) as f32 * 0.25;
-        for (j, v) in [(i, v0), (i + 1, v0 + 0.25)] {
-            let (nx, nz) = side(j);
-            for k in 0..3 {
-                let t = (k as f32 - 1.0) * w * 0.5;
-                let (x, z) = (line[j].0 + nx * t, line[j].1 + nz * t);
-                m.positions.extend_from_slice(&[x, ground(syn, x, z) + ROAD_LIFT_M, z]);
-                m.normals.extend_from_slice(&[0.0, 1.0, 0.0]);
-                m.uvs.extend_from_slice(&[k as f32 * 0.5, v]);
+        let (mut lo, mut hi) = (0.0f32, 1.0f32);
+        for _ in 0..30 {
+            let m = (lo + hi) * 0.5;
+            if along(i, lo) * along(i, m) <= 0.0 {
+                hi = m;
+            } else {
+                lo = m;
             }
         }
-        for k in 0..2u32 {
-            let (a, b, c, d) = (base + k, base + k + 1, base + 3 + k + 1, base + 3 + k);
-            m.indices.extend_from_slice(&[a, b, c, a, c, d, a, c, b, a, d, c]);
+        let key = (wrap(b.heading - a.heading).abs(), near(a));
+        if best.is_none_or(|bb| key.partial_cmp(&(bb.0, bb.1)) == Some(std::cmp::Ordering::Less)) {
+            best = Some((key.0, key.1, i, (lo + hi) * 0.5));
         }
     }
-    m
+    let (px, pz, h, s) = match best {
+        Some((_, _, i, t)) => at(i, t),
+        None => {
+            let q = st.iter().min_by(|a, b| near(a).total_cmp(&near(b))).unwrap();
+            (q.x, q.z, q.heading, q.s)
+        }
+    };
+    let (rx, rz) = crate::trackprog::right_vector(h);
+    (s.rem_euclid(lap), (x - px) * rx + (z - pz) * rz, (heading.to_degrees() - h.to_degrees()).rem_euclid(360.0))
 }
 
-/// The paddock's layout, before it is placed: rig size, tent size, extents.
-struct Layout {
-    rig_len: f32,
-    rig_w: f32,
-    tent: f32,
-    len: f32,
-    depth: f32,
-}
-
-impl Layout {
-    fn of(rig_len: f32, rig_w: f32, tent: f32) -> Layout {
-        let row = PAD_MARGIN_M + rig_w + 1.5 + tent + 2.0;
-        let pitch = rig_len + SPOT_GAP_M;
-        Layout { rig_len, rig_w, tent, len: 4.0 * pitch + GATE_M + 2.0 * PAD_MARGIN_M, depth: 2.0 * row + AISLE_M }
-    }
-    /// Spot `k`'s middle along the paddock, two a side of the gate gap.
-    fn x(&self, k: usize) -> f32 {
-        let pitch = self.rig_len + SPOT_GAP_M;
-        let half = self.len * 0.5 - PAD_MARGIN_M;
-        if k < 2 { -half + pitch * (k as f32 + 0.5) } else { half - pitch * (3 - k) as f32 - pitch * 0.5 }
-    }
-}
-
-/// Where the paddock goes, and the road from its gate to the lane: anywhere on the plot clear
-/// of every leg of the lap and the start, on ground that falls little, as near the pits as it
-/// can be. The road never crosses the start; it crosses the lap only where the lane is boxed in
-/// by it, and the fewer metres of track it crosses the better. Returns the crossings too.
-fn site(prog: &TrackProgram, syn: &Synth, pits: &Lane, lay: &Layout) -> Option<(Rect, Vec<(f32, f32)>, usize)> {
-    let lap = prog.lap_length();
-    let half = prog.width * 0.5;
-    let st = prog.stations(0.5);
-    let at = |s: f32| st[((s.rem_euclid(lap) / 0.5) as usize).min(st.len() - 1)];
-    // Where the road may end: the lane's outer edge beside each stall.
-    let ends: Vec<(f32, f32)> = pits
+/// The old stalls beside the lap, for a track the paddock cannot reach.
+fn lane_spawns(prog: &TrackProgram) -> Vec<Spawn> {
+    let (lap, st) = (prog.lap_length(), prog.stations(0.5));
+    lane(prog)
         .stalls
         .iter()
-        .map(|&(long, _)| {
-            let p = at(long);
-            let pr = crate::trackprog::right_vector(p.heading);
-            let reach = (pits.lane + LANE_HALF_M - 1.0) * pits.side;
-            (p.x + pr.0 * reach, p.z + pr.1 * reach)
+        .map(|&(long, lat)| {
+            let q = st[((long.rem_euclid(lap) / 0.5) as usize).min(st.len() - 1)];
+            let (rx, rz) = crate::trackprog::right_vector(q.heading);
+            Spawn { x: q.x + rx * lat, z: q.z + rz * lat, heading: q.heading, long, lat, angle: 0.0 }
+        })
+        .collect()
+}
+
+/// Five bikes a bay, side by side in front of the team's awning, facing the aisle.
+fn paddock_spawns(prog: &TrackProgram, area: &Rect) -> Vec<Spawn> {
+    let (lap, st) = (prog.lap_length(), prog.stations(0.5));
+    let mut out = Vec::new();
+    for i in 0..BRANDS.len() {
+        let (bx, row) = bay(i);
+        let dir = (-row * area.z.0, -row * area.z.1);
+        let heading = dir.0.atan2(dir.1);
+        for j in 0..SPAWNS_PER_BAY {
+            let (x, z) = area.at(bx - 12.0 + j as f32 * SPAWN_GAP_M, row * (AISLE_M * 0.5 + FRONT_M * 0.5));
+            let (long, lat, angle) = on_lap(&st, lap, x, z, heading);
+            out.push(Spawn { x, z, heading, long, lat, angle });
+        }
+    }
+    out
+}
+
+/// The gate row: its middle station on the start straight, and the pad's half-width there.
+fn gate_row(syn: &Synth) -> Option<(crate::trackprog::Station, f32)> {
+    let spur = syn.spur.as_ref()?;
+    let g = spur.stations[((spur.gate_at() / 0.5) as usize).min(spur.stations.len().saturating_sub(1))];
+    Some((g, spur.at(spur.gate_at())))
+}
+
+/// The sponsor wall's room behind the gate row: the first clear of the pad, the lap and the plot.
+fn wall_site(prog: &TrackProgram, syn: &Synth) -> Option<Wall> {
+    let (g, _) = gate_row(syn)?;
+    let half = prog.width * 0.5;
+    let f = crate::trackprog::heading_vector(g.heading);
+    let r = crate::trackprog::right_vector(g.heading);
+    let mut back = WALL_BACK_M.0;
+    while back <= WALL_BACK_M.1 {
+        let foot = Rect { c: (g.x - f.0 * back, g.z - f.1 * back), x: r, z: f, hx: WALL_ENV_M.0 * 0.5, hz: WALL_ENV_M.1 * 0.5 };
+        let ok = (0..=WALL_ENV_M.0 as i32).all(|i| {
+            [-1.0f32, 0.0, 1.0].iter().all(|&j| {
+                let (x, z) = foot.at(-foot.hx + i as f32, j * foot.hz);
+                on_plot(prog, x, z, 2.0) && dist(syn, x, z) > half + 3.0 && syn.outside_the_start(x, z).is_none_or(|e| e > WALL_OFF_PAD_M)
+            })
+        });
+        if ok {
+            return Some(Wall { foot, faces: g.heading, lifted: false, back });
+        }
+        back += 0.5;
+    }
+    None
+}
+
+/// Where the road meets the start: beside each end of the gate row, a little behind it, and the
+/// point on the pad's edge it runs on to.
+fn gate_goals(syn: &Synth) -> Vec<((f32, f32), (f32, f32))> {
+    let Some((g, ph)) = gate_row(syn) else { return Vec::new() };
+    let f = crate::trackprog::heading_vector(g.heading);
+    let r = crate::trackprog::right_vector(g.heading);
+    [-1.0f32, 1.0]
+        .iter()
+        .map(|&s| {
+            let at = |out: f32| (g.x + r.0 * s * out - f.0 * 2.0, g.z + r.1 * s * out - f.1 * 2.0);
+            (at(ph + ROAD_OFF_PAD_M + 1.0), at(ph + 0.5))
+        })
+        .collect()
+}
+
+/// Where a road may run: on the plot, clear of the lap by [`ROAD_CLEAR_M`], off the pad, and
+/// not under the wall.
+fn road_ok(prog: &TrackProgram, syn: &Synth, wall: Option<&Wall>, x: f32, z: f32) -> bool {
+    on_plot(prog, x, z, 3.0)
+        && dist(syn, x, z) > prog.width * 0.5 + ROAD_CLEAR_M
+        && syn.outside_the_start(x, z).is_none_or(|e| e > ROAD_OFF_PAD_M)
+        && wall.is_none_or(|w| !w.foot.covers(x, z, 3.0))
+}
+
+/// Every cell's road distance to the gate row, and the way there.
+struct Route {
+    nx: usize,
+    nz: usize,
+    cost: Vec<f32>,
+    next: Vec<u32>,
+    goal: Vec<u8>,
+}
+
+impl Route {
+    fn cell(&self, x: f32, z: f32) -> Option<usize> {
+        let (i, j) = ((x / ROUTE_CELL_M).floor(), (z / ROUTE_CELL_M).floor());
+        (i >= 0.0 && j >= 0.0 && (i as usize) < self.nx && (j as usize) < self.nz).then(|| j as usize * self.nx + i as usize)
+    }
+    fn centre(&self, k: usize) -> (f32, f32) {
+        (((k % self.nx) as f32 + 0.5) * ROUTE_CELL_M, ((k / self.nx) as f32 + 0.5) * ROUTE_CELL_M)
+    }
+    fn cost_at(&self, x: f32, z: f32) -> Option<f32> {
+        self.cell(x, z).map(|k| self.cost[k]).filter(|c| c.is_finite())
+    }
+    /// The cells from `(x, z)` to the gate row, and which goal it reaches.
+    fn path(&self, x: f32, z: f32) -> Option<(Vec<(f32, f32)>, usize)> {
+        let mut k = self.cell(x, z)?;
+        if !self.cost[k].is_finite() {
+            return None;
+        }
+        let mut out = vec![(x, z)];
+        while self.next[k] != u32::MAX {
+            k = self.next[k] as usize;
+            out.push(self.centre(k));
+        }
+        Some((out, self.goal[k] as usize))
+    }
+}
+
+fn route(prog: &TrackProgram, syn: &Synth, wall: Option<&Wall>, goals: &[(f32, f32)]) -> Route {
+    use std::cmp::Reverse;
+    let (nx, nz) = ((prog.terrain.size_x / ROUTE_CELL_M).ceil() as usize, (prog.terrain.size_z / ROUTE_CELL_M).ceil() as usize);
+    let mut r = Route { nx, nz, cost: vec![f32::INFINITY; nx * nz], next: vec![u32::MAX; nx * nz], goal: vec![0; nx * nz] };
+    let open: Vec<bool> = (0..nx * nz)
+        .map(|k| {
+            let (x, z) = r.centre(k);
+            road_ok(prog, syn, wall, x, z)
         })
         .collect();
-    let (hx, hz) = (lay.len * 0.5, lay.depth * 0.5);
-    const GROW: f32 = 2.0;
-    let fall = |area: &Rect| -> Option<f32> {
-        let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
-        for i in 0..=((hx + GROW) as i32) {
-            for j in 0..=((hz + GROW) as i32) {
-                let (x, z) = area.at(-hx - GROW + i as f32 * 2.0, -hz - GROW + j as f32 * 2.0);
-                if !on_plot(prog, x, z, 2.0) || dist(syn, x, z) <= half + PAD_CLEAR_M || syn.outside_the_start(x, z).is_some_and(|e| e <= 4.0) {
-                    return None;
-                }
-                let y = ground(syn, x, z);
-                (lo, hi) = (lo.min(y), hi.max(y));
+    let mut heap = std::collections::BinaryHeap::new();
+    for (gi, g) in goals.iter().enumerate() {
+        for k in 0..nx * nz {
+            let c = r.centre(k);
+            if open[k] && (c.0 - g.0).hypot(c.1 - g.1) <= 3.0 {
+                r.cost[k] = 0.0;
+                r.goal[k] = gi as u8;
+                heap.push((Reverse(0u64), k));
             }
         }
-        (hi - lo <= PAD_FALL_M).then_some(hi - lo)
-    };
-    // A straight road from the gate: its length and metres on the track, or `None` if it
-    // leaves the plot, touches the start or runs back through the paddock.
-    let road = |area: &Rect, gate: (f32, f32), end: (f32, f32)| -> Option<(f32, usize, usize)> {
-        let len = (end.0 - gate.0).hypot(end.1 - gate.1);
-        let n = len.ceil().max(1.0) as usize;
-        let (mut on, mut runs, mut was) = (0usize, 0usize, false);
-        for k in 0..=n {
+    }
+    while let Some((Reverse(c), k)) = heap.pop() {
+        let c = c as f32 / 1000.0;
+        if c > r.cost[k] + 1e-3 {
+            continue;
+        }
+        let (i, j) = ((k % nx) as isize, (k / nx) as isize);
+        for (di, dj) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+            let (a, b) = (i + di, j + dj);
+            if a < 0 || b < 0 || a >= nx as isize || b >= nz as isize {
+                continue;
+            }
+            let n = b as usize * nx + a as usize;
+            if !open[n] {
+                continue;
+            }
+            let step = if di != 0 && dj != 0 { std::f32::consts::SQRT_2 } else { 1.0 } * ROUTE_CELL_M;
+            if c + step < r.cost[n] {
+                r.cost[n] = c + step;
+                r.next[n] = k as u32;
+                r.goal[n] = r.goal[k];
+                heap.push((Reverse(((c + step) * 1000.0) as u64), n));
+            }
+        }
+    }
+    r
+}
+
+/// A path cut down to the fewest straight runs that stay where a road may go.
+fn pull(prog: &TrackProgram, syn: &Synth, wall: Option<&Wall>, pts: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    let clear = |a: (f32, f32), b: (f32, f32)| {
+        let n = ((b.0 - a.0).hypot(b.1 - a.1) / 0.5).ceil().max(1.0) as usize;
+        (0..=n).all(|k| {
             let t = k as f32 / n as f32;
-            let (x, z) = (gate.0 + (end.0 - gate.0) * t, gate.1 + (end.1 - gate.1) * t);
-            if !on_plot(prog, x, z, 2.0) || syn.outside_the_start(x, z).is_some_and(|e| e <= 1.5) || (t * len > 1.0 && area.covers(x, z, 0.0)) {
-                return None;
-            }
-            let track = dist(syn, x, z) < half + 2.0;
-            on += track as usize;
-            runs += (track && !was) as usize;
-            was = track;
-        }
-        Some((len, on, runs))
+            road_ok(prog, syn, wall, a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t)
+        })
     };
-    let q = at((pits.stalls[0].0 + pits.stalls[pits.stalls.len() - 1].0) * 0.5);
-    let mut best: Option<(f32, Rect, Vec<(f32, f32)>, usize)> = None;
-    for base in [q.heading, 0.0] {
+    let mut out = vec![pts[0]];
+    let mut i = 0;
+    while i + 1 < pts.len() {
+        let j = (i + 1..pts.len()).rev().find(|&j| clear(pts[i], pts[j])).unwrap_or(i + 1);
+        out.push(pts[j]);
+        i = j;
+    }
+    out
+}
+
+/// The natural ground on a coarse grid: how much a paddock site falls is judged on this, never
+/// on the finished terrain, which `grade` levels.
+struct Land {
+    nx: usize,
+    nz: usize,
+    h: Vec<f32>,
+}
+
+impl Land {
+    const STEP: f32 = 4.0;
+    fn of(prog: &TrackProgram) -> Land {
+        let l = crate::tracksynth::Landscape::of(prog);
+        let (nx, nz) = ((prog.terrain.size_x / Self::STEP).ceil() as usize + 1, (prog.terrain.size_z / Self::STEP).ceil() as usize + 1);
+        let h = (0..nx * nz).map(|k| l.at((k % nx) as f32 * Self::STEP, (k / nx) as f32 * Self::STEP)).collect();
+        Land { nx, nz, h }
+    }
+    fn at(&self, x: f32, z: f32) -> f32 {
+        let (gx, gz) = ((x / Self::STEP).clamp(0.0, (self.nx - 1) as f32), (z / Self::STEP).clamp(0.0, (self.nz - 1) as f32));
+        let (i, j) = ((gx as usize).min(self.nx - 2), (gz as usize).min(self.nz - 2));
+        let (tx, tz) = (gx - i as f32, gz - j as f32);
+        let p = |a: usize, b: usize| self.h[b * self.nx + a];
+        let a = p(i, j) + (p(i + 1, j) - p(i, j)) * tx;
+        let b = p(i, j + 1) + (p(i + 1, j + 1) - p(i, j + 1)) * tx;
+        a + (b - a) * tz
+    }
+}
+
+/// Where the paddock goes: anywhere on the plot clear of the lap, the start and the wall, on
+/// ground that falls little, with the shortest road from its gate to the gate row that never
+/// crosses the lap. Returns the site, that road from just outside its gate, and which goal.
+fn site(prog: &TrackProgram, syn: &Synth, wall: Option<&Wall>, route: &Route) -> Option<(Rect, Vec<(f32, f32)>, usize)> {
+    let half = prog.width * 0.5;
+    let (hx, hz) = pad_half();
+    let land = Land::of(prog);
+    let base = gate_row(syn).map_or(0.0, |(g, _)| g.heading);
+    let mut cands: Vec<(f32, Rect)> = Vec::new();
+    for b in [base, 0.0] {
         for k in 0..4 {
-            let psi = base + k as f32 * std::f32::consts::FRAC_PI_2;
+            let psi = b + k as f32 * std::f32::consts::FRAC_PI_2;
             let (x, z) = (crate::trackprog::heading_vector(psi), crate::trackprog::right_vector(psi));
             let mut cz = hz;
             while cz < prog.terrain.size_z - hz {
@@ -800,91 +1217,406 @@ fn site(prog: &TrackProgram, syn: &Synth, pits: &Lane, lay: &Layout) -> Option<(
                         continue;
                     }
                     let area = Rect { c, x, z, hx, hz };
-                    let gate = area.at(0.0, -hz);
-                    let near = ends.iter().map(|e| (e.0 - gate.0).hypot(e.1 - gate.1)).fold(f32::INFINITY, f32::min);
-                    if best.as_ref().is_some_and(|b| b.0 <= near) {
-                        continue;
-                    }
-                    let Some(f) = fall(&area) else { continue };
-                    for &end in &ends {
-                        let Some((len, on, runs)) = road(&area, gate, end) else { continue };
-                        let score = len + 3.0 * f + 25.0 * on as f32 + 80.0 * runs as f32;
-                        if best.as_ref().is_none_or(|b| score < b.0) {
-                            best = Some((score, area, vec![area.at(0.0, -AISLE_M * 0.5), gate, end], runs));
+                    let gp = area.at(0.0, -hz - 2.0);
+                    let Some(cost) = route.cost_at(gp.0, gp.1) else { continue };
+                    let (mut lo, mut hi, mut ok) = (f32::INFINITY, f32::NEG_INFINITY, true);
+                    'g: for i in 0..=((hx + 2.0) as i32) {
+                        for j in 0..=((hz + 2.0) as i32) {
+                            let (x, z) = area.at(-hx - 2.0 + i as f32 * 2.0, -hz - 2.0 + j as f32 * 2.0);
+                            if !on_plot(prog, x, z, 2.0)
+                                || dist(syn, x, z) <= half + PAD_CLEAR_M
+                                || syn.outside_the_start(x, z).is_some_and(|e| e <= 6.0)
+                                || wall.is_some_and(|w| w.foot.covers(x, z, 4.0))
+                            {
+                                ok = false;
+                                break 'g;
+                            }
+                            let y = land.at(x, z);
+                            (lo, hi) = (lo.min(y), hi.max(y));
                         }
+                    }
+                    if ok && hi - lo <= PAD_FALL_M {
+                        cands.push((cost + 3.0 * (hi - lo), area));
                     }
                 }
                 cz += 4.0;
             }
         }
     }
-    best.map(|b| (b.1, b.2, b.3))
+    cands.sort_by(|a, b| a.0.total_cmp(&b.0));
+    for (_, area) in cands.into_iter().take(60) {
+        let gp = area.at(0.0, -hz - 2.0);
+        let Some((pts, goal)) = route.path(gp.0, gp.1) else { continue };
+        // Out through the gate and away, never back through the paddock.
+        if pts.iter().skip(1).any(|p| area.covers(p.0, p.1, 1.0)) {
+            continue;
+        }
+        return Some((area, pull(prog, syn, wall, &pts), goal));
+    }
+    None
 }
 
-/// The paddock: fence, a rig, a tent and a board per team, the road in, and its kinds.
-fn paddock(prog: &TrackProgram, syn: &Synth, lib: Option<&crate::trackprops::PropLibrary>, v: &mut Venue) {
-    use crate::trackobjects::Class;
-    let pits = lane(prog);
-    // Rigs: the big single semis, else box trucks; our own boxes without a library.
-    let pool = |lo: f32, hi: f32, h: (f32, f32)| -> Vec<(&crate::trackprops::Prop, Mesh)> {
-        let Some(lib) = lib else { return Vec::new() };
-        let mut v: Vec<_> = lib
-            .props
-            .iter()
-            .filter(|p| p.class == Class::Vehicle && whole(p) && (h.0..=h.1).contains(&p.height) && lib.sheets.iter().any(|s| s.0 == p.sheet))
-            .filter_map(|p| {
-                let a = aligned(&p.mesh);
-                let (l, w) = { let (lo, hi) = a.bounds(); (hi[0] - lo[0], hi[2] - lo[2]) };
-                ((lo..=hi).contains(&l) && (2.0..=4.5).contains(&w)).then_some((p, a))
-            })
-            .collect();
-        v.sort_by(|a, b| a.0.id.cmp(&b.0.id));
-        v
-    };
-    let mut rigs = pool(17.0, 21.0, (3.8, 5.4));
-    if rigs.is_empty() {
-        rigs = pool(9.0, 16.0, (2.8, 5.0));
+/// The venue's layout for a track.
+pub fn plan(prog: &TrackProgram, syn: &Synth) -> Plan {
+    let wall = wall_site(prog, syn);
+    let goals = gate_goals(syn);
+    let mut p = Plan { paddock: None, road: Vec::new(), aisle: None, wall, spawns: Vec::new() };
+    if !goals.is_empty() {
+        let pts: Vec<(f32, f32)> = goals.iter().map(|g| g.0).collect();
+        let r = route(prog, syn, wall.as_ref(), &pts);
+        if let Some((area, path, goal)) = site(prog, syn, wall.as_ref(), &r) {
+            let (hx, hz) = pad_half();
+            let mut road = vec![area.at(0.0, 0.0), area.at(0.0, -hz)];
+            road.extend(path);
+            // On to the pad's edge, unless that brings the paint near the lap.
+            let end = goals[goal].1;
+            if dist(syn, end.0, end.1) > prog.width * 0.5 + ROAD_W_M * 0.5 + ROAD_FADE_M + 1.0 {
+                road.push(end);
+            }
+            p.aisle = Some((area.at(-hx + PAD_MARGIN_M, 0.0), area.at(hx - PAD_MARGIN_M, 0.0)));
+            p.spawns = paddock_spawns(prog, &area);
+            p.paddock = Some(area);
+            p.road = road;
+        }
     }
-    let picked: Vec<Option<&(&crate::trackprops::Prop, Mesh)>> =
-        (0..BRANDS.len()).map(|i| (!rigs.is_empty()).then(|| &rigs[i * rigs.len() / BRANDS.len()])).collect();
-    let dims = |m: &Mesh| { let (lo, hi) = m.bounds(); (hi[0] - lo[0], hi[2] - lo[2]) };
-    let (rig_len, rig_w) = picked.iter().fold((0.0f32, 0.0f32), |acc, r| {
-        let (l, w) = r.map_or((15.0, 2.55), |r| dims(&r.1));
-        (acc.0.max(l), acc.1.max(w))
-    });
-    let lay = Layout::of(rig_len, rig_w, CANOPY_M.0);
-    let Some((area, road, crossings)) = site(prog, syn, &pits, &lay) else {
+    if p.spawns.is_empty() {
+        p.spawns = lane_spawns(prog);
+    }
+    p
+}
+
+/// Where the `.rdf` spawns riders, and where the stands go: the paddock's bays, or the old
+/// stalls beside the lap on a track the paddock cannot reach.
+pub fn spawns(prog: &TrackProgram, syn: &Synth) -> Vec<Spawn> {
+    plan(prog, syn).spawns
+}
+
+/// The road and the paddock floor as paint, on a fine grid over where they are.
+pub struct Paint {
+    x0: f32,
+    z0: f32,
+    nx: usize,
+    nz: usize,
+    /// Coverage: the road, its two packed wheel tracks, the loose soil at its edges, the floor.
+    road: Vec<f32>,
+    lines: Vec<f32>,
+    loose: Vec<f32>,
+    floor: Vec<f32>,
+}
+
+impl Paint {
+    pub fn at(&self, x: f32, z: f32) -> (f32, f32, f32, f32) {
+        let (i, j) = (((x - self.x0) / PAINT_CELL_M).floor(), ((z - self.z0) / PAINT_CELL_M).floor());
+        if i < 0.0 || j < 0.0 || i as usize >= self.nx || j as usize >= self.nz {
+            return (0.0, 0.0, 0.0, 0.0);
+        }
+        let k = j as usize * self.nx + i as usize;
+        (self.road[k], self.lines[k], self.loose[k], self.floor[k])
+    }
+    /// Every cell the road paints, and how much.
+    pub fn road_cells(&self) -> impl Iterator<Item = (f32, f32, f32)> + '_ {
+        self.road.iter().enumerate().filter(|(_, r)| **r > 0.0).map(|(k, r)| {
+            (self.x0 + ((k % self.nx) as f32 + 0.5) * PAINT_CELL_M, self.z0 + ((k / self.nx) as f32 + 0.5) * PAINT_CELL_M, *r)
+        })
+    }
+}
+
+/// Paint the plan's road and paddock floor: the track's own light soil with a torn, soft edge,
+/// two packed wheel tracks down it, loose soil thrown to its sides, worked ground in the paddock.
+pub fn paint(plan: &Plan) -> Option<Paint> {
+    let area = plan.paddock?;
+    let mut runs: Vec<((f32, f32), (f32, f32))> = plan.road.windows(2).map(|w| (w[0], w[1])).collect();
+    runs.extend(plan.aisle);
+    let reach = ROAD_W_M * 0.5 + ROAD_FADE_M + 1.0;
+    let (mut lo, mut hi) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
+    let mut grow = |x: f32, z: f32, m: f32| {
+        lo = (lo.0.min(x - m), lo.1.min(z - m));
+        hi = (hi.0.max(x + m), hi.1.max(z + m));
+    };
+    for &(a, b) in &runs {
+        grow(a.0, a.1, reach);
+        grow(b.0, b.1, reach);
+    }
+    for (a, b) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+        let (x, z) = area.at(a * area.hx, b * area.hz);
+        grow(x, z, 3.0);
+    }
+    let (nx, nz) = (((hi.0 - lo.0) / PAINT_CELL_M).ceil() as usize + 1, ((hi.1 - lo.1) / PAINT_CELL_M).ceil() as usize + 1);
+    let mut p = Paint { x0: lo.0, z0: lo.1, nx, nz, road: vec![0.0; nx * nz], lines: vec![0.0; nx * nz], loose: vec![0.0; nx * nz], floor: vec![0.0; nx * nz] };
+    let centre = |i: usize, j: usize| (lo.0 + (i as f32 + 0.5) * PAINT_CELL_M, lo.1 + (j as f32 + 0.5) * PAINT_CELL_M);
+    for &(a, b) in &runs {
+        let len = (b.0 - a.0).hypot(b.1 - a.1).max(1e-3);
+        let (ux, uz) = ((b.0 - a.0) / len, (b.1 - a.1) / len);
+        let i0 = ((a.0.min(b.0) - reach - lo.0) / PAINT_CELL_M).max(0.0) as usize;
+        let i1 = (((a.0.max(b.0) + reach - lo.0) / PAINT_CELL_M) as usize).min(nx - 1);
+        let j0 = ((a.1.min(b.1) - reach - lo.1) / PAINT_CELL_M).max(0.0) as usize;
+        let j1 = (((a.1.max(b.1) + reach - lo.1) / PAINT_CELL_M) as usize).min(nz - 1);
+        for j in j0..=j1 {
+            for i in i0..=i1 {
+                let (x, z) = centre(i, j);
+                let d = seg_dist(a, b, (x, z));
+                if d > reach {
+                    continue;
+                }
+                let lat = ux * (z - a.1) - uz * (x - a.0);
+                // Torn, not drawn: the edge wanders a metre and more.
+                let core = ROAD_W_M * 0.5 + (vnoise(x / 5.0, z / 5.0, 0x70AD) - 0.5) * 1.4 + (vnoise(x / 1.5, z / 1.5, 0x70AE) - 0.5) * 0.5;
+                let k = j * nx + i;
+                p.road[k] = p.road[k].max(smooth((core + ROAD_FADE_M - d) / ROAD_FADE_M));
+                let inside = smooth((core - d) / 1.0);
+                let line = (-((lat.abs() - 0.95) / 0.3).powi(2)).exp() * inside * (0.65 + 0.35 * vnoise(x / 2.0, z / 2.0, 0x71AF));
+                p.lines[k] = p.lines[k].max(line);
+                let edge = (((d - (core - 1.5)) / 2.5).clamp(0.0, 1.0) * std::f32::consts::PI).sin();
+                p.loose[k] = p.loose[k].max(edge * vnoise(x / 3.0, z / 3.0, 0x72B0));
+            }
+        }
+    }
+    for j in 0..nz {
+        for i in 0..nx {
+            let (x, z) = centre(i, j);
+            let (a, b) = area.local(x, z);
+            let e = (a.abs() - area.hx).max(0.0).hypot((b.abs() - area.hz).max(0.0));
+            if e < 2.0 {
+                p.floor[j * nx + i] = smooth(1.0 - e / 2.0) * (0.5 + 0.5 * vnoise(x / 4.0, z / 4.0, 0x73B1));
+            }
+        }
+    }
+    Some(p)
+}
+
+/// Lay the plan's paint into the ground masks: the riding soil over the road and, patchily,
+/// the paddock; grass off both; the wheel tracks into the packed band; loose soil at the sides.
+pub fn paint_ground(plan: &Plan, syn: &Synth, dirt: &mut [u8], ddim: usize, grass: &mut [u8], rut: &mut [u8], loose: &mut [u8], dim: usize) {
+    let Some(p) = paint(plan) else { return };
+    // A mask texel's ground, as `tracksynth`'s masks read it.
+    let world = |x: usize, y: usize, n: usize| (((x * syn.gw / n).min(syn.gw - 1)) as f32 * syn.mps, ((y * syn.gh / n).min(syn.gh - 1)) as f32 * syn.mps);
+    for y in 0..ddim {
+        for x in 0..ddim {
+            let (wx, wz) = world(x, y, ddim);
+            let (r, _, _, f) = p.at(wx, wz);
+            let v = (r.max(f * 0.6) * 255.0) as u8;
+            let o = &mut dirt[y * ddim + x];
+            *o = (*o).max(v);
+        }
+    }
+    for y in 0..dim {
+        for x in 0..dim {
+            let (wx, wz) = world(x, y, dim);
+            let (r, l, lo, f) = p.at(wx, wz);
+            if r + l + lo + f <= 0.0 {
+                continue;
+            }
+            let k = y * dim + x;
+            grass[k] = (grass[k] as f32 * (1.0 - r.max(f * 0.85))) as u8;
+            rut[k] = rut[k].max((l * 0.8 * 255.0) as u8);
+            loose[k] = loose[k].max((lo * 0.75 * 255.0) as u8);
+        }
+    }
+}
+
+/// Level the paddock floor and grade the road's bed into the field round them, on the finished
+/// terrain before anything stands on it. Never on the lap or the pad; the plan reads no heights,
+/// so it comes out the same after this as before.
+pub fn grade(prog: &TrackProgram, syn: &mut Synth) {
+    let plan = plan(prog, syn);
+    let Some(area) = plan.paddock else { return };
+    let half = prog.width * 0.5;
+    let (gw, gh, mps) = (syn.gw, syn.gh, syn.mps);
+    let src = syn.heights.clone();
+    let at = |x: f32, z: f32| src[((z / mps).round().clamp(0.0, (gh - 1) as f32) as usize) * gw + (x / mps).round().clamp(0.0, (gw - 1) as f32) as usize];
+    let keep = |x: f32, z: f32| smooth((dist(syn, x, z) - half - 3.0) / 2.0) * syn.outside_the_start(x, z).map_or(1.0, |e| smooth(e / 2.0));
+    let mut out = src.clone();
+    // Every cell within `r` of a box, by index.
+    let cells = |lo: (f32, f32), hi: (f32, f32)| {
+        let (i0, i1) = (((lo.0 / mps).floor().max(0.0)) as usize, ((hi.0 / mps).ceil() as usize).min(gw - 1));
+        let (j0, j1) = (((lo.1 / mps).floor().max(0.0)) as usize, ((hi.1 / mps).ceil() as usize).min(gh - 1));
+        (i0, i1, j0, j1)
+    };
+    // The floor, level at its own mean.
+    let (mut sum, mut n) = (0.0f32, 0.0f32);
+    for i in 0..=(area.hx * 2.0) as i32 {
+        for j in 0..=(area.hz * 2.0) as i32 {
+            let (x, z) = area.at(-area.hx + i as f32, -area.hz + j as f32);
+            sum += at(x, z);
+            n += 1.0;
+        }
+    }
+    let level = sum / n.max(1.0);
+    let reach = area.hx.hypot(area.hz) + LEVEL_FADE_M;
+    let (i0, i1, j0, j1) = cells((area.c.0 - reach, area.c.1 - reach), (area.c.0 + reach, area.c.1 + reach));
+    for j in j0..=j1 {
+        for i in i0..=i1 {
+            let (x, z) = (i as f32 * mps, j as f32 * mps);
+            let (a, b) = area.local(x, z);
+            let e = (a.abs() - area.hx).max(0.0).hypot((b.abs() - area.hz).max(0.0));
+            if e >= LEVEL_FADE_M {
+                continue;
+            }
+            let w = smooth(1.0 - e / LEVEL_FADE_M) * keep(x, z);
+            let k = j * gw + i;
+            out[k] = src[k] + (level - src[k]) * w;
+        }
+    }
+    // The road's bed: its own ground averaged along it, from the gate out.
+    let mut pts: Vec<(f32, f32)> = Vec::new();
+    for w in plan.road[1..].windows(2) {
+        let len = (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1);
+        let n = len.ceil().max(1.0) as usize;
+        for k in 0..n {
+            let t = k as f32 / n as f32;
+            pts.push((w[0].0 + (w[1].0 - w[0].0) * t, w[0].1 + (w[1].1 - w[0].1) * t));
+        }
+    }
+    if let Some(l) = plan.road.last() {
+        pts.push(*l);
+    }
+    if pts.len() < 2 {
+        syn.heights = out;
+        return;
+    }
+    let raw: Vec<f32> = pts
+        .iter()
+        .map(|&(x, z)| {
+            let mut s = 0.0;
+            for (dx, dz) in [(0.0, 0.0), (2.0, 0.0), (-2.0, 0.0), (0.0, 2.0), (0.0, -2.0)] {
+                s += out[((z + dz) / mps).round().clamp(0.0, (gh - 1) as f32) as usize * gw + ((x + dx) / mps).round().clamp(0.0, (gw - 1) as f32) as usize];
+            }
+            s / 5.0
+        })
+        .collect();
+    let bed: Vec<f32> = (0..raw.len())
+        .map(|k| {
+            let (a, b) = (k.saturating_sub(8), (k + 8).min(raw.len() - 1));
+            raw[a..=b].iter().sum::<f32>() / (b - a + 1) as f32
+        })
+        .collect();
+    let mut weight = vec![0.0f32; 0];
+    let mut target = vec![0.0f32; 0];
+    let reach = ROAD_W_M * 0.5 + BED_FADE_M;
+    let mut touched: std::collections::HashMap<usize, (f32, f32)> = Default::default();
+    for s in 0..pts.len() - 1 {
+        let (a, b) = (pts[s], pts[s + 1]);
+        let (i0, i1, j0, j1) = cells((a.0.min(b.0) - reach, a.1.min(b.1) - reach), (a.0.max(b.0) + reach, a.1.max(b.1) + reach));
+        for j in j0..=j1 {
+            for i in i0..=i1 {
+                let (x, z) = (i as f32 * mps, j as f32 * mps);
+                if area.covers(x, z, 0.0) {
+                    continue;
+                }
+                let d = seg_dist(a, b, (x, z));
+                if d > reach {
+                    continue;
+                }
+                let w = smooth(1.0 - (d - ROAD_W_M * 0.5) / BED_FADE_M) * keep(x, z);
+                let e = touched.entry(j * gw + i).or_insert((0.0, 0.0));
+                if w > e.0 {
+                    *e = (w, (bed[s] + bed[s + 1]) * 0.5);
+                }
+            }
+        }
+    }
+    let _ = (&mut weight, &mut target);
+    for (k, (w, t)) in touched {
+        let d = ((t - out[k]) * 0.85 * w).clamp(-1.0, 1.0);
+        out[k] += d;
+    }
+    syn.heights = out;
+}
+
+/// A group of rigid parts turned by `deg` and stood together at `(x, z)` on the lowest ground
+/// under all of them.
+fn stand_parts(parts: &[&Mesh], x: f32, z: f32, deg: f32, syn: &Synth) -> Vec<Mesh> {
+    let t: Vec<Mesh> = parts.iter().map(|m| edfwrite::turned(m, deg)).collect();
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for m in &t {
+        let (a, b) = m.bounds();
+        for k in 0..3 {
+            lo[k] = lo[k].min(a[k]);
+            hi[k] = hi[k].max(b[k]);
+        }
+    }
+    let mut foot = f32::INFINITY;
+    for (a, b) in [(lo[0], lo[2]), (hi[0], lo[2]), (lo[0], hi[2]), (hi[0], hi[2]), ((lo[0] + hi[0]) * 0.5, (lo[2] + hi[2]) * 0.5)] {
+        foot = foot.min(ground(syn, x + a, z + b));
+    }
+    t.iter().map(|m| edfwrite::moved(m, [x, foot - lo[1] - 0.05, z])).collect()
+}
+
+/// The paddock's scenery: in each bay a whole team rig backing onto the fence, the team's pop-up
+/// in its colour and its board at the aisle; the fence round it all.
+fn dress_paddock(prog: &TrackProgram, syn: &Synth, lib: Option<&crate::trackprops::PropLibrary>, plan: &Plan, v: &mut Venue) {
+    use crate::trackobjects::Class;
+    let _ = prog;
+    let Some(area) = plan.paddock else {
         v.tally.push(("paddock", 0));
         return;
     };
-
-    let (f, o) = (area.x, area.z);
-    let (mut rig_mesh, mut own_rigs, mut tent_mesh, mut boards) = (Mesh::default(), Mesh::default(), Mesh::default(), Mesh::default());
+    let (hx, hz, f, o) = (area.hx, area.hz, area.x, area.z);
+    let lib_sheet = |sheet: &str| lib.and_then(|l| lib_tex(l, sheet));
+    // Whole team rigs; else a loose semi; else our own boxes.
+    let team: Vec<&crate::trackprops::Prop> = lib
+        .map(|l| l.props.iter().filter(|p| p.id.starts_with("team_rig_") && lib_tex(l, &p.sheet).is_some()).collect())
+        .unwrap_or_default();
+    let semis: Vec<(&crate::trackprops::Prop, Mesh)> = match (lib, team.is_empty()) {
+        (Some(l), true) => l
+            .props
+            .iter()
+            .filter(|p| p.class == Class::Vehicle && whole(p) && (3.8..=5.4).contains(&p.height) && lib_tex(l, &p.sheet).is_some())
+            .filter_map(|p| {
+                let a = aligned(&p.mesh);
+                let (lo, hi) = a.bounds();
+                ((17.0..=21.0).contains(&(hi[0] - lo[0])) && (2.0..=4.5).contains(&(hi[2] - lo[2]))).then_some((p, a))
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let popup = |c: &str| -> Option<(&crate::trackprops::Prop, &crate::trackprops::Prop)> {
+        let l = lib?;
+        let r = l.props.iter().find(|p| p.id == format!("team_popup_{c}_roof"))?;
+        let fr = l.props.iter().find(|p| p.id == format!("team_popup_{c}_frame"))?;
+        (lib_tex(l, &r.sheet).is_some() && lib_tex(l, &fr.sheet).is_some()).then_some((r, fr))
+    };
+    let (mut rigs, mut trucks, mut roofs, mut frames, mut canopies, mut boards) =
+        (Mesh::default(), Mesh::default(), Mesh::default(), Mesh::default(), Mesh::default(), Mesh::default());
+    let (mut rig_sheet, mut roof_sheet, mut frame_sheet) = (None, None, None);
     let mut spots = Vec::new();
     for (i, (brand, ..)) in BRANDS.iter().enumerate() {
-        // Far row first, then the near one; each rig backs onto the fence, facing the aisle.
-        let (k, row) = (i % 4, if i < 4 { 1.0f32 } else { -1.0 });
-        let x = lay.x(k);
-        let back = lay.depth * 0.5 - PAD_MARGIN_M;
-        let (rx, rz) = area.at(x, row * (back - lay.rig_w * 0.5));
-        let deg = deg_along(f);
-        match picked[i] {
-            Some((_, m)) => rig_mesh.append(&stand(m, rx, rz, deg, syn)),
-            None => own_rigs.append(&stand(&own_rig(i), rx, rz, deg, syn)),
+        let (bx, row) = bay(i);
+        let to_aisle = (-row * o.0, -row * o.1);
+        let deg = deg_facing(to_aisle);
+        let (len, dep, (rx, rz)) = if !team.is_empty() {
+            let p = team[i * team.len() / BRANDS.len()];
+            let (lo, hi) = p.mesh.bounds();
+            let at = area.at(bx, row * (hz - PAD_MARGIN_M - RIG_DEPTH_M * 0.5));
+            rigs.append(&stand(&p.mesh, at.0, at.1, deg, syn));
+            rig_sheet = Some(p.sheet.clone());
+            (hi[0] - lo[0], hi[2] - lo[2], at)
+        } else if !semis.is_empty() {
+            let (p, m) = &semis[i * semis.len() / BRANDS.len()];
+            let (lo, hi) = m.bounds();
+            let at = area.at(bx, row * (hz - PAD_MARGIN_M - (hi[2] - lo[2]) * 0.5 - 0.5));
+            rigs.append(&stand(m, at.0, at.1, deg, syn));
+            rig_sheet = Some(p.sheet.clone());
+            (hi[0] - lo[0], hi[2] - lo[2], at)
+        } else {
+            let at = area.at(bx, row * (hz - PAD_MARGIN_M - 2.0));
+            trucks.append(&stand(&own_rig(i), at.0, at.1, deg, syn));
+            (15.0, 2.55, at)
+        };
+        let (px, pz) = area.at(bx + 6.5, row * (AISLE_M * 0.5 + FRONT_M * 0.5));
+        match popup(BRAND_POPUP[i]) {
+            Some((r, fr)) => {
+                let parts = stand_parts(&[&r.mesh, &fr.mesh], px, pz, deg, syn);
+                roofs.append(&parts[0]);
+                frames.append(&parts[1]);
+                roof_sheet = Some(r.sheet.clone());
+                frame_sheet = Some(fr.sheet.clone());
+            }
+            None => canopies.append(&stand(&canopy_mesh(i), px, pz, deg, syn)),
         }
-        let front = back - lay.rig_w - 1.5;
-        let (tx, tz) = area.at(x + lay.rig_len * 0.18, row * (front - lay.tent * 0.5));
-        tent_mesh.append(&stand(&canopy_mesh(i), tx, tz, deg, syn));
-        let tent = Some((tx, tz));
-        let (bx, bz) = area.at(x - lay.rig_len * 0.25, row * (AISLE_M * 0.5 + 0.8));
-        // Faces the aisle.
-        boards.append(&stand(&board_mesh(i), bx, bz, deg_facing((-o.0 * row, -o.1 * row)), syn));
-        spots.push(Spot {
-            brand,
-            rig: Rect { c: (rx, rz), x: f, z: o, hx: lay.rig_len * 0.5, hz: lay.rig_w * 0.5 },
-            board: (bx, bz),
-            tent,
-        });
+        let (bxw, bzw) = area.at(bx + 12.0, row * (AISLE_M * 0.5 + 0.8));
+        boards.append(&stand(&board_mesh(i), bxw, bzw, deg_facing(to_aisle), syn));
+        spots.push(Spot { brand, rig: Rect { c: (rx, rz), x: f, z: o, hx: len * 0.5, hz: dep * 0.5 }, board: (bxw, bzw), tent: Some((px, pz)) });
     }
 
     // The fence: panel after panel round the edge, a gap for the gate in the near side.
@@ -892,7 +1624,6 @@ fn paddock(prog: &TrackProgram, syn: &Synth, lib: Option<&crate::trackprops::Pro
     let post = lib.and_then(|l| l.props.iter().find(|p| p.id == "edge_post").filter(|p| lib_tex(l, &p.sheet).is_some()));
     let step = barrier.map_or(3.0, |p| p.span.clamp(1.5, 4.0));
     let (mut fence, mut posts, mut centres) = (Mesh::default(), Mesh::default(), Vec::new());
-    let (hx, hz) = (area.hx, area.hz);
     for (a, b) in [((-hx, -hz), (hx, -hz)), ((hx, -hz), (hx, hz)), ((hx, hz), (-hx, hz)), ((-hx, hz), (-hx, -hz))] {
         let (pa, pb) = (area.at(a.0, a.1), area.at(b.0, b.1));
         let len = (pb.0 - pa.0).hypot(pb.1 - pa.1);
@@ -919,27 +1650,22 @@ fn paddock(prog: &TrackProgram, syn: &Synth, lib: Option<&crate::trackprops::Pro
         }
     }
 
-    // The road: in along the aisle, then out through the gate to the lane.
-    // Not drawn on the riding surface or the start: it meets the track edge either side.
-    let half = prog.width * 0.5;
-    let off = |x: f32, z: f32| dist(syn, x, z) < half + 1.5 || syn.outside_the_start(x, z).is_some_and(|e| e < 0.5);
-    let aisle = strip(&[area.at(-hx + PAD_MARGIN_M, 0.0), area.at(hx - PAD_MARGIN_M, 0.0)], AISLE_ROAD_W_M, syn, &off);
-    let mut road_mesh = strip(&road, ROAD_W_M, syn, &off);
-    road_mesh.append(&aisle);
-    let road_len: f32 = road.windows(2).map(|s| (s[1].0 - s[0].0).hypot(s[1].1 - s[0].1)).sum();
-
-    let n_rigs = spots.len();
-    let n_tents = spots.iter().filter(|s| s.tent.is_some()).count();
-    let lib_sheet = |sheet: &str| lib.and_then(|l| lib_tex(l, sheet));
-    if let Some((p, _)) = picked.iter().flatten().next() {
-        if let Some(t) = lib_sheet(&p.sheet) {
-            v.kinds.push(("paddock_rigs".into(), rig_mesh, t, true));
-        }
+    let n_popups = if roofs.vertex_count() > 0 || canopies.vertex_count() > 0 { BRANDS.len() } else { 0 };
+    if let Some(t) = rig_sheet.and_then(|s| lib_sheet(&s)) {
+        v.kinds.push(("paddock_rigs".into(), rigs, t, true));
     }
-    if own_rigs.vertex_count() > 0 {
-        v.kinds.push(("paddock_trucks".into(), own_rigs, brand_sheet(), true));
+    if trucks.vertex_count() > 0 {
+        v.kinds.push(("paddock_trucks".into(), trucks, brand_sheet(), true));
     }
-    v.kinds.push(("paddock_canopies".into(), tent_mesh, brand_sheet(), true));
+    if let Some(t) = roof_sheet.and_then(|s| lib_sheet(&s)) {
+        v.kinds.push(("paddock_popup_roofs".into(), roofs, t, true));
+    }
+    if let Some(t) = frame_sheet.and_then(|s| lib_sheet(&s)) {
+        v.kinds.push(("paddock_popup_frames".into(), frames, t, true));
+    }
+    if canopies.vertex_count() > 0 {
+        v.kinds.push(("paddock_canopies".into(), canopies, brand_sheet(), true));
+    }
     v.kinds.push(("paddock_boards".into(), boards, brand_sheet(), true));
     match barrier.and_then(|p| lib_sheet(&p.sheet)) {
         Some(t) => v.kinds.push(("paddock_fence".into(), fence, t, true)),
@@ -948,32 +1674,26 @@ fn paddock(prog: &TrackProgram, syn: &Synth, lib: Option<&crate::trackprops::Pro
     if let Some(t) = post.and_then(|p| lib_sheet(&p.sheet)) {
         v.kinds.push(("paddock_posts".into(), posts, t, true));
     }
-    v.kinds.push(("paddock_road".into(), road_mesh, road_sheet(), false));
+    let road_len: f32 = plan.road.windows(2).map(|s| (s[1].0 - s[0].0).hypot(s[1].1 - s[0].1)).sum();
     v.tally.extend([
         ("paddock", 1),
-        ("paddock rigs", n_rigs),
-        ("paddock canopies", n_tents),
+        ("paddock rigs", spots.len()),
+        ("paddock popups", n_popups),
         ("paddock boards", BRANDS.len()),
         ("paddock fence panels", centres.len()),
+        ("paddock spawns", plan.spawns.len()),
         ("paddock road m", road_len.round() as usize),
-        ("paddock road crossings", crossings),
     ]);
     v.paddock = Some(Paddock { area, spots, fence: centres });
-    v.road = road;
 }
 
-/// The sponsor wall behind the gate row, facing it, clear of the start pad: the library's
-/// lifted one when it has it, our own printed board when it does not.
-fn wall(prog: &TrackProgram, syn: &Synth, lib: Option<&crate::trackprops::PropLibrary>, v: &mut Venue) {
-    let Some(spur) = &syn.spur else {
+/// The sponsor wall in its room behind the gate row, facing the row: the library's lifted one
+/// when it has it, our own printed board when it does not.
+fn dress_wall(syn: &Synth, lib: Option<&crate::trackprops::PropLibrary>, plan: &Plan, v: &mut Venue) {
+    let Some(w) = plan.wall else {
         v.tally.push(("sponsor wall", 0));
         return;
     };
-    let half = prog.width * 0.5;
-    let gi = ((spur.gate_at() / 0.5) as usize).min(spur.stations.len().saturating_sub(1));
-    let g = spur.stations[gi];
-    let f = crate::trackprog::heading_vector(g.heading);
-    let r = crate::trackprog::right_vector(g.heading);
     let parts: Vec<(&crate::trackprops::Prop, Texture)> = lib
         .map(|l| {
             WALL_PARTS
@@ -989,71 +1709,43 @@ fn wall(prog: &TrackProgram, syn: &Synth, lib: Option<&crate::trackprops::PropLi
         parts
             .iter()
             .map(|(p, t)| {
-                let m = edfwrite::turned(&p.mesh, (g.heading - p.axis_ref).to_degrees());
+                let m = edfwrite::turned(&p.mesh, (w.faces - p.axis_ref).to_degrees());
                 (p.id.clone(), if m.vertex_count() < 64 { fine(&fine(&m)) } else { m }, t.clone())
             })
             .collect()
     } else {
-        let (w, h, lift) = OWN_WALL_M;
-        let face = edfwrite::moved(&into_window(&edfwrite::card(w, h), (0.0, 0.0, 1.0, 0.8)), [0.0, lift, 0.0]);
-        let mut m = face;
+        let (ww, h, lift) = OWN_WALL_M;
+        let mut m = edfwrite::moved(&into_window(&edfwrite::card(ww, h), (0.0, 0.0, 1.0, 0.8)), [0.0, lift, 0.0]);
         let grey = (0.0, 0.85, 1.0, 0.1);
-        let back = edfwrite::turned(&edfwrite::moved(&on_hem(&edfwrite::card(w, h), grey), [0.0, lift, 0.0]), 180.0);
+        let back = edfwrite::turned(&edfwrite::moved(&on_hem(&edfwrite::card(ww, h), grey), [0.0, lift, 0.0]), 180.0);
         m.append(&edfwrite::moved(&back, [0.0, 0.0, -0.05]));
         for k in 0..9 {
             let post = on_hem(&edfwrite::cuboid(0.2, lift + h + 0.2, 0.2), grey);
-            m.append(&edfwrite::moved(&post, [(k as f32 / 8.0 - 0.5) * (w - 0.4), 0.0, -0.2]));
+            m.append(&edfwrite::moved(&post, [(k as f32 / 8.0 - 0.5) * (ww - 0.4), 0.0, -0.2]));
         }
-        vec![("sponsor_wall".into(), edfwrite::turned(&m, g.heading.to_degrees()), own_wall_sheet())]
-    };
-    let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
-    for (_, m, _) in &meshes {
-        for p in m.positions.chunks_exact(3) {
-            let (a, c) = (p[0] * f.0 + p[2] * f.1, p[0] * r.0 + p[2] * r.1);
-            (lo, hi) = ([lo[0].min(a), lo[1].min(c)], [hi[0].max(a), hi[1].max(c)]);
-        }
-    }
-    let (mut back, mut placed) = (WALL_BACK_M.0, None);
-    while back <= WALL_BACK_M.1 {
-        let (cx, cz) = (g.x - f.0 * back, g.z - f.1 * back);
-        let foot = Rect { c: (cx + f.0 * (lo[0] + hi[0]) * 0.5 + r.0 * (lo[1] + hi[1]) * 0.5, cz + f.1 * (lo[0] + hi[0]) * 0.5 + r.1 * (lo[1] + hi[1]) * 0.5), x: r, z: f, hx: (hi[1] - lo[1]) * 0.5, hz: (hi[0] - lo[0]) * 0.5 };
-        let n = (foot.hx * 2.0) as i32;
-        let ok = (0..=n).all(|i| {
-            [-1.0f32, 0.0, 1.0].iter().all(|&j| {
-                let (x, z) = foot.at(-foot.hx + i as f32 * foot.hx * 2.0 / n as f32, j * foot.hz);
-                on_plot(prog, x, z, 2.0) && dist(syn, x, z) > half + 3.0 && syn.outside_the_start(x, z).is_none_or(|e| e > WALL_OFF_PAD_M)
-            })
-        });
-        if ok {
-            placed = Some((cx, cz, foot));
-            break;
-        }
-        back += 0.5;
-    }
-    let Some((cx, cz, foot)) = placed else {
-        v.tally.push(("sponsor wall", 0));
-        return;
+        vec![("sponsor_wall".into(), edfwrite::turned(&m, w.faces.to_degrees()), own_wall_sheet())]
     };
     // On the lowest ground along it: its legs reach into the higher.
     let fall = (0..=20)
         .map(|i| {
-            let (x, z) = foot.at(-foot.hx + i as f32 * foot.hx / 10.0, 0.0);
+            let (x, z) = w.foot.at(-w.foot.hx + i as f32 * w.foot.hx / 10.0, 0.0);
             ground(syn, x, z)
         })
         .fold(f32::INFINITY, f32::min);
     for (name, m, t) in meshes {
-        v.kinds.push((name, edfwrite::moved(&m, [cx, fall - 0.1, cz]), t, true));
+        v.kinds.push((name, edfwrite::moved(&m, [w.foot.c.0, fall - 0.1, w.foot.c.1]), t, true));
     }
     v.tally.push(("sponsor wall", 1));
-    v.tally.push(("sponsor wall back m", back.round() as usize));
-    v.wall = Some(Wall { foot, faces: g.heading, lifted });
+    v.tally.push(("sponsor wall back m", w.back.round() as usize));
+    v.wall = Some(Wall { lifted, ..w });
 }
 
-/// The venue for a track: the paddock and its road, and the sponsor wall.
+/// The venue for a track: the paddock and the sponsor wall. The road is paint (`paint_ground`).
 pub fn build(prog: &TrackProgram, syn: &Synth, lib: Option<&crate::trackprops::PropLibrary>) -> Venue {
-    let mut v = Venue { kinds: Vec::new(), tally: Vec::new(), paddock: None, road: Vec::new(), wall: None };
-    paddock(prog, syn, lib, &mut v);
-    wall(prog, syn, lib, &mut v);
+    let plan = plan(prog, syn);
+    let mut v = Venue { kinds: Vec::new(), tally: Vec::new(), paddock: None, road: plan.road.clone(), wall: None };
+    dress_paddock(prog, syn, lib, &plan, &mut v);
+    dress_wall(syn, lib, &plan, &mut v);
     v
 }
 
@@ -1158,25 +1850,40 @@ mod tests {
         })
     }
 
+    fn plan_ng() -> &'static Plan {
+        static P: std::sync::OnceLock<Plan> = std::sync::OnceLock::new();
+        P.get_or_init(|| {
+            let (p, s) = northgate();
+            plan(p, s)
+        })
+    }
+
     fn prop(id: &str, sheet: &str, class: Class, mesh: Mesh, axis_ref: f32) -> Prop {
         let (lo, hi) = mesh.bounds();
         let reach = mesh.positions.chunks_exact(3).map(|v| v[0].hypot(v[2])).fold(0.0f32, f32::max);
         Prop { id: id.into(), sheet: sheet.into(), class, height: hi[1] - lo[1], span: (hi[0] - lo[0]).max(hi[2] - lo[2]), reach, axis_ref, mesh }
     }
 
-    /// A library with what the venue asks for: semis, pop-ups, a barrier and post, a wall.
+    /// A library with what the venue asks for: team rigs, pop-ups, a barrier and post, a wall.
     fn library() -> PropLibrary {
         let wall = edfwrite::moved(&edfwrite::card(50.0, 4.0), [0.0, 1.0, 0.0]);
-        let props = vec![
-            prop("semi_a", "semi_trailers_c", Class::Vehicle, edfwrite::cuboid(19.7, 4.6, 3.2), 0.0),
-            prop("semi_b", "semi_trailers_c", Class::Vehicle, edfwrite::cuboid(19.6, 4.8, 3.0), 0.0),
-            prop("tent", "tent_sides_c", Class::Structure, edfwrite::cuboid(4.5, 2.8, 4.5), 0.0),
+        let mut props = vec![
+            prop("team_rig_00", "semi_trailers_c", Class::Vehicle, edfwrite::cuboid(26.0, 5.2, 13.0), 0.0),
+            prop("team_rig_01", "semi_trailers_c", Class::Vehicle, edfwrite::cuboid(26.2, 5.3, 13.2), 0.0),
             prop("edge_barrier", "ck_fence_c_a", Class::Structure, edfwrite::cuboid(0.05, 1.36, 3.0), 0.0),
             prop("edge_post", "main_track_objects_c", Class::Structure, edfwrite::cuboid(0.05, 1.46, 0.05), 0.0),
             prop("sponsor_wall", "start_backdrop_c", Class::Structure, wall, 0.0),
             prop("sponsor_wall_frame", "main_track_objects_c", Class::Structure, edfwrite::moved(&edfwrite::cuboid(50.0, 5.8, 0.4), [0.0, 0.0, -0.5]), 0.0),
         ];
-        let sheets = ["semi_trailers_c", "tent_sides_c", "ck_fence_c_a", "main_track_objects_c", "start_backdrop_c"]
+        for (c, _) in POPUP_COLOURS {
+            props.push(prop(&format!("team_popup_{c}_roof"), "easy_ups_roof_c", Class::Structure, edfwrite::moved(&edfwrite::cuboid(4.0, 0.4, 4.0), [0.0, 2.7, 0.0]), 0.0));
+            let mut legs = Mesh::default();
+            for (x, z) in [(-1.9, -1.9), (1.9, -1.9), (1.9, 1.9), (-1.9, 1.9)] {
+                legs.append(&edfwrite::moved(&edfwrite::cuboid(0.05, 2.7, 0.05), [x, 0.0, z]));
+            }
+            props.push(prop(&format!("team_popup_{c}_frame"), "main_track_objects_c", Class::Structure, legs, 0.0));
+        }
+        let sheets = ["semi_trailers_c", "easy_ups_roof_c", "ck_fence_c_a", "main_track_objects_c", "start_backdrop_c"]
             .iter()
             .map(|n| (n.to_string(), 2, 2, vec![200u8; 16]))
             .collect();
@@ -1195,23 +1902,78 @@ mod tests {
         v.kinds.iter().filter(move |k| k.0.starts_with(prefix)).flat_map(|k| k.1.positions.chunks_exact(3).map(|p| [p[0], p[1], p[2]]))
     }
 
-    /// The stalls here are the ones the `.rdf` spawns riders at.
+    /// The centreline's point and heading at `long` round the lap, between stations, the way
+    /// a `long`/`lat` in the `.rdf` is read back.
+    fn at_long(st: &[crate::trackprog::Station], long: f32) -> (f32, f32, f32) {
+        let k = st.partition_point(|q| q.s <= long).clamp(1, st.len() - 1);
+        let (a, b) = (&st[k - 1], &st[k]);
+        let t = ((long - a.s) / (b.s - a.s).max(1e-6)).clamp(0.0, 1.0);
+        let turn = (b.heading - a.heading + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        (a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t, a.heading + turn * t)
+    }
+
+    /// Every point along a polyline, `step` metres apart.
+    fn along(pts: &[(f32, f32)], step: f32) -> Vec<(f32, f32)> {
+        let mut out = Vec::new();
+        for w in pts.windows(2) {
+            let n = ((w[1].0 - w[0].0).hypot(w[1].1 - w[0].1) / step).ceil().max(1.0) as usize;
+            for k in 0..=n {
+                let t = k as f32 / n as f32;
+                out.push((w[0].0 + (w[1].0 - w[0].0) * t, w[0].1 + (w[1].1 - w[0].1) * t));
+            }
+        }
+        out
+    }
+
+    /// A written track's files, once.
+    fn written() -> &'static std::path::PathBuf {
+        static D: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+        D.get_or_init(|| {
+            let (p, s) = northgate();
+            let dir = std::env::temp_dir().join(format!("mxb-venue-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            crate::tracksynth::write_source(p, s, &dir).unwrap();
+            dir
+        })
+    }
+
+    /// A mask's coverage at a world point, read back out of its `.tga`.
+    fn mask_at(tga: &[u8], p: &TrackProgram, x: f32, z: f32) -> u8 {
+        let w = u16::from_le_bytes([tga[12], tga[13]]) as usize;
+        let (px, py) = (((x / p.terrain.size_x) * w as f32) as usize, ((z / p.terrain.size_z) * w as f32) as usize);
+        tga[18 + (py.min(w - 1) * w + px.min(w - 1)) * 4 + 3]
+    }
+
+    /// The `.rdf` spawns riders in the paddock's bays: every stall, read back the way the game
+    /// places one, lands inside the fence on one of the plan's spots, facing the aisle.
     #[test]
-    fn the_lane_is_the_rdf_s() {
-        let (p, s) = northgate();
-        let dir = std::env::temp_dir().join(format!("mxb-venue-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let wrote = crate::tracksynth::write_source(p, s, &dir).unwrap();
-        let rdf = wrote.iter().find(|f| f.ends_with(".rdf")).expect("an .rdf");
-        let txt = std::fs::read_to_string(dir.join(rdf)).unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
+    fn the_rdf_spawns_riders_in_the_paddock() {
+        let (p, _) = northgate();
+        let pl = plan_ng();
+        let area = pl.paddock.expect("Northgate gets a paddock");
+        let dir = written();
+        let rdf = std::fs::read_dir(dir.join(crate::tracksynth::slug(&p.name)))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .find(|e| e.path().extension().is_some_and(|x| x == "rdf"))
+            .expect("an .rdf");
+        let txt = std::fs::read_to_string(rdf.path()).unwrap().replace('\r', "");
         let block = &txt[txt.find("pit_lane").unwrap()..txt.find("pit_board").unwrap()];
         let num = |k: &str| block.lines().filter_map(|l| l.trim().strip_prefix(k).map(|v| v.parse::<f32>().unwrap())).collect::<Vec<_>>();
-        let (longs, lats) = (num("long = "), num("lat = "));
-        let l = lane(p);
-        assert_eq!(longs.len(), l.stalls.len());
-        for ((a, b), &(sa, sb)) in longs.iter().zip(&lats).zip(&l.stalls) {
-            assert!((a - sa).abs() < 0.01 && (b - sb).abs() < 0.01, "{a}/{b} in the .rdf, {sa}/{sb} here");
+        let (longs, lats, angles) = (num("long = "), num("lat = "), num("angle = "));
+        assert_eq!(longs.len(), BRANDS.len() * SPAWNS_PER_BAY, "one stall a bike");
+        assert!(block.contains(&format!("numstalls = {}", longs.len())));
+        let st = p.stations(0.5);
+        for ((long, lat), angle) in longs.iter().zip(&lats).zip(&angles) {
+            // The centreline's point at that distance round, as the game finds it.
+            let (qx, qz, qh) = at_long(&st, *long);
+            let (rx, rz) = crate::trackprog::right_vector(qh);
+            let (x, z) = (qx + rx * lat, qz + rz * lat);
+            assert!(area.covers(x, z, -1.0), "a stall at {long:.1}/{lat:.1} lands at ({x:.0}, {z:.0}), outside the paddock");
+            let sp = pl.spawns.iter().min_by(|a, b| (a.x - x).hypot(a.z - z).total_cmp(&(b.x - x).hypot(b.z - z))).unwrap();
+            assert!((sp.x - x).hypot(sp.z - z) < 0.8, "a stall {:.1} m from its spot", (sp.x - x).hypot(sp.z - z));
+            let facing = (angle + qh.to_degrees() - sp.heading.to_degrees()).rem_euclid(360.0);
+            assert!(facing.min(360.0 - facing) < 1.0, "a stall faces {facing:.0}° off its spot");
         }
     }
 
@@ -1222,8 +1984,7 @@ mod tests {
         let v = venue();
         let pad = v.paddock.as_ref().expect("Northgate gets a paddock");
         let a = pad.area;
-        assert!(a.hx * 2.0 >= 80.0 && a.hz * 2.0 >= 30.0, "{:.0} x {:.0} m is not a big paddock", a.hx * 2.0, a.hz * 2.0);
-        // Every metre of the edge has a panel within reach, except the gate.
+        assert!(a.hx * 2.0 >= 100.0 && a.hz * 2.0 >= 40.0, "{:.0} x {:.0} m is not a big paddock", a.hx * 2.0, a.hz * 2.0);
         let per = [((-a.hx, -a.hz), (a.hx, -a.hz)), ((a.hx, -a.hz), (a.hx, a.hz)), ((a.hx, a.hz), (-a.hx, a.hz)), ((-a.hx, a.hz), (-a.hx, -a.hz))];
         let mut gap = 0.0f32;
         for (s0, s1) in per {
@@ -1240,36 +2001,43 @@ mod tests {
         }
         assert!(gap >= ROAD_W_M, "the gate is {gap} m, narrower than the road");
         let half = p.width * 0.5;
-        for pre in ["paddock_rigs", "paddock_canopies", "paddock_boards", "paddock_fence", "paddock_posts"] {
+        for pre in ["paddock_rigs", "paddock_popup_roofs", "paddock_popup_frames", "paddock_boards", "paddock_fence", "paddock_posts"] {
             let mut n = 0;
             for q in verts(v, pre) {
                 n += 1;
                 assert!(dist(s, q[0], q[2]) > half + PAD_CLEAR_M - 1.0, "{pre} {:.1} m from the centreline", dist(s, q[0], q[2]));
                 assert!(s.outside_the_start(q[0], q[2]).is_none_or(|e| e > 2.0), "{pre} on the start");
                 assert!(a.covers(q[0], q[2], 1.0), "{pre} outside the fence");
-                assert!((q[1] - ground(s, q[0], q[2])).abs() < 8.0, "{pre} off the ground");
             }
             assert!(n > 0, "no {pre}");
         }
     }
 
-    /// Eight teams, each a rig, a tent and a board, and no two rigs in each other.
+    /// Eight teams, each a whole rig backing onto the fence, its pop-up and its board, apart.
     #[test]
-    fn a_rig_per_brand() {
+    fn a_rig_and_a_popup_per_brand() {
         let v = venue();
         let pad = v.paddock.as_ref().expect("a paddock");
         let names: Vec<&str> = pad.spots.iter().map(|s| s.brand).collect();
         assert_eq!(names, BRANDS.iter().map(|b| b.0).collect::<Vec<_>>());
         for (i, a) in pad.spots.iter().enumerate() {
+            let (_, lz) = pad.area.local(a.rig.c.0, a.rig.c.1);
             assert!(pad.area.covers(a.rig.c.0, a.rig.c.1, -a.rig.hz), "{}'s rig outside", a.brand);
-            assert!(a.tent.is_some(), "{} has no tent", a.brand);
+            assert!(lz.abs() > pad.area.hz * 0.5, "{}'s rig is not backed onto the fence", a.brand);
+            assert!(a.tent.is_some(), "{} has no pop-up", a.brand);
             for b in &pad.spots[i + 1..] {
                 let (dx, dz) = pad.area.local(b.rig.c.0, b.rig.c.1);
                 let (ex, ez) = pad.area.local(a.rig.c.0, a.rig.c.1);
                 assert!((dx - ex).abs() > a.rig.hx * 2.0 || (dz - ez).abs() > a.rig.hz * 2.0, "{} and {} overlap", a.brand, b.brand);
             }
         }
-        assert_eq!(v.tally.iter().find(|t| t.0 == "paddock rigs").map(|t| t.1), Some(8));
+        for k in ["paddock rigs", "paddock popups", "paddock boards"] {
+            assert_eq!(v.tally.iter().find(|t| t.0 == k).map(|t| t.1), Some(8), "{k}");
+        }
+        // Each team's pop-up is the library's whole one — roof and legs — not our drawn canopy.
+        assert!(v.kinds.iter().all(|k| k.0 != "paddock_canopies"));
+        let roofs = v.kinds.iter().find(|k| k.0 == "paddock_popup_roofs").expect("pop-up roofs");
+        assert_eq!(roofs.1.vertex_count(), 8 * 24);
         // Every board prints its own name: the cells differ.
         let sheet = brand_sheet();
         let mut seen = std::collections::HashSet::new();
@@ -1277,61 +2045,105 @@ mod tests {
             let (u0, v0, uw, vh) = cell(i);
             let (x0, y0) = ((u0 * 1024.0) as u32, (v0 * 1024.0) as u32);
             let ink = BRANDS[i].2;
-            let mut inked = 0;
             let mut sig = Vec::new();
             for y in (y0 + 20..y0 + (vh * 1024.0) as u32 - 20).step_by(3) {
                 for x in (x0 + 20..x0 + (uw * 1024.0) as u32 - 20).step_by(3) {
                     let k = ((y * 1024 + x) * 4) as usize;
-                    let is = sheet.rgba[k..k + 3] == ink;
-                    inked += is as usize;
-                    sig.push(is);
+                    sig.push(sheet.rgba[k..k + 3] == ink);
                 }
             }
-            assert!(inked > 200, "{}'s board prints nothing", BRANDS[i].0);
+            assert!(sig.iter().filter(|b| **b).count() > 200, "{}'s board prints nothing", BRANDS[i].0);
             assert!(seen.insert(sig), "{}'s board is another's", BRANDS[i].0);
         }
     }
 
-    /// The road runs from inside the paddock, out through its gate, onto the pit lane.
+    /// The road never comes near the lap: its line keeps clear, and none of its paint, soft edge
+    /// and all, lands on the riding surface.
     #[test]
-    fn the_road_connects_the_paddock_to_the_pit_lane() {
+    fn the_road_never_touches_the_lap() {
         let (p, s) = northgate();
-        let v = venue();
-        let pad = v.paddock.as_ref().expect("a paddock");
-        let (start, end) = (v.road[0], *v.road.last().unwrap());
-        assert!(pad.area.covers(start.0, start.1, 0.0), "the road starts outside the paddock");
-        // Through the gate: where it crosses the near fence line it is inside the gap.
-        let cross = v.road.windows(2).find_map(|w| {
-            let (a, b) = (pad.area.local(w[0].0, w[0].1), pad.area.local(w[1].0, w[1].1));
-            let e = -pad.area.hz;
+        let pl = plan_ng();
+        let half = p.width * 0.5;
+        assert!(pl.road.len() >= 3, "no road");
+        for (x, z) in along(&pl.road, 0.5) {
+            assert!(dist(s, x, z) > half + ROAD_W_M * 0.5 + ROAD_FADE_M + 0.9, "the road runs {:.1} m from the centreline", dist(s, x, z));
+        }
+        let paint = paint(pl).expect("paint");
+        let mut n = 0;
+        for (x, z, r) in paint.road_cells() {
+            if r > 0.02 {
+                n += 1;
+                assert!(dist(s, x, z) > half + 0.5, "road paint {:.1} m from the centreline", dist(s, x, z));
+            }
+        }
+        assert!(n > 1000, "hardly any road painted");
+    }
+
+    /// The road runs from the paddock's aisle, out through its gate, to the start pad beside
+    /// the gate row, where the riders line up.
+    #[test]
+    fn the_road_reaches_the_gate_area() {
+        let (_, s) = northgate();
+        let pl = plan_ng();
+        let area = pl.paddock.expect("a paddock");
+        let (start, end) = (pl.road[0], *pl.road.last().unwrap());
+        assert!(area.covers(start.0, start.1, -1.0), "the road starts outside the paddock");
+        let cross = pl.road.windows(2).find_map(|w| {
+            let (a, b) = (area.local(w[0].0, w[0].1), area.local(w[1].0, w[1].1));
+            let e = -area.hz;
             let dz = b.1 - a.1;
             ((a.1 - e) * (b.1 - e) <= 0.0).then(|| if dz.abs() < 1e-6 { a.0 } else { a.0 + (b.0 - a.0) * (e - a.1) / dz })
         });
         let x = cross.expect("the road never leaves the paddock");
         assert!(x.abs() + ROAD_W_M * 0.5 <= GATE_M * 0.5 + 0.1, "the road meets the fence {x:.1} m off the gate");
-        // Ends on the lane's strip, beside a stall.
-        let l = lane(p);
-        let (lap, st) = (p.lap_length(), p.stations(0.5));
-        let on_lane = l.stalls.iter().any(|&(long, _)| {
-            let q = st[((long / 0.5) as usize).min(st.len() - 1)];
-            let (rx, rz) = crate::trackprog::right_vector(q.heading);
-            let out = ((end.0 - q.x) * rx + (end.1 - q.z) * rz) * l.side;
-            let along = (end.0 - q.x) * q.heading.sin() + (end.1 - q.z) * q.heading.cos();
-            (out - l.lane).abs() <= LANE_HALF_M && along.abs() <= STALL_GAP_M
-        });
-        assert!(on_lane, "the road ends off the pit lane");
-        let _ = lap;
-        // Never drawn on the track or the start, and across the lap at most once.
-        let half = p.width * 0.5;
-        let mut n = 0;
-        for q in verts(v, "paddock_road") {
-            n += 1;
-            assert!(dist(s, q[0], q[2]) > half + 1.0, "road {:.1} m from the centreline", dist(s, q[0], q[2]));
-            assert!(s.outside_the_start(q[0], q[2]).is_none_or(|e| e > 0.0), "road on the start");
+        let (g, ph) = gate_row(s).expect("a gate row");
+        let (fx, fz) = crate::trackprog::heading_vector(g.heading);
+        let (rx, rz) = crate::trackprog::right_vector(g.heading);
+        let (dx, dz) = (end.0 - g.x, end.1 - g.z);
+        let (a, c) = (dx * fx + dz * fz, dx * rx + dz * rz);
+        assert!(a.abs() < 10.0, "the road ends {a:.1} m along from the gate row");
+        assert!((c.abs() - ph).abs() < ROAD_OFF_PAD_M + 3.0, "the road ends {c:.1} m across, the row reaches {ph:.1}");
+        assert!(s.outside_the_start(end.0, end.1).is_some_and(|e| e < ROAD_OFF_PAD_M + 2.0), "the road stops short of the pad");
+    }
+
+    /// Painted into the ground, not laid on it: the riding soil over the road, grass off it, a
+    /// soft edge; the paddock floor level and the road's bed without steps.
+    #[test]
+    fn the_road_is_painted_and_graded() {
+        let (p, s) = northgate();
+        let pl = plan_ng();
+        let dir = written();
+        let dirt = std::fs::read(dir.join("mask_dirt.tga")).unwrap();
+        let grass = std::fs::read(dir.join("mask_grass.tga")).unwrap();
+        let pts = along(&pl.road[1..], 1.0);
+        let mut soft = 0;
+        for k in [pts.len() / 4, pts.len() / 2, pts.len() * 3 / 4] {
+            let (x, z) = pts[k];
+            assert!(mask_at(&dirt, p, x, z) >= 200, "the road is not the riding soil at ({x:.0}, {z:.0})");
+            assert!(mask_at(&grass, p, x, z) <= 60, "grass on the road at ({x:.0}, {z:.0})");
+            let (a, b) = (pts[k.saturating_sub(2)], pts[(k + 2).min(pts.len() - 1)]);
+            let l = (b.0 - a.0).hypot(b.1 - a.1).max(1e-3);
+            let (nx, nz) = (-(b.1 - a.1) / l, (b.0 - a.0) / l);
+            for o in 0..40 {
+                let d = ROAD_W_M * 0.5 - 1.0 + o as f32 * 0.15;
+                let v = mask_at(&dirt, p, x + nx * d, z + nz * d);
+                soft += (30..=225).contains(&v) as usize;
+            }
         }
-        assert!(n > 100, "hardly any road drawn");
-        let crossings = v.tally.iter().find(|t| t.0 == "paddock road crossings").map(|t| t.1).unwrap();
-        assert!(crossings <= 1, "the road crosses the lap {crossings} times");
+        assert!(soft >= 6, "the road's edge is hard: {soft} blended texels across it");
+        let area = pl.paddock.unwrap();
+        let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+        for i in 0..=((area.hx - 1.0) * 2.0) as i32 {
+            for j in 0..=((area.hz - 1.0) * 2.0) as i32 {
+                let (x, z) = area.at(-area.hx + 1.0 + i as f32, -area.hz + 1.0 + j as f32);
+                let h = ground(s, x, z);
+                (lo, hi) = (lo.min(h), hi.max(h));
+            }
+        }
+        assert!(hi - lo < 0.2, "the paddock floor falls {:.2} m", hi - lo);
+        let hs: Vec<f32> = pts.iter().map(|&(x, z)| ground(s, x, z)).collect();
+        let step = hs.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+        assert!(step < 0.35, "a {step:.2} m step in the road's bed");
     }
 
     /// The wall stands behind the gate row, square to it, printed side to the gates, off the pad.
@@ -1341,16 +2153,14 @@ mod tests {
         let v = venue();
         let w = v.wall.expect("a sponsor wall");
         assert!(w.lifted, "the library's wall was not used");
-        let spur = s.spur.as_ref().expect("a start straight");
-        let g = spur.stations[((spur.gate_at() / 0.5) as usize).min(spur.stations.len() - 1)];
+        let (g, _) = gate_row(s).expect("a gate row");
         let (fx, fz) = crate::trackprog::heading_vector(g.heading);
         let (rx, rz) = crate::trackprog::right_vector(g.heading);
         let (dx, dz) = (w.foot.c.0 - g.x, w.foot.c.1 - g.z);
-        let (along, across) = (dx * fx + dz * fz, dx * rx + dz * rz);
-        assert!(along < -WALL_BACK_M.0 + 0.5 && along > -WALL_BACK_M.1 - 5.0, "the wall is {along:.1} m along from the gates");
+        let (a, across) = (dx * fx + dz * fz, dx * rx + dz * rz);
+        assert!(a < -WALL_BACK_M.0 + 0.5 && a > -WALL_BACK_M.1 - 5.0, "the wall is {a:.1} m along from the gates");
         assert!(across.abs() < 3.0, "the wall is {across:.1} m off the gates' middle");
         assert!((w.foot.x.0 * fx + w.foot.x.1 * fz).abs() < 0.05, "the wall is not square to the row");
-        assert!(w.foot.hx * 2.0 >= 40.0, "{:.0} m is not a wall", w.foot.hx * 2.0);
         let print = v.kinds.iter().find(|k| k.0 == "sponsor_wall").expect("the print");
         let n = print.1.normals.chunks_exact(3).fold((0.0, 0.0), |a, q| (a.0 + q[0], a.1 + q[2]));
         assert!(n.0 * fx + n.1 * fz > 0.0, "the print faces away from the gates");
@@ -1361,18 +2171,19 @@ mod tests {
                 assert!(dist(s, q[0], q[2]) > half + 2.0, "{} on the track", k.0);
             }
         }
+        // And the road keeps out from under it.
+        for (x, z) in along(&plan_ng().road, 0.5) {
+            assert!(!w.foot.covers(x, z, 1.0), "the road runs under the wall");
+        }
     }
 
     /// Every venue model is one `trackscenery::build` writes: eight vertices or more, whole.
     #[test]
     fn every_venue_model_is_written() {
         let (p, s) = northgate();
-        // The lifted wall's print and tarp are single quads in a real library.
         let mut lib = library();
-        for id in ["sponsor_wall"] {
-            let w = lib.props.iter_mut().find(|q| q.id == id).unwrap();
-            w.mesh = edfwrite::moved(&edfwrite::card(50.0, 4.0), [0.0, 1.0, 0.0]);
-        }
+        let w = lib.props.iter_mut().find(|q| q.id == "sponsor_wall").unwrap();
+        w.mesh = edfwrite::moved(&edfwrite::card(50.0, 4.0), [0.0, 1.0, 0.0]);
         let v = build(p, s, Some(&lib));
         for (name, m, t, _) in &v.kinds {
             assert!(m.vertex_count() >= 8, "{name} has {} vertices and would not be written", m.vertex_count());
@@ -1383,13 +2194,15 @@ mod tests {
         }
     }
 
-    /// Without a library the paddock still has its trucks, fence and boards, and the wall is ours.
+    /// Without a library the paddock still has its trucks, canopies, fence and boards, and the
+    /// wall is ours.
     #[test]
     fn without_a_library_the_venue_draws_its_own() {
         let (p, s) = northgate();
         let v = build(p, s, None);
         assert!(v.paddock.is_some());
         assert!(v.kinds.iter().any(|k| k.0 == "paddock_trucks" && k.1.triangle_count() >= 8 * 12));
+        assert!(v.kinds.iter().any(|k| k.0 == "paddock_canopies"));
         assert!(v.kinds.iter().any(|k| k.0 == "paddock_fence" && k.2.name == "paddock_net_c_a"));
         let w = v.wall.expect("our own wall");
         assert!(!w.lifted);
@@ -1412,73 +2225,10 @@ mod tests {
         assert_eq!(kinds[1].1.vertex_count(), 4, "the bank is never cut");
     }
 
-    /// Why a paddock does or doesn't fit: rejections by reason, and a clearance map.
-    #[test]
-    #[ignore = "diagnostic — set FROST_OUT"]
-    fn why_no_paddock() {
-        let out = std::path::PathBuf::from(std::env::var("FROST_OUT").expect("set FROST_OUT"));
-        let (p, s) = northgate();
-        let l = lane(p);
-        let lay = Layout::of(19.7, 3.2, 4.5);
-        println!("paddock {:.0} x {:.0}, lane side {} at {:.1}, stalls {:?}..{:?}, plot {}x{}", lay.len, lay.depth, l.side, l.lane, l.stalls[0], l.stalls.last(), p.terrain.size_x, p.terrain.size_z);
-        let half = p.width * 0.5;
-        let (lap, st) = (p.lap_length(), p.stations(0.5));
-        let at = |x: f32| st[((x.rem_euclid(lap) / 0.5) as usize).min(st.len() - 1)];
-        let q = at((l.stalls[0].0 + l.stalls.last().unwrap().0) * 0.5);
-        let f = crate::trackprog::heading_vector(q.heading);
-        let r = crate::trackprog::right_vector(q.heading);
-        let o = (r.0 * l.side, r.1 * l.side);
-        let mut why = std::collections::BTreeMap::<&str, usize>::new();
-        for gi in 0..40 {
-            let g = 6.0 + gi as f32 * 4.0;
-            for ai in 0..61 {
-                let a = ((ai + 1) / 2) as f32 * 5.0 * if ai % 2 == 0 { 1.0 } else { -1.0 };
-                let d = l.lane + LANE_HALF_M + g + lay.depth * 0.5;
-                let area = Rect { c: (q.x + f.0 * a + o.0 * d, q.z + f.1 * a + o.1 * d), x: f, z: o, hx: lay.len * 0.5, hz: lay.depth * 0.5 };
-                let mut reason = "";
-                let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
-                'g: for i in 0..=((lay.len + 6.0) / 2.0).ceil() as i32 {
-                    for j in 0..=((lay.depth + 6.0) / 2.0).ceil() as i32 {
-                        let (x, z) = area.at(-lay.len * 0.5 - 3.0 + i as f32 * 2.0, -lay.depth * 0.5 - 3.0 + j as f32 * 2.0);
-                        if !on_plot(p, x, z, 3.0) { reason = "off plot"; break 'g; }
-                        if dist(s, x, z) <= half + PAD_CLEAR_M { reason = "near track"; break 'g; }
-                        if s.outside_the_start(x, z).is_some_and(|e| e <= 4.0) { reason = "on start"; break 'g; }
-                        let y = ground(s, x, z);
-                        (lo, hi) = (lo.min(y), hi.max(y));
-                    }
-                }
-                if reason.is_empty() && hi - lo > PAD_FALL_M { reason = "falls"; }
-                if reason.is_empty() { reason = "fits (road unchecked)"; println!("  fits at a {a} g {g}, fall {:.1}", hi - lo); }
-                *why.entry(reason).or_default() += 1;
-            }
-        }
-        println!("{why:?}");
-        let (w, h) = (p.terrain.size_x as u32, p.terrain.size_z as u32);
-        let mut img = image::RgbImage::new(w, h);
-        let (glo, ghi) = s.heights.iter().fold((f32::MAX, f32::MIN), |a, &v| (a.0.min(v), a.1.max(v)));
-        for py in 0..h {
-            for px in 0..w {
-                let (x, z) = (px as f32 + 0.5, (h - py) as f32 - 0.5);
-                let shade = ((ground(s, x, z) - glo) / (ghi - glo).max(1.0) * 80.0) as u8;
-                let c = if dist(s, x, z) < half { [150, 110, 70] } else if s.outside_the_start(x, z).is_some_and(|e| e < 0.0) { [190, 140, 90] } else if dist(s, x, z) > half + PAD_CLEAR_M && s.outside_the_start(x, z).is_none_or(|e| e > 4.0) { [60 + shade, 150, 60] } else { [30, 70, 30] };
-                img.put_pixel(px, py, image::Rgb(c));
-            }
-        }
-        for &(long, lat) in &l.stalls {
-            let q = at(long);
-            let (rx, rz) = crate::trackprog::right_vector(q.heading);
-            let (x, z) = (q.x + rx * lat, q.z + rz * lat);
-            if x >= 0.0 && z >= 0.0 && (x as u32) < w && (z as u32) < h {
-                img.put_pixel(x as u32, h - 1 - z as u32, image::Rgb([255, 255, 255]));
-            }
-        }
-        img.save(out.join("northgate_room.png")).unwrap();
-    }
-
-    /// Northgate from above round the pits, the paddock, the road and the start, textured.
+    /// Northgate from above: the paddock, its painted road to the gate row, and the start.
     ///
     /// ```text
-    /// FROST_PROPS=library12.fpl FROST_VENUE_PNG=venue.png cargo test --bins -- --ignored --nocapture draw_the_venue
+    /// FROST_PROPS=library13.fpl FROST_VENUE_PNG=venue.png cargo test --bins -- --ignored --nocapture draw_the_venue
     /// ```
     #[test]
     #[ignore = "draws the venue — set FROST_PROPS and FROST_VENUE_PNG"]
@@ -1486,50 +2236,47 @@ mod tests {
         let path = std::env::var("FROST_VENUE_PNG").expect("set FROST_VENUE_PNG");
         let (p, s) = northgate();
         let sc = crate::trackscenery::build(p, s);
+        let pl = plan(p, s);
         let lib = crate::trackprops::load();
         let v = build(p, s, lib.as_ref());
         let pad = v.paddock.as_ref().expect("a paddock");
+        let paint = paint(&pl).unwrap();
         let half = p.width * 0.5;
-        let l = lane(p);
-        let st = p.stations(0.5);
-        let mut pts: Vec<(f32, f32)> = v.road.clone();
+        let (g, ph) = gate_row(s).expect("a gate row");
+        let mut pts: Vec<(f32, f32)> = pl.road.clone();
         for (a, b) in [(-1.0f32, -1.0f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
             pts.push(pad.area.at(a * (pad.area.hx + 10.0), b * (pad.area.hz + 10.0)));
         }
-        if let Some(w) = v.wall {
-            pts.push(w.foot.at(-w.foot.hx - 10.0, -20.0));
-            pts.push(w.foot.at(w.foot.hx + 10.0, 60.0));
-        }
-        for &(long, lat) in &l.stalls {
-            let q = st[((long / 0.5) as usize).min(st.len() - 1)];
-            let (rx, rz) = crate::trackprog::right_vector(q.heading);
-            pts.push((q.x - rx * lat, q.z - rz * lat));
+        let (fx, fz) = crate::trackprog::heading_vector(g.heading);
+        let (rx, rz) = crate::trackprog::right_vector(g.heading);
+        for (a, c) in [(-25.0f32, -ph - 12.0), (-25.0, ph + 12.0), (20.0, -ph - 12.0), (20.0, ph + 12.0)] {
+            pts.push((g.x + fx * a + rx * c, g.z + fz * a + rz * c));
         }
         let (x0, x1) = (pts.iter().map(|q| q.0).fold(f32::MAX, f32::min), pts.iter().map(|q| q.0).fold(f32::MIN, f32::max));
         let (z0, z1) = (pts.iter().map(|q| q.1).fold(f32::MAX, f32::min), pts.iter().map(|q| q.1).fold(f32::MIN, f32::max));
         let ppm = (2400.0 / (x1 - x0).max(z1 - z0)).min(8.0);
         let (w, h) = (((x1 - x0) * ppm) as u32, ((z1 - z0) * ppm) as u32);
         let mut img = image::RgbImage::new(w, h);
+        let mix = |a: [f32; 3], b: [f32; 3], t: f32| -> [f32; 3] { std::array::from_fn(|k| a[k] + (b[k] - a[k]) * t.clamp(0.0, 1.0)) };
         for py in 0..h {
             for px in 0..w {
                 let (x, z) = (x0 + px as f32 / ppm, z1 - py as f32 / ppm);
-                let pit = l.stalls.iter().any(|&(long, _)| {
-                    let q = st[((long / 0.5) as usize).min(st.len() - 1)];
-                    let (rx, rz) = crate::trackprog::right_vector(q.heading);
-                    let out = ((x - q.x) * rx + (z - q.z) * rz) * l.side;
-                    let along = (x - q.x) * q.heading.sin() + (z - q.z) * q.heading.cos();
-                    (out - l.lane).abs() <= LANE_HALF_M && along.abs() <= STALL_GAP_M * 0.5
-                });
-                let c = if dist(s, x, z) < half { [150, 110, 70] } else if s.outside_the_start(x, z).is_some_and(|e| e < 0.0) { [170, 125, 80] } else if pit { [205, 190, 150] } else { [72, 108, 58] };
-                img.put_pixel(px, py, image::Rgb(c));
+                let c = if dist(s, x, z) < half {
+                    [150.0, 110.0, 70.0]
+                } else if s.outside_the_start(x, z).is_some_and(|e| e < 0.0) {
+                    [170.0, 125.0, 80.0]
+                } else {
+                    let (r, l, lo, f) = paint.at(x, z);
+                    let c = mix([72.0, 108.0, 58.0], [178.0, 140.0, 104.0], r.max(f * 0.6));
+                    let c = mix(c, [118.0, 88.0, 60.0], l * 0.8);
+                    mix(c, [198.0, 164.0, 124.0], lo * 0.5)
+                };
+                img.put_pixel(px, py, image::Rgb([c[0] as u8, c[1] as u8, c[2] as u8]));
             }
         }
         let mut zb = vec![f32::MAX; (w * h) as usize];
         let proj = |x: f32, y: f32, z: f32| ((x - x0) * ppm, (z1 - z) * ppm, -y);
-        // The road first, so what stands on it draws over it.
-        let mut order: Vec<&(Mesh, Texture)> = sc.models.iter().collect();
-        order.sort_by_key(|m| m.1.name != "paddock_road_c");
-        for (m, t) in order {
+        for (m, t) in &sc.models {
             let (lo, hi) = m.bounds();
             if hi[0] < x0 || lo[0] > x1 || hi[2] < z0 || lo[2] > z1 {
                 continue;
@@ -1537,19 +2284,6 @@ mod tests {
             let tex = (t.width > 0).then(|| (t.width, t.height, t.rgba.as_slice()));
             pic::raster(&mut img, &mut zb, m, tex, [255, 0, 255], &proj);
         }
-        for &(long, lat) in &l.stalls {
-            let q = st[((long / 0.5) as usize).min(st.len() - 1)];
-            let (rx, rz) = crate::trackprog::right_vector(q.heading);
-            let (cx, cy) = ((q.x + rx * lat - x0) * ppm, (z1 - q.z - rz * lat) * ppm);
-            for a in 0..64 {
-                let t = a as f32 / 64.0 * std::f32::consts::TAU;
-                let (px, py) = (cx + t.cos() * 1.2 * ppm, cy + t.sin() * 1.2 * ppm);
-                if px >= 0.0 && py >= 0.0 && (px as u32) < w && (py as u32) < h {
-                    img.put_pixel(px as u32, py as u32, image::Rgb([255, 255, 255]));
-                }
-            }
-        }
-        // Thin from above, so drawn over: the fence runs, the wall's line, each team's name.
         let dot = |img: &mut image::RgbImage, x: f32, z: f32, r: i32, c: [u8; 3]| {
             let (px, py) = (((x - x0) * ppm) as i32, ((z1 - z) * ppm) as i32);
             for dy in -r..=r {
@@ -1568,78 +2302,31 @@ mod tests {
                 dot(&mut img, cx + d.0 * k as f32 * 0.25, cz + d.1 * k as f32 * 0.25, 1, [40, 40, 44]);
             }
         }
-        if let Some(wl) = v.wall {
-            for k in 0..=(wl.foot.hx * 8.0) as i32 {
-                let (x, z) = wl.foot.at(-wl.foot.hx + k as f32 * 0.25, 0.0);
-                dot(&mut img, x, z, 2, [20, 20, 20]);
+        // The spawns: a ring and a tick the way the bike faces.
+        for sp in &pl.spawns {
+            let (hx, hz) = crate::trackprog::heading_vector(sp.heading);
+            for a in 0..32 {
+                let t = a as f32 / 32.0 * std::f32::consts::TAU;
+                dot(&mut img, sp.x + t.cos() * 0.8, sp.z + t.sin() * 0.8, 0, [255, 255, 255]);
             }
-            let (x, z) = wl.foot.at(-6.0, -6.0);
+            for k in 0..6 {
+                dot(&mut img, sp.x + hx * k as f32 * 0.25, sp.z + hz * k as f32 * 0.25, 0, [255, 255, 255]);
+            }
+        }
+        if let Some(wl) = v.wall {
+            let (x, z) = wl.foot.at(-6.0, -7.0);
             pic::label(&mut img, "SPONSOR WALL", 22.0, (x - x0) * ppm, (z1 - z) * ppm, [255, 255, 255]);
         }
+        pic::label(&mut img, "GATES", 22.0, (g.x - x0) * ppm - 25.0, (z1 - g.z) * ppm, [255, 255, 255]);
         for sp in &pad.spots {
             pic::label(&mut img, sp.brand, 20.0, (sp.board.0 - x0) * ppm - 20.0, (z1 - sp.board.1) * ppm, [255, 255, 255]);
         }
         img.save(&path).unwrap();
         println!("VENUE picture {path}: {w}x{h} at {ppm:.1} px/m");
-        // And the wall as the gate row sees it.
-        if let (Some(wl), Some(spur)) = (v.wall, s.spur.as_ref()) {
-            let g = spur.stations[((spur.gate_at() / 0.5) as usize).min(spur.stations.len() - 1)];
-            let (fx, fz) = crate::trackprog::heading_vector(g.heading);
-            let (rx, rz) = crate::trackprog::right_vector(g.heading);
-            let base = ground(s, wl.foot.c.0, wl.foot.c.1);
-            let (ew, eh, eppm) = (70.0f32, 12.0f32, 16.0f32);
-            let (iw, ih) = ((ew * eppm) as u32, (eh * eppm) as u32);
-            let proj = |x: f32, y: f32, z: f32| {
-                let (dx, dz) = (x - g.x, z - g.z);
-                let (a, c) = (dx * fx + dz * fz, dx * rx + dz * rz);
-                if a >= 2.0 {
-                    return (-1e6, -1e6, f32::MAX);
-                }
-                ((ew * 0.5 - c) * eppm, ih as f32 - (y - base + 2.0) * eppm, -a)
-            };
-            // Everything the track places there, and the venue's own pieces alone.
-            let venue_models: Vec<(Mesh, Texture)> = v.kinds.iter().map(|k| (k.1.clone(), k.2.clone())).collect();
-            for (suffix, models) in [("_wall.png", &sc.models), ("_wall_alone.png", &venue_models)] {
-                let mut e = image::RgbImage::from_pixel(iw, ih, image::Rgb([150, 185, 215]));
-                let mut zb = vec![f32::MAX; (iw * ih) as usize];
-                for (m, t) in models {
-                    let (lo, hi) = m.bounds();
-                    if !wl.foot.covers((lo[0] + hi[0]) * 0.5, (lo[2] + hi[2]) * 0.5, 80.0) {
-                        continue;
-                    }
-                    let tex = (t.width > 0).then(|| (t.width, t.height, t.rgba.as_slice()));
-                    pic::raster(&mut e, &mut zb, m, tex, [255, 0, 255], &proj);
-                }
-                let wall_path = path.replace(".png", suffix);
-                e.save(&wall_path).unwrap();
-                println!("WALL picture {wall_path}");
-            }
-            // Everything the track stands in the wall's footprint, and how far from the row.
-            for (m, t) in &sc.models {
-                let near: Vec<f32> = m
-                    .positions
-                    .chunks_exact(3)
-                    .filter(|q| wl.foot.covers(q[0], q[2], 1.0))
-                    .map(|q| (q[0] - g.x) * fx + (q[2] - g.z) * fz)
-                    .collect();
-                if !near.is_empty() {
-                    let (lo, hi) = near.iter().fold((f32::MAX, f32::MIN), |a, &x| (a.0.min(x), a.1.max(x)));
-                    println!("  in the wall's footprint: {:24} {:6} of {:6} verts, {lo:6.2}..{hi:6.2} m from the row", t.name, near.len(), m.vertex_count());
-                }
-            }
-            // Which part stands nearest the gates: the print should.
-            for k in v.kinds.iter().filter(|k| k.0.starts_with("sponsor_wall")) {
-                let n = k.1.vertex_count().max(1) as f32;
-                let a = k.1.positions.chunks_exact(3).map(|q| (q[0] - g.x) * fx + (q[2] - g.z) * fz).sum::<f32>() / n;
-                let nf = k.1.normals.chunks_exact(3).map(|q| q[0] * fx + q[2] * fz).sum::<f32>() / n;
-                println!("  {:20} mean {a:6.2} m from the gate row, normal toward the gates {nf:5.2}", k.0);
-            }
-        }
         println!("tally {:?}", sc.tally.iter().filter(|(k, _)| k.starts_with("paddock") || k.starts_with("sponsor") || k.starts_with("venue") || k.starts_with("pit")).collect::<Vec<_>>());
-        println!("paddock {:.0} x {:.0} m", pad.area.hx * 2.0, pad.area.hz * 2.0);
-        for sp in &pad.spots {
-            println!("  {:10} rig at ({:.0}, {:.0})", sp.brand, sp.rig.c.0, sp.rig.c.1);
-        }
+        println!("paddock {:.0} x {:.0} m, road {} points, {} spawns", pad.area.hx * 2.0, pad.area.hz * 2.0, pl.road.len(), pl.spawns.len());
+        let lats: Vec<f32> = pl.spawns.iter().map(|s| s.lat).collect();
+        println!("spawn lat {:.1}..{:.1}, long {:.1}..{:.1}", lats.iter().cloned().fold(f32::MAX, f32::min), lats.iter().cloned().fold(f32::MIN, f32::max), pl.spawns.iter().map(|s| s.long).fold(f32::MAX, f32::min), pl.spawns.iter().map(|s| s.long).fold(f32::MIN, f32::max));
     }
 }
 
@@ -1691,6 +2378,144 @@ mod probe {
                 }
                 img.save(out.join(format!("wall_{}_{label}.png", d.stem))).unwrap();
             }
+        }
+    }
+
+    /// Indiana's whole rigs (touching `semi_trailers_c` pieces) and pop-ups (an `easy_ups` roof
+    /// and whatever stands under it), numbered in a contact sheet, side and top.
+    ///
+    /// ```text
+    /// FROST_TRACK=indiana.pkz FROST_OUT=dir cargo test --bins -- --ignored --nocapture donor_rigs_and_canopies
+    /// ```
+    #[test]
+    #[ignore = "reads a donor — set FROST_TRACK and FROST_OUT"]
+    fn donor_rigs_and_canopies() {
+        let out = std::path::PathBuf::from(std::env::var("FROST_OUT").expect("set FROST_OUT"));
+        let d = crate::trackprops::open(&std::path::PathBuf::from(std::env::var("FROST_TRACK").expect("set FROST_TRACK"))).unwrap();
+        let m = &d.mesh;
+        let tex = crate::map::textures(&d.map_bytes, 1024);
+        let sheet_of = |i: usize| d.sheets.get(m.objects[i].material as usize).map(|s| s.0.to_ascii_lowercase()).unwrap_or_default();
+        let mut picks: Vec<(String, Vec<(u32, Mesh)>)> = Vec::new();
+        for g in touching(&d, "semi_trailers_c", 0.5) {
+            let (lo, hi) = group_box(m, &g);
+            let c = ((lo[0] + hi[0]) * 0.5, lo[1], (lo[2] + hi[2]) * 0.5);
+            let mesh = aligned(&lift_islands(m, &g, c));
+            let (a, b) = mesh.bounds();
+            let (l, w, h) = (b[0] - a[0], b[2] - a[2], b[1] - a[1]);
+            if (12.0..=26.0).contains(&l) && w <= 5.0 && h >= 2.5 {
+                picks.push((format!("rig {l:.1}x{w:.1}x{h:.1} {} isl", g.len()), vec![(m.objects[g[0]].material, mesh)]));
+            }
+        }
+        for g in touching(&d, "easy_ups_roof_c", 0.3) {
+            let (lo, hi) = group_box(m, &g);
+            // Everything standing inside the roof's footprint and under it.
+            let under: Vec<usize> = (0..m.objects.len())
+                .filter(|&i| {
+                    let o = &m.objects[i];
+                    !g.contains(&i) && o.min[0] >= lo[0] - 0.4 && o.max[0] <= hi[0] + 0.4 && o.min[2] >= lo[2] - 0.4 && o.max[2] <= hi[2] + 0.4 && o.max[1] <= hi[1] + 0.2 && o.min[1] >= lo[1] - 4.0
+                })
+                .collect();
+            let foot = under.iter().map(|&i| m.objects[i].min[1]).fold(lo[1], f32::min);
+            let c = ((lo[0] + hi[0]) * 0.5, foot, (lo[2] + hi[2]) * 0.5);
+            let mut parts = vec![(m.objects[g[0]].material, lift_islands(m, &g, c))];
+            let mut sheets: std::collections::BTreeMap<u32, Vec<usize>> = Default::default();
+            for &i in &under {
+                sheets.entry(m.objects[i].material).or_default().push(i);
+            }
+            let names: Vec<String> = sheets.values().map(|v| format!("{}x{}", sheet_of(v[0]), v.len())).collect();
+            for (mat, isl) in sheets {
+                parts.push((mat, lift_islands(m, &isl, c)));
+            }
+            picks.push((format!("popup {:.1}x{:.1} h{:.1} {}", hi[0] - lo[0], hi[2] - lo[2], hi[1] - foot, names.join(",")), parts));
+        }
+        let (cw, ch, ppm, cols) = (360u32, 220u32, 12.0f32, 5u32);
+        let rows = (picks.len() as u32).div_ceil(cols).max(1);
+        let mut img = image::RgbImage::from_pixel(cw * cols, ch * rows, image::Rgb([60, 70, 80]));
+        let mut zb = vec![f32::MAX; (cw * cols * ch * rows) as usize];
+        for (n, (label, parts)) in picks.iter().enumerate() {
+            let (ox, oy) = ((n as u32 % cols * cw) as f32, (n as u32 / cols * ch) as f32);
+            for (mat, mesh) in parts {
+                let t = tex.iter().find(|t| t.material == *mat).map(|t| (t.width, t.height, t.rgba.as_slice()));
+                pic::raster(&mut img, &mut zb, mesh, t, [255, 0, 255], &|x, y, z| (ox + 180.0 + x * ppm, oy + 110.0 - y * ppm, z));
+                pic::raster(&mut img, &mut zb, mesh, t, [255, 0, 255], &|x, y, z| (ox + 180.0 + x * ppm, oy + 160.0 + z * ppm, -y));
+            }
+            pic::label(&mut img, &format!("{n} {label}"), 14.0, ox + 4.0, oy + 14.0, [255, 255, 255]);
+            println!("{n:3} {label}");
+        }
+        img.save(out.join("donor_rigs_popups.png")).unwrap();
+    }
+
+    /// Indiana's trailers and what stands against their ends: which sheet a cab is on.
+    #[test]
+    #[ignore = "reads a donor — set FROST_TRACK and FROST_OUT"]
+    fn donor_rig_parts() {
+        let out = std::path::PathBuf::from(std::env::var("FROST_OUT").expect("set FROST_OUT"));
+        let d = crate::trackprops::open(&std::path::PathBuf::from(std::env::var("FROST_TRACK").expect("set FROST_TRACK"))).unwrap();
+        let m = &d.mesh;
+        let tex = crate::map::textures(&d.map_bytes, 1024);
+        let sheet_of = |i: usize| d.sheets.get(m.objects[i].material as usize).map(|s| s.0.to_ascii_lowercase()).unwrap_or_default();
+        let mut picks: Vec<(String, Vec<(u32, Mesh)>)> = Vec::new();
+        for g in touching(&d, "semi_trailers_c", 0.5) {
+            let (lo, hi) = group_box(m, &g);
+            let (l, w, h) = ((hi[0] - lo[0]).max(hi[2] - lo[2]), (hi[0] - lo[0]).min(hi[2] - lo[2]), hi[1] - lo[1]);
+            if l < 8.0 || h < 2.5 {
+                continue;
+            }
+            // Pieces of any other sheet standing within 1.5 m of the group's box.
+            let near: Vec<usize> = (0..m.objects.len())
+                .filter(|&i| {
+                    let o = &m.objects[i];
+                    !g.contains(&i) && (o.max[1] - o.min[1]) > 0.3 && (0..3).all(|k| o.min[k] <= hi[k] + 1.5 && o.max[k] >= lo[k] - 1.5)
+                })
+                .collect();
+            let mut by: std::collections::BTreeMap<String, (u32, Vec<usize>)> = Default::default();
+            for &i in &near {
+                by.entry(sheet_of(i)).or_insert((m.objects[i].material, vec![])).1.push(i);
+            }
+            let c = ((lo[0] + hi[0]) * 0.5, lo[1], (lo[2] + hi[2]) * 0.5);
+            let mut parts = vec![(m.objects[g[0]].material, lift_islands(m, &g, c))];
+            let mut label = format!("{l:.1}x{w:.1}x{h:.1} {}isl", g.len());
+            for (s, (mat, isl)) in &by {
+                let (a, b) = group_box(m, isl);
+                label.push_str(&format!(" {s}:{}({:.1}x{:.1}h{:.1})", isl.len(), b[0] - a[0], b[2] - a[2], b[1] - a[1]));
+                parts.push((*mat, lift_islands(m, isl, c)));
+            }
+            picks.push((label, parts));
+        }
+        let (cw, ch, ppm, cols) = (420u32, 260u32, 12.0f32, 4u32);
+        let rows = (picks.len() as u32).div_ceil(cols).max(1);
+        let mut img = image::RgbImage::from_pixel(cw * cols, ch * rows, image::Rgb([60, 70, 80]));
+        let mut zb = vec![f32::MAX; (cw * cols * ch * rows) as usize];
+        for (n, (label, parts)) in picks.iter().enumerate() {
+            let (ox, oy) = ((n as u32 % cols * cw) as f32, (n as u32 / cols * ch) as f32);
+            for (mat, mesh) in parts {
+                let t = tex.iter().find(|t| t.material == *mat).map(|t| (t.width, t.height, t.rgba.as_slice()));
+                pic::raster(&mut img, &mut zb, mesh, t, [255, 0, 255], &|x, y, z| (ox + 210.0 + x * ppm, oy + 120.0 - y * ppm, z));
+                pic::raster(&mut img, &mut zb, mesh, t, [255, 0, 255], &|x, y, z| (ox + 210.0 + x * ppm, oy + 190.0 + z * ppm, -y));
+            }
+            pic::label(&mut img, &format!("{n}"), 16.0, ox + 4.0, oy + 16.0, [255, 255, 255]);
+            println!("{n:3} {label}");
+        }
+        img.save(out.join("donor_rig_parts.png")).unwrap();
+    }
+
+    /// Each donor's `.rdf` pit block: how its spawn stalls are written, and how far off the lap.
+    #[test]
+    #[ignore = "reads donor tracks — set FROST_DONORS"]
+    fn donor_pit_blocks() {
+        for path in std::env::var("FROST_DONORS").expect("set FROST_DONORS").split(',').filter(|p| !p.is_empty()) {
+            let path = std::path::PathBuf::from(path);
+            let names = crate::track::entry_names(&path).unwrap();
+            let Some(rdf) = names.iter().find(|n| n.to_ascii_lowercase().ends_with(".rdf")) else { continue };
+            let text = String::from_utf8_lossy(&crate::track::read_entry(&path, rdf).unwrap()).replace('\r', "");
+            let Some(a) = text.find("pit_lane") else { continue };
+            let block = &text[a..text[a..].find("pit_board").map_or(text.len(), |b| a + b)];
+            let head: Vec<&str> = block.lines().map(str::trim).filter(|l| l.starts_with("num") || l.starts_with("start") && !l.starts_with("start_stall")).collect();
+            let nums = |k: &str| block.lines().filter_map(|l| l.trim().strip_prefix(k).and_then(|v| v.parse::<f32>().ok())).collect::<Vec<_>>();
+            let (longs, lats, angs) = (nums("long = "), nums("lat = "), nums("angle = "));
+            let lat_max = lats.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+            println!("\n{}: {head:?}", path.file_stem().unwrap().to_string_lossy());
+            println!("  {} stalls, long {:?}..{:?}, lat {:?}..{:?} (max |lat| {lat_max:.1}), angles {:?}", longs.len(), longs.first(), longs.last(), lats.iter().cloned().fold(f32::MAX, f32::min), lats.iter().cloned().fold(f32::MIN, f32::max), angs.iter().take(4).collect::<Vec<_>>());
         }
     }
 
@@ -1932,6 +2757,69 @@ mod probe {
         for (n, w, h, _) in &lib.sheets {
             println!("sheet {n} {w}x{h}");
         }
+    }
+
+    /// Add a donor's whole team rigs and one pop-up a colour to a baked library, and draw them.
+    ///
+    /// ```text
+    /// FROST_BASE=library12.fpl FROST_TRACK=indiana.pkz FROST_BAKE=library13.fpl FROST_OUT=dir \
+    ///   cargo test --bins -- --ignored --nocapture bake_the_paddock_in
+    /// ```
+    #[test]
+    #[ignore = "bakes a library — set FROST_BASE, FROST_TRACK, FROST_BAKE and FROST_OUT"]
+    fn bake_the_paddock_in() {
+        let base = std::fs::read(std::env::var("FROST_BASE").expect("set FROST_BASE")).unwrap();
+        let mut lib = crate::trackprops::PropLibrary::decode(&base).expect("the base reads");
+        let path = std::path::PathBuf::from(std::env::var("FROST_TRACK").expect("set FROST_TRACK"));
+        let d = crate::trackprops::open(&path).expect("opens");
+        // They wear the library's own copies of the donor's sheets, so it has to be that donor.
+        assert_eq!(d.stem, lib.donor, "the rigs must come from the library's own donor");
+        lib.props.retain(|p| !p.id.starts_with("team_"));
+        let tex = crate::map::textures(&d.map_bytes, 1024);
+        let rigs = lift_team_rigs(&d);
+        let popups = lift_popups(&d, &tex);
+        println!("{} team rigs, {} pop-up parts", rigs.len(), popups.len());
+        let added: Vec<crate::trackprops::Prop> = rigs.into_iter().chain(popups).collect();
+        // Drawn, side and top, before they go in.
+        let out = std::path::PathBuf::from(std::env::var("FROST_OUT").expect("set FROST_OUT"));
+        let groups: Vec<Vec<&crate::trackprops::Prop>> = {
+            let mut g: Vec<Vec<&crate::trackprops::Prop>> = Vec::new();
+            for p in &added {
+                let key = p.id.trim_end_matches("_roof").trim_end_matches("_frame");
+                match g.iter_mut().find(|v| v[0].id.trim_end_matches("_roof").trim_end_matches("_frame") == key) {
+                    Some(v) => v.push(p),
+                    None => g.push(vec![p]),
+                }
+            }
+            g
+        };
+        let (cw, ch, ppm, cols) = (440u32, 300u32, 14.0f32, 4u32);
+        let rows = (groups.len() as u32).div_ceil(cols).max(1);
+        let mut img = image::RgbImage::from_pixel(cw * cols, ch * rows, image::Rgb([70, 80, 90]));
+        let mut zb = vec![f32::MAX; (cw * cols * ch * rows) as usize];
+        for (n, g) in groups.iter().enumerate() {
+            let (ox, oy) = ((n as u32 % cols * cw) as f32, (n as u32 / cols * ch) as f32);
+            for p in g {
+                let t = lib.sheets.iter().find(|s| s.0 == p.sheet).map(|s| (s.1, s.2, s.3.as_slice()));
+                pic::raster(&mut img, &mut zb, &p.mesh, t, [255, 0, 255], &|x, y, z| (ox + 220.0 + x * ppm, oy + 110.0 - y * ppm, z));
+                pic::raster(&mut img, &mut zb, &p.mesh, t, [255, 0, 255], &|x, y, z| (ox + 220.0 + x * ppm, oy + 215.0 + z * ppm, -y));
+            }
+            let (lo, hi) = g.iter().fold(([f32::MAX; 3], [f32::MIN; 3]), |acc, p| {
+                let (a, b) = p.mesh.bounds();
+                (std::array::from_fn(|k| acc.0[k].min(a[k])), std::array::from_fn(|k| acc.1[k].max(b[k])))
+            });
+            let name = g[0].id.trim_end_matches("_roof").trim_end_matches("_frame");
+            pic::label(&mut img, &format!("{name} {:.1}x{:.1}x{:.1}", hi[0] - lo[0], hi[2] - lo[2], hi[1] - lo[1]), 16.0, ox + 6.0, oy + 18.0, [255, 255, 255]);
+            println!("  {name}: {:.1} x {:.1} x {:.1} m, {} parts", hi[0] - lo[0], hi[2] - lo[2], hi[1] - lo[1], g.len());
+        }
+        img.save(out.join("paddock_picks.png")).unwrap();
+        lib.props.extend(added);
+        let bake = std::env::var("FROST_BAKE").expect("set FROST_BAKE");
+        let bytes = lib.encode();
+        std::fs::write(&bake, &bytes).unwrap();
+        let back = crate::trackprops::PropLibrary::decode(&std::fs::read(&bake).unwrap()).expect("reads back");
+        assert_eq!(back.props.len(), lib.props.len());
+        println!("{bake}: {} props, {} sheets, {:.1} MB", back.props.len(), back.sheets.len(), bytes.len() as f32 / 1_048_576.0);
     }
 
     /// Add a donor's sponsor wall to a baked library and write it out as a new one.

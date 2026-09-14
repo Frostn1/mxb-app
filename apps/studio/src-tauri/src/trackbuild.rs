@@ -712,8 +712,8 @@ mod build_one {
         if let Some(r) = std::env::var("FROST_ROUGH").ok().and_then(|v| v.parse::<f32>().ok()) {
             prog.terrain.roughness = r;
             prog.name = format!("{} ARL", prog.name);
-            // And bigger jumps: up to a quarter taller and longer on a raced build.
-            prog.bigger_jumps(1.0 + 0.25 * (r - 1.0).clamp(0.0, 1.0));
+            // And bigger jumps: up to a third taller and longer on a raced build.
+            prog.bigger_jumps(1.0 + 0.35 * (r - 1.0).clamp(0.0, 1.0));
         }
         println!("  {} on {:?}", prog.name, prog.terrain.surface);
         let prog = crate::tracksynth::with_fitted_budget(&prog).expect("a height budget");
