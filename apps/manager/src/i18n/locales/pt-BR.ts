@@ -134,6 +134,7 @@ export const ptBR: Translation = {
     "“{{name}}” sai da lista de motos deste perfil, junto com o visual salvo para ela. Nada instalado é apagado — se você pilotar essa moto de novo, o jogo a adiciona outra vez.",
   "presets.bikeForgotten": "“{{name}}” removida deste perfil.",
   "presets.forgetFailed": "Não foi possível remover essa moto",
+  "presets.openWindowsSecurity": "Abrir Segurança do Windows",
   "presets.namePlaceholder": "Nome do preset…",
   "presets.savePreset": "Salvar preset",
   "presets.saveChanges": "Salvar alterações",

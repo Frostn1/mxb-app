@@ -512,9 +512,7 @@ pub fn apply_loadout(
         }
     }
 
-    fs::write(&path, encode_ini(&doc.render(), was_utf8))
-        .with_context(|| format!("writing {}", path.display()))?;
-    Ok(())
+    write_profile_ini(&path, encode_ini(&doc.render(), was_utf8))
 }
 
 /// Drop every trace of one bike from a profile.
@@ -551,9 +549,28 @@ pub fn forget_bike(profiles_dir: &Path, profile: &str, bikeid: &str) -> anyhow::
         doc.set("info", "bikeid", &next);
     }
 
-    fs::write(&path, encode_ini(&doc.render(), was_utf8))
-        .with_context(|| format!("writing {}", path.display()))?;
-    Ok(())
+    write_profile_ini(&path, encode_ini(&doc.render(), was_utf8))
+}
+
+/// Write `profile.ini`, naming the likely culprit when Windows refuses.
+///
+/// Windows Security's Controlled folder access guards Documents: it lets the game write the
+/// file but blocks us, and a bare "Access is denied" says nothing about where to look.
+fn write_profile_ini(path: &Path, bytes: impl AsRef<[u8]>) -> anyhow::Result<()> {
+    fs::write(path, bytes).map_err(|e| profile_write_error(path, e))
+}
+
+fn profile_write_error(path: &Path, err: std::io::Error) -> anyhow::Error {
+    if cfg!(windows) && err.kind() == std::io::ErrorKind::PermissionDenied {
+        return anyhow::anyhow!(
+            "Windows blocked Frost's Mod Manager from changing {}. If Controlled folder access \
+             is on, open Windows Security → Virus & threat protection → Ransomware protection → \
+             Allow an app through Controlled folder access, and add Frost's Mod Manager. \
+             Antivirus can block it the same way.",
+            path.display()
+        );
+    }
+    anyhow::Error::new(err).context(format!("writing {}", path.display()))
 }
 
 fn store_path(dir: &Path) -> PathBuf {
@@ -708,6 +725,22 @@ pub fn import_code(dir: &Path, text: &str) -> anyhow::Result<Preset> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refused_profile_write_says_where_to_look() {
+        let path = Path::new("profiles/Frost/profile.ini");
+        let denied = format!(
+            "{:#}",
+            profile_write_error(path, std::io::ErrorKind::PermissionDenied.into())
+        );
+        assert!(denied.contains("profile.ini"));
+        assert_eq!(denied.contains("Controlled folder access"), cfg!(windows));
+
+        let missing =
+            format!("{:#}", profile_write_error(path, std::io::ErrorKind::NotFound.into()));
+        assert!(missing.starts_with("writing "));
+        assert!(!missing.contains("Controlled folder access"));
+    }
 
     const SAMPLE: &str = "\
 [info]

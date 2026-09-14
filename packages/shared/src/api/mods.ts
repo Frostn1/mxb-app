@@ -1119,6 +1119,11 @@ export function revealInExplorer(path: string): Promise<void> {
   return invoke<void>("reveal_in_explorer", { path });
 }
 
+/** Open Windows Security on Ransomware protection (Controlled folder access). */
+export function openRansomwareProtection(): Promise<void> {
+  return invoke<void>("open_ransomware_protection");
+}
+
 export interface LogFile {
   name: string;
   path: string;

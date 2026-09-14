@@ -131,6 +131,7 @@ export const it: Translation = {
     "“{{name}}” sparisce dall’elenco moto di questo profilo, insieme all’aspetto salvato per lei. Non viene eliminato nulla di installato: se torni a guidarla, il gioco la riaggiunge subito.",
   "presets.bikeForgotten": "“{{name}}” rimossa da questo profilo.",
   "presets.forgetFailed": "Impossibile rimuovere la moto",
+  "presets.openWindowsSecurity": "Apri Sicurezza di Windows",
   "presets.namePlaceholder": "Nome del preset…",
   "presets.savePreset": "Salva preset",
   "presets.saveChanges": "Salva modifiche",

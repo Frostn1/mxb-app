@@ -133,6 +133,7 @@ export const fr: Translation = {
     "« {{name}} » quitte la liste des motos de ce profil, avec le look enregistré pour elle. Rien d’installé n’est supprimé : si vous roulez de nouveau avec cette moto, le jeu la remet aussitôt.",
   "presets.bikeForgotten": "« {{name}} » retirée de ce profil.",
   "presets.forgetFailed": "Impossible de retirer cette moto",
+  "presets.openWindowsSecurity": "Ouvrir Sécurité Windows",
   "presets.namePlaceholder": "Nom du preset…",
   "presets.savePreset": "Enregistrer le preset",
   "presets.saveChanges": "Enregistrer les modifications",
