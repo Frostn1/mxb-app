@@ -609,6 +609,11 @@ pub fn read_sidecar_blob(bytes: &[u8]) -> Option<Vec<u8>> {
 }
 
 pub fn read_all(path: &Path) -> Result<Vec<(String, Vec<u8>)>> {
+    if crate::securesource::is_secured(path) {
+        let bytes = crate::securesource::open(path)
+            .with_context(|| format!("open secured {path:?}"))?;
+        return read_all_bytes(&bytes);
+    }
     if is_plain_zip(path) {
         let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
         let mut archive =
@@ -638,6 +643,11 @@ pub fn read_selected(
     path: &Path,
     keep: impl Fn(&str) -> bool + Copy,
 ) -> Result<Vec<(String, Vec<u8>)>> {
+    if crate::securesource::is_secured(path) {
+        let bytes = crate::securesource::open(path)
+            .with_context(|| format!("open secured {path:?}"))?;
+        return read_selected_bytes(&bytes, keep);
+    }
     if is_plain_zip(path) {
         let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
         let mut archive =
@@ -670,6 +680,11 @@ pub fn read_selected(
 /// the window sitting still while its preview art is decoded and rescaled. The name-collecting
 /// `keep` closure always returns `false`, so the archive is walked but nothing is read out.
 pub fn entry_names(path: &Path) -> Result<Vec<String>> {
+    if crate::securesource::is_secured(path) {
+        let bytes = crate::securesource::open(path)
+            .with_context(|| format!("open secured {path:?}"))?;
+        return entry_names_bytes(&bytes);
+    }
     if is_plain_zip(path) {
         let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
         let mut archive =
@@ -714,6 +729,60 @@ pub fn read_entry(path: &Path, file_name: &str) -> Result<Option<Vec<u8>>> {
     }
     #[cfg(not(sidecar))]
     bail!("unsupported .pkz (can't read {file_name}) for {path:?}");
+}
+
+/// Whether an in-memory buffer is a plain zip (local-file or end-of-central-directory magic).
+fn is_plain_zip_bytes(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"PK\x03\x04") || bytes.starts_with(b"PK\x05\x06")
+}
+
+/// [`read_selected`] over an archive already in memory — an inner `.pkz` decrypted from a
+/// `.mxbsecure` blob, say — so secured content can be read without its plaintext ever touching
+/// disk. Plain-zip and encrypted `KCOL` archives are both handled.
+pub fn read_selected_bytes(
+    bytes: &[u8],
+    keep: impl Fn(&str) -> bool + Copy,
+) -> Result<Vec<(String, Vec<u8>)>> {
+    if is_plain_zip_bytes(bytes) {
+        let mut archive =
+            zip::ZipArchive::new(std::io::Cursor::new(bytes)).context("open in-memory zip")?;
+        let mut out = Vec::new();
+        for idx in 0..archive.len() {
+            let mut e = archive.by_index(idx)?;
+            if !e.is_file() || !keep(e.name()) {
+                continue;
+            }
+            let name = e.name().replace('\\', "/");
+            let mut buf = Vec::with_capacity(e.size() as usize);
+            e.read_to_end(&mut buf)?;
+            out.push((name, buf));
+        }
+        return Ok(out);
+    }
+    #[cfg(sidecar)]
+    {
+        return Ok(crate::sidecar::decrypt_kcol_selected(bytes, keep)?
+            .into_iter()
+            .map(|e| (e.name.replace('\\', "/"), e.data))
+            .collect());
+    }
+    #[cfg(not(sidecar))]
+    bail!("unsupported archive (can't read from memory)");
+}
+
+/// [`read_all`] over an in-memory archive.
+pub fn read_all_bytes(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>> {
+    read_selected_bytes(bytes, |_| true)
+}
+
+/// [`entry_names`] over an in-memory archive: walks the directory without inflating payloads.
+pub fn entry_names_bytes(bytes: &[u8]) -> Result<Vec<String>> {
+    let names = std::cell::RefCell::new(Vec::new());
+    read_selected_bytes(bytes, |n| {
+        names.borrow_mut().push(n.replace('\\', "/"));
+        false
+    })?;
+    Ok(names.into_inner())
 }
 
 /// Resolve entry name under `out_dir`, dropping `..`/absolute (zip-slip guard).

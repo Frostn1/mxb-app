@@ -1068,6 +1068,8 @@ export const de: Translation = {
     "Deine installierten Mods. Sieh nach, was installiert ist, und entferne, was du nicht mehr willst.",
   "library.byAuthor": "von {{author}}",
   "library.locked": "Gesperrt — Inhalt kann nicht gelesen werden",
+  "library.securedLocked": "mxbsecure — gesperrt, zum Freischalten anmelden",
+  "library.securedUnlocked": "mxbsecure — freigeschaltet",
   "library.searchPlaceholder": "Installierte durchsuchen…",
   "library.sortFolder": "Nach Ordner",
   "library.sortRecent": "Zuletzt hinzugefügt",

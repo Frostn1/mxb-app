@@ -31,6 +31,7 @@ pub mod paint;
 pub mod paintwatch;
 pub mod pkz;
 pub mod scenery;
+pub mod securesource;
 pub mod texstore;
 pub mod track;
 pub mod trackstock;

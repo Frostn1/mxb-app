@@ -1060,6 +1060,8 @@ export const it: Translation = {
     "Le tue mod installate. Controlla cosa è installato e rimuovi ciò che non ti serve più.",
   "library.byAuthor": "di {{author}}",
   "library.locked": "Bloccato — il contenuto non è leggibile",
+  "library.securedLocked": "mxbsecure — bloccato, accedi per sbloccare",
+  "library.securedUnlocked": "mxbsecure — sbloccato",
   "library.searchPlaceholder": "Cerca tra le installate…",
   "library.sortFolder": "Per cartella",
   "library.sortRecent": "Aggiunte di recente",

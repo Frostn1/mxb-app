@@ -77,7 +77,13 @@ export function entryViewerProps(
   entries: LibraryEntry[],
   bikePreview = true,
 ): EntryViewerProps | null {
-  const isPaint = entry.kind === "loose" && /\.pnt$/i.test(entry.name);
+  // A locked secured file has no key on this account — there's nothing to render yet.
+  if (entry.secured && entry.locked) return null;
+  // A secured paint is packed, not a loose `.pnt`, so recognise it by its category. The viewer
+  // opens it in memory the same as an unlocked bike or gear model.
+  const isPaint =
+    (entry.kind === "loose" && /\.pnt$/i.test(entry.name)) ||
+    (!!entry.secured && entry.category in PAINT_WEARER);
   const viewable =
     entry.category === "bike" || RIDER_CATS.has(entry.category) || isPaint;
   if (!viewable) return null;

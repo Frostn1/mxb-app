@@ -396,6 +396,12 @@ pub struct LibraryEntry {
     pub kind: String,
     pub category: String,
     pub parent: Option<String>,
+    /// A `.mxbsecure` blob — protected content, listed like any mod.
+    #[serde(default)]
+    pub secured: bool,
+    /// A secured file with no key for the live account: shown, but not openable/viewable yet.
+    #[serde(default)]
+    pub locked: bool,
 }
 
 fn has_ext(p: &Path, ext: &str) -> bool {
@@ -403,6 +409,11 @@ fn has_ext(p: &Path, ext: &str) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case(ext))
         .unwrap_or(false)
+}
+
+/// A packed content file the library lists: a `.pkz`, or a `.mxbsecure` blob standing in for one.
+fn is_pkz_like(p: &Path) -> bool {
+    has_ext(p, "pkz") || crate::securesource::is_secured(p)
 }
 
 pub fn strip_ext(name: &str) -> String {
@@ -468,8 +479,11 @@ fn immediate_dirs(base: &Path) -> Vec<String> {
 
 fn make_entry(base: &Path, p: &Path, category: &str, parent: Option<String>) -> LibraryEntry {
     let is_dir = p.is_dir();
+    let secured = crate::securesource::is_secured(p);
     let kind = if is_dir {
         "folder"
+    } else if secured {
+        "mxbsecure"
     } else if has_ext(p, "pkz") {
         "pkz"
     } else {
@@ -494,6 +508,9 @@ fn make_entry(base: &Path, p: &Path, category: &str, parent: Option<String>) -> 
         kind: kind.to_string(),
         category: category.to_string(),
         parent,
+        secured,
+        // A secured file with no key for the live account can be shown but not opened.
+        locked: secured && !crate::securesource::is_unlocked(p),
     }
 }
 
@@ -525,7 +542,7 @@ fn collect_loose(
     if let Ok(rd) = fs::read_dir(dir) {
         for e in rd.flatten() {
             let p = e.path();
-            if p.is_file() && (has_ext(&p, "pnt") || has_ext(&p, "pkz")) {
+            if p.is_file() && (has_ext(&p, "pnt") || is_pkz_like(&p)) {
                 out.push(make_entry(base, &p, category, parent.map(str::to_string)));
             }
         }
@@ -536,7 +553,7 @@ fn collect_pkz_shallow(base: &Path, dir: &Path, category: &str, out: &mut Vec<Li
     if let Ok(rd) = fs::read_dir(dir) {
         for e in rd.flatten() {
             let p = e.path();
-            if p.is_file() && has_ext(&p, "pkz") {
+            if p.is_file() && is_pkz_like(&p) {
                 out.push(make_entry(base, &p, category, None));
             }
         }
@@ -571,7 +588,7 @@ fn scan_tracks(dir: &Path) -> Vec<LibraryEntry> {
                 out.push(make_entry(dir, p, "track", None));
                 walk.skip_current_dir();
             }
-        } else if entry.file_type().is_file() && has_ext(p, "pkz") {
+        } else if entry.file_type().is_file() && is_pkz_like(p) {
             out.push(make_entry(dir, p, "track", None));
         }
     }
@@ -650,7 +667,9 @@ fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
         }
         let p = entry.path();
         let is_pnt = has_ext(p, "pnt");
-        let is_pkz = has_ext(p, "pkz");
+        // A secured file stands in for whatever it packs: in a paints folder it's a paint, else a
+        // whole bike — same as a `.pkz`.
+        let is_pkz = is_pkz_like(p);
         if !is_pnt && !is_pkz {
             continue;
         }
@@ -707,7 +726,7 @@ fn scan_rider(dir: &Path, game: &GameProfile) -> Vec<LibraryEntry> {
             if let Ok(rd) = fs::read_dir(&abase) {
                 for e in rd.flatten() {
                     let p = e.path();
-                    if p.is_file() && has_ext(&p, "pnt") {
+                    if p.is_file() && (has_ext(&p, "pnt") || crate::securesource::is_secured(&p)) {
                         out.push(make_entry(dir, &p, paint_cat, None));
                     }
                 }
@@ -739,7 +758,7 @@ fn scan_rider(dir: &Path, game: &GameProfile) -> Vec<LibraryEntry> {
 fn scan_generic(dir: &Path) -> Vec<LibraryEntry> {
     let mut out = Vec::new();
     for entry in linkwalk::walk(dir).into_iter().filter_map(|e| e.ok()) {
-        if entry.file_type().is_file() && has_ext(entry.path(), "pkz") {
+        if entry.file_type().is_file() && is_pkz_like(entry.path()) {
             out.push(make_entry(dir, entry.path(), "misc", None));
         }
     }

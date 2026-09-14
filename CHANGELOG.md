@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- Secured (`.mxbsecure`) files now show in the Library like any other mod — as their real type
+  (track, bike, paint, gear), with a badge showing whether they're unlocked or still locked. An
+  unlocked bike, paint or gear model opens in the 3D viewer too: it's decrypted **only in memory**
+  to render on screen, so the protected source files are never written anywhere they could be
+  copied.
+
 ### Changed
 - Secured content is harder to pull apart, and its key is tied more tightly to your PC. If a key
   needs refreshing, the app does it for you the next time you unlock — nothing to redo.
