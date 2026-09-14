@@ -183,23 +183,24 @@ jobs:
       - name: Check credentials
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          missing=
-          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
-          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
-          if [ -n "$missing" ]; then
-            echo "::error::Missing repository secret(s):$missing. Add them under"\
-                 "Settings -> Environments -> production. The token needs the"\
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is not set. Add it as a repository secret,"\
+                 "or under Settings -> Environments -> production. It needs the"\
                  "'Edit Cloudflare Workers' template."
             exit 1
           fi
 
+      # The account id is optional: a token scoped to one account tells wrangler which, and
+      # this repository is public, so the id is not written into it. Set the secret only if
+      # the token can reach more than one account.
       - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx wrangler deploy
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$CF_ACCOUNT" ]; then export CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT"; fi
+          npx wrangler deploy
 
   bootstrap-script:
     # The one part of this repo that runs somewhere nobody can watch.
