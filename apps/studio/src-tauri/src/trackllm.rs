@@ -181,7 +181,7 @@ struct Rhythm {
 const LANDS_ON_THE_FACE: f32 = 0.25;
 
 fn rhythm(f: &Feature, speed: &crate::trackspeed::Speed) -> Option<Rhythm> {
-    let Feature::Double { at, height, gap, lip } = *f else {
+    let Feature::Double { at, height, gap, lip, .. } = *f else {
         return None;
     };
     let faces = crate::trackprog::double_faces(height, lip);
@@ -522,7 +522,10 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
                 // No gap clears from here: a tabletop of the same ground, landed on either way.
                 shrunk.push(format!("{at:.0} m: a {gap:.0} m gap no run-up clears becomes a tabletop"));
                 let length = f.length();
-                *f = crate::trackprog::Feature::Tabletop { at, length, height, lip: 0.0 };
+                // If this double was the named finish, the tabletop it becomes still is: the
+                // rider chose this spot on the lap, not this shape of jump.
+                let finish = f.is_finish();
+                *f = crate::trackprog::Feature::Tabletop { at, length, height, lip: 0.0, finish };
                 continue;
             }
             shrunk.push(format!("{at:.0} m: {gap:.0} m gap becomes {want:.0}"));
@@ -623,6 +626,10 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
                 length,
                 height,
                 lip: crate::trackprog::FINISH_FACE_M,
+                // Left untagged on purpose. This is the automatic placement, and it should
+                // keep being found by measurement — tagging is what a person does to overrule
+                // it, and a tag nobody asked for is one they would have to find and undo.
+                finish: false,
             });
             prog.features.sort_by(|a, b| a.at().total_cmp(&b.at()));
             done.push(format!(
@@ -1350,8 +1357,8 @@ mod tests {
         // names to go unchecked.
         use crate::trackprog::{Feature, ShapePoint};
         let one_of_each = [
-            Feature::Tabletop { at: 0.0, length: 30.0, height: 2.0, lip: 0.0 },
-            Feature::Double { at: 0.0, height: 1.0, gap: 3.0, lip: 5.0 },
+            Feature::Tabletop { at: 0.0, length: 30.0, height: 2.0, lip: 0.0, finish: false },
+            Feature::Double { at: 0.0, height: 1.0, gap: 3.0, lip: 5.0, finish: false },
             Feature::Roller { at: 0.0, length: 12.0, height: 0.8 },
             Feature::Whoops { at: 0.0, count: 6, spacing: 4.0, height: 0.6 },
             Feature::StepUp { at: 0.0, length: 25.0, height: 1.5 },
@@ -1492,6 +1499,32 @@ mod tests {
             problems.iter().any(|s| s.contains("berm at 60 m is on a straight")),
             "{problems:?}"
         );
+    }
+
+    #[test]
+    fn a_named_jump_is_the_finish_whatever_its_size_or_place() {
+        // Small, and deliberately nowhere near the window the automatic placement looks in.
+        // It is the finish because someone said so, and that is the whole of the rule.
+        let named = tweaked(|p| {
+            p.features.push(Feature::Tabletop {
+                at: p.lap_length() * 0.5,
+                length: 14.0,
+                height: 0.9,
+                lip: 0.0,
+                finish: true,
+            });
+        });
+        let picked = named.finish_jump().expect("a named jump is the finish");
+        assert!(picked.is_finish(), "the named one was not picked: {picked:?}");
+        assert!((picked.height() - 0.9).abs() < 0.001, "{picked:?}");
+    }
+
+    #[test]
+    fn nothing_named_still_finds_the_finish_by_measuring() {
+        // The automatic path is untouched: an untagged program behaves exactly as before.
+        let p = tweaked(|_| {});
+        let found = p.finish_jump().expect("the worked example ends on a jump");
+        assert!(!found.is_finish(), "the example should not be tagged: {found:?}");
     }
 
     #[test]
@@ -1693,7 +1726,7 @@ mod tests {
         // twenty-four metre gap wants far more than that.
         let hairpin_exit = 250.0 + std::f32::consts::PI * 10.0 + 5.0;
         let mut p = hairpin_then_straight();
-        p.features = vec![Feature::Double { at: hairpin_exit, height: 2.5, gap: 24.0, lip: 10.0 }];
+        p.features = vec![Feature::Double { at: hairpin_exit, height: 2.5, gap: 24.0, lip: 10.0, finish: false }];
         let complaint = review(&p)
             .problems
             .into_iter()
@@ -1705,7 +1738,7 @@ mod tests {
         let mut ok = hairpin_then_straight();
         // Longer faces carry the landing's sweet spot further out, so a 16 m gap wants more air
         // than the straight gives; ten is still a big double down it.
-        ok.features = vec![Feature::Double { at: 150.0, height: 2.5, gap: 10.0, lip: 10.0 }];
+        ok.features = vec![Feature::Double { at: 150.0, height: 2.5, gap: 10.0, lip: 10.0, finish: false }];
         assert!(
             !review(&ok).problems.iter().any(|c| c.contains("cannot be cleared")),
             "{:?}",
@@ -1721,7 +1754,7 @@ mod tests {
         // one becomes a tabletop instead.
         let hairpin_exit = 250.0 + std::f32::consts::PI * 10.0 + 25.0;
         let mut p = hairpin_then_straight();
-        p.features = vec![Feature::Double { at: hairpin_exit, height: 2.5, gap: 24.0, lip: 10.0 }];
+        p.features = vec![Feature::Double { at: hairpin_exit, height: 2.5, gap: 24.0, lip: 10.0, finish: false }];
         let done = repair(&mut p);
         assert!(done.iter().any(|d| d.contains("shrank")), "{done:?}");
         // By kind rather than by index: the lap gains a finish jump on its main straight, and

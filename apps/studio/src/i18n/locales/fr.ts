@@ -366,6 +366,8 @@ export const fr: Translation = {
   "track.stepWrites": "Ses chiffres passent directement dans le tour.",
   "track.pickAStep": "Choisis une étape à gauche, ou sur le plan, pour changer ses chiffres.",
   "track.removeStep": "Retirer cette étape",
+  "track.finishLine": "Ligne d'arrivée",
+  "track.finishLineHint": "Le tour se termine sur ce saut. Sans indication, le saut le plus haut de la ligne droite de départ est utilisé.",
   "track.startOver": "Recommencer",
   "track.briefTitle": "Décris un tour",
   "track.elevation": "Altimétrie",

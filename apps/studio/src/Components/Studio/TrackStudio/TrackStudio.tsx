@@ -427,6 +427,24 @@ export default function TrackStudio() {
     void settle({ ...program, features });
   }
 
+  /**
+   * Name this jump the finish, or stop it being one.
+   *
+   * Exclusive, and cleared on every other jump rather than only set here: two named finishes
+   * is a question with no answer, and leaving it to whichever the synthesiser met first would
+   * make the second tag look ignored rather than refused.
+   */
+  function setFinish(index: number, on: boolean) {
+    if (!program) return;
+    setTouched(true);
+    const features = program.features.map((f, i) =>
+      f.kind === "tabletop" || f.kind === "double"
+        ? ({ ...f, finish: on && i === index } as TrackFeature)
+        : f,
+    );
+    void settle({ ...program, features });
+  }
+
   function editSegment(index: number, patch: Partial<TrackSegment>) {
     if (!program) return;
     setTouched(true);
@@ -1223,6 +1241,21 @@ export default function TrackStudio() {
                     />
                   ))}
                 </div>
+                {selected.kind === "feature" &&
+                  (selected.feature.kind === "tabletop" || selected.feature.kind === "double") && (
+                    <label className="mt-4 flex cursor-default items-start justify-between gap-3">
+                      <span className="text-[12px]">
+                        {t("track.finishLine")}
+                        <span className="mt-0.5 block text-[10.5px] leading-snug text-faint">
+                          {t("track.finishLineHint")}
+                        </span>
+                      </span>
+                      <Switch
+                        checked={selected.feature.finish === true}
+                        onCheckedChange={(on) => setFinish(selected.index, on)}
+                      />
+                    </label>
+                  )}
                 <button
                   onClick={() => {
                     if (selected.kind === "feature") removeFeature(selected.index);

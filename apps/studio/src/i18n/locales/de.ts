@@ -366,6 +366,8 @@ export const de: Translation = {
   "track.stepWrites": "Seine Zahlen gehen direkt in die Runde.",
   "track.pickAStep": "Wähle links oder auf dem Plan einen Schritt, um seine Zahlen zu ändern.",
   "track.removeStep": "Diesen Schritt entfernen",
+  "track.finishLine": "Ziellinie",
+  "track.finishLineHint": "Die Runde endet über diesem Sprung. Ohne Angabe wird der höchste Sprung auf der Startgeraden verwendet.",
   "track.startOver": "Neu anfangen",
   "track.briefTitle": "Beschreibe eine Runde",
   "track.elevation": "Höhenprofil",

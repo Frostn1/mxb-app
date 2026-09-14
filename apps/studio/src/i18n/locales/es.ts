@@ -366,6 +366,8 @@ export const es: Translation = {
   "track.stepWrites": "Sus números pasan directamente a la vuelta.",
   "track.pickAStep": "Elige un paso a la izquierda, o en el plano, para cambiar sus números.",
   "track.removeStep": "Quitar este paso",
+  "track.finishLine": "Línea de meta",
+  "track.finishLineHint": "La vuelta termina sobre este salto. Sin uno, se usa el salto más alto de la recta de salida.",
   "track.startOver": "Empezar de nuevo",
   "track.briefTitle": "Describe una vuelta",
   "track.elevation": "Altimetría",

@@ -50,8 +50,9 @@ export type TrackSegment =
   | { kind: "arc"; radius: number; angle: number; rise: number };
 
 export type TrackFeature =
-  | { kind: "tabletop"; at: number; length: number; height: number }
-  | { kind: "double"; at: number; height: number; gap: number; lip: number }
+  /** `finish` names this the finish jump outright — see `setFinish` in TrackStudio. */
+  | { kind: "tabletop"; at: number; length: number; height: number; finish?: boolean }
+  | { kind: "double"; at: number; height: number; gap: number; lip: number; finish?: boolean }
   | { kind: "roller"; at: number; length: number; height: number }
   | { kind: "whoops"; at: number; count: number; spacing: number; height: number }
   | { kind: "stepUp"; at: number; length: number; height: number }

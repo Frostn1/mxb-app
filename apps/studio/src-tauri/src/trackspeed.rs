@@ -364,7 +364,7 @@ mod tests {
             s.lap, (secs / 60.0).floor(), secs % 60.0, s.lap / secs * 3.6
         );
         for f in &p.features {
-            if let crate::trackprog::Feature::Double { at, height, gap, lip } = f {
+            if let crate::trackprog::Feature::Double { at, height, gap, lip, .. } = f {
                 let fa = crate::trackprog::double_faces(*height, *lip);
                 let crest = at + fa.ramp;
                 let deg = crate::trackprog::face_sweep(*height, fa.ramp).to_degrees();

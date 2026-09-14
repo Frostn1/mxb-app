@@ -365,6 +365,8 @@ export const ptBR: Translation = {
   "track.stepWrites": "Seus números vão direto para a volta.",
   "track.pickAStep": "Escolha um passo à esquerda, ou na planta, para mudar seus números.",
   "track.removeStep": "Remover este passo",
+  "track.finishLine": "Linha de chegada",
+  "track.finishLineHint": "A volta termina sobre este salto. Sem indicação, é usado o salto mais alto da reta de largada.",
   "track.startOver": "Começar de novo",
   "track.briefTitle": "Descreva uma volta",
   "track.elevation": "Altimetria",

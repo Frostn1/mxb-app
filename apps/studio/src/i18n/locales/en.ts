@@ -369,6 +369,8 @@ export const en = {
   "track.stepWrites": "Its numbers go straight into the lap.",
   "track.pickAStep": "Pick a step on the left, or on the map, to change its numbers.",
   "track.removeStep": "Remove this step",
+  "track.finishLine": "Finish line",
+  "track.finishLineHint": "The lap finishes over this jump. Without one, the tallest jump on the start straight is used.",
   "track.startOver": "Start over",
   "track.briefTitle": "Describe a lap",
   "track.elevation": "Elevation",

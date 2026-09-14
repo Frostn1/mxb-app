@@ -366,6 +366,8 @@ export const it: Translation = {
   "track.stepWrites": "I suoi numeri finiscono direttamente nel giro.",
   "track.pickAStep": "Scegli un passo a sinistra, o sulla mappa, per cambiarne i numeri.",
   "track.removeStep": "Rimuovi questo passo",
+  "track.finishLine": "Linea del traguardo",
+  "track.finishLineHint": "Il giro finisce su questo salto. Senza indicazione si usa il salto più alto sul rettilineo di partenza.",
   "track.startOver": "Ricomincia",
   "track.briefTitle": "Descrivi un giro",
   "track.elevation": "Altimetria",
