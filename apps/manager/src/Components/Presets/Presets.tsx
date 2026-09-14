@@ -208,7 +208,9 @@ export default function Presets({
       setProfilesDir({ dir: scan.dir, exists: scan.exists });
       setSaved(presets);
       setScans(sc);
-      setProfile((p) => p || scan.profiles[0] || "");
+      // The profile last played wins over whichever sorts first — so "Save current"
+      // captures the one the rider was actually tuning.
+      setProfile((p) => p || scan.active || scan.profiles[0] || "");
     } catch (e) {
       setError(String(e));
     }

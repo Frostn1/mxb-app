@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Presets and Manage open on the profile you were last playing, instead of whichever
+  profile happened to sort first. "Save current" then captures the profile you were
+  actually tuning.
+
 ## Unreleased — Frost's Studio
 
 ### Removed

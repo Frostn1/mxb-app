@@ -345,16 +345,32 @@ pub struct ProfilesScan {
     pub dir: String,
     pub exists: bool,
     pub profiles: Vec<String>,
+    /// The profile the rider was last playing, as best the app can tell.
+    ///
+    /// MX Bikes rewrites `profile.ini` when Options is closed or the game exits, so the
+    /// newest `profile.ini` mtime is the profile the rider most recently touched.
+    /// Presets and Manage open on this one instead of whatever sorts first, so "Save
+    /// current" captures the profile the rider was actually tuning.
+    ///
+    /// `None` when no profile could be read (a fresh install, or a folder we couldn't
+    /// open), never a fallback to alphabetical — the UI has `profiles[0]` for that and
+    /// this field is a stronger claim than "any profile at all".
+    pub active: Option<String>,
 }
 
 pub fn scan_profiles(profiles_dir: &Path) -> ProfilesScan {
-    let mut profiles = Vec::new();
+    // Each entry carries its `profile.ini` mtime alongside its name so `active` picks the
+    // newest without re-stat'ing the disk. On an FS with no mtime, or one we can't stat,
+    // that profile still lists but can't claim the active slot.
+    let mut with_mtime: Vec<(String, Option<std::time::SystemTime>)> = Vec::new();
     let exists = match fs::read_dir(profiles_dir) {
         Ok(rd) => {
             for e in rd.flatten() {
-                if e.path().is_dir() && e.path().join("profile.ini").is_file() {
+                let ini = e.path().join("profile.ini");
+                if e.path().is_dir() && ini.is_file() {
                     if let Some(n) = e.file_name().to_str() {
-                        profiles.push(n.to_string());
+                        let mtime = fs::metadata(&ini).and_then(|m| m.modified()).ok();
+                        with_mtime.push((n.to_string(), mtime));
                     }
                 }
             }
@@ -364,11 +380,20 @@ pub fn scan_profiles(profiles_dir: &Path) -> ProfilesScan {
         // folder can't be used as-is.
         Err(_) => false,
     };
-    profiles.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    // Newest mtime wins for `active`. Alphabetical stays the order in the picker so a
+    // profile doesn't jump around whenever it's opened.
+    let active = with_mtime
+        .iter()
+        .filter_map(|(n, t)| t.map(|t| (n.clone(), t)))
+        .max_by_key(|(_, t)| *t)
+        .map(|(n, _)| n);
+    with_mtime.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    let profiles: Vec<String> = with_mtime.into_iter().map(|(n, _)| n).collect();
     ProfilesScan {
         dir: profiles_dir.to_string_lossy().into_owned(),
         exists,
         profiles,
+        active,
     }
 }
 
@@ -951,6 +976,53 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         assert!(scan.profiles.is_empty());
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The picker opens on the profile the rider was last playing — the newest `profile.ini`
+    /// mtime, which the game rewrites when Options is closed. Without this, "Save current"
+    /// captured from whichever profile happened to sort first.
+    #[test]
+    fn active_is_the_last_touched_profile() {
+        let root = tmp("active");
+        let dir = root.join("profiles");
+        fs::create_dir_all(&dir).unwrap();
+
+        // Three profiles whose alphabetical order and mtime order disagree, so the two rules
+        // can't be confused. `zzz` is the newest, `aaa` and `mmm` are older.
+        for name in ["aaa", "mmm", "zzz"] {
+            fs::create_dir_all(dir.join(name)).unwrap();
+            fs::write(dir.join(name).join("profile.ini"), "[input]\n").unwrap();
+        }
+        // Set mtimes deliberately: `zzz` newest, `aaa` middle, `mmm` oldest — so neither
+        // "first alphabetically" nor "last alphabetically" happens to be the newest.
+        let base = std::time::SystemTime::now();
+        set_mtime(&dir.join("mmm/profile.ini"), base - std::time::Duration::from_secs(3600));
+        set_mtime(&dir.join("aaa/profile.ini"), base - std::time::Duration::from_secs(1800));
+        set_mtime(&dir.join("zzz/profile.ini"), base);
+
+        let scan = scan_profiles(&dir);
+        assert_eq!(scan.profiles, vec!["aaa", "mmm", "zzz"], "picker order stays alphabetical");
+        assert_eq!(scan.active.as_deref(), Some("zzz"), "the newest profile.ini wins");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A profiles folder with no readable profile still scans cleanly — `active` is `None`,
+    /// callers fall back to `profiles[0]`.
+    #[test]
+    fn active_is_none_when_no_profile_is_readable() {
+        let root = tmp("active-none");
+        let dir = root.join("profiles");
+        fs::create_dir_all(&dir).unwrap();
+        let scan = scan_profiles(&dir);
+        assert!(scan.active.is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Set an mtime on a file, cross-platform. `utimensat` on Unix, `SetFileTime` on Windows.
+    fn set_mtime(path: &Path, when: std::time::SystemTime) {
+        let f = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        f.set_modified(when).unwrap();
     }
 
     #[test]
