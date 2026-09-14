@@ -15,7 +15,7 @@ export const fr: Translation = {
   "common.remove": "Retirer",
   "nav.pose": "Posture",
   "nav.settings": "Réglages",
-  "nav.designer": "Éditeur Designer",
+  "nav.designer": "Éditeur",
   "nav.paints": "Décos",
 
 

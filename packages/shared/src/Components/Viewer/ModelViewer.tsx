@@ -569,6 +569,37 @@ function partBounds(nodes: EdfNode[]) {
   return { lo, hi };
 }
 
+/**
+ * The body with its head's bare skin taken off, for when a helmet is on.
+ *
+ * A helmet is fitted to the body by proportion rather than seated on the head the way the
+ * game seats it, so on most models it sits a little small and the head — drawn as flat skin —
+ * pushes out through the visor, the goggles and the chin bar. Only `face` triangles above
+ * `floor`, the helmet's own bottom edge, are dropped, so the neck still shows beneath it.
+ * Triangles go, never vertices, so a skinned body keeps every weight it was bound with.
+ */
+function withoutHead(nodes: EdfNode[], floor: number): EdfNode[] {
+  return nodes.map((n) => {
+    if (!n.submeshes.some((sm) => sm.texture === "face")) return n;
+    const kept: number[] = [];
+    const submeshes = n.submeshes.map((sm) => {
+      const triStart = kept.length / 3;
+      for (let t = sm.triStart; t < sm.triStart + sm.triCount; t += 1) {
+        const a = n.indices[t * 3];
+        const b = n.indices[t * 3 + 1];
+        const c = n.indices[t * 3 + 2];
+        if (sm.texture === "face") {
+          const y = (n.positions[a * 3 + 1] + n.positions[b * 3 + 1] + n.positions[c * 3 + 1]) / 3;
+          if (y > floor) continue;
+        }
+        kept.push(a, b, c);
+      }
+      return { ...sm, triStart, triCount: kept.length / 3 - triStart };
+    });
+    return { ...n, indices: new Uint32Array(kept), submeshes };
+  });
+}
+
 // Yaw about world Y that points a boot's heel→toe along +Z, from the centroids of
 // the front and back 20% along Z (measured in the up-righted frame). 0 for degenerate input.
 function straightenYaw(geom: THREE.BufferGeometry, rotM: THREE.Matrix4): number {
@@ -1049,12 +1080,23 @@ function RiderComposite({
   const [headAt, chestAt, leftFootAt, rightFootAt] = useBoneDeltas(built, rig, pose, GEAR_BONES);
   const hand = leftIsPositiveX(rig) ? 1 : -1;
 
+  // Under a helmet the head's skin comes off, the way the stand-in body's head does — see
+  // `withoutHead`. Cut at the helmet's bottom edge, which `helmetAnchor` already names.
+  const helmetFloor = helmetAnchor[1];
+  const shownBody = useMemo(
+    () =>
+      body && hasBody && hasHelmet
+        ? { ...body, nodes: withoutHead(body.nodes, helmetFloor) }
+        : body,
+    [body, hasBody, hasHelmet, helmetFloor],
+  );
+
   if (solo) return <RiderGearSolo part={solo} overrides={overrides} />;
 
   return (
     <group>
       {hasBody ? (
-        <RiderBodyMesh part={body!} overrides={overrides} built={built} />
+        <RiderBodyMesh part={shownBody!} overrides={overrides} built={built} />
       ) : (
         <RiderBody suit={suit} gloves={gloves} showHead={!hasHelmet} />
       )}
