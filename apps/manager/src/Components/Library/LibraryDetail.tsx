@@ -5,13 +5,20 @@ import {
   Trash2,
   FolderInput,
   Lock,
+  ShieldCheck,
   Maximize2,
   Box,
   Mountain,
   Share2,
   type LucideIcon,
 } from "lucide-react";
-import { getPkzMeta, getPkzPreview, type ModType } from "@frost/shared/api/mods";
+import { toast } from "sonner";
+import {
+  getPkzMeta,
+  getPkzPreview,
+  mxbsecureUnlock,
+  type ModType,
+} from "@frost/shared/api/mods";
 import type { LibraryEntry, PkzMeta } from "@frost/shared/types";
 import { ViewerDialog } from "@frost/shared/Components/Viewer/ViewerDialog";
 import { TrackViewerDialog } from "@frost/shared/Components/Viewer/TrackViewerDialog";
@@ -39,6 +46,8 @@ interface LibraryDetailProps {
   onMove: (e: LibraryEntry) => void;
   onShare: (e: LibraryEntry) => void;
   onOpenEntry: (e: LibraryEntry) => void;
+  /** Re-scan the library — called after a secured file is unlocked here, so it flips to open. */
+  onChanged?: () => void;
 }
 
 function ownerKey(entry: LibraryEntry): string {
@@ -55,6 +64,7 @@ export default function LibraryDetail({
   onMove,
   onShare,
   onOpenEntry,
+  onChanged,
 }: LibraryDetailProps) {
   const t = useT();
   const [meta, setMeta] = useState<PkzMeta | null>(null);
@@ -62,8 +72,36 @@ export default function LibraryDetail({
   const [lightbox, setLightbox] = useState(false);
   const [view3d, setView3d] = useState(false);
   const [viewTrack, setViewTrack] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
   // A track has its own viewer: it isn't a model with paints, it's a terrain grid.
   const isTrack = entry.category === "track";
+  // A secured file with no key on this account yet — offer to unlock it right here.
+  const securedLocked = !!entry.secured && !!entry.locked;
+
+  const handleUnlock = async () => {
+    setUnlocking(true);
+    try {
+      await mxbsecureUnlock(entry.path);
+      toast.success(t("settings.mxbsecureUnlockOk"));
+      onChanged?.();
+      onClose();
+    } catch (e) {
+      const msg = String(e);
+      if (/no Steam account linked/i.test(msg) || /Steam ID/i.test(msg)) {
+        toast.error(t("settings.mxbsecureUnlockFail"), {
+          description: t("settings.unlockNeedsSteam"),
+        });
+      } else if (/not entitled/i.test(msg)) {
+        toast.error(t("settings.mxbsecureUnlockFail"), {
+          description: t("settings.unlockNotOwned"),
+        });
+      } else {
+        toast.error(t("settings.mxbsecureUnlockFail"), { description: msg });
+      }
+    } finally {
+      setUnlocking(false);
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -222,7 +260,21 @@ export default function LibraryDetail({
               </h1>
             </div>
 
-            {meta?.locked && (
+            {securedLocked && (
+              <div className="flex flex-col gap-3 rounded-lg border border-primary/25 bg-primary/[0.06] px-3.5 py-3 text-[12px] leading-relaxed text-muted-foreground">
+                <div className="flex items-start gap-2.5">
+                  <ShieldCheck className="mt-0.5 size-3.5 flex-none text-primary" />
+                  <span>{t("libraryDetail.securedLockedNote")}</span>
+                </div>
+                <div>
+                  <Button size="sm" disabled={unlocking} onClick={() => void handleUnlock()}>
+                    <ShieldCheck className="size-3.5" /> {t("settings.mxbsecureUnlockBtn")}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {meta?.locked && !securedLocked && (
               <div className="flex items-start gap-2.5 rounded-lg border border-white/[0.08] bg-foreground/[0.03] px-3.5 py-2.5 text-[12px] leading-relaxed text-muted-foreground">
                 <Lock className="mt-0.5 size-3.5 flex-none text-faint" />
                 {meta?.name?.trim() ? (
