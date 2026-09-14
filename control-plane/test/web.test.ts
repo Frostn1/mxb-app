@@ -415,3 +415,64 @@ describe("creators on /admin/assets", () => {
     expect((await assets(env, req("PATCH", `/admin/assets/${assetId}`, { cookie: frost, body: {} }))).status).toBe(400);
   });
 });
+
+describe("creator API keys", () => {
+  const BUYER = "76561198000000099";
+  const withKey = (key: string, method: string, path: string, body?: unknown) =>
+    new Request(`${API}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${key}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+  it("lets a shop's server list its creator's assets and change buyers, and nothing else", async () => {
+    const env = await deployment();
+    const frost = await cookieFor(CREATOR);
+    const { assetId } = (await (await assets(env, req("POST", "/admin/assets", { cookie: frost, body: { title: "Pine Hill" } }))).json()) as { assetId: string };
+    const { assetId: theirs } = (await (
+      await assets(env, req("POST", "/admin/assets", { cookie: await cookieFor(OTHER), body: { title: "Not yours" } }))
+    ).json()) as { assetId: string };
+
+    const made = await assets(env, req("POST", "/admin/api-keys", { cookie: frost, body: { label: "mxbikes-shop" } }));
+    expect(made.status).toBe(201);
+    const { id, key } = (await made.json()) as { id: string; key: string };
+    expect(key).toMatch(/^mxbs_/);
+    const listed = (await (await assets(env, req("GET", "/admin/api-keys", { cookie: frost }))).json()) as { keys: unknown[] };
+    expect(listed.keys).toEqual([expect.objectContaining({ id, label: "mxbikes-shop" })]);
+    expect(JSON.stringify(listed)).not.toContain(key);
+
+    const list = await assets(env, withKey(key, "GET", "/admin/assets"));
+    expect(list.status).toBe(200);
+    expect(((await list.json()) as { assets: { assetId: string }[] }).assets.map((a) => a.assetId)).toEqual([assetId]);
+    expect((await assets(env, withKey(key, "POST", `/admin/assets/${assetId}/grants`, { add: [BUYER] }))).status).toBe(200);
+    expect((await assets(env, withKey(key, "GET", `/admin/assets/${assetId}/grants`))).status).toBe(200);
+
+    for (const r of [
+      withKey(key, "POST", "/admin/assets", { title: "X" }),
+      withKey(key, "PATCH", `/admin/assets/${assetId}`, { withdrawn: true }),
+      withKey(key, "GET", `/admin/assets/${assetId}/usage`),
+      withKey(key, "POST", "/admin/api-keys", { label: "more" }),
+      withKey(key, "GET", "/admin/api-keys"),
+    ]) {
+      expect((await assets(env, r)).status).toBe(403);
+    }
+    expect((await assets(env, withKey(key, "POST", `/admin/assets/${theirs}/grants`, { add: [BUYER] }))).status).toBe(404);
+
+    expect((await assets(env, req("POST", `/admin/api-keys/${id}/revoke`, { cookie: frost, body: {} }))).status).toBe(200);
+    expect((await assets(env, withKey(key, "GET", "/admin/assets"))).status).toBe(401);
+    expect(((await (await assets(env, req("GET", "/admin/api-keys", { cookie: frost }))).json()) as { keys: unknown[] }).keys).toEqual([]);
+  });
+
+  it("refuses a made-up key, more than 10 keys, and keys whose owner stopped being a creator", async () => {
+    const env = await deployment();
+    expect((await assets(env, withKey(`mxbs_${"x".repeat(43)}`, "GET", "/admin/assets"))).status).toBe(401);
+    const frost = await cookieFor(CREATOR);
+    const make = () => assets(env, req("POST", "/admin/api-keys", { cookie: frost, body: { label: "k" } }));
+    const { key } = (await (await make()).json()) as { key: string };
+    for (let i = 1; i < 10; i++) expect((await make()).status).toBe(201);
+    expect((await make()).status).toBe(409);
+    expect((await assets(env, withKey(key, "GET", "/admin/assets"))).status).toBe(200);
+    await env.DB.prepare("UPDATE accounts SET creator_at = NULL WHERE id = 'acc_frost'").run();
+    expect((await assets(env, withKey(key, "GET", "/admin/assets"))).status).toBe(401);
+  });
+});
