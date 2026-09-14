@@ -28,6 +28,7 @@ import {
 import { adminSearch } from "./adminsearch";
 import { adminAssets, isAssetsPath } from "./assets";
 import { isWebPath, webRoutes } from "./web";
+import { page } from "./page";
 import { bmacWebhook } from "./bmac";
 import { pruneReports, putReport } from "./diagnostics";
 import {
@@ -529,14 +530,6 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
   }
 
   return page(200, "Steam account linked. You can close this tab and go back to the app.");
-}
-
-/** A one-line page for the browser half of the sign-in. */
-function page(status: number, message: string): Response {
-  const body = `<!doctype html><meta charset="utf-8"><title>MXB App</title>` +
-    `<body style="font:16px/1.5 system-ui;margin:4rem auto;max-width:30rem;padding:0 1rem">` +
-    `<p>${message.replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"))}</p>`;
-  return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
 /**

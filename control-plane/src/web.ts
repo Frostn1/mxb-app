@@ -14,6 +14,7 @@
 
 import { allowedOrigin, assetOrigins, cors, refuseCrossSiteWrite } from "./assets";
 import { tokenMatches } from "./auth";
+import { page } from "./page";
 import { isVerified, loginUrl, steamPersonaName, verifyAssertion } from "./steam";
 import {
   clearedCookie,
@@ -155,14 +156,6 @@ export async function webRoutes(
   }
 
   return json(404, { error: "no such endpoint" });
-}
-
-function page(status: number, message: string): Response {
-  const body =
-    `<!doctype html><meta charset="utf-8"><title>mxbsecure</title>` +
-    `<body style="font:16px/1.5 system-ui;margin:4rem auto;max-width:30rem;padding:0 1rem">` +
-    `<p>${message.replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"))}</p>`;
-  return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
 function json(status: number, body: unknown): Response {
