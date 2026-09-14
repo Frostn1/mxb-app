@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Unlock a purchased secured track from Settings → General: pick the `.mxbsecure` file, and it's
+  tied to your account on your machine, then lists and rides offline.
+
 ## 2026-09-13 — v0.14.2 — Locked tracks from Steam
 
 ### Changed

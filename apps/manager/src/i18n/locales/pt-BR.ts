@@ -559,6 +559,12 @@ export const ptBR: Translation = {
   "settings.mxbsecure": "Bloqueio de conteúdo (mxbsecure)",
   "settings.mxbsecureDesc":
     "Experimental. Adiciona uma aba Proteger que bloqueia um arquivo para que tê-lo não baste para usá-lo. Só criadores que empacotam conteúdo pago precisam disso.",
+  "settings.mxbsecureUnlock": "Desbloquear conteúdo comprado",
+  "settings.mxbsecureUnlockDesc":
+    "Escolha uma pista .mxbsecure que você possui. Ela é desbloqueada para esta conta neste computador e depois aparece e roda offline.",
+  "settings.mxbsecureUnlockBtn": "Desbloquear uma pista…",
+  "settings.mxbsecureUnlockOk": "Desbloqueado — a pista vai aparecer e rodar offline.",
+  "settings.mxbsecureUnlockFail": "Não foi possível desbloquear este conteúdo",
   "secure.intro":
     "Escolha um arquivo, bloqueie e depois verifique que ele desbloqueia. Verificar decifra o blob aqui mesmo e compara com o original, byte a byte — a prova de que ele vai e volta nesta máquina.",
   "secure.protectTitle": "Proteger uma pista",

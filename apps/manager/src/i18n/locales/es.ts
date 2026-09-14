@@ -557,6 +557,12 @@ export const es: Translation = {
   "settings.mxbsecure": "Bloqueo de contenido (mxbsecure)",
   "settings.mxbsecureDesc":
     "Experimental. Añade una pestaña Proteger que bloquea un archivo para que tenerlo no baste para usarlo. Solo lo necesitan los creadores que empaquetan contenido de pago.",
+  "settings.mxbsecureUnlock": "Desbloquear contenido comprado",
+  "settings.mxbsecureUnlockDesc":
+    "Elige un circuito .mxbsecure que poseas. Se desbloquea para esta cuenta en esta máquina, y luego aparece y se puede rodar sin conexión.",
+  "settings.mxbsecureUnlockBtn": "Desbloquear un circuito…",
+  "settings.mxbsecureUnlockOk": "Desbloqueado: el circuito aparecerá y se podrá rodar sin conexión.",
+  "settings.mxbsecureUnlockFail": "No se pudo desbloquear este contenido",
   "secure.intro":
     "Elige un archivo, bloquéalo y luego verifica que se desbloquea. Verificar descifra el blob aquí mismo y lo compara con el original, byte a byte — la prueba de que va y vuelve en esta máquina.",
   "secure.protectTitle": "Proteger un circuito",
