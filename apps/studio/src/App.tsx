@@ -27,6 +27,8 @@ import Settings from "./Components/Settings/Settings";
 import Studio, { type StudioTab } from "./Components/Studio/Studio";
 import Secure from "./Components/Secure/Secure";
 import { TrackBuildProvider } from "./Context/TrackBuild";
+import { UpdateProvider } from "./Context/Update";
+import UpdateBanner from "./Components/Shell/UpdateBanner";
 
 /** The rail's own view space: the Studio's six tools, plus two screens of its own. */
 type View = StudioTab | "secure" | "settings";
@@ -189,6 +191,8 @@ function Shell() {
             />
 
             <div className="flex min-w-0 flex-1 flex-col">
+              {/* Above the strip, so a tool that hides the strip doesn't hide it too. */}
+              <UpdateBanner />
               {/* One strip the mounted tool fills from both ends, rather than a second row of
                   chrome. Draggable, since the rail is the only other place to grab. It is
                   taller than the manager's context bar on purpose: this is the only chrome
@@ -254,7 +258,9 @@ function Shell() {
 export default function App() {
   return (
     <I18nProvider>
-      <Shell />
+      <UpdateProvider>
+        <Shell />
+      </UpdateProvider>
     </I18nProvider>
   );
 }

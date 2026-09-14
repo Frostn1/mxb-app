@@ -42,6 +42,9 @@
 
 ## 2026-09-14 — Frost's Studio v0.1.1
 
+### Added
+- Frost's Studio tells you when a new version is out and updates itself in one click.
+
 ### Fixed
 - The window's close button closes Frost's Studio.
 
