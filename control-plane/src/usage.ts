@@ -54,6 +54,21 @@ export const MAX_REPORTS_PER_DAY = 2000;
 export const RETENTION_DAYS = 400;
 
 /**
+ * The longest window that can be asked for. It has to stay under `RETENTION_DAYS`.
+ *
+ * `newInstalls` counts installs whose *first day ever* falls in the window, and the sweep has
+ * been deleting first days. Once a window reaches back as far as the prune, every surviving
+ * install's oldest row is inside it and they all look new — the figure does not fail, it
+ * quietly lies. The two constants have always been related; nothing said so, so
+ * `usage.test.ts` now asserts it.
+ *
+ * Retention is the same trap one window further out, and cannot be fixed by a ceiling: it
+ * compares this window with the one *before* it, so it needs twice the reach. It is left out
+ * rather than approximated when that lands past the prune.
+ */
+export const MAX_WINDOW_DAYS = 365;
+
+/**
  * Everything the app is expected to report.
  *
  * A display aid, not a filter: a name absent from this list is still stored, because a
@@ -254,6 +269,25 @@ export interface EventRow {
   volume: number;
 }
 
+/**
+ * This window against the one before it.
+ *
+ * The only thing that tells growth from churn: without it, "1,486 active installs" reads the
+ * same whether they are the same 1,486 as last month or 1,486 different people who each
+ * tried it once.
+ *
+ * Null when the previous window reaches past `RETENTION_DAYS` and the sweep has eaten it,
+ * which is a figure that cannot be computed rather than one that is zero.
+ */
+export interface Retention {
+  /** Distinct installs active in the window. */
+  recent: number;
+  /** Distinct installs active in the window immediately before it. */
+  prior: number;
+  /** Installs active in both. */
+  returning: number;
+}
+
 export interface DayRow {
   day: string;
   installs: number;
@@ -264,14 +298,16 @@ export interface DayRow {
 export interface Stats {
   generatedAt: number;
   days: number;
+  /** How far back counters go. What "all time" actually means, and why retention can be null. */
+  retentionDays: number;
   active: { day: number; week: number; month: number };
   installsEver: number;
   newInstalls: number;
   sessions: number;
   minutes: number;
   daily: DayRow[];
-  /** Installs that ran each version at any point in the window. Overlaps — see `currentVersions`. */
-  versions: Bucket[];
+  /** Whether the same installs keep coming back, or new ones keep replacing them. */
+  retention: Retention | null;
   /** The version each install last reported. One bucket each, so these sum to the window's actives. */
   currentVersions: Bucket[];
   platforms: Bucket[];
@@ -303,7 +339,12 @@ export async function collectStats(env: Env, days: number, now = Date.now()): Pr
       .bind(...binds)
       .all<T>();
 
-  const [active, ever, fresh, totals, daily, versions, current, platforms, games, events] =
+  // The window immediately before this one, for retention. Only asked for when the whole of
+  // it is still inside `RETENTION_DAYS` — see `MAX_WINDOW_DAYS`.
+  const before = dayKey(now, days * 2 - 1);
+  const canRetain = days * 2 <= RETENTION_DAYS;
+
+  const [active, ever, fresh, totals, daily, retention, current, platforms, games, events] =
     await Promise.all([
       q<{ day: number; week: number; month: number }>(
         "SELECT" +
@@ -334,13 +375,25 @@ export async function collectStats(env: Env, days: number, now = Date.now()): Pr
           " FROM usage_daily WHERE day >= ? GROUP BY day ORDER BY day",
         from,
       ),
-      q<Bucket>(
-        "SELECT version AS label, COUNT(DISTINCT install_id) AS installs FROM usage_daily" +
-          " WHERE day >= ? GROUP BY version ORDER BY installs DESC, label DESC",
-        from,
-      ),
-      // What everyone is on now. `versions` counts an install under every version it ran,
-      // so it overcounts; here each install contributes once, from its most recent day.
+      // One pass over both windows: each install is reduced to "was it in this one" and "was
+      // it in the one before", and the three counts fall out of the pair.
+      canRetain
+        ? q<Retention>(
+            "SELECT" +
+              "  COUNT(CASE WHEN recent THEN 1 END) AS recent," +
+              "  COUNT(CASE WHEN prior THEN 1 END) AS prior," +
+              "  COUNT(CASE WHEN recent AND prior THEN 1 END) AS \"returning\"" +
+              " FROM (" +
+              "  SELECT install_id, MAX(day >= ?1) AS recent, MAX(day >= ?2 AND day < ?1) AS prior" +
+              "  FROM usage_daily WHERE day >= ?2 GROUP BY install_id" +
+              " )",
+            from,
+            before,
+          )
+        : Promise.resolve({ results: [] as Retention[] }),
+      // What everyone is on now: each install contributes once, from its most recent day. A
+      // plain GROUP BY version counts an install under every build it ran in the window,
+      // which double-counts exactly the installs that updated — the ones you are asking about.
       q<Bucket>(
         "SELECT label, COUNT(*) AS installs FROM (" +
           " SELECT version AS label," +
@@ -373,13 +426,14 @@ export async function collectStats(env: Env, days: number, now = Date.now()): Pr
   return {
     generatedAt: now,
     days,
+    retentionDays: RETENTION_DAYS,
     active: { day: counts.day ?? 0, week: counts.week ?? 0, month: counts.month ?? 0 },
     installsEver: ever.results?.[0]?.n ?? 0,
     newInstalls: fresh.results?.[0]?.n ?? 0,
     sessions: totals.results?.[0]?.sessions ?? 0,
     minutes: totals.results?.[0]?.minutes ?? 0,
     daily: daily.results ?? [],
-    versions: versions.results ?? [],
+    retention: retention.results?.[0] ?? null,
     currentVersions: current.results ?? [],
     platforms: platforms.results ?? [],
     games: games.results ?? [],
@@ -405,11 +459,11 @@ export function adminAllowed(request: Request, url: URL, env: Env): "ok" | "unse
   return tokenMatches(expected, presented) ? "ok" : "denied";
 }
 
-/** How many days a request asked for, clamped to something a dashboard can draw. */
+/** How many days a request asked for, clamped to a window the figures stay honest over. */
 export function windowDays(url: URL): number {
   const asked = Number(url.searchParams.get("days") ?? "30");
   if (!Number.isFinite(asked)) return 30;
-  return Math.min(365, Math.max(1, Math.trunc(asked)));
+  return Math.min(MAX_WINDOW_DAYS, Math.max(1, Math.trunc(asked)));
 }
 
 /** `GET /v1/usage/stats` — the same numbers as the dashboard, for anything that scripts them. */

@@ -5,8 +5,10 @@ import {
   collectStats,
   MAX_REPORT_BYTES,
   MAX_REPORTS_PER_DAY,
+  MAX_WINDOW_DAYS,
   parseReport,
   reportUsage,
+  RETENTION_DAYS,
   usageStats,
   windowDays,
 } from "../src/usage";
@@ -248,9 +250,17 @@ describe("the window", () => {
   });
 
   it("clamps something absurd rather than scanning the whole history", () => {
-    expect(windowDays(new URL("https://cp.test/admin/usage?days=99999"))).toBe(365);
+    expect(windowDays(new URL("https://cp.test/admin/usage?days=99999"))).toBe(MAX_WINDOW_DAYS);
     expect(windowDays(new URL("https://cp.test/admin/usage?days=-4"))).toBe(1);
     expect(windowDays(new URL("https://cp.test/admin/usage?days=nonsense"))).toBe(30);
+  });
+
+  it("stops short of the prune, which is what keeps `newInstalls` honest", () => {
+    // `newInstalls` counts installs whose first day ever falls in the window, and the sweep
+    // deletes first days. A window that reached as far back as the prune would report every
+    // surviving install as new — no error, just a wrong number. These two have always been
+    // related; this is the line that says so.
+    expect(MAX_WINDOW_DAYS).toBeLessThan(RETENTION_DAYS);
   });
 });
 
@@ -265,22 +275,35 @@ describe("reading it back", () => {
     expect(stats.unused).toContain("view.browse");
   });
 
-  it("counts an install once per version it ran, and once overall", async () => {
-    // Two installs on 0.13.5, one of which was on 0.12.6 earlier in the window. "Seen"
-    // counts it twice on purpose; "now" is what says how many are actually on each build.
+  it("counts each install under one version: the one it last reported", async () => {
+    // Two installs on 0.13.5, one of which was on 0.12.6 earlier in the window. Only the
+    // build each is on now says how many would be affected by dropping support for one.
     const db = answering({
-      "GROUP BY version": [
-        { label: "0.13.5", installs: 2 },
-        { label: "0.12.6", installs: 1 },
-      ],
-      "PARTITION BY install_id": [
-        { label: "0.13.5", installs: 2 },
-      ],
+      "PARTITION BY install_id": [{ label: "0.13.5", installs: 2 }],
     });
     const stats = await collectStats({ DB: db } as unknown as Env, 30);
 
-    expect(stats.versions).toHaveLength(2);
     expect(stats.currentVersions).toEqual([{ label: "0.13.5", installs: 2 }]);
+  });
+
+  it("compares the window with the one before it", async () => {
+    const db = answering({ "MAX(day >= ?1)": [{ recent: 120, prior: 100, returning: 80 }] });
+    const stats = await collectStats({ DB: db } as unknown as Env, 30);
+
+    expect(stats.retention).toEqual({ recent: 120, prior: 100, returning: 80 });
+    // 60 days of rows read once, not two windows fetched and intersected here.
+    const sql = db.asked.find((q) => q.includes("MAX(day >= ?1)"))!;
+    expect(sql).toContain("GROUP BY install_id");
+  });
+
+  it("leaves retention out rather than guessing when the prune has eaten the window before", async () => {
+    const db = answering({});
+    const stats = await collectStats({ DB: db } as unknown as Env, MAX_WINDOW_DAYS);
+
+    // A year against the year before it needs 730 days of history and there are 400.
+    expect(MAX_WINDOW_DAYS * 2).toBeGreaterThan(RETENTION_DAYS);
+    expect(stats.retention).toBeNull();
+    expect(db.asked.some((q) => q.includes("MAX(day >= ?1)"))).toBe(false);
   });
 
   it("asks for the latest day per install, not every day it reported", async () => {
