@@ -410,6 +410,13 @@ export function mxbsecureUnlock(blobPath: string): Promise<SecureProvisionOutcom
   return invoke<SecureProvisionOutcome>("mxbsecure_unlock", { blobPath });
 }
 
+/** Try to unlock every secured `.mxbsecure` that doesn't have a key yet — after an install or at
+ *  startup, so content you own just works. No-op when not enrolled; a file you're not entitled to
+ *  is left locked. Returns how many were newly unlocked. */
+export function mxbsecureAutoUnlock(): Promise<number> {
+  return invoke<number>("mxbsecure_auto_unlock");
+}
+
 /** Start linking this account to Steam: returns a Steam OpenID URL to open in the browser.
  *  Completing it there sets your account's Steam ID (via /v1/steam/return), which is what
  *  grant checks before releasing a content key. */
