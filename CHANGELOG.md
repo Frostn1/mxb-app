@@ -1,77 +1,11 @@
 # Changelog
 
-## Unreleased
+## 2026-09-14 — Frost's Studio v0.1.4
 
 ### Changed
 - Frost's Studio now has its own title bar instead of the default Windows one — a compact File
   menu and window buttons on a frameless window, matching the app's look. All the File shortcuts
   (Ctrl+N/O/S/E, and the rest) keep working; macOS keeps its usual menu bar.
-
-### Fixed
-- Helmets in the 3D preview sit cleanly over the rider's head, with no skin showing through at
-  the visor, the goggles or the chin.
-
-### Changed
-- A locked secured file's details now offer an **Unlock** button (and a note that it also unlocks
-  on its own when you launch the game), instead of a dead-end "its name can't be read" message.
-
-### Added
-- Secured (`.mxbsecure`) files now show in the Library like any other mod — as their real type
-  (track, bike, paint, gear), with a badge showing whether they're unlocked or still locked. An
-  unlocked bike, paint or gear model opens in the 3D viewer too: it's decrypted **only in memory**
-  to render on screen, so the protected source files are never written anywhere they could be
-  copied.
-
-### Changed
-- Content you own unlocks on its own at the moments that matter — right after you sign in with
-  Steam, when you open the Library, and when the game launches — so a track you just bought is
-  playable without restarting the app. A file you don't own is left alone, not retried endlessly.
-- A secured file you own but haven't pulled down yet now reads "Ready to unlock" instead of a
-  misleading "Unlocking…", with a line saying it unlocks when you open the Library or start the game.
-- Signing in with Steam opens on a short mxbsecure page before it hands you to Steam and brings
-  you back, so the sign-in looks like ours from start to finish instead of jumping straight to a
-  Steam URL.
-- Secured content is harder to pull apart, and its key is tied more tightly to your PC. If a key
-  needs refreshing, the app does it for you the next time you unlock — nothing to redo.
-- Further hardened the app and Frost Studio against tampering.
-- The Settings list of secured content now finds files anywhere under your mods folder (a
-  `mxbsecure` sub-folder of your own included), not just the top of tracks/bikes/rider, and lists
-  every one it finds — each with a clear status and, when it's locked, a short reason (not in your
-  library, or sign in with Steam).
-- Signing in with Steam is easier to spot — a coloured dot shows whether you're signed in, and if
-  you try to unlock content before signing in, the message offers a one-tap sign-in.
-- Your library refreshes in place the moment the mods folder changes, keeping your scroll position
-  instead of jumping back to the top.
-- Secured files have a tidier name: locking a track writes `Northgate.mxbsecure` (with its key
-  `Northgate.mxbsecurekey`) instead of the longer `Northgate.pkz.mxbsecure`. Files you already
-  have keep working — the app reads both names.
-- Secured content just works: it injects and auto-unlocks when you own it, without turning on an
-  experimental setting first. Reading a secured file's status is lighter too — the app reads only
-  the header and streams the hash instead of loading the whole file, so large secured content
-  doesn't sit in memory or stutter a synced mods folder.
-
-### Added
-- Settings → General lists the secured files it found and each one's status — Unlocked,
-  Unlocking, Not in your library, or Unavailable — with its store name, so a locked file you
-  can't see in-game isn't a mystery.
-- Secured content you own unlocks on its own: install a `.mxbsecure` file and, once you're signed
-  in, it unlocks in the background — no need to pick it and press unlock. Content you don't own is
-  left locked and never nags.
-- Sign in with Steam from Settings → General, linking your account so you can unlock content
-  you own.
-- Unlock purchased secured content — tracks, bike paints, gear or bikes — from Settings →
-  General: pick the `.mxbsecure` file, and it's tied to your account on your machine, then
-  appears in the game offline. Unlocking while the game is open now shows the content without a
-  restart. A file that doesn't match what you bought (a stale or wrong copy) is turned away
-  clearly instead of unlocking and then failing to load.
-
-### Changed
-- The app is called MXB App again, with its MXB mark back. Installing this version swaps the
-  Frost's Mod Manager install for MXB App; your settings, mods and Launch at startup choice
-  carry over.
-- The app and Steam sign-in now go through api.mxbsecure.com.
-- When Windows blocks a preset from changing `profile.ini`, the error says how to allow the
-  app and has a button that opens Windows Security.
 
 ## 2026-09-14 — Frost's Studio v0.1.3
 
@@ -102,11 +36,51 @@
 - Frost's Studio no longer has an MXB Secure tab. Creators lock mxbsecure files on mxbsecure.com,
   where the buyer list lives too.
 
-## 2026-09-13 — v0.14.2 — Locked tracks from Steam
+## 2026-09-14 — v0.14.2 — Secured content, end to end
+
+### Added
+- Secured (`.mxbsecure`) files now show in the Library like any other mod — as their real type
+  (track, bike, paint, gear), with a badge showing whether they're unlocked or still locked. An
+  unlocked bike, paint or gear model opens in the 3D viewer too: it's decrypted **only in memory**
+  to render on screen, so the protected source files are never written anywhere they could be copied.
+- Unlock purchased secured content — tracks, bike paints, gear or bikes — from Settings → General:
+  pick the `.mxbsecure` file, and it's tied to your account on your machine, then appears in the
+  game offline. A file that doesn't match what you bought (a stale or wrong copy) is turned away
+  clearly instead of unlocking and then failing to load.
+- Sign in with Steam from Settings → General, linking your account so you can unlock content you own.
+- Settings → General lists the secured files it found and each one's status, with its store name,
+  so a locked file you can't see in-game isn't a mystery. It finds files anywhere under your mods
+  folder (a `mxbsecure` sub-folder of your own included), and each locked one shows a short reason.
 
 ### Changed
-- Locked tracks show in the track list however you start the game — from the app or from
-  Steam — once "Use locked content in game" is on.
+- Locked tracks show in the track list however you start the game — from the app or from Steam —
+  once secured content is on.
+- Content you own unlocks on its own — no experimental setting to turn on. Install a `.mxbsecure`
+  file and, once you're signed in, it unlocks in the background at the moments that matter: right
+  after you sign in, when you open the Library, and when the game launches — so a track you just
+  bought is playable without restarting. A file you don't own is left alone, not retried endlessly.
+- A secured file you own but haven't pulled down yet reads "Ready to unlock" rather than a
+  misleading "Unlocking…", and a locked file's details offer an Unlock button instead of a
+  dead-end "its name can't be read" message.
+- Reading a secured file's status is lighter — the app reads only the header and streams the hash
+  instead of loading the whole file, so large secured content doesn't sit in memory or stutter a
+  synced mods folder.
+- Signing in with Steam is easier to spot — a coloured dot shows whether you're signed in, an
+  unlock offers a one-tap sign-in, and the sign-in opens on a short mxbsecure page before handing
+  you to Steam and back, so it looks like ours from start to finish.
+- Secured files have a tidier name: locking a track writes `Northgate.mxbsecure` (with its key
+  `Northgate.mxbsecurekey`) instead of the longer `Northgate.pkz.mxbsecure`. Files you already have
+  keep working.
+- Secured content is harder to pull apart, and its key is tied more tightly to your PC. If a key
+  needs refreshing, the app does it for you the next time you unlock. The app and Frost Studio are
+  further hardened against tampering.
+- Your library refreshes in place the moment the mods folder changes, keeping your scroll position
+  instead of jumping back to the top.
+- The app is called MXB App again, with its MXB mark back. Installing this version swaps the
+  Frost's Mod Manager install for MXB App; your settings, mods and Launch at startup choice carry over.
+- The app and Steam sign-in now go through api.mxbsecure.com.
+- When Windows blocks a preset from changing `profile.ini`, the error says how to allow the app and
+  has a button that opens Windows Security.
 
 ### Fixed
 - Updating the app also updates the helper that opens locked tracks.
