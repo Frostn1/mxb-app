@@ -8,7 +8,7 @@
  * else), so the app reports it here and every other app on the server reads it back.
  */
 
-import { unwrapContentKey } from "./assetkey";
+import { unwrapContentKey, rewrapToCurrent, wrappedVersion, currentMasterVersion } from "./assetkey";
 import {
   isVerified,
   loginUrl,
@@ -71,7 +71,7 @@ import {
   PRESENCE_TTL_MS,
 } from "./validate";
 import { claimDeviceAccount, iceServers, voiceRoom } from "./voice";
-import { pruneUsage, reportUsage, usageStats } from "./usage";
+import { adminAllowed, pruneUsage, reportUsage, usageStats } from "./usage";
 import { usageDashboard } from "./usagepage";
 import { VoiceRoom } from "./voiceroom";
 
@@ -217,6 +217,11 @@ async function route(request: Request, env: Env): Promise<Response> {
   // One question asked of all three at once. Same key, same gate, no new facts — it runs the
   // searches the section pages already run and links into them.
   if (method === "GET" && path === "/admin/search") return adminSearch(request, url, env);
+
+  // Rotate the master key: re-wrap every stored content key to the current master-key version.
+  // No content key is exposed — each is unwrapped and re-wrapped inside the Worker. Behind
+  // ADMIN_KEY, above the account gate, like the rest of /admin.
+  if (method === "POST" && path === "/admin/keys/rewrap") return rewrapKeys(request, url, env);
 
   // What the app sees loaded inside people's running games, and the rules that say how to
   // read it. Behind `ADMIN_KEY` on the same terms as the usage page, and above the account
@@ -653,7 +658,7 @@ async function grantKey(request: Request, account: Account, env: Env): Promise<R
     return json(409, { error: "asset has no content key" });
   }
 
-  const key = await unwrapContentKey(asset.wrapped_key, env.MXB_ASSET_MASTER_KEY);
+  const key = await unwrapContentKey(asset.wrapped_key, env);
   if (!key) {
     // No master key configured, or the stored key doesn't unwrap. Either way this
     // deployment cannot serve secured content right now; say so rather than 200 with
@@ -2051,6 +2056,51 @@ async function readJson(request: Request): Promise<unknown | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Rotate the master key: re-wrap every stored content key to the current master-key version.
+ *
+ * A content key never leaves the Worker — each row is unwrapped under whatever version it
+ * carries and re-wrapped under the current one, so nothing is re-packed. Rows already at the
+ * current version are skipped, so it is safe to re-run. Behind `ADMIN_KEY`.
+ *
+ * To rotate: add the new key to `MXB_ASSET_MASTER_KEYS` (a JSON map `{version: b64}`) alongside
+ * the old one, point `MXB_ASSET_MASTER_KEY_VERSION` at the new version, deploy, then POST here.
+ * Once `rewrapped` has covered every asset and `failed` is 0, the old key can be dropped.
+ */
+async function rewrapKeys(request: Request, url: URL, env: Env): Promise<Response> {
+  const gate = adminAllowed(request, url, env);
+  if (gate === "unset") return json(503, { error: "admin key not configured" });
+  if (gate !== "ok") return json(403, { error: "forbidden" });
+
+  const current = currentMasterVersion(env);
+  if (!current) return json(503, { error: "content keys are unavailable" });
+
+  const rows = await env.DB.prepare(
+    "SELECT id, wrapped_key FROM assets WHERE wrapped_key IS NOT NULL",
+  ).all<{ id: string; wrapped_key: string }>();
+
+  let rewrapped = 0;
+  let alreadyCurrent = 0;
+  let failed = 0;
+  for (const row of rows.results ?? []) {
+    if (wrappedVersion(row.wrapped_key) === current) {
+      alreadyCurrent++;
+      continue;
+    }
+    const next = await rewrapToCurrent(row.wrapped_key, env);
+    if (!next) {
+      // A row we can't unwrap (its old key isn't configured, or it's tampered) is reported,
+      // not dropped — the operator needs to know a key is missing before retiring it.
+      failed++;
+      continue;
+    }
+    await env.DB.prepare("UPDATE assets SET wrapped_key = ? WHERE id = ?").bind(next, row.id).run();
+    rewrapped++;
+  }
+
+  return json(200, { current, rewrapped, alreadyCurrent, failed });
 }
 
 function json(status: number, body: unknown): Response {
