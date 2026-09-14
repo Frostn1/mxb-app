@@ -615,15 +615,25 @@ async function decideEntitlement(
 /** Pull and validate `{ assetId, sessionId }` from a request body. */
 async function assetRequest(
   request: Request,
-): Promise<{ assetId: string; session: string } | Response> {
+): Promise<{ assetId: string; session: string; blobSha256: string | null } | Response> {
   const body = await readJson(request);
   if (!body) return json(400, { error: "expected a JSON body" });
-  const { assetId, sessionId } = body as { assetId?: unknown; sessionId?: unknown };
+  const { assetId, sessionId, blobSha256 } = body as {
+    assetId?: unknown;
+    sessionId?: unknown;
+    blobSha256?: unknown;
+  };
   if (typeof assetId !== "string" || !assetId.trim()) {
     return json(400, { error: "an asset id is required" });
   }
   const session = typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : "none";
-  return { assetId: assetId.trim(), session };
+  // A 64-hex SHA-256 of the caller's blob, or null. Validated to shape here so the grant check
+  // is a plain equality against the stored hash.
+  const hash =
+    typeof blobSha256 === "string" && /^[0-9a-f]{64}$/i.test(blobSha256.trim())
+      ? blobSha256.trim().toLowerCase()
+      : null;
+  return { assetId: assetId.trim(), session, blobSha256: hash };
 }
 
 async function checkEntitlement(request: Request, account: Account, env: Env): Promise<Response> {
@@ -649,19 +659,28 @@ async function checkEntitlement(request: Request, account: Account, env: Env): P
 async function grantKey(request: Request, account: Account, env: Env): Promise<Response> {
   const parsed = await assetRequest(request);
   if (parsed instanceof Response) return parsed;
-  const { assetId, session } = parsed;
+  const { assetId, session, blobSha256 } = parsed;
 
   const { allowed, reason } = await decideEntitlement(account, assetId, session, env);
   if (!allowed) return json(403, { error: reason });
 
-  const asset = await env.DB.prepare("SELECT wrapped_key, key_id FROM assets WHERE id = ?")
+  const asset = await env.DB.prepare(
+    "SELECT wrapped_key, key_id, blob_sha256 FROM assets WHERE id = ?",
+  )
     .bind(assetId)
-    .first<{ wrapped_key: string | null; key_id: string | null }>();
+    .first<{ wrapped_key: string | null; key_id: string | null; blob_sha256: string | null }>();
   if (!asset?.wrapped_key) {
     // Entitled, but the asset has no stored key — it was never packed, or was registered
     // before key custody existed. Not the caller's fault and not a 403: there is simply
     // nothing to hand back.
     return json(409, { error: "asset has no content key" });
+  }
+
+  // Content-hash gate: if this asset registered a blob hash, the caller's file must match it, so
+  // a stale or mismatched blob (or one carrying a borrowed asset id) can't pull the key. Rows
+  // with no stored hash are legacy and not checked.
+  if (asset.blob_sha256 && asset.blob_sha256.toLowerCase() !== (blobSha256 ?? "")) {
+    return json(403, { error: "this file doesn't match the registered content" });
   }
 
   const key = await unwrapContentKey(asset.wrapped_key, env);

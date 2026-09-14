@@ -1779,6 +1779,15 @@ async fn unlock_one(
     let (asset_id, _key_id, _len) =
         mxbsecure::header_of(&blob).map_err(|e| format!("not a secured blob: {e}"))?;
 
+    // The blob's SHA-256, sent to the grant so it releases the key only for the exact registered
+    // file — a stale or mismatched blob is refused server-side.
+    let blob_sha256 = {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(&blob);
+        h.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()
+    };
+
     // Already unlocked? A .mxbkey beside it that opens for the live Steam ID means we're done.
     if let Some(id) = steamid::current_steam_id64() {
         if has_valid_key(blob_path, &id) {
@@ -1803,7 +1812,7 @@ async fn unlock_one(
     let resp = reqwest::Client::new()
         .post(format!("{}/v1/keys/grant", crate::paintsync::control_plane()))
         .bearer_auth(&cp_token)
-        .json(&serde_json::json!({ "assetId": asset_id, "sessionId": session }))
+        .json(&serde_json::json!({ "assetId": asset_id, "sessionId": session, "blobSha256": blob_sha256 }))
         .send()
         .await
         .map_err(|e| format!("couldn't reach the control plane: {e}"))?;
