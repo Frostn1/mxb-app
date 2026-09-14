@@ -658,3 +658,32 @@ describe("a creator who started on the site", () => {
     expect(await env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ?").bind(STEAM).first()).toEqual({ id: "acc_holder" });
   });
 });
+
+describe("the branded hop into Steam", () => {
+  it("renders the mxbsecure card and sends a pending sign-in on to Steam", async () => {
+    const env = await deployment({ MXB_SITE_ORIGIN: SITE });
+    const login = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO steam_logins (id, account_id, created_at) VALUES (?, ?, ?)").bind(login, OWNER, Date.now()).run();
+
+    const res = await call(env, new Request(`https://cp.test/v1/steam/start?login=${login}`));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+    expect(html).toContain("<title>mxbsecure</title>");
+    expect(html).toContain("<h1>Signing you in…</h1>");
+    expect(html).toContain("Taking you to Steam to confirm it&#39;s you.");
+    expect(html).toContain("data:image/svg+xml,");
+    const refresh = /<meta http-equiv="refresh" content="1;url=([^"]+)">/.exec(html)?.[1];
+    expect(refresh).toMatch(/^https:\/\/steamcommunity\.com\/openid\/login\?/);
+    expect(refresh).toContain("&amp;openid.");
+    expect(refresh).not.toContain("%3C");
+  });
+
+  it("sends a used or unknown sign-in to the site's /steam page", async () => {
+    const env = await deployment({ MXB_SITE_ORIGIN: SITE });
+    const used = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO steam_logins (id, account_id, created_at, consumed_at) VALUES (?, ?, ?, ?)").bind(used, OWNER, Date.now(), Date.now()).run();
+    expect((await call(env, new Request(`https://cp.test/v1/steam/start?login=${used}`))).headers.get("Location")).toBe(`${SITE}/steam?r=already-linked`);
+    expect((await call(env, new Request("https://cp.test/v1/steam/start?login=nope"))).headers.get("Location")).toBe(`${SITE}/steam?r=expired`);
+  });
+});
