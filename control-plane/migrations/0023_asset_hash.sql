@@ -1,0 +1,11 @@
+-- A content hash for a secured asset, so a key is released only for the exact registered file.
+--
+-- The `asset_id` in a `.mxbsecure` header is chosen by whoever packed it, so it is an identity
+-- the caller controls. The SHA-256 of the distributed blob is not: it pins the key to the bytes
+-- the creator registered. `/v1/keys/grant` refuses to release the key when a caller's blob hash
+-- doesn't match this — which turns "unlocked but the wrong/stale file won't load" into a clear
+-- refusal, and stops a crafted blob with a borrowed `asset_id` from pulling a real key.
+--
+-- Nullable: rows registered before this simply aren't hash-checked (legacy), so nothing that
+-- already works stops working. Re-register with a hash to turn the check on for that asset.
+ALTER TABLE assets ADD COLUMN blob_sha256 TEXT;
