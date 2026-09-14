@@ -3,7 +3,7 @@
   "app": {
     "windows": [
       {
-        "title": "Frost Mod Manager",
+        "title": "MXB App",
         "width": 1400,
         "height": 800,
         "minWidth": 1000,

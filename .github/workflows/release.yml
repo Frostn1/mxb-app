@@ -142,7 +142,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Frontend reads this at build time (see .env.production).
-          VITE_APP_NAME: "Frost's Mod Manager"
+          VITE_APP_NAME: "MXB App"
           # Sign the updater artifacts so the app can verify self-updates.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -171,9 +171,9 @@ jobs:
           # latest.json is written, so the manifest and the assets cannot disagree. The
           # `finalize` job below is kept for one release as a net — once a dispatch build
           # shows it reporting zero renames, it can go.
-          releaseAssetNamePattern: "Frost-Mod-Manager-[version]-[arch][ext]"
+          releaseAssetNamePattern: "MXB-App-[version]-[arch][ext]"
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.run_number) }}
-          releaseName: "Frost's Mod Manager ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}"
+          releaseName: "MXB App ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}"
           # What shipped, then which file to download — worded in scripts/release-notes.sh.
           # The download half describes files by extension, since exact filenames drift
           # when the `finalize` job renames the assets.
@@ -213,8 +213,8 @@ jobs:
               # which is deliberately unchanged, and is
               # deliberately left alone. latest.json's Linux entry points at the
               # AppImage, and the sed below keeps it pointing at the renamed one.
-              Frost.Mod.Manager_*.exe|Frost.Mod.Manager_*.dmg|Frost.Mod.Manager_*.exe.sig|Frost.Mod.Manager_*.dmg.sig|Frost.Mod.Manager_*.AppImage|Frost.Mod.Manager_*.AppImage.sig|Frost.Mod.Manager_*.deb)
-                new="$(printf '%s' "$name" | sed -e 's/Frost\.Mod\.Manager/Frost-Mod-Manager/' -e 's/_/-/g' -e 's/-setup//')"
+              MXB.App_*.exe|MXB.App_*.dmg|MXB.App_*.exe.sig|MXB.App_*.dmg.sig|MXB.App_*.AppImage|MXB.App_*.AppImage.sig|MXB.App_*.deb)
+                new="$(printf '%s' "$name" | sed -e 's/MXB\.App/MXB-App/' -e 's/_/-/g' -e 's/-setup//')"
                 [ "$name" = "$new" ] && continue
                 echo "rename: $name -> $new"
                 gh release download "$TAG" -R "$REPO" -p "$name" -O "$new" --clobber

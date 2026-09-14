@@ -18,6 +18,9 @@
   clearly instead of unlocking and then failing to load.
 
 ### Changed
+- The app is called MXB App again, with its MXB mark back. Installing this version swaps the
+  Frost's Mod Manager install for MXB App; your settings, mods and Launch at startup choice
+  carry over.
 - The app and Steam sign-in now go through api.mxbsecure.com.
 
 ## 2026-09-13 — v0.14.2 — Locked tracks from Steam

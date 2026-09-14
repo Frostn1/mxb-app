@@ -514,7 +514,7 @@ export const en = {
   "studioSettings.game": "Game",
   "studioSettings.mods": "Mods folder",
   "studioSettings.gameFolder": "Game install",
-  "studioSettings.foldersWhy": "These are read from the same config Frost's Mod Manager writes — it finds the game and owns first-run setup, so there is only ever one answer to where MX Bikes lives.",
-  "studioSettings.getManager": "Get Frost's Mod Manager",
+  "studioSettings.foldersWhy": "These are read from the same config MXB App writes — it finds the game and owns first-run setup, so there is only ever one answer to where MX Bikes lives.",
+  "studioSettings.getManager": "Get MXB App",
   "studioSettings.language": "Language",
 } as const;

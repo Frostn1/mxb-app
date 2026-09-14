@@ -511,7 +511,7 @@ export const fr: Translation = {
   "studioSettings.game": "Jeu",
   "studioSettings.mods": "Dossier des mods",
   "studioSettings.gameFolder": "Installation du jeu",
-  "studioSettings.foldersWhy": "Lus depuis la même configuration qu'écrit Frost's Mod Manager : c'est lui qui trouve le jeu et gère la configuration initiale, il n'y a donc qu'une seule réponse à où se trouve MX Bikes.",
-  "studioSettings.getManager": "Obtenir Frost's Mod Manager",
+  "studioSettings.foldersWhy": "Lus depuis la même configuration qu'écrit MXB App : c'est elle qui trouve le jeu et gère la configuration initiale, il n'y a donc qu'une seule réponse à où se trouve MX Bikes.",
+  "studioSettings.getManager": "Obtenir MXB App",
   "studioSettings.language": "Langue",
 };

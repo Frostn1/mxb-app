@@ -1251,7 +1251,7 @@ const BIG_TABLE_SHARE: f32 = 0.8;
 /// with `BASE_SEED=<n> cargo test --bin mxb-app -- --ignored --nocapture emit_base_track`.
 pub const EXAMPLE: &str = r#"{
       "name": "Corpus National",
-      "author": "Frost's Mod Manager",
+      "author": "MXB App",
       "location": "Generated",
       "width": 17.915,
       "terrain": {

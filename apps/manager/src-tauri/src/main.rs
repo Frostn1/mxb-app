@@ -1270,7 +1270,7 @@ fn log_client(level: String, message: String) {
     }
 }
 
-/// Where Frost's Mod Manager's own logs are, where the game's are, and what's currently in each.
+/// Where MXB App's own logs are, where the game's are, and what's currently in each.
 ///
 /// Read fresh on every call rather than cached: the whole reason someone opens this is
 /// that something just went wrong, and a stale "no logs found" would send them looking in
@@ -2239,11 +2239,11 @@ fn startup_vetoed(_app_name: &str) -> bool {
     false
 }
 
-/// The product name this app shipped under up to v0.13.x.
+/// The product name this app shipped under in v0.14.x, before it went back to `MXB App`.
 ///
 /// Kept as a literal rather than read from anywhere: it names things already written to a
 /// user's machine, so it must not follow `productName` when that changes again.
-const LEGACY_APP_NAME: &str = "MXB App";
+const LEGACY_APP_NAME: &str = "Frost Mod Manager";
 
 /// Delete the login item a previous product name left behind.
 ///
@@ -3546,7 +3546,7 @@ pub struct ServerRiders {
 ///
 /// That leaves two real answers, and the panel says which one it is showing. If you are on the
 /// server, FrostMod is in the session and hands over the actual grid. Otherwise the control
-/// plane knows where each rider's *app* said it was, which names the players who run Frost's Mod Manager
+/// plane knows where each rider's *app* said it was, which names the players who run MXB App
 /// and nobody else.
 #[tauri::command]
 async fn server_riders(
@@ -6167,7 +6167,7 @@ fn main() {
 
     let builder = tauri::Builder::default();
 
-    // One app, one process. Closing the window parks Frost's Mod Manager in the tray rather than
+    // One app, one process. Closing the window parks MXB App in the tray rather than
     // quitting it, so without this a second launch doesn't reveal the copy already
     // running — it builds a whole new one: another window, another tray icon, another
     // FrostMod, another mod watcher. Five launches in a day left five of everything, and
@@ -6175,11 +6175,11 @@ fn main() {
     //
     // Registered before every other plugin: the guard's setup hook is what kills the
     // second process, and it should do so before anything else has started work that
-    // would then need unwinding. `show_main` is the same path the tray's "Show Frost's Mod Manager"
+    // would then need unwinding. `show_main` is the same path the tray's "Show MXB App"
     // takes, so relaunching behaves exactly like clicking the tray icon.
     //
     // Release builds only, for the same reason close-to-tray is (see `CloseRequested`
-    // below): a `tauri dev` run must still start while the installed Frost's Mod Manager is sitting
+    // below): a `tauri dev` run must still start while the installed MXB App is sitting
     // in the tray, otherwise it would silently exit and just re-show the shipped app.
     //
     // The updater's restart is safe against this by construction, and it's worth knowing
@@ -6251,7 +6251,7 @@ fn main() {
         .manage(voice::Monitor::default())
         .manage(voice::session::Session::default())
         .setup(|app| {
-            log::info!("Frost's Mod Manager {} starting", env!("CARGO_PKG_VERSION"));
+            log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
 
             // The main window is `"create": false` in tauri.conf.json so it is built here
             // rather than by Tauri's own startup loop, which is the only way to decide the
@@ -6367,12 +6367,12 @@ fn main() {
                 });
             }
 
-            let show = MenuItem::with_id(app, "show", "Show Frost's Mod Manager", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "Show MXB App", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("Frost's Mod Manager")
+                .tooltip("MXB App")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
