@@ -42,7 +42,7 @@ import {
 import { batchCodes, keyQuery, licenseQuery } from "./pluginspage";
 import { paintThumb } from "./pntthumb";
 import { isSteamId64 } from "./steam";
-import { collectStats, windowDays } from "./usage";
+import { collectStats, windowApp, windowDays } from "./usage";
 import { webSession } from "./websession";
 
 export function isWebAdminPath(path: string): boolean {
@@ -80,7 +80,7 @@ export async function webAdminRoutes(request: Request, url: URL, env: Env, origi
   if (request.method === "GET") {
     switch (path) {
       case "/v1/web/admin/usage":
-        return said(200, await collectStats(env, windowDays(url)));
+        return said(200, await collectStats(env, windowDays(url), Date.now(), windowApp(url)));
 
       // The overview carries the rules as well: they are four rows in the same read, and a
       // second endpoint for them would be a second round trip for a tab switch.

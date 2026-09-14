@@ -27,6 +27,7 @@ import {
 } from "./Components/Shell/ContextBar";
 import Settings from "./Components/Settings/Settings";
 import Studio, { type StudioTab } from "./Components/Studio/Studio";
+import { track } from "./lib/analytics";
 import { TrackBuildProvider } from "./Context/TrackBuild";
 import { UpdateProvider } from "./Context/Update";
 import UpdateBanner from "./Components/Shell/UpdateBanner";
@@ -39,6 +40,10 @@ function Shell() {
   const [config, setConfig] = useState<Config>({ modsPath: "" });
   const [games, setGames] = useState<GameInfo[]>([MXB_FALLBACK]);
   const [view, setView] = useState<View>("designer");
+  // Which tool a creator actually opens. A name and nothing else — see `lib/analytics.ts`.
+  useEffect(() => {
+    track(`view.studio.${view}`);
+  }, [view]);
   const [left, setLeft] = useState<HTMLElement | null>(null);
   const [right, setRight] = useState<HTMLElement | null>(null);
   // A tool can say it is showing something that owns the window — the Designer's start

@@ -11,7 +11,7 @@
  */
 
 import { ctx, errorPage, esc, ranges, shell, wrap } from "./adminui";
-import { adminAllowed, collectStats, windowDays, type Bucket, type EventRow, type Stats } from "./usage";
+import { adminAllowed, collectStats, windowApp, windowDays, type Bucket, type EventRow, type Stats } from "./usage";
 
 /** Windows the header offers. Anything else still works via `?days=`. */
 const RANGES = [7, 30, 90, 365];
@@ -26,7 +26,7 @@ export async function usageDashboard(request: Request, url: URL, env: Env): Prom
   if (allowed === "denied") return errorPage(TITLE, 401, "Unauthorized.");
 
   const days = windowDays(url);
-  const stats = await collectStats(env, days);
+  const stats = await collectStats(env, days, Date.now(), windowApp(url));
   return new Response(render(stats, url), {
     status: 200,
     headers: {

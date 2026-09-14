@@ -151,13 +151,16 @@ describe("the endpoint", () => {
     expect(event.sql).toContain("count = count + excluded.count");
   });
 
-  it("keys the row on the install and the UTC day, and stores nothing else about the caller", async () => {
+  it("keys the row on the install, the app and the UTC day, and stores nothing else about the caller", async () => {
     const db = stubDb();
     await reportUsage(post(body()), { DB: db } as unknown as Env);
 
     const daily = db.statements.find((s) => s.sql.includes("INTO usage_daily"))!;
     expect(daily.args[0]).toBe(INSTALL);
-    expect(daily.args[1]).toBe(new Date().toISOString().slice(0, 10));
+    // The two apps share a config file and so share an install id: without the app in the
+    // key they would overwrite each other's version and add up each other's minutes.
+    expect(daily.args[1]).toBe("manager");
+    expect(daily.args[2]).toBe(new Date().toISOString().slice(0, 10));
     // The address never reaches a column: only its daily digest, in the rate counter.
     const claims = db.statements.find((s) => s.sql.includes("INTO device_claims"))!;
     expect(String(claims.args[0])).toMatch(/^[0-9a-f]{64}$/);
@@ -261,6 +264,18 @@ describe("the window", () => {
     // surviving install as new — no error, just a wrong number. These two have always been
     // related; this is the line that says so.
     expect(MAX_WINDOW_DAYS).toBeLessThan(RETENTION_DAYS);
+  });
+});
+
+describe("which app a report is from", () => {
+  it("is the manager when a build predates the field", () => {
+    const report = parseReport(JSON.stringify(body()));
+    expect(typeof report === "string" ? report : report.app).toBe("manager");
+  });
+
+  it("takes the two it knows and refuses anything else", () => {
+    expect(parseReport(JSON.stringify(body({ app: "studio" })))).toMatchObject({ app: "studio" });
+    expect(parseReport(JSON.stringify(body({ app: "something" })))).toMatch(/app must be one of/);
   });
 });
 

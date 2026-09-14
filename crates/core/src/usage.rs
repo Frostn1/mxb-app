@@ -148,11 +148,30 @@ impl Buffer {
 /// a week sends a number the endpoint will accept rather than one it drops.
 const MAX_MINUTES: u32 = 1440;
 
+/// Which binary is reporting.
+///
+/// Both apps share one config file (see [`crate::config::DATA_ID`]) and so share one install
+/// id — which is right, because the id names a machine and two apps on one machine are not
+/// two machines. But the control plane's rollups key on it: without this field the two would
+/// overwrite each other's version and add up each other's minutes as though one app had been
+/// open twice as long. So every report says which app it is.
+pub const MANAGER: &str = "manager";
+pub const STUDIO: &str = "studio";
+
+/// Set once, by whichever binary called [`start`].
+static APP_ID: Mutex<&'static str> = Mutex::new(MANAGER);
+
+fn app_id() -> &'static str {
+    *APP_ID.lock().unwrap()
+}
+
 /// A report, exactly as `POST /v1/usage` expects it.
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
     pub install_id: String,
+    /// [`MANAGER`] or [`STUDIO`].
+    pub app: String,
     pub version: String,
     pub os: String,
     pub game: String,
@@ -171,7 +190,8 @@ pub struct Event {
 ///
 /// Called once from `setup`. Mints the install id on first run and saves it — a fresh id
 /// every launch would turn one player into a crowd.
-pub fn start(app: &AppHandle) {
+pub fn start(app: &AppHandle, which: &'static str) {
+    *APP_ID.lock().unwrap() = which;
     let mut cfg = config::load(app).unwrap_or_default();
     if !allowed(&cfg) {
         log::info!("[usage] anonymous stats are off for this run");
@@ -179,6 +199,13 @@ pub fn start(app: &AppHandle) {
     }
     if cfg.install_id.trim().is_empty() {
         cfg.install_id = mint_install_id();
+        if cfg.install_id.is_empty() {
+            // A build without `mint-install-id` — the studio. The id names the machine and
+            // the manager is what creates it, so a studio-only install reports nothing
+            // rather than inventing a second identity for the same computer.
+            log::info!("[usage] no install id on this machine — not counting this run");
+            return;
+        }
         if let Err(e) = config::save(app, &cfg) {
             // Without a saved id every launch would look like a new install, which is worse
             // than no numbers at all — so don't count this run.
@@ -357,6 +384,7 @@ fn take(cfg: &AppConfig, version: &str) -> Option<Report> {
 
     Some(Report {
         install_id: cfg.install_id.trim().to_string(),
+        app: app_id().to_string(),
         version: version.to_string(),
         os: platform().to_string(),
         game: cfg.active_game.id().to_string(),
