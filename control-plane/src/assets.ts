@@ -16,13 +16,24 @@ import { currentMasterVersion, wrapContentKey } from "./assetkey";
 import { tokenMatches } from "./auth";
 import { isSteamId64 } from "./steam";
 import { adminAllowed } from "./usage";
+import { webSession } from "./websession";
 
 /** Origins allowed to call these routes from a browser. */
 export const ASSET_ORIGINS = [
   "https://mxbsecure.com",
   "https://www.mxbsecure.com",
   "http://localhost:5173",
+  "http://127.0.0.1:5173",
 ];
+
+/** The request's Origin if it's one of ours, else null. */
+export function allowedOrigin(request: Request): string | null {
+  const origin = request.headers.get("Origin");
+  return origin && ASSET_ORIGINS.includes(origin) ? origin : null;
+}
+
+/** A key (every asset) or a signed-in creator (only their own). */
+type Scope = { kind: "admin" } | { kind: "creator"; accountId: string };
 
 /** Most inputs one grants change may carry, adds and removes together. */
 export const MAX_GRANT_CHANGES = 100;
@@ -58,7 +69,7 @@ export async function adminAssets(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
   const origin = request.headers.get("Origin");
-  const allowed = origin && ASSET_ORIGINS.includes(origin) ? origin : null;
+  const allowed = allowedOrigin(request);
 
   if (request.method === "OPTIONS") {
     if (origin && !allowed) return cors(json(403, { error: "origin not allowed" }), null);
@@ -86,52 +97,104 @@ function assetsKeyMatches(request: Request, env: Env): boolean {
   return !!expected && !!presented && tokenMatches(expected, presented);
 }
 
+/** Who's asking. A key wins over a cookie; a signed-in Steam account must be a creator. */
+async function authorize(request: Request, url: URL, env: Env): Promise<Scope | Response> {
+  if (assetsKeyMatches(request, env)) return { kind: "admin" };
+  const admin = adminAllowed(request, url, env);
+  if (admin === "ok") return { kind: "admin" };
+  const session = await webSession(request, env);
+  if (session) {
+    const account = await env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ? AND creator_at IS NOT NULL")
+      .bind(session.steamId)
+      .first<{ id: string }>();
+    return account ? { kind: "creator", accountId: account.id } : json(403, { error: "this Steam account isn't a creator" });
+  }
+  if (admin === "unset" && !env.MXB_ASSETS_KEY && !env.MXB_WEB_SESSION_KEY) {
+    return json(503, { error: "no admin key is configured" });
+  }
+  return json(401, { error: "unauthorized" });
+}
+
 async function handle(
   request: Request,
   url: URL,
   env: Env,
   fetchImpl: typeof fetch,
 ): Promise<Response> {
-  const allowed = assetsKeyMatches(request, env) ? "ok" : adminAllowed(request, url, env);
-  if (allowed === "unset" && !env.MXB_ASSETS_KEY) return json(503, { error: "no admin key is configured" });
-  if (allowed !== "ok") return json(401, { error: "unauthorized" });
-  if (!currentMasterVersion(env) || !env.MXB_OWNER_ACCOUNT_ID) {
+  const scope = await authorize(request, url, env);
+  if (scope instanceof Response) return scope;
+  if (!currentMasterVersion(env) || (scope.kind === "admin" && !env.MXB_OWNER_ACCOUNT_ID)) {
     return json(503, { error: "secured assets are not configured" });
   }
 
-  const match = /^\/admin\/assets(?:\/([A-Za-z0-9_-]{1,64})(\/grants)?)?\/?$/.exec(url.pathname);
+  const match = /^\/admin\/assets(?:\/([A-Za-z0-9_-]{1,64})(?:\/(grants|usage))?)?\/?$/.exec(url.pathname);
   if (!match) return json(404, { error: "no such endpoint" });
-  const [, assetId, grants] = match;
+  const [, assetId, sub] = match;
   const method = request.method;
 
   if (!assetId) {
-    if (method === "GET") return listAssets(env);
-    if (method === "POST") return createAsset(request, env);
-  } else if (grants) {
+    if (method === "GET") return listAssets(env, scope);
+    if (method === "POST") {
+      return createAsset(request, env, scope.kind === "creator" ? scope.accountId : env.MXB_OWNER_ACCOUNT_ID!);
+    }
+    return json(405, { error: "method not allowed" });
+  }
+  // A creator's view stops at their own assets: anyone else's looks like it doesn't exist.
+  if (scope.kind === "creator" && !(await ownedBy(assetId, scope.accountId, env))) {
+    return json(404, { error: "no such asset" });
+  }
+  if (sub === "grants") {
     if (method === "GET") return listGrants(assetId, env);
     if (method === "POST") return changeGrants(request, assetId, env, fetchImpl);
+  } else if (sub === "usage") {
+    if (method === "GET") return assetUsage(assetId, env);
   } else if (method === "PATCH") {
-    return setBlobHash(request, assetId, env);
+    return updateAsset(request, assetId, env);
   }
   return json(405, { error: "method not allowed" });
 }
 
+async function ownedBy(assetId: string, accountId: string, env: Env): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT id FROM assets WHERE id = ? AND creator_id = ?").bind(assetId, accountId).first();
+  return row !== null;
+}
+
 /**
- * `PATCH /admin/assets/:id` — `{ blobSha256 }`, the SHA-256 of the packed file.
+ * `PATCH /admin/assets/:id` — `{ blobSha256?, withdrawn? }`.
  *
- * The site packs in the browser, so it's the only thing that sees the finished file. Once the
- * hash is stored, `/v1/keys/grant` releases the key only for that exact file.
+ * `blobSha256` is the packed file's hash. The site packs in the browser, so it's the only thing
+ * that sees the finished file; once stored, `/v1/keys/grant` releases the key only for it.
+ * `withdrawn: true` stops every new key release for the asset, `false` undoes that.
  */
-async function setBlobHash(request: Request, assetId: string, env: Env): Promise<Response> {
-  const body = await readJson(request);
-  const hash = (body as { blobSha256?: unknown } | null)?.blobSha256;
-  if (typeof hash !== "string" || !/^[0-9a-f]{64}$/i.test(hash.trim())) {
+async function updateAsset(request: Request, assetId: string, env: Env): Promise<Response> {
+  const body = (await readJson(request)) as { blobSha256?: unknown; withdrawn?: unknown } | null;
+  if (!body || typeof body !== "object") return json(400, { error: "expected a JSON body" });
+  const { blobSha256, withdrawn } = body;
+  if (blobSha256 === undefined && withdrawn === undefined) return json(400, { error: "nothing to change" });
+  if (blobSha256 !== undefined && (typeof blobSha256 !== "string" || !/^[0-9a-f]{64}$/i.test(blobSha256.trim()))) {
     return json(400, { error: "blobSha256 must be 64 hex characters" });
   }
+  if (withdrawn !== undefined && typeof withdrawn !== "boolean") {
+    return json(400, { error: "withdrawn must be true or false" });
+  }
   if (!(await assetExists(assetId, env))) return json(404, { error: "no such asset" });
-  const blobSha256 = hash.trim().toLowerCase();
-  await env.DB.prepare("UPDATE assets SET blob_sha256 = ? WHERE id = ?").bind(blobSha256, assetId).run();
-  return json(200, { assetId, blobSha256 });
+
+  const statements = [];
+  if (typeof blobSha256 === "string") {
+    statements.push(
+      env.DB.prepare("UPDATE assets SET blob_sha256 = ? WHERE id = ?").bind(blobSha256.trim().toLowerCase(), assetId),
+    );
+  }
+  if (withdrawn === true) {
+    statements.push(env.DB.prepare("UPDATE assets SET withdrawn_at = COALESCE(withdrawn_at, ?) WHERE id = ?").bind(Date.now(), assetId));
+  } else if (withdrawn === false) {
+    statements.push(env.DB.prepare("UPDATE assets SET withdrawn_at = NULL WHERE id = ?").bind(assetId));
+  }
+  await env.DB.batch(statements);
+  const row = await env.DB.prepare("SELECT blob_sha256, withdrawn_at FROM assets WHERE id = ?")
+    .bind(assetId)
+    .first<{ blob_sha256: string | null; withdrawn_at: number | null }>();
+  return json(200, { assetId, blobSha256: row?.blob_sha256 ?? null, withdrawnAt: row?.withdrawn_at ?? null });
 }
 
 /**
@@ -140,14 +203,13 @@ async function setBlobHash(request: Request, assetId: string, env: Env): Promise
  * The key is 32 random bytes, stored only wrapped under the master key. The raw bytes are in
  * this response and nowhere else, ever: the packer needs them once, to seal the blob.
  */
-async function createAsset(request: Request, env: Env): Promise<Response> {
+async function createAsset(request: Request, env: Env, owner: string): Promise<Response> {
   const body = await readJson(request);
   const title = (body as { title?: unknown } | null)?.title;
   if (typeof title !== "string" || !title.trim() || title.trim().length > 200) {
     return json(400, { error: "title must be 1 to 200 characters" });
   }
 
-  const owner = env.MXB_OWNER_ACCOUNT_ID;
   const account = await env.DB.prepare("SELECT id FROM accounts WHERE id = ?")
     .bind(owner)
     .first<{ id: string }>();
@@ -169,19 +231,26 @@ async function createAsset(request: Request, env: Env): Promise<Response> {
   return json(201, { assetId, keyId: KEY_ID, key: base64(key), title: title.trim() });
 }
 
-/** `GET /admin/assets` — every asset, newest first, with how many hold it now. */
-async function listAssets(env: Env): Promise<Response> {
-  const rows = await env.DB.prepare(
-    "SELECT a.id, a.title, a.created_at, a.withdrawn_at," +
-      " (SELECT COUNT(*) FROM entitlements e WHERE e.asset_id = a.id AND e.revoked_at IS NULL)" +
-      " AS buyers" +
-      " FROM assets a ORDER BY a.created_at DESC, a.id DESC",
-  ).all<{
+/**
+ * `GET /admin/assets` — newest first, with how many hold each one now, whether its file hash is
+ * registered, and when a buyer's app last asked for its key. A creator sees only their own.
+ */
+async function listAssets(env: Env, scope: Scope): Promise<Response> {
+  const mine = scope.kind === "creator";
+  const statement = env.DB.prepare(
+    "SELECT a.id, a.title, a.created_at, a.withdrawn_at, a.blob_sha256 IS NOT NULL AS hashed," +
+      " (SELECT COUNT(*) FROM entitlements e WHERE e.asset_id = a.id AND e.revoked_at IS NULL) AS buyers," +
+      " (SELECT MAX(g.issued_at) FROM entitlement_grants g WHERE g.asset_id = a.id) AS last_request_at" +
+      ` FROM assets a${mine ? " WHERE a.creator_id = ?" : ""} ORDER BY a.created_at DESC, a.id DESC`,
+  );
+  const rows = await (mine ? statement.bind(scope.accountId) : statement).all<{
     id: string;
     title: string;
     created_at: number;
     withdrawn_at: number | null;
+    hashed: number;
     buyers: number;
+    last_request_at: number | null;
   }>();
   return json(200, {
     assets: (rows.results ?? []).map((r) => ({
@@ -190,6 +259,8 @@ async function listAssets(env: Env): Promise<Response> {
       createdAt: r.created_at,
       withdrawnAt: r.withdrawn_at,
       buyers: r.buyers,
+      hashed: !!r.hashed,
+      lastRequestAt: r.last_request_at,
     })),
   });
 }
@@ -210,6 +281,40 @@ async function listGrants(assetId: string, env: Env): Promise<Response> {
       grantedAt: r.granted_at,
       revokedAt: r.revoked_at,
     })),
+  });
+}
+
+/**
+ * `GET /admin/assets/:id/usage` — whose app asked for the key, and when.
+ *
+ * Every request is logged, refusals included. A buyer's app asks once per PC; after that the
+ * file opens offline, so later plays don't show up here.
+ */
+async function assetUsage(assetId: string, env: Env): Promise<Response> {
+  if (!(await assetExists(assetId, env))) return json(404, { error: "no such asset" });
+  const rows = await env.DB.prepare(
+    "SELECT steam_id, decision, reason, issued_at FROM entitlement_grants" +
+      " WHERE asset_id = ? ORDER BY issued_at DESC LIMIT 500",
+  )
+    .bind(assetId)
+    .all<{ steam_id: string; decision: string; reason: string | null; issued_at: number }>();
+  const events = (rows.results ?? []).map((r) => ({
+    steamId: r.steam_id,
+    allowed: r.decision === "allow",
+    reason: r.reason,
+    at: r.issued_at,
+  }));
+  const byBuyer = new Map<string, { steamId: string; unlocks: number; refused: number; lastAt: number }>();
+  for (const e of events) {
+    const b = byBuyer.get(e.steamId) ?? { steamId: e.steamId, unlocks: 0, refused: 0, lastAt: 0 };
+    if (e.allowed) b.unlocks++;
+    else b.refused++;
+    b.lastAt = Math.max(b.lastAt, e.at);
+    byBuyer.set(e.steamId, b);
+  }
+  return json(200, {
+    buyers: [...byBuyer.values()].sort((a, b) => b.lastAt - a.lastAt),
+    events: events.slice(0, 100),
   });
 }
 
@@ -377,14 +482,18 @@ async function assetExists(assetId: string, env: Env): Promise<boolean> {
   return row !== null;
 }
 
-/** CORS headers for an allowed origin; always `Vary: Origin`, since the answer depends on it. */
-function cors(response: Response, origin: string | null, preflight = false): Response {
+/**
+ * CORS headers for an allowed origin; always `Vary: Origin`, since the answer depends on it.
+ * Credentials are allowed so the sign-in cookie rides along from the site.
+ */
+export function cors(response: Response, origin: string | null, preflight = false, methods = "GET, POST, PATCH, OPTIONS"): Response {
   const out = new Response(response.body, response);
   out.headers.append("Vary", "Origin");
   if (origin) {
     out.headers.set("Access-Control-Allow-Origin", origin);
+    out.headers.set("Access-Control-Allow-Credentials", "true");
     if (preflight) {
-      out.headers.set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
+      out.headers.set("Access-Control-Allow-Methods", methods);
       out.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
       out.headers.set("Access-Control-Max-Age", "600");
     }
