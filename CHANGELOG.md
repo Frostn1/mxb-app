@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+- A locked secured file's details now offer an **Unlock** button (and a note that it also unlocks
+  on its own when you launch the game), instead of a dead-end "its name can't be read" message.
+
 ### Added
 - Secured (`.mxbsecure`) files now show in the Library like any other mod — as their real type
   (track, bike, paint, gear), with a badge showing whether they're unlocked or still locked. An
