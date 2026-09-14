@@ -136,7 +136,11 @@ export default function Manage() {
     presetsListProfiles()
       .then((scan) => {
         setProfiles(scan.profiles);
-        setProfile((p) => (scan.profiles.includes(p) ? p : scan.profiles[0] ?? ""));
+        // Fall back to the profile the rider was last playing rather than whichever
+        // sorts first — same rule as Presets.
+        setProfile((p) =>
+          scan.profiles.includes(p) ? p : scan.active ?? scan.profiles[0] ?? "",
+        );
       })
       .catch(() => {});
   }, []);

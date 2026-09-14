@@ -2760,6 +2760,11 @@ export type ProfilesScan = {
    *  when it isn't (wrong path) than when it is (game never made a profile). */
   exists: boolean;
   profiles: string[];
+  /** The profile the rider was last playing (newest `profile.ini` mtime), or `null` when
+   *  none could be read. The Presets and Manage screens open on this one instead of
+   *  whatever profile happens to sort first, so "Save current" captures the profile the
+   *  rider was actually tuning. */
+  active: string | null;
 };
 
 export function presetsListProfiles(): Promise<ProfilesScan> {
