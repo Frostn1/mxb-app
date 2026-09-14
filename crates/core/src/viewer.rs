@@ -135,7 +135,6 @@ pub struct BikeModel {
     pub rig: Option<edf::BikeRig>,
     /// How many of `nodes`, at the end, are wheels from the tyres mod rather than the bike's
     /// own parts — so an export of the bike can leave them out.
-    #[serde(skip)]
     pub wheels: usize,
 }
 
@@ -1873,6 +1872,81 @@ pub fn load_pkz_mesh(pkz: &std::path::Path, entry: &str) -> Option<Vec<edf::EdfN
         return Some(n);
     }
     mesh_from_bytes(key, &read_pkz_entry(pkz, entry)?, true, |_, _| {})
+}
+
+/// A model read straight from a file: its meshes, bound to the textures they name, and those
+/// textures as the file carries them.
+#[derive(serde::Serialize)]
+pub struct LooseModel {
+    pub nodes: Vec<edf::EdfNode>,
+    pub textures: Vec<paint::PaintTexture>,
+}
+
+/// Any model on disk — a loose `.edf`, or every mesh in a `.pkz`, `.zip` or folder. A bar pad,
+/// a seat, a fork guard: parts that come as a file rather than as an installed bike or gear.
+#[tauri::command]
+pub async fn load_model_file(path: String) -> Result<LooseModel, String> {
+    tauri::async_runtime::spawn_blocking(move || load_model_file_blocking(&path))
+        .await
+        .map_err(|e| format!("load_model_file task failed: {e}"))?
+}
+
+pub fn load_model_file_blocking(path: &str) -> Result<LooseModel, String> {
+    let p = std::path::Path::new(path);
+    if crate::securesource::is_secured(p) {
+        return Err("A locked file can't be opened here.".into());
+    }
+    // Shadows (`_s.edf`, `model_shadow.edf`) and the game's temporary meshes are geometry
+    // nobody paints.
+    let wanted = |n: &str| {
+        let n = n.to_ascii_lowercase();
+        n.ends_with(".edf") && !n.contains("shadow") && !n.ends_with("_s.edf") && !n.ends_with("_temp.edf")
+    };
+    // Rider gear is read the way the viewer reads gear — see `edf::parse_gear`.
+    let gear = {
+        let p = path.replace('\\', "/").to_ascii_lowercase();
+        p.contains("/rider/") || p.contains("/helmets/") || p.contains("/boots/") || p.contains("/protections/")
+    };
+    let files: Vec<(String, Vec<u8>)> = if p.is_dir() {
+        walkdir::WalkDir::new(p)
+            .max_depth(4)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file() && wanted(&e.file_name().to_string_lossy()))
+            .filter_map(|e| Some((e.path().to_string_lossy().into_owned(), std::fs::read(e.path()).ok()?)))
+            .collect()
+    } else if wanted(path) {
+        vec![(path.to_string(), std::fs::read(p).map_err(|e| format!("{path}: {e}"))?)]
+    } else {
+        pkz::read_selected(p, wanted).map_err(|e| format!("{e:#}"))?
+    };
+
+    let mut nodes = Vec::new();
+    let mut textures: Vec<paint::PaintTexture> = Vec::new();
+    for (_, data) in &files {
+        // Plain meshes only. A sealed one is somebody's protected work, not a creator's own.
+        if !edf::is_edf(data) {
+            continue;
+        }
+        let mut part = if gear { edf::parse_gear(data) } else { edf::parse(data) };
+        edf::to_right_handed(&mut part);
+        keep_lod0(&mut part);
+        bind_textures(&mut part, data, &Default::default(), &Default::default());
+        for t in edf::color_textures(data) {
+            if textures.iter().any(|h| h.name.eq_ignore_ascii_case(&t.name)) {
+                continue;
+            }
+            if let Some(rgba) = edf::inflate_texture(data, &t) {
+                let token = crate::texstore::put(rgba);
+                textures.push(paint::PaintTexture { name: t.name, width: t.width, height: t.height, token });
+            }
+        }
+        nodes.extend(part);
+    }
+    if nodes.is_empty() {
+        return Err("There's no readable model in there.".into());
+    }
+    Ok(LooseModel { nodes, textures })
 }
 
 /// The stock rider profiles the game itself ships. They're the fallback for a custom model

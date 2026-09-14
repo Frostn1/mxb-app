@@ -779,25 +779,28 @@ const FLANK_WASH: Record<number, string> = {
  * that stops at the edge.
  *
  * `template` draws the same thing as a standalone file — the painting proxy's per-sheet
- * template — so it gets a white ground, dark edges and a `cap` of its own instead of the
- * overlay's.
+ * template — so it gets dark edges and a `cap` of its own instead of the overlay's, and a white
+ * `ground` unless asked not to. `wash` and `wire` turn either half off, so a layered template
+ * can hold the sides and the outlines as layers of their own.
  */
 export function uvWireframe(
   parts: UvPart[],
   width: number,
   height: number,
-  opts?: { cap?: number; template?: boolean },
+  opts?: { cap?: number; template?: boolean; ground?: boolean; wash?: boolean; wire?: boolean },
 ): HTMLCanvasElement | null {
   if (!parts.length) return null;
 
   const template = !!opts?.template;
+  const washed = opts?.wash ?? true;
+  const wired = opts?.wire ?? true;
   const k = Math.min(1, (opts?.cap ?? MAX_WIRE) / Math.max(width, height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(width * k));
   canvas.height = Math.max(1, Math.round(height * k));
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  if (template) {
+  if (opts?.ground ?? template) {
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
@@ -812,7 +815,9 @@ export function uvWireframe(
     // separate shapes, so the fill comes out flat instead of banded along every seam the way a
     // per-triangle fill would. Three paths rather than one leaves exactly one seam — the line
     // where the bike's left meets its right, which is the line this is drawn to show.
-    if (part.flanks) {
+    if (!washed) {
+      // Outlines only.
+    } else if (part.flanks) {
       const paths = new Map<number, Path2D>();
       const { tris, flanks } = part;
       for (let i = 0; i < tris.length; i += 6) {
@@ -837,6 +842,8 @@ export function uvWireframe(
       ctx.fillStyle = `hsla(${part.hue}, 70%, 60%, 0.13)`;
       ctx.fill(partPath(part, sx, sy), "nonzero");
     }
+
+    if (!wired) continue;
 
     // Edges once each. A closed mesh shares almost every edge between two triangles, and
     // drawing both makes the interior twice as bright as the outline that matters.

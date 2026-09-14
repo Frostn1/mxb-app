@@ -66,7 +66,7 @@ import {
   paintStudioStage,
   paintStudioTarget,
   designerRecentNote,
-  exportPaintProxy,
+  loadModelFile,
   psdRead,
   psdUnwatch,
   psdWatch,
@@ -75,10 +75,10 @@ import {
 } from "@frost/shared/api/mods";
 import { useT } from "@/i18n";
 import StartScreen from "./StartScreen";
+import { ProxyDialog } from "./ProxyDialog";
+import type { ProxyTarget } from "./proxyExport";
 import { IMAGE_EXTS, isBikeKind, PaintDestBar, usePaintDest } from "../paintDest";
 const PREVIEW_OPEN_KEY = "mxb:designer:preview:v1";
-/** Edge of a painting proxy's template — the size bike sheets are usually painted at. */
-const TEMPLATE_SIZE = 2048;
 
 import { CanvasStage } from "./CanvasStage";
 import { Slider } from "./controls";
@@ -339,8 +339,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // Whether that mesh was assembled about the bike's mirror plane. Without it a position is a
   // number in some part's own frame, and the sides and facings read off it would be invented.
   const [assembled, setAssembled] = useState(false);
-  // The bike's path on disk, for the painting proxy export. Null for a rider or no model.
-  const [geometrySource, setGeometrySource] = useState<string | null>(null);
+  // What a painting proxy of the model on screen is made from — see `PreviewPanel`'s `proxy`.
+  const [proxyNodes, setProxyNodes] = useState<EdfNode[] | null>(null);
+  // The proxy being exported, which is what holds its dialog open.
+  const [proxyTarget, setProxyTarget] = useState<ProxyTarget | null>(null);
   // That same model's own textures — the look it ships with. Empty for anything that can't
   // say which of its textures are its own, which is every model but a bike.
   const [stockTextures, setStockTextures] = useState<PaintTexture[]>([]);
@@ -1142,36 +1144,55 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     }
   }, [canvasFor, name, sheets, t]);
 
-  // A creator's stand-in for painters: the cut-down mesh comes from the backend, then a template
-  // per sheet is drawn here by the same rasteriser as the UV overlay, so the two can't disagree.
-  const exportProxy = useCallback(async () => {
-    const nodes = geometryRef.current;
-    if (!geometrySource || !nodes) return;
-    const picked = await openDialog({ directory: true });
-    const dir = Array.isArray(picked) ? picked[0] : picked;
-    if (!dir) return;
+  // A creator's stand-in for painters, of the model on screen. Its own look is offered as the
+  // shading layer; `ProxyDialog` asks whether it goes out.
+  const openProxy = useCallback(() => {
+    if (!proxyNodes) return;
+    const own = (texture: string) =>
+      stockTextures.find((s) => s.name.trim().toLowerCase() === texture.trim().toLowerCase());
+    setProxyTarget({
+      nodes: proxyNodes,
+      name: destState.model || name.trim() || "model",
+      assembled,
+      shading: stockTextures.length
+        ? (texture) => {
+            const tex = own(texture);
+            return tex ? stockBitmap(tex) : Promise.resolve(null);
+          }
+        : undefined,
+    });
+  }, [assembled, destState.model, name, proxyNodes, stockTextures]);
+
+  // Any model file — a bar pad, a seat — straight to its proxy, with no paint to open first.
+  const proxyFromFile = useCallback(async () => {
+    const picked = await openDialog({
+      filters: [{ name: "Model", extensions: ["edf", "pkz", "zip"] }],
+    });
+    const path = Array.isArray(picked) ? picked[0] : picked;
+    if (!path) return;
     setBusy(true);
     try {
-      const res = await exportPaintProxy(geometrySource, dir);
-      const sep = dir.includes("\\") ? "\\" : "/";
-      for (const { texture, file } of res.templates) {
-        const parts = uvParts(nodes, texture, { assembled });
-        const canvas = uvWireframe(parts, TEMPLATE_SIZE, TEMPLATE_SIZE, {
-          cap: TEMPLATE_SIZE,
-          template: true,
-        });
-        const blob = canvas && (await new Promise<Blob | null>((ok) => canvas.toBlob(ok, "image/png")));
-        if (blob) await psdSave(`${dir}${sep}${file}`, await blob.arrayBuffer());
-      }
-      toast.success(t("designer.exportedProxy", { dir }), {
-        description: t("designer.exportedProxyDesc", { kept: res.triangles, of: res.sourceTriangles }),
+      const m = await loadModelFile(path);
+      const file = path.split(/[\\/]/).pop() ?? "model";
+      const own = (texture: string) =>
+        m.textures.find((s) => s.name.toLowerCase() === texture.toLowerCase());
+      setProxyTarget({
+        nodes: m.nodes,
+        name: file.replace(/\.[^.]+$/, ""),
+        assembled: false,
+        shading: m.textures.length
+          ? (texture) => {
+              const tex = own(texture);
+              return tex ? stockBitmap(tex) : Promise.resolve(null);
+            }
+          : undefined,
       });
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
     } finally {
       setBusy(false);
     }
-  }, [assembled, geometrySource, t]);
+  }, []);
 
   // Sheets sent over from Paint Studio. Same path as unpacking a paint here, because it is the
   // same thing — that tab has already done the unpacking.
@@ -1872,10 +1893,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * isn't there — the worst kind of wrong for a guide.
    */
   const onGeometry = useCallback(
-    (nodes: EdfNode[] | null, assembled: boolean, source: string | null) => {
+    (nodes: EdfNode[] | null, assembled: boolean, proxy: EdfNode[] | null) => {
     // Compared against a ref rather than inside a `setState` updater: an updater has to be
     // pure, and this has to invalidate the wires as well as record the mesh.
-    setGeometrySource(source);
+    setProxyNodes(proxy);
     if (geometryRef.current === nodes) return;
     geometryRef.current = nodes;
     setGeometry(nodes);
@@ -2402,12 +2423,14 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           onBlank={beginNew}
           onFromPaint={() => void startFromPaint()}
           onFromPsd={() => void startFromPsd()}
+          onProxyFromFile={() => void proxyFromFile()}
           onOpenRecent={(r) => {
             setName(r.name);
             setStarted(true);
             void openPaint(r.path);
           }}
         />
+        <ProxyDialog target={proxyTarget} onClose={() => setProxyTarget(null)} />
       </div>
     );
   }
@@ -2509,18 +2532,19 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           >
             {t("designer.exportPsd")}
           </Button>
-          {geometrySource && (
+          {proxyNodes && (
             <Button
               variant="outline"
               size="sm"
               className="border-border text-muted-foreground hover:text-foreground"
               disabled={busy}
               title={t("designer.exportProxyHint")}
-              onClick={() => void exportProxy()}
+              onClick={openProxy}
             >
               {t("designer.exportProxy")}
             </Button>
           )}
+          <ProxyDialog target={proxyTarget} onClose={() => setProxyTarget(null)} />
           <Button
             size="sm"
             disabled={busy || !sheets.length}

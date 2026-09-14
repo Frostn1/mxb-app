@@ -856,7 +856,7 @@ export function psdRead(path: string): Promise<ArrayBuffer> {
 
 /**
  * Write a sheet's `.psd` to a path the user picked. Body and header, as {@link photoSave}.
- * A painting proxy's `.png` templates are written the same way.
+ * A painting proxy's templates and `.glb` are written the same way.
  */
 export function psdSave(dest: string, psd: ArrayBuffer): Promise<string> {
   return invoke<string>("psd_save", psd, {
@@ -871,14 +871,70 @@ export type PaintProxyResult = {
   sourceTriangles: number;
   /** One per texture the proxy uses: the `.png` its `.mtl` expects, for the caller to draw. */
   templates: { texture: string; file: string }[];
+  /** The proxy itself, one submesh per texture — what the `.glb` is built from. */
+  proxy: EdfNode[];
 };
 
+/** Meshes packed flat for the backend — the layout `paintproxy::decode_nodes` reads. */
+function packNodes(nodes: EdfNode[]): ArrayBuffer {
+  const enc = new TextEncoder();
+  const chunks: Uint8Array[] = [];
+  const u32 = (n: number) => chunks.push(new Uint8Array(new Uint32Array([n]).buffer));
+  const str = (s: string | null | undefined) => {
+    if (s == null) return u32(0xffffffff);
+    const b = enc.encode(s);
+    u32(b.length);
+    chunks.push(b);
+  };
+  const raw = (a: Float32Array | Uint32Array) =>
+    chunks.push(new Uint8Array(a.buffer, a.byteOffset, a.byteLength));
+  u32(nodes.length);
+  for (const n of nodes) {
+    str(n.name);
+    str(n.texture);
+    u32(n.positions.length / 3);
+    raw(n.positions);
+    raw(n.uvs);
+    u32(n.indices.length);
+    raw(n.indices);
+    u32(n.submeshes.length);
+    for (const sm of n.submeshes) {
+      str(sm.name);
+      str(sm.texture);
+      u32(sm.triStart);
+      u32(sm.triCount);
+    }
+  }
+  const out = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0));
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.length;
+  }
+  return out.buffer;
+}
+
 /**
- * Write a bike's painting proxy — a cut-down `.obj` with the real UV layout, and its `.mtl` —
- * into `outDir`. The templates the `.mtl` names are the caller's to write.
+ * Write a painting proxy of `nodes` — a cut-down `.obj` with the real UV layout, and its
+ * `.mtl` — into `outDir` as `<name>_proxy.obj`. The templates the `.mtl` names are the
+ * caller's to write, from the list that comes back.
  */
-export function exportPaintProxy(source: string, outDir: string): Promise<PaintProxyResult> {
-  return invoke<PaintProxyResult>("export_paint_proxy", { source, outDir });
+export function exportPaintProxy(
+  nodes: EdfNode[],
+  outDir: string,
+  name: string,
+): Promise<PaintProxyResult> {
+  return invoke<PaintProxyResult>("export_paint_proxy", packNodes(nodes), {
+    headers: { "x-dir": encodeURIComponent(outDir), "x-name": encodeURIComponent(name) },
+  }).then(reviveMesh);
+}
+
+/** A model read straight from a file: its meshes and the textures it carries. */
+export type LooseModel = { nodes: EdfNode[]; textures: PaintTexture[] };
+
+/** Read any model file — a loose `.edf`, or every mesh in a `.pkz` or a folder. */
+export function loadModelFile(path: string): Promise<LooseModel> {
+  return invoke<LooseModel>("load_model_file", { path }).then(reviveMesh);
 }
 
 /** The file a save would write, resolved but not written — so we can ask before replacing. */
