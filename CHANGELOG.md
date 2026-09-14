@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-09-14 — Frost's Studio v0.1.6
+
+### Added
+- Undo in the track creator. Ctrl+Z steps back through any edit — moving a jump, changing a
+  corner, dragging the elevation curve — and Ctrl+Shift+Z or Ctrl+Y steps forward again. A drag
+  is one step, so taking one back doesn't mean hammering the key. Loading another track starts a
+  fresh history.
+- Choose which jump the lap finishes over. Select a table or a double and turn on Finish line: it
+  stays the finish wherever you move it and whatever size it is. Only one jump can be the finish,
+  so naming one clears the last. Leave it off and the tallest jump on the start straight is used,
+  exactly as before.
+
+### Changed
+- A track with problems can be built. Problems that only mean the track is unlike a published one
+  — a jump taller than usual, whoops further apart, a berm on a straight — now ask before
+  building, and list what they are, instead of greying out the button. Only a lap that cannot be
+  built at all still stops you. The 3D preview follows the same rule, so you can look at whatever
+  it is complaining about and decide for yourself.
+
 ## 2026-09-14 — Frost's Studio v0.1.5
 
 ### Fixed
