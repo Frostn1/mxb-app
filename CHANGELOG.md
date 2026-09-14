@@ -2,6 +2,12 @@
 
 ## Unreleased — Frost's Studio
 
+### Fixed
+- Adding a part in the track creator now lands it where you're working and keeps it selected — the
+  same way adding a corner does — instead of dropping it in a gap somewhere in the middle of the
+  list where it's easy to miss. Moving or dragging a part also keeps it selected as the row order
+  updates, so the list no longer feels like it's shuffling out from under you.
+
 ### Removed
 - The Paints tab. The Designer editor does the same job, so it's gone from the sidebar.
 
