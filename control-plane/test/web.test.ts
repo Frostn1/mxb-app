@@ -42,6 +42,8 @@ async function deployment(overrides: Record<string, string> = {}): Promise<Env> 
         return body === undefined ? null : { body };
       },
     },
+    // The paints bucket, as far as the paint views ask: a digest nobody uploaded is absent.
+    PAINTS: { async head() { return null; }, async get() { return null; } },
     MXB_WEB_SESSION_KEY: KEY,
     MXB_ASSET_MASTER_KEY: masterKey(),
     MXB_OWNER_ACCOUNT_ID: "acc_owner",
@@ -613,6 +615,67 @@ describe("the dashboards on the site", () => {
 
     expect((await post({ action: "delete", id: rules[0].id })).status).toBe(200);
     expect((await post({ action: "delete", id: 0 })).status).toBe(400);
+  });
+
+  it("serves the paint views, and refuses a digest that isn't one", async () => {
+    const env = await deployment(ADMINS);
+    const frost = await cookieFor(CREATOR);
+    const get = async (path: string) => {
+      const res = await web(env, req("GET", path, { cookie: frost }));
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
+
+    const riders = await get("/v1/web/admin/paints/riders");
+    expect(riders.status).toBe(200);
+    expect(riders.body.totals).toMatchObject({ riders: 0, paints: 0 });
+    expect(riders.body.found).toMatchObject({ rows: [], page: 1 });
+    // The column asked for is looked up, never trusted: a hand-edited sort is the default.
+    expect((await get("/v1/web/admin/paints/riders?sort=nonsense")).body.order).toMatchObject({ sort: "published" });
+    expect((await get("/v1/web/admin/paints/files")).status).toBe(200);
+
+    expect((await get("/v1/web/admin/paints/rider?id=nobody")).status).toBe(404);
+    expect((await get("/v1/web/admin/paints/paint?sha=not-a-digest")).status).toBe(404);
+    expect((await get(`/v1/web/admin/paints/paint?sha=${"a".repeat(64)}`)).status).toBe(404);
+  });
+
+  it("mints, revokes and grants, and refuses what the data layer refuses", async () => {
+    const env = await deployment(ADMINS);
+    const frost = await cookieFor(CREATOR);
+    await env.DB.prepare("INSERT INTO plugins (id, name, created_at) VALUES ('voice', 'Voice', 1)").run();
+    const post = (body: unknown, opts: Record<string, unknown> = {}) =>
+      web(env, req("POST", "/v1/web/admin/plugins", { cookie: frost, body, ...opts }));
+    const read = async (path: string) =>
+      (await (await web(env, req("GET", path, { cookie: frost }))).json()) as Record<string, never>;
+
+    expect((await post({ action: "mint", plugin: "voice", months: 3, count: 2 }, { origin: "https://evil.example" })).status).toBe(403);
+    expect((await post({ action: "sideways" })).status).toBe(400);
+    // The ceilings are `mintKeys`'s, not this endpoint's: one place decides what is sane.
+    expect((await post({ action: "mint", plugin: "voice", months: 99, count: 2 })).status).toBe(400);
+    expect((await post({ action: "mint", plugin: "nope", months: 3, count: 2 })).status).toBe(400);
+
+    const minted = await post({ action: "mint", plugin: "voice", months: 3, count: 2, note: "testers" });
+    expect(minted.status).toBe(200);
+    const { at } = (await minted.json()) as { at: number };
+
+    const keys = await read(`/v1/web/admin/plugins/keys?minted=${at}`);
+    expect((keys.batch as unknown as string[]).length).toBe(2);
+    expect((keys.found as unknown as { rows: { code: string }[] }).rows).toHaveLength(2);
+    // The migrations ship a plugin of their own, so this is "contains", not "equals".
+    expect(keys.plugins as unknown as { id: string; keys: number }[]).toContainEqual(
+      expect.objectContaining({ id: "voice", keys: 2 }),
+    );
+
+    const code = (keys.batch as unknown as string[])[0];
+    expect((await post({ action: "key-revoke", code })).status).toBe(200);
+    const revoked = await read("/v1/web/admin/plugins/keys?state=revoked");
+    expect((revoked.found as unknown as { total: number }).total).toBe(1);
+    expect((await post({ action: "key-restore", code })).status).toBe(200);
+
+    expect((await post({ action: "grant", who: "nobody", plugin: "voice", months: 3 })).status).toBe(400);
+    expect((await post({ action: "grant", who: "Frost", plugin: "voice", months: 3 })).status).toBe(200);
+    expect((await read("/v1/web/admin/plugins/licenses")).found).toMatchObject({ total: 1 });
+    expect((await post({ action: "license-revoke", account: "acc_frost", plugin: "voice" })).status).toBe(200);
+    expect((await read("/v1/web/admin/plugins/licenses?state=live")).found).toMatchObject({ total: 0 });
   });
 
   it("clamps the window and refuses a path it doesn't serve", async () => {

@@ -29,6 +29,18 @@ import {
   searchRiders,
   totals,
 } from "./diagnosticssearch";
+import { filesData, onePaintData, oneRiderData, ridersData } from "./paintspage";
+import {
+  adminPlugins,
+  grantLicense,
+  mintKeys,
+  searchKeys,
+  searchLicenses,
+  setKeyRevoked,
+  setLicenseRevoked,
+} from "./plugins";
+import { batchCodes, keyQuery, licenseQuery } from "./pluginspage";
+import { paintThumb } from "./pntthumb";
 import { isSteamId64 } from "./steam";
 import { collectStats, windowDays } from "./usage";
 import { webSession } from "./websession";
@@ -97,6 +109,43 @@ export async function webAdminRoutes(request: Request, url: URL, env: Env, origi
         const detail = name ? await fileDetail(env, name, sha256, parsePage(url.searchParams.get("page"))) : null;
         return detail ? said(200, detail) : said(404, { error: "no such file" });
       }
+
+      case "/v1/web/admin/paints/riders":
+        return said(200, await ridersData(env, url));
+      case "/v1/web/admin/paints/files":
+        return said(200, await filesData(env, url));
+      case "/v1/web/admin/paints/rider": {
+        const d = await oneRiderData(env, url.searchParams.get("id") ?? "");
+        return d ? said(200, d) : said(404, { error: "no such account" });
+      }
+      case "/v1/web/admin/paints/paint": {
+        const d = await onePaintData(env, (url.searchParams.get("sha") ?? "").toLowerCase());
+        // The sheets are pixels; the page asks for those separately, from /thumb.
+        return d ? said(200, { ...d, sheets: d.sheets ? { chosen: d.sheets.chosen, count: d.sheets.images.length } : null })
+          : said(404, { error: "nothing here has that digest" });
+      }
+      // The picture itself. `cors` so the page can ask for it with the sign-in cookie —
+      // it is somebody's paint, not a public asset.
+      case "/v1/web/admin/paints/thumb":
+        return cors(await paintThumb((url.searchParams.get("sha") ?? "").toLowerCase(), env), origin);
+
+      case "/v1/web/admin/plugins/keys": {
+        const query = keyQuery(url);
+        // A batch is identified by the second it was minted in, so the codes survive a
+        // reload and a link without ever being in the address themselves.
+        const minted = Number(url.searchParams.get("minted") ?? "");
+        const [plugins, found, batch] = await Promise.all([
+          adminPlugins(env),
+          searchKeys(env, query),
+          Number.isInteger(minted) && minted > 0 ? batchCodes(env, minted) : Promise.resolve([]),
+        ]);
+        return said(200, { plugins, found, query, batch });
+      }
+      case "/v1/web/admin/plugins/licenses": {
+        const query = licenseQuery(url);
+        const [plugins, found] = await Promise.all([adminPlugins(env), searchLicenses(env, query)]);
+        return said(200, { plugins, found, query });
+      }
     }
   }
 
@@ -120,6 +169,46 @@ export async function webAdminRoutes(request: Request, url: URL, env: Env, origi
     }
     const result = await addRule(env, field("kind"), field("pattern"), field("sha256"), field("label"), field("note"));
     return result.ok ? said(200, { ok: true }) : said(400, { error: result.error ?? "that rule was not usable" });
+  }
+
+  // Everything a button on the plugin pages does. One endpoint rather than six, because they
+  // are all the same shape: a change, and what to say about it afterwards.
+  if (request.method === "POST" && path === "/v1/web/admin/plugins") {
+    const refused = refuseCrossSiteWrite(request, env);
+    if (refused) return cors(refused, origin);
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return said(400, { error: "that was not JSON" });
+    }
+    const field = (name: string) => String(body[name] ?? "");
+    switch (field("action")) {
+      case "mint": {
+        const result = await mintKeys(env, field("plugin"), Number(body.months), Number(body.count), field("note"));
+        return result.ok ? said(200, { ok: true, at: result.at }) : said(400, { error: result.error ?? "those keys were not minted" });
+      }
+      case "key-revoke":
+        await setKeyRevoked(env, field("code"), true);
+        return said(200, { ok: true });
+      case "key-restore":
+        await setKeyRevoked(env, field("code"), false);
+        return said(200, { ok: true });
+      case "license-revoke":
+        await setLicenseRevoked(env, field("account"), field("plugin"), true);
+        return said(200, { ok: true });
+      case "license-restore":
+        await setLicenseRevoked(env, field("account"), field("plugin"), false);
+        return said(200, { ok: true });
+      case "grant": {
+        const result = await grantLicense(env, field("who"), field("plugin"), Number(body.months));
+        return result.ok
+          ? said(200, { ok: true, account: result.account, expires: result.expires })
+          : said(400, { error: result.error ?? "nothing was granted" });
+      }
+      default:
+        return said(400, { error: "no such action" });
+    }
   }
 
   return said(404, { error: "no such endpoint" });
