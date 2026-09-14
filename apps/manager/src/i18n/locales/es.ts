@@ -573,6 +573,11 @@ export const es: Translation = {
   "settings.steamLinkOk": "Sesión iniciada como {{id}}.",
   "settings.steamLinkPending": "Aún no se detectó el inicio de sesión. Termínalo en el navegador y reabre Ajustes.",
   "settings.steamLinkFail": "Error al iniciar sesión con Steam",
+  "settings.secStatusTitle": "Contenido protegido encontrado",
+  "settings.secStatusUnlocked": "Desbloqueado",
+  "settings.secStatusUnlocking": "Desbloqueando…",
+  "settings.secStatusNotOwned": "No está en tu biblioteca",
+  "settings.secStatusUnavailable": "No disponible",
   "secure.intro":
     "Elige un archivo, bloquéalo y luego verifica que se desbloquea. Verificar descifra el blob aquí mismo y lo compara con el original, byte a byte — la prueba de que va y vuelve en esta máquina.",
   "secure.protectTitle": "Proteger un circuito",

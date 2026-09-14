@@ -318,6 +318,11 @@ async function route(request: Request, env: Env): Promise<Response> {
   // is the point of the flow, and entitlement is checked per asset when it is asked for.
   if (method === "POST" && path === "/v1/steam/login") return steamLogin(request, account, env);
   if (method === "GET" && path === "/v1/entitlements") return listEntitlements(account, env);
+
+  // Status for a set of secured files the app found on disk, so it can show a locked `.mxbsecure`
+  // with its registered name and why it's locked — without the content key. Public title, plus
+  // this account's ownership.
+  if (method === "POST" && path === "/v1/assets/status") return assetStatus(request, account, env);
   if (method === "POST" && path === "/v1/entitlements/check") {
     return checkEntitlement(request, account, env);
   }
@@ -548,6 +553,63 @@ async function listEntitlements(account: Account, env: Env): Promise<Response> {
       source: r.source,
       grantedAt: r.granted_at,
     })),
+  });
+}
+
+/**
+ * Status for a batch of secured assets the app found on disk. For each requested id: the public
+ * `title` (null if we don't know the asset), whether this account `owned` it, and whether it is
+ * `available` to unlock (has a stored key and isn't withdrawn). Lets the app show a locked file
+ * with a real name and a reason, without ever needing the content key.
+ */
+async function assetStatus(request: Request, account: Account, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const raw = (body as { assetIds?: unknown }).assetIds;
+  if (!Array.isArray(raw)) return json(400, { error: "assetIds must be an array" });
+  const assetIds = [
+    ...new Set(
+      raw
+        .filter((x): x is string => typeof x === "string" && !!x.trim())
+        .map((x) => x.trim()),
+    ),
+  ].slice(0, 200);
+  if (assetIds.length === 0) {
+    return json(200, { steamId: account.steam_id ?? null, assets: [] });
+  }
+
+  const placeholders = assetIds.map(() => "?").join(",");
+  const known = await env.DB.prepare(
+    `SELECT id, title, wrapped_key IS NOT NULL AS has_key, withdrawn_at IS NOT NULL AS withdrawn` +
+      ` FROM assets WHERE id IN (${placeholders})`,
+  )
+    .bind(...assetIds)
+    .all<{ id: string; title: string; has_key: number; withdrawn: number }>();
+  const byId = new Map((known.results ?? []).map((r) => [r.id, r]));
+
+  const owned = new Set<string>();
+  if (account.steam_id) {
+    const ent = await env.DB.prepare(
+      `SELECT asset_id FROM entitlements WHERE revoked_at IS NULL AND steam_id = ?` +
+        ` AND asset_id IN (${placeholders})`,
+    )
+      .bind(account.steam_id, ...assetIds)
+      .all<{ asset_id: string }>();
+    for (const r of ent.results ?? []) owned.add(r.asset_id);
+  }
+
+  return json(200, {
+    steamId: account.steam_id ?? null,
+    assets: assetIds.map((id) => {
+      const a = byId.get(id);
+      return {
+        assetId: id,
+        title: a?.title ?? null,
+        registered: !!a,
+        owned: owned.has(id),
+        available: !!a && a.has_key === 1 && a.withdrawn !== 1,
+      };
+    }),
   });
 }
 

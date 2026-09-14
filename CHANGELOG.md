@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- Settings → General lists the secured files it found and each one's status — Unlocked,
+  Unlocking, Not in your library, or Unavailable — with its store name, so a locked file you
+  can't see in-game isn't a mystery.
 - Secured content you own unlocks on its own: install a `.mxbsecure` file and, once you're signed
   in, it unlocks in the background — no need to pick it and press unlock. Content you don't own is
   left locked and never nags.

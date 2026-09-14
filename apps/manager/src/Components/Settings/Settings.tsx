@@ -68,6 +68,8 @@ import {
   mxbsecureUnlock,
   steamLinkStart,
   steamLinkStatus,
+  mxbsecureStatus,
+  type SecureStatusItem,
   setVoiceInputDevice,
   setVoiceOutputDevice,
   setVoicePttHotkey,
@@ -513,6 +515,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const [secureAvailable, setSecureAvailable] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [linkedSteam, setLinkedSteam] = useState<string | null>(null);
+  const [secureItems, setSecureItems] = useState<SecureStatusItem[]>([]);
+  const secureBadge = (it: SecureStatusItem) => {
+    if (it.unlocked)
+      return { label: t("settings.secStatusUnlocked"), cls: "bg-success/15 text-success" };
+    if (it.owned && it.available)
+      return { label: t("settings.secStatusUnlocking"), cls: "bg-primary/15 text-primary" };
+    if (it.registered && !it.owned)
+      return { label: t("settings.secStatusNotOwned"), cls: "bg-foreground/10 text-muted-foreground" };
+    return { label: t("settings.secStatusUnavailable"), cls: "bg-foreground/10 text-muted-foreground" };
+  };
   const [linking, setLinking] = useState(false);
   const voiceInput = config.voiceInputDevice ?? "";
   const voiceOutput = config.voiceOutputDevice ?? "";
@@ -915,6 +927,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     experimentalStateApi().then(setExperimentalState).catch(() => {});
     contentSecureAvailable().then(setSecureAvailable).catch(() => {});
     steamLinkStatus().then(setLinkedSteam).catch(() => {});
+    mxbsecureStatus().then(setSecureItems).catch(() => {});
     // Re-check FrostMod against GitHub whenever Settings opens — the provider
     // only fetches once at launch, so this catches releases cut since then.
     void refreshStatus();
@@ -1463,6 +1476,34 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                         {t("settings.mxbsecureUnlockBtn")}
                       </Button>
                     </div>
+                    {secureItems.length > 0 && (
+                      <div>
+                        <p className="text-[13px] font-medium">{t("settings.secStatusTitle")}</p>
+                        <ul className="mt-2 space-y-1">
+                          {secureItems.map((it) => {
+                            const b = secureBadge(it);
+                            return (
+                              <li
+                                key={it.blobPath}
+                                className="flex items-center justify-between gap-3 rounded-md bg-foreground/[0.03] px-2.5 py-1.5"
+                              >
+                                <span
+                                  className="min-w-0 flex-1 truncate text-[12px]"
+                                  title={it.gameName}
+                                >
+                                  {it.title ?? it.gameName}
+                                </span>
+                                <span
+                                  className={`flex-none rounded px-1.5 py-0.5 text-[10.5px] font-medium ${b.cls}`}
+                                >
+                                  {b.label}
+                                </span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
                   </>
                 )}
               </>

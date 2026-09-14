@@ -572,6 +572,11 @@ export const it: Translation = {
   "settings.steamLinkOk": "Accesso come {{id}}.",
   "settings.steamLinkPending": "Accesso non ancora rilevato. Completalo nel browser, poi riapri le Impostazioni.",
   "settings.steamLinkFail": "Accesso con Steam non riuscito",
+  "settings.secStatusTitle": "Contenuti protetti trovati",
+  "settings.secStatusUnlocked": "Sbloccato",
+  "settings.secStatusUnlocking": "Sblocco…",
+  "settings.secStatusNotOwned": "Non nella tua libreria",
+  "settings.secStatusUnavailable": "Non disponibile",
   "secure.intro":
     "Scegli un file, bloccalo, poi verifica che si sblocchi. La verifica decifra il blob qui e lo confronta con l'originale, byte per byte — la prova che fa il giro su questa macchina.",
   "secure.protectTitle": "Proteggi una pista",
