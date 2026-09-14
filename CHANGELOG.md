@@ -8,6 +8,7 @@
   Steam URL.
 - Secured content is harder to pull apart, and its key is tied more tightly to your PC. If a key
   needs refreshing, the app does it for you the next time you unlock — nothing to redo.
+- Further hardened the app and Frost Studio against tampering.
 - The Settings list of secured content now finds files anywhere under your mods folder (a
   `mxbsecure` sub-folder of your own included), not just the top of tracks/bikes/rider, and lists
   every one it finds — each with a clear status and, when it's locked, a short reason (not in your
@@ -56,7 +57,10 @@
 ### Fixed
 - Updating the app also updates the helper that opens locked tracks.
 
-## Unreleased — Frost's Studio
+## 2026-09-14 — Frost's Studio v0.1.1
+
+### Added
+- Frost's Studio tells you when a new version is out and updates itself in one click.
 
 ### Fixed
 - The window's close button closes Frost's Studio.

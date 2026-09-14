@@ -189,7 +189,8 @@ describe("Steam sign-in", () => {
 
     for (const cookie of [undefined, someoneElses, `${LOGIN_COOKIE}=`]) {
       const res = await web(env, comeBack(returnTo, CREATOR, cookie), steam as unknown as typeof fetch);
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(303);
+      expect(res.headers.get("Location")).toBe(`${SITE}/steam?r=other-browser`);
       expect(setCookie(res, SESSION_COOKIE)).toBeUndefined();
       // Left alone, so a sign-in this browser really has in flight still completes.
       expect(setCookie(res, LOGIN_COOKIE)).toBeUndefined();
@@ -209,11 +210,10 @@ describe("Steam sign-in", () => {
     const from = (ip: string, path: string) => new Request(`${API}${path}`, { headers: { "CF-Connecting-IP": ip } });
 
     expect((await web(env, from("1.2.3.4", "/v1/web/steam/login"))).status).toBe(302);
-    expect((await web(env, from("1.2.3.4", "/v1/web/steam/return?state=junk"))).status).toBe(400);
+    expect((await web(env, from("1.2.3.4", "/v1/web/steam/return?state=junk"))).headers.get("Location")).toBe(`${SITE}/steam?r=expired`);
     const slow = await web(env, from("1.2.3.4", "/v1/web/steam/login"));
-    expect(slow.status).toBe(429);
-    expect(slow.headers.get("Retry-After")).toBe("60");
-    expect(await slow.text()).toContain("Too many sign-in attempts");
+    expect(slow.status).toBe(303);
+    expect(slow.headers.get("Location")).toBe(`${SITE}/steam?r=busy`);
     expect((await web(env, from("5.6.7.8", "/v1/web/steam/login"))).status).toBe(302);
     // /me and logout aren't counted.
     expect((await web(env, from("1.2.3.4", "/v1/web/me"))).status).toBe(401);
@@ -238,10 +238,10 @@ describe("Steam sign-in", () => {
 
   it("refuses a broken state, and an assertion Steam won't confirm", async () => {
     const env = await deployment();
-    expect((await web(env, req("GET", "/v1/web/steam/return?state=junk", { origin: null }))).status).toBe(400);
+    expect((await web(env, req("GET", "/v1/web/steam/return?state=junk", { origin: null }))).headers.get("Location")).toBe(`${SITE}/steam?r=expired`);
     const no = vi.fn(async () => new Response("is_valid:false\n")) as unknown as typeof fetch;
     const res = await web(env, await steamComesBack(env, CREATOR), no);
-    expect(res.status).toBe(403);
+    expect(res.headers.get("Location")).toBe(`${SITE}/steam?r=unconfirmed`);
     expect(setCookie(res, SESSION_COOKIE)).toBeUndefined();
     expect(setCookie(res, LOGIN_COOKIE)).toContain("Max-Age=0");
   });
@@ -320,10 +320,64 @@ describe("creators on /admin/assets", () => {
     expect((await assets(env, req("POST", grants, { cookie: frost, body, contentType: "application/json; charset=utf-8" }))).status).toBe(200);
   });
 
-  it("refuses a signed-in account that isn't a creator, and an expired session", async () => {
+  it("keeps new creators out by default, and lets existing ones in", async () => {
     const env = await deployment();
-    await env.DB.prepare("UPDATE accounts SET creator_at = NULL WHERE id = 'acc_other'").run();
-    expect((await assets(env, req("GET", "/admin/assets", { cookie: await cookieFor(OTHER) }))).status).toBe(403);
+    const cookie = await cookieFor("76561198000000077");
+    expect((await assets(env, req("GET", "/admin/assets", { cookie }))).status).toBe(403);
+    expect((await assets(env, req("POST", "/admin/assets", { cookie, body: { title: "X" } }))).status).toBe(403);
+    expect(await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()).toMatchObject({ creator: false });
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts WHERE steam_id = '76561198000000077'").first<{ n: number }>())?.n).toBe(0);
+    expect((await assets(env, req("GET", "/admin/assets", { cookie: await cookieFor(CREATOR) }))).status).toBe(200);
+  });
+
+  it("lets a creator lock 10 new files a day, and the owner any number", async () => {
+    const make = (env: Env, cookie: string) => assets(env, req("POST", "/admin/assets", { cookie, body: { title: "T" } }));
+    const cookie = await cookieFor(CREATOR);
+    const env = await deployment();
+    for (let i = 0; i < 10; i++) expect((await make(env, cookie)).status).toBe(201);
+    const over = await make(env, cookie);
+    expect(over.status).toBe(429);
+    expect(((await over.json()) as { error: string }).error).toBe("You can lock 10 new files a day. Try again tomorrow.");
+    const owner = await deployment({ MXB_OWNER_ACCOUNT_ID: "acc_frost" });
+    for (let i = 0; i < 11; i++) expect((await make(owner, cookie)).status).toBe(201);
+  });
+
+  it("while new creators are open, makes anyone signed in with Steam a creator, on a web profile made with their first asset", async () => {
+    const env = await deployment({ MXB_NEW_CREATORS: "open" });
+    const NEWCOMER = "76561198000000077";
+    const cookie = await cookieFor(NEWCOMER);
+    const profile = () =>
+      env.DB.prepare("SELECT id, kind, creator_at IS NOT NULL AS creator FROM accounts WHERE steam_id = ?")
+        .bind(NEWCOMER)
+        .first<{ id: string; kind: string; creator: number }>();
+
+    // Signing in and looking around makes nothing.
+    const empty = await assets(env, req("GET", "/admin/assets", { cookie }));
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toEqual({ assets: [] });
+    expect(await profile()).toBeNull();
+    expect(await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()).toMatchObject({ creator: true, linked: false });
+
+    const made = await assets(env, req("POST", "/admin/assets", { cookie, body: { title: "First" } }));
+    expect(made.status).toBe(201);
+    const { assetId } = (await made.json()) as { assetId: string };
+    expect(await profile()).toMatchObject({ kind: "web", creator: 1 });
+    const again = await assets(env, req("POST", "/admin/assets", { cookie, body: { title: "Second" } }));
+    expect(again.status).toBe(201);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts WHERE steam_id = ?").bind(NEWCOMER).first<{ n: number }>())?.n).toBe(1);
+
+    // Theirs to manage, and nobody else's.
+    const mine = (await (await assets(env, req("GET", "/admin/assets", { cookie }))).json()) as { assets: unknown[] };
+    expect(mine.assets).toHaveLength(2);
+    const frost = await cookieFor(CREATOR);
+    expect((await assets(env, req("GET", `/admin/assets/${assetId}/grants`, { cookie: frost }))).status).toBe(404);
+    // A web profile's placeholder name never shows, and it isn't an app profile.
+    const me = (await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()) as { name: string; linked: boolean };
+    expect(me).toMatchObject({ name: "Frost", linked: false });
+  });
+
+  it("refuses an expired session", async () => {
+    const env = await deployment();
     const expired = await cookieFor(CREATOR, Date.now() - 1);
     expect((await assets(env, req("GET", "/admin/assets", { cookie: expired }))).status).toBe(401);
   });

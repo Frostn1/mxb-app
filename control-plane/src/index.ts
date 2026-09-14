@@ -27,8 +27,8 @@ import {
 } from "./aws";
 import { adminSearch } from "./adminsearch";
 import { adminAssets, isAssetsPath } from "./assets";
-import { isWebPath, webRoutes } from "./web";
-import { page, redirectPage } from "./page";
+import { isWebPath, landingSite, webRoutes } from "./web";
+import { steamResult, redirectPage } from "./page";
 import { bmacWebhook } from "./bmac";
 import { pruneReports, putReport } from "./diagnostics";
 import {
@@ -489,16 +489,17 @@ async function steamLogin(request: Request, account: Account, env: Env): Promise
  * consumed only by [`steamReturn`], so this can be reloaded harmlessly.
  */
 async function steamStart(url: URL, env: Env): Promise<Response> {
+  const site = landingSite(null, env);
   const loginId = url.searchParams.get("login");
-  if (!loginId) return page(400, "That sign-in link is incomplete.");
+  if (!loginId) return steamResult(site, "expired");
 
   const login = await env.DB.prepare(
     "SELECT consumed_at FROM steam_logins WHERE id = ?",
   )
     .bind(loginId)
     .first<{ consumed_at: number | null }>();
-  if (!login) return page(404, "That sign-in has expired or already been used.");
-  if (login.consumed_at !== null) return page(409, "That sign-in has already been used.");
+  if (!login) return steamResult(site, "expired");
+  if (login.consumed_at !== null) return steamResult(site, "already-linked");
 
   const origin = url.origin;
   const returnTo = `${origin}/v1/steam/return?login=${loginId}`;
@@ -517,11 +518,12 @@ async function steamStart(url: URL, env: Env): Promise<Response> {
  * whether it really signed this. The row is consumed before anything is written, so a
  * replayed return finds nothing to complete.
  *
- * The response is a page, not JSON — a person is looking at it.
+ * A person is looking at the answer, so it's a redirect to the site's /steam page, not JSON.
  */
 async function steamReturn(request: Request, url: URL, env: Env): Promise<Response> {
+  const site = landingSite(null, env);
   const loginId = url.searchParams.get("login");
-  if (!loginId) return page(400, "That sign-in link is incomplete.");
+  if (!loginId) return steamResult(site, "expired");
 
   const login = await env.DB.prepare(
     "SELECT account_id, created_at, consumed_at FROM steam_logins WHERE id = ?",
@@ -529,16 +531,14 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
     .bind(loginId)
     .first<{ account_id: string; created_at: number; consumed_at: number | null }>();
 
-  if (!login) return page(404, "That sign-in has expired or already been used.");
-  if (login.consumed_at !== null) return page(409, "That sign-in has already been used.");
-  if (Date.now() - login.created_at > LOGIN_TTL_MS) {
-    return page(410, "That sign-in took too long. Start it again from the app.");
+  if (!login || login.consumed_at !== null || Date.now() - login.created_at > LOGIN_TTL_MS) {
+    return steamResult(site, "expired");
   }
 
   const expectedReturnTo = `${url.origin}${url.pathname}`;
   const result = await verifyAssertion(url.searchParams, expectedReturnTo);
   if (!isVerified(result)) {
-    return page(403, `Steam couldn't confirm that sign-in: ${result.error}.`);
+    return steamResult(site, "unconfirmed");
   }
 
   // Consumed whatever happens next, so a failed link cannot be retried against a row that
@@ -554,13 +554,25 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
       .bind(result.steamId, login.account_id)
       .run();
   } catch (err) {
-    if (String(err).includes("UNIQUE")) {
-      return page(409, "That Steam account is already linked to another profile.");
-    }
-    throw err;
+    if (!String(err).includes("UNIQUE")) throw err;
+    // Held by a web-only profile made when this person locked something on mxbsecure.com. Steam
+    // just confirmed it's them, so the app profile takes over the Steam link and their assets.
+    const held = await env.DB.prepare("SELECT id, kind, creator_at FROM accounts WHERE steam_id = ?")
+      .bind(result.steamId)
+      .first<{ id: string; kind: string; creator_at: number | null }>();
+    if (held?.kind !== "web") return steamResult(site, "already-linked");
+    await env.DB.batch([
+      env.DB.prepare("UPDATE assets SET creator_id = ? WHERE creator_id = ?").bind(login.account_id, held.id),
+      env.DB.prepare("UPDATE accounts SET steam_id = NULL WHERE id = ?").bind(held.id),
+      env.DB.prepare("UPDATE accounts SET steam_id = ?, creator_at = COALESCE(creator_at, ?) WHERE id = ?").bind(
+        result.steamId,
+        held.creator_at ?? Date.now(),
+        login.account_id,
+      ),
+    ]);
   }
 
-  return page(200, "Steam account linked. You can close this tab and go back to the app.");
+  return steamResult(site, "linked");
 }
 
 /**

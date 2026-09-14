@@ -139,10 +139,28 @@ fn shop_credentials() {
             .or_else(|| local.get(key).cloned())
             .filter(|v| !v.trim().is_empty());
         if let Some(value) = value {
-            println!("cargo::rustc-env={key}={value}");
+            // Bake in an XOR-obfuscated form (hex of value XOR the cycled pad), not the
+            // plaintext, so the credential isn't a `strings` hit in the shipped binary.
+            // `shop_credentials.rs` holds the matching pad and decodes at runtime. Obfuscation,
+            // not secrecy — see that module. The trim happens here so the runtime value is clean.
+            let obf: String = value
+                .trim()
+                .as_bytes()
+                .iter()
+                .enumerate()
+                .map(|(i, b)| format!("{:02x}", b ^ SHOP_PAD[i % SHOP_PAD.len()]))
+                .collect();
+            println!("cargo::rustc-env={key}_OBF={obf}");
         }
     }
 }
+
+/// The XOR pad the credential is obfuscated with. MUST match `PAD` in `src/shop_credentials.rs`.
+const SHOP_PAD: [u8; 32] = [
+    0x41, 0xcb, 0xdf, 0x60, 0x8f, 0xa1, 0xfa, 0x7b, 0xfd, 0xae, 0x81, 0x7c,
+    0x3d, 0xd4, 0x15, 0xb4, 0x28, 0x11, 0xff, 0xa8, 0xa6, 0x73, 0x9c, 0x87,
+    0x1f, 0x2a, 0x0d, 0xf9, 0x9f, 0x22, 0x8d, 0x8e,
+];
 
 /// The smallest `.env` reader that covers what we ask people to write: `KEY=value`,
 /// `#` comments, blank lines, and optional surrounding quotes. A missing file is normal.

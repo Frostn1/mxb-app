@@ -12,9 +12,9 @@
  * — who would then be signed in as them.
  */
 
-import { allowedOrigin, assetOrigins, cors, refuseCrossSiteWrite } from "./assets";
+import { allowedOrigin, assetOrigins, cors, newCreatorsOpen, refuseCrossSiteWrite } from "./assets";
 import { tokenMatches } from "./auth";
-import { page } from "./page";
+import { steamResult } from "./page";
 import { isVerified, loginUrl, steamPersonaName, verifyAssertion } from "./steam";
 import {
   clearedCookie,
@@ -71,14 +71,12 @@ export async function webRoutes(
   if (method === "GET" && (path === "/v1/web/steam/login" || path === "/v1/web/steam/return") && env.SIGNIN_LIMITER) {
     const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
     if (!(await env.SIGNIN_LIMITER.limit({ key: ip })).success) {
-      const slow = page(429, "Too many sign-in attempts from here. Wait a minute and try again.");
-      slow.headers.set("Retry-After", "60");
-      return slow;
+      return steamResult(landingSite(null, env), "busy");
     }
   }
 
   if (method === "GET" && path === "/v1/web/steam/login") {
-    if (!key) return page(503, "Sign-in isn't set up on this server yet.");
+    if (!key) return steamResult(landingSite(null, env), "unavailable");
     const n = crypto.randomUUID();
     const state = await sealToken(
       {
@@ -102,25 +100,26 @@ export async function webRoutes(
   }
 
   if (method === "GET" && path === "/v1/web/steam/return") {
-    if (!key) return page(503, "Sign-in isn't set up on this server yet.");
+    if (!key) return steamResult(landingSite(null, env), "unavailable");
     const state = await openToken<LoginState>(url.searchParams.get("state"), key, "state");
-    if (!state) return page(400, "That sign-in took too long or the link is broken. Go back and sign in again.");
+    if (!state) return steamResult(landingSite(null, env), "expired");
+    const site = landingSite(state.site ?? null, env);
     // Checked before Steam is asked anything. A mismatch leaves the cookie alone, so a sign-in
     // this browser really has in flight still completes.
     const started = readCookie(request, LOGIN_COOKIE);
     if (!started || !tokenMatches(state.n, started)) {
-      return page(403, "That sign-in didn't start in this browser. Go back to mxbsecure and sign in again.");
+      return steamResult(site, "other-browser");
     }
     const result = await verifyAssertion(url.searchParams, `${url.origin}${url.pathname}`, fetchImpl);
     if (!isVerified(result)) {
-      const refused = page(403, `Steam couldn't confirm that sign-in: ${result.error}.`);
+      const refused = steamResult(site, "unconfirmed");
       refused.headers.append("Set-Cookie", clearedCookie(LOGIN_COOKIE));
       return refused;
     }
     const name = await steamPersonaName(result.steamId, fetchImpl);
     const token = await sealToken({ t: "session", steamId: result.steamId, name, exp: Date.now() + SESSION_TTL_MS }, key);
     const headers = new Headers({
-      Location: `${landingSite(state.site ?? null, env)}${state.next}`,
+      Location: `${site}${state.next}`,
       "Cache-Control": "no-store",
     });
     headers.append("Set-Cookie", sessionCookie(token));
@@ -132,15 +131,17 @@ export async function webRoutes(
   if (method === "GET" && path === "/v1/web/me") {
     const session = await webSession(request, env);
     if (!session) return cors(json(401, { error: "not signed in" }), origin);
-    const account = await env.DB.prepare("SELECT rider_name, creator_at FROM accounts WHERE steam_id = ?")
+    const account = await env.DB.prepare("SELECT rider_name, kind, creator_at FROM accounts WHERE steam_id = ?")
       .bind(session.steamId)
-      .first<{ rider_name: string; creator_at: number | null }>();
+      .first<{ rider_name: string; kind: string; creator_at: number | null }>();
+    // A web-only profile (made for a creator on the site) isn't an MXB App profile.
+    const app = account && account.kind !== "web" ? account : null;
     return cors(
       json(200, {
         steamId: session.steamId,
-        name: session.name || account?.rider_name || "",
-        creator: !!account?.creator_at,
-        linked: !!account,
+        name: session.name || app?.rider_name || "",
+        creator: !!account?.creator_at || newCreatorsOpen(env),
+        linked: !!app,
       }),
       origin,
     );

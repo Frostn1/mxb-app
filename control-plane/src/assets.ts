@@ -13,7 +13,7 @@
  */
 
 import { currentMasterVersion, wrapContentKey } from "./assetkey";
-import { tokenMatches } from "./auth";
+import { hashToken, newToken, tokenMatches } from "./auth";
 import { isSteamId64, steamPersonaName } from "./steam";
 import { adminAllowed } from "./usage";
 import { webSession } from "./websession";
@@ -49,8 +49,8 @@ export function refuseCrossSiteWrite(request: Request, env: Env): Response | nul
   return json(403, { error: "that request didn't come from mxbsecure.com" });
 }
 
-/** A key (every asset) or a signed-in creator (only their own). */
-type Scope = { kind: "admin" } | { kind: "creator"; accountId: string };
+/** A key (every asset) or a signed-in creator (only their own; no account until their first). */
+type Scope = { kind: "admin" } | { kind: "creator"; accountId: string | null; steamId: string };
 
 /** Most inputs one grants change may carry, adds and removes together. */
 export const MAX_GRANT_CHANGES = 100;
@@ -134,10 +134,15 @@ async function authorize(request: Request, url: URL, env: Env): Promise<Scope | 
   if (admin === "ok") return { kind: "admin" };
   const session = await webSession(request, env);
   if (session) {
-    const account = await env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ? AND creator_at IS NOT NULL")
+    // Creators can lock and sell. While new creators are open, so can anyone signed in with
+    // Steam: a profile is made with their first asset (see `creatorAccount`).
+    const account = await env.DB.prepare("SELECT id, creator_at FROM accounts WHERE steam_id = ?")
       .bind(session.steamId)
-      .first<{ id: string }>();
-    return account ? { kind: "creator", accountId: account.id } : json(403, { error: "this Steam account isn't a creator" });
+      .first<{ id: string; creator_at: number | null }>();
+    if (!account?.creator_at && !newCreatorsOpen(env)) {
+      return json(403, { error: "mxbsecure is invite only, for affiliated creators" });
+    }
+    return { kind: "creator", accountId: account?.id ?? null, steamId: session.steamId };
   }
   if (admin === "unset" && !env.MXB_ASSETS_KEY && !env.MXB_WEB_SESSION_KEY) {
     return json(503, { error: "no admin key is configured" });
@@ -172,12 +177,23 @@ async function handle(
   if (!assetId) {
     if (method === "GET") return listAssets(env, scope);
     if (method === "POST") {
-      return createAsset(request, env, scope.kind === "creator" ? scope.accountId : env.MXB_OWNER_ACCOUNT_ID!);
+      if (scope.kind === "admin") return createAsset(request, env, env.MXB_OWNER_ACCOUNT_ID!);
+      const owner = await creatorAccount(env, scope.steamId);
+      if (owner !== env.MXB_OWNER_ACCOUNT_ID) {
+        const limit = assetsPerDay(env);
+        const made = await env.DB.prepare("SELECT COUNT(*) AS n FROM assets WHERE creator_id = ? AND created_at > ?")
+          .bind(owner, Date.now() - DAY_MS)
+          .first<{ n: number }>();
+        if ((made?.n ?? 0) >= limit) {
+          return json(429, { error: `You can lock ${limit} new files a day. Try again tomorrow.` });
+        }
+      }
+      return createAsset(request, env, owner);
     }
     return json(405, { error: "method not allowed" });
   }
   // A creator's view stops at their own assets: anyone else's looks like it doesn't exist.
-  if (scope.kind === "creator" && !(await ownedBy(assetId, scope.accountId, env))) {
+  if (scope.kind === "creator" && !(scope.accountId && (await ownedBy(assetId, scope.accountId, env)))) {
     return json(404, { error: "no such asset" });
   }
   if (sub === "grants") {
@@ -189,6 +205,52 @@ async function handle(
     return updateAsset(request, assetId, env, scope);
   }
   return json(405, { error: "method not allowed" });
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** New assets a creator may make a day (batch locking makes one per file): `MXB_ASSETS_PER_DAY`,
+ *  10 when unset. The owner account has no ceiling. */
+function assetsPerDay(env: Env): number {
+  const n = Number(env.MXB_ASSETS_PER_DAY);
+  return Number.isInteger(n) && n > 0 ? n : 10;
+}
+
+/** Whether a Steam account that isn't a creator may start: `MXB_NEW_CREATORS = "open"`. Closed
+ *  when unset; creators who already joined keep working either way. */
+export function newCreatorsOpen(env: Env): boolean {
+  return env.MXB_NEW_CREATORS === "open";
+}
+
+/**
+ * The account a creator's assets belong to: their MXB App profile if Steam is linked to one,
+ * else a web-only profile made now. A web profile has a token nobody is ever shown, so it can't
+ * sign in to the app, and `kind = 'web'` keeps it out of invite-only routes. Linking the same
+ * Steam account in the app later moves its assets over (see `steamReturn`).
+ */
+async function creatorAccount(env: Env, steamId: string): Promise<string> {
+  const find = () => env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ?").bind(steamId).first<{ id: string }>();
+  const found = await find();
+  if (found) {
+    // An app profile that starts selling becomes a creator, so it stays one if joining closes.
+    await env.DB.prepare("UPDATE accounts SET creator_at = ? WHERE id = ? AND creator_at IS NULL").bind(Date.now(), found.id).run();
+    return found.id;
+  }
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  try {
+    await env.DB.prepare(
+      "INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at, kind, creator_at) VALUES (?, ?, ?, ?, ?, 'web', ?)",
+    )
+      .bind(id, `web:${steamId}`, steamId, await hashToken(newToken()), now, now)
+      .run();
+    return id;
+  } catch (err) {
+    // Two first requests at once: the other one made it.
+    const again = await find();
+    if (again) return again.id;
+    throw err;
+  }
 }
 
 async function ownedBy(assetId: string, accountId: string, env: Env): Promise<boolean> {
@@ -296,6 +358,7 @@ async function createAsset(request: Request, env: Env, owner: string): Promise<R
  */
 async function listAssets(env: Env, scope: Scope): Promise<Response> {
   const mine = scope.kind === "creator";
+  if (mine && !scope.accountId) return json(200, { assets: [] });
   const statement = env.DB.prepare(
     "SELECT a.id, a.title, a.created_at, a.withdrawn_at, a.taken_down_at, a.blob_sha256 IS NOT NULL AS hashed," +
       " (SELECT COUNT(*) FROM entitlements e WHERE e.asset_id = a.id AND e.revoked_at IS NULL) AS buyers," +
