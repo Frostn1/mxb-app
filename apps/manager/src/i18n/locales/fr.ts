@@ -626,7 +626,7 @@ export const fr: Translation = {
     "Recharger le jeu automatiquement quand des circuits ou des motos sont ajoutés à votre dossier de mods — même téléchargés manuellement hors de {{app}}.",
   "settings.secureContentInject": "Utiliser le contenu verrouillé en jeu",
   "settings.secureContentInjectDesc":
-    "Permet d'ouvrir les circuits verrouillés achetés en ajoutant un petit assistant au jeu en cours. Désactivé par défaut. Si activé, lance le jeu avec Play — une session que {{app}} n'a pas lancée est laissée tranquille.",
+    "Permet d'ouvrir les circuits verrouillés achetés en ajoutant un petit assistant au jeu en cours. Désactivé par défaut. Fonctionne quelle que soit la façon dont tu lances le jeu — depuis {{app}} ou depuis Steam.",
   "settings.checking": "Vérification…",
   "settings.runningConnected": "En cours · jeu connecté",
   "settings.notRunning": "Inactif",

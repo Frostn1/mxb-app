@@ -1277,7 +1277,12 @@ fn log_client(level: String, message: String) {
 #[tauri::command]
 fn logs_info(app: tauri::AppHandle) -> logs::LogsInfo {
     let cfg = config::load(&app).unwrap_or_default();
-    logs::info(&app_log_dir(&app), &frostmod_manage::frostmod_dir(&app), &cfg)
+    logs::info(
+        &app_log_dir(&app),
+        &frostmod_manage::frostmod_dir(&app),
+        &secure_launch::secure_dir(&app).unwrap_or_default(),
+        &cfg,
+    )
 }
 
 /// Open the folder one of the log sets lives in, newest file selected where the OS can do
@@ -1303,9 +1308,10 @@ async fn export_logs(app: tauri::AppHandle, dest: String) -> Result<logs::Export
     let log_dir = app_log_dir(&app);
     let frostmod_dir = frostmod_manage::frostmod_dir(&app);
     let frostmod_version = frostmod_manage::installed_version(&app);
+    let secure_dir = secure_launch::secure_dir(&app).unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).unwrap_or_default();
-        let info = logs::info(&log_dir, &frostmod_dir, &cfg);
+        let info = logs::info(&log_dir, &frostmod_dir, &secure_dir, &cfg);
         let summary = logs::summary(&version, frostmod_version.as_deref(), &cfg, &info);
         logs::export(std::path::Path::new(&dest), &info, &summary).map_err(|e| format!("{e:#}"))
     })
@@ -1325,7 +1331,8 @@ async fn share_logs(app: tauri::AppHandle) -> Result<logs::ShareResult, String> 
     let log_dir = app_log_dir(&app);
     let frostmod_dir = frostmod_manage::frostmod_dir(&app);
     let cfg = config::load(&app).unwrap_or_default();
-    let info = logs::info(&log_dir, &frostmod_dir, &cfg);
+    let secure_dir = secure_launch::secure_dir(&app).unwrap_or_default();
+    let info = logs::info(&log_dir, &frostmod_dir, &secure_dir, &cfg);
     let summary =
         logs::summary(&version, frostmod_manage::installed_version(&app).as_deref(), &cfg, &info);
     logs::share(&app, &info, &summary).await.map_err(|e| format!("{e:#}"))

@@ -2033,9 +2033,8 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               onChange={toggleWatchModsReload}
             />
 
-            {/* Off unless asked for: this puts a DLL into the running game, and the game is
-                usually Steam's process, not ours. With it on, launch from Play — a session
-                the app didn't start is left alone. */}
+            {/* Off unless asked for: this puts a DLL into the running game. With it on, it
+                injects however the game was started — Play or Steam — like FrostMod. */}
             <ToggleRow
               label={t("settings.secureContentInject")}
               desc={t("settings.secureContentInjectDesc")}
