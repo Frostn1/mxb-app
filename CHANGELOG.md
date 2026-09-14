@@ -27,8 +27,14 @@
   gaps. Small bumps in the way make room for them.
 - The ARL build has ruts up jump faces and off landings, more and bigger braking bumps that
   start further out from corners, and lone bumps all over the lap.
-- Generated tracks are stamped with the Frost algorithm version (now 0.28.0) in
+- Generated tracks are stamped with the Frost algorithm version (now 0.29.0) in
   `frost-algorithm.ini`, replacing `generator.ini`.
+- Riders spawn in the paddock, five bikes to a team, instead of beside the track.
+- The pit road is worn into the ground, runs from the paddock gate to the start gates and
+  never crosses the track.
+- Each team in the paddock has a whole rig (cab, trailer and awning) and a pop-up in its
+  colour.
+- Fewer yellow turn markers, spaced further apart, only on the inside of tight corners.
 
 ## 2026-09-13 — v0.14.1 — Shortcuts under both names
 

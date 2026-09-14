@@ -6,6 +6,7 @@ Minor for a new feature, patch for a fix, 0.x until the generator is finished. B
 
 | Version | Date | Commit | Change |
 |---|---|---|---|
+| 0.29.0 | 2026-09-13 | feature/paddock-spawns | spawns in the paddock, painted pit road to the gates, whole team rigs and pop-ups, sparser turn markers |
 | 0.28.0 | 2026-09-13 | 44824b98 | bigger ARL jumps, ruts over jumps, more braking bumps |
 | 0.27.1 | 2026-09-13 | e2e2baee | fill the straights before the finish, shorter taller step-ups |
 | 0.27.0 | 2026-09-13 | fa4632ce | paddock with team areas, pit road, start-gate sponsor wall |
