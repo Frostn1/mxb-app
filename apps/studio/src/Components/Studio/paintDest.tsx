@@ -454,7 +454,9 @@ export function PaintDestCard({
               />
             ))}
         </div>
-        <div className="grid grid-cols-5 gap-2">
+        {/* As many to a row as fit, not a fixed five. The same picker sits in a 320px popover,
+            where five columns left each tile about 18px of label — "Helmet" read as "H…". */}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(88px,1fr))] gap-2">
           {kinds
             .filter((k) => k.id !== "bike" && k.id !== "kit")
             .map((k) => (
@@ -463,7 +465,7 @@ export function PaintDestCard({
                 kind={k}
                 on={touched && kind.id === k.id}
                 onPick={() => pick(k)}
-                className="h-[52px]"
+                className="h-[52px] px-2"
                 labelClass="text-[11px]"
               />
             ))}
@@ -518,6 +520,7 @@ function KindCard({
       type="button"
       onClick={onPick}
       aria-pressed={on}
+      title={t(kind.label)}
       className={cn(
         "flex cursor-default items-center overflow-hidden rounded-lg border px-4 text-left transition-colors",
         on
@@ -526,9 +529,11 @@ function KindCard({
         className,
       )}
     >
+      {/* Two lines before an ellipsis, wrapping only at spaces: splitting "Protektoren"
+          mid-word reads worse than a tile a few pixels wider, which the padding gives it. */}
       <span
         className={cn(
-          "min-w-0 truncate font-medium leading-tight",
+          "min-w-0 line-clamp-2 font-medium leading-tight",
           on ? "text-foreground" : "text-muted-foreground",
           labelClass,
         )}

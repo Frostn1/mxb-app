@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+- In Frost's Studio, the "What are you painting?" picker shows Helmet, Goggles, Boots,
+  Protection and Gloves in full when it opens from the paint bar, instead of cutting each to
+  one letter.
+
 ### Changed
 - A locked secured file's details now offer an **Unlock** button (and a note that it also unlocks
   on its own when you launch the game), instead of a dead-end "its name can't be read" message.
