@@ -5,6 +5,10 @@
   "compatibility_date": "2026-08-08",
   "compatibility_flags": ["nodejs_compat"],
 
+  // The public address. workers.dev stays on: shipped apps still call it.
+  "routes": [{ "pattern": "api.mxbsecure.com", "custom_domain": true }],
+  "workers_dev": true,
+
   // Provisioning settings. Not secrets — none of these is worth hiding, and having them in
   // config means a change is a reviewable diff rather than an invisible dashboard edit.
   // The AWS key itself is a secret; see `src/env.d.ts`.
@@ -23,7 +27,7 @@
     "MXB_SECURITY_GROUP_ID": "sg-0d17867610872ce20",
     // Where a fresh instance fetches the agent and the dedicated server from. Both must be
     // reachable without credentials, because the instance has none.
-    "MXB_AGENT_DOWNLOAD_URL": "https://mxb-control-plane.aui-svi.workers.dev/v1/agent.exe",
+    "MXB_AGENT_DOWNLOAD_URL": "https://api.mxbsecure.com/v1/agent.exe",
     // PiBoSo's own installer. There is no separate dedicated-server package — the server
     // is inside this, and the bootstrap runs it with `-extract` to unpack it. Pointing at
     // the official URL means nothing of theirs is rehosted, at the cost of a 2 GB download
