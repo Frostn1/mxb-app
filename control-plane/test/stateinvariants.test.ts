@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   asDeviations,
   asManifest,
+  loadStateRegions,
   MAX_STATE_REGIONS,
   parseDigests,
   type StateBaseline,
@@ -132,6 +133,35 @@ describe("what a deviation means", () => {
       { id: 1, kind: "allow", pattern: "", sha256: DIRTY, label: "popular mod", note: "" },
     ];
     expect(classify(deviation, rules).state).toBe("ok");
+  });
+});
+
+describe("when the table is not there yet", () => {
+  /** A D1 handle whose every query fails, as one does before its migration is applied. */
+  const brokenDb = {
+    prepare() {
+      return {
+        bind() {
+          return {
+            all() {
+              return Promise.reject(new Error("D1_ERROR: no such table: state_regions"));
+            },
+          };
+        },
+      };
+    },
+  } as unknown as D1Database;
+
+  it("answers empty rather than throwing", async () => {
+    // Migrations are applied by hand, so this code is live before its table exists on every
+    // deploy between merge and running 0029. Empty is what an unbaselined build gets anyway;
+    // a throw here would 500 the manifest and refuse whole diagnostics reports over one
+    // optional part of them.
+    await expect(loadStateRegions(brokenDb, "abc123")).resolves.toEqual([]);
+  });
+
+  it("does not even ask without a build to ask about", async () => {
+    await expect(loadStateRegions(brokenDb, "")).resolves.toEqual([]);
   });
 });
 

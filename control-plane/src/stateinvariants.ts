@@ -159,20 +159,31 @@ export async function loadStateRegions(
   buildFp: string,
 ): Promise<StateBaseline[]> {
   if (!buildFp) return [];
-  const rows = await db
-    .prepare(
-      "SELECT name, rva, length, baseline FROM state_regions" +
-        " WHERE build_fp = ? AND active = 1 ORDER BY name LIMIT ?",
-    )
-    .bind(buildFp, MAX_STATE_REGIONS)
-    .all<{ name: string; rva: number; length: number; baseline: string }>();
+  try {
+    const rows = await db
+      .prepare(
+        "SELECT name, rva, length, baseline FROM state_regions" +
+          " WHERE build_fp = ? AND active = 1 ORDER BY name LIMIT ?",
+      )
+      .bind(buildFp, MAX_STATE_REGIONS)
+      .all<{ name: string; rva: number; length: number; baseline: string }>();
 
-  return (rows.results ?? []).map((r) => ({
-    name: r.name,
-    rva: r.rva,
-    length: r.length,
-    baseline: (r.baseline ?? "").toLowerCase(),
-  }));
+    return (rows.results ?? []).map((r) => ({
+      name: r.name,
+      rva: r.rva,
+      length: r.length,
+      baseline: (r.baseline ?? "").toLowerCase(),
+    }));
+  } catch (err) {
+    // Migrations are applied by hand, deliberately, so this code is live before its table
+    // exists — every deploy between merging and running 0029 lands in exactly that state.
+    // Answering empty is the same answer an unbaselined build gets and costs nothing; the
+    // alternative is a 500 on the manifest and, worse, a whole diagnostics report refused
+    // because one optional part of it could not be read. Logged, because a table that is
+    // still missing a week later is a deployment someone forgot to finish.
+    console.error(JSON.stringify({ msg: "state regions unavailable", error: String(err) }));
+    return [];
+  }
 }
 
 /** The manifest as the client receives it: where to read, never what to expect. */
