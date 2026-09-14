@@ -1189,11 +1189,16 @@ impl Feature {
 fn grow(f: &Feature, kh: f32, kl: f32) -> Feature {
     let h = |v: f32| (v * kh).min(BIG_JUMP_MAX_H_M);
     match f.clone() {
-        Feature::Tabletop { at, length, height, lip } => Feature::Tabletop { at, length: length * kl, height: h(height), lip },
-        Feature::Double { at, height, gap, lip } => Feature::Double { at, height: h(height), gap: gap * kl, lip },
+        // Tables and doubles at 80% of that: grown in full they rode too big on a 250.
+        Feature::Tabletop { at, length, height, lip } => {
+            Feature::Tabletop { at, length: length * kl * BIG_TABLE_SHARE, height: h(height) * BIG_TABLE_SHARE, lip }
+        }
+        Feature::Double { at, height, gap, lip } => {
+            Feature::Double { at, height: h(height) * BIG_TABLE_SHARE, gap: gap * kl * BIG_TABLE_SHARE, lip }
+        }
         // A single barely longer: stretched with the rest, its crest became a fake table.
         Feature::Custom { at, length, shape, side } => {
-            // A triple at 90% of that: "a tad too hard on a 250".
+            // A triple at 75% of that: at 90% still "a tad too hard on a 250".
             let triple = shape.windows(2).filter(|w| w[1].h > w[0].h + 0.01).count() >= 3;
             let t = if triple { BIG_TRIPLE_SHARE } else { 1.0 };
             Feature::Custom {
@@ -1211,7 +1216,8 @@ fn grow(f: &Feature, kh: f32, kl: f32) -> Feature {
 pub const BIG_JUMP_MAX_H_M: f32 = 4.0;
 const BIG_JUMP_CLEAR_M: f32 = 8.0;
 const BIG_JUMP_MAX_SAG_M: f32 = 4.0;
-const BIG_TRIPLE_SHARE: f32 = 0.9;
+const BIG_TRIPLE_SHARE: f32 = 0.75;
+const BIG_TABLE_SHARE: f32 = 0.8;
 
 /// A worked example of a track program: what a good one looks like.
 ///
