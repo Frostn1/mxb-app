@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Changed
+- Signing in with Steam opens on a short mxbsecure page before it hands you to Steam and brings
+  you back, so the sign-in looks like ours from start to finish instead of jumping straight to a
+  Steam URL.
 - Secured content is harder to pull apart, and its key is tied more tightly to your PC. If a key
   needs refreshing, the app does it for you the next time you unlock — nothing to redo.
 - Further hardened the app and Frost Studio against tampering.
