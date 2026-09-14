@@ -129,6 +129,7 @@ export const en = {
     "“{{name}}” leaves this profile’s bike list, along with the look saved for it. Nothing installed is deleted — if you ride that bike again the game adds it straight back.",
   "presets.bikeForgotten": "Removed “{{name}}” from this profile.",
   "presets.forgetFailed": "Couldn’t remove that bike",
+  "presets.openWindowsSecurity": "Open Windows Security",
   "presets.namePlaceholder": "Preset name…",
   "presets.savePreset": "Save preset",
   "presets.saveChanges": "Save changes",

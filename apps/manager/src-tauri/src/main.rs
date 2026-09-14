@@ -6485,6 +6485,7 @@ fn main() {
             scan_rider_targets,
             scan_bike_targets,
             reveal_in_explorer,
+            open_ransomware_protection,
             presets_save,
             list_games,
             get_config,
@@ -7978,6 +7979,17 @@ fn list_games() -> Vec<crate::game::GameInfo> {
 #[tauri::command]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     library::reveal_in_explorer(&path).map_err(|e| format!("{e:#}"))
+}
+
+/// Open Windows Security on Ransomware protection, where Controlled folder access lives.
+#[tauri::command]
+fn open_ransomware_protection() -> Result<(), String> {
+    #[cfg(windows)]
+    std::process::Command::new("explorer")
+        .arg("windowsdefender://ransomwareprotection")
+        .spawn()
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(())
 }
 
 #[tauri::command]

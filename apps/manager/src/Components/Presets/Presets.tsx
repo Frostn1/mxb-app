@@ -57,7 +57,22 @@ import {
   presetBundleCreate,
   presetBundleImport,
   onPresetBundleProgress,
+  openRansomwareProtection,
 } from "@frost/shared/api/mods";
+
+/**
+ * Toast options for a failed `profile.ini` write. A Windows Security block (the backend
+ * names Controlled folder access) gets a button straight to that setting.
+ */
+function writeFailure(e: unknown, buttonLabel: string) {
+  const description = String(e).replace(/^Error:\s*/, "");
+  if (!description.includes("Controlled folder access")) return { description };
+  return {
+    description,
+    duration: 20000,
+    action: { label: buttonLabel, onClick: () => void openRansomwareProtection() },
+  };
+}
 import type {
   BundlePhase,
   BundleProgress,
@@ -241,9 +256,10 @@ export default function Presets({
         setForgetBike(null);
         toast.success(t("presets.bikeForgotten", { name: target }));
       } catch (e) {
-        toast.error(t("presets.forgetFailed"), {
-          description: String(e).replace(/^Error:\s*/, ""),
-        });
+        toast.error(
+          t("presets.forgetFailed"),
+          writeFailure(e, t("presets.openWindowsSecurity")),
+        );
       } finally {
         setBusy(false);
       }
@@ -348,7 +364,8 @@ export default function Presets({
         const outcome = await presetsApply(profile, bike, lo, makeActive);
         toast.success(t(applyNoteKey(outcome), { label, bike }));
       } catch (e) {
-        toast.error(String(e).replace(/^Error:\s*/, ""));
+        const { description, ...rest } = writeFailure(e, t("presets.openWindowsSecurity"));
+        toast.error(description, rest);
       } finally {
         setApplyingId(null);
       }

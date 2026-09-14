@@ -16,6 +16,8 @@
 
 ### Changed
 - The app and Steam sign-in now go through api.mxbsecure.com.
+- When Windows blocks a preset from changing `profile.ini`, the error says how to allow the
+  app and has a button that opens Windows Security.
 
 ## 2026-09-13 — v0.14.2 — Locked tracks from Steam
 

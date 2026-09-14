@@ -136,6 +136,7 @@ export const de: Translation = {
     "„{{name}}“ verschwindet aus der Bike-Liste dieses Profils, samt dem dafür gespeicherten Look. Installiertes wird nicht gelöscht — fährst du das Bike wieder, trägt das Spiel es sofort erneut ein.",
   "presets.bikeForgotten": "„{{name}}“ aus diesem Profil entfernt.",
   "presets.forgetFailed": "Bike konnte nicht entfernt werden",
+  "presets.openWindowsSecurity": "Windows-Sicherheit öffnen",
   "presets.namePlaceholder": "Preset-Name…",
   "presets.savePreset": "Preset speichern",
   "presets.saveChanges": "Änderungen speichern",
