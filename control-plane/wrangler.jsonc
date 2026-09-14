@@ -35,7 +35,9 @@
     "MXB_GAME_DOWNLOAD_URL": "https://mx-bikes.com/downloads/mxbikes-beta21e.exe",
     // The account every asset made from mxbsecure.com is created under. Empty disables
     // `/admin/assets`.
-    "MXB_OWNER_ACCOUNT_ID": "f72db68a-9541-4814-ae09-6096b497abc9"
+    "MXB_OWNER_ACCOUNT_ID": "f72db68a-9541-4814-ae09-6096b497abc9",
+    // Where Steam sign-in on mxbsecure.com lands afterwards.
+    "MXB_SITE_ORIGIN": "https://mxbsecure.com"
   },
 
   // The idle reaper. Every five minutes it asks each running server who is connected and

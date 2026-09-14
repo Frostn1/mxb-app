@@ -372,7 +372,7 @@ describe("POST /v1/keys/grant after an admin grant", () => {
     expect((await patch("ast_missing", hash)).status).toBe(404);
     const set = await patch(created.assetId, hash.toUpperCase());
     expect(set.status).toBe(200);
-    expect(await set.json()).toEqual({ assetId: created.assetId, blobSha256: hash });
+    expect(await set.json()).toEqual({ assetId: created.assetId, blobSha256: hash, withdrawnAt: null });
 
     const ask = (blobSha256?: string) =>
       call(env, req("POST", "/v1/keys/grant", { key: token, body: { assetId: created.assetId, sessionId: "s1", blobSha256 } }));

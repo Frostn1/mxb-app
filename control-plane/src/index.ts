@@ -27,6 +27,7 @@ import {
 } from "./aws";
 import { adminSearch } from "./adminsearch";
 import { adminAssets, isAssetsPath } from "./assets";
+import { isWebPath, webRoutes } from "./web";
 import { bmacWebhook } from "./bmac";
 import { pruneReports, putReport } from "./diagnostics";
 import {
@@ -166,6 +167,9 @@ async function route(request: Request, env: Env): Promise<Response> {
   // return URL is what identifies the sign-in, and it is single-use. Above the account
   // gate for that reason, not because it is unprotected.
   if (method === "GET" && path === "/v1/steam/return") return steamReturn(request, url, env);
+
+  // Steam sign-in for mxbsecure.com. Its session is a signed cookie, checked where it's used.
+  if (isWebPath(path)) return webRoutes(request, url, env);
 
   // Self-serve signup, no invite. Voice is the reason this exists: a rider on a community
   // server has nobody to talk to unless the people beside them can sign up too. The account

@@ -60,6 +60,11 @@ declare global {
     /** mxbsecure.com's own key: opens `/admin/assets*` and nothing else under `/admin`. A
      *  secret. `ADMIN_KEY` still works on those routes too. */
     MXB_ASSETS_KEY?: string;
+    /** Signs mxbsecure.com's Steam sign-in state and session cookies. A secret; rotating it
+     *  signs everyone out. Unset means the site has no sign-in. */
+    MXB_WEB_SESSION_KEY?: string;
+    /** Where sign-in sends the browser back to. Defaults to https://mxbsecure.com. */
+    MXB_SITE_ORIGIN?: string;
   }
 }
 
