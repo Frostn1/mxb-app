@@ -8210,7 +8210,7 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
 /// the code that made it. Bump it with every change to what a program builds into: minor for
 /// a new feature, patch for a fix. 0.x until the generator is finished. History in
 /// `apps/studio/FROST_ALGORITHM.md`.
-pub const FROST_ALGORITHM_VERSION: &str = "0.29.1";
+pub const FROST_ALGORITHM_VERSION: &str = "0.30.0";
 
 /// The stamp every built track carries in `<slug>/frost-algorithm.ini`.
 ///

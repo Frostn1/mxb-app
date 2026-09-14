@@ -33,7 +33,7 @@
   gaps. Small bumps in the way make room for them.
 - The ARL build has ruts up jump faces and off landings, more and bigger braking bumps that
   start further out from corners, and lone bumps all over the lap.
-- Generated tracks are stamped with the Frost algorithm version (now 0.29.1) in
+- Generated tracks are stamped with the Frost algorithm version (now 0.30.0) in
   `frost-algorithm.ini`, replacing `generator.ini`.
 - Riders spawn in the paddock, five bikes to a team, instead of beside the track.
 - The pit road is worn into the ground, runs from the paddock gate to the start gates and
@@ -44,6 +44,8 @@
 - Fewer singles, never bunched together, and rollers tall enough to ride, so chicanes and
   bare stretches have something on them. On the ARL build singles grow taller, not into
   tables.
+- Generated laps have no long stretches or big chicanes: corners come at most about 55 m
+  apart, and the start straight runs straight into turn one.
 
 ## 2026-09-13 — v0.14.1 — Shortcuts under both names
 
