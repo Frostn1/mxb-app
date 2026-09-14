@@ -570,6 +570,8 @@ export const en = {
   "settings.secStatusTitle": "Secured content found",
   "settings.secStatusUnlocked": "Unlocked",
   "settings.secStatusUnlocking": "Unlocking…",
+  "settings.secStatusReady": "Ready to unlock",
+  "settings.secReasonReady": "You own this — it unlocks when you open the Library or launch the game.",
   "settings.secStatusNotOwned": "Not in your library",
   "settings.secStatusUnavailable": "Unavailable",
   "settings.secStatusNeedsSteam": "Sign in with Steam",

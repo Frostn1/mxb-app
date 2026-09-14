@@ -433,11 +433,13 @@ export function mxbsecureStatus(): Promise<SecureStatusItem[]> {
   return invoke<SecureStatusItem[]>("mxbsecure_status");
 }
 
-/** Try to unlock every secured `.mxbsecure` that doesn't have a key yet — after an install or at
- *  startup, so content you own just works. No-op when not enrolled; a file you're not entitled to
- *  is left locked. Returns how many were newly unlocked. */
-export function mxbsecureAutoUnlock(): Promise<number> {
-  return invoke<number>("mxbsecure_auto_unlock");
+/** Try to unlock every secured `.mxbsecure` that doesn't have a key yet, so content you own just
+ *  works. Called on the moments that change the answer (startup, install, opening the Library, a
+ *  sign-in, the game launching); throttled, so calling it often is cheap. `force` skips the
+ *  throttle for a fresh sign-in, whose new identity decides entitlement. Returns how many were
+ *  newly unlocked. */
+export function mxbsecureAutoUnlock(force = false): Promise<number> {
+  return invoke<number>("mxbsecure_auto_unlock", { force });
 }
 
 /** Start linking this account to Steam: returns a Steam OpenID URL to open in the browser.

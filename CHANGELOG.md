@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Content you own unlocks on its own at the moments that matter — right after you sign in with
+  Steam, when you open the Library, and when the game launches — so a track you just bought is
+  playable without restarting the app. A file you don't own is left alone, not retried endlessly.
+- A secured file you own but haven't pulled down yet now reads "Ready to unlock" instead of a
+  misleading "Unlocking…", with a line saying it unlocks when you open the Library or start the game.
 - Signing in with Steam opens on a short mxbsecure page before it hands you to Steam and brings
   you back, so the sign-in looks like ours from start to finish instead of jumping straight to a
   Steam URL.

@@ -577,6 +577,8 @@ export const es: Translation = {
   "settings.secStatusTitle": "Contenido protegido encontrado",
   "settings.secStatusUnlocked": "Desbloqueado",
   "settings.secStatusUnlocking": "Desbloqueando…",
+  "settings.secStatusReady": "Listo para desbloquear",
+  "settings.secReasonReady": "Es tuyo: se desbloquea al abrir la Biblioteca o iniciar el juego.",
   "settings.secStatusNotOwned": "No está en tu biblioteca",
   "settings.secStatusUnavailable": "No disponible",
   "settings.secStatusNeedsSteam": "Inicia sesión con Steam",
