@@ -7,7 +7,7 @@
  * table for pending sign-ins either.
  */
 
-import { allowedOrigin, cors } from "./assets";
+import { allowedOrigin, ASSET_ORIGINS, cors } from "./assets";
 import { isVerified, loginUrl, verifyAssertion } from "./steam";
 import {
   clearedSessionCookie,
@@ -37,6 +37,11 @@ function siteOrigin(env: Env): string {
   return (env.MXB_SITE_ORIGIN || "https://mxbsecure.com").replace(/\/+$/, "");
 }
 
+/** The site to land back on: the one the sign-in started from if it's ours, else the default. */
+export function landingSite(raw: string | null, env: Env): string {
+  return raw && ASSET_ORIGINS.includes(raw) ? raw : siteOrigin(env);
+}
+
 export async function webRoutes(
   request: Request,
   url: URL,
@@ -56,7 +61,13 @@ export async function webRoutes(
   if (method === "GET" && path === "/v1/web/steam/login") {
     if (!key) return page(503, "Sign-in isn't set up on this server yet.");
     const state = await sealToken(
-      { t: "state", next: safeNext(url.searchParams.get("next")), n: crypto.randomUUID(), exp: Date.now() + STATE_TTL_MS },
+      {
+        t: "state",
+        site: landingSite(url.searchParams.get("site"), env),
+        next: safeNext(url.searchParams.get("next")),
+        n: crypto.randomUUID(),
+        exp: Date.now() + STATE_TTL_MS,
+      },
       key,
     );
     const returnTo = `${url.origin}/v1/web/steam/return?state=${encodeURIComponent(state)}`;
@@ -73,7 +84,11 @@ export async function webRoutes(
     const token = await sealToken({ t: "session", steamId: result.steamId, name, exp: Date.now() + SESSION_TTL_MS }, key);
     return new Response(null, {
       status: 302,
-      headers: { Location: `${siteOrigin(env)}${state.next}`, "Set-Cookie": sessionCookie(token), "Cache-Control": "no-store" },
+      headers: {
+        Location: `${landingSite(state.site ?? null, env)}${state.next}`,
+        "Set-Cookie": sessionCookie(token),
+        "Cache-Control": "no-store",
+      },
     });
   }
 

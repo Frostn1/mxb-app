@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { adminAssets } from "../src/assets";
-import { safeNext, webRoutes } from "../src/web";
+import { landingSite, safeNext, webRoutes } from "../src/web";
 import { openToken, readCookie, sealToken, SESSION_COOKIE, type WebSession } from "../src/websession";
 import { addAccount, d1 } from "./d1sqlite";
 
@@ -57,9 +57,10 @@ const steamYes = vi.fn(async (input: RequestInfo | URL) =>
     : new Response("ns:http://specs.openid.net/auth/2.0\nis_valid:true\n"),
 ) as unknown as typeof fetch;
 
-/** The return URL Steam would send the browser to, for a login started at `next`. */
-async function steamComesBack(env: Env, steamId: string, next = "/dashboard"): Promise<string> {
-  const login = await web(env, req("GET", `/v1/web/steam/login?next=${encodeURIComponent(next)}`));
+/** The return URL Steam would send the browser to, for a login started at `next` on `site`. */
+async function steamComesBack(env: Env, steamId: string, next = "/dashboard", site?: string): Promise<string> {
+  const from = site ? `&site=${encodeURIComponent(site)}` : "";
+  const login = await web(env, req("GET", `/v1/web/steam/login?next=${encodeURIComponent(next)}${from}`));
   const returnTo = new URL(new URL(login.headers.get("Location")!).searchParams.get("openid.return_to")!);
   const q = new URLSearchParams({
     "openid.ns": "http://specs.openid.net/auth/2.0",
@@ -120,6 +121,15 @@ describe("Steam sign-in", () => {
     expect(me.headers.get("Access-Control-Allow-Origin")).toBe(SITE);
     expect(me.headers.get("Access-Control-Allow-Credentials")).toBe("true");
     expect(await me.json()).toEqual({ steamId: CREATOR, name: "Frost", creator: true, linked: true });
+  });
+
+  it("lands back on www when the sign-in started there, never on another site", async () => {
+    const env = await deployment();
+    const www = await web(env, req("GET", await steamComesBack(env, CREATOR, "/lock", "https://www.mxbsecure.com")), steamYes);
+    expect(www.headers.get("Location")).toBe("https://www.mxbsecure.com/lock");
+    const evil = await web(env, req("GET", await steamComesBack(env, CREATOR, "/lock", "https://evil.com")), steamYes);
+    expect(evil.headers.get("Location")).toBe(`${SITE}/lock`);
+    expect(landingSite(null, env)).toBe(SITE);
   });
 
   it("refuses a broken state, and an assertion Steam won't confirm", async () => {

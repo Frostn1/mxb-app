@@ -23,6 +23,8 @@ export interface WebSession {
 
 export interface LoginState {
   t: "state";
+  /** The site origin the sign-in started on, so it lands back there. */
+  site?: string;
   next: string;
   n: string;
   exp: number;
