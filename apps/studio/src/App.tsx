@@ -125,7 +125,8 @@ function Shell() {
     const all: (RailEntry<View> & { when?: boolean })[] = [
       // Two errands: making something, and checking something already on disk.
       { id: "designer", label: t("nav.designer"), group: "make" },
-      { id: "paints", label: t("nav.paints"), group: "make" },
+      // The Paints tab is retired from the rail — the Designer editor covers the same job better.
+      // Its tool (PaintStudio) is kept dormant behind the scenes, so the entry can come back.
       { id: "rider", label: t("nav.rider"), group: "make", when: game.caps.viewer },
       { id: "pose", label: t("nav.pose"), group: "make", when: game.caps.viewer },
       { id: "track", label: t("nav.track"), group: "make" },

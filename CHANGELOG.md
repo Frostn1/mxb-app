@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — Frost's Studio
+
+### Removed
+- The Paints tab. The Designer editor does the same job, so it's gone from the sidebar.
+
 ## 2026-09-14 — Frost's Studio v0.1.4
 
 ### Changed
