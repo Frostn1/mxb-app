@@ -99,19 +99,39 @@ async function handle(
     return json(503, { error: "secured assets are not configured" });
   }
 
-  const match = /^\/admin\/assets(?:\/([A-Za-z0-9_-]{1,64})\/grants)?\/?$/.exec(url.pathname);
+  const match = /^\/admin\/assets(?:\/([A-Za-z0-9_-]{1,64})(\/grants)?)?\/?$/.exec(url.pathname);
   if (!match) return json(404, { error: "no such endpoint" });
-  const assetId = match[1];
+  const [, assetId, grants] = match;
   const method = request.method;
 
   if (!assetId) {
     if (method === "GET") return listAssets(env);
     if (method === "POST") return createAsset(request, env);
-  } else {
+  } else if (grants) {
     if (method === "GET") return listGrants(assetId, env);
     if (method === "POST") return changeGrants(request, assetId, env, fetchImpl);
+  } else if (method === "PATCH") {
+    return setBlobHash(request, assetId, env);
   }
   return json(405, { error: "method not allowed" });
+}
+
+/**
+ * `PATCH /admin/assets/:id` — `{ blobSha256 }`, the SHA-256 of the packed file.
+ *
+ * The site packs in the browser, so it's the only thing that sees the finished file. Once the
+ * hash is stored, `/v1/keys/grant` releases the key only for that exact file.
+ */
+async function setBlobHash(request: Request, assetId: string, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  const hash = (body as { blobSha256?: unknown } | null)?.blobSha256;
+  if (typeof hash !== "string" || !/^[0-9a-f]{64}$/i.test(hash.trim())) {
+    return json(400, { error: "blobSha256 must be 64 hex characters" });
+  }
+  if (!(await assetExists(assetId, env))) return json(404, { error: "no such asset" });
+  const blobSha256 = hash.trim().toLowerCase();
+  await env.DB.prepare("UPDATE assets SET blob_sha256 = ? WHERE id = ?").bind(blobSha256, assetId).run();
+  return json(200, { assetId, blobSha256 });
 }
 
 /**
@@ -364,7 +384,7 @@ function cors(response: Response, origin: string | null, preflight = false): Res
   if (origin) {
     out.headers.set("Access-Control-Allow-Origin", origin);
     if (preflight) {
-      out.headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      out.headers.set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
       out.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
       out.headers.set("Access-Control-Max-Age", "600");
     }

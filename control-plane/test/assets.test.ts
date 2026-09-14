@@ -162,7 +162,7 @@ describe("CORS", () => {
       );
       expect(res.status).toBe(204);
       expect(res.headers.get("Access-Control-Allow-Origin")).toBe(origin);
-      expect(res.headers.get("Access-Control-Allow-Methods")).toBe("GET, POST, OPTIONS");
+      expect(res.headers.get("Access-Control-Allow-Methods")).toBe("GET, POST, PATCH, OPTIONS");
       expect(res.headers.get("Access-Control-Allow-Headers")).toBe("Authorization, Content-Type");
       expect(res.headers.get("Vary")).toContain("Origin");
     }
@@ -352,5 +352,32 @@ describe("POST /v1/keys/grant after an admin grant", () => {
     const after = await ask();
     expect(after.status).toBe(403);
     expect(await after.json()).toEqual({ error: "revoked" });
+  });
+
+  it("releases the key only for the registered file once its hash is set", async () => {
+    const env = await deployment();
+    const token = "buyer-token";
+    await env.DB.prepare(
+      "INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind("acc_buyer", "Buyer", BUYER, await hashToken(token), Date.now())
+      .run();
+    const created = await create(env);
+    await call(env, req("POST", `/admin/assets/${created.assetId}/grants`, { body: { add: [BUYER] } }));
+
+    const hash = "ab".repeat(32);
+    const patch = (id: string, blobSha256: unknown) =>
+      call(env, req("PATCH", `/admin/assets/${id}`, { body: { blobSha256 } }));
+    expect((await patch(created.assetId, "nope")).status).toBe(400);
+    expect((await patch("ast_missing", hash)).status).toBe(404);
+    const set = await patch(created.assetId, hash.toUpperCase());
+    expect(set.status).toBe(200);
+    expect(await set.json()).toEqual({ assetId: created.assetId, blobSha256: hash });
+
+    const ask = (blobSha256?: string) =>
+      call(env, req("POST", "/v1/keys/grant", { key: token, body: { assetId: created.assetId, sessionId: "s1", blobSha256 } }));
+    expect((await ask(hash)).status).toBe(200);
+    expect((await ask("cd".repeat(32))).status).not.toBe(200);
+    expect((await ask()).status).not.toBe(200);
   });
 });
