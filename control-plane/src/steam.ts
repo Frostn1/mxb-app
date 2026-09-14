@@ -89,7 +89,12 @@ export function steamIdFromClaimedId(claimedId: unknown): string | null {
   if (typeof claimedId !== "string") return null;
   if (!claimedId.startsWith(CLAIMED_ID_PREFIX)) return null;
   const id = claimedId.slice(CLAIMED_ID_PREFIX.length);
-  return /^\d{17}$/.test(id) ? id : null;
+  return isSteamId64(id) ? id : null;
+}
+
+/** 17 digits, and nothing else. */
+export function isSteamId64(value: string): boolean {
+  return /^\d{17}$/.test(value);
 }
 
 /**

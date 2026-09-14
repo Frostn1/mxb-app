@@ -26,6 +26,7 @@ import {
   terminateInstance,
 } from "./aws";
 import { adminSearch } from "./adminsearch";
+import { adminAssets, isAssetsPath } from "./assets";
 import { bmacWebhook } from "./bmac";
 import { pruneReports, putReport } from "./diagnostics";
 import {
@@ -268,6 +269,11 @@ async function route(request: Request, env: Env): Promise<Response> {
     return pluginLicensesPage(request, url, env);
   }
   if (method === "POST" && path === "/admin/plugins") return pluginsAction(request, url, env);
+
+  // Secured assets and their grants, for mxbsecure.com. Same key, above the account gate for
+  // the same reason as plugin keys; the only admin routes with CORS, since the site calls them
+  // from a browser. Every method goes in, so the preflight is answered before auth.
+  if (isAssetsPath(path)) return adminAssets(request, url, env);
 
   // Live share codes, and the one write path here that nobody signs in for.
   //

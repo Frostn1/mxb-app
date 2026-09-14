@@ -54,6 +54,9 @@ declare global {
     /** Which master-key version new wraps use (a key in `MXB_ASSET_MASTER_KEYS`). Defaults to
      *  "1". Point it at a new version, deploy, then POST `/admin/keys/rewrap` to rotate. */
     MXB_ASSET_MASTER_KEY_VERSION?: string;
+    /** The account assets made through `/admin/assets` are created under. Not a secret — a
+     *  var in `wrangler.jsonc`. Empty means `/admin/assets` answers 503. */
+    MXB_OWNER_ACCOUNT_ID?: string;
   }
 }
 
