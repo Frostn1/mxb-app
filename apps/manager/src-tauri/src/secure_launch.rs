@@ -271,6 +271,29 @@ pub fn arm(app: &AppHandle) {
     }
 }
 
+/// Refresh a running game after a mid-session unlock: rewrite the manifest the DLL watches, then
+/// ask FrostMod to rescan, so a just-unlocked asset appears without a restart. A no-op unless the
+/// game is running with injection on — otherwise `arm` picks the new asset up at the next launch.
+#[cfg_attr(not(mxbsecure), allow(dead_code))]
+pub fn refresh_running(app: &AppHandle) {
+    if !crate::gameproc::is_game_running() || !injection_enabled(app) {
+        return;
+    }
+    let Some(dir) = run_dir(app) else { return };
+    let assets = scan_secured(app);
+    if let Err(e) = write_manifest(&assets, &dir) {
+        log::warn!("[secure] couldn't rewrite the manifest on unlock: {e}");
+        return;
+    }
+    // The DLL polls the manifest (~2s) and reloads its catalog; give it a moment before the
+    // rescan, or the rescan could run before the new asset is in the catalog.
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        let outcome = crate::frostmod::signal_reload();
+        log::info!("[secure] mid-session unlock: manifest rewritten, asked FrostMod to rescan: {outcome:?}");
+    });
+}
+
 /// Wait for the DLL to finish installing its hooks. It sets up on its own thread, so
 /// `LoadLibraryW` returns first; it says when it's done in its log, past `from`. `false` on
 /// a failed install or a timeout.
