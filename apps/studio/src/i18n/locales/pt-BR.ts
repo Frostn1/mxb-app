@@ -70,7 +70,12 @@ export const ptBR: Translation = {
   "secure.selected": "{{count}} selecionadas",
   "secure.generate": "Gerar",
   "secure.buyerNote": "Envie os dois arquivos ao comprador. Ele os coloca na pasta de pistas — a pista aparece e roda, presa à conta Steam dele, offline.",
-  "secure.genResult": "Gerado",
+  "secure.genResult": "Empacotado",
+  "secure.registerNote": "Registre o ID do recurso e a chave de conteúdo na loja, depois distribua o arquivo .mxbsecure. Nunca compartilhe a chave de conteúdo — compradores que possuem a pista a obtêm da loja e desbloqueiam na própria máquina.",
+  "secure.assetId": "ID do recurso",
+  "secure.contentKey": "Chave de conteúdo",
+  "secure.copy": "Copiar",
+  "secure.copied": "Copiado para a área de transferência.",
   // ── Paint studio ───────────────────────────────────────────────────────────
   "paints.help":
     "Transforma arquivos .tga ou .png feitos no GIMP ou Photoshop em um .pnt que o jogo carrega — e descompacta uma pintura existente para usar como base.",
@@ -399,9 +404,9 @@ export const ptBR: Translation = {
   "rider.nameFirst": "Primeiro dê um nome a este visual.",
   "secure.help":
     "Bloqueia um arquivo em um blob .mxbsecure. O texto puro nunca é distribuído — só o blob cifrado, e ele é inútil sem uma chave que o servidor libera a jogadores com direito.",
-  "secure.genTitle": "Proteger pistas para um comprador",
-  "secure.genDesc": "Escolha uma ou mais pistas e o Steam ID do comprador. O app grava uma cópia criptografada e uma chave presa a essa conta ao lado de cada pista — seu original fica intacto.",
-  "secure.genOk": "Protegidas {{ok}} de {{total}} — presas a {{id}}.",
+  "secure.genTitle": "Empacote pistas para distribuição",
+  "secure.genDesc": "Escolha uma ou mais pistas. O app grava uma cópia criptografada ao lado de cada uma e fornece um ID de recurso e uma chave de conteúdo para registrar na loja — seu original fica intacto. Os compradores desbloqueiam na própria máquina.",
+  "secure.genOk": "Empacotadas {{ok}} de {{total}}.",
   "secure.genFail": "Não foi possível proteger {{name}}",
   "secure.badSteamId": "Informe primeiro o Steam ID de 17 dígitos do comprador.",
   "secure.experimental": "Experimental",

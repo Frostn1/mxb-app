@@ -70,7 +70,12 @@ export const es: Translation = {
   "secure.selected": "{{count}} seleccionados",
   "secure.generate": "Generar",
   "secure.buyerNote": "Envía al comprador ambos archivos. Los pone en su carpeta de circuitos: el circuito aparece y se puede rodar, ligado a su cuenta de Steam, sin conexión.",
-  "secure.genResult": "Generado",
+  "secure.genResult": "Empaquetado",
+  "secure.registerNote": "Registra el ID de recurso y la clave de contenido en la tienda, luego distribuye el archivo .mxbsecure. Nunca compartas la clave de contenido: los compradores que posean el circuito la obtienen de la tienda y lo desbloquean en su propia máquina.",
+  "secure.assetId": "ID de recurso",
+  "secure.contentKey": "Clave de contenido",
+  "secure.copy": "Copiar",
+  "secure.copied": "Copiado al portapapeles.",
   // ── Paint studio ───────────────────────────────────────────────────────────
   "paints.help":
     "Convierte archivos .tga o .png hechos en GIMP o Photoshop en un .pnt que el juego carga — y desempaqueta una pintura existente para partir de ella.",
@@ -400,9 +405,9 @@ export const es: Translation = {
   "rider.nameFirst": "Primero ponle nombre a este look.",
   "secure.help":
     "Bloquea un archivo en un blob .mxbsecure. El texto plano nunca se distribuye — solo el blob cifrado, y es inútil sin una clave que el servidor entrega a los jugadores con derecho.",
-  "secure.genTitle": "Proteger circuitos para un comprador",
-  "secure.genDesc": "Elige uno o más circuitos y el Steam ID del comprador. La app escribe una copia cifrada y una clave ligada a esa cuenta junto a cada circuito; tu original no se toca.",
-  "secure.genOk": "Protegidos {{ok}} de {{total}} — ligados a {{id}}.",
+  "secure.genTitle": "Empaqueta circuitos para distribución",
+  "secure.genDesc": "Elige uno o más circuitos. La app escribe una copia cifrada junto a cada uno y te da un ID de recurso y una clave de contenido para registrar en la tienda; tu original no se toca. Los compradores lo desbloquean en su propia máquina.",
+  "secure.genOk": "Empaquetados {{ok}} de {{total}}.",
   "secure.genFail": "No se pudo proteger {{name}}",
   "secure.badSteamId": "Introduce primero el Steam ID de 17 dígitos del comprador.",
   "secure.experimental": "Experimental",

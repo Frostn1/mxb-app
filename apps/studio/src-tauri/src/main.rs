@@ -1654,28 +1654,24 @@ fn content_lock_available() -> bool {
 /// Generate a protected copy of a track for a **specific Steam ID**, leaving the original
 /// untouched.
 ///
-/// This is the creator's action. Given a track and the buyer's 17-digit Steam ID, it writes two
-/// files beside the original:
+/// This is the creator's action. Given a track, it writes the encrypted blob beside the
+/// original (`<track>.mxbsecure`) and returns the fresh **content key** and **asset id** to
+/// register with the store. The original `.pkz` is never modified — the creator keeps their
+/// master and distributes only the blob.
 ///
-/// - `<track>.mxbsecure` — the encrypted blob.
-/// - `<track>.mxbsecure.mxbkey` — the content key sealed to that Steam ID.
-///
-/// Both are needed, next to each other, to load; the key opens only on the machine signed into
-/// that Steam account. The original `.pkz` is never modified — the creator keeps their master,
-/// and hands the buyer only the two generated files.
+/// It does **not** seal a `.mxbkey` for a buyer. A key sealed here, for a buyer on a different
+/// machine, could not be DPAPI-machine-bound, so it was portable — a shared file plus the
+/// buyer's public Steam ID opened it anywhere. Keys now reach buyers only by provisioning on
+/// their own machine (the manager's unlock step calls `/v1/keys/grant` and DPAPI-binds the key),
+/// so a copy is useless. The creator registers the content key with the store; the server hands
+/// it to entitled buyers.
 #[tauri::command]
 async fn mxbsecure_generate(
     track_path: String,
-    steam_id: String,
 ) -> Result<SecureGenerateOutcome, String> {
     #[cfg(mxbsecure)]
     {
         use std::path::Path;
-
-        let steam_id = steam_id.trim().to_string();
-        if steam_id.len() != 17 || !steam_id.bytes().all(|b| b.is_ascii_digit()) {
-            return Err("that isn't a Steam ID — it should be 17 digits (a SteamID64)".into());
-        }
 
         let plaintext = tokio::fs::read(&track_path)
             .await
@@ -1695,37 +1691,32 @@ async fn mxbsecure_generate(
         let asset_id = format!("{}-{suffix}", mxb_core::names::sanitize_asset_id(&name));
 
         let locked = mxbsecure::lock(&plaintext, &asset_id, "k1");
-        // The creator seals here, on their own machine, for the *buyer's* Steam ID: no machine
-        // binding (DPAPI would tie it to the creator's box), and no per-provision secret — this
-        // offline hand-off flow has no server grant to mint one, so it binds to the Steam ID
-        // alone. The server-provisioned path (manager's mxbsecure_provision) adds both.
-        let sealed = mxbsecure::seal_key_to_identity(&locked.content_key, &steam_id, "", b"", false);
 
-        // `<track>.mxbsecure` and `<track>.mxbsecure.mxbkey`, beside the original.
+        // `<track>.mxbsecure` beside the original. Written to a temp and renamed, so a crash
+        // mid-write leaves no half file.
         let blob_path = format!("{track_path}.mxbsecure");
-        let mxbkey_path = format!("{blob_path}.mxbkey");
-        // Blob is written to a temp and renamed, so a crash mid-write leaves no half file.
         let tmp = format!("{blob_path}.writing");
         tokio::fs::write(&tmp, &locked.blob).await.map_err(|e| format!("write blob: {e}"))?;
         tokio::fs::rename(&tmp, &blob_path).await.map_err(|e| format!("finish blob: {e}"))?;
-        tokio::fs::write(&mxbkey_path, &sealed).await.map_err(|e| format!("write .mxbkey: {e}"))?;
 
         Ok(SecureGenerateOutcome {
             game_name: name,
             blob_path,
-            mxbkey_path,
-            steam_id,
+            asset_id: locked.asset_id,
+            content_key: mxbsecure::hex_key(&locked.content_key),
             plain_bytes: plaintext.len() as u64,
         })
     }
     #[cfg(not(mxbsecure))]
     {
-        let _ = (track_path, steam_id);
+        let _ = track_path;
         Err("this build can't generate protected content".into())
     }
 }
 
-/// What generating a protected copy produced. The two files a buyer needs, side by side.
+/// What packing produced: the blob to distribute, plus the asset id and content key to register
+/// with the store so entitled buyers can be granted the key. The key is shown once, here — it is
+/// never written to disk beside the blob.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SecureGenerateOutcome {
@@ -1733,10 +1724,10 @@ struct SecureGenerateOutcome {
     game_name: String,
     /// The encrypted blob: `<original>.mxbsecure`.
     blob_path: String,
-    /// The key sealed to the buyer's Steam ID: `<original>.mxbsecure.mxbkey`.
-    mxbkey_path: String,
-    /// The Steam ID it was sealed to.
-    steam_id: String,
+    /// The asset id recorded in the blob header — register this with the store.
+    asset_id: String,
+    /// The content key as hex, shown once for registration with the store. Never stored on disk.
+    content_key: String,
     plain_bytes: u64,
 }
 

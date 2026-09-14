@@ -557,6 +557,22 @@ export const es: Translation = {
   "settings.mxbsecure": "Bloqueo de contenido (mxbsecure)",
   "settings.mxbsecureDesc":
     "Experimental. Añade una pestaña Proteger que bloquea un archivo para que tenerlo no baste para usarlo. Solo lo necesitan los creadores que empaquetan contenido de pago.",
+  "settings.mxbsecureUnlock": "Desbloquear contenido comprado",
+  "settings.mxbsecureUnlockDesc":
+    "Elige un circuito .mxbsecure que poseas. Se desbloquea para esta cuenta en esta máquina, y luego aparece y se puede rodar sin conexión.",
+  "settings.mxbsecureUnlockBtn": "Desbloquear un circuito…",
+  "settings.mxbsecureUnlockOk": "Desbloqueado: el circuito aparecerá y se podrá rodar sin conexión.",
+  "settings.mxbsecureUnlockFail": "No se pudo desbloquear este contenido",
+  "settings.steamLink": "Iniciar sesión con Steam",
+  "settings.steamLinkDesc": "Necesario para desbloquear contenido comprado — vincula esta cuenta con tu Steam ID.",
+  "settings.steamLinkedAs": "Sesión iniciada como {{id}}.",
+  "settings.steamLinkBtn": "Iniciar sesión con Steam",
+  "settings.steamRelink": "Volver a vincular",
+  "settings.steamLinking": "Esperando…",
+  "settings.steamLinkOpened": "Abriendo Steam en tu navegador — termina ahí y luego vuelve.",
+  "settings.steamLinkOk": "Sesión iniciada como {{id}}.",
+  "settings.steamLinkPending": "Aún no se detectó el inicio de sesión. Termínalo en el navegador y reabre Ajustes.",
+  "settings.steamLinkFail": "Error al iniciar sesión con Steam",
   "secure.intro":
     "Elige un archivo, bloquéalo y luego verifica que se desbloquea. Verificar descifra el blob aquí mismo y lo compara con el original, byte a byte — la prueba de que va y vuelve en esta máquina.",
   "secure.protectTitle": "Proteger un circuito",

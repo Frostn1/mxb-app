@@ -556,6 +556,22 @@ export const it: Translation = {
   "settings.mxbsecure": "Blocco dei contenuti (mxbsecure)",
   "settings.mxbsecureDesc":
     "Sperimentale. Aggiunge una scheda Proteggi che blocca un file in modo che possederlo non basti a usarlo. Serve solo ai creatori che impacchettano contenuti a pagamento.",
+  "settings.mxbsecureUnlock": "Sblocca contenuto acquistato",
+  "settings.mxbsecureUnlockDesc":
+    "Scegli un tracciato .mxbsecure che possiedi. Viene sbloccato per questo account su questo computer, poi appare e si guida offline.",
+  "settings.mxbsecureUnlockBtn": "Sblocca un tracciato…",
+  "settings.mxbsecureUnlockOk": "Sbloccato — il tracciato apparirà e si potrà guidare offline.",
+  "settings.mxbsecureUnlockFail": "Impossibile sbloccare questo contenuto",
+  "settings.steamLink": "Accedi con Steam",
+  "settings.steamLinkDesc": "Necessario per sbloccare i contenuti acquistati — collega questo account al tuo Steam ID.",
+  "settings.steamLinkedAs": "Accesso come {{id}}.",
+  "settings.steamLinkBtn": "Accedi con Steam",
+  "settings.steamRelink": "Ricollega",
+  "settings.steamLinking": "In attesa…",
+  "settings.steamLinkOpened": "Apertura di Steam nel browser — completa lì, poi torna qui.",
+  "settings.steamLinkOk": "Accesso come {{id}}.",
+  "settings.steamLinkPending": "Accesso non ancora rilevato. Completalo nel browser, poi riapri le Impostazioni.",
+  "settings.steamLinkFail": "Accesso con Steam non riuscito",
   "secure.intro":
     "Scegli un file, bloccalo, poi verifica che si sblocchi. La verifica decifra il blob qui e lo confronta con l'originale, byte per byte — la prova che fa il giro su questa macchina.",
   "secure.protectTitle": "Proteggi una pista",

@@ -21,10 +21,12 @@ const LOGINUSERS_ENV: &str = "MXB_STEAM_LOGINUSERS";
 /// `None` is not an error to hide: without it, secured content simply can't be provisioned or
 /// opened, and the UI says so rather than sealing to nothing.
 pub fn current_steam_id64() -> Option<String> {
-    let path = if let Ok(p) = std::env::var(LOGINUSERS_ENV) {
-        PathBuf::from(p)
-    } else {
-        steam_config_dir()?.join("loginusers.vdf")
+    // The override is a test/dev affordance only. Honouring it in a release build would let
+    // anyone point identity resolution at a hand-written file — spoofing the account a sealed
+    // key is checked against — so release always reads the real Steam install.
+    let path = match std::env::var(LOGINUSERS_ENV) {
+        Ok(p) if cfg!(debug_assertions) => PathBuf::from(p),
+        _ => steam_config_dir()?.join("loginusers.vdf"),
     };
     let text = std::fs::read_to_string(&path).ok()?;
     most_recent_steam_id(&text)

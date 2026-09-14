@@ -98,7 +98,8 @@ mod offline_flow_test {
         let steam = crate::steamid::current_steam_id64().expect("steam id");
         assert_eq!(steam, "76561198000000001");
         let secret = b"a-server-minted-provision-secret";
-        let sealed = crate::mxbsecure::seal_key_to_identity(&locked.content_key, &steam, "", secret, true);
+        let sealed = crate::mxbsecure::seal_key_to_identity(&locked.content_key, &steam, "", secret, true)
+            .expect("a debug build seals identity-only when DPAPI is unavailable");
         std::fs::write(dir.join("track.pkz.mxbsecure.mxbkey"), &sealed).unwrap();
 
         // Open offline as the same account: unseal (the secret rides inside the envelope),
@@ -1671,47 +1672,198 @@ async fn mxbsecure_provision(
 ) -> Result<SecureProvisionOutcome, String> {
     #[cfg(mxbsecure)]
     {
-        let steam_id = steamid::current_steam_id64()
-            .ok_or("couldn't read your Steam ID — is Steam installed and signed in?")?;
         let content_key = mxbsecure::key_from_hex(&key).ok_or("the key isn't 32 bytes of hex")?;
         let secret = match secret_b64.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             Some(s) => mxbsecure::secret_from_b64(s).ok_or("the provision secret isn't valid base64")?,
             None => Vec::new(),
         };
-        // The buyer is provisioning on their own machine, so bind to it (DPAPI) as well.
-        let sealed = mxbsecure::seal_key_to_identity(&content_key, &steam_id, "", &secret, true);
-        let out = std::path::PathBuf::from(format!("{blob_path}.mxbkey"));
-        tokio::fs::write(&out, &sealed).await.map_err(|e| format!("write .mxbkey: {e}"))?;
-
-        // Remember the mapping so the app can arm this asset — write the manifest and inject
-        // the DLL — the next time the game starts. The game name is the blob's own name with
-        // the `.mxbsecure` suffix removed: the file the engine will ask for.
-        let game_name = std::path::Path::new(&blob_path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .map(|n| n.strip_suffix(".mxbsecure").unwrap_or(&n).to_string())
-            .unwrap_or_default();
-        if let Err(e) = secure_launch::record_asset(
-            &app,
-            secure_launch::SecureAsset {
-                game_name,
-                blob_path: blob_path.clone(),
-                mxbkey_path: out.to_string_lossy().to_string(),
-            },
-        ) {
-            log::warn!("[secure] couldn't record the provisioned asset: {e}");
-        }
-
-        Ok(SecureProvisionOutcome {
-            mxbkey_path: out.to_string_lossy().to_string(),
-            steam_id,
-        })
+        provision_and_record(&app, &blob_path, &content_key, &secret).await
     }
     #[cfg(not(mxbsecure))]
     {
         let _ = (app, blob_path, key, secret_b64);
         Err("this build can't provision mxbsecure content".into())
     }
+}
+
+/// Seal a content key to this machine (the live Steam ID + the DPAPI machine layer), store the
+/// `.mxbkey` beside the blob, and record the asset so it arms on the next game start. Shared by
+/// the manual [`mxbsecure_provision`] (Lock-tab test path) and the buyer's [`mxbsecure_unlock`].
+///
+/// The seal is refused rather than downgraded: `seal_key_to_identity` returns `None` in a
+/// release build if it could not machine-bind, and we surface that as an error and write
+/// nothing — so a copiable, identity-only `.mxbkey` is never left on disk.
+#[cfg(mxbsecure)]
+async fn provision_and_record(
+    app: &tauri::AppHandle,
+    blob_path: &str,
+    content_key: &[u8; 32],
+    secret: &[u8],
+) -> Result<SecureProvisionOutcome, String> {
+    let steam_id = steamid::current_steam_id64()
+        .ok_or("couldn't read your Steam ID — is Steam installed and signed in?")?;
+    // Bind to this machine (DPAPI) as well as the identity. None = couldn't machine-protect;
+    // fail loudly rather than storing a portable key.
+    let sealed = mxbsecure::seal_key_to_identity(content_key, &steam_id, "", secret, true)
+        .ok_or("couldn't machine-protect this key on this device — nothing was stored")?;
+    let out = std::path::PathBuf::from(format!("{blob_path}.mxbkey"));
+    tokio::fs::write(&out, &sealed).await.map_err(|e| format!("write .mxbkey: {e}"))?;
+
+    // Remember the mapping so the app can arm this asset — write the manifest and inject the
+    // DLL — the next time the game starts. The game name is the blob's own name with the
+    // `.mxbsecure` suffix removed: the file the engine will ask for.
+    let game_name = std::path::Path::new(blob_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .map(|n| n.strip_suffix(".mxbsecure").unwrap_or(&n).to_string())
+        .unwrap_or_default();
+    if let Err(e) = secure_launch::record_asset(
+        app,
+        secure_launch::SecureAsset {
+            game_name,
+            blob_path: blob_path.to_string(),
+            mxbkey_path: out.to_string_lossy().to_string(),
+        },
+    ) {
+        log::warn!("[secure] couldn't record the provisioned asset: {e}");
+    }
+
+    Ok(SecureProvisionOutcome {
+        mxbkey_path: out.to_string_lossy().to_string(),
+        steam_id,
+    })
+}
+
+/// Unlock purchased secured content for offline play — the buyer's one online step, and the
+/// only way a content key reaches a machine.
+///
+/// The asset id is read from the blob's own authenticated header, so the buyer just drops the
+/// `.mxbsecure` file in and clicks unlock. We prove entitlement at `/v1/keys/grant` (which
+/// releases the content key and the per-provision secret only to an entitled account), then
+/// seal both to *this* machine via [`provision_and_record`]. The resulting `.mxbkey` is
+/// DPAPI-bound, so a copy is useless on any other machine or account. From then on it opens
+/// offline with no further server call.
+#[tauri::command]
+async fn mxbsecure_unlock(
+    app: tauri::AppHandle,
+    blob_path: String,
+) -> Result<SecureProvisionOutcome, String> {
+    #[cfg(mxbsecure)]
+    {
+        // Which asset is this? Read it from the blob's authenticated header — no key needed.
+        let blob = tokio::fs::read(&blob_path)
+            .await
+            .map_err(|e| format!("read blob: {e}"))?;
+        let (asset_id, _key_id, _len) =
+            mxbsecure::header_of(&blob).map_err(|e| format!("not a secured blob: {e}"))?;
+
+        // Entitlement is checked server-side; the key is tied to the caller's account, so this
+        // needs the enrolled control-plane token.
+        let cfg = config::load_or_detect(&app).unwrap_or_default();
+        let cp_token = cfg.cp_token.trim().to_string();
+        if cp_token.is_empty() {
+            return Err("Enroll with an invite code first — secured content is tied to your account.".into());
+        }
+
+        // A one-off session id for the grant's audit log.
+        let mut sid = [0u8; 16];
+        getrandom::getrandom(&mut sid).map_err(|e| e.to_string())?;
+        let session: String = sid.iter().map(|b| format!("{b:02x}")).collect();
+
+        let resp = reqwest::Client::new()
+            .post(format!("{}/v1/keys/grant", crate::paintsync::control_plane()))
+            .bearer_auth(&cp_token)
+            .json(&serde_json::json!({ "assetId": asset_id, "sessionId": session }))
+            .send()
+            .await
+            .map_err(|e| format!("couldn't reach the control plane: {e}"))?;
+        if !resp.status().is_success() {
+            // The control plane answers `{error}`; surface it (403 not entitled, 409 no key…).
+            let detail = resp.text().await.unwrap_or_default();
+            let msg = serde_json::from_str::<serde_json::Value>(&detail)
+                .ok()
+                .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+                .unwrap_or(detail);
+            return Err(format!("couldn't unlock this content: {msg}"));
+        }
+
+        #[derive(serde::Deserialize)]
+        struct Grant {
+            #[serde(rename = "contentKey")]
+            content_key: String,
+            #[serde(rename = "provisionSecret")]
+            provision_secret: Option<String>,
+        }
+        let grant: Grant = resp.json().await.map_err(|e| format!("bad grant response: {e}"))?;
+        let content_key =
+            mxbsecure::key_from_b64(&grant.content_key).ok_or("the released key isn't 32 bytes")?;
+        let secret = match grant.provision_secret.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(s) => mxbsecure::secret_from_b64(s).ok_or("the provision secret isn't valid base64")?,
+            None => Vec::new(),
+        };
+
+        provision_and_record(&app, &blob_path, &content_key, &secret).await
+    }
+    #[cfg(not(mxbsecure))]
+    {
+        let _ = (app, blob_path);
+        Err("this build can't unlock secured content".into())
+    }
+}
+
+/// Start linking this account to a Steam identity: ask the control plane for a Steam OpenID
+/// sign-in URL. The frontend opens it in the browser; the browser half lands on
+/// `/v1/steam/return`, which sets `accounts.steam_id`. Returns the URL to open.
+#[tauri::command]
+async fn steam_link_start(app: tauri::AppHandle) -> Result<String, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let tok = cfg.cp_token.trim().to_string();
+    if tok.is_empty() {
+        return Err("Enroll with an invite code first — sign-in is tied to your account.".into());
+    }
+    let resp = reqwest::Client::new()
+        .post(format!("{}/v1/steam/login", crate::paintsync::control_plane()))
+        .bearer_auth(&tok)
+        .send()
+        .await
+        .map_err(|e| format!("couldn't reach the control plane: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("control plane refused the sign-in ({})", resp.status()));
+    }
+    #[derive(serde::Deserialize)]
+    struct Login {
+        url: String,
+    }
+    let login: Login = resp.json().await.map_err(|e| format!("bad response: {e}"))?;
+    Ok(login.url)
+}
+
+/// The Steam ID this account is currently linked to on the control plane, or `None` if it is
+/// not linked yet. Reflects sign-in state and lets the UI poll for completion after the
+/// browser half.
+#[tauri::command]
+async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let tok = cfg.cp_token.trim().to_string();
+    if tok.is_empty() {
+        return Ok(None);
+    }
+    let resp = reqwest::Client::new()
+        .get(format!("{}/v1/entitlements", crate::paintsync::control_plane()))
+        .bearer_auth(&tok)
+        .send()
+        .await
+        .map_err(|e| format!("couldn't reach the control plane: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("control plane error ({})", resp.status()));
+    }
+    #[derive(serde::Deserialize)]
+    struct Ent {
+        #[serde(rename = "steamId")]
+        steam_id: Option<String>,
+    }
+    let ent: Ent = resp.json().await.map_err(|e| format!("bad response: {e}"))?;
+    Ok(ent.steam_id)
 }
 
 /// Open a blob offline using its provisioned `.mxbkey`: read the live Steam ID, unseal the
@@ -6275,6 +6427,9 @@ fn main() {
             mxbsecure_verify,
             secure_steam_id,
             mxbsecure_provision,
+            mxbsecure_unlock,
+            steam_link_start,
+            steam_link_status,
             mxbsecure_open_offline,
             local_guid,
             mxb_core::viewer::load_bike_model,

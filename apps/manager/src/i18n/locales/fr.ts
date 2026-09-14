@@ -561,6 +561,22 @@ export const fr: Translation = {
   "settings.mxbsecure": "Verrouillage de contenu (mxbsecure)",
   "settings.mxbsecureDesc":
     "Expérimental. Ajoute un onglet Sécuriser qui verrouille un fichier pour que le posséder ne suffise pas à l'utiliser. Réservé aux créateurs qui empaquettent du contenu payant.",
+  "settings.mxbsecureUnlock": "Déverrouiller un contenu acheté",
+  "settings.mxbsecureUnlockDesc":
+    "Choisis un circuit .mxbsecure que tu possèdes. Il est déverrouillé pour ce compte sur cette machine, puis apparaît et se roule hors ligne.",
+  "settings.mxbsecureUnlockBtn": "Déverrouiller un circuit…",
+  "settings.mxbsecureUnlockOk": "Déverrouillé — le circuit apparaîtra et se roulera hors ligne.",
+  "settings.mxbsecureUnlockFail": "Impossible de déverrouiller ce contenu",
+  "settings.steamLink": "Se connecter avec Steam",
+  "settings.steamLinkDesc": "Nécessaire pour déverrouiller le contenu acheté — lie ce compte à ton Steam ID.",
+  "settings.steamLinkedAs": "Connecté en tant que {{id}}.",
+  "settings.steamLinkBtn": "Se connecter avec Steam",
+  "settings.steamRelink": "Relier",
+  "settings.steamLinking": "En attente…",
+  "settings.steamLinkOpened": "Ouverture de Steam dans le navigateur — termine là-bas, puis reviens.",
+  "settings.steamLinkOk": "Connecté en tant que {{id}}.",
+  "settings.steamLinkPending": "Connexion pas encore détectée. Termine-la dans le navigateur, puis rouvre les Paramètres.",
+  "settings.steamLinkFail": "Échec de la connexion Steam",
   "secure.intro":
     "Choisissez un fichier, verrouillez-le, puis vérifiez qu'il se déverrouille. La vérification déchiffre le blob ici même et le compare à l'original, octet par octet — la preuve qu'il fait l'aller-retour sur cette machine.",
   "secure.protectTitle": "Protéger un circuit",

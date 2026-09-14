@@ -550,6 +550,22 @@ export const en = {
   "settings.mxbsecure": "Content locking (mxbsecure)",
   "settings.mxbsecureDesc":
     "Experimental. Adds a Secure tab that locks a file so owning it isn't enough to use it. Only creators packing paid content need this.",
+  "settings.mxbsecureUnlock": "Unlock purchased content",
+  "settings.mxbsecureUnlockDesc":
+    "Pick a .mxbsecure track you own. It's unlocked for this account on this machine, then lists and rides offline.",
+  "settings.mxbsecureUnlockBtn": "Unlock a track…",
+  "settings.mxbsecureUnlockOk": "Unlocked — the track will list and ride offline.",
+  "settings.mxbsecureUnlockFail": "Couldn't unlock this content",
+  "settings.steamLink": "Sign in with Steam",
+  "settings.steamLinkDesc": "Required to unlock purchased content — links this account to your Steam ID.",
+  "settings.steamLinkedAs": "Signed in as {{id}}.",
+  "settings.steamLinkBtn": "Sign in with Steam",
+  "settings.steamRelink": "Re-link",
+  "settings.steamLinking": "Waiting…",
+  "settings.steamLinkOpened": "Opening Steam in your browser — finish there, then come back.",
+  "settings.steamLinkOk": "Signed in as {{id}}.",
+  "settings.steamLinkPending": "Didn't detect the sign-in yet. Finish it in the browser, then reopen Settings.",
+  "settings.steamLinkFail": "Steam sign-in failed",
   "secure.intro":
     "Pick a file, lock it, then verify it unlocks. Verifying decrypts the blob right here and checks it matches the original, byte for byte — the proof it round-trips on this machine.",
   "secure.protectTitle": "Protect a track",

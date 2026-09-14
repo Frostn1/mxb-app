@@ -74,7 +74,12 @@ export const en = {
   "secure.selected": "{{count}} selected",
   "secure.generate": "Generate",
   "secure.buyerNote": "Send the buyer both files. They drop them into their tracks folder — the track lists and rides, bound to their Steam account, offline.",
-  "secure.genResult": "Generated",
+  "secure.genResult": "Packed",
+  "secure.registerNote": "Register the asset id and content key with the store, then distribute the .mxbsecure file. Never share the content key — buyers who own the track get it from the store and unlock on their own machine.",
+  "secure.assetId": "Asset ID",
+  "secure.contentKey": "Content key",
+  "secure.copy": "Copy",
+  "secure.copied": "Copied to clipboard.",
   // ── Paint studio ───────────────────────────────────────────────────────────
   "paints.help":
     "Turn .tga or .png sheets drawn in GIMP or Photoshop into a .pnt the game loads — and unpack an existing paint to start from.",
@@ -403,9 +408,9 @@ export const en = {
   "rider.nameFirst": "Name this rider look first.",
   "secure.help":
     "Lock a file into a .mxbsecure blob. The plaintext never ships — only the encrypted blob does, and it's useless without a key the server releases to entitled players.",
-  "secure.genTitle": "Protect tracks for a buyer",
-  "secure.genDesc": "Pick one or more tracks and the buyer's Steam ID. The app writes an encrypted copy and a key locked to that account beside each track — your original is left untouched.",
-  "secure.genOk": "Protected {{ok}} of {{total}} — bound to {{id}}.",
+  "secure.genTitle": "Pack tracks for distribution",
+  "secure.genDesc": "Pick one or more tracks. The app writes an encrypted copy beside each and gives you an asset id and content key to register with the store — your original is left untouched. Buyers unlock it on their own machine.",
+  "secure.genOk": "Packed {{ok}} of {{total}}.",
   "secure.genFail": "Couldn't protect {{name}}",
   "secure.badSteamId": "Enter the buyer's 17-digit Steam ID first.",
   "secure.experimental": "Experimental",
