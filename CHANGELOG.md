@@ -41,10 +41,6 @@
   the header and streams the hash instead of loading the whole file, so large secured content
   doesn't sit in memory or stutter a synced mods folder.
 
-### Removed
-- Frost Studio no longer has an MXB Secure tab. Creators lock mxbsecure files on mxbsecure.com,
-  where the buyer list lives too.
-
 ### Added
 - Settings → General lists the secured files it found and each one's status — Unlocked,
   Unlocking, Not in your library, or Unavailable — with its store name, so a locked file you
@@ -67,6 +63,12 @@
 - The app and Steam sign-in now go through api.mxbsecure.com.
 - When Windows blocks a preset from changing `profile.ini`, the error says how to allow the
   app and has a button that opens Windows Security.
+
+## 2026-09-14 — Frost's Studio v0.1.2
+
+### Removed
+- Frost's Studio no longer has an MXB Secure tab. Creators lock mxbsecure files on mxbsecure.com,
+  where the buyer list lives too.
 
 ## 2026-09-13 — v0.14.2 — Locked tracks from Steam
 
