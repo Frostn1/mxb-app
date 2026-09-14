@@ -66,6 +66,7 @@ import {
   setMxbsecureEnabled,
   contentSecureAvailable,
   mxbsecureUnlock,
+  mxbsecureAutoUnlock,
   steamLinkStart,
   steamLinkStatus,
   mxbsecureStatus,
@@ -527,8 +528,14 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
         cls: "bg-warning/15 text-warning",
         reason: t("settings.secReasonUnreadable"),
       };
+    // Owned and a key is available, but not pulled to this PC yet. Not a live progress bar — it
+    // unlocks on the next trigger (opening the Library, launching the game, signing in).
     if (it.owned && it.available)
-      return { label: t("settings.secStatusUnlocking"), cls: "bg-primary/15 text-primary" };
+      return {
+        label: t("settings.secStatusReady"),
+        cls: "bg-primary/15 text-primary",
+        reason: t("settings.secReasonReady"),
+      };
     if (it.registered && !it.owned)
       return {
         label: t("settings.secStatusNotOwned"),
@@ -870,7 +877,11 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
         if (id) {
           setLinkedSteam(id);
           toast.success(t("settings.steamLinkOk", { id }));
-          mxbsecureStatus().then(setSecureItems).catch(() => {});
+          // The identity that decides entitlement just changed — pull keys for anything now
+          // owned, then refresh the list so it flips to Unlocked without a restart.
+          void mxbsecureAutoUnlock(true)
+            .catch(() => 0)
+            .then(() => mxbsecureStatus().then(setSecureItems).catch(() => {}));
           return;
         }
       }
@@ -965,7 +976,11 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     experimentalStateApi().then(setExperimentalState).catch(() => {});
     contentSecureAvailable().then(setSecureAvailable).catch(() => {});
     steamLinkStatus().then(setLinkedSteam).catch(() => {});
-    mxbsecureStatus().then(setSecureItems).catch(() => {});
+    // Opening Settings is a natural "check now": try any owned-but-locked file, then read the
+    // list back so a freshly unlocked one shows as Unlocked.
+    void mxbsecureAutoUnlock()
+      .catch(() => 0)
+      .then(() => mxbsecureStatus().then(setSecureItems).catch(() => {}));
     // Re-check FrostMod against GitHub whenever Settings opens — the provider
     // only fetches once at launch, so this catches releases cut since then.
     void refreshStatus();

@@ -53,6 +53,7 @@ import {
   downloadHistory,
   scanModelSwaps,
   onFrostmodReload,
+  mxbsecureAutoUnlock,
   MODS_WATCH_SLUG,
   type ModType,
 } from "@frost/shared/api/mods";
@@ -668,6 +669,13 @@ export default function Library({
       void un.then((f) => f());
     };
   }, [load]);
+
+  // Opening the Library (and switching tabs) is a natural moment to pull down keys for any
+  // secured content you own but haven't unlocked yet — so it can appear here and in-game without
+  // digging into Settings. Throttled server-side, so re-entering the Library is cheap.
+  useEffect(() => {
+    void mxbsecureAutoUnlock().catch(() => {});
+  }, [modType]);
 
   // Model swaps, for the bikes tab only — one scan of the whole tree, indexed by bike
   // folder. Installing a mod or editing the folder changes what's swappable, so it rides

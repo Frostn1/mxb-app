@@ -584,6 +584,8 @@ export const de: Translation = {
   "settings.secStatusTitle": "Geschützte Inhalte gefunden",
   "settings.secStatusUnlocked": "Freigeschaltet",
   "settings.secStatusUnlocking": "Wird freigeschaltet…",
+  "settings.secStatusReady": "Bereit zum Freischalten",
+  "settings.secReasonReady": "Gehört dir — wird beim Öffnen der Bibliothek oder beim Spielstart freigeschaltet.",
   "settings.secStatusNotOwned": "Nicht in deiner Bibliothek",
   "settings.secStatusUnavailable": "Nicht verfügbar",
   "settings.secStatusNeedsSteam": "Mit Steam anmelden",

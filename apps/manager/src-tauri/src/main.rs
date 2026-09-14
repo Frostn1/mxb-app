@@ -1737,60 +1737,73 @@ fn register_secure_opener() {
     }));
 }
 
-/// Blobs auto-unlock has already failed on this run, so a not-entitled file isn't re-granted on
-/// every install signal. Cleared on restart — a purchase since then gets a fresh try.
+/// When auto-unlock last ran, so a burst of triggers (an unzip firing many install signals, the
+/// Library re-rendering, a status refresh) collapses to one pass instead of hammering the grant.
 #[cfg(mxbsecure)]
-static AUTO_UNLOCK_TRIED: std::sync::Mutex<std::collections::BTreeSet<String>> =
-    std::sync::Mutex::new(std::collections::BTreeSet::new());
+static AUTO_UNLOCK_LAST: std::sync::Mutex<Option<std::time::Instant>> =
+    std::sync::Mutex::new(None);
+/// The shortest gap between two unforced auto-unlock passes.
+#[cfg(mxbsecure)]
+const AUTO_UNLOCK_THROTTLE: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// Try to unlock every secured blob that doesn't have a key yet — after an install or at startup,
-/// so content the buyer owns "just works" without a manual step. Quiet: not enrolled leaves
-/// everything untouched, and a file you're not entitled to is left locked and not retried this
-/// run. Returns how many were newly unlocked.
+/// Try to unlock every secured blob that doesn't have a key yet, so content the buyer owns "just
+/// works". Runs on the moments that can change the answer — startup, a Steam sign-in (`force`), an
+/// install, opening the Library, and the game launching — rather than on a loop. A file that isn't
+/// entitled just fails quietly and is retried on the next trigger (cheap: the throttle bounds it,
+/// and the moment entitlement appears it unlocks). Returns how many were newly unlocked.
+///
+/// `force` (a fresh sign-in) skips the throttle and the not-yet-elapsed guard, because the identity
+/// that decides entitlement just changed. Not enrolled leaves everything untouched.
 #[tauri::command]
-async fn mxbsecure_auto_unlock(app: tauri::AppHandle) -> Result<usize, String> {
+async fn mxbsecure_auto_unlock(app: tauri::AppHandle, force: Option<bool>) -> Result<usize, String> {
     #[cfg(mxbsecure)]
     {
-        let cfg = config::load_or_detect(&app).unwrap_or_default();
-        if cfg.cp_token.trim().is_empty() {
-            return Ok(0);
-        }
-        let live = steamid::current_steam_id64();
-        let mut unlocked = 0usize;
-        for blob in secure_launch::scan_blobs(&app) {
-            if let Some(id) = &live {
-                if has_valid_key(&blob, id) {
-                    continue;
-                }
-            }
-            if AUTO_UNLOCK_TRIED
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .contains(&blob)
-            {
-                continue;
-            }
-            match unlock_one(&app, &blob).await {
-                Ok(_) => unlocked += 1,
-                Err(e) => {
-                    log::info!("[secure] auto-unlock skipped {blob}: {e}");
-                    AUTO_UNLOCK_TRIED
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .insert(blob);
-                }
-            }
-        }
-        if unlocked > 0 {
-            secure_launch::refresh_running(&app);
-        }
-        Ok(unlocked)
+        Ok(auto_unlock_now(&app, force.unwrap_or(false)).await)
     }
     #[cfg(not(mxbsecure))]
     {
-        let _ = app;
+        let _ = (app, force);
         Ok(0)
     }
+}
+
+/// The auto-unlock pass, callable from inside the app (the game-launch watcher) as well as the
+/// command. `force` skips the throttle — used when the signing-in identity just changed or the
+/// game just started, both of which can change what unlocks.
+#[cfg(mxbsecure)]
+pub(crate) async fn auto_unlock_now(app: &tauri::AppHandle, force: bool) -> usize {
+    {
+        let mut last = AUTO_UNLOCK_LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if !force {
+            if let Some(t) = *last {
+                if t.elapsed() < AUTO_UNLOCK_THROTTLE {
+                    return 0;
+                }
+            }
+        }
+        *last = Some(std::time::Instant::now());
+    }
+    let cfg = config::load_or_detect(app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return 0;
+    }
+    let live = steamid::current_steam_id64();
+    let mut unlocked = 0usize;
+    for blob in secure_launch::scan_blobs(app) {
+        if let Some(id) = &live {
+            if has_valid_key(&blob, id) {
+                continue;
+            }
+        }
+        match unlock_one(app, &blob).await {
+            Ok(_) => unlocked += 1,
+            Err(e) => log::info!("[secure] auto-unlock skipped {blob}: {e}"),
+        }
+    }
+    if unlocked > 0 {
+        secure_launch::refresh_running(app);
+    }
+    unlocked
 }
 
 /// One secured file the app found on disk, and what it can say about it without the key: the

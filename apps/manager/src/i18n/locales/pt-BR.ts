@@ -579,6 +579,8 @@ export const ptBR: Translation = {
   "settings.secStatusTitle": "Conteúdo protegido encontrado",
   "settings.secStatusUnlocked": "Desbloqueado",
   "settings.secStatusUnlocking": "Desbloqueando…",
+  "settings.secStatusReady": "Pronto para desbloquear",
+  "settings.secReasonReady": "É seu — desbloqueia ao abrir a Biblioteca ou iniciar o jogo.",
   "settings.secStatusNotOwned": "Não está na sua biblioteca",
   "settings.secStatusUnavailable": "Indisponível",
   "settings.secStatusNeedsSteam": "Entrar com a Steam",

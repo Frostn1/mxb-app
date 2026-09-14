@@ -285,6 +285,14 @@ pub fn watch(app: &AppHandle) {
             // decision, and none of them should be retried on a two-second timer.
             decided_this_run = true;
 
+            // The game just started: pull keys for anything owned but not yet unlocked first, so
+            // content bought while the app stayed open is playable this session without a restart.
+            // `arm` then serves whatever now has a key.
+            #[cfg(mxbsecure)]
+            {
+                crate::auto_unlock_now(&app, true).await;
+            }
+
             // Always arm when there is secured content to serve — `arm` is a no-op when the scan
             // finds nothing, so a player with no locked content pays only a config + scan and
             // never sees an injection. However the game was started — Play or Steam — like FrostMod.
