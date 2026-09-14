@@ -51,8 +51,35 @@ const STAKE_W_M: f32 = 0.045;
 /// How far past the track edge the line stands: Indiana's netting is ~12.5 m out from its ±7 m
 /// edge. Measured from our edge, so a wider track doesn't swallow it; at 20 m flat it stood
 /// 12 m back from a 16 m track.
-// Hugging the track, just outside the stakes: at 5.5 m out it marked nothing.
-const EDGE_LINE_OUT_M: f32 = 2.0;
+// Right behind the stakes, so the two read as one line: 2 m out read as off the track.
+const EDGE_LINE_OUT_M: f32 = 0.5;
+
+/// Where the stake line and the barrier behind it stand, from the centreline.
+fn edge_offsets(half: f32) -> (f32, f32) {
+    let stake = (half + 1.0).max(STAKE_OFF_M);
+    (stake, stake + EDGE_LINE_OUT_M)
+}
+
+/// A donor's edge stake: thin and knee high. The rule lays the stake line, so a replayed one
+/// stood a second line beside it.
+fn is_stake(p: &crate::trackprops::Prop) -> bool {
+    p.class == crate::trackobjects::Class::Structure && (0.5..=0.9).contains(&p.height) && p.span < 0.12
+}
+
+/// The stake the rule lays: the library's own, else the donor's commonest stake.
+fn stake_piece(lib: &crate::trackprops::PropLibrary) -> Option<&crate::trackprops::Prop> {
+    if let Some(p) = lib.props.iter().find(|p| p.id == "edge_stake") {
+        return Some(p);
+    }
+    let mut n = vec![0usize; lib.props.len()];
+    for i in &lib.instances {
+        n[i.prop] += 1;
+    }
+    (0..lib.props.len())
+        .filter(|&k| n[k] > 0 && is_stake(&lib.props[k]) && lib.sheets.iter().any(|s| s.0 == lib.props[k].sheet))
+        .max_by_key(|&k| n[k])
+        .map(|k| &lib.props[k])
+}
 /// Most ground a panel may cross end to end before it is left out rather than hung in the air.
 const EDGE_LINE_STEP_M: f32 = 0.6;
 const BANNER_W_M: f32 = 4.0;
@@ -1357,7 +1384,10 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let mut arch_kind: Option<(String, Mesh, Texture, bool)> = None;
     // Indiana's own edge pieces, when the library carries them: its stake, and one piece of
     // the barrier that lines its lap, repeated where ours drew boxes and printed boards.
-    let edge_stake = lib.as_ref().and_then(|l| l.props.iter().find(|p| p.id == "edge_stake"));
+    let edge_stake = lib.as_ref().and_then(stake_piece);
+    // Lifted first: the barrier leaves a gap where a row of bales stands.
+    let mut lifted = lib.as_ref().map(|l| lifted_counted(l, prog, syn));
+    let bale_spots: Vec<[f32; 2]> = lifted.as_ref().map(|l| l.1.bale_spots.clone()).unwrap_or_default();
     let edge_barrier = lib.as_ref().and_then(|l| l.props.iter().find(|p| p.id == "edge_barrier"));
     let edge_post = lib.as_ref().and_then(|l| l.props.iter().find(|p| p.id == "edge_post"));
     let mut barrier_kind: Option<(String, Mesh, Texture, bool)> = None;
@@ -1369,7 +1399,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     // 1. The edge line: little white plastic stakes at the track edge, which is how a
     // motocross track is marked and what Indiana measures — see [`STAKE_OFF_M`]. Thin and
     // low, so what you see down the track is a line of points rather than a wall.
-    let stake_off = (half + 1.0).max(STAKE_OFF_M);
+    let stake_off = edge_offsets(half).0;
     let mut n = 0usize;
     // Along each edge's own line, by arc length: stepped along the centreline they bunched on
     // the inside of every bend and spread on the outside.
@@ -1418,7 +1448,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     if let (Some(piece), Some(lib)) = (edge_barrier, lib.as_ref()) {
         // The real barrier, one piece after another along both sides, where the printed
         // boards ran. Turned by our heading less the piece's own, like any lifted instance.
-        let off = half + EDGE_LINE_OUT_M;
+        let off = edge_offsets(half).1;
         let step = piece.span.max(0.5);
         let mut mesh = Mesh::default();
         let mut post_mesh = Mesh::default();
@@ -1447,6 +1477,8 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
                 if !inside(prog, x, z, 3.0)
                     || clearance(&coarse, x, z) < off - 1.5
                     || !clear_of_the_start(x, z)
+                    // The bales are the edge there.
+                    || bale_spots.iter().any(|b| (b[0] - x).hypot(b[1] - z) < step * 0.5 + 0.8)
                 {
                     continue;
                 }
@@ -1529,7 +1561,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
     let mut n = 0usize;
     let mut runs = 0usize;
     let mut tiled = 0usize;
-    let banner_off = half + EDGE_LINE_OUT_M;
+    let banner_off = edge_offsets(half).1;
     for side in [-1.0f32, 1.0] {
         let line: Vec<(f32, f32)> = stations
             .iter()
@@ -1903,7 +1935,7 @@ pub fn build(prog: &TrackProgram, syn: &Synth) -> Scenery {
             tally.push(("real trees", mesh.triangle_count()));
             kinds.push((name, mesh, tex, is_solid));
         }
-        let (placed, got) = lifted_counted(lib, prog, syn);
+        let (placed, got) = lifted.take().unwrap_or_default();
         tally.push(("arches", got.arches));
         tally.push(("bales", got.bales));
         tally.push(("parked cars", got.parked));
@@ -2608,6 +2640,75 @@ mod tests {
         }
     }
 
+    /// A marker's face is its broad side, on the side it bows out to, and turns with it.
+    #[test]
+    fn a_marker_faces_the_way_it_bows() {
+        let at = |c: Mesh, x: f32, z: f32| {
+            let (lo, hi) = c.bounds();
+            edfwrite::moved(&c, [x - (lo[0] + hi[0]) * 0.5, -lo[1], z - (lo[2] + hi[2]) * 0.5])
+        };
+        // A tab broad across z, its middle bowed out to +x.
+        let mut tab = at(edfwrite::cuboid(0.05, 1.0, 0.25), 0.06, 0.0);
+        tab.append(&at(edfwrite::cuboid(0.05, 1.0, 0.2), 0.0, -0.25));
+        tab.append(&at(edfwrite::cuboid(0.05, 1.0, 0.2), 0.0, 0.25));
+        let near = |a: f32, b: f32| (a - b + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        assert!(near(face_heading(&tab), std::f32::consts::FRAC_PI_2).abs() < 0.05, "faces {:.2}", face_heading(&tab));
+        // Turned to face a heading, it faces it.
+        let want = 2.3f32;
+        let turned = edfwrite::turned(&tab, (want - face_heading(&tab)).to_degrees());
+        assert!(near(face_heading(&turned), want).abs() < 0.05, "turned to {:.2}, faces {:.2}", want, face_heading(&turned));
+    }
+
+    /// An arch whose header bars run leg to leg stands on those legs, even with a banner hung
+    /// outboard of one of them: BlitzCo lost its own left leg and its printed header that way.
+    #[test]
+    fn an_arch_hung_with_a_banner_keeps_its_own_legs() {
+        let at = |c: Mesh, x: f32, y: f32| {
+            let (lo, hi) = c.bounds();
+            edfwrite::moved(&c, [x - (lo[0] + hi[0]) * 0.5, y - lo[1], -(lo[2] + hi[2]) * 0.5])
+        };
+        let mut arch = at(edfwrite::cuboid(0.3, 5.5, 0.3), -2.4, 0.0);
+        arch.append(&at(edfwrite::cuboid(0.3, 5.5, 0.3), 6.6, 0.0));
+        arch.append(&at(edfwrite::cuboid(9.3, 0.3, 0.3), 2.1, 5.1));
+        // The banner, down the outside of the left leg.
+        arch.append(&at(edfwrite::cuboid(4.5, 4.3, 0.05), -4.85, 0.6));
+        let (m, gap, _) = arch_on_legs(&arch).expect("an arch");
+        assert!((gap - 8.7).abs() < 0.1, "gap {gap}");
+        let feet: Vec<f32> = m.positions.chunks_exact(3).filter(|v| v[1] < 0.4).map(|v| v[0]).collect();
+        assert!(feet.iter().all(|&x| (4.3..=4.7).contains(&x.abs())), "not on its own legs: {feet:?}");
+        assert!(m.positions.chunks_exact(3).any(|v| v[0] < -6.0), "lost the banner");
+    }
+
+    /// A donor with no edge stake of its own: its commonest stake is the rule's, and a replay of
+    /// it never stands a second line.
+    #[test]
+    fn a_donor_stake_is_the_rules_and_never_replayed() {
+        let (p, s) = demo();
+        let c = edfwrite::cuboid(0.045, 0.76, 0.045);
+        let lib = crate::trackprops::PropLibrary {
+            donor: "t".into(),
+            donor_lap_m: 1000.0,
+            props: vec![crate::trackprops::Prop {
+                id: "stake_copy".into(),
+                sheet: "stake_c".into(),
+                class: crate::trackobjects::Class::Structure,
+                mesh: c,
+                height: 0.76,
+                span: 0.045,
+                reach: 0.032,
+                axis_ref: 0.0,
+            }],
+            instances: (0..40)
+                .map(|i| crate::trackprops::Instance { prop: 0, along: i as f32 / 40.0, offset: if i % 2 == 0 { 5.4 } else { -5.4 }, yaw: 0.0, lift: 0.0, near: true })
+                .collect(),
+            runs: vec![],
+            sheets: vec![("stake_c".into(), 2, 2, vec![200u8; 16])],
+        };
+        assert_eq!(stake_piece(&lib).map(|p| p.id.as_str()), Some("stake_copy"));
+        let (placed, _) = lifted_counted(&lib, &p, &s);
+        assert!(placed.iter().all(|k| k.0 != "stake"), "a lifted stake stood beside the rule's");
+    }
+
     /// Indiana's stake lifted as a prop is not laid again beside the rule's own.
     #[test]
     fn a_lifted_edge_stake_is_not_laid_twice() {
@@ -2825,6 +2926,479 @@ mod tests {
         println!("PIT picture {path}: {w}x{h}, {} stalls, tally {:?}", pits.stalls.len(), sc.tally.iter().filter(|(k, _)| k.starts_with("pit") || *k == "arches" || *k == "bales").collect::<Vec<_>>());
     }
 
+    /// Fills a triangle given in pixels, and always its centroid, so a thin stake shows.
+    fn fill_px(img: &mut image::RgbaImage, q: [(f32, f32); 3], c: [u8; 3]) {
+        let (w, h) = (img.width() as f32, img.height() as f32);
+        let (bx0, bx1) = (q.iter().map(|p| p.0).fold(f32::MAX, f32::min).max(0.0), q.iter().map(|p| p.0).fold(f32::MIN, f32::max).min(w - 1.0));
+        let (by0, by1) = (q.iter().map(|p| p.1).fold(f32::MAX, f32::min).max(0.0), q.iter().map(|p| p.1).fold(f32::MIN, f32::max).min(h - 1.0));
+        let (cx, cy) = ((q[0].0 + q[1].0 + q[2].0) / 3.0, (q[0].1 + q[1].1 + q[2].1) / 3.0);
+        if cx >= 0.0 && cy >= 0.0 && cx < w && cy < h {
+            img.put_pixel(cx as u32, cy as u32, image::Rgba([c[0], c[1], c[2], 255]));
+        }
+        if bx0 > bx1 || by0 > by1 {
+            return;
+        }
+        let area = (q[1].0 - q[0].0) * (q[2].1 - q[0].1) - (q[2].0 - q[0].0) * (q[1].1 - q[0].1);
+        for py in by0 as u32..=by1 as u32 {
+            for px in bx0 as u32..=bx1 as u32 {
+                let (x, y) = (px as f32 + 0.5, py as f32 + 0.5);
+                let e = |a: (f32, f32), b: (f32, f32)| (b.0 - a.0) * (y - a.1) - (x - a.0) * (b.1 - a.1);
+                let (a, b, cc) = (e(q[1], q[2]), e(q[2], q[0]), e(q[0], q[1]));
+                let hit = if area >= 0.0 { a >= -0.5 && b >= -0.5 && cc >= -0.5 } else { a <= 0.5 && b <= 0.5 && cc <= 0.5 };
+                if hit {
+                    img.put_pixel(px, py, image::Rgba([c[0], c[1], c[2], 255]));
+                }
+            }
+        }
+    }
+
+    /// Northgate as the build makes it, for the probes: `FROST_ROUGH` as the build reads it.
+    fn northgate_built() -> (TrackProgram, Synth) {
+        let m = match crate::tracklayout::search(103, 1) { Ok(m) => m.program, Err(v) => v[0].program.clone() };
+        let mut prog = m.clone();
+        prog.terrain.surface = serde_json::from_str("\"soil\"").unwrap();
+        if let Some(r) = std::env::var("FROST_ROUGH").ok().and_then(|v| v.parse::<f32>().ok()) {
+            prog.terrain.roughness = r;
+            prog.name = format!("{} ARL", prog.name);
+            prog.bigger_jumps(1.0 + 0.35 * (r - 1.0).clamp(0.0, 1.0));
+        }
+        let prog = crate::tracksynth::with_fitted_budget(&prog).unwrap();
+        let syn = crate::tracksynth::synthesise(&prog).unwrap();
+        (prog, syn)
+    }
+
+    /// What each lifted piece became on Northgate: where it stands against our track, what
+    /// colour it wears, and each sheet's see-through share.
+    #[test]
+    #[ignore = "reads the library — set FROST_PROPS"]
+    fn probe_lifted_inventory() {
+        let lib = crate::trackprops::load().expect("a library");
+        for (name, w, h, rgba) in &lib.sheets {
+            let clear = rgba.chunks_exact(4).filter(|p| p[3] < 128).count() as f32 / (w * h).max(1) as f32;
+            println!("sheet {name} {w}x{h} clear {:.0}%", clear * 100.0);
+        }
+        let (prog, syn) = northgate_built();
+        let coarse = prog.stations(2.0);
+        let half = prog.width * 0.5;
+        let colour = |p: &crate::trackprops::Prop| -> [u8; 3] {
+            let Some((_, w, h, rgba)) = lib.sheets.iter().find(|s| s.0 == p.sheet) else { return [0; 3] };
+            let (mut s, mut n) = ([0f64; 3], 0f64);
+            for uv in p.mesh.uvs.chunks_exact(2) {
+                let x = (uv[0].rem_euclid(1.0) * (*w as f32 - 1.0)) as usize;
+                let y = (uv[1].rem_euclid(1.0) * (*h as f32 - 1.0)) as usize;
+                let o = (y * *w as usize + x) * 4;
+                for k in 0..3 {
+                    s[k] += rgba[o + k] as f64;
+                }
+                n += 1.0;
+            }
+            s.map(|v| (v / n.max(1.0)) as u8)
+        };
+        let mut rows: std::collections::BTreeMap<usize, (usize, usize, Vec<f32>, Vec<f32>)> = Default::default();
+        for inst in &lib.instances {
+            let p = &lib.props[inst.prop];
+            if is_marker(&lib, p) || matches!(p.class, crate::trackobjects::Class::Bale | crate::trackobjects::Class::Vehicle) {
+                continue;
+            }
+            let one = crate::trackprops::PropLibrary {
+                donor: lib.donor.clone(),
+                donor_lap_m: lib.donor_lap_m,
+                props: vec![p.clone()],
+                instances: vec![crate::trackprops::Instance { prop: 0, ..*inst }],
+                runs: vec![],
+                sheets: lib.sheets.iter().filter(|s| s.0 == p.sheet).cloned().collect(),
+            };
+            let (placed, _) = lifted_counted(&one, &prog, &syn);
+            let e = rows.entry(inst.prop).or_default();
+            e.0 += 1;
+            e.2.push(inst.offset.abs());
+            for (_, m, ..) in &placed {
+                let (lo, hi) = m.bounds();
+                let (cx, cz) = ((lo[0] + hi[0]) * 0.5, (lo[2] + hi[2]) * 0.5);
+                e.1 += 1;
+                e.3.push(clearance(&coarse, cx, cz));
+            }
+        }
+        let med = |v: &mut Vec<f32>| {
+            v.sort_by(f32::total_cmp);
+            v.get(v.len() / 2).copied().unwrap_or(f32::NAN)
+        };
+        println!("half {half}");
+        for (k, (n, placed, mut off, mut ours)) in rows {
+            if placed == 0 {
+                continue;
+            }
+            let p = &lib.props[k];
+            println!(
+                "{:28} {:24} {:?} h {:.2} span {:.2} reach {:.2} inst {n} placed {placed} donor off {:.1} ours {:.1} colour {:?}",
+                p.id, p.sheet, p.class, p.height, p.span, p.reach, med(&mut off), med(&mut ours), colour(p)
+            );
+        }
+        // The arches: how much of each sits on see-through texels.
+        for p in lib.props.iter().filter(|p| p.id == "finish_arch" || (p.class == crate::trackobjects::Class::Structure && p.height > 4.0 && p.span >= 2.0 * DONOR_HALF_M)) {
+            let Some((_, w, h, rgba)) = lib.sheets.iter().find(|s| s.0 == p.sheet) else { continue };
+            let (mut clear, mut n) = (0, 0);
+            for t in p.mesh.indices.chunks_exact(3) {
+                let uv = |i: u32| (p.mesh.uvs[i as usize * 2], p.mesh.uvs[i as usize * 2 + 1]);
+                let (u, v) = ((uv(t[0]).0 + uv(t[1]).0 + uv(t[2]).0) / 3.0, (uv(t[0]).1 + uv(t[1]).1 + uv(t[2]).1) / 3.0);
+                let x = (u.rem_euclid(1.0) * (*w as f32 - 1.0)) as usize;
+                let y = (v.rem_euclid(1.0) * (*h as f32 - 1.0)) as usize;
+                clear += (rgba[(y * *w as usize + x) * 4 + 3] < 128) as usize;
+                n += 1;
+            }
+            println!("arch {} sheet {} h {:.1} span {:.1} tris {n} on clear texels {clear}", p.id, p.sheet, p.height, p.span);
+        }
+    }
+
+    /// Which way the donor's turn markers faced its lap, each marker from four sides, and the
+    /// edge pieces the rule lays.
+    #[test]
+    #[ignore = "reads the library — set FROST_PROPS and FROST_SCENE_PNG"]
+    fn probe_marker_yaw() {
+        let pre = std::env::var("FROST_SCENE_PNG").expect("set FROST_SCENE_PNG");
+        let lib = crate::trackprops::load().expect("a library");
+        for p in lib.props.iter().filter(|p| p.id.starts_with("edge_")) {
+            println!("{} sheet {} h {:.3} span {:.3} axis_ref {:.1}°", p.id, p.sheet, p.height, p.span, p.axis_ref.to_degrees());
+        }
+        let marks: Vec<(usize, &crate::trackprops::Prop)> = lib.props.iter().enumerate().filter(|(_, p)| is_marker(&lib, p)).collect();
+        let (cw, ch, ppm) = (160u32, 160u32, 110.0f32);
+        let mut img = image::RgbImage::from_pixel(cw * 4, ch * marks.len().max(1) as u32, image::Rgb([235, 235, 235]));
+        let mut zb = vec![f32::MAX; (img.width() * img.height()) as usize];
+        for (n, &(k, p)) in marks.iter().enumerate() {
+            let yaws: Vec<String> = lib
+                .instances
+                .iter()
+                .filter(|i| i.prop == k)
+                .map(|i| format!("{:.0}°@{:+.1}", i.yaw.to_degrees().rem_euclid(360.0), i.offset))
+                .collect();
+            println!("marker {} yaws (deg @ offset) {:?}", p.id, yaws);
+            let tex = lib.sheets.iter().find(|s| s.0 == p.sheet).map(|s| (s.1, s.2, s.3.as_slice()));
+            // Seen from +z, -z, +x, -x.
+            for (col, (name, view)) in [("from +z", 0), ("from -z", 1), ("from +x", 2), ("from -x", 3)].into_iter().enumerate() {
+                let (ox, oy) = ((col as u32 * cw) as f32, (n as u32 * ch) as f32);
+                let proj = move |x: f32, y: f32, z: f32| {
+                    let (a, d) = match view { 0 => (-x, -z), 1 => (x, z), 2 => (z, -x), _ => (-z, x) };
+                    (ox + cw as f32 * 0.5 + a * ppm, oy + ch as f32 - 15.0 - y * ppm, d)
+                };
+                crate::trackvenue::pic::raster(&mut img, &mut zb, &p.mesh, tex, [255, 0, 255], &proj);
+                crate::trackvenue::pic::label(&mut img, &format!("{n} {name}"), 14.0, ox + 4.0, oy + 14.0, [0, 0, 0]);
+            }
+        }
+        let path = format!("{pre}_markers.png");
+        img.save(&path).unwrap();
+        println!("wrote {path}");
+    }
+
+    /// The connected parts of one arch piece (`FROST_ARCH`), raw, after `tall_parts`, and stood.
+    #[test]
+    #[ignore = "reads the library — set FROST_PROPS and FROST_ARCH"]
+    fn probe_arch_parts() {
+        let lib = crate::trackprops::load().expect("a library");
+        let id = std::env::var("FROST_ARCH").expect("set FROST_ARCH");
+        let p = lib.props.iter().find(|p| p.id == id).expect("that piece");
+        let show = |what: &str, m: &Mesh| {
+            let (lo, hi) = m.bounds();
+            let ax = if hi[0] - lo[0] >= hi[2] - lo[2] { 0 } else { 2 };
+            let part = part_of(m);
+            let mut by: std::collections::BTreeMap<usize, (usize, [f32; 4])> = Default::default();
+            for t in m.indices.chunks_exact(3) {
+                let e = by.entry(part[t[0] as usize]).or_insert((0, [f32::MAX, f32::MIN, f32::MAX, f32::MIN]));
+                e.0 += 1;
+                for &i in t {
+                    let v = &m.positions[i as usize * 3..i as usize * 3 + 3];
+                    e.1 = [e.1[0].min(v[1]), e.1[1].max(v[1]), e.1[2].min(v[ax]), e.1[3].max(v[ax])];
+                }
+            }
+            println!("{what}: {} tris, box y {:.2}..{:.2} across {:.2}..{:.2}, {} parts", m.triangle_count(), lo[1], hi[1], lo[ax], hi[ax], by.len());
+            for (r, (n, b)) in by {
+                println!("   part {r}: {n} tris y {:.2}..{:.2} across {:.2}..{:.2}", b[0], b[1], b[2], b[3]);
+            }
+        };
+        show("raw", &p.mesh);
+        let tall = tall_parts(&p.mesh, ARCH_PART_MIN_H_M);
+        show("tall", &tall);
+        if let Some((m, gap, out)) = arch_on_legs(&tall) {
+            println!("gap {gap:.2} legs out {out:.2}");
+            show("stood", &m);
+        }
+    }
+
+    /// Every piece that spanned the donor's track, front on: as lifted, and as we stand it.
+    #[test]
+    #[ignore = "reads the library — set FROST_PROPS and FROST_SCENE_PNG"]
+    fn probe_arch_pieces() {
+        let pre = std::env::var("FROST_SCENE_PNG").expect("set FROST_SCENE_PNG");
+        let lib = crate::trackprops::load().expect("a library");
+        let picks: Vec<&crate::trackprops::Prop> = lib
+            .props
+            .iter()
+            .filter(|p| p.id == "finish_arch" || (spans_track(p, 0.0) && p.height <= ARCH_MAX_H_M))
+            .collect();
+        let (cw, ch, ppm) = (700u32, 260u32, 20.0f32);
+        let mut img = image::RgbImage::from_pixel(cw * 2, ch * picks.len().max(1) as u32, image::Rgb([235, 235, 235]));
+        let mut zb = vec![f32::MAX; (img.width() * img.height()) as usize];
+        for (n, p) in picks.iter().enumerate() {
+            let tex = lib.sheets.iter().find(|s| s.0 == p.sheet).map(|s| (s.1, s.2, s.3.as_slice()));
+            let kept = arch_on_legs(&tall_parts(&p.mesh, ARCH_PART_MIN_H_M)).map(|a| a.0);
+            for (col, m) in [Some(p.mesh.clone()), kept].into_iter().enumerate() {
+                let Some(m) = m else { continue };
+                let (lo, hi) = m.bounds();
+                let ax = if hi[0] - lo[0] >= hi[2] - lo[2] { 0 } else { 2 };
+                let mid = (lo[ax] + hi[ax]) * 0.5;
+                let (ox, oy) = ((col as u32 * cw) as f32, (n as u32 * ch) as f32);
+                let proj = move |x: f32, y: f32, z: f32| {
+                    let (a, d) = if ax == 0 { (x, z) } else { (z, x) };
+                    (ox + cw as f32 * 0.5 + (a - mid) * ppm, oy + ch as f32 - 20.0 - y * ppm, d)
+                };
+                crate::trackvenue::pic::raster(&mut img, &mut zb, &m, tex, [255, 0, 255], &proj);
+                crate::trackvenue::pic::label(&mut img, &format!("{} {} tris {}", p.id, if col == 0 { "lifted" } else { "stood" }, m.triangle_count()), 16.0, ox + 4.0, oy + 16.0, [0, 0, 0]);
+            }
+            println!("{n} {} {} h {:.1} span {:.1} tris {}", p.id, p.sheet, p.height, p.span, p.mesh.triangle_count());
+        }
+        let path = format!("{pre}_arch_pieces.png");
+        img.save(&path).unwrap();
+        println!("wrote {path}");
+    }
+
+    /// The turn markers' faces and the team rigs' feet, as the library holds them.
+    #[test]
+    #[ignore = "reads the library — set FROST_PROPS"]
+    fn probe_markers_and_rigs() {
+        let lib = crate::trackprops::load().expect("a library");
+        for p in lib.props.iter().filter(|p| is_marker(&lib, p)) {
+            let t = lib.sheets.iter().find(|s| s.0 == p.sheet).unwrap();
+            let (lo, hi) = p.mesh.bounds();
+            println!("marker {} sheet {} box {:?}..{:?} tris {}", p.id, p.sheet, lo, hi, p.mesh.triangle_count());
+            // Area and mean colour of faces by which way they look.
+            let mut by: std::collections::BTreeMap<&str, (f32, [f64; 3], f64)> = Default::default();
+            for tri in p.mesh.indices.chunks_exact(3) {
+                let v = |i: u32| [p.mesh.positions[i as usize * 3], p.mesh.positions[i as usize * 3 + 1], p.mesh.positions[i as usize * 3 + 2]];
+                let (a, b, c) = (v(tri[0]), v(tri[1]), v(tri[2]));
+                let e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                let e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+                let area = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt() * 0.5;
+                let nn = [0usize, 1, 2].map(|k| p.mesh.normals[tri[0] as usize * 3 + k]);
+                let dir = if nn[1].abs() > 0.7 { if nn[1] > 0.0 { "+y" } else { "-y" } } else if nn[0].abs() > nn[2].abs() { if nn[0] > 0.0 { "+x" } else { "-x" } } else if nn[2] > 0.0 { "+z" } else { "-z" };
+                let uv = |i: u32| (p.mesh.uvs[i as usize * 2], p.mesh.uvs[i as usize * 2 + 1]);
+                let (u, w) = ((uv(tri[0]).0 + uv(tri[1]).0 + uv(tri[2]).0) / 3.0, (uv(tri[0]).1 + uv(tri[1]).1 + uv(tri[2]).1) / 3.0);
+                let x = (u.rem_euclid(1.0) * t.1 as f32) as usize % t.1 as usize;
+                let y = (w.rem_euclid(1.0) * t.2 as f32) as usize % t.2 as usize;
+                let o = (y * t.1 as usize + x) * 4;
+                let e = by.entry(dir).or_default();
+                e.0 += area;
+                for k in 0..3 {
+                    e.1[k] += t.3[o + k] as f64 * area as f64;
+                }
+                e.2 += area as f64;
+            }
+            for (d, (a, c, n)) in by {
+                println!("   {d}: area {a:.3} colour {:?}", c.map(|v| (v / n.max(1e-9)) as u8));
+            }
+        }
+        for p in lib.props.iter().filter(|p| p.id.starts_with("team_rig_")) {
+            let (lo, hi) = p.mesh.bounds();
+            println!("rig {} box {:?}..{:?}", p.id, lo, hi);
+            let mut xs: std::collections::BTreeMap<i32, f32> = Default::default();
+            let mut zs: std::collections::BTreeMap<i32, f32> = Default::default();
+            for v in p.mesh.positions.chunks_exact(3) {
+                let e = xs.entry((v[0] / 2.0).floor() as i32).or_insert(f32::MAX);
+                *e = e.min(v[1]);
+                let e = zs.entry((v[2] / 2.0).floor() as i32).or_insert(f32::MAX);
+                *e = e.min(v[1]);
+            }
+            println!("   min y by x/2m {:?}", xs.iter().map(|(k, v)| format!("{}:{:.2}", k * 2, v)).collect::<Vec<_>>());
+            println!("   min y by z/2m {:?}", zs.iter().map(|(k, v)| format!("{}:{:.2}", k * 2, v)).collect::<Vec<_>>());
+        }
+    }
+
+    /// Pictures of the whole lap's scenery from above, coloured by the sheet each piece wears,
+    /// and a close-up of everything standing tall over the track.
+    ///
+    /// ```text
+    /// FROST_PROPS=library13.fpl FROST_SCENE_PNG=/tmp/ng cargo test --bins -- --ignored draw_the_scenery
+    /// ```
+    #[test]
+    #[ignore = "draws the scenery — set FROST_PROPS and FROST_SCENE_PNG"]
+    fn draw_the_scenery() {
+        let pre = std::env::var("FROST_SCENE_PNG").expect("set FROST_SCENE_PNG");
+        let (prog, syn) = northgate_built();
+        let sc = build(&prog, &syn);
+        let (lap, half) = (prog.lap_length(), prog.width * 0.5);
+        let coarse = prog.stations(2.0);
+        println!("width {} lap {lap}", prog.width);
+        let skip = |n: &str| n.contains("tree") || n.starts_with("backdrop") || n.starts_with("tearoffs") || n.starts_with("leafs");
+        let texel = |t: &Texture, u: f32, v: f32| -> [u8; 4] {
+            let x = ((u.rem_euclid(1.0)) * t.width as f32) as usize % t.width as usize;
+            let y = ((v.rem_euclid(1.0)) * t.height as f32) as usize % t.height as usize;
+            let o = (y * t.width as usize + x) * 4;
+            [t.rgba[o], t.rgba[o + 1], t.rgba[o + 2], t.rgba[o + 3]]
+        };
+        let draw = |x0: f32, z0: f32, x1: f32, z1: f32, ppm: f32, path: &str, true_colour: bool| {
+            let (w, h) = (((x1 - x0) * ppm) as u32, ((z1 - z0) * ppm) as u32);
+            let mut img = image::RgbaImage::new(w, h);
+            for py in 0..h {
+                for px in 0..w {
+                    let (x, z) = (x0 + px as f32 / ppm, z1 - py as f32 / ppm);
+                    let d = syn.dist[grid_cell(&syn, x, z)];
+                    let c = if d < half {
+                        [150, 110, 70]
+                    } else if syn.outside_the_start(x, z).is_some_and(|e| e < 0.0) {
+                        [170, 130, 90]
+                    } else {
+                        [60, 95, 50]
+                    };
+                    img.put_pixel(px, py, image::Rgba([c[0], c[1], c[2], 255]));
+                }
+            }
+            let to_px = |x: f32, z: f32| ((x - x0) * ppm, (z1 - z) * ppm);
+            for ((name, _), (m, t)) in sc.files.iter().zip(&sc.models) {
+                if skip(name) {
+                    continue;
+                }
+                let fixed: [u8; 3] = if name.starts_with("stakes") { [255, 255, 0] }
+                    else if name.starts_with("barrier_posts") { [255, 0, 255] }
+                    else if name.starts_with("barrier") { [0, 0, 0] }
+                    else if name.contains("haybale") { [255, 140, 0] }
+                    else if name.starts_with("finish_arch") { [255, 0, 0] }
+                    else if name.starts_with("main_track_objects") { [0, 255, 255] }
+                    else { [255, 255, 255] };
+                for tri in m.indices.chunks_exact(3) {
+                    let p = |i: u32| (m.positions[i as usize * 3], m.positions[i as usize * 3 + 2]);
+                    let q = [p(tri[0]), p(tri[1]), p(tri[2])].map(|(x, z)| to_px(x, z));
+                    let c = if true_colour {
+                        let uv = |i: u32| (m.uvs[i as usize * 2], m.uvs[i as usize * 2 + 1]);
+                        let (a, b, c) = (uv(tri[0]), uv(tri[1]), uv(tri[2]));
+                        let k = texel(t, (a.0 + b.0 + c.0) / 3.0, (a.1 + b.1 + c.1) / 3.0);
+                        if k[3] < 128 { continue; }
+                        [k[0], k[1], k[2]]
+                    } else {
+                        fixed
+                    };
+                    fill_px(&mut img, q, c);
+                }
+            }
+            img.save(path).unwrap();
+            println!("wrote {path} {w}x{h}");
+        };
+        let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
+        draw(0.0, 0.0, sx, sz, 2.5, &format!("{pre}_files.png"), false);
+        draw(0.0, 0.0, sx, sz, 2.5, &format!("{pre}_top.png"), true);
+        for (name, m) in sc.files.iter().map(|f| &f.0).zip(sc.models.iter().map(|m| &m.0)) {
+            println!("  {name}: {} verts {} tris sheet", m.vertex_count(), m.triangle_count());
+        }
+        println!("tally {:?}", sc.tally.iter().filter(|(k, _)| *k != "lifted" && *k != "real trees").collect::<Vec<_>>());
+
+        // Everything standing 4 m over its ground within 12 m of the line: clustered.
+        let mut tall: Vec<(f32, f32, String)> = Vec::new();
+        for ((name, _), (m, _)) in sc.files.iter().zip(&sc.models) {
+            if skip(name) || name.starts_with("paddock") || name.starts_with("sponsor") {
+                continue;
+            }
+            for v in m.positions.chunks_exact(3) {
+                if v[1] - ground(&syn, v[0], v[2]) > 4.0 && clearance(&coarse, v[0], v[2]) < half + 12.0 {
+                    tall.push((v[0], v[2], name.clone()));
+                }
+            }
+        }
+        let mut clusters: Vec<(f32, f32, usize, std::collections::BTreeSet<String>)> = Vec::new();
+        for (x, z, n) in tall {
+            match clusters.iter_mut().find(|c| (c.0 / c.2 as f32 - x).hypot(c.1 / c.2 as f32 - z) < 25.0) {
+                Some(c) => {
+                    c.0 += x;
+                    c.1 += z;
+                    c.2 += 1;
+                    c.3.insert(n);
+                }
+                None => clusters.push((x, z, 1, [n].into_iter().collect())),
+            }
+        }
+        let adim = 1024usize;
+        let (span_x, span_z) = ((syn.gw - 1) as f32 * syn.mps, (syn.gh - 1) as f32 * syn.mps);
+        let albedo: Vec<[f32; 3]> = (0..adim * adim)
+            .map(|k| {
+                let (x, z) = ((k % adim) as f32 / adim as f32 * span_x, (k / adim) as f32 / adim as f32 * span_z);
+                if syn.dist[grid_cell(&syn, x, z)] < half { [150.0, 110.0, 70.0] } else { [80.0, 120.0, 60.0] }
+            })
+            .collect();
+        let objects: Vec<crate::trackshot::Object> = sc
+            .files
+            .iter()
+            .zip(&sc.models)
+            .filter(|((n, _), _)| !n.contains("tree") && !n.starts_with("backdrop"))
+            .map(|(_, (mesh, sheet))| crate::trackshot::Object { mesh, sheet })
+            .collect();
+        // Bales too: the first few rows.
+        let mut spots: Vec<(f32, f32, String, f32, f32)> = clusters
+            .iter()
+            .filter(|c| c.2 > 100)
+            .map(|c| (c.0 / c.2 as f32, c.1 / c.2 as f32, format!("tall{:?}", c.3), 6.0, 20.0))
+            .collect();
+        for ((name, _), (m, _)) in sc.files.iter().zip(&sc.models) {
+            if !name.contains("haybale") {
+                continue;
+            }
+            let mut rows: Vec<(f32, f32)> = Vec::new();
+            for v in m.positions.chunks_exact(3) {
+                if !rows.iter().any(|r| (r.0 - v[0]).hypot(r.1 - v[2]) < 30.0) {
+                    rows.push((v[0], v[2]));
+                }
+            }
+            for r in rows.iter().take(3) {
+                spots.push((r.0, r.1, "bales".into(), 10.0, 10.0));
+            }
+        }
+        // And the turn markers, laid again on their own to find where they stand.
+        if let Some(lib) = crate::trackprops::load() {
+            let mut bs = std::collections::HashMap::new();
+            place_markers(&lib, &prog, &syn, &mut bs);
+            let mut sets: Vec<(f32, f32)> = Vec::new();
+            for m in bs.values() {
+                for v in m.positions.chunks_exact(3) {
+                    if !sets.iter().any(|r| (r.0 - v[0]).hypot(r.1 - v[2]) < 30.0) {
+                        sets.push((v[0], v[2]));
+                    }
+                }
+            }
+            for r in sets.iter().take(3) {
+                spots.push((r.0, r.1, "markers".into(), 4.0, 4.0));
+            }
+        }
+        if let Ok(extra) = std::env::var("FROST_SHOT_AT") {
+            for xy in extra.split(';').filter(|s| !s.is_empty()) {
+                let v: Vec<f32> = xy.split(',').map(|t| t.parse().unwrap()).collect();
+                spots.push((v[0], v[1], "asked".into(), v.get(2).copied().unwrap_or(10.0), v.get(3).copied().unwrap_or(10.0)));
+            }
+        }
+        for (i, &(cx, cz, ref what, along_m, across_m)) in spots.iter().enumerate() {
+            let near = coarse.iter().min_by(|a, b| (a.x - cx).hypot(a.z - cz).total_cmp(&(b.x - cx).hypot(b.z - cz))).unwrap();
+            println!("shot {i}: {what} at ({cx:.0}, {cz:.0}) lap {:.0} m of {lap:.0}", near.s);
+            draw(cx - 40.0, cz - 40.0, cx + 40.0, cz + 40.0, 10.0, &format!("{pre}_shot{i}_top.png"), true);
+            let g = ground(&syn, cx, cz);
+            let (hx, hz) = crate::trackprog::heading_vector(near.heading);
+            // Long across the track, so the camera looks along it.
+            let focus: Vec<[f32; 3]> = [-along_m, along_m]
+                .iter()
+                .flat_map(|&a| [-across_m, across_m].map(|b| [cx + hx * a - hz * b, g, cz + hz * a + hx * b]))
+                .chain([[cx, g + 8.0, cz]])
+                .collect();
+            let scene = crate::trackshot::Scene {
+                gw: syn.gw, gh: syn.gh, mps: syn.mps, heights: &syn.heights, albedo: &albedo, adim, focus: &focus, objects: &objects,
+                sun: [0.21, 0.63, -0.74], sun_colour: [0.78, 0.72, 0.60], ambient: [0.40, 0.43, 0.50],
+                zenith: [96.0, 140.0, 196.0], horizon: [179.0, 179.0, 217.0], haze: [179.0, 179.0, 217.0],
+                tilt_deg: 12.0, yaw_deg: 0.0,
+            };
+            let px = crate::trackshot::render(&scene, 900);
+            let mut img = image::RgbImage::new(900, 900);
+            for (k, p) in px.iter().enumerate() {
+                img.put_pixel((k % 900) as u32, (k / 900) as u32, image::Rgb(*p));
+            }
+            let path = format!("{pre}_shot{i}.png");
+            img.save(&path).unwrap();
+            println!("wrote {path}");
+        }
+    }
+
     #[test]
     fn an_arch_that_spanned_the_donor_track_spans_ours() {
         let (p, s) = demo();
@@ -3017,7 +3591,7 @@ mod tests {
             .map(|(x, z)| st.iter().map(|q| (q.x - x).hypot(q.z - z)).fold(f32::INFINITY, f32::min))
             .collect();
         d.sort_by(|a, b| a.total_cmp(b));
-        let (half, want) = (p.width * 0.5, p.width * 0.5 + EDGE_LINE_OUT_M);
+        let (half, want) = (p.width * 0.5, edge_offsets(p.width * 0.5).1);
         let med = d[d.len() / 2];
         assert!((med - want).abs() < 0.75, "{name} stands {med:.1} m out, not {want:.1}");
         assert!(d[0] > half + 1.0, "{name} comes {:.1} m from the centreline, at the track edge", d[0]);
@@ -3369,11 +3943,24 @@ mod built {
 /// near our track in that shape instead of along it. Our edge is laid by rule (`lift_edge`).
 const LIFT_RUN_SPAN_M: f32 = 8.0;
 const LIFT_RUN_HEIGHT_M: f32 = 3.5;
+
+/// Whether a lifted piece is a run: long, and low for all but a pole or two. Its height alone
+/// let a Race Tech run on one 4.6 m pole lie curled in a field.
+fn is_run(p: &crate::trackprops::Prop) -> bool {
+    if p.span <= LIFT_RUN_SPAN_M || p.class == crate::trackobjects::Class::Tree {
+        return false;
+    }
+    let mut ys: Vec<f32> = p.mesh.positions.chunks_exact(3).map(|v| v[1]).collect();
+    ys.sort_by(f32::total_cmp);
+    ys.get(ys.len() * 9 / 10).is_none_or(|&y| y - ys[0] < LIFT_RUN_HEIGHT_M)
+}
 /// A prop's mesh is centred on its box, so it reaches at most `span / √2`; this is float slack.
 const LIFT_REACH_SLACK_M: f32 = 0.5;
 
-/// How far an arch sized for a narrower track may be scaled up to span ours.
+/// How far an arch sized for a narrower track may be scaled up to span ours, and past that how
+/// far it may be stretched across on top.
 const ARCH_MAX_SCALE: f32 = 1.8;
+const ARCH_MAX_STRETCH: f32 = 1.6;
 
 /// The parts of a piece taller than `min_h`, each part a connected run of triangles.
 fn tall_parts(m: &Mesh, min_h: f32) -> Mesh {
@@ -3500,8 +4087,34 @@ fn arch_on_legs(m: &Mesh) -> Option<(Mesh, f32, f32)> {
     // outer foot is the leg, the far one was built apart, and anything nearer is a pole.
     let mid = (lo[ax] + hi[ax]) * 0.5;
     let off = |c: (f32, f32)| (c.0 + c.1) * 0.5 - mid;
-    let (l, r) = (clusters[0], *clusters.last().unwrap());
-    let paired = off(l) < 0.0 && off(r) > 0.0 && (off(r) + off(l)).abs() <= ARCH_LEG_SYM_M;
+    let (mut l, mut r) = (clusters[0], *clusters.last().unwrap());
+    let mut paired = off(l) < 0.0 && off(r) > 0.0 && (off(r) + off(l)).abs() <= ARCH_LEG_SYM_M;
+    // Or the two feet a header bar runs between, end to end: a banner hung outboard of one leg
+    // moves the box's middle off the legs', and the far leg was mirrored in under nothing.
+    if !paired {
+        let mut bars: std::collections::HashMap<usize, (f32, f32, f32)> = std::collections::HashMap::new();
+        for i in 0..n {
+            let e = bars.entry(part[i]).or_insert((f32::MAX, f32::MAX, f32::MIN));
+            let v = &m.positions[i * 3..i * 3 + 3];
+            *e = (e.0.min(v[1]), e.1.min(v[ax]), e.2.max(v[ax]));
+        }
+        let near = |t: f32, c: &(f32, f32)| t >= c.0 - ARCH_LEG_W_M && t <= c.1 + ARCH_LEG_W_M;
+        let mut best: Option<((f32, f32), (f32, f32))> = None;
+        for (_, &(bottom, a0, a1)) in bars.iter().filter(|(k, _)| frame(**k)) {
+            if bottom < lo[1] + RIDE_H_M {
+                continue;
+            }
+            let (Some(cl), Some(cr)) = (clusters.iter().find(|c| near(a0, c)), clusters.iter().find(|c| near(a1, c))) else {
+                continue;
+            };
+            if cr.0 - cl.1 >= ARCH_MIN_GAP_M && best.is_none_or(|b| cr.0 - cl.1 > b.1 .0 - b.0 .1) {
+                best = Some((*cl, *cr));
+            }
+        }
+        if let Some((a, b)) = best {
+            (l, r, paired) = (a, b, true);
+        }
+    }
     let legs: Vec<(f32, f32)> = if paired { vec![l, r] } else if -off(l) >= off(r) { vec![l] } else { vec![r] };
     let mut is_leg = vec![false; n];
     for &(t, i) in &feet {
@@ -3693,13 +4306,15 @@ pub fn lifted(
 }
 
 /// What [`lifted_counted`] stood by rule rather than replayed.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Lifted {
     pub turn_markers: usize,
     pub parked: usize,
     pub arches: usize,
     pub bales: usize,
     pub pit_vehicles: usize,
+    /// Where each bale stands, for the barrier to leave room.
+    pub bale_spots: Vec<[f32; 2]>,
 }
 
 /// [`lifted`], with how many arches, bales and pit vehicles it stood.
@@ -3766,12 +4381,13 @@ pub fn lifted_counted(
     let edge: Vec<&crate::trackprops::Prop> =
         lib.props.iter().filter(|p| p.id == "edge_stake" || p.id == "edge_post").collect();
     let duplicates_edge = |p: &crate::trackprops::Prop| {
-        edge.iter().any(|e| e.sheet == p.sheet && (e.height - p.height).abs() < 0.1 && p.span < 0.25)
+        is_stake(p) || edge.iter().any(|e| e.sheet == p.sheet && (e.height - p.height).abs() < 0.1 && p.span < 0.25)
     };
     let markers: std::collections::HashSet<usize> = (0..lib.props.len()).filter(|&k| is_marker(lib, &lib.props[k])).collect();
     for inst in &lib.instances {
         let prop = &lib.props[inst.prop];
-        if prop.span > LIFT_RUN_SPAN_M && prop.height < LIFT_RUN_HEIGHT_M {
+        // An arch is a run with a header on it, so it is judged as one first.
+        if is_run(prop) && !(spans_track(prop, inst.offset) && prop.height <= ARCH_MAX_H_M) {
             continue;
         }
         if !whole(prop) || thin_near(prop, inst.offset) {
@@ -3805,15 +4421,29 @@ pub fn lifted_counted(
                 continue;
             };
             // Sized by its legs, not its header: both stand ARCH_LEG_CLEAR_M past our edges.
+            // Evenly up to ARCH_MAX_SCALE, then stretched across: Indiana's stand 9-13 m apart
+            // and a 16 m track wants 23 m.
             let k = (2.0 * (half + ARCH_LEG_CLEAR_M) / gap).max(1.0);
-            if k > ARCH_MAX_SCALE {
+            let up = k.min(ARCH_MAX_SCALE);
+            let wide = k / up;
+            if wide > ARCH_MAX_STRETCH {
                 continue;
             }
+            let (lo, hi) = mesh.bounds();
+            let ax = if hi[0] - lo[0] >= hi[2] - lo[2] { 0 } else { 2 };
             // Its legs' reach, not its header's: the header is overhead, and `fits` has the rest.
             let arch_reach = (legs_out + ARCH_LEG_W_M) * k;
-            for v in mesh.positions.iter_mut() {
-                *v *= k;
+            for v in mesh.positions.chunks_exact_mut(3) {
+                for c in 0..3 {
+                    v[c] *= if c == ax { k } else { up };
+                }
             }
+            for nv in mesh.normals.chunks_exact_mut(3) {
+                nv[ax] /= wide;
+                let l = (nv[0] * nv[0] + nv[1] * nv[1] + nv[2] * nv[2]).sqrt().max(1e-6);
+                nv.iter_mut().for_each(|c| *c /= l);
+            }
+            let k = up;
             let place = |s: f32| -> Mesh {
                 let st = at(s);
                 let (rx, rz) = crate::trackprog::right_vector(st.heading);
@@ -3894,7 +4524,7 @@ pub fn lifted_counted(
         by_sheet.entry(prop.sheet.clone()).or_default().append(&placed);
     }
 
-    let bales = place_bales(lib, prog, syn, &mut by_sheet);
+    let (bales, bale_spots) = place_bales(lib, prog, syn, &mut by_sheet);
     let parked = place_parking(lib, prog, syn, &mut by_sheet);
     let turn_markers = place_markers(lib, prog, syn, &mut by_sheet);
     // Parked in the paddock now (`trackvenue`), not in a row behind the stalls.
@@ -3923,7 +4553,7 @@ pub fn lifted_counted(
         out.push((short_sheet(&sheet), mesh, tex, solid));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
-    (out, Lifted { arches: arches_at.len(), bales, pit_vehicles, parked, turn_markers })
+    (out, Lifted { arches: arches_at.len(), bales, pit_vehicles, parked, turn_markers, bale_spots })
 }
 
 /// The most vertices one model may carry: the game's draw groups index in 16 bits, TerrainEd makes
@@ -4203,11 +4833,11 @@ fn pit_sheet() -> Texture {
 /// Bales: how far past the half-width a row stands, how many are in one, and where rows go —
 /// the inside of corners tighter than `BALE_CORNER_R_M`, and beside jump landings — and how
 /// many a kilometre, which is what rated tracks carry.
-const BALE_OUT_M: (f32, f32) = (1.5, 3.0);
-const BALE_ROW: (usize, usize) = (2, 4);
+// On the barrier line, in its place: set back behind the netting in twos they went unseen.
+const BALE_ROW: (usize, usize) = (4, 7);
 const BALE_CORNER_R_M: f32 = 35.0;
 const BALE_APART_M: f32 = 40.0;
-const BALE_PER_KM: f32 = 14.0;
+const BALE_PER_KM: f32 = 26.0;
 /// A single bale, not a stack: at most this tall, and this far across from its middle.
 const BALE_MAX_H_M: f32 = 1.4;
 const BALE_MAX_REACH_M: f32 = 1.6;
@@ -4297,11 +4927,16 @@ fn place_markers(
         for j in 0..MARKERS_PER_CORNER {
             let st = at(s0 + (j as f32 - (MARKERS_PER_CORNER as f32 - 1.0) * 0.5) * MARKER_PITCH_M);
             let (rx, rz) = crate::trackprog::right_vector(st.heading);
-            let out = half + MARKER_OUT_M;
-            let (x, z) = (st.x + rx * out * side, st.z + rz * out * side);
             let key = (i * 7 + j) as u32;
             let prop = blocks[((rnd(seed ^ 0x3A7C, key) * blocks.len() as f32) as usize).min(blocks.len() - 1)];
-            let m = draped(&edfwrite::turned(&prop.mesh, st.heading.to_degrees()), x, z, 0.0, syn);
+            // Face on to the approach it lies across it, so out far enough that its width clears.
+            let out = half + MARKER_OUT_M.max(RIDE_MARGIN_M + prop.reach + 0.1);
+            let (x, z) = (st.x + rx * out * side, st.z + rz * out * side);
+            // Its face to where riders come from, up the lap: each donor tab has its own yaw,
+            // so turned by the heading alone they faced any way, the exit included.
+            let from = at(st.s - MARKER_LOOK_M);
+            let deg = ((from.x - x).atan2(from.z - z) - face_heading(&prop.mesh)).to_degrees();
+            let m = draped(&edfwrite::turned(&prop.mesh, deg), x, z, 0.0, syn);
             if on_riding_surface(syn, half, &m)
                 || pits.on_lane(lap, syn, &m)
                 || syn.outside_the_start(x, z).is_some_and(|e| e < 2.0)
@@ -4324,6 +4959,34 @@ const MARKERS_PER_CORNER: usize = 2;
 const MARKER_PITCH_M: f32 = 7.0;
 const MARKER_OUT_M: f32 = 1.3;
 const MARKER_APART_M: f32 = 45.0;
+/// How far back up the lap a marker looks: at the corner's entry.
+const MARKER_LOOK_M: f32 = 12.0;
+
+/// Which way a marker tab's face looks, as a heading (radians, `heading_vector`'s sense): across
+/// its broad side, on the side it bows out to.
+fn face_heading(m: &Mesh) -> f32 {
+    let p = |i: u32| [m.positions[i as usize * 3], m.positions[i as usize * 3 + 1], m.positions[i as usize * 3 + 2]];
+    let (mut sxx, mut sxz, mut szz) = (0.0f32, 0.0f32, 0.0f32);
+    for t in m.indices.chunks_exact(3) {
+        let (a, b, c) = (p(t[0]), p(t[1]), p(t[2]));
+        let (e, f) = ([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]);
+        let (nx, nz) = (e[1] * f[2] - e[2] * f[1], e[0] * f[1] - e[1] * f[0]);
+        sxx += nx * nx;
+        sxz += nx * nz;
+        szz += nz * nz;
+    }
+    // The broad faces' normal, and the plate's width across it.
+    let th = 0.5 * (2.0 * sxz).atan2(sxx - szz);
+    let (n, w) = ((th.cos(), th.sin()), (-th.sin(), th.cos()));
+    let pts: Vec<(f32, f32)> = m.positions.chunks_exact(3).map(|v| (v[0] * w.0 + v[2] * w.1, v[0] * n.0 + v[2] * n.1)).collect();
+    let wide = pts.iter().map(|q| q.0.abs()).fold(0.0f32, f32::max).max(1e-3);
+    let mean = |keep: &dyn Fn(f32) -> bool| {
+        let (s, k) = pts.iter().filter(|q| keep(q.0.abs() / wide)).fold((0.0f32, 0.0f32), |a, q| (a.0 + q.1, a.1 + 1.0));
+        s / k.max(1.0)
+    };
+    let s = if mean(&|t| t < 0.3) >= mean(&|t| t > 0.7) { 1.0 } else { -1.0 };
+    (n.0 * s).atan2(n.1 * s)
+}
 
 fn place_parking(
     lib: &crate::trackprops::PropLibrary,
@@ -4410,7 +5073,7 @@ fn place_bales(
     prog: &TrackProgram,
     syn: &Synth,
     by_sheet: &mut std::collections::HashMap<String, Mesh>,
-) -> usize {
+) -> (usize, Vec<[f32; 2]>) {
     use crate::trackprog::Feature;
     let singles: Vec<&crate::trackprops::Prop> = lib
         .props
@@ -4423,11 +5086,12 @@ fn place_bales(
         })
         .collect();
     if singles.is_empty() {
-        return 0;
+        return (0, Vec::new());
     }
     let (lap, half, seed) = (prog.lap_length(), prog.width * 0.5, prog.terrain.relief.seed);
     let stations = prog.stations(0.5);
     let at = |s: f32| stations[((s.rem_euclid(lap) / 0.5) as usize).min(stations.len() - 1)];
+    let mut spots_at: Vec<[f32; 2]> = Vec::new();
     let wrap = |d: f32| {
         let d = d.rem_euclid(lap);
         d.min(lap - d)
@@ -4460,7 +5124,7 @@ fn place_bales(
     let pits = Pits::of(prog);
     let mut taken: Vec<(f32, f32)> = Vec::new();
     let mut count = 0;
-    for (k, &(s0, side, _)) in spots.iter().enumerate() {
+    for (k, &(s0, side, curve)) in spots.iter().enumerate() {
         if count >= most {
             break;
         }
@@ -4472,12 +5136,17 @@ fn place_bales(
         let (lo, hi) = prop.mesh.bounds();
         let long_x = hi[0] - lo[0] >= hi[2] - lo[2];
         let pitch = (hi[0] - lo[0]).max(hi[2] - lo[2]) + 0.15;
+        let deep = (hi[0] - lo[0]).min(hi[2] - lo[2]);
         let row = (BALE_ROW.0 + (rnd(seed ^ 0xBA1F, key) * (BALE_ROW.1 - BALE_ROW.0 + 1) as f32) as usize).min(BALE_ROW.1);
-        let out = half + BALE_OUT_M.0 + rnd(seed ^ 0xBA20, key) * (BALE_OUT_M.1 - BALE_OUT_M.0);
+        // On the barrier line, clear of the riding margin.
+        let out = edge_offsets(half).1.max(half + RIDE_MARGIN_M + deep * 0.5 + 0.1);
+        // Stepped along the centreline, so shorter on the outside of a bend to stay butted.
+        let step = pitch / (1.0 + curve * out);
         let mut laid = Mesh::default();
+        let mut feet: Vec<[f32; 2]> = Vec::new();
         let mut ok = true;
         for j in 0..row {
-            let st = at(s0 + (j as f32 - (row as f32 - 1.0) * 0.5) * pitch);
+            let st = at(s0 + (j as f32 - (row as f32 - 1.0) * 0.5) * step);
             let (rx, rz) = crate::trackprog::right_vector(st.heading);
             let (x, z) = (st.x + rx * out * side, st.z + rz * out * side);
             // Along the track: a mesh long in x turns by the heading plus ninety.
@@ -4492,14 +5161,16 @@ fn place_bales(
                 break;
             }
             laid.append(&bale);
+            feet.push([x, z]);
         }
         if ok {
             taken.push((s0, side));
             by_sheet.entry(prop.sheet.clone()).or_default().append(&laid);
+            spots_at.extend(feet);
             count += row;
         }
     }
-    count
+    (count, spots_at)
 }
 
 /// Tear-off patches per 2 km of lap, and strips in each. Indiana: 1,452 in about ten patches.

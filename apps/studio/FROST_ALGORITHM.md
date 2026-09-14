@@ -6,8 +6,9 @@ Minor for a new feature, patch for a fix, 0.x until the generator is finished. B
 
 | Version | Date | Commit | Change |
 |---|---|---|---|
-| 0.30.0 | 2026-09-13 | fix/fewer-singles-real-rollers | laps drawn with at most 55 m between corners (70 m on the way home) and no chicanes; the start straight runs into turn one |
-| 0.29.1 | 2026-09-13 | fix/fewer-singles-real-rollers | singles 50 m apart, rollers 0.9-1.2 m so chicanes aren't empty, ARL singles taller not longer, step-ups no longer clear rollers on ARL |
+| 0.31.0 | 2026-09-13 | feature/ride-round-14 | Northgate layout pinned; ruts in every real corner (48/26 m); ARL lanes vary down the lap; ARL braking sets keep a gap and lone bumps sit before them; ARL triples 90%; side singles slope, not wall, and keep their size on ARL; scenery fixes |
+| 0.30.0 | 2026-09-13 | 5861c3cd (#598) | laps drawn with at most 55 m between corners (70 m on the way home) and no chicanes; the start straight runs into turn one |
+| 0.29.1 | 2026-09-13 | f86f423b (#598) | singles 50 m apart, rollers 0.9-1.2 m so chicanes aren't empty, ARL singles taller not longer, step-ups no longer clear rollers on ARL |
 | 0.29.0 | 2026-09-13 | cc20a1b3 (#596) | spawns in the paddock, painted pit road to the gates, whole team rigs and pop-ups, sparser turn markers |
 | 0.28.0 | 2026-09-13 | 44824b98 | bigger ARL jumps, ruts over jumps, more braking bumps |
 | 0.27.1 | 2026-09-13 | e2e2baee | fill the straights before the finish, shorter taller step-ups |

@@ -230,7 +230,8 @@ const WIDTH_WAVELENGTH_M: f32 = 70.0;
 /// Forty metres because that is where the measurement changes: below it a corner's grooves
 /// deepen and its two edges stop being the same height, above it published corners read like
 /// straights.
-const RUT_RADIUS_M: (f32, f32) = (40.0, 14.0);
+// 48/26, not 40/14: the lap's widest corners (27 m) wore no ruts at all.
+const RUT_RADIUS_M: (f32, f32) = (48.0, 26.0);
 
 /// How deep a corner's own rut gets, metres, and how deep the shallowest ground on the lap is
 /// worn.
@@ -578,6 +579,8 @@ const ARL_JUMP_LANES: f32 = 0.85;
 const ARL_BRAKE_REACH_M: f32 = 12.0;
 /// Lone bumps on a raced lap: one chance per cell, likelier where it brakes.
 const ARL_LUMP_CELL_M: f32 = 5.0;
+/// How far a raced lap runs before its lanes change character, metres.
+const ARL_MOOD_M: f32 = 90.0;
 
 /// How much the edge of the riding line wanders in and out, metres, and over what length of
 /// lap.
@@ -1578,7 +1581,9 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 * lane_turn.at(s);
             let lane_presence = lane_presence.max(lane_lead.at(s) * LANE_LEAD_DEPTH * open);
             // A raced straight carries shallow packed lanes too, rounded rather than sharp.
-            let lane_presence = lane_presence.max(arl * ARL_STRAIGHT_LANES * open);
+            // Varied down the lap, or a raced lap is one stripe pattern end to end.
+            let mood = 0.5 + 0.5 * fbm(s / ARL_MOOD_M, 4.4, r.seed ^ 0xA2D0);
+            let lane_presence = lane_presence.max(arl * ARL_STRAIGHT_LANES * (0.45 + 0.55 * mood) * open);
             let (lanes, lane_used) = if lane_presence > 0.0 {
                 let mut best = 0.0f32;
                 let mut used = 0.0f32;
@@ -1638,7 +1643,13 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                         * RUT_LANE_WIDTH
                         * (1.0 + 0.35 * usage)
                         * (1.0 + RUT_LANE_WIDTH_VARY * fbm(s / 14.0, kf * 2.3, r.seed ^ 0x1A81));
-                    let v = trough(at, width) * exists;
+                    // Where the mood is low only the main lines run, and wider.
+                    let sparse = arl * (1.0 - mood);
+                    let v = if matches!(k, 0 | 3 | -1) {
+                        trough(at, width * (1.0 + 0.4 * sparse)) * exists
+                    } else {
+                        trough(at, width) * exists * (1.0 - 0.85 * sparse)
+                    };
                     best = best.max(v * fall * along * (0.55 + 0.45 * usage));
                     used = used.max(v * usage * room);
                 }
@@ -1848,8 +1859,8 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                     let g = (n / BRAKE_GROUP).floor();
                     let slot = n - g * BRAKE_GROUP;
                     // Two or three: ARL's approaches run 1.1–1.9 swells per 10 m and ours ran 0.5.
-                    // Every slot on a raced build.
-                    let count = if rough > 1.4 { BRAKE_GROUP } else { 3.0 };
+                    // Every slot ran the bumps together; a gap in each set keeps them apart.
+                    let count = 3.0;
                     let size = if slot < count { 0.6 + 0.4 * pick(3) } else { 0.0 };
                     let (prof, falling) = if x < peak {
                         (smoothstep(x / peak), false)
@@ -1891,8 +1902,10 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 let cell = (s / ARL_LUMP_CELL_M).floor();
                 let pick = |salt: i32| hash2(cell as i32, salt, r.seed ^ 0x1B7A) * 0.5 + 0.5;
                 let mid_s = (cell + 0.5) * ARL_LUMP_CELL_M;
-                let braking = chop.braking.at(mid_s).max(chop.braking.at(mid_s + ARL_BRAKE_REACH_M)).min(1.0);
-                if pick(0) < 0.3 + 0.5 * braking {
+                // Where the braking starts, not on its sets: on them they clumped into the bumps.
+                let on = chop.braking.at(mid_s).min(1.0);
+                let ahead = chop.braking.at(mid_s + ARL_BRAKE_REACH_M).min(1.0) * (1.0 - on);
+                if pick(0) < 0.3 * (1.0 - on) + 0.5 * ahead {
                     let len = 1.6 + 1.6 * pick(1);
                     let mid = cell * ARL_LUMP_CELL_M + (ARL_LUMP_CELL_M - len) * pick(2) + len * 0.5;
                     let u = ((s - mid) / (len * 0.5)).abs();
@@ -2568,8 +2581,9 @@ fn one_side(t: f32, side: f32) -> f32 {
 }
 
 /// Where a one-sided feature stops short of the middle, and over how much ground it eases out.
-const SIDE_SPLIT_M: f32 = 0.5;
-const SIDE_FADE_M: f32 = 3.0;
+/// Over 3 m a side single's inner flank rode as a wall down the middle of the track.
+const SIDE_SPLIT_M: f32 = 2.5;
+const SIDE_FADE_M: f32 = 5.0;
 
 /// How much of a feature reaches a cell. Full height across most of the track, gone by the
 /// edge, so a jump doesn't run off into the field.
@@ -8210,7 +8224,7 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
 /// the code that made it. Bump it with every change to what a program builds into: minor for
 /// a new feature, patch for a fix. 0.x until the generator is finished. History in
 /// `apps/studio/FROST_ALGORITHM.md`.
-pub const FROST_ALGORITHM_VERSION: &str = "0.30.0";
+pub const FROST_ALGORITHM_VERSION: &str = "0.31.0";
 
 /// The stamp every built track carries in `<slug>/frost-algorithm.ini`.
 ///
@@ -12820,6 +12834,16 @@ mod ground_preview {
             Ok(p) => serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap(),
             Err(_) => serde_json::from_str(crate::trackprog::EXAMPLE).unwrap(),
         };
+        // As the harness builds it: FROST_SURFACE and FROST_ROUGH, the ARL build's jumps too.
+        let mut prog = prog;
+        if let Ok(sf) = std::env::var("FROST_SURFACE") {
+            prog.terrain.surface = serde_json::from_str(&format!("\"{sf}\"")).expect("soil, sand or grass");
+        }
+        if let Some(r) = std::env::var("FROST_ROUGH").ok().and_then(|v| v.parse::<f32>().ok()) {
+            prog.terrain.roughness = r;
+            prog.bigger_jumps(1.0 + 0.35 * (r - 1.0).clamp(0.0, 1.0));
+        }
+        let prog = with_fitted_budget(&prog).unwrap();
         println!("FINISH_AT {:?}", finish_at(&prog));
         let out = std::env::var("FROST_PNG").expect("set FROST_PNG");
         let span: f32 = std::env::var("FROST_SPAN")

@@ -1192,12 +1192,17 @@ fn grow(f: &Feature, kh: f32, kl: f32) -> Feature {
         Feature::Tabletop { at, length, height, lip } => Feature::Tabletop { at, length: length * kl, height: h(height), lip },
         Feature::Double { at, height, gap, lip } => Feature::Double { at, height: h(height), gap: gap * kl, lip },
         // A single barely longer: stretched with the rest, its crest became a fake table.
-        Feature::Custom { at, length, shape, side } => Feature::Custom {
-            at,
-            length: length * (1.0 + (kl - 1.0) * 0.25),
-            shape: shape.into_iter().map(|p| ShapePoint { u: p.u, h: h(p.h) }).collect(),
-            side,
-        },
+        Feature::Custom { at, length, shape, side } => {
+            // A triple at 90% of that: "a tad too hard on a 250".
+            let triple = shape.windows(2).filter(|w| w[1].h > w[0].h + 0.01).count() >= 3;
+            let t = if triple { BIG_TRIPLE_SHARE } else { 1.0 };
+            Feature::Custom {
+                at,
+                length: length * (1.0 + (kl - 1.0) * 0.25) * t,
+                shape: shape.into_iter().map(|p| ShapePoint { u: p.u, h: h(p.h) * t }).collect(),
+                side,
+            }
+        }
         other => other,
     }
 }
@@ -1206,6 +1211,7 @@ fn grow(f: &Feature, kh: f32, kl: f32) -> Feature {
 pub const BIG_JUMP_MAX_H_M: f32 = 4.0;
 const BIG_JUMP_CLEAR_M: f32 = 8.0;
 const BIG_JUMP_MAX_SAG_M: f32 = 4.0;
+const BIG_TRIPLE_SHARE: f32 = 0.9;
 
 /// A worked example of a track program: what a good one looks like.
 ///
@@ -1625,7 +1631,8 @@ impl TrackProgram {
         let mut i = 0;
         while i < self.features.len() {
             let f = self.features[i].clone();
-            if !jump(&f) {
+            // A side single stays its size: grown, its inner side stood as a wall mid-track.
+            if !jump(&f) || matches!(f, Feature::Custom { side, .. } if side != 0.0) {
                 i += 1;
                 continue;
             }

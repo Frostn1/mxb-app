@@ -1622,6 +1622,18 @@ pub fn search(from: u64, tries: u32) -> Result<Measured, Vec<Measured>> {
 mod tests {
     use super::*;
 
+    /// Northgate (seed 103) as the rider signed it off, 2026-09-13: "KEEP THIS LAYOUT". A change
+    /// that moves its lap or what's built on it has to be ridden and signed off again.
+    #[test]
+    fn northgate_keeps_its_layout() {
+        let p = match search(103, 1) { Ok(m) => m.program, Err(v) => v[0].program.clone() };
+        assert_eq!(p.segments.len(), 90);
+        assert!((p.lap_length() - 2271.3).abs() < 0.1, "lap {}", p.lap_length());
+        assert_eq!(p.features.len(), 73);
+        let at: f32 = p.features.iter().map(|f| f.at()).sum();
+        assert!((at - 89644.8).abs() < 0.5, "features moved: {at}");
+    }
+
     /// A seed that draws, for the tests that need one. Roughly nine in ten do.
     fn drawn(seed: u64) -> TrackProgram {
         (0..24)
