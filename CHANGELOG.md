@@ -40,7 +40,7 @@
 ### Fixed
 - Updating the app also updates the helper that opens locked tracks.
 
-## Unreleased — Frost's Studio
+## 2026-09-14 — Frost's Studio v0.1.1
 
 ### Fixed
 - The window's close button closes Frost's Studio.
