@@ -603,3 +603,58 @@ describe("buyer names", () => {
     expect(steam).toHaveBeenCalledTimes(50);
   });
 });
+
+describe("a creator who started on the site", () => {
+  const STEAM = "76561198000000077";
+  const signedIn = async (steamId: string) =>
+    `${SESSION_COOKIE}=${await sealToken({ t: "session", steamId, name: "N", exp: Date.now() + 60_000 }, "session-secret")}`;
+  /** The app's Steam link coming back from a Steam that confirms it. */
+  async function linkInApp(env: Env, accountId: string, steamId: string): Promise<Response> {
+    const login = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO steam_logins (id, account_id, created_at) VALUES (?, ?, ?)").bind(login, accountId, Date.now()).run();
+    const id = `https://steamcommunity.com/openid/id/${steamId}`;
+    const q = new URLSearchParams({
+      login,
+      "openid.ns": "http://specs.openid.net/auth/2.0",
+      "openid.mode": "id_res",
+      "openid.op_endpoint": "https://steamcommunity.com/openid/login",
+      "openid.claimed_id": id,
+      "openid.identity": id,
+      "openid.return_to": `https://cp.test/v1/steam/return?login=${login}`,
+      "openid.response_nonce": "2026-09-14T00:00:00Z0123456789",
+      "openid.assoc_handle": "1234567890",
+      "openid.sig": "deadbeef",
+      "openid.signed": "signed,op_endpoint,claimed_id,identity,return_to,response_nonce,assoc_handle",
+    });
+    vi.stubGlobal("fetch", async () => new Response("ns:http://specs.openid.net/auth/2.0\nis_valid:true\n"));
+    try {
+      return await call(env, new Request(`https://cp.test/v1/steam/return?${q}`));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }
+
+  it("brings their assets along when they link the same Steam account in the app", async () => {
+    const env = await deployment({ MXB_WEB_SESSION_KEY: "session-secret", MXB_SITE_ORIGIN: SITE });
+    await addAccount(env.DB, "acc_app", "Rider");
+    const made = await call(env, req("POST", "/admin/assets", { key: null, origin: SITE, body: { title: "Pine Hill" }, headers: { Cookie: await signedIn(STEAM) } }));
+    expect(made.status).toBe(201);
+    const { assetId } = (await made.json()) as { assetId: string };
+    const web = await env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ?").bind(STEAM).first<{ id: string }>();
+
+    const res = await linkInApp(env, "acc_app", STEAM);
+    expect(res.headers.get("Location")).toBe(`${SITE}/steam?r=linked`);
+    expect(await env.DB.prepare("SELECT creator_id FROM assets WHERE id = ?").bind(assetId).first()).toEqual({ creator_id: "acc_app" });
+    expect(await env.DB.prepare("SELECT id, creator_at IS NOT NULL AS creator FROM accounts WHERE steam_id = ?").bind(STEAM).first()).toEqual({ id: "acc_app", creator: 1 });
+    expect(await env.DB.prepare("SELECT steam_id FROM accounts WHERE id = ?").bind(web!.id).first()).toEqual({ steam_id: null });
+  });
+
+  it("still refuses a Steam account that's on another app profile", async () => {
+    const env = await deployment({ MXB_WEB_SESSION_KEY: "session-secret", MXB_SITE_ORIGIN: SITE });
+    await addAccount(env.DB, "acc_holder", "Holder", STEAM);
+    await addAccount(env.DB, "acc_app", "Rider");
+    const res = await linkInApp(env, "acc_app", STEAM);
+    expect(res.headers.get("Location")).toBe(`${SITE}/steam?r=already-linked`);
+    expect(await env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ?").bind(STEAM).first()).toEqual({ id: "acc_holder" });
+  });
+});

@@ -522,10 +522,22 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
       .bind(result.steamId, login.account_id)
       .run();
   } catch (err) {
-    if (String(err).includes("UNIQUE")) {
-      return steamResult(site, "already-linked");
-    }
-    throw err;
+    if (!String(err).includes("UNIQUE")) throw err;
+    // Held by a web-only profile made when this person locked something on mxbsecure.com. Steam
+    // just confirmed it's them, so the app profile takes over the Steam link and their assets.
+    const held = await env.DB.prepare("SELECT id, kind, creator_at FROM accounts WHERE steam_id = ?")
+      .bind(result.steamId)
+      .first<{ id: string; kind: string; creator_at: number | null }>();
+    if (held?.kind !== "web") return steamResult(site, "already-linked");
+    await env.DB.batch([
+      env.DB.prepare("UPDATE assets SET creator_id = ? WHERE creator_id = ?").bind(login.account_id, held.id),
+      env.DB.prepare("UPDATE accounts SET steam_id = NULL WHERE id = ?").bind(held.id),
+      env.DB.prepare("UPDATE accounts SET steam_id = ?, creator_at = COALESCE(creator_at, ?) WHERE id = ?").bind(
+        result.steamId,
+        held.creator_at ?? Date.now(),
+        login.account_id,
+      ),
+    ]);
   }
 
   return steamResult(site, "linked");

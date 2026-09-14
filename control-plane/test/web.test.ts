@@ -320,10 +320,42 @@ describe("creators on /admin/assets", () => {
     expect((await assets(env, req("POST", grants, { cookie: frost, body, contentType: "application/json; charset=utf-8" }))).status).toBe(200);
   });
 
-  it("refuses a signed-in account that isn't a creator, and an expired session", async () => {
+  it("makes anyone signed in with Steam a creator, on a web profile made with their first asset", async () => {
     const env = await deployment();
-    await env.DB.prepare("UPDATE accounts SET creator_at = NULL WHERE id = 'acc_other'").run();
-    expect((await assets(env, req("GET", "/admin/assets", { cookie: await cookieFor(OTHER) }))).status).toBe(403);
+    const NEWCOMER = "76561198000000077";
+    const cookie = await cookieFor(NEWCOMER);
+    const profile = () =>
+      env.DB.prepare("SELECT id, kind, creator_at IS NOT NULL AS creator FROM accounts WHERE steam_id = ?")
+        .bind(NEWCOMER)
+        .first<{ id: string; kind: string; creator: number }>();
+
+    // Signing in and looking around makes nothing.
+    const empty = await assets(env, req("GET", "/admin/assets", { cookie }));
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toEqual({ assets: [] });
+    expect(await profile()).toBeNull();
+    expect(await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()).toMatchObject({ creator: true, linked: false });
+
+    const made = await assets(env, req("POST", "/admin/assets", { cookie, body: { title: "First" } }));
+    expect(made.status).toBe(201);
+    const { assetId } = (await made.json()) as { assetId: string };
+    expect(await profile()).toMatchObject({ kind: "web", creator: 1 });
+    const again = await assets(env, req("POST", "/admin/assets", { cookie, body: { title: "Second" } }));
+    expect(again.status).toBe(201);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts WHERE steam_id = ?").bind(NEWCOMER).first<{ n: number }>())?.n).toBe(1);
+
+    // Theirs to manage, and nobody else's.
+    const mine = (await (await assets(env, req("GET", "/admin/assets", { cookie }))).json()) as { assets: unknown[] };
+    expect(mine.assets).toHaveLength(2);
+    const frost = await cookieFor(CREATOR);
+    expect((await assets(env, req("GET", `/admin/assets/${assetId}/grants`, { cookie: frost }))).status).toBe(404);
+    // A web profile's placeholder name never shows, and it isn't an app profile.
+    const me = (await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()) as { name: string; linked: boolean };
+    expect(me).toMatchObject({ name: "Frost", linked: false });
+  });
+
+  it("refuses an expired session", async () => {
+    const env = await deployment();
     const expired = await cookieFor(CREATOR, Date.now() - 1);
     expect((await assets(env, req("GET", "/admin/assets", { cookie: expired }))).status).toBe(401);
   });
