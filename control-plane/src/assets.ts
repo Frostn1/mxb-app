@@ -134,11 +134,14 @@ async function authorize(request: Request, url: URL, env: Env): Promise<Scope | 
   if (admin === "ok") return { kind: "admin" };
   const session = await webSession(request, env);
   if (session) {
-    // Anyone signed in with Steam can lock and sell. No profile yet is fine: one is made with
-    // their first asset (see `creatorAccount`).
-    const account = await env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ?")
+    // Creators can lock and sell. While new creators are open, so can anyone signed in with
+    // Steam: a profile is made with their first asset (see `creatorAccount`).
+    const account = await env.DB.prepare("SELECT id, creator_at FROM accounts WHERE steam_id = ?")
       .bind(session.steamId)
-      .first<{ id: string }>();
+      .first<{ id: string; creator_at: number | null }>();
+    if (!account?.creator_at && !newCreatorsOpen(env)) {
+      return json(403, { error: "mxbsecure is invite only, for affiliated creators" });
+    }
     return { kind: "creator", accountId: account?.id ?? null, steamId: session.steamId };
   }
   if (admin === "unset" && !env.MXB_ASSETS_KEY && !env.MXB_WEB_SESSION_KEY) {
@@ -176,11 +179,14 @@ async function handle(
     if (method === "POST") {
       if (scope.kind === "admin") return createAsset(request, env, env.MXB_OWNER_ACCOUNT_ID!);
       const owner = await creatorAccount(env, scope.steamId);
-      const made = await env.DB.prepare("SELECT COUNT(*) AS n FROM assets WHERE creator_id = ? AND created_at > ?")
-        .bind(owner, Date.now() - DAY_MS)
-        .first<{ n: number }>();
-      if ((made?.n ?? 0) >= ASSETS_PER_DAY) {
-        return json(429, { error: `at most ${ASSETS_PER_DAY} new assets a day` });
+      if (owner !== env.MXB_OWNER_ACCOUNT_ID) {
+        const limit = assetsPerDay(env);
+        const made = await env.DB.prepare("SELECT COUNT(*) AS n FROM assets WHERE creator_id = ? AND created_at > ?")
+          .bind(owner, Date.now() - DAY_MS)
+          .first<{ n: number }>();
+        if ((made?.n ?? 0) >= limit) {
+          return json(429, { error: `You can lock ${limit} new files a day. Try again tomorrow.` });
+        }
       }
       return createAsset(request, env, owner);
     }
@@ -201,9 +207,20 @@ async function handle(
   return json(405, { error: "method not allowed" });
 }
 
-/** A ceiling on new assets per creator per day. Batch locking makes one per file. */
-const ASSETS_PER_DAY = 500;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** New assets a creator may make a day (batch locking makes one per file): `MXB_ASSETS_PER_DAY`,
+ *  10 when unset. The owner account has no ceiling. */
+function assetsPerDay(env: Env): number {
+  const n = Number(env.MXB_ASSETS_PER_DAY);
+  return Number.isInteger(n) && n > 0 ? n : 10;
+}
+
+/** Whether a Steam account that isn't a creator may start: `MXB_NEW_CREATORS = "open"`. Closed
+ *  when unset; creators who already joined keep working either way. */
+export function newCreatorsOpen(env: Env): boolean {
+  return env.MXB_NEW_CREATORS === "open";
+}
 
 /**
  * The account a creator's assets belong to: their MXB App profile if Steam is linked to one,
@@ -214,7 +231,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 async function creatorAccount(env: Env, steamId: string): Promise<string> {
   const find = () => env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ?").bind(steamId).first<{ id: string }>();
   const found = await find();
-  if (found) return found.id;
+  if (found) {
+    // An app profile that starts selling becomes a creator, so it stays one if joining closes.
+    await env.DB.prepare("UPDATE accounts SET creator_at = ? WHERE id = ? AND creator_at IS NULL").bind(Date.now(), found.id).run();
+    return found.id;
+  }
   const id = crypto.randomUUID();
   const now = Date.now();
   try {

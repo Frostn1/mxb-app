@@ -320,8 +320,30 @@ describe("creators on /admin/assets", () => {
     expect((await assets(env, req("POST", grants, { cookie: frost, body, contentType: "application/json; charset=utf-8" }))).status).toBe(200);
   });
 
-  it("makes anyone signed in with Steam a creator, on a web profile made with their first asset", async () => {
+  it("keeps new creators out by default, and lets existing ones in", async () => {
     const env = await deployment();
+    const cookie = await cookieFor("76561198000000077");
+    expect((await assets(env, req("GET", "/admin/assets", { cookie }))).status).toBe(403);
+    expect((await assets(env, req("POST", "/admin/assets", { cookie, body: { title: "X" } }))).status).toBe(403);
+    expect(await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()).toMatchObject({ creator: false });
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts WHERE steam_id = '76561198000000077'").first<{ n: number }>())?.n).toBe(0);
+    expect((await assets(env, req("GET", "/admin/assets", { cookie: await cookieFor(CREATOR) }))).status).toBe(200);
+  });
+
+  it("lets a creator lock 10 new files a day, and the owner any number", async () => {
+    const make = (env: Env, cookie: string) => assets(env, req("POST", "/admin/assets", { cookie, body: { title: "T" } }));
+    const cookie = await cookieFor(CREATOR);
+    const env = await deployment();
+    for (let i = 0; i < 10; i++) expect((await make(env, cookie)).status).toBe(201);
+    const over = await make(env, cookie);
+    expect(over.status).toBe(429);
+    expect(((await over.json()) as { error: string }).error).toBe("You can lock 10 new files a day. Try again tomorrow.");
+    const owner = await deployment({ MXB_OWNER_ACCOUNT_ID: "acc_frost" });
+    for (let i = 0; i < 11; i++) expect((await make(owner, cookie)).status).toBe(201);
+  });
+
+  it("while new creators are open, makes anyone signed in with Steam a creator, on a web profile made with their first asset", async () => {
+    const env = await deployment({ MXB_NEW_CREATORS: "open" });
     const NEWCOMER = "76561198000000077";
     const cookie = await cookieFor(NEWCOMER);
     const profile = () =>
