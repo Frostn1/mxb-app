@@ -284,7 +284,7 @@ export default function PaintStudio({ onSendToDesigner }: PaintStudioProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* One band: where it goes, what it is called, and everything that puts sheets on
-          the screen. Saving is the run bar at the bottom, like Protect and the Designer. */}
+          the screen. Saving is the run bar at the bottom, like the Designer. */}
       <div className="flex flex-none flex-wrap items-center gap-2 px-4 pb-3 pt-4">
         <PaintDestBar state={destState} className="w-[290px]" />
         <Input

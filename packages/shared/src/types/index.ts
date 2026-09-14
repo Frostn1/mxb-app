@@ -1619,35 +1619,13 @@ export type ShopSort =
   | "onSale"
   | "nameAsc";
 
-/* ── Content lock ──────────────────────────────────────────────────────────────────── */
+/* ── Locked GUID reader ────────────────────────────────────────────────────────────── */
 
-/** One file a locking run would produce, or the reason it will be left alone. */
-export interface LockItem {
-  /** Where the file lands under each GUID folder — relative to the parent of the
-   *  selection it came from, so picking a folder keeps the folder. */
+/** A file on disk and the GUID it is locked to, as Diagnose reads it. */
+export interface LockedFile {
+  /** Relative to the parent of the selection it came from. */
   rel: string;
   abs: string;
-  bytes: number;
-  /** A `.pkz` is locked as an archive; everything else as a single file. */
-  kind: "archive" | "file";
-  /** `null` when the file will be locked. */
-  skip: "junk" | "empty" | "protected" | null;
-  /** The GUID an already-protected file is bound to; all zeros means bound to nobody. */
+  /** `null` when the file isn't locked; all zeros means locked to nobody. */
   guid: string | null;
-}
-
-export interface LockOutcome {
-  guids: number;
-  files: number;
-  written: number;
-  skipped: number;
-  bytes: number;
-  outDir: string;
-}
-
-export interface LockProgress {
-  done: number;
-  total: number;
-  guid: string;
-  file: string;
 }

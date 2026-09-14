@@ -1051,6 +1051,10 @@ export default function Library({
           onMove={setMoveTarget}
           onShare={(e) => shareFiles([e.path])}
           onOpenEntry={setDetail}
+          onChanged={() => {
+            dropScans();
+            void load({ quiet: true });
+          }}
         />
       ) : (
         <>

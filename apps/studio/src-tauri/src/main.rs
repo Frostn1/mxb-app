@@ -31,7 +31,8 @@ mod trackvenue;
 mod winefetch;
 
 /// Sealing content to a buyer. Gitignored, like the module it builds on.
-#[cfg(sidecar)]
+// Locking is out of Studio for now; kept only for the developer-only track-delivery tests in trackbuild.rs.
+#[cfg(all(sidecar, test))]
 mod sidecar_lock;
 
 // Re-exported at the root so the `crate::edf::…` call sites throughout the modules above
@@ -44,8 +45,6 @@ pub(crate) use mxb_core::{
 };
 #[cfg(sidecar)]
 pub(crate) use mxb_core::sidecar;
-#[cfg(mxbsecure)]
-pub(crate) use mxb_core::mxbsecure;
 
 // ── Track prop placement ─────────────────────────────────────────────────────
 // Placing scenery on a track and writing it to the `.scr` the game loads. A creator action,
@@ -133,10 +132,8 @@ fn main() {
             scan_bike_targets,
             scan_rider_targets,
             presets_save,
-            experimental_state,
-            set_guid,
-            content_lock_available,
-            mxbsecure_generate,
+            guid_reader_available,
+            read_locked_guids,
             photo_save,
             psd_read,
             psd_save,
@@ -164,8 +161,6 @@ fn main() {
             paint_studio_stage,
             paint_studio_save,
             paint_studio_extract,
-            content_lock_plan,
-            content_lock_run,
             read_track_placeable,
             load_track_prop,
             save_track_props,
@@ -870,58 +865,52 @@ async fn paint_studio_extract(
 /// Where templates go when the player doesn't pick somewhere: their Documents folder, not
 /// the mods folder — the game scans that, and a folder of loose sheets isn't a mod.
 
-/// What a run over `paths` would touch — every file under the selection, with the ones it
-/// would leave alone flagged and why. Folders are walked; a file is taken as itself.
+/// A file and the GUID it is locked to, for Diagnose. Read-only: Studio no longer locks.
+#[derive(serde::Serialize)]
+struct LockedFile {
+    rel: String,
+    abs: String,
+    guid: Option<String>,
+}
+
+/// Every file under `paths` with the GUID it's locked to. Folders are walked; a file is taken
+/// as itself. Reads only the end of each file.
 #[tauri::command]
-async fn content_lock_plan(paths: Vec<String>) -> Result<serde_json::Value, String> {
+async fn read_locked_guids(paths: Vec<String>) -> Result<Vec<LockedFile>, String> {
     #[cfg(sidecar)]
     {
-        let roots: Vec<std::path::PathBuf> =
-            paths.into_iter().map(std::path::PathBuf::from).collect();
-        let items = tauri::async_runtime::spawn_blocking(move || sidecar_lock::plan(&roots))
-            .await
-            .map_err(|e| format!("content_lock_plan task failed: {e}"))?
-            .map_err(|e| format!("{e:#}"))?;
-        return serde_json::to_value(items).map_err(|e| e.to_string());
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut out = Vec::new();
+            for root in paths.iter().map(std::path::Path::new) {
+                let base = root.parent().unwrap_or(std::path::Path::new(""));
+                let files: Vec<std::path::PathBuf> = if root.is_file() {
+                    vec![root.to_path_buf()]
+                } else {
+                    walkdir::WalkDir::new(root)
+                        .sort_by_file_name()
+                        .into_iter()
+                        .filter_map(Result::ok)
+                        .filter(|e| e.file_type().is_file())
+                        .map(|e| e.into_path())
+                        .collect()
+                };
+                for p in files {
+                    out.push(LockedFile {
+                        rel: p.strip_prefix(base).unwrap_or(&p).to_string_lossy().replace('\\', "/"),
+                        abs: p.to_string_lossy().into_owned(),
+                        guid: crate::sidecar::locked_guid_of(&p),
+                    });
+                }
+            }
+            out
+        })
+        .await
+        .map_err(|e| format!("read_locked_guids task failed: {e}"))
     }
     #[cfg(not(sidecar))]
     {
         let _ = paths;
-        Err("this build can't lock content".into())
-    }
-}
-
-/// Write a copy of every file in `paths`, locked to each GUID in `guids`, under
-/// `out_dir/<GUID>/`. Reports progress on `content-lock://progress`.
-///
-/// The sources are only ever read. A creator's plaintext is the one thing they can't get
-/// back, so the tool that hands out locked copies is not also the tool that could eat the
-/// original.
-#[tauri::command]
-async fn content_lock_run(
-    app: tauri::AppHandle,
-    paths: Vec<String>,
-    guids: Vec<String>,
-    out_dir: String,
-) -> Result<serde_json::Value, String> {
-    #[cfg(sidecar)]
-    {
-        let roots: Vec<std::path::PathBuf> =
-            paths.into_iter().map(std::path::PathBuf::from).collect();
-        let out = std::path::PathBuf::from(out_dir);
-        let outcome = tauri::async_runtime::spawn_blocking(move || {
-            sidecar_lock::run(&app, &roots, &guids, &out)
-        })
-        .await
-        .map_err(|e| format!("content_lock_run task failed: {e}"))?
-        .map_err(|e| format!("{e:#}"))?;
-        usage::track("content.protect");
-        return serde_json::to_value(outcome).map_err(|e| e.to_string());
-    }
-    #[cfg(not(sidecar))]
-    {
-        let _ = (app, paths, guids, out_dir);
-        Err("this build can't lock content".into())
+        Err("this build can't read locked GUIDs".into())
     }
 }
 
@@ -1763,102 +1752,11 @@ mod gear_repair_crossing_tests {
     }
 }
 
-/// Whether this build can produce protected copies of a creator's files. Same shape as
-/// [`bike_preview_available`]: the optional local module carries the format, so a build
-/// without it hides the tool rather than offering one that can't do anything.
+/// Whether this build can read which GUID a file is locked to. Same shape as
+/// [`bike_preview_available`]: the optional local module carries the format.
 #[tauri::command]
-fn content_lock_available() -> bool {
+fn guid_reader_available() -> bool {
     cfg!(sidecar)
-}
-
-/// Generate a protected copy of a track for a **specific Steam ID**, leaving the original
-/// untouched.
-///
-/// This is the creator's action. Given a track, it writes the encrypted blob beside the
-/// original (`<track>.mxbsecure`) and returns the fresh **content key** and **asset id** to
-/// register with the store. The original `.pkz` is never modified — the creator keeps their
-/// master and distributes only the blob.
-///
-/// It does **not** seal a `.mxbkey` for a buyer. A key sealed here, for a buyer on a different
-/// machine, could not be DPAPI-machine-bound, so it was portable — a shared file plus the
-/// buyer's public Steam ID opened it anywhere. Keys now reach buyers only by provisioning on
-/// their own machine (the manager's unlock step calls `/v1/keys/grant` and DPAPI-binds the key),
-/// so a copy is useless. The creator registers the content key with the store; the server hands
-/// it to entitled buyers.
-#[tauri::command]
-async fn mxbsecure_generate(
-    track_path: String,
-) -> Result<SecureGenerateOutcome, String> {
-    #[cfg(mxbsecure)]
-    {
-        use std::path::Path;
-
-        let plaintext = tokio::fs::read(&track_path)
-            .await
-            .map_err(|e| format!("read {track_path}: {e}"))?;
-        // Refuse a file that is already one of ours, so a double-encrypt can't seal ciphertext.
-        if plaintext.starts_with(b"MXBSEC") {
-            return Err("that file is already protected".into());
-        }
-        let src = Path::new(&track_path);
-        // The original filename (e.g. `FarmSX.pkz`) is stored in the header so the blob can drop
-        // it; the output uses the stem, so it's `FarmSX.mxbsecure`, not `FarmSX.pkz.mxbsecure`.
-        let name = src
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .ok_or("not a file")?;
-        let stem = src
-            .file_stem()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| name.clone());
-
-        let mut rnd = [0u8; 6];
-        getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
-        let suffix: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
-        let asset_id = format!("{}-{suffix}", mxb_core::names::sanitize_asset_id(&name));
-
-        let locked = mxbsecure::lock(&plaintext, &asset_id, "k1", &name);
-
-        // `<stem>.mxbsecure` beside the original. Written to a temp and renamed, so a crash
-        // mid-write leaves no half file.
-        let blob_path = src
-            .with_file_name(format!("{stem}.mxbsecure"))
-            .to_string_lossy()
-            .to_string();
-        let tmp = format!("{blob_path}.writing");
-        tokio::fs::write(&tmp, &locked.blob).await.map_err(|e| format!("write blob: {e}"))?;
-        tokio::fs::rename(&tmp, &blob_path).await.map_err(|e| format!("finish blob: {e}"))?;
-
-        Ok(SecureGenerateOutcome {
-            game_name: name,
-            blob_path,
-            asset_id: locked.asset_id,
-            content_key: mxbsecure::hex_key(&locked.content_key),
-            plain_bytes: plaintext.len() as u64,
-        })
-    }
-    #[cfg(not(mxbsecure))]
-    {
-        let _ = track_path;
-        Err("this build can't generate protected content".into())
-    }
-}
-
-/// What packing produced: the blob to distribute, plus the asset id and content key to register
-/// with the store so entitled buyers can be granted the key. The key is shown once, here — it is
-/// never written to disk beside the blob.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SecureGenerateOutcome {
-    /// The name the game will list and open (the original file's name, e.g. `FarmSX.pkz`).
-    game_name: String,
-    /// The encrypted blob: `<original>.mxbsecure`.
-    blob_path: String,
-    /// The asset id recorded in the blob header — register this with the store.
-    asset_id: String,
-    /// The content key as hex, shown once for registration with the store. Never stored on disk.
-    content_key: String,
-    plain_bytes: u64,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────
@@ -1942,33 +1840,6 @@ fn presets_save(app: tauri::AppHandle, preset: presets::Preset) -> Result<(), St
     presets::save_preset(&dir, preset).map_err(|e| format!("{e:#}"))?;
     usage::track("preset.save");
     Ok(())
-}
-
-/// What the Protect tab needs to know: whether a GUID has been set, and what it is.
-///
-/// A narrow slice of the manager's command of the same name. Paint sync, enrolment and the
-/// release badge are all its business, not this app's — the shared key is the GUID, which a
-/// creator sets here to seal content to themselves.
-#[tauri::command]
-fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
-    let cfg = config::load_or_detect(&app).unwrap_or_default();
-    serde_json::json!({
-        "version": app.package_info().version.to_string(),
-        "guid": cfg.cp_guid,
-        "enrolled": !cfg.cp_token.trim().is_empty(),
-    })
-}
-
-/// Record the GUID a creator typed.
-///
-/// The manager claims a GUID against the control plane; this only writes it down. Reading it
-/// out of the running game is `gameproc`'s job and stays with the manager — the studio asks
-/// the creator to type it, exactly as they already do for every buyer.
-#[tauri::command]
-fn set_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
-    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
-    cfg.cp_guid = guid.trim().to_string();
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
 /// Draw a bike as one of its model swaps, for the shared viewer.

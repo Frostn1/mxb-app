@@ -472,6 +472,7 @@ export const fr: Translation = {
   "libraryDetail.lockedWord": "verrouillé",
   "libraryDetail.lockedWithMeta":
     "Ce circuit est {{locked}} par son créateur. Son nom, ses détails et son aperçu sont affichés ici, mais les fichiers restent scellés — il ne peut être ni extrait ni prévisualisé en 3D.",
+  "libraryDetail.securedLockedNote": "Contenu protégé par mxbsecure. Déverrouillez-le pour voir ses détails et y jouer — connectez-vous avec Steam si ce n'est pas fait. Il se déverrouille aussi tout seul au lancement du jeu.",
   "libraryDetail.lockedNoMeta":
     "Ce circuit est {{locked}}, donc son nom, sa longueur et son aperçu ne peuvent pas être lus depuis le fichier — seulement son nom de fichier et sa taille.",
 

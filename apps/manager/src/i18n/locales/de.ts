@@ -475,6 +475,7 @@ export const de: Translation = {
   "libraryDetail.lockedWord": "gesperrt",
   "libraryDetail.lockedWithMeta":
     "Diese Strecke wurde von ihrem Ersteller {{locked}}. Name, Details und Vorschau werden hier angezeigt, die Dateien bleiben aber versiegelt — sie lässt sich weder entpacken noch in 3D ansehen.",
+  "libraryDetail.securedLockedNote": "mxbsecure-geschützter Inhalt. Schalte ihn frei, um Details zu sehen und zu spielen — melde dich mit Steam an, falls noch nicht geschehen. Er wird auch beim Spielstart von selbst freigeschaltet.",
   "libraryDetail.lockedNoMeta":
     "Diese Strecke ist {{locked}}, deshalb lassen sich Name, Länge und Vorschau nicht aus der Datei lesen — nur Dateiname und Größe.",
 

@@ -2,7 +2,7 @@
 # Cargo target names cannot hold a space, so this is as close to `mainBinaryName` as it
 # gets. The description is what Windows Task Manager shows in its Processes tab.
 name = "frost-studio"
-version = "0.1.1"
+version = "0.1.2"
 description = "Frost's Studio — MX Bikes content studio"
 authors = ["Frost"]
 edition = "2021"
@@ -46,7 +46,6 @@ base64 = "0.22"
 dirs-next = "2.0.0"
 regex = "1"
 chacha20poly1305 = "0.10"
-getrandom = "0.2"
 image = { version = "0.25", default-features = false, features = [
     "png",
     "jpeg",

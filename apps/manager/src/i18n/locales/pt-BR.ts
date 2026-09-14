@@ -470,6 +470,7 @@ export const ptBR: Translation = {
   "libraryDetail.lockedWord": "bloqueada",
   "libraryDetail.lockedWithMeta":
     "Esta pista foi {{locked}} pelo criador. O nome, os detalhes e a prévia aparecem aqui, mas os arquivos continuam lacrados — não dá pra extrair nem ver em 3D.",
+  "libraryDetail.securedLockedNote": "Conteúdo protegido com mxbsecure. Desbloqueie para ver os detalhes e jogar — entre com a Steam se ainda não entrou. Ele também desbloqueia sozinho quando você inicia o jogo.",
   "libraryDetail.lockedNoMeta":
     "Esta pista está {{locked}}, então o nome, a extensão e a prévia não podem ser lidos do arquivo — só o nome do arquivo e o tamanho.",
 

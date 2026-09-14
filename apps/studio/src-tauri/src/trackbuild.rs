@@ -256,7 +256,8 @@ pub fn compile(
 
 /// Seal a built `.pkz` in place with Studio's own locker. The all-zero GUID is sealed but bound
 /// to nobody, which is how public locked tracks ship. A file already sealed is left alone.
-#[cfg(sidecar)]
+/// Test-only, like the locker it calls: locking is out of Studio for now.
+#[cfg(all(sidecar, test))]
 pub fn lock_pkz(path: &Path, guid: &str) -> Result<()> {
     use crate::sidecar::{KCOL_FOOTER_LEN, KCOL_MAGIC};
     use sha2::{Digest, Sha256};
