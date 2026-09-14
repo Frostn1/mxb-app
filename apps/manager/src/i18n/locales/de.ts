@@ -564,6 +564,12 @@ export const de: Translation = {
   "settings.mxbsecure": "Inhaltssperre (mxbsecure)",
   "settings.mxbsecureDesc":
     "Experimentell. Fügt einen Schützen-Tab hinzu, der eine Datei so sperrt, dass ihr Besitz allein nicht zur Nutzung reicht. Nur für Creator, die bezahlte Inhalte packen.",
+  "settings.mxbsecureUnlock": "Gekaufte Inhalte freischalten",
+  "settings.mxbsecureUnlockDesc":
+    "Wähle eine .mxbsecure-Strecke, die dir gehört. Sie wird für dieses Konto auf diesem Rechner freigeschaltet, erscheint dann und ist offline fahrbar.",
+  "settings.mxbsecureUnlockBtn": "Strecke freischalten…",
+  "settings.mxbsecureUnlockOk": "Freigeschaltet — die Strecke erscheint und ist offline fahrbar.",
+  "settings.mxbsecureUnlockFail": "Dieser Inhalt konnte nicht freigeschaltet werden",
   "secure.intro":
     "Datei wählen, sperren, dann das Entsperren prüfen. Beim Prüfen wird das Blob hier entschlüsselt und Byte für Byte mit dem Original verglichen — der Beleg, dass es auf diesem Rechner zurückkommt.",
   "secure.protectTitle": "Eine Strecke schützen",

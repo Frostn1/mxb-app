@@ -550,6 +550,12 @@ export const en = {
   "settings.mxbsecure": "Content locking (mxbsecure)",
   "settings.mxbsecureDesc":
     "Experimental. Adds a Secure tab that locks a file so owning it isn't enough to use it. Only creators packing paid content need this.",
+  "settings.mxbsecureUnlock": "Unlock purchased content",
+  "settings.mxbsecureUnlockDesc":
+    "Pick a .mxbsecure track you own. It's unlocked for this account on this machine, then lists and rides offline.",
+  "settings.mxbsecureUnlockBtn": "Unlock a track…",
+  "settings.mxbsecureUnlockOk": "Unlocked — the track will list and ride offline.",
+  "settings.mxbsecureUnlockFail": "Couldn't unlock this content",
   "secure.intro":
     "Pick a file, lock it, then verify it unlocks. Verifying decrypts the blob right here and checks it matches the original, byte for byte — the proof it round-trips on this machine.",
   "secure.protectTitle": "Protect a track",

@@ -65,6 +65,7 @@ import {
   setPaintSyncEnabled,
   setMxbsecureEnabled,
   contentSecureAvailable,
+  mxbsecureUnlock,
   setVoiceInputDevice,
   setVoiceOutputDevice,
   setVoicePttHotkey,
@@ -508,6 +509,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const paintSyncEnabled = config.paintSyncEnabled ?? false;
   const mxbsecureEnabled = config.mxbsecureEnabled ?? false;
   const [secureAvailable, setSecureAvailable] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
   const voiceInput = config.voiceInputDevice ?? "";
   const voiceOutput = config.voiceOutputDevice ?? "";
   const voicePtt = config.voicePttHotkey || FALLBACK_PTT_HOTKEY;
@@ -771,6 +773,27 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
       await reloadConfig();
+    }
+  };
+
+  // Unlock a purchased .mxbsecure track: pick the file, prove entitlement online once, and
+  // seal the released key to this machine. From then on it lists and rides offline.
+  const unlockSecured = async () => {
+    const chosen = await pickFolder({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Secured content", extensions: ["mxbsecure"] }],
+    });
+    const path = typeof chosen === "string" ? chosen : null;
+    if (!path) return;
+    setUnlocking(true);
+    try {
+      await mxbsecureUnlock(path);
+      toast.success(t("settings.mxbsecureUnlockOk"));
+    } catch (e) {
+      toast.error(t("settings.mxbsecureUnlockFail"), { description: String(e) });
+    } finally {
+      setUnlocking(false);
     }
   };
 
@@ -1362,6 +1385,25 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   checked={mxbsecureEnabled}
                   onChange={toggleMxbsecure}
                 />
+                {mxbsecureEnabled && (
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-medium">{t("settings.mxbsecureUnlock")}</p>
+                      <p className="mt-0.5 text-[12px] text-muted-foreground">
+                        {t("settings.mxbsecureUnlockDesc")}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-none"
+                      disabled={unlocking}
+                      onClick={() => void unlockSecured()}
+                    >
+                      {t("settings.mxbsecureUnlockBtn")}
+                    </Button>
+                  </div>
+                )}
               </>
             )}
           </Section>
