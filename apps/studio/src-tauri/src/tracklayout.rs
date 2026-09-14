@@ -1001,7 +1001,11 @@ fn side_singles(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
             if pos + span + SIDE_SINGLE_CLEAR_M > a {
                 break;
             }
-            if tight(pos - 10.0, span + 15.0) || !single_fits(&spans, pos, span) {
+            if tight(pos - 10.0, span + 15.0)
+                || !single_fits(&spans, pos, span)
+                || single_near(out, pos, span)
+                || single_near(&added, pos, span)
+            {
                 pos += 4.0;
                 continue;
             }
@@ -1054,11 +1058,13 @@ fn fill_gaps(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
                     .wrapping_mul(0xBF58_476D_1CE4_E5B9);
                 let frac = ((x >> 11) as f64 / (1u64 << 53) as f64) as f32;
                 // Rollers and, now and then, a small single: an empty chicane rode as nothing.
+                // Never near another single: one every 10 m rode as "a lot of singles".
                 if frac > 0.55 {
                     let h = 1.1 + 0.5 * frac;
                     let (up, down) = (air_run(h), landing_run(h));
                     let span = up + 1.2 + down;
-                    if pos + span + FILL_CLEAR_M <= a && !hairpin(pos, span) {
+                    let lone = !single_near(out, pos, span) && !single_near(&added, pos, span);
+                    if lone && pos + span + FILL_CLEAR_M <= a && !hairpin(pos, span) {
                         let marks = [(0.0, 0.0), (up, h), (up + 1.2, h), (span, 0.0)];
                         added.push(Feature::Custom {
                             at: pos,
@@ -1070,7 +1076,8 @@ fn fill_gaps(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
                         continue;
                     }
                 }
-                added.push(Feature::Roller { at: pos, length: FILL_ROLLER_M, height: 0.5 + 0.3 * frac });
+                // Tall enough to ride: at 0.5–0.8 m a chicane full of them rode as empty.
+                added.push(Feature::Roller { at: pos, length: FILL_ROLLER_M, height: FILL_ROLLER_H.0 + (FILL_ROLLER_H.1 - FILL_ROLLER_H.0) * frac });
                 pos += FILL_ROLLER_M + FILL_SPACING_M;
             }
         }
@@ -1089,6 +1096,20 @@ const FILL_CLEAR_M: f32 = 8.0;
 const FILL_ROLLER_M: f32 = 12.0;
 const FILL_SPACING_M: f32 = 10.0;
 const FILL_HAIRPIN_M: f32 = 15.0;
+const FILL_ROLLER_H: (f32, f32) = (0.9, 1.19);
+
+/// The least clear ground between two singles, metres.
+const SINGLE_APART_M: f32 = 50.0;
+
+/// Whether a single (not a wave run) stands within [`SINGLE_APART_M`] of `at..at + len`.
+fn single_near(fs: &[Feature], at: f32, len: f32) -> bool {
+    fs.iter().any(|f| {
+        matches!(f, Feature::Custom { .. })
+            && f.height() >= 1.2
+            && f.at() < at + len + SINGLE_APART_M
+            && f.at() + f.length() > at - SINGLE_APART_M
+    })
+}
 
 /// Whether the lap turns little enough under a jump that one built along its straight line
 /// still lands on the track: the stray of an arc over it, `len × turning / 8`, stays under a

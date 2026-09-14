@@ -1191,9 +1191,10 @@ fn grow(f: &Feature, kh: f32, kl: f32) -> Feature {
     match f.clone() {
         Feature::Tabletop { at, length, height, lip } => Feature::Tabletop { at, length: length * kl, height: h(height), lip },
         Feature::Double { at, height, gap, lip } => Feature::Double { at, height: h(height), gap: gap * kl, lip },
+        // A single barely longer: stretched with the rest, its crest became a fake table.
         Feature::Custom { at, length, shape, side } => Feature::Custom {
             at,
-            length: length * kl,
+            length: length * (1.0 + (kl - 1.0) * 0.25),
             shape: shape.into_iter().map(|p| ShapePoint { u: p.u, h: h(p.h) }).collect(),
             side,
         },
@@ -1617,7 +1618,10 @@ impl TrackProgram {
                 .sum();
             len * turning / 8.0 <= BIG_JUMP_MAX_SAG_M
         };
-        let jump = |f: &Feature| f.lips() > 0 && f.height() >= 1.2;
+        // Jumps only: a step-up is a grade, and taken for a jump it cleared the rollers after it.
+        let jump = |f: &Feature| {
+            matches!(f, Feature::Tabletop { .. } | Feature::Double { .. } | Feature::Custom { .. }) && f.height() >= 1.2
+        };
         let mut i = 0;
         while i < self.features.len() {
             let f = self.features[i].clone();
