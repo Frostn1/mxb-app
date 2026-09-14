@@ -32,6 +32,7 @@ import { steamResult, redirectPage } from "./page";
 import { rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
 import { pruneReports, putReport } from "./diagnostics";
+import { stateRegions } from "./stateinvariants";
 import {
   diagnosticsDashboard,
   diagnosticsFile,
@@ -316,6 +317,12 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "PUT" && path === "/v1/me/name") return putName(request, account, env);
   if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
   if (method === "PUT" && path === "/v1/diagnostics") return putReport(request, account, env);
+  // Which runs of the game's memory to hash, for the build the client is running. Where to
+  // read, never what to expect: the baselines stay here, so the shipped binary still knows
+  // nothing about what any of it should contain. An unbaselined build answers empty.
+  if (method === "GET" && path === "/v1/diagnostics/state-regions") {
+    return stateRegions(request, env);
+  }
   if (method === "GET" && path === "/v1/voice/ice") return iceServers();
 
   // Paid plugins. Open to every account on the same terms as voice and paint sync: holding
