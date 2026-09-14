@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Content you own unlocks on its own at the moments that matter — right after you sign in with
+  Steam, when you open the Library, and when the game launches — so a track you just bought is
+  playable without restarting the app. A file you don't own is left alone, not retried endlessly.
+- A secured file you own but haven't pulled down yet now reads "Ready to unlock" instead of a
+  misleading "Unlocking…", with a line saying it unlocks when you open the Library or start the game.
 - Secured content is harder to pull apart, and its key is tied more tightly to your PC. If a key
   needs refreshing, the app does it for you the next time you unlock — nothing to redo.
 - The Settings list of secured content now finds files anywhere under your mods folder (a

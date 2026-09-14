@@ -581,6 +581,8 @@ export const fr: Translation = {
   "settings.secStatusTitle": "Contenu sécurisé trouvé",
   "settings.secStatusUnlocked": "Déverrouillé",
   "settings.secStatusUnlocking": "Déverrouillage…",
+  "settings.secStatusReady": "Prêt à déverrouiller",
+  "settings.secReasonReady": "Vous le possédez — il se déverrouille en ouvrant la Bibliothèque ou en lançant le jeu.",
   "settings.secStatusNotOwned": "Pas dans ta bibliothèque",
   "settings.secStatusUnavailable": "Indisponible",
   "settings.secStatusNeedsSteam": "Se connecter avec Steam",
