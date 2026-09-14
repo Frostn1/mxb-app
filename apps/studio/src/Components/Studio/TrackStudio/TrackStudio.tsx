@@ -437,7 +437,11 @@ export default function TrackStudio() {
       const features = program.features.map((f, i) =>
         i === moved.index ? { ...f, at: Math.max(0, at) } : f,
       );
-      void settle({ ...program, features });
+      const next = { ...program, features };
+      void settle(next);
+      // Keep the part you just dragged selected, at its new row.
+      const row = lapSteps(next).findIndex((x) => x.kind === "feature" && x.index === moved.index);
+      if (row >= 0) setScope(row);
       return;
     }
     // A segment lands where the row it was dropped on sits. Dropped on a feature, that is
@@ -513,11 +517,20 @@ export default function TrackStudio() {
     if (!program) return;
     setTouched(true);
     const probe = newFeature(kind, 0);
-    const at = roomiestGap(program, featureSpan(probe).length);
-    void settle({ ...program, features: [...program.features, newFeature(kind, at)] });
-    // Put it on screen. It lands in the emptiest stretch of lap, which is rarely the part
-    // you are looking at — a new row appearing somewhere off-screen reads as nothing
-    // happening at all.
+    // Land it where you are looking — the start of the selected step — and select it, the same
+    // way a new corner does. Only when nothing is selected does it fall back to the emptiest
+    // stretch of lap; a part that lands next to what you're editing, already selected, reads far
+    // better than one that jumps to a computed gap somewhere in the middle of the list.
+    const on = scope !== null ? steps[scope] : undefined;
+    const at = on ? on.at : roomiestGap(program, featureSpan(probe).length);
+    const newIndex = program.features.length;
+    const next = { ...program, features: [...program.features, newFeature(kind, at)] };
+    void settle(next);
+    const row = lapSteps(next).findIndex((x) => x.kind === "feature" && x.index === newIndex);
+    if (row >= 0) {
+      setScope(row);
+      setFocus(positionAt(next, at));
+    }
     setFlash(at);
   }
 
@@ -1048,10 +1061,25 @@ export default function TrackStudio() {
                       on.kind === "feature"
                         ? { at: on.at, feature: on.feature }
                         : { at: on.at, segment: on.segment },
-                    onScoped: (patch: Record<string, number>) =>
-                      on.kind === "feature"
-                        ? editFeature(on.index, patch as Partial<TrackFeature>)
-                        : editSegment(on.index, patch as Partial<TrackSegment>),
+                    onScoped: (patch: Record<string, number>) => {
+                      if (on.kind !== "feature") {
+                        editSegment(on.index, patch as Partial<TrackSegment>);
+                        return;
+                      }
+                      editFeature(on.index, patch as Partial<TrackFeature>);
+                      // Moving a part along the lap re-sorts the rows; follow it to its new one
+                      // so the selection stays on the part you're editing instead of jumping to
+                      // whatever now sits where it used to.
+                      if ("at" in patch) {
+                        const moved = program.features.map((f, i) =>
+                          i === on.index ? ({ ...f, ...patch } as TrackFeature) : f,
+                        );
+                        const row = lapSteps({ ...program, features: moved }).findIndex(
+                          (x) => x.kind === "feature" && x.index === on.index,
+                        );
+                        if (row >= 0) setScope(row);
+                      }
+                    },
                     mode: on.kind === "feature" ? stripMode : "height",
                     // Only a jump that is already a drawn shape has loose points to move;
                     // every other kind is reshaped through its own numbers.
