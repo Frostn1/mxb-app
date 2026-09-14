@@ -28,6 +28,7 @@ import {
 import { adminSearch } from "./adminsearch";
 import { adminAssets, isAssetsPath } from "./assets";
 import { isWebPath, webRoutes } from "./web";
+import { page } from "./page";
 import { bmacWebhook } from "./bmac";
 import { pruneReports, putReport } from "./diagnostics";
 import {
@@ -330,7 +331,16 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "POST" && path === "/v1/entitlements/check") {
     return checkEntitlement(request, account, env);
   }
-  if (method === "POST" && path === "/v1/keys/grant") return grantKey(request, account, env);
+  if (method === "POST" && path === "/v1/keys/grant") {
+    // Per account, since that's who is asking. The app asks once per file per PC.
+    if (env.KEY_GRANT_LIMITER && !(await env.KEY_GRANT_LIMITER.limit({ key: account.id })).success) {
+      return new Response(JSON.stringify({ error: "too many key requests, wait a minute and try again" }), {
+        status: 429,
+        headers: { "content-type": "application/json", "Retry-After": "60" },
+      });
+    }
+    return grantKey(request, account, env);
+  }
   if (method === "GET" && path === "/v1/voice/room") return voiceRoom(request, url, account, env);
 
   // Paint sync, open on the same terms as voice, and for the same reason: a rider only sees
@@ -522,14 +532,6 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
   return page(200, "Steam account linked. You can close this tab and go back to the app.");
 }
 
-/** A one-line page for the browser half of the sign-in. */
-function page(status: number, message: string): Response {
-  const body = `<!doctype html><meta charset="utf-8"><title>MXB App</title>` +
-    `<body style="font:16px/1.5 system-ui;margin:4rem auto;max-width:30rem;padding:0 1rem">` +
-    `<p>${message.replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"))}</p>`;
-  return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
-}
-
 /**
  * What this player may use.
  *
@@ -543,7 +545,7 @@ async function listEntitlements(account: Account, env: Env): Promise<Response> {
   const rows = await env.DB.prepare(
     "SELECT e.asset_id, a.title, e.source, e.granted_at" +
       " FROM entitlements e JOIN assets a ON a.id = e.asset_id" +
-      " WHERE e.steam_id = ? AND e.revoked_at IS NULL AND a.withdrawn_at IS NULL" +
+      " WHERE e.steam_id = ? AND e.revoked_at IS NULL AND a.withdrawn_at IS NULL AND a.taken_down_at IS NULL" +
       " ORDER BY e.granted_at DESC",
   )
     .bind(account.steam_id)
@@ -584,7 +586,8 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
 
   const placeholders = assetIds.map(() => "?").join(",");
   const known = await env.DB.prepare(
-    `SELECT id, title, wrapped_key IS NOT NULL AS has_key, withdrawn_at IS NOT NULL AS withdrawn` +
+    `SELECT id, title, wrapped_key IS NOT NULL AS has_key,` +
+      ` (withdrawn_at IS NOT NULL OR taken_down_at IS NOT NULL) AS withdrawn` +
       ` FROM assets WHERE id IN (${placeholders})`,
   )
     .bind(...assetIds)
@@ -634,8 +637,8 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
  * and the revoked-entitlement branches matter to the grant especially — a key must stop
  * being issued the instant either flips, which is what makes revocation real.
  *
- * Every call is logged, refusals included: one identity walking the catalogue is only
- * visible if the "no"s are written down too.
+ * Every call from a linked account about a real asset is logged, refusals included: one
+ * identity walking the catalogue is only visible if the "no"s are written down too.
  */
 async function decideEntitlement(
   account: Account,
@@ -643,40 +646,45 @@ async function decideEntitlement(
   session: string,
   env: Env,
 ): Promise<{ allowed: boolean; reason: string }> {
-  const decide = async (): Promise<{ allowed: boolean; reason: string }> => {
-    if (!account.steam_id) return { allowed: false, reason: "no Steam account linked" };
-    const asset = await env.DB.prepare("SELECT withdrawn_at FROM assets WHERE id = ?")
+  // `log` is false for the two answers that say nothing about a real buyer and a real asset: any
+  // account token could otherwise write rows forever, and bury the creator's usage log in them.
+  const decide = async (): Promise<{ allowed: boolean; reason: string; log: boolean }> => {
+    if (!account.steam_id) return { allowed: false, reason: "no Steam account linked", log: false };
+    const asset = await env.DB.prepare("SELECT withdrawn_at, taken_down_at FROM assets WHERE id = ?")
       .bind(assetId)
-      .first<{ withdrawn_at: number | null }>();
-    if (!asset) return { allowed: false, reason: "no such asset" };
-    if (asset.withdrawn_at !== null) return { allowed: false, reason: "withdrawn" };
+      .first<{ withdrawn_at: number | null; taken_down_at: number | null }>();
+    if (!asset) return { allowed: false, reason: "no such asset", log: false };
+    // Ours, and checked first: a creator restoring a withdrawal doesn't lift it.
+    if (asset.taken_down_at !== null) return { allowed: false, reason: "taken down", log: true };
+    if (asset.withdrawn_at !== null) return { allowed: false, reason: "withdrawn", log: true };
 
     const row = await env.DB.prepare(
       "SELECT revoked_at FROM entitlements WHERE steam_id = ? AND asset_id = ?",
     )
       .bind(account.steam_id, assetId)
       .first<{ revoked_at: number | null }>();
-    if (!row) return { allowed: false, reason: "not entitled" };
-    if (row.revoked_at !== null) return { allowed: false, reason: "revoked" };
-    return { allowed: true, reason: "entitled" };
+    if (!row) return { allowed: false, reason: "not entitled", log: true };
+    if (row.revoked_at !== null) return { allowed: false, reason: "revoked", log: true };
+    return { allowed: true, reason: "entitled", log: true };
   };
 
-  const result = await decide();
-  await env.DB.prepare(
-    "INSERT INTO entitlement_grants (steam_id, asset_id, session_id, decision, reason, issued_at)" +
-      " VALUES (?, ?, ?, ?, ?, ?)",
-  )
-    .bind(
-      account.steam_id ?? "unlinked",
-      assetId,
-      session,
-      result.allowed ? "allow" : "deny",
-      result.reason,
-      Date.now(),
+  const { allowed, reason, log } = await decide();
+  if (log) {
+    await env.DB.prepare(
+      "INSERT INTO entitlement_grants (steam_id, asset_id, session_id, decision, reason, issued_at)" +
+        " VALUES (?, ?, ?, ?, ?, ?)",
     )
-    .run();
-  return result;
+      .bind(account.steam_id, assetId, session, allowed ? "allow" : "deny", reason, Date.now())
+      .run();
+  }
+  return { allowed, reason };
 }
+
+/** What an asset id may look like: the site mints `ast_…`, older tools `trk_…`. */
+const ASSET_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** The app sends 32 hex characters; anything printable up to 128 is accepted. */
+const SESSION_ID = /^[\x21-\x7e]{1,128}$/;
 
 /** Pull and validate `{ assetId, sessionId }` from a request body. */
 async function assetRequest(
@@ -692,7 +700,11 @@ async function assetRequest(
   if (typeof assetId !== "string" || !assetId.trim()) {
     return json(400, { error: "an asset id is required" });
   }
+  if (!ASSET_ID.test(assetId.trim())) return json(400, { error: "that isn't an asset id" });
   const session = typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : "none";
+  if (!SESSION_ID.test(session)) {
+    return json(400, { error: "sessionId must be 1 to 128 printable characters" });
+  }
   // A 64-hex SHA-256 of the caller's blob, or null. Validated to shape here so the grant check
   // is a plain equality against the stored hash.
   const hash =
