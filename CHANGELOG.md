@@ -6,6 +6,9 @@
 - Locked tracks show in the track list however you start the game — from the app or from
   Steam — once "Use locked content in game" is on.
 
+### Fixed
+- Updating the app also updates the helper that opens locked tracks.
+
 ## Unreleased — Frost's Studio
 
 ### Changed
