@@ -31,7 +31,8 @@ mod trackvenue;
 mod winefetch;
 
 /// Sealing content to a buyer. Gitignored, like the module it builds on.
-#[cfg(sidecar)]
+// Locking is out of Studio for now; kept only for the developer-only track-delivery tests in trackbuild.rs.
+#[cfg(all(sidecar, test))]
 mod sidecar_lock;
 
 // Re-exported at the root so the `crate::edf::…` call sites throughout the modules above
@@ -131,9 +132,8 @@ fn main() {
             scan_bike_targets,
             scan_rider_targets,
             presets_save,
-            experimental_state,
-            set_guid,
-            content_lock_available,
+            guid_reader_available,
+            read_locked_guids,
             photo_save,
             psd_read,
             psd_save,
@@ -160,8 +160,6 @@ fn main() {
             paint_studio_stage,
             paint_studio_save,
             paint_studio_extract,
-            content_lock_plan,
-            content_lock_run,
             read_track_placeable,
             load_track_prop,
             save_track_props,
@@ -866,58 +864,52 @@ async fn paint_studio_extract(
 /// Where templates go when the player doesn't pick somewhere: their Documents folder, not
 /// the mods folder — the game scans that, and a folder of loose sheets isn't a mod.
 
-/// What a run over `paths` would touch — every file under the selection, with the ones it
-/// would leave alone flagged and why. Folders are walked; a file is taken as itself.
+/// A file and the GUID it is locked to, for Diagnose. Read-only: Studio no longer locks.
+#[derive(serde::Serialize)]
+struct LockedFile {
+    rel: String,
+    abs: String,
+    guid: Option<String>,
+}
+
+/// Every file under `paths` with the GUID it's locked to. Folders are walked; a file is taken
+/// as itself. Reads only the end of each file.
 #[tauri::command]
-async fn content_lock_plan(paths: Vec<String>) -> Result<serde_json::Value, String> {
+async fn read_locked_guids(paths: Vec<String>) -> Result<Vec<LockedFile>, String> {
     #[cfg(sidecar)]
     {
-        let roots: Vec<std::path::PathBuf> =
-            paths.into_iter().map(std::path::PathBuf::from).collect();
-        let items = tauri::async_runtime::spawn_blocking(move || sidecar_lock::plan(&roots))
-            .await
-            .map_err(|e| format!("content_lock_plan task failed: {e}"))?
-            .map_err(|e| format!("{e:#}"))?;
-        return serde_json::to_value(items).map_err(|e| e.to_string());
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut out = Vec::new();
+            for root in paths.iter().map(std::path::Path::new) {
+                let base = root.parent().unwrap_or(std::path::Path::new(""));
+                let files: Vec<std::path::PathBuf> = if root.is_file() {
+                    vec![root.to_path_buf()]
+                } else {
+                    walkdir::WalkDir::new(root)
+                        .sort_by_file_name()
+                        .into_iter()
+                        .filter_map(Result::ok)
+                        .filter(|e| e.file_type().is_file())
+                        .map(|e| e.into_path())
+                        .collect()
+                };
+                for p in files {
+                    out.push(LockedFile {
+                        rel: p.strip_prefix(base).unwrap_or(&p).to_string_lossy().replace('\\', "/"),
+                        abs: p.to_string_lossy().into_owned(),
+                        guid: crate::sidecar::locked_guid_of(&p),
+                    });
+                }
+            }
+            out
+        })
+        .await
+        .map_err(|e| format!("read_locked_guids task failed: {e}"))
     }
     #[cfg(not(sidecar))]
     {
         let _ = paths;
-        Err("this build can't lock content".into())
-    }
-}
-
-/// Write a copy of every file in `paths`, locked to each GUID in `guids`, under
-/// `out_dir/<GUID>/`. Reports progress on `content-lock://progress`.
-///
-/// The sources are only ever read. A creator's plaintext is the one thing they can't get
-/// back, so the tool that hands out locked copies is not also the tool that could eat the
-/// original.
-#[tauri::command]
-async fn content_lock_run(
-    app: tauri::AppHandle,
-    paths: Vec<String>,
-    guids: Vec<String>,
-    out_dir: String,
-) -> Result<serde_json::Value, String> {
-    #[cfg(sidecar)]
-    {
-        let roots: Vec<std::path::PathBuf> =
-            paths.into_iter().map(std::path::PathBuf::from).collect();
-        let out = std::path::PathBuf::from(out_dir);
-        let outcome = tauri::async_runtime::spawn_blocking(move || {
-            sidecar_lock::run(&app, &roots, &guids, &out)
-        })
-        .await
-        .map_err(|e| format!("content_lock_run task failed: {e}"))?
-        .map_err(|e| format!("{e:#}"))?;
-        usage::track("content.protect");
-        return serde_json::to_value(outcome).map_err(|e| e.to_string());
-    }
-    #[cfg(not(sidecar))]
-    {
-        let _ = (app, paths, guids, out_dir);
-        Err("this build can't lock content".into())
+        Err("this build can't read locked GUIDs".into())
     }
 }
 
@@ -1698,11 +1690,10 @@ mod gear_repair_crossing_tests {
     }
 }
 
-/// Whether this build can produce protected copies of a creator's files. Same shape as
-/// [`bike_preview_available`]: the optional local module carries the format, so a build
-/// without it hides the tool rather than offering one that can't do anything.
+/// Whether this build can read which GUID a file is locked to. Same shape as
+/// [`bike_preview_available`]: the optional local module carries the format.
 #[tauri::command]
-fn content_lock_available() -> bool {
+fn guid_reader_available() -> bool {
     cfg!(sidecar)
 }
 
@@ -1787,33 +1778,6 @@ fn presets_save(app: tauri::AppHandle, preset: presets::Preset) -> Result<(), St
     presets::save_preset(&dir, preset).map_err(|e| format!("{e:#}"))?;
     usage::track("preset.save");
     Ok(())
-}
-
-/// What the Protect tab needs to know: whether a GUID has been set, and what it is.
-///
-/// A narrow slice of the manager's command of the same name. Paint sync, enrolment and the
-/// release badge are all its business, not this app's — the shared key is the GUID, which a
-/// creator sets here to seal content to themselves.
-#[tauri::command]
-fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
-    let cfg = config::load_or_detect(&app).unwrap_or_default();
-    serde_json::json!({
-        "version": app.package_info().version.to_string(),
-        "guid": cfg.cp_guid,
-        "enrolled": !cfg.cp_token.trim().is_empty(),
-    })
-}
-
-/// Record the GUID a creator typed.
-///
-/// The manager claims a GUID against the control plane; this only writes it down. Reading it
-/// out of the running game is `gameproc`'s job and stays with the manager — the studio asks
-/// the creator to type it, exactly as they already do for every buyer.
-#[tauri::command]
-fn set_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
-    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
-    cfg.cp_guid = guid.trim().to_string();
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
 /// Draw a bike as one of its model swaps, for the shared viewer.

@@ -2,13 +2,11 @@ import { useEffect, useState } from "react";
 import { cn } from "@frost/shared/lib/utils";
 import { PaneActive } from "../Shell/ContextBar";
 import { useConfig } from "@frost/shared/Context/Config";
-import { contentLockAvailable } from "@frost/shared/api/mods";
 import type { Loadout } from "@frost/shared/types";
 import Designer from "./Designer/Designer";
 import PaintStudio from "../PaintStudio/PaintStudio";
 import RiderStudio from "../Rider/RiderStudio";
 import PoseStudio from "../Rider/PoseStudio";
-import Protect from "./Protect/Protect";
 import Diagnose from "./Diagnose/Diagnose";
 import TrackStudio from "./TrackStudio/TrackStudio";
 import RiderKitProvider from "../Rider/RiderKit";
@@ -32,7 +30,6 @@ export type StudioTab =
   | "rider"
   | "pose"
   | "track"
-  | "protect"
   | "diagnose";
 
 interface StudioProps {
@@ -57,14 +54,6 @@ export default function Studio({
   // isn't offered there rather than being offered and empty. Designer and Paints both work
   // for either title: a `.pnt` is a `.pnt`.
   const hasRider = game.caps.viewer;
-  // Locking needs the optional local module, the same one the bike preview needs. Without
-  // it the tab would be a button that can only ever fail, so it isn't offered.
-  const [hasLock, setHasLock] = useState(false);
-  useEffect(() => {
-    contentLockAvailable()
-      .then(setHasLock)
-      .catch(() => {});
-  }, []);
   // Which sub-views have ever been opened. A tab is mounted on first visit and then kept —
   // see the note on `Pane` below — so this is what stops someone who never opens the Rider
   // paying for its geometry.
@@ -74,12 +63,10 @@ export default function Studio({
   const [handoff, setHandoff] = useState<string[] | null>(null);
   useEffect(() => setVisited((v) => (v.has(tab) ? v : new Set(v).add(tab))), [tab]);
 
-  // Switching titles can take the Rider away underneath us, and the lock tab only
-  // exists once the availability check has come back.
+  // Switching titles can take the Rider away underneath us.
   useEffect(() => {
     if (!hasRider && (tab === "rider" || tab === "pose")) onTab("designer");
-    if (!hasLock && tab === "protect") onTab("designer");
-  }, [hasRider, hasLock, tab, onTab]);
+  }, [hasRider, tab, onTab]);
 
   return (
     <div className="flex h-full flex-col">
@@ -97,11 +84,6 @@ export default function Studio({
       {visited.has("track") && (
         <Pane active={tab === "track"}>
           <TrackStudio />
-        </Pane>
-      )}
-      {visited.has("protect") && hasLock && (
-        <Pane active={tab === "protect"}>
-          <Protect />
         </Pane>
       )}
       {visited.has("diagnose") && (

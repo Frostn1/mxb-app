@@ -60,9 +60,7 @@ import type {
   LiveShareInfo,
   GameId,
   GameInfo,
-  LockItem,
-  LockOutcome,
-  LockProgress,
+  LockedFile,
 } from "../types";
 import type { BaseTKey } from "../i18n/core";
 import { isHost, readDownloadPrefs, type DownloadPrefs } from "../lib/downloadPrefs";
@@ -309,12 +307,17 @@ export function bikePreviewAvailable(): Promise<boolean> {
   return invoke<boolean>("bike_preview_available");
 }
 
-/* ── Content lock ──────────────────────────────────────────────────────────────────── */
+/* ── Locked GUID reader ────────────────────────────────────────────────────────────── */
 
-/** Whether this build can lock content. Same gate as the bike preview: without the
- *  optional local module the Studio hides the tool rather than offering a dead one. */
-export function contentLockAvailable(): Promise<boolean> {
-  return invoke<boolean>("content_lock_available");
+/** Whether this build can read which GUID a file is locked to. Needs the optional local
+ *  module, like the bike preview. */
+export function guidReaderAvailable(): Promise<boolean> {
+  return invoke<boolean>("guid_reader_available");
+}
+
+/** Every file under `paths`, with the GUID each is locked to. Folders are walked. */
+export function readLockedGuids(paths: string[]): Promise<LockedFile[]> {
+  return invoke<LockedFile[]>("read_locked_guids", { paths });
 }
 
 /** Whether this build can lock content with mxbsecure (the packer is a local-only module). */
@@ -434,27 +437,6 @@ export function steamLinkStart(): Promise<string> {
  *  linked yet. Reflects sign-in state and lets the UI poll for completion. */
 export function steamLinkStatus(): Promise<string | null> {
   return invoke<string | null>("steam_link_status");
-}
-
-/** What a run would touch — folders walked, files taken as themselves, skips flagged. */
-export function contentLockPlan(paths: string[]): Promise<LockItem[]> {
-  return invoke<LockItem[]>("content_lock_plan", { paths });
-}
-
-/** Write a copy of every file locked to each GUID, under `outDir/<GUID>/`. Reads only:
- *  the creator's originals are never touched. */
-export function contentLockRun(
-  paths: string[],
-  guids: string[],
-  outDir: string,
-): Promise<LockOutcome> {
-  return invoke<LockOutcome>("content_lock_run", { paths, guids, outDir });
-}
-
-export function onContentLockProgress(
-  cb: (p: LockProgress) => void,
-): Promise<UnlistenFn> {
-  return listen<LockProgress>("content-lock://progress", (e) => cb(e.payload));
 }
 
 /** This player's own MX Bikes GUID, read out of the running game. `null` when the game

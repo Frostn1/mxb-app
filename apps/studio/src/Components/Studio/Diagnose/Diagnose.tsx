@@ -5,12 +5,12 @@ import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
 import {
-  contentLockAvailable,
-  contentLockPlan,
+  guidReaderAvailable,
   modelSwapLineup,
+  readLockedGuids,
   scanModelSwaps,
 } from "@frost/shared/api/mods";
-import type { BikeModels, LockItem } from "@frost/shared/types";
+import type { BikeModels, LockedFile } from "@frost/shared/types";
 import { useT } from "@/i18n";
 
 /** A bike folder as people say it: the OEM prefix and underscores dropped. */
@@ -137,14 +137,14 @@ function SwapLineup() {
 
 function LockedGuids() {
   const t = useT();
-  // Reading a file's trailer needs the optional local module, same as locking does.
+  // Reading a file's trailer needs the optional local module.
   const [available, setAvailable] = useState(false);
-  const [items, setItems] = useState<LockItem[]>([]);
+  const [items, setItems] = useState<LockedFile[]>([]);
   const [roots, setRoots] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    contentLockAvailable()
+    guidReaderAvailable()
       .then(setAvailable)
       .catch(() => {});
   }, []);
@@ -156,10 +156,10 @@ function LockedGuids() {
     const all = [...new Set([...roots, ...paths])];
     setBusy(true);
     try {
-      setItems(await contentLockPlan(all));
+      setItems(await readLockedGuids(all));
       setRoots(all);
     } catch (e) {
-      toast.error(t("protect.planFailed"), { description: String(e) });
+      toast.error(t("diagnose.readFailed"), { description: String(e) });
     } finally {
       setBusy(false);
     }
@@ -175,10 +175,10 @@ function LockedGuids() {
         <>
           <div className="flex flex-none flex-wrap items-center gap-2 px-6 pb-3">
             <Button size="sm" variant="outline" disabled={busy} onClick={() => void pick(false)}>
-              <FileSearch className="size-3.5" /> {t("protect.addFiles")}
+              <FileSearch className="size-3.5" /> {t("diagnose.addFiles")}
             </Button>
             <Button size="sm" variant="outline" disabled={busy} onClick={() => void pick(true)}>
-              <FolderOpen className="size-3.5" /> {t("protect.addFolder")}
+              <FolderOpen className="size-3.5" /> {t("diagnose.addFolder")}
             </Button>
             {items.length > 0 && (
               <Button
@@ -190,7 +190,7 @@ function LockedGuids() {
                   setRoots([]);
                 }}
               >
-                <Trash2 className="size-3.5" /> {t("protect.clear")}
+                <Trash2 className="size-3.5" /> {t("diagnose.clear")}
               </Button>
             )}
             {busy && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
@@ -212,7 +212,7 @@ function LockedGuids() {
                     <span className="flex-none select-text font-mono text-[11px]">
                       {it.guid
                         ? /^0+$/.test(it.guid)
-                          ? t("protect.lockedToNobody")
+                          ? t("diagnose.lockedToNobody")
                           : it.guid
                         : t("diagnose.notProtected")}
                     </span>

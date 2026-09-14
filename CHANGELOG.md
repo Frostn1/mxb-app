@@ -40,6 +40,7 @@
 ### Removed
 - Frost Studio no longer has an MXB Secure tab. Creators lock mxbsecure files on mxbsecure.com,
   where the buyer list lives too.
+- Frost Studio no longer has the GUID Lock tab. Diagnose still shows which GUID a file is locked to.
 
 ### Added
 - Settings → General lists the secured files it found and each one's status — Unlocked,

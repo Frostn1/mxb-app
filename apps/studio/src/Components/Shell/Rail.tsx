@@ -17,8 +17,8 @@ export interface RailEntry<T extends string> {
  * per row gets you once the rows stop being nouns you can draw. The names are quicker to read than a glyph
  * you have to decode, and they are what people call these tools anyway.
  *
- * Grouped, because "draw something" and "lock something you have already made" are different
- * errands and a flat list of seven says they are the same one.
+ * Grouped, because "make something" and "check something already on disk" are different
+ * errands and a flat list says they are the same one.
  */
 export default function Rail<T extends string>({
   entries,
