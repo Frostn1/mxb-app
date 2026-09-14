@@ -488,6 +488,8 @@ export interface BikeModel {
   assembled: boolean;
   /** The joints to pose about. Null for a bike that wasn't assembled. */
   rig: BikeRig | null;
+  /** How many of `nodes`, at the end, are wheels from the tyres mod rather than the bike. */
+  wheels: number;
 }
 
 /**

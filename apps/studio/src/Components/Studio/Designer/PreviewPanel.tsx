@@ -70,10 +70,10 @@ export function PreviewPanel({
    * position mean "left of the bike" rather than "left of whatever this part's frame is", and
    * handing over geometry without it invites reading the numbers as more than they say.
    *
-   * `source` is the bike's path on disk, for an export that reads the files itself (the
-   * painting proxy). Null for a rider.
+   * `proxy` is what a painting proxy is made from: the bike without its wheels (they belong to
+   * a tyres mod), or the one piece of gear being painted, or the rider for a kit.
    */
-  onGeometry?: (nodes: EdfNode[] | null, assembled: boolean, source: string | null) => void;
+  onGeometry?: (nodes: EdfNode[] | null, assembled: boolean, proxy: EdfNode[] | null) => void;
   /** Triangles to light up — what the pointer is over in the 2D editor. */
   highlight?: Int32Array | null;
   /**
@@ -95,8 +95,8 @@ export function PreviewPanel({
   const { game } = useConfig();
   const { kind, model, bikePreview } = state;
   const [nodes, setNodes] = useState<EdfNode[] | null>(null);
-  // Where `nodes` was read from, set with them so the two always describe the same bike.
-  const [source, setSource] = useState<string | null>(null);
+  // How many of `nodes`, at the end, are the tyres mod's wheels — see `BikeModel.wheels`.
+  const [wheels, setWheels] = useState(0);
   const [rig, setRig] = useState<BikeRig | null>(null);
   // Reported by the backend with the mesh, never inferred here — see `BikeModel.assembled`.
   const [assembled, setAssembled] = useState(false);
@@ -183,7 +183,6 @@ export function PreviewPanel({
       return;
     }
     let alive = true;
-    let path: string | null = null;
     setLoading(true);
     setErr(null);
     scanLibrary("mods/bikes")
@@ -200,13 +199,12 @@ export function PreviewPanel({
         // something else, and it is still the right path to try — the load then fails with
         // the accurate reason (no mesh) instead of this claiming it isn't installed.
         if (!found) throw new Error(t("designer.noModelFound", { model }));
-        path = found.path;
         return loadBikeModel(found.path, tyresPick.tyres);
       })
       .then((m) => {
         if (!alive) return;
         setNodes(m.nodes);
-        setSource(path);
+        setWheels(m.wheels ?? 0);
         setRig(m.rig ?? null);
         setAssembled(m.assembled);
         // The model's own look, under the drawing — so parts this paint doesn't cover still
@@ -264,10 +262,18 @@ export function PreviewPanel({
   useEffect(() => {
     // `assembled` only ever describes the bike branch: a rider's parts are posed by the rig
     // rather than by a `.geom`, and sides are never asked of them.
+    // A proxy is of the thing being painted: the bike's own parts, or the one piece of gear.
+    const proxy = nodes
+      ? nodes.slice(0, nodes.length - wheels)
+      : riderParts
+        ? (gearPart ? riderParts.filter((p) => p.part === gearPart) : riderParts).flatMap(
+            (p) => p.nodes,
+          )
+        : null;
     onGeometry?.(
       nodes ?? (riderParts ? riderParts.flatMap((p) => p.nodes) : null),
       nodes ? assembled : false,
-      nodes ? source : null,
+      proxy?.length ? proxy : null,
     );
     // Through the same effect, so the mesh and the textures said to be its own can never
     // describe two different models.
@@ -280,7 +286,7 @@ export function PreviewPanel({
     onStock?.(
       nodes ? stock : riderParts ? riderParts.flatMap((p) => p.textures) : NO_STOCK,
     );
-  }, [nodes, assembled, source, riderParts, stock, onGeometry, onStock]);
+  }, [nodes, assembled, wheels, gearPart, riderParts, stock, onGeometry, onStock]);
 
   // Toggled-off gear is dropped before it reaches the viewer, which is what makes hiding it
   // reveal what's underneath rather than just dimming it.

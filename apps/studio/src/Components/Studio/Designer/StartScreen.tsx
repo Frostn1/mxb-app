@@ -29,6 +29,7 @@ export default function StartScreen({
   onBlank,
   onFromPaint,
   onFromPsd,
+  onProxyFromFile,
   onOpenRecent,
 }: {
   dest: PaintDestState;
@@ -36,6 +37,8 @@ export default function StartScreen({
   onBlank: () => void;
   onFromPaint: () => void;
   onFromPsd: () => void;
+  /** A painting proxy of any model file — a bar pad, a seat — without opening a paint. */
+  onProxyFromFile: () => void;
   onOpenRecent: (r: RecentPaint) => void;
 }) {
   const t = useT();
@@ -68,6 +71,7 @@ export default function StartScreen({
           <Heading>{t("designer.startTitle")}</Heading>
           <Action label={t("designer.startFromPaint")} disabled={busy} onClick={onFromPaint} />
           <Action label={t("designer.startFromPsd")} disabled={busy} onClick={onFromPsd} />
+          <Action label={t("designer.proxyFromFile")} disabled={busy} onClick={onProxyFromFile} />
         </div>
 
         <div className="flex min-h-0 flex-col gap-1">

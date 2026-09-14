@@ -1,13 +1,15 @@
-//! A painting proxy: a bike's mesh cut down to a stand-in a painter can work on in Blender or
-//! Substance, without the model itself ever leaving the creator.
+//! A painting proxy: a model's mesh cut down to a stand-in a painter can work on in Blender or
+//! Substance, without the model itself ever leaving the creator. Any model: a bike, a helmet, a
+//! pair of boots, a bar pad on its own.
 //!
 //! The UV layout is the one thing kept exactly — a paint made on the proxy has to land on the
-//! real bike — and everything that makes a mesh worth taking is dropped: most of the triangles,
-//! the normals, the LODs (the viewer only reads level0), and sub-millimetre position detail.
+//! real model — and everything that makes a mesh worth taking is dropped: most of the
+//! triangles, the normals, the LODs (the viewer only reads level0), and sub-millimetre position
+//! detail.
 //!
 //! The ratio is a constant on purpose. A slider would let anyone set it back to 100%.
 
-use crate::edf::EdfNode;
+use crate::edf::{EdfNode, Submesh};
 
 /// Share of each part's triangles the proxy aims to keep.
 pub const KEEP: f32 = 0.15;
@@ -35,6 +37,40 @@ pub struct Proxy {
 impl Proxy {
     pub fn triangles(&self) -> usize {
         self.parts.iter().flat_map(|p| &p.groups).map(|(_, i)| i.len() / 3).sum()
+    }
+
+    /// The proxy as meshes the webview already knows how to read, one submesh per texture —
+    /// so the Designer can build the `.glb` from exactly what went into the `.obj`.
+    pub fn to_nodes(&self) -> Vec<EdfNode> {
+        self.parts
+            .iter()
+            .map(|p| {
+                let mut indices = Vec::new();
+                let mut submeshes = Vec::new();
+                for (texture, idx) in &p.groups {
+                    submeshes.push(Submesh {
+                        name: texture.clone().unwrap_or_else(|| "untextured".into()),
+                        tri_start: (indices.len() / 3) as u32,
+                        tri_count: (idx.len() / 3) as u32,
+                        texture: texture.clone(),
+                        uv_tile: None,
+                        mat: None,
+                    });
+                    indices.extend_from_slice(idx);
+                }
+                EdfNode {
+                    name: p.name.clone(),
+                    positions: p.positions.clone(),
+                    uvs: p.uvs.clone(),
+                    normals: Vec::new(),
+                    indices,
+                    submeshes,
+                    texture: None,
+                    placed: true,
+                    materials: Vec::new(),
+                }
+            })
+            .collect()
     }
 }
 
@@ -139,8 +175,11 @@ pub fn build(nodes: &[EdfNode]) -> Proxy {
 }
 
 /// The proxy as Wavefront OBJ and its material library, which names `<stem>_template.png`
-/// per texture. `v` of the UV is flipped: OBJ counts it up from the bottom of the image, the
-/// game down from the top.
+/// per texture.
+///
+/// `v` is written as the game stores it. The game samples a sheet top-down and keeps its rows
+/// upside-down from what a painter sees; OBJ counts `v` up from the bottom of the image. The
+/// two flips cancel, so the templates — drawn the way painters see sheets — land right way up.
 pub fn to_obj(proxy: &Proxy, mtl_file: &str) -> (String, String) {
     use std::fmt::Write;
     let mut obj = String::new();
@@ -154,7 +193,7 @@ pub fn to_obj(proxy: &Proxy, mtl_file: &str) -> (String, String) {
             let _ = writeln!(obj, "v {:.3} {:.3} {:.3}", p[0], p[1], p[2]);
         }
         for t in part.uvs.chunks_exact(2) {
-            let _ = writeln!(obj, "vt {} {}", t[0], 1.0 - t[1]);
+            let _ = writeln!(obj, "vt {} {}", t[0], t[1]);
         }
         for (texture, idx) in &part.groups {
             let mat = texture.as_deref().map(template_stem).unwrap_or_else(|| "untextured".into());
@@ -182,10 +221,80 @@ pub fn to_obj(proxy: &Proxy, mtl_file: &str) -> (String, String) {
     (obj, mtl)
 }
 
+/// The meshes the Designer sends: whatever model it has on screen, packed flat.
+///
+/// Little-endian throughout. `u32` node count; per node a name, a texture, `u32` vertex count,
+/// the positions (3 × f32 each) and UVs (2 × f32 each), `u32` index count and the indices, then
+/// `u32` submesh count and per submesh a name, a texture, and `u32` first triangle and count.
+/// A string is a `u32` byte length and UTF-8, with `u32::MAX` for none.
+pub fn decode_nodes(bytes: &[u8]) -> Option<Vec<EdfNode>> {
+    struct Cur<'a>(&'a [u8]);
+    impl Cur<'_> {
+        fn take(&mut self, n: usize) -> Option<&[u8]> {
+            if n > self.0.len() {
+                return None;
+            }
+            let (a, b) = self.0.split_at(n);
+            self.0 = b;
+            Some(a)
+        }
+        fn u32(&mut self) -> Option<u32> {
+            Some(u32::from_le_bytes(self.take(4)?.try_into().ok()?))
+        }
+        fn str(&mut self) -> Option<Option<String>> {
+            match self.u32()? {
+                u32::MAX => Some(None),
+                n => Some(Some(String::from_utf8_lossy(self.take(n as usize)?).into_owned())),
+            }
+        }
+        fn f32s(&mut self, n: usize) -> Option<Vec<f32>> {
+            let b = self.take(n.checked_mul(4)?)?;
+            Some(b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+        }
+        fn u32s(&mut self, n: usize) -> Option<Vec<u32>> {
+            let b = self.take(n.checked_mul(4)?)?;
+            Some(b.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+        }
+    }
+
+    let mut c = Cur(bytes);
+    let count = c.u32()? as usize;
+    let mut nodes = Vec::new();
+    for _ in 0..count {
+        let name = c.str()?.unwrap_or_default();
+        let texture = c.str()?;
+        let vcount = c.u32()? as usize;
+        let positions = c.f32s(vcount.checked_mul(3)?)?;
+        let uvs = c.f32s(vcount.checked_mul(2)?)?;
+        let icount = c.u32()? as usize;
+        let indices = c.u32s(icount)?;
+        let subs = c.u32()? as usize;
+        let mut submeshes = Vec::new();
+        for _ in 0..subs {
+            let name = c.str()?.unwrap_or_default();
+            let texture = c.str()?;
+            let tri_start = c.u32()?;
+            let tri_count = c.u32()?;
+            submeshes.push(Submesh { name, tri_start, tri_count, texture, uv_tile: None, mat: None });
+        }
+        nodes.push(EdfNode {
+            name,
+            positions,
+            uvs,
+            normals: Vec::new(),
+            indices,
+            submeshes,
+            texture,
+            placed: true,
+            materials: Vec::new(),
+        });
+    }
+    c.0.is_empty().then_some(nodes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::edf::Submesh;
 
     /// A curved `n`×`n` sheet with a UV seam down the middle: the two halves share positions
     /// along the seam but not vertices, the way a real unwrap splits an island.
@@ -225,6 +334,46 @@ mod tests {
             placed: true,
             materials: Vec::new(),
         }
+    }
+
+    fn two_sheets(n: usize) -> EdfNode {
+        let mut node = seamed_sheet(n);
+        let tris = (node.indices.len() / 3) as u32;
+        node.submeshes = vec![
+            Submesh { name: "a".into(), tri_start: 0, tri_count: tris / 2, texture: Some("plastics.tga".into()), uv_tile: Some(0), mat: None },
+            Submesh { name: "b".into(), tri_start: tris / 2, tri_count: tris - tris / 2, texture: Some("frame decals.png".into()), uv_tile: Some(0), mat: None },
+        ];
+        node
+    }
+
+    /// The Designer's side of [`decode_nodes`], for the round trip.
+    fn encode(nodes: &[EdfNode]) -> Vec<u8> {
+        let mut b = Vec::new();
+        let u = |b: &mut Vec<u8>, n: u32| b.extend_from_slice(&n.to_le_bytes());
+        let s = |b: &mut Vec<u8>, v: &Option<String>| match v {
+            Some(v) => {
+                b.extend_from_slice(&(v.len() as u32).to_le_bytes());
+                b.extend_from_slice(v.as_bytes());
+            }
+            None => b.extend_from_slice(&u32::MAX.to_le_bytes()),
+        };
+        u(&mut b, nodes.len() as u32);
+        for n in nodes {
+            s(&mut b, &Some(n.name.clone()));
+            s(&mut b, &n.texture);
+            u(&mut b, (n.positions.len() / 3) as u32);
+            n.positions.iter().chain(&n.uvs).for_each(|f| b.extend_from_slice(&f.to_le_bytes()));
+            u(&mut b, n.indices.len() as u32);
+            n.indices.iter().for_each(|&i| u(&mut b, i));
+            u(&mut b, n.submeshes.len() as u32);
+            for sm in &n.submeshes {
+                s(&mut b, &Some(sm.name.clone()));
+                s(&mut b, &sm.texture);
+                u(&mut b, sm.tri_start);
+                u(&mut b, sm.tri_count);
+            }
+        }
+        b
     }
 
     #[test]
@@ -286,13 +435,7 @@ mod tests {
 
     #[test]
     fn obj_is_consistent_and_names_one_template_per_texture() {
-        let mut node = seamed_sheet(20);
-        let tris = (node.indices.len() / 3) as u32;
-        node.submeshes = vec![
-            Submesh { name: "a".into(), tri_start: 0, tri_count: tris / 2, texture: Some("plastics.tga".into()), uv_tile: Some(0), mat: None },
-            Submesh { name: "b".into(), tri_start: tris / 2, tri_count: tris - tris / 2, texture: Some("frame decals.png".into()), uv_tile: Some(0), mat: None },
-        ];
-        let proxy = build(&[node]);
+        let proxy = build(&[two_sheets(20)]);
         let (obj, mtl) = to_obj(&proxy, "bike_proxy.mtl");
         let v = obj.lines().filter(|l| l.starts_with("v ")).count();
         let vt = obj.lines().filter(|l| l.starts_with("vt ")).count();
@@ -309,6 +452,56 @@ mod tests {
     }
 
     #[test]
+    fn obj_writes_v_as_stored() {
+        let proxy = build(&[seamed_sheet(10)]);
+        let (obj, _) = to_obj(&proxy, "p.mtl");
+        let first = obj.lines().find(|l| l.starts_with("vt ")).unwrap();
+        let p = &proxy.parts[0];
+        assert_eq!(first, format!("vt {} {}", p.uvs[0], p.uvs[1]));
+    }
+
+    #[test]
+    fn nodes_round_trip_through_the_wire() {
+        let nodes = vec![two_sheets(8), seamed_sheet(4)];
+        let back = decode_nodes(&encode(&nodes)).expect("decodes");
+        assert_eq!(back.len(), 2);
+        for (a, b) in nodes.iter().zip(&back) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.texture, b.texture);
+            assert_eq!(a.positions, b.positions);
+            assert_eq!(a.uvs, b.uvs);
+            assert_eq!(a.indices, b.indices);
+            assert_eq!(a.submeshes.len(), b.submeshes.len());
+            for (x, y) in a.submeshes.iter().zip(&b.submeshes) {
+                assert_eq!((x.tri_start, x.tri_count, &x.texture), (y.tri_start, y.tri_count, &y.texture));
+            }
+        }
+    }
+
+    #[test]
+    fn a_truncated_or_padded_payload_is_refused() {
+        let bytes = encode(&[seamed_sheet(4)]);
+        assert!(decode_nodes(&bytes[..bytes.len() - 1]).is_none());
+        let mut long = bytes.clone();
+        long.push(0);
+        assert!(decode_nodes(&long).is_none());
+        assert!(decode_nodes(&[0xff, 0xff, 0xff, 0x7f]).is_none());
+    }
+
+    #[test]
+    fn to_nodes_keeps_one_submesh_per_texture() {
+        let proxy = build(&[two_sheets(20)]);
+        let nodes = proxy.to_nodes();
+        let n = &nodes[0];
+        assert_eq!(n.submeshes.len(), 2);
+        let total: u32 = n.submeshes.iter().map(|s| s.tri_count).sum();
+        assert_eq!(total as usize, n.indices.len() / 3);
+        assert_eq!(n.submeshes[1].tri_start, n.submeshes[0].tri_count);
+        assert_eq!(n.submeshes[0].texture.as_deref(), Some("plastics.tga"));
+        assert_eq!(n.uvs.len() / 2, n.positions.len() / 3);
+    }
+
+    #[test]
     fn template_stems() {
         assert_eq!(template_stem("plastics.tga"), "plastics");
         assert_eq!(template_stem("my sheet:2.png"), "my_sheet_2");
@@ -316,7 +509,7 @@ mod tests {
         assert_eq!(template_stem("noext"), "noext");
     }
 
-    /// A whole installed bike, down the path the Studio's export takes:
+    /// A whole installed bike, down the path the Designer takes:
     /// `MXB_REAL_BIKE=<bike folder or .pkz> cargo test -p mxb-core real_bike -- --ignored --nocapture`.
     #[test]
     #[ignore]
@@ -341,20 +534,26 @@ mod tests {
         }
     }
 
-    /// A real bike part: `MXB_EDF=<model.edf plaintext> cargo test -p mxb-core real_edf -- --ignored --nocapture`.
+    /// Any model file, down the loose-file loader:
+    /// `MXB_MODEL_FILE=<.edf, .pkz or folder> cargo test -p mxb-core real_model_file -- --ignored --nocapture`.
     #[test]
     #[ignore]
-    fn real_edf() {
-        let path = std::env::var("MXB_EDF").expect("MXB_EDF");
-        let bytes = std::fs::read(path).unwrap();
-        let proxy = build(&crate::edf::parse(&bytes));
-        println!("{} -> {} triangles", proxy.source_triangles, proxy.triangles());
-        assert!(proxy.triangles() > 0);
-        // `MXB_PROXY_OUT=<dir>` keeps the result, to look at.
+    fn real_model_file() {
+        let path = std::env::var("MXB_MODEL_FILE").expect("MXB_MODEL_FILE");
+        let model = crate::viewer::load_model_file_blocking(&path).expect("load model");
+        let proxy = build(&model.nodes);
+        let (obj, mtl) = to_obj(&proxy, "proxy.mtl");
         if let Ok(out) = std::env::var("MXB_PROXY_OUT") {
-            let (obj, mtl) = to_obj(&proxy, "proxy.mtl");
-            std::fs::write(format!("{out}/proxy.obj"), obj).unwrap();
-            std::fs::write(format!("{out}/proxy.mtl"), mtl).unwrap();
+            std::fs::write(format!("{out}/file_proxy.obj"), obj).unwrap();
         }
+        println!(
+            "{} nodes, {} textures, {} -> {} triangles",
+            model.nodes.len(),
+            model.textures.len(),
+            proxy.source_triangles,
+            proxy.triangles()
+        );
+        println!("{mtl}");
+        assert!(proxy.triangles() > 0);
     }
 }

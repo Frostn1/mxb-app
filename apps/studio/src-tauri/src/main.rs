@@ -184,6 +184,7 @@ fn main() {
             mxb_core::viewer::load_rider_model,
             mxb_core::viewer::load_rider_body_model,
             mxb_core::viewer::load_gear_model,
+            mxb_core::viewer::load_model_file,
             mxb_core::viewer::load_stock_gear_model,
             mxb_core::viewer::list_gear_paints,
             mxb_core::viewer::list_installed_gear_paints,
@@ -1153,10 +1154,11 @@ async fn psd_save(request: tauri::ipc::Request<'_>) -> Result<String, String> {
     let psd = psd.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut path = std::path::PathBuf::from(&dest);
-        // A painting proxy's `.png` templates come through here too.
+        // A painting proxy's `.png` templates and its `.glb` come through here too.
         let known = path
             .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("psd") || e.eq_ignore_ascii_case("png"));
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| ["psd", "png", "glb"].iter().any(|k| e.eq_ignore_ascii_case(k)));
         if !known {
             path.set_extension("psd");
         }
@@ -1170,28 +1172,38 @@ async fn psd_save(request: tauri::ipc::Request<'_>) -> Result<String, String> {
     .map_err(|e| format!("psd_save task failed: {e}"))?
 }
 
-/// Write a bike's painting proxy into a folder the user picked: `<bike>_proxy.obj` and its
-/// `.mtl`. A cut-down stand-in with the real UV layout (see `mxb_core::paintproxy`), so a
-/// creator can hand painters something for Blender without handing over the model. The
-/// Designer writes the `.png` templates the `.mtl` names beside them.
+/// Write a painting proxy into a folder the user picked: `<name>_proxy.obj` and its `.mtl`. A
+/// cut-down stand-in with the real UV layout (see `mxb_core::paintproxy`), so a creator can
+/// hand painters something for Blender without handing over the model.
 ///
-/// The bike's own parts only: the wheels come from a tyres mod, not from its creator.
+/// The model is whatever the Designer has — a bike without its wheels, a helmet, a part picked
+/// from a file — sent as the request body (`paintproxy::decode_nodes`), with the folder and the
+/// name in percent-encoded headers as [`psd_save`] takes its destination. What comes back is the
+/// cut, the templates the `.mtl` names, and the proxy itself, for the Designer to draw the
+/// templates and build the `.glb` from.
 #[tauri::command]
-async fn export_paint_proxy(source: String, out_dir: String) -> Result<serde_json::Value, String> {
+async fn export_paint_proxy(request: tauri::ipc::Request<'_>) -> Result<serde_json::Value, String> {
+    let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
+        return Err("export_paint_proxy expects the model as the request body".into());
+    };
+    let header = |key: &str| {
+        let raw = request.headers().get(key).and_then(|v| v.to_str().ok()).unwrap_or_default();
+        percent_encoding::percent_decode_str(raw).decode_utf8_lossy().into_owned()
+    };
+    let (out_dir, name) = (header("x-dir"), header("x-name"));
+    if out_dir.is_empty() {
+        return Err("export_paint_proxy needs a folder".into());
+    }
+    let body = body.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let src = std::path::Path::new(&source);
-        if mxb_core::securesource::is_secured(src) {
-            return Err("A locked bike can't be exported. Export the proxy from your own copy.".to_string());
-        }
-        let model = mxb_core::viewer::load_bike_model_blocking(source.clone(), None)?;
-        let own = &model.nodes[..model.nodes.len() - model.wheels];
-        let proxy = mxb_core::paintproxy::build(own);
+        let nodes = mxb_core::paintproxy::decode_nodes(&body)
+            .ok_or_else(|| "The model didn't arrive whole.".to_string())?;
+        let proxy = mxb_core::paintproxy::build(&nodes);
         if proxy.parts.is_empty() {
-            return Err("This bike has no mesh to export.".to_string());
+            return Err("There's no mesh here to export.".to_string());
         }
-        let name = src.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let stem = match mxb_core::paintproxy::template_stem(&name) {
-            s if s.is_empty() => "bike".to_string(),
+            s if s.is_empty() => "model".to_string(),
             s => s,
         };
         let dir = std::path::PathBuf::from(&out_dir);
@@ -1221,6 +1233,7 @@ async fn export_paint_proxy(source: String, out_dir: String) -> Result<serde_jso
             "triangles": proxy.triangles(),
             "sourceTriangles": proxy.source_triangles,
             "templates": templates,
+            "proxy": proxy.to_nodes(),
         }))
     })
     .await
