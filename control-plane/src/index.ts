@@ -644,6 +644,7 @@ async function decideEntitlement(
   account: Account,
   assetId: string,
   session: string,
+  blobSha256: string | null,
   env: Env,
 ): Promise<{ allowed: boolean; reason: string }> {
   // `log` is false for the two answers that say nothing about a real buyer and a real asset: any
@@ -671,10 +672,10 @@ async function decideEntitlement(
   const { allowed, reason, log } = await decide();
   if (log) {
     await env.DB.prepare(
-      "INSERT INTO entitlement_grants (steam_id, asset_id, session_id, decision, reason, issued_at)" +
-        " VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO entitlement_grants (steam_id, asset_id, session_id, decision, reason, blob_sha256, issued_at)" +
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
-      .bind(account.steam_id, assetId, session, allowed ? "allow" : "deny", reason, Date.now())
+      .bind(account.steam_id, assetId, session, allowed ? "allow" : "deny", reason, blobSha256, Date.now())
       .run();
   }
   return { allowed, reason };
@@ -717,7 +718,13 @@ async function assetRequest(
 async function checkEntitlement(request: Request, account: Account, env: Env): Promise<Response> {
   const parsed = await assetRequest(request);
   if (parsed instanceof Response) return parsed;
-  const { allowed, reason } = await decideEntitlement(account, parsed.assetId, parsed.session, env);
+  const { allowed, reason } = await decideEntitlement(
+    account,
+    parsed.assetId,
+    parsed.session,
+    parsed.blobSha256,
+    env,
+  );
   return json(allowed ? 200 : 403, { allowed, reason });
 }
 
@@ -739,7 +746,7 @@ async function grantKey(request: Request, account: Account, env: Env): Promise<R
   if (parsed instanceof Response) return parsed;
   const { assetId, session, blobSha256 } = parsed;
 
-  const { allowed, reason } = await decideEntitlement(account, assetId, session, env);
+  const { allowed, reason } = await decideEntitlement(account, assetId, session, blobSha256, env);
   if (!allowed) return json(403, { error: reason });
 
   const asset = await env.DB.prepare(

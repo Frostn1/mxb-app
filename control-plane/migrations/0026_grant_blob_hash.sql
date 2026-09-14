@@ -1,0 +1,15 @@
+-- Record which blob a grant released a key for, on the audit row itself.
+--
+-- `entitlement_grants` is the "theft has a name on it" ledger: who asked for a key, for which
+-- asset, when, and whether we said yes. It named the asset but not the exact file. The SHA-256
+-- the caller presented (validated against `assets.blob_sha256` before the key is released) now
+-- rides on the grant too, so a leaked `.mxbsecure` blob can be tied back to the grants issued
+-- for that exact hash — and a mismatch is recorded rather than only refused.
+--
+-- This traces the sealed blob and the key request. It does NOT fingerprint a leaked *decrypted*
+-- file: a decrypted `.pkz` has no mxbsecure header and carries no buyer identity. See
+-- `secure/README.md` — attribution names who unlocked, it is not a plaintext watermark.
+--
+-- Nullable: existing rows keep a NULL hash (they predate this), and a check request that sends
+-- no blob still logs its decision.
+ALTER TABLE entitlement_grants ADD COLUMN blob_sha256 TEXT;
