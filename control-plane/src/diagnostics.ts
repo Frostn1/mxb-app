@@ -40,6 +40,7 @@
  * raises the cost of the ordinary case; it is not a wall.
  */
 
+import { asDeviations, loadStateRegions, parseDigests } from "./stateinvariants";
 import { isAppVersion, isGuid, isSha256, PRESENCE_TTL_MS } from "./validate";
 
 export interface Account {
@@ -52,12 +53,17 @@ export interface Account {
 /**
  * Where the client found this. Its judgement of location, not of character.
  *
- * The first four are where a *file* was loaded from. The last two are not files at all:
- * `memory` is executable memory in the game that no loaded module covers, and `disk` is a
- * file sitting in the game's `plugins` folder that the game has not loaded. Both are things
- * the module list is structurally unable to mention, which is why they are here.
+ * The first four are where a *file* was loaded from. The last three are not files at all:
+ * `memory` is executable memory in the game that no loaded module covers, `disk` is a
+ * file sitting in the game's `plugins` folder that the game has not loaded, and `state` is a
+ * run of the game's own memory whose contents no longer match what a clean install holds.
+ * All three are things the module list is structurally unable to mention, which is why they
+ * are here.
+ *
+ * `state` is the one origin a client cannot send: `ORIGINS` does not accept it, so a row
+ * carrying it can only have been built here, from a region we asked that client to hash.
  */
-export type Origin = "game" | "system" | "app" | "other" | "memory" | "disk";
+export type Origin = "game" | "system" | "app" | "other" | "memory" | "disk" | "state";
 
 export type State = "unknown" | "ok" | "warn" | "alert";
 
@@ -507,10 +513,8 @@ export async function putReport(request: Request, account: Account, env: Env): P
     return json(400, { error: "expected a JSON body" });
   }
   if (!body || typeof body !== "object") return json(400, { error: "expected a JSON body" });
-  const { modules, appVersion, available, guid, regions, threads, files } = body as Record<
-    string,
-    unknown
-  >;
+  const { modules, appVersion, available, guid, regions, threads, files, digests, build } =
+    body as Record<string, unknown>;
 
   // Tie the report to the player, not just the install. The game already publishes this GUID
   // to every server the player joins, so it is the identity the rest of the system keys on.
@@ -545,11 +549,23 @@ export async function putReport(request: Request, account: Account, env: Env): P
   if (!plugins) return json(400, { error: "that is not a plugins folder" });
   const counted = parseThreads(threads);
 
+  // What the game's own memory says about itself. Absent is an app too old to have been
+  // asked; malformed is refused like any other bad list.
+  const reported = parseDigests(digests);
+  if (!reported) return json(400, { error: "that is not a state digest list" });
+  // Only a build we hold baselines for has anything to compare against, and only the digests
+  // that differ from one become observations. Everything matching its baseline — the
+  // overwhelmingly common case — produces nothing at all.
+  const deviations =
+    reported.length > 0 && typeof build === "string"
+      ? asDeviations(reported, await loadStateRegions(env.DB, build))
+      : [];
+
   const { rules, version: rulesVersion } = await loadRules(env);
   // One list, because they are one question. A region and a file in the plugins folder are
   // both "something is in the game that we cannot account for", and the rules that read a
   // module read them without knowing there was ever a difference.
-  const verdict = classify([...list, ...found, ...plugins], rules);
+  const verdict = classify([...list, ...found, ...plugins, ...deviations], rules);
   await store(
     env,
     account,
@@ -560,7 +576,7 @@ export async function putReport(request: Request, account: Account, env: Env): P
     verdict.matched,
     // System libraries are not recorded per-file: hundreds of them, identical everywhere,
     // and they would bury the rows worth reading.
-    [...list.filter((m) => m.origin !== "system"), ...found, ...plugins],
+    [...list.filter((m) => m.origin !== "system"), ...found, ...plugins, ...deviations],
     counted,
     found.length,
     version,
