@@ -146,14 +146,19 @@ pub fn secure_dir(app: &AppHandle) -> Option<PathBuf> {
 fn stage_dll(app: &AppHandle, run_dir: &std::path::Path) -> Result<PathBuf, String> {
     let src = source_dll(app).ok_or("no mxbsecure.dll shipped with the app")?;
     let dst = run_dir.join("mxbsecure.dll");
-    let same = std::fs::metadata(&dst)
-        .ok()
-        .zip(std::fs::metadata(&src).ok())
-        .map(|(a, b)| a.len() == b.len())
-        .unwrap_or(false);
+    let bytes = std::fs::read(&src).map_err(|e| format!("reading {}: {e}", src.display()))?;
+    // Bytes, not length: a rebuilt DLL is often the exact same size (PE sections are padded),
+    // and comparing lengths kept injecting the old one.
+    let same = std::fs::read(&dst).is_ok_and(|old| old == bytes);
     if !same {
-        std::fs::copy(&src, &dst).map_err(|e| format!("staging the DLL: {e}"))?;
+        std::fs::write(&dst, &bytes).map_err(|e| format!("staging the DLL: {e}"))?;
     }
+    log::info!(
+        "[secure] DLL from {} ({} bytes, {})",
+        src.display(),
+        bytes.len(),
+        if same { "already staged" } else { "staged" }
+    );
     Ok(dst)
 }
 
