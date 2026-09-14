@@ -104,7 +104,7 @@ fn ensure_window<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, Str
         return Ok(w);
     }
     let builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App(URL.into()))
-        .title("Frost Mod Manager overlay")
+        .title("MXB App overlay")
         .inner_size(WIDTH, HEIGHT)
         .min_inner_size(720.0, 480.0)
         .decorations(false)

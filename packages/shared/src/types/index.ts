@@ -104,7 +104,7 @@ export interface Config {
   instantRefresh?: boolean;
   /**
    * Watch `<modsPath>/mods` and reload the game when tracks/bikes are added outside
-   * Frost's Mod Manager (e.g. a manual download dropped into the folder). Default true.
+   * MXB App (e.g. a manual download dropped into the folder). Default true.
    */
   watchModsReload?: boolean;
   /** Offer beta builds through the in-app updater, not only full releases. Default false. */

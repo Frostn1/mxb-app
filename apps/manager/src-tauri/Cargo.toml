@@ -4,7 +4,7 @@
 # it gets. The description is what Windows Task Manager shows in its Processes tab.
 name = "mxb-app"
 version = "0.14.2"
-description = "Frost's Mod Manager — MX Bikes mod manager"
+description = "MXB App — MX Bikes mod manager"
 authors = ["Frost"]
 edition = "2021"
 

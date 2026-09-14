@@ -1,8 +1,8 @@
 ; Installer hooks — clear the way before the installer writes over the app it is replacing.
 ;
-; Frost Mod Manager hides to the tray when its window is closed and launches at login, so an
+; MXB App hides to the tray when its window is closed and launches at login, so an
 ; installer a user started by hand nearly always finds it running; the in-app updater
-; launches the installer from inside the app itself. Either way `$INSTDIR\Frost Mod Manager.exe` — the
+; launches the installer from inside the app itself. Either way `$INSTDIR\MXB App.exe` — the
 ; app's own image — can still be held when the copy starts, and NSIS answers that with a
 ; blunt "error opening file for writing", reported against v0.8.1.
 ;
@@ -54,16 +54,17 @@
 !macro DropLegacyBinaries
   Delete "$INSTDIR\frost.exe"
   Delete "$INSTDIR\frost.exe.old*"
-  Delete "$INSTDIR\MXB App.exe"
-  Delete "$INSTDIR\MXB App.exe.old*"
+  ; NOT `MXB App.exe`: that is the main binary again, and this runs after it is written.
+  Delete "$INSTDIR\${LEGACY_PRODUCTNAME}.exe"
+  Delete "$INSTDIR\${LEGACY_PRODUCTNAME}.exe.old*"
 !macroend
 
-; Up to v0.13.x the app shipped as `MXB App.exe`. Same story as `CloseLegacyApp` above, one
+; v0.14.x shipped as `Frost Mod Manager.exe`. Same story as `CloseLegacyApp` above, one
 ; name later: `${MAINBINARYNAME}` no longer matches it, so `CloseRunningApp` walks straight
 ; past the build being replaced — and this one is nearly always running, because it parks in
 ; the tray and launches at login.
-!macro CloseLegacyMxbApp
-  nsExec::Exec 'taskkill /F /IM "MXB App.exe"'
+!macro CloseRetiredApp
+  nsExec::Exec 'taskkill /F /IM "${LEGACY_PRODUCTNAME}.exe"'
   Pop $0 ; 0 = closed it, 128 = wasn't running. Either is the state we want.
 !macroend
 
@@ -80,17 +81,18 @@
 ; macro below, because a macro body is expanded where it is inserted — which is after the
 ; template has defined it.
 !define LEGACY_MANUFACTURER   "Frost"
-!define LEGACY_PRODUCTNAME    "MXB App"
+!define LEGACY_PRODUCTNAME    "Frost Mod Manager"
 !define LEGACY_MANUPRODUCTKEY "Software\${LEGACY_MANUFACTURER}\${LEGACY_PRODUCTNAME}"
 !define LEGACY_UNINSTKEY      "Software\Microsoft\Windows\CurrentVersion\Uninstall\${LEGACY_PRODUCTNAME}"
 
-; Retire the install the rename orphaned.
+; Retire the install the rename orphaned. v0.14.0 renamed `MXB App` to `Frost Mod Manager`
+; and this macro retired `MXB App`; the name is back, so now it retires `Frost Mod Manager`.
 ;
 ; Everything the bundler's template uses to find a previous install is keyed on
 ; ${PRODUCTNAME}, not on the bundle identifier: $INSTDIR's default, both registry keys,
 ; every shortcut and the login item. Rename the product and the new installer therefore sees
 ; no previous install at all — its reinstall page aborts, its own old-binary sweep reads an
-; empty key, and `%LOCALAPPDATA%\MXB App` is left behind with a live exe, its uninstaller,
+; empty key, and `%LOCALAPPDATA%\Frost Mod Manager` is left behind with a live exe, its uninstaller,
 ; its Add/Remove entry and its Run value. Since the app parks in the tray and launches at
 ; login, the next reboot then starts two of it: two tray icons, two FrostMods, two mod
 ; watchers. `tauri-plugin-single-instance` cannot help — it dedupes on the identifier, which
@@ -133,12 +135,12 @@
 ;
 ; The in-app updater runs this installer with `/UPDATE`, and the template never creates a
 ; shortcut in update mode — it expects the old ones to still be there. After the rename they
-; aren't: `RetireLegacyInstall` just deleted `MXB App.lnk`, so an in-app update left the app
-; with no Start-menu or desktop entry, and Windows search found it under neither name.
+; aren't: `RetireLegacyInstall` just deleted `Frost Mod Manager.lnk`, so an in-app update
+; would leave the app with no Start-menu or desktop entry.
 ;
-; `MXB App.lnk` stays as a second Start-menu entry so players searching the old name still
-; find it. It carries no AppUserModelID on purpose: Start lists one entry per ID, and giving
-; it the bundle id would fold it into the Frost Mod Manager entry and lose the old name.
+; The Start-menu link is written even when one exists: v0.14.x placed an extra `MXB App.lnk`
+; there pointing into the Frost Mod Manager folder that was just deleted, and keeping it
+; would leave a dead shortcut under the right name.
 ;
 ; The flag makes this one-shot, so a shortcut the player deletes stays deleted.
 !define SHORTCUTS_FLAG "ShortcutsPlaced"
@@ -147,10 +149,8 @@
   ReadRegDWORD $0 SHCTX "${MANUPRODUCTKEY}" "${SHORTCUTS_FLAG}"
   ${If} $0 <> 1
   ${AndIf} $NoShortcutMode <> 1
-    ${IfNot} ${FileExists} "$SMPROGRAMS\${PRODUCTNAME}.lnk"
-      CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
-      !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\${PRODUCTNAME}.lnk"
-    ${EndIf}
+    CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+    !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\${PRODUCTNAME}.lnk"
 
     ; A hand-run installer offers the desktop link on its finish page; only an update skips it.
     ${If} $UpdateMode = 1
@@ -159,14 +159,12 @@
       !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"
     ${EndIf}
 
-    CreateShortcut "$SMPROGRAMS\${LEGACY_PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe" \
-      "" "$INSTDIR\${MAINBINARYNAME}.exe" 0 SW_SHOWNORMAL "" "Frost's Mod Manager (formerly MXB App)"
-
     WriteRegDWORD SHCTX "${MANUPRODUCTKEY}" "${SHORTCUTS_FLAG}" 1
   ${EndIf}
 !macroend
 
-; The template's uninstaller only knows the shortcuts named after the product. Skipped on
+; The template's uninstaller only knows the shortcuts named after the product, so a stray
+; old-name link is swept here too. Skipped on
 ; `/UPDATE`, where the uninstaller runs only to make way for the next build.
 !macro RemoveLegacyShortcut
   ${If} $UpdateMode <> 1
@@ -227,7 +225,7 @@
 
 ; The Visual C++ 2015-2022 x64 runtime, which the app cannot start without.
 ;
-; `Frost Mod Manager.exe` imports exactly two symbols from `MSVCP140.dll` — `std::_Xout_of_range` and
+; `MXB App.exe` imports exactly two symbols from `MSVCP140.dll` — `std::_Xout_of_range` and
 ; `std::_Xlength_error`, the STL's throw helpers — by way of UnRAR's C++ sources, which
 ; `unrar_sys` builds against the dynamic CRT. `MSVCP140.dll` is not an inbox Windows file;
 ; it arrives only with the redistributable. On a machine that has never had it the first
@@ -308,7 +306,7 @@
         ; Silent is the in-app updater running this installer from inside the app. A modal
         ; there would hang an update with no window to answer it.
         ${IfNot} ${Silent}
-          MessageBox MB_YESNO|MB_ICONEXCLAMATION "Frost's Mod Manager needs the Microsoft Visual C++ 2015-2022 (x64) runtime, and this PC doesn't have it. Installing it just now didn't work.$\r$\n$\r$\nFrost's Mod Manager is installed either way, but it will close on launch with error 0xc000007b until the runtime is in. Open Microsoft's download page?" IDNO vc140_declined
+          MessageBox MB_YESNO|MB_ICONEXCLAMATION "MXB App needs the Microsoft Visual C++ 2015-2022 (x64) runtime, and this PC doesn't have it. Installing it just now didn't work.$\r$\n$\r$\nMXB App is installed either way, but it will close on launch with error 0xc000007b until the runtime is in. Open Microsoft's download page?" IDNO vc140_declined
           ExecShell "open" "${VC140_URL}"
           vc140_declined:
         ${EndIf}
@@ -321,7 +319,7 @@
   !insertmacro CloseRunningApp
   !insertmacro CloseLegacyApp
   ; Before RetireLegacyInstall: its folder cannot be deleted while its image is running.
-  !insertmacro CloseLegacyMxbApp
+  !insertmacro CloseRetiredApp
   !insertmacro RetireLegacyInstall
   !insertmacro FreeMainBinary
   ; Last: freeing the binary is a race against a process that just died, while this can
@@ -342,7 +340,7 @@
 !macro NSIS_HOOK_PREUNINSTALL
   !insertmacro CloseRunningApp
   !insertmacro CloseLegacyApp
-  !insertmacro CloseLegacyMxbApp
+  !insertmacro CloseRetiredApp
   !insertmacro FreeMainBinary
   !insertmacro DropLegacyBinaries
   !insertmacro RemoveLegacyShortcut

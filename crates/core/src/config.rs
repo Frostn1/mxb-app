@@ -85,7 +85,7 @@ pub struct AppConfig {
     pub wine_runner: String,
     /// Hide to the tray on window close and keep running.
     pub run_in_background: bool,
-    /// Start Frost's Mod Manager automatically on login. Off until the player asks for it: it is a mod
+    /// Start MXB App automatically on login. Off until the player asks for it: it is a mod
     /// manager, not something that needs to be running before the game is.
     pub launch_at_startup: bool,
     /// Which [`AUTOSTART_BINDING_REV`] the login item was last written for.
@@ -324,11 +324,12 @@ pub const DEFAULT_OVERLAY_HOTKEY: &str = "CommandOrControl+Shift+X";
 /// Bumped whenever the executable's path changes, so a login item written for the old one is
 /// re-registered rather than left pointing at a file that no longer exists.
 ///
-/// v1: the binary is `Frost's Mod Manager`, not `frost`.
+/// v1: the binary is `MXB App`, not `frost`.
 /// v2: the product is `Frost Mod Manager`. `tauri-plugin-autostart` names the `Run` *value*
 ///     after `package_info().name`, so this is not a rebind but a second login item — the
-///     old `Frost's Mod Manager` value survives, pointing into a folder the installer no longer owns.
-pub const AUTOSTART_BINDING_REV: u32 = 2;
+///     old `MXB App` value survives, pointing into a folder the installer no longer owns.
+/// v3: the product is `MXB App` again. Same story the other way round.
+pub const AUTOSTART_BINDING_REV: u32 = 3;
 
 /// Push-to-talk combo used until the player picks another one.
 ///
