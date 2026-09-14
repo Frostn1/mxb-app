@@ -16,8 +16,10 @@ function assertion(over: Record<string, string> = {}): URLSearchParams {
     "openid.claimed_id": "https://steamcommunity.com/openid/id/76561198000000001",
     "openid.identity": "https://steamcommunity.com/openid/id/76561198000000001",
     "openid.return_to": "https://cp.example.com/v1/steam/return?login=abc",
+    "openid.response_nonce": "2026-09-14T00:00:00Z0123456789",
+    "openid.assoc_handle": "1234567890",
     "openid.sig": "deadbeef",
-    "openid.signed": "signed,op_endpoint,claimed_id,identity,return_to",
+    "openid.signed": "signed,op_endpoint,claimed_id,identity,return_to,response_nonce,assoc_handle",
     ...over,
   });
 }
@@ -128,6 +130,48 @@ describe("verifyAssertion", () => {
       saysValid as typeof fetch,
     );
     expect(isVerified(r)).toBe(false);
+  });
+
+  it("refuses an assertion from any endpoint but Steam's, without asking", async () => {
+    let asked = false;
+    const spy = (async () => {
+      asked = true;
+      return new Response("is_valid:true");
+    }) as unknown as typeof fetch;
+    for (const over of [
+      { "openid.op_endpoint": "https://evil.example.com/openid/login" },
+      { "openid.op_endpoint": "http://steamcommunity.com/openid/login" },
+      { "openid.op_endpoint": "" },
+    ]) {
+      expect(isVerified(await verifyAssertion(assertion(over), RETURN_TO, spy)), JSON.stringify(over)).toBe(false);
+    }
+    const missing = assertion();
+    missing.delete("openid.op_endpoint");
+    expect(isVerified(await verifyAssertion(missing, RETURN_TO, spy))).toBe(false);
+    expect(asked).toBe(false);
+  });
+
+  it("refuses an assertion that doesn't sign every field we rely on, without asking", async () => {
+    // Steam's check only covers the fields `openid.signed` lists; one left off it could have
+    // been swapped after Steam signed the rest.
+    let asked = false;
+    const spy = (async () => {
+      asked = true;
+      return new Response("is_valid:true");
+    }) as unknown as typeof fetch;
+    for (const field of ["op_endpoint", "claimed_id", "identity", "return_to", "response_nonce"]) {
+      const signed = "signed,op_endpoint,claimed_id,identity,return_to,response_nonce,assoc_handle"
+        .split(",")
+        .filter((f) => f !== field)
+        .join(",");
+      const r = await verifyAssertion(assertion({ "openid.signed": signed }), RETURN_TO, spy);
+      expect(isVerified(r), field).toBe(false);
+      expect((r as { error: string }).error).toMatch(/sign every part/);
+    }
+    const unsigned = assertion();
+    unsigned.delete("openid.signed");
+    expect(isVerified(await verifyAssertion(unsigned, RETURN_TO, spy))).toBe(false);
+    expect(asked).toBe(false);
   });
 
   it("treats a user cancelling as a cancellation, not a failure", async () => {
