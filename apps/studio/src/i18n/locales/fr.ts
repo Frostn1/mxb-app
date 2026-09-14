@@ -131,6 +131,11 @@ export const fr: Translation = {
   "designer.hideModel": "Masquer le modèle",
   "designer.showModel": "Afficher le modèle",
   "designer.exportPsdHint": "Écrit chaque planche en .psd avec ses calques, dans un dossier de votre choix.",
+  "designer.exportProxy": "Exporter un proxy de peinture",
+  "designer.exportProxyHint":
+    "Une version allégée de cette moto avec son vrai dépliage UV et un gabarit par planche, pour peindre dans Blender. Le modèle lui-même reste chez vous.",
+  "designer.exportedProxy": "Proxy de peinture écrit dans {{dir}}",
+  "designer.exportedProxyDesc": "{{kept}} triangles gardés sur {{of}}, avec un gabarit par planche.",
   "designer.psdWatching": "Surveille les changements : enregistrez dans Photoshop et la planche se met à jour ici.",
   "designer.psdReloaded": "« {{name}} » rechargée depuis Photoshop",
   "designer.blankSheet": "Planche vierge",

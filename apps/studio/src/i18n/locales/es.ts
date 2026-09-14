@@ -131,6 +131,11 @@ export const es: Translation = {
   "designer.hideModel": "Ocultar modelo",
   "designer.showModel": "Mostrar modelo",
   "designer.exportPsdHint": "Guarda cada hoja como un .psd con capas, en una carpeta que elijas.",
+  "designer.exportProxy": "Exportar proxy de pintura",
+  "designer.exportProxyHint":
+    "Una versión ligera de esta moto con su distribución UV real y una plantilla por hoja, para pintar en Blender. El modelo en sí se queda contigo.",
+  "designer.exportedProxy": "Proxy de pintura guardado en {{dir}}",
+  "designer.exportedProxyDesc": "Se conservaron {{kept}} de {{of}} triángulos, con una plantilla por hoja.",
   "designer.psdWatching": "Atento a los cambios: guarda en Photoshop y la hoja se actualiza aquí.",
   "designer.psdReloaded": "«{{name}}» recargada desde Photoshop",
   "designer.blankSheet": "Hoja en blanco",

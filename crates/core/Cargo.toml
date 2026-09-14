@@ -56,6 +56,8 @@ log = "0.4"
 dirs-next = "2.0.0"
 chacha20poly1305 = "0.10"
 getrandom = "0.2"
+# The painting proxy's cut: seam-aware simplification that keeps every UV the source's own.
+meshopt = "0.6.2"
 
 [features]
 # Only the binary that owns the anonymous-stats reporting mints an install id, so only it

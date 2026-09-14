@@ -131,6 +131,11 @@ export const ptBR: Translation = {
   "designer.hideModel": "Ocultar modelo",
   "designer.showModel": "Mostrar modelo",
   "designer.exportPsdHint": "Grava cada folha como um .psd com camadas, em uma pasta que você escolher.",
+  "designer.exportProxy": "Exportar proxy de pintura",
+  "designer.exportProxyHint":
+    "Uma versão leve desta moto com o layout UV real e um modelo por folha, para pintar no Blender. O modelo em si fica com você.",
+  "designer.exportedProxy": "Proxy de pintura gravado em {{dir}}",
+  "designer.exportedProxyDesc": "Mantidos {{kept}} de {{of}} triângulos, com um modelo por folha.",
   "designer.psdWatching": "Observando alterações — salve no Photoshop e a folha atualiza aqui.",
   "designer.psdReloaded": "“{{name}}” recarregada do Photoshop",
   "designer.blankSheet": "Folha em branco",

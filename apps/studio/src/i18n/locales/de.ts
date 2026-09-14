@@ -131,6 +131,11 @@ export const de: Translation = {
   "designer.hideModel": "Modell ausblenden",
   "designer.showModel": "Modell einblenden",
   "designer.exportPsdHint": "Schreibt jede Bahn als PSD mit Ebenen in einen Ordner deiner Wahl.",
+  "designer.exportProxy": "Mal-Proxy exportieren",
+  "designer.exportProxyHint":
+    "Ein leichter Ersatz dieses Bikes mit dem echten UV-Layout und einer Vorlage pro Bahn, zum Lackieren in Blender. Das Modell selbst bleibt bei dir.",
+  "designer.exportedProxy": "Mal-Proxy nach {{dir}} geschrieben",
+  "designer.exportedProxyDesc": "{{kept}} von {{of}} Dreiecken behalten, mit einer Vorlage pro Bahn.",
   "designer.psdWatching": "Überwacht Änderungen — in Photoshop speichern und die Bahn wird hier aktualisiert.",
   "designer.psdReloaded": "„{{name}}“ aus Photoshop neu geladen",
   "designer.blankSheet": "Leere Bahn",

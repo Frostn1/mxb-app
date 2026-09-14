@@ -854,11 +854,31 @@ export function psdRead(path: string): Promise<ArrayBuffer> {
   return invoke<ArrayBuffer>("psd_read", { path });
 }
 
-/** Write a sheet's `.psd` to a path the user picked. Body and header, as {@link photoSave}. */
+/**
+ * Write a sheet's `.psd` to a path the user picked. Body and header, as {@link photoSave}.
+ * A painting proxy's `.png` templates are written the same way.
+ */
 export function psdSave(dest: string, psd: ArrayBuffer): Promise<string> {
   return invoke<string>("psd_save", psd, {
     headers: { "x-dest": encodeURIComponent(dest) },
   });
+}
+
+/** What a painting proxy export wrote, and how far it cut the mesh down. */
+export type PaintProxyResult = {
+  obj: string;
+  triangles: number;
+  sourceTriangles: number;
+  /** One per texture the proxy uses: the `.png` its `.mtl` expects, for the caller to draw. */
+  templates: { texture: string; file: string }[];
+};
+
+/**
+ * Write a bike's painting proxy — a cut-down `.obj` with the real UV layout, and its `.mtl` —
+ * into `outDir`. The templates the `.mtl` names are the caller's to write.
+ */
+export function exportPaintProxy(source: string, outDir: string): Promise<PaintProxyResult> {
+  return invoke<PaintProxyResult>("export_paint_proxy", { source, outDir });
 }
 
 /** The file a save would write, resolved but not written — so we can ask before replacing. */

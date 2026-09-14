@@ -28,6 +28,7 @@ pub mod lru;
 pub mod map;
 pub mod names;
 pub mod paint;
+pub mod paintproxy;
 pub mod paintwatch;
 pub mod pkz;
 pub mod scenery;

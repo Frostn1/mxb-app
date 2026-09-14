@@ -133,6 +133,10 @@ pub struct BikeModel {
     /// that are each still in their own frame. See [`edf::BikeRig`] for why the viewer poses
     /// at all rather than drawing one settled stance.
     pub rig: Option<edf::BikeRig>,
+    /// How many of `nodes`, at the end, are wheels from the tyres mod rather than the bike's
+    /// own parts — so an export of the bike can leave them out.
+    #[serde(skip)]
+    pub wheels: usize,
 }
 
 impl BikeModel {
@@ -533,6 +537,7 @@ pub fn build_bike_model(
     // Wheels last, and only onto a bike that arrived: a mesh that didn't read has to go on
     // reading as "none of this bike arrived", not as a pair of wheels hanging in the air.
     let mut tyres = None;
+    let mut wheel_count = 0;
     if let Some(set) = tyre_set.as_ref().filter(|_| !nodes.is_empty()) {
         let (mut wheels, meshes) = wheel_nodes(&set.files);
         if wheels.is_empty() {
@@ -540,6 +545,7 @@ pub fn build_bike_model(
         } else {
             tyres = Some(set.name.clone());
         }
+        wheel_count = wheels.len();
         nodes.append(&mut wheels);
         used.extend(meshes);
     }
@@ -729,7 +735,15 @@ pub fn build_bike_model(
         log::info!("  node '{}' placed={} {}", n.name, n.placed, subs.join(", "));
     }
 
-    let model = BikeModel { nodes, paints, base: model_base, tyres, assembled, rig };
+    let model = BikeModel {
+        nodes,
+        paints,
+        base: model_base,
+        tyres,
+        assembled,
+        rig,
+        wheels: wheel_count,
+    };
     if let Ok(mut c) = bike_cache().lock() {
         // The pixels of whatever this displaced go with it — evicted or replaced in place,
         // nothing else references them; tokens are minted per build.
@@ -3838,6 +3852,7 @@ mod viewer_tests {
             tyres: None,
             assembled: true,
             rig: None,
+            wheels: 0,
         };
         let tokens = model.tokens();
         assert!(tokens.contains(&"t-own".to_string()), "the overridden one is still released");
