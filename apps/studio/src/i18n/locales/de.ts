@@ -70,7 +70,12 @@ export const de: Translation = {
   "secure.selected": "{{count}} ausgewählt",
   "secure.generate": "Erzeugen",
   "secure.buyerNote": "Schicke dem Käufer beide Dateien. Er legt sie in seinen Strecken-Ordner — die Strecke erscheint und ist fahrbar, an sein Steam-Konto gebunden, offline.",
-  "secure.genResult": "Erzeugt",
+  "secure.genResult": "Verpackt",
+  "secure.registerNote": "Registriere die Asset-ID und den Inhaltsschlüssel im Store und verteile dann die .mxbsecure-Datei. Gib den Inhaltsschlüssel niemals weiter — Käufer, die die Strecke besitzen, erhalten ihn aus dem Store und schalten auf ihrem eigenen Rechner frei.",
+  "secure.assetId": "Asset-ID",
+  "secure.contentKey": "Inhaltsschlüssel",
+  "secure.copy": "Kopieren",
+  "secure.copied": "In die Zwischenablage kopiert.",
   // ── Paint studio ───────────────────────────────────────────────────────────
   "paints.help":
     "Macht aus .tga- oder .png-Dateien aus GIMP oder Photoshop eine .pnt, die das Spiel lädt — und entpackt ein vorhandenes Design als Ausgangspunkt.",
@@ -400,9 +405,9 @@ export const de: Translation = {
   "rider.nameFirst": "Gib diesem Fahrer-Look zuerst einen Namen.",
   "secure.help":
     "Sperrt eine Datei in ein .mxbsecure-Blob. Der Klartext wird nie ausgeliefert — nur das verschlüsselte Blob, und das ist ohne einen Schlüssel wertlos, den der Server berechtigten Spielern gibt.",
-  "secure.genTitle": "Strecken für einen Käufer schützen",
-  "secure.genDesc": "Wähle eine oder mehrere Strecken und die Steam-ID des Käufers. Die App legt neben jeder Strecke eine verschlüsselte Kopie und einen an dieses Konto gebundenen Schlüssel ab — dein Original bleibt unberührt.",
-  "secure.genOk": "{{ok}} von {{total}} geschützt — an {{id}} gebunden.",
+  "secure.genTitle": "Strecken für die Verteilung verpacken",
+  "secure.genDesc": "Wähle eine oder mehrere Strecken. Die App legt neben jeder eine verschlüsselte Kopie ab und gibt dir eine Asset-ID und einen Inhaltsschlüssel zur Registrierung im Store — dein Original bleibt unberührt. Käufer schalten sie auf ihrem eigenen Rechner frei.",
+  "secure.genOk": "{{ok}} von {{total}} verpackt.",
   "secure.genFail": "{{name}} konnte nicht geschützt werden",
   "secure.badSteamId": "Gib zuerst die 17-stellige Steam-ID des Käufers ein.",
   "secure.experimental": "Experimentell",

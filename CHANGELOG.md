@@ -12,6 +12,9 @@
 ## Unreleased — Frost's Studio
 
 ### Changed
+- Protecting a track packs it for distribution and gives you an asset id and content key to
+  register with the store. Buyers unlock it by signing in once on their own machine, where the
+  key stays tied and works offline.
 - Generated tracks are rougher, closer to an ARL track, and have a roughness setting to go
   further.
 - Doubles, triples and singles have steeper take-offs and real gaps you have to jump.
