@@ -8,6 +8,9 @@
 //! binaries build off one core, and that a command registered by path across a crate
 //! boundary actually reaches the webview.
 
+// Refuse to run under a debugger in release builds — the runtime half of the binary hardening.
+mod antidebug;
+
 // The studio's own modules: making a track, packing a paint, sealing content for a buyer.
 mod edfwrite;
 mod gearrepair;
@@ -95,6 +98,8 @@ async fn save_track_props(
 }
 
 fn main() {
+    // As early as possible: refuse to run under a debugger in release builds. No-op in debug.
+    antidebug::guard();
     tauri::Builder::default()
         .manage(PsdWatcher::default())
         // The viewer's own watches — without these its commands are refused, and a paint
