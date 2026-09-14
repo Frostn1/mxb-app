@@ -580,6 +580,11 @@ export const de: Translation = {
   "settings.steamLinkOk": "Angemeldet als {{id}}.",
   "settings.steamLinkPending": "Anmeldung noch nicht erkannt. Schließe sie im Browser ab und öffne die Einstellungen erneut.",
   "settings.steamLinkFail": "Steam-Anmeldung fehlgeschlagen",
+  "settings.secStatusTitle": "Geschützte Inhalte gefunden",
+  "settings.secStatusUnlocked": "Freigeschaltet",
+  "settings.secStatusUnlocking": "Wird freigeschaltet…",
+  "settings.secStatusNotOwned": "Nicht in deiner Bibliothek",
+  "settings.secStatusUnavailable": "Nicht verfügbar",
   "secure.intro":
     "Datei wählen, sperren, dann das Entsperren prüfen. Beim Prüfen wird das Blob hier entschlüsselt und Byte für Byte mit dem Original verglichen — der Beleg, dass es auf diesem Rechner zurückkommt.",
   "secure.protectTitle": "Eine Strecke schützen",

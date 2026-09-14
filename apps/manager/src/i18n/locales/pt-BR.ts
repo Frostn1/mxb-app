@@ -575,6 +575,11 @@ export const ptBR: Translation = {
   "settings.steamLinkOk": "Conectado como {{id}}.",
   "settings.steamLinkPending": "Login ainda não detectado. Conclua no navegador e reabra as Configurações.",
   "settings.steamLinkFail": "Falha ao entrar com a Steam",
+  "settings.secStatusTitle": "Conteúdo protegido encontrado",
+  "settings.secStatusUnlocked": "Desbloqueado",
+  "settings.secStatusUnlocking": "Desbloqueando…",
+  "settings.secStatusNotOwned": "Não está na sua biblioteca",
+  "settings.secStatusUnavailable": "Indisponível",
   "secure.intro":
     "Escolha um arquivo, bloqueie e depois verifique que ele desbloqueia. Verificar decifra o blob aqui mesmo e compara com o original, byte a byte — a prova de que ele vai e volta nesta máquina.",
   "secure.protectTitle": "Proteger uma pista",

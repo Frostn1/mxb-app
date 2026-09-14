@@ -577,6 +577,11 @@ export const fr: Translation = {
   "settings.steamLinkOk": "Connecté en tant que {{id}}.",
   "settings.steamLinkPending": "Connexion pas encore détectée. Termine-la dans le navigateur, puis rouvre les Paramètres.",
   "settings.steamLinkFail": "Échec de la connexion Steam",
+  "settings.secStatusTitle": "Contenu sécurisé trouvé",
+  "settings.secStatusUnlocked": "Déverrouillé",
+  "settings.secStatusUnlocking": "Déverrouillage…",
+  "settings.secStatusNotOwned": "Pas dans ta bibliothèque",
+  "settings.secStatusUnavailable": "Indisponible",
   "secure.intro":
     "Choisissez un fichier, verrouillez-le, puis vérifiez qu'il se déverrouille. La vérification déchiffre le blob ici même et le compare à l'original, octet par octet — la preuve qu'il fait l'aller-retour sur cette machine.",
   "secure.protectTitle": "Protéger un circuit",

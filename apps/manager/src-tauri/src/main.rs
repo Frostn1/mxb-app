@@ -1910,6 +1910,106 @@ async fn mxbsecure_auto_unlock(app: tauri::AppHandle) -> Result<usize, String> {
     }
 }
 
+/// One secured file the app found on disk, and what it can say about it without the key: the
+/// name to show, whether it's unlocked here, and — from the store — its title and this account's
+/// entitlement. A locked file can still be shown with a real name and a reason.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(not(mxbsecure), allow(dead_code))]
+struct SecureStatusItem {
+    blob_path: String,
+    game_name: String,
+    asset_id: String,
+    title: Option<String>,
+    registered: bool,
+    owned: bool,
+    available: bool,
+    unlocked: bool,
+}
+
+/// The secured files present on disk, each with its status — for a "Secured content" view that
+/// can show a locked `.mxbsecure` (whose real info is encrypted) with its store name and why it
+/// isn't playing yet. Local facts (name, unlocked) are read from disk; title/owned/available come
+/// from the control plane when enrolled.
+#[tauri::command]
+async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>, String> {
+    #[cfg(mxbsecure)]
+    {
+        let live = steamid::current_steam_id64();
+        let mut items: Vec<SecureStatusItem> = Vec::new();
+        for blob_path in secure_launch::scan_blobs(&app) {
+            let Ok(blob) = std::fs::read(&blob_path) else { continue };
+            let Ok((asset_id, _k, _l)) = mxbsecure::header_of(&blob) else { continue };
+            let game_name = std::path::Path::new(&blob_path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .map(|n| n.strip_suffix(".mxbsecure").unwrap_or(&n).to_string())
+                .unwrap_or_default();
+            let unlocked = live.as_deref().map(|id| has_valid_key(&blob_path, id)).unwrap_or(false);
+            items.push(SecureStatusItem {
+                blob_path,
+                game_name,
+                asset_id,
+                title: None,
+                registered: false,
+                owned: false,
+                available: false,
+                unlocked,
+            });
+        }
+        if items.is_empty() {
+            return Ok(items);
+        }
+
+        let cfg = config::load_or_detect(&app).unwrap_or_default();
+        let cp_token = cfg.cp_token.trim().to_string();
+        if !cp_token.is_empty() {
+            let asset_ids: Vec<&str> = items.iter().map(|i| i.asset_id.as_str()).collect();
+            let sent = reqwest::Client::new()
+                .post(format!("{}/v1/assets/status", crate::paintsync::control_plane()))
+                .bearer_auth(&cp_token)
+                .json(&serde_json::json!({ "assetIds": asset_ids }))
+                .send()
+                .await;
+            if let Ok(resp) = sent {
+                if resp.status().is_success() {
+                    #[derive(serde::Deserialize)]
+                    struct StatusResp {
+                        assets: Vec<AssetStatus>,
+                    }
+                    #[derive(serde::Deserialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct AssetStatus {
+                        asset_id: String,
+                        title: Option<String>,
+                        registered: bool,
+                        owned: bool,
+                        available: bool,
+                    }
+                    if let Ok(body) = resp.json::<StatusResp>().await {
+                        let map: std::collections::HashMap<String, AssetStatus> =
+                            body.assets.into_iter().map(|a| (a.asset_id.clone(), a)).collect();
+                        for item in &mut items {
+                            if let Some(a) = map.get(&item.asset_id) {
+                                item.title = a.title.clone();
+                                item.registered = a.registered;
+                                item.owned = a.owned;
+                                item.available = a.available;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(items)
+    }
+    #[cfg(not(mxbsecure))]
+    {
+        let _ = app;
+        Ok(Vec::new())
+    }
+}
+
 /// Start linking this account to a Steam identity: ask the control plane for a Steam OpenID
 /// sign-in URL. The frontend opens it in the browser; the browser half lands on
 /// `/v1/steam/return`, which sets `accounts.steam_id`. Returns the URL to open.
@@ -6528,6 +6628,7 @@ fn main() {
             mxbsecure_provision,
             mxbsecure_unlock,
             mxbsecure_auto_unlock,
+            mxbsecure_status,
             steam_link_start,
             steam_link_status,
             mxbsecure_open_offline,

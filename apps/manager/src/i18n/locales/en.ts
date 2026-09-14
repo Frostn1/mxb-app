@@ -566,6 +566,11 @@ export const en = {
   "settings.steamLinkOk": "Signed in as {{id}}.",
   "settings.steamLinkPending": "Didn't detect the sign-in yet. Finish it in the browser, then reopen Settings.",
   "settings.steamLinkFail": "Steam sign-in failed",
+  "settings.secStatusTitle": "Secured content found",
+  "settings.secStatusUnlocked": "Unlocked",
+  "settings.secStatusUnlocking": "Unlocking…",
+  "settings.secStatusNotOwned": "Not in your library",
+  "settings.secStatusUnavailable": "Unavailable",
   "secure.intro":
     "Pick a file, lock it, then verify it unlocks. Verifying decrypts the blob right here and checks it matches the original, byte for byte — the proof it round-trips on this machine.",
   "secure.protectTitle": "Protect a track",

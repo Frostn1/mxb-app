@@ -410,6 +410,25 @@ export function mxbsecureUnlock(blobPath: string): Promise<SecureProvisionOutcom
   return invoke<SecureProvisionOutcome>("mxbsecure_unlock", { blobPath });
 }
 
+/** One secured file on disk and what can be shown about it without the key. */
+export interface SecureStatusItem {
+  blobPath: string;
+  gameName: string;
+  assetId: string;
+  /** The store title, or null when the file isn't a known/registered asset. */
+  title: string | null;
+  registered: boolean;
+  owned: boolean;
+  available: boolean;
+  unlocked: boolean;
+}
+
+/** The secured files present on disk, each with its status — so a locked `.mxbsecure` can be
+ *  shown with its store name and why it isn't playing yet, without the content key. */
+export function mxbsecureStatus(): Promise<SecureStatusItem[]> {
+  return invoke<SecureStatusItem[]>("mxbsecure_status");
+}
+
 /** Try to unlock every secured `.mxbsecure` that doesn't have a key yet — after an install or at
  *  startup, so content you own just works. No-op when not enrolled; a file you're not entitled to
  *  is left locked. Returns how many were newly unlocked. */
