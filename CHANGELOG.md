@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Changed
+- Secured files have a tidier name: locking a track writes `Northgate.mxbsecure` (with its key
+  `Northgate.mxbsecurekey`) instead of the longer `Northgate.pkz.mxbsecure`. Files you already
+  have keep working — the app reads both names.
 - Secured content just works: it injects and auto-unlocks when you own it, without turning on an
   experimental setting first. Reading a secured file's status is lighter too — the app reads only
   the header and streams the hash instead of loading the whole file, so large secured content
