@@ -2,7 +2,12 @@
 
 ## Unreleased
 
+### Changed
+- Frost's Studio's "Designer editor" tab is now just "Editor".
+
 ### Fixed
+- Helmets in the 3D preview sit cleanly over the rider's head, with no skin showing through at
+  the visor, the goggles or the chin.
 - In Frost's Studio, the "What are you painting?" picker shows Helmet, Goggles, Boots,
   Protection and Gloves in full when it opens from the paint bar, instead of cutting each to
   one letter.

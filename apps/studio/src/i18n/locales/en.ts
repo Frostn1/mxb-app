@@ -19,7 +19,7 @@ export const en = {
   "common.remove": "Remove",
   "nav.pose": "Pose",
   "nav.settings": "Settings",
-  "nav.designer": "Designer editor",
+  "nav.designer": "Editor",
   "nav.paints": "Paints",
 
 

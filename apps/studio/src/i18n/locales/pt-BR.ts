@@ -15,7 +15,7 @@ export const ptBR: Translation = {
   "common.remove": "Remover",
   "nav.pose": "Pose",
   "nav.settings": "Configurações",
-  "nav.designer": "Editor Designer",
+  "nav.designer": "Editor",
   "nav.paints": "Pinturas",
 
 
