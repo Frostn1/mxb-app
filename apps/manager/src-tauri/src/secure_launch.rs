@@ -49,11 +49,11 @@ pub fn load_assets(app: &AppHandle) -> Vec<SecureAsset> {
 pub fn scan_secured(app: &AppHandle) -> Vec<SecureAsset> {
     let mut found: Vec<SecureAsset> = Vec::new();
     if let Ok(cfg) = crate::config::load(app) {
-        // The game's content roots: tracks, bikes (and their paints), and rider gear.
-        for sub in ["mods/tracks", "mods/bikes", "mods/rider"] {
-            let root = crate::library::mods_subdir(&cfg.mods_path, sub);
-            collect_mxbsecure(&root, &mut found);
-        }
+        // The whole mods tree: secured content is any asset type and a buyer may drop it in any
+        // sub-folder (a `mxbsecure` folder of their own included), so walk all of `mods` rather
+        // than only tracks/bikes/rider.
+        let root = crate::library::mods_subdir(&cfg.mods_path, "mods");
+        collect_mxbsecure(&root, &mut found);
     }
     for a in load_assets(app) {
         if !found.iter().any(|f| f.blob_path.eq_ignore_ascii_case(&a.blob_path)) {
@@ -145,10 +145,8 @@ fn header_orig_name(path: &std::path::Path) -> Option<String> {
 pub fn scan_blobs(app: &AppHandle) -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(cfg) = crate::config::load(app) {
-        for sub in ["mods/tracks", "mods/bikes", "mods/rider"] {
-            let root = crate::library::mods_subdir(&cfg.mods_path, sub);
-            collect_blobs(&root, &mut out);
-        }
+        let root = crate::library::mods_subdir(&cfg.mods_path, "mods");
+        collect_blobs(&root, &mut out);
     }
     out
 }

@@ -623,17 +623,23 @@ export default function Library({
     };
   }, [showRemoved, modType, refreshKey]);
 
-  // What `refreshKey` was last time. A bump means something installed, moved or was
-  // removed, so every remembered scan is stale — including the other tabs'.
+  // What `refreshKey` and the open tab were last time. A `refreshKey` bump means something
+  // installed, moved or was removed, so every remembered scan is stale — including the other
+  // tabs'. A tab change is a different folder entirely.
   const seenRefresh = useRef(refreshKey);
+  const seenModType = useRef(modType.id);
 
   useEffect(() => {
-    const changed = seenRefresh.current !== refreshKey;
+    const refreshBumped = seenRefresh.current !== refreshKey;
+    const tabChanged = seenModType.current !== modType.id;
     seenRefresh.current = refreshKey;
-    if (changed) dropScans();
-    const hit = changed ? null : cachedScan<LibraryEntry[]>(modType.installSubpath);
+    seenModType.current = modType.id;
+    if (refreshBumped) dropScans();
+    const hit = refreshBumped ? null : cachedScan<LibraryEntry[]>(modType.installSubpath);
     if (!hit) {
-      void load();
+      // A same-folder change (an install, or a hand edit) refreshes behind the list so scroll
+      // position is kept; switching tabs is a new folder, so it shows the scan state.
+      void load({ quiet: refreshBumped && !tabChanged });
       return;
     }
     setEntries(hit.value);

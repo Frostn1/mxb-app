@@ -1842,6 +1842,11 @@ struct SecureStatusItem {
     owned: bool,
     available: bool,
     unlocked: bool,
+    /// The blob's header parsed — false for a truncated or non-mxbsecure file, which is still
+    /// listed (with its filename) so a broken drop-in isn't a silent no-show.
+    readable: bool,
+    /// A key file sits beside the blob (whether or not it opens for the live account).
+    has_key: bool,
 }
 
 /// The secured files present on disk, each with its status — for a "Secured content" view that
@@ -1855,7 +1860,11 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
         let live = steamid::current_steam_id64();
         let mut items: Vec<SecureStatusItem> = Vec::new();
         for blob_path in secure_launch::scan_blobs(&app) {
-            let Ok((asset_id, _k, _l, orig)) = read_blob_header(&blob_path).await else { continue };
+            // A file whose header won't parse is still listed (as its filename, marked
+            // unreadable) rather than silently dropped — a broken drop-in shouldn't just vanish.
+            let header = read_blob_header(&blob_path).await.ok();
+            let readable = header.is_some();
+            let (asset_id, orig) = header.map(|(a, _k, _l, o)| (a, o)).unwrap_or_default();
             let game_name = if orig.is_empty() {
                 std::path::Path::new(&blob_path)
                     .file_name()
@@ -1865,6 +1874,7 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
             } else {
                 orig
             };
+            let has_key = secure_launch::existing_key_path(&blob_path).is_some();
             let unlocked = live.as_deref().map(|id| has_valid_key(&blob_path, id)).unwrap_or(false);
             items.push(SecureStatusItem {
                 blob_path,
@@ -1875,6 +1885,8 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
                 owned: false,
                 available: false,
                 unlocked,
+                readable,
+                has_key,
             });
         }
         if items.is_empty() {
@@ -1884,7 +1896,8 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
         let cfg = config::load_or_detect(&app).unwrap_or_default();
         let cp_token = cfg.cp_token.trim().to_string();
         if !cp_token.is_empty() {
-            let asset_ids: Vec<&str> = items.iter().map(|i| i.asset_id.as_str()).collect();
+            let asset_ids: Vec<&str> =
+                items.iter().map(|i| i.asset_id.as_str()).filter(|a| !a.is_empty()).collect();
             let sent = reqwest::Client::new()
                 .post(format!("{}/v1/assets/status", crate::paintsync::control_plane()))
                 .bearer_auth(&cp_token)

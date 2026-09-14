@@ -516,14 +516,37 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const [unlocking, setUnlocking] = useState(false);
   const [linkedSteam, setLinkedSteam] = useState<string | null>(null);
   const [secureItems, setSecureItems] = useState<SecureStatusItem[]>([]);
-  const secureBadge = (it: SecureStatusItem) => {
+  const secureBadge = (
+    it: SecureStatusItem,
+  ): { label: string; cls: string; reason?: string } => {
     if (it.unlocked)
       return { label: t("settings.secStatusUnlocked"), cls: "bg-success/15 text-success" };
+    if (!it.readable)
+      return {
+        label: t("settings.secStatusUnreadable"),
+        cls: "bg-warning/15 text-warning",
+        reason: t("settings.secReasonUnreadable"),
+      };
     if (it.owned && it.available)
       return { label: t("settings.secStatusUnlocking"), cls: "bg-primary/15 text-primary" };
     if (it.registered && !it.owned)
-      return { label: t("settings.secStatusNotOwned"), cls: "bg-foreground/10 text-muted-foreground" };
-    return { label: t("settings.secStatusUnavailable"), cls: "bg-foreground/10 text-muted-foreground" };
+      return {
+        label: t("settings.secStatusNotOwned"),
+        cls: "bg-foreground/10 text-muted-foreground",
+        reason: t("settings.secReasonNotOwned"),
+      };
+    // Ownership can't be told apart from "not signed in" — nudge to Steam first.
+    if (!linkedSteam)
+      return {
+        label: t("settings.secStatusNeedsSteam"),
+        cls: "bg-warning/15 text-warning",
+        reason: t("settings.secReasonNeedsSteam"),
+      };
+    return {
+      label: t("settings.secStatusUnavailable"),
+      cls: "bg-foreground/10 text-muted-foreground",
+      reason: t("settings.secReasonLocked"),
+    };
   };
   const [linking, setLinking] = useState(false);
   const voiceInput = config.voiceInputDevice ?? "";
@@ -806,8 +829,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     try {
       await mxbsecureUnlock(path);
       toast.success(t("settings.mxbsecureUnlockOk"));
+      mxbsecureStatus().then(setSecureItems).catch(() => {});
     } catch (e) {
-      toast.error(t("settings.mxbsecureUnlockFail"), { description: String(e) });
+      const msg = String(e);
+      if (/no Steam account linked/i.test(msg) || /Steam ID/i.test(msg)) {
+        // The one failure the user can fix right here — offer the sign-in inline.
+        toast.error(t("settings.mxbsecureUnlockFail"), {
+          description: t("settings.unlockNeedsSteam"),
+          action: { label: t("settings.steamLinkBtn"), onClick: () => void linkSteam() },
+        });
+      } else if (/not entitled/i.test(msg)) {
+        toast.error(t("settings.mxbsecureUnlockFail"), {
+          description: t("settings.unlockNotOwned"),
+        });
+      } else {
+        toast.error(t("settings.mxbsecureUnlockFail"), { description: msg });
+      }
     } finally {
       setUnlocking(false);
     }
@@ -833,6 +870,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
         if (id) {
           setLinkedSteam(id);
           toast.success(t("settings.steamLinkOk", { id }));
+          mxbsecureStatus().then(setSecureItems).catch(() => {});
           return;
         }
       }
@@ -1438,7 +1476,14 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   <>
                     <div className="flex items-center justify-between gap-4">
                       <div className="min-w-0">
-                        <p className="text-[13px] font-medium">{t("settings.steamLink")}</p>
+                        <p className="flex items-center gap-1.5 text-[13px] font-medium">
+                          <span
+                            className={`inline-block size-2 flex-none rounded-full ${
+                              linkedSteam ? "bg-success" : "bg-warning"
+                            }`}
+                          />
+                          {t("settings.steamLink")}
+                        </p>
                         <p className="mt-0.5 text-[12px] text-muted-foreground">
                           {linkedSteam
                             ? t("settings.steamLinkedAs", { id: linkedSteam })
@@ -1447,7 +1492,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                       </div>
                       <Button
                         size="sm"
-                        variant="outline"
+                        variant={linkedSteam ? "outline" : "default"}
                         className="flex-none"
                         disabled={linking}
                         onClick={() => void linkSteam()}
@@ -1487,11 +1532,18 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                                 key={it.blobPath}
                                 className="flex items-center justify-between gap-3 rounded-md bg-foreground/[0.03] px-2.5 py-1.5"
                               >
-                                <span
-                                  className="min-w-0 flex-1 truncate text-[12px]"
-                                  title={it.gameName}
-                                >
-                                  {it.title ?? it.gameName}
+                                <span className="min-w-0 flex-1">
+                                  <span
+                                    className="block truncate text-[12px]"
+                                    title={it.gameName}
+                                  >
+                                    {it.title ?? it.gameName}
+                                  </span>
+                                  {b.reason && (
+                                    <span className="block truncate text-[11px] text-muted-foreground">
+                                      {b.reason}
+                                    </span>
+                                  )}
                                 </span>
                                 <span
                                   className={`flex-none rounded px-1.5 py-0.5 text-[10.5px] font-medium ${b.cls}`}

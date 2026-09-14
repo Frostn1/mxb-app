@@ -421,6 +421,10 @@ export interface SecureStatusItem {
   owned: boolean;
   available: boolean;
   unlocked: boolean;
+  /** The blob's header parsed — false for a truncated or non-mxbsecure file, still listed. */
+  readable: boolean;
+  /** A key file sits beside the blob (whether or not it opens for this account). */
+  hasKey: boolean;
 }
 
 /** The secured files present on disk, each with its status — so a locked `.mxbsecure` can be
