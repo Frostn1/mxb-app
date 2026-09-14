@@ -37,6 +37,10 @@
   the header and streams the hash instead of loading the whole file, so large secured content
   doesn't sit in memory or stutter a synced mods folder.
 
+### Removed
+- Frost Studio no longer has an MXB Secure tab. Creators lock mxbsecure files on mxbsecure.com,
+  where the buyer list lives too.
+
 ### Added
 - Settings → General lists the secured files it found and each one's status — Unlocked,
   Unlocking, Not in your library, or Unavailable — with its store name, so a locked file you

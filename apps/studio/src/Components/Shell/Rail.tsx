@@ -12,10 +12,9 @@ export interface RailEntry<T extends string> {
  * The studio's navigation: the tools, named, down the left.
  *
  * Not the manager's horizontal rail — a tool row across the top costs the canvas its full
- * height and puts the thing you are working on second. And not an icon strip either: seven
- * glyphs for seven tools meant two near-identical people for Rider and Pose and two
- * near-identical padlocks for Protect and Secure, which is what an icon per row gets you
- * once the rows stop being nouns you can draw. The names are quicker to read than a glyph
+ * height and puts the thing you are working on second. And not an icon strip either: one
+ * glyph per tool meant two near-identical people for Rider and Pose, which is what an icon
+ * per row gets you once the rows stop being nouns you can draw. The names are quicker to read than a glyph
  * you have to decode, and they are what people call these tools anyway.
  *
  * Grouped, because "draw something" and "lock something you have already made" are different
