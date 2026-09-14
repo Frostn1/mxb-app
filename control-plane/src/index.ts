@@ -330,7 +330,16 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "POST" && path === "/v1/entitlements/check") {
     return checkEntitlement(request, account, env);
   }
-  if (method === "POST" && path === "/v1/keys/grant") return grantKey(request, account, env);
+  if (method === "POST" && path === "/v1/keys/grant") {
+    // Per account, since that's who is asking. The app asks once per file per PC.
+    if (env.KEY_GRANT_LIMITER && !(await env.KEY_GRANT_LIMITER.limit({ key: account.id })).success) {
+      return new Response(JSON.stringify({ error: "too many key requests, wait a minute and try again" }), {
+        status: 429,
+        headers: { "content-type": "application/json", "Retry-After": "60" },
+      });
+    }
+    return grantKey(request, account, env);
+  }
   if (method === "GET" && path === "/v1/voice/room") return voiceRoom(request, url, account, env);
 
   // Paint sync, open on the same terms as voice, and for the same reason: a rider only sees

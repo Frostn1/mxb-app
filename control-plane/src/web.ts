@@ -65,6 +65,17 @@ export async function webRoutes(
     return cors(new Response(null, { status: 204 }), origin, true, "GET, POST, OPTIONS");
   }
 
+  // Each return asks Steam, and a login state costs nothing to mint: a ceiling per address keeps
+  // this host from being a free way to hammer Steam, or to spend our request budget.
+  if (method === "GET" && (path === "/v1/web/steam/login" || path === "/v1/web/steam/return") && env.SIGNIN_LIMITER) {
+    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    if (!(await env.SIGNIN_LIMITER.limit({ key: ip })).success) {
+      const slow = page(429, "Too many sign-in attempts from here. Wait a minute and try again.");
+      slow.headers.set("Retry-After", "60");
+      return slow;
+    }
+  }
+
   if (method === "GET" && path === "/v1/web/steam/login") {
     if (!key) return page(503, "Sign-in isn't set up on this server yet.");
     const n = crypto.randomUUID();

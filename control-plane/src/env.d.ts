@@ -68,6 +68,11 @@ declare global {
     /** "1" lets a local build of the site (localhost:5173, 127.0.0.1:5173) call the site's routes
      *  and land sign-in there. For `.dev.vars` only — never set it in production. */
     MXB_ALLOW_DEV_ORIGINS?: string;
+    /** Rate limit on `/v1/web/steam/login` and `/return`, per client address (`ratelimits` in
+     *  `wrangler.jsonc`). Optional so tests and a bare `wrangler dev` run without it. */
+    SIGNIN_LIMITER?: RateLimit;
+    /** Rate limit on `/v1/keys/grant`, per account. Optional for the same reason. */
+    KEY_GRANT_LIMITER?: RateLimit;
   }
 }
 

@@ -480,6 +480,35 @@ describe("POST /v1/keys/grant after an admin grant", () => {
   });
 });
 
+describe("key grant rate limit", () => {
+  it("limits /v1/keys/grant per account", async () => {
+    const keys: string[] = [];
+    const seen = new Map<string, number>();
+    const KEY_GRANT_LIMITER = {
+      limit: async ({ key }: { key: string }) => {
+        keys.push(key);
+        seen.set(key, (seen.get(key) ?? 0) + 1);
+        return { success: seen.get(key)! <= 2 };
+      },
+    };
+    const env = { ...(await deployment()), KEY_GRANT_LIMITER } as unknown as Env;
+    const insert = "INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at) VALUES (?, ?, ?, ?, ?)";
+    await env.DB.prepare(insert).bind("acc_buyer", "Buyer", BUYER, await hashToken("buyer-token"), Date.now()).run();
+    await env.DB.prepare(insert).bind("acc_other", "Other", OTHER, await hashToken("other-token"), Date.now()).run();
+    const { assetId } = await create(env);
+    const ask = (token: string) => call(env, req("POST", "/v1/keys/grant", { key: token, body: { assetId, sessionId: "s1" } }));
+
+    expect((await ask("buyer-token")).status).toBe(403);
+    expect((await ask("buyer-token")).status).toBe(403);
+    const slow = await ask("buyer-token");
+    expect(slow.status).toBe(429);
+    expect(slow.headers.get("Retry-After")).toBe("60");
+    expect(((await slow.json()) as { error: string }).error).toMatch(/too many key requests/);
+    expect((await ask("other-token")).status).toBe(403);
+    expect(keys).toEqual(["acc_buyer", "acc_buyer", "acc_buyer", "acc_other"]);
+  });
+});
+
 describe("takedown", () => {
   it("is set and cleared only with a key, and a creator's restore doesn't lift it", async () => {
     const CREATOR = "76561198174305985";

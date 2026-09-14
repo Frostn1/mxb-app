@@ -197,6 +197,28 @@ describe("Steam sign-in", () => {
     expect(steam).not.toHaveBeenCalled();
   });
 
+  it("limits sign-in per client address, login and return together", async () => {
+    const seen = new Map<string, number>();
+    const SIGNIN_LIMITER = {
+      limit: async ({ key }: { key: string }) => {
+        seen.set(key, (seen.get(key) ?? 0) + 1);
+        return { success: seen.get(key)! <= 2 };
+      },
+    };
+    const env = { ...(await deployment()), SIGNIN_LIMITER } as unknown as Env;
+    const from = (ip: string, path: string) => new Request(`${API}${path}`, { headers: { "CF-Connecting-IP": ip } });
+
+    expect((await web(env, from("1.2.3.4", "/v1/web/steam/login"))).status).toBe(302);
+    expect((await web(env, from("1.2.3.4", "/v1/web/steam/return?state=junk"))).status).toBe(400);
+    const slow = await web(env, from("1.2.3.4", "/v1/web/steam/login"));
+    expect(slow.status).toBe(429);
+    expect(slow.headers.get("Retry-After")).toBe("60");
+    expect(await slow.text()).toContain("Too many sign-in attempts");
+    expect((await web(env, from("5.6.7.8", "/v1/web/steam/login"))).status).toBe(302);
+    // /me and logout aren't counted.
+    expect((await web(env, from("1.2.3.4", "/v1/web/me"))).status).toBe(401);
+  });
+
   it("lands back on www when the sign-in started there, never on another site", async () => {
     const env = await deployment();
     const www = await web(env, await steamComesBack(env, CREATOR, "/lock", "https://www.mxbsecure.com"), steamYes);
