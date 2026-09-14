@@ -42,6 +42,9 @@
 
 ## Unreleased — Frost's Studio
 
+### Fixed
+- The window's close button closes Frost's Studio.
+
 ### Changed
 - Protecting a track packs it for distribution and gives you an asset id and content key to
   register with the store. Buyers unlock it by signing in once on their own machine, where the
