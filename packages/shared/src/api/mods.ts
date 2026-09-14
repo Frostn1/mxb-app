@@ -410,6 +410,19 @@ export function mxbsecureUnlock(blobPath: string): Promise<SecureProvisionOutcom
   return invoke<SecureProvisionOutcome>("mxbsecure_unlock", { blobPath });
 }
 
+/** Start linking this account to Steam: returns a Steam OpenID URL to open in the browser.
+ *  Completing it there sets your account's Steam ID (via /v1/steam/return), which is what
+ *  grant checks before releasing a content key. */
+export function steamLinkStart(): Promise<string> {
+  return invoke<string>("steam_link_start");
+}
+
+/** The Steam ID this account is currently linked to on the control plane, or null if not
+ *  linked yet. Reflects sign-in state and lets the UI poll for completion. */
+export function steamLinkStatus(): Promise<string | null> {
+  return invoke<string | null>("steam_link_status");
+}
+
 /** What a run would touch — folders walked, files taken as themselves, skips flagged. */
 export function contentLockPlan(paths: string[]): Promise<LockItem[]> {
   return invoke<LockItem[]>("content_lock_plan", { paths });
