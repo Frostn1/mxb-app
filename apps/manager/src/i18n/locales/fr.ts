@@ -563,9 +563,9 @@ export const fr: Translation = {
     "Expérimental. Ajoute un onglet Sécuriser qui verrouille un fichier pour que le posséder ne suffise pas à l'utiliser. Réservé aux créateurs qui empaquettent du contenu payant.",
   "settings.mxbsecureUnlock": "Déverrouiller un contenu acheté",
   "settings.mxbsecureUnlockDesc":
-    "Choisis un circuit .mxbsecure que tu possèdes. Il est déverrouillé pour ce compte sur cette machine, puis apparaît et se roule hors ligne.",
-  "settings.mxbsecureUnlockBtn": "Déverrouiller un circuit…",
-  "settings.mxbsecureUnlockOk": "Déverrouillé — le circuit apparaîtra et se roulera hors ligne.",
+    "Choisis un fichier .mxbsecure que tu possèdes — circuit, peinture, équipement ou moto. Il est déverrouillé pour ce compte sur cette machine, puis apparaît dans le jeu hors ligne.",
+  "settings.mxbsecureUnlockBtn": "Déverrouiller du contenu…",
+  "settings.mxbsecureUnlockOk": "Déverrouillé — il apparaîtra dans le jeu hors ligne.",
   "settings.mxbsecureUnlockFail": "Impossible de déverrouiller ce contenu",
   "settings.steamLink": "Se connecter avec Steam",
   "settings.steamLinkDesc": "Nécessaire pour déverrouiller le contenu acheté — lie ce compte à ton Steam ID.",

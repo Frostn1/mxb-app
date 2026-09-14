@@ -559,9 +559,9 @@ export const es: Translation = {
     "Experimental. Añade una pestaña Proteger que bloquea un archivo para que tenerlo no baste para usarlo. Solo lo necesitan los creadores que empaquetan contenido de pago.",
   "settings.mxbsecureUnlock": "Desbloquear contenido comprado",
   "settings.mxbsecureUnlockDesc":
-    "Elige un circuito .mxbsecure que poseas. Se desbloquea para esta cuenta en esta máquina, y luego aparece y se puede rodar sin conexión.",
-  "settings.mxbsecureUnlockBtn": "Desbloquear un circuito…",
-  "settings.mxbsecureUnlockOk": "Desbloqueado: el circuito aparecerá y se podrá rodar sin conexión.",
+    "Elige un archivo .mxbsecure que poseas — circuito, pintura, equipo o moto. Se desbloquea para esta cuenta en esta máquina y luego aparece en el juego sin conexión.",
+  "settings.mxbsecureUnlockBtn": "Desbloquear contenido…",
+  "settings.mxbsecureUnlockOk": "Desbloqueado: aparecerá en el juego sin conexión.",
   "settings.mxbsecureUnlockFail": "No se pudo desbloquear este contenido",
   "settings.steamLink": "Iniciar sesión con Steam",
   "settings.steamLinkDesc": "Necesario para desbloquear contenido comprado — vincula esta cuenta con tu Steam ID.",

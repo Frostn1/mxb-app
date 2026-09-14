@@ -40,15 +40,20 @@ pub fn load_assets(app: &AppHandle) -> Vec<SecureAsset> {
         .unwrap_or_default()
 }
 
-/// The secured assets actually present on disk: every `*.mxbsecure` under the tracks tree
-/// that has a sibling `.mxbkey`. This is how a **buyer** works with no provisioning — they drop
-/// the two files into their tracks folder and the manifest is built from what's there, the same
-/// way MX Bikes discovers tracks by scanning. Anything provisioned on this machine is folded in.
+/// The secured assets actually present on disk: every `*.mxbsecure` under the mods trees that
+/// has a sibling `.mxbkey`. Secured content can be any asset type — a track, a bike paint, rider
+/// gear, a whole bike — so every tree the game loads from is walked, not just tracks. This is how
+/// a **buyer** works with no provisioning: they drop the two files into the right folder and the
+/// manifest is built from what's there, the same way MX Bikes discovers content by scanning.
+/// Anything provisioned on this machine is folded in.
 pub fn scan_secured(app: &AppHandle) -> Vec<SecureAsset> {
     let mut found: Vec<SecureAsset> = Vec::new();
     if let Ok(cfg) = crate::config::load(app) {
-        let tracks = crate::library::mods_subdir(&cfg.mods_path, "mods/tracks");
-        collect_mxbsecure(&tracks, &mut found);
+        // The game's content roots: tracks, bikes (and their paints), and rider gear.
+        for sub in ["mods/tracks", "mods/bikes", "mods/rider"] {
+            let root = crate::library::mods_subdir(&cfg.mods_path, sub);
+            collect_mxbsecure(&root, &mut found);
+        }
     }
     for a in load_assets(app) {
         if !found.iter().any(|f| f.blob_path.eq_ignore_ascii_case(&a.blob_path)) {
@@ -59,7 +64,8 @@ pub fn scan_secured(app: &AppHandle) -> Vec<SecureAsset> {
 }
 
 /// Walk `dir` for `<name>.mxbsecure` blobs that have a `<name>.mxbsecure.mxbkey` beside them,
-/// pushing a [`SecureAsset`] for each. Recursive, because tracks live in sub-folders.
+/// pushing a [`SecureAsset`] for each. Recursive, because content lives in sub-folders (tracks,
+/// bikes and their paints, rider gear).
 fn collect_mxbsecure(dir: &std::path::Path, out: &mut Vec<SecureAsset>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {

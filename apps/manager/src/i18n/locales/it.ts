@@ -558,9 +558,9 @@ export const it: Translation = {
     "Sperimentale. Aggiunge una scheda Proteggi che blocca un file in modo che possederlo non basti a usarlo. Serve solo ai creatori che impacchettano contenuti a pagamento.",
   "settings.mxbsecureUnlock": "Sblocca contenuto acquistato",
   "settings.mxbsecureUnlockDesc":
-    "Scegli un tracciato .mxbsecure che possiedi. Viene sbloccato per questo account su questo computer, poi appare e si guida offline.",
-  "settings.mxbsecureUnlockBtn": "Sblocca un tracciato…",
-  "settings.mxbsecureUnlockOk": "Sbloccato — il tracciato apparirà e si potrà guidare offline.",
+    "Scegli un file .mxbsecure che possiedi — tracciato, verniciatura, equipaggiamento o moto. Viene sbloccato per questo account su questo computer, poi appare nel gioco offline.",
+  "settings.mxbsecureUnlockBtn": "Sblocca contenuto…",
+  "settings.mxbsecureUnlockOk": "Sbloccato — apparirà nel gioco offline.",
   "settings.mxbsecureUnlockFail": "Impossibile sbloccare questo contenuto",
   "settings.steamLink": "Accedi con Steam",
   "settings.steamLinkDesc": "Necessario per sbloccare i contenuti acquistati — collega questo account al tuo Steam ID.",
