@@ -122,3 +122,42 @@ jobs:
           releaseDraft: false
           prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
           args: ${{ matrix.args }}
+
+  # Announce the finished release in the studio's own Discord channel. The server is the
+  # MXB Secure home with a category per product, so this lands in #studio-releases (or
+  # #studio-beta for a suffixed tag) rather than the channel manager users watch — a studio
+  # build in there is a release most of its readers cannot install.
+  #
+  # Runs after `build`, which publishes with the assets already named `Frost-Studio-*`, so
+  # there is no rename to wait on the way the manager's has. Only for real tags on the
+  # canonical repo: forks stay silent, and a `workflow_dispatch` test build has a branch for
+  # its ref rather than a tag, so it cannot spam a channel.
+  # (`scripts/notify-discord.sh <tag> --app studio --print` renders it without sending.)
+  notify:
+    needs: build
+    if: ${{ github.repository == 'Frostn1/mxb-app' && github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # The changelog and the studio's icon are both read out of this checkout: the release
+      # itself lives in frost-studio, which holds the installers and no source.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Tag without the studio- prefix
+        id: tag
+        shell: bash
+        run: echo "name=${GITHUB_REF_NAME#studio-}" >> "$GITHUB_OUTPUT"
+
+      - name: Post release announcement to Discord
+        env:
+          # The release is in another repository, which GITHUB_TOKEN cannot read — the same
+          # PAT the build publishes with is the one that can see it afterwards.
+          GH_TOKEN: ${{ secrets.STUDIO_RELEASE_TOKEN }}
+          REPO: Frostn1/frost-studio
+          # Missing secret is a warning, not a failure — see the script. It picks one of the
+          # two by the tag and never falls back to the other, or to the manager's.
+          DISCORD_STUDIO_WEBHOOK_URL: ${{ secrets.DISCORD_STUDIO_WEBHOOK_URL }}
+          DISCORD_STUDIO_BETA_WEBHOOK_URL: ${{ secrets.DISCORD_STUDIO_BETA_WEBHOOK_URL }}
+        run: bash scripts/notify-discord.sh "${{ steps.tag.outputs.name }}" --app studio

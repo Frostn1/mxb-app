@@ -145,7 +145,7 @@ Running through all of it:
 | [`packages/shared/`](packages/shared/) | Shared TypeScript: the 3D viewer, the UI primitives, the API client and the base dictionary. |
 | [`control-plane/`](control-plane/) | The Cloudflare Worker paint sync, plugin licensing and server registration talk to. |
 | [`server-agent/`](server-agent/) | The Rust agent that runs on a dedicated-server box. |
-| [`scripts/`](scripts/) | Release plumbing — changelog sections, Discord notes, the Linux AppImage fix-up. |
+| [`scripts/`](scripts/) | Release plumbing — changelog sections, the Discord announcements and server layout, the Linux AppImage fix-up. |
 | [`site/`](site/) | The landing page published by [`pages.yml`](.github/workflows/pages.yml). |
 
 The repo is an npm + Cargo workspace holding two applications. They share one copy of the
@@ -285,6 +285,24 @@ release → Create new tag on publish** — which is the way to cut one without 
 terminal. **Actions → Release → Run workflow** is *not*: a `workflow_dispatch`
 build tags itself `v<run number>`, leaves the running app without its version, and
 skips the announcement. It's for testing that a build compiles, not for shipping.
+
+## The Discord server
+
+The server is the MXB Secure home, with a category per product and its own releases channel
+for each: a tagged MXB App release announces itself in `#app-releases`, a suffixed tag in
+`#app-beta`, and Frost's Studio in its own two. mxbsecure.com announces its deploys from the
+`mxbsecure-web` repo.
+
+[`scripts/discord-server.mjs`](scripts/discord-server.mjs) builds and maintains that layout.
+It matches channels by name, so it adopts the ones already there rather than duplicating
+them, and it never deletes — run it without `--apply` first and it prints the plan:
+
+```sh
+DISCORD_BOT_TOKEN=... DISCORD_GUILD_ID=... node scripts/discord-server.mjs
+```
+
+[`docs/discord.md`](docs/discord.md) has the channel table, the bot's permissions, the five
+webhook secrets and which workflow reads each.
 
 ## Roadmap
 

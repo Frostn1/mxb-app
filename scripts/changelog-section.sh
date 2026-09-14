@@ -2,10 +2,14 @@
 #
 # Print one release's section out of CHANGELOG.md.
 #
-#   scripts/changelog-section.sh <tag|version> [--heading] [--fold|--summary]
+#   scripts/changelog-section.sh <tag|version> [--product <name>] [--heading] [--fold|--summary]
 #
 # Default output is the section's body — its `### Added` / `### Fixed` groups, verbatim.
 #   --heading  print the section's heading line instead of the body.
+#   --product  also require the heading to name this product, e.g. `--product "Frost's Studio"`.
+#              One changelog records both applications and their version numbers run
+#              independently, so `v0.1.6` alone will one day match the wrong product's
+#              section. Whoever knows which product they are announcing says so.
 #   --fold     join each bullet's hard-wrapped continuation lines back onto one line.
 #              The file wraps for readability; Discord renders those newlines literally.
 #   --summary  --fold, then cut each bullet down to its bold headline. Every item still
@@ -24,15 +28,28 @@ TAG=""
 MODE="body"
 FOLD=0
 SUMMARY=0
+PRODUCT=""
+want_product=0
 for arg in "$@"; do
+  if [ "$want_product" -eq 1 ]; then
+    PRODUCT="$arg"
+    want_product=0
+    continue
+  fi
   case "$arg" in
     --heading) MODE="heading" ;;
     --fold) FOLD=1 ;;
     --summary) SUMMARY=1; FOLD=1 ;;
+    --product) want_product=1 ;;
     -*) echo "unknown option: $arg" >&2; exit 2 ;;
     *) TAG="$arg" ;;
   esac
 done
+
+if [ "$want_product" -eq 1 ]; then
+  echo "--product needs a name" >&2
+  exit 2
+fi
 
 if [ -z "$TAG" ]; then
   echo "usage: $0 <tag|version> [--heading] [--fold|--summary]" >&2
@@ -49,7 +66,13 @@ heading_for() {
   # Escape regex metacharacters so `0.6.1` can't match `0x6y1`.
   local ver_re
   ver_re="$(printf '%s' "$1" | sed 's/[].[^$*\\/]/\\&/g')"
-  awk -v re="^## .*[[:space:]]v${ver_re}([[:space:]]|\$)" '$0 ~ re { print; exit }' "$changelog"
+  # With --product the heading must also name it, which is what keeps the manager's
+  # `v0.14.0` and a future studio `v0.14.0` from reading each other's notes. Matched as a
+  # literal substring by index(), not a regex, so an apostrophe in `Frost's Studio` is just
+  # an apostrophe.
+  awk -v re="^## .*[[:space:]]v${ver_re}([[:space:]]|\$)" -v prod="$PRODUCT" '
+    $0 ~ re && (prod == "" || index($0, prod) > 0) { print; exit }
+  ' "$changelog"
 }
 
 VERSION="${TAG#v}"
