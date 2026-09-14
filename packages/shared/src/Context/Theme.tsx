@@ -94,8 +94,19 @@ function systemPrefersDark() {
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeMode>(readStored);
+export function ThemeProvider({
+  children,
+  defaultTheme = "system",
+  scalable = true,
+}: {
+  children: ReactNode;
+  /** What an app that has never been told starts in. The Studio starts light — see `studio.css`. */
+  defaultTheme?: ThemeMode;
+  /** Whether this app applies the interface scale. The Studio doesn't offer one. */
+  scalable?: boolean;
+}) {
+  const stored = () => (localStorage.getItem(STORAGE_KEY) ? readStored() : defaultTheme);
+  const [theme, setThemeState] = useState<ThemeMode>(stored);
   const [colorway, setColorwayState] = useState<Colorway>(readStoredColorway);
   const [scale, setScaleState] = useState<UiScale>(readStoredScale);
   const [systemDark, setSystemDark] = useState(systemPrefersDark);
@@ -141,11 +152,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // well as on change. Never to the overlay: it is sized against the game's screen, not the
   // desk this window sits on, and scaling it would push it over what it is meant to annotate.
   useEffect(() => {
-    if (IS_OVERLAY) return;
+    if (IS_OVERLAY || !scalable) return;
     getCurrentWebview()
       .setZoom(scale)
       .catch((e) => console.warn("could not set the interface scale", e));
-  }, [scale]);
+  }, [scale, scalable]);
 
   const setTheme = (mode: ThemeMode) => {
     localStorage.setItem(STORAGE_KEY, mode);

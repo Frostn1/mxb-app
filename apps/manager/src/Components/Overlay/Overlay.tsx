@@ -8,7 +8,7 @@ import Locker from "../Locker/Locker";
 import ModDetail from "../ModDetail/ModDetail";
 import Manage from "../Manage/Manage";
 import Presets from "../Presets/Presets";
-import { ThemeProvider } from "../../Context/Theme";
+import { ThemeProvider } from "@frost/shared/Context/Theme";
 import { useI18n, APP_NAME } from "@/i18n";
 import { setAmbientVars, type TKey } from "@/i18n";
 import { FrostmodProvider } from "../../Context/Frostmod";

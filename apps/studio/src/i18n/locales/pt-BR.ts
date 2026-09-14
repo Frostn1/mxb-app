@@ -479,4 +479,9 @@ export const ptBR: Translation = {
   "studioSettings.foldersWhy": "São lidas da mesma configuração que o MXB App escreve — é ele que encontra o jogo e cuida da configuração inicial, então há só uma resposta para onde o MX Bikes está.",
   "studioSettings.getManager": "Baixar o MXB App",
   "studioSettings.language": "Idioma",
+  "studioSettings.theme": "Tema",
+  "studioSettings.themeHint": "O claro é melhor para avaliar cores. O escuro cansa menos a vista.",
+  "studioSettings.themeLight": "Claro",
+  "studioSettings.themeDark": "Escuro",
+  "studioSettings.themeSystem": "Sistema",
 };

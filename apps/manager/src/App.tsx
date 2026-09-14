@@ -4,7 +4,7 @@ import Dashboard from "./Components/Dashboard/Dashboard";
 import Setup from "./Components/Setup/Setup";
 import Welcome from "./Components/Welcome/Welcome";
 import LooseSwapPrompt from "./Components/Locker/LooseSwapPrompt";
-import { ThemeProvider } from "./Context/Theme";
+import { ThemeProvider } from "@frost/shared/Context/Theme";
 import { FrostmodProvider } from "./Context/Frostmod";
 import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
 import { toast } from "sonner";
