@@ -10,6 +10,7 @@ import {
   Plus,
   ChevronRight,
   Lock,
+  ShieldCheck,
   Box,
   ListChecks,
   CheckCircle2,
@@ -218,12 +219,20 @@ function LibraryCardBody({
         ) : (
           <TypeIcon className="size-5" strokeWidth={1.5} />
         )}
-        {meta?.locked && (
+        {(meta?.locked || (item.secured && item.locked)) && (
           <span
             className="absolute bottom-0.5 right-0.5 rounded bg-black/60 p-0.5 text-white/75"
-            title={t("library.locked")}
+            title={item.secured ? t("library.securedLocked") : t("library.locked")}
           >
             <Lock className="size-3" />
+          </span>
+        )}
+        {item.secured && !item.locked && (
+          <span
+            className="absolute bottom-0.5 right-0.5 rounded bg-success/70 p-0.5 text-white"
+            title={t("library.securedUnlocked")}
+          >
+            <ShieldCheck className="size-3" />
           </span>
         )}
       </div>

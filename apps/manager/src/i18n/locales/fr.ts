@@ -1069,6 +1069,8 @@ export const fr: Translation = {
     "Vos mods installés. Vérifiez ce qui est installé et retirez ce dont vous ne voulez plus.",
   "library.byAuthor": "par {{author}}",
   "library.locked": "Verrouillé — le contenu ne peut pas être lu",
+  "library.securedLocked": "mxbsecure — verrouillé, connectez-vous pour déverrouiller",
+  "library.securedUnlocked": "mxbsecure — déverrouillé",
   "library.searchPlaceholder": "Rechercher parmi les installés…",
   "library.sortFolder": "Par dossier",
   "library.sortRecent": "Ajoutés récemment",

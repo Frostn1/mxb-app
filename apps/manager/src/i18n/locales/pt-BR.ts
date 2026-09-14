@@ -1064,6 +1064,8 @@ export const ptBR: Translation = {
     "Seus mods instalados. Veja o que está instalado e remova o que não quiser mais.",
   "library.byAuthor": "de {{author}}",
   "library.locked": "Bloqueado — não dá pra ler o conteúdo",
+  "library.securedLocked": "mxbsecure — bloqueado, entre para desbloquear",
+  "library.securedUnlocked": "mxbsecure — desbloqueado",
   "library.searchPlaceholder": "Pesquisar entre os instalados…",
   "library.sortFolder": "Por pasta",
   "library.sortRecent": "Adicionados recentemente",

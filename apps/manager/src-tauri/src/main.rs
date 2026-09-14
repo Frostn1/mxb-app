@@ -1714,6 +1714,29 @@ fn has_valid_key(blob_path: &str, steam_id: &str) -> bool {
         .is_some()
 }
 
+/// Teach the core viewer to open a `.mxbsecure` file to its inner `.pkz` bytes **in memory**, so
+/// the app can render your unlocked secured content (a bike, a paint, a track's terrain) without
+/// ever writing the source files to disk. The key is unsealed for the live Steam account; a file
+/// you haven't unlocked (or aren't signed in for) simply returns `None` and won't render.
+#[cfg(mxbsecure)]
+fn register_secure_opener() {
+    mxb_core::securesource::set_opener(Box::new(|blob_path: &std::path::Path| {
+        let steam_id = steamid::current_steam_id64()?;
+        let key_path = secure_launch::existing_key_path(blob_path.to_str()?)?;
+        let sealed = std::fs::read(&key_path).ok()?;
+        let key = mxbsecure::unseal_key(&sealed, &steam_id, "")?;
+        let blob = std::fs::read(blob_path).ok()?;
+        mxbsecure::open(&blob, &key).ok()
+    }));
+    // The cheap flag for the library scan: only the key is unsealed, never the content.
+    mxb_core::securesource::set_unlocked_check(Box::new(|blob_path: &std::path::Path| {
+        match (steamid::current_steam_id64(), blob_path.to_str()) {
+            (Some(id), Some(p)) => has_valid_key(p, &id),
+            _ => false,
+        }
+    }));
+}
+
 /// When auto-unlock last ran, so a burst of triggers (an unzip firing many install signals, the
 /// Library re-rendering, a status refresh) collapses to one pass instead of hammering the grant.
 #[cfg(mxbsecure)]
@@ -5963,6 +5986,8 @@ fn main() {
             // session and check the mods folder is really on disk.
             sessionwatch::start(handle);
             secure_launch::watch(handle);
+            #[cfg(mxbsecure)]
+            register_secure_opener();
             // Voice follows the rider onto whatever server they join, and off it again.
             // There is nothing to press: the supervisor is the whole of "joining a room".
             voice::session::start(handle);
@@ -7428,6 +7453,8 @@ fn scan_library_blocking(
                 kind: "loose".into(),
                 category: "reshade".into(),
                 parent: None,
+                secured: false,
+                locked: false,
             })
             .collect());
     }

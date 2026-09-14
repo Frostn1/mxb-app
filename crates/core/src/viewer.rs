@@ -1126,7 +1126,11 @@ pub fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec
         let bytes = pkz::read_sidecar_blob(&bytes).unwrap_or(bytes);
         return Ok(vec![("model.edf".to_string(), bytes)]);
     }
-    if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pkz")) {
+    // A `.pkz`, or a `.mxbsecure` blob standing in for one — `pkz::read_selected` opens the
+    // secured file in memory (never to disk) and hands back the same entry bytes.
+    if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pkz"))
+        || crate::securesource::is_secured(p)
+    {
         return pkz::read_selected(p, wanted_bike_file);
     }
     if p.is_dir() {

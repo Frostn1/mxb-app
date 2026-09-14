@@ -238,7 +238,7 @@ export interface InstalledMod {
 }
 
 /** How an installed item exists on disk. */
-export type LibraryKind = "pkz" | "folder" | "loose";
+export type LibraryKind = "pkz" | "folder" | "loose" | "mxbsecure";
 
 export type LibraryCategory =
   | "track"
@@ -271,6 +271,10 @@ export interface LibraryEntry {
   category: LibraryCategory;
   /** For paints / model-swaps: the owning bike / gear model / rider profile. */
   parent: string | null;
+  /** A `.mxbsecure` blob — protected content, listed like any other mod. */
+  secured?: boolean;
+  /** A secured file with no key for this account yet: shown, but not openable/viewable. */
+  locked?: boolean;
 }
 
 export interface ModelVariant {

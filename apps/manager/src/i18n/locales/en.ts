@@ -1048,6 +1048,8 @@ export const en = {
     "Your installed mods. Review what's installed and remove ones you no longer want.",
   "library.byAuthor": "by {{author}}",
   "library.locked": "Locked — contents can't be read",
+  "library.securedLocked": "mxbsecure — locked, sign in to unlock",
+  "library.securedUnlocked": "mxbsecure — unlocked",
   "library.searchPlaceholder": "Search installed…",
   "library.sortFolder": "By folder",
   "library.sortRecent": "Recently added",
