@@ -18,18 +18,35 @@ import { isSteamId64, steamPersonaName } from "./steam";
 import { adminAllowed } from "./usage";
 import { webSession } from "./websession";
 
-/** Origins allowed to call these routes from a browser. */
-export const ASSET_ORIGINS = [
-  "https://mxbsecure.com",
-  "https://www.mxbsecure.com",
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-];
+/** The site's origins, allowed to call these routes from a browser. */
+export const SITE_ORIGINS = ["https://mxbsecure.com", "https://www.mxbsecure.com"];
+
+/** A local build of the site. Only with `MXB_ALLOW_DEV_ORIGINS=1`, never in production. */
+const DEV_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"];
+
+export function assetOrigins(env: Env): string[] {
+  return env.MXB_ALLOW_DEV_ORIGINS === "1" ? [...SITE_ORIGINS, ...DEV_ORIGINS] : SITE_ORIGINS;
+}
 
 /** The request's Origin if it's one of ours, else null. */
-export function allowedOrigin(request: Request): string | null {
+export function allowedOrigin(request: Request, env: Env): string | null {
   const origin = request.headers.get("Origin");
-  return origin && ASSET_ORIGINS.includes(origin) ? origin : null;
+  return origin && assetOrigins(env).includes(origin) ? origin : null;
+}
+
+/**
+ * A 403 unless this write came from our own site, as JSON; null when it may go ahead.
+ *
+ * For requests the sign-in cookie authorizes. The cookie is SameSite=Lax, which keeps other
+ * sites out but not a sibling subdomain: a page there could send a plain-text POST, with no
+ * preflight, and the cookie would ride along. It can't send our Origin, and a JSON content type
+ * would need a preflight we refuse.
+ */
+export function refuseCrossSiteWrite(request: Request, env: Env): Response | null {
+  if (request.method === "GET" || request.method === "HEAD") return null;
+  const type = (request.headers.get("Content-Type") ?? "").split(";")[0].trim().toLowerCase();
+  if (allowedOrigin(request, env) && type === "application/json") return null;
+  return json(403, { error: "that request didn't come from mxbsecure.com" });
 }
 
 /** A key (every asset) or a signed-in creator (only their own). */
@@ -37,6 +54,15 @@ type Scope = { kind: "admin" } | { kind: "creator"; accountId: string };
 
 /** Most inputs one grants change may carry, adds and removes together. */
 export const MAX_GRANT_CHANGES = 100;
+
+/** Longest single grants input. A profile URL is well under this. */
+export const MAX_GRANT_INPUT = 256;
+
+/** Largest JSON body these routes read. */
+export const MAX_BODY_BYTES = 64 * 1024;
+
+/** Most accounts `?names=1` looks up; the rest come back with a blank name. */
+export const MAX_NAMED = 50;
 
 /** Which master-key version wraps a new asset's content key. */
 const KEY_ID = "k1";
@@ -69,7 +95,7 @@ export async function adminAssets(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
   const origin = request.headers.get("Origin");
-  const allowed = allowedOrigin(request);
+  const allowed = allowedOrigin(request, env);
 
   if (request.method === "OPTIONS") {
     if (origin && !allowed) return cors(json(403, { error: "origin not allowed" }), null);
@@ -80,9 +106,13 @@ export async function adminAssets(
   try {
     response = await handle(request, url, env, fetchImpl);
   } catch (err) {
-    // Caught here rather than by the router so the site still gets a readable 500.
-    console.error(JSON.stringify({ msg: "admin assets failed", error: String(err) }));
-    response = json(500, { error: "internal error" });
+    if (err instanceof BodyTooLarge) {
+      response = json(413, { error: `the request body is over ${MAX_BODY_BYTES / 1024} KB` });
+    } else {
+      // Caught here rather than by the router so the site still gets a readable 500.
+      console.error(JSON.stringify({ msg: "admin assets failed", error: String(err) }));
+      response = json(500, { error: "internal error" });
+    }
   }
   return cors(response, allowed);
 }
@@ -123,6 +153,11 @@ async function handle(
 ): Promise<Response> {
   const scope = await authorize(request, url, env);
   if (scope instanceof Response) return scope;
+  // A key is presented on purpose, from curl or the site; only the cookie arrives on its own.
+  if (scope.kind === "creator") {
+    const refused = refuseCrossSiteWrite(request, env);
+    if (refused) return refused;
+  }
   if (!currentMasterVersion(env) || (scope.kind === "admin" && !env.MXB_OWNER_ACCOUNT_ID)) {
     return json(503, { error: "secured assets are not configured" });
   }
@@ -242,7 +277,8 @@ async function listAssets(env: Env, scope: Scope): Promise<Response> {
   const statement = env.DB.prepare(
     "SELECT a.id, a.title, a.created_at, a.withdrawn_at, a.blob_sha256 IS NOT NULL AS hashed," +
       " (SELECT COUNT(*) FROM entitlements e WHERE e.asset_id = a.id AND e.revoked_at IS NULL) AS buyers," +
-      " (SELECT MAX(g.issued_at) FROM entitlement_grants g WHERE g.asset_id = a.id) AS last_request_at" +
+      ` (SELECT MAX(g.issued_at) FROM entitlement_grants g WHERE g.asset_id = a.id AND ${isSteamIdSql("g.steam_id")})` +
+      " AS last_request_at" +
       ` FROM assets a${mine ? " WHERE a.creator_id = ?" : ""} ORDER BY a.created_at DESC, a.id DESC`,
   );
   const rows = await (mine ? statement.bind(scope.accountId) : statement).all<{
@@ -267,9 +303,14 @@ async function listAssets(env: Env, scope: Scope): Promise<Response> {
   });
 }
 
-/** Steam display names for a set of accounts, a few lookups at a time. */
+/** SQL that holds when `column` is a SteamID64: 17 digits and nothing else. */
+function isSteamIdSql(column: string): string {
+  return `length(${column}) = 17 AND ${column} NOT GLOB '*[^0-9]*'`;
+}
+
+/** Steam display names for the first `MAX_NAMED` accounts, a few lookups at a time. */
 async function namesFor(ids: string[], fetchImpl: typeof fetch): Promise<Map<string, string>> {
-  const todo = [...new Set(ids)];
+  const todo = [...new Set(ids)].slice(0, MAX_NAMED);
   const out = new Map<string, string>();
   let next = 0;
   const worker = async () => {
@@ -307,14 +348,15 @@ async function listGrants(assetId: string, env: Env, names: typeof fetch | null)
 /**
  * `GET /admin/assets/:id/usage` — whose app asked for the key, and when.
  *
- * Every request is logged, refusals included. A buyer's app asks once per PC; after that the
- * file opens offline, so later plays don't show up here.
+ * Every request from a linked Steam account is logged, refusals included. A buyer's app asks
+ * once per PC; after that the file opens offline, so later plays don't show up here. Rows from
+ * before accounts had to be linked (`steam_id` "unlinked") are left out.
  */
 async function assetUsage(assetId: string, env: Env, names: typeof fetch | null): Promise<Response> {
   if (!(await assetExists(assetId, env))) return json(404, { error: "no such asset" });
   const rows = await env.DB.prepare(
     "SELECT steam_id, decision, reason, issued_at FROM entitlement_grants" +
-      " WHERE asset_id = ? ORDER BY issued_at DESC LIMIT 500",
+      ` WHERE asset_id = ? AND ${isSteamIdSql("steam_id")} ORDER BY issued_at DESC LIMIT 500`,
   )
     .bind(assetId)
     .all<{ steam_id: string; decision: string; reason: string | null; issued_at: number }>();
@@ -384,6 +426,10 @@ async function changeGrants(
   const split = (list: unknown[]): Resolved[] => {
     const ok: Resolved[] = [];
     for (const entry of list) {
+      if (typeof entry === "string" && entry.length > MAX_GRANT_INPUT) {
+        failed.push({ input: `${entry.slice(0, MAX_GRANT_INPUT)}…`, error: `longer than ${MAX_GRANT_INPUT} characters` });
+        continue;
+      }
       const input = String(entry);
       const result = typeof entry === "string" ? lookup.get(entry)! : { error: "not a string" };
       if ("steamId" in result) ok.push({ input, steamId: result.steamId });
@@ -427,7 +473,9 @@ async function resolveAll(
 ): Promise<Map<string, { steamId: string } | { error: string }>> {
   const parsed = new Map<string, ReturnType<typeof parseSteamInput>>();
   for (const input of inputs) {
-    if (typeof input === "string" && !parsed.has(input)) parsed.set(input, parseSteamInput(input));
+    if (typeof input === "string" && input.length <= MAX_GRANT_INPUT && !parsed.has(input)) {
+      parsed.set(input, parseSteamInput(input));
+    }
   }
   const names = [
     ...new Set([...parsed.values()].flatMap((p) => ("vanity" in p ? [p.vanity.toLowerCase()] : []))),
@@ -533,9 +581,40 @@ function base64url(bytes: Uint8Array): string {
   return base64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+class BodyTooLarge extends Error {}
+
+/**
+ * The JSON body, or null if it isn't JSON. Throws `BodyTooLarge` past `MAX_BODY_BYTES`, read
+ * a chunk at a time so an oversized body is never held whole — a declared length isn't trusted.
+ */
 async function readJson(request: Request): Promise<unknown | null> {
+  if (Number(request.headers.get("Content-Length") ?? 0) > MAX_BODY_BYTES) throw new BodyTooLarge();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
   try {
-    return await request.json();
+    const reader = request.body?.getReader();
+    while (reader) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_BODY_BYTES) {
+        await reader.cancel();
+        throw new BodyTooLarge();
+      }
+      chunks.push(value);
+    }
+  } catch (err) {
+    if (err instanceof BodyTooLarge) throw err;
+    return null;
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    bytes.set(c, at);
+    at += c.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     return null;
   }

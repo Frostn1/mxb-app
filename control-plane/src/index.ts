@@ -634,8 +634,8 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
  * and the revoked-entitlement branches matter to the grant especially — a key must stop
  * being issued the instant either flips, which is what makes revocation real.
  *
- * Every call is logged, refusals included: one identity walking the catalogue is only
- * visible if the "no"s are written down too.
+ * Every call from a linked account about a real asset is logged, refusals included: one
+ * identity walking the catalogue is only visible if the "no"s are written down too.
  */
 async function decideEntitlement(
   account: Account,
@@ -643,40 +643,43 @@ async function decideEntitlement(
   session: string,
   env: Env,
 ): Promise<{ allowed: boolean; reason: string }> {
-  const decide = async (): Promise<{ allowed: boolean; reason: string }> => {
-    if (!account.steam_id) return { allowed: false, reason: "no Steam account linked" };
+  // `log` is false for the two answers that say nothing about a real buyer and a real asset: any
+  // account token could otherwise write rows forever, and bury the creator's usage log in them.
+  const decide = async (): Promise<{ allowed: boolean; reason: string; log: boolean }> => {
+    if (!account.steam_id) return { allowed: false, reason: "no Steam account linked", log: false };
     const asset = await env.DB.prepare("SELECT withdrawn_at FROM assets WHERE id = ?")
       .bind(assetId)
       .first<{ withdrawn_at: number | null }>();
-    if (!asset) return { allowed: false, reason: "no such asset" };
-    if (asset.withdrawn_at !== null) return { allowed: false, reason: "withdrawn" };
+    if (!asset) return { allowed: false, reason: "no such asset", log: false };
+    if (asset.withdrawn_at !== null) return { allowed: false, reason: "withdrawn", log: true };
 
     const row = await env.DB.prepare(
       "SELECT revoked_at FROM entitlements WHERE steam_id = ? AND asset_id = ?",
     )
       .bind(account.steam_id, assetId)
       .first<{ revoked_at: number | null }>();
-    if (!row) return { allowed: false, reason: "not entitled" };
-    if (row.revoked_at !== null) return { allowed: false, reason: "revoked" };
-    return { allowed: true, reason: "entitled" };
+    if (!row) return { allowed: false, reason: "not entitled", log: true };
+    if (row.revoked_at !== null) return { allowed: false, reason: "revoked", log: true };
+    return { allowed: true, reason: "entitled", log: true };
   };
 
-  const result = await decide();
-  await env.DB.prepare(
-    "INSERT INTO entitlement_grants (steam_id, asset_id, session_id, decision, reason, issued_at)" +
-      " VALUES (?, ?, ?, ?, ?, ?)",
-  )
-    .bind(
-      account.steam_id ?? "unlinked",
-      assetId,
-      session,
-      result.allowed ? "allow" : "deny",
-      result.reason,
-      Date.now(),
+  const { allowed, reason, log } = await decide();
+  if (log) {
+    await env.DB.prepare(
+      "INSERT INTO entitlement_grants (steam_id, asset_id, session_id, decision, reason, issued_at)" +
+        " VALUES (?, ?, ?, ?, ?, ?)",
     )
-    .run();
-  return result;
+      .bind(account.steam_id, assetId, session, allowed ? "allow" : "deny", reason, Date.now())
+      .run();
+  }
+  return { allowed, reason };
 }
+
+/** What an asset id may look like: the site mints `ast_…`, older tools `trk_…`. */
+const ASSET_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** The app sends 32 hex characters; anything printable up to 128 is accepted. */
+const SESSION_ID = /^[\x21-\x7e]{1,128}$/;
 
 /** Pull and validate `{ assetId, sessionId }` from a request body. */
 async function assetRequest(
@@ -692,7 +695,11 @@ async function assetRequest(
   if (typeof assetId !== "string" || !assetId.trim()) {
     return json(400, { error: "an asset id is required" });
   }
+  if (!ASSET_ID.test(assetId.trim())) return json(400, { error: "that isn't an asset id" });
   const session = typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : "none";
+  if (!SESSION_ID.test(session)) {
+    return json(400, { error: "sessionId must be 1 to 128 printable characters" });
+  }
   // A 64-hex SHA-256 of the caller's blob, or null. Validated to shape here so the grant check
   // is a plain equality against the stored hash.
   const hash =

@@ -140,6 +140,30 @@ describe("auth", () => {
     expect((await call(siteOnly, req("GET", "/admin/assets", { key: "guess" }))).status).toBe(401);
   });
 
+  it("takes a key from curl with no Origin and no JSON type, writes included", async () => {
+    const env = await deployment();
+    const { assetId } = await create(env);
+    const res = await call(
+      env,
+      new Request(`https://cp.test/admin/assets/${assetId}/grants`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ADMIN}`, "Content-Type": "text/plain" },
+        body: JSON.stringify({ add: [BUYER] }),
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("refuses a body over 64 KB with a 413", async () => {
+    const env = await deployment();
+    const big = await call(env, req("POST", "/admin/assets", { body: { title: "x".repeat(70 * 1024) } }));
+    expect(big.status).toBe(413);
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM assets").first()).toEqual({ n: 0 });
+    // Just under the cap is read (and refused on its own terms).
+    const under = await call(env, req("POST", "/admin/assets", { body: { title: "x".repeat(60 * 1024) } }));
+    expect(under.status).toBe(400);
+  });
+
   it("503s when the admin key, master key or owner is unset", async () => {
     for (const unset of ["ADMIN_KEY", "MXB_ASSET_MASTER_KEY", "MXB_OWNER_ACCOUNT_ID"]) {
       const env = await deployment({ [unset]: undefined });
@@ -150,22 +174,36 @@ describe("auth", () => {
 });
 
 describe("CORS", () => {
+  const preflight = (env: Env, origin: string) =>
+    call(
+      env,
+      req("OPTIONS", "/admin/assets/ast_x/grants", {
+        key: null,
+        origin,
+        headers: { "Access-Control-Request-Method": "POST" },
+      }),
+    );
+
   it("answers an allowed preflight 204 before auth", async () => {
     const env = await deployment();
-    for (const origin of [SITE, "https://www.mxbsecure.com", "http://localhost:5173"]) {
-      const res = await call(
-        env,
-        req("OPTIONS", "/admin/assets/ast_x/grants", {
-          key: null,
-          origin,
-          headers: { "Access-Control-Request-Method": "POST" },
-        }),
-      );
+    for (const origin of [SITE, "https://www.mxbsecure.com"]) {
+      const res = await preflight(env, origin);
       expect(res.status).toBe(204);
       expect(res.headers.get("Access-Control-Allow-Origin")).toBe(origin);
       expect(res.headers.get("Access-Control-Allow-Methods")).toBe("GET, POST, PATCH, OPTIONS");
       expect(res.headers.get("Access-Control-Allow-Headers")).toBe("Authorization, Content-Type");
       expect(res.headers.get("Vary")).toContain("Origin");
+    }
+  });
+
+  it("allows a local build of the site only with MXB_ALLOW_DEV_ORIGINS=1", async () => {
+    for (const origin of ["http://localhost:5173", "http://127.0.0.1:5173"]) {
+      const prod = await preflight(await deployment(), origin);
+      expect(prod.status).toBe(403);
+      expect(prod.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      const dev = await preflight(await deployment({ MXB_ALLOW_DEV_ORIGINS: "1" }), origin);
+      expect(dev.status).toBe(204);
+      expect(dev.headers.get("Access-Control-Allow-Origin")).toBe(origin);
     }
   });
 
@@ -324,6 +362,24 @@ describe("grants", () => {
     const tooMany = Array.from({ length: 101 }, (_, i) => String(76561198000000100n + BigInt(i)));
     expect((await call(env, req("POST", mine, { body: { add: tooMany } }))).status).toBe(400);
   });
+
+  it("fails an input over 256 characters without looking it up, and keeps the rest", async () => {
+    const env = await deployment();
+    const { assetId } = await create(env);
+    const steam = vi.fn(steamStub);
+    const long = `https://steamcommunity.com/id/frostn1/?${"x".repeat(300)}`;
+    const res = await direct(
+      env,
+      req("POST", `/admin/assets/${assetId}/grants`, { body: { add: [BUYER, long] } }),
+      steam as unknown as typeof fetch,
+    );
+    const body = (await res.json()) as { added: { steamId: string }[]; failed: { input: string; error: string }[] };
+    expect(body.added.map((a) => a.steamId)).toEqual([BUYER]);
+    expect(body.failed).toHaveLength(1);
+    expect(body.failed[0].error).toMatch(/256/);
+    expect(body.failed[0].input.length).toBe(257);
+    expect(steam).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /v1/keys/grant after an admin grant", () => {
@@ -381,6 +437,46 @@ describe("POST /v1/keys/grant after an admin grant", () => {
     expect((await ask("cd".repeat(32))).status).not.toBe(200);
     expect((await ask()).status).not.toBe(200);
   });
+
+  it("refuses malformed ids, and logs only a linked account asking about a real asset", async () => {
+    const env = await deployment();
+    const insert = "INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at) VALUES (?, ?, ?, ?, ?)";
+    await env.DB.prepare(insert).bind("acc_buyer", "Buyer", BUYER, await hashToken("buyer-token"), Date.now()).run();
+    await env.DB.prepare(insert).bind("acc_nolink", "Nolink", null, await hashToken("nolink-token"), Date.now()).run();
+    const created = await create(env);
+    const ask = (token: string, body: Record<string, unknown>, path = "/v1/keys/grant") =>
+      call(env, req("POST", path, { key: token, body }));
+
+    const appSession = "0123456789abcdef0123456789abcdef";
+    for (const body of [
+      { assetId: "not an id!", sessionId: appSession },
+      { assetId: "a".repeat(65), sessionId: appSession },
+      { assetId: created.assetId, sessionId: "x".repeat(129) },
+      { assetId: created.assetId, sessionId: "has a space" },
+      { assetId: created.assetId, sessionId: "bell\u0007" },
+    ]) {
+      expect((await ask("buyer-token", body)).status, JSON.stringify(body).slice(0, 60)).toBe(400);
+    }
+    expect((await ask("buyer-token", { assetId: "bad id" }, "/v1/entitlements/check")).status).toBe(400);
+
+    // What the app sends goes through to the decision; an old tool's shapes too.
+    expect(await (await ask("buyer-token", { assetId: created.assetId, sessionId: appSession })).json()).toEqual({ error: "not entitled" });
+    expect((await ask("buyer-token", { assetId: created.assetId, sessionId: "s1" })).status).toBe(403);
+    expect((await ask("buyer-token", { assetId: created.assetId })).status).toBe(403);
+
+    // Refused, and not written down: an asset that doesn't exist, and an account with no Steam.
+    expect(await (await ask("buyer-token", { assetId: "trk_nope", sessionId: appSession })).json()).toEqual({ error: "no such asset" });
+    expect(await (await ask("nolink-token", { assetId: created.assetId, sessionId: appSession })).json()).toEqual({
+      error: "no Steam account linked",
+    });
+
+    const rows = await env.DB.prepare("SELECT steam_id, asset_id, session_id FROM entitlement_grants ORDER BY id").all();
+    expect(rows.results).toEqual([
+      { steam_id: BUYER, asset_id: created.assetId, session_id: appSession },
+      { steam_id: BUYER, asset_id: created.assetId, session_id: "s1" },
+      { steam_id: BUYER, asset_id: created.assetId, session_id: "none" },
+    ]);
+  });
 });
 
 describe("buyer names", () => {
@@ -398,5 +494,27 @@ describe("buyer names", () => {
     expect(named.grants[0]).toMatchObject({ steamId: BUYER, name: "Buyer One" });
     const usage = await direct(env, req("GET", `/admin/assets/${created.assetId}/usage?names=1`), steamStub);
     expect(usage.status).toBe(200);
+  });
+
+  it("looks up at most 50 names; the rest come back blank", async () => {
+    const env = await deployment();
+    const created = await create(env);
+    const ids = Array.from({ length: 60 }, (_, i) => String(76561198000001000n + BigInt(i)));
+    await env.DB.batch(
+      ids.map((id, i) =>
+        env.DB.prepare("INSERT INTO entitlements (steam_id, asset_id, source, granted_at) VALUES (?, ?, 'grant', ?)").bind(
+          id,
+          created.assetId,
+          1000 - i,
+        ),
+      ),
+    );
+    const steam = vi.fn(steamStub);
+    const res = await direct(env, req("GET", `/admin/assets/${created.assetId}/grants?names=1`), steam as unknown as typeof fetch);
+    const { grants } = (await res.json()) as { grants: { steamId: string; name: string }[] };
+    expect(grants).toHaveLength(60);
+    expect(grants.filter((g) => g.name === "Buyer One")).toHaveLength(50);
+    expect(grants.slice(50).every((g) => g.name === "")).toBe(true);
+    expect(steam).toHaveBeenCalledTimes(50);
   });
 });
