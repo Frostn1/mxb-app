@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+- A locked secured file's details now offer an **Unlock** button (and a note that it also unlocks
+  on its own when you launch the game), instead of a dead-end "its name can't be read" message.
+
 ### Added
 - Secured (`.mxbsecure`) files now show in the Library like any other mod — as their real type
   (track, bike, paint, gear), with a badge showing whether they're unlocked or still locked. An
@@ -38,9 +42,7 @@
   doesn't sit in memory or stutter a synced mods folder.
 
 ### Removed
-- Frost Studio no longer has an MXB Secure tab. Creators lock mxbsecure files on mxbsecure.com,
-  where the buyer list lives too.
-- Frost Studio no longer has the GUID Lock tab. Diagnose still shows which GUID a file is locked to.
+- Frost's Studio no longer has the GUID Lock tab. Diagnose still shows which GUID a file is locked to.
 
 ### Added
 - Settings → General lists the secured files it found and each one's status — Unlocked,
@@ -64,6 +66,12 @@
 - The app and Steam sign-in now go through api.mxbsecure.com.
 - When Windows blocks a preset from changing `profile.ini`, the error says how to allow the
   app and has a button that opens Windows Security.
+
+## 2026-09-14 — Frost's Studio v0.1.2
+
+### Removed
+- Frost's Studio no longer has an MXB Secure tab. Creators lock mxbsecure files on mxbsecure.com,
+  where the buyer list lives too.
 
 ## 2026-09-13 — v0.14.2 — Locked tracks from Steam
 

@@ -461,6 +461,7 @@ export const en = {
   "libraryDetail.lockedWord": "locked",
   "libraryDetail.lockedWithMeta":
     "This track is {{locked}} by its creator. Its name, details and preview are shown here, but the files stay sealed — it can't be unpacked or previewed in 3D.",
+  "libraryDetail.securedLockedNote": "mxbsecure-protected content. Unlock it to read its details and play — sign in with Steam if you haven't. It also unlocks on its own when you launch the game.",
   "libraryDetail.lockedNoMeta":
     "This track is {{locked}}, so its name, length and preview can't be read from the file — only its filename and size.",
 

@@ -467,6 +467,7 @@ export const it: Translation = {
   "libraryDetail.lockedWord": "bloccata",
   "libraryDetail.lockedWithMeta":
     "Questa pista è {{locked}} dal suo creatore. Nome, dettagli e anteprima sono visibili qui, ma i file restano sigillati — non può essere estratta né vista in 3D.",
+  "libraryDetail.securedLockedNote": "Contenuto protetto con mxbsecure. Sbloccalo per vederne i dettagli e giocarlo — accedi con Steam se non l'hai fatto. Si sblocca da solo anche all'avvio del gioco.",
   "libraryDetail.lockedNoMeta":
     "Questa pista è {{locked}}, quindi nome, lunghezza e anteprima non si possono leggere dal file — solo nome file e dimensione.",
 
