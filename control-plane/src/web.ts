@@ -5,22 +5,32 @@
  * host rather than a link on an account. `/admin/assets*` reads that cookie, so a creator can
  * use the site without a key. The login state travels signed in the return URL, so there is no
  * table for pending sign-ins either.
+ *
+ * The state is bound to the browser that started the sign-in: its nonce also goes into a
+ * short-lived cookie, and the return only counts if the two match. Without that, someone could
+ * finish a sign-in as themselves, stop short of the redirect, and send the link to someone else
+ * — who would then be signed in as them.
  */
 
-import { allowedOrigin, ASSET_ORIGINS, cors } from "./assets";
+import { allowedOrigin, assetOrigins, cors, refuseCrossSiteWrite } from "./assets";
+import { tokenMatches } from "./auth";
+import { page } from "./page";
 import { isVerified, loginUrl, steamPersonaName, verifyAssertion } from "./steam";
 import {
-  clearedSessionCookie,
+  clearedCookie,
+  LEGACY_SESSION_COOKIE,
+  LOGIN_COOKIE,
+  LOGIN_TTL_MS,
+  loginCookie,
   openToken,
+  readCookie,
   sealToken,
+  SESSION_COOKIE,
   SESSION_TTL_MS,
   sessionCookie,
   webSession,
   type LoginState,
 } from "./websession";
-
-/** A sign-in that hasn't come back from Steam in this long has to start again. */
-const STATE_TTL_MS = 10 * 60 * 1000;
 
 export function isWebPath(path: string): boolean {
   return path.startsWith("/v1/web/");
@@ -37,7 +47,7 @@ function siteOrigin(env: Env): string {
 
 /** The site to land back on: the one the sign-in started from if it's ours, else the default. */
 export function landingSite(raw: string | null, env: Env): string {
-  return raw && ASSET_ORIGINS.includes(raw) ? raw : siteOrigin(env);
+  return raw && assetOrigins(env).includes(raw) ? raw : siteOrigin(env);
 }
 
 export async function webRoutes(
@@ -48,7 +58,7 @@ export async function webRoutes(
 ): Promise<Response> {
   const path = url.pathname;
   const method = request.method;
-  const origin = allowedOrigin(request);
+  const origin = allowedOrigin(request, env);
   const key = env.MXB_WEB_SESSION_KEY;
 
   if (method === "OPTIONS" && (path === "/v1/web/me" || path === "/v1/web/logout")) {
@@ -56,38 +66,67 @@ export async function webRoutes(
     return cors(new Response(null, { status: 204 }), origin, true, "GET, POST, OPTIONS");
   }
 
+  // Each return asks Steam, and a login state costs nothing to mint: a ceiling per address keeps
+  // this host from being a free way to hammer Steam, or to spend our request budget.
+  if (method === "GET" && (path === "/v1/web/steam/login" || path === "/v1/web/steam/return") && env.SIGNIN_LIMITER) {
+    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    if (!(await env.SIGNIN_LIMITER.limit({ key: ip })).success) {
+      const slow = page(429, "Too many sign-in attempts from here. Wait a minute and try again.");
+      slow.headers.set("Retry-After", "60");
+      return slow;
+    }
+  }
+
   if (method === "GET" && path === "/v1/web/steam/login") {
     if (!key) return page(503, "Sign-in isn't set up on this server yet.");
+    const n = crypto.randomUUID();
     const state = await sealToken(
       {
         t: "state",
         site: landingSite(url.searchParams.get("site"), env),
         next: safeNext(url.searchParams.get("next")),
-        n: crypto.randomUUID(),
-        exp: Date.now() + STATE_TTL_MS,
+        n,
+        exp: Date.now() + LOGIN_TTL_MS,
       },
       key,
     );
     const returnTo = `${url.origin}/v1/web/steam/return?state=${encodeURIComponent(state)}`;
-    return new Response(null, { status: 302, headers: { Location: loginUrl(returnTo, `${url.origin}/`) } });
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: loginUrl(returnTo, `${url.origin}/`),
+        "Set-Cookie": loginCookie(n),
+        "Cache-Control": "no-store",
+      },
+    });
   }
 
   if (method === "GET" && path === "/v1/web/steam/return") {
     if (!key) return page(503, "Sign-in isn't set up on this server yet.");
     const state = await openToken<LoginState>(url.searchParams.get("state"), key, "state");
     if (!state) return page(400, "That sign-in took too long or the link is broken. Go back and sign in again.");
+    // Checked before Steam is asked anything. A mismatch leaves the cookie alone, so a sign-in
+    // this browser really has in flight still completes.
+    const started = readCookie(request, LOGIN_COOKIE);
+    if (!started || !tokenMatches(state.n, started)) {
+      return page(403, "That sign-in didn't start in this browser. Go back to mxbsecure and sign in again.");
+    }
     const result = await verifyAssertion(url.searchParams, `${url.origin}${url.pathname}`, fetchImpl);
-    if (!isVerified(result)) return page(403, `Steam couldn't confirm that sign-in: ${result.error}.`);
+    if (!isVerified(result)) {
+      const refused = page(403, `Steam couldn't confirm that sign-in: ${result.error}.`);
+      refused.headers.append("Set-Cookie", clearedCookie(LOGIN_COOKIE));
+      return refused;
+    }
     const name = await steamPersonaName(result.steamId, fetchImpl);
     const token = await sealToken({ t: "session", steamId: result.steamId, name, exp: Date.now() + SESSION_TTL_MS }, key);
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: `${landingSite(state.site ?? null, env)}${state.next}`,
-        "Set-Cookie": sessionCookie(token),
-        "Cache-Control": "no-store",
-      },
+    const headers = new Headers({
+      Location: `${landingSite(state.site ?? null, env)}${state.next}`,
+      "Cache-Control": "no-store",
     });
+    headers.append("Set-Cookie", sessionCookie(token));
+    headers.append("Set-Cookie", clearedCookie(LOGIN_COOKIE));
+    headers.append("Set-Cookie", clearedCookie(LEGACY_SESSION_COOKIE));
+    return new Response(null, { status: 302, headers });
   }
 
   if (method === "GET" && path === "/v1/web/me") {
@@ -108,18 +147,15 @@ export async function webRoutes(
   }
 
   if (method === "POST" && path === "/v1/web/logout") {
-    return cors(new Response(null, { status: 204, headers: { "Set-Cookie": clearedSessionCookie() } }), origin);
+    const refused = refuseCrossSiteWrite(request, env);
+    if (refused) return cors(refused, origin);
+    const headers = new Headers();
+    headers.append("Set-Cookie", clearedCookie(SESSION_COOKIE));
+    headers.append("Set-Cookie", clearedCookie(LEGACY_SESSION_COOKIE));
+    return cors(new Response(null, { status: 204, headers }), origin);
   }
 
   return json(404, { error: "no such endpoint" });
-}
-
-function page(status: number, message: string): Response {
-  const body =
-    `<!doctype html><meta charset="utf-8"><title>mxbsecure</title>` +
-    `<body style="font:16px/1.5 system-ui;margin:4rem auto;max-width:30rem;padding:0 1rem">` +
-    `<p>${message.replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"))}</p>`;
-  return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
 function json(status: number, body: unknown): Response {

@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Changed
+- The Settings list of secured content now finds files anywhere under your mods folder (a
+  `mxbsecure` sub-folder of your own included), not just the top of tracks/bikes/rider, and lists
+  every one it finds — each with a clear status and, when it's locked, a short reason (not in your
+  library, or sign in with Steam).
+- Signing in with Steam is easier to spot — a coloured dot shows whether you're signed in, and if
+  you try to unlock content before signing in, the message offers a one-tap sign-in.
+- Your library refreshes in place the moment the mods folder changes, keeping your scroll position
+  instead of jumping back to the top.
+- Secured files have a tidier name: locking a track writes `Northgate.mxbsecure` (with its key
+  `Northgate.mxbsecurekey`) instead of the longer `Northgate.pkz.mxbsecure`. Files you already
+  have keep working — the app reads both names.
 - Secured content just works: it injects and auto-unlocks when you own it, without turning on an
   experimental setting first. Reading a secured file's status is lighter too — the app reads only
   the header and streams the hash instead of loading the whole file, so large secured content
@@ -41,6 +52,9 @@
 - Updating the app also updates the helper that opens locked tracks.
 
 ## Unreleased — Frost's Studio
+
+### Fixed
+- The window's close button closes Frost's Studio.
 
 ### Changed
 - Protecting a track packs it for distribution and gives you an asset id and content key to

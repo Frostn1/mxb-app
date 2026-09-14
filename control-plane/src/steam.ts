@@ -37,6 +37,12 @@ const OPENID_ENDPOINT = "https://steamcommunity.com/openid/login";
 /** The only issuer whose claimed identifiers we accept. */
 const CLAIMED_ID_PREFIX = "https://steamcommunity.com/openid/id/";
 
+/**
+ * The fields Steam must have signed. `check_authentication` vouches only for the fields
+ * `openid.signed` names, so each one we read or rely on has to be on that list.
+ */
+const REQUIRED_SIGNED = ["op_endpoint", "claimed_id", "identity", "return_to", "response_nonce"];
+
 /** A sign-in that hasn't completed in this long is abandoned, not pending. */
 export const LOGIN_TTL_MS = 10 * 60 * 1000;
 
@@ -135,6 +141,13 @@ export async function verifyAssertion(
   if (query.get("openid.mode") !== "id_res") {
     // `cancel` is the user declining at Steam, which is not an error worth alarming about.
     return { error: query.get("openid.mode") === "cancel" ? "cancelled" : "not an assertion" };
+  }
+  if (query.get("openid.op_endpoint") !== OPENID_ENDPOINT) {
+    return { error: "that sign-in wasn't from Steam" };
+  }
+  const signed = new Set((query.get("openid.signed") ?? "").split(",").map((f) => f.trim()));
+  if (!REQUIRED_SIGNED.every((f) => signed.has(f))) {
+    return { error: "Steam didn't sign every part of that sign-in" };
   }
   if (!returnToMatches(query.get("openid.return_to"), expectedReturnTo)) {
     return { error: "that sign-in was not for this site" };

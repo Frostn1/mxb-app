@@ -4,15 +4,27 @@
  * Stateless on purpose. A token is `base64url(json).base64url(hmac)`, keyed on
  * `MXB_WEB_SESSION_KEY`; rotating that secret signs everyone out. Each payload carries a type
  * tag, so a login state can never be presented as a session.
+ *
+ * Both cookies are `__Host-`: the browser takes them only from this host, over HTTPS, at `/`,
+ * with no `Domain`, so a sibling subdomain can't plant one for us.
  */
 
 import { tokenMatches } from "./auth";
 import { isSteamId64 } from "./steam";
 
-export const SESSION_COOKIE = "mxb_session";
+export const SESSION_COOKIE = "__Host-mxb_session";
+
+/** The session's name before `__Host-`. Read only when the new one is absent, and cleared on sign-in. */
+export const LEGACY_SESSION_COOKIE = "mxb_session";
+
+/** Ties a sign-in to the browser that started it: holds the state's nonce until Steam comes back. */
+export const LOGIN_COOKIE = "__Host-mxb_login";
 
 /** How long a sign-in lasts. */
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** A sign-in that hasn't come back from Steam in this long has to start again. */
+export const LOGIN_TTL_MS = 10 * 60 * 1000;
 
 export interface WebSession {
   t: "session";
@@ -73,10 +85,17 @@ export async function openToken<T extends WebSession | LoginState>(
   }
 }
 
-export function readCookie(request: Request, name: string): string | null {
+/** A cookie's value by name, or null. `names` in order of preference: the first one present wins. */
+export function readCookie(request: Request, ...names: string[]): string | null {
+  const found = new Map<string, string>();
   for (const part of (request.headers.get("Cookie") ?? "").split(";")) {
     const i = part.indexOf("=");
-    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+    const name = i > 0 ? part.slice(0, i).trim() : "";
+    if (name && !found.has(name)) found.set(name, part.slice(i + 1).trim());
+  }
+  for (const name of names) {
+    const value = found.get(name);
+    if (value !== undefined) return value;
   }
   return null;
 }
@@ -85,14 +104,24 @@ export function readCookie(request: Request, name: string): string | null {
 export async function webSession(request: Request, env: Env, now = Date.now()): Promise<WebSession | null> {
   const key = env.MXB_WEB_SESSION_KEY;
   if (!key) return null;
-  const s = await openToken<WebSession>(readCookie(request, SESSION_COOKIE), key, "session", now);
+  const token = readCookie(request, SESSION_COOKIE, LEGACY_SESSION_COOKIE);
+  const s = await openToken<WebSession>(token, key, "session", now);
   return s && isSteamId64(s.steamId) ? s : null;
 }
 
-export function sessionCookie(token: string): string {
-  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`;
+function cookie(name: string, value: string, maxAgeSeconds: number): string {
+  return `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAgeSeconds}`;
 }
 
-export function clearedSessionCookie(): string {
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+export function sessionCookie(token: string): string {
+  return cookie(SESSION_COOKIE, token, SESSION_TTL_MS / 1000);
+}
+
+export function loginCookie(nonce: string): string {
+  return cookie(LOGIN_COOKIE, nonce, LOGIN_TTL_MS / 1000);
+}
+
+/** A `Set-Cookie` that deletes `name` (set with the same attributes, so it matches). */
+export function clearedCookie(name: string): string {
+  return cookie(name, "", 0);
 }

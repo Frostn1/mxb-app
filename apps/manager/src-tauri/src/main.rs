@@ -88,7 +88,7 @@ mod offline_flow_test {
         let plaintext = vec![9u8; 130_000];
         let src = dir.join("track.pkz");
         std::fs::write(&src, &plaintext).unwrap();
-        let locked = crate::mxbsecure::lock(&plaintext, "trk_x", "k1");
+        let locked = crate::mxbsecure::lock(&plaintext, "trk_x", "k1", "track.pkz");
         let blob_path = dir.join("track.pkz.mxbsecure");
         std::fs::write(&blob_path, &locked.blob).unwrap();
 
@@ -1501,95 +1501,6 @@ fn set_mxbsecure_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
-/// The result of locking a file: where the blob landed, and the content key to keep. The key
-/// is returned once, for the operator to store server-side; it is never written into the blob.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SecureLockOutcome {
-    blob_path: String,
-    asset_id: String,
-    key_id: String,
-    key: String,
-    plain_bytes: u64,
-    blob_bytes: u64,
-}
-
-/// Lock a file into a `.mxbsecure` blob under a fresh content key.
-///
-/// `src` is read and never modified. The blob is written beside it (or into `out_dir` when
-/// given) as `<name>.mxbsecure`. Reads the whole file into memory — a creator's asset, not a
-/// stream — which is fine for the sizes involved and keeps the packer simple.
-#[tauri::command]
-async fn mxbsecure_lock(
-    src: String,
-    out_dir: Option<String>,
-) -> Result<SecureLockOutcome, String> {
-    #[cfg(mxbsecure)]
-    {
-        use std::path::PathBuf;
-        let src_path = PathBuf::from(&src);
-        let name = src_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .ok_or_else(|| "not a file".to_string())?;
-        let out = match out_dir {
-            Some(d) => PathBuf::from(d).join(format!("{name}.mxbsecure")),
-            None => src_path.with_file_name(format!("{name}.mxbsecure")),
-        };
-        // A stable-ish asset id from the file name plus a random suffix, so two locks of two
-        // files don't collide. A real registration mints this; here it just labels the blob.
-        let mut rnd = [0u8; 6];
-        getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
-        let suffix: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
-        let asset_id = format!("{}-{suffix}", mxb_core::names::sanitize_asset_id(&name));
-
-        let plaintext = tokio::fs::read(&src_path).await.map_err(|e| format!("read {src}: {e}"))?;
-        let locked = mxbsecure::lock(&plaintext, &asset_id, "k1");
-        tokio::fs::write(&out, &locked.blob).await.map_err(|e| format!("write blob: {e}"))?;
-
-        Ok(SecureLockOutcome {
-            blob_path: out.to_string_lossy().to_string(),
-            asset_id: locked.asset_id,
-            key_id: locked.key_id,
-            key: mxbsecure::hex_key(&locked.content_key),
-            plain_bytes: plaintext.len() as u64,
-            blob_bytes: locked.blob.len() as u64,
-        })
-    }
-    #[cfg(not(mxbsecure))]
-    {
-        let _ = (src, out_dir);
-        Err("this build can't lock content with mxbsecure".into())
-    }
-}
-
-/// Verify a locked blob opens back to a plaintext identical to `original`.
-///
-/// This is the "can it unlock it" check the Secure tab runs after a lock: decrypt the blob
-/// with the key and compare byte-for-byte to the source. Proves the format round-trips on
-/// this machine, independently of the in-game DLL.
-#[tauri::command]
-async fn mxbsecure_verify(
-    blob_path: String,
-    key: String,
-    original: String,
-) -> Result<bool, String> {
-    #[cfg(mxbsecure)]
-    {
-        let content_key = mxbsecure::key_from_hex(&key).ok_or("the key isn't 32 bytes of hex")?;
-        let blob = tokio::fs::read(&blob_path).await.map_err(|e| format!("read blob: {e}"))?;
-        let opened = mxbsecure::open(&blob, &content_key).map_err(|e| format!("{e}"))?;
-        let original = tokio::fs::read(&original).await.map_err(|e| format!("read original: {e}"))?;
-        Ok(opened == original)
-    }
-    #[cfg(not(mxbsecure))]
-    {
-        let _ = (blob_path, key, original);
-        Err("this build can't open mxbsecure content".into())
-    }
-}
-
-
 
 
 /// What provisioning a key produced.
@@ -1600,39 +1511,9 @@ struct SecureProvisionOutcome {
     steam_id: String,
 }
 
-/// Provision a content key for offline play: seal it to the live Steam ID (and the
-/// per-provision secret) and store it as a `.mxbkey` beside the blob. Called once, after the
-/// server has released the key and minted the secret at `/v1/keys/grant`. From then on the key
-/// opens offline for this account, on this machine, only.
-///
-/// `secret_b64` is the base64 secret the grant returned; empty is allowed for the local
-/// Lock-tab test path (no server), where the binding is Steam ID + machine only.
-#[tauri::command]
-async fn mxbsecure_provision(
-    app: tauri::AppHandle,
-    blob_path: String,
-    key: String,
-    secret_b64: Option<String>,
-) -> Result<SecureProvisionOutcome, String> {
-    #[cfg(mxbsecure)]
-    {
-        let content_key = mxbsecure::key_from_hex(&key).ok_or("the key isn't 32 bytes of hex")?;
-        let secret = match secret_b64.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            Some(s) => mxbsecure::secret_from_b64(s).ok_or("the provision secret isn't valid base64")?,
-            None => Vec::new(),
-        };
-        provision_and_record(&app, &blob_path, &content_key, &secret).await
-    }
-    #[cfg(not(mxbsecure))]
-    {
-        let _ = (app, blob_path, key, secret_b64);
-        Err("this build can't provision mxbsecure content".into())
-    }
-}
-
 /// Seal a content key to this machine (the live Steam ID + the DPAPI machine layer), store the
-/// `.mxbkey` beside the blob, and record the asset so it arms on the next game start. Shared by
-/// the manual [`mxbsecure_provision`] (Lock-tab test path) and the buyer's [`mxbsecure_unlock`].
+/// key beside the blob, and record the asset so it arms on the next game start. The buyer's
+/// [`mxbsecure_unlock`] calls it after `/v1/keys/grant` releases the key.
 ///
 /// The seal is refused rather than downgraded: `seal_key_to_identity` returns `None` in a
 /// release build if it could not machine-bind, and we surface that as an error and write
@@ -1650,17 +1531,17 @@ async fn provision_and_record(
     // fail loudly rather than storing a portable key.
     let sealed = mxbsecure::seal_key_to_identity(content_key, &steam_id, "", secret, true)
         .ok_or("couldn't machine-protect this key on this device — nothing was stored")?;
-    let out = std::path::PathBuf::from(format!("{blob_path}.mxbkey"));
-    tokio::fs::write(&out, &sealed).await.map_err(|e| format!("write .mxbkey: {e}"))?;
+    // The key file the app writes: `X.mxbsecure` → `X.mxbsecurekey` (older blobs kept a
+    // `.mxbkey` sibling; discovery still reads those).
+    let out = std::path::PathBuf::from(secure_launch::key_path_for(blob_path));
+    tokio::fs::write(&out, &sealed).await.map_err(|e| format!("write key: {e}"))?;
 
     // Remember the mapping so the app can arm this asset — write the manifest and inject the
-    // DLL — the next time the game starts. The game name is the blob's own name with the
-    // `.mxbsecure` suffix removed: the file the engine will ask for.
-    let game_name = std::path::Path::new(blob_path)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .map(|n| n.strip_suffix(".mxbsecure").unwrap_or(&n).to_string())
-        .unwrap_or_default();
+    // DLL — the next time the game starts. The game name is the file the engine will ask for:
+    // the v2 header's original name if present, else the blob name with `.mxbsecure` stripped.
+    let path = std::path::Path::new(blob_path);
+    let file_name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let game_name = secure_launch::game_name_of(path, &file_name);
     if let Err(e) = secure_launch::record_asset(
         app,
         secure_launch::SecureAsset {
@@ -1707,11 +1588,11 @@ async fn mxbsecure_unlock(
     }
 }
 
-/// Read only a blob's header (asset id, key id, plaintext length) without pulling the whole file
-/// into memory — the header is tiny and lives at the front. For the status view, which touches
-/// every secured file.
+/// Read only a blob's header (asset id, key id, plaintext length, original name) without pulling
+/// the whole file into memory — the header is tiny and lives at the front. For the status view,
+/// which touches every secured file.
 #[cfg(mxbsecure)]
-async fn read_blob_header(path: &str) -> Result<(String, String, u64), String> {
+async fn read_blob_header(path: &str) -> Result<(String, String, u64, String), String> {
     use tokio::io::AsyncReadExt;
     let mut f = tokio::fs::File::open(path).await.map_err(|e| format!("read blob: {e}"))?;
     let mut head = vec![0u8; 8192];
@@ -1723,7 +1604,9 @@ async fn read_blob_header(path: &str) -> Result<(String, String, u64), String> {
 /// Stream a blob once for both its header and its SHA-256, keeping only a 64 KB buffer and the
 /// header prefix in memory rather than the whole (often ~200 MB) file.
 #[cfg(mxbsecure)]
-async fn blob_header_and_hash(path: &str) -> Result<(String, String, u64, String), String> {
+async fn blob_header_and_hash(
+    path: &str,
+) -> Result<(String, String, u64, String, String), String> {
     use sha2::{Digest, Sha256};
     use tokio::io::AsyncReadExt;
     let mut f = tokio::fs::File::open(path).await.map_err(|e| format!("read blob: {e}"))?;
@@ -1741,10 +1624,10 @@ async fn blob_header_and_hash(path: &str) -> Result<(String, String, u64, String
             head.extend_from_slice(&buf[..take]);
         }
     }
-    let (asset, key, len) =
+    let (asset, key, len, orig) =
         mxbsecure::header_of(&head).map_err(|e| format!("not a secured blob: {e}"))?;
     let hash: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
-    Ok((asset, key, len, hash))
+    Ok((asset, key, len, orig, hash))
 }
 
 /// The grant→provision core, shared by the manual unlock and auto-unlock. Reads the asset id from
@@ -1762,13 +1645,14 @@ async fn unlock_one(
     // Stream the file once for its header (the asset id) and its SHA-256 — the hash is sent to the
     // grant so the key is released only for this exact file. Streaming keeps a ~200 MB blob out of
     // memory.
-    let (asset_id, _key_id, _len, blob_sha256) = blob_header_and_hash(blob_path).await?;
+    let (asset_id, _key_id, _len, _orig, blob_sha256) = blob_header_and_hash(blob_path).await?;
 
-    // Already unlocked? A .mxbkey beside it that opens for the live Steam ID means we're done.
+    // Already unlocked? A key beside it that opens for the live Steam ID means we're done.
     if let Some(id) = steamid::current_steam_id64() {
         if has_valid_key(blob_path, &id) {
             return Ok(SecureProvisionOutcome {
-                mxbkey_path: format!("{blob_path}.mxbkey"),
+                mxbkey_path: secure_launch::existing_key_path(blob_path)
+                    .unwrap_or_else(|| secure_launch::key_path_for(blob_path)),
                 steam_id: id,
             });
         }
@@ -1824,8 +1708,8 @@ async fn unlock_one(
 /// this account and machine, so there is nothing to grant.
 #[cfg(mxbsecure)]
 fn has_valid_key(blob_path: &str, steam_id: &str) -> bool {
-    std::fs::read(format!("{blob_path}.mxbkey"))
-        .ok()
+    secure_launch::existing_key_path(blob_path)
+        .and_then(|p| std::fs::read(p).ok())
         .and_then(|sealed| mxbsecure::unseal_key(&sealed, steam_id, ""))
         .is_some()
 }
@@ -1901,6 +1785,11 @@ struct SecureStatusItem {
     owned: bool,
     available: bool,
     unlocked: bool,
+    /// The blob's header parsed — false for a truncated or non-mxbsecure file, which is still
+    /// listed (with its filename) so a broken drop-in isn't a silent no-show.
+    readable: bool,
+    /// A key file sits beside the blob (whether or not it opens for the live account).
+    has_key: bool,
 }
 
 /// The secured files present on disk, each with its status — for a "Secured content" view that
@@ -1914,12 +1803,21 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
         let live = steamid::current_steam_id64();
         let mut items: Vec<SecureStatusItem> = Vec::new();
         for blob_path in secure_launch::scan_blobs(&app) {
-            let Ok((asset_id, _k, _l)) = read_blob_header(&blob_path).await else { continue };
-            let game_name = std::path::Path::new(&blob_path)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .map(|n| n.strip_suffix(".mxbsecure").unwrap_or(&n).to_string())
-                .unwrap_or_default();
+            // A file whose header won't parse is still listed (as its filename, marked
+            // unreadable) rather than silently dropped — a broken drop-in shouldn't just vanish.
+            let header = read_blob_header(&blob_path).await.ok();
+            let readable = header.is_some();
+            let (asset_id, orig) = header.map(|(a, _k, _l, o)| (a, o)).unwrap_or_default();
+            let game_name = if orig.is_empty() {
+                std::path::Path::new(&blob_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .map(|n| n.strip_suffix(".mxbsecure").unwrap_or(&n).to_string())
+                    .unwrap_or_default()
+            } else {
+                orig
+            };
+            let has_key = secure_launch::existing_key_path(&blob_path).is_some();
             let unlocked = live.as_deref().map(|id| has_valid_key(&blob_path, id)).unwrap_or(false);
             items.push(SecureStatusItem {
                 blob_path,
@@ -1930,6 +1828,8 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
                 owned: false,
                 available: false,
                 unlocked,
+                readable,
+                has_key,
             });
         }
         if items.is_empty() {
@@ -1939,7 +1839,8 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
         let cfg = config::load_or_detect(&app).unwrap_or_default();
         let cp_token = cfg.cp_token.trim().to_string();
         if !cp_token.is_empty() {
-            let asset_ids: Vec<&str> = items.iter().map(|i| i.asset_id.as_str()).collect();
+            let asset_ids: Vec<&str> =
+                items.iter().map(|i| i.asset_id.as_str()).filter(|a| !a.is_empty()).collect();
             let sent = reqwest::Client::new()
                 .post(format!("{}/v1/assets/status", crate::paintsync::control_plane()))
                 .bearer_auth(&cp_token)
@@ -2039,35 +1940,6 @@ async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, Stri
     let ent: Ent = resp.json().await.map_err(|e| format!("bad response: {e}"))?;
     Ok(ent.steam_id)
 }
-
-/// Open a blob offline using its provisioned `.mxbkey`: read the live Steam ID, unseal the
-/// key, decrypt, and confirm it matches `original`. This is the offline "does it still
-/// unlock for me, with no server" proof — a different account gets nothing.
-#[tauri::command]
-async fn mxbsecure_open_offline(
-    blob_path: String,
-    original: String,
-) -> Result<bool, String> {
-    #[cfg(mxbsecure)]
-    {
-        let steam_id = steamid::current_steam_id64()
-            .ok_or("couldn't read your Steam ID — is Steam installed and signed in?")?;
-        let mxbkey_path = format!("{blob_path}.mxbkey");
-        let sealed = tokio::fs::read(&mxbkey_path).await.map_err(|e| format!("read .mxbkey: {e}"))?;
-        let key = mxbsecure::unseal_key(&sealed, &steam_id, "")
-            .ok_or("this key isn't sealed to your Steam account")?;
-        let blob = tokio::fs::read(&blob_path).await.map_err(|e| format!("read blob: {e}"))?;
-        let opened = mxbsecure::open(&blob, &key).map_err(|e| format!("{e}"))?;
-        let original = tokio::fs::read(&original).await.map_err(|e| format!("read original: {e}"))?;
-        Ok(opened == original)
-    }
-    #[cfg(not(mxbsecure))]
-    {
-        let _ = (blob_path, original);
-        Err("this build can't open mxbsecure content".into())
-    }
-}
-
 
 #[tauri::command]
 fn set_run_in_background(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
@@ -6186,15 +6058,11 @@ fn main() {
             mxb_core::viewer::unpack_pkz,
             content_secure_available,
             set_mxbsecure_enabled,
-            mxbsecure_lock,
-            mxbsecure_verify,
-            mxbsecure_provision,
             mxbsecure_unlock,
             mxbsecure_auto_unlock,
             mxbsecure_status,
             steam_link_start,
             steam_link_status,
-            mxbsecure_open_offline,
             mxb_core::viewer::load_bike_model,
             preview_model_swap,
             mxb_core::viewer::load_rider_model,
