@@ -903,6 +903,26 @@ pub fn review(prog: &TrackProgram) -> Review {
              gets built on it."
         ));
     }
+    // A lap has one finish. The studio clears the others when you name one, so two can only
+    // arrive from a file — and then `finish_jump` quietly takes the first, which looks like
+    // the second tag was ignored rather than refused. Say so instead.
+    let named: Vec<f32> = prog
+        .features
+        .iter()
+        .filter(|f| f.is_finish())
+        .map(|f| f.at())
+        .collect();
+    if named.len() > 1 {
+        let places = named
+            .iter()
+            .map(|at| format!("{at:.0} m"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push(format!(
+            "{} jumps are named the finish ({places}), and a lap has one. The earliest round              the lap is the one being used — clear the rest, or name the one you mean again.",
+            named.len()
+        ));
+    }
     if let Some((a, b, gap)) = self_crossing(prog) {
         // Named in the model's own terms. It wrote a list of segments, not a distance round
         // a lap, so "1632 m comes within 0 m of 2066 m" makes it do the dead reckoning it is
@@ -1517,6 +1537,31 @@ mod tests {
         let picked = named.finish_jump().expect("a named jump is the finish");
         assert!(picked.is_finish(), "the named one was not picked: {picked:?}");
         assert!((picked.height() - 0.9).abs() < 0.001, "{picked:?}");
+    }
+
+    #[test]
+    fn two_named_finishes_are_refused_rather_than_silently_halved() {
+        let p = tweaked(|p| {
+            for at in [60.0f32, 120.0] {
+                p.features.push(Feature::Tabletop {
+                    at,
+                    length: 14.0,
+                    height: 1.2,
+                    lip: 0.0,
+                    finish: true,
+                });
+            }
+        });
+        let r = review(&p);
+        assert!(
+            r.problems.iter().any(|s| s.contains("named the finish")),
+            "{:?}",
+            r.problems
+        );
+        // Still builds: an ambiguous choice is not an unbuildable one.
+        assert!(r.fatal.is_empty(), "{:?}", r.fatal);
+        // And the one in use is the earliest, deterministically.
+        assert_eq!(p.finish_jump().map(|f| f.at()), Some(60.0));
     }
 
     #[test]
