@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — Frost's Mod Manager
+
+### Changed
+- Locked tracks open however you start the game — from the app or from Steam — once "Use
+  locked content in game" is on.
+
 ## Unreleased — Frost's Studio
 
 ### Changed

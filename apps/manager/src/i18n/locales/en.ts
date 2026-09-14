@@ -614,7 +614,7 @@ export const en = {
     "Reload the game automatically when tracks or bikes are added to your mods folder — even downloaded manually outside {{app}}.",
   "settings.secureContentInject": "Use locked content in game",
   "settings.secureContentInjectDesc":
-    "Lets purchased locked tracks open by adding a small helper to the running game. Off by default. With it on, start the game with Play — a session {{app}} didn't launch is left alone.",
+    "Lets purchased locked tracks open by adding a small helper to the running game. Off by default. Works however you start the game — from {{app}} or from Steam.",
   "settings.checking": "Checking…",
   "settings.runningConnected": "Running · game connected",
   "settings.notRunning": "Not running",

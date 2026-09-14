@@ -1080,11 +1080,12 @@ export interface LogGroup {
   files: LogFile[];
 }
 
-/** Every log set: Frost's Mod Manager's own, FrostMod's managed folder, and the game's `log.txt`. */
+/** Every log set: Frost's Mod Manager's own, FrostMod's managed folder, the game's `log.txt`, and the locked-content DLL's log. */
 export interface LogsInfo {
   app: LogGroup;
   frostmod: LogGroup;
   game: LogGroup;
+  secure: LogGroup;
 }
 
 export type LogsKind = "app" | "frostmod" | "game";

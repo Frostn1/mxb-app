@@ -620,7 +620,7 @@ export const it: Translation = {
     "Ricarica il gioco automaticamente quando piste o moto vengono aggiunte alla cartella mod — anche se scaricate manualmente fuori da {{app}}.",
   "settings.secureContentInject": "Usa i contenuti bloccati nel gioco",
   "settings.secureContentInjectDesc":
-    "Consente di aprire i tracciati bloccati acquistati aggiungendo un piccolo supporto al gioco in esecuzione. Disattivato per impostazione predefinita. Se attivo, avvia il gioco con Play: una sessione non avviata da {{app}} viene lasciata stare.",
+    "Consente di aprire i tracciati bloccati acquistati aggiungendo un piccolo supporto al gioco in esecuzione. Disattivato per impostazione predefinita. Funziona comunque avvii il gioco: da {{app}} o da Steam.",
   "settings.checking": "Controllo…",
   "settings.runningConnected": "In esecuzione · gioco collegato",
   "settings.notRunning": "Non in esecuzione",
