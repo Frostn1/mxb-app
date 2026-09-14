@@ -377,19 +377,37 @@ export function mxbsecureOpenOffline(blobPath: string, original: string): Promis
   return invoke<boolean>("mxbsecure_open_offline", { blobPath, original });
 }
 
-/** The two files generating a protected copy produced. */
+/** What packing a track for distribution produced: the blob, plus the asset id and content key
+ *  to register with the store so entitled buyers can be granted the key. */
 export interface SecureGenerateOutcome {
   gameName: string;
   blobPath: string;
-  mxbkeyPath: string;
-  steamId: string;
+  assetId: string;
+  /** Content key as hex, shown once for registration. Never written to disk beside the blob. */
+  contentKey: string;
   plainBytes: number;
 }
 
-/** Generate a protected copy of a track for a specific Steam ID, leaving the original untouched.
- *  Writes `<track>.mxbsecure` and `<track>.mxbsecure.mxbkey` beside it — the buyer needs both. */
-export function mxbsecureGenerate(trackPath: string, steamId: string): Promise<SecureGenerateOutcome> {
-  return invoke<SecureGenerateOutcome>("mxbsecure_generate", { trackPath, steamId });
+/** Pack a track into a `.mxbsecure` blob for distribution, leaving the original untouched.
+ *  No `.mxbkey` is sealed here — buyers provision on their own machine (the manager's unlock
+ *  step), which DPAPI-binds the key so a copy is useless. Register the returned asset id and
+ *  content key with the store. */
+export function mxbsecureGenerate(trackPath: string): Promise<SecureGenerateOutcome> {
+  return invoke<SecureGenerateOutcome>("mxbsecure_generate", { trackPath });
+}
+
+/** Where a provisioned `.mxbkey` was written, and the Steam account it opens for. */
+export interface SecureProvisionOutcome {
+  mxbkeyPath: string;
+  steamId: string;
+}
+
+/** Unlock purchased secured content for offline play — the buyer's one online step, and the
+ *  only way a content key reaches a machine. Reads the asset id from the blob's own header,
+ *  proves entitlement at `/v1/keys/grant`, and seals the released key to THIS machine (DPAPI),
+ *  so the stored `.mxbkey` is useless if copied. From then on it opens offline. */
+export function mxbsecureUnlock(blobPath: string): Promise<SecureProvisionOutcome> {
+  return invoke<SecureProvisionOutcome>("mxbsecure_unlock", { blobPath });
 }
 
 /** What a run would touch — folders walked, files taken as themselves, skips flagged. */

@@ -70,7 +70,12 @@ export const fr: Translation = {
   "secure.selected": "{{count}} sélectionnés",
   "secure.generate": "Générer",
   "secure.buyerNote": "Envoie les deux fichiers à l'acheteur. Il les dépose dans son dossier de circuits — le circuit apparaît et se roule, lié à son compte Steam, hors ligne.",
-  "secure.genResult": "Généré",
+  "secure.genResult": "Empaqueté",
+  "secure.registerNote": "Enregistrez l'ID de ressource et la clé de contenu sur la boutique, puis distribuez le fichier .mxbsecure. Ne partagez jamais la clé de contenu — les acheteurs qui possèdent le circuit l'obtiennent depuis la boutique et le déverrouillent sur leur propre machine.",
+  "secure.assetId": "ID de ressource",
+  "secure.contentKey": "Clé de contenu",
+  "secure.copy": "Copier",
+  "secure.copied": "Copié dans le presse-papiers.",
   // ── Paint studio ───────────────────────────────────────────────────────────
   "paints.help":
     "Transforme des .tga ou .png dessinés dans GIMP ou Photoshop en un .pnt que le jeu charge — et décompresse une déco existante pour partir de celle-ci.",
@@ -400,9 +405,9 @@ export const fr: Translation = {
   "rider.nameFirst": "Nommez d'abord ce look de pilote.",
   "secure.help":
     "Verrouille un fichier dans un blob .mxbsecure. Le texte en clair n'est jamais distribué — seul le blob chiffré l'est, et il est inutile sans une clé que le serveur remet aux joueurs autorisés.",
-  "secure.genTitle": "Protéger des circuits pour un acheteur",
-  "secure.genDesc": "Choisis un ou plusieurs circuits et le Steam ID de l'acheteur. L'app écrit une copie chiffrée et une clé liée à ce compte à côté de chaque circuit — ton original reste intact.",
-  "secure.genOk": "{{ok}} sur {{total}} protégés — liés à {{id}}.",
+  "secure.genTitle": "Empaquetez des circuits pour la distribution",
+  "secure.genDesc": "Choisissez un ou plusieurs circuits. L'app écrit une copie chiffrée à côté de chacun et vous donne un ID de ressource et une clé de contenu à enregistrer sur la boutique — votre original reste intact. Les acheteurs le déverrouillent sur leur propre machine.",
+  "secure.genOk": "{{ok}} sur {{total}} empaquetés.",
   "secure.genFail": "Impossible de protéger {{name}}",
   "secure.badSteamId": "Saisis d'abord le Steam ID à 17 chiffres de l'acheteur.",
   "secure.experimental": "Expérimental",

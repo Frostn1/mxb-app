@@ -2,31 +2,29 @@ import { useState } from "react";
 import { Card } from "@frost/shared/Components/ui/card";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
-import { Lock, Loader2, FileUp, Check, X } from "lucide-react";
+import { Lock, Loader2, FileUp, Check, X, Copy } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { ContextBarRight } from "../Shell/ContextBar";
 import HelpHint from "@frost/shared/Components/ui/help-hint";
-import { cn } from "@frost/shared/lib/utils";
 import { mxbsecureGenerate, type SecureGenerateOutcome } from "@frost/shared/api/mods";
 import { useT } from "@/i18n";
 
 /**
- * The mxbsecure tab — protect tracks for a buyer.
+ * The mxbsecure tab — pack tracks for distribution.
  *
- * Pick one or more tracks and type the buyer's Steam ID. For each track the app writes two
- * files beside it: `<track>.mxbsecure` (the encrypted copy) and `<track>.mxbsecure.mxbkey`
- * (the key sealed to that Steam ID). The original is never touched. The buyer drops both files
- * into their tracks folder — the injected client lists the track and decrypts it on load, only
- * on the machine signed into that Steam account, offline.
+ * Pick one or more tracks. For each, the app writes `<track>.mxbsecure` (the encrypted copy)
+ * beside it and returns an asset id and a content key. The original is never touched. It does
+ * NOT seal a per-buyer key here: a key sealed for a buyer on another machine can't be
+ * machine-bound, so it would be portable — a shared file plus the buyer's public Steam ID would
+ * open it anywhere. Instead the creator registers the asset id + content key with the store, and
+ * a buyer who owns the track provisions on their own machine (the manager's unlock step), which
+ * DPAPI-binds the key so a copy is useless.
  */
 const Secure = () => {
   const t = useT();
-  const [steamId, setSteamId] = useState("");
   const [files, setFiles] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<SecureGenerateOutcome[]>([]);
-
-  const steamIdOk = /^\d{17}$/.test(steamId.trim());
 
   const pick = async () => {
     const chosen = await openDialog({ multiple: true, directory: false });
@@ -45,18 +43,23 @@ const Secure = () => {
     setResults([]);
   };
 
-  const generate = async () => {
-    if (!steamIdOk) {
-      toast.error(t("secure.badSteamId"));
-      return;
+  const copy = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(t("secure.copied"));
+    } catch (e) {
+      toast.error(String(e));
     }
+  };
+
+  const generate = async () => {
     if (!files.length) return;
     setBusy(true);
     setResults([]);
     const done: SecureGenerateOutcome[] = [];
     for (const path of files) {
       try {
-        done.push(await mxbsecureGenerate(path, steamId.trim()));
+        done.push(await mxbsecureGenerate(path));
       } catch (e) {
         toast.error(t("secure.genFail", { name: path.split(/[\\/]/).pop() ?? path }), {
           description: String(e),
@@ -65,9 +68,7 @@ const Secure = () => {
     }
     setResults(done);
     if (done.length) {
-      toast.success(
-        t("secure.genOk", { ok: done.length, total: files.length, id: steamId.trim() }),
-      );
+      toast.success(t("secure.genOk", { ok: done.length, total: files.length }));
     }
     setBusy(false);
   };
@@ -83,7 +84,6 @@ const Secure = () => {
         <HelpHint title={t("nav.secure")} description={t("secure.help")} />
       </ContextBarRight>
 
-
       <div className="mx-auto w-full max-w-2xl px-4 pb-10">
         <Card data-raised className="rounded-lg border border-primary/30 bg-primary/[0.04] p-5">
           <div className="flex items-center gap-2">
@@ -93,26 +93,6 @@ const Secure = () => {
           <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted-foreground">
             {t("secure.genDesc")}
           </p>
-
-          {/* Buyer's Steam ID */}
-          <label className="mt-4 block text-[12px] font-medium text-foreground/90">
-            {t("secure.steamIdLabel")}
-          </label>
-          <input
-            value={steamId}
-            onChange={(e) => setSteamId(e.target.value.replace(/[^\d]/g, "").slice(0, 17))}
-            inputMode="numeric"
-            placeholder={t("secure.steamIdPlaceholder")}
-            className={cn(
-              "mt-1.5 w-full rounded-lg border bg-background/60 px-3 py-2 font-mono text-[13px] outline-none transition-colors",
-              steamId.length === 0
-                ? "border-border focus:border-primary/50"
-                : steamIdOk
-                  ? "border-success/50"
-                  : "border-destructive/50",
-            )}
-          />
-          <p className="mt-1.5 text-[11px] text-muted-foreground">{t("secure.steamIdHint")}</p>
 
           {/* Track selection */}
           <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -153,7 +133,7 @@ const Secure = () => {
           <Button
             className="mt-4"
             size="sm"
-            disabled={busy || !steamIdOk || files.length === 0}
+            disabled={busy || files.length === 0}
             onClick={() => void generate()}
           >
             {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Lock className="size-3.5" />}
@@ -161,7 +141,7 @@ const Secure = () => {
           </Button>
         </Card>
 
-        {/* Results — the two files per track, ready to send */}
+        {/* Results — the blob to distribute, and the asset id + key to register with the store */}
         {results.length > 0 && (
           <Card className="mt-4 p-4">
             <div className="flex items-center gap-2">
@@ -169,18 +149,22 @@ const Secure = () => {
               <h2 className="text-[13.5px] font-semibold">{t("secure.genResult")}</h2>
             </div>
             <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
-              {t("secure.buyerNote")}
+              {t("secure.registerNote")}
             </p>
             <ul className="mt-3 space-y-3">
               {results.map((r) => (
                 <li key={r.blobPath} className="border-t border-border pt-3 first:border-0 first:pt-0">
                   <p className="text-[12.5px] font-medium">{r.gameName}</p>
-                  <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground" title={r.blobPath}>
+                  <p
+                    className="mt-1 break-all font-mono text-[11px] text-muted-foreground"
+                    title={r.blobPath}
+                  >
                     {r.blobPath}
                   </p>
-                  <p className="break-all font-mono text-[11px] text-muted-foreground" title={r.mxbkeyPath}>
-                    {r.mxbkeyPath}
-                  </p>
+                  <div className="mt-2 space-y-1.5">
+                    <CopyRow label={t("secure.assetId")} value={r.assetId} onCopy={copy} copyTitle={t("secure.copy")} />
+                    <CopyRow label={t("secure.contentKey")} value={r.contentKey} onCopy={copy} copyTitle={t("secure.copy")} />
+                  </div>
                 </li>
               ))}
             </ul>
@@ -190,5 +174,32 @@ const Secure = () => {
     </div>
   );
 };
+
+/** A labelled monospace value with a copy button — the asset id and the content key. */
+const CopyRow = ({
+  label,
+  value,
+  onCopy,
+  copyTitle,
+}: {
+  label: string;
+  value: string;
+  onCopy: (v: string) => void;
+  copyTitle: string;
+}) => (
+  <div className="flex items-center gap-2">
+    <span className="w-24 flex-none text-[11px] text-muted-foreground">{label}</span>
+    <code className="min-w-0 flex-1 truncate rounded bg-foreground/[0.05] px-2 py-1 text-[11px]" title={value}>
+      {value}
+    </code>
+    <button
+      onClick={() => onCopy(value)}
+      className="flex-none text-muted-foreground hover:text-foreground"
+      title={copyTitle}
+    >
+      <Copy className="size-3.5" />
+    </button>
+  </div>
+);
 
 export default Secure;
