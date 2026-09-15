@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { cn } from "@frost/shared/lib/utils";
+import { cn } from "../../lib/utils";
 
 export interface RailEntry<T extends string> {
   id: T;
@@ -9,7 +9,46 @@ export interface RailEntry<T extends string> {
 }
 
 /**
- * The studio's navigation: the tools, named, down the left.
+ * The app's mark at the top of the rail: the snowflake, and a two-line logotype — the small
+ * italic word over the name, stepped in under it so the two overlap and read as one mark.
+ * Draggable, since the rail is one of the few places to grab a frameless window.
+ */
+export function RailBrand({
+  top,
+  name,
+  logo = "/logo.svg",
+}: {
+  top: string;
+  name: string;
+  logo?: string;
+}) {
+  return (
+    <div data-tauri-drag-region className="flex select-none items-center gap-2.5 px-2.5 pt-0.5">
+      {/* The app's own mark, not a lettered plate — the same two-paint snowflake the icon and
+          the installer carry. */}
+      <img
+        src={logo}
+        alt=""
+        draggable={false}
+        className="size-[28px] flex-none [filter:drop-shadow(0_1px_3px_rgba(0,0,0,0.25))]"
+      />
+      {/* The only face in the app that is not Barlow. */}
+      <span className="flex min-w-0 flex-col items-start">
+        <span className="font-serif text-[15px] italic leading-none text-muted-foreground">
+          {top}
+        </span>
+        <span className="-mt-[5px] ml-[15px] font-serif text-[19px] font-bold italic leading-none tracking-[-0.01em] text-foreground">
+          {name}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Named navigation down the left, shared by the Studio and Coach.
+ *
+ * In the Studio: the tools, named, down the left.
  *
  * Not the manager's horizontal rail — a tool row across the top costs the canvas its full
  * height and puts the thing you are working on second. And not an icon strip either: one

@@ -4,6 +4,10 @@
 
 ### Added
 - New Frost's Studio versions are posted in the Discord, in #studio-releases.
+- MXB Coach, a new app that helps you find lap time. It records your laps in MX Bikes, compares
+  each one with your fastest, and tells you corner by corner what to change: brake later or
+  harder, carry more speed, lean more, pick a different line, get on the gas sooner, scrub a jump
+  or stop landing short. It also shows your ideal lap from your best sections.
 
 ## 2026-09-14 — v0.14.3 — Secured content restores itself
 
