@@ -13,6 +13,7 @@
  */
 
 import { cors, refuseCrossSiteWrite } from "./assets";
+import { addCreator, listCreators, removeCreator } from "./creators";
 import { addRule, collectAdminView, deleteRule } from "./diagnostics";
 import {
   clampDays,
@@ -61,7 +62,13 @@ export function isWebAdmin(steamId: string, env: Env): boolean {
  * Usage is the same `collectStats` that `/v1/usage/stats` returns, so a script and the page
  * can never disagree about what a figure means.
  */
-export async function webAdminRoutes(request: Request, url: URL, env: Env, origin: string | null): Promise<Response> {
+export async function webAdminRoutes(
+  request: Request,
+  url: URL,
+  env: Env,
+  origin: string | null,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
   const session = await webSession(request, env);
   if (!session) return cors(json(401, { error: "not signed in" }), origin);
   if (!isWebAdmin(session.steamId, env)) return cors(json(403, { error: "not an admin" }), origin);
@@ -143,6 +150,9 @@ export async function webAdminRoutes(request: Request, url: URL, env: Env, origi
         const [plugins, found] = await Promise.all([adminPlugins(env), searchLicenses(env, query)]);
         return said(200, { plugins, found, query });
       }
+
+      case "/v1/web/admin/creators":
+        return said(200, { creators: await listCreators(env, fetchImpl) });
     }
   }
 
@@ -203,6 +213,31 @@ export async function webAdminRoutes(request: Request, url: URL, env: Env, origi
           ? said(200, { ok: true, account: result.account, expires: result.expires })
           : said(400, { error: result.error ?? "nothing was granted" });
       }
+      default:
+        return said(400, { error: "no such action" });
+    }
+  }
+
+  // Who may lock and sell. Same shape as the plugin buttons: one endpoint, an action each.
+  if (request.method === "POST" && path === "/v1/web/admin/creators") {
+    const refused = refuseCrossSiteWrite(request, env);
+    if (refused) return cors(refused, origin);
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return said(400, { error: "that was not JSON" });
+    }
+    const field = (name: string) => String(body[name] ?? "");
+    switch (field("action")) {
+      case "add": {
+        const result = await addCreator(env, field("who"), fetchImpl);
+        return result.ok ? said(200, result) : said(400, { error: result.error });
+      }
+      case "remove":
+        return (await removeCreator(env, field("account")))
+          ? said(200, { ok: true })
+          : said(404, { error: "that account isn't a creator" });
       default:
         return said(400, { error: "no such action" });
     }

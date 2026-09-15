@@ -12,6 +12,7 @@
 
 ### Added
 - New Frost's Studio versions are posted in the Discord, in #studio-releases.
+- mxbsecure admins can add and remove creators from the site, by Steam profile link.
 
 ### Changed
 - Tabletops on generated tracks are wide, rounded mounds. The bigger the jump, the further its
