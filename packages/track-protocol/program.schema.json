@@ -1,0 +1,330 @@
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "author": {
+      "type": "string"
+    },
+    "location": {
+      "type": "string"
+    },
+    "width": {
+      "type": "number",
+      "description": "the riding line, metres"
+    },
+    "terrain": {
+      "type": "object",
+      "properties": {
+        "sizeX": {
+          "type": "number",
+          "description": "metres of ground across"
+        },
+        "sizeZ": {
+          "type": "number",
+          "description": "metres of ground down"
+        },
+        "samples": {
+          "type": "integer",
+          "description": "a power of two plus one; 2049 unless there is a reason\n\n{minimum: -9007199254740991, maximum: 9007199254740991}"
+        },
+        "scale": {
+          "type": "number",
+          "description": "the whole height budget in metres — everything is quantised against it, so keep it just above the tallest thing on the track"
+        },
+        "relief": {
+          "type": "object",
+          "properties": {
+            "amplitude": {
+              "type": "number",
+              "description": "the landscape's own hills, peak to trough, metres"
+            },
+            "wavelength": {
+              "type": "number",
+              "description": "metres between those hills"
+            },
+            "seed": {
+              "type": "integer",
+              "description": "{minimum: -9007199254740991, maximum: 9007199254740991}"
+            },
+            "texture": {
+              "type": "number",
+              "description": "ridden-surface roughness, metres; 0.085 is normal"
+            },
+            "tilt": {
+              "type": "number",
+              "description": "metres the whole plot falls from one side to the other — a hillside rather than a plain. 0 for flat ground, 20-30 for a hillside national."
+            },
+            "tiltAngle": {
+              "type": "number",
+              "description": "which way it falls, degrees, same convention as a heading"
+            },
+            "landforms": {
+              "type": "integer",
+              "description": "how many banks and spoil hills the venue has around the track. 0 for a bare field, 10-15 for a proper venue. These are what make a plot look built rather than generated.\n\n{minimum: -9007199254740991, maximum: 9007199254740991}"
+            },
+            "landformHeight": {
+              "type": "number",
+              "description": "how tall the tallest of them stands, metres; 12-18 is normal"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "amplitude",
+            "wavelength",
+            "seed",
+            "texture",
+            "tilt",
+            "tiltAngle",
+            "landforms",
+            "landformHeight"
+          ]
+        },
+        "surface": {
+          "type": "string",
+          "description": "what the ground is. It decides how the track rides as well as how it looks: sand cuts deeper ruts, banks bigger berms and replaces the braking washboard with long swells; grass barely wears at all.",
+          "enum": [
+            "soil",
+            "sand",
+            "grass"
+          ]
+        },
+        "wear": {
+          "type": "number",
+          "description": "how raced the ground arrives, 0 to 1. 0 is freshly prepped — the shapes are there but the grooves are not, and the ground has its whole depth left to give over a session. 1 is a Sunday afternoon, everything worn in. 0.55 is a track that has seen a session; pick from the brief."
+        },
+        "roughness": {
+          "type": "number",
+          "description": "how rough the ridden ground is, 1 to 2. 1 is a national; 2 is a raced ARL track, rougher everywhere with bigger jumps' ground worked in"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sizeX",
+        "sizeZ",
+        "samples",
+        "scale",
+        "relief",
+        "surface",
+        "wear",
+        "roughness"
+      ]
+    },
+    "start": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        },
+        "angle": {
+          "type": "number",
+          "description": "degrees; 0 looks down +z and increases clockwise towards +x"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "z",
+        "angle"
+      ]
+    },
+    "blend": {
+      "type": "number",
+      "description": "metres things ease into each other over: where two jumps meet, where a straight becomes a corner, and how long a jump's own ramps are. 1.2 is normal; 0 is every edge sharp"
+    },
+    "elevation": {
+      "type": "array",
+      "description": "the lap height as a curve; leave empty to follow the landscape",
+      "items": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "number",
+            "description": "metres round the lap"
+          },
+          "height": {
+            "type": "number",
+            "description": "metres above the ground the track would otherwise follow"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "at",
+          "height"
+        ]
+      }
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "description": "{const: \"straight\"}"
+              },
+              "length": {
+                "type": "number",
+                "description": "metres"
+              },
+              "rise": {
+                "type": "number",
+                "description": "metres the ground climbs over this segment; negative drops, 0 follows the land"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "length",
+              "rise"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "description": "{const: \"arc\"}"
+              },
+              "radius": {
+                "type": "number",
+                "description": "metres, signed — positive turns right, negative turns left"
+              },
+              "angle": {
+                "type": "number",
+                "description": "degrees swept, always positive"
+              },
+              "rise": {
+                "type": "number",
+                "description": "metres the ground climbs over this segment; negative drops, 0 follows the land"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "radius",
+              "angle",
+              "rise"
+            ]
+          }
+        ]
+      }
+    },
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "tabletop",
+              "roller",
+              "stepUp",
+              "berm",
+              "double",
+              "whoops",
+              "rut",
+              "custom"
+            ]
+          },
+          "at": {
+            "type": "number",
+            "description": "metres round the lap from the start"
+          },
+          "length": {
+            "type": "number",
+            "description": "tabletop/roller/stepUp/berm/rut/custom; 0 otherwise. A tabletop's is its WHOLE footprint, ramp to ramp"
+          },
+          "height": {
+            "type": "number",
+            "description": "metres, all but rut and custom; for stepUp the ground gained, negative for a step down; 0 otherwise"
+          },
+          "gap": {
+            "type": "number",
+            "description": "double: metres of flat ground between the two jumps; 0 otherwise"
+          },
+          "lip": {
+            "type": "number",
+            "description": "tabletop: metres of take-off when it wants to be longer and gentler than its height makes it, 0 to leave it to the angle; double: metres of takeoff face; 0 otherwise"
+          },
+          "count": {
+            "type": "integer",
+            "description": "whoops: how many; 0 otherwise\n\n{minimum: -9007199254740991, maximum: 9007199254740991}"
+          },
+          "spacing": {
+            "type": "number",
+            "description": "whoops: metres crest to crest; 0 otherwise"
+          },
+          "depth": {
+            "type": "number",
+            "description": "rut: metres deep; 0 otherwise"
+          },
+          "shape": {
+            "type": "array",
+            "description": "custom: heights along the feature, u running 0 at its start to 1 at its end; [] otherwise",
+            "items": {
+              "type": "object",
+              "properties": {
+                "u": {
+                  "type": "number"
+                },
+                "h": {
+                  "type": "number"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "u",
+                "h"
+              ]
+            }
+          },
+          "finish": {
+            "type": "boolean",
+            "description": "tabletop/double: true for the one finish jump on the start straight; false otherwise"
+          },
+          "side": {
+            "type": "number",
+            "description": "custom: 0 across the whole width, 1 or -1 to stand it on the right or left half only; 0 otherwise"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "at",
+          "length",
+          "height",
+          "gap",
+          "lip",
+          "count",
+          "spacing",
+          "depth",
+          "shape",
+          "finish",
+          "side"
+        ]
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "author",
+    "location",
+    "width",
+    "terrain",
+    "start",
+    "blend",
+    "elevation",
+    "segments",
+    "features"
+  ],
+  "description": "{$schema: \"https://json-schema.org/draft/2020-12/schema\"}"
+}

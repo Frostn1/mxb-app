@@ -6,6 +6,7 @@ import { Segmented } from "@frost/shared/Components/ui/segmented";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useTheme, type ThemeMode } from "@frost/shared/Context/Theme";
 import { APP_NAME, LOCALE_OPTIONS, useI18n, useT } from "@/i18n";
+import TrackModelSettings from "./TrackModelSettings";
 
 const MANAGER_RELEASES = "https://github.com/Frostn1/mxb-app/releases/latest";
 
@@ -110,6 +111,8 @@ export default function Settings() {
             ))}
           </select>
         </div>
+
+        <TrackModelSettings />
 
         <p className="mt-10 text-[11.5px] text-faint">{APP_NAME}</p>
       </div>

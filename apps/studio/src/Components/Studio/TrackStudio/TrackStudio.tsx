@@ -59,6 +59,8 @@ import {
   saveTrackProject,
   TRACK_PROJECT_EXT,
   generateTrack,
+  getTrackModel,
+  type GenerateMode,
   lapLength,
   FEATURE_COLOUR,
   elevationAt,
@@ -313,6 +315,37 @@ export default function TrackStudio() {
     };
   }
 
+  // Which half the model does. Remembered once picked; until then, settings when the saved
+  // model is one of the user's own that isn't Claude, because a free or local model can't
+  // draw a whole lap.
+  const [mode, setMode] = useState<GenerateMode>(() => {
+    try {
+      return localStorage.getItem(MODE_KEY) === "settings" ? "settings" : "program";
+    } catch {
+      return "program";
+    }
+  });
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(MODE_KEY)) return;
+    } catch {
+      // No storage: fall through to the default.
+    }
+    getTrackModel()
+      .then((m) => {
+        if (m && m.kind !== "anthropic") setMode("settings");
+      })
+      .catch(() => {});
+  }, []);
+  function pickMode(next: GenerateMode) {
+    setMode(next);
+    try {
+      localStorage.setItem(MODE_KEY, next);
+    } catch {
+      // Remembered for this session only.
+    }
+  }
+
   async function onGenerate() {
     if (!brief.trim() || busy) return;
     setWorking("generate");
@@ -320,13 +353,24 @@ export default function TrackStudio() {
     setFatal([]);
     setProblems([]);
     try {
-      const next = await generateTrack(brief.trim());
+      const { program: next, settings } = await generateTrack(brief.trim(), mode);
       await settle(next, { fresh: true });
       // Minutes of generating is work worth asking about before it's dropped.
       setTouched(true);
       setFile(null);
       setAsking(false);
-      toast.success(t("track.generated", { name: next.name }));
+      toast.success(
+        t("track.generated", { name: next.name }),
+        settings
+          ? {
+              description: t("track.settingsPicked", {
+                ground: t(`track.picked.${settings.surface}` as const),
+                length: Math.round(settings.lapLength),
+                corners: settings.cornersPerKm.toFixed(1),
+              }),
+            }
+          : undefined,
+      );
     } catch (e) {
       toast.error(t("track.generateFailed"), { description: String(e) });
     } finally {
@@ -792,6 +836,17 @@ export default function TrackStudio() {
               <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
                 {t("track.briefTitle")}
               </h2>
+              <div className="ml-auto">
+                <Segmented
+                  size="sm"
+                  value={mode}
+                  onChange={(v) => pickMode(v as GenerateMode)}
+                  options={[
+                    { value: "program", label: t("track.ask.program") },
+                    { value: "settings", label: t("track.ask.settings") },
+                  ]}
+                />
+              </div>
             </div>
             <div className="mt-3 flex items-center gap-2">
               <Input
@@ -811,7 +866,9 @@ export default function TrackStudio() {
               </Button>
             </div>
             <p className="mt-3 text-[12.5px] leading-relaxed text-muted-foreground">
-              {busy === "generate" ? t("track.generatingHint") : t("track.empty")}
+              {busy === "generate"
+                ? t(mode === "settings" ? "track.generatingSettingsHint" : "track.generatingHint")
+                : t("track.empty")}
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
@@ -1738,6 +1795,9 @@ export default function TrackStudio() {
 
 /** How far back undo reaches. A program is small; a hundred of them is still nothing. */
 const UNDO_DEPTH = 100;
+
+/** Where the Whole lap / Settings only choice is remembered. */
+const MODE_KEY = "frost.track.generateMode";
 
 const KIND_KEY = {
   tabletop: "track.kind.tabletop",

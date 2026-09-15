@@ -5,6 +5,9 @@
   "compatibility_date": "2026-08-08",
   "compatibility_flags": ["nodejs_compat"],
 
+  // The track prompts live in packages/track-protocol, where the Studio reads them too.
+  "rules": [{ "type": "Text", "globs": ["**/*.md"], "fallthrough": true }],
+
   // The public address. workers.dev stays on: shipped apps still call it.
   "routes": [{ "pattern": "api.mxbsecure.com", "custom_domain": true }],
   "workers_dev": true,

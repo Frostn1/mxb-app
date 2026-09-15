@@ -450,9 +450,9 @@ fn a_wander(rng: &mut Rng) -> Vec<Segment> {
 /// the same apex radius covers thirty. Offered one arc at a time the walk could only reach the
 /// corpus's tight radii with a hairpin, and a same-handed wander landing beside it read as one
 /// corner of 197 degrees.
-fn a_corner(rng: &mut Rng) -> Vec<Segment> {
+fn a_corner(rng: &mut Rng, knobs: &LayoutKnobs) -> Vec<Segment> {
     let side = if rng.chance(0.5) { 1.0 } else { -1.0 };
-    if rng.chance(0.22) {
+    if rng.chance(knobs.sweep_share) {
         // Not every corner is a hairpin: a fifth of the corpus's are a single sweep.
         return vec![Segment::Arc {
             radius: side * rng.range(15.0, 32.0),
@@ -462,7 +462,7 @@ fn a_corner(rng: &mut Rng) -> Vec<Segment> {
     }
     vec![
         Segment::Arc { radius: side * rng.range(26.0, 60.0), angle: rng.range(22.0, 50.0), rise: 0.0 },
-        Segment::Arc { radius: side * rng.range(8.0, 15.0), angle: rng.range(55.0, 105.0), rise: 0.0 },
+        Segment::Arc { radius: side * rng.range(knobs.apex.0, knobs.apex.1), angle: rng.range(55.0, 105.0), rise: 0.0 },
         Segment::Arc { radius: side * rng.range(18.0, 45.0), angle: rng.range(18.0, 45.0), rise: 0.0 },
     ]
 }
@@ -554,10 +554,16 @@ struct Step {
 /// And it takes moves back. Greedy, sixty seeds gave one lap and the other fifty-nine ran out
 /// of legal moves 150 to 900 m in, because the first dead end was final. The moves live on a
 /// stack, and a dead end pops one and takes the next-best instead.
-fn walk(rng: &mut Rng, plot: f32, width: f32, want_m: f32) -> Option<(Vec<Segment>, Start)> {
+fn walk(
+    rng: &mut Rng,
+    plot: f32,
+    width: f32,
+    want_m: f32,
+    knobs: &LayoutKnobs,
+) -> Option<(Vec<Segment>, Start)> {
     let clear = width + 5.0;
     // Drawn once: redrawn at every step it averages to the middle and the noise decides.
-    let want_rate = rng.range(CORNERS_PER_KM.0, CORNERS_PER_KM.1) / 1000.0;
+    let want_rate = rng.range(knobs.corners_per_km.0, knobs.corners_per_km.1) / 1000.0;
     let start = (plot * 0.5, MARGIN_M + GATE_ROOM_M, 0.0); // facing +z, up the plot
     let mut ground = Ground::new(plot);
     let mut cover = Cover::new(plot);
@@ -565,7 +571,10 @@ fn walk(rng: &mut Rng, plot: f32, width: f32, want_m: f32) -> Option<(Vec<Segmen
     let mut pts = Vec::new();
 
     // The first stretch is the start straight, and nothing may be built on it.
-    let opening = Segment::Straight { length: rng.range(90.0, 130.0), rise: 0.0 };
+    let opening = Segment::Straight {
+        length: rng.range(knobs.start_straight.0, knobs.start_straight.1),
+        rise: 0.0,
+    };
     samples(start, &opening, 3.0, &mut pts);
     ground.add(&pts, 0.0);
     cover.add(&pts);
@@ -600,7 +609,7 @@ fn walk(rng: &mut Rng, plot: f32, width: f32, want_m: f32) -> Option<(Vec<Segmen
             }
             let cands = if laid < cap {
                 offers(rng, &ground, &cover, &segs, pose, laid, since_corner, corners_laid,
-                       tight_m, want_rate)
+                       tight_m, want_rate, knobs)
             } else {
                 Vec::new()
             };
@@ -732,6 +741,7 @@ fn offers(
     corners_laid: u32,
     tight_m: f32,
     want_rate: f32,
+    knobs: &LayoutKnobs,
 ) -> Vec<Vec<Segment>> {
     let mut running = 0.0;
     for prev in segs.iter().rev() {
@@ -762,7 +772,7 @@ fn offers(
     // corpus's p50 run between corners is 27 to 30 m.
     if since_corner >= 20.0 {
         for _ in 0..4 {
-            cand.push(a_corner(rng));
+            cand.push(a_corner(rng, knobs));
         }
     }
 
@@ -1201,7 +1211,9 @@ const SIDE_SINGLE_CREST_M: f32 = 1.2;
 const SIDE_SINGLE_CLEAR_M: f32 = 10.0;
 const SIDE_SINGLE_GAP_M: f32 = 30.0;
 
-fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
+fn features(rng: &mut Rng, segs: &[Segment], knobs: &LayoutKnobs) -> Vec<Feature> {
+    let [table, whale, single, double, triple, table_single, waves_at, step] = knobs.picks;
+    let js = knobs.jump_scale;
     let (total, spans) = spans(segs);
     let tight = |at: f32, length: f32| {
         spans
@@ -1225,7 +1237,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
         // on a track that has to be built right or not at all, and ours are not.
         let pick = rng.range(0.0, 1.0);
         let length;
-        if pick < 0.22 && room > 38.0 && flies_straight(&spans, pos, 45.0) {
+        if pick < table && room > 38.0 && flies_straight(&spans, pos, 45.0) {
             // A table's size is its *deck*, with the faces added on. The faces are set by the
             // published lip and landing angles and come to thirty-odd metres on their own, so
             // stating a 40 m table asks for a 6 m top and gets a long rounded hill.
@@ -1235,10 +1247,10 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             // a program to it. This used to draw up to 3.4 and every table was outside it.
             // 70% of the 2.4-3.0 m drawn here before: 85% rode too big again.
             // Taller: ridden as "the jumps are still very small height-wise".
-            let height = rng.range(2.4, 3.0);
+            let height = rng.range(2.4, 3.0) * js;
             length = (rng.range(11.2, 18.9) + faces(height)).min(room);
             out.push(Feature::Tabletop { at: pos, length, height, lip: 0.0, finish: false });
-        } else if pick < 0.30 && room > 40.0 && flies_straight(&spans, pos, 55.0) {
+        } else if pick < whale && room > 40.0 && flies_straight(&spans, pos, 55.0) {
             // A table is not always flat end to end. A whale tail rises, dips over its middle
             // and rises again before the landing — two crests a rider can either double or
             // roll — which is a shape a tabletop's three numbers cannot describe.
@@ -1246,7 +1258,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             // Drawn in metres and normalised afterwards, so the take-off gets the same run a
             // tabletop of this height gets. Drawn as fractions it had 3.6 m of lip in 8.5 m of
             // ground, and from the seat that is a wall.
-            let h = rng.range(2.3, 2.9);
+            let h = rng.range(2.3, 2.9) * js;
             let dip = rng.range(0.30, 0.40);
             let (up, down) = (lip_run(h), landing_run(h));
             let near = up + 2.8 + down * 0.55;
@@ -1271,9 +1283,9 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
                     .map(|(m, v)| crate::trackprog::ShapePoint { u: m / span, h: (v * scale).min(2.9) })
                     .collect(),
             });
-        } else if pick < 0.40 && room > 32.0 && single_fits(&spans, pos, SINGLE_NOMINAL_M) && flies_straight(&spans, pos, SINGLE_NOMINAL_M) {
+        } else if pick < single && room > 32.0 && single_fits(&spans, pos, SINGLE_NOMINAL_M) && flies_straight(&spans, pos, SINGLE_NOMINAL_M) {
             // A single: one mound, jumped off its face and landed on its own back.
-            let h = rng.range(1.8, 2.5);
+            let h = rng.range(1.8, 2.5) * js;
             let (up, down) = (air_run(h), landing_run(h));
             let crest = 1.5;
             let span = up + crest + down;
@@ -1289,18 +1301,18 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
                     .map(|(m, v)| crate::trackprog::ShapePoint { u: m / span, h: (v * scale).min(2.9) })
                     .collect(),
             });
-        } else if pick < 0.50 && room > 56.0 && flies_straight(&spans, pos, 45.0) {
+        } else if pick < double && room > 56.0 && flies_straight(&spans, pos, 45.0) {
             // A double: a take-off, a gap and a landing ramp, cleared in one.
-            let height = rng.range(2.2, 2.8);
+            let height = rng.range(2.2, 2.8) * js;
             let lip = if rng.range(0.0, 1.0) < 0.5 { 0.0 } else { 10.0 };
             // Crest to crest stays near what it was: the gentler back and front take the rest.
             let gap = rng.range(4.0, 9.0);
             length = crate::trackprog::double_faces(height, lip).total(gap);
             out.push(Feature::Double { at: pos, height, gap, lip, finish: false });
-        } else if pick < 0.57 && room > 64.0 && flies_straight(&spans, pos, 55.0) {
+        } else if pick < triple && room > 64.0 && flies_straight(&spans, pos, 55.0) {
             // A triple: a take-off, a middle lump and a landing ramp. The fast clear it in one;
             // everyone else jumps it as a double and a single.
-            let h = rng.range(1.9, 2.5);
+            let h = rng.range(1.9, 2.5) * js;
             let (up, down) = (air_run(h), landing_run(h));
             let (g1, g2) = (rng.range(7.0, 9.0), rng.range(7.0, 9.0));
             let mut x = 0.0f32;
@@ -1319,11 +1331,11 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
                     .map(|(m, v)| crate::trackprog::ShapePoint { u: m / x, h: *v })
                     .collect(),
             });
-        } else if pick < 0.64 && room > 70.0 && flies_straight(&spans, pos, 68.0) {
+        } else if pick < table_single && room > 70.0 && flies_straight(&spans, pos, 68.0) {
             // A table with a single after it: roll the table and jump the single, clear the
             // deck onto the single's back as a double, or go further still.
-            let h = rng.range(2.3, 2.8);
-            let h2 = rng.range(1.8, 2.2);
+            let h = rng.range(2.3, 2.8) * js;
+            let h2 = rng.range(1.8, 2.2) * js;
             let (up, down) = (lip_run(h), landing_run(h));
             let (up2, down2) = (air_run(h2), landing_run(h2));
             let deck = rng.range(8.0, 12.0);
@@ -1353,7 +1365,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
                     .map(|(m, v)| crate::trackprog::ShapePoint { u: m / x, h: *v })
                     .collect(),
             });
-        } else if pick < 0.68 && room > 90.0 && waves_laid < MAX_WAVE_SECTIONS {
+        } else if pick < waves_at && room > 90.0 && waves_laid < knobs.waves {
             waves_laid += 1;
             // A wave section, drawn as one shape so no hollow is dug between them: a small
             // kicker to flow in, the waves at one size, and a small one out.
@@ -1381,7 +1393,7 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
             }
             shape.push(crate::trackprog::ShapePoint { u: 1.0, h: 0.0 });
             out.push(Feature::Custom { at: pos, length, side: 0.0, shape });
-        } else if pick < 0.86 && room > 24.0 {
+        } else if pick < step && room > 24.0 {
             // A climb rather than a wall with a ramp on it, or a drop down one.
             // Shorter and taller: at under a metre over forty the step rode as a flat straight.
             length = rng.range(20.0, 28.0).min(room);
@@ -1397,29 +1409,265 @@ fn features(rng: &mut Rng, segs: &[Segment]) -> Vec<Feature> {
         // Closer than 6-15 m, so the run-up a jump now keeps off a corner does not thin the lap
         // below the published twelve lips a kilometre.
         // Closer together now the jumps are bigger, or a lap falls short of the corpus's count.
-        pos += length + rng.range(3.0, 8.0);
+        pos += length + rng.range(knobs.feature_gap.0, knobs.feature_gap.1);
     }
     out
 }
 
+/// What a track is like, in the words a brief uses. A model reads the brief and fills this in;
+/// [`LayoutKnobs::from_settings`] turns it into the bands the walk draws from. The seed still
+/// decides the lap itself, so two seeds with the same settings are two tracks of one kind.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackSettings {
+    /// Empty leaves the seed's own name.
+    pub name: String,
+    /// Empty leaves the seed's own place.
+    pub location: String,
+    /// Metres, 1700–2300: at 2400 under half of seeds closed with everything else at its top.
+    pub lap_length: f32,
+    /// Metres, 12–18.
+    pub width: f32,
+    /// 6.5–12.
+    pub corners_per_km: f32,
+    /// Metres, the tightest radius in a normal corner, 8–18.
+    pub apex_radius: f32,
+    /// 0–0.5, the share of corners that are one long sweep.
+    pub sweep_share: f32,
+    /// Metres, 60–125.
+    pub start_straight: f32,
+    /// 0 sparse … 1 packed.
+    pub jump_density: f32,
+    /// 0 mostly rollers … 1 mostly real jumps.
+    pub big_jump_share: f32,
+    /// 0.8–1.0, a multiplier on jump heights.
+    pub jump_scale: f32,
+    /// At most this many wave sections, 0–2.
+    pub waves: u32,
+    pub surface: Surface,
+    /// 0–1, see [`Terrain::wear`].
+    pub wear: f32,
+    /// 1–2: ARL is anything above 1.
+    pub roughness: f32,
+    /// Relief amplitude, metres, 2–10.
+    pub hills: f32,
+    /// Metres the plot falls side to side, 0–25.
+    pub tilt: f32,
+    /// 0–5.
+    pub landforms: u32,
+    /// 0–4 long straights that climb or drop.
+    pub elevation_changes: u32,
+}
+
+impl Default for TrackSettings {
+    /// The middle of what [`draw`] draws on its own.
+    fn default() -> Self {
+        TrackSettings {
+            name: String::new(),
+            location: String::new(),
+            lap_length: 2175.0,
+            width: 16.25,
+            corners_per_km: 8.85,
+            apex_radius: 11.5,
+            sweep_share: 0.22,
+            start_straight: 110.0,
+            jump_density: 0.65,
+            big_jump_share: 0.5,
+            jump_scale: 1.0,
+            waves: 2,
+            surface: Surface::Soil,
+            wear: crate::trackprog::default_wear(),
+            roughness: crate::trackprog::default_roughness(),
+            hills: 6.0,
+            tilt: 11.0,
+            landforms: 3,
+            elevation_changes: 2,
+        }
+    }
+}
+
+impl TrackSettings {
+    /// Inside the bounds the walk still closes in. A model writes whatever it likes; a NaN
+    /// takes the default rather than poisoning every band it feeds.
+    pub fn clamped(&self) -> Self {
+        let d = TrackSettings::default();
+        let c = |v: f32, lo: f32, hi: f32, or: f32| if v.is_nan() { or } else { v.clamp(lo, hi) };
+        let trim = |s: &str| s.trim().chars().take(60).collect::<String>().trim().to_string();
+        TrackSettings {
+            name: trim(&self.name),
+            location: trim(&self.location),
+            lap_length: c(self.lap_length, 1700.0, 2300.0, d.lap_length),
+            width: c(self.width, 12.0, 18.0, d.width),
+            corners_per_km: c(self.corners_per_km, 6.5, 12.0, d.corners_per_km),
+            apex_radius: c(self.apex_radius, 8.0, 18.0, d.apex_radius),
+            sweep_share: c(self.sweep_share, 0.0, 0.5, d.sweep_share),
+            start_straight: c(self.start_straight, 60.0, 125.0, d.start_straight),
+            jump_density: c(self.jump_density, 0.0, 1.0, d.jump_density),
+            big_jump_share: c(self.big_jump_share, 0.0, 1.0, d.big_jump_share),
+            jump_scale: c(self.jump_scale, 0.8, 1.0, d.jump_scale),
+            waves: self.waves.min(2),
+            surface: self.surface,
+            wear: c(self.wear, 0.0, 1.0, d.wear),
+            roughness: c(self.roughness, 1.0, 2.0, d.roughness),
+            hills: c(self.hills, 2.0, 10.0, d.hills),
+            tilt: c(self.tilt, 0.0, 25.0, d.tilt),
+            landforms: self.landforms.min(5),
+            elevation_changes: self.elevation_changes.min(4),
+        }
+    }
+}
+
+/// Every choice the walk makes that a setting can move, as the band it draws from.
+///
+/// `Default` is exactly what [`draw`] has always drawn, and a knob that only overrides a
+/// roll still makes the roll: a seed is its sequence of draws, and one fewer moves every lap.
+#[derive(Clone, Debug)]
+pub struct LayoutKnobs {
+    pub(crate) width: (f32, f32),
+    pub(crate) lap: (f32, f32),
+    /// The finished lap must measure inside this, or it is walked again.
+    pub(crate) lap_within: Option<(f32, f32)>,
+    /// How many walks a seed gets before it gives up.
+    pub(crate) attempts: usize,
+    pub(crate) corners_per_km: (f32, f32),
+    pub(crate) start_straight: (f32, f32),
+    pub(crate) sweep_share: f32,
+    pub(crate) apex: (f32, f32),
+    /// Cumulative odds: table, whale, single, double, triple, table and single, waves, step;
+    /// a roller past the last.
+    pub(crate) picks: [f32; 8],
+    pub(crate) jump_scale: f32,
+    pub(crate) waves: usize,
+    pub(crate) feature_gap: (f32, f32),
+    pub(crate) elevation_changes: usize,
+    pub(crate) surface: Option<Surface>,
+    pub(crate) amplitude: (f32, f32),
+    pub(crate) tilt: (f32, f32),
+    pub(crate) landforms: (i32, i32),
+    pub(crate) name: Option<String>,
+    pub(crate) location: Option<String>,
+    pub(crate) wear: Option<f32>,
+    pub(crate) roughness: Option<f32>,
+}
+
+/// The feature odds [`draw`] has always used, cumulative. Written out rather than summed so
+/// the default compares against the very same floats.
+const PICKS: [f32; 8] = [0.22, 0.30, 0.40, 0.50, 0.57, 0.64, 0.68, 0.86];
+
+impl Default for LayoutKnobs {
+    fn default() -> Self {
+        LayoutKnobs {
+            // Ridden and called "little skinny": ten to thirteen and a half metres is the
+            // bottom of what the corpus allows, and a national is wider than that.
+            width: (14.5, 18.0),
+            // And longer: 1451 m rode as "overall small" and 2400 m "a bit too big". Indiana
+            // is 2138.
+            lap: (2000.0, 2350.0),
+            lap_within: None,
+            attempts: 6,
+            corners_per_km: CORNERS_PER_KM,
+            start_straight: (90.0, 130.0),
+            sweep_share: 0.22,
+            apex: (8.0, 15.0),
+            picks: PICKS,
+            jump_scale: 1.0,
+            waves: MAX_WAVE_SECTIONS,
+            feature_gap: (3.0, 8.0),
+            elevation_changes: 2,
+            surface: None,
+            amplitude: (4.2, 7.5),
+            tilt: (6.0, 16.0),
+            landforms: (2, 4),
+            name: None,
+            location: None,
+            wear: None,
+            roughness: None,
+        }
+    }
+}
+
+impl LayoutKnobs {
+    /// Settings into bands. Each is a narrow band round what was asked rather than the point
+    /// itself: a point makes every seed walk the same way into the same dead ends.
+    pub fn from_settings(s: &TrackSettings) -> Self {
+        let s = s.clamped();
+        let band = |v: f32, by: f32, lo: f32, hi: f32| ((v - by).max(lo), (v + by).min(hi));
+        // Jumps against everything else. 0.5 is today's 64%; the kinds keep their proportions.
+        let jumps = if s.big_jump_share <= 0.5 {
+            0.2 + 0.44 * s.big_jump_share / 0.5
+        } else {
+            0.64 + 0.28 * (s.big_jump_share - 0.5) / 0.5
+        };
+        let (kj, kr) = (jumps / 0.64, (1.0 - jumps) / 0.36);
+        let weights = [0.22 * kj, 0.08 * kj, 0.10 * kj, 0.10 * kj, 0.07 * kj, 0.07 * kj, 0.04 * kr, 0.18 * kr];
+        let mut picks = [0.0f32; 8];
+        let mut acc = 0.0;
+        for (p, w) in picks.iter_mut().zip(weights) {
+            acc += w;
+            *p = acc;
+        }
+        // The gap after a feature: 12 m sparse, 2 m packed; 0.65 is today's 3–8.
+        let gap = 12.0 - 10.0 * s.jump_density;
+        let some = |t: &str| (!t.is_empty()).then(|| t.to_string());
+        LayoutKnobs {
+            width: band(s.width, 0.3, 12.0, 18.0),
+            lap: (s.lap_length * 0.96, s.lap_length * 1.04),
+            lap_within: Some((s.lap_length * 0.93, s.lap_length * 1.07)),
+            // The window turns away about a third of the laps that close, so a seed gets more
+            // walks to find one that fits.
+            attempts: 12,
+            corners_per_km: band(s.corners_per_km, 0.5, 6.0, 12.5),
+            // The start straight's top is today's: past it the lap's merged straight runs over
+            // the FFM's 125 m.
+            start_straight: band(s.start_straight, 20.0, 60.0, 130.0),
+            sweep_share: s.sweep_share,
+            // 11.5 m, today's middle, gives today's 8–15.
+            apex: band(s.apex_radius, 3.5, 7.0, 21.5),
+            picks,
+            jump_scale: s.jump_scale,
+            waves: s.waves as usize,
+            feature_gap: ((gap - 2.5).max(1.0), gap + 2.5),
+            elevation_changes: s.elevation_changes as usize,
+            surface: Some(s.surface),
+            amplitude: (s.hills * 0.85, s.hills * 1.15),
+            tilt: (s.tilt * 0.75, s.tilt * 1.25),
+            landforms: (s.landforms as i32, s.landforms as i32),
+            name: some(&s.name),
+            location: some(&s.location),
+            wear: Some(s.wear),
+            roughness: Some(s.roughness),
+        }
+    }
+}
+
 /// One lap, from one number. Not checked — see [`search`] for that.
 pub fn draw(seed: u64) -> Option<TrackProgram> {
+    draw_with(seed, &LayoutKnobs::default())
+}
+
+/// One lap, from one number and the bands to draw it from.
+pub fn draw_with(seed: u64, knobs: &LayoutKnobs) -> Option<TrackProgram> {
     let mut rng = Rng::new(seed);
-    // Ridden and called "little skinny": ten to thirteen and a half metres is the bottom of
-    // what the corpus allows, and a national is wider than that.
-    let width = rng.range(14.5, 18.0);
-    // And longer: 1451 m rode as "overall small" and 2400 m "a bit too big". Indiana is 2138.
+    let width = rng.range(knobs.width.0, knobs.width.1);
+    // A lap that strays from the length asked for is walked again: the walk only aims at its
+    // target, and short ones run long. With no length asked for, every lap fits.
+    let fits = |segs: &[Segment]| {
+        knobs.lap_within.is_none_or(|(lo, hi)| (lo..=hi).contains(&chain_length(segs)))
+    };
     let mut grown = None;
-    for _ in 0..6 {
-        let want = rng.range(2000.0, 2350.0);
-        grown = walk(&mut rng, PLOT_M, width, want);
-        if grown.is_some() {
+    for _ in 0..knobs.attempts {
+        let want = rng.range(knobs.lap.0, knobs.lap.1);
+        grown = walk(&mut rng, PLOT_M, width, want, knobs).map(|(mut segs, start)| {
+            // No rng in here, so measuring after it moves nothing.
+            break_long_straights(&mut segs, (start.x, start.z, start.angle.to_radians()), width);
+            (segs, start)
+        });
+        if grown.as_ref().is_some_and(|(segs, _)| fits(segs)) {
             break;
         }
     }
-    let (mut segments, start) = grown?;
-    break_long_straights(&mut segments, (start.x, start.z, start.angle.to_radians()), width);
-    let mut features = features(&mut rng, &segments);
+    let (mut segments, start) = grown.filter(|(segs, _)| fits(segs))?;
+    let mut features = features(&mut rng, &segments, knobs);
     side_singles(&mut features, &segments, seed);
     fill_gaps(&mut features, &segments, seed);
     // Up and down: a climb on one long straight and a drop on another. Drawn after the jumps,
@@ -1433,20 +1681,27 @@ pub fn draw(seed: u64) -> Option<TrackProgram> {
         .map(|(i, _)| ((rng.range(0.0, 1.0) * 1e6) as u64, i))
         .collect();
     long.sort();
-    for (j, &(_, i)) in long.iter().take(2).enumerate() {
+    for (j, &(_, i)) in long.iter().take(knobs.elevation_changes).enumerate() {
         if let Segment::Straight { rise, .. } = &mut segments[i] {
-            *rise = rng.range(2.5, 4.0) * if j == 0 { 1.0 } else { -1.0 };
+            *rise = rng.range(2.5, 4.0) * if j % 2 == 0 { 1.0 } else { -1.0 };
         }
     }
-    let surface = match rng.int(0, 9) {
+    let rolled = match rng.int(0, 9) {
         0..=6 => Surface::Soil,
         7..=8 => Surface::Sand,
         _ => Surface::Grass,
     };
+    let surface = knobs.surface.unwrap_or(rolled);
     Some(TrackProgram {
-        name: NAMES[(seed % NAMES.len() as u64) as usize].to_string(),
+        name: knobs
+            .name
+            .clone()
+            .unwrap_or_else(|| NAMES[(seed % NAMES.len() as u64) as usize].to_string()),
         author: "MXB App".into(),
-        location: PLACES[((seed / 7) % PLACES.len() as u64) as usize].to_string(),
+        location: knobs
+            .location
+            .clone()
+            .unwrap_or_else(|| PLACES[((seed / 7) % PLACES.len() as u64) as usize].to_string()),
         width,
         blend: crate::trackprog::default_blend(),
         terrain: Terrain {
@@ -1455,19 +1710,19 @@ pub fn draw(seed: u64) -> Option<TrackProgram> {
             samples: 2049,
             scale: if rng.chance(0.5) { 63.0 } else { 70.0 },
             surface,
-            wear: crate::trackprog::default_wear(),
-            roughness: crate::trackprog::default_roughness(),
+            wear: knobs.wear.unwrap_or_else(crate::trackprog::default_wear),
+            roughness: knobs.roughness.unwrap_or_else(crate::trackprog::default_roughness),
             // Gently rolling, and no more. A lap is benched into whatever it crosses, so
             // ground with twenty metres of landform in it puts the track in a trench with the
             // banners along the rim of the cut. A motocross venue is a field with shape in it.
             relief: Relief {
-                amplitude: rng.range(4.2, 7.5),
+                amplitude: rng.range(knobs.amplitude.0, knobs.amplitude.1),
                 wavelength: rng.range(320.0, 480.0),
                 seed: (seed % 9973) as u32,
                 texture: 0.085,
-                tilt: rng.range(6.0, 16.0),
+                tilt: rng.range(knobs.tilt.0, knobs.tilt.1),
                 tilt_angle: rng.range(0.0, 359.0),
-                landforms: rng.int(2, 4) as u32,
+                landforms: rng.int(knobs.landforms.0, knobs.landforms.1) as u32,
                 landform_height: rng.range(2.0, 5.0),
             },
         },
@@ -1818,6 +2073,236 @@ mod tests {
         // Measured at 27-30 of 40. `random_track_program` searches forward from its seed, so
         // what this guards is a regression to the greedy walk's one in sixty.
         assert!(drew >= 24, "only {drew} of 40 seeds drew a lap");
+    }
+
+    /// Every setting at the bottom of its range.
+    fn all_min() -> TrackSettings {
+        TrackSettings {
+            name: String::new(),
+            location: String::new(),
+            lap_length: 1700.0,
+            width: 12.0,
+            corners_per_km: 6.5,
+            apex_radius: 8.0,
+            sweep_share: 0.0,
+            start_straight: 60.0,
+            jump_density: 0.0,
+            big_jump_share: 0.0,
+            jump_scale: 0.8,
+            waves: 0,
+            surface: Surface::Soil,
+            wear: 0.0,
+            roughness: 1.0,
+            hills: 2.0,
+            tilt: 0.0,
+            landforms: 0,
+            elevation_changes: 0,
+        }
+    }
+
+    /// And at the top.
+    fn all_max() -> TrackSettings {
+        TrackSettings {
+            name: String::new(),
+            location: String::new(),
+            lap_length: 2300.0,
+            width: 18.0,
+            corners_per_km: 12.0,
+            apex_radius: 18.0,
+            sweep_share: 0.5,
+            start_straight: 125.0,
+            jump_density: 1.0,
+            big_jump_share: 1.0,
+            jump_scale: 1.0,
+            waves: 2,
+            surface: Surface::Grass,
+            wear: 1.0,
+            roughness: 2.0,
+            hills: 10.0,
+            tilt: 25.0,
+            landforms: 5,
+            elevation_changes: 4,
+        }
+    }
+
+    /// How many of forty seeds draw a lap from these settings that review has no problem with.
+    fn passing(s: &TrackSettings) -> usize {
+        let knobs = LayoutKnobs::from_settings(s);
+        (500u64..540)
+            .filter(|seed| {
+                let Some(mut p) = draw_with(*seed, &knobs) else { return false };
+                crate::trackllm::repair_for_tests(&mut p);
+                let r = crate::trackllm::review(&p);
+                r.fatal.is_empty() && r.problems.is_empty()
+            })
+            .count()
+    }
+
+    /// A setting at the edge of its range still draws: the clamps are where the walk stops
+    /// closing, not where a brief stops making sense.
+    ///
+    /// Ignored by default: each extreme repairs and reviews up to forty laps, nine minutes for
+    /// the six. Run with `--ignored` after touching the walker or a clamp.
+    fn holds_up(what: &str, s: TrackSettings) {
+        let n = passing(&s);
+        println!("{what}: {n} of 40");
+        assert!(n >= 20, "{what}: only {n} of 40 seeds drew a lap review passes");
+    }
+
+    #[test]
+    #[ignore = "slow: reviews forty laps"]
+    fn settings_at_the_bottom_draw() {
+        holds_up("all min", all_min());
+    }
+
+    #[test]
+    #[ignore = "slow: reviews forty laps"]
+    fn settings_at_the_top_draw() {
+        holds_up("all max", all_max());
+    }
+
+    #[test]
+    #[ignore = "slow: reviews forty laps"]
+    fn a_rough_hilly_sand_track_draws() {
+        holds_up(
+            "sand, rough, hilly",
+            TrackSettings {
+                surface: Surface::Sand,
+                roughness: 2.0,
+                wear: 0.9,
+                hills: 10.0,
+                tilt: 20.0,
+                landforms: 5,
+                elevation_changes: 4,
+                ..TrackSettings::default()
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "slow: reviews forty laps"]
+    fn a_packed_track_of_big_jumps_draws() {
+        holds_up(
+            "packed, big jumps",
+            TrackSettings {
+                jump_density: 1.0,
+                big_jump_share: 1.0,
+                jump_scale: 1.0,
+                waves: 2,
+                ..TrackSettings::default()
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "slow: reviews forty laps"]
+    fn a_long_lap_of_tight_corners_draws() {
+        holds_up(
+            "long lap, many corners",
+            TrackSettings {
+                lap_length: 2300.0,
+                corners_per_km: 12.0,
+                apex_radius: 8.0,
+                ..TrackSettings::default()
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "slow: reviews forty laps"]
+    fn a_short_open_lap_draws() {
+        holds_up(
+            "short lap, few corners",
+            TrackSettings {
+                lap_length: 1700.0,
+                corners_per_km: 6.5,
+                apex_radius: 18.0,
+                sweep_share: 0.5,
+                ..TrackSettings::default()
+            },
+        );
+    }
+
+    /// What was asked for is what arrives.
+    #[test]
+    fn settings_are_respected() {
+        for (lap_length, width, surface) in
+            [(1800.0f32, 13.0f32, Surface::Sand), (2300.0, 17.5, Surface::Grass)]
+        {
+            let s = TrackSettings {
+                name: "Test Park".into(),
+                location: "Nowhere".into(),
+                lap_length,
+                width,
+                surface,
+                wear: 0.2,
+                roughness: 1.6,
+                ..TrackSettings::default()
+            };
+            let knobs = LayoutKnobs::from_settings(&s);
+            let laps: Vec<TrackProgram> = (600u64..620).filter_map(|n| draw_with(n, &knobs)).collect();
+            assert!(laps.len() >= 10, "only {} of 20 drew", laps.len());
+            for p in &laps {
+                assert_eq!(p.terrain.surface, surface);
+                assert_eq!((p.name.as_str(), p.location.as_str()), ("Test Park", "Nowhere"));
+                assert_eq!((p.terrain.wear, p.terrain.roughness), (0.2, 1.6));
+                assert!((p.width - width).abs() <= 0.5, "width {} for {width}", p.width);
+                let off = (p.lap_length() - lap_length).abs() / lap_length;
+                assert!(off <= 0.08, "lap {:.0} m for {lap_length:.0}", p.lap_length());
+            }
+        }
+    }
+
+    /// Big jumps, full size, and still under the three metres two federations write.
+    #[test]
+    fn the_biggest_jumps_stay_under_three_metres() {
+        let knobs = LayoutKnobs::from_settings(&TrackSettings {
+            big_jump_share: 1.0,
+            jump_scale: 1.0,
+            jump_density: 1.0,
+            ..TrackSettings::default()
+        });
+        let mut drew = 0;
+        for seed in 700u64..730 {
+            let Some(mut p) = draw_with(seed, &knobs) else { continue };
+            drew += 1;
+            crate::trackllm::repair_for_tests(&mut p);
+            let tallest = p.features.iter().map(|f| f.height()).fold(0.0f32, f32::max);
+            assert!(tallest <= 3.0 + 1e-3, "seed {seed}: {tallest:.2} m");
+        }
+        assert!(drew >= 15, "only {drew} of 30 drew");
+    }
+
+    /// The model writes camelCase JSON, and gets back what it wrote.
+    #[test]
+    fn settings_round_trip_through_json() {
+        let s = TrackSettings { surface: Surface::Sand, name: "Ridge".into(), ..all_max() };
+        let v = serde_json::to_value(&s).unwrap();
+        for key in ["lapLength", "cornersPerKm", "apexRadius", "sweepShare", "startStraight",
+                    "jumpDensity", "bigJumpShare", "jumpScale", "elevationChanges"] {
+            assert!(v.get(key).is_some(), "no `{key}`");
+        }
+        assert_eq!(v["surface"], "sand");
+        assert_eq!(serde_json::from_value::<TrackSettings>(v).unwrap(), s);
+    }
+
+    /// Out of range is pulled in, NaN takes the default, and a name is kept to a name.
+    #[test]
+    fn settings_are_clamped() {
+        let s = TrackSettings {
+            name: "x".repeat(200),
+            lap_length: 9000.0,
+            width: f32::NAN,
+            hills: -3.0,
+            waves: 9,
+            ..TrackSettings::default()
+        }
+        .clamped();
+        assert_eq!(s.name.chars().count(), 60);
+        assert_eq!(s.lap_length, 2300.0);
+        assert_eq!(s.width, TrackSettings::default().width);
+        assert_eq!(s.hills, 2.0);
+        assert_eq!(s.waves, 2);
     }
 
     /// The whole point: a seed range yields a lap that passes both halves.
