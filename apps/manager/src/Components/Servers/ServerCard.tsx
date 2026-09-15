@@ -1,9 +1,24 @@
 import { memo } from "react";
-import { Mountain, Users, Lock, Play, Loader2, Wifi, Copy, Star, Hourglass, Palette } from "lucide-react";
-import type { MasterServer } from "@frost/shared/api/mods";
+import {
+  Mountain,
+  Users,
+  Lock,
+  Play,
+  Loader2,
+  Wifi,
+  Copy,
+  Star,
+  Hourglass,
+  Palette,
+  AlertTriangle,
+  Download,
+  ShoppingCart,
+} from "lucide-react";
+import type { CatalogTrack, MasterServer } from "@frost/shared/api/mods";
 import { Badge } from "@frost/shared/Components/ui/badge";
 import { cn } from "@frost/shared/lib/utils";
-import { useT } from "@/i18n";
+import { useI18n } from "@/i18n";
+import { formatPrice, openShopUrl } from "../../api/shop";
 import { isFull } from "@/lib/useServerQueue";
 
 /** Latency to colour: close is green, far is red. */
@@ -18,6 +33,13 @@ interface Props {
   server: MasterServer;
   /** The track's preview, when the player has the track. */
   art?: string;
+  /** The player doesn't have this track. False until that's known. */
+  missing: boolean;
+  /** Where a missing track comes from, when our server knows. */
+  product?: CatalogTrack;
+  /** Its track is installing, to join once it lands. */
+  installing: boolean;
+  onInstallJoin: (s: MasterServer, product: CatalogTrack) => void;
   favourite: boolean;
   /** Riders on this server running paint sync. */
   paintSync: number;
@@ -40,6 +62,10 @@ interface Props {
 const ServerCard = memo(function ServerCard({
   server: s,
   art,
+  missing,
+  product,
+  installing,
+  onInstallJoin,
   favourite,
   paintSync,
   joining,
@@ -51,10 +77,20 @@ const ServerCard = memo(function ServerCard({
   onCopy,
   onToggleFavourite,
 }: Props) {
-  const t = useT();
+  const { t, resolved } = useI18n();
   const full = isFull(s);
   const cat = s.categories[0];
   const stop = (e: React.MouseEvent) => e.stopPropagation();
+  // The player's own copy wins; a missing track shows what it looks like, from our server.
+  const picture = art || (missing ? product?.image : null);
+  const free = missing && product?.source === "mods" && !!product.slug;
+  const sold = missing && product?.source === "shop" ? product : null;
+  const price = sold?.price;
+  const priceLabel = !price
+    ? ""
+    : price.free
+      ? t("shopCatalog.free")
+      : formatPrice(price.sale ?? price.base, price.currency ?? "", resolved);
 
   return (
     <div
@@ -67,9 +103,9 @@ const ServerCard = memo(function ServerCard({
       )}
     >
       <div className="relative aspect-video overflow-hidden bg-gradient-to-br from-[#3a3f45] to-[#20242a]">
-        {art ? (
+        {picture ? (
           <img
-            src={art}
+            src={picture}
             alt={s.track}
             decoding="async"
             loading="lazy"
@@ -79,6 +115,17 @@ const ServerCard = memo(function ServerCard({
           <div className="grid size-full place-items-center text-foreground/20">
             <Mountain className="size-8" strokeWidth={1.5} />
           </div>
+        )}
+
+        {missing && (
+          <span
+            className="absolute inset-0 grid place-items-center"
+            title={t("serverBrowser.trackMissing")}
+          >
+            <span className="grid size-9 place-items-center rounded-full bg-amber-500/90 text-black shadow">
+              <AlertTriangle className="size-5" strokeWidth={2.5} />
+            </span>
+          </span>
         )}
 
         <span
@@ -177,6 +224,36 @@ const ServerCard = memo(function ServerCard({
             <CardButton disabled>
               <Hourglass className="size-3.5" />
               {t("serverBrowser.inLine", { position: queuePosition })}
+            </CardButton>
+          ) : installing ? (
+            <CardButton disabled>
+              <Loader2 className="size-3.5 animate-spin" />
+              {t("serverBrowser.installing")}
+            </CardButton>
+          ) : free && s.joinable && product ? (
+            <CardButton
+              primary
+              disabled={busy}
+              onClick={(e) => {
+                stop(e);
+                onInstallJoin(s, product);
+              }}
+              title={t("serverBrowser.installJoinHint", { title: product.name })}
+            >
+              <Download className="size-3.5" />
+              {t("serverBrowser.installJoin")}
+            </CardButton>
+          ) : sold ? (
+            <CardButton
+              primary
+              onClick={(e) => {
+                stop(e);
+                void openShopUrl(sold.url);
+              }}
+              title={t("serverBrowser.buyHint", { name: sold.name })}
+            >
+              <ShoppingCart className="size-3.5" />
+              {priceLabel ? `${t("serverBrowser.buyTrack")} · ${priceLabel}` : t("serverBrowser.buyTrack")}
             </CardButton>
           ) : s.joinable && full ? (
             <CardButton
