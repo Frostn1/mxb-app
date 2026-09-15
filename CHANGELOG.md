@@ -52,7 +52,7 @@
 ### Changed
 - Lean the bike more now says when the front isn't sliding, so you know the grip is there.
 
-## Unreleased — Frost's Studio
+## 2026-09-15 — Frost's Studio v0.1.9 — Your own AI model for tracks
 
 ### Added
 - Write tracks with your own AI model. Pick Groq, OpenRouter, OpenAI, Ollama or Anthropic in
