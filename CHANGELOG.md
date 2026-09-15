@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Your secured content survives a spring clean. The key file that sits next to a protected track
+  is the easiest thing in your mods folder to delete by accident — and without it the track
+  quietly stops showing up in game. The app now keeps its own copy of every key it unlocks, and
+  puts the file back by itself the next time it looks: when the game starts, when you open the
+  Library, or when you open Settings. No internet, no re-download, nothing to click.
+- **Restore keys** in Settings, under secured content. Puts back everything that has gone
+  missing in one pass and tells you what it fixed. A key the app doesn't have a copy of (a new
+  PC, a fresh install) is simply fetched again — free, as long as you're online and signed in;
+  you own the content, not the file.
+
 ## 2026-09-14 — Frost's Studio v0.1.6
 
 ### Added

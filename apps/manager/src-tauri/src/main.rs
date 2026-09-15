@@ -1522,6 +1522,7 @@ struct SecureProvisionOutcome {
 async fn provision_and_record(
     app: &tauri::AppHandle,
     blob_path: &str,
+    asset_id: &str,
     content_key: &[u8; 32],
     secret: &[u8],
 ) -> Result<SecureProvisionOutcome, String> {
@@ -1535,6 +1536,9 @@ async fn provision_and_record(
     // `.mxbkey` sibling; discovery still reads those).
     let out = std::path::PathBuf::from(secure_launch::key_path_for(blob_path));
     tokio::fs::write(&out, &sealed).await.map_err(|e| format!("write key: {e}"))?;
+    // And a copy in the app's own data dir, so deleting the file beside the blob — a tidy-up,
+    // an unzip over the top, a moved folder — costs a file copy to undo instead of a re-grant.
+    secure_launch::vault_store(app, &steam_id, asset_id, &sealed);
 
     // Remember the mapping so the app can arm this asset — write the manifest and inject the
     // DLL — the next time the game starts. The game name is the file the engine will ask for:
@@ -1647,9 +1651,10 @@ async fn unlock_one(
     // memory.
     let (asset_id, _key_id, _len, _orig, blob_sha256) = blob_header_and_hash(blob_path).await?;
 
-    // Already unlocked? A key beside it that opens for the live Steam ID means we're done.
+    // Already unlocked? A key beside it that opens for the live Steam ID means we're done — and
+    // one that is only in the vault is restored here, so a deleted key never reaches the server.
     if let Some(id) = steamid::current_steam_id64() {
-        if has_valid_key(blob_path, &id) {
+        if restore_key_from_vault(app, blob_path, &id) {
             return Ok(SecureProvisionOutcome {
                 mxbkey_path: secure_launch::existing_key_path(blob_path)
                     .unwrap_or_else(|| secure_launch::key_path_for(blob_path)),
@@ -1701,7 +1706,7 @@ async fn unlock_one(
         None => Vec::new(),
     };
 
-    provision_and_record(app, blob_path, &content_key, &secret).await
+    provision_and_record(app, blob_path, &asset_id, &content_key, &secret).await
 }
 
 /// Whether a `.mxbkey` beside `blob_path` already opens for `steam_id` — i.e. it's unlocked on
@@ -1712,6 +1717,68 @@ fn has_valid_key(blob_path: &str, steam_id: &str) -> bool {
         .and_then(|p| std::fs::read(p).ok())
         .and_then(|sealed| mxbsecure::unseal_key(&sealed, steam_id, ""))
         .is_some()
+}
+
+/// Make the key beside `blob_path` one that actually opens for `steam_id`, using only what is
+/// already on this machine — no server, no network.
+///
+/// Covers both ways a key stops working by accident: it was deleted, or the file that is there
+/// no longer opens (truncated by a half-finished copy, a stale envelope from before a keybind
+/// bump, a sibling that came from someone else's machine inside a re-zipped folder). The vault
+/// copy is the one this app provisioned for this account, so it is preferred over whatever is
+/// on disk — but only after it has been proved to unseal, so a stale vault entry never clobbers
+/// a working key. `false` means nothing local can fix it and the asset needs a re-provision,
+/// which is free but needs to be online.
+#[cfg(mxbsecure)]
+fn restore_key_from_vault(app: &tauri::AppHandle, blob_path: &str, steam_id: &str) -> bool {
+    if has_valid_key(blob_path, steam_id) {
+        // Working key, nothing to restore — but make sure the vault has it. This is what gives
+        // everyone who unlocked before the vault existed a copy, on the first pass after the
+        // update, instead of only protecting content unlocked from now on.
+        vault_backfill(app, blob_path, steam_id);
+        return true;
+    }
+    let Some(asset_id) = secure_launch::header_asset_id(std::path::Path::new(blob_path)) else {
+        return false; // not a readable blob — there is nothing to look up
+    };
+    let Some(sealed) = secure_launch::vault_read(app, steam_id, &asset_id) else {
+        return false;
+    };
+    if mxbsecure::unseal_key(&sealed, steam_id, "").is_none() {
+        log::info!("[secure] the vaulted key for {asset_id} no longer opens — re-provisioning");
+        return false;
+    }
+    match secure_launch::write_key_beside(blob_path, &sealed) {
+        Ok(p) => {
+            log::info!("[secure] restored the key for {asset_id} from the vault → {p}");
+            true
+        }
+        Err(e) => {
+            log::warn!("[secure] couldn't restore the key for {asset_id}: {e}");
+            false
+        }
+    }
+}
+
+/// Copy a working key into the vault if it isn't there yet. Cheap enough to call on every pass:
+/// it reads the blob's 8 KB header for the asset id, and stops at a `path.exists()` when the copy
+/// is already held. Silent on failure — the key beside the blob is what plays, and [`vault_store`]
+/// logs its own reason.
+///
+/// [`vault_store`]: secure_launch::vault_store
+#[cfg(mxbsecure)]
+fn vault_backfill(app: &tauri::AppHandle, blob_path: &str, steam_id: &str) {
+    let Some(asset_id) = secure_launch::header_asset_id(std::path::Path::new(blob_path)) else {
+        return;
+    };
+    if secure_launch::vault_key_path(app, steam_id, &asset_id).is_some_and(|p| p.exists()) {
+        return;
+    }
+    let Some(sealed) = secure_launch::existing_key_path(blob_path).and_then(|p| std::fs::read(p).ok())
+    else {
+        return;
+    };
+    secure_launch::vault_store(app, steam_id, &asset_id, &sealed);
 }
 
 /// Teach the core viewer to open a `.mxbsecure` file to its inner `.pkz` bytes **in memory**, so
@@ -1791,7 +1858,9 @@ pub(crate) async fn auto_unlock_now(app: &tauri::AppHandle, force: bool) -> usiz
     let mut unlocked = 0usize;
     for blob in secure_launch::scan_blobs(app) {
         if let Some(id) = &live {
-            if has_valid_key(&blob, id) {
+            // A key that is simply missing (or no longer opens) is put back from the vault
+            // here, offline — only a blob with no local key at all goes on to ask the server.
+            if restore_key_from_vault(app, &blob, id) {
                 continue;
             }
         }
@@ -1804,6 +1873,66 @@ pub(crate) async fn auto_unlock_now(app: &tauri::AppHandle, force: bool) -> usiz
         secure_launch::refresh_running(app);
     }
     unlocked
+}
+
+/// What a repair pass did: how many secured files it looked at, how many keys it put back from
+/// the vault (offline), how many it had to fetch again from the control plane, and how many it
+/// could not fix at all (not entitled, not enrolled, no Steam, or offline with nothing vaulted).
+#[derive(Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(not(mxbsecure), allow(dead_code))]
+struct SecureRepairOutcome {
+    checked: usize,
+    restored: usize,
+    reprovisioned: usize,
+    unresolved: usize,
+}
+
+/// Put back every secured key that has gone missing — the "I deleted something I shouldn't have"
+/// button, and the one thing to try when content stops showing up in game.
+///
+/// Two stages per file, cheapest first: restore this account's vaulted copy (a file copy, no
+/// network), and only if that can't work ask `/v1/keys/grant` for the key again. Re-provisioning
+/// is free — the entitlement is perpetual and the server re-issues the same content key and
+/// per-provision secret — it just needs the app enrolled and online. Files that are already fine
+/// are counted and left alone.
+#[tauri::command]
+async fn mxbsecure_repair_keys(app: tauri::AppHandle) -> Result<SecureRepairOutcome, String> {
+    #[cfg(mxbsecure)]
+    {
+        let live = steamid::current_steam_id64();
+        let mut out = SecureRepairOutcome::default();
+        for blob in secure_launch::scan_blobs(&app) {
+            out.checked += 1;
+            if let Some(id) = &live {
+                let had_key = has_valid_key(&blob, id);
+                if restore_key_from_vault(&app, &blob, id) {
+                    // `restore_key_from_vault` also backfills the vault for a healthy file, so
+                    // the count is about what the player would notice: a key put back.
+                    if !had_key {
+                        out.restored += 1;
+                    }
+                    continue;
+                }
+            }
+            match unlock_one(&app, &blob).await {
+                Ok(_) => out.reprovisioned += 1,
+                Err(e) => {
+                    log::info!("[secure] repair couldn't fix {blob}: {e}");
+                    out.unresolved += 1;
+                }
+            }
+        }
+        if out.restored + out.reprovisioned > 0 {
+            secure_launch::refresh_running(&app);
+        }
+        Ok(out)
+    }
+    #[cfg(not(mxbsecure))]
+    {
+        let _ = app;
+        Ok(SecureRepairOutcome::default())
+    }
 }
 
 /// One secured file the app found on disk, and what it can say about it without the key: the
@@ -1853,8 +1982,13 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
             } else {
                 orig
             };
+            // Put a deleted key back from the vault before reporting, so opening the view is
+            // itself a repair rather than a list of things that are mysteriously missing.
+            let unlocked = live
+                .as_deref()
+                .map(|id| restore_key_from_vault(&app, &blob_path, id))
+                .unwrap_or(false);
             let has_key = secure_launch::existing_key_path(&blob_path).is_some();
-            let unlocked = live.as_deref().map(|id| has_valid_key(&blob_path, id)).unwrap_or(false);
             items.push(SecureStatusItem {
                 blob_path,
                 game_name,
@@ -6098,6 +6232,7 @@ fn main() {
             set_mxbsecure_enabled,
             mxbsecure_unlock,
             mxbsecure_auto_unlock,
+            mxbsecure_repair_keys,
             mxbsecure_status,
             steam_link_start,
             steam_link_status,

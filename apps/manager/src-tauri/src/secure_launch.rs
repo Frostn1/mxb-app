@@ -53,7 +53,7 @@ pub fn scan_secured(app: &AppHandle) -> Vec<SecureAsset> {
         // sub-folder (a `mxbsecure` folder of their own included), so walk all of `mods` rather
         // than only tracks/bikes/rider.
         let root = crate::library::mods_subdir(&cfg.mods_path, "mods");
-        collect_mxbsecure(&root, &mut found);
+        collect_mxbsecure(app, &root, &mut found);
     }
     for a in load_assets(app) {
         if !found.iter().any(|f| f.blob_path.eq_ignore_ascii_case(&a.blob_path)) {
@@ -65,13 +65,14 @@ pub fn scan_secured(app: &AppHandle) -> Vec<SecureAsset> {
 
 /// Walk `dir` for `*.mxbsecure` blobs that have a key beside them, pushing a [`SecureAsset`] for
 /// each. Recursive, because content lives in sub-folders (tracks, bikes and their paints, rider
-/// gear).
-fn collect_mxbsecure(dir: &std::path::Path, out: &mut Vec<SecureAsset>) {
+/// gear). A blob whose key was deleted gets it back from the vault here
+/// ([`ensure_key_present`]), so arming a game after a tidy-up is not a re-provision.
+fn collect_mxbsecure(app: &AppHandle, dir: &std::path::Path, out: &mut Vec<SecureAsset>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            collect_mxbsecure(&path, out);
+            collect_mxbsecure(app, &path, out);
             continue;
         }
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
@@ -79,8 +80,8 @@ fn collect_mxbsecure(dir: &std::path::Path, out: &mut Vec<SecureAsset>) {
             continue; // key siblings end in .mxbsecurekey / .mxbkey, so they're skipped here
         }
         let blob_path = path.to_string_lossy().to_string();
-        let Some(mxbkey) = existing_key_path(&blob_path) else {
-            continue; // a blob with no key can't be opened — don't list it
+        let Some(mxbkey) = ensure_key_present(app, &blob_path) else {
+            continue; // no key here and none vaulted — it can't be opened, so don't list it
         };
         out.push(SecureAsset {
             game_name: game_name_of(&path, name),
@@ -109,6 +110,121 @@ pub fn existing_key_path(blob_path: &str) -> Option<String> {
     }
     let legacy = format!("{blob_path}.mxbkey");
     std::path::Path::new(&legacy).exists().then_some(legacy)
+}
+
+// ── the key vault ──────────────────────────────────────────────────────────────────────────
+//
+// The `.mxbsecurekey` beside a blob lives in the mods tree, which is exactly where a player
+// tidies up, unzips over the top, or moves a folder — and a key deleted by accident used to
+// mean the asset silently stopped appearing in game. So every key the app provisions is also
+// copied into the app's own data directory, keyed by the account and asset it belongs to, and
+// the sibling is put back from that copy whenever it goes missing. That restore is a file copy:
+// no server, no network, no re-grant. Losing both copies is still free (the entitlement is
+// perpetual and `/v1/keys/grant` re-issues the same key and secret), it just needs to be online.
+
+/// `<app-data>/secure/keys/` — the app's own copy of every key it has provisioned. Outside the
+/// mods tree on purpose: nothing a player cleans up, unzips into, or syncs touches it.
+#[cfg_attr(not(mxbsecure), allow(dead_code))]
+pub fn key_vault_dir(app: &AppHandle) -> Option<PathBuf> {
+    Some(secure_dir(app)?.join("keys"))
+}
+
+/// One path component, made safe to join: an `asset_id` or Steam ID comes from a blob header or
+/// a VDF, so it is treated as untrusted. Everything outside `[A-Za-z0-9._-]` becomes `_`, and a
+/// name that is empty or only dots (`.`, `..`) is refused rather than escaping the directory.
+#[cfg_attr(not(mxbsecure), allow(dead_code))]
+fn vault_component(raw: &str) -> Option<String> {
+    let cleaned: String = raw
+        .trim()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '_' })
+        .collect();
+    (!cleaned.is_empty() && !cleaned.chars().all(|c| c == '.')).then_some(cleaned)
+}
+
+/// Where this account's copy of an asset's key lives: `keys/<steam_id>/<asset_id>.mxbsecurekey`.
+/// Per account as well as per asset, because a key is sealed to one Steam ID — two accounts on
+/// the same PC each own their own copy and must not overwrite each other's.
+#[cfg_attr(not(mxbsecure), allow(dead_code))]
+pub fn vault_key_path(app: &AppHandle, steam_id: &str, asset_id: &str) -> Option<PathBuf> {
+    let steam = vault_component(steam_id)?;
+    let asset = vault_component(asset_id)?;
+    Some(key_vault_dir(app)?.join(steam).join(format!("{asset}.mxbsecurekey")))
+}
+
+/// Keep a copy of a freshly provisioned key. Best-effort: the sibling beside the blob is what
+/// plays, so a vault write that fails is logged and nothing else changes.
+#[cfg_attr(not(mxbsecure), allow(dead_code))]
+pub fn vault_store(app: &AppHandle, steam_id: &str, asset_id: &str, sealed: &[u8]) {
+    let Some(path) = vault_key_path(app, steam_id, asset_id) else {
+        log::warn!("[secure] no vault path for asset {asset_id:?} — key not backed up");
+        return;
+    };
+    let wrote = path
+        .parent()
+        .map(std::fs::create_dir_all)
+        .transpose()
+        .and_then(|_| std::fs::write(&path, sealed));
+    match wrote {
+        Ok(()) => log::info!("[secure] key for {asset_id} backed up to the vault"),
+        Err(e) => log::warn!("[secure] couldn't back up the key for {asset_id}: {e}"),
+    }
+}
+
+/// This account's vaulted key for an asset, if there is one.
+#[cfg_attr(not(mxbsecure), allow(dead_code))]
+pub fn vault_read(app: &AppHandle, steam_id: &str, asset_id: &str) -> Option<Vec<u8>> {
+    std::fs::read(vault_key_path(app, steam_id, asset_id)?).ok()
+}
+
+/// Write a vaulted key back beside its blob, returning where it landed. Used both to replace a
+/// deleted sibling and to overwrite one that no longer opens.
+#[cfg_attr(not(mxbsecure), allow(dead_code))]
+pub fn write_key_beside(blob_path: &str, sealed: &[u8]) -> Result<String, String> {
+    let out = key_path_for(blob_path);
+    std::fs::write(&out, sealed).map_err(|e| format!("restoring the key beside the blob: {e}"))?;
+    Ok(out)
+}
+
+/// The key beside `blob_path`, restoring it from the vault first if it has gone missing.
+///
+/// This is the accidental-deletion path, and it is deliberately offline: the asset id comes from
+/// the blob's own (authenticated) header and the bytes come from `<app-data>`, so a player who
+/// deleted the key file gets it back the next time the app looks at that blob, with no server
+/// call and nothing to click. `None` means there is no key here and none vaulted — that asset
+/// needs a re-provision (see the app's repair pass), which is free but needs to be online.
+pub fn ensure_key_present(app: &AppHandle, blob_path: &str) -> Option<String> {
+    if let Some(p) = existing_key_path(blob_path) {
+        return Some(p);
+    }
+    #[cfg(mxbsecure)]
+    {
+        let steam_id = crate::steamid::current_steam_id64()?;
+        let asset_id = header_asset_id(std::path::Path::new(blob_path))?;
+        let sealed = vault_read(app, &steam_id, &asset_id)?;
+        match write_key_beside(blob_path, &sealed) {
+            Ok(p) => {
+                log::info!("[secure] restored the deleted key for {asset_id} from the vault");
+                return Some(p);
+            }
+            Err(e) => log::warn!("[secure] couldn't restore the key for {asset_id}: {e}"),
+        }
+    }
+    let _ = app;
+    None
+}
+
+/// The `asset_id` from a blob's authenticated header — what a key is vaulted under. Reads only
+/// the header prefix, not the whole (often ~200 MB) file.
+#[cfg(mxbsecure)]
+pub fn header_asset_id(path: &std::path::Path) -> Option<String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut head = vec![0u8; 8192];
+    let n = f.read(&mut head).ok()?;
+    head.truncate(n);
+    let (asset_id, _key, _len, _orig) = crate::mxbsecure::header_of(&head).ok()?;
+    (!asset_id.is_empty()).then_some(asset_id)
 }
 
 /// The filename the game opens for a blob. New `X.mxbsecure` blobs carry the original name
@@ -500,6 +616,40 @@ mod tests {
         let started = std::time::Instant::now();
         assert!(!wait_for_hooks(&log, from, Duration::from_secs(5)));
         assert!(started.elapsed() < Duration::from_secs(1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_vault_name_cannot_escape_the_vault() {
+        // asset_id and Steam ID come from a blob header and a VDF — untrusted input that is
+        // joined into a path, so traversal and separators must not survive.
+        assert_eq!(vault_component("trk_pinehill").as_deref(), Some("trk_pinehill"));
+        assert_eq!(vault_component("  76561198000000001 ").as_deref(), Some("76561198000000001"));
+        assert_eq!(vault_component("../../etc/passwd").as_deref(), Some(".._.._etc_passwd"));
+        assert_eq!(vault_component(r"a\b").as_deref(), Some("a__b"));
+        assert_eq!(vault_component(".."), None, "dots only");
+        assert_eq!(vault_component("."), None);
+        assert_eq!(vault_component("   "), None, "empty");
+    }
+
+    #[test]
+    fn a_restored_key_lands_at_the_name_the_scan_looks_for() {
+        // The repair path writes the key back beside the blob; discovery has to find exactly
+        // that file, or a restore would look like it did nothing.
+        let dir = std::env::temp_dir().join(format!("frost-vault-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let blob = dir.join("pinehill.mxbsecure").to_string_lossy().to_string();
+        std::fs::write(&blob, b"not a real blob").unwrap();
+        assert_eq!(existing_key_path(&blob), None, "no key to start with");
+
+        let wrote = write_key_beside(&blob, b"sealed-key-bytes").unwrap();
+        assert_eq!(wrote, key_path_for(&blob));
+        assert_eq!(existing_key_path(&blob).as_deref(), Some(wrote.as_str()));
+        assert_eq!(std::fs::read(&wrote).unwrap(), b"sealed-key-bytes");
+
+        // Restoring over a key that no longer opens replaces it rather than failing.
+        let again = write_key_beside(&blob, b"a-newer-sealed-key").unwrap();
+        assert_eq!(std::fs::read(&again).unwrap(), b"a-newer-sealed-key");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
