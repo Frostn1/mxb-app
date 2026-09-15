@@ -48,7 +48,6 @@ import { isRunning, useTrackBuild } from "../../../Context/TrackBuild";
 import { UnsavedRegistry } from "../../Shell/ContextBar";
 import { cn } from "@frost/shared/lib/utils";
 import {
-  baseTrackProgram,
   blankTrackProgram,
   randomTrackProgram,
   closeTrackLap,
@@ -59,8 +58,6 @@ import {
   saveTrackProject,
   TRACK_PROJECT_EXT,
   generateTrack,
-  getTrackModel,
-  type GenerateMode,
   lapLength,
   FEATURE_COLOUR,
   elevationAt,
@@ -179,9 +176,9 @@ export default function TrackStudio() {
   // Rebuilding a two-thousand-square terrain on every drag is real work, so this is a choice
   // rather than the default. With it on, an edit settles and then the view catches up.
   const [live, setLive] = useState(false);
-  // The size a random track is drawn at.
+  // The size a random track is drawn at. It belongs to Random, so it sits against it.
   const [scale, setScale] = useState<TrackScale>("normal");
-  const scales = (["easy", "normal", "arl"] as const).map((value) => ({
+  const scales = (["easy", "normal", "pro"] as const).map((value) => ({
     value,
     label: t(`track.scale.${value}`),
   }));
@@ -315,37 +312,6 @@ export default function TrackStudio() {
     };
   }
 
-  // Which half the model does. Remembered once picked; until then, settings when the saved
-  // model is one of the user's own that isn't Claude, because a free or local model can't
-  // draw a whole lap.
-  const [mode, setMode] = useState<GenerateMode>(() => {
-    try {
-      return localStorage.getItem(MODE_KEY) === "settings" ? "settings" : "program";
-    } catch {
-      return "program";
-    }
-  });
-  useEffect(() => {
-    try {
-      if (localStorage.getItem(MODE_KEY)) return;
-    } catch {
-      // No storage: fall through to the default.
-    }
-    getTrackModel()
-      .then((m) => {
-        if (m && m.kind !== "anthropic") setMode("settings");
-      })
-      .catch(() => {});
-  }, []);
-  function pickMode(next: GenerateMode) {
-    setMode(next);
-    try {
-      localStorage.setItem(MODE_KEY, next);
-    } catch {
-      // Remembered for this session only.
-    }
-  }
-
   async function onGenerate() {
     if (!brief.trim() || busy) return;
     setWorking("generate");
@@ -353,7 +319,10 @@ export default function TrackStudio() {
     setFatal([]);
     setProblems([]);
     try {
-      const { program: next, settings } = await generateTrack(brief.trim(), mode);
+      // Whole lap or settings only is decided in `generate_track`, by what the configured
+      // model can actually do — see the comment there. `settings` coming back is how the
+      // studio learns which way it went, and the toast says so.
+      const { program: next, settings } = await generateTrack(brief.trim());
       await settle(next, { fresh: true });
       // Minutes of generating is work worth asking about before it's dropped.
       setTouched(true);
@@ -839,25 +808,12 @@ export default function TrackStudio() {
     <div ref={rootRef} className="flex h-full min-h-0 flex-col">
       {!program ? (
         /* Nothing loaded yet. One line describes a track and the schema does the rest, and
-           two starting points sit beside it for when the model isn't the answer. */
+           a few starting points sit under it for when the model isn't the answer. */
         <div className="flex min-h-0 flex-1 items-center justify-center px-4">
           <div className="w-full max-w-[560px]">
-            <div className="flex items-center">
-              <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
-                {t("track.briefTitle")}
-              </h2>
-              <div className="ml-auto">
-                <Segmented
-                  size="sm"
-                  value={mode}
-                  onChange={(v) => pickMode(v as GenerateMode)}
-                  options={[
-                    { value: "program", label: t("track.ask.program") },
-                    { value: "settings", label: t("track.ask.settings") },
-                  ]}
-                />
-              </div>
-            </div>
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
+              {t("track.briefTitle")}
+            </h2>
             <div className="mt-3 flex items-center gap-2">
               <Input
                 value={brief}
@@ -876,26 +832,25 @@ export default function TrackStudio() {
               </Button>
             </div>
             <p className="mt-3 text-[12.5px] leading-relaxed text-muted-foreground">
-              {busy === "generate"
-                ? t(mode === "settings" ? "track.generatingSettingsHint" : "track.generatingHint")
-                : t("track.empty")}
+              {busy === "generate" ? t("track.generatingHint") : t("track.empty")}
             </p>
+            {/* Or start from a track instead of a sentence. Random leads, because it is the
+                one that hands you something to ride, and the size sits against it: the size is
+                Random's, and sat across the row from the brief it read as the brief's. */}
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
-              <Button
-                variant="outline"
-                onClick={() => void onLoad(randomAtScale)}
-                disabled={busy !== null}
-              >
-                {t("track.random")}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => void onLoad(baseTrackProgram)}
-                disabled={busy !== null}
-              >
-                {t("track.base")}
-              </Button>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  onClick={() => void onLoad(randomAtScale)}
+                  disabled={busy !== null}
+                >
+                  {t("track.random")}
+                </Button>
+                <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
+              </div>
+              <span aria-hidden className="text-faint">
+                ·
+              </span>
               <Button
                 variant="ghost"
                 onClick={() => void onLoad(blankTrackProgram)}
@@ -1596,21 +1551,17 @@ export default function TrackStudio() {
                   <span className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
                     {t("track.startOver")}
                   </span>
-                  <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
-                  <button
-                    onClick={() => void onLoad(randomAtScale)}
-                    disabled={busy !== null}
-                    className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
-                  >
-                    {t("track.random")}
-                  </button>
-                  <button
-                    onClick={() => void onLoad(baseTrackProgram)}
-                    disabled={busy !== null}
-                    className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
-                  >
-                    {t("track.base")}
-                  </button>
+                  {/* The size is Random's, so it travels with it here too. */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => void onLoad(randomAtScale)}
+                      disabled={busy !== null}
+                      className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                    >
+                      {t("track.random")}
+                    </button>
+                    <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
+                  </div>
                   <button
                     onClick={() => void onLoad(blankTrackProgram)}
                     disabled={busy !== null}
@@ -1820,9 +1771,6 @@ export default function TrackStudio() {
 
 /** How far back undo reaches. A program is small; a hundred of them is still nothing. */
 const UNDO_DEPTH = 100;
-
-/** Where the Whole lap / Settings only choice is remembered. */
-const MODE_KEY = "frost.track.generateMode";
 
 const KIND_KEY = {
   tabletop: "track.kind.tabletop",

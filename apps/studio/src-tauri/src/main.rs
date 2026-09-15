@@ -150,7 +150,6 @@ fn main() {
             set_track_model,
             clear_track_model,
             test_track_model,
-            base_track_program,
             random_track_program,
             bake_prop_library,
             blank_track_program,
@@ -279,17 +278,28 @@ struct Generated {
 /// Ask a model for a track, and keep asking until it measures like one.
 ///
 /// A model of the user's own is asked directly when one is saved, see `trackmodel`; our
-/// control plane otherwise, which holds our key. `mode` "settings" asks only for the
-/// character and has `tracklayout` draw the lap; anything else asks for the whole lap.
-/// Everything that comes back is built and measured before this returns.
+/// control plane otherwise, which holds our key. Everything that comes back is built and
+/// measured before this returns.
+///
+/// There are two ways to ask, and which one works is a fact about the model rather than a
+/// preference, so it is decided here instead of on screen: writing a whole lap that closes is
+/// beyond a small or free model, and one of those is asked only for the track's character —
+/// `tracklayout` then draws the lap, which is geometry and needs no model at all. `mode`
+/// forces it either way for anything that still wants to say.
 #[tauri::command]
 async fn generate_track(
     app: tauri::AppHandle,
     brief: String,
     mode: Option<String>,
 ) -> Result<Generated, String> {
-    let settings_only = mode.as_deref() == Some("settings");
     let own = mxb_core::config::data_dir(&app).and_then(|d| trackmodel::load(&d));
+    let settings_only = match mode.as_deref() {
+        Some("settings") => true,
+        Some("program") => false,
+        // Ours is Claude and writes the lap. One of the user's own is trusted with it only
+        // when it is an Anthropic model too; everything else is asked for the character.
+        _ => own.as_ref().is_some_and(|m| m.kind != trackmodel::Kind::Anthropic),
+    };
     let out = match own {
         Some(model) => {
             generate_with(&trackmodel::Direct { model }, brief.trim(), settings_only).await
@@ -416,18 +426,6 @@ async fn test_track_model(
         return Err("A model needs an address and a name.".into());
     }
     trackmodel::check(&m).await.map_err(|e| format!("{e:#}"))
-}
-
-/// A track to start from, without asking anyone for one.
-///
-/// The studio's first screen used to be a prompt and nothing else, which is a bad place to
-/// start from when the model isn't configured — and a worse one when you just want to change
-/// two jumps on something that already works.
-#[tauri::command]
-async fn base_track_program() -> Result<serde_json::Value, String> {
-    serde_json::from_str::<trackprog::TrackProgram>(trackprog::EXAMPLE)
-        .and_then(|p| serde_json::to_value(&p))
-        .map_err(|e| format!("the built-in track didn't load: {e}"))
 }
 
 /// A whole track from a number, with no model in it.
