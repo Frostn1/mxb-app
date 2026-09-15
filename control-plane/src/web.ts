@@ -16,6 +16,7 @@ import { allowedOrigin, assetOrigins, cors, refuseCrossSiteWrite } from "./asset
 import { tokenMatches } from "./auth";
 import { repairBySteamId } from "./steamlink";
 import { steamResult } from "./page";
+import { isWebAdmin, isWebAdminPath, webAdminRoutes } from "./webadmin";
 import { isVerified, loginUrl, steamPersonaName, verifyAssertion } from "./steam";
 import {
   clearedCookie,
@@ -62,7 +63,7 @@ export async function webRoutes(
   const origin = allowedOrigin(request, env);
   const key = env.MXB_WEB_SESSION_KEY;
 
-  if (method === "OPTIONS" && (path === "/v1/web/me" || path === "/v1/web/logout")) {
+  if (method === "OPTIONS" && (path === "/v1/web/me" || path === "/v1/web/logout" || isWebAdminPath(path))) {
     if (request.headers.get("Origin") && !origin) return cors(json(403, { error: "origin not allowed" }), null);
     return cors(new Response(null, { status: 204 }), origin, true, "GET, POST, OPTIONS");
   }
@@ -147,6 +148,9 @@ export async function webRoutes(
         name: session.name || app?.rider_name || "",
         creator: !!account?.creator_at,
         linked: !!app,
+        // So the site knows whether to offer the dashboards at all. Never the gate itself —
+        // every admin route checks the session again, and a client flag decides nothing.
+        admin: isWebAdmin(session.steamId, env),
       }),
       origin,
     );
@@ -169,6 +173,10 @@ export async function webRoutes(
   if (method === "GET" && path.startsWith("/v1/web/lockweb/")) {
     return lockweb(request, url, env, origin);
   }
+
+  // The dashboards the site draws. Gated on the Steam account rather than a key — see
+  // `webadmin.ts` for why a person's admin credential should not travel in a URL.
+  if (isWebAdminPath(path)) return webAdminRoutes(request, url, env, origin);
 
   return json(404, { error: "no such endpoint" });
 }

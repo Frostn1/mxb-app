@@ -12,6 +12,8 @@
   missing in one pass and tells you what it fixed. A key the app doesn't have a copy of (a new
   PC, a fresh install) is simply fetched again — free, as long as you're online and signed in;
   you own the content, not the file.
+- Frost's Studio sends the same anonymous usage counts as the MXB App, under the same switch in
+  Settings → General. Each report says which app sent it, so the two are counted apart.
 
 ## 2026-09-14 — Frost's Studio v0.1.6
 

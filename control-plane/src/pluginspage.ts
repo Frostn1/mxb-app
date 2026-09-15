@@ -95,7 +95,7 @@ function oneOf<T extends string>(value: string | null, allowed: readonly T[], fa
   return (allowed as readonly string[]).includes(value ?? "") ? (value as T) : fallback;
 }
 
-function keyQuery(url: URL): KeyQuery {
+export function keyQuery(url: URL): KeyQuery {
   return {
     q: url.searchParams.get("q") ?? "",
     plugin: url.searchParams.get("plugin") ?? "",
@@ -104,7 +104,7 @@ function keyQuery(url: URL): KeyQuery {
   };
 }
 
-function licenseQuery(url: URL): LicenseQuery {
+export function licenseQuery(url: URL): LicenseQuery {
   return {
     q: url.searchParams.get("q") ?? "",
     plugin: url.searchParams.get("plugin") ?? "",
@@ -141,7 +141,7 @@ export async function pluginLicensesPage(request: Request, url: URL, env: Env): 
 }
 
 /** The codes from one mint, read back after the redirect. */
-async function batchCodes(env: Env, createdAt: number): Promise<string[]> {
+export async function batchCodes(env: Env, createdAt: number): Promise<string[]> {
   const { results } = await env.DB.prepare(
     `SELECT code FROM plugin_keys WHERE created_at = ? ORDER BY code LIMIT ${MAX_MINT}`,
   )

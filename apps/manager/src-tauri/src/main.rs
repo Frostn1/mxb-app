@@ -6133,7 +6133,7 @@ fn main() {
             memwatch::start();
             // Anonymous counters. Started last of the startup tasks and after the config
             // work above, because the install id it mints is saved into that same config.
-            usage::start(handle);
+            usage::start(handle, usage::MANAGER);
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);

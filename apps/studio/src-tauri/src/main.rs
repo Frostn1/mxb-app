@@ -112,6 +112,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             mxb_core::viewer::app_platform,
+            track_event,
             // The studio's own: making a track, packing a paint, sealing content.
             preview_model_swap,
             log_client,
@@ -200,8 +201,18 @@ fn main() {
             // the same actions run from the title bar's File menu and keyboard shortcuts.
             #[cfg(target_os = "macos")]
             app.set_menu(app_menu(app.handle())?)?;
+            // Anonymous counters, under the same switch and the same config as the manager's —
+            // which is also where the install id comes from. This build does not mint one, so
+            // a machine with only the studio on it reports nothing rather than inventing a
+            // second identity for a computer the manager would also call one install.
+            usage::start(app.handle(), usage::STUDIO);
             let _ = app;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                usage::flush_on_exit(window.app_handle());
+            }
         })
         // Every item is a request the frontend answers, because everything a menu here can do
         // is something a tool already knows how to do. The id travels as-is — the title bar's
@@ -211,6 +222,16 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Frost's Studio");
+}
+
+/// Count something the creator did.
+///
+/// A name and nothing else, exactly as in the manager: the backend holds the switch, the
+/// buffer and the rules about what a name may be, so there is no payload here to accidentally
+/// put a file path or a rider name into.
+#[tauri::command]
+fn track_event(name: String) {
+    usage::track(&name);
 }
 
 /// Gear models the game can't reach where they are: files loose in an area root, or a package
