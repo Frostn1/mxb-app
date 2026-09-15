@@ -404,12 +404,57 @@ pub async fn flush(app: &AppHandle) {
 /// The header a signed report carries, matching the control plane's `SIGNATURE_HEADER`.
 const SIGNATURE_HEADER: &str = "X-MXB-Usage";
 
-/// The build key, or `None` in a build that was not given one.
+/// The XOR pad `build.rs` obfuscates the build key with before baking it in. MUST match
+/// `USAGE_PAD` there.
+///
+/// Obfuscation, not secrecy — the same bargain the shop credential makes, for the same reason:
+/// a constant in a shipped binary is recoverable by anyone who reads the pad. What it buys is
+/// that the key is not a `strings` hit, which is the difference between the floor this raises
+/// and no floor at all.
+const PAD: [u8; 32] = [
+    0x50, 0x9e, 0x35, 0xb3, 0x30, 0xb8, 0x6e, 0x96, 0x77, 0x76, 0x19, 0x54,
+    0xc7, 0x96, 0xad, 0x78, 0x19, 0xa3, 0x9e, 0xa6, 0x30, 0xa7, 0xb6, 0x4b,
+    0x3a, 0x23, 0xa0, 0xcf, 0x71, 0x95, 0xa0, 0xf9,
+];
+
+/// The obfuscated build key baked in by `build.rs`, or `None` in a build without one.
 ///
 /// `option_env!` rather than `env!`: the public repo builds without it, and must keep doing so.
 /// A build with no key sends no signature, which the endpoint accepts until a deployment turns
 /// [`MXB_USAGE_REQUIRE_SIGNATURE`](../../../control-plane/src/env.d.ts) on.
-const BUILD_KEY: Option<&str> = option_env!("MXB_USAGE_KEY");
+const BUILD_KEY_OBF: Option<&str> = option_env!("MXB_USAGE_KEY_OBF");
+
+/// The key this build was given, or `None`.
+fn build_key() -> Option<Vec<u8>> {
+    decode_key(BUILD_KEY_OBF)
+}
+
+/// Hex-decode a baked value, then XOR it back with the cycled [`PAD`].
+///
+/// Bytes rather than a string — HMAC wants bytes, and there is no reason to reconstitute the
+/// key as something printable on its way to being one. `None` for a malformed or empty bake,
+/// so a broken one reads as "this build does not sign" rather than signing with rubbish. Takes
+/// the value rather than reading the constant, so it can be tested from a build without a key,
+/// which is every build in this repo.
+fn decode_key(baked: Option<&str>) -> Option<Vec<u8>> {
+    let hex = baked?.trim();
+    if hex.is_empty() || hex.len() % 2 != 0 {
+        return None;
+    }
+    let h = hex.as_bytes();
+    let mut bytes = Vec::with_capacity(h.len() / 2);
+    let mut i = 0;
+    while i < h.len() {
+        let hi = (h[i] as char).to_digit(16)?;
+        let lo = (h[i + 1] as char).to_digit(16)?;
+        bytes.push(((hi << 4) | lo) as u8);
+        i += 2;
+    }
+    for (j, b) in bytes.iter_mut().enumerate() {
+        *b ^= PAD[j % PAD.len()];
+    }
+    Some(bytes)
+}
 
 /// Sign a report body, when this build can.
 ///
@@ -421,16 +466,17 @@ const BUILD_KEY: Option<&str> = option_env!("MXB_USAGE_KEY");
 ///
 /// The timestamp is what bounds replay; see the endpoint for how far out it may be.
 fn signature(body: &str) -> Option<String> {
-    signature_with(BUILD_KEY, body)
+    signature_with(build_key().as_deref(), body)
 }
 
-/// The same, with the key passed in, so both ways of having no key can be tested from any build.
-fn signature_with(key: Option<&str>, body: &str) -> Option<String> {
+/// The same, with the key passed in, so every way of having no key can be tested from any build.
+fn signature_with(key: Option<&[u8]>, body: &str) -> Option<String> {
     // An *empty* key is the shape a misconfigured release takes — a CI secret referenced but
-    // never set arrives as "" rather than as absent, and `option_env!` reports that as `Some`.
-    // Signing with it would produce a MAC the endpoint refuses, so a deployment that had turned
-    // the requirement on would drop every report and say nothing at all. Unset and blank mean
-    // the same thing here: do not sign, and let the endpoint decide what to do about that.
+    // never set arrives as "" rather than as absent. `build.rs` drops a blank before baking it,
+    // and this is the second half of that: signing with nothing would produce a MAC the endpoint
+    // refuses, so a deployment that had turned the requirement on would drop every report and
+    // say nothing at all. No key and a blank one mean the same thing — do not sign, and let the
+    // endpoint decide what to do about a report that arrives unsigned.
     let key = key.filter(|k| !k.is_empty())?;
     let seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -444,11 +490,11 @@ fn signature_with(key: Option<&str>, body: &str) -> Option<String> {
 /// The construction — `v1.<seconds>.<body>`, MAC'd, rendered as lower-case hex, presented as
 /// `v1 <seconds> <mac>` — is written twice, here and in `control-plane/src/usage.ts`, with
 /// nothing but agreement holding the two together. Both sides test the same vector.
-fn sign_with(key: &str, seconds: u64, body: &str) -> Option<String> {
+fn sign_with(key: &[u8], seconds: u64, body: &str) -> Option<String> {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
 
-    let mut mac = <Hmac<Sha256>>::new_from_slice(key.as_bytes()).ok()?;
+    let mut mac = <Hmac<Sha256>>::new_from_slice(key).ok()?;
     mac.update(format!("v1.{seconds}.{body}").as_bytes());
     let hex = mac
         .finalize()
@@ -856,7 +902,7 @@ mod tests {
     #[test]
     fn a_signature_is_built_the_way_the_endpoint_rebuilds_it() {
         assert_eq!(
-            sign_with("a-build-key", 1_700_000_000, r#"{"installId":"x"}"#).unwrap(),
+            sign_with(b"a-build-key", 1_700_000_000, r#"{"installId":"x"}"#).unwrap(),
             "v1 1700000000 78626f503fcdc861e76c223f96c36373bdd848c8e9aeacca28ee27d41e40db86",
         );
     }
@@ -869,8 +915,47 @@ mod tests {
     #[test]
     fn nothing_is_signed_without_a_key_worth_the_name() {
         assert!(signature_with(None, "{}").is_none());
-        assert!(signature_with(Some(""), "{}").is_none());
-        assert!(signature_with(Some("a-build-key"), "{}").is_some());
+        assert!(signature_with(Some(b""), "{}").is_none());
+        assert!(signature_with(Some(b"a-build-key"), "{}").is_some());
+    }
+
+    /// The bake and the decode live in two files and have to agree.
+    ///
+    /// This is the round trip: obfuscate the way `build.rs` does, then read it back with the
+    /// real [`decode_key`]. A pad edited in one file and not the other fails here rather than
+    /// in the field, where the only symptom would be a signed build whose reports are refused.
+    #[test]
+    fn the_key_survives_being_obfuscated_and_read_back() {
+        let key: &[u8] = b"a-build-key";
+        // Exactly what `usage_build_key` in build.rs emits.
+        let baked: String = key
+            .iter()
+            .enumerate()
+            .map(|(i, b)| format!("{:02x}", b ^ PAD[i % PAD.len()]))
+            .collect();
+        let plain: String = key.iter().map(|b| format!("{b:02x}")).collect();
+        assert_ne!(baked, plain, "the bake is not obfuscating anything");
+
+        assert_eq!(decode_key(Some(&baked)).as_deref(), Some(key));
+    }
+
+    /// Holds in both build flavours, which is the point: the public build signs nothing, a
+    /// release built with `MXB_USAGE_KEY` signs everything, and neither is a special case. Run
+    /// the suite once each way and this is what proves the bake is wired end to end.
+    #[test]
+    fn this_build_signs_exactly_when_it_has_a_key() {
+        assert_eq!(signature("{}").is_some(), build_key().is_some());
+    }
+
+    /// A bake that went wrong reads as "this build does not sign", never as a key of rubbish —
+    /// which would be refused by the endpoint and look identical to the numbers dying.
+    #[test]
+    fn a_broken_bake_is_not_a_key() {
+        assert_eq!(decode_key(None), None);
+        assert_eq!(decode_key(Some("")), None);
+        assert_eq!(decode_key(Some("   ")), None);
+        assert_eq!(decode_key(Some("abc")), None, "an odd number of hex digits");
+        assert_eq!(decode_key(Some("zz")), None, "not hex at all");
     }
 
     #[test]

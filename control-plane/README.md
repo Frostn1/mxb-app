@@ -170,17 +170,22 @@ so what keeps a figure worth deciding from is a stack of bounds rather than a cr
   it must stay off until signed builds are the ones in the field — switching early throws
   everybody's numbers away silently.
 
+  Rolling it out is three steps, **in this order**:
+
   ```sh
-  bunx wrangler secret put USAGE_SIGNING_KEY    # same value the apps are built with
-  # then, once signed builds have rolled out:
-  #   "MXB_USAGE_REQUIRE_SIGNATURE": "1" in wrangler.jsonc
+  # 1. The same value on both sides. Set the repo secret MXB_USAGE_KEY in mxb-app first —
+  #    the release workflows already pass it to the builds.
+  bunx wrangler secret put USAGE_SIGNING_KEY
+  # 2. Tag a release of each app, and wait for signed builds to actually be out there.
+  # 3. Only then: "MXB_USAGE_REQUIRE_SIGNATURE": "1" in wrangler.jsonc.
   ```
 
-  The apps pick the key up at build time from `MXB_USAGE_KEY`; a build without it (which is
-  what the public repo produces) signs nothing and is accepted while the switch is off. The
-  key ships inside a downloadable binary, so this is **not** authentication — it raises the
-  floor from "anyone with a terminal" to "someone willing to reverse a binary", which is the
-  whole of the ambition.
+  The apps pick the key up at build time from `MXB_USAGE_KEY`, and `crates/core/build.rs`
+  XOR-obfuscates it before baking it in so it is not a `strings` hit. A build without it —
+  which is what a fork and the public repo produce — signs nothing and is accepted while the
+  switch is off. The key still ships inside a downloadable binary, so this is **not**
+  authentication: it raises the floor from "anyone with a terminal" to "someone willing to
+  reverse a binary", which is the whole of the ambition.
 
 None of that makes a field unforgeable — `version`, `os` and `game` are still whatever the
 caller said, and they are what "can I stop shipping 0.8.x" and "is GP Bikes worth carrying"
