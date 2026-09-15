@@ -949,6 +949,13 @@ export const ptBR: Translation = {
   "serverBrowser.join": "Entrar",
   "serverBrowser.joinFailed": "Não foi possível entrar nesse servidor",
   "serverBrowser.waitInLine": "Entrar na fila",
+  "serverBrowser.trackMissing": "Você não tem esta pista",
+  "serverBrowser.installJoin": "Instalar e entrar",
+  "serverBrowser.installJoinHint": "Instala {{title}} do mxb-mods.com e depois entra",
+  "serverBrowser.installing": "Instalando",
+  "serverBrowser.installFailed": "Não foi possível instalar {{title}}",
+  "serverBrowser.buyTrack": "Comprar",
+  "serverBrowser.buyHint": "Abre {{name}} na loja",
   "serverBrowser.inLine": "#{{position}} na fila",
   "serverBrowser.unnamed": "Servidor sem nome",
   "serverBrowser.full": "Servidor cheio",
@@ -1995,6 +2002,9 @@ export const ptBR: Translation = {
     "Não deu pra buscar a lista agora — esta é a última que vimos.",
   "supporters.optOut":
     "Os nomes aparecem com permissão. É só falar no Discord ou no Buy Me a Coffee que o seu sai na hora.",
+  "supporters.contributors": "Colaboradores",
+  "supporters.contributorsDesc":
+    "Pessoas que deixaram o app melhor com ideias, testes e feedback.",
   "reshade.needsGameFolder":
     "O ReShade fica na sua pasta do {{game}} — defina ela em Pasta do jogo, ou aponte direto para ela aqui.",
   "reshade.folder": "Procurando na sua pasta do {{game}}:",

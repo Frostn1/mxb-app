@@ -34,6 +34,24 @@
 - When the shock bottoms slowly, under braking or in turns, the fix now firms up its
   low-speed compression rather than the high-speed.
 - Rebound changes read as slower or faster, and preload as more or less.
+## 2026-09-15 — Contributors
+
+### Added
+- Settings → Supporters now has a Contributors list for the people who helped make the app
+  better. Trystan34 is the first one on it, for ideas that shaped the app.
+
+## 2026-09-15 — Every server tile shows its track
+
+### Added
+- Server tiles show the track's picture even when you don't have it, with a mark over it so
+  you can tell at a glance.
+- Install & join: on a server running a free track you don't have, one button installs it and
+  joins. If the server is full, you're put in line instead.
+- Tracks sold in the shop show their price on the tile, and the button opens the shop page.
+
+### Changed
+- Tiles find your installed track even when its name is written a little differently, like
+  Farm14 and Farm 14.
 
 ## 2026-09-15 — MXB Coach v0.1.5-beta.5
 

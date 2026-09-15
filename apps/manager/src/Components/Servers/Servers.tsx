@@ -39,8 +39,14 @@ import {
   queueJoin,
   serversWithPaintSync,
   serverTrackPreviews,
+  serverTrackCatalog,
+  resolveQuickInstall,
+  modTypesFor,
+  type CatalogTrack,
   type MasterServer,
 } from "@frost/shared/api/mods";
+import { useConfig } from "@frost/shared/Context/Config";
+import { useInstall } from "../../Context/Install";
 import { useT } from "@/i18n";
 import { useFavorites } from "@/lib/useFavorites";
 import { isFull, useServerQueue } from "@/lib/useServerQueue";
@@ -52,8 +58,17 @@ import ServerCard from "./ServerCard";
 type ViewMode = "tiles" | "list";
 const VIEW_KEY = "mxb:serversView:v1";
 
-/** Track art by track id, kept for the app's life so coming back to the tab paints at once. */
+/** Track art by track id, kept for the app's life so coming back to the tab paints at once.
+ *  `""` for a track the player has that carries no picture. */
 const ART: Record<string, string> = {};
+/** Tracks the library has been asked about. One of these missing from ART isn't installed. */
+const ASKED = new Set<string>();
+/** What our server knows about tracks the player lacks, kept for the app's life. */
+const CATALOG: Record<string, CatalogTrack> = {};
+/** When each track was last asked of our server. One it didn't know yet is asked again after
+ *  `REASK_MS`, since asking is what gets it looked up. */
+const CATALOG_ASKED = new Map<string, number>();
+const REASK_MS = 5 * 60 * 1000;
 
 type SortMode = "players" | "ping" | "name" | "region" | "track";
 type SortDir = "asc" | "desc";
@@ -139,21 +154,45 @@ const Servers = () => {
   // One request for every track in the list, not one per tile. Tracks already drawn aren't
   // asked again; the ones the player lacks are, in case they installed one since.
   const [art, setArt] = useState<Record<string, string>>(() => ({ ...ART }));
+  // Bumped when a track is installed from a tile, so its own art replaces the catalogue's.
+  const [installed, setInstalled] = useState(0);
   useEffect(() => {
     if (view !== "tiles" || !servers?.length) return;
     const tracks = [...new Set(servers.map((s) => s.track).filter((tr) => tr && !(tr in ART)))];
     if (tracks.length === 0) return;
-    let live = true;
+    // Never dropped on a re-run: the next run skips whatever is in ART, so art that landed
+    // there without reaching the tiles would stay off them until the app restarted.
     serverTrackPreviews(tracks)
       .then((found) => {
         Object.assign(ART, found);
-        if (live) setArt({ ...ART });
+        for (const tr of tracks) ASKED.add(tr);
+        setArt({ ...ART });
       })
       .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [view, servers]);
+  }, [view, servers, installed]);
+
+  // The tracks the player lacks, from our server: what they are, their picture, the price.
+  const [catalog, setCatalog] = useState<Record<string, CatalogTrack>>(() => ({ ...CATALOG }));
+  useEffect(() => {
+    if (view !== "tiles" || !servers?.length) return;
+    const now = Date.now();
+    const tracks = [...new Set(servers.map((s) => s.track))].filter(
+      (tr) =>
+        tr &&
+        ASKED.has(tr) &&
+        !(tr in art) &&
+        !(tr in CATALOG) &&
+        now - (CATALOG_ASKED.get(tr) ?? 0) > REASK_MS,
+    );
+    if (tracks.length === 0) return;
+    for (const tr of tracks) CATALOG_ASKED.set(tr, now);
+    serverTrackCatalog(tracks)
+      .then((found) => {
+        Object.assign(CATALOG, found);
+        setCatalog({ ...CATALOG });
+      })
+      .catch(() => {});
+  }, [view, servers, art]);
 
   // One fetch at a time. Two overlapping ones each sign in to Steam, and the loser's
   // failure used to replace the winner's list with an error.
@@ -293,6 +332,87 @@ const Servers = () => {
     },
     [t],
   );
+
+  // Install & join: a free track goes through the install queue, and the server is joined
+  // once it lands. Keyed by the mod's slug, since that is all the queue reports by.
+  const { game } = useConfig();
+  const { startPendingInstall, active } = useInstall();
+  const [installing, setInstalling] = useState<Record<string, string>>({});
+  // Slugs whose install has been seen running. A finished card left over from an earlier
+  // install of the same track must not join the server before this one has even started.
+  const started = useRef(new Set<string>());
+  const doneInstalling = useCallback((slug: string) => {
+    started.current.delete(slug);
+    setInstalling((cur) => {
+      const rest = { ...cur };
+      delete rest[slug];
+      return rest;
+    });
+  }, []);
+
+  const installAndJoin = useCallback(
+    (s: MasterServer, product: CatalogTrack) => {
+      const slug = product.slug;
+      const tracks = modTypesFor(game.id).find((m) => m.id === "tracks");
+      if (!slug || !tracks) return;
+      setInstalling((cur) => ({ ...cur, [slug]: s.address }));
+      startPendingInstall({
+        slug,
+        title: product.name,
+        subpath: tracks.installSubpath,
+        resolve: async () => {
+          try {
+            const res = await resolveQuickInstall(slug, tracks, game, tracks.categoryId);
+            if (res.ok) return { ...res.params, categoryId: tracks.categoryId };
+            if (res.reason === "blocked") {
+              toast.error(t("browse.needsBrowser", { title: res.title }), {
+                description: t("browse.needsBrowserDesc", { host: res.host ?? "" }),
+              });
+            } else if (res.reason === "serverOnly") {
+              toast.error(t("browse.serverOnly", { title: res.title }), {
+                description: t("browse.serverOnlyDesc"),
+              });
+            } else {
+              toast.error(t("browse.noDownload", { title: res.title }));
+            }
+          } catch (e) {
+            toast.error(t("serverBrowser.installFailed", { title: product.name }), {
+              description: String(e),
+            });
+          }
+          doneInstalling(slug);
+          return null;
+        },
+      });
+    },
+    [game, startPendingInstall, doneInstalling, t],
+  );
+
+  useEffect(() => {
+    for (const [slug, address] of Object.entries(installing)) {
+      const job = active.find((a) => a.slug === slug);
+      if (!job) continue;
+      const finished = job.stage === "done" || job.stage === "error" || job.stage === "review";
+      if (!finished) {
+        started.current.add(slug);
+        continue;
+      }
+      if (!started.current.has(slug)) continue;
+      doneInstalling(slug);
+      // A pack goes to review and an error has its own card; neither is ready to ride.
+      if (job.stage !== "done") continue;
+      const s = servers?.find((x) => x.address === address);
+      if (s?.track) {
+        delete ART[s.track];
+        ASKED.delete(s.track);
+        setInstalled((n) => n + 1);
+      }
+      if (s && isFull(s)) void wait(s);
+      else void join(address);
+    }
+  }, [active, installing, servers, join, wait, doneInstalling]);
+
+  const installingAt = useMemo(() => new Set(Object.values(installing)), [installing]);
 
   const copy = useCallback(
     (address: string) => {
@@ -445,6 +565,10 @@ const Servers = () => {
                 key={`${s.address}-${i}`}
                 server={s}
                 art={art[s.track]}
+                missing={!!s.track && ASKED.has(s.track) && !(s.track in art)}
+                product={catalog[s.track]}
+                installing={installingAt.has(s.address)}
+                onInstallJoin={installAndJoin}
                 favourite={favs.has(s.address)}
                 paintSync={paintSync[s.address] ?? 0}
                 joining={joining === s.address}
