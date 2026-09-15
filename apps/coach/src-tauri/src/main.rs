@@ -8,9 +8,12 @@
 //! each app wraps the part of it that app means.
 
 mod analysis;
+mod bikecfg;
 mod coach;
+mod fixes;
 mod ground;
 mod lines;
+mod stp;
 mod surface;
 mod telemetry;
 
@@ -85,6 +88,8 @@ fn main() {
             coach::coach_surface,
             coach::coach_lines,
             coach::coach_ground,
+            coach::coach_setup_plan,
+            coach::coach_save_setup,
             check_coach_update,
             reveal_in_explorer,
             open_folder,

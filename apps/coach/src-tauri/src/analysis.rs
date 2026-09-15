@@ -1203,7 +1203,8 @@ fn setup(p: &Trace, r: Option<&Trace>, secs: &[Section], bike: Bike, travel: boo
     };
 
     if travel {
-        for (k, end) in ["fork", "shock"].iter().enumerate() {
+        let ends = [("fork", "setup_bottoming_fork", "setup_stiff_fork"), ("shock", "setup_bottoming_shock", "setup_stiff_shock")];
+        for (k, (end, bottoming, stiff)) in ends.into_iter().enumerate() {
             let runs = bottom_runs(p, 0..p.len(), k);
             if runs.len() >= th::BOTTOMS_PER_LAP {
                 let mut places: Vec<&str> = runs
@@ -1211,7 +1212,7 @@ fn setup(p: &Trace, r: Option<&Trace>, secs: &[Section], bike: Bike, travel: boo
                     .filter_map(|&(a, _)| secs.iter().find(|s| s.start <= a && a <= s.end).map(|s| s.name.as_str()))
                     .collect();
                 places.dedup();
-                tip("setup_bottoming", 1.0, runs[0].0, format!("The {end} bottoms {} times a lap", runs.len()), format!(
+                tip(bottoming, 1.0, runs[0].0, format!("The {end} bottoms {} times a lap", runs.len()), format!(
                     "It runs out of travel at {}. If your landings are clean, stiffen the {end}: more compression \
                      damping or a stiffer spring, one step at a time.",
                     places.join(", ")
@@ -1219,7 +1220,7 @@ fn setup(p: &Trace, r: Option<&Trace>, secs: &[Section], bike: Bike, travel: boo
             } else {
                 let most = p.pts.iter().map(|q| q.used[k]).fold(0.0, f32::max);
                 if most < th::LAZY_TRAVEL {
-                    tip("setup_stiff", 0.5, 0, format!("The {end} never uses its travel"), format!(
+                    tip(stiff, 0.5, 0, format!("The {end} never uses its travel"), format!(
                         "It uses at most {:.0}% of its travel all lap. A softer spring or less compression would \
                          let it soak up the bumps.",
                         most * 100.0

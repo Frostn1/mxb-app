@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { loadTrackOverview, loadTrackTerrain } from "@frost/shared/api/tracks";
 import type { TrackOverview, TrackTerrain } from "@frost/shared/types";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -11,7 +12,9 @@ import {
   coachGround,
   coachLines,
   coachReview,
+  coachSaveSetup,
   coachSessions,
+  coachSetupPlan,
   coachSurface,
   type Finding,
   type Ground,
@@ -19,6 +22,9 @@ import {
   type ReviewOut,
   type SectionReview,
   type SessionSummary,
+  type SetupChange,
+  type SetupFix,
+  type SetupPlan,
   type Surface,
   type Theme,
 } from "@/api/coach";
@@ -297,7 +303,7 @@ export default function Review({
             />
           )}
 
-          {review.setup.length > 0 && <Setup findings={review.setup} />}
+          {review.setup.length > 0 && <Setup path={path} findings={review.setup} />}
 
           <div>
             <Label>{t("review.focus")}</Label>
@@ -387,15 +393,36 @@ function Overall({ themes, solo, onPick }: { themes: Theme[]; solo: boolean; onP
 }
 
 const SETUP_GROUPS: { key: TKey; of: (skill: string) => boolean }[] = [
-  { key: "review.group.suspension", of: (s) => s === "setup_bottoming" || s === "setup_stiff" },
+  { key: "review.group.suspension", of: (s) => s.startsWith("setup_bottoming") || s.startsWith("setup_stiff") },
   { key: "review.group.gearing", of: (s) => s.startsWith("setup_gearing") },
   { key: "review.group.shifting", of: (s) => s.startsWith("setup_shift") },
   { key: "review.group.chassis", of: (s) => s === "setup_swingarm" },
 ];
 
-/** Bike setup advice for the whole lap, by what it's about. */
-function Setup({ findings }: { findings: Finding[] }) {
+/** Bike setup advice for the whole lap, by what it's about, with the changes behind each tip
+ *  against the setup the rider had on, and a copy of that setup with them made. */
+function Setup({ path, findings }: { path: string; findings: Finding[] }) {
   const t = useT();
+  const [plan, setPlan] = useState<SetupPlan | null>(null);
+  const [saving, setSaving] = useState(false);
+  const skills = useMemo(() => findings.map((f) => f.skill), [findings]);
+  useEffect(() => {
+    setPlan(null);
+    coachSetupPlan(path, skills).then(setPlan).catch(() => {});
+  }, [path, skills]);
+  const fixes = (mine: Finding[]) =>
+    mine.map((f) => plan?.fixes.find((x) => x.skill === f.skill)).filter((x): x is SetupFix => x != null);
+  const writes = (plan?.saveAs != null && plan.fixes.some((f) => f.changes.some((c) => c.writes))) ?? false;
+  const save = async () => {
+    setSaving(true);
+    try {
+      toast.success(t("setup.saved", { name: await coachSaveSetup(path, skills) }));
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <div>
       <Label>{t("review.setup")}</Label>
@@ -407,11 +434,62 @@ function Setup({ findings }: { findings: Finding[] }) {
             <div key={g.key}>
               <div className="mb-1.5 eyebrow">{t(g.key)}</div>
               <Notes findings={mine} />
+              {fixes(mine).map((f) => (
+                <Changes key={f.skill} fix={f} />
+              ))}
             </div>
           );
         })}
+        {plan && (writes || plan.why) && (
+          <div className="border-t border-border pt-3">
+            {writes ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button size="sm" onClick={save} disabled={saving}>
+                  {t("setup.save", { name: plan.saveAs ?? "" })}
+                </Button>
+                <span className="text-[12px] text-muted-foreground">{t("setup.saveHint")}</span>
+              </div>
+            ) : (
+              <p className="text-[12px] text-muted-foreground">{plan.why}</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+/** How far one change goes: the values where the bike's file says, else the direction. */
+function amount(c: SetupChange, t: ReturnType<typeof useT>): string {
+  if (c.fromValue && c.toValue && c.fromValue !== c.toValue) return `${c.fromValue} → ${c.toValue}`;
+  if (c.from != null && c.from === c.to) return t("setup.atLimit");
+  const n = Math.abs(c.steps);
+  if (c.field === "forkOil") return t(c.steps > 0 ? "setup.moreOil" : "setup.lessOil");
+  if (c.field === "frontSprocket" || c.field === "rearSprocket") return `${c.steps > 0 ? "+" : "−"}${n}T`;
+  if (c.field === "swingarmLength" || c.field === "rodLength") return t(c.steps > 0 ? "setup.longer" : "setup.shorter");
+  const firmer = c.steps > 0;
+  return n === 1 ? t(firmer ? "setup.firmerOne" : "setup.softerOne") : t(firmer ? "setup.firmerMany" : "setup.softerMany", { n });
+}
+
+/** The changes behind one tip, in the order to try them. */
+function Changes({ fix }: { fix: SetupFix }) {
+  const t = useT();
+  return (
+    <ol className="mt-2 space-y-1.5">
+      {fix.changes.map((c, i) => (
+        <li key={c.field} className="grid grid-cols-[14px_1fr_auto] items-baseline gap-x-2 text-[12.5px]">
+          <span className="font-mono text-faint">{i + 1}</span>
+          <span>
+            <span className="text-foreground">{t(`setupField.${c.field}` as TKey)}</span>{" "}
+            <span className="text-muted-foreground">{c.why}</span>
+            {!c.writes && c.from !== c.to && (
+              <span className="ml-1.5 text-[11px] text-faint">{t("setup.byHand")}</span>
+            )}
+          </span>
+          <span className="whitespace-nowrap font-mono text-[12px] text-accent-foreground">{amount(c, t)}</span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
