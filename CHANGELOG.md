@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-09-15 — v0.14.7 — Secured content follows your access
+## 2026-09-15 — v0.15.0 — Secured content follows your access
 
 ### Added
 - Server tiles show the track's picture even when you don't have it, with a mark over it so

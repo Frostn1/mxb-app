@@ -1607,6 +1607,20 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0150.hero.title":
+    "Installez le circuit d'un serveur et rejoignez-le, en un clic",
+  "showcase.v0150.hero.body":
+    "Sur un serveur qui fait tourner un circuit gratuit que vous n'avez pas, un bouton installe le circuit et vous connecte. Si le serveur est plein, vous êtes mis en file d'attente.",
+  "showcase.v0150.pictures":
+    "Les tuiles de serveur montrent l'image du circuit même si vous ne l'avez pas, avec une marque pour le voir d'un coup d'œil.",
+  "showcase.v0150.prices":
+    "Les circuits vendus dans la boutique affichent leur prix sur la tuile, et le bouton ouvre leur page dans la boutique.",
+  "showcase.v0150.feel":
+    "Les préréglages Feeling gardent maintenant la réponse de chaque commande, comme la zone morte, le gain et le lissage de l'accélérateur. Vos boutons et axes restent tels quels.",
+  "showcase.v0150.hub":
+    "MXB Hub se charge à nouveau quand la boutique demande une vérification anti-robot : l'app y répond en arrière-plan, ou ouvre la boutique pour que vous la terminiez vous-même.",
+  "showcase.v0150.secured":
+    "Le contenu sécurisé suit l'accès que vous avez vraiment. Si un créateur vous retire des acheteurs, il ne s'ouvre plus dès que l'app est de nouveau en ligne, et l'app vous dit pourquoi.",
   "showcase.v0140.hero.title":
     "Frost's Mod Manager, et un Studio à part",
   "showcase.v0140.hero.body":

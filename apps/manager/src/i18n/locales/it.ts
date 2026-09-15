@@ -1598,6 +1598,20 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v0150.hero.title":
+    "Installa la pista di un server ed entra, con un clic",
+  "showcase.v0150.hero.body":
+    "Su un server con una pista gratuita che non hai, un pulsante installa la pista ed entra. Se il server è pieno, ti mette in coda.",
+  "showcase.v0150.pictures":
+    "Le schede dei server mostrano l'immagine della pista anche se non ce l'hai, con un segno per capirlo a colpo d'occhio.",
+  "showcase.v0150.prices":
+    "Le piste vendute nello shop mostrano il prezzo sulla scheda, e il pulsante apre la loro pagina nello shop.",
+  "showcase.v0150.feel":
+    "I preset Feeling ora salvano come risponde ogni comando, come zona morta, guadagno e smussatura dell'acceleratore. I tuoi pulsanti e assi restano come sono.",
+  "showcase.v0150.hub":
+    "MXB Hub si carica di nuovo quando lo shop chiede una verifica anti-robot: l'app la risolve in background, oppure apre lo shop perché tu la completi.",
+  "showcase.v0150.secured":
+    "I contenuti protetti seguono l'accesso che hai davvero. Se un creatore ti rimuove dagli acquirenti, smettono di aprirsi la prossima volta che l'app è online, e l'app ti dice perché.",
   "showcase.v0140.hero.title":
     "Frost's Mod Manager, e uno Studio tutto suo",
   "showcase.v0140.hero.body":
