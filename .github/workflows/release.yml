@@ -123,7 +123,11 @@ jobs:
       - name: Apply sidecar module
         if: ${{ github.repository == 'Frostn1/mxb-app' }}
         shell: bash
-        run: bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
+        # worldnet.rs is the server browser. Without it the build still compiles, just with a
+        # Servers tab that says it isn't included, so fail here instead of shipping that.
+        run: |
+          bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
+          test -f apps/manager/src-tauri/src/worldnet.rs || { echo "::error::worldnet.rs missing after sync.sh"; exit 1; }
 
 
       # Ask the bundler for the secure-content files only on the legs that have them. Tauri's
