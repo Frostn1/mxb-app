@@ -69,9 +69,23 @@ pub struct QueueState {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Place {
     ahead: u32,
     waiting: u32,
+    /// Ask the server ourselves next beat. Only the front of the line does, unless the shared
+    /// count went stale. Missing from an older control plane, which means everyone probes.
+    #[serde(default = "yes")]
+    probe: bool,
+    /// The line's latest rider count, from whoever probed.
+    #[serde(default)]
+    players: Option<u32>,
+    #[serde(default)]
+    max_players: Option<u32>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// The line we're in, and a generation that ends any older loop.
@@ -88,7 +102,7 @@ pub async fn join(app: AppHandle, address: String, name: String) -> Result<Queue
     let cfg = crate::config::load_or_detect(&app).unwrap_or_default();
     let token = crate::voice::signal::account(&app, &cfg).await?;
 
-    let place = beat(&token, &key, false).await.map_err(|e| format!("{e:#}"))?;
+    let place = beat(&token, &key, false, None).await.map_err(|e| format!("{e:#}"))?;
     let state = QueueState {
         address: key.clone(),
         name,
@@ -106,7 +120,7 @@ pub async fn join(app: AppHandle, address: String, name: String) -> Result<Queue
         active.0
     };
     let _ = app.emit(EVENT, &state);
-    tauri::async_runtime::spawn(run(app, token, key, generation));
+    tauri::async_runtime::spawn(run(app, token, key, generation, place.probe));
     Ok(state)
 }
 
@@ -166,7 +180,7 @@ pub async fn counts(app: &AppHandle, addresses: Vec<String>) -> Result<Vec<(Stri
 }
 
 /// The loop behind one line. Ends when a newer [`join`] or a [`leave`] bumps the generation.
-async fn run(app: AppHandle, token: String, key: String, generation: u64) {
+async fn run(app: AppHandle, token: String, key: String, generation: u64, mut probe_next: bool) {
     let mut launched_at: Option<Instant> = None;
     let mut turn_at: Option<Instant> = None;
     // The server an already-open game was on when the turn came. Still being there isn't a join.
@@ -191,9 +205,17 @@ async fn run(app: AppHandle, token: String, key: String, generation: u64) {
             }
         }
 
-        let probe = crate::probe_server(key.clone()).await;
+        // Only the rider the control plane picked asks the server; the rest read its answer.
+        let own = if probe_next {
+            crate::probe_server(key.clone())
+                .await
+                .ok()
+                .map(|s| (s.players, s.max_players))
+        } else {
+            None
+        };
         let claimed = launched_at.is_some() || turn_at.is_some();
-        let place = match beat(&token, &key, claimed).await {
+        let place = match beat(&token, &key, claimed, own).await {
             Ok(p) => p,
             Err(e) => {
                 log::debug!("[queue] heartbeat failed: {e:#}");
@@ -205,14 +227,16 @@ async fn run(app: AppHandle, token: String, key: String, generation: u64) {
         state.error = None;
         state.position = place.ahead + 1;
         state.waiting = place.waiting;
-        if let Ok(server) = &probe {
-            state.players = Some(server.players);
-            state.max_players = Some(server.max_players);
+        probe_next = place.probe;
+        let count = own.or(place.players.zip(place.max_players));
+        if let Some((players, max)) = count {
+            state.players = Some(players);
+            state.max_players = Some(max);
         }
 
         if !claimed {
-            if let Ok(server) = &probe {
-                if is_my_turn(server.players, server.max_players, place.ahead) {
+            if let Some((players, max)) = count {
+                if is_my_turn(players, max, place.ahead) {
                     let mut outcome = take_turn(&app, &key);
                     if matches!(outcome, Ok(LaunchOutcome::AlreadyRunning))
                         && close_open_game(&app).await
@@ -236,7 +260,7 @@ async fn run(app: AppHandle, token: String, key: String, generation: u64) {
                         }
                     }
                     // Marks the slot as ours so the riders behind don't rush it too.
-                    if let Err(e) = beat(&token, &key, true).await {
+                    if let Err(e) = beat(&token, &key, true, None).await {
                         log::debug!("[queue] claiming the slot failed: {e:#}");
                     }
                 }
@@ -320,11 +344,22 @@ async fn finish(
     let _ = app.emit(EVENT, &state);
 }
 
-async fn beat(token: &str, key: &str, launched: bool) -> anyhow::Result<Place> {
+/// Heartbeat, carrying the server's `(players, max)` when we were the one who probed.
+async fn beat(
+    token: &str,
+    key: &str,
+    launched: bool,
+    count: Option<(u32, u32)>,
+) -> anyhow::Result<Place> {
+    let mut body = serde_json::json!({ "server": key, "launched": launched });
+    if let Some((players, max)) = count {
+        body["players"] = players.into();
+        body["maxPlayers"] = max.into();
+    }
     Ok(client()?
         .put(format!("{}/v1/queue", control_plane()))
         .bearer_auth(token)
-        .json(&serde_json::json!({ "server": key, "launched": launched }))
+        .json(&body)
         .send()
         .await?
         .error_for_status()?
