@@ -1,7 +1,7 @@
 {
   "name": "@frost/manager",
   "private": true,
-  "version": "0.14.3",
+  "version": "0.14.4",
   "type": "module",
   "scripts": {
     "predev": "node ../../scripts/free-dev-port.mjs MXB_DEV_PORT 1420",
