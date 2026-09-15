@@ -182,7 +182,7 @@ export default function Track3D({
           {t("review.objects")}
         </Button>
       )}
-      <p className="pointer-events-none absolute bottom-2 left-3 text-[11px] text-muted-foreground">
+      <p className="pointer-events-none absolute left-3 top-3 max-w-[70%] text-[11px] text-muted-foreground">
         {ground && !scene.terrain
           ? t("review.loadingTrack")
           : !real
