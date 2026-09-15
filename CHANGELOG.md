@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-15 — MXB Coach v0.1.12-beta.12
+
+### Added
+- In-game HUD: sending cues to the game now also sends what the recorder's HUD needs, your fast
+  lap for the gap and the ghost on the map, and each section's name and tip. Needs the recorder
+  from FrostMod 0.22 or newer.
+
 ## 2026-09-15 — v0.15.1 — Small fixes
 
 ### Changed

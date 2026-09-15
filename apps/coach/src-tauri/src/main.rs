@@ -13,6 +13,7 @@ mod coach;
 mod cues;
 mod fixes;
 mod ground;
+mod hudsheet;
 mod lines;
 mod others;
 mod sag;
