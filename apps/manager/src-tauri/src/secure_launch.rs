@@ -626,7 +626,7 @@ mod tests {
         assert_eq!(vault_component("trk_pinehill").as_deref(), Some("trk_pinehill"));
         assert_eq!(vault_component("  76561198000000001 ").as_deref(), Some("76561198000000001"));
         assert_eq!(vault_component("../../etc/passwd").as_deref(), Some(".._.._etc_passwd"));
-        assert_eq!(vault_component(r"a\b").as_deref(), Some("a__b"));
+        assert_eq!(vault_component(r"a\b").as_deref(), Some("a_b"));
         assert_eq!(vault_component(".."), None, "dots only");
         assert_eq!(vault_component("."), None);
         assert_eq!(vault_component("   "), None, "empty");
