@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
+import { Line, OrbitControls } from "@react-three/drei";
 import { Move, Rotate3d, ZoomIn } from "lucide-react";
 import * as THREE from "three";
 import { cn } from "../../lib/utils";
@@ -317,6 +317,32 @@ function Highlight({
         side={THREE.DoubleSide}
       />
     </mesh>
+  );
+}
+
+/** A line through the scene in world metres, height included, e.g. a rider's lap. */
+export interface ViewerLine {
+  points: [number, number, number][];
+  colour: string;
+  /** Pixels. */
+  width?: number;
+}
+
+/** Lines placed through the same frame as the terrain, so a lap sits on the ground it rode. */
+function Lines({ terrain, lines }: { terrain: TrackTerrain; lines: ViewerLine[] }) {
+  const lift = useContext(ReliefContext);
+  const placed = useMemo(() => {
+    const frame = viewFrame(terrain, lift);
+    return lines
+      .filter((l) => l.points.length > 1)
+      .map((l) => ({ ...l, points: l.points.map(([x, y, z]) => toView(frame, x, y, z)) }));
+  }, [terrain, lines, lift]);
+  return (
+    <>
+      {placed.map((l, i) => (
+        <Line key={i} points={l.points} color={l.colour} lineWidth={l.width ?? 2} renderOrder={3} />
+      ))}
+    </>
   );
 }
 
@@ -1504,6 +1530,8 @@ interface TrackViewerProps {
    * which is exactly when you are looking at a jump.
    */
   highlight?: { path: { x: number; z: number }[]; width: number } | null;
+  /** Lines to draw over the ground, in world metres with height. */
+  lines?: ViewerLine[];
   className?: string;
 }
 
@@ -1521,6 +1549,7 @@ export function TrackViewer({
   onPick,
   focus = null,
   highlight = null,
+  lines = [],
   className,
 }: TrackViewerProps) {
   const lift = RELIEF_EXAGGERATION;
@@ -1628,6 +1657,7 @@ export function TrackViewer({
           )}
           {terrain && <FocusCamera terrain={terrain} focus={focus} />}
           {terrain && highlight && <Highlight terrain={terrain} at={highlight} />}
+          {terrain && lines.length > 0 && <Lines terrain={terrain} lines={lines} />}
           </group>
           </ReliefContext.Provider>
           <OrbitControls

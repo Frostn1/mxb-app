@@ -118,13 +118,54 @@ export interface Review {
 }
 
 export interface ReviewOut {
+  trackId: string;
   trackName: string;
   lap: LapRef;
   reference: LapRef;
   review: Review;
 }
 
+/** The ground under a session's laps, built from the laps. Heights row-major, row along z. */
+export interface Surface {
+  x0: number;
+  z0: number;
+  cell: number;
+  width: number;
+  height: number;
+  heights: (number | null)[];
+}
+
+export interface LineNote {
+  section: number;
+  name: string;
+  /** `line` for a line that pays, `cut` for ground cutting up. */
+  kind: "line" | "cut";
+  title: string;
+  detail: string;
+}
+
+/** How the session's lines and the track changed; see `lines.rs`. */
+export interface Lines {
+  laps: { lap: number; time: number; path: [number, number][] }[];
+  sections: Pick<SectionReview, "kind" | "name" | "start" | "end" | "core" | "dir">[];
+  /** Per section, one row per lap: metres right of the fast line, and the section time. */
+  offsets: { lap: number; offset: number; time: number }[][];
+  notes: LineNote[];
+}
+
+/** The track's own terrain for a session, when it is installed, readable and lines up. */
+export interface Ground {
+  path: string;
+  prefix: string | null;
+  name: string;
+  /** How high the bike rides above this terrain, metres. */
+  lift: number;
+}
+
 export const coachStatus = () => invoke<CoachStatus>("coach_status");
+export const coachGround = (path: string) => invoke<Ground | null>("coach_ground", { path });
+export const coachLines = (path: string) => invoke<Lines | null>("coach_lines", { path });
+export const coachSurface = (path: string) => invoke<Surface | null>("coach_surface", { path });
 export const coachSessions = () => invoke<SessionSummary[]>("coach_sessions");
 export const coachSession = (path: string) => invoke<SessionDetail>("coach_session", { path });
 export const coachReview = (path: string, lap: number, refPath?: string, refLap?: number) =>

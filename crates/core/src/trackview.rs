@@ -9,7 +9,22 @@
 //! Also the `.pkz` metadata readers, for the same reason: the Library lists archives and the
 //! studio reads its own output back.
 
-use crate::{map, pkz, scenery, track};
+use crate::{map, pkz, scenery, track, tracksource};
+
+/// The file a track id names — an installed mod, or a stock track's folder inside the
+/// install's `tracks.pkz` — for a caller that knows only what the game reported. `None` when
+/// nothing installed answers to it.
+#[tauri::command]
+pub async fn resolve_track_source(
+    app: tauri::AppHandle,
+    track_id: String,
+) -> Option<tracksource::TrackSource> {
+    let cfg = crate::config::load(&app).ok()?;
+    tauri::async_runtime::spawn_blocking(move || tracksource::resolve(&cfg, &track_id))
+        .await
+        .ok()
+        .flatten()
+}
 
 #[tauri::command]
 pub async fn get_pkz_meta(app: tauri::AppHandle, path: String) -> Result<pkz::PkzMeta, String> {
@@ -55,10 +70,17 @@ fn get_pkz_preview_blocking(path: String) -> Result<Option<String>, String> {
 
 /// A track's metadata and contents. Cheap by construction — nothing is inflated — so the
 /// track view can paint everything except the terrain immediately.
+///
+/// `prefix`, here and on the terrain and overview, names one track's folder inside a shared
+/// archive: a stock track in `tracks.pkz`, as [`resolve_track_source`] reports it.
 #[tauri::command]
-pub async fn read_track_info(app: tauri::AppHandle, path: String) -> Result<track::TrackInfo, String> {
+pub async fn read_track_info(
+    app: tauri::AppHandle,
+    path: String,
+    prefix: Option<String>,
+) -> Result<track::TrackInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        track::read_info(&app, &path).map_err(|e| format!("{e:#}"))
+        track::read_info(&app, &path, prefix.as_deref()).map_err(|e| format!("{e:#}"))
     })
     .await
     .map_err(|e| format!("read_track_info task failed: {e}"))?
@@ -86,9 +108,11 @@ pub async fn load_track_terrain(
     app: tauri::AppHandle,
     path: String,
     max_dim: u32,
+    prefix: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let master = track::load_master(&app, &path).map_err(|e| format!("{e:#}"))?;
+        let master =
+            track::load_master(&app, &path, prefix.as_deref()).map_err(|e| format!("{e:#}"))?;
         Ok(tauri::ipc::Response::new(track::terrain_blob(
             &master, max_dim,
         )))
@@ -107,9 +131,11 @@ pub async fn load_track_overview(
     app: tauri::AppHandle,
     path: String,
     max_dim: u32,
+    prefix: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let blob = track::overview_blob(&app, std::path::Path::new(&path), max_dim)
+        let path = std::path::Path::new(&path);
+        let blob = track::overview_blob(&app, path, prefix.as_deref(), max_dim)
             .unwrap_or_default();
         tauri::ipc::Response::new(blob)
     })

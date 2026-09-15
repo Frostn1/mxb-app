@@ -30,6 +30,17 @@
 - Tabletops on generated tracks are wide, rounded mounds. The bigger the jump, the further its
   dirt runs out either side, so its sides slope into the ground.
 
+## 2026-09-15 — MXB Coach v0.1.3-beta.3
+
+### Added
+- The track itself under your lines. The map and a new 3D view show the real terrain when the
+  track is installed, or ground built from your own laps when it isn't or it's locked.
+- See every lap's line at once, fastest in green to slowest in red, and notes on how your riding
+  and the track changed: which line through a corner was quicker, and where the track is cutting
+  up as ruts form.
+- MXB Coach updates itself. It checks for new versions and offers to update and restart, and
+  you can choose between beta and stable versions in Settings.
+
 ## 2026-09-14 — MXB Coach v0.1.0-beta.2
 
 ### Added

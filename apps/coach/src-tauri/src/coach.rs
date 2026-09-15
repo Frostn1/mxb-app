@@ -278,6 +278,7 @@ pub fn coach_session(app: AppHandle, path: String) -> Result<SessionDetail, Stri
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewOut {
+    pub track_id: String,
     pub track_name: String,
     pub lap: LapRef,
     pub reference: LapRef,
@@ -315,11 +316,75 @@ pub fn coach_review(
     let review = analysis::review(&mine, &theirs, bike);
     let time_ms = summary.laps.iter().find(|l| l.num == lap).map_or(0, |l| l.time_ms);
     Ok(ReviewOut {
+        track_id: summary.track_id.clone(),
         track_name: summary.track_name.clone(),
         lap: LapRef { path, lap, time_ms, started: summary.started, bike_name: summary.bike_name },
         reference,
         review,
     })
+}
+
+/// How the session's lines and the track changed, against the fastest lap on the track; see
+/// `lines.rs`. None until there is a lap to compare with.
+#[tauri::command]
+pub fn coach_lines(app: AppHandle, path: String) -> Result<Option<crate::lines::Lines>, String> {
+    let rec = load(&path)?;
+    let summary = summarize(Path::new(&path), &rec);
+    let Some(r) = best_reference(&all_sessions(&app), &summary.track_id, &summary.bike_id, None) else {
+        return Ok(None);
+    };
+    let ref_rec = if r.path == path { None } else { Some(load(&r.path)?) };
+    let reference = trace(ref_rec.as_ref().unwrap_or(&rec), r.lap)?;
+    let laps: Vec<(i32, Trace)> = rec
+        .laps()
+        .iter()
+        .filter(|l| l.whole && !l.invalid)
+        .filter_map(|l| Some((l.num, Trace::new(l, rec.event.track_length)?)))
+        .collect();
+    Ok(Some(crate::lines::lines(&laps, &reference)))
+}
+
+/// The track's own terrain for a session: installed, readable, and lined up with the laps.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ground {
+    pub path: String,
+    pub prefix: Option<String>,
+    pub name: String,
+    /// How high the bike rides above this terrain, metres.
+    pub lift: f32,
+}
+
+/// None when the track isn't installed, is locked, or its terrain doesn't line up with the
+/// laps; the app then draws the ground built from the laps instead. Off the main thread: the
+/// first read of a big track is most of a second.
+#[tauri::command]
+pub async fn coach_ground(app: AppHandle, path: String) -> Result<Option<Ground>, String> {
+    tauri::async_runtime::spawn_blocking(move || ground_for(&app, &path)).await.map_err(err)?
+}
+
+fn ground_for(app: &AppHandle, path: &str) -> Result<Option<Ground>, String> {
+    let rec = load(path)?;
+    let Some(src) = mxb_core::tracksource::resolve(&load_config(app), &rec.event.track_id) else {
+        return Ok(None);
+    };
+    if src.locked {
+        return Ok(None);
+    }
+    let Ok(master) = mxb_core::track::load_master(app, &src.path, src.prefix.as_deref()) else {
+        return Ok(None);
+    };
+    let points: Vec<[f32; 3]> =
+        rec.samples.iter().filter(|s| !s.airborne() && !s.crashed).step_by(5).map(|s| [s.x, s.y, s.z]).collect();
+    let i = &master.info;
+    let lift = crate::ground::fit(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points);
+    Ok(lift.map(|lift| Ground { path: src.path, prefix: src.prefix, name: src.name, lift }))
+}
+
+/// The ground under a session's laps, built from the laps; see `surface.rs`.
+#[tauri::command]
+pub fn coach_surface(path: String) -> Result<Option<crate::surface::Surface>, String> {
+    Ok(crate::surface::build(&load(&path)?.samples, 400))
 }
 
 /// Puts the recorder in `<game>\plugins`: downloaded from the latest FrostMod release, or

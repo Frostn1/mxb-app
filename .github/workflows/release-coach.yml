@@ -1,13 +1,13 @@
-name: Release MXB Coach (beta)
+name: Release MXB Coach
 
-# Build and publish MXB Coach betas as pre-releases of this repo.
+# Build, sign and publish MXB Coach as a release of this repo, tagged `coach-v<version>`.
 #
-# Safe here only because they are pre-releases with no updater manifest: `releases/latest`
-# never points at a pre-release, the manager's beta channel only considers `v<semver>` tags
-# carrying a `latest.json`, and `release.yml` triggers on `v*`, which `coach-v*` doesn't
-# match. A plain (non-beta) Coach tag would become this repo's latest release and hand every
-# manager install a Coach build as its next update, so this workflow refuses one: a stable
-# Coach gets its own repository, the way Frost's Studio did.
+# Every Coach release is a GitHub pre-release, stable ones included, so this repo's
+# `releases/latest` (the manager's updater endpoint, baked into every install) never points at
+# one. The coach finds its own releases instead (core's update_channel, `coach-v` prefix):
+# stable takes versions with no pre-release part, beta takes them all. The manager's beta
+# channel only reads `v` tags, and `release.yml` triggers on `v*`, which `coach-v*` doesn't
+# match, so neither app ever sees the other's builds.
 
 on:
   push:
@@ -34,14 +34,6 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
-      - name: Refuse a tag that isn't a pre-release
-        shell: bash
-        run: |
-          case "$GITHUB_REF_NAME" in
-            *-beta*|*-rc*) ;;
-            *) echo "::error::$GITHUB_REF_NAME is not a beta or rc. A stable Coach must release to its own repo."; exit 1 ;;
-          esac
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -94,6 +86,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_NAME: "MXB Coach"
+          # The coach's own key, not the manager's: a leak here can't sign a manager update.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.COACH_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.COACH_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/coach
           tagName: ${{ github.ref_name }}
@@ -109,7 +104,9 @@ jobs:
 
             The recorder only saves your laps. It changes nothing in the game.
           assetNamePattern: "MXB-Coach-[version]-[arch][ext]"
-          includeUpdaterJson: false
+          # The signed manifest the coach's updater reads.
+          includeUpdaterJson: true
           releaseDraft: false
+          # Always, see the top of this file.
           prerelease: true
           args: ${{ matrix.args }}

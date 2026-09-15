@@ -9,6 +9,9 @@
 
 mod analysis;
 mod coach;
+mod ground;
+mod lines;
+mod surface;
 mod telemetry;
 
 use mxb_core::{config, game};
@@ -23,12 +26,37 @@ fn list_games() -> Vec<game::GameInfo> {
     game::all_info()
 }
 
+/// Frontend log lines, into the same file the Rust side writes. The shared 3D viewer reports
+/// its renderer through this.
+#[tauri::command]
+fn log_client(level: String, message: String) {
+    // A log line is not a transport for arbitrary payloads: trim rather than reject.
+    let msg: String = message.chars().take(2000).collect();
+    match level.as_str() {
+        "error" => log::error!("[webview] {msg}"),
+        "warn" => log::warn!("[webview] {msg}"),
+        _ => log::info!("[webview] {msg}"),
+    }
+}
+
+/// The coach's own builds: `coach-v` releases in the manager's repo, betas when asked for.
+#[tauri::command]
+async fn check_coach_update(
+    webview: tauri::Webview,
+    beta: bool,
+) -> Result<Option<mxb_core::update_channel::UpdateMetadata>, String> {
+    mxb_core::update_channel::check(&webview, "Frostn1/mxb-app", "coach-v", beta, "mxb-coach")
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             // What the shared shell calls: the platform, the config, the titles.
             mxb_core::viewer::app_platform,
@@ -40,6 +68,14 @@ fn main() {
             coach::coach_sessions,
             coach::coach_session,
             coach::coach_review,
+            coach::coach_surface,
+            coach::coach_lines,
+            coach::coach_ground,
+            check_coach_update,
+            log_client,
+            // The track's own terrain, from core, for the map and the 3D view.
+            mxb_core::trackview::load_track_terrain,
+            mxb_core::trackview::load_track_overview,
             coach::coach_install_plugin,
             coach::coach_uninstall_plugin,
         ])

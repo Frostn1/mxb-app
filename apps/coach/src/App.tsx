@@ -9,6 +9,8 @@ import TitleBar from "@frost/shared/Components/Shell/TitleBar";
 import { I18nProvider, setAmbientVars, useT } from "@/i18n";
 import Sessions from "./Components/Sessions/Sessions";
 import Settings from "./Components/Settings/Settings";
+import UpdateBanner from "./Components/UpdateBanner";
+import { UpdateProvider } from "./Context/Update";
 
 type View = "sessions" | "settings";
 
@@ -65,8 +67,11 @@ function Shell() {
               />
             }
           />
-          <main className="min-w-0 flex-1">
-            {view === "settings" ? <Settings /> : <Sessions onSettings={() => setView("settings")} />}
+          <main className="flex min-w-0 flex-1 flex-col">
+            <UpdateBanner />
+            <div className="min-h-0 flex-1">
+              {view === "settings" ? <Settings /> : <Sessions onSettings={() => setView("settings")} />}
+            </div>
           </main>
         </div>
       </div>
@@ -85,7 +90,9 @@ export default function App() {
   return (
     <ThemeProvider defaultTheme="dark" scalable={false}>
       <I18nProvider>
-        <Shell />
+        <UpdateProvider>
+          <Shell />
+        </UpdateProvider>
       </I18nProvider>
     </ThemeProvider>
   );

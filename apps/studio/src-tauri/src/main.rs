@@ -169,6 +169,7 @@ fn main() {
             // track it is building with the same code the manager shows one with.
             mxb_core::trackview::read_track_info,
             mxb_core::trackview::diagnose_track,
+            mxb_core::trackview::resolve_track_source,
             mxb_core::trackview::load_track_terrain,
             mxb_core::trackview::load_track_overview,
             mxb_core::trackview::load_track_scenery,

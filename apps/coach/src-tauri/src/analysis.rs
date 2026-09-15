@@ -260,7 +260,7 @@ impl Trace {
         true
     }
 
-    fn span(&self, a: usize, b: usize) -> f32 {
+    pub(crate) fn span(&self, a: usize, b: usize) -> f32 {
         self.pts[b].t - self.pts[a].t
     }
 
@@ -302,7 +302,7 @@ impl Trace {
     }
 
     /// Travel bearing at a grid point, radians clockwise from north (+z).
-    fn bearing(&self, i: usize) -> f32 {
+    pub(crate) fn bearing(&self, i: usize) -> f32 {
         let n = self.len();
         let (a, b) = (&self.pts[i.saturating_sub(2)], &self.pts[(i + 2).min(n - 1)]);
         (b.x - a.x).atan2(b.z - a.z)
@@ -1142,8 +1142,9 @@ pub fn ideal(sections: &[Section], laps: &[(i32, Trace)]) -> Option<Ideal> {
     Some(Ideal { time: bests.iter().map(|b| b.best).sum(), sections: bests, least_consistent })
 }
 
+/// Also the stadium laps other modules' tests ride.
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::telemetry::{Lap, Sample};
 
@@ -1170,22 +1171,37 @@ mod tests {
         }
     }
 
-    struct Style {
-        decel: f32,
-        brake: f32,
+    pub(crate) struct Style {
+        pub(crate) decel: f32,
+        pub(crate) brake: f32,
         /// Takeoff, landing, peak height.
-        jump: (f32, f32, f32),
+        pub(crate) jump: (f32, f32, f32),
         /// Speed along the ground while airborne: nothing drives the bike in the air, so the
         /// longer the flight the more it bleeds off.
-        air_v: f32,
+        pub(crate) air_v: f32,
         /// Peak lean in the air, degrees; it unwinds just after touchdown, the way a whip does.
-        whip: f32,
+        pub(crate) whip: f32,
         /// Suspension squashed on the landing, metres of the 0.3 m travel; 0 lands normally.
-        bottom: f32,
+        pub(crate) bottom: f32,
+        /// Turn 1 ridden this many metres outside the centreline; negative is inside.
+        pub(crate) wide: f32,
+        /// Speed through both corners, m/s.
+        pub(crate) corner_v: f32,
+        /// Ground under Turn 1 this much lower, metres, as a rut cut by earlier laps.
+        pub(crate) sink: f32,
     }
 
-    const FAST: Style =
-        Style { decel: 4.0, brake: 0.8, jump: (330.0, 350.0, 3.0), air_v: 20.0, whip: 0.0, bottom: 0.0 };
+    pub(crate) const FAST: Style = Style {
+        decel: 4.0,
+        brake: 0.8,
+        jump: (330.0, 350.0, 3.0),
+        air_v: 20.0,
+        whip: 0.0,
+        bottom: 0.0,
+        wide: 0.0,
+        corner_v: 10.0,
+        sink: 0.0,
+    };
     const BIKE: Bike = Bike { limiter: 13000.0, travel: [0.3, 0.3] };
 
     /// Speed, throttle, brake and lean at `d`.
@@ -1193,11 +1209,12 @@ mod tests {
         let arc = PI * R;
         let (c1, c1e, c2) = (200.0, 200.0 + arc, 400.0 + arc);
         if (c1..c1e).contains(&d) || d >= c2 {
-            return (10.0, 0.3, 0.0, 35.0);
+            return (st.corner_v, 0.3, 0.0, 35.0);
         }
         let (exit, next) = if d < c1 { (0.0, c1) } else { (c1e, c2) };
-        let accel = (100.0 + 6.0 * (d - exit)).sqrt();
-        let braking = (100.0 + 2.0 * st.decel * (next - d)).sqrt();
+        let cv2 = st.corner_v * st.corner_v;
+        let accel = (cv2 + 6.0 * (d - exit)).sqrt();
+        let braking = (cv2 + 2.0 * st.decel * (next - d)).sqrt();
         if braking < accel && braking < 20.0 {
             (braking, 0.0, st.brake, 0.0)
         } else if accel < 20.0 {
@@ -1207,7 +1224,7 @@ mod tests {
         }
     }
 
-    fn lap(st: &Style) -> Trace {
+    pub(crate) fn lap(st: &Style) -> Trace {
         let (samples, t) = ride_lap(st);
         let lap = Lap { num: 1, time_ms: (t * 1000.0) as i32, invalid: false, whole: true, samples };
         Trace::new(&lap, len()).unwrap()
@@ -1221,6 +1238,9 @@ mod tests {
         while d < l {
             let (v, throttle, brake, roll) = ride(st, d);
             let (x, z, bearing) = place(d);
+            // Outside of a right-hander is the rider's left: (-cos, sin) of the bearing.
+            let turn1 = (200.0..200.0 + PI * R).contains(&d);
+            let (x, z) = if turn1 { (x - bearing.cos() * st.wide, z + bearing.sin() * st.wide) } else { (x, z) };
             let (take, land, peak) = st.jump;
             let air = d >= take && d <= land;
             let v = if air { v.min(st.air_v) } else { v };
@@ -1243,7 +1263,13 @@ mod tests {
             s.pos = d / l;
             s.x = x;
             s.z = z;
-            s.y = if air { peak * (1.0 - ((d - mid) / half).powi(2)) } else { 0.0 };
+            s.y = if air {
+                peak * (1.0 - ((d - mid) / half).powi(2))
+            } else if turn1 {
+                -st.sink
+            } else {
+                0.0
+            };
             s.vel = [v * bearing.sin(), 0.0, v * bearing.cos()];
             s.speed = v;
             s.throttle = throttle;

@@ -1,12 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { loadTrackOverview, loadTrackTerrain } from "@frost/shared/api/tracks";
+import type { TrackOverview, TrackTerrain } from "@frost/shared/types";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { cn } from "@frost/shared/lib/utils";
 import { useT, type TKey } from "@/i18n";
-import { coachReview, type Finding, type ReviewOut, type SectionReview } from "@/api/coach";
+import {
+  coachGround,
+  coachLines,
+  coachReview,
+  coachSurface,
+  type Finding,
+  type Lines,
+  type ReviewOut,
+  type SectionReview,
+  type Surface,
+} from "@/api/coach";
 import { gap, lapTime, lossColor, started } from "@/lib/format";
 import Page, { Label } from "../Page";
+import { Segmented } from "@frost/shared/Components/ui/segmented";
 import TrackMap from "./TrackMap";
+import Track3D, { surfaceTerrain, type Ground3D } from "./Track3D";
 import SectionStrip from "./SectionStrip";
 import Charts from "./Charts";
 
@@ -18,6 +32,48 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
   const [selected, setSelected] = useState<number | null>(null);
   const [cursor, setCursor] = useState<number | null>(null);
   const [whole, setWhole] = useState(false);
+  const [surface, setSurface] = useState<Surface | null>(null);
+  const [view, setView] = useState<"map" | "laps" | "3d">("map");
+  const [lines, setLines] = useState<Lines | null>(null);
+
+  const [real, setReal] = useState<{ terrain: TrackTerrain; overview: TrackOverview | null; lift: number } | null>(null);
+
+  // The ground and the other laps are extras: the review stands without them. The track's
+  // own terrain wins over the ground built from the laps, when it's there and lines up.
+  useEffect(() => {
+    setSurface(null);
+    setLines(null);
+    setReal(null);
+    coachSurface(path).then(setSurface).catch(() => {});
+    coachLines(path).then(setLines).catch(() => {});
+    coachGround(path)
+      .then(async (g) => {
+        if (!g) return;
+        const [terrain, overview] = await Promise.all([
+          loadTrackTerrain(g.path, 1024, g.prefix),
+          loadTrackOverview(g.path, 1024, g.prefix).catch(() => null),
+        ]);
+        setReal({ terrain, overview, lift: g.lift });
+      })
+      .catch(() => {});
+  }, [path]);
+
+  const relief = useMemo(
+    () =>
+      real
+        ? { x0: 0, z0: 0, cell: real.terrain.metresPerSample, width: real.terrain.width, height: real.terrain.height, heights: real.terrain.heights }
+        : surface,
+    [real, surface],
+  );
+  const ground3d = useMemo<Ground3D | null>(
+    () =>
+      real
+        ? { terrain: real.terrain, overview: real.overview, origin: [0, 0], lift: real.lift }
+        : surface
+          ? { terrain: surfaceTerrain(surface), overview: null, origin: [surface.x0, surface.z0], lift: 0 }
+          : null,
+    [real, surface],
+  );
 
   useEffect(() => {
     setData(null);
@@ -64,6 +120,20 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
     ...review.sections.map((s, i) => (s.findings.length > 0 && !review.focus.includes(i) ? i : -1)).filter((i) => i >= 0),
   ];
   const against = [lapTime(reference.timeMs), reference.bikeName, started(reference.started)].filter(Boolean).join(" · ");
+  // Every lap's line, fastest green to slowest red; this lap in blue on top.
+  const others = (() => {
+    if (view !== "laps" || !lines) return undefined;
+    const times = lines.laps.map((l) => l.time);
+    const [lo, hi] = [Math.min(...times), Math.max(...times)];
+    return lines.laps
+      .filter((l) => l.lap !== lap)
+      .map((l) => ({ path: l.path, colour: `hsl(${Math.round(120 * (1 - (l.time - lo) / Math.max(hi - lo, 0.01)))} 65% 55%)` }));
+  })();
+  const views = [
+    { value: "map" as const, label: t("review.viewMap") },
+    ...(lines && lines.laps.length > 1 ? [{ value: "laps" as const, label: t("review.viewLaps") }] : []),
+    ...(ground3d ? [{ value: "3d" as const, label: t("review.view3d") }] : []),
+  ];
 
   return (
     <Page
@@ -82,8 +152,20 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
     >
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
         <div className="min-w-0 space-y-3">
-          <div className="h-[440px] border border-border bg-card p-3">
-            <TrackMap review={review} selected={selected} cursor={cursor} onPick={pick} />
+          <div className="relative h-[440px] border border-border bg-card">
+            {views.length > 1 && (
+              <Segmented size="sm" className="absolute right-3 top-3 z-10" value={view} onChange={setView} options={views} />
+            )}
+            {view === "3d" && ground3d ? (
+              <Track3D review={review} ground={ground3d} selected={selected} className="h-full w-full" />
+            ) : (
+              <div className="h-full p-3">
+                <TrackMap review={review} surface={relief} others={others} selected={selected} cursor={cursor} onPick={pick} />
+              </div>
+            )}
+            {view === "laps" && (
+              <p className="pointer-events-none absolute bottom-2 left-3 text-[11px] text-muted-foreground">{t("review.lapsLegend")}</p>
+            )}
           </div>
           <SectionStrip review={review} selected={selected} onPick={pick} />
           <p className="text-[11.5px] text-faint">{t("review.strip")}</p>
@@ -130,6 +212,30 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
               </div>
             )}
           </div>
+
+          {lines && lines.notes.length > 0 && (
+            <div>
+              <Label>{t("review.linesTitle")}</Label>
+              <div className="space-y-1">
+                {lines.notes.map((n, k) => {
+                  const i = review.sections.findIndex((s) => s.name === n.name);
+                  return (
+                    <button
+                      key={k}
+                      onClick={() => i >= 0 && pick(i)}
+                      className={cn(
+                        "w-full border bg-card px-4 py-3 text-left",
+                        i === selected ? "border-primary/60" : "border-border hover:border-foreground/30",
+                      )}
+                    >
+                      <div className="text-[13px] font-semibold">{n.title}</div>
+                      <div className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{n.detail}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {review.setup.length > 0 && (
             <div>

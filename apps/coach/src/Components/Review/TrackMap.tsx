@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Review } from "@/api/coach";
 import { gap, lossColor } from "@/lib/format";
+import { reliefImage, type Relief } from "@/lib/relief";
 
 /** Points along the drawn paths: `paths` holds one every 2 m. */
 const PATH_STEP = 2;
@@ -16,11 +17,17 @@ export function shortName(name: string): string {
  */
 export default function TrackMap({
   review,
+  surface,
+  others,
   selected,
   cursor,
   onPick,
 }: {
   review: Review;
+  /** The ground, drawn under the lines when there is one: the track's own or the ridden one. */
+  surface?: Relief | null;
+  /** Other laps' lines, drawn thin under this one. */
+  others?: { path: [number, number][]; colour: string; width?: number }[];
   selected: number | null;
   /** Metres into the lap, or null. */
   cursor: number | null;
@@ -50,9 +57,21 @@ export default function TrackMap({
   const sel = selected != null ? review.sections[selected] : null;
   const dot = cursor != null ? clamp(lap, cursor) : null;
   const fs = view.size / 30;
+  const relief = useMemo(() => (surface ? reliefImage(surface) : ""), [surface]);
 
   return (
     <svg viewBox={view.box} className="h-full w-full" preserveAspectRatio="xMidYMid meet">
+      {surface && relief && (
+        <image
+          href={relief}
+          x={surface.x0}
+          y={-(surface.z0 + surface.height * surface.cell)}
+          width={surface.width * surface.cell}
+          height={surface.height * surface.cell}
+          preserveAspectRatio="none"
+          opacity={0.85}
+        />
+      )}
       <polyline
         points={line(reference)}
         fill="none"
@@ -63,6 +82,19 @@ export default function TrackMap({
         strokeLinecap="round"
         vectorEffect="non-scaling-stroke"
       />
+      {others?.map((o, i) => (
+        <polyline
+          key={`o${i}`}
+          points={line(o.path)}
+          fill="none"
+          stroke={o.colour}
+          strokeWidth={o.width ?? 1.2}
+          strokeOpacity={0.85}
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+          className="pointer-events-none"
+        />
+      ))}
       {review.sections.map((s, i) => {
         const on = selected === i;
         const faded = sel != null && !on && hover !== i;

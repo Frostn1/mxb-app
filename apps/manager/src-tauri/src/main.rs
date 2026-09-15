@@ -3377,22 +3377,13 @@ async fn guess_server_track(app: tauri::AppHandle, track: String) -> Result<Trac
     // Installed wins outright: nothing to buy, and the track's own artwork beats a shop photo.
     // A server names the folder inside a track's `.pkz`, which is often not the file's name.
     if let Ok(entries) = scan_library(app.clone(), "tracks".into()).await {
-        let want = fold_name(&id);
-        let by_name = entries
-            .iter()
-            .position(|e| fold_name(&mxb_core::library::strip_ext(&e.name)) == want);
-        let hit = match by_name {
-            Some(i) => entries.into_iter().nth(i),
-            None => tauri::async_runtime::spawn_blocking(move || {
-                entries.into_iter().find(|e| {
-                    mxb_core::track::folder_name(std::path::Path::new(&e.path))
-                        .is_some_and(|f| fold_name(&f) == want)
-                })
-            })
-            .await
-            .ok()
-            .flatten(),
-        };
+        let want = id.clone();
+        let hit = tauri::async_runtime::spawn_blocking(move || {
+            mxb_core::tracksource::find_installed(entries, &want)
+        })
+        .await
+        .ok()
+        .flatten();
         if let Some(hit) = hit {
             guess.installed = mxb_core::library::strip_ext(&hit.name);
             guess.exact = true;
@@ -3723,18 +3714,10 @@ fn sells_tracks(categories: &[String]) -> bool {
         || categories.iter().any(|c| c.to_ascii_lowercase().contains("track"))
 }
 
-/// Lowercase and reduce everything that isn't alphanumeric to a single space, so an internal
-/// id (`mmx_supercross`) and a folder or product name ("MMX Supercross") fold together. The
-/// same rule the shop catalogue matches on, so the two agree about what counts as the same
-/// name.
-fn fold_name(raw: &str) -> String {
-    raw.chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { ' ' })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
+// Lowercase and reduce everything that isn't alphanumeric to a single space, so an internal
+// id (`mmx_supercross`) and a folder or product name ("MMX Supercross") fold together. The
+// same rule the shop catalogue and core's track matching use.
+use mxb_core::trackstock::fold as fold_name;
 
 /// Which GUID the Ranked tab will ask about, and where it came from.
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -6462,6 +6445,7 @@ fn main() {
             mxb_core::trackview::load_track_ground,
             mxb_core::trackview::load_track_ground_layers,
             mxb_core::trackview::diagnose_track,
+            mxb_core::trackview::resolve_track_source,
             mxb_core::viewer::unpack_paint,
             mxb_core::viewer::texture_bytes,
             mxb_core::viewer::watch_paint_files,
