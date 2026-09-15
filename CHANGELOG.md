@@ -5,6 +5,10 @@
 ### Added
 - New Frost's Studio versions are posted in the Discord, in #studio-releases.
 
+### Changed
+- Tabletops on generated tracks are wide, rounded mounds. The bigger the jump, the further its
+  dirt runs out either side, so its sides slope into the ground.
+
 ## 2026-09-14 — v0.14.4 — Wait in line
 
 ### Added
