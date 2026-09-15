@@ -349,6 +349,13 @@ pub fn coach_review(
         }
         None => (analysis::solo(&mine, bike), this.clone()),
     };
+    // Lap-wide setup tips that come from the recording and the setup file, not the lap: sag, tyres.
+    let mut review = review;
+    let r = rider_setup(&app, &rec);
+    review.setup.extend(r.sag.as_ref().and_then(|s| crate::sag::finding(s, rec.event.susp_max_travel)));
+    if let (Some(s), Some(o)) = (&r.setup, &r.opts) {
+        review.setup.extend(crate::fixes::pressure_finding(s, o, r.optimal));
+    }
     Ok(ReviewOut { track_id: summary.track_id, track_name: summary.track_name, lap: this, reference, review })
 }
 
@@ -359,21 +366,36 @@ struct RiderSetup {
     setup: Option<crate::stp::Setup>,
     opts: Option<crate::bikecfg::BikeOptions>,
     why: Option<String>,
+    sag: Option<crate::sag::Sag>,
+    /// The pressure each tyre the setup runs is made for, kPa.
+    optimal: [Option<f32>; 2],
 }
 
-fn rider_setup(app: &AppHandle, path: &str) -> Result<RiderSetup, String> {
-    let rec = load(path)?;
+fn rider_setup(app: &AppHandle, rec: &Recording) -> RiderSetup {
     let cfg = load_config(app);
     let e = &rec.event;
     let raw = rec.session.setup.clone();
     let name = raw.trim_start_matches(':').to_string();
-    let opts = crate::bikecfg::load(&cfg.mods_path, &e.bike_id);
+    let bike_cfg = crate::bikecfg::load_cfg(&cfg.mods_path, &e.bike_id);
+    let mut opts = bike_cfg.as_ref().map(crate::bikecfg::options);
     let file = crate::stp::locate(&cfg.profiles_dir(), &raw, &e.track_id, &e.bike_id);
     let setup = file
         .as_ref()
         .and_then(|p| fs::read(p).ok())
         .and_then(|b| crate::stp::Setup::parse(&b, usize::try_from(e.gears).ok()).ok())
         .filter(|s| s.bike_id() == e.bike_id);
+    // The tyres the setup runs: their pressure lists join the bike's, with what they're made for.
+    let mut optimal = [None, None];
+    if let (Some(bc), Some(s), Some(o)) = (&bike_cfg, &setup, opts.as_mut()) {
+        use crate::stp::Field;
+        let wheels = [(Field::FrontTyre, Field::FrontPressure), (Field::RearTyre, Field::RearPressure)];
+        for (k, (tyre, pressure)) in wheels.into_iter().enumerate() {
+            if let Some(t) = crate::tyres::load(&cfg.mods_path, &cfg.install_dir(), bc, k, s.get(tyre)) {
+                o.insert(pressure, t.pressure);
+                optimal[k] = Some(t.optimal);
+            }
+        }
+    }
     let why = if name.is_empty() || name.eq_ignore_ascii_case("default") {
         Some("You rode the bike's default setup. Save it under a name in the garage, and the coach can change it for you.".into())
     } else if file.is_none() {
@@ -385,7 +407,27 @@ fn rider_setup(app: &AppHandle, path: &str) -> Result<RiderSetup, String> {
     } else {
         None
     };
-    Ok(RiderSetup { name, file, setup, opts, why })
+    RiderSetup { name, file, setup, opts, why, sag: crate::sag::measure(rec), optimal }
+}
+
+/// Every fix for the lap's setup tips, the sag and tyre ones included when they're asked for.
+fn all_fixes(r: &RiderSetup, skills: &[String], travel: [f32; 2]) -> Vec<crate::fixes::Fix> {
+    let mut fixes = crate::fixes::plan(skills, r.setup.as_ref(), r.opts.as_ref());
+    let asked = |s: &str| skills.iter().any(|k| k == s);
+    if let Some(off) = r.sag.as_ref().and_then(|s| crate::sag::rear_off(s, travel[1])) {
+        let fix = crate::fixes::sag_fix(off, r.setup.as_ref(), r.opts.as_ref());
+        if asked(&fix.skill) {
+            fixes.push(fix);
+        }
+    }
+    if let (Some(s), Some(o)) = (&r.setup, &r.opts) {
+        if let Some(fix) = crate::fixes::pressure_fix(s, o, r.optimal) {
+            if asked(&fix.skill) {
+                fixes.push(fix);
+            }
+        }
+    }
+    fixes
 }
 
 #[derive(Serialize)]
@@ -399,6 +441,8 @@ pub struct SetupPlan {
     /// Why the coach can't make the changes itself, when it can't.
     pub why: Option<String>,
     pub fixes: Vec<crate::fixes::Fix>,
+    /// The sag measured in this session, standing still or riding.
+    pub sag: Option<crate::sag::Sag>,
 }
 
 /// The rider's setup name without any "(coach)" the coach added: copies of a copy are numbered.
@@ -409,24 +453,27 @@ fn setup_base(file: &Path) -> String {
 /// The changes behind a lap's setup tips, against the setup the rider had on.
 #[tauri::command]
 pub fn coach_setup_plan(app: AppHandle, path: String, skills: Vec<String>) -> Result<SetupPlan, String> {
-    let r = rider_setup(&app, &path)?;
-    let fixes = crate::fixes::plan(&skills, r.setup.as_ref(), r.opts.as_ref());
+    let rec = load(&path)?;
+    let r = rider_setup(&app, &rec);
+    let fixes = all_fixes(&r, &skills, rec.event.susp_max_travel);
     let save_as = r.file.as_deref().and_then(|f| {
         let dir = f.parent()?;
         crate::stp::coach_names(&setup_base(f)).find(|n| !dir.join(format!("{n}.stp")).exists())
     });
-    Ok(SetupPlan { name: r.name, file: r.file.map(|p| p.display().to_string()), save_as, why: r.why, fixes })
+    let sag = r.sag;
+    Ok(SetupPlan { name: r.name, file: r.file.map(|p| p.display().to_string()), save_as, why: r.why, fixes, sag })
 }
 
 /// Saves a lap's setup fixes as a new setup beside the rider's own and returns its name.
 /// Never overwrites a file: the rider's setup stays as it was.
 #[tauri::command]
 pub fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Result<String, String> {
-    let r = rider_setup(&app, &path)?;
+    let rec = load(&path)?;
+    let r = rider_setup(&app, &rec);
+    let fixes = all_fixes(&r, &skills, rec.event.susp_max_travel);
     let (Some(file), Some(setup), Some(opts)) = (r.file, r.setup, r.opts) else {
         return Err(r.why.unwrap_or_else(|| "The coach can't change this setup.".into()));
     };
-    let fixes = crate::fixes::plan(&skills, Some(&setup), Some(&opts));
     let (out, moved) = crate::fixes::apply(&setup, &fixes, &opts);
     if moved == 0 {
         return Err("There's nothing in this setup the coach can change.".into());

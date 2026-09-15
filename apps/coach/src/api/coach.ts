@@ -214,7 +214,11 @@ export type SetupField =
   | "shockPreload"
   | "rodLength"
   | "frontSprocket"
-  | "rearSprocket";
+  | "rearSprocket"
+  | "frontTyre"
+  | "rearTyre"
+  | "frontPressure"
+  | "rearPressure";
 
 /** One change behind a setup tip. Positions are in the bike's own list for the setting. */
 export interface SetupChange {
@@ -245,6 +249,8 @@ export interface SetupPlan {
   /** Why the coach can't make the changes itself, when it can't. */
   why: string | null;
   fixes: SetupFix[];
+  /** Sag measured in the session: standing still (what setup guides mean) or riding. */
+  sag: { still: boolean; metres: [number, number]; share: [number, number] } | null;
 }
 
 /** The changes behind a lap's setup tips, against the setup the rider had on. */

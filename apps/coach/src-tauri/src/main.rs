@@ -13,9 +13,11 @@ mod coach;
 mod fixes;
 mod ground;
 mod lines;
+mod sag;
 mod stp;
 mod surface;
 mod telemetry;
+mod tyres;
 
 use mxb_core::{config, game};
 

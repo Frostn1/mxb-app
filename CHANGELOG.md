@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-15 — MXB Coach v0.1.7-beta.7
+
+### Added
+- Hold more throttle: when you use less gas than the fast lap out of a corner and the rear never
+  slips, the coach tells you the grip is there to use.
+- Your real sag: stop for 2 seconds in neutral with you on the bike, and the coach measures your
+  sag from that moment. It says how many millimetres of preload to change, or the spring when
+  preload can't go that far, and can make the change in your saved copy.
+- Tyre pressure: the coach checks your pressures against what each tyre is made for, and can put
+  them back in your saved copy.
+- Tips on the map: the numbered tips now show on the track map where each one happens.
+
+### Changed
+- Lean the bike more now says when the front isn't sliding, so you know the grip is there.
+
 ## 2026-09-15 — MXB Coach v0.1.6-beta.6
 
 ### Added

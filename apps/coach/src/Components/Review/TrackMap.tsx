@@ -159,6 +159,28 @@ export default function TrackMap({
           <Pill at={clamp(reference, (sel.core[0] + sel.core[1]) / 2)} centre={view.centre} fs={fs} color={lossColor(sel.lost)}>
             {solo ? sel.name : `${sel.name}  ${gap(sel.lost)} s`}
           </Pill>
+          {/* Each tip where it happens, numbered as in the tips and on the charts. */}
+          {sel.findings
+            .filter((f) => f.skill !== "unclear")
+            .map((f, k) => {
+              const p = clamp(lap, f.at);
+              return (
+                <g key={`f${k}`} className="select-none">
+                  <circle cx={p[0]} cy={-p[1]} r={fs * 0.55} fill="var(--foreground)" stroke="var(--background)" strokeWidth={fs / 10} />
+                  <text
+                    x={p[0]}
+                    y={-p[1]}
+                    fontSize={fs * 0.7}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fill="var(--background)"
+                    className="font-semibold"
+                  >
+                    {k + 1}
+                  </text>
+                </g>
+              );
+            })}
         </g>
       )}
 

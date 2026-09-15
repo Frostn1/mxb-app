@@ -397,11 +397,16 @@ const SETUP_GROUPS: { key: TKey; of: (skill: string) => boolean }[] = [
   {
     key: "review.group.suspension",
     of: (s) =>
-      s.startsWith("setup_bottoming") || s.startsWith("setup_stiff") || s.startsWith("setup_packing") || SUSPENSION.includes(s),
+      s.startsWith("setup_bottoming") ||
+      s.startsWith("setup_stiff") ||
+      s.startsWith("setup_packing") ||
+      s.startsWith("setup_sag") ||
+      SUSPENSION.includes(s),
   },
   { key: "review.group.gearing", of: (s) => s.startsWith("setup_gearing") },
   { key: "review.group.shifting", of: (s) => s.startsWith("setup_shift") },
   { key: "review.group.chassis", of: (s) => s === "setup_swingarm" || s === "setup_front_push" },
+  { key: "review.group.tyres", of: (s) => s === "setup_pressure" },
 ];
 
 /** Bike setup advice for the whole lap, by what it's about, with the changes behind each tip
@@ -445,6 +450,18 @@ function Setup({ path, findings }: { path: string; findings: Finding[] }) {
             </div>
           );
         })}
+        {plan?.sag && (
+          <p className="text-[12px] text-muted-foreground">
+            {plan.sag.still
+              ? t("setup.sagStill", {
+                  front: Math.round(plan.sag.metres[0] * 1000),
+                  fp: Math.round(plan.sag.share[0] * 100),
+                  rear: Math.round(plan.sag.metres[1] * 1000),
+                  rp: Math.round(plan.sag.share[1] * 100),
+                })
+              : t("setup.sagRiding")}
+          </p>
+        )}
         {plan && (writes || plan.why) && (
           <div className="border-t border-border pt-3">
             {writes ? (

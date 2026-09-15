@@ -22,6 +22,11 @@ pub type BikeOptions = HashMap<Field, Options>;
 /// Reads `<bike>.cfg` beside the bike, else inside its `.pkz`. Locked OEM bikes open with the
 /// locked-content reader, which release builds carry.
 pub fn load(mods_path: &str, bike: &str) -> Option<BikeOptions> {
+    load_cfg(mods_path, bike).map(|c| options(&c))
+}
+
+/// The bike's parsed cfg, for what else it names: its tyres, its gearbox.
+pub fn load_cfg(mods_path: &str, bike: &str) -> Option<CfgNode> {
     let root = library::mods_subdir(mods_path, "mods/bikes");
     let want = format!("{bike}.cfg");
     let loose = std::fs::read(root.join(bike).join(&want)).ok();
@@ -30,7 +35,7 @@ pub fn load(mods_path: &str, bike: &str) -> Option<BikeOptions> {
         let is_cfg = move |n: &str| n.rsplit('/').next().is_some_and(|f| f.eq_ignore_ascii_case(want));
         pkz::read_selected(&root.join(format!("{bike}.pkz")), is_cfg).ok()?.into_iter().next().map(|(_, b)| b)
     })?;
-    Some(options(&cfg::parse(&bytes)))
+    Some(cfg::parse(&bytes))
 }
 
 /// Where each setting's list sits in the cfg; keys are lowercased by the parser.
@@ -71,7 +76,7 @@ fn find<'a>(n: &'a CfgNode, name: &str) -> Option<&'a CfgNode> {
 }
 
 /// An option list: `range = first, step, last`, or numbered `setting0`, `gear0` … entries.
-fn list(n: &CfgNode) -> Option<Options> {
+pub(crate) fn list(n: &CfgNode) -> Option<Options> {
     if let Some(r) = n.get("range") {
         let v: Vec<f64> = r.split(',').filter_map(|s| s.trim().parse().ok()).collect();
         let &[a, s, b] = v.as_slice() else { return None };
@@ -166,6 +171,11 @@ rear_suspension
 	{
 		range = 45000, 3000, 60000
 		setting = 4
+	}
+	Preload
+	{
+		range = 0, 0.001, 0.025
+		setting = 12
 	}
 	Damper
 	{

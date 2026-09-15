@@ -125,6 +125,13 @@ mod th {
     pub const RAKE_LO: f32 = -0.05;
     /// A shock bottoming while compressing slower than this, m/s, is a low-speed problem.
     pub const SLOW_HIT_MS: f32 = 0.4;
+    /// On an exit, the rear never slipping more than this (wheel over ground speed) means grip
+    /// is left over; with this much less throttle than the fast lap, it's worth using.
+    pub const GRIP_LEFT_SLIP: f32 = 1.08;
+    pub const MORE_GAS: f32 = 0.2;
+    /// On its own: an exit at least this long, ridden under this much throttle.
+    pub const SOLO_EXIT_M: usize = 25;
+    pub const SOLO_GAS: f32 = 0.55;
 
     // A lap on its own: plain amounts, with nothing to hold them against.
     // Set from real laps (2026-09-15): lower bars flagged most turns and jumps of a good lap.
@@ -644,10 +651,10 @@ pub struct Finding {
     pub at: usize,
     /// Orders the advice within a section: the likeliest cause first.
     #[serde(skip)]
-    weight: f32,
+    pub(crate) weight: f32,
     /// Advice about something risky: shown even where the section lost no time.
     #[serde(skip)]
-    safety: bool,
+    pub(crate) safety: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -753,7 +760,7 @@ fn theme(skill: &str) -> &'static str {
         "brake_early" | "brake_late" | "brake_harder" | "brake_unneeded" | "more_front" | "front_lock"
         | "rear_lock" | "stoppie" | "clutch_braking" | "bottom_braking" => "Braking",
         "carry_speed" | "lean_more" | "line" | "coasting" | "bar_fight" | "front_push" => "Corner speed",
-        "late_throttle" | "wheelspin" | "wheelie" | "exit_speed" | "gear_up" | "gear_down" => "Corner exits",
+        "late_throttle" | "wheelspin" | "wheelie" | "exit_speed" | "gear_up" | "gear_down" | "throttle_room" => "Corner exits",
         "jump_it" | "chop_face" | "scrub" | "land_short" | "overjump" | "land_throttle" | "land_crooked"
         | "bottom_landing" | "air_throttle" | "rhythm_count" | "land_hard" => "Jumps",
         "whoops_speed" | "whoops_throttle" | "whoops_bucking" => "Whoops",
@@ -1018,9 +1025,15 @@ fn corner(c: &mut Ctx) {
     let lean = |t: &Trace| t.max_by(a..b + 1, |q| q.roll.abs());
     let (lean_p, lean_r) = (lean(p), lean(r));
     if lean_r - lean_p > th::LEAN_DEG && slower_mid {
+        // Only where the front is holding: leaning more on a sliding front would put it down.
+        let grip = if p.coordination(a..b + 1).is_some_and(|c| c >= 0.95) {
+            " The front isn't sliding, so the grip is there."
+        } else {
+            ""
+        };
         c.add("lean_more", 0.6, apex_p, "Lean the bike more", format!(
             "The fast lap leans the bike {:.0}° further in {name}. Lean the bike in and keep the rider \
-             slightly to the outside, so the tyres keep their grip.",
+             slightly to the outside, so the tyres keep their grip.{grip}",
             lean_r - lean_p
         ));
     }
@@ -1071,6 +1084,21 @@ fn corner(c: &mut Ctx) {
         c.add("wheelspin", 0.65, apex_p, "Smoother on the throttle", format!(
             "The rear wheel spins for {sp:.1} s out of {name}. Roll the throttle on more gradually, and \
              feed the clutch if you ride with a manual one."
+        ));
+    }
+    // Grip left on the table: less gas than the fast lap out of the corner, while the rear never
+    // slips and the front stays down.
+    let gas = |t: &Trace, from: usize| t.mean(from..end + 1, |q| q.throttle);
+    let (gas_p, gas_r) = (gas(p, apex_p), gas(r, apex_r));
+    let slip = p.max_by(apex_p..end + 1, |q| if q.air || q.v < 5.0 { 0.0 } else { q.slip_r });
+    let front_up = p.time_where(apex_p..end, |q| q.off[0] && !q.off[1]) > th::WHEELIE_S;
+    if !exit_explained && gas_r - gas_p > th::MORE_GAS && slip < th::GRIP_LEFT_SLIP && !front_up {
+        exit_explained = true;
+        c.add("throttle_room", 0.7, apex_p, "Hold more throttle", format!(
+            "Out of {name} you use {:.0}% throttle to the fast lap's {:.0}%, and the rear never slips. The \
+             grip is there: roll it on further and hold it.",
+            gas_p * 100.0,
+            gas_r * 100.0
         ));
     }
     let (gear_p, gear_r) = (p.pts[apex_p].gear, r.pts[apex_r].gear);
@@ -1605,6 +1633,20 @@ fn alone(c: &mut Ctx) {
     match s.kind {
         Kind::Corner => {
             let apex = p.slowest(s.core.0.max(start)..s.core.1.min(end) + 1);
+            let exit = apex..end;
+            let slip = p.max_by(exit.clone(), |q| if q.air || q.v < 5.0 { 0.0 } else { q.slip_r });
+            let gas = p.mean(exit.clone(), |q| q.throttle);
+            if exit.len() >= th::SOLO_EXIT_M
+                && gas < th::SOLO_GAS
+                && slip < th::GRIP_LEFT_SLIP
+                && p.time_where(exit.clone(), |q| q.off[0] && !q.off[1]) <= th::WHEELIE_S
+            {
+                c.add("throttle_room", 0.6, apex, "Hold more throttle", format!(
+                    "Out of {name} you use {:.0}% throttle and the rear never slips. The grip is there: roll \
+                     it on further and hold it.",
+                    gas * 100.0
+                ));
+            }
             if p.coordination(s.core.0..s.core.1 + 1).is_some_and(|cp| cp < th::SOLO_PUSH) {
                 c.warn("front_push", apex, "The front is washing out", format!(
                     "Through {name} the bike leans more than it turns: the front tyre is sliding. Brake a \
@@ -1890,6 +1932,9 @@ pub(crate) mod tests {
         pub(crate) torque: f32,
         /// How much the bike turns for its lean in the corners: 1 clean, under 1 the front slides.
         pub(crate) push: f32,
+        /// Throttle while driving out of a corner, and the acceleration it gives, m/s².
+        pub(crate) gas: f32,
+        pub(crate) accel: f32,
     }
 
     pub(crate) const FAST: Style = Style {
@@ -1906,6 +1951,8 @@ pub(crate) mod tests {
         hit: 4.0,
         torque: 15.0,
         push: 1.0,
+        gas: 1.0,
+        accel: 6.0,
     };
     const BIKE: Bike = Bike { limiter: 13000.0, max_rpm: 14000.0, shift_rpm: 12500.0, travel: [0.3, 0.3] };
 
@@ -1918,12 +1965,12 @@ pub(crate) mod tests {
         }
         let (exit, next) = if d < c1 { (0.0, c1) } else { (c1e, c2) };
         let cv2 = st.corner_v * st.corner_v;
-        let accel = (cv2 + 6.0 * (d - exit)).sqrt();
+        let accel = (cv2 + st.accel * (d - exit)).sqrt();
         let braking = (cv2 + 2.0 * st.decel * (next - d)).sqrt();
         if braking < accel && braking < 20.0 {
             (braking, 0.0, st.brake, 0.0)
         } else if accel < 20.0 {
-            (accel, 1.0, 0.0, 0.0)
+            (accel, st.gas, 0.0, 0.0)
         } else {
             (20.0, 0.9, 0.0, 0.0)
         }
@@ -2068,6 +2115,14 @@ pub(crate) mod tests {
         assert!(!skills_of(&clean).contains(&"front_push"));
         assert!(!clean.setup.iter().any(|f| f.skill == "setup_front_push"));
         assert!(!solo(&fast, BIKE).setup.iter().any(|f| f.skill == "setup_front_push"));
+    }
+
+    #[test]
+    fn grip_left_on_the_exit_says_hold_more_throttle() {
+        let fast = lap(&FAST);
+        let soft = lap(&Style { gas: 0.6, accel: 4.0, ..FAST });
+        assert!(skills_of(&review(&soft, &fast, BIKE)).contains(&"throttle_room"));
+        assert!(!skills_of(&review(&fast, &fast, BIKE)).contains(&"throttle_room"));
     }
 
     #[test]
