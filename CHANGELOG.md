@@ -5,6 +5,23 @@
 ### Changed
 - Clearer wording in a few places, in all six languages.
 
+## 2026-09-15 — Track Studio asks you less
+
+### Changed
+- Random tracks come in Easy, Normal and Pro. Pro is what ARL was — the same big, rough, raced
+  build, under a name that says what it is. A track you saved at that size still opens.
+- The size now sits against the Random track button, because that is the button it changes.
+  Next to the brief it looked like it shaped the track you were describing, which it never did.
+- Writing a track no longer asks whether to write the whole lap or only its settings. Which one
+  works is a fact about the model, not a preference: ours writes the whole lap, and a small or
+  free model of your own is asked for the track's character while the app draws the lap itself.
+  The app picks and gets on with it, and still tells you what the model chose when it went that
+  second way.
+
+### Removed
+- The Base track button. Random track also hands you a finished track to ride and tweak, and a
+  different one every time, so there were two buttons doing one job.
+
 ## 2026-09-15 — MXB Coach v0.1.11-beta.11
 
 ### Changed
