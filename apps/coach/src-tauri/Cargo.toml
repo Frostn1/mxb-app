@@ -2,7 +2,7 @@
 # Cargo target names cannot hold a space, so this is as close to `mainBinaryName` as it
 # gets. The description is what Windows Task Manager shows in its Processes tab.
 name = "mxb-coach"
-version = "0.1.11"
+version = "0.1.12"
 description = "MXB Coach — lap-time coaching for MX Bikes"
 authors = ["Frost"]
 edition = "2021"
@@ -18,6 +18,9 @@ tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
+# The overlay hotkey, and one Coach at a time holding it.
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

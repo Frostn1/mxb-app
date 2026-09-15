@@ -834,6 +834,32 @@ pub fn save(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Set single keys in `config.json`, leaving every other field as it is, the ones this
+/// build doesn't know included. For an app that doesn't own the config (Coach).
+pub fn patch_json(app: &AppHandle, keys: serde_json::Map<String, serde_json::Value>) -> anyhow::Result<()> {
+    patch_file(&config_path(app), keys)
+}
+
+fn patch_file(path: &Path, keys: serde_json::Map<String, serde_json::Value>) -> anyhow::Result<()> {
+    let mut doc = match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice::<serde_json::Value>(&bytes)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(e) => return Err(e.into()),
+    };
+    let obj = doc
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("config.json isn't an object"))?;
+    obj.extend(keys);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    // Aside and moved in, so MXB App never reads half a file.
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(&doc)?)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 pub fn finalize(mut cfg: AppConfig) -> AppConfig {
     let game = cfg.game();
     // Picked one level too deep — take the folder above `mods`, which is the one every
@@ -1207,6 +1233,29 @@ fn parse_library_paths(vdf: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Coach sets the overlay keys in a file MXB App owns: every other field, known to this
+    /// build or not, must come through as it was.
+    #[test]
+    fn a_patch_changes_only_the_keys_it_names() {
+        let dir = std::env::temp_dir().join(format!("frost-patch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        std::fs::write(&path, r#"{"modsPath":"C:\\mods","someFutureField":[1,2],"overlayHotkey":"Alt+F1"}"#).unwrap();
+
+        let mut keys = serde_json::Map::new();
+        keys.insert("overlayHotkey".into(), serde_json::json!("Alt+F2"));
+        keys.insert("overlayEnabled".into(), serde_json::json!(false));
+        patch_file(&path, keys).unwrap();
+
+        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(v["overlayHotkey"], "Alt+F2");
+        assert_eq!(v["overlayEnabled"], false);
+        assert_eq!(v["modsPath"], "C:\\mods");
+        assert_eq!(v["someFutureField"], serde_json::json!([1, 2]));
+        assert!(!path.with_extension("json.tmp").exists(), "moved in, not left aside");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// The whole compatibility contract for existing installs: a `config.json` written
     /// before GP Bikes support has no `activeGame` and no `games`, and must come back as

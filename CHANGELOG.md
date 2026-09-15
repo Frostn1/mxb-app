@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-15 — MXB Coach v0.1.12-beta.12
+
+### Added
+- An in-game overlay. Press Ctrl+Shift+X in the game to see your last lap's tips, setup fixes,
+  live cues and HUD settings without leaving it. Turn it on or pick another shortcut in Settings.
+- The overlay can switch the recorder's HUD parts on and off: the live cue, section and tip, gap
+  to your fast lap, sit or stand, the track map and the setup card.
+- Live cues can be spoken. Turn on Speak the cues and set the volume. It needs the recorder from
+  FrostMod 0.22 or newer.
+- With MXB App running too, the two share one shortcut, and each overlay shows the other's tabs.
+
+## Unreleased — MXB App
+
+### Added
+- With MXB Coach running, the overlay shows Coach's tabs next to yours and one shortcut opens
+  both.
+
 ## 2026-09-15 — v0.15.1 — Small fixes
 
 ### Changed

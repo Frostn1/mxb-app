@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, Monitor } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealInExplorer } from "@frost/shared/api/mods";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Switch } from "@frost/shared/Components/ui/switch";
+import HotkeyField from "@frost/shared/Components/HotkeyField";
+import {
+  getOverlayState,
+  overlayToggle,
+  setOverlayEnabled,
+  setOverlayHotkey,
+  type OverlayState,
+} from "@frost/shared/api/overlay";
 import { betaUpdates, setBetaUpdates, useUpdate } from "@/Context/Update";
 import { useConfig } from "@frost/shared/Context/Config";
-import { useT } from "@/i18n";
+import { useT, type TKey } from "@/i18n";
 import { coachStatus, installRecorder, openFolder, removeRecorder, type CoachStatus } from "@/api/coach";
 import Page, { Label } from "../Page";
 
@@ -29,6 +37,76 @@ function Row({ label, value, onOpen }: { label: string; value: string; onOpen?: 
           {t("coachSettings.open")}
         </Button>
       )}
+    </div>
+  );
+}
+
+const OVERLAY_POLL_MS = 5000;
+
+/** The overlay: on or off, its shortcut, and who holds the shortcut right now. */
+function Overlay() {
+  const t = useT();
+  const [state, setState] = useState<OverlayState | null>(null);
+  const refresh = useCallback(() => {
+    getOverlayState().then(setState).catch(() => {});
+  }, []);
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, OVERLAY_POLL_MS);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  const run = async (job: () => Promise<void>, fail: TKey, done?: TKey) => {
+    try {
+      await job();
+      if (done) toast.success(t(done));
+    } catch (e) {
+      toast.error(t(fail), { description: String(e) });
+    } finally {
+      refresh();
+    }
+  };
+
+  const enabled = state?.enabled ?? true;
+  return (
+    <div className="border border-border bg-card px-4 py-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="text-[13px] font-semibold">{t("overlay.enable")}</div>
+          <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t("overlay.enableDesc")}</p>
+        </div>
+        <Switch
+          checked={enabled}
+          disabled={!state}
+          onCheckedChange={(on) => void run(() => setOverlayEnabled(on), "overlay.registerFailed")}
+        />
+      </div>
+      <div className="mt-4 flex items-start justify-between gap-6 border-t border-border pt-4">
+        <div>
+          <div className="text-[13px] font-semibold">{t("overlay.shortcut")}</div>
+          <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t("overlay.shortcutDesc")}</p>
+        </div>
+        <HotkeyField
+          value={state?.hotkey ?? "CommandOrControl+Shift+X"}
+          disabled={!enabled}
+          onCapture={(combo) => void run(() => setOverlayHotkey(combo), "overlay.shortcutRejected", "overlay.shortcutUpdated")}
+        />
+      </div>
+      {state?.deferred && (
+        <p className="mt-3 text-[12px] text-muted-foreground">{t(`overlay.deferred.${state.deferred}` as TKey)}</p>
+      )}
+      {state?.hotkeyError && (
+        <div className="mt-3 text-[12px] text-warning">
+          <div className="font-semibold">{t("overlay.hotkeyTaken")}</div>
+          <div>{t("overlay.hotkeyTakenDesc")}</div>
+        </div>
+      )}
+      <div className="mt-4">
+        <Button size="sm" variant="outline" disabled={!enabled} onClick={() => void run(overlayToggle, "overlay.showFailed")}>
+          <Monitor className="size-3.5" />
+          {t("overlay.showNow")}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -94,6 +172,11 @@ export default function Settings() {
           )}
         </div>
         {status && !status.gameDir && <p className="mt-3 text-[12px] text-warning">{t("recorder.noGame")}</p>}
+      </div>
+
+      <div className="mt-8">
+        <Label>{t("overlay.section")}</Label>
+        <Overlay />
       </div>
 
       <div className="mt-8">

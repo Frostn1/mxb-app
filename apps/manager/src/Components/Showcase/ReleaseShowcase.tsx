@@ -9,7 +9,7 @@ import {
 } from "@frost/shared/Components/ui/dialog";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useI18n } from "@/i18n";
-import { prettyHotkey } from "../../lib/hotkey";
+import { prettyHotkey } from "@frost/shared/lib/hotkey";
 import { usePlatform } from "@frost/shared/lib/usePlatform";
 import type { SectionId } from "../Settings/Settings";
 import ShowcaseSupporters from "./ShowcaseSupporters";
