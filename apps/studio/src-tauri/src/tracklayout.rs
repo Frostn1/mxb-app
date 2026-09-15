@@ -87,22 +87,29 @@ impl Rules {
 
 /// A stadium floor, and how a supercross lap's lanes are laid on it.
 ///
-/// The measured SX lap is one shape: parallel lanes down the floor's length joined by 180s at
-/// alternate ends, and one lane down the side that brings the lap back to the start straight.
+/// A lap is lanes across the floor, each ending where the draw puts it rather than at the wall,
+/// and one lane down the side that brings it home. Where the next lane's end falls decides the
+/// corner: back the way it came is a 180, on past it is a step across on two 90s. So the corner
+/// mix and the spread of runs both come out of the run lengths, which is what the measured
+/// tracks vary — median 64 m, longest 109.
 #[derive(Clone, Copy, Debug)]
 pub struct Stadium {
     /// The biggest floor a lap is laid on, metres along and across, centred on the plot.
     pub floor: (f32, f32),
-    /// How many parallel lanes: even, so the last one runs back towards the return lane.
-    pub lanes: [usize; 2],
+    /// How many lanes across the floor.
+    pub lanes: (i32, i32),
     /// Centre to centre between two lanes, and how long the floor is along them.
     pub lane_gap_m: (f32, f32),
     pub length_m: (f32, f32),
     /// From the floor's edge to a lane's centreline.
     pub edge_m: f32,
-    /// How far in from the floor's end a 180 may stand, and the first one (the holeshot) more.
-    pub stagger_m: (f32, f32),
-    pub holeshot_stagger_m: (f32, f32),
+    /// How far a lane runs before its corner, and the start straight, which is lane one.
+    pub lane_run_m: (f32, f32),
+    pub start_run_m: (f32, f32),
+    /// The odds a lane turns back the way it came rather than stepping across.
+    pub switchback: f32,
+    /// The odds a lane skips a row, which turns its 180 into two 90s round a short link.
+    pub wide: f32,
 }
 
 /// The pieces a lap is built from, per lap unless it says otherwise.
@@ -253,16 +260,27 @@ pub const SX_RULES: Rules = Rules {
         ..corpus::MX
     },
     stadium: Some(Stadium {
-        // M: 117–138 along, 72–86 across on the FSX and Feulatracks floors.
-        floor: (140.0, 100.0),
-        // M: 5–7 of the 7–9 corners are 180s; 6 lanes give 5, 8 give 7.
-        lanes: [6, 8],
+        // M: 117–150 along and 72–139 across. The FSX floors are the tight ones (72–86); the
+        // 2020 rounds are 124–139, and a lap needs that room to carry nine lanes.
+        floor: (140.0, 120.0),
+        // M: 7–10 corners, 5–8 of them 180s — one per lane, less one for each step or skip.
+        lanes: (7, 9),
         // E: a 10 m lane and a row of tuff blocks; a 180 between two is 5.5–8 m.
         lane_gap_m: (12.0, 14.0),
-        length_m: (115.0, 140.0),
+        // M: the floors run 117–138 along; a lane has to hold the longest run.
+        length_m: (125.0, 140.0),
         edge_m: 7.0,
-        stagger_m: (0.0, 8.0),
-        holeshot_stagger_m: (0.0, 25.0),
+        // M: runs measure 64 at the median and 90–130 at the longest.
+        lane_run_m: (45.0, 110.0),
+        // M: 35–110, typically about 75. The bottom is what a finish jump needs, which is
+        // what keeps these at the top of the measured range.
+        start_run_m: (75.0, 110.0),
+        // E: enough steps across that a lap is not a boustrophedon, and few enough that the
+        // 180s stay 5–8 of the corners.
+        switchback: 0.75,
+        // E: the odd wide turn round a short link rather than a 180, which is where the
+        // measured 0–3 corners that are not 180s come from.
+        wide: 0.2,
     }),
     // M, per lap.
     sections: Some(Sections {
@@ -2092,13 +2110,18 @@ pub fn draw_with(seed: u64, knobs: &LayoutKnobs) -> Option<TrackProgram> {
 /// How many floors a stadium lap is tried on before the seed gives up.
 const STADIUM_TRIES: usize = 40;
 
-/// A supercross lap: parallel lanes down a stadium floor joined by 180s at alternate ends, and
-/// one lane down the side that brings it back to the start straight.
+/// A supercross lap: lanes across a stadium floor, and one lane down the side that brings it
+/// back to the start straight.
 ///
-/// It is the one shape the measured stadium tracks share (5–7 of their 7–9 corners are 180s),
-/// and it closes and cannot cross itself by construction: every lane has its own row, the
-/// return lane runs outside every 180, and each corner is filleted inside its own square.
-/// Returns the lap and its start pose: the first lane, which is the start straight.
+/// Each lane ends where its run puts it rather than at the wall, and the next lane's end decides
+/// what the corner is: back the way it came is a 180, on past it is a step across on two 90s.
+/// The measured tracks are 5–8 180s and 0–3 other corners with runs spread round a 64 m median,
+/// and both fall out of drawing the runs.
+///
+/// It closes and cannot cross itself by construction: every lane has a row to itself, the
+/// return lane runs outside every lane's end, and each corner is filleted inside its own square.
+/// Returns the lap and its start pose — lane one, which is the start straight, on a long side
+/// and into the holeshot 180.
 fn walk_stadium(
     rng: &mut Rng,
     rules: &Rules,
@@ -2107,32 +2130,91 @@ fn walk_stadium(
     lap: (f32, f32),
 ) -> Option<(Vec<Segment>, Start)> {
     for _ in 0..STADIUM_TRIES {
-        let n = st.lanes[rng.int(0, st.lanes.len() as i32 - 1) as usize];
-        let widest = (st.floor.1 - 2.0 * st.edge_m) / (n - 1) as f32;
-        let gap = rng.range(st.lane_gap_m.0, st.lane_gap_m.1.min(widest));
-        let long = rng.range(st.length_m.0, st.length_m.1.min(st.floor.0));
-        let across = (n - 1) as f32 * gap + 2.0 * st.edge_m;
-        if gap < st.lane_gap_m.0 || across > st.floor.1 {
+        let n = rng.int(st.lanes.0, st.lanes.1) as usize;
+        // How many rows each lane moves over: one is a 180, two is a wide turn round a short
+        // link, which reads as two 90s. The holeshot is always a 180.
+        let skips: Vec<usize> = (0..n - 1)
+            .map(|k| if k > 0 && rng.chance(st.wide) { 2 } else { 1 })
+            .collect();
+        let rows = 1 + skips.iter().sum::<usize>();
+        let widest = (st.floor.1 - 2.0 * st.edge_m) / (rows - 1) as f32;
+        if widest < st.lane_gap_m.0 {
             continue;
         }
+        let gap = rng.range(st.lane_gap_m.0, st.lane_gap_m.1.min(widest));
+        let long = rng.range(st.length_m.0, st.length_m.1.min(st.floor.0));
+        let across = (rows - 1) as f32 * gap + 2.0 * st.edge_m;
         // Which end the return lane runs down, and which side the start straight is on.
         let flip = |rng: &mut Rng| if rng.chance(0.5) { 1.0f32 } else { -1.0 };
         let (fx, fz) = (flip(rng), flip(rng));
         // The floor's own frame: `u` along the lanes from the return end, `v` across from the
-        // start straight. The 180s at the return end stand a lane's width clear of it.
+        // start straight. Every lane ends clear of the return lane by a lane's width.
         let ret = st.edge_m;
         let inner = ret + width + 5.0;
-        let far = long - st.edge_m;
-        let v = |k: usize| st.edge_m + k as f32 * gap;
-        let mut corners: Vec<(f32, f32)> = vec![(ret, v(0))];
-        for k in 0..n - 1 {
-            let (lo, hi) = if k == 0 { st.holeshot_stagger_m } else { st.stagger_m };
-            let s = rng.range(lo, hi);
-            let end = if k % 2 == 0 { far - s } else { inner + s };
-            corners.push((end, v(k)));
-            corners.push((end, v(k + 1)));
+        let wall = long - st.edge_m;
+        let run = st.lane_run_m;
+
+        // Where each lane ends, `ret` either end: the lap leaves the return lane down lane one
+        // and comes back to it down the last.
+        let mut p: Vec<f32> = vec![ret];
+        // The start straight holds the finish jump as well as the gates, and the fillets at
+        // both ends take their radii off it.
+        let lo = st.start_run_m.0.max(crate::trackprog::finish_straight_m(rules) + 14.0);
+        let hi = st.start_run_m.1.min(wall - ret);
+        if lo > hi {
+            continue;
         }
-        corners.push((ret, v(n - 1)));
+        p.push(ret + rng.range(lo, hi));
+        let mut dir = 1.0f32;
+        let mut laid = true;
+        for k in 1..n {
+            if k == n - 1 {
+                // Home: the last lane ends on the return lane, and has to be a run from it.
+                laid = (run.0..=run.1).contains(&(p[k] - ret));
+                p.push(ret);
+                break;
+            }
+            // A lane's end, going one way or the other: inside the floor, a run from the lane
+            // before it, and — for the one before last — a run from the return lane too.
+            let window = |d: f32| {
+                let (mut lo, mut hi) = if d > 0.0 {
+                    (p[k] + run.0, p[k] + run.1)
+                } else {
+                    (p[k] - run.1, p[k] - run.0)
+                };
+                lo = lo.max(inner);
+                hi = hi.min(wall);
+                if k + 1 == n - 1 {
+                    lo = lo.max(ret + run.0);
+                    hi = hi.min(ret + run.1);
+                }
+                (lo <= hi).then_some((lo, hi))
+            };
+            // Turning back the way it came is a 180; carrying on is a step across on two 90s.
+            // The first corner is always the holeshot 180.
+            let first = if k == 1 || rng.chance(st.switchback) { -dir } else { dir };
+            let Some((d, lo, hi)) = window(first)
+                .map(|w| (first, w.0, w.1))
+                .or_else(|| window(-first).map(|w| (-first, w.0, w.1)))
+            else {
+                laid = false;
+                break;
+            };
+            p.push(rng.range(lo, hi));
+            dir = d;
+        }
+        if !laid {
+            continue;
+        }
+        let v = |r: usize| st.edge_m + r as f32 * gap;
+        let mut corners: Vec<(f32, f32)> = vec![(p[0], v(0))];
+        let mut row = 0usize;
+        for k in 0..n - 1 {
+            corners.push((p[k + 1], v(row)));
+            row += skips[k];
+            corners.push((p[k + 1], v(row)));
+        }
+        corners.push((p[n], v(row)));
         let (cx, cz) = (rules.plot.0 * 0.5, rules.plot.1 * 0.5);
         let world: Vec<(f32, f32)> = corners
             .iter()
@@ -2796,8 +2878,30 @@ mod tests {
         (cx - st.floor.0 * 0.5, cz - st.floor.1 * 0.5, cx + st.floor.0 * 0.5, cz + st.floor.1 * 0.5)
     }
 
-    /// Fifty stadium laps: on the floor, riding line and all, with the lap and the corner count
-    /// the measured SX tracks carry.
+    /// The corners a lap turns: how many, and how many of them are 180s.
+    fn sx_corners(p: &TrackProgram) -> (usize, usize) {
+        let turns = crate::trackprog::turns(&p.segments);
+        let all = turns.iter().filter(|t| t.0 >= 25.0).count();
+        (all, turns.iter().filter(|t| t.0 > 170.0).count())
+    }
+
+    /// The ground between a lap's corners, metres.
+    ///
+    /// Past the eight metres `trackprog::turns` merges across, so the metre or two of link
+    /// inside a 180 is part of that corner rather than a run of its own — which is how the
+    /// survey counts a published track's runs.
+    fn sx_runs(p: &TrackProgram) -> Vec<f32> {
+        p.segments
+            .iter()
+            .filter_map(|s| match s {
+                Segment::Straight { length, .. } if *length > 8.0 => Some(*length),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Fifty stadium laps: on the floor, riding line and all, with the lap, the corner mix and
+    /// the spread of runs the measured SX tracks carry.
     #[test]
     fn sx_laps_fit_the_floor() {
         let (x0, z0, x1, z1) = sx_floor();
@@ -2816,18 +2920,53 @@ mod tests {
             }
             let lap = p.lap_length();
             assert!((SX_RULES.lap_m.0..=SX_RULES.lap_m.1).contains(&lap), "seed {seed}: {lap:.0} m");
-            let turns = crate::trackprog::turns(&p.segments).iter().filter(|t| t.0 >= 25.0).count();
+            let (turns, hairpins) = sx_corners(&p);
             assert!(
                 (turns_band.0..=turns_band.1).contains(&(turns as f32)),
                 "seed {seed}: {turns} corners"
             );
-            let hairpins = crate::trackprog::turns(&p.segments)
-                .iter()
-                .filter(|t| t.0 > 170.0)
-                .count();
-            assert!(hairpins >= 5, "seed {seed}: only {hairpins} 180s");
+            // The measured tracks are 5–8 180s with 0–3 corners that are not: a lap of nothing
+            // but 180s is the boustrophedon this walker exists not to draw.
+            assert!((5..=8).contains(&hairpins), "seed {seed}: {hairpins} 180s of {turns}");
+            assert!(hairpins < turns, "seed {seed}: every one of {turns} corners is a 180");
+            // And its runs vary: every lane the same length is the same tell.
+            let mut runs = sx_runs(&p);
+            let mean = runs.iter().sum::<f32>() / runs.len() as f32;
+            let spread =
+                (runs.iter().map(|r| (r - mean).powi(2)).sum::<f32>() / runs.len() as f32).sqrt();
+            assert!(spread > 10.0, "seed {seed}: runs spread {spread:.1} m, mean {mean:.0}");
+            runs.sort_by(f32::total_cmp);
+            // The corpus measures 57–77 m at the median and 90–130 at the longest.
+            let median = runs[runs.len() / 2];
+            assert!((40.0..=90.0).contains(&median), "seed {seed}: runs median {median:.0} m");
+            let longest = *runs.last().expect("a lap has runs");
+            assert!(longest <= SX_RULES.run_max_m, "seed {seed}: a {longest:.0} m run");
             assert!(p.closure_error() < 0.05, "seed {seed}: misses by {:.2} m", p.closure_error());
         }
+    }
+
+    /// And the fifty are not one shape repeated: the corner mix differs, and so do the runs
+    /// inside a lap. A boustrophedon of full-width lanes is one shape at one length, which is
+    /// what this is here to catch.
+    #[test]
+    fn sx_laps_are_not_all_one_shape() {
+        let mut mixes = std::collections::BTreeSet::new();
+        let mut hairpin_counts = std::collections::BTreeSet::new();
+        let mut medians = std::collections::BTreeSet::new();
+        for seed in 0..50u64 {
+            let p = sx(seed).expect("an SX lap");
+            let (turns, hairpins) = sx_corners(&p);
+            mixes.insert((turns, hairpins));
+            hairpin_counts.insert(hairpins);
+            let mut runs = sx_runs(&p);
+            runs.sort_by(f32::total_cmp);
+            medians.insert(runs[runs.len() / 2] as i32);
+        }
+        println!("50 seeds: corner mixes {mixes:?}, {} run medians", medians.len());
+        assert!(mixes.len() >= 3, "only {} corner mixes: {mixes:?}", mixes.len());
+        assert!(hairpin_counts.len() >= 2, "every lap has {hairpin_counts:?} 180s");
+        // Lane lengths that vary lap to lap, not one shape stretched.
+        assert!(medians.len() >= 10, "only {} distinct run medians", medians.len());
     }
 
     /// No two parts of a stadium lap share dirt: anything far apart round the lap stays more

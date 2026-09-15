@@ -844,14 +844,14 @@ Status: **M** measured, **P** published, **E** estimated.
 
 | Rule | Value in code | Measured or source | Status |
 |---|---|---|---|
-| Floor | ≤ 140 x 100 m, drawn 115–140 along | 117–138 x 72–86 (FSX, Feulatracks); aspect 1.4–1.6 | M |
+| Floor | ≤ 140 x 120 m, drawn 125–140 along | 117–150 along, 72–139 across: the FSX floors are 72–86, the 2020 rounds 124–139 | M |
 | Lap | 750–900 m | 770 / 779 / 880, target 780 | M |
 | Riding width | 8.5–10 m | 9.3–11.3, median 10; 6.1 m real minimum | M, P |
-| Lanes | 6 or 8, 12–14 m apart | 5–7 of the 7–9 corners are 180s; parallel lanes 55–110 m | M, E (gap) |
-| Corners | 7 (6 lanes) or 9 (8 lanes) | 7 / 9 / 9; 0–2 90s; no sweepers | M |
+| Lanes | 7 to 9, 12–14 m apart; a lane may skip a row, which makes a wide turn on two 90s rather than a 180 | 5–8 of the 7–10 corners are 180s; parallel lanes 55–110 m | M, E (gap) |
+| Corners | 7–10: one 180 a lane, less one for each step across, plus the return lane's two 90s | 7 / 9 / 9, of which 5 / 6 / 7 are 180s; 0–3 90s; no sweepers | M |
 | Corner radius | 5.5–8 m | apex 5.8 / 6.7 / 7.8 | M |
-| Longest run | ≤ 130 m | median run 64, longest 90–130 | M |
-| Start straight | 35–115 m | 35–110, target 75; gate to holeshot 34–108 | M |
+| Runs | each lane 45–110 m, longest ≤ 130 | median run 64, longest 90–130; a lane may end anywhere, so runs vary within a lap | M |
+| Start straight | 75–110 m, on a long side and into the holeshot 180 | 35–110, target 75; gate to holeshot 34–108. The floor is 75 m because that is what a finish jump needs, so ours sit at the top of the measured range | M, E |
 | Gate off the line | 20 m | 9.6–29.9, median 16.8; 20 keeps the 26.4 m row off the next lane | M, E |
 | Gates | 22 | 22 riders | P |
 | Finish jump | 2.0–2.2 m tall, 20–25 m deck | usually a triple 22.6–25.3 m crest to crest, 30° lip, 0–5 m past the line | M; built as a tabletop (E) |
