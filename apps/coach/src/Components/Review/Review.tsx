@@ -58,6 +58,12 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
   const { review, reference } = data;
   const total = (data.lap.timeMs - reference.timeMs) / 1000;
   const sel = selected != null ? review.sections[selected] : null;
+  // Where the time went first, then anything flagged that cost nothing, like a hard landing.
+  const worth = [
+    ...review.focus,
+    ...review.sections.map((s, i) => (s.findings.length > 0 && !review.focus.includes(i) ? i : -1)).filter((i) => i >= 0),
+  ];
+  const against = [lapTime(reference.timeMs), reference.bikeName, started(reference.started)].filter(Boolean).join(" · ");
 
   return (
     <Page
@@ -68,7 +74,7 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
           <span style={{ color: lossColor(total) }} className="font-mono">
             {gap(total)} s
           </span>{" "}
-          {t("review.against")} {lapTime(reference.timeMs)} ({reference.bikeName}, {started(reference.started)})
+          {t("review.against")} {against}
         </>
       }
       onBack={onBack}
@@ -97,11 +103,11 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
 
           <div>
             <Label>{t("review.focus")}</Label>
-            {review.focus.length === 0 ? (
+            {worth.length === 0 ? (
               <p className="border border-border px-4 py-3 text-[12.5px] text-muted-foreground">{t("review.nothing")}</p>
             ) : (
               <div className="space-y-1">
-                {review.focus.map((i, k) => {
+                {worth.map((i, k) => {
                   const s = review.sections[i];
                   return (
                     <button

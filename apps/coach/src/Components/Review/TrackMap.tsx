@@ -36,7 +36,11 @@ export default function TrackMap({
     const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
     const size = Math.max(x1 - x0, y1 - y0, 1);
     const pad = size * 0.08;
-    return { box: `${x0 - pad} ${y0 - pad} ${x1 - x0 + 2 * pad} ${y1 - y0 + 2 * pad}`, size };
+    return {
+      box: `${x0 - pad} ${y0 - pad} ${x1 - x0 + 2 * pad} ${y1 - y0 + 2 * pad}`,
+      size,
+      centre: [(x0 + x1) / 2, (y0 + y1) / 2] as [number, number],
+    };
   }, [lap, reference]);
 
   const clamp = (pts: [number, number][], m: number) =>
@@ -118,7 +122,7 @@ export default function TrackMap({
             const p = clamp(lap, m);
             return <circle key={k} cx={p[0]} cy={-p[1]} r={fs / 4} fill="var(--foreground)" stroke="var(--background)" strokeWidth={fs / 10} />;
           })}
-          <Pill at={clamp(reference, (sel.core[0] + sel.core[1]) / 2)} fs={fs} color={lossColor(sel.lost)}>
+          <Pill at={clamp(reference, (sel.core[0] + sel.core[1]) / 2)} centre={view.centre} fs={fs} color={lossColor(sel.lost)}>
             {`${sel.name}  ${gap(sel.lost)} s`}
           </Pill>
         </g>
@@ -156,14 +160,31 @@ export default function TrackMap({
   );
 }
 
-/** A label on a rounded plate, lifted above the point it names. */
-function Pill({ at, fs, color, children }: { at: [number, number]; fs: number; color: string; children: string }) {
+/** A label on a rounded plate, set off from the point it names towards the middle of the map,
+ *  so a section on the edge doesn't push its label out of view. */
+function Pill({
+  at,
+  centre,
+  fs,
+  color,
+  children,
+}: {
+  at: [number, number];
+  centre: [number, number];
+  fs: number;
+  color: string;
+  children: string;
+}) {
   const w = children.length * fs * 0.58 + fs * 1.2;
   const h = fs * 1.7;
-  const [x, y] = [at[0], -at[1] - fs * 2.2];
+  const [px, py] = [at[0], -at[1]];
+  const [dx, dy] = [centre[0] - px, centre[1] - py];
+  const len = Math.hypot(dx, dy) || 1;
+  const reach = fs * 3;
+  const [x, y] = [px + (dx / len) * reach, py + (dy / len) * reach];
   return (
     <g>
-      <line x1={at[0]} y1={-at[1]} x2={x} y2={y + h / 2} stroke="var(--foreground)" strokeWidth={fs / 12} />
+      <line x1={px} y1={py} x2={x} y2={y} stroke="var(--foreground)" strokeWidth={fs / 12} />
       <rect x={x - w / 2} y={y - h / 2} width={w} height={h} rx={h / 2} fill="var(--popover)" stroke={color} strokeWidth={fs / 10} />
       <text x={x} y={y} fontSize={fs} textAnchor="middle" dominantBaseline="central" fill="var(--foreground)" className="font-semibold">
         {children}
