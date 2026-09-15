@@ -4,45 +4,16 @@
  * Everything else in the control plane treats a paint as a digest — which is right for
  * moving bytes between riders and leaves nobody able to answer the two questions worth
  * asking about it: who has published a look, and what does what we are shipping to a grid
- * actually look like. Both are answered here, behind the same `ADMIN_KEY` as the usage and
- * diagnostics pages and for the same reason: rider names, GUIDs and Steam ids are on it.
- *
- * The pictures come from `pntthumb.ts`, which reads the `.pnt` in R2. Nothing on the page
- * depends on one appearing — a paint that is locked content, or whose blob was never
- * uploaded, still lists with everything else and shows a tile saying which.
+ * actually look like. The site's paint dashboard asks both through `webadmin.ts`, behind
+ * the Steam admin sign-in: rider names, GUIDs and Steam ids are in every answer.
  */
 
-import {
-  ago,
-  bytes,
-  count,
-  ctx,
-  errorPage,
-  esc,
-  href,
-  likeTerm,
-  MAX_COUNT,
-  PAGE_SIZE,
-  pager,
-  parsePage,
-  shell,
-  stamp,
-  wrap,
-  type Ctx,
-  type Paged,
-  type Params,
-  type SubTab,
-} from "./adminui";
-import { adminAllowed } from "./usage";
-import { imageTable, paintThumb, pickImage, type PntImage } from "./pntthumb";
+import { likeTerm, MAX_COUNT, PAGE_SIZE, parsePage, type Paged } from "./adminui";
+import { imageTable, pickImage, type PntImage } from "./pntthumb";
 import { PRESENCE_TTL_MS } from "./validate";
-
-const ROOT = "/admin/paints";
 
 /** How many riders one paint's page lists. Past this it is a popular paint, not a list. */
 const MAX_WEARERS = 200;
-
-type Tab = "riders" | "paints";
 
 // ---------------------------------------------------------------------------
 // Rows
@@ -200,37 +171,9 @@ export function orderBy(columns: Record<string, Column>, order: Order, tiebreak:
 }
 
 // ---------------------------------------------------------------------------
-// Routes
+// What each view reads
 // ---------------------------------------------------------------------------
 
-/** The gate every view goes through, so no handler can forget it. */
-function gate(request: Request, url: URL, env: Env): Response | null {
-  const allowed = adminAllowed(request, url, env);
-  if (allowed === "unset") {
-    return errorPage("Paint sync", 503, "No admin key is configured on this deployment.");
-  }
-  if (allowed === "denied") return errorPage("Paint sync", 401, "Unauthorized.");
-  return null;
-}
-
-function html(body: string, status = 200): Response {
-  return new Response(body, {
-    status,
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-      // Named people, behind a key: never cached by anything in between.
-      "cache-control": "no-store",
-    },
-  });
-}
-
-/** `GET /admin/paints` — who has published a look. */
-/**
- * What each view reads, apart from how it is drawn.
- *
- * The site draws these too (`webadmin.ts`), and the two must not drift into asking slightly
- * different questions: a gather function each is what keeps one query behind both doors.
- */
 export interface RidersData {
   totals: Totals;
   found: Paged<RiderRow>;
@@ -244,15 +187,6 @@ export async function ridersData(env: Env, url: URL): Promise<RidersData> {
   const page = parsePage(url.searchParams.get("page"));
   const [sums, found] = await Promise.all([totals(env), searchRiders(env, q, order, page)]);
   return { totals: sums, found, q, order };
-}
-
-export async function paintRiders(request: Request, url: URL, env: Env): Promise<Response> {
-  const denied = gate(request, url, env);
-  if (denied) return denied;
-
-  const c = ctx(url);
-  const d = await ridersData(env, url);
-  return html(view("Paint sync", "riders", ridersView(d.totals, d.found, d.q, d.order, c), c));
 }
 
 export interface OneRiderData {
@@ -296,18 +230,6 @@ export async function oneRiderData(env: Env, id: string): Promise<OneRiderData |
   return { account, slots: slots.results ?? [], published: published.results ?? [], presence };
 }
 
-/** `GET /admin/paints/rider?id=…` — one rider's bikes, slot by slot. */
-export async function paintRider(request: Request, url: URL, env: Env): Promise<Response> {
-  const denied = gate(request, url, env);
-  if (denied) return denied;
-
-  const c = ctx(url);
-  const d = await oneRiderData(env, url.searchParams.get("id") ?? "");
-  if (!d) return html(view("Paint sync", "riders", empty("No such account."), c), 404);
-  const when = new Map(d.published.map((r) => [r.bike_id, r.updated_at]));
-  return html(view(d.account.rider_name, "riders", riderView(d.account, d.slots, when, d.presence, c), c));
-}
-
 export interface FilesData {
   totals: Totals;
   found: Paged<PaintRow>;
@@ -321,16 +243,6 @@ export async function filesData(env: Env, url: URL): Promise<FilesData> {
   const page = parsePage(url.searchParams.get("page"));
   const [sums, found] = await Promise.all([totals(env), searchPaints(env, q, order, page)]);
   return { totals: sums, found, q, order };
-}
-
-/** `GET /admin/paints/files` — every paint we hold, once per digest. */
-export async function paintFiles(request: Request, url: URL, env: Env): Promise<Response> {
-  const denied = gate(request, url, env);
-  if (denied) return denied;
-
-  const c = ctx(url);
-  const d = await filesData(env, url);
-  return html(view("Paints", "paints", paintsView(d.totals, d.found, d.q, d.order, c), c));
 }
 
 export interface Wearer {
@@ -379,29 +291,6 @@ export async function onePaintData(env: Env, sha: string): Promise<OnePaintData 
   const rows = wearers.results ?? [];
   if (rows.length === 0 && !stored) return null;
   return { sha, wearers: rows, stored: stored?.size ?? null, sheets };
-}
-
-/** `GET /admin/paints/paint?sha=…` — one paint: its sheets, and who is wearing it. */
-export async function paintOne(request: Request, url: URL, env: Env): Promise<Response> {
-  const denied = gate(request, url, env);
-  if (denied) return denied;
-
-  const c = ctx(url);
-  const sha = (url.searchParams.get("sha") ?? "").toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(sha)) {
-    return html(view("Paints", "paints", empty("That is not a paint digest."), c), 400);
-  }
-  const d = await onePaintData(env, sha);
-  if (!d) return html(view("Paints", "paints", empty("Nothing here has that digest."), c), 404);
-  const title = d.wearers[0]?.file_name ?? sha.slice(0, 12);
-  return html(view(title, "paints", oneView(sha, d.wearers, d.stored, d.sheets, c), c));
-}
-
-/** `GET /admin/paints/thumb?sha=…` — the picture itself. */
-export async function paintThumbnail(request: Request, url: URL, env: Env): Promise<Response> {
-  const denied = gate(request, url, env);
-  if (denied) return denied;
-  return paintThumb((url.searchParams.get("sha") ?? "").toLowerCase(), env);
 }
 
 // ---------------------------------------------------------------------------
@@ -548,382 +437,4 @@ async function sheetsOf(
     // Sealed, absent or unreadable — the thumbnail tile already says which.
     return null;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Views
-// ---------------------------------------------------------------------------
-
-const TABS: SubTab[] = [
-  { id: "riders", text: "Riders", path: ROOT },
-  { id: "paints", text: "Paints", path: `${ROOT}/files` },
-];
-
-/** This section's views, in the chrome every admin page shares. */
-function view(title: string, tab: Tab, body: string, c: Ctx): string {
-  return shell({ title, section: "paints", tabs: TABS, current: tab, body, c });
-}
-
-function empty(message: string): string {
-  return `<section class="panel"><p class="muted">${esc(message)}</p></section>`;
-}
-
-function tile(label: string, value: string, hint: string): string {
-  return `<div class="tile"><div class="n">${esc(value)}</div><div class="l">${esc(label)}</div>
-  <div class="h">${esc(hint)}</div></div>`;
-}
-
-function tiles(s: Totals): string {
-  return `<section class="tiles">
-  ${tile("Riders publishing", s.riders.toLocaleString("en-GB"), "accounts with a loadout")}
-  ${tile("Published today", s.today.toLocaleString("en-GB"), "in the last 24 hours")}
-  ${tile("On a server", s.present.toLocaleString("en-GB"), "reported in the last 10 minutes")}
-  ${tile("Paints", s.paints.toLocaleString("en-GB"), "distinct files, de-duplicated")}
-  ${tile("Equipped slots", s.slots.toLocaleString("en-GB"), "rider × bike × slot")}
-  ${tile("Stored", bytes(s.stored), "one copy per digest")}
-</section>`;
-}
-
-/** The picture, linking to the paint it belongs to. */
-export function thumb(sha: string, name: string, c: Ctx, big = false): string {
-  return `<a class="thumblink" href="${esc(href(`${ROOT}/paint`, { sha }, c.key))}"
-  ><img class="thumb${big ? " big" : ""}" loading="lazy" decoding="async"
-    src="${esc(href(`${ROOT}/thumb`, { sha }, c.key))}" alt="${esc(name)}"></a>`;
-}
-
-/**
- * A header row whose columns are links.
- *
- * Clicking the column already being read turns it around; clicking a new one starts it the
- * way that column is worth reading. `page` is dropped rather than carried: page 7 of a
- * different ordering is a different set of rows, and landing there reads as a bug.
- */
-function sortable(
-  path: string,
-  params: Params,
-  columns: Record<string, Column>,
-  order: Order,
-  c: Ctx,
-  lead = "",
-  trail = "",
-): string {
-  const heads = Object.entries(columns)
-    .map(([key, col]) => {
-      const on = key === order.sort;
-      const dir: Dir = on ? (order.dir === "asc" ? "desc" : "asc") : col.first;
-      const arrow = on ? `<span class="dir">${order.dir === "asc" ? "\u2191" : "\u2193"}</span>` : "";
-      const to = href(path, { ...params, sort: key, dir, page: undefined }, c.key);
-      return `<th class="${col.num ? "num" : ""}${on ? " on" : ""}"><a href="${esc(to)}"
-    title="Sort by ${esc(col.label)}">${esc(col.label)}${arrow}</a></th>`;
-    })
-    .join("");
-  return `<thead><tr>${lead}${heads}${trail}</tr></thead>`;
-}
-
-/** The current ordering, as hidden fields, so searching does not reset the table. */
-function keep(order: Order): string {
-  return `<input type="hidden" name="sort" value="${esc(order.sort)}">
-  <input type="hidden" name="dir" value="${esc(order.dir)}">`;
-}
-
-function searchBox(path: string, q: string, extra: string, c: Ctx, hint: string): string {
-  return `<form class="search" method="get" action="${esc(path)}">
-  ${c.key ? `<input type="hidden" name="key" value="${esc(c.key)}">` : ""}
-  <input name="q" value="${esc(q)}" placeholder="${esc(hint)}" autocomplete="off">
-  ${extra}
-  <button type="submit">Search</button>
-  ${q ? `<a class="clear" href="${esc(href(path, {}, c.key))}">clear</a>` : ""}
-</form>`;
-}
-
-// ---------------------------------------------------------------------------
-// Riders
-// ---------------------------------------------------------------------------
-
-function ridersView(
-  s: Totals,
-  found: Paged<RiderRow>,
-  q: string,
-  order: Order,
-  c: Ctx,
-): string {
-  const params: Params = { q, sort: order.sort, dir: order.dir };
-  return `${tiles(s)}
-<section class="panel">
-  <h2>Riders</h2>
-  ${searchBox(ROOT, q, keep(order), c, "rider name, GUID or Steam id")}
-  ${count(found, "rider")}
-  ${
-    found.rows.length
-      ? wrap(riderTable(found.rows, params, order, c))
-      : `<p class="muted">Nobody matches.</p>`
-  }
-  ${pager(ROOT, params, found, c)}
-</section>`;
-}
-
-function riderTable(rows: RiderRow[], params: Params, order: Order, c: Ctx): string {
-  return `<table>
-${sortable(ROOT, params, RIDER_COLUMNS, order, c)}
-<tbody>
-${rows
-  .map(
-    (r) => `<tr>
-  <td><a href="${esc(href(`${ROOT}/rider`, { id: r.id }, c.key))}">${esc(r.rider_name)}</a>
-    ${r.kind === "device" ? ` <span class="tag">device</span>` : ""}</td>
-  <td class="mono">${r.guid ? esc(r.guid) : `<span class="muted">—</span>`}</td>
-  <td class="mono">${r.steam_id ? esc(r.steam_id) : `<span class="muted">—</span>`}</td>
-  <td class="num">${r.bikes}</td>
-  <td class="num">${r.slots}</td>
-  <td class="num">${r.files}</td>
-  <td class="num">${esc(bytes(r.bytes))}</td>
-  <td title="${esc(stamp(r.published_at ?? 0))}">${esc(ago(r.published_at ?? 0))}</td>
-  <td>${r.at_server ? `<span class="dot ok"></span> ${esc(r.at_server)}` : `<span class="muted">—</span>`}</td>
-  <td>${reported(r.state, r.reported_at, r.id, c)}</td>
-</tr>`,
-  )
-  .join("")}
-</tbody></table>`;
-}
-
-/**
- * What diagnostics says about the same account, as a link into it.
- *
- * A rider who publishes paints and never reports is the ordinary case — the two features are
- * independent and most people run one of them — so the absence is drawn as an em dash rather
- * than as a state of its own.
- */
-function reported(state: string | null, at: number | null, id: string, c: Ctx): string {
-  if (!state) return `<span class="muted">—</span>`;
-  const tone = state === "alert" ? "alert" : state === "warn" ? "warn" : state === "ok" ? "ok" : "";
-  const to = href("/admin/diagnostics/rider", { id }, c.key);
-  return `<a href="${esc(to)}" title="${esc(stamp(at ?? 0))}"><span class="pill ${tone}">${esc(
-    state,
-  )}</span></a> <span class="muted">${esc(ago(at ?? 0))}</span>`;
-}
-
-// ---------------------------------------------------------------------------
-// One rider
-// ---------------------------------------------------------------------------
-
-function riderView(
-  account: {
-    id: string;
-    rider_name: string;
-    guid: string | null;
-    steam_id: string | null;
-    kind: string;
-    created_at: number;
-  },
-  slots: SlotRow[],
-  when: Map<string, number>,
-  presence: { server_id: string; updated_at: number } | null,
-  c: Ctx,
-): string {
-  const live = presence && presence.updated_at > Date.now() - PRESENCE_TTL_MS;
-  // Both dashboards key on the same account id, so one rider is one link away from what
-  // their game has loaded — the two halves of the same person, previously unconnected.
-  const diagnostics = href("/admin/diagnostics/rider", { id: account.id }, c.key);
-  const facts = `<section class="panel">
-  <div class="who"><span class="name">${esc(account.rider_name)}</span>
-    <span class="tag">${esc(account.kind)}</span>
-    ${live ? `<span class="pill ok">on ${esc(presence!.server_id)}</span>` : ""}
-    <a class="aside" href="${esc(diagnostics)}">Diagnostics for this rider →</a></div>
-  <dl class="facts">
-    ${fact("GUID", account.guid ?? "—", true)}
-    ${fact("Steam id", account.steam_id ?? "—", true)}
-    ${fact("Account id", account.id, true)}
-    ${fact("Enrolled", stamp(account.created_at))}
-    ${fact("Bikes published", String(when.size))}
-    ${fact("Last publish", when.size ? ago(Math.max(...when.values())) : "—")}
-    ${fact(
-      "Last seen",
-      presence ? `${ago(presence.updated_at)} on ${presence.server_id}` : "never reported",
-    )}
-  </dl>
-</section>`;
-
-  if (slots.length === 0) return `${facts}${empty("This account has no paints published.")}`;
-
-  const byBike = new Map<string, SlotRow[]>();
-  for (const row of slots) {
-    const at = byBike.get(row.bike_id);
-    if (at) at.push(row);
-    else byBike.set(row.bike_id, [row]);
-  }
-
-  const bikes = [...byBike.entries()]
-    .map(
-      ([bike, rows]) => `<section class="panel">
-  <h2>${esc(bike || "(no bike named)")}
-    <span class="more muted">${rows.length} slot${rows.length === 1 ? "" : "s"} ·
-      published ${esc(ago(when.get(bike) ?? 0))}</span></h2>
-  ${wrap(slotTable(rows, c))}
-</section>`,
-    )
-    .join("");
-
-  return `${facts}${bikes}`;
-}
-
-function fact(label: string, value: string, mono = false): string {
-  return `<dt>${esc(label)}</dt><dd${mono ? ' class="mono"' : ""}>${esc(value)}</dd>`;
-}
-
-function slotTable(rows: SlotRow[], c: Ctx): string {
-  return `<table><thead><tr>
-  <th></th><th>Slot</th><th>File</th><th class="num">Size</th><th>Installs at</th><th>Digest</th>
-</tr></thead><tbody>
-${rows
-  .map(
-    (r) => `<tr>
-  <td>${thumb(r.sha256, r.file_name, c)}</td>
-  <td>${esc(r.slot)}</td>
-  <td>${esc(r.file_name)}</td>
-  <td class="num">${esc(bytes(r.size))}</td>
-  <td class="mono">${esc(r.rel_dest)}</td>
-  <td class="mono"><a href="${esc(href(`${ROOT}/paint`, { sha: r.sha256 }, c.key))}">${esc(
-    r.sha256.slice(0, 12),
-  )}</a></td>
-</tr>`,
-  )
-  .join("")}
-</tbody></table>`;
-}
-
-// ---------------------------------------------------------------------------
-// Paints
-// ---------------------------------------------------------------------------
-
-function paintsView(
-  s: Totals,
-  found: Paged<PaintRow>,
-  q: string,
-  order: Order,
-  c: Ctx,
-): string {
-  const path = `${ROOT}/files`;
-  const params: Params = { q, sort: order.sort, dir: order.dir };
-
-  return `${tiles(s)}
-<section class="panel">
-  <h2>Paints</h2>
-  ${searchBox(path, q, keep(order), c, "file name or digest")}
-  ${count(found, "paint")}
-  ${
-    found.rows.length
-      ? wrap(paintTable(found.rows, params, order, c))
-      : `<p class="muted">Nothing matches.</p>`
-  }
-  ${pager(path, params, found, c)}
-</section>`;
-}
-
-function paintTable(rows: PaintRow[], params: Params, order: Order, c: Ctx): string {
-  // The picture leads and `Blob` trails, neither of them a column the database can order by:
-  // one is the paint itself, and the other is what the bucket answered about this page's
-  // rows after the query had already run.
-  return `<table>
-${sortable(`${ROOT}/files`, params, PAINT_COLUMNS, order, c, "<th></th>", "<th>Blob</th>")}
-<tbody>
-${rows
-  .map(
-    (r) => `<tr>
-  <td>${thumb(r.sha256, r.file_name, c)}</td>
-  <td><a href="${esc(href(`${ROOT}/paint`, { sha: r.sha256 }, c.key))}">${esc(r.file_name)}</a>
-    ${r.names > 1 ? ` <span class="tag">${r.names} names</span>` : ""}</td>
-  <td class="muted">${esc((r.slots ?? "").split(",").join(", "))}</td>
-  <td class="num">${r.riders}</td>
-  <td class="num">${r.uses}</td>
-  <td class="num">${esc(bytes(r.size))}</td>
-  <td class="mono">${esc(r.sha256.slice(0, 12))}</td>
-  <td>${
-    r.stored === null
-      ? `<span class="pill alert">missing</span>`
-      : r.stored === r.size
-        ? `<span class="dot ok"></span>`
-        : `<span class="pill warn">${esc(bytes(r.stored))}</span>`
-  }</td>
-</tr>`,
-  )
-  .join("")}
-</tbody></table>`;
-}
-
-// ---------------------------------------------------------------------------
-// One paint
-// ---------------------------------------------------------------------------
-
-function oneView(
-  sha: string,
-  wearers: {
-    id: string;
-    rider_name: string;
-    guid: string | null;
-    bike_id: string;
-    slot: string;
-    file_name: string;
-    size: number;
-    rel_dest: string;
-  }[],
-  stored: number | null,
-  sheets: { images: PntImage[]; chosen: number } | null,
-  c: Ctx,
-): string {
-  const names = [...new Set(wearers.map((w) => w.file_name))];
-  const riders = new Set(wearers.map((w) => w.id)).size;
-
-  const head = `<section class="panel">
-  <div class="who">${thumb(sha, names[0] ?? sha, c, true)}
-    <div>
-      <div class="name">${esc(names[0] ?? "unknown file")}</div>
-      <div class="muted mono">${esc(sha)}</div>
-    </div></div>
-  <dl class="facts">
-    ${fact("Stored", stored === null ? "not in the bucket" : bytes(stored))}
-    ${fact("Riders", String(riders))}
-    ${fact("Equipped", `${wearers.length} slot${wearers.length === 1 ? "" : "s"}`)}
-    ${fact("Names in use", names.length > 1 ? names.join(", ") : (names[0] ?? "—"))}
-    ${fact("Sheets", sheets ? String(sheets.images.length) : "unreadable — sealed or absent")}
-  </dl>
-</section>`;
-
-  const table = sheets
-    ? `<section class="panel">
-  <h2>Sheets <span class="more muted">the largest is the one drawn</span></h2>
-  ${wrap(`<table><thead><tr><th>Texture</th><th class="num">Size</th><th></th></tr></thead><tbody>
-  ${sheets.images
-    .map(
-      (i, at) => `<tr><td class="mono">${esc(i.name)}</td>
-    <td class="num">${i.width}×${i.height}</td>
-    <td>${at === sheets.chosen ? `<span class="tag">drawn</span>` : ""}</td></tr>`,
-    )
-    .join("")}
-  </tbody></table>`)}
-</section>`
-    : "";
-
-  const worn = wearers.length
-    ? `<section class="panel">
-  <h2>Worn by${wearers.length >= MAX_WEARERS ? ` <span class="more muted">first ${MAX_WEARERS}</span>` : ""}</h2>
-  ${wrap(`<table><thead><tr>
-    <th>Rider</th><th>GUID</th><th>Bike</th><th>Slot</th><th>File</th><th>Installs at</th>
-  </tr></thead><tbody>
-  ${wearers
-    .map(
-      (w) => `<tr>
-    <td><a href="${esc(href(`${ROOT}/rider`, { id: w.id }, c.key))}">${esc(w.rider_name)}</a></td>
-    <td class="mono">${w.guid ? esc(w.guid) : `<span class="muted">—</span>`}</td>
-    <td>${esc(w.bike_id || "—")}</td>
-    <td>${esc(w.slot)}</td>
-    <td>${esc(w.file_name)}</td>
-    <td class="mono">${esc(w.rel_dest)}</td>
-  </tr>`,
-    )
-    .join("")}
-  </tbody></table>`)}
-</section>`
-    : empty("Nobody has this paint equipped — the blob is stored but unreferenced.");
-
-  return `${head}${table}${worn}`;
 }

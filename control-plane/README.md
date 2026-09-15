@@ -42,16 +42,11 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/bmac/webhook` | HMAC signature | Buy Me a Coffee announcing a supporter. Posted on to Discord. |
 | POST | `/v1/usage` | — | Anonymous usage counters from an install. Unauthenticated because most people who run the app never claim an invite; bounded by body size, event count and a per-address daily cap. |
 | GET | `/v1/usage/stats` | `ADMIN_KEY` | The same numbers as JSON, for anything that scripts them |
-| GET | `/admin` | `ADMIN_KEY` | The dashboard. One URL, four tabs — usage, diagnostics, paint sync, plugins — and a search box on every page of it |
-| GET | `/admin/search` | `ADMIN_KEY` | One query asked of all three at once: riders, mod files, paints |
-| GET | `/admin/usage` | `ADMIN_KEY` | The usage tab on its own. What `/admin` opens on |
+| GET/POST | `/v1/web/admin/*` | Steam sign-in + `MXB_ADMIN_STEAM_IDS` | The dashboards at mxbsecure.com/admin — usage, diagnostics, paint sync, plugin keys |
 | GET | `/v1/plugins` | — | The paid-plugin catalogue. Public: what is on offer is not a secret. |
 | GET | `/v1/me/plugins` | bearer | What this account holds, each with a freshly signed license |
 | POST | `/v1/plugins/redeem` | bearer | Trade a key for months on a license |
 | GET | `/v1/plugins/:id/bundle` | bearer + license | The build itself, streamed rather than redirected to |
-| GET | `/admin/plugins` | `ADMIN_KEY` | Mint keys, and every code with what became of it |
-| GET | `/admin/plugins/licenses` | `ADMIN_KEY` | Who can run what, and the button that ends it |
-| POST | `/admin/plugins` | `ADMIN_KEY` | Mint, grant, revoke, restore |
 
 Enrollment by invite code stands in for Steam sign-in until there's an API key. `accounts`
 already carries a nullable `steam_id`, so adding Steam is a backfill rather than a rewrite
@@ -111,7 +106,7 @@ A paid plugin is bought in months. A **key** is a one-shot code that adds its mo
 account's **license**, and the app runs the plugin on a short-lived signed statement it can
 check with no network — so a license is honoured for up to seven days with nobody to ask.
 
-Both halves are revocable from `/admin/plugins`, which is also where keys are minted:
+Both halves are revocable from mxbsecure.com/admin/plugins, which is also where keys are minted:
 
 - **Revoking a key** withdraws a code that has not been spent. Redeeming it then answers
   "revoked" rather than "already used", because those are different next steps for whoever
@@ -146,14 +141,12 @@ row per install per event per day. `install_id` stays in the events key so a fea
 opens the track studio" and "one person lives in it" are different answers. Rows older than
 400 days are swept on the same cron as the idle servers.
 
-```sh
-npx wrangler secret put ADMIN_KEY   # without it both admin routes answer 503, not 401
-```
+Read them at mxbsecure.com/admin, signed in with a Steam account listed in
+`MXB_ADMIN_STEAM_IDS` (`wrangler.jsonc`). Scripts use `GET /v1/usage/stats` with `ADMIN_KEY`:
 
-Then `https://<worker>/admin?key=<ADMIN_KEY>` — the one URL worth bookmarking. It opens on
-usage (`&days=7|30|90|365`), and the tabs across the top reach the diagnostics and paint-sync
-dashboards without a second browser tab. The search box in the header answers across all
-three: a rider name, a GUID, a Steam id, a file name, a signer or a digest.
+```sh
+bunx wrangler secret put ADMIN_KEY   # without it /v1/usage/stats answers 503, not 401
+```
 
 The app's side is `src-tauri/src/usage.rs`. It is off in debug builds unless
 `MXB_ANALYTICS_DEV=1`, off for a run with `MXB_NO_ANALYTICS=1`, and off for good from the

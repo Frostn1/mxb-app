@@ -1,12 +1,9 @@
 /**
  * The admin dashboards, read from mxbsecure.com by the person who runs the deployment.
  *
- * `ADMIN_KEY` opens every `/admin` page on this host and will keep doing so — it is the right
- * credential for a script. It is the wrong one for a person: `href` in `adminui.ts` puts it in
- * every link on the page, which means it ends up in a browser history, a screenshot and a
- * support thread, and nothing about a URL says which of those it has already reached.
- *
- * The site's dashboards gate on the Steam sign-in instead. `MXB_ADMIN_STEAM_IDS` names the
+ * `ADMIN_KEY` is the credential for a script, and the wrong one for a person: a key in a
+ * dashboard URL ends up in a browser history, a screenshot and a support thread. So the
+ * dashboards live only on the site, and gate on the Steam sign-in instead. `MXB_ADMIN_STEAM_IDS` names the
  * accounts; the session cookie proves one. A list in config rather than a column on `accounts`
  * is deliberate — this is the credential that reads everybody's numbers, so granting it should
  * be a deploy that leaves a diff, not an UPDATE that leaves none.
@@ -59,10 +56,10 @@ export function isWebAdmin(steamId: string, env: Env): boolean {
 }
 
 /**
- * `GET /v1/web/admin/usage?days=N` — the numbers the `/admin/usage` page draws, as JSON.
+ * Every `/v1/web/admin/*` route the site's dashboards read and write.
  *
- * The same `collectStats` the server-rendered page calls, so the two can never disagree about
- * what a figure means: this route is a second door onto one query, not a second query.
+ * Usage is the same `collectStats` that `/v1/usage/stats` returns, so a script and the page
+ * can never disagree about what a figure means.
  */
 export async function webAdminRoutes(request: Request, url: URL, env: Env, origin: string | null): Promise<Response> {
   const session = await webSession(request, env);
@@ -71,7 +68,7 @@ export async function webAdminRoutes(request: Request, url: URL, env: Env, origi
 
   const said = (status: number, body: unknown) => {
     const res = cors(json(status, body), origin);
-    // Numbers about people: never held by anything in between, as on the rendered pages.
+    // Numbers about people: never held by anything in between.
     res.headers.set("Cache-Control", "no-store");
     return res;
   };

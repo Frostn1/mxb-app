@@ -25,7 +25,6 @@ import {
   runInstance,
   terminateInstance,
 } from "./aws";
-import { adminSearch } from "./adminsearch";
 import { adminAssets, isAssetsPath } from "./assets";
 import { isWebPath, landingSite, webRoutes } from "./web";
 import { steamResult, redirectPage } from "./page";
@@ -33,24 +32,7 @@ import { rememberLink, steamIdFor } from "./steamlink";
 import { bmacWebhook } from "./bmac";
 import { pruneReports, putReport } from "./diagnostics";
 import { stateRegions } from "./stateinvariants";
-import {
-  diagnosticsDashboard,
-  diagnosticsFile,
-  diagnosticsFiles,
-  diagnosticsRider,
-  diagnosticsRiders,
-  diagnosticsRules,
-  diagnosticsRulesPage,
-} from "./diagnosticspage";
-import {
-  paintFiles,
-  paintOne,
-  paintRider,
-  paintRiders,
-  paintThumbnail,
-} from "./paintspage";
 import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
-import { pluginKeysPage, pluginLicensesPage, pluginsAction } from "./pluginspage";
 import { deleteShare, publishShare, readShare, updateShare } from "./liveshare";
 import { generateTrack } from "./trackgen";
 import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
@@ -77,7 +59,6 @@ import {
 } from "./validate";
 import { claimDeviceAccount, iceServers, voiceRoom } from "./voice";
 import { adminAllowed, pruneUsage, reportUsage, usageStats } from "./usage";
-import { usageDashboard } from "./usagepage";
 import { VoiceRoom } from "./voiceroom";
 
 interface Account {
@@ -218,68 +199,12 @@ async function route(request: Request, env: Env): Promise<Response> {
   // token must never be enough to read what everybody else is doing.
   if (method === "GET" && path === "/v1/usage/stats") return usageStats(request, url, env);
 
-  // The three dashboards are one tool, so they have one front door: `/admin` is the URL to
-  // bookmark, and every page it leads to carries the same tabs and the same search box. It
-  // opens on usage — the widest of the three — rather than redirecting, so what stays in the
-  // address bar is the URL that was typed.
-  if (method === "GET" && (path === "/admin" || path === "/admin/usage")) {
-    return usageDashboard(request, url, env);
-  }
-
-  // One question asked of all three at once. Same key, same gate, no new facts — it runs the
-  // searches the section pages already run and links into them.
-  if (method === "GET" && path === "/admin/search") return adminSearch(request, url, env);
+  // The dashboards live on mxbsecure.com/admin, behind Steam sign-in (`webadmin.ts`).
 
   // Rotate the master key: re-wrap every stored content key to the current master-key version.
   // No content key is exposed — each is unwrapped and re-wrapped inside the Worker. Behind
   // ADMIN_KEY, above the account gate, like the rest of /admin.
   if (method === "POST" && path === "/admin/keys/rewrap") return rewrapKeys(request, url, env);
-
-  // What the app sees loaded inside people's running games, and the rules that say how to
-  // read it. Behind `ADMIN_KEY` on the same terms as the usage page, and above the account
-  // gate for the same reason: the key belongs to whoever runs the deployment, and no
-  // player's token should ever be enough to read this about anybody else.
-  if (method === "GET" && path === "/admin/diagnostics") {
-    return diagnosticsDashboard(request, url, env);
-  }
-  if (method === "GET" && path === "/admin/diagnostics/riders") {
-    return diagnosticsRiders(request, url, env);
-  }
-  if (method === "GET" && path === "/admin/diagnostics/rider") {
-    return diagnosticsRider(request, url, env);
-  }
-  if (method === "GET" && path === "/admin/diagnostics/files") {
-    return diagnosticsFiles(request, url, env);
-  }
-  if (method === "GET" && path === "/admin/diagnostics/file") {
-    return diagnosticsFile(request, url, env);
-  }
-  if (method === "GET" && path === "/admin/diagnostics/rules") {
-    return diagnosticsRulesPage(request, url, env);
-  }
-  if (method === "POST" && path === "/admin/diagnostics/rules") {
-    return diagnosticsRules(request, url, env);
-  }
-
-  // Who has published a look, and what we are shipping to a grid. Behind `ADMIN_KEY` and
-  // above the account gate on exactly the same terms as the two pages before it: it names
-  // riders, their GUIDs and their Steam ids, and no player's token should be enough to read
-  // any of that about anybody else.
-  if (method === "GET" && path === "/admin/paints") return paintRiders(request, url, env);
-  if (method === "GET" && path === "/admin/paints/rider") return paintRider(request, url, env);
-  if (method === "GET" && path === "/admin/paints/files") return paintFiles(request, url, env);
-  if (method === "GET" && path === "/admin/paints/paint") return paintOne(request, url, env);
-  if (method === "GET" && path === "/admin/paints/thumb") return paintThumbnail(request, url, env);
-
-  // Minting and revoking plugin keys. Behind `ADMIN_KEY` with the rest of `/admin`, and above
-  // the account gate for a sharper reason than the pages before it: these routes hand out and
-  // take away paid access, and an account token is exactly the credential a person who wants
-  // free access already holds.
-  if (method === "GET" && path === "/admin/plugins") return pluginKeysPage(request, url, env);
-  if (method === "GET" && path === "/admin/plugins/licenses") {
-    return pluginLicensesPage(request, url, env);
-  }
-  if (method === "POST" && path === "/admin/plugins") return pluginsAction(request, url, env);
 
   // Secured assets and their grants, for mxbsecure.com. Same key, above the account gate for
   // the same reason as plugin keys; the only admin routes with CORS, since the site calls them
