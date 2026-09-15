@@ -111,6 +111,10 @@ mod th {
     /// How far a session may move them, and how many landings it needs to move the landing one.
     pub const SCALE: (f32, f32) = (0.7, 1.5);
     pub const SCALE_LANDINGS: usize = 8;
+    /// Sitting this much more (or less) of a section than the fast lap is worth a word.
+    pub const STANCE_GAP: f32 = 0.3;
+    /// A lap needs its stance known over this share of the section to be judged.
+    pub const STANCE_KNOWN: f32 = 0.6;
     /// Turning less than this share of what the lean would give: the front is sliding.
     pub const PUSH: f32 = 0.75;
     pub const SOLO_PUSH: f32 = 0.65;
@@ -192,6 +196,8 @@ pub struct Point {
     pub off: [bool; 2],
     /// The ground under the rear wheel as the recorder gives it, 0 in the air; see `soil`.
     pub ground: u8,
+    /// Sitting or standing, `telemetry::stance`.
+    pub stance: u8,
     /// Share of the travel in use, 0 fully extended to 1 bottomed; see `Trace::fill_travel`.
     pub used: [f32; 2],
     /// Acceleration in G, in the chassis frame: sideways, up (1 standing still), forward.
@@ -240,6 +246,7 @@ fn point(s: &Sample) -> Point {
         susp: s.susp,
         off: [s.wheel_material[0] == 0, s.wheel_material[1] == 0],
         ground: s.wheel_material[1].clamp(0, 255) as u8,
+        stance: s.stance,
         used: [0.0; 2],
         acc: s.acc,
         turn: s.yaw_rate / s.roll.to_radians().cos().max(0.3),
@@ -275,6 +282,7 @@ fn lerp(a: &Point, b: &Point, f: f32) -> Point {
         susp: [m(a.susp[0], b.susp[0]), m(a.susp[1], b.susp[1])],
         off: near.off,
         ground: near.ground,
+        stance: near.stance,
         used: [0.0; 2],
         acc: [m(a.acc[0], b.acc[0]), m(a.acc[1], b.acc[1]), m(a.acc[2], b.acc[2])],
         turn: m(a.turn, b.turn),
@@ -816,6 +824,7 @@ fn theme(skill: &str) -> &'static str {
         | "bottom_landing" | "air_throttle" | "rhythm_count" | "land_hard" => "Jumps",
         "whoops_speed" | "whoops_throttle" | "whoops_bucking" => "Whoops",
         "shift_earlier" | "full_gas" => "Straights",
+        "stance_sit" | "stance_stand" => "Body position",
         _ => "Other",
     }
 }
@@ -891,6 +900,7 @@ pub fn review(lap: &Trace, reference: &Trace, bike: Bike) -> Review {
             let (lap_time, ref_time) = (p.span(s.start, s.end), r.span(s.start, s.end));
             let lost = lap_time - ref_time;
             let mut c = Ctx { p, r, s: &s, bike, travel, out: Vec::new() };
+            stance(&mut c);
             match s.kind {
                 Kind::Corner => corner(&mut c),
                 Kind::Jump | Kind::Rhythm => jumps(&mut c),
@@ -1827,6 +1837,44 @@ fn alone(c: &mut Ctx) {
     }
 }
 
+/// The share of these metres on the ground spent sitting, or None when too little of it is known.
+fn seated(t: &Trace, range: std::ops::Range<usize>) -> Option<f32> {
+    use crate::telemetry::stance;
+    let ground: Vec<&Point> = t.pts.get(range)?.iter().filter(|q| !q.air).collect();
+    let known: Vec<bool> = ground.iter().filter(|q| q.stance != stance::UNKNOWN).map(|q| q.stance == stance::SIT).collect();
+    if ground.len() < 5 || (known.len() as f32) < ground.len() as f32 * th::STANCE_KNOWN {
+        return None;
+    }
+    Some(known.iter().filter(|&&s| s).count() as f32 / known.len() as f32)
+}
+
+/// Sitting and standing against the fast lap, where the recorder could tell: seated from
+/// turn-in through a corner, standing through whoops and rhythms.
+fn stance(c: &mut Ctx) {
+    let s = c.s;
+    let from = match s.kind {
+        Kind::Corner => s.core.0.max(s.start),
+        Kind::Whoops | Kind::Rhythm => s.start,
+        _ => return,
+    };
+    if s.end <= from {
+        return;
+    }
+    let (Some(p), Some(r)) = (seated(c.p, from..s.end + 1), seated(c.r, from..s.end + 1)) else { return };
+    let (name, pc, rc) = (s.name.clone(), p * 100.0, r * 100.0);
+    if s.kind == Kind::Corner && r - p > th::STANCE_GAP {
+        c.add("stance_sit", 0.4, from, "Sit down through the turn", format!(
+            "You sit for {pc:.0}% of {name} from turn-in, the fast lap {rc:.0}%. Sit on the front of the seat as \
+             you turn in: it weights the front tyre and frees your inside leg."
+        ));
+    } else if s.kind != Kind::Corner && p - r > th::STANCE_GAP {
+        c.add("stance_stand", 0.5, from, "Stand up through here", format!(
+            "You sit for {pc:.0}% of {name}, the fast lap {rc:.0}%. Stand with your weight back and let the bike \
+             move under you: your legs soak up the hits and the rear keeps driving."
+        ));
+    }
+}
+
 fn whoops(c: &mut Ctx) {
     let (p, r, s) = (c.p, c.r, c.s);
     let name = s.name.clone();
@@ -2084,6 +2132,22 @@ pub(crate) mod tests {
     };
     const BIKE: Bike =
         Bike { limiter: 13000.0, max_rpm: 14000.0, shift_rpm: 12500.0, travel: [0.3, 0.3], land_scale: 0.0, torque_scale: 0.0 };
+
+    #[test]
+    fn standing_where_the_fast_lap_sits_is_called_only_when_known() {
+        use crate::telemetry::stance;
+        let slow = Style { corner_v: 9.0, ..FAST };
+        let with = |st: &Style, s: u8| {
+            let mut t = lap(st);
+            t.pts.iter_mut().for_each(|q| q.stance = s);
+            t
+        };
+        let called = |rv: &Review| rv.sections.iter().any(|s| s.findings.iter().any(|f| f.skill == "stance_sit"));
+        assert!(called(&review(&with(&slow, stance::STAND), &with(&FAST, stance::SIT), BIKE)));
+        // Sitting like the fast lap, or no stance recorded: nothing to say.
+        assert!(!called(&review(&with(&slow, stance::SIT), &with(&FAST, stance::SIT), BIKE)));
+        assert!(!called(&review(&with(&slow, stance::UNKNOWN), &with(&FAST, stance::SIT), BIKE)));
+    }
 
     #[test]
     fn the_floors_follow_the_riders_own_session() {

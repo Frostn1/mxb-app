@@ -18,6 +18,18 @@ mod tag {
     pub const SAMPLE: u8 = 4;
     pub const LAP: u8 = 5;
     pub const END: u8 = 9;
+    /// How the rider's Sit control is bound and how sure the recorder is of it; then each
+    /// change of sitting or standing (FrostMod's `src/stance.h`).
+    pub const STANCE_BIND: u8 = 10;
+    pub const STANCE: u8 = 11;
+}
+
+/// Sitting or standing, as each sample carries it. Unknown in recordings from before the
+/// recorder read the Sit control, or when it couldn't.
+pub mod stance {
+    pub const UNKNOWN: u8 = 0;
+    pub const STAND: u8 = 1;
+    pub const SIT: u8 = 2;
 }
 
 /// `SPluginsBikeEvent_t`: who, on what, where.
@@ -118,6 +130,8 @@ pub struct Sample {
     /// kPa.
     pub brake_pressure: [f32; 2],
     pub steer_torque: f32,
+    /// See [`stance`]: the last change the recorder wrote before this sample.
+    pub stance: u8,
 }
 
 impl Sample {
@@ -144,6 +158,9 @@ pub struct Recording {
     pub laps: Vec<LapMark>,
     /// The stint ended cleanly. False when the game quit or crashed mid-stint.
     pub complete: bool,
+    /// How sure the recorder is of sitting and standing: 0 not read, 1 a guess (a toggle bind,
+    /// or auto-sit it couldn't rule out), 2 sure.
+    pub stance_confidence: u8,
 }
 
 /// One lap's samples, with `pos` unwrapped to run 0..1 across it.
@@ -259,6 +276,7 @@ fn sample(p: &[u8]) -> Sample {
         clutch: b.f(156),
         wheel_speed: [b.f(160), b.f(164)],
         wheel_material: [b.i(168), b.i(172)],
+        stance: stance::UNKNOWN,
         brake_pressure: [b.f(176), b.f(180)],
         steer_torque: b.f(184),
     }
@@ -274,6 +292,7 @@ pub fn parse(bytes: &[u8]) -> Result<Recording> {
         bail!("recording format {version} is newer than this app understands");
     }
     let mut rec = Recording::default();
+    let mut now = stance::UNKNOWN;
     let mut at = 8;
     while at + 8 <= bytes.len() {
         let t = bytes[at];
@@ -285,7 +304,16 @@ pub fn parse(bytes: &[u8]) -> Result<Recording> {
             tag::EVENT => rec.event = event(p),
             tag::SESSION => rec.session = session(p),
             tag::CENTRELINE => rec.centreline = centreline(p),
-            tag::SAMPLE => rec.samples.push(sample(p)),
+            tag::SAMPLE => rec.samples.push(Sample { stance: now, ..sample(p) }),
+            tag::STANCE_BIND => rec.stance_confidence = p.get(4).copied().unwrap_or(0),
+            // The recorder writes 0 standing, 1 sitting, 2 unknown.
+            tag::STANCE => {
+                now = match p.get(8) {
+                    Some(0) => stance::STAND,
+                    Some(1) => stance::SIT,
+                    _ => stance::UNKNOWN,
+                }
+            }
             tag::LAP => rec.laps.push(LapMark {
                 num: b.i(0),
                 invalid: b.i(4) != 0,
@@ -409,6 +437,21 @@ pub(crate) mod testfile {
         pub fn end(&mut self) -> &mut Self {
             self.record(tag::END, &[])
         }
+        /// A hold bind on key 18 (E), with the confidence given.
+        pub fn stance_bind(&mut self, confidence: u8) -> &mut Self {
+            let mut p = vec![0u8; 52];
+            p[..6].copy_from_slice(&[1, 1, 0, 0, confidence, 1]);
+            p[8..12].copy_from_slice(&18i32.to_le_bytes());
+            self.record(tag::STANCE_BIND, &p)
+        }
+        /// `state` as the recorder writes it: 0 standing, 1 sitting, 2 unknown.
+        pub fn stance(&mut self, t: f32, pos: f32, state: u8) -> &mut Self {
+            let mut p = Vec::with_capacity(12);
+            p.extend_from_slice(&t.to_le_bytes());
+            p.extend_from_slice(&pos.to_le_bytes());
+            p.extend_from_slice(&[state, 0, 0, 0]);
+            self.record(tag::STANCE, &p)
+        }
     }
 
     /// A `SPluginsBikeData_t` being filled in by offset.
@@ -449,6 +492,20 @@ mod tests {
         assert_eq!(s.wheel_material, [2, 0]);
         assert!(!s.airborne());
         assert!(!rec.complete);
+        assert_eq!((s.stance, rec.stance_confidence), (stance::UNKNOWN, 0));
+    }
+
+    #[test]
+    fn each_sample_carries_the_last_stance_the_recorder_wrote() {
+        let mut f = File::new();
+        f.event("indiana", 1650.0).stance_bind(2).stance(0.0, 0.0, 0);
+        f.sample(0.0, 0.0, |_| {}).sample(0.02, 0.001, |_| {});
+        f.stance(0.04, 0.002, 1).sample(0.04, 0.002, |_| {});
+        f.stance(0.06, 0.003, 2).sample(0.06, 0.003, |_| {});
+        let rec = parse(&f.0).unwrap();
+        assert_eq!(rec.stance_confidence, 2);
+        let got: Vec<u8> = rec.samples.iter().map(|s| s.stance).collect();
+        assert_eq!(got, [stance::STAND, stance::STAND, stance::SIT, stance::UNKNOWN]);
     }
 
     #[test]

@@ -13,6 +13,9 @@
   adds the fix to your saved copy.
 - The ground: each section shows what it's ridden on, like hardpack, soft soil, sand or mud.
   A lap with a lot of sand, hardpack or mud gets setup changes for it. Works on locked tracks too.
+- Sitting and standing: with the new recorder, the coach sees when you sit and stand, and tells
+  you where the fast lap does it differently, like standing through the whoops or sitting into a
+  turn. Needs the recorder from the next FrostMod.
 
 ### Changed
 - Hard landings and fighting the bars are now judged against your own session on that bike, so a

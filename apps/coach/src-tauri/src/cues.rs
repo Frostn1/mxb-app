@@ -119,7 +119,8 @@ fn answers(skill: &str) -> Option<u8> {
         "gear_up" => cue::UPSHIFT,
         "gear_down" => cue::DOWNSHIFT,
         "scrub" => cue::SCRUB,
-        "whoops_bucking" | "whoops_speed" => cue::STAND,
+        "whoops_bucking" | "whoops_speed" | "stance_stand" => cue::STAND,
+        "stance_sit" => cue::SIT,
         _ => return None,
     })
 }

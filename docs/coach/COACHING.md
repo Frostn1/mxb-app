@@ -139,7 +139,11 @@ its spot at the bike's speed for 1.5 s, only in testing or a race event's practi
 
 ## Not yet
 
-- Rider lean / body position (needs a memory read; not in the plugin API).
+- Rider lean (needs a memory read; not in the plugin API). Sitting and standing are read: the
+  recorder polls the rider's own Sit control from `controls.txt` (FrostMod `src/stance.h`) and
+  writes STANCE_BIND (tag 10) and STANCE (tag 11). `stance_sit` fires where the fast lap sits
+  ≥ 30% more of a corner from turn-in, `stance_stand` where it stands ≥ 30% more of whoops or a
+  rhythm; both need the stance known for 60% of the section on both laps.
 - Riding-aid settings and deformation from `profile.ini`, stored with each session.
 - Starts (launch, wheelie, bog) and consistency across a session beyond section spread.
 - A terrain background under the track map.
