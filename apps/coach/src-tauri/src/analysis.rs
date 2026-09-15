@@ -68,7 +68,17 @@ mod th {
     pub const CHOP_M: usize = 15;
     pub const LAND_THROTTLE_LOW: f32 = 0.3;
     pub const LAND_THROTTLE_GOOD: f32 = 0.5;
-    pub const LAND_ROLL_DEG: f32 = 10.0;
+    pub const LAND_ROLL_DEG: f32 = 15.0;
+    /// Share of the travel that counts as bottomed out.
+    pub const BOTTOM: f32 = 0.95;
+    pub const BOTTOMS_PER_LAP: usize = 3;
+    /// Never past this share of the travel all lap: the spring or damping is too stiff.
+    pub const LAZY_TRAVEL: f32 = 0.7;
+    pub const WHEELIE_S: f32 = 0.3;
+    pub const STOPPIE_S: f32 = 0.2;
+    pub const REAR_LOCK_SLIP: f32 = 0.7;
+    pub const REAR_LOCK_S: f32 = 0.4;
+    pub const AIR_GAS: f32 = 0.6;
     pub const TAKEOFF_SPEED_RATIO: f32 = 0.97;
 
     pub const WHOOPS_SPEED_RATIO: f32 = 0.95;
@@ -102,6 +112,12 @@ pub struct Point {
     /// Wheel speed over ground speed: under 1 is locking, over 1 is spinning.
     pub slip_f: f32,
     pub slip_r: f32,
+    /// Suspension length as the game reports it, metres, front then rear.
+    pub susp: [f32; 2],
+    /// Which wheels are off the ground, front then rear.
+    pub off: [bool; 2],
+    /// Share of the travel in use, 0 fully extended to 1 bottomed; see `Trace::fill_travel`.
+    pub used: [f32; 2],
 }
 
 impl Point {
@@ -130,6 +146,9 @@ fn point(s: &Sample) -> Point {
         air: s.airborne(),
         slip_f: slip(s.wheel_speed[0]),
         slip_r: slip(s.wheel_speed[1]),
+        susp: s.susp,
+        off: [s.wheel_material[0] == 0, s.wheel_material[1] == 0],
+        used: [0.0; 2],
     }
 }
 
@@ -153,6 +172,9 @@ fn lerp(a: &Point, b: &Point, f: f32) -> Point {
         air: near.air,
         slip_f: m(a.slip_f, b.slip_f),
         slip_r: m(a.slip_r, b.slip_r),
+        susp: [m(a.susp[0], b.susp[0]), m(a.susp[1], b.susp[1])],
+        off: near.off,
+        used: [0.0; 2],
     }
 }
 
@@ -212,6 +234,30 @@ impl Trace {
 
     pub fn time(&self) -> f32 {
         self.pts.last().map_or(0.0, |p| p.t)
+    }
+
+    /// Works out how much of its travel each end uses, given the travel in metres. The fully
+    /// extended length is read off the lap itself, in the air where nothing loads the springs,
+    /// so it doesn't matter which way the game counts. False when there's nothing to go on.
+    fn fill_travel(&mut self, travel: [f32; 2]) -> bool {
+        if travel[0] <= 0.0 || travel[1] <= 0.0 {
+            return false;
+        }
+        let mut ext = [0.0f32; 2];
+        for (k, e) in ext.iter_mut().enumerate() {
+            let mut v: Vec<f32> = self.pts.iter().filter(|q| q.off[0] && q.off[1]).map(|q| q.susp[k]).collect();
+            if v.len() < 5 {
+                return false;
+            }
+            v.sort_by(f32::total_cmp);
+            *e = v[v.len() / 2];
+        }
+        for q in &mut self.pts {
+            for k in 0..2 {
+                q.used[k] = ((q.susp[k] - ext[k]).abs() / travel[k]).min(1.2);
+            }
+        }
+        true
     }
 
     fn span(&self, a: usize, b: usize) -> f32 {
@@ -506,6 +552,9 @@ pub struct Channels {
     pub lean: Channel,
     pub gear: Channel,
     pub height: Channel,
+    /// Share of the travel in use, percent; all zero when the lap gives nothing to go on.
+    pub fork: Channel,
+    pub shock: Channel,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -522,20 +571,35 @@ pub struct Review {
     pub sections: Vec<SectionReview>,
     /// The sections to work on first: most time lost, at most three.
     pub focus: Vec<usize>,
+    /// Suspension advice for the whole lap.
+    pub setup: Vec<Finding>,
     pub channels: Channels,
     pub paths: Paths,
 }
 
-/// What the lap is compared by. `limiter` is the bike's rev limiter, 0 if unknown.
-pub fn review(lap: &Trace, reference: &Trace, limiter: f32) -> Review {
+/// The bike the lap was ridden on, as far as the review needs it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Bike {
+    /// Rev limiter, 0 if unknown.
+    pub limiter: f32,
+    /// Suspension travel in metres, front then rear; 0 if unknown.
+    pub travel: [f32; 2],
+}
+
+/// Compares `lap` with the faster `reference`, both ridden on `bike`.
+pub fn review(lap: &Trace, reference: &Trace, bike: Bike) -> Review {
     let n = lap.len().min(reference.len());
-    let (p, r) = (&Trace { pts: lap.pts[..n].to_vec() }, &Trace { pts: reference.pts[..n].to_vec() });
-    let mut out: Vec<SectionReview> = sections(r)
+    let (mut p, mut r) = (Trace { pts: lap.pts[..n].to_vec() }, Trace { pts: reference.pts[..n].to_vec() });
+    let travel = p.fill_travel(bike.travel) && r.fill_travel(bike.travel);
+    let (p, r) = (&p, &r);
+    let secs = sections(r);
+    let setup = if travel { setup(p, &secs) } else { Vec::new() };
+    let mut out: Vec<SectionReview> = secs
         .into_iter()
         .map(|s| {
             let (lap_time, ref_time) = (p.span(s.start, s.end), r.span(s.start, s.end));
             let lost = lap_time - ref_time;
-            let mut c = Ctx { p, r, s: &s, limiter, out: Vec::new() };
+            let mut c = Ctx { p, r, s: &s, bike, travel, out: Vec::new() };
             match s.kind {
                 Kind::Corner => corner(&mut c),
                 Kind::Jump | Kind::Rhythm => jumps(&mut c),
@@ -575,6 +639,7 @@ pub fn review(lap: &Trace, reference: &Trace, limiter: f32) -> Review {
         ref_time: r.time(),
         sections: out,
         focus: order,
+        setup,
         channels: channels(p, r, 2),
         paths: Paths {
             lap: p.pts.iter().step_by(2).map(|q| [q.x, q.z]).collect(),
@@ -597,6 +662,8 @@ fn channels(p: &Trace, r: &Trace, step: usize) -> Channels {
         lean: ch(&|q| q.roll),
         gear: ch(&|q| q.gear as f32),
         height: ch(&|q| q.y),
+        fork: ch(&|q| q.used[0] * 100.0),
+        shock: ch(&|q| q.used[1] * 100.0),
     }
 }
 
@@ -604,7 +671,9 @@ struct Ctx<'a> {
     p: &'a Trace,
     r: &'a Trace,
     s: &'a Section,
-    limiter: f32,
+    bike: Bike,
+    /// Suspension travel could be worked out for both laps.
+    travel: bool,
     out: Vec<Finding>,
 }
 
@@ -779,6 +848,36 @@ fn corner(c: &mut Ctx) {
              keeps the rear settled."
         ));
     }
+    let wheelie = |t: &Trace| t.time_where(apex_r..end, |q| q.off[0] && !q.off[1] && q.throttle > 0.5);
+    let (wp, wr) = (wheelie(p), wheelie(r));
+    if wp - wr > th::WHEELIE_S {
+        c.add("wheelie", 0.6, apex_p, "Keep the front down on the exit", format!(
+            "The front wheel comes up for {wp:.1} s out of {name}. Move your weight forward and roll the \
+             throttle on more smoothly."
+        ));
+    }
+    let entry = start..apex_r.max(start + 1);
+    let stoppie = p.time_where(entry.clone(), |q| q.off[1] && !q.off[0] && q.brake() > th::BRAKE_ON);
+    if stoppie > th::STOPPIE_S {
+        c.warn("stoppie", start, "Rear wheel lifts under braking", format!(
+            "The rear comes off the ground while you brake into {name}. Ease the front brake a little and \
+             keep your weight back."
+        ));
+    }
+    let skid = |t: &Trace| t.time_where(start..end, |q| q.rear > 0.3 && q.slip_r < th::REAR_LOCK_SLIP && q.v > 5.0 && !q.air);
+    let (kp, kr) = (skid(p), skid(r));
+    if kp - kr > th::REAR_LOCK_S {
+        c.add("rear_lock", 0.45, start, "Don't lock the rear", format!(
+            "The rear wheel skids for {kp:.1} s into {name}. A locked wheel slows you less than a turning one. \
+             Ease the rear brake until it keeps rolling."
+        ));
+    }
+    if c.travel && !bottom_runs(p, entry.clone(), 0).is_empty() && bottom_runs(r, entry, 0).is_empty() {
+        c.warn("bottom_braking", start, "The fork bottoms in the braking bumps", format!(
+            "The fork runs out of travel braking into {name}. Brake a little earlier and lighter on the front, \
+             use more rear, and stay standing. If it keeps happening, add fork compression."
+        ));
+    }
     let lock = p.time_where(start..end, |q| q.front > 0.3 && q.slip_f < th::FRONT_LOCK_SLIP && q.v > 5.0 && !q.air);
     if lock > th::FRONT_LOCK_S {
         c.warn("front_lock", start, "Front wheel locking", format!(
@@ -848,13 +947,98 @@ fn jumps(c: &mut Ctx) {
                  drives and the shock stays firm."
             ));
         }
-        if p.pts[pl].roll.abs() > th::LAND_ROLL_DEG {
+        // A whip is still unwinding at touchdown, so judge the lean once the bike has settled,
+        // and only where the fast lap lands straighter.
+        let settled = |t: &Trace, l: usize| t.pts[(l + 4).min(s.end)].roll.abs();
+        let (lean_p, lean_r) = (settled(p, pl), settled(r, rl));
+        if lean_p > th::LAND_ROLL_DEG && lean_p - lean_r > th::LAND_ROLL_DEG / 2.0 {
             c.warn("land_crooked", pl, "Straighten up before landing", format!(
-                "The bike is still leaned {:.0}° when you land at {name}. Straighten it in the air first.",
-                p.pts[pl].roll.abs()
+                "The bike is still leaned {lean_p:.0}° after you land at {name}. Bring it straight in the air, \
+                 a moment earlier."
+            ));
+        }
+        if c.travel {
+            for (k, end) in ["fork", "shock"].iter().enumerate() {
+                let after = |t: &Trace, l: usize| bottom_runs(t, l..(l + 12).min(s.end + 1), k);
+                if !after(p, pl).is_empty() && after(r, rl).is_empty() {
+                    c.warn("bottom_landing", pl, &format!("The {end} bottoms on the landing"), format!(
+                        "You run out of {end} travel landing {name}. Land on the downslope rather than flat: \
+                         carry a touch more speed, or scrub lower. If it bottoms on a good landing too, add \
+                         {end} compression."
+                    ));
+                }
+            }
+        }
+        let gas = |t: &Trace, a: usize, b: usize| t.mean(a..b + 1, |q| q.throttle);
+        if gas(p, pt, pl) > th::AIR_GAS && gas(r, rt, rl) < th::AIR_GAS / 2.0 {
+            c.add("air_throttle", 0.4, pt, "Off the gas in the air", format!(
+                "You hold the throttle open in the air over {name}. Close it in the air so the bike stays \
+                 level, then open it as you touch down."
             ));
         }
     }
+}
+
+/// Stretches where one end (0 fork, 1 shock) is out of travel.
+fn bottom_runs(tr: &Trace, within: Range<usize>, k: usize) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut i = within.start;
+    while i < within.end {
+        if tr.pts[i].used[k] < th::BOTTOM {
+            i += 1;
+            continue;
+        }
+        let s = i;
+        while i < within.end && tr.pts[i].used[k] >= th::BOTTOM {
+            i += 1;
+        }
+        out.push((s, i - 1));
+    }
+    out
+}
+
+/// Suspension advice for the whole lap: bottoming again and again, or travel left unused.
+fn setup(p: &Trace, secs: &[Section]) -> Vec<Finding> {
+    let mut out = Vec::new();
+    for (k, end) in ["fork", "shock"].iter().enumerate() {
+        let runs = bottom_runs(p, 0..p.len(), k);
+        if runs.len() >= th::BOTTOMS_PER_LAP {
+            let mut places: Vec<&str> = runs
+                .iter()
+                .filter_map(|&(a, _)| secs.iter().find(|s| s.start <= a && a <= s.end).map(|s| s.name.as_str()))
+                .collect();
+            places.dedup();
+            out.push(Finding {
+                skill: "setup_bottoming",
+                title: format!("The {end} bottoms {} times a lap", runs.len()),
+                detail: format!(
+                    "It runs out of travel at {}. If your landings are clean, stiffen the {end}: more compression \
+                     damping or a stiffer spring, one step at a time.",
+                    places.join(", ")
+                ),
+                at: runs[0].0,
+                weight: 1.0,
+                safety: false,
+            });
+        } else {
+            let most = p.pts.iter().map(|q| q.used[k]).fold(0.0, f32::max);
+            if most < th::LAZY_TRAVEL {
+                out.push(Finding {
+                    skill: "setup_stiff",
+                    title: format!("The {end} never uses its travel"),
+                    detail: format!(
+                        "It uses at most {:.0}% of its travel all lap. A softer spring or less compression would \
+                         let it soak up the bumps.",
+                        most * 100.0
+                    ),
+                    at: 0,
+                    weight: 0.5,
+                    safety: false,
+                });
+            }
+        }
+    }
+    out
 }
 
 fn whoops(c: &mut Ctx) {
@@ -890,8 +1074,8 @@ fn whoops(c: &mut Ctx) {
 fn straight(c: &mut Ctx) {
     let (p, r, s) = (c.p, c.r, c.s);
     let range = s.start..s.end.max(s.start + 1);
-    if c.limiter > 0.0 {
-        let cap = c.limiter * 0.98;
+    if c.bike.limiter > 0.0 {
+        let cap = c.bike.limiter * 0.98;
         let (lp, lr) = (p.time_where(range.clone(), |q| q.rpm >= cap), r.time_where(range.clone(), |q| q.rpm >= cap));
         if lp - lr > th::LIMITER_S {
             c.add("shift_earlier", 0.7, s.start, "Shift up sooner", format!(
@@ -994,9 +1178,15 @@ mod tests {
         /// Speed along the ground while airborne: nothing drives the bike in the air, so the
         /// longer the flight the more it bleeds off.
         air_v: f32,
+        /// Peak lean in the air, degrees; it unwinds just after touchdown, the way a whip does.
+        whip: f32,
+        /// Suspension squashed on the landing, metres of the 0.3 m travel; 0 lands normally.
+        bottom: f32,
     }
 
-    const FAST: Style = Style { decel: 4.0, brake: 0.8, jump: (330.0, 350.0, 3.0), air_v: 20.0 };
+    const FAST: Style =
+        Style { decel: 4.0, brake: 0.8, jump: (330.0, 350.0, 3.0), air_v: 20.0, whip: 0.0, bottom: 0.0 };
+    const BIKE: Bike = Bike { limiter: 13000.0, travel: [0.3, 0.3] };
 
     /// Speed, throttle, brake and lean at `d`.
     fn ride(st: &Style, d: f32) -> (f32, f32, f32, f32) {
@@ -1034,6 +1224,18 @@ mod tests {
             let (take, land, peak) = st.jump;
             let air = d >= take && d <= land;
             let v = if air { v.min(st.air_v) } else { v };
+            let roll = if st.whip > 0.0 && d >= take && d <= land + 2.0 {
+                st.whip * (PI * (d - take) / (land + 2.0 - take)).sin()
+            } else {
+                roll
+            };
+            let squash = if air {
+                0.0
+            } else if st.bottom > 0.0 && d > land && d <= land + 4.0 {
+                st.bottom
+            } else {
+                0.05
+            };
             let mid = (take + land) / 2.0;
             let half = (land - take) / 2.0;
             let mut s = Sample::default();
@@ -1050,6 +1252,7 @@ mod tests {
             s.wheel_speed = [v, v];
             s.wheel_material = if air { [0, 0] } else { [1, 1] };
             s.roll = roll;
+            s.susp = [0.30 - squash; 2];
             s.gear = 3;
             s.rpm = 8000.0;
             samples.push(s);
@@ -1070,6 +1273,7 @@ mod tests {
             FAST,
             Style { decel: 2.5, brake: 0.5, ..FAST },
             Style { jump: (330.0, 356.0, 4.5), air_v: 17.0, ..FAST },
+            Style { whip: 35.0, bottom: 0.29, ..FAST },
             FAST,
         ];
         let mut f = crate::telemetry::testfile::File::new();
@@ -1082,6 +1286,7 @@ mod tests {
                     b.i(0, s.rpm as i32).i(12, s.gear).f(20, s.speed);
                     b.f(24, s.x).f(28, s.y).f(32, s.z).f(36, s.vel[0]).f(40, s.vel[1]).f(44, s.vel[2]);
                     b.f(104, s.roll).f(144, s.throttle).f(148, s.front_brake).f(152, s.rear_brake);
+                    b.f(120, s.susp[0]).f(124, s.susp[1]);
                     b.f(160, s.wheel_speed[0]).f(164, s.wheel_speed[1]);
                     b.i(168, s.wheel_material[0]).i(172, s.wheel_material[1]);
                 });
@@ -1124,7 +1329,7 @@ mod tests {
     #[test]
     fn the_same_lap_has_nothing_to_say() {
         let fast = lap(&FAST);
-        let rv = review(&fast, &fast, 13000.0);
+        let rv = review(&fast, &fast, BIKE);
         assert!(rv.focus.is_empty());
         for s in &rv.sections {
             assert!(s.lost.abs() < 0.01, "{} lost {}", s.section.name, s.lost);
@@ -1135,7 +1340,7 @@ mod tests {
     #[test]
     fn early_soft_braking_is_called_out_where_it_costs() {
         let slow = lap(&Style { decel: 2.5, brake: 0.5, ..FAST });
-        let rv = review(&slow, &lap(&FAST), 13000.0);
+        let rv = review(&slow, &lap(&FAST), BIKE);
         let t1 = section(&rv, "Turn 1");
         assert!(t1.lost > 0.1, "lost {}", t1.lost);
         let found = skills(t1);
@@ -1148,7 +1353,7 @@ mod tests {
     #[test]
     fn floating_long_over_a_jump_says_scrub_and_overjump() {
         let floaty = lap(&Style { jump: (330.0, 356.0, 4.5), air_v: 17.0, ..FAST });
-        let rv = review(&floaty, &lap(&FAST), 13000.0);
+        let rv = review(&floaty, &lap(&FAST), BIKE);
         let found = skills(section(&rv, "Jump 1"));
         assert!(found.contains(&"scrub"), "{found:?}");
         assert!(found.contains(&"overjump"), "{found:?}");
@@ -1157,10 +1362,30 @@ mod tests {
     #[test]
     fn rolling_a_jump_the_fast_lap_clears_says_jump_it() {
         let rolled = lap(&Style { jump: (0.0, 0.0, 0.0), ..FAST });
-        let rv = review(&rolled, &lap(&FAST), 0.0);
+        let rv = review(&rolled, &lap(&FAST), Bike::default());
         let j = section(&rv, "Jump 1");
         // Same speed on the ground: no time lost, so no advice. What matters is it matched.
         assert!(j.findings.is_empty() || skills(j).contains(&"jump_it"));
+    }
+
+    #[test]
+    fn a_whip_that_straightens_on_touchdown_is_not_a_crooked_landing() {
+        let whip = lap(&Style { whip: 35.0, ..FAST });
+        let rv = review(&whip, &lap(&FAST), BIKE);
+        let found = skills(section(&rv, "Jump 1"));
+        assert!(!found.contains(&"land_crooked"), "{found:?}");
+    }
+
+    #[test]
+    fn bottoming_on_a_landing_is_called_out_even_without_time_lost() {
+        let hard = lap(&Style { bottom: 0.29, ..FAST });
+        let rv = review(&hard, &lap(&FAST), BIKE);
+        let found = skills(section(&rv, "Jump 1"));
+        assert!(found.contains(&"bottom_landing"), "{found:?}");
+        // Unknown travel: no suspension advice at all rather than a guess.
+        let rv = review(&hard, &lap(&FAST), Bike { travel: [0.0; 2], ..BIKE });
+        assert!(!skills(section(&rv, "Jump 1")).contains(&"bottom_landing"));
+        assert!(rv.setup.is_empty());
     }
 
     #[test]

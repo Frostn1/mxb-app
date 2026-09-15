@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Button } from "@frost/shared/Components/ui/button";
 import { cn } from "@frost/shared/lib/utils";
-import { useT } from "@/i18n";
-import { coachReview, type ReviewOut, type SectionReview } from "@/api/coach";
+import { useT, type TKey } from "@/i18n";
+import { coachReview, type Finding, type ReviewOut, type SectionReview } from "@/api/coach";
 import { gap, lapTime, lossColor, started } from "@/lib/format";
 import Page, { Label } from "../Page";
 import TrackMap from "./TrackMap";
-import Traces from "./Traces";
+import SectionStrip from "./SectionStrip";
+import Charts from "./Charts";
 
 /** One lap against the reference: where the time went, and what to change. */
 export default function Review({ path, lap, onBack }: { path: string; lap: number; onBack: () => void }) {
@@ -14,6 +17,7 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [cursor, setCursor] = useState<number | null>(null);
+  const [whole, setWhole] = useState(false);
 
   useEffect(() => {
     setData(null);
@@ -26,6 +30,22 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
       .catch((e) => setError(String(e)));
   }, [path, lap]);
 
+  const count = data?.review.sections.length ?? 0;
+  const pick = (i: number) => {
+    setSelected(i);
+    setWhole(false);
+  };
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (!count || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+      const d = e.key === "ArrowLeft" ? -1 : 1;
+      setSelected((s) => ((s ?? (d > 0 ? -1 : 0)) + d + count) % count);
+      setWhole(false);
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [count]);
+
   const back = t("review.back");
   if (error || !data) {
     return (
@@ -37,6 +57,7 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
 
   const { review, reference } = data;
   const total = (data.lap.timeMs - reference.timeMs) / 1000;
+  const sel = selected != null ? review.sections[selected] : null;
 
   return (
     <Page
@@ -54,68 +75,126 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
       backLabel={back}
     >
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
-        <div className="min-w-0 space-y-4">
-          <div className="h-[380px] border border-border bg-card p-3">
-            <TrackMap review={review} selected={selected} cursor={cursor} onPick={setSelected} />
+        <div className="min-w-0 space-y-3">
+          <div className="h-[440px] border border-border bg-card p-3">
+            <TrackMap review={review} selected={selected} cursor={cursor} onPick={pick} />
           </div>
-          <div className="border border-border bg-card">
-            <Traces review={review} selected={selected} cursor={cursor} onCursor={setCursor} />
+          <SectionStrip review={review} selected={selected} onPick={pick} />
+          <p className="text-[11.5px] text-faint">{t("review.strip")}</p>
+          <div className="mt-3 border border-border bg-card">
+            <Charts review={review} selected={selected} whole={whole} onWhole={setWhole} cursor={cursor} onCursor={setCursor} />
           </div>
-          <p className="text-[11.5px] text-faint">{t("review.legend")}</p>
         </div>
 
         <div className="space-y-6">
+          {sel && selected != null && (
+            <SectionPanel
+              s={sel}
+              onPrev={() => pick((selected - 1 + count) % count)}
+              onNext={() => pick((selected + 1) % count)}
+            />
+          )}
+
           <div>
             <Label>{t("review.focus")}</Label>
             {review.focus.length === 0 ? (
               <p className="border border-border px-4 py-3 text-[12.5px] text-muted-foreground">{t("review.nothing")}</p>
             ) : (
-              <div className="space-y-2">
-                {review.focus.map((i) => (
-                  <SectionCard key={i} s={review.sections[i]} on={selected === i} onClick={() => setSelected(i)} open />
-                ))}
+              <div className="space-y-1">
+                {review.focus.map((i, k) => {
+                  const s = review.sections[i];
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => pick(i)}
+                      className={cn(
+                        "flex w-full items-center gap-3 border bg-card px-3 py-2 text-left",
+                        selected === i ? "border-primary/60" : "border-border hover:border-foreground/30",
+                      )}
+                    >
+                      <span className="font-mono text-[11px] text-faint">{k + 1}</span>
+                      <span className="w-20 shrink-0 text-[12.5px] font-semibold">{s.name}</span>
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">{s.findings[0]?.title}</span>
+                      <span className="font-mono text-[12px] tabular-nums" style={{ color: lossColor(s.lost) }}>
+                        {gap(s.lost)}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
-          <div>
-            <Label>{t("review.sections")}</Label>
-            <div className="space-y-1">
-              {review.sections.map((s, i) => (
-                <SectionCard
-                  key={i}
-                  s={s}
-                  on={selected === i}
-                  onClick={() => setSelected(selected === i ? null : i)}
-                  open={selected === i && !review.focus.includes(i)}
-                />
-              ))}
+
+          {review.setup.length > 0 && (
+            <div>
+              <Label>{t("review.setup")}</Label>
+              <div className="border border-border bg-card px-4 py-3">
+                <Notes findings={review.setup} numbered={false} />
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </Page>
   );
 }
 
-function SectionCard({ s, on, open, onClick }: { s: SectionReview; on: boolean; open: boolean; onClick: () => void }) {
+/** The picked section: what it cost, and each piece of advice, numbered like the chart markers. */
+function SectionPanel({ s, onPrev, onNext }: { s: SectionReview; onPrev: () => void; onNext: () => void }) {
+  const t = useT();
   return (
-    <div className={cn("border bg-card", on ? "border-primary/60" : "border-border")}>
-      <button onClick={onClick} className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
-        <span className="text-[12.5px] font-semibold">{s.name}</span>
-        <span className="font-mono text-[12px] tabular-nums" style={{ color: lossColor(s.lost) }}>
-          {gap(s.lost)}
-        </span>
-      </button>
-      {open && s.findings.length > 0 && (
-        <ul className="space-y-2 border-t border-border px-3 py-2.5">
-          {s.findings.map((f, k) => (
-            <li key={k}>
-              <div className="text-[12.5px] font-semibold">{f.title}</div>
-              <div className="mt-0.5 text-[12px] leading-snug text-muted-foreground">{f.detail}</div>
-            </li>
-          ))}
-        </ul>
-      )}
+    <div className="border border-primary/40 bg-card">
+      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+        <div>
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
+            {t(`review.kind.${s.kind}` as TKey)}
+          </div>
+          <div className="mt-0.5 font-cond text-[22px] font-semibold leading-tight">{s.name}</div>
+          <div className="mt-1 text-[12px] text-muted-foreground">
+            {t("review.you")} {s.lapTime.toFixed(2)} s · {t("review.fastLap")} {s.refTime.toFixed(2)} s
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="font-mono text-[20px] tabular-nums" style={{ color: lossColor(s.lost) }}>
+            {gap(s.lost)}
+          </div>
+          <div className="mt-2 flex gap-1">
+            <Button size="sm" variant="outline" onClick={onPrev} aria-label={t("review.prev")}>
+              <ChevronLeft className="size-3.5" />
+            </Button>
+            <Button size="sm" variant="outline" onClick={onNext} aria-label={t("review.next")}>
+              <ChevronRight className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+      </div>
+      <div className="px-4 py-3">
+        {s.findings.length === 0 ? (
+          <p className="text-[12.5px] text-muted-foreground">{t("review.nothingHere")}</p>
+        ) : (
+          <Notes findings={s.findings} numbered />
+        )}
+      </div>
     </div>
+  );
+}
+
+function Notes({ findings, numbered }: { findings: Finding[]; numbered: boolean }) {
+  return (
+    <ul className="space-y-3">
+      {findings.map((f, k) => (
+        <li key={k} className="flex gap-2.5">
+          {numbered && (
+            <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-foreground text-[10px] font-bold text-background">
+              {k + 1}
+            </span>
+          )}
+          <div>
+            <div className="text-[13px] font-semibold">{f.title}</div>
+            <div className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{f.detail}</div>
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
