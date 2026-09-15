@@ -57,6 +57,12 @@ export const en = {
   "session.review": "Review",
   "session.sections": "Your best for each section",
   "session.leastConsistent": "Least consistent",
+  "session.setups": "Your setups on this track",
+  "session.setupsHint": "Every setup you've ridden here on this bike: its best lap, and the average of your best three.",
+  "session.setupDefault": "Default setup",
+  "session.fastestSetup": "Fastest",
+  "session.thisSetup": "This session",
+  "session.lapsShort": "laps",
 
   "review.title": "Lap review",
   "review.back": "Laps",

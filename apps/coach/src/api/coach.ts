@@ -37,6 +37,8 @@ export interface SessionSummary {
   complete: boolean;
   laps: LapSummary[];
   bestMs: number | null;
+  /** The setup it was ridden on, as the game names it. */
+  setup: string;
 }
 
 export interface LapRef {

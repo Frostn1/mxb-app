@@ -11,6 +11,8 @@
 - Tyre pressure: the coach checks your pressures against what each tyre is made for, and can put
   them back in your saved copy.
 - Tips on the map: the numbered tips now show on the track map where each one happens.
+- Did the fix work: each session shows every setup you've ridden on that track and bike, the
+  coach's copies included, with the best lap and the average of your best three on each.
 
 ### Changed
 - Lean the bike more now says when the front isn't sliding, so you know the grip is there.

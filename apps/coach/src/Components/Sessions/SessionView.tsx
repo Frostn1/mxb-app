@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Badge } from "@frost/shared/Components/ui/badge";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useT } from "@/i18n";
-import { coachLines, coachSession, type Lines, type SessionDetail } from "@/api/coach";
+import { coachLines, coachSession, coachSessions, type Lines, type SessionDetail, type SessionSummary } from "@/api/coach";
 import { gap, lapTime, started } from "@/lib/format";
 import Page, { Label } from "../Page";
 
@@ -21,10 +21,12 @@ export default function SessionView({
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<Lines | null>(null);
+  const [all, setAll] = useState<SessionSummary[]>([]);
 
   useEffect(() => {
     coachSession(path).then(setDetail).catch((e) => setError(String(e)));
     coachLines(path).then(setLines).catch(() => {});
+    coachSessions().then(setAll).catch(() => {});
   }, [path]);
 
   if (error || !detail) {
@@ -38,6 +40,7 @@ export default function SessionView({
   const { summary: s, reference, ideal } = detail;
   const best = s.bestMs;
   const idealMs = ideal ? ideal.time * 1000 : null;
+  const setups = compareSetups(all.filter((o) => o.trackId === s.trackId && o.bikeId === s.bikeId));
 
   return (
     <Page
@@ -97,6 +100,35 @@ export default function SessionView({
         </div>
       </div>
 
+      {setups.length > 1 && (
+        <div className="mt-8">
+          <Label>{t("session.setups")}</Label>
+          <p className="-mt-1 mb-2 text-[12px] text-muted-foreground">{t("session.setupsHint")}</p>
+          <div className="border border-border">
+            {setups.map((r, i) => (
+              <div
+                key={r.name}
+                className="grid grid-cols-[1fr_60px_100px_120px] items-center gap-3 border-b border-border px-4 py-2 text-[12.5px] last:border-b-0"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate">{r.name || t("session.setupDefault")}</span>
+                  {i === 0 && <Badge>{t("session.fastestSetup")}</Badge>}
+                  {r.name === s.setup && <Badge>{t("session.thisSetup")}</Badge>}
+                </span>
+                <span className="text-muted-foreground">
+                  {r.laps} {t("session.lapsShort")}
+                </span>
+                <span className="font-mono tabular-nums">{lapTime(r.best)}</span>
+                <span className="font-mono tabular-nums text-muted-foreground">
+                  {lapTime(r.avg3)}
+                  {i > 0 && setups[0].avg3 && r.avg3 ? ` ${gap((r.avg3 - setups[0].avg3) / 1000)}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {lines && lines.notes.length > 0 && (
         <div className="mt-8">
           <Label>{t("review.linesTitle")}</Label>
@@ -136,6 +168,24 @@ export default function SessionView({
       )}
     </Page>
   );
+}
+
+/** Every setup ridden on this track and bike: its whole laps, best, and the average of its best
+ *  three, which one lucky lap can't carry. Fastest by that average first. */
+function compareSetups(sessions: SessionSummary[]) {
+  const times = new Map<string, number[]>();
+  for (const x of sessions) {
+    const list = times.get(x.setup) ?? [];
+    for (const l of x.laps) if (l.whole && !l.invalid && l.timeMs > 0) list.push(l.timeMs);
+    times.set(x.setup, list);
+  }
+  return [...times.entries()]
+    .filter(([, list]) => list.length > 0)
+    .map(([name, list]) => {
+      const top = [...list].sort((a, b) => a - b).slice(0, 3);
+      return { name, laps: list.length, best: top[0], avg3: top.reduce((a, b) => a + b, 0) / top.length };
+    })
+    .sort((a, b) => a.avg3 - b.avg3);
 }
 
 function Stat({ label, value, note }: { label: string; value: string; note?: string }) {

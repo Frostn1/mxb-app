@@ -111,6 +111,9 @@ pub struct SessionSummary {
     pub complete: bool,
     pub laps: Vec<LapSummary>,
     pub best_ms: Option<i32>,
+    /// The setup it was ridden on, as the game names it (without a common setup's ':').
+    #[serde(default)]
+    pub setup: String,
 }
 
 fn summarize(path: &Path, rec: &Recording) -> SessionSummary {
@@ -140,6 +143,7 @@ fn summarize(path: &Path, rec: &Recording) -> SessionSummary {
         track_length: e.track_length,
         limiter: e.limiter,
         complete: rec.complete,
+        setup: rec.session.setup.trim_start_matches(':').to_string(),
         best_ms: laps.iter().filter(|l| l.comparable()).map(|l| l.time_ms).min(),
         laps,
     }
@@ -153,8 +157,8 @@ struct Indexed {
 }
 
 fn index_path(app: &AppHandle) -> Option<PathBuf> {
-    // v2: laps say why they can't be compared, and a crash no longer makes one partial.
-    Some(config::data_dir(app)?.join("coach").join("index-v2.json"))
+    // v3: sessions carry the setup they were ridden on.
+    Some(config::data_dir(app)?.join("coach").join("index-v3.json"))
 }
 
 /// Every session on disk, newest first. A file that won't parse is skipped, not fatal.
@@ -630,6 +634,7 @@ mod tests {
                 .iter()
                 .map(|&(num, time_ms, whole)| LapSummary { num, time_ms, invalid: false, whole, issue: None, crashed: false, ridden_ms: 0 })
                 .collect(),
+            setup: String::new(),
             best_ms: None,
         }
     }
