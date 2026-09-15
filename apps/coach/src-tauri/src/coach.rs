@@ -453,6 +453,9 @@ pub struct SetupPlan {
     pub fixes: Vec<crate::fixes::Fix>,
     /// The sag measured in this session, standing still or riding.
     pub sag: Option<crate::sag::Sag>,
+    /// The most of each end's travel this session used, as a share: what the feel check
+    /// holds "it bottoms" and "it's harsh" against.
+    pub travel_used: Option<[f32; 2]>,
 }
 
 /// The rider's setup name without any "(coach)" the coach added: copies of a copy are numbered.
@@ -470,8 +473,8 @@ pub fn coach_setup_plan(app: AppHandle, path: String, skills: Vec<String>) -> Re
         let dir = f.parent()?;
         crate::stp::coach_names(&setup_base(f)).find(|n| !dir.join(format!("{n}.stp")).exists())
     });
-    let sag = r.sag;
-    Ok(SetupPlan { name: r.name, file: r.file.map(|p| p.display().to_string()), save_as, why: r.why, fixes, sag })
+    let (sag, travel_used) = (r.sag, crate::sag::travel_used(&rec));
+    Ok(SetupPlan { name: r.name, file: r.file.map(|p| p.display().to_string()), save_as, why: r.why, fixes, sag, travel_used })
 }
 
 /// Saves a lap's setup fixes as a new setup beside the rider's own and returns its name.

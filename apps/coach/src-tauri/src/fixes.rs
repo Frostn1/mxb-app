@@ -91,8 +91,22 @@ const SWINGARM: &[Step] = &[
     step(Field::ShockLowCompression, 1, "Firmer low-speed compression stops the rear squatting when you get on the gas."),
 ];
 
+// Only the rider feels these; telemetry can't see them, so they come from the feel check.
+const UNSTABLE: &[Step] = &[
+    step(Field::ForkHeight, 1, "Raise the front: slide the fork down in the clamps. Calmer at speed, a little slower to turn."),
+    step(Field::ForkOffset, -1, "Less offset: more trail, so the front holds its line."),
+    step(Field::SwingarmLength, 1, "Still loose: a longer swingarm is steadier and finds more drive."),
+];
+const TURNS_SLOW: &[Step] = &[
+    step(Field::ForkHeight, -1, "Lower the front: slide the fork up in the clamps. Turns in quicker, less calm at speed."),
+    step(Field::ForkOffset, 1, "More offset: lighter, quicker steering."),
+    step(Field::SwingarmLength, -1, "Still slow: a shorter swingarm turns tighter."),
+];
+
 fn steps(skill: &str) -> &'static [Step] {
     match skill {
+        "setup_unstable" => UNSTABLE,
+        "setup_turns_slow" => TURNS_SLOW,
         "setup_bottoming_fork" => BOTTOMING_FORK,
         "setup_bottoming_shock" => BOTTOMING_SHOCK,
         "setup_bottoming_shock_slow" => BOTTOMING_SHOCK_SLOW,

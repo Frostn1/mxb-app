@@ -93,6 +93,28 @@ pub fn measure(rec: &Recording) -> Option<Sag> {
     Some(Sag { still, metres, share: [metres[0] / travel[0], metres[1] / travel[1]] })
 }
 
+/// The most of each end's travel the session used, as a share, to check "it bottoms" or "it's
+/// harsh" against. The deepest 1 in 200 samples on the ground, so one glitch doesn't count.
+pub fn travel_used(rec: &Recording) -> Option<[f32; 2]> {
+    let travel = rec.event.susp_max_travel;
+    if travel[0] <= 0.0 || travel[1] <= 0.0 {
+        return None;
+    }
+    let air: Vec<&Sample> = rec.samples.iter().filter(|x| x.airborne()).collect();
+    let ground: Vec<&Sample> = rec.samples.iter().filter(|x| on_ground(x) && !x.crashed).collect();
+    if air.len() < 10 || ground.len() < 50 {
+        return None;
+    }
+    let mut out = [0.0; 2];
+    for k in 0..2 {
+        let ext = median(air.iter().map(|x| x.susp[k]))?;
+        let mut d: Vec<f32> = ground.iter().map(|x| (x.susp[k] - ext).abs()).filter(|v| v.is_finite()).collect();
+        d.sort_by(f32::total_cmp);
+        out[k] = (d.get(d.len() * 199 / 200)? / travel[k]).min(1.0);
+    }
+    Some(out)
+}
+
 /// How far the rear sits from the target, as metres of the shock's stroke: positive is too much
 /// sag (more preload), negative too little. None when it's within the target or not measured
 /// standing still.
@@ -173,5 +195,18 @@ mod tests {
         let sag = measure(&rec(s)).unwrap();
         assert!(!sag.still);
         assert_eq!(rear_off(&sag, 0.13), None);
+    }
+
+    #[test]
+    fn travel_used_counts_real_landings_not_one_glitch() {
+        let mut s: Vec<Sample> = (0..20).map(|i| sample(i as f32 * 0.02, 15.0, [0.31, 0.13], false)).collect();
+        s.extend((0..400).map(|i| sample(1.0 + i as f32 * 0.02, 15.0, [0.26, 0.10], true)));
+        // One sample deep in the fork: a glitch, not a landing.
+        s.push(sample(9.0, 15.0, [0.0, 0.10], true));
+        let used = travel_used(&rec(s.clone())).unwrap();
+        assert!((used[0] - 0.05 / 0.31).abs() < 1e-3, "{used:?}");
+        // A real landing lasts: ten samples 290 mm into the fork.
+        s.extend((0..10).map(|i| sample(9.1 + i as f32 * 0.02, 15.0, [0.02, 0.10], true)));
+        assert!(travel_used(&rec(s)).unwrap()[0] > 0.9);
     }
 }

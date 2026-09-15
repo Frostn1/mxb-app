@@ -243,6 +243,8 @@ export interface SetupFix {
 }
 
 export interface SetupPlan {
+  /** The most of each end's travel this session used, as a share. */
+  travelUsed: [number, number] | null;
   /** The setup the rider had on. */
   name: string;
   file: string | null;
