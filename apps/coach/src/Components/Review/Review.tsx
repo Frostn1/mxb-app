@@ -412,7 +412,7 @@ function Setup({ path, findings }: { path: string; findings: Finding[] }) {
   }, [path, skills]);
   const fixes = (mine: Finding[]) =>
     mine.map((f) => plan?.fixes.find((x) => x.skill === f.skill)).filter((x): x is SetupFix => x != null);
-  const writes = plan?.fixes.some((f) => f.changes.some((c) => c.writes)) ?? false;
+  const writes = (plan?.saveAs != null && plan.fixes.some((f) => f.changes.some((c) => c.writes))) ?? false;
   const save = async () => {
     setSaving(true);
     try {
@@ -445,7 +445,7 @@ function Setup({ path, findings }: { path: string; findings: Finding[] }) {
             {writes ? (
               <div className="flex flex-wrap items-center gap-3">
                 <Button size="sm" onClick={save} disabled={saving}>
-                  {t("setup.save", { name: plan.name })}
+                  {t("setup.save", { name: plan.saveAs ?? "" })}
                 </Button>
                 <span className="text-[12px] text-muted-foreground">{t("setup.saveHint")}</span>
               </div>

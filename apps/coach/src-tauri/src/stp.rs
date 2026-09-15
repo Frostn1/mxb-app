@@ -130,6 +130,24 @@ impl Setup {
     }
 }
 
+/// A setup's name without the " (coach)" or " (coach 3)" the coach adds, so a copy of a copy
+/// is numbered rather than nested.
+pub fn base_name(stem: &str) -> &str {
+    let Some(open) = stem.rfind(" (coach") else { return stem };
+    let Some(n) = stem[open + " (coach".len()..].strip_suffix(')') else { return stem };
+    let numbered = n.strip_prefix(' ').is_some_and(|d| !d.is_empty() && d.bytes().all(|c| c.is_ascii_digit()));
+    if n.is_empty() || numbered {
+        &stem[..open]
+    } else {
+        stem
+    }
+}
+
+/// The names the coach saves copies of `base` under, in order.
+pub fn coach_names(base: &str) -> impl Iterator<Item = String> + '_ {
+    (1..100).map(move |n| if n == 1 { format!("{base} (coach)") } else { format!("{base} (coach {n})") })
+}
+
 /// Where a recorded setup lives. The plugin reports the name only: a leading ':' means a
 /// setup for every track (`setups\common`), else it's saved under the track. `*` names a
 /// `.stt` file, which isn't a setup the coach reads.
@@ -244,6 +262,17 @@ pub(crate) mod tests {
         let mut bytes = file("2027_K85M", &SAND_85);
         bytes.push(0);
         assert!(Setup::parse(&bytes, None).is_err());
+    }
+
+    #[test]
+    fn a_copy_of_a_copy_is_numbered_not_nested() {
+        assert_eq!(base_name("frost-race"), "frost-race");
+        assert_eq!(base_name("frost-race (coach)"), "frost-race");
+        assert_eq!(base_name("frost-race (coach 3)"), "frost-race");
+        assert_eq!(base_name("my (coach) setup"), "my (coach) setup");
+        assert_eq!(base_name("frost-race (coach x)"), "frost-race (coach x)");
+        let names: Vec<String> = coach_names("frost-race").take(3).collect();
+        assert_eq!(names, ["frost-race (coach)", "frost-race (coach 2)", "frost-race (coach 3)"]);
     }
 
     #[test]

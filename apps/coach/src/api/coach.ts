@@ -240,6 +240,8 @@ export interface SetupPlan {
   /** The setup the rider had on. */
   name: string;
   file: string | null;
+  /** The name a saved copy gets: the next free "(coach)", "(coach 2)" … beside it. */
+  saveAs: string | null;
   /** Why the coach can't make the changes itself, when it can't. */
   why: string | null;
   fixes: SetupFix[];

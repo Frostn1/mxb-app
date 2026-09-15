@@ -7,7 +7,8 @@
   the order to try it, with your setting now and the new one, like the fork spring from
   6.1 to 6.3 N/mm or the rear sprocket from 52 to 51 teeth.
 - Save as a new setup: one button saves those changes as a copy next to the setup you rode,
-  ready to pick in the garage. Your own setup is never changed.
+  ready to pick in the garage. Your own setup is never changed. Ride that copy and save again,
+  and the next one is numbered, (coach 2), (coach 3), with the changes adding up.
 
 ### Changed
 - Suspension tips now come separately for the fork and the shock, each with its own changes.

@@ -394,9 +394,16 @@ pub struct SetupPlan {
     /// The setup the rider had on.
     pub name: String,
     pub file: Option<String>,
+    /// The name a saved copy gets: the next free "(coach)", "(coach 2)" … beside it.
+    pub save_as: Option<String>,
     /// Why the coach can't make the changes itself, when it can't.
     pub why: Option<String>,
     pub fixes: Vec<crate::fixes::Fix>,
+}
+
+/// The rider's setup name without any "(coach)" the coach added: copies of a copy are numbered.
+fn setup_base(file: &Path) -> String {
+    crate::stp::base_name(file.file_stem().and_then(|s| s.to_str()).unwrap_or("setup")).to_string()
 }
 
 /// The changes behind a lap's setup tips, against the setup the rider had on.
@@ -404,7 +411,11 @@ pub struct SetupPlan {
 pub fn coach_setup_plan(app: AppHandle, path: String, skills: Vec<String>) -> Result<SetupPlan, String> {
     let r = rider_setup(&app, &path)?;
     let fixes = crate::fixes::plan(&skills, r.setup.as_ref(), r.opts.as_ref());
-    Ok(SetupPlan { name: r.name, file: r.file.map(|p| p.display().to_string()), why: r.why, fixes })
+    let save_as = r.file.as_deref().and_then(|f| {
+        let dir = f.parent()?;
+        crate::stp::coach_names(&setup_base(f)).find(|n| !dir.join(format!("{n}.stp")).exists())
+    });
+    Ok(SetupPlan { name: r.name, file: r.file.map(|p| p.display().to_string()), save_as, why: r.why, fixes })
 }
 
 /// Saves a lap's setup fixes as a new setup beside the rider's own and returns its name.
@@ -421,9 +432,8 @@ pub fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Re
         return Err("There's nothing in this setup the coach can change.".into());
     }
     let dir = file.parent().ok_or("The setup's folder couldn't be found.")?;
-    let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("setup");
-    for n in 1..100 {
-        let name = if n == 1 { format!("{stem} (coach)") } else { format!("{stem} (coach {n})") };
+    let base = setup_base(&file);
+    for name in crate::stp::coach_names(&base) {
         match fs::OpenOptions::new().write(true).create_new(true).open(dir.join(format!("{name}.stp"))) {
             Ok(mut f) => {
                 std::io::Write::write_all(&mut f, out.bytes()).map_err(err)?;

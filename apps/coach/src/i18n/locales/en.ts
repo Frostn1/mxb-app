@@ -105,7 +105,7 @@ export const en = {
   "review.travelHint": "blue fork, yellow shock, dashed line is bottomed out",
   "review.nothingHere": "Nothing to fix here.",
   "review.setup": "Bike setup",
-  "setup.save": "Save as \u201c{{name}} (coach)\u201d",
+  "setup.save": "Save as \u201c{{name}}\u201d",
   "setup.saveHint": "A copy with these changes, next to your setup. Yours stays as it is.",
   "setup.saved": "Saved as \u201c{{name}}\u201d. Pick it in the garage.",
   "setup.firmerOne": "1 step firmer",
