@@ -392,11 +392,16 @@ function Overall({ themes, solo, onPick }: { themes: Theme[]; solo: boolean; onP
   );
 }
 
+const SUSPENSION = ["setup_brake_dive", "setup_exit_squat", "setup_shock_kick", "setup_rear_low", "setup_front_low"];
 const SETUP_GROUPS: { key: TKey; of: (skill: string) => boolean }[] = [
-  { key: "review.group.suspension", of: (s) => s.startsWith("setup_bottoming") || s.startsWith("setup_stiff") },
+  {
+    key: "review.group.suspension",
+    of: (s) =>
+      s.startsWith("setup_bottoming") || s.startsWith("setup_stiff") || s.startsWith("setup_packing") || SUSPENSION.includes(s),
+  },
   { key: "review.group.gearing", of: (s) => s.startsWith("setup_gearing") },
   { key: "review.group.shifting", of: (s) => s.startsWith("setup_shift") },
-  { key: "review.group.chassis", of: (s) => s === "setup_swingarm" },
+  { key: "review.group.chassis", of: (s) => s === "setup_swingarm" || s === "setup_front_push" },
 ];
 
 /** Bike setup advice for the whole lap, by what it's about, with the changes behind each tip
@@ -467,8 +472,15 @@ function amount(c: SetupChange, t: ReturnType<typeof useT>): string {
   if (c.field === "forkOil") return t(c.steps > 0 ? "setup.moreOil" : "setup.lessOil");
   if (c.field === "frontSprocket" || c.field === "rearSprocket") return `${c.steps > 0 ? "+" : "−"}${n}T`;
   if (c.field === "swingarmLength" || c.field === "rodLength") return t(c.steps > 0 ? "setup.longer" : "setup.shorter");
-  const firmer = c.steps > 0;
-  return n === 1 ? t(firmer ? "setup.firmerOne" : "setup.softerOne") : t(firmer ? "setup.firmerMany" : "setup.softerMany", { n });
+  const up = c.steps > 0;
+  // Rebound reads as slower or faster, preload as more or less, the rest firmer or softer.
+  const [one, many]: [TKey, TKey] =
+    c.field === "forkRebound" || c.field === "shockRebound"
+      ? up ? ["setup.slowerOne", "setup.slowerMany"] : ["setup.fasterOne", "setup.fasterMany"]
+      : c.field === "forkPreload" || c.field === "shockPreload"
+        ? up ? ["setup.moreOne", "setup.moreMany"] : ["setup.lessOne", "setup.lessMany"]
+        : up ? ["setup.firmerOne", "setup.firmerMany"] : ["setup.softerOne", "setup.softerMany"];
+  return n === 1 ? t(one) : t(many, { n });
 }
 
 /** The changes behind one tip, in the order to try them. */

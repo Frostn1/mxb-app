@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-15 — MXB Coach v0.1.6-beta.6
+
+### Added
+- Hard landings: the coach tells you when a landing hits much harder than the fast lap's, and
+  how to soak it up.
+- A sliding front: when the bike leans more than it turns, the coach says the front is washing
+  out in that corner and what to change in your riding.
+- Relax on the bars: when you push much harder on the bars into a corner than the fast lap.
+- New setup tips, each with the changes to make: the fork diving under braking, the rear
+  squatting on the gas, the shock kicking off jump faces, the suspension packing down in
+  whoops, the bike running nose-high or nose-down, and the front washing out in corner after
+  corner.
+
+### Changed
+- When the shock bottoms slowly, under braking or in turns, the fix now firms up its
+  low-speed compression rather than the high-speed.
+- Rebound changes read as slower or faster, and preload as more or less.
 ## 2026-09-15 — Contributors
 
 ### Added
