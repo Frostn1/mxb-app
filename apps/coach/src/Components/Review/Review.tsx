@@ -3,7 +3,16 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { cn } from "@frost/shared/lib/utils";
 import { useT, type TKey } from "@/i18n";
-import { coachReview, coachSurface, type Finding, type ReviewOut, type SectionReview, type Surface } from "@/api/coach";
+import {
+  coachLines,
+  coachReview,
+  coachSurface,
+  type Finding,
+  type Lines,
+  type ReviewOut,
+  type SectionReview,
+  type Surface,
+} from "@/api/coach";
 import { gap, lapTime, lossColor, started } from "@/lib/format";
 import Page, { Label } from "../Page";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
@@ -21,12 +30,15 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
   const [cursor, setCursor] = useState<number | null>(null);
   const [whole, setWhole] = useState(false);
   const [surface, setSurface] = useState<Surface | null>(null);
-  const [view, setView] = useState<"map" | "3d">("map");
+  const [view, setView] = useState<"map" | "laps" | "3d">("map");
+  const [lines, setLines] = useState<Lines | null>(null);
 
-  // The ground is a nicety: the review stands without it.
+  // The ground and the other laps are extras: the review stands without them.
   useEffect(() => {
     setSurface(null);
+    setLines(null);
     coachSurface(path).then(setSurface).catch(() => {});
+    coachLines(path).then(setLines).catch(() => {});
   }, [path]);
 
   useEffect(() => {
@@ -74,6 +86,20 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
     ...review.sections.map((s, i) => (s.findings.length > 0 && !review.focus.includes(i) ? i : -1)).filter((i) => i >= 0),
   ];
   const against = [lapTime(reference.timeMs), reference.bikeName, started(reference.started)].filter(Boolean).join(" · ");
+  // Every lap's line, fastest green to slowest red; this lap in blue on top.
+  const others = (() => {
+    if (view !== "laps" || !lines) return undefined;
+    const times = lines.laps.map((l) => l.time);
+    const [lo, hi] = [Math.min(...times), Math.max(...times)];
+    return lines.laps
+      .filter((l) => l.lap !== lap)
+      .map((l) => ({ path: l.path, colour: `hsl(${Math.round(120 * (1 - (l.time - lo) / Math.max(hi - lo, 0.01)))} 65% 55%)` }));
+  })();
+  const views = [
+    { value: "map" as const, label: t("review.viewMap") },
+    ...(lines && lines.laps.length > 1 ? [{ value: "laps" as const, label: t("review.viewLaps") }] : []),
+    ...(surface ? [{ value: "3d" as const, label: t("review.view3d") }] : []),
+  ];
 
   return (
     <Page
@@ -93,24 +119,18 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
         <div className="min-w-0 space-y-3">
           <div className="relative h-[440px] border border-border bg-card">
-            {surface && (
-              <Segmented
-                size="sm"
-                className="absolute right-3 top-3 z-10"
-                value={view}
-                onChange={setView}
-                options={[
-                  { value: "map", label: t("review.viewMap") },
-                  { value: "3d", label: t("review.view3d") },
-                ]}
-              />
+            {views.length > 1 && (
+              <Segmented size="sm" className="absolute right-3 top-3 z-10" value={view} onChange={setView} options={views} />
             )}
             {view === "3d" && surface ? (
               <Track3D review={review} surface={surface} selected={selected} className="h-full w-full" />
             ) : (
               <div className="h-full p-3">
-                <TrackMap review={review} surface={surface} selected={selected} cursor={cursor} onPick={pick} />
+                <TrackMap review={review} surface={surface} others={others} selected={selected} cursor={cursor} onPick={pick} />
               </div>
+            )}
+            {view === "laps" && (
+              <p className="pointer-events-none absolute bottom-2 left-3 text-[11px] text-muted-foreground">{t("review.lapsLegend")}</p>
             )}
           </div>
           <SectionStrip review={review} selected={selected} onPick={pick} />
@@ -158,6 +178,30 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
               </div>
             )}
           </div>
+
+          {lines && lines.notes.length > 0 && (
+            <div>
+              <Label>{t("review.linesTitle")}</Label>
+              <div className="space-y-1">
+                {lines.notes.map((n, k) => {
+                  const i = review.sections.findIndex((s) => s.name === n.name);
+                  return (
+                    <button
+                      key={k}
+                      onClick={() => i >= 0 && pick(i)}
+                      className={cn(
+                        "w-full border bg-card px-4 py-3 text-left",
+                        i === selected ? "border-primary/60" : "border-border hover:border-foreground/30",
+                      )}
+                    >
+                      <div className="text-[13px] font-semibold">{n.title}</div>
+                      <div className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{n.detail}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {review.setup.length > 0 && (
             <div>

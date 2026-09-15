@@ -18,6 +18,7 @@ export function shortName(name: string): string {
 export default function TrackMap({
   review,
   surface,
+  others,
   selected,
   cursor,
   onPick,
@@ -25,6 +26,8 @@ export default function TrackMap({
   review: Review;
   /** The ridden ground, drawn under the lines when there is one. */
   surface?: Surface | null;
+  /** Other laps' lines, drawn thin under this one. */
+  others?: { path: [number, number][]; colour: string; width?: number }[];
   selected: number | null;
   /** Metres into the lap, or null. */
   cursor: number | null;
@@ -79,6 +82,19 @@ export default function TrackMap({
         strokeLinecap="round"
         vectorEffect="non-scaling-stroke"
       />
+      {others?.map((o, i) => (
+        <polyline
+          key={`o${i}`}
+          points={line(o.path)}
+          fill="none"
+          stroke={o.colour}
+          strokeWidth={o.width ?? 1.2}
+          strokeOpacity={0.85}
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+          className="pointer-events-none"
+        />
+      ))}
       {review.sections.map((s, i) => {
         const on = selected === i;
         const faded = sel != null && !on && hover !== i;

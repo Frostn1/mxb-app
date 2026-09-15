@@ -322,6 +322,26 @@ pub fn coach_review(
     })
 }
 
+/// How the session's lines and the track changed, against the fastest lap on the track; see
+/// `lines.rs`. None until there is a lap to compare with.
+#[tauri::command]
+pub fn coach_lines(app: AppHandle, path: String) -> Result<Option<crate::lines::Lines>, String> {
+    let rec = load(&path)?;
+    let summary = summarize(Path::new(&path), &rec);
+    let Some(r) = best_reference(&all_sessions(&app), &summary.track_id, &summary.bike_id, None) else {
+        return Ok(None);
+    };
+    let ref_rec = if r.path == path { None } else { Some(load(&r.path)?) };
+    let reference = trace(ref_rec.as_ref().unwrap_or(&rec), r.lap)?;
+    let laps: Vec<(i32, Trace)> = rec
+        .laps()
+        .iter()
+        .filter(|l| l.whole && !l.invalid)
+        .filter_map(|l| Some((l.num, Trace::new(l, rec.event.track_length)?)))
+        .collect();
+    Ok(Some(crate::lines::lines(&laps, &reference)))
+}
+
 /// The ground under a session's laps, built from the laps; see `surface.rs`.
 #[tauri::command]
 pub fn coach_surface(path: String) -> Result<Option<crate::surface::Surface>, String> {

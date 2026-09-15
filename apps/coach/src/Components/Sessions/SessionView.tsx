@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Badge } from "@frost/shared/Components/ui/badge";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useT } from "@/i18n";
-import { coachSession, type SessionDetail } from "@/api/coach";
+import { coachLines, coachSession, type Lines, type SessionDetail } from "@/api/coach";
 import { gap, lapTime, started } from "@/lib/format";
 import Page, { Label } from "../Page";
 
@@ -19,9 +19,11 @@ export default function SessionView({
   const t = useT();
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lines, setLines] = useState<Lines | null>(null);
 
   useEffect(() => {
     coachSession(path).then(setDetail).catch((e) => setError(String(e)));
+    coachLines(path).then(setLines).catch(() => {});
   }, [path]);
 
   if (error || !detail) {
@@ -89,6 +91,20 @@ export default function SessionView({
           })}
         </div>
       </div>
+
+      {lines && lines.notes.length > 0 && (
+        <div className="mt-8">
+          <Label>{t("review.linesTitle")}</Label>
+          <div className="space-y-1">
+            {lines.notes.map((n, k) => (
+              <div key={k} className="border border-border bg-card px-4 py-3">
+                <div className="text-[13px] font-semibold">{n.title}</div>
+                <div className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{n.detail}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {ideal && (
         <div className="mt-8">
