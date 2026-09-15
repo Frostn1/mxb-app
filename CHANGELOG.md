@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-09-14 — v0.14.5 — Server tiles are back
 
 ### Added
 - The server browser has its tile view back. Each server shows as a picture of its track with
