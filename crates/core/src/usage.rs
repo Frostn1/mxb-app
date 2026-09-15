@@ -421,7 +421,17 @@ const BUILD_KEY: Option<&str> = option_env!("MXB_USAGE_KEY");
 ///
 /// The timestamp is what bounds replay; see the endpoint for how far out it may be.
 fn signature(body: &str) -> Option<String> {
-    let key = BUILD_KEY?;
+    signature_with(BUILD_KEY, body)
+}
+
+/// The same, with the key passed in, so both ways of having no key can be tested from any build.
+fn signature_with(key: Option<&str>, body: &str) -> Option<String> {
+    // An *empty* key is the shape a misconfigured release takes — a CI secret referenced but
+    // never set arrives as "" rather than as absent, and `option_env!` reports that as `Some`.
+    // Signing with it would produce a MAC the endpoint refuses, so a deployment that had turned
+    // the requirement on would drop every report and say nothing at all. Unset and blank mean
+    // the same thing here: do not sign, and let the endpoint decide what to do about that.
+    let key = key.filter(|k| !k.is_empty())?;
     let seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
@@ -851,12 +861,16 @@ mod tests {
         );
     }
 
-    /// The public build has no key, and must keep working without one.
+    /// Both ways of having no key, and the one way of having one.
+    ///
+    /// The blank case is the one worth a test: a CI secret referenced but never set arrives as
+    /// `Some("")`, the MAC construction would happily use it, and the endpoint would refuse
+    /// every report from that build — silently, if the deployment had turned the requirement on.
     #[test]
-    fn a_build_without_a_key_signs_nothing() {
-        if BUILD_KEY.is_none() {
-            assert!(signature("{}").is_none());
-        }
+    fn nothing_is_signed_without_a_key_worth_the_name() {
+        assert!(signature_with(None, "{}").is_none());
+        assert!(signature_with(Some(""), "{}").is_none());
+        assert!(signature_with(Some("a-build-key"), "{}").is_some());
     }
 
     #[test]
