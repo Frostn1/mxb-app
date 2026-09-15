@@ -198,6 +198,59 @@ export const coachSession = (path: string) => invoke<SessionDetail>("coach_sessi
 /** `solo` reviews the lap on its own; so does the backend when there's nothing to compare with. */
 export const coachReview = (path: string, lap: number, refPath?: string, refLap?: number, solo?: boolean) =>
   invoke<ReviewOut>("coach_review", { path, lap, refPath: refPath ?? null, refLap: refLap ?? null, solo: solo ?? false });
+export type SetupField =
+  | "forkOffset"
+  | "swingarmLength"
+  | "forkSpring"
+  | "forkCompression"
+  | "forkRebound"
+  | "forkPreload"
+  | "forkHeight"
+  | "forkOil"
+  | "shockSpring"
+  | "shockLowCompression"
+  | "shockHighCompression"
+  | "shockRebound"
+  | "shockPreload"
+  | "rodLength"
+  | "frontSprocket"
+  | "rearSprocket";
+
+/** One change behind a setup tip. Positions are in the bike's own list for the setting. */
+export interface SetupChange {
+  field: SetupField;
+  /** Steps firmer, more oil or more teeth; negative is the other way. */
+  steps: number;
+  why: string;
+  from: number | null;
+  to: number | null;
+  /** The values where the bike's file says, like "5.5 N/mm" or "13T". */
+  fromValue: string | null;
+  toValue: string | null;
+  /** The coach can make this change in a copy of the setup. */
+  writes: boolean;
+}
+
+export interface SetupFix {
+  skill: string;
+  changes: SetupChange[];
+}
+
+export interface SetupPlan {
+  /** The setup the rider had on. */
+  name: string;
+  file: string | null;
+  /** Why the coach can't make the changes itself, when it can't. */
+  why: string | null;
+  fixes: SetupFix[];
+}
+
+/** The changes behind a lap's setup tips, against the setup the rider had on. */
+export const coachSetupPlan = (path: string, skills: string[]) =>
+  invoke<SetupPlan>("coach_setup_plan", { path, skills });
+/** Saves those changes as a new setup beside the rider's own. Resolves to its name. */
+export const coachSaveSetup = (path: string, skills: string[]) =>
+  invoke<string>("coach_save_setup", { path, skills });
 /** Downloads the recorder, or copies it from `from`. Resolves to where it went. */
 export const installRecorder = (from?: string) =>
   invoke<string>("coach_install_plugin", { from: from ?? null });

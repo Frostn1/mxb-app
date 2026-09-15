@@ -352,6 +352,90 @@ pub fn coach_review(
     Ok(ReviewOut { track_id: summary.track_id, track_name: summary.track_name, lap: this, reference, review })
 }
 
+/// The setup the rider had on for a recording, as far as the coach could find and read it.
+struct RiderSetup {
+    name: String,
+    file: Option<PathBuf>,
+    setup: Option<crate::stp::Setup>,
+    opts: Option<crate::bikecfg::BikeOptions>,
+    why: Option<String>,
+}
+
+fn rider_setup(app: &AppHandle, path: &str) -> Result<RiderSetup, String> {
+    let rec = load(path)?;
+    let cfg = load_config(app);
+    let e = &rec.event;
+    let raw = rec.session.setup.clone();
+    let name = raw.trim_start_matches(':').to_string();
+    let opts = crate::bikecfg::load(&cfg.mods_path, &e.bike_id);
+    let file = crate::stp::locate(&cfg.profiles_dir(), &raw, &e.track_id, &e.bike_id);
+    let setup = file
+        .as_ref()
+        .and_then(|p| fs::read(p).ok())
+        .and_then(|b| crate::stp::Setup::parse(&b, usize::try_from(e.gears).ok()).ok())
+        .filter(|s| s.bike_id() == e.bike_id);
+    let why = if name.is_empty() || name.eq_ignore_ascii_case("default") {
+        Some("You rode the bike's default setup. Save it under a name in the garage, and the coach can change it for you.".into())
+    } else if file.is_none() {
+        Some(format!("Your setup \"{name}\" wasn't found in your profiles folder."))
+    } else if setup.is_none() {
+        Some(format!("Your setup \"{name}\" couldn't be read."))
+    } else if opts.is_none() {
+        Some("The bike's own settings couldn't be read, so the coach can't tell how far each one goes.".into())
+    } else {
+        None
+    };
+    Ok(RiderSetup { name, file, setup, opts, why })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupPlan {
+    /// The setup the rider had on.
+    pub name: String,
+    pub file: Option<String>,
+    /// Why the coach can't make the changes itself, when it can't.
+    pub why: Option<String>,
+    pub fixes: Vec<crate::fixes::Fix>,
+}
+
+/// The changes behind a lap's setup tips, against the setup the rider had on.
+#[tauri::command]
+pub fn coach_setup_plan(app: AppHandle, path: String, skills: Vec<String>) -> Result<SetupPlan, String> {
+    let r = rider_setup(&app, &path)?;
+    let fixes = crate::fixes::plan(&skills, r.setup.as_ref(), r.opts.as_ref());
+    Ok(SetupPlan { name: r.name, file: r.file.map(|p| p.display().to_string()), why: r.why, fixes })
+}
+
+/// Saves a lap's setup fixes as a new setup beside the rider's own and returns its name.
+/// Never overwrites a file: the rider's setup stays as it was.
+#[tauri::command]
+pub fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Result<String, String> {
+    let r = rider_setup(&app, &path)?;
+    let (Some(file), Some(setup), Some(opts)) = (r.file, r.setup, r.opts) else {
+        return Err(r.why.unwrap_or_else(|| "The coach can't change this setup.".into()));
+    };
+    let fixes = crate::fixes::plan(&skills, Some(&setup), Some(&opts));
+    let (out, moved) = crate::fixes::apply(&setup, &fixes, &opts);
+    if moved == 0 {
+        return Err("There's nothing in this setup the coach can change.".into());
+    }
+    let dir = file.parent().ok_or("The setup's folder couldn't be found.")?;
+    let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("setup");
+    for n in 1..100 {
+        let name = if n == 1 { format!("{stem} (coach)") } else { format!("{stem} (coach {n})") };
+        match fs::OpenOptions::new().write(true).create_new(true).open(dir.join(format!("{name}.stp"))) {
+            Ok(mut f) => {
+                std::io::Write::write_all(&mut f, out.bytes()).map_err(err)?;
+                return Ok(name);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(err(e)),
+        }
+    }
+    Err("There are already too many coach setups for this one.".into())
+}
+
 /// How the session's lines and the track changed, against the fastest lap on the track; see
 /// `lines.rs`. None until there is a lap to compare with.
 #[tauri::command]
