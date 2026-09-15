@@ -6,7 +6,8 @@
   "workspaces": [
     "packages/shared",
     "apps/manager",
-    "apps/studio"
+    "apps/studio",
+    "apps/coach"
   ],
   "scripts": {
     "dev": "cd apps/manager && npm run dev",
@@ -17,7 +18,9 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
     "dev:studio": "cd apps/studio && npm run dev",
-    "tauri:studio": "cd apps/studio && npm run tauri"
+    "tauri:studio": "cd apps/studio && npm run tauri",
+    "dev:coach": "cd apps/coach && bun run dev",
+    "tauri:coach": "cd apps/coach && bun run tauri"
   },
   "overrides": {
     "postcss": "^8.5.25"

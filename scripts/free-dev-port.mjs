@@ -6,7 +6,7 @@
 import { execSync } from "node:child_process";
 
 // Which app's port to free is passed in, because each app has its own: the
-// manager on 1420, the studio on 1430. Args are `<env var name> <default>`
+// manager on 1420, the studio on 1430, the coach on 1440. Args are `<env var name> <default>`
 // rather than a shell expansion so the script behaves the same on Windows.
 // Kept in step with each app's `vite.config.ts`, which reads the same variable.
 const [ENV_NAME = "MXB_DEV_PORT", FALLBACK = "1420"] = process.argv.slice(2);
