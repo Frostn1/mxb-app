@@ -26,6 +26,19 @@ fn list_games() -> Vec<game::GameInfo> {
     game::all_info()
 }
 
+/// Frontend log lines, into the same file the Rust side writes. The shared 3D viewer reports
+/// its renderer through this.
+#[tauri::command]
+fn log_client(level: String, message: String) {
+    // A log line is not a transport for arbitrary payloads: trim rather than reject.
+    let msg: String = message.chars().take(2000).collect();
+    match level.as_str() {
+        "error" => log::error!("[webview] {msg}"),
+        "warn" => log::warn!("[webview] {msg}"),
+        _ => log::info!("[webview] {msg}"),
+    }
+}
+
 /// The coach's own builds: `coach-v` releases in the manager's repo, betas when asked for.
 #[tauri::command]
 async fn check_coach_update(
@@ -59,6 +72,7 @@ fn main() {
             coach::coach_lines,
             coach::coach_ground,
             check_coach_update,
+            log_client,
             // The track's own terrain, from core, for the map and the 3D view.
             mxb_core::trackview::load_track_terrain,
             mxb_core::trackview::load_track_overview,
