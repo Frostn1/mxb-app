@@ -15,6 +15,21 @@
  * handful of counters — and `isEventName` is what makes it impossible for a careless call
  * site to smuggle anything else in.
  *
+ * ## What these numbers can and cannot promise
+ *
+ * Worth being plain about, because decisions get made from them. Every field in a report is
+ * chosen by the caller, so `version`, `os` and `game` are only as true as whoever sent them —
+ * and those three are precisely what "can I stop shipping 0.8.x" and "is the GP Bikes side worth
+ * carrying" are read off. What holds them up is not authentication, which this endpoint cannot
+ * have, but a stack of bounds: the content type (which is what keeps a web page from conscripting
+ * its visitors), the per-address daily cap, the ceilings each row can hold, and — where a
+ * deployment turns it on — a build signature. None of that makes a figure unforgeable; together
+ * they make forging one cost more than the decision it would move is worth.
+ *
+ * An install id is a UUID in a file, so the counting is honest rather than exact in the other
+ * direction too: clearing a config mints a new install, and a cloned or imaged machine reports
+ * as the one it was cloned from.
+ *
  * ## Why rollups
  *
  * Every write is an upsert onto a row that already exists for that install and day, so the
@@ -46,11 +61,45 @@ export const MAX_REPORT_BYTES = 16 * 1024;
 /**
  * Reports accepted from one address per day.
  *
- * An install flushes every few minutes while it is open, so a heavy day is around 300 for a
- * single machine; a household or a LAN shares an address. Set well above both, because the
- * cost of turning away a real player's numbers is worse than the cost of a few junk rows.
+ * An install flushes every half hour while it is open, so a machine left running all day is
+ * around 48; a household or a LAN shares an address. Set well above that, because the cost of
+ * turning away a real player's numbers is worse than the cost of a few junk rows.
+ *
+ * What this is *not* is the thing that stops a determined caller: it is keyed on an address, and
+ * anyone who minds can use more than one. It bounds an accident — a client in a retry loop, a
+ * script someone left running. The deliberate case is bounded by the content type this endpoint
+ * insists on and, where it is configured, by [`REQUIRE_SIGNATURE`].
  */
 export const MAX_REPORTS_PER_DAY = 2000;
+
+/**
+ * The most one `(install, app, day)` row may hold.
+ *
+ * Reports accumulate onto the row — that is what makes it a rollup — and nothing used to bound
+ * the total. Each report is capped at [`MAX_REPORT_MINUTES`], whose comment says "a day is the
+ * most that can honestly be reported at once", but 2,000 honest-looking reports put 2,000 days
+ * of wall clock inside one 24-hour day, and "Minutes per session" believed every one of them.
+ *
+ * A day holds 1,440 minutes; a launch a minute all day is already an absurd number of sessions.
+ * Past either, the row stops climbing rather than the report being refused: a clamp is
+ * idempotent and self-healing, and a real install can never reach it.
+ */
+export const MAX_DAY_MINUTES = 1440;
+export const MAX_DAY_SESSIONS = 1440;
+
+/** The content type a report must arrive as. See [`reportUsage`]. */
+const REPORT_CONTENT_TYPE = "application/json";
+
+/**
+ * Whether an unsigned report is refused.
+ *
+ * Off unless the deployment says otherwise, and it must stay off until signed builds are the
+ * ones in the field — turning it on early throws away everybody's numbers silently, which is
+ * worse than the spoofing it prevents. See [`signatureOk`] for what a signature is worth.
+ */
+function requireSignature(env: Env): boolean {
+  return env.MXB_USAGE_REQUIRE_SIGNATURE === "1";
+}
 
 /** How long counters are kept. Long enough to compare a season against the last one. */
 export const RETENTION_DAYS = 400;
@@ -70,49 +119,148 @@ export const RETENTION_DAYS = 400;
  */
 export const MAX_WINDOW_DAYS = 365;
 
+/** Which app may report a name. */
+type AppId = (typeof APPS)[number];
+
+const EVERY: readonly AppId[] = APPS;
+const MANAGER: readonly AppId[] = ["manager"];
+const STUDIO: readonly AppId[] = ["studio"];
+const COACH: readonly AppId[] = ["coach"];
+
 /**
- * Everything the app is expected to report.
+ * Everything the apps are expected to report, and which of them may report it.
  *
- * A display aid, not a filter: a name absent from this list is still stored, because a
- * shipped build that starts sending something new must not have its data dropped by a
- * worker that hasn't been redeployed. What the list buys is the other half of the question —
- * a feature nobody has touched has no row at all, and only a list of what *should* be there
- * can show it.
+ * A display aid, not a filter: a name absent from this list is still stored, because a shipped
+ * build that starts sending something new must not have its data dropped by a worker that hasn't
+ * been redeployed. What the list buys is the other half of the question — a feature nobody has
+ * touched has no row at all, and only a list of what *should* be there can show it.
+ *
+ * Which app owns a name matters for exactly that. The list used to be flat, so narrowing the
+ * dashboard to one app reported the *other* app's whole vocabulary as never touched — which
+ * buried the handful of names that were genuinely untouched in a wall of names that were never
+ * going to be there.
+ *
+ * The client keeps the same list, as a closed one it will not report outside of
+ * (`crates/core/src/usage.rs`). `usage.test.ts` reads that file and proves the two have not
+ * drifted: a name the apps send but this list has never heard of can never turn up in "Never
+ * touched", which is the one panel that exists to name an absence.
  */
-export const KNOWN_EVENTS = [
-  "app.start",
-  "app.update",
-  "view.browse",
-  "view.library",
-  "view.downloads",
-  "view.locker",
-  "view.presets",
-  "view.studio.designer",
-  "view.studio.rider",
-  "view.studio.pose",
-  "view.studio.track",
-  "view.studio.diagnose",
-  "view.studio.settings",
-  "view.manage",
-  "view.shop",
-  "view.hub",
-  "view.settings",
-  "game.launch",
-  "mod.install",
-  "mod.download",
-  "mod.detail",
-  "preset.apply",
-  "preset.save",
-  "paint.publish",
-  "paint.save",
-  "track.generate",
-  "track.build.install",
-  "voice.join",
-  "server.join",
-  "overlay.open",
-  "frostmod.install",
-  "drop.import",
-] as const;
+export const KNOWN_EVENTS: Readonly<Record<string, readonly AppId[]>> = {
+  // Lifecycle, from all three.
+  "app.start": EVERY,
+  "app.update": EVERY,
+
+  // The manager's pages. `view.plugin` is every plugin panel in one bucket, because naming
+  // each one would be unbounded cardinality.
+  "view.browse": MANAGER,
+  "view.library": MANAGER,
+  "view.downloads": MANAGER,
+  "view.locker": MANAGER,
+  "view.presets": MANAGER,
+  "view.manage": MANAGER,
+  "view.shop": MANAGER,
+  "view.hub": MANAGER,
+  "view.servers": MANAGER,
+  "view.ranked": MANAGER,
+  "view.studio": MANAGER,
+  "view.plugin": MANAGER,
+  // The studio counts its own settings tool as `view.studio.settings`, so this one is the
+  // manager's page and Coach's.
+  "view.settings": ["manager", "coach"],
+
+  // What the manager is for.
+  "mod.detail": MANAGER,
+  "mod.install": MANAGER,
+  "mod.download": MANAGER,
+  "game.launch": MANAGER,
+  "preset.apply": MANAGER,
+  "preset.save": ["manager", "studio"],
+  "paint.publish": MANAGER,
+  "voice.join": MANAGER,
+  "server.join": MANAGER,
+  "overlay.open": MANAGER,
+  "frostmod.install": MANAGER,
+  "drop.import": MANAGER,
+
+  // Frost's Studio: its tools, and what they make.
+  "view.studio.designer": STUDIO,
+  "view.studio.paints": STUDIO,
+  "view.studio.rider": STUDIO,
+  "view.studio.pose": STUDIO,
+  "view.studio.track": STUDIO,
+  "view.studio.diagnose": STUDIO,
+  "view.studio.settings": STUDIO,
+  "track.generate": STUDIO,
+  "track.settings": STUDIO,
+  "track.build.install": STUDIO,
+  "paint.save": STUDIO,
+
+  // MXB Coach.
+  "view.sessions": COACH,
+  "coach.session.open": COACH,
+  "coach.review": COACH,
+};
+
+/** The names one app — or all of them together — is expected to report. */
+export function knownFor(app: AppFilter): string[] {
+  return Object.keys(KNOWN_EVENTS).filter(
+    (name) => app === "all" || KNOWN_EVENTS[name].includes(app),
+  );
+}
+
+/** The header a signed report carries. `v1 <unix seconds> <hex hmac-sha256>`. */
+export const SIGNATURE_HEADER = "X-MXB-Usage";
+
+/** How far a signed report's clock may be out. Wide enough for a machine nobody syncs. */
+export const MAX_SIGNATURE_SKEW_SECONDS = 15 * 60;
+
+/**
+ * Is this report signed by something that holds the build key?
+ *
+ * ## What this buys, and what it does not
+ *
+ * The key is compiled into a client that anyone can download, so it is extractable and this is
+ * not authentication — a determined person will pull it out of the binary. What it stops is
+ * everything cheaper than that: a `curl` loop, a script pointed at the endpoint, and the case
+ * that actually worries this deployment — a web page quietly making its visitors post reports
+ * from their own addresses, where the per-address cap buys nothing because every visitor brings
+ * a fresh one. Raising the floor from "anyone with a terminal" to "someone willing to reverse a
+ * binary" is the whole of the ambition.
+ *
+ * The timestamp bounds replay to [`MAX_SIGNATURE_SKEW_SECONDS`] rather than preventing it: a
+ * captured report can be sent again inside that window. What it is worth there is bounded by the
+ * row ceilings above, which is why those came first.
+ */
+export async function signatureOk(
+  presented: string | null,
+  body: string,
+  env: Env,
+  now = Date.now(),
+): Promise<boolean> {
+  const key = env.USAGE_SIGNING_KEY;
+  if (!key || !presented) return false;
+  const [version, seconds, mac] = presented.trim().split(/\s+/);
+  if (version !== "v1" || !seconds || !mac) return false;
+
+  const at = Number(seconds);
+  if (!Number.isInteger(at)) return false;
+  if (Math.abs(now / 1000 - at) > MAX_SIGNATURE_SKEW_SECONDS) return false;
+
+  const imported = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(key),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signed = await crypto.subtle.sign(
+    "HMAC",
+    imported,
+    new TextEncoder().encode(`v1.${seconds}.${body}`),
+  );
+  const expected = [...new Uint8Array(signed)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return tokenMatches(expected, mac.toLowerCase());
+}
 
 interface Report {
   installId: string;
@@ -131,16 +279,34 @@ interface Report {
  *
  * Unauthenticated, like open signup: the caller holds no token and there is no token we
  * could give it that wouldn't itself be an identifier. Everything that could be abused is
- * bounded instead — the body size, the number of events, each count, and the reports one
- * address may send in a day.
+ * bounded instead — the body size, the number of events, each count, the reports one address
+ * may send in a day, and the ceilings on the row they land on.
+ *
+ * ## Why the content type is insisted on
+ *
+ * The body used to be read without looking at it, which made this a CORS *simple request*: a
+ * `text/plain` POST from any web page is delivered and processed, and the page does not care
+ * that it cannot read the reply. That turned every visitor to that page into a reporter, from
+ * their own address — so the per-address cap, the one bound this endpoint had, was being handed
+ * a fresh bucket per visitor. Insisting on `application/json` forces a preflight, and this
+ * worker answers no CORS headers here, so the browser never sends the request at all. The app's
+ * own client has always sent this type; nothing in the field notices.
  */
 export async function reportUsage(request: Request, env: Env): Promise<Response> {
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (declared > MAX_REPORT_BYTES) return json(413, { error: "report too large" });
 
+  const type = (request.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  if (type !== REPORT_CONTENT_TYPE) {
+    return json(415, { error: `expected ${REPORT_CONTENT_TYPE}` });
+  }
+
   const raw = await readText(request);
   if (raw === null || raw.length > MAX_REPORT_BYTES) {
     return json(413, { error: "report too large" });
+  }
+  if (requireSignature(env) && !(await signatureOk(request.headers.get(SIGNATURE_HEADER), raw, env))) {
+    return json(401, { error: "unsigned report" });
   }
   const report = parseReport(raw);
   if (typeof report === "string") return json(400, { error: report });
@@ -167,7 +333,13 @@ export async function reportUsage(request: Request, env: Env): Promise<Response>
         " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" +
         " ON CONFLICT(install_id, app, day) DO UPDATE SET" +
         "  version = excluded.version, os = excluded.os, game = excluded.game," +
-        "  sessions = sessions + excluded.sessions, minutes = minutes + excluded.minutes," +
+        // Accumulate, but never past what a day can hold. A real install cannot reach either
+        // ceiling; anything that does is telling us something other than how long it was open.
+        // Spliced, not bound: these are module constants, and mixing numbered parameters into
+        // a statement whose other placeholders are positional is exactly the kind of quiet
+        // off-by-one that returns a plausible wrong number.
+        `  sessions = MIN(${MAX_DAY_SESSIONS}, sessions + excluded.sessions),` +
+        `  minutes = MIN(${MAX_DAY_MINUTES}, minutes + excluded.minutes),` +
         "  updated_at = excluded.updated_at",
     ).bind(
       report.installId,
@@ -176,8 +348,8 @@ export async function reportUsage(request: Request, env: Env): Promise<Response>
       report.version,
       report.os,
       report.game,
-      report.sessions,
-      report.minutes,
+      Math.min(report.sessions, MAX_DAY_SESSIONS),
+      Math.min(report.minutes, MAX_DAY_MINUTES),
       now,
       now,
     ),
@@ -310,7 +482,12 @@ export interface Stats {
   app: AppFilter;
   /** How far back counters go. What "all time" actually means, and why retention can be null. */
   retentionDays: number;
-  active: { day: number; week: number; month: number };
+  /**
+   * Distinct installs active over each period. `day`, `week` and `month` are fixed periods and
+   * do not move with the range picker; `window` is the one that does, and is the only honest
+   * denominator for anything else here — every other figure on this page is window-scoped.
+   */
+  active: { day: number; week: number; month: number; window: number };
   installsEver: number;
   newInstalls: number;
   sessions: number;
@@ -323,7 +500,7 @@ export interface Stats {
   platforms: Bucket[];
   games: Bucket[];
   events: EventRow[];
-  /** Names from `KNOWN_EVENTS` with no rows in the window at all. */
+  /** Names this app is expected to report that have no rows in the window at all. */
   unused: string[];
 }
 
@@ -380,17 +557,29 @@ export async function collectStats(
 
   const [active, ever, fresh, totals, daily, retention, current, platforms, games, events] =
     await Promise.all([
-      q<{ day: number; week: number; month: number }>(
+      // `window` is quoted for the reason `returning` is below: both are SQLite keywords.
+      // Scanned from whichever of the month and the window reaches further back, so one pass
+      // still answers all four.
+      q<{ day: number; week: number; month: number; window: number }>(
         "SELECT" +
           "  COUNT(DISTINCT CASE WHEN day = ?1 THEN install_id END) AS day," +
           "  COUNT(DISTINCT CASE WHEN day >= ?2 THEN install_id END) AS week," +
-          "  COUNT(DISTINCT CASE WHEN day >= ?3 THEN install_id END) AS month" +
-          " FROM usage_daily WHERE day >= ?3/*app*/",
+          "  COUNT(DISTINCT CASE WHEN day >= ?3 THEN install_id END) AS month," +
+          "  COUNT(DISTINCT CASE WHEN day >= ?4 THEN install_id END) AS \"window\"" +
+          " FROM usage_daily WHERE day >= MIN(?3, ?4)/*app*/",
         today,
         week,
         month,
+        from,
       ),
-      q<{ n: number }>("SELECT COUNT(DISTINCT install_id) AS n FROM usage_daily WHERE 1 = 1/*app*/"),
+      // Bounded by the retention window rather than left open. The figure was only ever "since
+      // the beginning of time" by accident — the sweep happened to have deleted the rest — and
+      // the tile that shows it promises a number of days. A sweep that fails for a week should
+      // not quietly change what this means.
+      q<{ n: number }>(
+        "SELECT COUNT(DISTINCT install_id) AS n FROM usage_daily WHERE day >= ?/*app*/",
+        dayKey(now, RETENTION_DAYS - 1),
+      ),
       // An install is new in the window if the first day we ever saw it falls inside it.
       q<{ n: number }>(
         "SELECT COUNT(*) AS n FROM (" +
@@ -403,8 +592,12 @@ export async function collectStats(
           " FROM usage_daily WHERE day >= ?/*app*/",
         from,
       ),
+      // COUNT(DISTINCT install_id), not COUNT(*): the row key is (install_id, app, day), so a
+      // machine running two of the apps is two rows and was drawn as two installs — on the one
+      // read, "all", whose whole promise is that it counts a machine once however many of them
+      // reported. Every figure beside it on the page already counted distinctly.
       q<DayRow>(
-        "SELECT day, COUNT(*) AS installs, COALESCE(SUM(sessions), 0) AS sessions," +
+        "SELECT day, COUNT(DISTINCT install_id) AS installs, COALESCE(SUM(sessions), 0) AS sessions," +
           " COALESCE(SUM(minutes), 0) AS minutes" +
           " FROM usage_daily WHERE day >= ?/*app*/ GROUP BY day ORDER BY day",
         from,
@@ -455,14 +648,19 @@ export async function collectStats(
 
   const rows = events.results ?? [];
   const seen = new Set(rows.map((r) => r.name));
-  const counts = active.results?.[0] ?? { day: 0, week: 0, month: 0 };
+  const counts = active.results?.[0] ?? { day: 0, week: 0, month: 0, window: 0 };
 
   return {
     generatedAt: now,
     days,
     app,
     retentionDays: RETENTION_DAYS,
-    active: { day: counts.day ?? 0, week: counts.week ?? 0, month: counts.month ?? 0 },
+    active: {
+      day: counts.day ?? 0,
+      week: counts.week ?? 0,
+      month: counts.month ?? 0,
+      window: counts.window ?? 0,
+    },
     installsEver: ever.results?.[0]?.n ?? 0,
     newInstalls: fresh.results?.[0]?.n ?? 0,
     sessions: totals.results?.[0]?.sessions ?? 0,
@@ -473,7 +671,9 @@ export async function collectStats(
     platforms: platforms.results ?? [],
     games: games.results ?? [],
     events: rows,
-    unused: KNOWN_EVENTS.filter((name) => !seen.has(name)),
+    // Only the names this app could have sent. A studio-only read used to list the manager's
+    // entire vocabulary as never touched, which buried the few that genuinely were.
+    unused: knownFor(app).filter((name) => !seen.has(name)),
   };
 }
 

@@ -20,6 +20,26 @@
 - With MXB Coach running, the overlay shows Coach's tabs next to yours and one shortcut opens
   both.
 
+### Changed
+- The app reports anonymous usage from a fixed list of names and nothing else. A plugin shares
+  the app's window, and so could count whatever it liked under any name it liked — including
+  filling the buffer with invented ones, which quietly stopped real counters being recorded
+  until the next send.
+
+## Unreleased — Frost's Studio
+
+### Changed
+- The Studio reports anonymous usage from the same fixed list of names as the app, for the same
+  reason.
+
+## Unreleased — MXB Coach
+
+### Added
+- Coach counts anonymous usage the way the app and the Studio already do — which pages get
+  opened, and how many sessions get reviewed. Same switch (Settings → General), same config, and
+  the same nothing-about-you payload: no rider name, no paths, no session files. Coach never
+  mints an identifier of its own, so a machine with only Coach on it counts nothing at all.
+
 ## 2026-09-15 — v0.15.1 — Small fixes
 
 ### Changed

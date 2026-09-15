@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import SessionList from "./SessionList";
 import SessionView from "./SessionView";
 import Review from "../Review/Review";
+import { track } from "@/lib/analytics";
 
 type Place =
   | { kind: "list" }
@@ -11,6 +12,14 @@ type Place =
 /** Sessions, one session's laps, and a lap's review: a drill-down with back links. */
 export default function Sessions({ onSettings }: { onSettings: () => void }) {
   const [place, setPlace] = useState<Place>({ kind: "list" });
+
+  // Counted off where the drill-down *is*, not off the handlers that move it — a back link and
+  // a fresh pick both land here, and a step nobody counted is worse than one counted twice. The
+  // list itself is the Sessions page, which `App` already counts as `view.sessions`.
+  useEffect(() => {
+    if (place.kind === "session") track("coach.session.open");
+    else if (place.kind === "review") track("coach.review");
+  }, [place.kind]);
 
   if (place.kind === "review") {
     const { path, lap, solo } = place;
