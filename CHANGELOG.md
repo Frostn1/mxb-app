@@ -12,6 +12,10 @@
   nervous at speed". It checks that against your laps, says when they agree or say otherwise, and
   adds the fix to your saved copy.
 
+### Changed
+- Hard landings and fighting the bars are now judged against your own session on that bike, so a
+  heavy bike or a light 85 gets the same fair call as the 250 the coach was tuned on.
+
 ## 2026-09-15 — MXB Coach v0.1.8-beta.8
 
 ### Added

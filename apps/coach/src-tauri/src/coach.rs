@@ -333,11 +333,16 @@ pub fn coach_review(
         }
     };
     let e = &rec.event;
+    // The whole session, so one lap's floors are this rider's on this bike.
+    let laps: Vec<analysis::Trace> = rec.laps().iter().filter_map(|l| analysis::Trace::new(l, e.track_length)).collect();
+    let (land_scale, torque_scale) = analysis::norm(&laps);
     let bike = analysis::Bike {
         limiter: e.limiter as f32,
         max_rpm: e.max_rpm as f32,
         shift_rpm: e.shift_rpm as f32,
         travel: e.susp_max_travel,
+        land_scale,
+        torque_scale,
     };
     let mine = trace(&rec, lap)?;
     let time_ms = summary.laps.iter().find(|l| l.num == lap).map_or(0, |l| l.time_ms);

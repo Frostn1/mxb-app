@@ -104,6 +104,13 @@ mod th {
     /// Force on the bars into a corner this many times the fast lap's, and at least `TORQUE_MIN`.
     pub const TORQUE_RATIO: f32 = 1.5;
     pub const TORQUE_MIN: f32 = 25.0;
+    /// What the floors above were tuned on, five laps of a 250F: landings' 90th percentile, G,
+    /// and the median force on the bars. A rider's own session scales the floors from these.
+    pub const CAL_LAND_P90_G: f32 = 10.1;
+    pub const CAL_TORQUE_MEDIAN: f32 = 17.0;
+    /// How far a session may move them, and how many landings it needs to move the landing one.
+    pub const SCALE: (f32, f32) = (0.7, 1.5);
+    pub const SCALE_LANDINGS: usize = 8;
     /// Turning less than this share of what the lean would give: the front is sliding.
     pub const PUSH: f32 = 0.75;
     pub const SOLO_PUSH: f32 = 0.65;
@@ -753,6 +760,44 @@ pub struct Bike {
     pub shift_rpm: f32,
     /// Suspension travel in metres, front then rear; 0 if unknown.
     pub travel: [f32; 2],
+    /// This rider on this bike against what the floors were tuned on (see [`norm`]): landings
+    /// and bar force, 0 to keep the tuned floors.
+    pub land_scale: f32,
+    pub torque_scale: f32,
+}
+
+impl Bike {
+    fn land_g(&self, floor: f32) -> f32 {
+        floor * if self.land_scale > 0.0 { self.land_scale } else { 1.0 }
+    }
+    fn torque_min(&self) -> f32 {
+        th::TORQUE_MIN * if self.torque_scale > 0.0 { self.torque_scale } else { 1.0 }
+    }
+}
+
+/// How this rider's session compares with what the floors were tuned on: `(landing, bars)`.
+/// A heavier bike or a rider who always lands harder hits harder everywhere, so a hard landing
+/// is judged against their own; a light bike needs less force on the bars. Each is 0 when the
+/// session doesn't have enough to say.
+pub fn norm(laps: &[Trace]) -> (f32, f32) {
+    let mut lands: Vec<f32> = Vec::new();
+    let mut bars: Vec<f32> = Vec::new();
+    for t in laps {
+        for i in 1..t.pts.len() {
+            if t.pts[i - 1].air && !t.pts[i].air {
+                lands.push(t.max_by(i..(i + 8).min(t.pts.len()), |q| q.hit));
+            }
+        }
+        bars.extend(t.pts.iter().filter(|q| !q.air && q.v > 5.0).map(|q| q.torque.abs()).filter(|x| x.is_finite()));
+    }
+    let at = |v: &mut Vec<f32>, q: f32| {
+        v.sort_by(f32::total_cmp);
+        v[((v.len() - 1) as f32 * q) as usize]
+    };
+    let clamp = |x: f32| x.clamp(th::SCALE.0, th::SCALE.1);
+    let land = if lands.len() >= th::SCALE_LANDINGS { clamp(at(&mut lands, 0.9) / th::CAL_LAND_P90_G) } else { 0.0 };
+    let torque = if bars.len() >= 200 { clamp(at(&mut bars, 0.5) / th::CAL_TORQUE_MEDIAN) } else { 0.0 };
+    (land, torque)
 }
 
 fn theme(skill: &str) -> &'static str {
@@ -939,7 +984,7 @@ fn corner(c: &mut Ctx) {
     // The bars and the front tyre.
     let bars = |t: &Trace, apex: usize| t.mean(start..apex + 1, |q| q.torque.abs());
     let (tq_p, tq_r) = (bars(p, apex_p), bars(r, apex_r));
-    if tq_p > th::TORQUE_MIN && tq_p > tq_r * th::TORQUE_RATIO {
+    if tq_p > c.bike.torque_min() && tq_p > tq_r * th::TORQUE_RATIO {
         c.add("bar_fight", 0.5, start, "Relax on the bars", format!(
             "You push {:.0}% harder on the bars into {name} than the fast lap. Grip the bike with your \
              knees, keep your elbows loose and steer with your weight on the outside peg.",
@@ -1271,7 +1316,7 @@ fn jumps(c: &mut Ctx) {
         }
         let hit = |t: &Trace, l: usize| t.max_by(l..(l + 8).min(s.end + 1).max(l + 1), |q| q.hit);
         let (hp, hr) = (hit(p, pl), hit(r, rl));
-        if hp > th::LAND_HIT_G && hp > hr * th::LAND_HIT_RATIO {
+        if hp > c.bike.land_g(th::LAND_HIT_G) && hp > hr * th::LAND_HIT_RATIO {
             c.warn("land_hard", pl, "Land softer", format!(
                 "You hit {hp:.0} G landing {name}, the fast lap {hr:.0} G. Aim for the downslope, and soak \
                  the landing up with your legs instead of locking your arms."
@@ -1729,7 +1774,7 @@ fn alone(c: &mut Ctx) {
                     ));
                 }
                 let hit = p.max_by(pl..(pl + 8).min(s.end + 1).max(pl + 1), |q| q.hit);
-                if hit > th::SOLO_LAND_HIT_G {
+                if hit > c.bike.land_g(th::SOLO_LAND_HIT_G) {
                     c.warn("land_hard", pl, "Land softer", format!(
                         "You hit {hit:.0} G landing {which}. Aim for the downslope, and soak the landing up with \
                          your legs instead of locking your arms."
@@ -2031,7 +2076,24 @@ pub(crate) mod tests {
         gas: 1.0,
         accel: 6.0,
     };
-    const BIKE: Bike = Bike { limiter: 13000.0, max_rpm: 14000.0, shift_rpm: 12500.0, travel: [0.3, 0.3] };
+    const BIKE: Bike =
+        Bike { limiter: 13000.0, max_rpm: 14000.0, shift_rpm: 12500.0, travel: [0.3, 0.3], land_scale: 0.0, torque_scale: 0.0 };
+
+    #[test]
+    fn the_floors_follow_the_riders_own_session() {
+        assert_eq!(norm(&[]), (0.0, 0.0), "nothing to go on keeps the tuned floors");
+        let session = |st: &Style| (0..10).map(|_| lap(st)).collect::<Vec<_>>();
+        let soft = norm(&session(&FAST));
+        let hard = norm(&session(&Style { hit: 20.0, ..FAST }));
+        assert!(hard.0 >= soft.0, "{soft:?} {hard:?}");
+        for x in [soft.0, soft.1, hard.0, hard.1] {
+            assert!(x == 0.0 || (th::SCALE.0..=th::SCALE.1).contains(&x), "{x}");
+        }
+        // A rider who always lands this hard isn't told off for it at the tuned floor.
+        let b = Bike { land_scale: th::SCALE.1, ..BIKE };
+        assert!(b.land_g(th::LAND_HIT_G) > th::LAND_HIT_G);
+        assert_eq!(BIKE.land_g(th::LAND_HIT_G), th::LAND_HIT_G);
+    }
 
     /// Speed, throttle, brake and lean at `d`.
     fn ride(st: &Style, d: f32) -> (f32, f32, f32, f32) {
