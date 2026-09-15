@@ -51,6 +51,7 @@ import {
   setRunInBackground,
   setWatchModsReload,
   setBetaUpdates,
+  setAutoUpdates,
   setSecureContentInject,
   setWineRunner,
   wineHostInfo,
@@ -506,6 +507,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const instantRefresh = config.instantRefresh ?? true;
   const watchModsReload = config.watchModsReload ?? true;
   const betaUpdates = config.betaUpdates ?? false;
+  const autoUpdates = config.autoUpdates ?? true;
   const secureContentInject = config.secureContentInject ?? false;
 
   const overlayEnabled = config.overlayEnabled ?? true;
@@ -915,6 +917,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       await reloadConfig();
       // Turning it on is asking for a beta: look now, not at the next poll.
       if (v) void checkForUpdates();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const toggleAutoUpdates = async (v: boolean) => {
+    try {
+      await setAutoUpdates(v);
+      await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
     }
@@ -2518,6 +2529,12 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               desc={t("settings.betaUpdatesDesc")}
               checked={betaUpdates}
               onChange={toggleBetaUpdates}
+            />
+            <ToggleRow
+              label={t("settings.autoUpdates")}
+              desc={t("settings.autoUpdatesDesc")}
+              checked={autoUpdates}
+              onChange={toggleAutoUpdates}
             />
             <div className="flex flex-col gap-1 pt-1 text-[11.5px] text-faint">
               <div className="flex items-center gap-1.5">

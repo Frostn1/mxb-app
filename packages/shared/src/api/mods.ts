@@ -2761,6 +2761,11 @@ export function setBetaUpdates(enabled: boolean): Promise<void> {
   return invoke<void>("set_beta_updates", { enabled });
 }
 
+/** Install updates without asking: at launch, or once the app sits unused. */
+export function setAutoUpdates(enabled: boolean): Promise<void> {
+  return invoke<void>("set_auto_updates", { enabled });
+}
+
 /**
  * Toggle injecting `mxbsecure.dll` into the running game for locked content.
  *

@@ -837,6 +837,9 @@ export const it: Translation = {
   "settings.betaUpdates": "Aggiornamenti beta",
   "settings.betaUpdatesDesc":
     "Ricevi le versioni di prova nell'app prima della versione completa. Possono avere qualche difetto. Se lo disattivi, resti sulla tua versione fino alla prossima versione completa.",
+  "settings.autoUpdates": "Installa gli aggiornamenti automaticamente",
+  "settings.autoUpdatesDesc":
+    "Gli aggiornamenti si installano all'apertura dell'app o quando non la usi da un po'. Mai mentre MX Bikes è in esecuzione.",
 
   "sync.title": "Sincronizzazione livree",
   "sync.desc":

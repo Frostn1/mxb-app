@@ -111,6 +111,8 @@ export interface Config {
   watchModsReload?: boolean;
   /** Offer beta builds through the in-app updater, not only full releases. Default false. */
   betaUpdates?: boolean;
+  /** Install updates at launch or once the app sits unused, never mid-game. Default true. */
+  autoUpdates?: boolean;
   /**
    * Inject `mxbsecure.dll` into the running game so locked content can be opened.
    *
