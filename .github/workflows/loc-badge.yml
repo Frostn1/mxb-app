@@ -1,0 +1,38 @@
+# The "lines of code" badge in the README. Counts the tracked source lines on every push to
+# main and publishes a shields.io endpoint file to the `badges` branch, so main itself never
+# gets a bot commit.
+name: Lines of code badge
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: loc-badge
+  cancel-in-progress: true
+
+jobs:
+  count:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Count and publish
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          n=$(git ls-files -z -- '*.rs' '*.ts' '*.tsx' '*.css' '*.cpp' '*.h' '*.py' '*.sh' | xargs -0 cat | wc -l)
+          msg=$(awk -v n="$n" 'BEGIN { if (n >= 1000000) printf "%.1fM", n/1000000; else if (n >= 1000) printf "%.1fk", n/1000; else printf "%d", n }')
+          echo "Lines of code: $n ($msg)"
+          mkdir -p "$RUNNER_TEMP/badges" && cd "$RUNNER_TEMP/badges"
+          printf '{"schemaVersion":1,"label":"lines of code","message":"%s","color":"0071e3"}\n' "$msg" > loc.json
+          git init -q -b badges
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add loc.json
+          git commit -q -m "Lines of code: $msg"
+          git push -q --force "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges

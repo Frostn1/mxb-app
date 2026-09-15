@@ -1,11 +1,19 @@
+<p align="center">
+  <a href="https://mxbsecure.com/app"><img src="docs/brand/mxb-app.png" alt="MXB App, from mxbsecure. Mods in one click." width="720"></a>
+</p>
+
 # MXB App
 
+**[mxbsecure.com/app](https://mxbsecure.com/app)** · [Download for Windows](https://get.mxbsecure.com/app/windows) · [Everything from mxbsecure](https://mxbsecure.com)
+
 [![CI](https://github.com/Frostn1/mxb-app/actions/workflows/ci.yml/badge.svg)](https://github.com/Frostn1/mxb-app/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/Frostn1/mxb-app?sort=semver&label=release)](https://github.com/Frostn1/mxb-app/releases)
-[![Release date](https://img.shields.io/github/release-date/Frostn1/mxb-app?label=released)](https://github.com/Frostn1/mxb-app/releases)
-[![Downloads](https://img.shields.io/github/downloads/Frostn1/mxb-app/total?label=downloads)](https://github.com/Frostn1/mxb-app/releases)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0078D6)](#development)
+[![Latest release](https://img.shields.io/github/v/release/Frostn1/mxb-app?sort=semver&label=release&color=0071e3)](https://mxbsecure.com/app)
+[![Release date](https://img.shields.io/github/release-date/Frostn1/mxb-app?label=released&color=0071e3)](https://github.com/Frostn1/mxb-app/releases)
+[![Downloads](https://img.shields.io/github/downloads/Frostn1/mxb-app/total?label=downloads&color=0071e3)](https://mxbsecure.com/app)
+[![Lines of code](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFrostn1%2Fmxb-app%2Fbadges%2Floc.json)](https://github.com/Frostn1/mxb-app)
+[![License: MIT](https://img.shields.io/badge/license-MIT-0071e3)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0071e3)](#download)
+[![mxbsecure](https://img.shields.io/badge/mxbsecure-.com-0b0b0c)](https://mxbsecure.com)
 
 **MXB App** is a desktop mod manager for [MX Bikes](https://mx-bikes.com/). It
 replaces the tedious manual install dance — open mxb-mods.com, follow the link,
@@ -30,14 +38,24 @@ languages (Settings → Appearance).
 
 ## Download
 
-Grab the latest installer from the
-[**Releases**](https://github.com/Frostn1/mxb-app/releases) page:
+Get it from **[mxbsecure.com/app](https://mxbsecure.com/app)**, or straight from the
+[Releases](https://github.com/Frostn1/mxb-app/releases) page:
 
-- **Windows** — `.exe` NSIS installer (recommended; MX Bikes runs on Windows).
-- **macOS** (Apple Silicon) — `.dmg`; Play launches the game through a CrossOver,
-  Whisky or Wine bottle.
-- **Linux** — `.AppImage`, `.deb` and `.rpm`, for playing under Proton (SteamOS
-  included).
+- **Windows**: [`.exe` installer](https://get.mxbsecure.com/app/windows) (recommended; MX
+  Bikes runs on Windows).
+- **macOS** (Apple Silicon): [`.dmg`](https://get.mxbsecure.com/app/mac). Play launches the
+  game through a CrossOver, Whisky or Wine bottle.
+- **Linux**: [`.AppImage`](https://get.mxbsecure.com/app/linux),
+  [`.deb`](https://get.mxbsecure.com/app/deb) and [`.rpm`](https://get.mxbsecure.com/app/rpm),
+  for playing under Proton (SteamOS included).
+
+### More from mxbsecure
+
+- **[MXB Coach](https://mxbsecure.com/coach)**: reviews your laps, sets up your bike and calls
+  cues while you ride.
+- **[Frost's Studio](https://mxbsecure.com/studio)**: paints, tracks and the Designer.
+- **[FrostMod](https://mxbsecure.com/frostmod)**: the in-game companion.
+- **[Replay Mod](https://mxbsecure.com/replay)**: cameras and cuts for replays.
 
 Builds are unsigned, so Windows SmartScreen / macOS Gatekeeper will warn on
 first launch — choose _Run anyway_ / right-click _Open_.
