@@ -62,7 +62,11 @@ Thresholds are starting values in `analysis.rs` → `mod th`, to be tuned on rea
 
 Over the whole lap, with the fix for each in `fixes.rs` (the changes, in the order to try them,
 written into a copy of the rider's setup where the bike's own option list for the setting is
-known; geometry stays advice).
+known). Geometry is written too, with directions from the game: a later option raises the front
+(fork height), lengthens the rod (lowering the rear about 3 mm per mm) and adds offset. The
+swingarm's list is the bike's `.geom` (`rwheel_min`, `rwheel_max`, `swingarm_steps`), which runs
+long to short on the 2003 Suzukis, so its direction is read per bike. A setting already past its
+list is never written; swingarm pivot and rake never are.
 
 | Tip | Fires when | Fix |
 |---|---|---|
@@ -73,15 +77,23 @@ known; geometry stays advice).
 | `setup_exit_squat` | shock past 75% on the gas out of ≥ 2 corners | shock low-speed compression, preload |
 | `setup_shock_kick` | rear extends faster than 0.6 m/s at the lip on ≥ 2 jumps | slower shock rebound |
 | `setup_packing_fork` / `_shock` | in whoops, > 50% deep on average and never extending faster than 0.4 / 0.2 m/s | faster rebound, softer compression |
-| `setup_rear_low` / `setup_front_low` | on steady straights the shock sits > 30% deeper than the fork / the fork deeper than the shock | preload |
-| `setup_front_push` | the front slides in ≥ 2 corners | softer fork compression, more shock preload |
+| `setup_rear_low` / `setup_front_low` | on steady straights the shock sits > 30% deeper than the fork / the fork deeper than the shock | preload, then a shorter rod / the fork down in the clamps |
+| `setup_front_push` | the front slides in ≥ 2 corners | softer fork compression, more shock preload, then the fork up in the clamps |
+| `setup_unstable` / `setup_turns_slow` | only from the feel check | front higher, less offset, longer swingarm / the other way |
 | `setup_sag_rear_deep` / `_high` | standing still ≥ 1 s with the rider on, the shock outside 30–36% of its travel | shock preload by the millimetres it's off; the spring when preload runs out |
 | `setup_pressure` | a tyre > 10 kPa from the `OptimalPressure` in its `.tyre` file | back to the tyre's optimum |
-| `setup_gearing_*`, `setup_shift_*`, `setup_swingarm` | limiter, bogging, shift points, front up on exits | rear sprocket; swingarm as advice |
+| `setup_gearing_*`, `setup_shift_*`, `setup_swingarm` | limiter, bogging, shift points, front up on exits | rear sprocket; a longer swingarm |
 
 The suspension, acceleration and bar thresholds come from real laps (2026-09-15, five laps of a
 250F): a landing's hit has a median of 5 G and a 90th percentile of 10 G, the bars into a
-corner a median of 17. The game's brake pressure channel carries no data, so braking is read
+corner a median of 17. `analysis::norm` scales the hard-landing and bar floors by the rider's
+own session against those (clamped 0.7–1.5, from 8 landings or 200 m of riding), so a heavy bike
+or a light 85 is judged against itself.
+
+**Feel check.** The rider picks what they feel from thirteen feels in the Setup card, each
+mapped to a tip. A feel the review also found is confirmed; one the travel used argues with
+(bottoming under 90% of travel, harsh at 95% or more, from `sag::travel_used`) says so and adds
+no fix; the rest add their fix on the rider's word. The game's brake pressure channel carries no data, so braking is read
 from the lever inputs. The OEM MX tyres don't heat or wear in the game (heating factors and wear
 rate are 0), so pressure is judged against the tyre's optimum only. Sag is measured standing
 still when the recording has a second of it; riding sag is shown but not held to a target.
