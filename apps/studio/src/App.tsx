@@ -53,10 +53,15 @@ function Shell() {
   // A tool can say it is showing something that owns the window — the Designer's start
   // screen — and the strip goes with it rather than sitting above it with nothing in it.
   const [bare, setBare] = useState(false);
-  // What the mounted tool is holding, and how to save it — see `UnsavedRegistry`.
-  const work = useRef<UnsavedWork | null>(null);
+  // What the mounted tools are holding, and how to save it — see `UnsavedRegistry`.
+  const work = useRef(new Set<UnsavedWork>());
   const registry = useMemo(
-    () => ({ register: (w: UnsavedWork | null) => (work.current = w) }),
+    () => ({
+      register: (w: UnsavedWork) => {
+        work.current.add(w);
+        return () => void work.current.delete(w);
+      },
+    }),
     [],
   );
   const [asking, setAsking] = useState(false);
@@ -72,7 +77,7 @@ function Shell() {
   useEffect(() => {
     const win = getCurrentWindow();
     const un = win.onCloseRequested((e) => {
-      if (leaving.current || !work.current?.dirty()) return;
+      if (leaving.current || ![...work.current].some((w) => w.dirty())) return;
       e.preventDefault();
       setAsking(true);
     });
@@ -89,7 +94,12 @@ function Shell() {
 
   const saveAndLeave = useCallback(async () => {
     setSaving(true);
-    const ok = await work.current?.save().catch(() => false);
+    let ok = true;
+    for (const w of work.current) {
+      if (!w.dirty()) continue;
+      ok = await w.save().catch(() => false);
+      if (!ok) break;
+    }
     setSaving(false);
     // False means it could not save — usually because it needs a name and has just put the
     // cursor there. Dropping the close is the only sane answer; quitting anyway loses the

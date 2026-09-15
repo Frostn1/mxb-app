@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-15 — Save your tracks
+
+### Added
+- Track Studio: save a track you're working on and open it later to carry on. Save is in the
+  bottom bar (Ctrl+S), and Open track… is on the start screen.
+- Closing Studio with an unsaved track asks first, the same as the Designer does.
+
 ## 2026-09-15 — Contributors
 
 ### Added
