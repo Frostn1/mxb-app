@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-15 — Frost's Studio v0.1.8 — Easy and ARL random tracks
+
+### Added
+- Random track comes in three sizes: Easy, Normal and ARL. Easy has smaller jumps and shallower
+  ruts, for learning. ARL has the bigger jumps and rougher ground of a raced pro track. Pick the
+  size next to the Random track button.
+
 ## 2026-09-15 — Frost's Studio v0.1.7 — Save your tracks
 
 ### Added
