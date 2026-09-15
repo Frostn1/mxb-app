@@ -37,6 +37,8 @@ export interface SessionSummary {
   complete: boolean;
   laps: LapSummary[];
   bestMs: number | null;
+  /** The setup it was ridden on, as the game names it. */
+  setup: string;
 }
 
 export interface LapRef {
@@ -214,7 +216,11 @@ export type SetupField =
   | "shockPreload"
   | "rodLength"
   | "frontSprocket"
-  | "rearSprocket";
+  | "rearSprocket"
+  | "frontTyre"
+  | "rearTyre"
+  | "frontPressure"
+  | "rearPressure";
 
 /** One change behind a setup tip. Positions are in the bike's own list for the setting. */
 export interface SetupChange {
@@ -245,6 +251,8 @@ export interface SetupPlan {
   /** Why the coach can't make the changes itself, when it can't. */
   why: string | null;
   fixes: SetupFix[];
+  /** Sag measured in the session: standing still (what setup guides mean) or riding. */
+  sag: { still: boolean; metres: [number, number]; share: [number, number] } | null;
 }
 
 /** The changes behind a lap's setup tips, against the setup the rider had on. */
@@ -253,6 +261,28 @@ export const coachSetupPlan = (path: string, skills: string[]) =>
 /** Saves those changes as a new setup beside the rider's own. Resolves to its name. */
 export const coachSaveSetup = (path: string, skills: string[]) =>
   invoke<string>("coach_save_setup", { path, skills });
+export type CueLevel = "new" | "intermediate" | "subPro" | "pro";
+export type CueAmount = "few" | "normal" | "lots";
+
+/** One live cue: a short call the recorder shows a moment before its spot. */
+export interface CueOut {
+  /** Metres into the lap. */
+  at: number;
+  kind: number;
+  priority: number;
+  text: string;
+  section: string;
+}
+
+export interface CuesOut {
+  file: string;
+  cues: CueOut[];
+}
+
+/** Picks this lap's live cues for a rider's level and how much coaching they want, and writes
+ *  them where the recorder reads them. */
+export const coachWriteCues = (path: string, lap: number, level: CueLevel, amount: CueAmount) =>
+  invoke<CuesOut>("coach_write_cues", { path, lap, level, amount });
 /** Downloads the recorder, or copies it from `from`. Resolves to where it went. */
 export const installRecorder = (from?: string) =>
   invoke<string>("coach_install_plugin", { from: from ?? null });

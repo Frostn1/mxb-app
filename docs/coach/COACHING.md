@@ -45,6 +45,9 @@ Thresholds are starting values in `analysis.rs` → `mod th`, to be tuned on rea
 | Corner | `front_lock` ⚠ | front wheel < 80% of ground speed under front brake > 0.15 s |
 | Corner | `bar_fight` | mean bar torque into the apex > 25 and > 1.5× the reference |
 | Corner | `front_push` ⚠ | the bike turns < 75% of what its lean supports, the reference > 85% |
+| Corner | second line | the slower of two lines within 0.25 s: named as the line for passing or for when the fast one ruts; a corner cutting up points to the other line ridden there |
+| Corners | line pairs | two corners within 30 m of each other: laps grouped by their line in both; when the quickest pair over both isn't the one the first corner alone would pick (≥ 0.08 s), it's named and the first corner's own line note is dropped |
+| Corner | `throttle_room` | ≥ 20 points less exit throttle than the reference, rear slip never over 1.08, front down (on its own: a ≥ 25 m exit under 55% throttle) |
 | Jump | `jump_it` | reference jumps, lap rolls it |
 | Jump | `chop_face` | throttle drops > 0.3 on the last 15 m of the face |
 | Jump | `scrub` | > 10% + 0.1 s more airtime and > 0.5 m higher |
@@ -72,12 +75,38 @@ known; geometry stays advice).
 | `setup_packing_fork` / `_shock` | in whoops, > 50% deep on average and never extending faster than 0.4 / 0.2 m/s | faster rebound, softer compression |
 | `setup_rear_low` / `setup_front_low` | on steady straights the shock sits > 30% deeper than the fork / the fork deeper than the shock | preload |
 | `setup_front_push` | the front slides in ≥ 2 corners | softer fork compression, more shock preload |
+| `setup_sag_rear_deep` / `_high` | standing still ≥ 1 s with the rider on, the shock outside 30–36% of its travel | shock preload by the millimetres it's off; the spring when preload runs out |
+| `setup_pressure` | a tyre > 10 kPa from the `OptimalPressure` in its `.tyre` file | back to the tyre's optimum |
 | `setup_gearing_*`, `setup_shift_*`, `setup_swingarm` | limiter, bogging, shift points, front up on exits | rear sprocket; swingarm as advice |
 
 The suspension, acceleration and bar thresholds come from real laps (2026-09-15, five laps of a
 250F): a landing's hit has a median of 5 G and a 90th percentile of 10 G, the bars into a
 corner a median of 17. The game's brake pressure channel carries no data, so braking is read
-from the lever inputs.
+from the lever inputs. The OEM MX tyres don't heat or wear in the game (heating factors and wear
+rate are 0), so pressure is judged against the tyre's optimum only. Sag is measured standing
+still when the recording has a second of it; riding sag is shown but not held to a target.
+
+## Live cues
+
+`cues.rs` turns a review into the few calls the recorder shows during a lap in practice.
+The fast lap says where each call goes (`analysis::cue_points`): the corner's braking point,
+brake release, a downshift on the brakes, turn-in (sit), back on the gas, an upshift on the
+exit, a scrub at a takeoff, standing into a rhythm or whoops. Each candidate is rated by the
+time its section loses, doubled when one of the section's tips is about the same thing, plus
+how basic the call is at the rider's level. Line cues (go wide, cut inside) come from the
+`line` tips.
+
+| Level | Calls | Section must lose |
+|---|---|---|
+| New | brake, gas, stand, sit | nothing: the basics everywhere |
+| Intermediate | + off the brakes, shift up, shift down | 0.05 s |
+| Sub-pro | + go wide, cut inside, scrub (no sit) | 0.1 s |
+| Pro | the same | 0.15 s |
+
+How much: a few (2 a lap, 5 s apart), normal (4, 3 s), lots (6, 2 s); cues closer than 30 m
+keep the more important one. The file is `<user folder>\mxbcoach\cues\<track>.<bike>.cue`,
+`MXCQ` version 1, read by FrostMod's `src/coachcue.h`; the plugin shows each cue 1.2 s before
+its spot at the bike's speed for 1.5 s, only in testing or a race event's practice session.
 
 ## Where MX Bikes differs from real life
 

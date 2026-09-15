@@ -42,6 +42,12 @@ pub enum Field {
     RodLength,
     FrontSprocket,
     RearSprocket,
+    /// Which of the bike's tyres each wheel runs.
+    FrontTyre,
+    RearTyre,
+    /// Positions in the tyre's own pressure list.
+    FrontPressure,
+    RearPressure,
 }
 
 impl Field {
@@ -64,6 +70,10 @@ impl Field {
             Field::RodLength => 0x70,
             Field::FrontSprocket => t,
             Field::RearSprocket => t + 0x04,
+            Field::FrontTyre => t + 0x08,
+            Field::RearTyre => t + 0x0C,
+            Field::FrontPressure => t + 0x18,
+            Field::RearPressure => t + 0x1C,
         }
     }
 }

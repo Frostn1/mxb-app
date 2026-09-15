@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-09-15 — MXB Coach v0.1.8-beta.8
+
+### Added
+- Live cues: short calls on screen while you ride, like "Brake", "Gas", "Shift down" or
+  "Stand up", a moment before each spot, from where your lap loses time to your fastest.
+  Pick your level, from new to pro, and how much coaching you want, then send them to the game
+  from any lap review. They show only in practice sessions on that track and bike. Needs the
+  recorder from FrostMod 0.19 or newer: update it in Settings.
+
+## 2026-09-15 — MXB Coach v0.1.7-beta.7
+
+### Added
+- Hold more throttle: when you use less gas than the fast lap out of a corner and the rear never
+  slips, the coach tells you the grip is there to use.
+- Your real sag: stop for 2 seconds in neutral with you on the bike, and the coach measures your
+  sag from that moment. It says how many millimetres of preload to change, or the spring when
+  preload can't go that far, and can make the change in your saved copy.
+- Tyre pressure: the coach checks your pressures against what each tyre is made for, and can put
+  them back in your saved copy.
+- Tips on the map: the numbered tips now show on the track map where each one happens.
+- Did the fix work: each session shows every setup you've ridden on that track and bike, the
+  coach's copies included, with the best lap and the average of your best three on each.
+- Corners that set each other up are judged together. When the quicker line through one corner
+  leaves you badly placed for the next, the coach says which pair of lines is quicker over both.
+- A second line: when another line through a corner is nearly as quick, the coach tells you to
+  keep it for passing, or for when your line cuts up. When a corner ruts, it points you to the
+  other line you've ridden there.
+
+### Changed
+- Lean the bike more now says when the front isn't sliding, so you know the grip is there.
+
 ## Unreleased — Frost's Studio
 
 ### Added
