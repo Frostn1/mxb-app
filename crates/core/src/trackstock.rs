@@ -60,7 +60,7 @@ pub struct StockTrack {
 
 impl StockTrack {
     /// Where this track's files sit inside [`ARCHIVE`].
-    fn prefix(&self) -> String {
+    pub fn prefix(&self) -> String {
         format!("{ROOT}/{}/{}", self.category, self.id)
     }
 }
@@ -101,7 +101,8 @@ pub fn preview(install_dir: &str, track: &StockTrack) -> Option<String> {
     pkz::read_meta_and_preview_under(&path, &track.prefix()).ok()?.1
 }
 
-fn archive_path(install_dir: &str) -> Option<PathBuf> {
+/// The install's [`ARCHIVE`], when there is one on disk.
+pub fn archive_path(install_dir: &str) -> Option<PathBuf> {
     let dir = install_dir.trim();
     if dir.is_empty() {
         return None;
@@ -182,7 +183,7 @@ fn baked() -> Vec<(String, String)> {
 
 /// The same fold the rest of the app matches names by: lowercase, and everything that isn't
 /// alphanumeric reduced to a single space.
-fn fold(raw: &str) -> String {
+pub fn fold(raw: &str) -> String {
     raw.chars()
         .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { ' ' })
         .collect::<String>()

@@ -10,8 +10,18 @@ import type {
   TrackScenery,
   TrackSceneryGroup,
   TrackSceneryTexture,
+  TrackSource,
   TrackTerrain,
 } from "../types";
+
+/**
+ * The file a track id names — an installed mod, or a stock track's folder inside the
+ * install's `tracks.pkz` — for a caller that knows only what the game reported. Pass its
+ * `path` and `prefix` to the readers below. `null` when nothing installed answers to it.
+ */
+export function resolveTrackSource(trackId: string): Promise<TrackSource | null> {
+  return invoke<TrackSource | null>("resolve_track_source", { trackId });
+}
 
 /**
  * A track's metadata and contents.
@@ -19,9 +29,12 @@ import type {
  * Cheap enough to call as the view opens: the backend answers from the archive's index and
  * inflates nothing, so this returns in the time it takes to read a few kilobytes even for a
  * track that is hundreds of megabytes on disk.
+ *
+ * `prefix`, here and on the terrain and overview, names one track's folder inside a shared
+ * archive — a stock track in `tracks.pkz`, as {@link resolveTrackSource} reports it.
  */
-export function readTrackInfo(path: string): Promise<TrackInfo> {
-  return invoke<TrackInfo>("read_track_info", { path });
+export function readTrackInfo(path: string, prefix?: string | null): Promise<TrackInfo> {
+  return invoke<TrackInfo>("read_track_info", { path, prefix });
 }
 
 /** Header bytes before the grid. Mirrors `track::BLOB_HEADER`. */
@@ -41,8 +54,9 @@ const MAGIC = 0x4e525446;
 export async function loadTrackTerrain(
   path: string,
   maxDim: number,
+  prefix?: string | null,
 ): Promise<TrackTerrain> {
-  const buf = await invoke<ArrayBuffer>("load_track_terrain", { path, maxDim });
+  const buf = await invoke<ArrayBuffer>("load_track_terrain", { path, maxDim, prefix });
   const view = new DataView(buf);
   if (buf.byteLength < HEADER || view.getUint32(0, true) !== MAGIC) {
     throw new Error("terrain blob is not in the expected format");
@@ -91,8 +105,9 @@ const TEXTURE_MAGIC = 0x58455446;
 export async function loadTrackOverview(
   path: string,
   maxDim: number,
+  prefix?: string | null,
 ): Promise<TrackOverview | null> {
-  const buf = await invoke<ArrayBuffer>("load_track_overview", { path, maxDim });
+  const buf = await invoke<ArrayBuffer>("load_track_overview", { path, maxDim, prefix });
   // The track simply hasn't got any.
   if (buf.byteLength === 0) return null;
 

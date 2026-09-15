@@ -35,6 +35,7 @@ pub mod scenery;
 pub mod securesource;
 pub mod texstore;
 pub mod track;
+pub mod tracksource;
 pub mod trackstock;
 pub mod trackview;
 pub mod viewer;
