@@ -326,7 +326,10 @@ async fn base_track_program() -> Result<serde_json::Value, String> {
 /// which is why this takes a seed and searches forward from it. Roughly nine seeds in ten
 /// give a lap on the first try.
 #[tauri::command]
-async fn random_track_program(seed: Option<u64>) -> Result<serde_json::Value, String> {
+async fn random_track_program(
+    seed: Option<u64>,
+    scale: Option<trackprog::TrackScale>,
+) -> Result<serde_json::Value, String> {
     let from = seed.unwrap_or_else(|| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -334,7 +337,9 @@ async fn random_track_program(seed: Option<u64>) -> Result<serde_json::Value, St
             .unwrap_or(1)
     });
     let prog = tauri::async_runtime::spawn_blocking(move || {
-        (0..24u64).find_map(|i| tracklayout::draw(from.wrapping_add(i)))
+        let mut prog = (0..24u64).find_map(|i| tracklayout::draw(from.wrapping_add(i)))?;
+        prog.at_scale(scale.unwrap_or_default());
+        Some(prog)
     })
     .await
     .map_err(|e| format!("random_track_program task failed: {e}"))?

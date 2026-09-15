@@ -79,6 +79,7 @@ import {
   type TrackFeatureKind,
   type TrackPreview,
   type TrackProgram,
+  type TrackScale,
   type TrackSegment,
   type TrackToolsStatus,
 } from "../../../api/trackgen";
@@ -176,6 +177,13 @@ export default function TrackStudio() {
   // Rebuilding a two-thousand-square terrain on every drag is real work, so this is a choice
   // rather than the default. With it on, an edit settles and then the view catches up.
   const [live, setLive] = useState(false);
+  // The size a random track is drawn at.
+  const [scale, setScale] = useState<TrackScale>("normal");
+  const scales = (["easy", "normal", "arl"] as const).map((value) => ({
+    value,
+    label: t(`track.scale.${value}`),
+  }));
+  const randomAtScale = () => randomTrackProgram(undefined, scale);
   const rebuild = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tools, setTools] = useState<TrackToolsStatus | null>(null);
 
@@ -805,10 +813,11 @@ export default function TrackStudio() {
             <p className="mt-3 text-[12.5px] leading-relaxed text-muted-foreground">
               {busy === "generate" ? t("track.generatingHint") : t("track.empty")}
             </p>
-            <div className="mt-4 flex items-center gap-2">
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
               <Button
                 variant="outline"
-                onClick={() => void onLoad(randomTrackProgram)}
+                onClick={() => void onLoad(randomAtScale)}
                 disabled={busy !== null}
               >
                 {t("track.random")}
@@ -1501,12 +1510,13 @@ export default function TrackStudio() {
                   </dl>
                 )}
 
-                <div className="mt-5 flex items-center gap-3 border-t border-border pt-3.5">
+                <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-border pt-3.5">
                   <span className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
                     {t("track.startOver")}
                   </span>
+                  <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
                   <button
-                    onClick={() => void onLoad(randomTrackProgram)}
+                    onClick={() => void onLoad(randomAtScale)}
                     disabled={busy !== null}
                     className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
                   >
