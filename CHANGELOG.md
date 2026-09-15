@@ -1,6 +1,22 @@
 # Changelog
 
-## Unreleased — MXB App
+## 2026-09-15 — v0.14.7 — Secured content follows your access
+
+### Added
+- Server tiles show the track's picture even when you don't have it, with a mark over it so
+  you can tell at a glance.
+- Install & join: on a server running a free track you don't have, one button installs it and
+  joins. If the server is full, you're put in line instead.
+- Tracks sold in the shop show their price on the tile, and the button opens the shop page.
+- Settings → Supporters now has a Contributors list for the people who helped make the app
+  better. Trystan34 is the first one on it, for ideas that shaped the app.
+
+### Changed
+- Feel presets now save how each control feels, like the throttle's dead zone, gain and
+  smoothing, and put it back when you apply. Your buttons and axes stay as they are.
+- The feel editor names controls the way the game does, like Throttle, Front brake and Lean.
+- Tiles find your installed track even when its name is written a little differently, like
+  Farm14 and Farm 14.
 
 ### Fixed
 - Secured content now follows the access you actually have. If a creator removes you as a
@@ -9,10 +25,6 @@
   Secured content list marks it "Access removed" and the app says so when it happens, so
   content no longer showing up in game doesn't look like the app breaking. Nothing changes
   while you're offline, or if the check can't be made for any reason.
-
-## 2026-09-15 — MXB Hub gets past the store's robot check
-
-### Fixed
 - MXB Hub's robot check can now be finished by hand. The app still answers it quietly in the
   background, and when that doesn't work it opens the store in a window so you can complete the
   check yourself. Before, the catalogue just never loaded.
@@ -29,13 +41,6 @@
   on you. Needs the recorder from FrostMod 0.21 or newer: update it in Settings.
 - Where the track will wear: the lines view says where the other riders crowd through each
   corner, since that's where it ruts first, and whether the fast line stays smoother.
-
-## 2026-09-15 — Feel presets carry your controls
-
-### Changed
-- Feel presets now save how each control feels, like the throttle's dead zone, gain and
-  smoothing, and put it back when you apply. Your buttons and axes stay as they are.
-- The feel editor names controls the way the game does, like Throttle, Front brake and Lean.
 
 ## 2026-09-15 — MXB Coach v0.1.9-beta.9
 
@@ -137,25 +142,6 @@
 - When the shock bottoms slowly, under braking or in turns, the fix now firms up its
   low-speed compression rather than the high-speed.
 - Rebound changes read as slower or faster, and preload as more or less.
-## 2026-09-15 — Contributors
-
-### Added
-- Settings → Supporters now has a Contributors list for the people who helped make the app
-  better. Trystan34 is the first one on it, for ideas that shaped the app.
-
-## 2026-09-15 — Every server tile shows its track
-
-### Added
-- Server tiles show the track's picture even when you don't have it, with a mark over it so
-  you can tell at a glance.
-- Install & join: on a server running a free track you don't have, one button installs it and
-  joins. If the server is full, you're put in line instead.
-- Tracks sold in the shop show their price on the tile, and the button opens the shop page.
-
-### Changed
-- Tiles find your installed track even when its name is written a little differently, like
-  Farm14 and Farm 14.
-
 ## 2026-09-15 — MXB Coach v0.1.5-beta.5
 
 ### Added
