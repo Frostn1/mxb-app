@@ -51,12 +51,23 @@ jobs:
         run: bash scripts/command-census.sh
 
   rust:
-    name: Rust (test) — ${{ matrix.platform }}
+    name: Rust (test) — ${{ matrix.platform }} — ${{ matrix.shard.name }}
     strategy:
       fail-fast: false
       matrix:
         # Linux is the quick check; Windows is what ships, so it must pass there too.
         platform: [ubuntu-latest, windows-latest]
+        # The studio's track tests were ~95% of this job: 820 s of synthesis and terrain noise
+        # on a 4-core runner. So they run as three jobs, split by measured time. Every shard
+        # compiles the same thing, so they share one cache; only the test filter differs.
+        # `rest` skips what the other two run, so a new module lands there rather than nowhere.
+        shard:
+          - name: synth
+            filter: "tracksynth::"
+          - name: layout
+            filter: "tracklayout:: trackllm::"
+          - name: rest
+            filter: "--skip tracksynth:: --skip tracklayout:: --skip trackllm::"
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout
@@ -95,7 +106,9 @@ jobs:
         # `--workspace` covers every member. `server-agent` is excluded from the
         # workspace and keeps its own job below.
         # Tests needing a real MX Bikes asset are `#[ignore]`d and stay skipped here.
-        run: cargo test --workspace --locked
+        # bash on Windows too, so the `--` reaches libtest rather than PowerShell.
+        shell: bash
+        run: cargo test --workspace --locked -- ${{ matrix.shard.filter }}
 
   # The two things paint sync depends on that nothing was checking. Both ship separately from
   # the app — the agent runs on someone else's machine, and the Worker used to be deployed by
