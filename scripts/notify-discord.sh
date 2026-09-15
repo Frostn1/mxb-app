@@ -152,11 +152,12 @@ mac="$(jq -r '[.assets[] | select(.name | test("\\.dmg$"))] | first | .url // em
 lin="$(jq -r '[.assets[] | select(.name | test("\\.AppImage$"))] | first | .url // empty' <<<"$meta")"
 
 icon="https://raw.githubusercontent.com/$REPO/$TAG/apps/manager/src-tauri/icons/icon.png"
-avatar="https://raw.githubusercontent.com/$REPO/main/apps/manager/src-tauri/icons/icon.png"
+# Every product announces as mxbsecure, the brand that releases them; the thumbnail stays the product's.
+avatar="https://raw.githubusercontent.com/$REPO/main/docs/brand/mxbsecure-m-512.png"
 
-# Amber down the side of a beta instead of the usual blue, and a footer that says so — the
+# Amber down the side of a beta instead of the usual black, and a footer that says so — the
 # two announcements sit in different channels, but plenty of people watch both.
-color=10276076
+color=723724   # 0x0B0B0C, the mxbsecure black
 footer="$APP_NAME • GitHub Releases"
 if [ "$IS_BETA" -eq 1 ]; then
   color=15246141   # 0xE8A33D
@@ -175,9 +176,8 @@ payload="$(jq -n \
   --arg lin "$lin" \
   --argjson color "$color" \
   --arg footer "$footer" \
-  --arg appname "$APP_NAME" \
   '{
-    username: $appname,
+    username: "mxbsecure",
     avatar_url: $avatar,
     allowed_mentions: { parse: [] },
     embeds: [{
