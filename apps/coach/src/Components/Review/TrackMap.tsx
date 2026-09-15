@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import type { Review } from "@/api/coach";
+import type { Review, Surface } from "@/api/coach";
 import { gap, lossColor } from "@/lib/format";
+import { reliefImage } from "@/lib/relief";
 
 /** Points along the drawn paths: `paths` holds one every 2 m. */
 const PATH_STEP = 2;
@@ -16,11 +17,14 @@ export function shortName(name: string): string {
  */
 export default function TrackMap({
   review,
+  surface,
   selected,
   cursor,
   onPick,
 }: {
   review: Review;
+  /** The ridden ground, drawn under the lines when there is one. */
+  surface?: Surface | null;
   selected: number | null;
   /** Metres into the lap, or null. */
   cursor: number | null;
@@ -50,9 +54,21 @@ export default function TrackMap({
   const sel = selected != null ? review.sections[selected] : null;
   const dot = cursor != null ? clamp(lap, cursor) : null;
   const fs = view.size / 30;
+  const relief = useMemo(() => (surface ? reliefImage(surface) : ""), [surface]);
 
   return (
     <svg viewBox={view.box} className="h-full w-full" preserveAspectRatio="xMidYMid meet">
+      {surface && relief && (
+        <image
+          href={relief}
+          x={surface.x0}
+          y={-(surface.z0 + surface.height * surface.cell)}
+          width={surface.width * surface.cell}
+          height={surface.height * surface.cell}
+          preserveAspectRatio="none"
+          opacity={0.85}
+        />
+      )}
       <polyline
         points={line(reference)}
         fill="none"

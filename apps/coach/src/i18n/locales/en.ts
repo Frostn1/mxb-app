@@ -46,6 +46,8 @@ export const en = {
   "review.focus": "Work on these",
   "review.nothing": "This lap is as fast as the reference everywhere.",
   "review.strip": "The lap from start to finish. Click a section, or use the arrow keys.",
+  "review.viewMap": "Map",
+  "review.view3d": "3D",
   "review.upClose": "up close",
   "review.wholeLap": "Whole lap",
   "review.showWhole": "Show the whole lap",

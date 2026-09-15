@@ -322,6 +322,12 @@ pub fn coach_review(
     })
 }
 
+/// The ground under a session's laps, built from the laps; see `surface.rs`.
+#[tauri::command]
+pub fn coach_surface(path: String) -> Result<Option<crate::surface::Surface>, String> {
+    Ok(crate::surface::build(&load(&path)?.samples, 400))
+}
+
 /// Puts the recorder in `<game>\plugins`: downloaded from the latest FrostMod release, or
 /// copied from `from` when given. Returns where it went.
 #[tauri::command]

@@ -9,6 +9,7 @@
 
 mod analysis;
 mod coach;
+mod surface;
 mod telemetry;
 
 use mxb_core::{config, game};
@@ -40,6 +41,7 @@ fn main() {
             coach::coach_sessions,
             coach::coach_session,
             coach::coach_review,
+            coach::coach_surface,
             coach::coach_install_plugin,
             coach::coach_uninstall_plugin,
         ])

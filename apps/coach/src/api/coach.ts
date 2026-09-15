@@ -124,7 +124,18 @@ export interface ReviewOut {
   review: Review;
 }
 
+/** The ground under a session's laps, built from the laps. Heights row-major, row along z. */
+export interface Surface {
+  x0: number;
+  z0: number;
+  cell: number;
+  width: number;
+  height: number;
+  heights: (number | null)[];
+}
+
 export const coachStatus = () => invoke<CoachStatus>("coach_status");
+export const coachSurface = (path: string) => invoke<Surface | null>("coach_surface", { path });
 export const coachSessions = () => invoke<SessionSummary[]>("coach_sessions");
 export const coachSession = (path: string) => invoke<SessionDetail>("coach_session", { path });
 export const coachReview = (path: string, lap: number, refPath?: string, refLap?: number) =>

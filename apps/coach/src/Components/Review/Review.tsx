@@ -3,10 +3,12 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { cn } from "@frost/shared/lib/utils";
 import { useT, type TKey } from "@/i18n";
-import { coachReview, type Finding, type ReviewOut, type SectionReview } from "@/api/coach";
+import { coachReview, coachSurface, type Finding, type ReviewOut, type SectionReview, type Surface } from "@/api/coach";
 import { gap, lapTime, lossColor, started } from "@/lib/format";
 import Page, { Label } from "../Page";
+import { Segmented } from "@frost/shared/Components/ui/segmented";
 import TrackMap from "./TrackMap";
+import Track3D from "./Track3D";
 import SectionStrip from "./SectionStrip";
 import Charts from "./Charts";
 
@@ -18,6 +20,14 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
   const [selected, setSelected] = useState<number | null>(null);
   const [cursor, setCursor] = useState<number | null>(null);
   const [whole, setWhole] = useState(false);
+  const [surface, setSurface] = useState<Surface | null>(null);
+  const [view, setView] = useState<"map" | "3d">("map");
+
+  // The ground is a nicety: the review stands without it.
+  useEffect(() => {
+    setSurface(null);
+    coachSurface(path).then(setSurface).catch(() => {});
+  }, [path]);
 
   useEffect(() => {
     setData(null);
@@ -82,8 +92,26 @@ export default function Review({ path, lap, onBack }: { path: string; lap: numbe
     >
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
         <div className="min-w-0 space-y-3">
-          <div className="h-[440px] border border-border bg-card p-3">
-            <TrackMap review={review} selected={selected} cursor={cursor} onPick={pick} />
+          <div className="relative h-[440px] border border-border bg-card">
+            {surface && (
+              <Segmented
+                size="sm"
+                className="absolute right-3 top-3 z-10"
+                value={view}
+                onChange={setView}
+                options={[
+                  { value: "map", label: t("review.viewMap") },
+                  { value: "3d", label: t("review.view3d") },
+                ]}
+              />
+            )}
+            {view === "3d" && surface ? (
+              <Track3D review={review} surface={surface} selected={selected} className="h-full w-full" />
+            ) : (
+              <div className="h-full p-3">
+                <TrackMap review={review} surface={surface} selected={selected} cursor={cursor} onPick={pick} />
+              </div>
+            )}
           </div>
           <SectionStrip review={review} selected={selected} onPick={pick} />
           <p className="text-[11.5px] text-faint">{t("review.strip")}</p>
