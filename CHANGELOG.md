@@ -1,9 +1,13 @@
 # Changelog
 
-## Unreleased
+## Unreleased — Frost's Studio
 
 ### Added
 - New Frost's Studio versions are posted in the Discord, in #studio-releases.
+
+## 2026-09-14 — v0.14.4 — Wait in line
+
+### Added
 - **Wait in line** for a full server. Click it in the server browser and the app holds your
   place, watches the server, and starts the game straight into it when a slot opens. If the
   game is already open, it tells you it's your turn so you can join from the game. Your place
