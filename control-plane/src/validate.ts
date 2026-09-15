@@ -384,7 +384,14 @@ export function isGameId(value: unknown): value is string {
 }
 
 /** Which app a report came from. A closed list, like the platform and the title. */
-export const APPS = ["manager", "studio"] as const;
+/**
+ * The apps that report.
+ *
+ * Coach joined late: it shipped without counters at all, which made it the one product whose
+ * worth had to be argued from Discord. A build that predates the field is the manager — see the
+ * column default in `0030_usage_app.sql`.
+ */
+export const APPS = ["manager", "studio", "coach"] as const;
 
 export function isAppId(value: unknown): value is (typeof APPS)[number] {
   return typeof value === "string" && (APPS as readonly string[]).includes(value);

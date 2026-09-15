@@ -25,7 +25,7 @@ mod surface;
 mod telemetry;
 mod tyres;
 
-use mxb_core::{config, game};
+use mxb_core::{config, game, usage};
 use tauri::{Manager, WindowEvent};
 
 #[tauri::command]
@@ -117,6 +117,15 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             overlay::start(app.handle());
+            // Anonymous counters, under the same switch and the same config file as the manager's
+            // — which is also where the install id comes from. Coach does not mint one (no
+            // `mint-install-id` feature, exactly as the studio), so a machine with only Coach on
+            // it reports nothing rather than inventing a second identity for one computer.
+            //
+            // Until this existed Coach was a shipped app the numbers could not see at all: every
+            // decision about whether to keep building it was being made from the one source the
+            // rollups were meant to replace.
+            usage::start(app.handle(), usage::COACH);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -180,12 +189,27 @@ fn main() {
             overlay::overlay_open_main,
             overlay::overlay_handoff,
             overlay::overlay_peer,
+            track_event,
         ])
         .build(tauri::generate_context!())
         .expect("error while running MXB Coach")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 overlay::stop(app);
+                // The last counters, on the way out. This is the right exit point rather than a
+                // `Destroyed` window event: the window handler above is the overlay's, and the
+                // overlay parking itself is not this app finishing.
+                usage::flush_on_exit(app);
             }
         });
+}
+
+/// Count something the rider did.
+///
+/// A name and nothing else, exactly as in the manager and the studio: the backend holds the
+/// switch, the buffer and the vocabulary (`usage::KNOWN_EVENTS`), so there is no payload here to
+/// accidentally put a session path or a rider name into.
+#[tauri::command]
+fn track_event(name: String) {
+    usage::track(&name);
 }
