@@ -333,11 +333,16 @@ pub fn coach_review(
         }
     };
     let e = &rec.event;
+    // The whole session, so one lap's floors are this rider's on this bike.
+    let laps: Vec<analysis::Trace> = rec.laps().iter().filter_map(|l| analysis::Trace::new(l, e.track_length)).collect();
+    let (land_scale, torque_scale) = analysis::norm(&laps);
     let bike = analysis::Bike {
         limiter: e.limiter as f32,
         max_rpm: e.max_rpm as f32,
         shift_rpm: e.shift_rpm as f32,
         travel: e.susp_max_travel,
+        land_scale,
+        torque_scale,
     };
     let mine = trace(&rec, lap)?;
     let time_ms = summary.laps.iter().find(|l| l.num == lap).map_or(0, |l| l.time_ms);
@@ -353,8 +358,16 @@ pub fn coach_review(
         }
         None => (analysis::solo(&mine, bike), this.clone()),
     };
-    // Lap-wide setup tips that come from the recording and the setup file, not the lap: sag, tyres.
+    // The ground under each section and the lap, from the rear wheel: the review can't know
+    // the weather, and wet soil is mud.
     let mut review = review;
+    let wet = rec.session.conditions == 2;
+    for s in &mut review.sections {
+        let end = s.section.end.min(mine.pts.len().saturating_sub(1));
+        s.soil = mine.pts.get(s.section.start..=end).and_then(|p| crate::soil::profile(p, wet));
+    }
+    review.setup.extend(crate::soil::profile(&mine.pts, wet).as_ref().and_then(crate::soil::finding));
+    // Lap-wide setup tips that come from the recording and the setup file, not the lap: sag, tyres.
     let r = rider_setup(&app, &rec);
     review.setup.extend(r.sag.as_ref().and_then(|s| crate::sag::finding(s, rec.event.susp_max_travel)));
     if let (Some(s), Some(o)) = (&r.setup, &r.opts) {
@@ -382,6 +395,12 @@ fn rider_setup(app: &AppHandle, rec: &Recording) -> RiderSetup {
     let name = raw.trim_start_matches(':').to_string();
     let bike_cfg = crate::bikecfg::load_cfg(&cfg.mods_path, &e.bike_id);
     let mut opts = bike_cfg.as_ref().map(crate::bikecfg::options);
+    // The swingarm's lengths are in the bike's `.geom`, not its cfg.
+    if let (Some(bc), Some(o)) = (&bike_cfg, opts.as_mut()) {
+        if let Some(sw) = crate::bikecfg::load_geom(&cfg.mods_path, &e.bike_id, bc).as_ref().and_then(crate::bikecfg::swingarm) {
+            o.insert(crate::stp::Field::SwingarmLength, sw);
+        }
+    }
     let file = crate::stp::locate(&cfg.profiles_dir(), &raw, &e.track_id, &e.bike_id);
     let setup = file
         .as_ref()
@@ -447,6 +466,9 @@ pub struct SetupPlan {
     pub fixes: Vec<crate::fixes::Fix>,
     /// The sag measured in this session, standing still or riding.
     pub sag: Option<crate::sag::Sag>,
+    /// The most of each end's travel this session used, as a share: what the feel check
+    /// holds "it bottoms" and "it's harsh" against.
+    pub travel_used: Option<[f32; 2]>,
 }
 
 /// The rider's setup name without any "(coach)" the coach added: copies of a copy are numbered.
@@ -464,8 +486,8 @@ pub fn coach_setup_plan(app: AppHandle, path: String, skills: Vec<String>) -> Re
         let dir = f.parent()?;
         crate::stp::coach_names(&setup_base(f)).find(|n| !dir.join(format!("{n}.stp")).exists())
     });
-    let sag = r.sag;
-    Ok(SetupPlan { name: r.name, file: r.file.map(|p| p.display().to_string()), save_as, why: r.why, fixes, sag })
+    let (sag, travel_used) = (r.sag, crate::sag::travel_used(&rec));
+    Ok(SetupPlan { name: r.name, file: r.file.map(|p| p.display().to_string()), save_as, why: r.why, fixes, sag, travel_used })
 }
 
 /// Saves a lap's setup fixes as a new setup beside the rider's own and returns its name.

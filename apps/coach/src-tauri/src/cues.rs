@@ -119,7 +119,8 @@ fn answers(skill: &str) -> Option<u8> {
         "gear_up" => cue::UPSHIFT,
         "gear_down" => cue::DOWNSHIFT,
         "scrub" => cue::SCRUB,
-        "whoops_bucking" | "whoops_speed" => cue::STAND,
+        "whoops_bucking" | "whoops_speed" | "stance_stand" => cue::STAND,
+        "stance_sit" => cue::SIT,
         _ => return None,
     })
 }
@@ -226,7 +227,8 @@ mod tests {
     use crate::analysis::tests::{lap, Style, FAST};
     use crate::analysis::{cue_points, review, sections, Bike};
 
-    const BIKE: Bike = Bike { limiter: 13000.0, max_rpm: 14000.0, shift_rpm: 12500.0, travel: [0.3, 0.3] };
+    const BIKE: Bike =
+        Bike { limiter: 13000.0, max_rpm: 14000.0, shift_rpm: 12500.0, travel: [0.3, 0.3], land_scale: 0.0, torque_scale: 0.0 };
 
     fn cues_for(st: &Style, level: Level, amount: Amount) -> Vec<CueOut> {
         let (fast, mine) = (lap(&FAST), lap(st));

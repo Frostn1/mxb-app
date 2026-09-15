@@ -27,15 +27,33 @@ pub fn load(mods_path: &str, bike: &str) -> Option<BikeOptions> {
 
 /// The bike's parsed cfg, for what else it names: its tyres, its gearbox.
 pub fn load_cfg(mods_path: &str, bike: &str) -> Option<CfgNode> {
+    read_file(mods_path, bike, &format!("{bike}.cfg"))
+}
+
+/// The bike's `.geom`, named by its cfg: where the swingarm lengths are.
+pub fn load_geom(mods_path: &str, bike: &str, bike_cfg: &CfgNode) -> Option<CfgNode> {
+    read_file(mods_path, bike, bike_cfg.get("geom")?.trim())
+}
+
+/// One of the bike's files, beside it or inside its `.pkz`.
+fn read_file(mods_path: &str, bike: &str, want: &str) -> Option<CfgNode> {
     let root = library::mods_subdir(mods_path, "mods/bikes");
-    let want = format!("{bike}.cfg");
-    let loose = std::fs::read(root.join(bike).join(&want)).ok();
+    let loose = std::fs::read(root.join(bike).join(want)).ok();
     let bytes = loose.or_else(|| {
-        let want = &want;
-        let is_cfg = move |n: &str| n.rsplit('/').next().is_some_and(|f| f.eq_ignore_ascii_case(want));
-        pkz::read_selected(&root.join(format!("{bike}.pkz")), is_cfg).ok()?.into_iter().next().map(|(_, b)| b)
+        let is_it = move |n: &str| n.rsplit('/').next().is_some_and(|f| f.eq_ignore_ascii_case(want));
+        pkz::read_selected(&root.join(format!("{bike}.pkz")), is_it).ok()?.into_iter().next().map(|(_, b)| b)
     })?;
     Some(cfg::parse(&bytes))
+}
+
+/// The swingarm's options from the `.geom`: `swingarm_steps + 1` axle positions from
+/// `rwheel_min` to `rwheel_max`. Each value is how far back the axle sits, metres, so a larger
+/// one is a longer swingarm. Most bikes list short to long; a few run the other way.
+pub fn swingarm(geom: &CfgNode) -> Option<Options> {
+    let steps: usize = geom.get("swingarm_steps")?.trim().parse().ok().filter(|&s| s > 0)?;
+    let back = |k: &str| geom.get(k)?.split(',').nth(2)?.trim().parse::<f64>().ok().map(|z| -z);
+    let (a, b) = (back("rwheel_min")?, back("rwheel_max")?);
+    Some(Options { count: steps + 1, values: (0..=steps).map(|i| a + (b - a) * i as f64 / steps as f64).collect() })
 }
 
 /// Where each setting's list sits in the cfg; keys are lowercased by the parser.
@@ -209,5 +227,22 @@ rear_suspension
         // What the bike doesn't list, the coach doesn't claim to know.
         assert!(!o.contains_key(&Field::ShockHighCompression));
         assert!(!o.contains_key(&Field::SwingarmLength));
+    }
+
+    fn close(a: &[f64], b: &[f64]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6)
+    }
+
+    #[test]
+    fn the_swingarm_list_comes_from_the_geom_either_way_round() {
+        // A 2023 KTM 450: short to long, 9 positions over 40 mm.
+        let ktm = swingarm(&cfg::parse(b"rwheel_min = 0, 0.0331, -0.5758\nrwheel_max = 0, 0.0331, -0.6162\nswingarm_steps = 8\n")).unwrap();
+        assert_eq!(ktm.count, 9);
+        assert!(close(&[ktm.values[0], ktm.values[8]], &[0.5758, 0.6162]));
+        // A 2003 RM250 lists long to short.
+        let rm = swingarm(&cfg::parse(b"rwheel_min = 0, -0.0409, -0.6065\nrwheel_max = 0, -0.0457, -0.566\nswingarm_steps = 8\n")).unwrap();
+        assert!(rm.values[8] < rm.values[0]);
+        // No steps: the bike can't change it.
+        assert!(swingarm(&cfg::parse(b"rwheel_min = 0, 0, -0.5\nrwheel_max = 0, 0, -0.5\nswingarm_steps = 0\n")).is_none());
     }
 }

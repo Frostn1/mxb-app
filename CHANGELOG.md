@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-09-15 — MXB Coach v0.1.9-beta.9
+
+### Added
+- Secured tracks: a track locked to your Steam account now opens in the coach, for the 3D view
+  and the ground, the way it does in MXB App. Nobody else's does.
+- Geometry: the coach can now change fork height, linkage rod, fork offset and swingarm length in
+  your saved copy, reading which way each goes from the bike's own files. A front that sits low
+  or pushes, or a rear that sits low, gets a geometry step after the suspension ones.
+- How does the bike feel: tell the coach what you feel, like "the front bottoms out" or "it's
+  nervous at speed". It checks that against your laps, says when they agree or say otherwise, and
+  adds the fix to your saved copy.
+- The ground: each section shows what it's ridden on, like hardpack, soft soil, sand or mud.
+  A lap with a lot of sand, hardpack or mud gets setup changes for it. Works on locked tracks too.
+- Sitting and standing: with the new recorder, the coach sees when you sit and stand, and tells
+  you where the fast lap does it differently, like standing through the whoops or sitting into a
+  turn. Needs the recorder from the next FrostMod.
+
+### Changed
+- Hard landings and fighting the bars are now judged against your own session on that bike, so a
+  heavy bike or a light 85 gets the same fair call as the 250 the coach was tuned on.
+
 ## 2026-09-15 — MXB Coach v0.1.8-beta.8
 
 ### Added

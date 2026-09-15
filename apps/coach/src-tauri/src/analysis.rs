@@ -104,6 +104,17 @@ mod th {
     /// Force on the bars into a corner this many times the fast lap's, and at least `TORQUE_MIN`.
     pub const TORQUE_RATIO: f32 = 1.5;
     pub const TORQUE_MIN: f32 = 25.0;
+    /// What the floors above were tuned on, five laps of a 250F: landings' 90th percentile, G,
+    /// and the median force on the bars. A rider's own session scales the floors from these.
+    pub const CAL_LAND_P90_G: f32 = 10.1;
+    pub const CAL_TORQUE_MEDIAN: f32 = 17.0;
+    /// How far a session may move them, and how many landings it needs to move the landing one.
+    pub const SCALE: (f32, f32) = (0.7, 1.5);
+    pub const SCALE_LANDINGS: usize = 8;
+    /// Sitting this much more (or less) of a section than the fast lap is worth a word.
+    pub const STANCE_GAP: f32 = 0.3;
+    /// A lap needs its stance known over this share of the section to be judged.
+    pub const STANCE_KNOWN: f32 = 0.6;
     /// Turning less than this share of what the lean would give: the front is sliding.
     pub const PUSH: f32 = 0.75;
     pub const SOLO_PUSH: f32 = 0.65;
@@ -183,6 +194,10 @@ pub struct Point {
     pub susp: [f32; 2],
     /// Which wheels are off the ground, front then rear.
     pub off: [bool; 2],
+    /// The ground under the rear wheel as the recorder gives it, 0 in the air; see `soil`.
+    pub ground: u8,
+    /// Sitting or standing, `telemetry::stance`.
+    pub stance: u8,
     /// Share of the travel in use, 0 fully extended to 1 bottomed; see `Trace::fill_travel`.
     pub used: [f32; 2],
     /// Acceleration in G, in the chassis frame: sideways, up (1 standing still), forward.
@@ -230,6 +245,8 @@ fn point(s: &Sample) -> Point {
         slip_r: slip(s.wheel_speed[1]),
         susp: s.susp,
         off: [s.wheel_material[0] == 0, s.wheel_material[1] == 0],
+        ground: s.wheel_material[1].clamp(0, 255) as u8,
+        stance: s.stance,
         used: [0.0; 2],
         acc: s.acc,
         turn: s.yaw_rate / s.roll.to_radians().cos().max(0.3),
@@ -264,6 +281,8 @@ fn lerp(a: &Point, b: &Point, f: f32) -> Point {
         slip_r: m(a.slip_r, b.slip_r),
         susp: [m(a.susp[0], b.susp[0]), m(a.susp[1], b.susp[1])],
         off: near.off,
+        ground: near.ground,
+        stance: near.stance,
         used: [0.0; 2],
         acc: [m(a.acc[0], b.acc[0]), m(a.acc[1], b.acc[1]), m(a.acc[2], b.acc[2])],
         turn: m(a.turn, b.turn),
@@ -667,6 +686,8 @@ pub struct SectionReview {
     /// Seconds lost to the reference here; negative is a gain.
     pub lost: f32,
     pub findings: Vec<Finding>,
+    /// The ground here, filled in by the caller, which knows the weather.
+    pub soil: Option<crate::soil::Profile>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -753,6 +774,44 @@ pub struct Bike {
     pub shift_rpm: f32,
     /// Suspension travel in metres, front then rear; 0 if unknown.
     pub travel: [f32; 2],
+    /// This rider on this bike against what the floors were tuned on (see [`norm`]): landings
+    /// and bar force, 0 to keep the tuned floors.
+    pub land_scale: f32,
+    pub torque_scale: f32,
+}
+
+impl Bike {
+    fn land_g(&self, floor: f32) -> f32 {
+        floor * if self.land_scale > 0.0 { self.land_scale } else { 1.0 }
+    }
+    fn torque_min(&self) -> f32 {
+        th::TORQUE_MIN * if self.torque_scale > 0.0 { self.torque_scale } else { 1.0 }
+    }
+}
+
+/// How this rider's session compares with what the floors were tuned on: `(landing, bars)`.
+/// A heavier bike or a rider who always lands harder hits harder everywhere, so a hard landing
+/// is judged against their own; a light bike needs less force on the bars. Each is 0 when the
+/// session doesn't have enough to say.
+pub fn norm(laps: &[Trace]) -> (f32, f32) {
+    let mut lands: Vec<f32> = Vec::new();
+    let mut bars: Vec<f32> = Vec::new();
+    for t in laps {
+        for i in 1..t.pts.len() {
+            if t.pts[i - 1].air && !t.pts[i].air {
+                lands.push(t.max_by(i..(i + 8).min(t.pts.len()), |q| q.hit));
+            }
+        }
+        bars.extend(t.pts.iter().filter(|q| !q.air && q.v > 5.0).map(|q| q.torque.abs()).filter(|x| x.is_finite()));
+    }
+    let at = |v: &mut Vec<f32>, q: f32| {
+        v.sort_by(f32::total_cmp);
+        v[((v.len() - 1) as f32 * q) as usize]
+    };
+    let clamp = |x: f32| x.clamp(th::SCALE.0, th::SCALE.1);
+    let land = if lands.len() >= th::SCALE_LANDINGS { clamp(at(&mut lands, 0.9) / th::CAL_LAND_P90_G) } else { 0.0 };
+    let torque = if bars.len() >= 200 { clamp(at(&mut bars, 0.5) / th::CAL_TORQUE_MEDIAN) } else { 0.0 };
+    (land, torque)
 }
 
 fn theme(skill: &str) -> &'static str {
@@ -765,6 +824,7 @@ fn theme(skill: &str) -> &'static str {
         | "bottom_landing" | "air_throttle" | "rhythm_count" | "land_hard" => "Jumps",
         "whoops_speed" | "whoops_throttle" | "whoops_bucking" => "Whoops",
         "shift_earlier" | "full_gas" => "Straights",
+        "stance_sit" | "stance_stand" => "Body position",
         _ => "Other",
     }
 }
@@ -840,6 +900,7 @@ pub fn review(lap: &Trace, reference: &Trace, bike: Bike) -> Review {
             let (lap_time, ref_time) = (p.span(s.start, s.end), r.span(s.start, s.end));
             let lost = lap_time - ref_time;
             let mut c = Ctx { p, r, s: &s, bike, travel, out: Vec::new() };
+            stance(&mut c);
             match s.kind {
                 Kind::Corner => corner(&mut c),
                 Kind::Jump | Kind::Rhythm => jumps(&mut c),
@@ -863,7 +924,7 @@ pub fn review(lap: &Trace, reference: &Trace, bike: Bike) -> Review {
                 });
             }
             findings.sort_by(|a, b| b.weight.total_cmp(&a.weight));
-            SectionReview { section: s, lap_time, ref_time, lost, findings }
+            SectionReview { section: s, lap_time, ref_time, lost, findings, soil: None }
         })
         .collect();
 
@@ -939,7 +1000,7 @@ fn corner(c: &mut Ctx) {
     // The bars and the front tyre.
     let bars = |t: &Trace, apex: usize| t.mean(start..apex + 1, |q| q.torque.abs());
     let (tq_p, tq_r) = (bars(p, apex_p), bars(r, apex_r));
-    if tq_p > th::TORQUE_MIN && tq_p > tq_r * th::TORQUE_RATIO {
+    if tq_p > c.bike.torque_min() && tq_p > tq_r * th::TORQUE_RATIO {
         c.add("bar_fight", 0.5, start, "Relax on the bars", format!(
             "You push {:.0}% harder on the bars into {name} than the fast lap. Grip the bike with your \
              knees, keep your elbows loose and steer with your weight on the outside peg.",
@@ -1271,7 +1332,7 @@ fn jumps(c: &mut Ctx) {
         }
         let hit = |t: &Trace, l: usize| t.max_by(l..(l + 8).min(s.end + 1).max(l + 1), |q| q.hit);
         let (hp, hr) = (hit(p, pl), hit(r, rl));
-        if hp > th::LAND_HIT_G && hp > hr * th::LAND_HIT_RATIO {
+        if hp > c.bike.land_g(th::LAND_HIT_G) && hp > hr * th::LAND_HIT_RATIO {
             c.warn("land_hard", pl, "Land softer", format!(
                 "You hit {hp:.0} G landing {name}, the fast lap {hr:.0} G. Aim for the downslope, and soak \
                  the landing up with your legs instead of locking your arms."
@@ -1606,7 +1667,7 @@ pub fn solo(lap: &Trace, bike: Bike) -> Review {
             alone(&mut c);
             let mut findings = dedupe(c.out, s.kind != Kind::Corner);
             findings.sort_by(|a, b| b.weight.total_cmp(&a.weight));
-            SectionReview { section: s, lap_time: t, ref_time: t, lost: 0.0, findings }
+            SectionReview { section: s, lap_time: t, ref_time: t, lost: 0.0, findings, soil: None }
         })
         .collect();
     let mut order: Vec<usize> = (0..out.len()).filter(|&i| !out[i].findings.is_empty()).collect();
@@ -1729,7 +1790,7 @@ fn alone(c: &mut Ctx) {
                     ));
                 }
                 let hit = p.max_by(pl..(pl + 8).min(s.end + 1).max(pl + 1), |q| q.hit);
-                if hit > th::SOLO_LAND_HIT_G {
+                if hit > c.bike.land_g(th::SOLO_LAND_HIT_G) {
                     c.warn("land_hard", pl, "Land softer", format!(
                         "You hit {hit:.0} G landing {which}. Aim for the downslope, and soak the landing up with \
                          your legs instead of locking your arms."
@@ -1773,6 +1834,44 @@ fn alone(c: &mut Ctx) {
                 ));
             }
         }
+    }
+}
+
+/// The share of these metres on the ground spent sitting, or None when too little of it is known.
+fn seated(t: &Trace, range: std::ops::Range<usize>) -> Option<f32> {
+    use crate::telemetry::stance;
+    let ground: Vec<&Point> = t.pts.get(range)?.iter().filter(|q| !q.air).collect();
+    let known: Vec<bool> = ground.iter().filter(|q| q.stance != stance::UNKNOWN).map(|q| q.stance == stance::SIT).collect();
+    if ground.len() < 5 || (known.len() as f32) < ground.len() as f32 * th::STANCE_KNOWN {
+        return None;
+    }
+    Some(known.iter().filter(|&&s| s).count() as f32 / known.len() as f32)
+}
+
+/// Sitting and standing against the fast lap, where the recorder could tell: seated from
+/// turn-in through a corner, standing through whoops and rhythms.
+fn stance(c: &mut Ctx) {
+    let s = c.s;
+    let from = match s.kind {
+        Kind::Corner => s.core.0.max(s.start),
+        Kind::Whoops | Kind::Rhythm => s.start,
+        _ => return,
+    };
+    if s.end <= from {
+        return;
+    }
+    let (Some(p), Some(r)) = (seated(c.p, from..s.end + 1), seated(c.r, from..s.end + 1)) else { return };
+    let (name, pc, rc) = (s.name.clone(), p * 100.0, r * 100.0);
+    if s.kind == Kind::Corner && r - p > th::STANCE_GAP {
+        c.add("stance_sit", 0.4, from, "Sit down through the turn", format!(
+            "You sit for {pc:.0}% of {name} from turn-in, the fast lap {rc:.0}%. Sit on the front of the seat as \
+             you turn in: it weights the front tyre and frees your inside leg."
+        ));
+    } else if s.kind != Kind::Corner && p - r > th::STANCE_GAP {
+        c.add("stance_stand", 0.5, from, "Stand up through here", format!(
+            "You sit for {pc:.0}% of {name}, the fast lap {rc:.0}%. Stand with your weight back and let the bike \
+             move under you: your legs soak up the hits and the rear keeps driving."
+        ));
     }
 }
 
@@ -2031,7 +2130,40 @@ pub(crate) mod tests {
         gas: 1.0,
         accel: 6.0,
     };
-    const BIKE: Bike = Bike { limiter: 13000.0, max_rpm: 14000.0, shift_rpm: 12500.0, travel: [0.3, 0.3] };
+    const BIKE: Bike =
+        Bike { limiter: 13000.0, max_rpm: 14000.0, shift_rpm: 12500.0, travel: [0.3, 0.3], land_scale: 0.0, torque_scale: 0.0 };
+
+    #[test]
+    fn standing_where_the_fast_lap_sits_is_called_only_when_known() {
+        use crate::telemetry::stance;
+        let slow = Style { corner_v: 9.0, ..FAST };
+        let with = |st: &Style, s: u8| {
+            let mut t = lap(st);
+            t.pts.iter_mut().for_each(|q| q.stance = s);
+            t
+        };
+        let called = |rv: &Review| rv.sections.iter().any(|s| s.findings.iter().any(|f| f.skill == "stance_sit"));
+        assert!(called(&review(&with(&slow, stance::STAND), &with(&FAST, stance::SIT), BIKE)));
+        // Sitting like the fast lap, or no stance recorded: nothing to say.
+        assert!(!called(&review(&with(&slow, stance::SIT), &with(&FAST, stance::SIT), BIKE)));
+        assert!(!called(&review(&with(&slow, stance::UNKNOWN), &with(&FAST, stance::SIT), BIKE)));
+    }
+
+    #[test]
+    fn the_floors_follow_the_riders_own_session() {
+        assert_eq!(norm(&[]), (0.0, 0.0), "nothing to go on keeps the tuned floors");
+        let session = |st: &Style| (0..10).map(|_| lap(st)).collect::<Vec<_>>();
+        let soft = norm(&session(&FAST));
+        let hard = norm(&session(&Style { hit: 20.0, ..FAST }));
+        assert!(hard.0 >= soft.0, "{soft:?} {hard:?}");
+        for x in [soft.0, soft.1, hard.0, hard.1] {
+            assert!(x == 0.0 || (th::SCALE.0..=th::SCALE.1).contains(&x), "{x}");
+        }
+        // A rider who always lands this hard isn't told off for it at the tuned floor.
+        let b = Bike { land_scale: th::SCALE.1, ..BIKE };
+        assert!(b.land_g(th::LAND_HIT_G) > th::LAND_HIT_G);
+        assert_eq!(BIKE.land_g(th::LAND_HIT_G), th::LAND_HIT_G);
+    }
 
     /// Speed, throttle, brake and lean at `d`.
     fn ride(st: &Style, d: f32) -> (f32, f32, f32, f32) {

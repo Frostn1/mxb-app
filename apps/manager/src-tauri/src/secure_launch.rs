@@ -91,26 +91,8 @@ fn collect_mxbsecure(app: &AppHandle, dir: &std::path::Path, out: &mut Vec<Secur
     }
 }
 
-/// The key file the app writes beside a new blob: `X.mxbsecure` → `X.mxbsecurekey`. Older blobs
-/// were named `X.pkz.mxbsecure` with a `X.pkz.mxbsecure.mxbkey` sibling; that legacy form is still
-/// read (see [`existing_key_path`]), but every fresh provision writes the short name.
-pub fn key_path_for(blob_path: &str) -> String {
-    match blob_path.strip_suffix(".mxbsecure") {
-        Some(stem) => format!("{stem}.mxbsecurekey"),
-        None => format!("{blob_path}.mxbkey"), // not a .mxbsecure name; keep the old shape
-    }
-}
-
-/// The key file that actually exists beside `blob_path`, preferring the new `.mxbsecurekey` name
-/// and falling back to the legacy `.mxbkey` sibling, or `None` if neither is present.
-pub fn existing_key_path(blob_path: &str) -> Option<String> {
-    let new = key_path_for(blob_path);
-    if std::path::Path::new(&new).exists() {
-        return Some(new);
-    }
-    let legacy = format!("{blob_path}.mxbkey");
-    std::path::Path::new(&legacy).exists().then_some(legacy)
-}
+// In core so MXB Coach finds the same keys.
+pub use mxb_core::securesource::{existing_key_path, key_path_for};
 
 // ── the key vault ──────────────────────────────────────────────────────────────────────────
 //

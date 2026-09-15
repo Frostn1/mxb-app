@@ -2,8 +2,10 @@
 //! copy of the rider's setup with those changes made.
 //!
 //! The coach only writes a setting when it knows the bike's list for it and which way the
-//! list runs. Geometry (swingarm, fork height, rod, offset) stays advice: its direction in
-//! the lists isn't confirmed yet.
+//! list runs. For geometry that comes from the game itself: a later option raises the front
+//! (fork height), lengthens the rod (lowering the rear) and adds offset. The swingarm's list is
+//! the bike's `.geom`, which runs either way, so its direction is read from the positions.
+//! Swingarm pivot and rake are never written: no OEM bike can change them.
 
 use crate::analysis::Finding;
 use crate::bikecfg::{BikeOptions, Options};
@@ -13,7 +15,8 @@ use std::collections::HashMap;
 
 struct Step {
     field: Field,
-    /// Steps firmer, more oil or more teeth; negative is the other way.
+    /// Steps firmer, more oil or more teeth; negative is the other way. For geometry: a higher
+    /// front, a longer rod or swingarm, more offset.
     firmer: i32,
     why: &'static str,
 }
@@ -65,14 +68,19 @@ const PACKING_SHOCK: &[Step] = &[
     step(Field::ShockRebound, -2, "Faster rebound lets the shock come back up between hits."),
     step(Field::ShockLowCompression, -1, "Softer low-speed compression, so each hit pushes it down less."),
 ];
-const REAR_LOW: &[Step] = &[step(Field::ShockPreload, 1, "More shock preload lifts the rear and levels the bike.")];
+const REAR_LOW: &[Step] = &[
+    step(Field::ShockPreload, 1, "More shock preload lifts the rear and levels the bike."),
+    step(Field::RodLength, -1, "Still low: a shorter linkage rod lifts the rear about 3 mm a step."),
+];
 const FRONT_LOW: &[Step] = &[
     step(Field::ForkPreload, 1, "More fork preload lifts the front."),
     step(Field::ShockPreload, -1, "Or a little less shock preload lowers the rear."),
+    step(Field::ForkHeight, 1, "Still low: slide the fork down in the clamps to raise the front."),
 ];
 const FRONT_PUSH: &[Step] = &[
     step(Field::ForkCompression, -1, "Softer fork compression lets the front dig in."),
     step(Field::ShockPreload, 1, "A little more shock preload puts more weight on the front."),
+    step(Field::ForkHeight, -1, "Still pushing: the fork up in the clamps puts weight on the front. Less stable at speed."),
 ];
 const GEARING_TALL: &[Step] =
     &[step(Field::RearSprocket, -1, "One tooth less on the rear: taller gearing, so it pulls longer before the limiter.")];
@@ -83,8 +91,38 @@ const SWINGARM: &[Step] = &[
     step(Field::ShockLowCompression, 1, "Firmer low-speed compression stops the rear squatting when you get on the gas."),
 ];
 
+// Only the rider feels these; telemetry can't see them, so they come from the feel check.
+const UNSTABLE: &[Step] = &[
+    step(Field::ForkHeight, 1, "Raise the front: slide the fork down in the clamps. Calmer at speed, a little slower to turn."),
+    step(Field::ForkOffset, -1, "Less offset: more trail, so the front holds its line."),
+    step(Field::SwingarmLength, 1, "Still loose: a longer swingarm is steadier and finds more drive."),
+];
+const TURNS_SLOW: &[Step] = &[
+    step(Field::ForkHeight, -1, "Lower the front: slide the fork up in the clamps. Turns in quicker, less calm at speed."),
+    step(Field::ForkOffset, 1, "More offset: lighter, quicker steering."),
+    step(Field::SwingarmLength, -1, "Still slow: a shorter swingarm turns tighter."),
+];
+
+// The ground the lap is mostly on (`soil::finding`).
+const SAND: &[Step] = &[
+    step(Field::ShockLowCompression, 1, "Firmer low-speed compression stops the rear squatting in the sand."),
+    step(Field::ForkCompression, 1, "Firmer fork compression stops the front diving into it."),
+    step(Field::RearSprocket, 1, "One tooth more on the rear: sand drags, so shorter gearing keeps it pulling."),
+];
+const HARDPACK: &[Step] = &[
+    step(Field::ForkCompression, -1, "Softer fork compression keeps the front tyre on the slick ground."),
+    step(Field::ShockLowCompression, -1, "Softer low-speed compression lets the rear follow the ground for drive."),
+];
+const MUD: &[Step] =
+    &[step(Field::RearSprocket, -1, "One tooth less on the rear: taller gearing is smoother on the gas when it spins up.")];
+
 fn steps(skill: &str) -> &'static [Step] {
     match skill {
+        "setup_sand" => SAND,
+        "setup_hardpack" => HARDPACK,
+        "setup_mud" => MUD,
+        "setup_unstable" => UNSTABLE,
+        "setup_turns_slow" => TURNS_SLOW,
         "setup_bottoming_fork" => BOTTOMING_FORK,
         "setup_bottoming_shock" => BOTTOMING_SHOCK,
         "setup_bottoming_shock_slow" => BOTTOMING_SHOCK_SLOW,
@@ -121,12 +159,21 @@ const WRITES: &[Field] = &[
     Field::RearSprocket,
     Field::FrontPressure,
     Field::RearPressure,
+    Field::ForkHeight,
+    Field::RodLength,
+    Field::ForkOffset,
+    Field::SwingarmLength,
 ];
 
 /// Positions to move in the bike's list. Oil is listed as the air gap above it, so more oil is
-/// an earlier option.
-fn positions(field: Field, firmer: i32) -> i64 {
-    if field == Field::ForkOil {
+/// an earlier option; a swingarm listed long to short runs backwards too.
+fn positions(field: Field, firmer: i32, o: &Options) -> i64 {
+    let backwards = match field {
+        Field::ForkOil => true,
+        Field::SwingarmLength => o.values.last() < o.values.first(),
+        _ => false,
+    };
+    if backwards {
         -(firmer as i64)
     } else {
         firmer as i64
@@ -164,6 +211,12 @@ fn value(field: Field, o: &Options, i: u32) -> Option<String> {
         Field::ForkOil | Field::ForkPreload | Field::ShockPreload => format!("{:.0} mm", v * 1000.0),
         Field::FrontSprocket | Field::RearSprocket => format!("{v:.0}T"),
         Field::FrontPressure | Field::RearPressure => format!("{v:.1} kPa"),
+        Field::RodLength | Field::ForkOffset => format!("{:+.0} mm", v * 1000.0),
+        // From the shortest it goes, which is what the garage's step number counts.
+        Field::SwingarmLength => {
+            let short = o.values.iter().copied().fold(f64::INFINITY, f64::min);
+            format!("+{:.0} mm", (v - short) * 1000.0)
+        }
         _ => return None,
     })
 }
@@ -190,7 +243,10 @@ pub fn plan(skills: &[String], setup: Option<&Setup>, opts: Option<&BikeOptions>
 fn make(field: Field, firmer: i32, why: String, setup: Option<&Setup>, opts: Option<&BikeOptions>) -> Change {
     let o = opts.and_then(|m| m.get(&field)).filter(|o| o.count > 0);
     let from = setup.map(|s| s.get(field));
-    let to = from.zip(o).map(|(f, o)| target(f, positions(field, firmer), o));
+    let to = from.zip(o).map(|(f, o)| target(f, positions(field, firmer, o), o));
+    // A setting already past the bike's list (a tool wrote it; the game doesn't clamp every
+    // one) is left alone: stepping back into the list could go the wrong way.
+    let in_list = from.zip(o).is_some_and(|(f, o)| (f as usize) < o.count);
     Change {
         field,
         steps: firmer,
@@ -199,7 +255,7 @@ fn make(field: Field, firmer: i32, why: String, setup: Option<&Setup>, opts: Opt
         to,
         from_value: from.zip(o).and_then(|(i, o)| value(field, o, i)),
         to_value: to.zip(o).and_then(|(i, o)| value(field, o, i)),
-        writes: WRITES.contains(&field) && to.is_some() && to != from,
+        writes: WRITES.contains(&field) && in_list && to.is_some() && to != from,
     }
 }
 
@@ -406,12 +462,38 @@ mod tests {
         assert!(c.writes);
     }
 
+    fn with_swingarm(o: &mut BikeOptions, short_to_long: bool) {
+        let mut values: Vec<f64> = (0..9).map(|i| 0.5758 + 0.00505 * i as f64).collect();
+        if !short_to_long {
+            values.reverse();
+        }
+        o.insert(Field::SwingarmLength, Options { count: 9, values });
+    }
+
     #[test]
-    fn geometry_stays_advice() {
-        let (s, o) = sand();
-        let c = &plan(&skills(&["setup_swingarm"]), Some(&s), Some(&o))[0].changes;
-        assert!(!c[0].writes, "swingarm");
-        assert!(c[1].writes, "shock low-speed compression");
+    fn a_longer_swingarm_goes_the_way_the_bike_lists_it() {
+        let (mut s, mut o) = sand();
+        s.set(Field::SwingarmLength, 4);
+        with_swingarm(&mut o, true);
+        let c = &plan(&skills(&["setup_swingarm"]), Some(&s), Some(&o))[0].changes[0];
+        assert_eq!((c.to, c.writes), (Some(5), true));
+        assert_eq!((c.from_value.as_deref(), c.to_value.as_deref()), (Some("+20 mm"), Some("+25 mm")));
+        with_swingarm(&mut o, false);
+        let c = &plan(&skills(&["setup_swingarm"]), Some(&s), Some(&o))[0].changes[0];
+        assert_eq!((c.to, c.writes), (Some(3), true));
+        assert_eq!(c.to_value.as_deref(), Some("+25 mm"));
+    }
+
+    #[test]
+    fn a_setting_already_past_the_list_is_left_alone() {
+        let (mut s, mut o) = sand();
+        with_swingarm(&mut o, true);
+        s.set(Field::SwingarmLength, 12);
+        let c = &plan(&skills(&["setup_swingarm"]), Some(&s), Some(&o))[0].changes[0];
+        assert!(!c.writes);
+        // Without the bike's list for it, it stays advice.
+        o.remove(&Field::SwingarmLength);
+        assert!(!plan(&skills(&["setup_swingarm"]), Some(&s), Some(&o))[0].changes[0].writes);
     }
 
     #[test]

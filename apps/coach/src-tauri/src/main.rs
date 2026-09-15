@@ -15,6 +15,7 @@ mod fixes;
 mod ground;
 mod lines;
 mod sag;
+mod soil;
 mod stp;
 mod surface;
 mod telemetry;
@@ -70,7 +71,30 @@ async fn check_coach_update(
         .map_err(|e| format!("{e:#}"))
 }
 
+/// Opens a secured (`.mxbsecure`) track the rider has unlocked, in memory, the way MXB App does:
+/// the key beside it is unsealed for the Steam account signed in now. Anyone else's stays locked.
+#[cfg(mxbsecure)]
+fn register_secure_opener() {
+    use mxb_core::{mxbsecure, securesource, steamid};
+    securesource::set_opener(Box::new(|blob_path: &std::path::Path| {
+        let steam_id = steamid::current_steam_id64()?;
+        let sealed = std::fs::read(securesource::existing_key_path(blob_path.to_str()?)?).ok()?;
+        let key = mxbsecure::unseal_key(&sealed, &steam_id, "")?;
+        mxbsecure::open(&std::fs::read(blob_path).ok()?, &key).ok()
+    }));
+    securesource::set_unlocked_check(Box::new(|blob_path: &std::path::Path| {
+        (|| {
+            let steam_id = steamid::current_steam_id64()?;
+            let sealed = std::fs::read(securesource::existing_key_path(blob_path.to_str()?)?).ok()?;
+            mxbsecure::unseal_key(&sealed, &steam_id, "")
+        })()
+        .is_some()
+    }));
+}
+
 fn main() {
+    #[cfg(mxbsecure)]
+    register_secure_opener();
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
