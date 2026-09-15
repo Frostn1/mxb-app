@@ -14,6 +14,23 @@ export const en = {
   "common.refresh": "Refresh",
   "common.loading": "Loading…",
 
+  "update.available": "{{version}} is available.",
+  "update.downloading": "Downloading…",
+  "update.downloadingPct": "Downloading… {{pct}}%",
+  "update.pitch": "Update to get the latest tips and fixes.",
+  "update.updating": "Updating…",
+  "update.updateAndRestart": "Update & restart",
+  "update.dismiss": "Dismiss update notification",
+  "update.failed": "Update failed",
+  "update.onLatest": "You're on the latest version.",
+  "update.checkFailed": "Couldn't check for updates",
+
+  "coachSettings.updates": "Updates",
+  "coachSettings.beta": "Beta updates",
+  "coachSettings.betaBody":
+    "Get new versions as soon as they're out. The coach is in beta, so this starts on.",
+  "coachSettings.check": "Check for updates",
+
   "sessions.title": "Sessions",
   "sessions.sub": "Every stint you ride with the recorder on. Pick one to see its laps.",
   "sessions.emptyTitle": "No sessions yet",

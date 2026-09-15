@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "@frost/shared/Components/ui/button";
+import { Switch } from "@frost/shared/Components/ui/switch";
+import { betaUpdates, setBetaUpdates, useUpdate } from "@/Context/Update";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useT } from "@/i18n";
 import { coachStatus, installRecorder, removeRecorder, type CoachStatus } from "@/api/coach";
@@ -22,6 +25,12 @@ export default function Settings() {
   const { game } = useConfig();
   const [status, setStatus] = useState<CoachStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [version, setVersion] = useState("");
+  const [beta, setBeta] = useState(betaUpdates);
+  const update = useUpdate();
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => {});
+  }, []);
 
   const load = useCallback(() => {
     coachStatus().then(setStatus).catch(() => {});
@@ -68,6 +77,31 @@ export default function Settings() {
           )}
         </div>
         {status && !status.gameDir && <p className="mt-3 text-[12px] text-warning">{t("recorder.noGame")}</p>}
+      </div>
+
+      <div className="mt-8">
+        <Label>{t("coachSettings.updates")}</Label>
+        <div className="border border-border bg-card px-4 py-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-[13px] font-semibold">{t("coachSettings.beta")}</div>
+              <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t("coachSettings.betaBody")}</p>
+            </div>
+            <Switch
+              checked={beta}
+              onCheckedChange={(on) => {
+                setBetaUpdates(on);
+                setBeta(on);
+              }}
+            />
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <Button size="sm" variant="outline" onClick={() => void update.check({ silent: false })}>
+              {t("coachSettings.check")}
+            </Button>
+            {version && <span className="font-mono text-[12px] text-muted-foreground">v{version}</span>}
+          </div>
+        </div>
       </div>
 
       <div className="mt-8">

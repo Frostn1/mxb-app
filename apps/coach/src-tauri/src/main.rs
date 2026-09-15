@@ -26,12 +26,24 @@ fn list_games() -> Vec<game::GameInfo> {
     game::all_info()
 }
 
+/// The coach's own builds: `coach-v` releases in the manager's repo, betas when asked for.
+#[tauri::command]
+async fn check_coach_update(
+    webview: tauri::Webview,
+    beta: bool,
+) -> Result<Option<mxb_core::update_channel::UpdateMetadata>, String> {
+    mxb_core::update_channel::check(&webview, "Frostn1/mxb-app", "coach-v", beta, "mxb-coach")
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             // What the shared shell calls: the platform, the config, the titles.
             mxb_core::viewer::app_platform,
@@ -46,6 +58,7 @@ fn main() {
             coach::coach_surface,
             coach::coach_lines,
             coach::coach_ground,
+            check_coach_update,
             // The track's own terrain, from core, for the map and the 3D view.
             mxb_core::trackview::load_track_terrain,
             mxb_core::trackview::load_track_overview,

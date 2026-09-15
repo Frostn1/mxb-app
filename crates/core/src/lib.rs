@@ -17,6 +17,7 @@ pub mod modelswap;
 pub mod presets;
 pub mod soundmods;
 pub mod proton;
+pub mod update_channel;
 pub mod usage;
 pub mod winehost;
 pub mod cfg;
