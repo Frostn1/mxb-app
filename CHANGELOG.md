@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — MXB App
+
+### Fixed
+- Secured content now follows the access you actually have. If a creator removes you as a
+  buyer, the app picks that up the next time it's online — you launch the game, open the
+  Library, sign in, or press Restore keys — and that content stops opening on this PC. The
+  Secured content list marks it "Access removed" and the app says so when it happens, so
+  content no longer showing up in game doesn't look like the app breaking. Nothing changes
+  while you're offline, or if the check can't be made for any reason.
+
 ## 2026-09-15 — MXB Hub gets past the store's robot check
 
 ### Fixed
