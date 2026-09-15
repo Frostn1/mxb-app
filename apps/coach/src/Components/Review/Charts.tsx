@@ -108,6 +108,8 @@ export default function Charts({
 }) {
   const t = useT();
   const plot = useRef<HTMLDivElement>(null);
+  // On its own there's no fast lap: its line, lane and the time against it all drop out.
+  const solo = review.solo;
   const ch = review.channels;
   const step = ch.step;
   const n = ch.delta.length;
@@ -179,10 +181,12 @@ export default function Charts({
             <span className="inline-block h-[3px] w-4 rounded bg-primary" />
             {t("review.you")}
           </span>
-          <span className="flex items-center gap-1.5 text-muted-foreground">
-            <span className="inline-block h-[3px] w-4 rounded bg-faint" />
-            {t("review.fastLap")}
-          </span>
+          {!solo && (
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <span className="inline-block h-[3px] w-4 rounded bg-faint" />
+              {t("review.fastLap")}
+            </span>
+          )}
         </div>
         {sel && (
           <Button size="sm" variant="outline" onClick={() => onWhole(!whole)}>
@@ -194,33 +198,43 @@ export default function Charts({
       <div className="relative select-none" onMouseMove={move} onMouseLeave={() => onCursor(null)}>
         <Row
           label={t("review.speed")}
-          hint={t("review.speedHint")}
+          hint={solo ? undefined : t("review.speedHint")}
           height={130}
-          value={at != null ? `${ch.speed.lap[at].toFixed(0)} / ${ch.speed.reference[at].toFixed(0)} km/h` : undefined}
+          value={
+            at == null
+              ? undefined
+              : solo
+                ? `${ch.speed.lap[at].toFixed(0)} km/h`
+                : `${ch.speed.lap[at].toFixed(0)} / ${ch.speed.reference[at].toFixed(0)} km/h`
+          }
           gutter={<Ends top={`${sp.max.toFixed(0)} km/h`} bottom={`${sp.min.toFixed(0)}`} />}
         >
-          {bands(xs, you, fast, sp.y).map((band, k) => (
-            <polygon key={k} points={band.points} fill={band.up ? "var(--success)" : "var(--destructive)"} fillOpacity={0.25} />
-          ))}
-          <polyline points={poly(xs, fast, sp.y)} stroke="var(--faint)" strokeWidth={1.5} {...stroke} />
+          {!solo &&
+            bands(xs, you, fast, sp.y).map((band, k) => (
+              <polygon key={k} points={band.points} fill={band.up ? "var(--success)" : "var(--destructive)"} fillOpacity={0.25} />
+            ))}
+          {!solo && <polyline points={poly(xs, fast, sp.y)} stroke="var(--faint)" strokeWidth={1.5} {...stroke} />}
           <polyline points={poly(xs, you, sp.y)} stroke="var(--primary)" strokeWidth={2} {...stroke} />
         </Row>
 
         <Row
           label={t("review.inputs")}
           hint={t("review.inputsHint")}
-          height={60}
+          height={solo ? 30 : 60}
           gutter={
             <>
               <span className="absolute right-2 top-[9px] font-sans font-semibold text-muted-foreground">{t("review.you")}</span>
-              <span className="absolute right-2 top-[39px] font-sans font-semibold text-muted-foreground">{t("review.fastLap")}</span>
+              {!solo && (
+                <span className="absolute right-2 top-[39px] font-sans font-semibold text-muted-foreground">{t("review.fastLap")}</span>
+              )}
             </>
           }
         >
           {lane(pick(ch.throttle.lap), pick(ch.brake.lap), 4, 24)}
-          {lane(pick(ch.throttle.reference), pick(ch.brake.reference), 34, 24)}
+          {!solo && lane(pick(ch.throttle.reference), pick(ch.brake.reference), 34, 24)}
         </Row>
 
+        {!solo && (
         <Row
           label={zoomed ? t("review.timeHere") : t("review.time")}
           hint={t("review.timeHint")}
@@ -238,6 +252,7 @@ export default function Charts({
           ))}
           <polyline points={poly(xs, lost, tm.y)} stroke="var(--foreground)" strokeOpacity={0.8} strokeWidth={1.5} {...stroke} />
         </Row>
+        )}
 
         <Row
           label={t("review.lean")}
@@ -245,7 +260,7 @@ export default function Charts({
           value={at != null ? `${Math.abs(ch.lean.lap[at]).toFixed(0)}° / ${Math.abs(ch.lean.reference[at]).toFixed(0)}°` : undefined}
           gutter={<Ends top={`${ln.max.toFixed(0)}°`} bottom="0°" />}
         >
-          <polyline points={poly(xs, leanFast, ln.y)} stroke="var(--faint)" strokeWidth={1.5} {...stroke} />
+          {!solo && <polyline points={poly(xs, leanFast, ln.y)} stroke="var(--faint)" strokeWidth={1.5} {...stroke} />}
           <polyline points={poly(xs, leanYou, ln.y)} stroke="var(--primary)" strokeWidth={2} {...stroke} />
         </Row>
 

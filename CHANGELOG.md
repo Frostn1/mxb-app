@@ -30,6 +30,32 @@
 - Tabletops on generated tracks are wide, rounded mounds. The bigger the jump, the further its
   dirt runs out either side, so its sides slope into the ground.
 
+## 2026-09-15 — MXB Coach v0.1.4-beta.4
+
+### Added
+- An overall summary at the top of every lap review: the kinds of mistakes that cost you most,
+  where they happened, and the one thing to change.
+- A bike setup card with advice on suspension, gearing, shifting and swingarm length: bottoming
+  out, the rev limiter, bogging out of corners, short-shifting and the front lifting on exits.
+- Review any lap on its own, without a faster lap to compare with. Useful for your first laps
+  on a track, or a lap that had a crash.
+- Compare a lap with any other lap on the same track, not only your fastest.
+- The 3D view shows the track the way MXB App does, with its scenery and ground, and your lines
+  on it. GUID-locked tracks open too. When a track can't be shown, the coach says why and draws
+  the ground from your laps.
+- Open buttons in Settings for the game folder, the recorder and your session files.
+
+### Changed
+- The lap review shows the track, session and bike it's about, and has two separate switches:
+  this lap or all laps, and 2D or 3D.
+- Each section now leads with the tip that matters most, with the rest under More details.
+- Laps that can't be compared say why, for example an out lap, and a crash no longer stops a
+  lap from being compared.
+
+### Fixed
+- Rhythm sections and double jumps no longer give tips that contradict each other or repeat.
+  If you take them in a different number of jumps than the fast lap, the coach says that instead.
+
 ## 2026-09-15 — MXB Coach v0.1.3-beta.3
 
 ### Added

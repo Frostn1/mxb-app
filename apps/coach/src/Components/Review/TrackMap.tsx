@@ -3,8 +3,6 @@ import type { Review } from "@/api/coach";
 import { gap, lossColor } from "@/lib/format";
 import { reliefImage, type Relief } from "@/lib/relief";
 
-/** Points along the drawn paths: `paths` holds one every 2 m. */
-const PATH_STEP = 2;
 
 export function shortName(name: string): string {
   const m = /^(Turn|Jump|Rhythm|Whoops) (\d+)$/.exec(name);
@@ -22,8 +20,11 @@ export default function TrackMap({
   selected,
   cursor,
   onPick,
+  solo = false,
 }: {
   review: Review;
+  /** Reviewed on its own: no time against a fast lap to put on the label. */
+  solo?: boolean;
   /** The ground, drawn under the lines when there is one: the track's own or the ridden one. */
   surface?: Relief | null;
   /** Other laps' lines, drawn thin under this one. */
@@ -34,6 +35,7 @@ export default function TrackMap({
   onPick: (i: number) => void;
 }) {
   const { lap, reference } = review.paths;
+  const PATH_STEP = review.paths.step || 1;
   const [hover, setHover] = useState<number | null>(null);
 
   const view = useMemo(() => {
@@ -155,7 +157,7 @@ export default function TrackMap({
             return <circle key={k} cx={p[0]} cy={-p[1]} r={fs / 4} fill="var(--foreground)" stroke="var(--background)" strokeWidth={fs / 10} />;
           })}
           <Pill at={clamp(reference, (sel.core[0] + sel.core[1]) / 2)} centre={view.centre} fs={fs} color={lossColor(sel.lost)}>
-            {`${sel.name}  ${gap(sel.lost)} s`}
+            {solo ? sel.name : `${sel.name}  ${gap(sel.lost)} s`}
           </Pill>
         </g>
       )}

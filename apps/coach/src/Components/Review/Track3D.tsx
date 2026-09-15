@@ -1,29 +1,21 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { Boxes } from "lucide-react";
 import { TrackViewer, type ViewerLine } from "@frost/shared/Components/Viewer/TrackViewer";
-import type { TrackOverview, TrackTerrain } from "@frost/shared/types";
-import type { Review, Surface } from "@/api/coach";
-
-/** Points along the drawn paths and channels: one every 2 m. */
-const STEP = 2;
-
-/** What the 3D view stands the laps on. */
-export interface Ground3D {
-  terrain: TrackTerrain;
-  overview: TrackOverview | null;
-  /** World x/z of the terrain grid's corner; the viewer puts it at the origin. */
-  origin: [number, number];
-  /** How high the bike rides above this ground, metres. */
-  lift: number;
-}
+import { useTrackScene } from "@frost/shared/Components/Viewer/useTrackScene";
+import { Button } from "@frost/shared/Components/ui/button";
+import { cn } from "@frost/shared/lib/utils";
+import type { TrackTerrain } from "@frost/shared/types";
+import { useT } from "@/i18n";
+import type { Ground, Lines, Review, Surface } from "@/api/coach";
 
 /**
  * The ridden ground as a terrain grid. Ground nobody rode takes the height of the nearest
  * ground somebody did, spreading out from the track, so it sits in a plain rather than on a
- * causeway with cliffs either side.
+ * causeway; then it's smoothed, since one bike's height a metre apart reads as steps.
  */
 export function surfaceTerrain(surface: Surface): TrackTerrain {
   const { width, height } = surface;
-  const heights = new Float32Array(width * height);
+  let heights = new Float32Array(width * height);
   const known = new Uint8Array(width * height);
   const queue: number[] = [];
   surface.heights.forEach((h, k) => {
@@ -45,6 +37,24 @@ export function surfaceTerrain(surface: Surface): TrackTerrain {
       queue.push(n);
     }
   }
+  for (let pass = 0; pass < 3; pass++) {
+    const src = heights;
+    heights = new Float32Array(width * height);
+    for (let r = 0; r < height; r++) {
+      for (let c = 0; c < width; c++) {
+        let [sum, n] = [0, 0];
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            const [rr, cc] = [r + dr, c + dc];
+            if (rr < 0 || cc < 0 || rr >= height || cc >= width) continue;
+            sum += src[rr * width + cc];
+            n++;
+          }
+        }
+        heights[r * width + c] = sum / n;
+      }
+    }
+  }
   let [lo, hi] = [Infinity, -Infinity];
   for (const h of heights) [lo, hi] = [Math.min(lo, h), Math.max(hi, h)];
   return {
@@ -60,58 +70,127 @@ export function surfaceTerrain(surface: Surface): TrackTerrain {
   };
 }
 
-/**
- * The ground in 3D with the fast lap in grey, this lap in blue and the picked section in its
- * colour, the camera brought to the section.
- */
-export default function Track3D({
-  review,
-  ground,
-  selected,
-  className,
-}: {
-  review: Review;
-  ground: Ground3D;
-  selected: number | null;
-  className?: string;
-}) {
-  const { paths, channels } = review;
-  const sel = selected != null ? review.sections[selected] : null;
-  const [ox, oz] = ground.origin;
-
-  const lines = useMemo<ViewerLine[]>(() => {
-    const at = (pts: [number, number][], ys: number[], k: number): [number, number, number] => [
-      pts[k][0] - ox,
-      (ys[k] ?? 0) - ground.lift + 0.3,
-      pts[k][1] - oz,
-    ];
-    const whole = (pts: [number, number][], ys: number[]) => pts.map((_, k) => at(pts, ys, k));
-    const out: ViewerLine[] = [
-      { points: whole(paths.reference, channels.height.reference), colour: "#8a8a93", width: 1.5 },
-      { points: whole(paths.lap, channels.height.lap), colour: "#9ccfec", width: 2 },
-    ];
-    if (sel) {
-      const [a, b] = [Math.floor(sel.start / STEP), Math.min(paths.lap.length - 1, Math.ceil(sel.end / STEP))];
-      const pts = paths.lap.slice(a, b + 1).map((_, k) => at(paths.lap, channels.height.lap, a + k));
-      out.push({ points: pts, colour: loss(sel.lost), width: 5 });
-    }
-    return out;
-  }, [paths, channels, sel, ox, oz, ground.lift]);
-
-  const focus = useMemo(() => {
-    if (!sel) return null;
-    const p = paths.reference[Math.min(paths.reference.length - 1, Math.round((sel.core[0] + sel.core[1]) / 2 / STEP))];
-    return { x: p[0] - ox, z: p[1] - oz };
-  }, [sel, paths, ox, oz]);
-
-  return (
-    <TrackViewer terrain={ground.terrain} overview={ground.overview} lines={lines} focus={focus} className={className} />
-  );
-}
-
 /** Three.js wants real colours, not CSS variables. */
 function loss(lost: number): string {
   if (lost > 0.05) return "#ef8078";
   if (lost < -0.05) return "#6fd99a";
   return "#f2f3f5";
+}
+
+/**
+ * The track in 3D as MXB App shows it, when its files can be read: terrain, scenery and the
+ * ground in game view, with this lap, the fast lap and the picked section drawn on it. When
+ * they can't, the ground built from the laps, and why.
+ */
+export default function Track3D({
+  review,
+  ground,
+  why,
+  surface,
+  lines,
+  allLaps,
+  lap,
+  selected,
+  className,
+}: {
+  review: Review;
+  /** The track's own files, when they line up with the laps. */
+  ground: Ground | null;
+  /** Why they aren't used, when they aren't. */
+  why: string | null;
+  surface: Surface | null;
+  lines: Lines | null;
+  allLaps: boolean;
+  lap: number;
+  selected: number | null;
+  className?: string;
+}) {
+  const t = useT();
+  const scene = useTrackScene(ground?.path ?? null, { prefix: ground?.prefix ?? null });
+  const [objects, setObjects] = useState(true);
+  const fallback = useMemo(() => (surface ? surfaceTerrain(surface) : null), [surface]);
+  const real = ground != null && scene.terrain != null;
+  const terrain = real ? scene.terrain : fallback;
+  // The viewer puts a grid's corner at the world origin: the track's own grid is already
+  // there, the ridden one starts where the laps do.
+  const [ox, oz] = real || !surface ? [0, 0] : [surface.x0, surface.z0];
+  const lift = real && ground ? ground.lift : 0;
+  const { paths } = review;
+  const step = paths.step || 1;
+  const sel = selected != null ? review.sections[selected] : null;
+
+  const drawn = useMemo<ViewerLine[]>(() => {
+    const at = (pts: [number, number][], ys: number[], k: number): [number, number, number] => [
+      pts[k][0] - ox,
+      (ys[k] ?? 0) - lift + 0.3,
+      pts[k][1] - oz,
+    ];
+    const whole = (pts: [number, number][], ys: number[]) => pts.map((_, k) => at(pts, ys, k));
+    const out: ViewerLine[] = [];
+    if (allLaps && lines) {
+      const times = lines.laps.map((l) => l.time);
+      const [lo, hi] = [Math.min(...times), Math.max(...times)];
+      for (const l of lines.laps) {
+        if (l.lap === lap) continue;
+        const hue = Math.round(120 * (1 - (l.time - lo) / Math.max(hi - lo, 0.01)));
+        out.push({ points: whole(l.path, l.heights), colour: `hsl(${hue}, 65%, 55%)`, width: 1.2 });
+      }
+    }
+    if (!review.solo) out.push({ points: whole(paths.reference, paths.referenceY), colour: "#8a8a93", width: 1.5 });
+    out.push({ points: whole(paths.lap, paths.lapY), colour: "#9ccfec", width: 2.2 });
+    if (sel) {
+      const [a, b] = [Math.floor(sel.start / step), Math.min(paths.lap.length - 1, Math.ceil(sel.end / step))];
+      const pts = paths.lap.slice(a, b + 1).map((_, k) => at(paths.lap, paths.lapY, a + k));
+      out.push({ points: pts, colour: loss(sel.lost), width: 5 });
+    }
+    return out;
+  }, [paths, lines, allLaps, lap, review.solo, sel, step, ox, oz, lift]);
+
+  const focus = useMemo(() => {
+    if (!sel) return null;
+    const p = paths.reference[Math.min(paths.reference.length - 1, Math.round((sel.core[0] + sel.core[1]) / 2 / step))];
+    return { x: p[0] - ox, z: p[1] - oz };
+  }, [sel, paths, step, ox, oz]);
+
+  return (
+    <div className={cn("relative", className)}>
+      <TrackViewer
+        terrain={terrain}
+        overview={real ? scene.overview : null}
+        scenery={real ? scene.scenery : null}
+        surfaces={real ? scene.surfaces : []}
+        backdrop={real ? scene.backdrop : null}
+        ground={real ? scene.ground : null}
+        groundLayers={real ? scene.groundLayers : []}
+        placements={real ? scene.placements : []}
+        showObjects={objects}
+        // The game's own look, the way MXB App shows a track.
+        gameView={real && scene.groundLayers.length > 0}
+        lines={drawn}
+        focus={focus}
+        className="h-full w-full"
+      />
+      {real && (scene.scenery || scene.placements.length > 0) && (
+        <Button
+          size="sm"
+          variant={objects ? "outline" : "ghost"}
+          className="absolute left-3 top-3 h-7 gap-1.5 px-2 text-[12px]"
+          aria-pressed={objects}
+          onClick={() => setObjects((v) => !v)}
+        >
+          <Boxes className="size-3.5" />
+          {t("review.objects")}
+        </Button>
+      )}
+      <p className="pointer-events-none absolute left-3 top-3 max-w-[70%] text-[11px] text-muted-foreground">
+        {ground && !scene.terrain
+          ? t("review.loadingTrack")
+          : !real
+            ? `${t("review.groundFromLaps")}${why ? ` ${why}.` : ""}`
+            : scene.painting
+              ? t("review.loadingTrack")
+              : ""}
+      </p>
+    </div>
+  );
 }

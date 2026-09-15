@@ -75,8 +75,16 @@ pub struct LapSummary {
     pub num: i32,
     pub time_ms: i32,
     pub invalid: bool,
-    /// Started and finished at the line, no crash: it can be compared.
+    /// Started and finished at the line: it can be compared.
     pub whole: bool,
+    /// Why it can't be compared, when it can't: `out lap`, `unfinished`, `gap in the recording`.
+    #[serde(default)]
+    pub issue: Option<String>,
+    #[serde(default)]
+    pub crashed: bool,
+    /// How long it took by the recording, for a lap the game left untimed.
+    #[serde(default)]
+    pub ridden_ms: i32,
 }
 
 impl LapSummary {
@@ -109,7 +117,15 @@ fn summarize(path: &Path, rec: &Recording) -> SessionSummary {
     let laps: Vec<LapSummary> = rec
         .laps()
         .iter()
-        .map(|l| LapSummary { num: l.num, time_ms: l.time_ms, invalid: l.invalid, whole: l.whole })
+        .map(|l| LapSummary {
+            num: l.num,
+            time_ms: l.time_ms,
+            invalid: l.invalid,
+            whole: l.whole,
+            issue: l.issue.map(str::to_owned),
+            crashed: l.crashed,
+            ridden_ms: l.ridden_ms,
+        })
         .collect();
     let e = &rec.event;
     SessionSummary {
@@ -137,7 +153,8 @@ struct Indexed {
 }
 
 fn index_path(app: &AppHandle) -> Option<PathBuf> {
-    Some(config::data_dir(app)?.join("coach").join("index.json"))
+    // v2: laps say why they can't be compared, and a crash no longer makes one partial.
+    Some(config::data_dir(app)?.join("coach").join("index-v2.json"))
 }
 
 /// Every session on disk, newest first. A file that won't parse is skipped, not fatal.
@@ -286,7 +303,8 @@ pub struct ReviewOut {
 }
 
 /// Reviews lap `lap` of `path` against `ref_path`/`ref_lap`, or against the fastest other lap
-/// on the track when none is given.
+/// on the track when none is given. `solo`, or no other lap to compare with, reviews it on its
+/// own instead.
 #[tauri::command]
 pub fn coach_review(
     app: AppHandle,
@@ -294,34 +312,44 @@ pub fn coach_review(
     lap: i32,
     ref_path: Option<String>,
     ref_lap: Option<i32>,
+    solo: Option<bool>,
 ) -> Result<ReviewOut, String> {
     let rec = load(&path)?;
     let summary = summarize(Path::new(&path), &rec);
-    let reference = match (ref_path, ref_lap) {
-        (Some(p), Some(n)) => {
-            let s = if p == path { summary.clone() } else { summarize(Path::new(&p), &load(&p)?) };
-            let l = s.laps.iter().find(|l| l.num == n).ok_or_else(|| format!("Lap {n} isn't in that session."))?;
-            LapRef { path: p, lap: n, time_ms: l.time_ms, started: s.started, bike_name: s.bike_name }
+    let reference = if solo.unwrap_or(false) {
+        None
+    } else {
+        match (ref_path, ref_lap) {
+            (Some(p), Some(n)) => {
+                let s = if p == path { summary.clone() } else { summarize(Path::new(&p), &load(&p)?) };
+                let l = s.laps.iter().find(|l| l.num == n).ok_or_else(|| format!("Lap {n} isn't in that session."))?;
+                Some(LapRef { path: p, lap: n, time_ms: l.time_ms, started: s.started, bike_name: s.bike_name })
+            }
+            _ => best_reference(&all_sessions(&app), &summary.track_id, &summary.bike_id, Some((&path, lap))),
         }
-        _ => best_reference(&all_sessions(&app), &summary.track_id, &summary.bike_id, Some((&path, lap)))
-            .ok_or("There's no other whole lap on this track to compare with yet.")?,
     };
-    let ref_rec = if reference.path == path { None } else { Some(load(&reference.path)?) };
-    let ref_rec = ref_rec.as_ref().unwrap_or(&rec);
-    if ref_rec.event.track_id != rec.event.track_id {
-        return Err("The reference lap is on a different track.".into());
-    }
-    let (mine, theirs) = (trace(&rec, lap)?, trace(ref_rec, reference.lap)?);
-    let bike = analysis::Bike { limiter: rec.event.limiter as f32, travel: rec.event.susp_max_travel };
-    let review = analysis::review(&mine, &theirs, bike);
+    let e = &rec.event;
+    let bike = analysis::Bike {
+        limiter: e.limiter as f32,
+        max_rpm: e.max_rpm as f32,
+        shift_rpm: e.shift_rpm as f32,
+        travel: e.susp_max_travel,
+    };
+    let mine = trace(&rec, lap)?;
     let time_ms = summary.laps.iter().find(|l| l.num == lap).map_or(0, |l| l.time_ms);
-    Ok(ReviewOut {
-        track_id: summary.track_id.clone(),
-        track_name: summary.track_name.clone(),
-        lap: LapRef { path, lap, time_ms, started: summary.started, bike_name: summary.bike_name },
-        reference,
-        review,
-    })
+    let this = LapRef { path, lap, time_ms, started: summary.started.clone(), bike_name: summary.bike_name.clone() };
+    let (review, reference) = match reference {
+        Some(reference) => {
+            let ref_rec = if reference.path == this.path { None } else { Some(load(&reference.path)?) };
+            let ref_rec = ref_rec.as_ref().unwrap_or(&rec);
+            if ref_rec.event.track_id != rec.event.track_id {
+                return Err("The reference lap is on a different track.".into());
+            }
+            (analysis::review(&mine, &trace(ref_rec, reference.lap)?, bike), reference)
+        }
+        None => (analysis::solo(&mine, bike), this.clone()),
+    };
+    Ok(ReviewOut { track_id: summary.track_id, track_name: summary.track_name, lap: this, reference, review })
 }
 
 /// How the session's lines and the track changed, against the fastest lap on the track; see
@@ -355,30 +383,41 @@ pub struct Ground {
     pub lift: f32,
 }
 
-/// None when the track isn't installed, is locked, or its terrain doesn't line up with the
-/// laps; the app then draws the ground built from the laps instead. Off the main thread: the
-/// first read of a big track is most of a second.
+/// The track's own terrain, or why the ground built from the laps is drawn instead.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroundAnswer {
+    pub ground: Option<Ground>,
+    pub why: Option<String>,
+}
+
+/// Off the main thread: the first read of a big track is most of a second.
 #[tauri::command]
-pub async fn coach_ground(app: AppHandle, path: String) -> Result<Option<Ground>, String> {
+pub async fn coach_ground(app: AppHandle, path: String) -> Result<GroundAnswer, String> {
     tauri::async_runtime::spawn_blocking(move || ground_for(&app, &path)).await.map_err(err)?
 }
 
-fn ground_for(app: &AppHandle, path: &str) -> Result<Option<Ground>, String> {
+fn ground_for(app: &AppHandle, path: &str) -> Result<GroundAnswer, String> {
+    let no = |why: &str| Ok(GroundAnswer { ground: None, why: Some(why.into()) });
     let rec = load(path)?;
     let Some(src) = mxb_core::tracksource::resolve(&load_config(app), &rec.event.track_id) else {
-        return Ok(None);
+        return no("the track isn't in your mods");
     };
+    // A GUID-locked track opens here the way it does in MXB App, through the private reader
+    // in a release build; only one that still can't be read counts as locked.
     if src.locked {
-        return Ok(None);
+        return no("the track is locked");
     }
     let Ok(master) = mxb_core::track::load_master(app, &src.path, src.prefix.as_deref()) else {
-        return Ok(None);
+        return no("its terrain couldn't be read");
     };
     let points: Vec<[f32; 3]> =
         rec.samples.iter().filter(|s| !s.airborne() && !s.crashed).step_by(5).map(|s| [s.x, s.y, s.z]).collect();
     let i = &master.info;
-    let lift = crate::ground::fit(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points);
-    Ok(lift.map(|lift| Ground { path: src.path, prefix: src.prefix, name: src.name, lift }))
+    match crate::ground::fit(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points) {
+        Some(lift) => Ok(GroundAnswer { ground: Some(Ground { path: src.path, prefix: src.prefix, name: src.name, lift }), why: None }),
+        None => no("its terrain doesn't line up with your laps"),
+    }
 }
 
 /// The ground under a session's laps, built from the laps; see `surface.rs`.
@@ -432,6 +471,7 @@ pub fn coach_uninstall_plugin(app: AppHandle) -> Result<(), String> {
 mod tests {
     use super::*;
 
+
     fn session(path: &str, track: &str, bike: &str, laps: &[(i32, i32, bool)]) -> SessionSummary {
         SessionSummary {
             path: path.into(),
@@ -445,7 +485,10 @@ mod tests {
             track_length: 1000.0,
             limiter: 0,
             complete: true,
-            laps: laps.iter().map(|&(num, time_ms, whole)| LapSummary { num, time_ms, invalid: false, whole }).collect(),
+            laps: laps
+                .iter()
+                .map(|&(num, time_ms, whole)| LapSummary { num, time_ms, invalid: false, whole, issue: None, crashed: false, ridden_ms: 0 })
+                .collect(),
             best_ms: None,
         }
     }

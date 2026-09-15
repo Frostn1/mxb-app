@@ -14,7 +14,8 @@ export default function SessionView({
 }: {
   path: string;
   onBack: () => void;
-  onReview: (lap: number) => void;
+  /** `solo` reviews the lap on its own, with no faster lap to compare with. */
+  onReview: (lap: number, solo: boolean) => void;
 }) {
   const t = useT();
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -75,15 +76,19 @@ export default function SessionView({
                 <span className="text-muted-foreground">
                   {t("session.lap")} {l.num + 1}
                 </span>
-                <span className="font-mono tabular-nums">{lapTime(l.timeMs)}</span>
+                <span className={l.timeMs ? "font-mono tabular-nums" : "font-mono tabular-nums text-muted-foreground"}>
+                  {lapTime(l.timeMs || l.riddenMs)}
+                </span>
                 <span className="font-mono tabular-nums text-muted-foreground">
                   {best && comparable ? (l.timeMs === best ? t("session.bestTag") : gap((l.timeMs - best) / 1000)) : ""}
                 </span>
                 <span className="flex gap-1.5">
                   {l.invalid && <Badge>{t("session.invalid")}</Badge>}
-                  {!l.whole && <Badge>{t("session.partial")}</Badge>}
+                  {l.issue && <Badge>{l.issue[0].toUpperCase() + l.issue.slice(1)}</Badge>}
+                  {l.crashed && <Badge>{t("session.crashed")}</Badge>}
                 </span>
-                <Button size="sm" variant="outline" disabled={!comparable || !reference} onClick={() => onReview(l.num)}>
+                {/* A lap that can't be held against another is still worth a look on its own. */}
+                <Button size="sm" variant="outline" onClick={() => onReview(l.num, !comparable || !reference)}>
                   {t("session.review")}
                 </Button>
               </div>

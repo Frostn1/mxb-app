@@ -152,9 +152,14 @@ pub struct Lap {
     pub num: i32,
     pub time_ms: i32,
     pub invalid: bool,
-    /// Starts at the line and ends at it, with the time it reports. An out lap from the pits,
-    /// or a lap that lost samples, is not whole and can't be compared.
+    /// Starts at the line and ends at it, with the time it reports: it can be compared.
     pub whole: bool,
+    /// Why it isn't whole: `out lap`, `unfinished`, `untimed`, `gap in the recording`.
+    pub issue: Option<&'static str>,
+    /// The rider came off during it. Still whole: the game timed it, and the review says where.
+    pub crashed: bool,
+    /// How long it took by the recording, for a lap the game left untimed.
+    pub ridden_ms: i32,
     pub samples: Vec<Sample>,
 }
 
@@ -295,9 +300,11 @@ pub fn parse(bytes: &[u8]) -> Result<Recording> {
     Ok(rec)
 }
 
-/// Lap timing is off by at most this much from the samples and still counts as whole: one
-/// sample either side of the line, plus slack for a stutter.
-const WHOLE_SLACK_S: f32 = 0.25;
+/// Lap timing is off by at most this much from the samples and still counts as whole: a sample
+/// either side of the line, plus slack for a stutter or a pause.
+const WHOLE_SLACK_S: f32 = 0.5;
+/// How far from the line a lap's first and last samples may sit, as a share of the lap.
+const LINE_SLACK: f32 = 0.05;
 
 impl Recording {
     /// Every lap the game timed, in order. The samples before the first timed lap belong to
@@ -310,8 +317,13 @@ impl Recording {
             let mut samples = self.samples[start.min(end)..end].to_vec();
             start = end;
             unwrap(&mut samples);
-            let whole = is_whole(&samples, m.time_ms);
-            out.push(Lap { num: m.num, time_ms: m.time_ms, invalid: m.invalid, whole, samples });
+            let issue = issue(&samples, m.time_ms);
+            let crashed = samples.iter().any(|s| s.crashed);
+            let ridden_ms = match (samples.first(), samples.last()) {
+                (Some(a), Some(b)) => ((b.t - a.t) * 1000.0).round() as i32,
+                _ => 0,
+            };
+            out.push(Lap { num: m.num, time_ms: m.time_ms, invalid: m.invalid, whole: issue.is_none(), issue, crashed, ridden_ms, samples });
         }
         out
     }
@@ -332,15 +344,21 @@ fn unwrap(samples: &mut [Sample]) {
     }
 }
 
-fn is_whole(samples: &[Sample], time_ms: i32) -> bool {
-    let (Some(first), Some(last)) = (samples.first(), samples.last()) else { return false };
-    let duration = last.t - first.t;
+/// Why a lap can't be compared, or None when it can.
+fn issue(samples: &[Sample], time_ms: i32) -> Option<&'static str> {
+    let (Some(first), Some(last)) = (samples.first(), samples.last()) else { return Some("gap in the recording") };
     let reported = time_ms as f32 / 1000.0;
-    time_ms > 0
-        && first.pos.abs() < 0.03
-        && (last.pos - 1.0).abs() < 0.03
-        && (duration - reported).abs() <= WHOLE_SLACK_S + reported * 0.01
-        && !samples.iter().any(|s| s.crashed)
+    if time_ms <= 0 {
+        Some("untimed")
+    } else if first.pos.abs() >= LINE_SLACK {
+        Some("out lap")
+    } else if (last.pos - 1.0).abs() >= LINE_SLACK {
+        Some("unfinished")
+    } else if ((last.t - first.t) - reported).abs() > WHOLE_SLACK_S + reported * 0.02 {
+        Some("gap in the recording")
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -471,9 +489,29 @@ mod tests {
         let laps = rec.laps();
         assert_eq!(laps.len(), 2);
         assert!(!laps[0].whole, "an out lap is not comparable");
+        assert_eq!(laps[0].issue, Some("out lap"));
         let lap = &laps[1];
         assert!(lap.samples[0].pos < 0.0, "early sample folded before the line");
         assert!(lap.samples.last().unwrap().pos > 0.99);
         assert!(lap.whole, "a clean lap is whole");
+    }
+
+    #[test]
+    fn a_crash_leaves_the_lap_timed_and_comparable() {
+        let mut f = File::new();
+        f.event("t", 100.0);
+        f.sample(0.0, 0.0, |_| {});
+        for k in 1..=100 {
+            let pos = (k as f32 / 100.0).min(0.999);
+            f.sample(k as f32 * 0.1, pos, |b| {
+                if k == 50 {
+                    b.i(136, 1);
+                }
+            });
+        }
+        f.lap(0, 10_000).end();
+        let lap = &parse(&f.0).unwrap().laps()[0];
+        assert!(lap.crashed);
+        assert!(lap.whole, "{:?}", lap.issue);
     }
 }

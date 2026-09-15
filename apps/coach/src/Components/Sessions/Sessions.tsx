@@ -6,15 +6,15 @@ import Review from "../Review/Review";
 type Place =
   | { kind: "list" }
   | { kind: "session"; path: string }
-  | { kind: "review"; path: string; lap: number };
+  | { kind: "review"; path: string; lap: number; solo: boolean };
 
 /** Sessions, one session's laps, and a lap's review: a drill-down with back links. */
 export default function Sessions({ onSettings }: { onSettings: () => void }) {
   const [place, setPlace] = useState<Place>({ kind: "list" });
 
   if (place.kind === "review") {
-    const { path, lap } = place;
-    return <Review path={path} lap={lap} onBack={() => setPlace({ kind: "session", path })} />;
+    const { path, lap, solo } = place;
+    return <Review path={path} lap={lap} solo={solo} onBack={() => setPlace({ kind: "session", path })} />;
   }
   if (place.kind === "session") {
     const { path } = place;
@@ -22,7 +22,7 @@ export default function Sessions({ onSettings }: { onSettings: () => void }) {
       <SessionView
         path={path}
         onBack={() => setPlace({ kind: "list" })}
-        onReview={(lap) => setPlace({ kind: "review", path, lap })}
+        onReview={(lap, solo) => setPlace({ kind: "review", path, lap, solo })}
       />
     );
   }
