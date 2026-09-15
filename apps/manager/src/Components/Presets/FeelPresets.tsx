@@ -47,7 +47,7 @@ import {
   feelImport,
   type Feel,
 } from "@frost/shared/api/mods";
-import FeelEditor from "./FeelEditor";
+import FeelEditor, { controlLabel } from "./FeelEditor";
 import { copyName } from "@frost/shared/lib/presets";
 import { useT } from "@/i18n";
 import { copyText } from "../../lib/clipboard";
@@ -128,7 +128,9 @@ export default function FeelPresets({ profiles, profile, onProfile }: Props) {
         const missing = report.missingControls;
         toast.success(t("feel.applied", { name: feel.name }), {
           description: missing.length
-            ? t("feel.missingControls", { names: missing.join(", ") })
+            ? t("feel.missingControls", {
+                names: missing.map((c) => controlLabel(t, c)).join(", "),
+              })
             : t("feel.restartHint"),
         });
       } catch (e) {
