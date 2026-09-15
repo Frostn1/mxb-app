@@ -223,9 +223,14 @@ pub fn read_meta(path: &Path) -> Result<PkzMeta> {
 }
 
 pub fn read_preview(path: &Path) -> Result<Option<String>> {
+    read_preview_at(path, PREVIEW_MAX)
+}
+
+/// [`read_preview`] no larger than `max` on its longest edge, for small cards.
+pub fn read_preview_at(path: &Path, max: u32) -> Result<Option<String>> {
     let _permit = acquire();
     let (_, image) = inspect(path)?;
-    Ok(image.and_then(|(name, bytes)| make_thumbnail(&name, &bytes, PREVIEW_MAX)))
+    Ok(image.and_then(|(name, bytes)| make_thumbnail(&name, &bytes, max)))
 }
 
 /// The metadata and full-size preview for **one folder** inside a plain-zip archive.

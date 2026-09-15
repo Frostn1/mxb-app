@@ -3474,6 +3474,12 @@ export function guessServerTrack(track: string): Promise<TrackGuess> {
   return invoke<TrackGuess>("guess_server_track", { track });
 }
 
+/** Card art for the server browser: track id to its preview, for every id the player has
+ *  installed or got with the game. The rest are left out. One call for the whole list. */
+export function serverTrackPreviews(tracks: string[]): Promise<Record<string, string>> {
+  return invoke<Record<string, string>>("server_track_previews", { tracks });
+}
+
 export type ServerAction = "start" | "stop" | "restart";
 
 export function listServers(): Promise<ServerRef[]> {

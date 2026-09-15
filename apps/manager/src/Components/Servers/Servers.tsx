@@ -17,10 +17,13 @@ import {
   Globe,
   UserCheck,
   Hourglass,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
 import { Button } from "@frost/shared/Components/ui/button";
+import { Segmented } from "@frost/shared/Components/ui/segmented";
 import {
   Select,
   SelectTrigger,
@@ -35,6 +38,7 @@ import {
   joinServer,
   queueJoin,
   serversWithPaintSync,
+  serverTrackPreviews,
   type MasterServer,
 } from "@frost/shared/api/mods";
 import { useT } from "@/i18n";
@@ -43,6 +47,13 @@ import { isFull, useServerQueue } from "@/lib/useServerQueue";
 import { REGION_LABEL_KEY, REGION_ORDER, canonicalRegion, type RegionKey } from "@/lib/serverRegion";
 import JoinServerDialog from "../Shell/JoinServerDialog";
 import ServerDetail from "./ServerDetail";
+import ServerCard from "./ServerCard";
+
+type ViewMode = "tiles" | "list";
+const VIEW_KEY = "mxb:serversView:v1";
+
+/** Track art by track id, kept for the app's life so coming back to the tab paints at once. */
+const ART: Record<string, string> = {};
 
 type SortMode = "players" | "ping" | "name" | "region" | "track";
 type SortDir = "asc" | "desc";
@@ -109,6 +120,40 @@ const Servers = () => {
     }
   }, [hideEmpty]);
   const favs = useFavorites();
+
+  const [view, setView] = useState<ViewMode>(() => {
+    try {
+      return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "tiles";
+    } catch {
+      return "tiles";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_KEY, view);
+    } catch {
+      // Storage disabled; the choice still holds for this session.
+    }
+  }, [view]);
+
+  // One request for every track in the list, not one per tile. Tracks already drawn aren't
+  // asked again; the ones the player lacks are, in case they installed one since.
+  const [art, setArt] = useState<Record<string, string>>(() => ({ ...ART }));
+  useEffect(() => {
+    if (view !== "tiles" || !servers?.length) return;
+    const tracks = [...new Set(servers.map((s) => s.track).filter((tr) => tr && !(tr in ART)))];
+    if (tracks.length === 0) return;
+    let live = true;
+    serverTrackPreviews(tracks)
+      .then((found) => {
+        Object.assign(ART, found);
+        if (live) setArt({ ...ART });
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [view, servers]);
 
   // One fetch at a time. Two overlapping ones each sign in to Steam, and the loser's
   // failure used to replace the winner's list with an error.
@@ -271,6 +316,23 @@ const Servers = () => {
             {t("serverBrowser.count", { count: servers.length - (showHidden ? 0 : hiddenCount) })}
           </span>
         )}
+        <Segmented<ViewMode>
+          size="sm"
+          value={view}
+          onChange={setView}
+          options={[
+            {
+              value: "tiles",
+              label: (
+                <LayoutGrid className="size-3.5" aria-label={t("serverBrowser.viewTiles")} />
+              ),
+            },
+            {
+              value: "list",
+              label: <List className="size-3.5" aria-label={t("serverBrowser.viewList")} />,
+            },
+          ]}
+        />
         {favs.count > 0 && (
           <ToggleChip on={favesOnly} onClick={() => setFavesOnly((v) => !v)}>
             <Star className={cn("size-3.5", favesOnly && "fill-current")} />
@@ -376,6 +438,26 @@ const Servers = () => {
               {favesOnly ? t("serverBrowser.favesEmpty") : t("serverBrowser.empty")}
             </p>
           </Centered>
+        ) : view === "tiles" ? (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
+            {shown.map((s, i) => (
+              <ServerCard
+                key={`${s.address}-${i}`}
+                server={s}
+                art={art[s.track]}
+                favourite={favs.has(s.address)}
+                paintSync={paintSync[s.address] ?? 0}
+                joining={joining === s.address}
+                busy={joining !== null}
+                queuePosition={queue?.address === s.address ? queue.position : null}
+                onOpen={setDetail}
+                onJoin={join}
+                onWait={wait}
+                onCopy={copy}
+                onToggleFavourite={favs.toggle}
+              />
+            ))}
+          </div>
         ) : (
           <div className="overflow-hidden rounded-xl border border-input">
             <table className="w-full border-collapse text-[13px]">

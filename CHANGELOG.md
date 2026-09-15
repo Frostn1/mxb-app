@@ -1,8 +1,12 @@
 # Changelog
 
-## 2026-09-14
+## Unreleased
 
 ### Added
+- The server browser has its tile view back. Each server shows as a picture of its track with
+  the rider count, ping and a Join button. Switch between tiles and the list at the top; the app
+  remembers which you picked. Track pictures load in one go and show straight away when you come
+  back to the tab.
 - A setting to close the game when your turn in a server line comes, so the app can start it
   straight into the server. It's off by default and lives in Settings, General.
 
@@ -10,6 +14,10 @@
 
 ### Added
 - New Frost's Studio versions are posted in the Discord, in #studio-releases.
+
+### Changed
+- Tabletops on generated tracks are wide, rounded mounds. The bigger the jump, the further its
+  dirt runs out either side, so its sides slope into the ground.
 
 ## 2026-09-14 — v0.14.4 — Wait in line
 

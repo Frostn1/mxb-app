@@ -23,8 +23,8 @@
 //! 1. a landscape, from noise, that knows nothing about the track;
 //! 2. the riding line **benched** into it — the corridor takes a smoothed version of the
 //!    ground it crosses, so the track follows the land without inheriting its every bump;
-//! 3. the features, added on top of the bench and faded out at the edge of the corridor so a
-//!    jump never spills into the field beside it.
+//! 3. the features, added on top of the bench and faded out past the edge of the corridor, a
+//!    tall jump spilling as far as its height asks.
 
 #![allow(dead_code)]
 
@@ -83,8 +83,26 @@ const BENCH_SMOOTH_M: f32 = 45.0;
 /// is a 51° face, steeper than anything measured on a published track, and it lands inside
 /// the corridor where it is exactly what a rider hits. Real jumps spill onto the shoulder,
 /// and letting these do the same puts the slope back where the corpus has it.
+///
+/// The edge is now the least a feature reaches; a tall one spills further — see
+/// [`FEATURE_SIDE_DEG`].
 const FEATURE_FULL: f32 = 0.8;
 const FEATURE_EDGE: f32 = 1.75;
+
+/// The steepest the side of a jump stands where it spills past the track, degrees, reached at
+/// [`FEATURE_SIDE_KNEE`]: above it the edge rounds over, below it the side runs out in a skirt.
+///
+/// A fade of fixed width stood a tall table's sides as steep as it was tall: 38° on a 3 m
+/// one, a box set on the track. Spread evenly at 18° they rode as low plateaus. A pile of dirt
+/// stands steep near its top and runs out long at its foot.
+const FEATURE_SIDE_DEG: f32 = 28.0;
+
+/// Where on the side, as a fraction of the height, the rounded top gives way to the skirt.
+const FEATURE_SIDE_KNEE: f32 = 0.65;
+
+/// Metres of lap the spill past the track is softened over. Following the jump's own profile
+/// out there carried the take-off face sideways into the field, a crease at every lip.
+const SPILL_ROUND_M: f32 = 6.0;
 
 /// How much shorter a cut face is than a fill slope.
 ///
@@ -1186,6 +1204,13 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     let feat = feature_profile(&prog.features, lap, prog.blend.max(0.0));
     let feat_side = side_profile(&prog.features, lap, prog.blend.max(0.0));
     let chords = jump_chords(&prog.features, &stations);
+    let feat_soft = {
+        let mut v = feat.v.clone();
+        let r = (SPILL_ROUND_M / PROFILE_STEP) as usize;
+        smooth_along(&mut v, r);
+        smooth_along(&mut v, r);
+        Profile { v }
+    };
     let berms = berm_profile(&prog.features, &turn, lap);
     let mut feel = ride();
     // How raced the ground arrives. It thins the deformable stack in `tht` and deepens what
@@ -1260,6 +1285,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         p
     };
     let widths = width_profile(prog.width * 0.5, lap, r.seed);
+    let seam = seam_distance(&station, &stations, lap, gw, gh, mps_x, mps_z);
     // The start straight: its own line off to the side of the lap, cut to the height of the
     // lap beside it. Built here because it takes that deck, and used twice below — to bench
     // it into the ground, and by everything that then paints the track.
@@ -1366,9 +1392,14 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             }
             None => (s, d, t),
         };
+        // Past the track the spill follows a softened profile, so a take-off's face doesn't run
+        // out sideways as a crease across the field.
+        let soft = smoothstep(((fd - half * FEATURE_FULL) / SPILL_ROUND_M).clamp(0.0, 1.0));
         let f = feat.at(fs);
+        let f = f + (feat_soft.at(fs) - f) * soft;
         if f != 0.0 {
-            heights[i] += f * lateral(fd, half) * one_side(ft, feat_side.at(fs));
+            let reach = fd + seam[i] - SEAM_CLEAR_M;
+            heights[i] += f * lateral(fd, half, f, reach) * one_side(ft, feat_side.at(fs));
         }
         // A berm stands on the outside of the corner, which is the side away from the turn.
         // Whatever the program asked for, plus what the corner would have grown on its own:
@@ -2314,6 +2345,113 @@ fn grid_dims(prog: &TrackProgram) -> Result<(usize, usize)> {
 /// which costs two sweeps instead of a search per cell. The distance it propagates is only
 /// approximate, so it is thrown away at the end and recomputed exactly against the station it
 /// found — the label is what the sweep is for.
+/// Stations further apart round the lap than this, on neighbouring cells, are two legs
+/// meeting: a seam.
+const SEAM_ARC_M: f32 = 30.0;
+
+/// How far short of a seam a feature's spill has gone. Up to it, the jump met the other leg's
+/// ground as a wall.
+const SEAM_CLEAR_M: f32 = 2.0;
+
+/// How far each cell is from the nearest seam between two legs of the lap, metres. The same
+/// two-pass chamfer as [`nearest_station`], seeded where the station owning a cell flips.
+fn seam_distance(
+    station: &[u32],
+    st: &[Station],
+    lap: f32,
+    gw: usize,
+    gh: usize,
+    mps_x: f32,
+    mps_z: f32,
+) -> Vec<f32> {
+    let arc = |i: usize| st[station[i] as usize].s;
+    let apart = |a: f32, b: f32| {
+        let d = (a - b).abs();
+        d.min(lap - d)
+    };
+    let mut d = vec![f32::MAX; gw * gh];
+    for y in 0..gh {
+        for x in 0..gw {
+            let i = y * gw + x;
+            if (x + 1 < gw && apart(arc(i), arc(i + 1)) > SEAM_ARC_M)
+                || (y + 1 < gh && apart(arc(i), arc(i + gw)) > SEAM_ARC_M)
+            {
+                d[i] = 0.0;
+            }
+        }
+    }
+    let diag = (mps_x * mps_x + mps_z * mps_z).sqrt();
+    let relax = |d: &mut Vec<f32>, at: usize, from: usize, cost: f32| {
+        if d[from] + cost < d[at] {
+            d[at] = d[from] + cost;
+        }
+    };
+    for y in 0..gh {
+        for x in 0..gw {
+            let at = y * gw + x;
+            if y > 0 {
+                relax(&mut d, at, at - gw, mps_z);
+                if x > 0 {
+                    relax(&mut d, at, at - gw - 1, diag);
+                }
+                if x + 1 < gw {
+                    relax(&mut d, at, at - gw + 1, diag);
+                }
+            }
+            if x > 0 {
+                relax(&mut d, at, at - 1, mps_x);
+            }
+        }
+    }
+    for y in (0..gh).rev() {
+        for x in (0..gw).rev() {
+            let at = y * gw + x;
+            if y + 1 < gh {
+                relax(&mut d, at, at + gw, mps_z);
+                if x > 0 {
+                    relax(&mut d, at, at + gw - 1, diag);
+                }
+                if x + 1 < gw {
+                    relax(&mut d, at, at + gw + 1, diag);
+                }
+            }
+            if x + 1 < gw {
+                relax(&mut d, at, at + 1, mps_x);
+            }
+        }
+    }
+    // The flip between two legs is a staircase at the station spacing, and a distance taken
+    // from a staircase ripples along the lap: capped by it, a spill stood in stripes.
+    for v in &mut d {
+        *v = v.min(1000.0);
+    }
+    let d = blur_clamped(&d, gw, gh, (SEAM_SMOOTH_M / mps_x) as usize, 1);
+    blur_clamped(&d, gw, gh, (SEAM_SMOOTH_M / mps_z) as usize, gw)
+}
+
+/// Half the window the seam distance is averaged over, metres. Wider than the station
+/// spacing the seam steps at.
+const SEAM_SMOOTH_M: f32 = 2.0;
+
+/// A box average along one axis of the grid — `stride` 1 for rows, `gw` for columns — over
+/// `r` cells either side, clamped at the edges rather than wrapped round them.
+fn blur_clamped(v: &[f32], gw: usize, gh: usize, r: usize, stride: usize) -> Vec<f32> {
+    let (lines, len, step) = if stride == 1 { (gh, gw, gw) } else { (gw, gh, 1) };
+    let mut out = vec![0.0f32; v.len()];
+    let mut pre = vec![0.0f64; len + 1];
+    for l in 0..lines {
+        let at = |k: usize| l * step + k * stride;
+        for k in 0..len {
+            pre[k + 1] = pre[k] + v[at(k)] as f64;
+        }
+        for k in 0..len {
+            let (a, b) = (k.saturating_sub(r), (k + r + 1).min(len));
+            out[at(k)] = ((pre[b] - pre[a]) / (b - a) as f64) as f32;
+        }
+    }
+    out
+}
+
 fn nearest_station(
     st: &[Station],
     gw: usize,
@@ -2585,17 +2723,32 @@ fn one_side(t: f32, side: f32) -> f32 {
 const SIDE_SPLIT_M: f32 = 2.5;
 const SIDE_FADE_M: f32 = 5.0;
 
-/// How much of a feature reaches a cell. Full height across most of the track, gone by the
-/// edge, so a jump doesn't run off into the field.
-fn lateral(d: f32, half: f32) -> f32 {
+/// How much of a feature `h` tall reaches a cell. Full height across most of the track, then
+/// rolling off to the field over a width its height sets — see [`FEATURE_SIDE_DEG`] — but
+/// never past `reach` metres off the line.
+///
+/// The riding surface stays level. Crowning it tilted every face and deck under the wheels,
+/// and a table is the safe jump because you can land anywhere on its top.
+fn lateral(d: f32, half: f32, h: f32, reach: f32) -> f32 {
     let full = half * FEATURE_FULL;
-    let edge = half * FEATURE_EDGE;
     if d <= full {
-        1.0
-    } else if d >= edge {
-        0.0
+        return 1.0;
+    }
+    // A parabola over the top to the steepest point at the knee, then a cubic skirt: the two
+    // meet at the same slope and the skirt lands flat.
+    let (s, k) = (FEATURE_SIDE_DEG.to_radians().tan(), FEATURE_SIDE_KNEE);
+    let (top, skirt) = (2.0 * (1.0 - k) * h.abs() / s, 3.0 * k * h.abs() / s);
+    // Scaled whole: never narrower than the old fixed fade, never past `reach`.
+    let width = (top + skirt).min(reach - full).max(half * (FEATURE_EDGE - FEATURE_FULL));
+    let scale = width / (top + skirt).max(1e-4);
+    let (top, skirt) = (top * scale, skirt * scale);
+    let u = d - full;
+    if u < top {
+        1.0 - (1.0 - k) * (u / top).powi(2)
+    } else if u < top + skirt {
+        k * (1.0 - (u - top) / skirt).powi(3)
     } else {
-        smoothstep(1.0 - (d - full) / (edge - full))
+        0.0
     }
 }
 
@@ -8223,7 +8376,7 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
 /// the code that made it. Bump it with every change to what a program builds into: minor for
 /// a new feature, patch for a fix. 0.x until the generator is finished. History in
 /// `apps/studio/FROST_ALGORITHM.md`.
-pub const FROST_ALGORITHM_VERSION: &str = "0.31.2";
+pub const FROST_ALGORITHM_VERSION: &str = "0.32.0";
 
 /// The stamp every built track carries in `<slug>/frost-algorithm.ini`.
 ///
