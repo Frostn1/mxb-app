@@ -16,10 +16,11 @@ fastest whole lap on that track, same bike first) and says where the time went a
    position × track length), so index `i` is the same place on track in both.
 4. **Split into sections** from the reference: corners (curvature tighter than 45 m, at least
    35° of turn, plus a 70 m braking zone and 25 m exit), jumps (both wheels off the ground
-   ≥ 0.25 s), rhythm (two jumps within 12 m) and whoops (three or more), and straights between.
+   ≥ 0.3 s and ≥ 6 m), rhythm (jumps within 30 m of each other) and whoops (three or more hops
+   under 10 m long), and straights between.
 5. **Explain** each section that loses more than 0.05 s with the rules below. The three
-   sections losing most are shown first. Safety findings (front lock, crooked landing) show
-   even where no time was lost.
+   sections losing most are shown first. Safety findings (⚠: front lock, crooked or hard
+   landing, sliding front) show even where no time was lost.
 
 ## Rules
 
@@ -42,14 +43,41 @@ Thresholds are starting values in `analysis.rs` → `mod th`, to be tuned on rea
 | Corner | `exit_speed` | leaves > 3 km/h slower with no other exit cause |
 | Corner | `clutch_braking` | clutch in > 0.5 s under braking, reference doesn't |
 | Corner | `front_lock` ⚠ | front wheel < 80% of ground speed under front brake > 0.15 s |
+| Corner | `bar_fight` | mean bar torque into the apex > 25 and > 1.5× the reference |
+| Corner | `front_push` ⚠ | the bike turns < 75% of what its lean supports, the reference > 85% |
 | Jump | `jump_it` | reference jumps, lap rolls it |
 | Jump | `chop_face` | throttle drops > 0.3 on the last 15 m of the face |
 | Jump | `scrub` | > 10% + 0.1 s more airtime and > 0.5 m higher |
 | Jump | `land_short` / `overjump` | lands > 2 m short / > 3 m long |
 | Jump | `land_throttle` | off the gas at touchdown, reference on it |
-| Jump | `land_crooked` ⚠ | > 10° of lean at touchdown |
+| Jump | `land_crooked` ⚠ | > 15° of lean 4 m after touchdown (a whip has unwound by then), 7.5° more than the reference |
+| Jump | `land_hard` ⚠ | the landing hits > 10 G and > 1.4× the reference (on its own: > 12 G) |
 | Whoops | `whoops_speed` / `whoops_throttle` / `whoops_bucking` | slower, off the gas, pitching more |
 | Straight | `shift_earlier` / `full_gas` | more time on the limiter / less throttle |
+
+## Setup
+
+Over the whole lap, with the fix for each in `fixes.rs` (the changes, in the order to try them,
+written into a copy of the rider's setup where the bike's own option list for the setting is
+known; geometry stays advice).
+
+| Tip | Fires when | Fix |
+|---|---|---|
+| `setup_bottoming_fork` / `_shock` | ≥ 3 bottom-outs a lap | fork: compression, oil, spring; shock: high-speed compression, spring, preload |
+| `setup_bottoming_shock_slow` | the shock's bottom-outs mostly compress slower than 0.4 m/s | low-speed compression, spring, preload |
+| `setup_stiff_fork` / `_shock` | never past 70% of the travel | softer compression, oil or spring |
+| `setup_brake_dive` | fork past 85% braking into ≥ 2 corners | fork compression, oil, preload |
+| `setup_exit_squat` | shock past 75% on the gas out of ≥ 2 corners | shock low-speed compression, preload |
+| `setup_shock_kick` | rear extends faster than 0.6 m/s at the lip on ≥ 2 jumps | slower shock rebound |
+| `setup_packing_fork` / `_shock` | in whoops, > 50% deep on average and never extending faster than 0.4 / 0.2 m/s | faster rebound, softer compression |
+| `setup_rear_low` / `setup_front_low` | on steady straights the shock sits > 30% deeper than the fork / the fork deeper than the shock | preload |
+| `setup_front_push` | the front slides in ≥ 2 corners | softer fork compression, more shock preload |
+| `setup_gearing_*`, `setup_shift_*`, `setup_swingarm` | limiter, bogging, shift points, front up on exits | rear sprocket; swingarm as advice |
+
+The suspension, acceleration and bar thresholds come from real laps (2026-09-15, five laps of a
+250F): a landing's hit has a median of 5 G and a 90th percentile of 10 G, the bars into a
+corner a median of 17. The game's brake pressure channel carries no data, so braking is read
+from the lever inputs.
 
 ## Where MX Bikes differs from real life
 
