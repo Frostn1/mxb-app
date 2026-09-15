@@ -368,6 +368,8 @@ pub(crate) mod testfile {
             p[444..444 + track.len()].copy_from_slice(track.as_bytes());
             p[644..648].copy_from_slice(&length.to_le_bytes());
             p[308..312].copy_from_slice(&13000i32.to_le_bytes());
+            p[332..336].copy_from_slice(&0.3f32.to_le_bytes());
+            p[336..340].copy_from_slice(&0.3f32.to_le_bytes());
             self.record(tag::EVENT, &p)
         }
         pub fn sample(&mut self, t: f32, pos: f32, fill: impl Fn(&mut Bike)) -> &mut Self {

@@ -100,6 +100,9 @@ export interface Channels {
   lean: Channel;
   gear: Channel;
   height: Channel;
+  /** Share of the travel in use, percent; all zero when unknown. */
+  fork: Channel;
+  shock: Channel;
 }
 
 export interface Review {
@@ -107,6 +110,8 @@ export interface Review {
   refTime: number;
   sections: SectionReview[];
   focus: number[];
+  /** Suspension advice for the whole lap. */
+  setup: Finding[];
   channels: Channels;
   /** World x/z every 2 m. */
   paths: { lap: [number, number][]; reference: [number, number][] };

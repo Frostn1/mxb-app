@@ -18,6 +18,24 @@
 - Tabletops on generated tracks are wide, rounded mounds. The bigger the jump, the further its
   dirt runs out either side, so its sides slope into the ground.
 
+## 2026-09-14 — MXB Coach v0.1.0-beta.2
+
+### Added
+- Suspension tips. The coach tells you when the fork or shock bottoms out on a landing or in the
+  braking bumps, and once a lap it says whether your suspension bottoms again and again or never
+  uses its travel, with what to change in the setup.
+- New tips for the front wheel lifting on the exit, the rear lifting under braking, a locked rear
+  wheel and holding the throttle open in the air.
+
+### Changed
+- The lap review is easier to read. The section you pick glows on the track map with its name and
+  time, a bar across the lap replaces the long list of sections, and the charts zoom to that
+  section: your speed against the fast lap, your brake and gas next to theirs, and the time you
+  lose there. Numbered marks on the charts match the numbered tips.
+
+### Fixed
+- A whip no longer counts as landing crooked.
+
 ## 2026-09-14 — v0.14.4 — Wait in line
 
 ### Added

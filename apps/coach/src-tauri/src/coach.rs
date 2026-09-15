@@ -311,7 +311,8 @@ pub fn coach_review(
         return Err("The reference lap is on a different track.".into());
     }
     let (mine, theirs) = (trace(&rec, lap)?, trace(ref_rec, reference.lap)?);
-    let review = analysis::review(&mine, &theirs, rec.event.limiter as f32);
+    let bike = analysis::Bike { limiter: rec.event.limiter as f32, travel: rec.event.susp_max_travel };
+    let review = analysis::review(&mine, &theirs, bike);
     let time_ms = summary.laps.iter().find(|l| l.num == lap).map_or(0, |l| l.time_ms);
     Ok(ReviewOut {
         track_name: summary.track_name.clone(),
