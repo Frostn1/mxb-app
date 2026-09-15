@@ -1,11 +1,13 @@
 # Changelog
 
-## Unreleased
+## 2026-09-15 — v0.14.6 — The app updates itself
 
 ### Added
 - The app updates itself. New versions install when you open the app, or once it has sat
   unused for ten minutes, and never while MX Bikes is running. If the app was in the tray, it
   goes back there. Turn it off in Settings with "Install updates automatically".
+- A setting to close the game when your turn in a server line comes, so the app can start it
+  straight into the server. It's off by default and lives in Settings, General.
 
 ### Changed
 - You no longer need an invite code to sign in with Steam or unlock mxbsecure content you own.
@@ -17,8 +19,6 @@
   the rider count, ping and a Join button. Switch between tiles and the list at the top; the app
   remembers which you picked. Track pictures load in one go and show straight away when you come
   back to the tab.
-- A setting to close the game when your turn in a server line comes, so the app can start it
-  straight into the server. It's off by default and lives in Settings, General.
 
 ## Unreleased — Frost's Studio
 
