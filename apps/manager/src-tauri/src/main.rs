@@ -53,6 +53,9 @@ mod procmods;
 /// What the running game's own memory says about itself — digests of named regions, compared
 /// against a per-build baseline the control plane holds. The client half of state invariants.
 mod stateinvariants;
+/// Beta capture aid: logs the running build's fingerprint and, on request, a memory region's
+/// bytes, so a clean-install baseline can be read off the app log to arm state invariants.
+mod statedump;
 /// Linux only: the Proton prefix the game runs in, and how to put a Windows program in it.
 #[cfg(target_os = "linux")]
 pub(crate) use mxb_core::proton;

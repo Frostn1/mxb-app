@@ -342,6 +342,11 @@ pub fn reset() {
 /// Called from [`crate::sessionwatch`] on its poll rather than from a watcher of its own:
 /// the question only has an answer while the game is up, and that loop already knows.
 pub fn tick(app: &tauri::AppHandle) {
+    // Baseline capture runs ahead of the enrolment gate: a tester reading a clean baseline off
+    // the log has no reason to hold a control-plane token. It logs once per session and is a
+    // no-op where the game's memory cannot be read.
+    crate::statedump::dump_once();
+
     let cfg = crate::config::load_or_detect(app).unwrap_or_default();
     let token = cfg.cp_token.trim().to_string();
     // Nothing to report to. Enrolment is what gives a report somewhere to go.
