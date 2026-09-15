@@ -29,8 +29,14 @@ mod th {
     pub const CORNER_MERGE_M: usize = 8;
     pub const CORNER_ENTRY_M: usize = 70; // room for the braking zone
     pub const CORNER_EXIT_M: usize = 25;
-    pub const JUMP_MIN_AIR_S: f32 = 0.25;
-    pub const JUMP_GROUP_M: usize = 12; // closer than this and it's one rhythm or whoops
+    pub const JUMP_MIN_AIR_S: f32 = 0.3;
+    /// Shorter than this in the air is a hop over a bump, not a jump.
+    pub const JUMP_MIN_M: usize = 6;
+    /// Back in the air this soon after touching down is a bounce off the same landing.
+    pub const BOUNCE_M: usize = 5;
+    pub const JUMP_GROUP_M: usize = 30; // closer than this and it's one rhythm or whoops
+    /// A group's jumps averaging this long or less in the air are whoops, not a rhythm.
+    pub const WHOOP_HOP_M: usize = 10;
     pub const JUMP_ENTRY_M: usize = 25;
     pub const JUMP_EXIT_M: usize = 15;
     pub const MATCH_JUMP_M: i64 = 20;
@@ -89,10 +95,14 @@ mod th {
     pub const WHEELIE_LAP_S: f32 = 1.0;
 
     // A lap on its own: plain amounts, with nothing to hold them against.
-    pub const SOLO_COAST_S: f32 = 0.6;
-    pub const SOLO_SPIN_S: f32 = 0.5;
+    // Set from real laps (2026-09-15): lower bars flagged most turns and jumps of a good lap.
+    pub const SOLO_COAST_S: f32 = 1.0;
+    pub const SOLO_SPIN_S: f32 = 0.8;
     pub const SOLO_SKID_S: f32 = 0.6;
-    pub const SOLO_WHEELIE_S: f32 = 0.4;
+    pub const SOLO_WHEELIE_S: f32 = 0.7;
+    pub const SOLO_LAND_ROLL_DEG: f32 = 25.0;
+    pub const SOLO_CHOP: f32 = 0.5;
+    pub const SOLO_AIR_GAS: f32 = 0.85;
     pub const SOLO_LIMITER_S: f32 = 0.5;
     pub const SOLO_PART_GAS: f32 = 0.75;
     pub const SOLO_LONG_STRAIGHT_M: usize = 80;
@@ -352,9 +362,10 @@ fn curvature(tr: &Trace) -> Vec<f32> {
         .collect()
 }
 
-/// Stretches with both wheels off the ground long enough to be a jump: (takeoff, landing).
+/// Stretches with both wheels off the ground long enough to be a jump: (takeoff, landing). A
+/// landing that touches and bounces straight back up is one jump, not two.
 fn air_runs(tr: &Trace, within: Range<usize>) -> Vec<(usize, usize)> {
-    let mut out = Vec::new();
+    let mut raw: Vec<(usize, usize)> = Vec::new();
     let mut i = within.start;
     while i < within.end {
         if !tr.pts[i].air {
@@ -365,12 +376,12 @@ fn air_runs(tr: &Trace, within: Range<usize>) -> Vec<(usize, usize)> {
         while i < within.end && tr.pts[i].air {
             i += 1;
         }
-        let e = i - 1;
-        if e - s >= 3 && tr.span(s, e) >= th::JUMP_MIN_AIR_S {
-            out.push((s, e));
+        match raw.last_mut() {
+            Some(last) if s - last.1 <= th::BOUNCE_M => last.1 = i - 1,
+            _ => raw.push((s, i - 1)),
         }
     }
-    out
+    raw.into_iter().filter(|&(s, e)| e - s >= th::JUMP_MIN_M && tr.span(s, e) >= th::JUMP_MIN_AIR_S).collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -426,10 +437,13 @@ fn features(tr: &Trace) -> Vec<Feature> {
         if group.is_empty() {
             return;
         }
-        let kind = match group.len() {
+        // Whoops are many short hops close together; a rhythm is proper jumps in a row.
+        let n = group.len();
+        let hop = group.iter().map(|&(s, e)| e - s).sum::<usize>() / n;
+        let kind = match n {
             1 => Kind::Jump,
-            2 => Kind::Rhythm,
-            _ => Kind::Whoops,
+            _ if n >= 3 && hop <= th::WHOOP_HOP_M => Kind::Whoops,
+            _ => Kind::Rhythm,
         };
         let (a, b) = (group[0].0, group[group.len() - 1].1);
         feats.push(Feature { kind, a, b, dir: 0, runs: std::mem::take(group) });
@@ -480,7 +494,7 @@ pub fn sections(reference: &Trace) -> Vec<Section> {
         let k = kind as usize;
         counts[k] += 1;
         let word = ["Straight", "Turn", "Jump", "Rhythm", "Whoops"][k];
-        if kind == Kind::Straight { word.to_string() } else { format!("{word} {}", counts[k]) }
+        format!("{word} {}", counts[k])
     };
     let straight = |a: usize, b: usize, name: String| Section {
         kind: Kind::Straight,
@@ -1054,7 +1068,9 @@ fn jumps(c: &mut Ctx) {
         let (air_p, air_r) = (p.span(pt, pl), r.span(rt, rl));
         let peak = |t: &Trace, x: usize, y: usize| t.max_by(x..y + 1, |q| q.y);
         let higher = peak(p, pt, pl) - peak(r, rt, rl);
-        if air_p > air_r * th::FLOAT_AIR + 0.1 && higher > th::FLOAT_HEIGHT_M {
+        // Landing short, the fix is speed; staying low would only make it shorter.
+        let short = (pl as i64 - rl as i64) < -th::SHORT_M;
+        if air_p > air_r * th::FLOAT_AIR + 0.1 && higher > th::FLOAT_HEIGHT_M && !short {
             let scrubs = r.max_by(rt..rt + (rl - rt) / 3 + 1, |q| q.roll.abs()) > th::SCRUB_ROLL_DEG;
             let hint = if scrubs { " The fast lap scrubs this one." } else { "" };
             c.add("scrub", 0.85, pt, "Stay low: scrub it", format!(
@@ -1118,6 +1134,26 @@ fn jumps(c: &mut Ctx) {
                 "You hold the throttle open in the air over {name}. Close it in the air so the bike stays \
                  level, then open it as you touch down."
             ));
+        }
+    }
+
+    // Through a rhythm, one landing off throws the next jump off too: say the first only.
+    if theirs > 1 {
+        let landing = |f: &Finding| f.skill == "land_short" || f.skill == "overjump";
+        let before = c.out.iter().filter(|f| landing(f)).count();
+        let mut seen = false;
+        c.out.retain(|f| {
+            if !landing(f) {
+                return true;
+            }
+            let keep = !seen;
+            seen = true;
+            keep
+        });
+        if before > 1 {
+            if let Some(f) = c.out.iter_mut().find(|f| landing(f)) {
+                f.detail.push_str(" That throws off the rest of the rhythm.");
+            }
         }
     }
 }
@@ -1184,34 +1220,40 @@ fn setup(p: &Trace, r: Option<&Trace>, secs: &[Section], bike: Bike, travel: boo
         }
     }
 
-    if bike.limiter > 0.0 {
-        let cap = bike.limiter * 0.98;
-        let on = p.time_where(0..p.len(), |q| q.rpm >= cap);
-        if on > th::LIMITER_LAP_S {
-            tip("setup_gearing_tall", 0.8, 0, "Try taller gearing".into(), format!(
-                "You're on the rev limiter for {on:.1} s a lap. Taller gearing, a bigger front sprocket or a \
-                 smaller rear one, lets the bike keep pulling. Shifting up sooner helps too."
-            ));
-        }
-    }
-    if bike.max_rpm > 0.0 {
-        let bogs: Vec<&str> = secs
-            .iter()
+    let on = if bike.limiter > 0.0 { p.time_where(0..p.len(), |q| q.rpm >= bike.limiter * 0.98) } else { 0.0 };
+    let bogs: Vec<&str> = if bike.max_rpm > 0.0 {
+        secs.iter()
             .filter(|s| s.kind == Kind::Corner)
             .filter(|s| {
                 let apex = p.slowest(s.core.0..s.core.1 + 1);
                 p.pts[apex].rpm > 0.0 && p.pts[apex].rpm < bike.max_rpm * th::BOG_SHARE && p.pts[apex].gear > 1
             })
             .map(|s| s.name.as_str())
-            .collect();
-        if bogs.len() >= 2 {
-            tip("setup_gearing_short", 0.7, 0, "The engine bogs out of corners".into(), format!(
-                "Out of {} the engine is below {:.0}% of its revs at the slowest point. Take those corners a gear \
-                 lower, or try shorter gearing: a smaller front sprocket or a bigger rear one.",
-                bogs.join(", "),
-                th::BOG_SHARE * 100.0
-            ));
-        }
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let (limited, bogging) = (on > th::LIMITER_LAP_S, bogs.len() >= 2);
+    if limited && bogging {
+        // Taller gearing would bog it worse and shorter would hit the limiter sooner: this one
+        // is riding, not gearing.
+        tip("setup_gearing_mixed", 0.8, 0, "Shift up sooner, and take slow corners a gear lower".into(), format!(
+            "You're on the rev limiter for {on:.1} s a lap, and the engine bogs out of {}. Changing the gearing \
+             can't fix both: shift up before the limiter, and take those corners a gear lower.",
+            bogs.join(", ")
+        ));
+    } else if limited {
+        tip("setup_gearing_tall", 0.8, 0, "Try taller gearing".into(), format!(
+            "You're on the rev limiter for {on:.1} s a lap. Taller gearing, a bigger front sprocket or a \
+             smaller rear one, lets the bike keep pulling. Shifting up sooner helps too."
+        ));
+    } else if bogging {
+        tip("setup_gearing_short", 0.7, 0, "The engine bogs out of corners".into(), format!(
+            "Out of {} the engine is below {:.0}% of its revs at the slowest point. Take those corners a gear \
+             lower, or try shorter gearing: a smaller front sprocket or a bigger rear one.",
+            bogs.join(", "),
+            th::BOG_SHARE * 100.0
+        ));
     }
 
     let ups = upshifts(p);
@@ -1361,19 +1403,19 @@ fn alone(c: &mut Ctx) {
             for (k, &(pt, pl)) in runs.iter().enumerate() {
                 let which = if runs.len() > 1 { format!("the {} jump of {name}", ordinal(k + 1)) } else { name.clone() };
                 let from = pt.saturating_sub(th::CHOP_M);
-                if p.max_by(from..pt + 1, |q| q.throttle) - p.pts[pt].throttle > th::CHOP {
+                if p.max_by(from..pt + 1, |q| q.throttle) - p.pts[pt].throttle > th::SOLO_CHOP && p.pts[pt].throttle < 0.3 {
                     c.add("chop_face", 0.9, pt, "Stay on the gas up the face", format!(
                         "You shut the throttle on the face of {which}, which drops the nose. Hold it steady to the lip."
                     ));
                 }
-                if p.mean(pt..pl + 1, |q| q.throttle) > th::AIR_GAS {
+                if p.mean(pt..pl + 1, |q| q.throttle) > th::SOLO_AIR_GAS {
                     c.add("air_throttle", 0.4, pt, "Off the gas in the air", format!(
                         "You hold the throttle open in the air over {which}. Close it so the bike stays level, then \
                          open it as you touch down."
                     ));
                 }
                 let lean = p.pts[(pl + 4).min(s.end)].roll.abs();
-                if lean > th::LAND_ROLL_DEG {
+                if lean > th::SOLO_LAND_ROLL_DEG {
                     c.warn("land_crooked", pl, "Straighten up before landing", format!(
                         "The bike is still leaned {lean:.0}° after you land {which}. Bring it straight in the air, a \
                          moment earlier."
@@ -1608,7 +1650,7 @@ pub(crate) mod tests {
 
     pub(crate) fn lap(st: &Style) -> Trace {
         let (samples, t) = ride_lap(st);
-        let lap = Lap { num: 1, time_ms: (t * 1000.0) as i32, invalid: false, whole: true, issue: None, crashed: false, samples };
+        let lap = Lap { num: 1, time_ms: (t * 1000.0) as i32, invalid: false, whole: true, issue: None, crashed: false, ridden_ms: 0, samples };
         Trace::new(&lap, len()).unwrap()
     }
 
@@ -1802,11 +1844,26 @@ pub(crate) mod tests {
 
     #[test]
     fn a_jump_taken_in_two_hops_says_link_them_not_short_and_long() {
-        let hops = lap(&Style { jump: (330.0, 342.0, 1.5), hop: (346.0, 358.0, 1.5), air_v: 17.0, ..FAST });
+        let hops = lap(&Style { jump: (330.0, 340.0, 1.5), hop: (348.0, 358.0, 1.5), air_v: 17.0, ..FAST });
         let rv = review(&hops, &lap(&FAST), BIKE);
         let found = skills(section(&rv, "Jump 1"));
         assert!(found.contains(&"rhythm_count"), "{found:?}");
         assert!(!found.contains(&"land_short") && !found.contains(&"overjump"), "{found:?}");
+    }
+
+    #[test]
+    fn a_bounce_off_the_landing_is_the_same_jump() {
+        let bounced = lap(&Style { jump: (330.0, 350.0, 3.0), hop: (353.0, 360.0, 0.3), ..FAST });
+        let rv = review(&bounced, &lap(&FAST), BIKE);
+        assert!(!skills(section(&rv, "Jump 1")).contains(&"rhythm_count"));
+    }
+
+    #[test]
+    fn on_the_limiter_and_bogging_is_one_tip_not_two_opposite_ones() {
+        // Every corner's slowest point is at 8000 rpm: under 45% of an 18,000 rpm engine.
+        let rv = review(&lap(&FAST), &lap(&FAST), Bike { limiter: 7900.0, max_rpm: 18000.0, ..BIKE });
+        let gearing: Vec<_> = rv.setup.iter().filter(|f| f.skill.starts_with("setup_gearing")).map(|f| f.skill).collect();
+        assert_eq!(gearing, vec!["setup_gearing_mixed"]);
     }
 
     #[test]

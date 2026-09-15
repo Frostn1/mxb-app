@@ -1,25 +1,39 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { FolderOpen } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
+import { revealInExplorer } from "@frost/shared/api/mods";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import { betaUpdates, setBetaUpdates, useUpdate } from "@/Context/Update";
 import { useConfig } from "@frost/shared/Context/Config";
 import { useT } from "@/i18n";
-import { coachStatus, installRecorder, removeRecorder, type CoachStatus } from "@/api/coach";
+import { coachStatus, installRecorder, openFolder, removeRecorder, type CoachStatus } from "@/api/coach";
 import Page, { Label } from "../Page";
 
-function Row({ label, value }: { label: string; value: string }) {
+/** The folder a file sits in. */
+const folderOf = (path: string) => path.replace(/[\\/][^\\/]*$/, "");
+
+function Row({ label, value, onOpen }: { label: string; value: string; onOpen?: () => void }) {
+  const t = useT();
   return (
-    <div className="border-b border-border py-3 last:border-b-0">
-      <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">{label}</div>
-      <div className="mt-1 break-all font-mono text-[12px] text-muted-foreground">{value || "—"}</div>
+    <div className="flex items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
+      <div className="min-w-0">
+        <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">{label}</div>
+        <div className="mt-1 break-all font-mono text-[12px] text-muted-foreground">{value || "—"}</div>
+      </div>
+      {onOpen && value && (
+        <Button size="sm" variant="outline" onClick={onOpen}>
+          <FolderOpen className="size-3.5" />
+          {t("coachSettings.open")}
+        </Button>
+      )}
     </div>
   );
 }
 
-/** The recorder plugin, and where the coach looks. */
+/** The recorder plugin, updates, and where the coach looks. */
 export default function Settings() {
   const t = useT();
   const { game } = useConfig();
@@ -54,6 +68,9 @@ export default function Settings() {
     const f = await open({ filters: [{ name: "MX Bikes plugin", extensions: ["dlo"] }] });
     if (typeof f === "string") await run(() => installRecorder(f), t("recorder.installed"));
   };
+
+  const show = (job: Promise<void>) => job.catch((e) => toast.error(String(e)));
+  const plugin = status?.pluginPath ?? "";
 
   return (
     <Page title={t("coachSettings.title")}>
@@ -107,9 +124,19 @@ export default function Settings() {
       <div className="mt-8">
         <Label>{t("coachSettings.where")}</Label>
         <Row label={t("coachSettings.game")} value={game.display} />
-        <Row label={t("coachSettings.gameFolder")} value={status?.gameDir ?? ""} />
-        <Row label={t("coachSettings.plugin")} value={status?.pluginPath ?? ""} />
-        <Row label={t("coachSettings.sessions")} value={(status?.sessionDirs ?? []).join("\n")} />
+        <Row
+          label={t("coachSettings.gameFolder")}
+          value={status?.gameDir ?? ""}
+          onOpen={() => void show(openFolder(status?.gameDir ?? ""))}
+        />
+        <Row
+          label={t("coachSettings.plugin")}
+          value={plugin}
+          onOpen={() => void show(status?.pluginInstalled ? revealInExplorer(plugin) : openFolder(folderOf(plugin)))}
+        />
+        {(status?.sessionDirs.length ? status.sessionDirs : [""]).map((dir, k) => (
+          <Row key={dir || k} label={t("coachSettings.sessions")} value={dir} onOpen={() => void show(openFolder(dir))} />
+        ))}
       </div>
     </Page>
   );

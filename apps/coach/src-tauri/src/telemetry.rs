@@ -158,6 +158,8 @@ pub struct Lap {
     pub issue: Option<&'static str>,
     /// The rider came off during it. Still whole: the game timed it, and the review says where.
     pub crashed: bool,
+    /// How long it took by the recording, for a lap the game left untimed.
+    pub ridden_ms: i32,
     pub samples: Vec<Sample>,
 }
 
@@ -317,7 +319,11 @@ impl Recording {
             unwrap(&mut samples);
             let issue = issue(&samples, m.time_ms);
             let crashed = samples.iter().any(|s| s.crashed);
-            out.push(Lap { num: m.num, time_ms: m.time_ms, invalid: m.invalid, whole: issue.is_none(), issue, crashed, samples });
+            let ridden_ms = match (samples.first(), samples.last()) {
+                (Some(a), Some(b)) => ((b.t - a.t) * 1000.0).round() as i32,
+                _ => 0,
+            };
+            out.push(Lap { num: m.num, time_ms: m.time_ms, invalid: m.invalid, whole: issue.is_none(), issue, crashed, ridden_ms, samples });
         }
         out
     }

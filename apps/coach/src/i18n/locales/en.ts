@@ -127,4 +127,5 @@ export const en = {
   "coachSettings.gameFolder": "Game install",
   "coachSettings.plugin": "Recorder",
   "coachSettings.sessions": "Session files",
+  "coachSettings.open": "Open",
 };

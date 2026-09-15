@@ -76,7 +76,9 @@ export default function SessionView({
                 <span className="text-muted-foreground">
                   {t("session.lap")} {l.num + 1}
                 </span>
-                <span className="font-mono tabular-nums">{lapTime(l.timeMs)}</span>
+                <span className={l.timeMs ? "font-mono tabular-nums" : "font-mono tabular-nums text-muted-foreground"}>
+                  {lapTime(l.timeMs || l.riddenMs)}
+                </span>
                 <span className="font-mono tabular-nums text-muted-foreground">
                   {best && comparable ? (l.timeMs === best ? t("session.bestTag") : gap((l.timeMs - best) / 1000)) : ""}
                 </span>

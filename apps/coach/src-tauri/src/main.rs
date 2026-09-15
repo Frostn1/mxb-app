@@ -39,6 +39,20 @@ fn log_client(level: String, message: String) {
     }
 }
 
+/// Show a file in the OS file manager, selected. Core's, as the manager and studio wrap it.
+#[tauri::command]
+fn reveal_in_explorer(path: String) -> Result<(), String> {
+    mxb_core::library::reveal_in_explorer(&path).map_err(|e| format!("{e:#}"))
+}
+
+/// Open a folder in the OS file manager, making it first if it isn't there yet: the sessions
+/// folder only appears once the recorder has written to it.
+#[tauri::command]
+fn open_folder(path: String) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(&path);
+    mxb_core::library::open_folder(&path).map_err(|e| format!("{e:#}"))
+}
+
 /// The coach's own builds: `coach-v` releases in the manager's repo, betas when asked for.
 #[tauri::command]
 async fn check_coach_update(
@@ -72,6 +86,8 @@ fn main() {
             coach::coach_lines,
             coach::coach_ground,
             check_coach_update,
+            reveal_in_explorer,
+            open_folder,
             log_client,
             // The track's own terrain, from core, for the map and the 3D view.
             mxb_core::trackview::load_track_terrain,

@@ -18,6 +18,8 @@ export interface LapSummary {
   /** Why it can't be compared: `out lap`, `unfinished`, `untimed`, `gap in the recording`. */
   issue: string | null;
   crashed: boolean;
+  /** How long it took by the recording, for a lap the game left untimed. */
+  riddenMs: number;
 }
 
 export interface SessionSummary {
@@ -180,6 +182,8 @@ export interface Ground {
 }
 
 export const coachStatus = () => invoke<CoachStatus>("coach_status");
+/** Opens a folder in the file manager, making it first if the recorder hasn't yet. */
+export const openFolder = (path: string) => invoke<void>("open_folder", { path });
 export const coachGround = (path: string) => invoke<Ground | null>("coach_ground", { path });
 export const coachLines = (path: string) => invoke<Lines | null>("coach_lines", { path });
 export const coachSurface = (path: string) => invoke<Surface | null>("coach_surface", { path });

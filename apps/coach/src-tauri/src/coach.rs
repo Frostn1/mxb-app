@@ -82,6 +82,9 @@ pub struct LapSummary {
     pub issue: Option<String>,
     #[serde(default)]
     pub crashed: bool,
+    /// How long it took by the recording, for a lap the game left untimed.
+    #[serde(default)]
+    pub ridden_ms: i32,
 }
 
 impl LapSummary {
@@ -121,6 +124,7 @@ fn summarize(path: &Path, rec: &Recording) -> SessionSummary {
             whole: l.whole,
             issue: l.issue.map(str::to_owned),
             crashed: l.crashed,
+            ridden_ms: l.ridden_ms,
         })
         .collect();
     let e = &rec.event;
@@ -472,7 +476,7 @@ mod tests {
             complete: true,
             laps: laps
                 .iter()
-                .map(|&(num, time_ms, whole)| LapSummary { num, time_ms, invalid: false, whole, issue: None, crashed: false })
+                .map(|&(num, time_ms, whole)| LapSummary { num, time_ms, invalid: false, whole, issue: None, crashed: false, ridden_ms: 0 })
                 .collect(),
             best_ms: None,
         }
