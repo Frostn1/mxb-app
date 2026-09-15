@@ -34,10 +34,56 @@ pub fn painted() -> bool {
     PAINTED.load(Ordering::SeqCst)
 }
 
+/// Set when this run is the restart of an update installed while the window sat in the
+/// tray. It goes back there rather than popping up over whatever the player is doing; the
+/// tray's Show handles an unpainted window already.
+static PARKED: AtomicBool = AtomicBool::new(false);
+
+/// Older than this, the marker is left from an update that never restarted.
+const PARK_FRESH: Duration = Duration::from_secs(120);
+
+fn park_marker(app: &AppHandle) -> Option<std::path::PathBuf> {
+    Some(app.path().app_local_data_dir().ok()?.join("update-parked"))
+}
+
+/// Before installing an update: `parked` marks the restart to stay in the tray, if the window
+/// is in it now. `false` clears the mark, for an install that failed.
+#[tauri::command]
+pub fn park_for_update(app: AppHandle, parked: bool) {
+    let Some(path) = park_marker(&app) else {
+        return;
+    };
+    let hidden = app
+        .get_webview_window(crate::MAIN_WINDOW)
+        .is_some_and(|w| !w.is_visible().unwrap_or(true));
+    if parked && hidden {
+        let _ = std::fs::write(&path, b"");
+    } else {
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+/// Take the mark [`park_for_update`] left. Call once, before the main window is built.
+pub fn claim_parked(app: &AppHandle) {
+    let Some(path) = park_marker(app) else {
+        return;
+    };
+    let fresh = std::fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < PARK_FRESH);
+    let _ = std::fs::remove_file(&path);
+    if fresh {
+        log::info!("[startup] restarted from an update in the tray — staying there");
+        PARKED.store(true, Ordering::SeqCst);
+    }
+}
+
 /// The document finished loading — put the window on screen, still undecorated because the
 /// frontend's own title bar is a frame away. Reloads land here again and are ignored.
 pub fn loaded(app: &AppHandle) {
-    if painted() {
+    if painted() || PARKED.load(Ordering::SeqCst) {
         return;
     }
     let Some(w) = app.get_webview_window(crate::MAIN_WINDOW) else {
@@ -79,6 +125,10 @@ pub fn decorate_unpainted(window: &tauri::WebviewWindow) {
 /// On its own OS thread rather than the async runtime: it has to survive a startup that
 /// has gone wrong, and a runtime that isn't scheduling is one of the ways it can go wrong.
 pub fn arm(app: &AppHandle) {
+    // Hidden on purpose, so there is nothing to rescue.
+    if PARKED.load(Ordering::SeqCst) {
+        return;
+    }
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(GRACE);

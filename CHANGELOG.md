@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- The app updates itself. New versions install when you open the app, or once it has sat
+  unused for ten minutes, and never while MX Bikes is running. If the app was in the tray, it
+  goes back there. Turn it off in Settings with "Install updates automatically".
+
 ## 2026-09-14 — v0.14.5 — Server tiles are back
 
 ### Added

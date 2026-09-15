@@ -820,6 +820,9 @@ export const en = {
   "settings.betaUpdates": "Beta updates",
   "settings.betaUpdatesDesc":
     "Get test builds in the app before the full release. They can have rough edges. Turned off, you stay on your version until the next full release.",
+  "settings.autoUpdates": "Install updates automatically",
+  "settings.autoUpdatesDesc":
+    "Updates install when you open the app, or once it has sat unused for a while. Never while MX Bikes is running.",
 
   "sync.title": "Paint sync",
   "sync.desc":

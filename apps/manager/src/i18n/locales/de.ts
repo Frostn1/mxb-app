@@ -843,6 +843,9 @@ export const de: Translation = {
   "settings.betaUpdates": "Beta-Updates",
   "settings.betaUpdatesDesc":
     "Testversionen schon vor dem vollen Release in der App bekommen. Sie können noch Ecken und Kanten haben. Ausgeschaltet bleibst du bis zum nächsten vollen Release auf deiner Version.",
+  "settings.autoUpdates": "Updates automatisch installieren",
+  "settings.autoUpdatesDesc":
+    "Updates werden beim Öffnen der App installiert oder wenn sie eine Weile nicht benutzt wurde. Nie, während MX Bikes läuft.",
 
   "sync.title": "Paint-Sync",
   "sync.desc":

@@ -108,6 +108,9 @@ pub struct AppConfig {
     pub watch_mods_reload: bool,
     /// Offer beta builds through the in-app updater, not only full releases.
     pub beta_updates: bool,
+    /// Install updates on their own: at launch, or once the app has sat unused. Never while
+    /// the game runs.
+    pub auto_updates: bool,
     /// Inject `mxbsecure.dll` into the running game so locked content can be opened.
     ///
     /// **Off by default, deliberately.** This reaches into a process the app usually did not
@@ -371,6 +374,7 @@ impl Default for AppConfig {
             instant_refresh: true,
             watch_mods_reload: true,
             beta_updates: false,
+            auto_updates: true,
             secure_content_inject: false,
             welcome_seen: false,
             tour_done: false,

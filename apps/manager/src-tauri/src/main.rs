@@ -4270,6 +4270,14 @@ fn set_beta_updates(app: tauri::AppHandle, enabled: bool) -> Result<(), String> 
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Install updates without asking. Read on each check, so nothing to restart.
+#[tauri::command]
+fn set_auto_updates(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.auto_updates = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 /// Turn injecting `mxbsecure.dll` into the running game on or off.
 ///
 /// Takes effect on the next game session: the watcher decides once per run, so a change made
@@ -6104,6 +6112,7 @@ fn main() {
             if cfg!(target_os = "linux") {
                 write_graphics_attempt(tier, false);
             }
+            firstpaint::claim_parked(app.handle());
             for window_config in app
                 .config()
                 .app
@@ -6546,6 +6555,8 @@ fn main() {
             voice_test_output,
             set_watch_mods_reload,
             set_beta_updates,
+            set_auto_updates,
+            firstpaint::park_for_update,
             update_channel::check_beta_update,
             set_secure_content_inject,
             frostmod_reload,
