@@ -14,6 +14,7 @@ mod cues;
 mod fixes;
 mod ground;
 mod hud;
+mod hudsheet;
 mod lines;
 mod others;
 mod overlay;

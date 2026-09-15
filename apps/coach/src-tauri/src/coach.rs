@@ -566,6 +566,14 @@ pub fn coach_write_cues(
     let tmp = dir.join(format!("{}.tmp", crate::cues::file_name(&rec.event.track_id, &rec.event.bike_id)));
     fs::write(&tmp, crate::cues::write(rec.event.track_length, &cues, amount)).map_err(err)?;
     fs::rename(&tmp, &file).map_err(err)?;
+    // The HUD sheet beside it: the fast lap for the gap and the ghost, and each section's tip.
+    // The sag prompt asks for a stop when this session has no standing-still sag yet.
+    let hud_name = crate::hudsheet::file_name(&rec.event.track_id, &rec.event.bike_id);
+    let parts = crate::hudsheet::parts(&out.review, rec.event.track_length);
+    let flags = if crate::sag::measure(&rec).is_some_and(|s| s.still) { 0 } else { crate::hudsheet::SAG_PROMPT };
+    let hud_tmp = dir.join(format!("{hud_name}.tmp"));
+    fs::write(&hud_tmp, crate::hudsheet::write(rec.event.track_length, &fast, &parts, flags)).map_err(err)?;
+    fs::rename(&hud_tmp, dir.join(&hud_name)).map_err(err)?;
     Ok(CuesOut { file: file.display().to_string(), cues })
 }
 
