@@ -542,6 +542,8 @@ export const es: Translation = {
   "settings.colorwayRetro": "Retro",
   "settings.language": "Idioma",
   "settings.languageSystem": "Sistema",
+  "settings.queueRestartGame": "Cerrar el juego cuando te toque en la cola",
+  "settings.queueRestartGameDesc": "Cuando te toque en la cola de un servidor y el juego esté abierto, se cierra y se vuelve a abrir directamente en el servidor.",
   "settings.preferServer": "Preferir archivos de servidor dedicado",
   "settings.preferServerDesc": "Tomar la versión de servidor dedicado cuando un mod la ofrezca. Para una máquina que aloja un servidor en lugar de jugar.",
   "settings.preferredHost": "Servidor de descarga preferido",

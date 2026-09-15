@@ -544,6 +544,8 @@ export const ptBR: Translation = {
   "settings.colorwayRetro": "Retrô",
   "settings.language": "Idioma",
   "settings.languageSystem": "Sistema",
+  "settings.queueRestartGame": "Fechar o jogo quando chegar sua vez na fila",
+  "settings.queueRestartGameDesc": "Quando chegar sua vez na fila de um servidor e o jogo estiver aberto, ele é fechado e aberto de novo direto no servidor.",
   "settings.preferServer": "Preferir arquivos de servidor dedicado",
   "settings.preferServerDesc": "Pegar a versão de servidor dedicado quando um mod oferecer uma. Para uma máquina que hospeda um servidor em vez de jogar.",
   "settings.preferredHost": "Host de download preferido",

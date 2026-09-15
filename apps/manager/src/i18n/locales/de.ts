@@ -549,6 +549,8 @@ export const de: Translation = {
   "settings.colorwayRetro": "Retro",
   "settings.language": "Sprache",
   "settings.languageSystem": "System",
+  "settings.queueRestartGame": "Spiel schließen, wenn du in der Warteschlange dran bist",
+  "settings.queueRestartGameDesc": "Wenn du in der Warteschlange eines Servers dran bist und das Spiel offen ist, wird es geschlossen und direkt auf dem Server neu gestartet.",
   "settings.preferServer": "Dateien für dedizierte Server bevorzugen",
   "settings.preferServerDesc": "Die Dedicated-Server-Version nehmen, wenn ein Mod eine anbietet. Für einen Rechner, der einen Server betreibt statt zu spielen.",
   "settings.preferredHost": "Bevorzugter Download-Anbieter",

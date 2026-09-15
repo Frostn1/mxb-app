@@ -5,7 +5,8 @@
 //! a slot is ours. One line at a time, beating every [`BEAT`].
 //!
 //! The game only reads `-directconnect` at startup, so a game that's already open can't be
-//! steered. Then the turn is announced instead and the rider joins from the in-game browser.
+//! steered. Then the turn is announced instead and the rider joins from the in-game browser,
+//! unless they turned on `queue_restart_game`: then the game is closed and launched again.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -24,6 +25,12 @@ const LAUNCH_WAIT: Duration = Duration::from_secs(180);
 
 /// How long an announced turn is held for a rider whose game was already open.
 const TURN_HOLD: Duration = Duration::from_secs(120);
+
+/// How long an open game gets to close before we fall back to announcing the turn.
+const CLOSE_WAIT: Duration = Duration::from_secs(15);
+
+/// A pause between the game closing and launching it again, so Steam sees it gone.
+const SETTLE: Duration = Duration::from_secs(3);
 
 /// The event the frontend listens on.
 const EVENT: &str = "server-queue";
@@ -206,7 +213,13 @@ async fn run(app: AppHandle, token: String, key: String, generation: u64) {
         if !claimed {
             if let Ok(server) = &probe {
                 if is_my_turn(server.players, server.max_players, place.ahead) {
-                    match take_turn(&app, &key) {
+                    let mut outcome = take_turn(&app, &key);
+                    if matches!(outcome, Ok(LaunchOutcome::AlreadyRunning))
+                        && close_open_game(&app).await
+                    {
+                        outcome = take_turn(&app, &key);
+                    }
+                    match outcome {
                         Ok(LaunchOutcome::Launched) => {
                             launched_at = Some(Instant::now());
                             state.phase = Phase::Launched;
@@ -236,6 +249,21 @@ async fn run(app: AppHandle, token: String, key: String, generation: u64) {
 /// Launch into the slot. Reports `AlreadyRunning` rather than touching an open game.
 fn take_turn(app: &AppHandle, key: &str) -> Result<LaunchOutcome, String> {
     crate::join_server(app.clone(), key.to_string())
+}
+
+/// Close an open game so the turn can launch into the slot, if the rider turned that on.
+async fn close_open_game(app: &AppHandle) -> bool {
+    let cfg = crate::config::load_or_detect(app).unwrap_or_default();
+    if !cfg.queue_restart_game {
+        return false;
+    }
+    let closed = tauri::async_runtime::spawn_blocking(|| gameproc::close_game(CLOSE_WAIT))
+        .await
+        .unwrap_or(false);
+    if closed {
+        tokio::time::sleep(SETTLE).await;
+    }
+    closed
 }
 
 /// The server FrostMod says the game is on, if any.

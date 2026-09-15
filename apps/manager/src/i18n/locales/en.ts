@@ -535,6 +535,8 @@ export const en = {
   "settings.colorwayRetro": "Retro",
   "settings.language": "Language",
   "settings.languageSystem": "System",
+  "settings.queueRestartGame": "Close the game for your turn in line",
+  "settings.queueRestartGameDesc": "When your turn in a server line comes and the game is open, close it and start it again straight into the server.",
   "settings.preferServer": "Prefer dedicated-server files",
   "settings.preferServerDesc": "Take the dedicated-server build where a mod ships one. For a machine running a server rather than playing.",
   "settings.preferredHost": "Preferred download host",
