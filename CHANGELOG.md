@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — Frost's Studio
+
+### Added
+- Write tracks with your own AI model. Pick Groq, OpenRouter, OpenAI, Ollama or Anthropic in
+  Settings and paste a key. The key stays on your computer.
+- A Settings only mode for writing tracks: the model picks the kind of track and the Studio
+  draws the lap. It works with free models and usually takes under a minute.
+
 ## 2026-09-15 — Frost's Studio v0.1.8 — Easy and ARL random tracks
 
 ### Added
