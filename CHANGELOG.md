@@ -19,6 +19,13 @@
 ### Added
 - With MXB Coach running, the overlay shows Coach's tabs next to yours and one shortcut opens
   both.
+- When the server list won't load, the Servers tab now says whether it's MX Bikes' own servers
+  or something at your end. The game answers a dead master server with "connection timeout" and
+  nothing else — the same thing it says for a firewall or a router problem — so the app asks
+  how many other apps failed the same fetch in the last ten minutes and leads with that.
+- Check my connection, on that screen: it tests your internet, whether the master server's
+  address resolves, whether outbound UDP is being blocked, and the server list itself, then says
+  whose problem it is. The same numbers are public at mxbsecure.com/status.
 
 ## 2026-09-15 — v0.15.1 — Small fixes
 

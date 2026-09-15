@@ -83,7 +83,9 @@ Each of these is a tab in the app.
 - **Presets** — save a full rider look and load it onto a bike on command.
 - **Servers** — every MX Bikes server, live, with the track's picture even when you
   don't have it. On a server running a free track you're missing, **Install & join**
-  installs it and joins, or puts you in line when the server is full.
+  installs it and joins, or puts you in line when the server is full. When the list
+  won't load it says whether that is MX Bikes' own master server or something at your
+  end, rather than showing a bare error — see "Is MX Bikes down, or is it you?" below.
 - **Studio** — opens [Frost's Studio](https://mxbsecure.com/studio), or gets it for
   you. The Designer, the Paint, Track and Rider studios and content locking are all
   there now, in their own app ([`apps/studio`](apps/studio/)). Both apps read the same
@@ -104,6 +106,20 @@ Running through all of it:
   the host installs nothing. Content-addressed by SHA-256, so twenty riders
   sharing a paint is one stored object. Off by default; Settings → General turns
   it on, and Settings → Paint sync shows what it published and pulled.
+- **Is MX Bikes down, or is it you?** The game answers a dead master server with
+  `connection timeout` and nothing else — the identical string it prints for a firewall
+  rule, a broken DNS server or a router that wants restarting. So the commonest failure
+  in the game is the one failure it gives you no way to place, and it reaches the Discord
+  as several people each debugging a machine that is working perfectly. A failed server
+  list now asks how many *other* apps failed the same fetch in the last ten minutes and
+  leads with that, because one machine failing proves nothing and twenty proves a great
+  deal. **Check my connection** then walks outwards from the machine — internet, whether
+  the master's address resolves, whether outbound UDP is being blocked, our own fetch —
+  and finishes with what everyone else is seeing, the only check that can overturn the
+  rest. Each app contributes one anonymous bit and one word for why, on the same setting
+  the usage counters use; the same numbers are public at
+  [mxbsecure.com/status](https://mxbsecure.com/status), which is a link a Discord bot can
+  post instead of a troubleshooting list.
 - **Live reload.** A debounced watcher on `<modsPath>/mods` signals FrostMod to
   reload the game when mods are added — including ones installed outside the app.
   Off Windows that means the game's own Wine prefix — Proton's

@@ -42,6 +42,8 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/bmac/webhook` | HMAC signature | Buy Me a Coffee announcing a supporter. Posted on to Discord. |
 | POST | `/v1/usage` | — | Anonymous usage counters from an install. Unauthenticated because most people who run the app never claim an invite; bounded by body size, event count and a per-address daily cap. |
 | GET | `/v1/usage/stats` | `ADMIN_KEY` | The same numbers as JSON, for anything that scripts them |
+| POST | `/v1/master-status` | — | One install saying whether it could reach MX Bikes' own master server. Unauthenticated for the same reason as `/v1/usage`; one row per install per minute. |
+| GET | `/v1/status` | — | Is the master answering? Public, CORS-open and cacheable — it is what mxbsecure.com/status renders and what a Discord bot answering `!timeout` reads. |
 | GET/POST | `/v1/web/admin/*` | Steam sign-in + `MXB_ADMIN_STEAM_IDS` | The dashboards at mxbsecure.com/admin — usage, diagnostics, paint sync, plugin keys |
 | GET | `/v1/plugins` | — | The paid-plugin catalogue. Public: what is on offer is not a secret. |
 | GET | `/v1/me/plugins` | bearer | What this account holds, each with a freshly signed license |
@@ -122,6 +124,39 @@ spending the code, and granting is refused rather than silently changing nothing
 `Grant months` hands an account a license with no key in between — for a tester, or for
 putting someone right. `scripts/mint-plugin-key.ts` still prints SQL for a machine that
 cannot reach the page.
+
+### Is MX Bikes down, or is it you?
+
+MX Bikes answers a dead master server with `connection timeout` and nothing else — the
+identical string it prints for a firewall rule, a broken DNS server, a captive portal or a
+router that wants power-cycling. So the commonest failure in the game is the one failure it
+gives a player no way at all to place. It reaches the Discord as several people each debugging
+a machine that is working perfectly, and by the time anyone works out the master was down for
+ten minutes it is already back.
+
+**This service cannot check for itself.** The master speaks its own protocol over UDP; a Worker
+has no datagram socket, and the protocol is not in the public tree to put in one. A TCP probe
+of the port would answer a different question, and answer it wrong.
+
+So the check is the apps. Every MXB App already talks to the master whenever somebody opens the
+Servers tab, and each one `POST`s whether its own fetch worked — an install id, worked-or-didn't,
+and one word from `PROBE_REASONS` saying why not. That is the whole payload: no address, no
+rider name, no server, no path. It turns out to be a *better* signal than a probe of our own
+rather than a substitute for one, because "is it up from one Cloudflare colo" was never the
+question anybody was asking. "Are the other twenty people who tried in the last ten minutes
+also failing" is.
+
+`GET /v1/status` folds the last ten minutes into one answer, each install counted once by its
+**most recent** minute. Latest-wins matters: an "ever succeeded in the window" rule reads `up`
+through the first ten minutes of every outage, because each affected install was working right
+up until the master stopped — which is exactly the window people are in the channel asking
+about. Below `MIN_INSTALLS` the answer is `unknown` rather than a guess; a status page that
+guesses in the quiet hours is one nobody believes in the loud ones.
+
+Rows live in `master_probes`, one per install per minute (so one person hammering Refresh counts
+once, not twenty times), and are swept after an hour on the same cron as everything else.
+Reporting rides on the app's anonymous-stats setting; reading does not, because the reason to
+withhold a report is privacy and the reason to read the answer is that your game is broken.
 
 ### Usage counters
 

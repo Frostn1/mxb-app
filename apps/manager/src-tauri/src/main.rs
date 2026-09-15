@@ -33,6 +33,7 @@ pub(crate) use mxb_core::library;
 mod liveshare;
 pub(crate) use mxb_core::linkwalk;
 mod logs;
+mod masterstatus;
 mod memwatch;
 pub(crate) use mxb_core::modelswap;
 mod mods;
@@ -4079,6 +4080,16 @@ fn set_ranked_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
 /// opaquely.
 #[tauri::command]
 async fn list_master_servers(app: tauri::AppHandle) -> Result<Vec<WorldServer>, String> {
+    let out = master_list(app.clone()).await;
+    // Every fetch, working or not, is one anonymous bit towards the answer to "is the master
+    // down, or is it me" — the question the game's own `connection timeout` leaves a player
+    // with no way at all to answer. See `masterstatus`; a report costs this call nothing,
+    // because it is spawned and never waited on.
+    masterstatus::report(&app, out.as_ref().map(|_| ()).map_err(|e| e.as_str()));
+    out
+}
+
+async fn master_list(app: tauri::AppHandle) -> Result<Vec<WorldServer>, String> {
     #[cfg(worldnet)]
     {
         worldnet::list_servers(app).await
@@ -4088,6 +4099,30 @@ async fn list_master_servers(app: tauri::AppHandle) -> Result<Vec<WorldServer>, 
         let _ = app;
         Err("The server browser isn't included in this build.".into())
     }
+}
+
+/// What every other app is seeing of the master server, right now.
+///
+/// The Servers tab asks after a failed fetch, and only then. One machine failing knows nothing
+/// — that is the whole reason `connection timeout` sends people to reinstall a working game —
+/// and one machine failing while twenty others are fine, or alongside twenty others, knows
+/// exactly what to tell the player. `None` when the control plane couldn't be asked, which the
+/// banner renders as the plain failure it was already going to show.
+#[tauri::command]
+async fn master_status() -> Option<masterstatus::MasterStatus> {
+    masterstatus::fetch(std::time::Duration::from_secs(8)).await
+}
+
+/// Check this machine's side of the connection, end to end, and say whose problem it is.
+///
+/// The button under a failed server list. It walks outwards from the machine — internet, the
+/// master's name, outbound UDP, our own fetch — and finishes with what everyone else is
+/// seeing, because that last one is the only check that can overturn the others.
+#[tauri::command]
+async fn connection_selftest(app: tauri::AppHandle) -> masterstatus::SelfTest {
+    let master = master_list(app.clone()).await.map(|list| list.len());
+    masterstatus::report(&app, master.as_ref().map(|_| ()).map_err(|e| e.as_str()));
+    masterstatus::self_test(app, master).await
 }
 
 /// Ask one server about itself, right now.
@@ -6854,6 +6889,8 @@ fn main() {
             queue_status,
             queue_counts,
             list_master_servers,
+            master_status,
+            connection_selftest,
             probe_server,
             server_riders,
             servers_with_paint_sync,

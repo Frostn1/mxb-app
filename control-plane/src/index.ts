@@ -61,6 +61,7 @@ import {
 } from "./validate";
 import { claimDeviceAccount, iceServers, voiceRoom } from "./voice";
 import { adminAllowed, pruneUsage, reportUsage, usageStats } from "./usage";
+import { masterStatus, pruneMasterProbes, reportMasterProbe } from "./masterstatus";
 import { VoiceRoom } from "./voiceroom";
 
 interface Account {
@@ -104,6 +105,7 @@ export default {
         advanceImageBuild(env),
         pruneDeviceClaims(env),
         pruneUsage(env),
+        pruneMasterProbes(env),
         pruneReports(env),
         pruneQueue(env),
         resolveTrackCatalog(env),
@@ -203,6 +205,21 @@ async function route(request: Request, env: Env): Promise<Response> {
   // identifies anyone — see `usage.ts` — and everything about it is bounded by size, by
   // count and by a per-address daily cap.
   if (method === "POST" && path === "/v1/usage") return reportUsage(request, env);
+
+  // One app saying whether it could reach MX Bikes' own master server, and the answer everyone's
+  // reports add up to. Unauthenticated on both halves, for two different reasons.
+  //
+  // The write, like the usage counters: most installs have never claimed an invite, and a signal
+  // only enrolled accounts could contribute to would describe almost nobody — least of all during
+  // an outage, when what matters is how many people are seeing it.
+  //
+  // The read, because of who needs it. Somebody whose game says `connection timeout` is somebody
+  // who has been told for ten minutes that their own connection is broken; the point of this
+  // endpoint is that a web page, a Discord bot answering `!timeout`, or a community site can tell
+  // them it isn't, without anyone holding a credential. It carries nothing belonging to anyone —
+  // see `masterstatus.ts` — so it is CORS-open and cacheable by anything.
+  if (method === "POST" && path === "/v1/master-status") return reportMasterProbe(request, env);
+  if (method === "GET" && path === "/v1/status") return masterStatus(env);
 
   // Reading the numbers back. Behind `ADMIN_KEY`, above the account gate because it is not a
   // player's endpoint at all: the key belongs to whoever runs the deployment, and an account
