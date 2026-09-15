@@ -11,6 +11,7 @@ import type { GameCaps } from "@frost/shared/types";
 import { RAIL, railItemFor, type DashboardView, type RailItem } from "./nav";
 import DownloadQueue from "./DownloadQueue";
 import FrostmodBadge from "./FrostmodBadge";
+import QueueBanner from "./QueueBanner";
 import Brand from "./Brand";
 import ContextBar from "./ContextBar";
 import WindowControls, { IS_MAC } from "./WindowControls";
@@ -119,6 +120,8 @@ export default function TopRail({ view, plugins, onNavigate, leftRef, rightRef }
         {/* What FrostMod is doing, and Start/Stop, from wherever you are. The sidebar
             carried this on every screen and the rail has to as well: its state changes
             while you are somewhere else, and Settings is four screens away. */}
+        {/* The server line, visible on every tab: the turn can come while you're elsewhere. */}
+        <QueueBanner />
         <FrostmodBadge />
         <DownloadQueue collapsed />
         <button

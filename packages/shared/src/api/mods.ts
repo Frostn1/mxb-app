@@ -3355,6 +3355,48 @@ export function probeServer(address: string): Promise<MasterServer> {
   return invoke<MasterServer>("probe_server", { address });
 }
 
+/** Where a rider stands in a server's line. */
+export type QueuePhase = "waiting" | "turn" | "launched" | "joined" | "ended";
+
+export interface QueueState {
+  /** Normalized `host:port`. */
+  address: string;
+  name: string;
+  /** `turn`: a slot is ours but the game was already open, so join it from the game. */
+  phase: QueuePhase;
+  position: number;
+  waiting: number;
+  players: number | null;
+  maxPlayers: number | null;
+  /** `"missed"`, `"offline"`, or a launch error to show as is. */
+  error: string | null;
+}
+
+/**
+ * Wait in line for a full server. The app watches the server and launches the game into it
+ * when a slot is ours. Only riders using MXB App are in the line.
+ */
+export function queueJoin(address: string, name: string): Promise<QueueState> {
+  return invoke<QueueState>("queue_join", { address, name });
+}
+
+export function queueLeave(): Promise<void> {
+  return invoke<void>("queue_leave");
+}
+
+export function queueStatus(): Promise<QueueState | null> {
+  return invoke<QueueState | null>("queue_status");
+}
+
+/** How many are waiting for each server, keyed by normalized `host:port`. */
+export function queueCounts(addresses: string[]): Promise<Record<string, number>> {
+  return invoke<Record<string, number>>("queue_counts", { addresses });
+}
+
+export function onServerQueue(cb: (state: QueueState) => void): Promise<UnlistenFn> {
+  return listen<QueueState>("server-queue", (event) => cb(event.payload));
+}
+
 /** Who the app can name on a server, and how it knows. */
 export interface ServerRiders {
   riders: string[];

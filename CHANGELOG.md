@@ -4,6 +4,10 @@
 
 ### Added
 - New Frost's Studio versions are posted in the Discord, in #studio-releases.
+- **Wait in line** for a full server. Click it in the server browser and the app holds your
+  place, watches the server, and starts the game straight into it when a slot opens. If the
+  game is already open, it tells you it's your turn so you can join from the game. Your place
+  shows in the top bar on every tab. Only riders using MXB App are in the line.
 
 ## 2026-09-14 — v0.14.3 — Secured content restores itself
 
