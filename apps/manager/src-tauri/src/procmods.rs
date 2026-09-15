@@ -291,6 +291,16 @@ struct Payload<'a> {
     threads: Threads,
     /// What is sitting in the game's `plugins` folder.
     files: &'a [DiskFile],
+    /// The running game's build fingerprint, so the control plane knows which baselines the
+    /// digests below should be compared against. Empty until it has been read, and skipped on
+    /// the wire then — the control plane ignores digests it cannot place a build for.
+    #[serde(skip_serializing_if = "str::is_empty")]
+    build: &'a str,
+    /// Digests of the memory regions this build's manifest named — the one signal that fires
+    /// on a trainer that changed a value rather than loaded a file. Empty when no manifest has
+    /// been fetched yet or nothing was hashable, and skipped on the wire then.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    digests: &'a [crate::stateinvariants::Digest],
 }
 
 /// What the last report said, so an unchanged session stays quiet.
@@ -322,6 +332,9 @@ pub fn reset() {
     if let Ok(mut cache) = hash_cache().lock() {
         cache.clear();
     }
+    // The state-region manifest is fetched for the build that was running; when the game goes
+    // away, drop it so the next session fetches afresh rather than hashing against a stale one.
+    crate::stateinvariants::reset();
 }
 
 /// Look at the running game and report, if there is anything new to say.
@@ -360,7 +373,14 @@ pub fn tick(app: &tauri::AppHandle) {
         Vec::new()
     };
 
-    let digest = digest(available, &modules, &regions, threads, &files);
+    // What the game's own memory says about itself: the build it is, and digests of the regions
+    // that build's manifest names. This is the one part of a report that fires on a change to a
+    // value rather than on a file being present, so it is folded into the digest below — a
+    // trainer that flips a coefficient between two heartbeats is a fresh report, not a wait.
+    let (build, state_digests) =
+        if available { crate::stateinvariants::look(&token) } else { (String::new(), Vec::new()) };
+
+    let digest = digest(available, &modules, &regions, threads, &files, &build, &state_digests);
     let due = match last_sent().lock() {
         Ok(slot) => match slot.as_ref() {
             Some(prev) => prev.digest != digest || prev.at.elapsed() >= HEARTBEAT,
@@ -390,8 +410,11 @@ pub fn tick(app: &tauri::AppHandle) {
 
     let version = app.package_info().version.to_string();
     tauri::async_runtime::spawn(async move {
-        if let Err(e) =
-            send(&token, &version, available, &guid, &modules, &regions, threads, &files).await
+        if let Err(e) = send(
+            &token, &version, available, &guid, &modules, &regions, threads, &files, &build,
+            &state_digests,
+        )
+        .await
         {
             log::debug!("[diag] report not sent: {e:#}");
         }
@@ -712,6 +735,8 @@ fn digest(
     regions: &[Region],
     threads: Threads,
     files: &[DiskFile],
+    build: &str,
+    state_digests: &[crate::stateinvariants::Digest],
 ) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut eat = |bytes: &[u8]| {
@@ -748,6 +773,14 @@ fn digest(
         eat(file.sha256.as_bytes());
         eat(if file.loaded { b"1" } else { b"0" });
     }
+    // The build, and the digest of each named region. This is what makes a value the game
+    // never legitimately rewrites part of the answer: change one and the report is due, even
+    // when every module, region and thread is exactly as it was.
+    eat(build.as_bytes());
+    for d in state_digests {
+        eat(d.name.as_bytes());
+        eat(d.digest.as_bytes());
+    }
     hash
 }
 
@@ -761,11 +794,23 @@ async fn send(
     regions: &[Region],
     threads: Threads,
     files: &[DiskFile],
+    build: &str,
+    digests: &[crate::stateinvariants::Digest],
 ) -> anyhow::Result<()> {
     let res = reqwest::Client::new()
         .put(format!("{}/v1/diagnostics", crate::paintsync::control_plane()))
         .bearer_auth(token)
-        .json(&Payload { app_version, available, guid, modules, regions, threads, files })
+        .json(&Payload {
+            app_version,
+            available,
+            guid,
+            modules,
+            regions,
+            threads,
+            files,
+            build,
+            digests,
+        })
         .timeout(Duration::from_secs(10))
         .send()
         .await?;
@@ -926,14 +971,14 @@ mod tests {
     fn the_digest_only_changes_when_the_answer_does() {
         let a = collected(&["C:\\x\\a.dll", "C:\\x\\b.dll"]);
         let b = collected(&["C:\\x\\b.dll", "C:\\x\\a.dll"]);
-        let quiet = |mods: &[Module]| digest(true, mods, &[], Threads::default(), &[]);
+        let quiet = |mods: &[Module]| digest(true, mods, &[], Threads::default(), &[], "", &[]);
         assert_eq!(quiet(&a), quiet(&b), "order must not matter");
         let c = collected(&["C:\\x\\a.dll"]);
         assert_ne!(quiet(&a), quiet(&c));
         // "Could not look" is a different answer from "looked and found nothing".
         assert_ne!(
-            digest(true, &[], &[], Threads::default(), &[]),
-            digest(false, &[], &[], Threads::default(), &[])
+            digest(true, &[], &[], Threads::default(), &[], "", &[]),
+            digest(false, &[], &[], Threads::default(), &[], "", &[])
         );
     }
 
@@ -954,19 +999,19 @@ mod tests {
     #[test]
     fn a_region_appearing_is_something_new_to_say() {
         let mods = collected(&["C:\\x\\a.dll"]);
-        let clean = digest(true, &mods, &[], Threads::default(), &[]);
-        assert_ne!(clean, digest(true, &mods, &[a_region()], Threads::default(), &[]));
+        let clean = digest(true, &mods, &[], Threads::default(), &[], "", &[]);
+        assert_ne!(clean, digest(true, &mods, &[a_region()], Threads::default(), &[], "", &[]));
     }
 
     #[test]
     fn a_thread_from_nowhere_is_something_new_to_say() {
         let mods = collected(&["C:\\x\\a.dll"]);
-        let clean = digest(true, &mods, &[], Threads::default(), &[]);
+        let clean = digest(true, &mods, &[], Threads::default(), &[], "", &[]);
         let foreign = Threads { total: 40, foreign: 1, breakpoints: 0 };
-        assert_ne!(clean, digest(true, &mods, &[], foreign, &[]));
+        assert_ne!(clean, digest(true, &mods, &[], foreign, &[], "", &[]));
         // The total moves every time the game spawns a worker. On its own it is not news.
         let busier = Threads { total: 41, foreign: 0, breakpoints: 0 };
-        assert_eq!(clean, digest(true, &mods, &[], busier, &[]));
+        assert_eq!(clean, digest(true, &mods, &[], busier, &[], "", &[]));
     }
 
     /// The wire shape the control plane parses. Its validator refuses anything else outright,
@@ -982,6 +1027,8 @@ mod tests {
             regions: &[],
             threads: Threads::default(),
             files: &[],
+            build: "",
+            digests: &[],
         })
         .unwrap();
         assert!(json.contains(r#""appVersion":"0.13.1""#), "{json}");
@@ -1006,6 +1053,8 @@ mod tests {
             regions: &[],
             threads: Threads::default(),
             files: &[],
+            build: "",
+            digests: &[],
         })
         .unwrap();
         assert!(!anon.contains("guid"), "{anon}");
@@ -1123,6 +1172,11 @@ mod tests {
                 loaded: true,
                 facts: FileFacts::default(),
             }],
+            build: "abc123",
+            digests: &[crate::stateinvariants::Digest {
+                name: "physics-coefficients".into(),
+                digest: "d".repeat(64),
+            }],
         })
         .unwrap();
         assert!(json.contains(r#""kind":"private""#), "{json}");
@@ -1131,6 +1185,11 @@ mod tests {
         assert!(json.contains(r#""thread":true"#), "{json}");
         assert!(json.contains(r#""threads":{"total":44,"foreign":1,"breakpoints":2}"#), "{json}");
         assert!(json.contains(r#""loaded":true"#), "{json}");
+        assert!(json.contains(r#""build":"abc123""#), "{json}");
+        assert!(
+            json.contains(r#""digests":[{"name":"physics-coefficients","digest":"dddd"#),
+            "{json}"
+        );
     }
 
     /// An app that looked and found nothing must not read like one too old to have looked.
@@ -1144,10 +1203,16 @@ mod tests {
             regions: &[],
             threads: Threads::default(),
             files: &[],
+            build: "",
+            digests: &[],
         })
         .unwrap();
         assert!(json.contains(r#""regions":[]"#), "{json}");
         assert!(json.contains(r#""threads":{"total":0,"foreign":0,"breakpoints":0}"#), "{json}");
         assert!(json.contains(r#""files":[]"#), "{json}");
+        // build and digests are skipped when empty: an app that has not fetched a manifest yet
+        // says nothing about state rather than sending an empty answer that reads like a fact.
+        assert!(!json.contains("build"), "{json}");
+        assert!(!json.contains("digests"), "{json}");
     }
 }
