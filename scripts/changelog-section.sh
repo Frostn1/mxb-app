@@ -2,9 +2,12 @@
 #
 # Print one release's section out of CHANGELOG.md.
 #
-#   scripts/changelog-section.sh <tag|version> [--heading] [--fold|--summary]
+#   scripts/changelog-section.sh <tag|version> [--app=NAME] [--heading] [--fold|--summary]
 #
 # Default output is the section's body — its `### Added` / `### Fixed` groups, verbatim.
+#   --app=NAME read another product's section, headed `## <date> — NAME v0.1.6`. Without
+#              it, the MXB App's: `## <date> — v0.14.2 — Name`. Keeps a Studio v0.1.7 from
+#              reading the MXB App's old v0.1.7 notes.
 #   --heading  print the section's heading line instead of the body.
 #   --fold     join each bullet's hard-wrapped continuation lines back onto one line.
 #              The file wraps for readability; Discord renders those newlines literally.
@@ -21,11 +24,13 @@
 set -euo pipefail
 
 TAG=""
+APP=""
 MODE="body"
 FOLD=0
 SUMMARY=0
 for arg in "$@"; do
   case "$arg" in
+    --app=*) APP="${arg#--app=}" ;;
     --heading) MODE="heading" ;;
     --fold) FOLD=1 ;;
     --summary) SUMMARY=1; FOLD=1 ;;
@@ -35,7 +40,7 @@ for arg in "$@"; do
 done
 
 if [ -z "$TAG" ]; then
-  echo "usage: $0 <tag|version> [--heading] [--fold|--summary]" >&2
+  echo "usage: $0 <tag|version> [--app=NAME] [--heading] [--fold|--summary]" >&2
   exit 2
 fi
 
@@ -45,11 +50,18 @@ fi
 changelog="$root/CHANGELOG.md"
 [ -f "$changelog" ] || exit 1
 
+# Escape regex metacharacters so `0.6.1` can't match `0x6y1`.
+escape_re() { printf '%s' "$1" | sed 's/[].[^$*\\/()|+?{}]/\\&/g'; }
+
+# What stands before the version: `— ` for the MXB App, the product's name for any other.
+if [ -n "$APP" ]; then
+  lead_re="$(escape_re "$APP") "
+else
+  lead_re="— "
+fi
+
 heading_for() {
-  # Escape regex metacharacters so `0.6.1` can't match `0x6y1`.
-  local ver_re
-  ver_re="$(printf '%s' "$1" | sed 's/[].[^$*\\/]/\\&/g')"
-  awk -v re="^## .*[[:space:]]v${ver_re}([[:space:]]|\$)" '$0 ~ re { print; exit }' "$changelog"
+  awk -v re="^## .*${lead_re}v$(escape_re "$1")([[:space:]]|\$)" '$0 ~ re { print; exit }' "$changelog"
 }
 
 VERSION="${TAG#v}"

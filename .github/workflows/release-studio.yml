@@ -125,3 +125,27 @@ jobs:
           releaseDraft: false
           prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
           args: ${{ matrix.args }}
+
+  # Announce the release in #studio-releases once every platform has uploaded. Real tags on
+  # the canonical repo only, like the manager's. The Studio has no beta channel, so a beta
+  # goes to the same webhook and is marked as one in the post.
+  notify:
+    needs: build
+    if: ${{ github.repository == 'Frostn1/mxb-app' && github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Post release announcement to Discord
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: Frostn1/frost-studio
+          APP_NAME: "Frost's Studio"
+          SLUG: studio
+          ICON_URL: https://raw.githubusercontent.com/Frostn1/mxb-app/${{ github.ref_name }}/apps/studio/src-tauri/icons/icon.png
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_STUDIO_WEBHOOK_URL }}
+          DISCORD_BETA_WEBHOOK_URL: ${{ secrets.DISCORD_STUDIO_WEBHOOK_URL }}
+        run: bash scripts/notify-discord.sh "${GITHUB_REF_NAME#studio-}"
