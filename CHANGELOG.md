@@ -33,6 +33,7 @@
   Settings → General. Each report says which app sent it, so the two are counted apart.
 
 ### Changed
+- The Servers tab lists the live MX Bikes servers on Windows.
 - Release posts in Discord now come from mxbsecure, in the mxbsecure black.
 
 ## 2026-09-14 — Frost's Studio v0.1.6
