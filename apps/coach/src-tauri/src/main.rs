@@ -15,6 +15,7 @@ mod fixes;
 mod ground;
 mod lines;
 mod sag;
+mod soil;
 mod stp;
 mod surface;
 mod telemetry;

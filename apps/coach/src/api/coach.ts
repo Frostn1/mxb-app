@@ -90,7 +90,11 @@ export interface SectionReview {
   /** Seconds lost to the reference; negative is a gain. */
   lost: number;
   findings: Finding[];
+  /** The ground here, from the rear wheel. */
+  soil: { kind: Soil; share: number; sand: number } | null;
 }
+
+export type Soil = "hard" | "hardpack" | "intermediate" | "soft" | "sand" | "grass" | "rocky" | "mud";
 
 export interface Channel {
   lap: number[];

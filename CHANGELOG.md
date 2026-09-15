@@ -11,6 +11,8 @@
 - How does the bike feel: tell the coach what you feel, like "the front bottoms out" or "it's
   nervous at speed". It checks that against your laps, says when they agree or say otherwise, and
   adds the fix to your saved copy.
+- The ground: each section shows what it's ridden on, like hardpack, soft soil, sand or mud.
+  A lap with a lot of sand, hardpack or mud gets setup changes for it. Works on locked tracks too.
 
 ### Changed
 - Hard landings and fighting the bars are now judged against your own session on that bike, so a

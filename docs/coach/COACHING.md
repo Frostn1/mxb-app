@@ -82,6 +82,12 @@ list is never written; swingarm pivot and rake never are.
 | `setup_unstable` / `setup_turns_slow` | only from the feel check | front higher, less offset, longer swingarm / the other way |
 | `setup_sag_rear_deep` / `_high` | standing still ≥ 1 s with the rider on, the shock outside 30–36% of its travel | shock preload by the millimetres it's off; the spring when preload runs out |
 | `setup_pressure` | a tyre > 10 kPa from the `OptimalPressure` in its `.tyre` file | back to the tyre's optimum |
+| `setup_sand` / `_hardpack` / `_mud` | ≥ 30% of the lap on sand / ≥ 50% on hardpack or wet soil (`soil.rs`) | firmer shock low-speed and fork compression, +1 rear tooth / softer compression / −1 rear tooth |
+
+The ground comes from the rear wheel's material as the recorder gives it: the game's global
+surface list plus one (0 in the air). 11 is soft soil, 12 compact soil (hardpack), 8 soil, 6
+sand, 5 grass, 13–14 gravel and rock; there is no mud, so soil in rainy conditions counts as mud.
+No track file is read, so locked tracks work. Each section carries its main ground.
 | `setup_gearing_*`, `setup_shift_*`, `setup_swingarm` | limiter, bogging, shift points, front up on exits | rear sprocket; a longer swingarm |
 
 The suspension, acceleration and bar thresholds come from real laps (2026-09-15, five laps of a

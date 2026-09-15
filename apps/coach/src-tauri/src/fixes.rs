@@ -103,8 +103,24 @@ const TURNS_SLOW: &[Step] = &[
     step(Field::SwingarmLength, -1, "Still slow: a shorter swingarm turns tighter."),
 ];
 
+// The ground the lap is mostly on (`soil::finding`).
+const SAND: &[Step] = &[
+    step(Field::ShockLowCompression, 1, "Firmer low-speed compression stops the rear squatting in the sand."),
+    step(Field::ForkCompression, 1, "Firmer fork compression stops the front diving into it."),
+    step(Field::RearSprocket, 1, "One tooth more on the rear: sand drags, so shorter gearing keeps it pulling."),
+];
+const HARDPACK: &[Step] = &[
+    step(Field::ForkCompression, -1, "Softer fork compression keeps the front tyre on the slick ground."),
+    step(Field::ShockLowCompression, -1, "Softer low-speed compression lets the rear follow the ground for drive."),
+];
+const MUD: &[Step] =
+    &[step(Field::RearSprocket, -1, "One tooth less on the rear: taller gearing is smoother on the gas when it spins up.")];
+
 fn steps(skill: &str) -> &'static [Step] {
     match skill {
+        "setup_sand" => SAND,
+        "setup_hardpack" => HARDPACK,
+        "setup_mud" => MUD,
         "setup_unstable" => UNSTABLE,
         "setup_turns_slow" => TURNS_SLOW,
         "setup_bottoming_fork" => BOTTOMING_FORK,

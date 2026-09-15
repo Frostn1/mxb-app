@@ -358,8 +358,16 @@ pub fn coach_review(
         }
         None => (analysis::solo(&mine, bike), this.clone()),
     };
-    // Lap-wide setup tips that come from the recording and the setup file, not the lap: sag, tyres.
+    // The ground under each section and the lap, from the rear wheel: the review can't know
+    // the weather, and wet soil is mud.
     let mut review = review;
+    let wet = rec.session.conditions == 2;
+    for s in &mut review.sections {
+        let end = s.section.end.min(mine.pts.len().saturating_sub(1));
+        s.soil = mine.pts.get(s.section.start..=end).and_then(|p| crate::soil::profile(p, wet));
+    }
+    review.setup.extend(crate::soil::profile(&mine.pts, wet).as_ref().and_then(crate::soil::finding));
+    // Lap-wide setup tips that come from the recording and the setup file, not the lap: sag, tyres.
     let r = rider_setup(&app, &rec);
     review.setup.extend(r.sag.as_ref().and_then(|s| crate::sag::finding(s, rec.event.susp_max_travel)));
     if let (Some(s), Some(o)) = (&r.setup, &r.opts) {

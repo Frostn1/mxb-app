@@ -190,6 +190,8 @@ pub struct Point {
     pub susp: [f32; 2],
     /// Which wheels are off the ground, front then rear.
     pub off: [bool; 2],
+    /// The ground under the rear wheel as the recorder gives it, 0 in the air; see `soil`.
+    pub ground: u8,
     /// Share of the travel in use, 0 fully extended to 1 bottomed; see `Trace::fill_travel`.
     pub used: [f32; 2],
     /// Acceleration in G, in the chassis frame: sideways, up (1 standing still), forward.
@@ -237,6 +239,7 @@ fn point(s: &Sample) -> Point {
         slip_r: slip(s.wheel_speed[1]),
         susp: s.susp,
         off: [s.wheel_material[0] == 0, s.wheel_material[1] == 0],
+        ground: s.wheel_material[1].clamp(0, 255) as u8,
         used: [0.0; 2],
         acc: s.acc,
         turn: s.yaw_rate / s.roll.to_radians().cos().max(0.3),
@@ -271,6 +274,7 @@ fn lerp(a: &Point, b: &Point, f: f32) -> Point {
         slip_r: m(a.slip_r, b.slip_r),
         susp: [m(a.susp[0], b.susp[0]), m(a.susp[1], b.susp[1])],
         off: near.off,
+        ground: near.ground,
         used: [0.0; 2],
         acc: [m(a.acc[0], b.acc[0]), m(a.acc[1], b.acc[1]), m(a.acc[2], b.acc[2])],
         turn: m(a.turn, b.turn),
@@ -674,6 +678,8 @@ pub struct SectionReview {
     /// Seconds lost to the reference here; negative is a gain.
     pub lost: f32,
     pub findings: Vec<Finding>,
+    /// The ground here, filled in by the caller, which knows the weather.
+    pub soil: Option<crate::soil::Profile>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -908,7 +914,7 @@ pub fn review(lap: &Trace, reference: &Trace, bike: Bike) -> Review {
                 });
             }
             findings.sort_by(|a, b| b.weight.total_cmp(&a.weight));
-            SectionReview { section: s, lap_time, ref_time, lost, findings }
+            SectionReview { section: s, lap_time, ref_time, lost, findings, soil: None }
         })
         .collect();
 
@@ -1651,7 +1657,7 @@ pub fn solo(lap: &Trace, bike: Bike) -> Review {
             alone(&mut c);
             let mut findings = dedupe(c.out, s.kind != Kind::Corner);
             findings.sort_by(|a, b| b.weight.total_cmp(&a.weight));
-            SectionReview { section: s, lap_time: t, ref_time: t, lost: 0.0, findings }
+            SectionReview { section: s, lap_time: t, ref_time: t, lost: 0.0, findings, soil: None }
         })
         .collect();
     let mut order: Vec<usize> = (0..out.len()).filter(|&i| !out[i].findings.is_empty()).collect();

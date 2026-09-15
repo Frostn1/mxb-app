@@ -412,6 +412,7 @@ const SETUP_GROUPS: { key: TKey; of: (skill: string) => boolean }[] = [
   { key: "review.group.shifting", of: (s) => s.startsWith("setup_shift") },
   { key: "review.group.chassis", of: (s) => s === "setup_swingarm" || s === "setup_front_push" },
   { key: "review.group.tyres", of: (s) => s === "setup_pressure" },
+  { key: "review.group.ground", of: (s) => s === "setup_sand" || s === "setup_hardpack" || s === "setup_mud" },
 ];
 
 /** Bike setup advice for the whole lap, by what it's about, with the changes behind each tip
@@ -740,6 +741,7 @@ function SectionPanel({ s, solo, onPrev, onNext }: { s: SectionReview; solo: boo
         <div>
           <div className="eyebrow">
             {t(`review.kind.${s.kind}` as TKey)}
+            {s.soil && ` · ${t(`soil.${s.soil.kind}` as TKey)}`}
           </div>
           <div className="mt-0.5 headline text-[24px]">{s.name}</div>
           <div className="mt-1 text-[12px] text-muted-foreground">
