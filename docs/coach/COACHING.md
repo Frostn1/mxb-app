@@ -136,6 +136,11 @@ sections on them. The review names up to three: the rider just faster than this 
 in the session and, in a race, the rider ahead on track when the lap ended, each with the
 sections where they gain more than 0.05 s (at most three).
 
+`lines.rs` also places every other rider's position beside each corner's core against the fast
+line (nearest point within 8 m, ends of the core excluded). With 30 or more, the median side is
+where the crowd rides: within 1 m, the fast line will rut first; further out, the crowd's line
+will and the fast line stays smoother (`wear` notes).
+
 ## Where MX Bikes differs from real life
 
 - **Scrubbing** is done seated in MX Bikes: lean the bike leaving the lip, lean the other way

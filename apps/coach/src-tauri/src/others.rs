@@ -62,7 +62,7 @@ impl TheirLap {
 }
 
 /// The bike the recorder took for the rider's own: the one it flagged most.
-fn local_num(rec: &Recording) -> Option<i32> {
+pub(crate) fn local_num(rec: &Recording) -> Option<i32> {
     let mut count: Vec<(i32, usize)> = Vec::new();
     for b in rec.frames.iter().flat_map(|f| &f.bikes).filter(|b| b.local) {
         match count.iter_mut().find(|c| c.0 == b.num) {

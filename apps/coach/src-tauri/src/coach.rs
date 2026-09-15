@@ -586,7 +586,11 @@ pub fn coach_lines(app: AppHandle, path: String) -> Result<Option<crate::lines::
         .filter(|l| l.whole && !l.invalid)
         .filter_map(|l| Some((l.num, Trace::new(l, rec.event.track_length)?)))
         .collect();
-    Ok(Some(crate::lines::lines(&laps, &reference)))
+    // Everyone else the recorder saw, for where the track will wear.
+    let me = crate::others::local_num(&rec);
+    let others: Vec<[f32; 2]> =
+        rec.frames.iter().flat_map(|f| &f.bikes).filter(|b| Some(b.num) != me && !b.crashed).map(|b| [b.x, b.z]).collect();
+    Ok(Some(crate::lines::lines(&laps, &reference, &others)))
 }
 
 /// The track's own terrain for a session: installed, readable, and lined up with the laps.

@@ -178,7 +178,8 @@ export interface LineNote {
   section: number;
   name: string;
   /** `line` for a line that pays, `cut` for ground cutting up. */
-  kind: "line" | "cut";
+  /** A line that pays, ground cutting up, or where the other riders will wear it. */
+  kind: "line" | "cut" | "wear";
   title: string;
   detail: string;
 }
