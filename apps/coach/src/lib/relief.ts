@@ -1,13 +1,21 @@
-import type { Surface } from "@/api/coach";
+/** A height grid in world metres: corner at `x0`, `z0`, rows along z, null where unknown. */
+export interface Relief {
+  x0: number;
+  z0: number;
+  cell: number;
+  width: number;
+  height: number;
+  heights: ArrayLike<number | null>;
+}
 
 /** Relief exaggeration: the slopes on a motocross track are gentle from above. */
 const LIFT = 3;
 
 /**
- * The ridden ground as a grey hillshade, lit from the north-west, as a picture the map can
- * lay under the lines. North is up: the canvas's top row is the grid's last (largest z).
+ * The ground as a grey hillshade, lit from the north-west, as a picture the map can lay under
+ * the lines. North is up: the canvas's top row is the grid's last (largest z).
  */
-export function reliefImage(s: Surface): string {
+export function reliefImage(s: Relief): string {
   const canvas = document.createElement("canvas");
   canvas.width = s.width;
   canvas.height = s.height;
@@ -16,9 +24,12 @@ export function reliefImage(s: Surface): string {
   const img = g.createImageData(s.width, s.height);
   const at = (c: number, r: number) =>
     c < 0 || r < 0 || c >= s.width || r >= s.height ? null : s.heights[r * s.width + c];
-  const known = s.heights.filter((h): h is number => h != null);
-  const lo = Math.min(...known);
-  const span = Math.max(Math.max(...known) - lo, 0.5);
+  let [lo, hi] = [Infinity, -Infinity];
+  for (let k = 0; k < s.heights.length; k++) {
+    const h = s.heights[k];
+    if (h != null) [lo, hi] = [Math.min(lo, h), Math.max(hi, h)];
+  }
+  const span = Math.max(hi - lo, 0.5);
   const [lx, ly, lz] = [-0.5, 0.75, 0.43];
 
   for (let r = 0; r < s.height; r++) {

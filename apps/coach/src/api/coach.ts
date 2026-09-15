@@ -118,6 +118,7 @@ export interface Review {
 }
 
 export interface ReviewOut {
+  trackId: string;
   trackName: string;
   lap: LapRef;
   reference: LapRef;
@@ -152,7 +153,17 @@ export interface Lines {
   notes: LineNote[];
 }
 
+/** The track's own terrain for a session, when it is installed, readable and lines up. */
+export interface Ground {
+  path: string;
+  prefix: string | null;
+  name: string;
+  /** How high the bike rides above this terrain, metres. */
+  lift: number;
+}
+
 export const coachStatus = () => invoke<CoachStatus>("coach_status");
+export const coachGround = (path: string) => invoke<Ground | null>("coach_ground", { path });
 export const coachLines = (path: string) => invoke<Lines | null>("coach_lines", { path });
 export const coachSurface = (path: string) => invoke<Surface | null>("coach_surface", { path });
 export const coachSessions = () => invoke<SessionSummary[]>("coach_sessions");

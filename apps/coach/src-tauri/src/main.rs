@@ -9,6 +9,7 @@
 
 mod analysis;
 mod coach;
+mod ground;
 mod lines;
 mod surface;
 mod telemetry;
@@ -44,6 +45,10 @@ fn main() {
             coach::coach_review,
             coach::coach_surface,
             coach::coach_lines,
+            coach::coach_ground,
+            // The track's own terrain, from core, for the map and the 3D view.
+            mxb_core::trackview::load_track_terrain,
+            mxb_core::trackview::load_track_overview,
             coach::coach_install_plugin,
             coach::coach_uninstall_plugin,
         ])

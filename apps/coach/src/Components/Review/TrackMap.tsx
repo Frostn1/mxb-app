@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import type { Review, Surface } from "@/api/coach";
+import type { Review } from "@/api/coach";
 import { gap, lossColor } from "@/lib/format";
-import { reliefImage } from "@/lib/relief";
+import { reliefImage, type Relief } from "@/lib/relief";
 
 /** Points along the drawn paths: `paths` holds one every 2 m. */
 const PATH_STEP = 2;
@@ -24,8 +24,8 @@ export default function TrackMap({
   onPick,
 }: {
   review: Review;
-  /** The ridden ground, drawn under the lines when there is one. */
-  surface?: Surface | null;
+  /** The ground, drawn under the lines when there is one: the track's own or the ridden one. */
+  surface?: Relief | null;
   /** Other laps' lines, drawn thin under this one. */
   others?: { path: [number, number][]; colour: string; width?: number }[];
   selected: number | null;
