@@ -38,10 +38,23 @@ export function d1(): Env["DB"] {
     if (file.endsWith(".sql")) db.exec(readFileSync(join(MIGRATIONS, file), "utf8"));
   }
 
+  // D1 binds `?NNN` by position; `node:sqlite` treats it as a named parameter and refuses
+  // positional args. So spell each `?NNN` as `?` and repeat its argument in place.
+  const positional = (sql: string, args: unknown[]): [string, unknown[]] => {
+    const picks: unknown[] = [];
+    const plain = sql.replace(/\?(\d+)/g, (_, n: string) => {
+      picks.push(args[Number(n) - 1]);
+      return "?";
+    });
+    return picks.length ? [plain, picks] : [sql, args];
+  };
+
   // `all` runs the statement whatever it is, so an UPDATE ... RETURNING comes back the way
   // D1 hands it to `.first()`.
-  const rows = (sql: string, args: unknown[]) =>
-    db.prepare(sql).all(...(args as never[])) as unknown as Record<string, unknown>[];
+  const rows = (sql: string, args: unknown[]) => {
+    const [s, a] = positional(sql, args);
+    return db.prepare(s).all(...(a as never[])) as unknown as Record<string, unknown>[];
+  };
 
   const statement = (sql: string, args: unknown[] = []) => ({
     sql,

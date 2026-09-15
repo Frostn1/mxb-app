@@ -60,6 +60,11 @@ declare global {
     /** mxbsecure.com's own key: opens `/admin/assets*` and nothing else under `/admin`. A
      *  secret. `ADMIN_KEY` still works on those routes too. */
     MXB_ASSETS_KEY?: string;
+    /** The Steam accounts (SteamID64, comma or space separated) that may read the dashboards
+     *  at mxbsecure.com/admin. Not a secret — a var in `wrangler.jsonc`, so granting admin is
+     *  a reviewable diff. Unset means nobody is an admin; `ADMIN_KEY` still opens the rendered
+     *  `/admin` pages on this host either way. */
+    MXB_ADMIN_STEAM_IDS?: string;
     /** Signs mxbsecure.com's Steam sign-in state and session cookies. A secret; rotating it
      *  signs everyone out. Unset means the site has no sign-in. */
     MXB_WEB_SESSION_KEY?: string;

@@ -27,6 +27,8 @@
 import { tokenMatches } from "./auth";
 import { ipDigest } from "./voice";
 import {
+  APPS,
+  isAppId,
   isAppVersion,
   isCount,
   isEventName,
@@ -54,6 +56,21 @@ export const MAX_REPORTS_PER_DAY = 2000;
 export const RETENTION_DAYS = 400;
 
 /**
+ * The longest window that can be asked for. It has to stay under `RETENTION_DAYS`.
+ *
+ * `newInstalls` counts installs whose *first day ever* falls in the window, and the sweep has
+ * been deleting first days. Once a window reaches back as far as the prune, every surviving
+ * install's oldest row is inside it and they all look new — the figure does not fail, it
+ * quietly lies. The two constants have always been related; nothing said so, so
+ * `usage.test.ts` now asserts it.
+ *
+ * Retention is the same trap one window further out, and cannot be fixed by a ceiling: it
+ * compares this window with the one *before* it, so it needs twice the reach. It is left out
+ * rather than approximated when that lands past the prune.
+ */
+export const MAX_WINDOW_DAYS = 365;
+
+/**
  * Everything the app is expected to report.
  *
  * A display aid, not a filter: a name absent from this list is still stored, because a
@@ -71,11 +88,11 @@ export const KNOWN_EVENTS = [
   "view.locker",
   "view.presets",
   "view.studio.designer",
-  "view.studio.paints",
   "view.studio.rider",
   "view.studio.pose",
   "view.studio.track",
-  "view.studio.protect",
+  "view.studio.diagnose",
+  "view.studio.settings",
   "view.manage",
   "view.shop",
   "view.hub",
@@ -89,8 +106,7 @@ export const KNOWN_EVENTS = [
   "paint.publish",
   "paint.save",
   "track.generate",
-  "track.install",
-  "content.protect",
+  "track.build.install",
   "voice.join",
   "server.join",
   "overlay.open",
@@ -100,6 +116,8 @@ export const KNOWN_EVENTS = [
 
 interface Report {
   installId: string;
+  /** Which app reported. Absent on a build that predates the field, and that is the manager. */
+  app: (typeof APPS)[number];
   version: string;
   os: string;
   game: string;
@@ -145,14 +163,15 @@ export async function reportUsage(request: Request, env: Env): Promise<Response>
   const statements = [
     env.DB.prepare(
       "INSERT INTO usage_daily" +
-        " (install_id, day, version, os, game, sessions, minutes, first_seen, updated_at)" +
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)" +
-        " ON CONFLICT(install_id, day) DO UPDATE SET" +
+        " (install_id, app, day, version, os, game, sessions, minutes, first_seen, updated_at)" +
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" +
+        " ON CONFLICT(install_id, app, day) DO UPDATE SET" +
         "  version = excluded.version, os = excluded.os, game = excluded.game," +
         "  sessions = sessions + excluded.sessions, minutes = minutes + excluded.minutes," +
         "  updated_at = excluded.updated_at",
     ).bind(
       report.installId,
+      report.app,
       day,
       report.version,
       report.os,
@@ -172,11 +191,11 @@ export async function reportUsage(request: Request, env: Env): Promise<Response>
   for (const event of report.events) {
     statements.push(
       env.DB.prepare(
-        "INSERT INTO usage_events (day, name, install_id, count, updated_at)" +
-          " VALUES (?, ?, ?, ?, ?)" +
-          " ON CONFLICT(day, name, install_id) DO UPDATE SET" +
+        "INSERT INTO usage_events (day, app, name, install_id, count, updated_at)" +
+          " VALUES (?, ?, ?, ?, ?, ?)" +
+          " ON CONFLICT(day, app, name, install_id) DO UPDATE SET" +
           "  count = count + excluded.count, updated_at = excluded.updated_at",
-      ).bind(day, event.name, report.installId, event.count, now),
+      ).bind(day, report.app, event.name, report.installId, event.count, now),
     );
   }
   await env.DB.batch(statements);
@@ -198,12 +217,15 @@ export function parseReport(raw: string): Report | string {
     return "expected a JSON body";
   }
   if (!body || typeof body !== "object") return "expected a JSON body";
-  const { installId, version, os, game, sessions, minutes, events } = body as Record<
+  const { installId, app, version, os, game, sessions, minutes, events } = body as Record<
     string,
     unknown
   >;
 
   if (!isInstallId(installId)) return "installId must be a UUID";
+  // Absent is the manager: every build that shipped before this field existed is one, and a
+  // report from one of those must keep landing where it always did.
+  if (app !== undefined && !isAppId(app)) return `app must be one of ${APPS.join(", ")}`;
   if (!isAppVersion(version)) return "version must be a semver string";
   if (!isPlatform(os)) return "os must be windows, macos or linux";
   if (!isGameId(game)) return "game must be mxb or gpb";
@@ -232,6 +254,7 @@ export function parseReport(raw: string): Report | string {
 
   return {
     installId: installId as string,
+    app: (app as (typeof APPS)[number] | undefined) ?? "manager",
     version: version as string,
     os: os as string,
     game: game as string,
@@ -254,6 +277,25 @@ export interface EventRow {
   volume: number;
 }
 
+/**
+ * This window against the one before it.
+ *
+ * The only thing that tells growth from churn: without it, "1,486 active installs" reads the
+ * same whether they are the same 1,486 as last month or 1,486 different people who each
+ * tried it once.
+ *
+ * Null when the previous window reaches past `RETENTION_DAYS` and the sweep has eaten it,
+ * which is a figure that cannot be computed rather than one that is zero.
+ */
+export interface Retention {
+  /** Distinct installs active in the window. */
+  recent: number;
+  /** Distinct installs active in the window immediately before it. */
+  prior: number;
+  /** Installs active in both. */
+  returning: number;
+}
+
 export interface DayRow {
   day: string;
   installs: number;
@@ -264,14 +306,18 @@ export interface DayRow {
 export interface Stats {
   generatedAt: number;
   days: number;
+  /** Which app these numbers are about; "all" is both together. */
+  app: AppFilter;
+  /** How far back counters go. What "all time" actually means, and why retention can be null. */
+  retentionDays: number;
   active: { day: number; week: number; month: number };
   installsEver: number;
   newInstalls: number;
   sessions: number;
   minutes: number;
   daily: DayRow[];
-  /** Installs that ran each version at any point in the window. Overlaps — see `currentVersions`. */
-  versions: Bucket[];
+  /** Whether the same installs keep coming back, or new ones keep replacing them. */
+  retention: Retention | null;
   /** The version each install last reported. One bucket each, so these sum to the window's actives. */
   currentVersions: Bucket[];
   platforms: Bucket[];
@@ -292,76 +338,117 @@ export function dayKey(now: number, back = 0): string {
  * Read-only and cheap: every query is an aggregate over an indexed day range, so the cost is
  * the size of the window rather than the size of the history.
  */
-export async function collectStats(env: Env, days: number, now = Date.now()): Promise<Stats> {
+/** The apps a read may be narrowed to, plus the two of them together. */
+export type AppFilter = (typeof APPS)[number] | "all";
+
+export function windowApp(url: URL): AppFilter {
+  const asked = url.searchParams.get("app");
+  return isAppId(asked) ? asked : "all";
+}
+
+export async function collectStats(
+  env: Env,
+  days: number,
+  now = Date.now(),
+  app: AppFilter = "all",
+): Promise<Stats> {
   const today = dayKey(now);
   const from = dayKey(now, days - 1);
   const week = dayKey(now, 6);
   const month = dayKey(now, 29);
 
+  /**
+   * One predicate, spliced into every read: a figure drawn from a different slice than the
+   * one beside it is worse than no filter at all.
+   *
+   * Written into the SQL rather than bound. `app` has already been through `isAppId`, so it
+   * is one of two words from a closed list and there is nothing to inject; binding it would
+   * mean threading a parameter through nine queries whose `?`s are positional and, in two
+   * cases, sit inside a subquery that is read before the outer `WHERE` — which is exactly
+   * the kind of silent off-by-one that returns a plausible wrong number.
+   */
+  const only = app === "all" ? "" : ` AND app = '${app}'`;
   const q = <T>(sql: string, ...binds: unknown[]) =>
-    env.DB.prepare(sql)
+    env.DB.prepare(sql.replaceAll("/*app*/", only))
       .bind(...binds)
       .all<T>();
 
-  const [active, ever, fresh, totals, daily, versions, current, platforms, games, events] =
+  // The window immediately before this one, for retention. Only asked for when the whole of
+  // it is still inside `RETENTION_DAYS` — see `MAX_WINDOW_DAYS`.
+  const before = dayKey(now, days * 2 - 1);
+  const canRetain = days * 2 <= RETENTION_DAYS;
+
+  const [active, ever, fresh, totals, daily, retention, current, platforms, games, events] =
     await Promise.all([
       q<{ day: number; week: number; month: number }>(
         "SELECT" +
           "  COUNT(DISTINCT CASE WHEN day = ?1 THEN install_id END) AS day," +
           "  COUNT(DISTINCT CASE WHEN day >= ?2 THEN install_id END) AS week," +
           "  COUNT(DISTINCT CASE WHEN day >= ?3 THEN install_id END) AS month" +
-          " FROM usage_daily WHERE day >= ?3",
+          " FROM usage_daily WHERE day >= ?3/*app*/",
         today,
         week,
         month,
       ),
-      q<{ n: number }>("SELECT COUNT(DISTINCT install_id) AS n FROM usage_daily"),
+      q<{ n: number }>("SELECT COUNT(DISTINCT install_id) AS n FROM usage_daily WHERE 1 = 1/*app*/"),
       // An install is new in the window if the first day we ever saw it falls inside it.
       q<{ n: number }>(
         "SELECT COUNT(*) AS n FROM (" +
-          " SELECT install_id, MIN(day) AS firstDay FROM usage_daily GROUP BY install_id" +
+          " SELECT install_id, MIN(day) AS firstDay FROM usage_daily WHERE 1 = 1/*app*/ GROUP BY install_id" +
           ") WHERE firstDay >= ?",
         from,
       ),
       q<{ sessions: number; minutes: number }>(
         "SELECT COALESCE(SUM(sessions), 0) AS sessions, COALESCE(SUM(minutes), 0) AS minutes" +
-          " FROM usage_daily WHERE day >= ?",
+          " FROM usage_daily WHERE day >= ?/*app*/",
         from,
       ),
       q<DayRow>(
         "SELECT day, COUNT(*) AS installs, COALESCE(SUM(sessions), 0) AS sessions," +
           " COALESCE(SUM(minutes), 0) AS minutes" +
-          " FROM usage_daily WHERE day >= ? GROUP BY day ORDER BY day",
+          " FROM usage_daily WHERE day >= ?/*app*/ GROUP BY day ORDER BY day",
         from,
       ),
-      q<Bucket>(
-        "SELECT version AS label, COUNT(DISTINCT install_id) AS installs FROM usage_daily" +
-          " WHERE day >= ? GROUP BY version ORDER BY installs DESC, label DESC",
-        from,
-      ),
-      // What everyone is on now. `versions` counts an install under every version it ran,
-      // so it overcounts; here each install contributes once, from its most recent day.
+      // One pass over both windows: each install is reduced to "was it in this one" and "was
+      // it in the one before", and the three counts fall out of the pair.
+      canRetain
+        ? q<Retention>(
+            "SELECT" +
+              "  COUNT(CASE WHEN recent THEN 1 END) AS recent," +
+              "  COUNT(CASE WHEN prior THEN 1 END) AS prior," +
+              "  COUNT(CASE WHEN recent AND prior THEN 1 END) AS \"returning\"" +
+              " FROM (" +
+              "  SELECT install_id, MAX(day >= ?1) AS recent, MAX(day >= ?2 AND day < ?1) AS prior" +
+              "  FROM usage_daily WHERE day >= ?2/*app*/ GROUP BY install_id" +
+              " )",
+            from,
+            before,
+          )
+        : Promise.resolve({ results: [] as Retention[] }),
+      // What everyone is on now: each install contributes once, from its most recent day. A
+      // plain GROUP BY version counts an install under every build it ran in the window,
+      // which double-counts exactly the installs that updated — the ones you are asking about.
       q<Bucket>(
         "SELECT label, COUNT(*) AS installs FROM (" +
           " SELECT version AS label," +
           " ROW_NUMBER() OVER (PARTITION BY install_id ORDER BY day DESC) AS rn" +
-          " FROM usage_daily WHERE day >= ?" +
+          " FROM usage_daily WHERE day >= ?/*app*/" +
           ") WHERE rn = 1 GROUP BY label ORDER BY installs DESC, label DESC",
         from,
       ),
       q<Bucket>(
         "SELECT os AS label, COUNT(DISTINCT install_id) AS installs FROM usage_daily" +
-          " WHERE day >= ? GROUP BY os ORDER BY installs DESC",
+          " WHERE day >= ?/*app*/ GROUP BY os ORDER BY installs DESC",
         from,
       ),
       q<Bucket>(
         "SELECT game AS label, COUNT(DISTINCT install_id) AS installs FROM usage_daily" +
-          " WHERE day >= ? GROUP BY game ORDER BY installs DESC",
+          " WHERE day >= ?/*app*/ GROUP BY game ORDER BY installs DESC",
         from,
       ),
       q<EventRow>(
         "SELECT name, COUNT(DISTINCT install_id) AS reach, COALESCE(SUM(count), 0) AS volume" +
-          " FROM usage_events WHERE day >= ? GROUP BY name ORDER BY reach DESC, volume DESC",
+          " FROM usage_events WHERE day >= ?/*app*/ GROUP BY name ORDER BY reach DESC, volume DESC",
         from,
       ),
     ]);
@@ -373,13 +460,15 @@ export async function collectStats(env: Env, days: number, now = Date.now()): Pr
   return {
     generatedAt: now,
     days,
+    app,
+    retentionDays: RETENTION_DAYS,
     active: { day: counts.day ?? 0, week: counts.week ?? 0, month: counts.month ?? 0 },
     installsEver: ever.results?.[0]?.n ?? 0,
     newInstalls: fresh.results?.[0]?.n ?? 0,
     sessions: totals.results?.[0]?.sessions ?? 0,
     minutes: totals.results?.[0]?.minutes ?? 0,
     daily: daily.results ?? [],
-    versions: versions.results ?? [],
+    retention: retention.results?.[0] ?? null,
     currentVersions: current.results ?? [],
     platforms: platforms.results ?? [],
     games: games.results ?? [],
@@ -405,11 +494,11 @@ export function adminAllowed(request: Request, url: URL, env: Env): "ok" | "unse
   return tokenMatches(expected, presented) ? "ok" : "denied";
 }
 
-/** How many days a request asked for, clamped to something a dashboard can draw. */
+/** How many days a request asked for, clamped to a window the figures stay honest over. */
 export function windowDays(url: URL): number {
   const asked = Number(url.searchParams.get("days") ?? "30");
   if (!Number.isFinite(asked)) return 30;
-  return Math.min(365, Math.max(1, Math.trunc(asked)));
+  return Math.min(MAX_WINDOW_DAYS, Math.max(1, Math.trunc(asked)));
 }
 
 /** `GET /v1/usage/stats` — the same numbers as the dashboard, for anything that scripts them. */
@@ -417,7 +506,7 @@ export async function usageStats(request: Request, url: URL, env: Env): Promise<
   const allowed = adminAllowed(request, url, env);
   if (allowed === "unset") return json(503, { error: "no admin key is configured" });
   if (allowed === "denied") return json(401, { error: "unauthorized" });
-  return json(200, await collectStats(env, windowDays(url)));
+  return json(200, await collectStats(env, windowDays(url), Date.now(), windowApp(url)));
 }
 
 /**

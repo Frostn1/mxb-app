@@ -604,6 +604,11 @@ export const fr: Translation = {
   "settings.secReasonLocked": "Pas encore de clé pour ce contenu sur votre compte.",
   "settings.secReasonUnreadable": "Ce n'est pas un fichier mxbsecure valide.",
   "settings.unlockNeedsSteam": "Connectez-vous d'abord avec Steam — le déverrouillage est lié à votre compte Steam.",
+  "secure.promptTitle_one": "Vous avez un mod sécurisé à déverrouiller",
+  "secure.promptTitle_other": "Vous avez {{count}} mods sécurisés à déverrouiller",
+  "secure.promptSteam": "Les mods sécurisés sont liés à votre compte Steam. Connectez-vous pour déverrouiller.",
+  "secure.promptEnroll": "Inscrivez-vous d'abord avec votre code d'invitation, dans Réglages, section Synchro des peintures.",
+  "secure.promptEnrollBtn": "Ouvrir les Réglages",
   "settings.unlockNotOwned": "Vous ne possédez pas encore ce contenu sur ce compte.",
   "secure.intro":
     "Choisissez un fichier, verrouillez-le, puis vérifiez qu'il se déverrouille. La vérification déchiffre le blob ici même et le compare à l'original, octet par octet — la preuve qu'il fait l'aller-retour sur cette machine.",

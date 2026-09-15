@@ -37,7 +37,12 @@
     // `/admin/assets`.
     "MXB_OWNER_ACCOUNT_ID": "f72db68a-9541-4814-ae09-6096b497abc9",
     // Where Steam sign-in on mxbsecure.com lands afterwards.
-    "MXB_SITE_ORIGIN": "https://mxbsecure.com"
+    "MXB_SITE_ORIGIN": "https://mxbsecure.com",
+    // The Steam accounts that may read the dashboards at mxbsecure.com/admin, comma
+    // separated. Empty means nobody, which is the right default: this is the credential that
+    // reads everybody's numbers, so granting it should be a diff. `ADMIN_KEY` still opens the
+    // rendered /admin pages on this host either way.
+    "MXB_ADMIN_STEAM_IDS": "76561198174305985"
   },
 
   // The idle reaper. Every five minutes it asks each running server who is connected and

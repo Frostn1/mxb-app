@@ -11,7 +11,7 @@
  */
 
 import { ctx, errorPage, esc, ranges, shell, wrap } from "./adminui";
-import { adminAllowed, collectStats, windowDays, type Bucket, type EventRow, type Stats } from "./usage";
+import { adminAllowed, collectStats, windowApp, windowDays, type Bucket, type EventRow, type Stats } from "./usage";
 
 /** Windows the header offers. Anything else still works via `?days=`. */
 const RANGES = [7, 30, 90, 365];
@@ -26,7 +26,7 @@ export async function usageDashboard(request: Request, url: URL, env: Env): Prom
   if (allowed === "denied") return errorPage(TITLE, 401, "Unauthorized.");
 
   const days = windowDays(url);
-  const stats = await collectStats(env, days);
+  const stats = await collectStats(env, days, Date.now(), windowApp(url));
   return new Response(render(stats, url), {
     status: 200,
     headers: {
@@ -47,11 +47,13 @@ function render(s: Stats, url: URL): string {
   ${tile("Active today", s.active.day, "installs that reported in on today's UTC day")}
   ${tile("Active this week", s.active.week, "distinct installs over 7 days")}
   ${tile("Active this month", s.active.month, "distinct installs over 30 days")}
-  ${tile("Installs ever", s.installsEver, "distinct installs, all time")}
+  ${tile("Installs seen", s.installsEver, `distinct installs over ${s.retentionDays} days; a reinstall is a new one`)}
   ${tile("New in window", s.newInstalls, `first seen within the last ${s.days} days`)}
-  ${tile("Sessions", s.sessions, "app launches in the window")}
-  ${tile("Hours open", Math.round(s.minutes / 60), "time the app was running")}
+  ${tile("Sessions per install", per(s.sessions, s.active.month), "how often an active install is opened")}
+  ${tile("Minutes per session", per(s.minutes, s.sessions), "how long it stays open")}
 </section>
+
+${retention(s)}
 
 <section class="panel">
   <h2>Active installs per day</h2>
@@ -60,10 +62,17 @@ function render(s: Stats, url: URL): string {
 
 <div class="cols">
   ${buckets("Version now", s.currentVersions, "what each install last reported — one vote each")}
-  ${buckets("Versions seen", s.versions, "ran it at any point; an install that updated is in both")}
   ${buckets("Platform", s.platforms)}
-  ${buckets("Title", s.games)}
 </div>
+
+<section class="panel">
+  <h2>Title</h2>
+  <p class="muted">${
+    s.games.length
+      ? s.games.map((g) => `${esc(g.label)} ${g.installs.toLocaleString("en-GB")}`).join(" · ")
+      : "Nothing yet."
+  }</p>
+</section>
 
 <section class="panel">
   <h2>Pages</h2>
@@ -101,9 +110,39 @@ ${lifecycle.length ? `<section class="panel"><h2>Lifecycle</h2>${table(lifecycle
   });
 }
 
-function tile(label: string, value: number, hint: string): string {
-  return `<div class="tile"><span class="n">${value.toLocaleString("en-GB")}</span>
+function tile(label: string, value: number | string, hint: string): string {
+  const n = typeof value === "number" ? value.toLocaleString("en-GB") : value;
+  return `<div class="tile"><span class="n">${esc(n)}</span>
     <span class="l">${esc(label)}</span><span class="h">${esc(hint)}</span></div>`;
+}
+
+/**
+ * A rate rather than a total.
+ *
+ * A window total scales with the window: change the range and the number changes with it, so
+ * "21,540 sessions" is not a fact anyone can act on. Per active install it holds still.
+ */
+function per(total: number, over: number): string {
+  return over ? (total / over).toFixed(1) : "—";
+}
+
+/** This window against the one before it, or why there isn't one. */
+function retention(s: Stats): string {
+  if (!s.retention) {
+    return `<section class="panel"><h2>Returning</h2><p class="muted">Not over this window —
+      it would have to look back ${s.days * 2} days, and counters are kept for ${s.retentionDays}.
+      Pick a shorter one.</p></section>`;
+  }
+  const { recent, prior, returning } = s.retention;
+  const share = (n: number, of: number) => (of ? `${Math.round((n / of) * 100)}%` : "—");
+  return `<section class="panel">
+  <h2>Returning <span class="muted">— against the ${s.days} days before this window</span></h2>
+  <div class="tiles">
+    ${tile("Came back", share(returning, prior), `of the ${prior.toLocaleString("en-GB")} active before this window`)}
+    ${tile("Already knew it", share(returning, recent), `of this window's ${recent.toLocaleString("en-GB")} were here before`)}
+    ${tile("New to it", share(recent - returning, recent), "first seen in this window")}
+  </div>
+</section>`;
 }
 
 /**

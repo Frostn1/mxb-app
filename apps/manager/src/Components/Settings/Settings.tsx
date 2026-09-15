@@ -68,7 +68,6 @@ import {
   mxbsecureUnlock,
   mxbsecureAutoUnlock,
   mxbsecureRepairKeys,
-  steamLinkStart,
   steamLinkStatus,
   mxbsecureStatus,
   type SecureStatusItem,
@@ -90,6 +89,7 @@ import {
 import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "@frost/shared/lib/usePlatform";
 import { useConfig } from "@frost/shared/Context/Config";
+import { useSteamLink } from "@/lib/useSteamLink";
 import GameSwitcher from "../Shell/GameSwitcher";
 import { ContextBarLeft, ContextBarRight } from "../Shell/ContextBar";
 import ReshadeCard from "./ReshadeCard";
@@ -557,7 +557,11 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       reason: t("settings.secReasonLocked"),
     };
   };
-  const [linking, setLinking] = useState(false);
+  const { linking, linkSteam } = useSteamLink({
+    onLinked: setLinkedSteam,
+    // Re-read the list so a freshly owned file flips to Unlocked without a restart.
+    onUnlocked: () => void mxbsecureStatus().then(setSecureItems).catch(() => {}),
+  });
   const voiceInput = config.voiceInputDevice ?? "";
   const voiceOutput = config.voiceOutputDevice ?? "";
   const voicePtt = config.voicePttHotkey || FALLBACK_PTT_HOTKEY;
@@ -882,42 +886,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       toast.error(t("settings.secRepairFail"), { description: String(e) });
     } finally {
       setRepairing(false);
-    }
-  };
-
-  // Sign in with Steam: the control plane returns an OpenID URL, we open it in the browser,
-  // and the browser half links the account. Poll until it lands (or the window closes).
-  const linkSteam = async () => {
-    setLinking(true);
-    try {
-      const url = await steamLinkStart();
-      await openUrl(url);
-      toast.info(t("settings.steamLinkOpened"));
-      const started = Date.now();
-      while (Date.now() - started < 150_000) {
-        await new Promise((r) => setTimeout(r, 2500));
-        let id: string | null = null;
-        try {
-          id = await steamLinkStatus();
-        } catch {
-          // keep polling
-        }
-        if (id) {
-          setLinkedSteam(id);
-          toast.success(t("settings.steamLinkOk", { id }));
-          // The identity that decides entitlement just changed — pull keys for anything now
-          // owned, then refresh the list so it flips to Unlocked without a restart.
-          void mxbsecureAutoUnlock(true)
-            .catch(() => 0)
-            .then(() => mxbsecureStatus().then(setSecureItems).catch(() => {}));
-          return;
-        }
-      }
-      toast.info(t("settings.steamLinkPending"));
-    } catch (e) {
-      toast.error(t("settings.steamLinkFail"), { description: String(e) });
-    } finally {
-      setLinking(false);
     }
   };
 
