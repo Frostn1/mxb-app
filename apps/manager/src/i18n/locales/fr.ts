@@ -2012,6 +2012,9 @@ export const fr: Translation = {
     "Impossible de joindre la liste pour l'instant — voici la dernière connue.",
   "supporters.optOut":
     "Les noms sont affichés avec accord. Un message sur Discord ou Buy Me a Coffee et le vôtre est retiré aussitôt.",
+  "supporters.contributors": "Contributeurs",
+  "supporters.contributorsDesc":
+    "Ceux qui ont amélioré l'app avec leurs idées, leurs tests et leurs retours.",
   "reshade.needsGameFolder":
     "ReShade se trouve dans ton dossier {{game}} — indique-le dans Dossier de jeu, ou pointe directement dessus ici.",
   "reshade.folder": "Recherche dans ton dossier {{game}} :",

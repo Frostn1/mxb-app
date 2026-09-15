@@ -2002,6 +2002,9 @@ export const ptBR: Translation = {
     "Não deu pra buscar a lista agora — esta é a última que vimos.",
   "supporters.optOut":
     "Os nomes aparecem com permissão. É só falar no Discord ou no Buy Me a Coffee que o seu sai na hora.",
+  "supporters.contributors": "Colaboradores",
+  "supporters.contributorsDesc":
+    "Pessoas que deixaram o app melhor com ideias, testes e feedback.",
   "reshade.needsGameFolder":
     "O ReShade fica na sua pasta do {{game}} — defina ela em Pasta do jogo, ou aponte direto para ela aqui.",
   "reshade.folder": "Procurando na sua pasta do {{game}}:",

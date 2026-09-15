@@ -39,6 +39,14 @@ export interface Supporter {
   since?: string;
 }
 
+/** Someone who helped build the app rather than fund it: ideas, testing, feedback. */
+export interface Contributor {
+  /** Display name, as they asked for it. */
+  name: string;
+  /** What they did, in a few words. Hand-written, so never translated. */
+  note?: string;
+}
+
 export interface SupportersManifest {
   /** Overrides {@link SUPPORT_URL} when set — how a moved page gets fixed without a
    *  release. */
@@ -47,6 +55,7 @@ export interface SupportersManifest {
    *  sorts after the named ones. */
   tiers: string[];
   supporters: Supporter[];
+  contributors: Contributor[];
 }
 
 /**
@@ -71,6 +80,7 @@ export const BUNDLED_SUPPORTERS: SupportersManifest = {
     { name: "Bøddi" },
     { name: "Kelso" },
   ],
+  contributors: [{ name: "Trystan34", note: "Ideas that made the app better" }],
 };
 
 const CACHE_KEY = "mxb:supporters:v1";
@@ -81,6 +91,7 @@ const FETCH_TIMEOUT_MS = 6000;
 const MAX_SUPPORTERS = 500;
 const MAX_NAME_CHARS = 48;
 const MAX_TIER_CHARS = 32;
+const MAX_NOTE_CHARS = 80;
 
 function trimmed(value: unknown, max: number): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -120,10 +131,24 @@ export function parseManifest(raw: unknown): SupportersManifest | null {
         .filter((t): t is string => Boolean(t))
     : [];
 
+  // Optional, so a manifest from before contributors existed still parses.
+  const contributors: Contributor[] = [];
+  const rawContributors = Array.isArray(obj.contributors) ? obj.contributors : [];
+  for (const entry of rawContributors.slice(0, MAX_SUPPORTERS)) {
+    const fields = (typeof entry === "object" && entry ? entry : {}) as Record<
+      string,
+      unknown
+    >;
+    const name = trimmed(typeof entry === "string" ? entry : fields.name, MAX_NAME_CHARS);
+    if (!name) continue;
+    contributors.push({ name, note: trimmed(fields.note, MAX_NOTE_CHARS) });
+  }
+
   return {
     supportUrl: trimmed(obj.supportUrl, 200),
     tiers,
     supporters,
+    contributors,
   };
 }
 
