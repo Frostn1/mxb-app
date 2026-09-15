@@ -3,7 +3,7 @@
   "properties": {
     "name": { "type": "string", "description": "the track's name, a few words" },
     "location": { "type": "string", "description": "where it is, a town or region" },
-    "lapLength": { "type": "number", "description": "metres round the lap, 1700 to 2400; 2100 is a national" },
+    "lapLength": { "type": "number", "description": "metres round the lap, 1700 to 2300; 2100 is a national" },
     "width": { "type": "number", "description": "the riding line, metres, 12 to 18; 15 is normal" },
     "cornersPerKm": { "type": "number", "description": "corners per kilometre, 6.5 to 12; 8.5 is normal, higher is tighter and more technical" },
     "apexRadius": { "type": "number", "description": "metres, the tightest radius in an ordinary corner, 8 to 18; low is hairpins, high is flowing" },

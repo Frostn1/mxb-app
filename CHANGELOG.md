@@ -38,6 +38,10 @@
 ### Added
 - New Frost's Studio versions are posted in the Discord, in #studio-releases.
 - mxbsecure admins can add and remove creators from the site, by Steam profile link.
+- Write tracks with your own AI model. Pick Groq, OpenRouter, OpenAI, Ollama or Anthropic in
+  Settings and paste a key. The key stays on your computer.
+- A Settings only mode for writing tracks: the model picks the kind of track and the Studio
+  draws the lap. It works with free models and usually takes under a minute.
 
 ### Changed
 - Tabletops on generated tracks are wide, rounded mounds. The bigger the jump, the further its

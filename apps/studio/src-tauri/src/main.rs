@@ -19,6 +19,7 @@ mod trackbuild;
 mod tracklayout;
 mod trackline;
 mod trackllm;
+mod trackmodel;
 mod trackobjects;
 mod trackprog;
 mod trackprops;
@@ -145,6 +146,10 @@ fn main() {
             scan_gear_repairs,
             repair_gear,
             generate_track,
+            get_track_model,
+            set_track_model,
+            clear_track_model,
+            test_track_model,
             base_track_program,
             random_track_program,
             bake_prop_library,
@@ -262,41 +267,153 @@ fn track_program(value: serde_json::Value) -> Result<trackprog::TrackProgram, St
     serde_json::from_value(value).map_err(|e| format!("that isn't a track program: {e}"))
 }
 
-/// Ask the control plane for a track program, and keep asking until it measures like a track.
+/// A generated track, and the settings it was drawn from when the model only picked those.
+#[derive(serde::Serialize)]
+struct Generated {
+    program: trackprog::TrackProgram,
+    settings: Option<tracklayout::TrackSettings>,
+}
+
+/// Ask a model for a track, and keep asking until it measures like one.
 ///
-/// The key lives there, not here. Everything that comes back is synthesised and measured
-/// before this returns — see `trackllm` — so a program reaching the studio has already been
-/// built once.
+/// A model of the user's own is asked directly when one is saved, see `trackmodel`; our
+/// control plane otherwise, which holds our key. `mode` "settings" asks only for the
+/// character and has `tracklayout` draw the lap; anything else asks for the whole lap.
+/// Everything that comes back is built and measured before this returns.
 #[tauri::command]
-async fn generate_track(app: tauri::AppHandle, brief: String) -> Result<serde_json::Value, String> {
-    let cfg = config::load_or_detect(&app).unwrap_or_default();
-    let base = mxb_core::names::control_plane();
-    // A debug build pointed at a local control plane is someone testing this, and a local
-    // `wrangler dev` has no accounts to enroll with. Anywhere else, the token is what says
-    // whose Anthropic spend this is.
-    let local = cfg!(debug_assertions) && !base.starts_with("https://");
-    if cfg.cp_token.trim().is_empty() && !local {
-        return Err(
-            "Track generation goes through your MXB account — enroll with an invite code in \
-             Settings first. To test against a local control plane, run `wrangler dev` in \
-             control-plane/ with ANTHROPIC_API_KEY in .dev.vars and start the app with \
-             MXB_CONTROL_PLANE=http://localhost:8787."
-                .into(),
-        );
+async fn generate_track(
+    app: tauri::AppHandle,
+    brief: String,
+    mode: Option<String>,
+) -> Result<Generated, String> {
+    let settings_only = mode.as_deref() == Some("settings");
+    let own = mxb_core::config::data_dir(&app).and_then(|d| trackmodel::load(&d));
+    let out = match own {
+        Some(model) => {
+            generate_with(&trackmodel::Direct { model }, brief.trim(), settings_only).await
+        }
+        None => {
+            let cfg = config::load_or_detect(&app).unwrap_or_default();
+            let base = mxb_core::names::control_plane();
+            // A debug build pointed at a local control plane is someone testing this, and a
+            // local `wrangler dev` has no accounts to enroll with. Anywhere else, the token is
+            // what says whose Anthropic spend this is.
+            let local = cfg!(debug_assertions) && !base.starts_with("https://");
+            if cfg.cp_token.trim().is_empty() && !local {
+                return Err(
+                    "Track generation needs a model. Add your own in Settings (a free Groq key \
+                     works with Settings only), or enroll your MXB account with an invite code \
+                     in the manager's Settings."
+                        .into(),
+                );
+            }
+            let ask = trackllm::ControlPlane { base, token: cfg.cp_token.clone() };
+            generate_with(&ask, brief.trim(), settings_only).await
+        }
     }
-    let ask = trackllm::ControlPlane {
-        base,
-        token: cfg.cp_token.clone(),
+    .map_err(|e| format!("{e:#}"))?;
+    usage::track(if settings_only { "track.settings" } else { "track.generate" });
+    Ok(out)
+}
+
+async fn generate_with(
+    ask: &impl trackllm::Ask,
+    brief: &str,
+    settings_only: bool,
+) -> anyhow::Result<Generated> {
+    if !settings_only {
+        // Four attempts: one to write it, one to fix the numbers, one for the thing the fix
+        // broke, and one more because they are cheap now. Three was set when this called Opus
+        // at $5/$25 per MTok; it calls Haiku at $1/$5, most of what used to come back wrong is
+        // repaired without asking, and an attempt costs a fraction of a cent and twenty seconds.
+        let program = trackllm::generate(brief, ask, 4).await?;
+        return Ok(Generated { program, settings: None });
+    }
+    let settings = trackllm::ask_settings(brief, ask).await?;
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(1);
+    let drawn = settings.clone();
+    let program = tauri::async_runtime::spawn_blocking(move || {
+        trackllm::draw_from_settings(&drawn, seed)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("drawing the lap failed: {e}"))??;
+    Ok(Generated { program, settings: Some(settings) })
+}
+
+fn model_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    mxb_core::config::data_dir(app).ok_or_else(|| "couldn't find the app's data folder".into())
+}
+
+/// What is on screen as a model. A `key` left out means the saved one, so once typed the key
+/// never has to go back to the webview.
+fn model_from(
+    dir: &std::path::Path,
+    kind: trackmodel::Kind,
+    base_url: String,
+    model: String,
+    key: Option<String>,
+) -> trackmodel::TrackModel {
+    let key = match key {
+        Some(k) => k.trim().to_string(),
+        None => trackmodel::load(dir).map(|m| m.key).unwrap_or_default(),
     };
-    // Four attempts: one to write it, one to fix the numbers, one for the thing the fix
-    // broke, and one more because they are cheap now. Three was set when this called Opus at
-    // $5/$25 per MTok; it calls Haiku at $1/$5, most of what used to come back wrong is
-    // repaired without asking, and an attempt costs a fraction of a cent and twenty seconds.
-    let prog = trackllm::generate(brief.trim(), &ask, 4)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
-    usage::track("track.generate");
-    serde_json::to_value(&prog).map_err(|e| e.to_string())
+    trackmodel::TrackModel {
+        kind,
+        base_url: base_url.trim().into(),
+        model: model.trim().into(),
+        key,
+    }
+}
+
+/// The model of the user's own, without its key.
+#[tauri::command]
+fn get_track_model(app: tauri::AppHandle) -> Option<trackmodel::TrackModelView> {
+    mxb_core::config::data_dir(&app)
+        .and_then(|d| trackmodel::load(&d))
+        .map(|m| m.view())
+}
+
+/// Save a model of the user's own. An empty `key` clears it; a missing one keeps it.
+#[tauri::command]
+fn set_track_model(
+    app: tauri::AppHandle,
+    kind: trackmodel::Kind,
+    base_url: String,
+    model: String,
+    key: Option<String>,
+) -> Result<trackmodel::TrackModelView, String> {
+    let dir = model_dir(&app)?;
+    let m = model_from(&dir, kind, base_url, model, key);
+    if !m.usable() {
+        return Err("A model needs an address and a name.".into());
+    }
+    trackmodel::save(&dir, &m).map_err(|e| format!("{e:#}"))?;
+    Ok(m.view())
+}
+
+/// Back to generating through the MXB account.
+#[tauri::command]
+fn clear_track_model(app: tauri::AppHandle) -> Result<(), String> {
+    trackmodel::clear(&model_dir(&app)?).map_err(|e| format!("{e:#}"))
+}
+
+/// Try a model before a track is asked of it: what is on screen, saved or not.
+#[tauri::command]
+async fn test_track_model(
+    app: tauri::AppHandle,
+    kind: trackmodel::Kind,
+    base_url: String,
+    model: String,
+    key: Option<String>,
+) -> Result<(), String> {
+    let m = model_from(&model_dir(&app)?, kind, base_url, model, key);
+    if !m.usable() {
+        return Err("A model needs an address and a name.".into());
+    }
+    trackmodel::check(&m).await.map_err(|e| format!("{e:#}"))
 }
 
 /// A track to start from, without asking anyone for one.

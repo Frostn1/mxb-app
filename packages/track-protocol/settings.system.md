@@ -23,7 +23,7 @@ it does not mention at the normal value. Some common words and what they mean:
 - "rhythm", "jumpy": jumpDensity 0.8 to 1, bigJumpShare 0.9.
 - "beginner", "easy", "vet": jumpScale 0.8, bigJumpShare 0.4, jumpDensity 0.3.
 - "whoops": waves 2.
-- "short": lapLength 1700 to 1850. "long": lapLength 2250 to 2400.
+- "short": lapLength 1700 to 1850. "long": lapLength 2200 to 2300.
 
 Name the track from the brief if it gives a name. Otherwise make up a short, plausible one
 and a location to match the ground: a sand track near the coast, a hillside track in hill

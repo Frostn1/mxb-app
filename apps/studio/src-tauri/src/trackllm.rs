@@ -11,14 +11,16 @@
 //! outside what real tracks do goes back with the numbers attached. A model told "corridor
 //! width 31 m, published tracks run 10–17" fixes it; one told "invalid" does not.
 //!
-//! The API key lives in the control plane, never here — see `control-plane/src/trackgen.ts`,
-//! which owns the system prompt and the schema so a stolen app token can only ever be spent
-//! on generating tracks.
+//! The model is reached one of two ways, see `trackmodel`: through our control plane, which
+//! holds our key, or directly with a key of the user's own. Either way the prompt and the
+//! schema are the same files in `packages/track-protocol`.
 
 #![allow(dead_code)]
 
 use anyhow::{bail, Context, Result};
 
+use crate::tracklayout::{draw_with, LayoutKnobs, TrackSettings};
+use crate::trackmodel::Protocol;
 use crate::trackprog::{Feature, Segment, TrackProgram};
 use crate::tracksynth;
 
@@ -149,7 +151,7 @@ pub struct Attempt {
 /// a key — the failure modes worth testing are all in what comes *back*.
 pub trait Ask {
     /// The brief, plus whatever went wrong last time. Returns the model's JSON, unparsed.
-    fn ask(&self, brief: &str, attempt: &Attempt)
+    fn ask(&self, protocol: Protocol, brief: &str, attempt: &Attempt)
         -> impl std::future::Future<Output = Result<String>>;
 }
 
@@ -713,7 +715,7 @@ pub fn repair_for_tests(prog: &mut TrackProgram) -> Vec<String> {
 /// complaint fixes.
 /// What an answer starts with when the service is reporting the model's mistake rather than
 /// its own. Not a track, and not a failure either — a thing to send back and have fixed.
-const REJECTED: &str = "\u{0}rejected\u{0}";
+pub(crate) const REJECTED: &str = "\u{0}rejected\u{0}";
 
 pub async fn generate(brief: &str, ask: &impl Ask, tries: usize) -> Result<TrackProgram> {
     let mut attempt = Attempt::default();
@@ -721,7 +723,7 @@ pub async fn generate(brief: &str, ask: &impl Ask, tries: usize) -> Result<Track
 
     for round in 0..tries.max(1) {
         let raw = ask
-            .ask(brief, &attempt)
+            .ask(Protocol::Program, brief, &attempt)
             .await
             .with_context(|| format!("asking for a track (attempt {})", round + 1))?;
 
@@ -785,6 +787,57 @@ pub async fn generate(brief: &str, ask: &impl Ask, tries: usize) -> Result<Track
         tries.max(1),
         last.unwrap_or_else(|| "no answer".into())
     )
+}
+
+/// Ask for a track's settings rather than its lap.
+///
+/// The model only picks the character, see [`TrackSettings`], so the answer is small enough
+/// for a free tier or a local model. Two tries, because the only thing that can be wrong with
+/// settings is an answer that didn't parse: anything that did is clamped into range.
+pub async fn ask_settings(brief: &str, ask: &impl Ask) -> Result<TrackSettings> {
+    let mut last = String::new();
+    for round in 0..2 {
+        let raw = ask
+            .ask(Protocol::Settings, brief, &Attempt::default())
+            .await
+            .with_context(|| format!("asking for track settings (attempt {})", round + 1))?;
+        last = match raw.strip_prefix(REJECTED) {
+            Some(why) => why.to_string(),
+            None => match serde_json::from_str::<TrackSettings>(&raw) {
+                Ok(settings) => return Ok(settings.clamped()),
+                Err(e) => format!("that didn't parse as track settings: {e}"),
+            },
+        };
+        log::info!("[trackllm] settings attempt {} failed: {last}", round + 1);
+    }
+    bail!("the model's settings didn't parse twice; last time: {last}")
+}
+
+/// Draw a lap from settings, with the walker rather than the model.
+///
+/// Settings at their extremes draw less often, so a lap that won't come on any of 24 seeds is
+/// tried again with its length and corner rate halfway back to normal before giving up. A lap
+/// is kept only once it is repaired and reviewed clean, as `tracklayout::search` does.
+pub fn draw_from_settings(settings: &TrackSettings, seed: u64) -> Result<TrackProgram> {
+    let first = settings.clamped();
+    let normal = TrackSettings::default();
+    let eased = TrackSettings {
+        lap_length: (first.lap_length + normal.lap_length) / 2.0,
+        corners_per_km: (first.corners_per_km + normal.corners_per_km) / 2.0,
+        ..first.clone()
+    };
+    for s in [&first, &eased] {
+        let knobs = LayoutKnobs::from_settings(s);
+        for i in 0..24u64 {
+            let Some(mut prog) = draw_with(seed.wrapping_add(i), &knobs) else { continue };
+            repair(&mut prog);
+            let r = review(&prog);
+            if r.fatal.is_empty() && r.problems.is_empty() {
+                return Ok(prog);
+            }
+        }
+    }
+    bail!("those settings didn't draw a lap on any of 48 tries; try a shorter or less twisty track")
 }
 
 /// What is wrong with a program, and what is merely unlike a published one.
@@ -1204,6 +1257,7 @@ pub fn review(prog: &TrackProgram) -> Review {
 #[serde(rename_all = "camelCase")]
 struct GenerateRequest<'a> {
     brief: &'a str,
+    mode: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     previous: Option<&'a str>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -1213,6 +1267,7 @@ struct GenerateRequest<'a> {
 #[derive(serde::Deserialize)]
 struct GenerateResponse {
     program: Option<serde_json::Value>,
+    settings: Option<serde_json::Value>,
     error: Option<String>,
 }
 
@@ -1223,9 +1278,10 @@ pub struct ControlPlane {
 }
 
 impl Ask for ControlPlane {
-    async fn ask(&self, brief: &str, attempt: &Attempt) -> Result<String> {
+    async fn ask(&self, protocol: Protocol, brief: &str, attempt: &Attempt) -> Result<String> {
         let body = GenerateRequest {
             brief,
+            mode: protocol.wire(),
             previous: attempt.previous.as_deref(),
             problems: attempt.problems.clone(),
         };
@@ -1263,7 +1319,11 @@ impl Ask for ControlPlane {
 
         let parsed: GenerateResponse =
             serde_json::from_str(&text).context("the track service sent something unreadable")?;
-        match (parsed.program, parsed.error) {
+        let answer = match protocol {
+            Protocol::Program => parsed.program,
+            Protocol::Settings => parsed.settings,
+        };
+        match (answer, parsed.error) {
             (Some(p), _) => Ok(serde_json::to_string(&p)?),
             (None, Some(e)) => bail!("{e}"),
             (None, None) => bail!("the track service sent no program and no reason"),
@@ -1302,7 +1362,7 @@ mod tests {
     }
 
     impl Ask for Canned {
-        async fn ask(&self, _brief: &str, attempt: &Attempt) -> Result<String> {
+        async fn ask(&self, _protocol: Protocol, _brief: &str, attempt: &Attempt) -> Result<String> {
             self.seen.borrow_mut().push(attempt.clone());
             self.answers
                 .borrow_mut()
@@ -1338,47 +1398,55 @@ mod tests {
         assert_eq!(validate(&p), Vec::<String>::new());
     }
 
-    /// The Zod schema in `control-plane/src/trackgen.ts` names every field, and nothing but
-    /// this test stops the two drifting apart. A rename here fails loudly rather than
-    /// producing a model that confidently writes a field the app throws away.
+    /// Property names of an object in a schema.
+    fn props(schema: &serde_json::Value) -> std::collections::BTreeSet<String> {
+        schema["properties"].as_object().unwrap().keys().cloned().collect()
+    }
+
+    /// Keys serde wrote.
+    fn keys(v: &serde_json::Value) -> std::collections::BTreeSet<String> {
+        v.as_object().unwrap().keys().cloned().collect()
+    }
+
+    /// The schema in `packages/track-protocol` is what the model is held to, and nothing but
+    /// this test stops it drifting from serde. Both directions: a field the schema has and
+    /// serde doesn't read is one the model writes and the app throws away, and one serde
+    /// reads and the schema lacks is one the model is never asked for.
     #[test]
     fn the_program_serialises_with_the_names_the_schema_uses() {
+        let schema = Protocol::Program.schema();
         let p: TrackProgram = serde_json::from_str(EXAMPLE).unwrap();
         let v = serde_json::to_value(&p).unwrap();
-        for key in ["name", "author", "location", "width", "terrain", "start", "segments", "features"] {
-            assert!(v.get(key).is_some(), "the schema names `{key}`");
+        assert_eq!(keys(&v), props(&schema));
+        let terrain = &schema["properties"]["terrain"];
+        assert_eq!(keys(&v["terrain"]), props(terrain));
+        assert_eq!(keys(&v["terrain"]["relief"]), props(&terrain["properties"]["relief"]));
+        assert_eq!(keys(&v["start"]), props(&schema["properties"]["start"]));
+        let knot = crate::trackprog::Knot { at: 0.0, height: 0.0 };
+        assert_eq!(
+            keys(&serde_json::to_value(knot).unwrap()),
+            props(&schema["properties"]["elevation"]["items"])
+        );
+        for surface in terrain["properties"]["surface"]["enum"].as_array().unwrap() {
+            serde_json::from_value::<crate::trackprog::Surface>(surface.clone()).unwrap();
         }
-        for key in ["sizeX", "sizeZ", "samples", "scale", "relief"] {
-            assert!(v["terrain"].get(key).is_some(), "the schema names `terrain.{key}`");
+
+        let arms = schema["properties"]["segments"]["items"]["anyOf"].as_array().unwrap();
+        for (arm, wire) in arms.iter().zip([
+            serde_json::json!({ "kind": "straight", "length": 10.0, "rise": 0.0 }),
+            serde_json::json!({ "kind": "arc", "radius": 20.0, "angle": 90.0, "rise": 0.0 }),
+        ]) {
+            let seg: Segment = serde_json::from_value(wire).unwrap();
+            assert_eq!(keys(&serde_json::to_value(seg).unwrap()), props(arm));
         }
-        for key in ["amplitude", "wavelength", "seed", "texture", "tilt", "tiltAngle", "landforms", "landformHeight"] {
-            assert!(v["terrain"]["relief"].get(key).is_some(), "`relief.{key}`");
-        }
-        for key in ["x", "z", "angle"] {
-            assert!(v["start"].get(key).is_some(), "`start.{key}`");
-        }
-        // A lap may open on either — this one starts into a corner. What the check is for is
-        // that the tag is one of the two the schema uses, not which one it happens to be.
-        assert!(matches!(
-            v["segments"][0]["kind"].as_str(),
-            Some("straight") | Some("arc")
-        ));
-        let kinds: Vec<&str> = v["features"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|f| f["kind"].as_str())
-            .collect();
-        // camelCase on the wire, so a step-up is `stepUp` and not `step_up`.
-        assert!(kinds.contains(&"stepUp"), "{kinds:?}");
-        assert!(kinds.contains(&"tabletop"), "{kinds:?}");
-        // And every kind, not only the ones this example happens to use — the example is a
+
+        // Every kind, not only the ones this example happens to use — the example is a
         // walked lap now and its mix changes with the seed, which is no reason for the wire
-        // names to go unchecked.
+        // names to go unchecked. Lip and finish are set so serde writes them.
         use crate::trackprog::{Feature, ShapePoint};
         let one_of_each = [
-            Feature::Tabletop { at: 0.0, length: 30.0, height: 2.0, lip: 0.0, finish: false },
-            Feature::Double { at: 0.0, height: 1.0, gap: 3.0, lip: 5.0, finish: false },
+            Feature::Tabletop { at: 0.0, length: 30.0, height: 2.0, lip: 4.0, finish: true },
+            Feature::Double { at: 0.0, height: 1.0, gap: 3.0, lip: 5.0, finish: true },
             Feature::Roller { at: 0.0, length: 12.0, height: 0.8 },
             Feature::Whoops { at: 0.0, count: 6, spacing: 4.0, height: 0.6 },
             Feature::StepUp { at: 0.0, length: 25.0, height: 1.5 },
@@ -1391,14 +1459,50 @@ mod tests {
                 shape: vec![ShapePoint { u: 0.0, h: 0.0 }, ShapePoint { u: 1.0, h: 0.0 }],
             },
         ];
-        let names: Vec<String> = one_of_each
+        let feature = &schema["properties"]["features"]["items"];
+        let mut names = std::collections::BTreeSet::new();
+        let mut written = std::collections::BTreeSet::new();
+        for f in &one_of_each {
+            let v = serde_json::to_value(f).unwrap();
+            names.insert(v["kind"].as_str().unwrap().to_string());
+            written.extend(keys(&v));
+        }
+        let kinds: std::collections::BTreeSet<String> = feature["properties"]["kind"]["enum"]
+            .as_array()
+            .unwrap()
             .iter()
-            .map(|f| serde_json::to_value(f).unwrap()["kind"].as_str().unwrap().to_string())
+            .map(|k| k.as_str().unwrap().to_string())
             .collect();
-        assert_eq!(
-            names,
-            ["tabletop", "double", "roller", "whoops", "stepUp", "berm", "rut", "custom"]
-        );
+        // camelCase on the wire, so a step-up is `stepUp` and not `step_up`.
+        assert_eq!(names, kinds);
+        assert_eq!(written, props(feature));
+    }
+
+    #[test]
+    fn the_settings_serialise_with_the_names_the_schema_uses() {
+        let schema = Protocol::Settings.schema();
+        let v = serde_json::to_value(TrackSettings::default()).unwrap();
+        assert_eq!(keys(&v), props(&schema));
+        for surface in schema["properties"]["surface"]["enum"].as_array().unwrap() {
+            serde_json::from_value::<crate::trackprog::Surface>(surface.clone()).unwrap();
+        }
+    }
+
+    #[test]
+    fn settings_that_dont_parse_are_asked_for_once_more() {
+        let good = serde_json::to_string(&TrackSettings::default()).unwrap();
+        let ask = Canned::new(&["not json", &good]);
+        let got = block_on(ask_settings("sandy", &ask)).unwrap();
+        assert_eq!(got, TrackSettings::default().clamped());
+        assert!(block_on(ask_settings("sandy", &Canned::new(&["no", "still no"]))).is_err());
+    }
+
+    #[test]
+    fn settings_become_a_lap_that_reviews_clean() {
+        let prog = draw_from_settings(&TrackSettings::default(), 1).unwrap();
+        let r = review(&prog);
+        assert!(r.fatal.is_empty() && r.problems.is_empty(), "{:?}", r.problems);
+        assert!(prog.closure_error() < 2.0);
     }
 
     /// The example is what the model is shown, and `generate` puts every answer through
