@@ -304,6 +304,8 @@ pub struct ReviewOut {
     pub lap: LapRef,
     pub reference: LapRef,
     pub review: Review,
+    /// Other riders in the session worth comparing with, where the recorder saw them.
+    pub rivals: Vec<crate::others::Rival>,
 }
 
 /// Reviews lap `lap` of `path` against `ref_path`/`ref_lap`, or against the fastest other lap
@@ -373,7 +375,15 @@ pub fn coach_review(
     if let (Some(s), Some(o)) = (&r.setup, &r.opts) {
         review.setup.extend(crate::fixes::pressure_finding(s, o, r.optimal));
     }
-    Ok(ReviewOut { track_id: summary.track_id, track_name: summary.track_name, lap: this, reference, review })
+    // The other riders, timed over this lap's own sections.
+    let parts: Vec<crate::others::Part> = review
+        .sections
+        .iter()
+        .map(|s| crate::others::Part { name: s.section.name.clone(), start: s.section.start, end: s.section.end, time: s.lap_time })
+        .collect();
+    let ended = rec.laps().into_iter().find(|l| l.num == this.lap).and_then(|l| l.samples.last().map(|s| s.t)).unwrap_or(0.0);
+    let rivals = crate::others::rivals(&rec, &parts, this.time_ms, ended, rec.event.event_type == 2);
+    Ok(ReviewOut { track_id: summary.track_id, track_name: summary.track_name, lap: this, reference, review, rivals })
 }
 
 /// The setup the rider had on for a recording, as far as the coach could find and read it.
@@ -576,7 +586,11 @@ pub fn coach_lines(app: AppHandle, path: String) -> Result<Option<crate::lines::
         .filter(|l| l.whole && !l.invalid)
         .filter_map(|l| Some((l.num, Trace::new(l, rec.event.track_length)?)))
         .collect();
-    Ok(Some(crate::lines::lines(&laps, &reference)))
+    // Everyone else the recorder saw, for where the track will wear.
+    let me = crate::others::local_num(&rec);
+    let others: Vec<[f32; 2]> =
+        rec.frames.iter().flat_map(|f| &f.bikes).filter(|b| Some(b.num) != me && !b.crashed).map(|b| [b.x, b.z]).collect();
+    Ok(Some(crate::lines::lines(&laps, &reference, &others)))
 }
 
 /// The track's own terrain for a session: installed, readable, and lined up with the laps.

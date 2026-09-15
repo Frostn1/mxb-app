@@ -24,6 +24,7 @@ import {
   type Ground,
   type Lines,
   type ReviewOut,
+  type Rival,
   type SectionReview,
   type SessionSummary,
   type SetupChange,
@@ -309,6 +310,7 @@ export default function Review({
 
           <Setup path={path} findings={review.setup} />
           <LiveCues path={path} lap={lap} />
+          <Rivals rivals={data?.rivals ?? []} />
 
           <div>
             <Label>{t("review.focus")}</Label>
@@ -586,6 +588,46 @@ function Setup({ path, findings }: { path: string; findings: Finding[] }) {
             )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** The other riders in the session worth comparing with, and where each gains on this lap.
+ *  Empty, and hidden, for recordings from before the recorder saw other riders. */
+function Rivals({ rivals }: { rivals: Rival[] }) {
+  const t = useT();
+  if (rivals.length === 0) return null;
+  return (
+    <div>
+      <Label>{t("rivals.title")}</Label>
+      <div className="space-y-3 border border-border bg-card px-4 py-3">
+        {rivals.map((r) => (
+          <div key={`${r.num}-${r.lap}`}>
+            <div className="eyebrow">{t(`rivals.${r.why}` as TKey)}</div>
+            <div className="mt-0.5 flex flex-wrap items-baseline justify-between gap-2">
+              <span className="text-[13px] text-foreground">
+                {r.name}
+                {r.bike && <span className="ml-1.5 text-[12px] text-muted-foreground">{r.bike}</span>}
+              </span>
+              <span className="font-mono text-[12px] text-muted-foreground">
+                {t("rivals.lap", { lap: r.lap, time: lapTime(r.timeMs) })}
+              </span>
+            </div>
+            {r.gains.length === 0 ? (
+              <p className="mt-1 text-[12px] text-muted-foreground">{t("rivals.even")}</p>
+            ) : (
+              <ol className="mt-1.5 space-y-1">
+                {r.gains.map((g) => (
+                  <li key={g.section} className="grid grid-cols-[1fr_auto] gap-x-2 text-[12.5px]">
+                    <span className="text-muted-foreground">{g.section}</span>
+                    <span className="font-mono text-accent-foreground">{`−${g.gain.toFixed(2)} s`}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
