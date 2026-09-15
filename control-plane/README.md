@@ -148,9 +148,43 @@ Read them at mxbsecure.com/admin, signed in with a Steam account listed in
 bunx wrangler secret put ADMIN_KEY   # without it /v1/usage/stats answers 503, not 401
 ```
 
-The app's side is `src-tauri/src/usage.rs`. It is off in debug builds unless
-`MXB_ANALYTICS_DEV=1`, off for a run with `MXB_NO_ANALYTICS=1`, and off for good from the
-switch in Settings → General.
+The app's side is `crates/core/src/usage.rs`, shared by all three apps. It is off in debug
+builds unless `MXB_ANALYTICS_DEV=1`, off for a run with `MXB_NO_ANALYTICS=1`, and off for good
+from the switch in Settings → General. The names it may send are a closed list there
+(`KNOWN_EVENTS`), mirrored by the one here; `usage.test.ts` reads the Rust file and fails if
+the two drift.
+
+#### What holds the numbers up
+
+The endpoint cannot authenticate — a token for every install would itself be an identifier —
+so what keeps a figure worth deciding from is a stack of bounds rather than a credential:
+
+- **`application/json` is required.** Without it a report is a CORS *simple request*, which
+  means any web page can have its visitors post one from their own address — and the
+  per-address cap buys nothing when every visitor brings a fresh address. Insisting on a type
+  that needs a preflight, on a route that answers no CORS headers, is what closes that.
+- **Row ceilings.** Reports accumulate onto a `(install, app, day)` row, and nothing used to
+  bound the total: reports that each looked honest could put thousands of days of wall clock
+  inside one day. A row now stops at `MAX_DAY_MINUTES` / `MAX_DAY_SESSIONS`.
+- **A build signature**, where a deployment turns it on. Optional and **off by default**, and
+  it must stay off until signed builds are the ones in the field — switching early throws
+  everybody's numbers away silently.
+
+  ```sh
+  bunx wrangler secret put USAGE_SIGNING_KEY    # same value the apps are built with
+  # then, once signed builds have rolled out:
+  #   "MXB_USAGE_REQUIRE_SIGNATURE": "1" in wrangler.jsonc
+  ```
+
+  The apps pick the key up at build time from `MXB_USAGE_KEY`; a build without it (which is
+  what the public repo produces) signs nothing and is accepted while the switch is off. The
+  key ships inside a downloadable binary, so this is **not** authentication — it raises the
+  floor from "anyone with a terminal" to "someone willing to reverse a binary", which is the
+  whole of the ambition.
+
+None of that makes a field unforgeable — `version`, `os` and `game` are still whatever the
+caller said, and they are what "can I stop shipping 0.8.x" and "is GP Bikes worth carrying"
+are read off. Together the bounds make forging one cost more than the decision it would move.
 
 ## Security notes
 

@@ -23,7 +23,9 @@ mod surface;
 mod telemetry;
 mod tyres;
 
-use mxb_core::{config, game};
+use mxb_core::{config, game, usage};
+// `Manager` for `app_handle()` on the window a close event hands over.
+use tauri::Manager;
 
 #[tauri::command]
 fn get_config(app: tauri::AppHandle) -> config::AppConfig {
@@ -137,7 +139,35 @@ fn main() {
             mxb_core::trackview::read_track_placements,
             coach::coach_install_plugin,
             coach::coach_uninstall_plugin,
+            track_event,
         ])
+        .setup(|app| {
+            // Anonymous counters, under the same switch and the same config file as the manager's
+            // — which is also where the install id comes from. Coach does not mint one (no
+            // `mint-install-id` feature, exactly as the studio), so a machine with only Coach on
+            // it reports nothing rather than inventing a second identity for one computer.
+            //
+            // Until this existed Coach was a shipped app the numbers could not see at all: every
+            // decision about whether to keep building it was being made from the one source the
+            // rollups were meant to replace.
+            usage::start(app.handle(), usage::COACH);
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                usage::flush_on_exit(window.app_handle());
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running MXB Coach");
+}
+
+/// Count something the rider did.
+///
+/// A name and nothing else, exactly as in the manager and the studio: the backend holds the
+/// switch, the buffer and the vocabulary (`usage::KNOWN_EVENTS`), so there is no payload here to
+/// accidentally put a session path or a rider name into.
+#[tauri::command]
+fn track_event(name: String) {
+    usage::track(&name);
 }

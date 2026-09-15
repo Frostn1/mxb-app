@@ -40,6 +40,15 @@ declare global {
      *  the right default: a deployment that was never given a key has no admin surface
      *  rather than an open one. */
     ADMIN_KEY?: string;
+    /** Keys the build signature on `POST /v1/usage`, matching the key compiled into the apps.
+     *  Not authentication — the key ships inside a binary anyone can download — but it puts a
+     *  reverse-engineering step between the endpoint and a script. Unset means reports are not
+     *  checked. A secret. */
+    USAGE_SIGNING_KEY?: string;
+    /** `"1"` refuses an unsigned usage report. Not a secret — a var in `wrangler.jsonc`, so
+     *  turning it on is a reviewable diff. Leave it off until signed builds are the ones in the
+     *  field: switching early drops everybody's numbers and says nothing. */
+    MXB_USAGE_REQUIRE_SIGNATURE?: string;
     /** Keys the daily digest of a signup's IP address. Without it the digest is a plain
      *  hash, which is reversible for IPv4 — set it before open signup carries real load. */
     IP_HASH_SECRET?: string;

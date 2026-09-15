@@ -135,7 +135,7 @@ impl Buffer {
             let whole = now.duration_since(since).as_secs() / 60;
             if whole > 0 {
                 // Advance by whole minutes only, so the seconds either side of a flush are
-                // carried rather than rounded away every five minutes.
+                // carried rather than rounded away at every flush.
                 self.open_since = Some(since + Duration::from_secs(whole * 60));
                 self.minutes = self.minutes.saturating_add(whole as u32);
             }
@@ -157,6 +157,7 @@ const MAX_MINUTES: u32 = 1440;
 /// open twice as long. So every report says which app it is.
 pub const MANAGER: &str = "manager";
 pub const STUDIO: &str = "studio";
+pub const COACH: &str = "coach";
 
 /// Set once, by whichever binary called [`start`].
 static APP_ID: Mutex<&'static str> = Mutex::new(MANAGER);
@@ -247,6 +248,82 @@ pub fn allowed(cfg: &AppConfig) -> bool {
     cfg.analytics_enabled
 }
 
+/// Every name this project may report, as a closed list.
+///
+/// [`is_event_name`] is the privacy guarantee — it is what makes a path or a rider name
+/// impossible to send. This is the *integrity* one, and it exists because `track_event` is not
+/// a private door. Paid plugins are third-party modules mounted into the app's own window, and
+/// the plugin host hands each of them a raw `invoke`, so anything the webview can count, a
+/// plugin can count too. Without a closed list one could write rows of its own choosing into
+/// everybody's numbers — and, worse, fill [`MAX_EVENTS`] with names it invented, after which
+/// [`track`] drops every *new* real name until the next flush. A counter a third party can
+/// silence is not a counter.
+///
+/// It is also why the cap is now unreachable in ordinary running: this list is deliberately
+/// shorter than [`MAX_EVENTS`], so the "more than 64 buffered" warning means what it says
+/// rather than describing a busy afternoon.
+///
+/// Adding a name here is the deliberate half of adding a call site. The control plane keeps the
+/// same list (`control-plane/src/usage.ts`) and its `usage.test.ts` reads this file to prove the
+/// two have not drifted — which is what keeps the dashboard's "Never touched" panel honest,
+/// because a name missing from that list can never be reported as missing.
+pub const KNOWN_EVENTS: &[&str] = &[
+    // Lifecycle, from every app.
+    "app.start",
+    "app.update",
+    // The manager's pages. One name per tab; `view.plugin` is every plugin panel together,
+    // because naming each one would be unbounded cardinality.
+    "view.browse",
+    "view.library",
+    "view.downloads",
+    "view.locker",
+    "view.presets",
+    "view.manage",
+    "view.shop",
+    "view.hub",
+    "view.servers",
+    "view.ranked",
+    "view.studio",
+    "view.plugin",
+    "view.settings",
+    // What the manager is for.
+    "mod.detail",
+    "mod.install",
+    "mod.download",
+    "game.launch",
+    "preset.apply",
+    "preset.save",
+    "paint.publish",
+    "voice.join",
+    "server.join",
+    "overlay.open",
+    "frostmod.install",
+    "drop.import",
+    // Frost's Studio: its tools, and what they make.
+    "view.studio.designer",
+    "view.studio.paints",
+    "view.studio.rider",
+    "view.studio.pose",
+    "view.studio.track",
+    "view.studio.diagnose",
+    "view.studio.settings",
+    "track.generate",
+    "track.settings",
+    "track.build.install",
+    "paint.save",
+    // MXB Coach. It shares `view.settings` above with the manager — it is the same page, and
+    // the `app` column is what tells them apart. The studio counts its own as
+    // `view.studio.settings`, because there it is one tool among six rather than the shell.
+    "view.sessions",
+    "coach.session.open",
+    "coach.review",
+];
+
+/// Whether [`KNOWN_EVENTS`] holds this name.
+pub fn is_known_event(name: &str) -> bool {
+    KNOWN_EVENTS.contains(&name)
+}
+
 /// Count one thing.
 ///
 /// Deliberately infallible and silent: nothing in the app should be able to fail, slow down
@@ -254,6 +331,13 @@ pub fn allowed(cfg: &AppConfig) -> bool {
 /// where the mistake is, rather than travelling.
 pub fn track(name: &str) {
     if !ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+    // Before the shape check, and without a debug assertion: an unknown name is what a plugin
+    // sends, so it is refused rather than treated as a bug in this codebase. A first-party typo
+    // lands here too, and shows up as the name it meant to be sitting in "Never touched".
+    if !is_known_event(name) {
+        log::warn!("[usage] refusing to count {name:?} — not a name this app reports");
         return;
     }
     if !is_event_name(name) {
@@ -317,6 +401,54 @@ pub async fn flush(app: &AppHandle) {
     }
 }
 
+/// The header a signed report carries, matching the control plane's `SIGNATURE_HEADER`.
+const SIGNATURE_HEADER: &str = "X-MXB-Usage";
+
+/// The build key, or `None` in a build that was not given one.
+///
+/// `option_env!` rather than `env!`: the public repo builds without it, and must keep doing so.
+/// A build with no key sends no signature, which the endpoint accepts until a deployment turns
+/// [`MXB_USAGE_REQUIRE_SIGNATURE`](../../../control-plane/src/env.d.ts) on.
+const BUILD_KEY: Option<&str> = option_env!("MXB_USAGE_KEY");
+
+/// Sign a report body, when this build can.
+///
+/// The key is compiled into something anyone can download, so this is not authentication and
+/// is not meant to be: it is the difference between "anyone with a terminal can move these
+/// numbers" and "someone would have to reverse a binary first". What it actually defends is the
+/// cheap case — a script, or a web page quietly posting from its visitors' addresses, where the
+/// per-address cap buys nothing because every visitor brings a fresh one.
+///
+/// The timestamp is what bounds replay; see the endpoint for how far out it may be.
+fn signature(body: &str) -> Option<String> {
+    let key = BUILD_KEY?;
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    sign_with(key, seconds, body)
+}
+
+/// The header value itself, with the key and the clock passed in so it can be tested.
+///
+/// The construction — `v1.<seconds>.<body>`, MAC'd, rendered as lower-case hex, presented as
+/// `v1 <seconds> <mac>` — is written twice, here and in `control-plane/src/usage.ts`, with
+/// nothing but agreement holding the two together. Both sides test the same vector.
+fn sign_with(key: &str, seconds: u64, body: &str) -> Option<String> {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let mut mac = <Hmac<Sha256>>::new_from_slice(key.as_bytes()).ok()?;
+    mac.update(format!("v1.{seconds}.{body}").as_bytes());
+    let hex = mac
+        .finalize()
+        .into_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    Some(format!("v1 {seconds} {hex}"))
+}
+
 async fn report(app: &AppHandle) -> Outcome {
     if !ENABLED.load(Ordering::Relaxed) {
         return Outcome::Done;
@@ -333,8 +465,31 @@ async fn report(app: &AppHandle) -> Outcome {
         return Outcome::Done;
     };
     let url = format!("{}/v1/usage", control_plane());
+    // Serialized once, here, rather than by `.json()`: the signature is over the exact bytes
+    // that travel, so anything that re-serializes between signing and sending would produce a
+    // body the endpoint checks against a MAC for a different one.
+    let raw = match serde_json::to_string(&payload) {
+        Ok(raw) => raw,
+        Err(e) => {
+            // Nothing a retry fixes — the payload is the same shape every time.
+            log::warn!("[usage] couldn't serialize a report ({e}) — dropped");
+            return Outcome::Done;
+        }
+    };
     let sent = match client() {
-        Ok(client) => client.post(&url).json(&payload).send().await,
+        Ok(client) => {
+            // Signed before the body is handed over, so the bytes that were MAC'd are the bytes
+            // that go — and there is no second copy of the report kept alive to manage that.
+            let signed = signature(&raw);
+            let mut request = client
+                .post(&url)
+                .header("content-type", "application/json")
+                .body(raw);
+            if let Some(header) = signed {
+                request = request.header(SIGNATURE_HEADER, header);
+            }
+            request.send().await
+        }
         Err(e) => {
             log::debug!("[usage] no HTTP client: {e}");
             restore(payload);
@@ -472,7 +627,7 @@ pub fn flush_on_exit(app: &AppHandle) {
 fn client() -> anyhow::Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
         // Short on purpose: a counter is never worth holding a connection open for, and a
-        // report that times out is simply retried in five minutes.
+        // report that times out is simply retried at the next flush.
         .timeout(Duration::from_secs(15))
         .build()?)
 }
@@ -596,14 +751,65 @@ mod tests {
         assert_eq!(again.events, vec![Event { name: "view.browse".into(), count: 2 }]);
     }
 
+    /// The plugin case, which is the reason [`KNOWN_EVENTS`] exists.
+    ///
+    /// A third-party module holds the same `invoke` the app's own webview does, so this is the
+    /// only thing standing between somebody else's code and everybody's numbers.
     #[test]
-    fn a_call_site_generating_names_is_capped() {
+    fn a_name_this_app_does_not_report_is_refused() {
         let _guard = fresh();
-        for i in 0..MAX_EVENTS + 20 {
-            track(&format!("view.tab{i}"));
+        track("view.browse");
+        // Well-formed, plausible, and not ours.
+        track("replaycam.export");
+        track("view.tab7");
+
+        let report = take(&config_with_id(), "0.12.3").expect("something was counted");
+        assert_eq!(report.events, vec![Event { name: "view.browse".into(), count: 1 }]);
+    }
+
+    /// ...which is also what makes the buffer cap unreachable by anything but a bug.
+    ///
+    /// [`track`] drops *new* names once the buffer is full, so a vocabulary that could fill it
+    /// would let a busy session silence the names that had not been counted yet.
+    #[test]
+    fn the_vocabulary_cannot_fill_the_buffer() {
+        assert!(
+            KNOWN_EVENTS.len() < MAX_EVENTS,
+            "{} names against a cap of {MAX_EVENTS}",
+            KNOWN_EVENTS.len()
+        );
+    }
+
+    #[test]
+    fn every_name_this_app_reports_is_a_name() {
+        for name in KNOWN_EVENTS {
+            assert!(is_event_name(name), "{name} is in the list but is not an event name");
         }
-        let report = take(&config_with_id(), "0.12.3").unwrap();
-        assert_eq!(report.events.len(), MAX_EVENTS);
+        let mut sorted = KNOWN_EVENTS.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), KNOWN_EVENTS.len(), "a name is in the list twice");
+    }
+
+    /// The cap itself still holds where it can still be reached: a report that failed and is
+    /// being folded back in comes from the wire, not from [`track`].
+    #[test]
+    fn a_restored_report_cannot_overflow_the_buffer() {
+        let _guard = fresh();
+        let events = (0..MAX_EVENTS + 20)
+            .map(|i| Event { name: format!("view.tab{i}"), count: 1 })
+            .collect();
+        restore(Report {
+            install_id: String::new(),
+            app: MANAGER.to_string(),
+            version: String::new(),
+            os: String::new(),
+            game: String::new(),
+            sessions: 0,
+            minutes: 0,
+            events,
+        });
+        assert_eq!(BUFFER.lock().unwrap().events.len(), MAX_EVENTS);
     }
 
     #[test]
@@ -630,6 +836,27 @@ mod tests {
         let start = Instant::now();
         buffer.open_since = Some(start);
         assert_eq!(buffer.take_minutes(start + Duration::from_secs(86_400 * 5)), MAX_MINUTES);
+    }
+
+    /// The vector `control-plane/src/usage.test.ts` also checks.
+    ///
+    /// Two implementations of one construction, in two languages, joined by nothing but this
+    /// number. A build whose signature the endpoint rejects reports nothing at all once a
+    /// deployment requires one, and the only sign of it would be numbers quietly going flat.
+    #[test]
+    fn a_signature_is_built_the_way_the_endpoint_rebuilds_it() {
+        assert_eq!(
+            sign_with("a-build-key", 1_700_000_000, r#"{"installId":"x"}"#).unwrap(),
+            "v1 1700000000 78626f503fcdc861e76c223f96c36373bdd848c8e9aeacca28ee27d41e40db86",
+        );
+    }
+
+    /// The public build has no key, and must keep working without one.
+    #[test]
+    fn a_build_without_a_key_signs_nothing() {
+        if BUILD_KEY.is_none() {
+            assert!(signature("{}").is_none());
+        }
     }
 
     #[test]
