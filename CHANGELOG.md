@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- Secured mods that won't unlock now tell you why. If you have one in your mods and aren't signed
+  in with Steam, the app says so and signs you in from the notice. If you haven't enrolled yet, it
+  takes you to Settings to do that first. The Unlock button in the Library offers Steam sign-in
+  too.
 - Your secured content survives a spring clean. The key file that sits next to a protected track
   is the easiest thing in your mods folder to delete by accident — and without it the track
   quietly stops showing up in game. The app now keeps its own copy of every key it unlocks, and

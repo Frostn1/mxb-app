@@ -600,6 +600,11 @@ export const es: Translation = {
   "settings.secReasonLocked": "Aún no hay clave para este contenido en tu cuenta.",
   "settings.secReasonUnreadable": "No es un archivo mxbsecure válido.",
   "settings.unlockNeedsSteam": "Inicia sesión con Steam primero: el desbloqueo está ligado a tu cuenta de Steam.",
+  "secure.promptTitle_one": "Tienes un mod protegido por desbloquear",
+  "secure.promptTitle_other": "Tienes {{count}} mods protegidos por desbloquear",
+  "secure.promptSteam": "Los mods protegidos están ligados a tu cuenta de Steam. Inicia sesión para desbloquear.",
+  "secure.promptEnroll": "Primero regístrate con tu código de invitación. Está en Ajustes, en Sincronización de pinturas.",
+  "secure.promptEnrollBtn": "Abrir Ajustes",
   "settings.unlockNotOwned": "Aún no posees este contenido en esta cuenta.",
   "secure.intro":
     "Elige un archivo, bloquéalo y luego verifica que se desbloquea. Verificar descifra el blob aquí mismo y lo compara con el original, byte a byte — la prueba de que va y vuelve en esta máquina.",

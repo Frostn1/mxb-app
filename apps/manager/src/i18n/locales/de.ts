@@ -607,6 +607,11 @@ export const de: Translation = {
   "settings.secReasonLocked": "Noch kein Schlüssel für diesen Inhalt auf deinem Konto.",
   "settings.secReasonUnreadable": "Das ist keine gültige mxbsecure-Datei.",
   "settings.unlockNeedsSteam": "Melde dich zuerst mit Steam an — das Freischalten ist an dein Steam-Konto gebunden.",
+  "secure.promptTitle_one": "Du hast einen gesicherten Mod zum Freischalten",
+  "secure.promptTitle_other": "Du hast {{count}} gesicherte Mods zum Freischalten",
+  "secure.promptSteam": "Gesicherte Mods sind an dein Steam-Konto gebunden. Melde dich zum Freischalten an.",
+  "secure.promptEnroll": "Registriere dich zuerst mit deinem Einladungscode. Das geht in den Einstellungen unter Lackierungs-Sync.",
+  "secure.promptEnrollBtn": "Einstellungen öffnen",
   "settings.unlockNotOwned": "Du besitzt diesen Inhalt auf diesem Konto noch nicht.",
   "secure.intro":
     "Datei wählen, sperren, dann das Entsperren prüfen. Beim Prüfen wird das Blob hier entschlüsselt und Byte für Byte mit dem Original verglichen — der Beleg, dass es auf diesem Rechner zurückkommt.",

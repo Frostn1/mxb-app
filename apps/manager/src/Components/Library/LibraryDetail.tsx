@@ -35,6 +35,7 @@ import { Trans } from "@/i18n";
 import { ContextBarLeft } from "../Shell/ContextBar";
 import { useT } from "@/i18n";
 import { Button } from "@frost/shared/Components/ui/button";
+import { useSteamLink } from "@/lib/useSteamLink";
 
 interface LibraryDetailProps {
   entry: LibraryEntry;
@@ -73,6 +74,7 @@ export default function LibraryDetail({
   const [view3d, setView3d] = useState(false);
   const [viewTrack, setViewTrack] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
+  const { linkSteam } = useSteamLink({ onUnlocked: onChanged });
   // A track has its own viewer: it isn't a model with paints, it's a terrain grid.
   const isTrack = entry.category === "track";
   // A secured file with no key on this account yet — offer to unlock it right here.
@@ -90,6 +92,7 @@ export default function LibraryDetail({
       if (/no Steam account linked/i.test(msg) || /Steam ID/i.test(msg)) {
         toast.error(t("settings.mxbsecureUnlockFail"), {
           description: t("settings.unlockNeedsSteam"),
+          action: { label: t("settings.steamLinkBtn"), onClick: () => void linkSteam() },
         });
       } else if (/not entitled/i.test(msg)) {
         toast.error(t("settings.mxbsecureUnlockFail"), {

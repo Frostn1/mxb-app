@@ -19,6 +19,7 @@ import ModDetail from "../ModDetail/ModDetail";
 import DropZone from "../Dropzone/DropZone";
 import RuntimeBanner from "../RuntimeBanner/RuntimeBanner";
 import UpdateBanner from "../UpdateBanner/UpdateBanner";
+import SecurePrompt from "./SecurePrompt";
 import Settings, { type SectionId } from "../Settings/Settings";
 import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import ReleaseShowcase from "../Showcase/ReleaseShowcase";
@@ -196,6 +197,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           there is nowhere to install to before the MX Bikes folder is known. The overlay
           window renders its own tree and deliberately gets no drop target. */}
       <DropZone />
+      <SecurePrompt onOpenSettings={openSettingsSection} />
       <TopRail
         view={view}
         plugins={plugins}
