@@ -954,6 +954,13 @@ export const fr: Translation = {
   "serverBrowser.join": "Rejoindre",
   "serverBrowser.joinFailed": "Impossible de rejoindre ce serveur",
   "serverBrowser.waitInLine": "Faire la queue",
+  "serverBrowser.trackMissing": "Tu n'as pas cette piste",
+  "serverBrowser.installJoin": "Installer et rejoindre",
+  "serverBrowser.installJoinHint": "Installe {{title}} depuis mxb-mods.com, puis rejoint",
+  "serverBrowser.installing": "Installation",
+  "serverBrowser.installFailed": "Impossible d'installer {{title}}",
+  "serverBrowser.buyTrack": "Acheter",
+  "serverBrowser.buyHint": "Ouvre {{name}} dans la boutique",
   "serverBrowser.inLine": "#{{position}} dans la file",
   "serverBrowser.unnamed": "Serveur sans nom",
   "serverBrowser.full": "Serveur plein",
@@ -2005,6 +2012,9 @@ export const fr: Translation = {
     "Impossible de joindre la liste pour l'instant — voici la dernière connue.",
   "supporters.optOut":
     "Les noms sont affichés avec accord. Un message sur Discord ou Buy Me a Coffee et le vôtre est retiré aussitôt.",
+  "supporters.contributors": "Contributeurs",
+  "supporters.contributorsDesc":
+    "Ceux qui ont amélioré l'app avec leurs idées, leurs tests et leurs retours.",
   "reshade.needsGameFolder":
     "ReShade se trouve dans ton dossier {{game}} — indique-le dans Dossier de jeu, ou pointe directement dessus ici.",
   "reshade.folder": "Recherche dans ton dossier {{game}} :",

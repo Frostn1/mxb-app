@@ -36,6 +36,7 @@ import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
 import { deleteShare, publishShare, readShare, updateShare } from "./liveshare";
 import { leaveQueue, pruneQueue, putQueue, queueCounts } from "./serverqueue";
 import { generateTrack } from "./trackgen";
+import { getTracks, resolveTrackCatalog, trackArt } from "./trackcatalog";
 import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
 import { bearer, hashToken, newToken, tokenMatches } from "./auth";
 import {
@@ -105,6 +106,7 @@ export default {
         pruneUsage(env),
         pruneReports(env),
         pruneQueue(env),
+        resolveTrackCatalog(env),
       ]).then(
         () => undefined,
       ),
@@ -172,6 +174,12 @@ async function route(request: Request, env: Env): Promise<Response> {
   // secret; it is the same name/region/address a server browser shows, and `agent_url` is
   // deliberately not selected, so the admin API's location stays private.
   if (method === "GET" && path === "/v1/servers") return listServers(env);
+
+  // What a server's track is and its picture, for the app's server tiles. Public like the
+  // server list: a player with no account browses servers too, and it's catalogue data.
+  if (method === "GET" && path === "/v1/tracks") return getTracks(url, env);
+  const art = /^\/v1\/tracks\/art\/([^/]{1,200})$/.exec(path);
+  if (art && method === "GET") return trackArt(decodeURIComponent(art[1]), env);
 
   // A provisioned box announcing itself. Authenticated by the agent token in its own row,
   // not by an account bearer — the machine holds no account and has no way to be given one.

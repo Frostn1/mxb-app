@@ -1,4 +1,4 @@
-import { Coffee, ExternalLink, RefreshCw } from "lucide-react";
+import { Coffee, ExternalLink, Lightbulb, RefreshCw } from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { useI18n } from "@/i18n";
 import { getLocale } from "@/i18n";
@@ -103,6 +103,31 @@ export default function SupportersCard() {
             </span>
           </div>
         )
+      )}
+
+      {manifest.contributors.length > 0 && (
+        <div className="flex flex-col gap-1.5 pt-1">
+          <span className="text-[11.5px] font-semibold text-foreground/80">
+            {t("supporters.contributors")}
+          </span>
+          <span className="text-[11.5px] leading-relaxed text-muted-foreground">
+            {t("supporters.contributorsDesc")}
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {manifest.contributors.map((person) => (
+              <span
+                key={person.name}
+                className="flex items-center gap-1.5 rounded-full border border-input bg-foreground/[0.03] px-2.5 py-1 text-[12px] text-foreground/85"
+              >
+                <Lightbulb className="size-3 flex-none text-primary" />
+                {person.name}
+                {person.note && (
+                  <span className="text-[10.5px] text-faint">{person.note}</span>
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* Only after a fetch actually failed. Saying "this list may be out of date" on

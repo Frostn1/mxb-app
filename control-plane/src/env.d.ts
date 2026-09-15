@@ -82,6 +82,12 @@ declare global {
     SIGNIN_LIMITER?: RateLimit;
     /** Rate limit on `/v1/keys/grant`, per account. Optional for the same reason. */
     KEY_GRANT_LIMITER?: RateLimit;
+    /** How the shop's catalogue dump is authenticated: `header:<name>`, `basic:<user>`,
+     *  `bearer` or `query:<name>`. With `SHOP_CATALOG_KEY`, lets the track catalogue find sold
+     *  tracks and their prices. Unset means mxb-mods.com only. */
+    SHOP_CATALOG_AUTH?: string;
+    /** The shop catalogue's key. A secret. */
+    SHOP_CATALOG_KEY?: string;
   }
 }
 

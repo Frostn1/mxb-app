@@ -933,6 +933,13 @@ export const en = {
   "serverBrowser.join": "Join",
   "serverBrowser.joinFailed": "Couldn't join that server",
   "serverBrowser.waitInLine": "Wait in line",
+  "serverBrowser.trackMissing": "You don't have this track",
+  "serverBrowser.installJoin": "Install & join",
+  "serverBrowser.installJoinHint": "Installs {{title}} from mxb-mods.com, then joins",
+  "serverBrowser.installing": "Installing",
+  "serverBrowser.installFailed": "Couldn't install {{title}}",
+  "serverBrowser.buyTrack": "Buy",
+  "serverBrowser.buyHint": "Opens {{name}} in the shop",
   "serverBrowser.inLine": "#{{position}} in line",
   "serverBrowser.unnamed": "Unnamed server",
   "serverBrowser.full": "Server full",
@@ -1974,6 +1981,9 @@ export const en = {
     "Couldn't reach the list just now — this is the last one we saw.",
   "supporters.optOut":
     "Names are shown with permission. Ask on Discord or Buy Me a Coffee and yours comes straight off.",
+  "supporters.contributors": "Contributors",
+  "supporters.contributorsDesc":
+    "People who made the app better with ideas, testing and feedback.",
   "reshade.needsGameFolder":
     "ReShade sits in your {{game}} folder — set that under Game folder, or point straight at it here.",
   "reshade.folder": "Looking in your {{game}} folder:",

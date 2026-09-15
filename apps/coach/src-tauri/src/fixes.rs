@@ -41,6 +41,38 @@ const STIFF_SHOCK: &[Step] = &[
     step(Field::ShockHighCompression, -1, "Softer high-speed compression on the bigger hits."),
     step(Field::ShockSpring, -1, "Still not using it: a softer spring."),
 ];
+const BOTTOMING_SHOCK_SLOW: &[Step] = &[
+    step(Field::ShockLowCompression, 2, "Firmer low-speed compression holds the rear up under braking and in turns."),
+    step(Field::ShockSpring, 1, "Still bottoming after that: a stiffer spring."),
+    step(Field::ShockPreload, 1, "A little more preload keeps it higher in its stroke."),
+];
+const BRAKE_DIVE: &[Step] = &[
+    step(Field::ForkCompression, 1, "Firmer compression holds the front up under braking."),
+    step(Field::ForkOil, 1, "More oil firms up the deep part of the stroke."),
+    step(Field::ForkPreload, 1, "A little more preload starts the fork higher."),
+];
+const EXIT_SQUAT: &[Step] = &[
+    step(Field::ShockLowCompression, 1, "Firmer low-speed compression stops the rear squatting on the gas."),
+    step(Field::ShockPreload, 1, "A little more preload lifts the rear and puts weight on the front."),
+];
+const SHOCK_KICK: &[Step] = &[step(Field::ShockRebound, 1, "Slower rebound stops the rear springing up off the lip.")];
+const PACKING_FORK: &[Step] = &[
+    step(Field::ForkRebound, -2, "Faster rebound lets the fork come back up between hits."),
+    step(Field::ForkCompression, -1, "Softer compression, so each hit pushes it down less."),
+];
+const PACKING_SHOCK: &[Step] = &[
+    step(Field::ShockRebound, -2, "Faster rebound lets the shock come back up between hits."),
+    step(Field::ShockLowCompression, -1, "Softer low-speed compression, so each hit pushes it down less."),
+];
+const REAR_LOW: &[Step] = &[step(Field::ShockPreload, 1, "More shock preload lifts the rear and levels the bike.")];
+const FRONT_LOW: &[Step] = &[
+    step(Field::ForkPreload, 1, "More fork preload lifts the front."),
+    step(Field::ShockPreload, -1, "Or a little less shock preload lowers the rear."),
+];
+const FRONT_PUSH: &[Step] = &[
+    step(Field::ForkCompression, -1, "Softer fork compression lets the front dig in."),
+    step(Field::ShockPreload, 1, "A little more shock preload puts more weight on the front."),
+];
 const GEARING_TALL: &[Step] =
     &[step(Field::RearSprocket, -1, "One tooth less on the rear: taller gearing, so it pulls longer before the limiter.")];
 const GEARING_SHORT: &[Step] =
@@ -54,6 +86,15 @@ fn steps(skill: &str) -> &'static [Step] {
     match skill {
         "setup_bottoming_fork" => BOTTOMING_FORK,
         "setup_bottoming_shock" => BOTTOMING_SHOCK,
+        "setup_bottoming_shock_slow" => BOTTOMING_SHOCK_SLOW,
+        "setup_brake_dive" => BRAKE_DIVE,
+        "setup_exit_squat" => EXIT_SQUAT,
+        "setup_shock_kick" => SHOCK_KICK,
+        "setup_packing_fork" => PACKING_FORK,
+        "setup_packing_shock" => PACKING_SHOCK,
+        "setup_rear_low" => REAR_LOW,
+        "setup_front_low" => FRONT_LOW,
+        "setup_front_push" => FRONT_PUSH,
         "setup_stiff_fork" => STIFF_FORK,
         "setup_stiff_shock" => STIFF_SHOCK,
         "setup_gearing_tall" => GEARING_TALL,
@@ -207,6 +248,19 @@ mod tests {
         assert_eq!((c[1].from, c[1].to, c[1].writes), (Some(0), Some(0), false));
         assert_eq!(c[2].from_value.as_deref(), Some("6.1 N/mm"));
         assert_eq!(c[2].to_value.as_deref(), Some("6.3 N/mm"));
+    }
+
+    #[test]
+    fn every_setup_tip_the_review_gives_has_a_fix() {
+        let tips = [
+            "setup_bottoming_fork", "setup_bottoming_shock", "setup_bottoming_shock_slow", "setup_stiff_fork",
+            "setup_stiff_shock", "setup_gearing_tall", "setup_gearing_short", "setup_swingarm", "setup_brake_dive",
+            "setup_exit_squat", "setup_shock_kick", "setup_packing_fork", "setup_packing_shock", "setup_rear_low",
+            "setup_front_low", "setup_front_push",
+        ];
+        for s in tips {
+            assert!(!steps(s).is_empty(), "{s}");
+        }
     }
 
     #[test]
