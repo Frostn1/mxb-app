@@ -84,14 +84,91 @@ export interface TrackPreview {
 }
 
 /**
+ * What a model is asked for. `program` is the whole lap, drawn by the model and measured by
+ * the app, and only a strong model manages it. `settings` is the character only, and the
+ * app's own walker draws the lap, so any model can do it, a free one included.
+ */
+export type GenerateMode = "program" | "settings";
+
+/** The character a model picked. Mirrors `TrackSettings` in `src-tauri/src/tracklayout.rs`. */
+export interface TrackSettings {
+  name: string;
+  location: string;
+  lapLength: number;
+  width: number;
+  cornersPerKm: number;
+  apexRadius: number;
+  sweepShare: number;
+  startStraight: number;
+  jumpDensity: number;
+  bigJumpShare: number;
+  jumpScale: number;
+  waves: number;
+  surface: "soil" | "sand" | "grass";
+  wear: number;
+  roughness: number;
+  hills: number;
+  tilt: number;
+  landforms: number;
+  elevationChanges: number;
+}
+
+/** A generated track, and the settings it was drawn from when that was the mode. */
+export interface Generated {
+  program: TrackProgram;
+  settings: TrackSettings | null;
+}
+
+/**
  * Ask for a track.
  *
  * Slow on purpose — the model lays out a lap that has to close, and the app builds and
  * measures every answer before accepting it, retrying with the measurements when it doesn't
- * land. Minutes, not seconds.
+ * land. Minutes, not seconds. Settings mode is seconds.
  */
-export function generateTrack(brief: string): Promise<TrackProgram> {
-  return invoke<TrackProgram>("generate_track", { brief });
+export function generateTrack(brief: string, mode: GenerateMode): Promise<Generated> {
+  return invoke<Generated>("generate_track", { brief, mode });
+}
+
+/** Which API shape a model of the user's own speaks. */
+export type ModelKind = "openAi" | "anthropic";
+
+/** A model of the user's own, as the app shows it: never the key, only whether there is one. */
+export interface TrackModel {
+  kind: ModelKind;
+  baseUrl: string;
+  model: string;
+  hasKey: boolean;
+}
+
+/** The saved model, or null when tracks go through the MXB account. */
+export function getTrackModel(): Promise<TrackModel | null> {
+  return invoke<TrackModel | null>("get_track_model");
+}
+
+/** Save a model. Leave `key` out to keep the saved one. */
+export function setTrackModel(
+  kind: ModelKind,
+  baseUrl: string,
+  model: string,
+  key?: string,
+): Promise<TrackModel> {
+  return invoke<TrackModel>("set_track_model", { kind, baseUrl, model, key });
+}
+
+/** Back to the MXB account. */
+export function clearTrackModel(): Promise<void> {
+  return invoke<void>("clear_track_model");
+}
+
+/** One small request to the model on screen, saved or not. Rejects with the reason. */
+export function testTrackModel(
+  kind: ModelKind,
+  baseUrl: string,
+  model: string,
+  key?: string,
+): Promise<void> {
+  return invoke<void>("test_track_model", { kind, baseUrl, model, key });
 }
 
 /** A track to start from, with no model involved. */
