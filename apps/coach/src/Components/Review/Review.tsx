@@ -420,8 +420,6 @@ function Setup({ path, findings }: { path: string; findings: Finding[] }) {
     setPlan(null);
     coachSetupPlan(path, skills).then(setPlan).catch(() => {});
   }, [path, skills]);
-  const fixes = (mine: Finding[]) =>
-    mine.map((f) => plan?.fixes.find((x) => x.skill === f.skill)).filter((x): x is SetupFix => x != null);
   const writes = (plan?.saveAs != null && plan.fixes.some((f) => f.changes.some((c) => c.writes))) ?? false;
   const save = async () => {
     setSaving(true);
@@ -443,10 +441,18 @@ function Setup({ path, findings }: { path: string; findings: Finding[] }) {
           return (
             <div key={g.key}>
               <div className="mb-1.5 eyebrow">{t(g.key)}</div>
-              <Notes findings={mine} />
-              {fixes(mine).map((f) => (
-                <Changes key={f.skill} fix={f} />
-              ))}
+              {/* Each tip with the changes behind it right under it. */}
+              <div className="space-y-3">
+                {mine.map((f) => {
+                  const fix = plan?.fixes.find((x) => x.skill === f.skill);
+                  return (
+                    <div key={f.skill + f.title}>
+                      <Notes findings={[f]} />
+                      {fix && <Changes fix={fix} />}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           );
         })}

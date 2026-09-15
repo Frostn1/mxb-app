@@ -268,7 +268,8 @@ pub fn pressure_fix(setup: &Setup, opts: &BikeOptions, optimal: [Option<f32>; 2]
             let best = (0..o.count)
                 .min_by(|&a, &b| (o.values[a] as f32 - opt).abs().total_cmp(&(o.values[b] as f32 - opt).abs()))
                 .unwrap_or(0) as i32;
-            let why = format!("The tyre is made for {opt:.0} kPa and it's at {now:.1}.");
+            let _ = now;
+            let why = "Back to what the tyre is made for.".to_string();
             make(f, best - setup.get(f) as i32, why, Some(setup), Some(opts))
         })
         .collect();
