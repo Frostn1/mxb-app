@@ -3498,6 +3498,166 @@ struct StockGuess {
     preview: String,
 }
 
+/// The longest edge of a server card's track art. The cards are about 260 px wide.
+const CARD_ART_MAX: u32 = 560;
+
+/// A file by path, size and mtime, so a cache entry dies with the file it came from.
+type Stamped = (String, u64, u64);
+type StampCache = std::sync::Mutex<std::collections::HashMap<Stamped, Option<String>>>;
+
+/// The folder inside each track archive, which costs opening the archive to learn.
+static TRACK_FOLDERS: std::sync::LazyLock<StampCache> = std::sync::LazyLock::new(Default::default);
+/// Card art already made, which costs an image decode.
+static CARD_ART: std::sync::LazyLock<StampCache> = std::sync::LazyLock::new(Default::default);
+
+fn cached(map: &StampCache, key: Stamped, make: impl FnOnce() -> Option<String>) -> Option<String> {
+    if let Some(hit) = map.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return hit.clone();
+    }
+    let value = make();
+    map.lock().unwrap_or_else(|e| e.into_inner()).insert(key, value.clone());
+    value
+}
+
+/// Card art for the server browser: each track id the player has, mapped to its preview.
+///
+/// One call for the whole list. Per card, [`guess_server_track`] would scan the library once
+/// a card and ask catalogues online. Ids the player doesn't have are left out. Everything is
+/// kept for the session, so a refresh costs a directory listing.
+#[tauri::command]
+async fn server_track_previews(
+    app: tauri::AppHandle,
+    tracks: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let entries = scan_library(app.clone(), "tracks".into()).await.unwrap_or_default();
+    let install = config::load(&app).map(|c| c.install_dir()).unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || track_previews(&entries, &install, tracks))
+        .await
+        .map_err(|e| format!("server_track_previews task failed: {e}"))
+}
+
+enum ArtSource {
+    Installed(usize),
+    /// Not installed, so maybe stock. Carries an id as the server spelled it.
+    Stock(String),
+}
+
+fn track_previews(
+    entries: &[library::LibraryEntry],
+    install: &str,
+    tracks: Vec<String>,
+) -> std::collections::HashMap<String, String> {
+    use rayon::prelude::*;
+    use std::collections::HashMap;
+    let stamp = |e: &library::LibraryEntry| (e.path.clone(), e.size, e.modified);
+
+    // Folded id to the spellings asked for, since two spellings can name one track.
+    let mut want: HashMap<String, Vec<String>> = HashMap::new();
+    for id in tracks {
+        let folded = fold_name(&id);
+        if !folded.is_empty() {
+            want.entry(folded).or_default().push(id);
+        }
+    }
+
+    // The order `guess_server_track` uses: file name, then the folder inside, then stock.
+    let mut found: HashMap<String, ArtSource> = HashMap::new();
+    for (i, e) in entries.iter().enumerate() {
+        let folded = fold_name(&library::strip_ext(&e.name));
+        if want.contains_key(&folded) {
+            found.entry(folded).or_insert(ArtSource::Installed(i));
+        }
+    }
+    if found.len() < want.len() {
+        let folders: Vec<Option<String>> = entries
+            .par_iter()
+            .map(|e| {
+                cached(&TRACK_FOLDERS, stamp(e), || {
+                    mxb_core::track::folder_name(std::path::Path::new(&e.path))
+                })
+            })
+            .collect();
+        for (i, folder) in folders.iter().enumerate() {
+            if let Some(folded) = folder.as_deref().map(fold_name) {
+                if want.contains_key(&folded) {
+                    found.entry(folded).or_insert(ArtSource::Installed(i));
+                }
+            }
+        }
+    }
+    for (folded, ids) in &want {
+        found
+            .entry(folded.clone())
+            .or_insert_with(|| ArtSource::Stock(ids[0].clone()));
+    }
+
+    found
+        .into_par_iter()
+        .filter_map(|(folded, source)| {
+            let art = match source {
+                ArtSource::Installed(i) => {
+                    let e = &entries[i];
+                    cached(&CARD_ART, stamp(e), || {
+                        pkz::read_preview_at(std::path::Path::new(&e.path), CARD_ART_MAX)
+                            .ok()
+                            .flatten()
+                    })
+                }
+                ArtSource::Stock(id) => {
+                    cached(&CARD_ART, (format!("stock:{folded}"), 0, 0), || {
+                        let hit = trackstock::find(install, &id)?;
+                        trackstock::preview(install, &hit)
+                    })
+                }
+            }?;
+            Some((folded, art))
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .flat_map(|(folded, art)| {
+            want[&folded].iter().map(move |id| (id.clone(), art.clone())).collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod card_art_tests {
+    use super::*;
+
+    #[test]
+    fn every_spelling_of_an_installed_track_gets_its_art() {
+        let root = std::env::temp_dir().join(format!("card-art-{}", std::process::id()));
+        let track = root.join("Walnut");
+        std::fs::create_dir_all(&track).unwrap();
+        image::RgbImage::from_pixel(1600, 900, image::Rgb([200, 120, 40]))
+            .save(track.join("preview.png"))
+            .unwrap();
+        let entry = library::LibraryEntry {
+            name: "Walnut".into(),
+            path: track.to_string_lossy().into_owned(),
+            folder: String::new(),
+            size: 1,
+            modified: 1,
+            kind: "folder".into(),
+            category: "tracks".into(),
+            parent: None,
+            secured: false,
+            locked: false,
+        };
+
+        let art = track_previews(
+            &[entry],
+            "",
+            vec!["walnut".into(), "WALNUT".into(), "not_installed".into()],
+        );
+        std::fs::remove_dir_all(&root).ok();
+
+        assert!(art["walnut"].starts_with("data:image/jpeg;base64,"));
+        assert_eq!(art["walnut"], art["WALNUT"]);
+        assert!(!art.contains_key("not_installed"));
+    }
+}
+
 fn shop_guess(mut guess: TrackGuess, hit: mods::shop_catalog::ShopMod, exact: bool) -> TrackGuess {
     guess.source = "shop".into();
     guess.product_id = hit.id;
@@ -6412,6 +6572,7 @@ fn main() {
             server_riders,
             servers_with_paint_sync,
             guess_server_track,
+            server_track_previews,
             ranked_identity,
             ranked_profile,
             set_ranked_guid,
