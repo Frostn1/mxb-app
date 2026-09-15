@@ -13,6 +13,11 @@
 - Tips on the map: the numbered tips now show on the track map where each one happens.
 - Did the fix work: each session shows every setup you've ridden on that track and bike, the
   coach's copies included, with the best lap and the average of your best three on each.
+- Corners that set each other up are judged together. When the quicker line through one corner
+  leaves you badly placed for the next, the coach says which pair of lines is quicker over both.
+- A second line: when another line through a corner is nearly as quick, the coach tells you to
+  keep it for passing, or for when your line cuts up. When a corner ruts, it points you to the
+  other line you've ridden there.
 
 ### Changed
 - Lean the bike more now says when the front isn't sliding, so you know the grip is there.

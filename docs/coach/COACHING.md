@@ -45,6 +45,8 @@ Thresholds are starting values in `analysis.rs` → `mod th`, to be tuned on rea
 | Corner | `front_lock` ⚠ | front wheel < 80% of ground speed under front brake > 0.15 s |
 | Corner | `bar_fight` | mean bar torque into the apex > 25 and > 1.5× the reference |
 | Corner | `front_push` ⚠ | the bike turns < 75% of what its lean supports, the reference > 85% |
+| Corner | second line | the slower of two lines within 0.25 s: named as the line for passing or for when the fast one ruts; a corner cutting up points to the other line ridden there |
+| Corners | line pairs | two corners within 30 m of each other: laps grouped by their line in both; when the quickest pair over both isn't the one the first corner alone would pick (≥ 0.08 s), it's named and the first corner's own line note is dropped |
 | Corner | `throttle_room` | ≥ 20 points less exit throttle than the reference, rear slip never over 1.08, front down (on its own: a ≥ 25 m exit under 55% throttle) |
 | Jump | `jump_it` | reference jumps, lap rolls it |
 | Jump | `chop_face` | throttle drops > 0.3 on the last 15 m of the face |
