@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- The server browser has its tile view back. Each server shows as a picture of its track with
+  the rider count, ping and a Join button. Switch between tiles and the list at the top; the app
+  remembers which you picked. Track pictures load in one go and show straight away when you come
+  back to the tab.
+
 ## Unreleased — Frost's Studio
 
 ### Added
