@@ -563,7 +563,7 @@ mod tests {
 
         assert_eq!(
             serde_json::to_string(&report).unwrap(),
-            r#"{"installId":"6f1f2b6c-0f6d-4a5e-9f3a-2b7c4d5e6f70","version":"0.12.3","os":"PLATFORM","game":"mxb","sessions":1,"minutes":7,"events":[{"name":"view.browse","count":1}]}"#
+            r#"{"installId":"6f1f2b6c-0f6d-4a5e-9f3a-2b7c4d5e6f70","app":"manager","version":"0.12.3","os":"PLATFORM","game":"mxb","sessions":1,"minutes":7,"events":[{"name":"view.browse","count":1}]}"#
                 .replace("PLATFORM", platform())
         );
     }
