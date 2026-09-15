@@ -404,6 +404,10 @@ export interface SecureStatusItem {
   registered: boolean;
   owned: boolean;
   available: boolean;
+  /** Access was taken back — the creator removed you as a buyer, or withdrew the asset. The
+   *  key has already been deleted from this PC when this is true, so `unlocked` is false
+   *  beside it; this is the reason why. */
+  revoked: boolean;
   unlocked: boolean;
   /** The blob's header parsed — false for a truncated or non-mxbsecure file, still listed. */
   readable: boolean;
@@ -434,6 +438,10 @@ export interface SecureRepairOutcome {
   restored: number;
   reprovisioned: number;
   unresolved: number;
+  /** Keys handed back during the pass because this account is no longer entitled. Repair is
+   *  where a player lands when content stopped appearing, so it has to be able to say that it
+   *  stopped on purpose rather than look like a repair that did nothing. */
+  revoked: number;
 }
 
 /** Put back every secured key that has gone missing — the fix for a `.mxbsecurekey` deleted by
@@ -469,6 +477,23 @@ export function onMxbsecureBlocked(
   cb: (payload: MxbsecureBlocked) => void,
 ): Promise<UnlistenFn> {
   return listen<MxbsecureBlocked>("mxbsecure-blocked", (event) => cb(event.payload));
+}
+
+/** Secured content whose keys the app just deleted because this account may no longer open it
+ *  — the creator removed you as a buyer, or withdrew the asset. Named for the message, since a
+ *  file quietly vanishing from the game is the thing worth explaining. */
+export interface MxbsecureRevoked {
+  names: string[];
+}
+
+/** Fires when a pass takes back the keys for content this account is no longer entitled to.
+ *
+ *  A `.mxbsecure` key is sealed to the buyer's PC and opens offline, so removing a buyer on the
+ *  site could never reach a machine that had already unlocked. The app now asks on every unlock
+ *  pass whether it may still hold what it holds, and deletes both copies of the key (the one
+ *  beside the blob and the one in its vault) when the answer is no. This is that moment. */
+export function onMxbsecureRevoked(cb: (payload: MxbsecureRevoked) => void): Promise<UnlistenFn> {
+  return listen<MxbsecureRevoked>("mxbsecure-revoked", (event) => cb(event.payload));
 }
 
 /** This player's own MX Bikes GUID, read out of the running game. `null` when the game

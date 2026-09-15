@@ -564,6 +564,100 @@ describe("takedown", () => {
   });
 });
 
+describe("asset status", () => {
+  /** Every asset's status for one account, keyed by asset id. */
+  async function statuses(env: Env, token: string, assetIds: string[]) {
+    const res = await call(env, req("POST", "/v1/assets/status", { key: token, body: { assetIds } }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      steamId: string | null;
+      assets: { assetId: string; owned: boolean; available: boolean; revoked: boolean; registered: boolean }[];
+    };
+    return { steamId: body.steamId, by: new Map(body.assets.map((a) => [a.assetId, a])) };
+  }
+
+  // The whole point of `revoked`: an entitlement removed on the site has to reach a PC that is
+  // already provisioned, because the key there opens offline and no grant is ever asked for again.
+  it("reports a removed buyer as revoked, and says so again when the grant is put back", async () => {
+    const env = await deployment();
+    await env.DB.prepare("INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind("acc_buyer", "Buyer", BUYER, await hashToken("buyer-token"), Date.now())
+      .run();
+    const { assetId } = await create(env);
+    const grants = (change: unknown) => call(env, req("POST", `/admin/assets/${assetId}/grants`, { body: change }));
+
+    await grants({ add: [BUYER] });
+    let seen = await statuses(env, "buyer-token", [assetId]);
+    expect(seen.steamId).toBe(BUYER);
+    expect(seen.by.get(assetId)).toMatchObject({ owned: true, available: true, revoked: false });
+
+    await grants({ remove: [BUYER] });
+    seen = await statuses(env, "buyer-token", [assetId]);
+    expect(seen.by.get(assetId)).toMatchObject({ owned: false, revoked: true });
+    // And the grant refuses too, so a machine that deletes its key cannot just fetch another.
+    const denied = await call(env, req("POST", "/v1/keys/grant", { key: "buyer-token", body: { assetId, sessionId: "s1" } }));
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ error: "revoked" });
+
+    // Re-adding lifts it: the app stops deleting and unlocks on its next pass.
+    await grants({ add: [BUYER] });
+    seen = await statuses(env, "buyer-token", [assetId]);
+    expect(seen.by.get(assetId)).toMatchObject({ owned: true, revoked: false });
+  });
+
+  // `revoked` deletes files on the buyer's PC, so every "we can't tell" answer has to be `false`.
+  it("never says revoked about an unknown asset or an account with no Steam link", async () => {
+    const env = await deployment();
+    await env.DB.prepare("INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind("acc_buyer", "Buyer", BUYER, await hashToken("buyer-token"), Date.now())
+      .run();
+    await env.DB.prepare("INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at) VALUES (?, ?, NULL, ?, ?)")
+      .bind("acc_nolink", "Nolink", await hashToken("nolink-token"), Date.now())
+      .run();
+    const { assetId } = await create(env);
+
+    // An id we have never heard of is not ours to judge — another deployment's, or a typo.
+    const unknown = await statuses(env, "buyer-token", ["ast_nosuchthing"]);
+    expect(unknown.by.get("ast_nosuchthing")).toMatchObject({ registered: false, revoked: false });
+
+    // No Steam link yet: nothing is owned by anyone here, so `!owned` would wipe the machine.
+    const nolink = await statuses(env, "nolink-token", [assetId]);
+    expect(nolink.steamId).toBeNull();
+    expect(nolink.by.get(assetId)).toMatchObject({ owned: false, revoked: false });
+  });
+
+  // Withdrawn and taken-down assets stop granting for everyone, entitled included — the key
+  // already on disk goes on the same terms.
+  it("reports a withdrawn asset as revoked even for an entitled buyer", async () => {
+    const env = await deployment();
+    await env.DB.prepare("INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind("acc_buyer", "Buyer", BUYER, await hashToken("buyer-token"), Date.now())
+      .run();
+    const { assetId } = await create(env);
+    await call(env, req("POST", `/admin/assets/${assetId}/grants`, { body: { add: [BUYER] } }));
+    expect((await statuses(env, "buyer-token", [assetId])).by.get(assetId)).toMatchObject({ revoked: false });
+
+    await call(env, req("PATCH", `/admin/assets/${assetId}`, { body: { withdrawn: true } }));
+    const gone = (await statuses(env, "buyer-token", [assetId])).by.get(assetId);
+    expect(gone).toMatchObject({ owned: true, available: false, revoked: true });
+
+    // Put back, and the key may be held again.
+    await call(env, req("PATCH", `/admin/assets/${assetId}`, { body: { withdrawn: false } }));
+    expect((await statuses(env, "buyer-token", [assetId])).by.get(assetId)).toMatchObject({ revoked: false });
+  });
+
+  // An account that never bought it is in the same position as one that was removed: whatever
+  // key it is holding, it may not hold it.
+  it("says revoked about an asset this account never owned", async () => {
+    const env = await deployment();
+    await env.DB.prepare("INSERT INTO accounts (id, rider_name, steam_id, token_hash, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind("acc_other", "Other", OTHER, await hashToken("other-token"), Date.now())
+      .run();
+    const { assetId } = await create(env);
+    expect((await statuses(env, "other-token", [assetId])).by.get(assetId)).toMatchObject({ owned: false, revoked: true });
+  });
+});
+
 describe("buyer names", () => {
   it("adds Steam names to the buyer list and the usage log when asked", async () => {
     const env = await deployment();

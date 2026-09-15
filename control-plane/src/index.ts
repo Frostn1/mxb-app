@@ -564,6 +564,27 @@ async function listEntitlements(account: Account, env: Env): Promise<Response> {
  * `title` (null if we don't know the asset), whether this account `owned` it, and whether it is
  * `available` to unlock (has a stored key and isn't withdrawn). Lets the app show a locked file
  * with a real name and a reason, without ever needing the content key.
+ *
+ * It also answers the question that makes a removal real on a machine that is already
+ * provisioned: `revoked`. A `.mxbsecure` key is sealed to the buyer's PC and opens **offline**
+ * forever after (see the app's key vault), so revoking an entitlement only ever stopped the
+ * *next* grant — the buyer who already unlocked kept playing. `revoked` is this batch poll's
+ * standing answer to "should this machine still be holding a key for this asset?", and the app
+ * deletes the key (beside the blob and in its vault) when it comes back true.
+ *
+ * It is deliberately a three-way answer rather than `!owned`:
+ *
+ * - `revoked: true` — we know the identity, we know the asset, and it may not be held. The
+ *   entitlement was removed or never existed, or the asset is withdrawn / taken down. The same
+ *   conditions `decideEntitlement` refuses a grant on, minus the audit write: the app polls this
+ *   on every pass and a row per asset per poll would bury the creator's real usage log.
+ * - `revoked: false` — it may be held (entitled), **or** we can't tell: an unknown asset id (not
+ *   ours to judge) or an account with no Steam link yet (`steamId: null`, so nothing is owned by
+ *   anyone here and `!owned` would delete every key on the machine).
+ *
+ * The "can't tell" cases fold into `false` on purpose: this answer deletes files, so silence
+ * must mean keep. `steamId` is echoed back so the app can check the answer is about the identity
+ * its keys are actually sealed to before acting on it.
  */
 async function assetStatus(request: Request, account: Account, env: Env): Promise<Response> {
   const body = await readJson(request);
@@ -577,8 +598,11 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
         .map((x) => x.trim()),
     ),
   ].slice(0, 200);
+  // Through `steamIdFor`, like the grant decision, so a link Valve has already confirmed is put
+  // back rather than read as "not linked" — which here would mean reporting nothing revoked.
+  const steamId = await steamIdFor(env, account);
   if (assetIds.length === 0) {
-    return json(200, { steamId: account.steam_id ?? null, assets: [] });
+    return json(200, { steamId, assets: [] });
   }
 
   const placeholders = assetIds.map(() => "?").join(",");
@@ -592,18 +616,18 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
   const byId = new Map((known.results ?? []).map((r) => [r.id, r]));
 
   const owned = new Set<string>();
-  if (account.steam_id) {
+  if (steamId) {
     const ent = await env.DB.prepare(
       `SELECT asset_id FROM entitlements WHERE revoked_at IS NULL AND steam_id = ?` +
         ` AND asset_id IN (${placeholders})`,
     )
-      .bind(account.steam_id, ...assetIds)
+      .bind(steamId, ...assetIds)
       .all<{ asset_id: string }>();
     for (const r of ent.results ?? []) owned.add(r.asset_id);
   }
 
   return json(200, {
-    steamId: account.steam_id ?? null,
+    steamId,
     assets: assetIds.map((id) => {
       const a = byId.get(id);
       return {
@@ -612,6 +636,10 @@ async function assetStatus(request: Request, account: Account, env: Env): Promis
         registered: !!a,
         owned: owned.has(id),
         available: !!a && a.has_key === 1 && a.withdrawn !== 1,
+        // Only ever true about an asset we know, for an identity we know. A withdrawn or
+        // taken-down asset counts as revoked for everyone, entitled or not, because the grant
+        // refuses it for everyone — the key on disk should stop opening on the same terms.
+        revoked: !!a && !!steamId && (a.withdrawn === 1 || !owned.has(id)),
       };
     }),
   });

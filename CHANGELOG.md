@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — MXB App
+
+### Fixed
+- Removing a buyer from secured content now actually takes it away. A PC that had already
+  unlocked kept playing forever, because the key there works offline and the app put it back
+  from its own copy whenever it went missing. The app now checks, whenever it would unlock
+  something — you launch the game, open the Library, sign in, or press Restore keys — whether
+  you may still open what you have, and deletes both copies of the key when the answer is no.
+  It says so when it happens, and the Secured content list marks it "Access removed", so
+  content vanishing from the game doesn't look like the app breaking. If you're offline, or
+  the check can't be made for any reason, nothing is deleted.
+
 ## 2026-09-15 — MXB Coach v0.1.9-beta.9
 
 ### Added
