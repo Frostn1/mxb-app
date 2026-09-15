@@ -411,16 +411,26 @@ export default function TrackStudio() {
     }
   }
 
-  // Escape leaves full screen. Anything that covers the whole window has to have a way out
-  // that does not involve finding a button on top of a 3D scene.
+  // Escape backs out one level: full screen first, since anything covering the whole window
+  // needs a way out that isn't a button on top of a 3D scene; then a selected step, back to
+  // the whole track. Not while typing in a field or with a dialog open, where Escape is theirs.
   useEffect(() => {
-    if (!full) return;
+    if (!full && scope === null) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFull(false);
+      if (e.key !== "Escape" || confirming) return;
+      if (full) {
+        setFull(false);
+        return;
+      }
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+        return;
+      }
+      setScope(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [full]);
+  }, [full, scope, confirming]);
 
   // A track that goes away while you are looking at it full screen would leave you staring
   // at an empty black window with no obvious way back.
@@ -942,6 +952,11 @@ export default function TrackStudio() {
                     data-step={row}
                     data-at={step.at}
                     onClick={() => {
+                      // Clicking the open step again closes it, back to the whole track.
+                      if (scope === row) {
+                        setScope(null);
+                        return;
+                      }
                       setScope(row);
                       setFocus(positionAt(program, step.at));
                     }}
@@ -1376,9 +1391,19 @@ export default function TrackStudio() {
           <aside className="flex w-[300px] flex-none flex-col overflow-y-auto border-l border-border">
             {selected ? (
               <div className="flex-none px-4 pb-4 pt-4">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
-                  {t("track.stepNumber", { n: String((scope ?? 0) + 1).padStart(2, "0") })} —{" "}
-                  {stepName(selected, t)}
+                <div className="flex items-baseline gap-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.09em] text-faint">
+                    {t("track.stepNumber", { n: String((scope ?? 0) + 1).padStart(2, "0") })} —{" "}
+                    {stepName(selected, t)}
+                  </div>
+                  {/* The way back to the track's own settings. Esc does the same. */}
+                  <button
+                    onClick={() => setScope(null)}
+                    className="ml-auto flex-none cursor-default font-mono text-[10.5px] text-faint hover:text-foreground"
+                    title="Esc"
+                  >
+                    ← {t("track.wholeLap")}
+                  </button>
                 </div>
                 <div className="mt-1 font-mono text-[10.5px] text-faint">
                   {t("track.stepWrites")}

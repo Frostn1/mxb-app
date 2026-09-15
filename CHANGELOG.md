@@ -12,6 +12,13 @@
   content vanishing from the game doesn't look like the app breaking. If you're offline, or
   the check can't be made for any reason, nothing is deleted.
 
+## 2026-09-15 — Feel presets carry your controls
+
+### Changed
+- Feel presets now save how each control feels, like the throttle's dead zone, gain and
+  smoothing, and put it back when you apply. Your buttons and axes stay as they are.
+- The feel editor names controls the way the game does, like Throttle, Front brake and Lean.
+
 ## 2026-09-15 — MXB Coach v0.1.9-beta.9
 
 ### Added
@@ -64,13 +71,17 @@
 ### Changed
 - Lean the bike more now says when the front isn't sliding, so you know the grip is there.
 
-## Unreleased — Frost's Studio
+## 2026-09-15 — Frost's Studio v0.1.9 — Your own AI model for tracks
 
 ### Added
 - Write tracks with your own AI model. Pick Groq, OpenRouter, OpenAI, Ollama or Anthropic in
   Settings and paste a key. The key stays on your computer.
 - A Settings only mode for writing tracks: the model picks the kind of track and the Studio
   draws the lap. It works with free models and usually takes under a minute.
+
+### Changed
+- In Track Studio, press Esc, click the step again or use "← whole lap" to go back from a step
+  to the whole track's settings.
 
 ## 2026-09-15 — Frost's Studio v0.1.8 — Easy and ARL random tracks
 

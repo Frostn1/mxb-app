@@ -2917,7 +2917,7 @@ export type Feel = {
   name: string;
   /** `profile.ini` values: section -> key -> value. */
   ini: Record<string, Record<string, string>>;
-  /** `controls.txt` tuning, keyed by the control's own name (not its index). */
+  /** `controls.txt` tuning, keyed by the game's control name (`CTRL_THROTTLE`). */
   controls: Record<string, Record<string, string>>;
 };
 
