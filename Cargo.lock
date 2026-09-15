@@ -3693,7 +3693,7 @@ dependencies = [
 
 [[package]]
 name = "mxb-app"
-version = "0.14.2"
+version = "0.14.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3756,7 +3756,7 @@ dependencies = [
 
 [[package]]
 name = "mxb-core"
-version = "0.14.2"
+version = "0.14.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
