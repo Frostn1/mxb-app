@@ -678,6 +678,45 @@ describe("the dashboards on the site", () => {
     expect((await read("/v1/web/admin/plugins/licenses?state=live")).found).toMatchObject({ total: 0 });
   });
 
+  it("adds and removes creators, making a web-only row for someone with no app account", async () => {
+    const env = await deployment(ADMINS);
+    const frost = await cookieFor(CREATOR);
+    const LINCAO = "76561198209325252";
+    const RIDER = "76561198000000077";
+    await addAccount(env.DB, "acc_rider", "Rider", RIDER);
+    const steam = (async (input: RequestInfo | URL) => {
+      const u = String(input);
+      if (u.includes("/id/gstavlincon/")) return new Response(`<profile><steamID64>${LINCAO}</steamID64></profile>`);
+      if (u.includes(`/profiles/${LINCAO}/`)) return new Response("<profile><steamID><![CDATA[Lincão]]></steamID></profile>");
+      return new Response("", { status: 404 });
+    }) as typeof fetch;
+    const post = (body: unknown, opts: Record<string, unknown> = {}) =>
+      web(env, req("POST", "/v1/web/admin/creators", { cookie: frost, body, ...opts }), steam);
+    const list = async () =>
+      ((await (await web(env, req("GET", "/v1/web/admin/creators", { cookie: frost }), steam)).json()) as {
+        creators: { accountId: string; steamId: string; steamName: string; linked: boolean }[];
+      }).creators;
+
+    expect((await post({ action: "add", who: LINCAO }, { origin: "https://evil.example" })).status).toBe(403);
+    expect((await post({ action: "sideways" })).status).toBe(400);
+    expect((await post({ action: "add", who: "not a profile!" })).status).toBe(400);
+
+    // Nobody in the app has this Steam account: a web-only row stands in until they link it.
+    const added = await post({ action: "add", who: "https://steamcommunity.com/id/gstavlincon/" });
+    expect(added.status).toBe(200);
+    expect(await added.json()).toMatchObject({ steamId: LINCAO, already: false });
+    expect(await list()).toContainEqual(expect.objectContaining({ steamId: LINCAO, steamName: "Lincão", linked: false }));
+    expect(await (await post({ action: "add", who: LINCAO })).json()).toMatchObject({ already: true });
+
+    // An app account with that Steam ID is promoted in place, not duplicated.
+    expect(await (await post({ action: "add", who: RIDER })).json()).toMatchObject({ accountId: "acc_rider", already: false });
+    expect(await list()).toContainEqual(expect.objectContaining({ accountId: "acc_rider", linked: true }));
+
+    expect((await post({ action: "remove", account: "acc_rider" })).status).toBe(200);
+    expect((await post({ action: "remove", account: "acc_rider" })).status).toBe(404);
+    expect((await list()).map((c) => c.accountId)).not.toContain("acc_rider");
+  });
+
   it("clamps the window and refuses a path it doesn't serve", async () => {
     const env = await deployment(ADMINS);
     const frost = await cookieFor(CREATOR);

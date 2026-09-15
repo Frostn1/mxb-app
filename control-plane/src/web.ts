@@ -176,7 +176,7 @@ export async function webRoutes(
 
   // The dashboards the site draws. Gated on the Steam account rather than a key — see
   // `webadmin.ts` for why a person's admin credential should not travel in a URL.
-  if (isWebAdminPath(path)) return webAdminRoutes(request, url, env, origin);
+  if (isWebAdminPath(path)) return webAdminRoutes(request, url, env, origin, fetchImpl);
 
   return json(404, { error: "no such endpoint" });
 }
