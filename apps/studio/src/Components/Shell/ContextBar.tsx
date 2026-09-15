@@ -55,9 +55,11 @@ export interface UnsavedWork {
   save: () => Promise<boolean>;
 }
 
+/** Every tool stays mounted once visited, so several can hold work at once. */
 export const UnsavedRegistry = createContext<{
-  register: (w: UnsavedWork | null) => void;
-}>({ register: () => {} });
+  /** Returns the unregister. */
+  register: (w: UnsavedWork) => () => void;
+}>({ register: () => () => {} });
 
 export const ShellChrome = createContext<{ bare: boolean; setBare: (v: boolean) => void }>({
   bare: false,

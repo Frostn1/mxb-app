@@ -6,6 +6,7 @@ Minor for a new feature, patch for a fix, 0.x until the generator is finished. B
 
 | Version | Date | Commit | Change |
 |---|---|---|---|
+| 0.33.0 | 2026-09-15 | feature/random-track-scales | a random track picks a scale: Easy (jumps at 70% tall, tables and gaps 70% long; wear 0.25, roughness 0.6 for shallower ruts), Normal (as drawn), or ARL (the `FROST_ROUGH=2` raced build: roughness 2, jumps grown ×1.35) |
 | 0.32.0 | 2026-09-14 | feature/table-mounds | jumps spill wider the taller they are: sides round over the top, stand at most 28° a third of the way down and run out in a long skirt (a 3 m table stood at 38° within 6 m); rounded along the lap past the track and stopped 2 m short of another leg |
 | 0.31.2 | 2026-09-13 | fix/arl-triples-75 | ARL triples at 75% and tabletops and doubles at 80% of the full ARL growth (triples were 90%) |
 | 0.31.1 | 2026-09-13 | 590e8c87 (#603) | 35 cm soft soil over the whole plot as ARL's pro tracks carry, on a 40 cm soil bed (was 0.146 m in all); no longer thinned by wear |

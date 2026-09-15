@@ -279,11 +279,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const unsavedRef = useRef(false);
   unsavedRef.current = unsaved && started;
   useEffect(() => {
-    register({
+    return register({
       dirty: () => unsavedRef.current,
       save: async () => saveRef.current?.() ?? false,
     });
-    return () => register(null);
   }, [register]);
   // The title is editable in place: open when it is clicked, or when a save needs a name.
   const [naming, setNaming] = useState(false);
