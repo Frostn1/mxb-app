@@ -1018,6 +1018,13 @@ mod tests {
     }
 
     fn lap(st: &Style) -> Trace {
+        let (samples, t) = ride_lap(st);
+        let lap = Lap { num: 1, time_ms: (t * 1000.0) as i32, invalid: false, whole: true, samples };
+        Trace::new(&lap, len()).unwrap()
+    }
+
+    /// One lap of the stadium at 50 Hz, and how long it took.
+    fn ride_lap(st: &Style) -> (Vec<Sample>, f32) {
         let l = len();
         let (mut d, mut t, dt) = (0.0f32, 0.0f32, 0.02f32);
         let mut samples = Vec::new();
@@ -1049,8 +1056,42 @@ mod tests {
             d += v * dt;
             t += dt;
         }
-        let lap = Lap { num: 1, time_ms: (t * 1000.0) as i32, invalid: false, whole: true, samples };
-        Trace::new(&lap, l).unwrap()
+        (samples, t)
+    }
+
+    /// Writes a demo session to `$COACH_DEMO_DIR` for looking at the app without the game:
+    /// a fast lap, one braking early and soft, one floating the jump, then the fast one again.
+    /// `COACH_DEMO_DIR=<sessions dir> cargo test -p mxb-coach write_demo_session -- --ignored`
+    #[test]
+    #[ignore]
+    fn write_demo_session() {
+        let Ok(dir) = std::env::var("COACH_DEMO_DIR") else { return };
+        let styles = [
+            FAST,
+            Style { decel: 2.5, brake: 0.5, ..FAST },
+            Style { jump: (330.0, 356.0, 4.5), air_v: 17.0, ..FAST },
+            FAST,
+        ];
+        let mut f = crate::telemetry::testfile::File::new();
+        f.event("coach-demo", len());
+        let mut clock = 0.0;
+        for (num, st) in styles.iter().enumerate() {
+            let (samples, t) = ride_lap(st);
+            for s in &samples {
+                f.sample(clock + s.t, s.pos, |b| {
+                    b.i(0, s.rpm as i32).i(12, s.gear).f(20, s.speed);
+                    b.f(24, s.x).f(28, s.y).f(32, s.z).f(36, s.vel[0]).f(40, s.vel[1]).f(44, s.vel[2]);
+                    b.f(104, s.roll).f(144, s.throttle).f(148, s.front_brake).f(152, s.rear_brake);
+                    b.f(160, s.wheel_speed[0]).f(164, s.wheel_speed[1]);
+                    b.i(168, s.wheel_material[0]).i(172, s.wheel_material[1]);
+                });
+            }
+            clock += t;
+            f.lap(num as i32, (t * 1000.0).round() as i32);
+        }
+        f.end();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(std::path::Path::new(&dir).join("20260914-120000-000.mxbc"), &f.0).unwrap();
     }
 
     fn section<'a>(rv: &'a Review, name: &str) -> &'a SectionReview {

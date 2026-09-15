@@ -1,0 +1,115 @@
+name: Release MXB Coach (beta)
+
+# Build and publish MXB Coach betas as pre-releases of this repo.
+#
+# Safe here only because they are pre-releases with no updater manifest: `releases/latest`
+# never points at a pre-release, the manager's beta channel only considers `v<semver>` tags
+# carrying a `latest.json`, and `release.yml` triggers on `v*`, which `coach-v*` doesn't
+# match. A plain (non-beta) Coach tag would become this repo's latest release and hand every
+# manager install a Coach build as its next update, so this workflow refuses one: a stable
+# Coach gets its own repository, the way Frost's Studio did.
+
+on:
+  push:
+    tags:
+      - "coach-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          # Pinned to 22.04 like the other apps: the AppImage inherits the builder's glibc.
+          - platform: ubuntu-22.04
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Refuse a tag that isn't a pre-release
+        shell: bash
+        run: |
+          case "$GITHUB_REF_NAME" in
+            *-beta*|*-rc*) ;;
+            *) echo "::error::$GITHUB_REF_NAME is not a beta or rc. A stable Coach must release to its own repo."; exit 1 ;;
+          esac
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # The app's beforeBuildCommand is `bun run build`.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
+
+      - name: Install Linux system dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            patchelf \
+            squashfs-tools
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          shared-key: release
+          save-if: false
+
+      # The lockfile is npm's; the workspace install is the same one CI uses.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Version without the coach- prefix
+        id: tag
+        shell: bash
+        run: echo "name=${GITHUB_REF_NAME#coach-}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish pre-release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_NAME: "MXB Coach"
+        with:
+          projectPath: apps/coach
+          tagName: ${{ github.ref_name }}
+          releaseName: "MXB Coach ${{ steps.tag.outputs.name }}"
+          releaseBody: |
+            **MXB Coach beta.** Records your laps in MX Bikes and tells you, corner by corner, where you lose time and what to change.
+
+            **Getting started**
+            1. Install MXB Coach (Windows: the `.exe` below).
+            2. Open **Settings** and press **Install** to add the recorder to MX Bikes. Restart the game if it's open.
+            3. Ride a few laps, ideally in Testing. Every stint on track becomes a session.
+            4. Open **Sessions**, pick the session and press **Review** on a lap. It's compared with your fastest whole lap on that track.
+
+            The recorder only saves your laps. It changes nothing in the game.
+          assetNamePattern: "MXB-Coach-[version]-[arch][ext]"
+          includeUpdaterJson: false
+          releaseDraft: false
+          prerelease: true
+          args: ${{ matrix.args }}
