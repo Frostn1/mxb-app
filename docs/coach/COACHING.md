@@ -129,8 +129,10 @@ its spot at the bike's speed for 1.5 s, only in testing or a race event's practi
 ## Other riders
 
 Recorders from FrostMod 0.21 write ENTRY (tag 12, who's in the event), POSITIONS (tag 13, every
-bike's track position and x/y/z about ten times a second, the rider's own flagged as the bike
-nearest their telemetry) and RACE_LAP (tag 14, every rider's timed laps). `others.rs` cuts each
+bike's track position and x/y/z about ten times a second, with the bike nearest the rider's
+telemetry flagged) and RACE_LAP (tag 14, every rider's timed laps). The plugin API gives only the
+rider's own GUID, never anyone else's, so the rider recording is the entry with the name EventInit
+gave them, the nearest-bike flag deciding between two of the same name. `others.rs` cuts each
 other rider's valid laps from their positions, as metres against time, and times this lap's own
 sections on them. The review names up to three: the rider just faster than this lap, the fastest
 in the session and, in a race, the rider ahead on track when the lap ended, each with the

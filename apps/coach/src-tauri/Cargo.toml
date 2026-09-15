@@ -2,7 +2,7 @@
 # Cargo target names cannot hold a space, so this is as close to `mainBinaryName` as it
 # gets. The description is what Windows Task Manager shows in its Processes tab.
 name = "mxb-coach"
-version = "0.1.10"
+version = "0.1.11"
 description = "MXB Coach — lap-time coaching for MX Bikes"
 authors = ["Frost"]
 edition = "2021"

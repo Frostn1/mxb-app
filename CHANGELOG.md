@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-15 — MXB Coach v0.1.11-beta.11
+
+### Changed
+- Other riders: the coach now finds you among them by your rider name, the one the game shows
+  everyone. Two riders with the same name are told apart by where each bike is.
+
 ## 2026-09-15 — MXB Hub gets past the store's robot check
 
 ### Fixed

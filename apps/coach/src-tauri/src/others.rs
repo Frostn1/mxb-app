@@ -61,10 +61,18 @@ impl TheirLap {
     }
 }
 
-/// The bike the recorder took for the rider's own: the one it flagged most.
+/// The rider recording. The plugin API gives only their own GUID, never anyone else's, so
+/// they're found by the name the event gave them, which the game lists their entry under.
+/// With no entry by that name, or two, the bike the recorder flagged most as nearest their
+/// own telemetry decides.
 pub(crate) fn local_num(rec: &Recording) -> Option<i32> {
+    let me = rec.event.rider.trim();
+    let named: Vec<i32> = rec.riders.iter().filter(|r| !me.is_empty() && r.name.trim() == me).map(|r| r.num).collect();
+    if let [num] = named[..] {
+        return Some(num);
+    }
     let mut count: Vec<(i32, usize)> = Vec::new();
-    for b in rec.frames.iter().flat_map(|f| &f.bikes).filter(|b| b.local) {
+    for b in rec.frames.iter().flat_map(|f| &f.bikes).filter(|b| b.local && (named.is_empty() || named.contains(&b.num))) {
         match count.iter_mut().find(|c| c.0 == b.num) {
             Some(c) => c.1 += 1,
             None => count.push((b.num, 1)),
@@ -221,6 +229,19 @@ mod tests {
     fn the_rider_recording_is_never_their_own_rival() {
         let r = rivals(&session(), &parts(), 50_000, 60.0, false);
         assert!(r.is_empty(), "nobody is faster than 50 s: {r:?}");
+    }
+
+    #[test]
+    fn the_rider_is_found_by_their_name_and_the_flag_breaks_a_tie() {
+        let mut rec = session();
+        rec.frames.iter_mut().flat_map(|f| &mut f.bikes).for_each(|b| b.local = false);
+        assert_eq!(local_num(&rec), None, "no name, no flag");
+        rec.event.rider = "Me".into();
+        assert_eq!(local_num(&rec), Some(3));
+        // Two riders called Me: the one flagged as nearest the telemetry.
+        rec.riders[1].name = "Me".into();
+        rec.frames.iter_mut().flat_map(|f| &mut f.bikes).filter(|b| b.num == 7).for_each(|b| b.local = true);
+        assert_eq!(local_num(&rec), Some(7));
     }
 
     #[test]
