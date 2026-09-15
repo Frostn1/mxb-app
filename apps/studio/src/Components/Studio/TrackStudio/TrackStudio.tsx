@@ -79,6 +79,7 @@ import {
   type TrackPreview,
   type TrackProgram,
   type TrackScale,
+  type Discipline,
   type TrackSegment,
   type TrackToolsStatus,
 } from "../../../api/trackgen";
@@ -182,7 +183,13 @@ export default function TrackStudio() {
     value,
     label: t(`track.scale.${value}`),
   }));
-  const randomAtScale = () => randomTrackProgram(undefined, scale);
+  // Motocross, supercross or SuperMotocross: which walker draws the lap, and what it is held to.
+  const [discipline, setDiscipline] = useState<Discipline>("mx");
+  const disciplines = (["mx", "sx", "smx"] as const).map((value) => ({
+    value,
+    label: t(`track.discipline.${value}`),
+  }));
+  const randomAtScale = () => randomTrackProgram(undefined, scale, discipline);
   const rebuild = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tools, setTools] = useState<TrackToolsStatus | null>(null);
 
@@ -322,7 +329,11 @@ export default function TrackStudio() {
       // Whole lap or settings only is decided in `generate_track`, by what the configured
       // model can actually do — see the comment there. `settings` coming back is how the
       // studio learns which way it went, and the toast says so.
-      const { program: next, settings } = await generateTrack(brief.trim());
+      const { program: next, settings } = await generateTrack(
+        brief.trim(),
+        undefined,
+        discipline,
+      );
       await settle(next, { fresh: true });
       // Minutes of generating is work worth asking about before it's dropped.
       setTouched(true);
@@ -847,6 +858,12 @@ export default function TrackStudio() {
                   {t("track.random")}
                 </Button>
                 <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
+                <Segmented
+                  size="sm"
+                  options={disciplines}
+                  value={discipline}
+                  onChange={setDiscipline}
+                />
               </div>
               <span aria-hidden className="text-faint">
                 ·
@@ -1561,6 +1578,12 @@ export default function TrackStudio() {
                       {t("track.random")}
                     </button>
                     <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
+                    <Segmented
+                      size="sm"
+                      options={disciplines}
+                      value={discipline}
+                      onChange={setDiscipline}
+                    />
                   </div>
                   <button
                     onClick={() => void onLoad(blankTrackProgram)}

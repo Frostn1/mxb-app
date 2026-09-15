@@ -21,23 +21,342 @@
 //! on paper and rides like a ploughed field is one nobody wants, and the only way to know
 //! which one this is, is to build it and measure.
 
-use crate::trackprog::{Feature, Relief, Segment, Start, Surface, Terrain, TrackProgram};
+use crate::trackllm::corpus;
+use crate::trackprog::{
+    Discipline, Feature, Relief, Segment, Start, Surface, Terrain, TrackProgram,
+};
 
-/// The plot every generated track is laid out on.
+/// What a discipline changes about a lap: the ground it is drawn on, what the walk draws from,
+/// where it starts and finishes, and what review holds it to. [`Discipline::rules`] picks one.
+#[derive(Clone, Copy, Debug)]
+pub struct Rules {
+    /// The ground a lap is drawn on, metres across (x) and down (z).
+    pub plot: (f32, f32),
+    /// Samples on the plot's long edge.
+    pub samples: u32,
+    /// What the walk draws a lap's length, the riding line's width and the start straight from.
+    pub lap_m: (f32, f32),
+    pub width_m: (f32, f32),
+    pub start_straight_draw_m: (f32, f32),
+    /// The tightest radius in a corner, metres.
+    pub apex_m: (f32, f32),
+    /// Under this radius a corner is no place for a take-off: a rider cannot leave the ground
+    /// square out of a turn that tight.
+    pub tight_m: f32,
+    /// How far round the lap is left bare for the gate row and the run to the first jump.
+    pub start_clear_m: f32,
+    /// The most ground between two corners, straight or gentler than [`GENTLE_R_M`].
+    pub run_max_m: f32,
+    /// The shortest straight a start fits beside.
+    pub start_straight_m: f32,
+    /// How far off the lap the gate row stands, and how long its sprint runs before it turns in.
+    pub start_offset_m: f32,
+    pub start_sprint_m: f32,
+    /// The finish jump: how tall, how long its deck (the air a rider clears), and its take-off.
+    pub finish_jump_m: (f32, f32),
+    pub finish_deck_m: (f32, f32),
+    pub finish_face_m: f32,
+    /// Gates in the start row. Sets how wide the start pad is, see [`Rules::fan_half_m`].
+    pub gates: usize,
+    /// The landscape the walk draws: hills, fall across the plot, banks, and how many
+    /// straights climb or drop.
+    pub amplitude_m: (f32, f32),
+    pub tilt_m: (f32, f32),
+    pub landforms: (i32, i32),
+    pub elevation_changes: usize,
+    /// A flat floor: no hills, no fall, no banks.
+    pub flat: bool,
+    /// What review holds the lap to.
+    pub review: corpus::Bands,
+    /// A stadium floor and how its lanes are laid. `None` walks an outdoor lap.
+    pub stadium: Option<Stadium>,
+    /// What the lap is built from. Stated for Phase 2, which places them; nothing reads it yet.
+    pub sections: Option<Sections>,
+}
+
+impl Rules {
+    /// Half the start pad's width: the gate row plus a margin.
+    ///
+    /// Forty gates at 1.2 m is 48 m across, and the pad has to hold it. The *layout* needs it
+    /// as well as the synthesiser: a start line whose centreline clears the lap by fifteen
+    /// metres still lays its pad straight over it.
+    pub fn fan_half_m(&self) -> f32 {
+        self.gates as f32 * crate::tracksynth::GRID_LANE_M * 0.5 + 3.0
+    }
+}
+
+/// A stadium floor, and how a supercross lap's lanes are laid on it.
 ///
-/// Smaller than the 620 m it was, on purpose. A 1700 m lap inside a 620 m plot is shorter than
-/// the plot's own perimeter — 2160 m round the inside of the margin — so a ring fits
-/// comfortably and the walk has no reason to fold inwards. Indiana is 525 m across with a
-/// 2138 m lap: its lap is *longer* than its perimeter, so it has to double back through its
-/// own middle, and that is what a track looks like.
-const PLOT_M: f32 = 470.0;
+/// The measured SX lap is one shape: parallel lanes down the floor's length joined by 180s at
+/// alternate ends, and one lane down the side that brings the lap back to the start straight.
+#[derive(Clone, Copy, Debug)]
+pub struct Stadium {
+    /// The biggest floor a lap is laid on, metres along and across, centred on the plot.
+    pub floor: (f32, f32),
+    /// How many parallel lanes: even, so the last one runs back towards the return lane.
+    pub lanes: [usize; 2],
+    /// Centre to centre between two lanes, and how long the floor is along them.
+    pub lane_gap_m: (f32, f32),
+    pub length_m: (f32, f32),
+    /// From the floor's edge to a lane's centreline.
+    pub edge_m: f32,
+    /// How far in from the floor's end a 180 may stand, and the first one (the holeshot) more.
+    pub stagger_m: (f32, f32),
+    pub holeshot_stagger_m: (f32, f32),
+}
 
-/// Under this radius a corner is no place for a takeoff: a rider cannot leave the ground
-/// square out of a turn that tight.
-const TIGHT_M: f32 = 22.0;
+/// The pieces a lap is built from, per lap unless it says otherwise.
+#[derive(Clone, Copy, Debug)]
+pub struct Sections {
+    /// Rhythm lanes: how many, how long, how many hills, their pitch and height.
+    pub rhythm_lanes: (u32, u32),
+    pub rhythm_m: (f32, f32),
+    pub rhythm_hills: (u32, u32),
+    pub rhythm_pitch_m: (f32, f32),
+    pub rhythm_h_m: (f32, f32),
+    /// Whoops: how many sections, whoops in one, pitch, height, and a section's length.
+    pub whoop_sections: (u32, u32),
+    pub whoops: (u32, u32),
+    pub whoop_pitch_m: (f32, f32),
+    pub whoop_h_m: (f32, f32),
+    pub whoops_m: f32,
+    /// Triples and their crest-to-crest span.
+    pub triples: (u32, u32),
+    pub triple_span_m: (f32, f32),
+    /// Standalone doubles and rhythm doubles, crest to crest.
+    pub doubles: (u32, u32),
+    pub double_m: (f32, f32),
+    pub rhythm_doubles: (u32, u32),
+    pub rhythm_double_m: (f32, f32),
+    /// Tabletops and their decks.
+    pub tables: (u32, u32),
+    pub table_deck_m: (f32, f32),
+    /// How far a corner banks, degrees: median and ninetieth.
+    pub bank_deg: (f32, f32),
+}
 
-/// How far round the lap is left bare for the gate row and the run to the first jump.
-const START_CLEAR_M: f32 = 130.0;
+// ------------------------------------------------------------------------------------------
+// The rules, one row per discipline.
+//
+// MX is what the walk has always drawn: every value is the constant it replaced, and a seed
+// makes the same draws it always has (`northgate_keeps_its_layout`).
+//
+// SX and SMX: M = measured off 11 community tracks' own .trh/.rdf (7 SX, 3 SMX, Daytona) plus
+// 15 real rounds, P = published, E = estimated. The measurements, their sources and each
+// value's status are in `docs/tracks/real-track-corpus.md` §12. Change a value there too.
+// ------------------------------------------------------------------------------------------
+
+/// Motocross.
+pub const MX_RULES: Rules = Rules {
+    // Smaller than the 620 m it was, on purpose. A 1700 m lap inside a 620 m plot is shorter
+    // than the plot's own perimeter, so a ring fits and the walk never folds inwards. Indiana
+    // is 525 m across with a 2138 m lap: it has to double back through its own middle.
+    plot: (470.0, 470.0),
+    samples: 2049,
+    // 1451 m rode as "overall small" and 2400 m "a bit too big". Indiana is 2138.
+    lap_m: (2000.0, 2350.0),
+    // Ridden and called "little skinny" at 10–13.5 m.
+    width_m: (14.5, 18.0),
+    start_straight_draw_m: (90.0, 130.0),
+    apex_m: (8.0, 15.0),
+    tight_m: 22.0,
+    start_clear_m: 130.0,
+    // The corpus runs 20–72 m (p50 27–30). The rider: no long stretches, no big chicanes.
+    run_max_m: 55.0,
+    start_straight_m: 60.0,
+    // Measured off six published tracks' own start lines: Indiana 37.9, SandPoint 36.4,
+    // Briarcliff 41.0, I40 47.2, SFDR 48.9, Smokey Pines 34.0. A spur beside the lap.
+    start_offset_m: 40.0,
+    // Published start lines run 79–91 m before their first corner. Ridden at 80 m as a long
+    // drag with nothing to do; shorter, so the pack arrives at turn one still bunched.
+    start_sprint_m: 55.0,
+    // Full size: at three quarters it rode too small for the one jump a track is known by.
+    finish_jump_m: (2.4, 3.0),
+    // Past the published twelve: at 3 m the finish jump still rode small, and a longer deck
+    // makes it bigger without making it taller.
+    finish_deck_m: (crate::trackprog::TABLETOP_DECK_M, 20.0),
+    // Longer and gentler than the angle gives a 3 m face on its own: at 13 m it leaves at 26°.
+    finish_face_m: 16.0,
+    // Indiana, Millville, Washougal, Maryland and the GP tracks all ship 40.
+    gates: 40,
+    amplitude_m: (4.2, 7.5),
+    tilt_m: (6.0, 16.0),
+    landforms: (2, 4),
+    elevation_changes: 2,
+    flat: false,
+    review: corpus::MX,
+    stadium: None,
+    sections: None,
+};
+
+/// Supercross: a flat stadium floor of parallel lanes joined by 180s.
+pub const SX_RULES: Rules = Rules {
+    // The biggest floor, 140 x 100, with 40 m round it for the start pad beside the first lane.
+    plot: (220.0, 180.0),
+    samples: 1025,
+    // M: 770 / 779 / 880 (p10 / p50 / p90). Target 780.
+    lap_m: (750.0, 900.0),
+    // M: 9.3–11.3 on the stadium tracks, median 10. P: 6.1 m is the real minimum.
+    width_m: (8.5, 10.0),
+    // M: 35–110 from the gate to the holeshot, target 75.
+    start_straight_draw_m: (35.0, 115.0),
+    // M: 5.8 / 6.7 / 7.8.
+    apex_m: (5.5, 8.0),
+    // E: under any SX corner, so a take-off can come straight out of a turn.
+    tight_m: 5.0,
+    // E.
+    start_clear_m: 20.0,
+    // M: the longest run between corners is 90–130.
+    run_max_m: 130.0,
+    // M: 35.
+    start_straight_m: 35.0,
+    // M: the gate stands 9.6–29.9 m off the line, median 16.8. 20 keeps the 22-gate row
+    // (26.4 m) off the lane beside it.
+    start_offset_m: 20.0,
+    // E: the gate to the holeshot measures 34–108, median 76.
+    start_sprint_m: 45.0,
+    // M: 2.0–2.2 m tall.
+    finish_jump_m: (2.0, 2.2),
+    // M: usually a triple of 22.6–25.3 m crest to crest; built as a tabletop of that air.
+    finish_deck_m: (20.0, 25.0),
+    // E: the measured 30° lip wants about 6 m, and no face here is shorter than 9.
+    finish_face_m: crate::trackprog::JUMP_FACE_MIN_M,
+    // P.
+    gates: 22,
+    // M: a flat floor, the lap climbs about 0.
+    amplitude_m: (0.0, 0.0),
+    tilt_m: (0.0, 0.0),
+    landforms: (0, 0),
+    elevation_changes: 0,
+    flat: true,
+    review: corpus::Bands {
+        // P: 6.1 m minimum. M: 9.3–11.3.
+        width_m: (6.0, 12.0),
+        // M: 670–907 across all seven.
+        lap_m: (650.0, 1000.0),
+        // M: 57–72. Rhythm lanes and whoops, which Phase 2 builds.
+        lips_per_km: (40.0, 90.0),
+        // M: about 0.
+        lap_climb_m: (0.0, 5.0),
+        segments: (10.0, 200.0),
+        // Lanes are straights joined by turns, so about half the segments are straights.
+        arc_fraction: (0.3, 1.0),
+        // M: 1075–1618.
+        total_turn_deg: (900.0, 2400.0),
+        // M: 7–10.
+        turns: (6.0, 12.0),
+        // M: apex 5.6–8.2.
+        turn_radius_m: (4.5, 10.0),
+        amplitude_m: (0.0, 2.0),
+        // E.
+        lap_avg_kmh: (25.0, 60.0),
+        ..corpus::MX
+    },
+    stadium: Some(Stadium {
+        // M: 117–138 along, 72–86 across on the FSX and Feulatracks floors.
+        floor: (140.0, 100.0),
+        // M: 5–7 of the 7–9 corners are 180s; 6 lanes give 5, 8 give 7.
+        lanes: [6, 8],
+        // E: a 10 m lane and a row of tuff blocks; a 180 between two is 5.5–8 m.
+        lane_gap_m: (12.0, 14.0),
+        length_m: (115.0, 140.0),
+        edge_m: 7.0,
+        stagger_m: (0.0, 8.0),
+        holeshot_stagger_m: (0.0, 25.0),
+    }),
+    // M, per lap.
+    sections: Some(Sections {
+        rhythm_lanes: (4, 7),
+        rhythm_m: (40.0, 65.0),
+        rhythm_hills: (5, 6),
+        rhythm_pitch_m: (9.5, 10.5),
+        rhythm_h_m: (0.9, 1.5),
+        whoop_sections: (1, 2),
+        whoops: (9, 10),
+        whoop_pitch_m: (5.2, 5.6),
+        whoop_h_m: (0.45, 0.7),
+        whoops_m: 48.0,
+        triples: (0, 2),
+        triple_span_m: (22.6, 25.3),
+        doubles: (0, 1),
+        double_m: (17.0, 18.0),
+        rhythm_doubles: (1, 3),
+        rhythm_double_m: (10.0, 13.0),
+        tables: (0, 4),
+        table_deck_m: (6.5, 11.0),
+        bank_deg: (2.0, 8.0),
+    }),
+};
+
+/// SuperMotocross: an outdoor-style lap, flatter and tighter, with 22 gates. Phase 1 walks it
+/// as an outdoor lap; its stadium blocks come later.
+pub const SMX_RULES: Rules = Rules {
+    // E: a square the outdoor walk can fill. M: up to 540 x 200.
+    plot: (400.0, 400.0),
+    samples: 2049,
+    // M: 1141–1925.
+    lap_m: (1300.0, 1700.0),
+    // M: 10.0–10.5.
+    width_m: (10.0, 13.0),
+    start_straight_draw_m: (70.0, 110.0),
+    // M: 6.8–11.5.
+    apex_m: (7.0, 11.5),
+    tight_m: 18.0,
+    start_clear_m: 110.0,
+    // E: shorter runs than MX.
+    run_max_m: 45.0,
+    start_straight_m: 60.0,
+    // M: 10.5 and 28.3 off the line on two of three.
+    start_offset_m: 30.0,
+    start_sprint_m: 45.0,
+    finish_jump_m: (2.2, 2.8),
+    finish_deck_m: (crate::trackprog::TABLETOP_DECK_M, 16.0),
+    finish_face_m: 14.0,
+    gates: 22,
+    // E: flatter than MX.
+    amplitude_m: (1.0, 2.5),
+    tilt_m: (0.0, 3.0),
+    landforms: (0, 1),
+    elevation_changes: 0,
+    flat: false,
+    review: corpus::Bands {
+        // M: 1141–1925.
+        lap_m: (900.0, 2100.0),
+        // M: 37–45.
+        lips_per_km: (25.0, 60.0),
+        lap_climb_m: (0.0, 20.0),
+        total_turn_deg: (1000.0, 3600.0),
+        // M: 12–22.
+        turns: (8.0, 30.0),
+        // M: apex 6.8–11.5.
+        turn_radius_m: (6.0, 30.0),
+        amplitude_m: (0.5, 30.0),
+        ..corpus::MX
+    },
+    stadium: None,
+    // M where the three tracks agree, E otherwise.
+    sections: Some(Sections {
+        rhythm_lanes: (2, 5),
+        rhythm_m: (25.0, 35.0),
+        rhythm_hills: (3, 3),
+        rhythm_pitch_m: (9.5, 10.5),
+        rhythm_h_m: (0.9, 1.5),
+        whoop_sections: (0, 0),
+        whoops: (0, 0),
+        whoop_pitch_m: (0.0, 0.0),
+        whoop_h_m: (0.0, 0.0),
+        whoops_m: 0.0,
+        triples: (3, 7),
+        triple_span_m: (25.0, 29.0),
+        doubles: (2, 4),
+        double_m: (15.0, 20.0),
+        rhythm_doubles: (0, 2),
+        rhythm_double_m: (10.0, 13.0),
+        tables: (0, 4),
+        table_deck_m: (6.5, 12.0),
+        bank_deg: (2.0, 8.0),
+    }),
+};
 
 /// Names, so two tracks from two seeds are never the same track twice. Each takes its own
 /// folder inside its own `.pkz`, which is what stops one installing over another.
@@ -497,9 +816,7 @@ fn longest_straight(segs: &[Segment], opening: f32) -> f32 {
     runs.into_iter().fold(0.0f32, f32::max)
 }
 
-/// The most ground between two corners, metres: straight or gentler than [`GENTLE_R_M`]. The
-/// corpus runs 20-72 m (p50 27-30).
-const RUN_MAX_M: f32 = 55.0;
+/// Gentler than this and an arc counts as ground between corners, see [`Rules::run_max_m`].
 const GENTLE_R_M: f32 = 60.0;
 /// The same on the way home, a little looser or most laps never close. Long enough for a jump,
 /// never long enough to be bent into a chicane (see [`STRAIGHT_MAX_M`]).
@@ -755,7 +1072,7 @@ fn offers(
     // colinear, so the app's `straight_runs` reads a row of them as ONE straight.
     // And never a long stretch between corners: straights and wanders chained with no limit
     // rode as long straights, and the longer ones came back as big chicanes.
-    let left = RUN_MAX_M - since_corner;
+    let left = knobs.rules().run_max_m - since_corner;
     let room = (STRAIGHT_CAP_M - running).min(left).min(STRAIGHT_MAX_M);
     if room > 20.0 {
         cand.push(vec![Segment::Straight { length: rng.range(20.0, room), rise: 0.0 }]);
@@ -1023,12 +1340,12 @@ const WIGGLE_END_M: f32 = 10.0;
 /// Singles on one side of the track, in the stretches the draw left empty: a choice of line
 /// down a straight rather than nothing. They take nothing from the layout's own generator, so
 /// the rest of a seed's lap is the same with them.
-fn side_singles(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
+fn side_singles(out: &mut Vec<Feature>, segs: &[Segment], seed: u64, rules: &Rules) {
     let (total, spans) = spans(segs);
     let tight = |at: f32, length: f32| {
         spans
             .iter()
-            .any(|(a, b, r)| r.is_some_and(|r| r < TIGHT_M) && *b > at && *a < at + length)
+            .any(|(a, b, r)| r.is_some_and(|r| r < rules.tight_m) && *b > at && *a < at + length)
     };
     // A grade is ground, not a feature: straights carrying only a step rode as empty.
     let mut taken: Vec<(f32, f32)> = out
@@ -1044,7 +1361,7 @@ fn side_singles(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
         (((x >> 11) as f64 / (1u64 << 53) as f64) as f32, (x >> 7) & 1 == 1)
     };
     let mut added = Vec::new();
-    let mut from = START_CLEAR_M;
+    let mut from = rules.start_clear_m;
     for (a, b) in taken {
         let mut pos = from + SIDE_SINGLE_CLEAR_M;
         loop {
@@ -1083,7 +1400,7 @@ fn side_singles(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
 
 /// Rollers in any stretch the jumps left bare: a long sweeper between two tight corners rode as
 /// a straight with nothing on it. Keyed on position, like the side singles.
-fn fill_gaps(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
+fn fill_gaps(out: &mut Vec<Feature>, segs: &[Segment], seed: u64, rules: &Rules) {
     let (total, spans) = spans(segs);
     let hairpin = |at: f32, len: f32| {
         spans
@@ -1099,7 +1416,7 @@ fn fill_gaps(out: &mut Vec<Feature>, segs: &[Segment], seed: u64) {
     taken.sort_by(|a, b| a.0.total_cmp(&b.0));
     taken.push((total - 20.0, total));
     let mut added = Vec::new();
-    let mut from = START_CLEAR_M;
+    let mut from = rules.start_clear_m;
     for (a, b) in taken {
         if a - from > FILL_GAP_M {
             let mut pos = from + FILL_CLEAR_M;
@@ -1214,17 +1531,18 @@ const SIDE_SINGLE_GAP_M: f32 = 30.0;
 fn features(rng: &mut Rng, segs: &[Segment], knobs: &LayoutKnobs) -> Vec<Feature> {
     let [table, whale, single, double, triple, table_single, waves_at, step] = knobs.picks;
     let js = knobs.jump_scale;
+    let rules = knobs.rules();
     let (total, spans) = spans(segs);
     let tight = |at: f32, length: f32| {
         spans
             .iter()
-            .any(|(a, b, r)| r.is_some_and(|r| r < TIGHT_M) && *b > at && *a < at + length)
+            .any(|(a, b, r)| r.is_some_and(|r| r < rules.tight_m) && *b > at && *a < at + length)
     };
     let mut waves_laid = 0usize;
     let mut out = Vec::new();
     // The first stretch is where the gate row goes, and forty riders arrive at the first jump
     // in a pack. Leave it bare.
-    let mut pos = START_CLEAR_M;
+    let mut pos = rules.start_clear_m;
     while pos < total - 40.0 {
         let room = total - 20.0 - pos;
         if tight(pos - JUMP_RUNUP_M, JUMP_RUNUP_M + 34.0) {
@@ -1457,6 +1775,9 @@ pub struct TrackSettings {
     pub landforms: u32,
     /// 0–4 long straights that climb or drop.
     pub elevation_changes: u32,
+    /// Set by the app from the discipline switch, never by the model. `None` is motocross.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discipline: Option<Discipline>,
 }
 
 impl Default for TrackSettings {
@@ -1482,6 +1803,7 @@ impl Default for TrackSettings {
             tilt: 11.0,
             landforms: 3,
             elevation_changes: 2,
+            discipline: None,
         }
     }
 }
@@ -1513,6 +1835,7 @@ impl TrackSettings {
             tilt: c(self.tilt, 0.0, 25.0, d.tilt),
             landforms: self.landforms.min(5),
             elevation_changes: self.elevation_changes.min(4),
+            discipline: self.discipline,
         }
     }
 }
@@ -1548,6 +1871,8 @@ pub struct LayoutKnobs {
     pub(crate) location: Option<String>,
     pub(crate) wear: Option<f32>,
     pub(crate) roughness: Option<f32>,
+    /// Which rules the lap is drawn by, see [`Rules`].
+    pub(crate) discipline: Discipline,
 }
 
 /// The feature odds [`draw`] has always used, cumulative. Written out rather than summed so
@@ -1556,37 +1881,45 @@ const PICKS: [f32; 8] = [0.22, 0.30, 0.40, 0.50, 0.57, 0.64, 0.68, 0.86];
 
 impl Default for LayoutKnobs {
     fn default() -> Self {
-        LayoutKnobs {
-            // Ridden and called "little skinny": ten to thirteen and a half metres is the
-            // bottom of what the corpus allows, and a national is wider than that.
-            width: (14.5, 18.0),
-            // And longer: 1451 m rode as "overall small" and 2400 m "a bit too big". Indiana
-            // is 2138.
-            lap: (2000.0, 2350.0),
-            lap_within: None,
-            attempts: 6,
-            corners_per_km: CORNERS_PER_KM,
-            start_straight: (90.0, 130.0),
-            sweep_share: 0.22,
-            apex: (8.0, 15.0),
-            picks: PICKS,
-            jump_scale: 1.0,
-            waves: MAX_WAVE_SECTIONS,
-            feature_gap: (3.0, 8.0),
-            elevation_changes: 2,
-            surface: None,
-            amplitude: (4.2, 7.5),
-            tilt: (6.0, 16.0),
-            landforms: (2, 4),
-            name: None,
-            location: None,
-            wear: None,
-            roughness: None,
-        }
+        LayoutKnobs::for_discipline(Discipline::Mx)
     }
 }
 
 impl LayoutKnobs {
+    /// What [`draw`] draws for a discipline, from its row of [`Rules`].
+    pub fn for_discipline(discipline: Discipline) -> Self {
+        let r = discipline.rules();
+        LayoutKnobs {
+            width: r.width_m,
+            lap: r.lap_m,
+            lap_within: None,
+            attempts: 6,
+            corners_per_km: CORNERS_PER_KM,
+            start_straight: r.start_straight_draw_m,
+            sweep_share: 0.22,
+            apex: r.apex_m,
+            picks: PICKS,
+            jump_scale: 1.0,
+            waves: MAX_WAVE_SECTIONS,
+            feature_gap: (3.0, 8.0),
+            elevation_changes: r.elevation_changes,
+            // A stadium floor is dirt.
+            surface: r.flat.then_some(Surface::Soil),
+            amplitude: r.amplitude_m,
+            tilt: r.tilt_m,
+            landforms: r.landforms,
+            name: None,
+            location: None,
+            wear: None,
+            roughness: None,
+            discipline,
+        }
+    }
+
+    pub(crate) fn rules(&self) -> &'static Rules {
+        self.discipline.rules()
+    }
+
     /// Settings into bands. Each is a narrow band round what was asked rather than the point
     /// itself: a point makes every seed walk the same way into the same dead ends.
     pub fn from_settings(s: &TrackSettings) -> Self {
@@ -1609,6 +1942,22 @@ impl LayoutKnobs {
         // The gap after a feature: 12 m sparse, 2 m packed; 0.65 is today's 3–8.
         let gap = 12.0 - 10.0 * s.jump_density;
         let some = |t: &str| (!t.is_empty()).then(|| t.to_string());
+        // Another discipline keeps its own lap, width and ground, which the settings' ranges
+        // are motocross's for. The brief still sets what is built on it and the name.
+        if let Some(d) = s.discipline.filter(|d| !d.is_mx()) {
+            return LayoutKnobs {
+                picks,
+                jump_scale: s.jump_scale,
+                waves: s.waves as usize,
+                feature_gap: ((gap - 2.5).max(1.0), gap + 2.5),
+                surface: Some(s.surface),
+                name: some(&s.name),
+                location: some(&s.location),
+                wear: Some(s.wear),
+                roughness: Some(s.roughness),
+                ..LayoutKnobs::for_discipline(d)
+            };
+        }
         LayoutKnobs {
             width: band(s.width, 0.3, 12.0, 18.0),
             lap: (s.lap_length * 0.96, s.lap_length * 1.04),
@@ -1636,6 +1985,7 @@ impl LayoutKnobs {
             location: some(&s.location),
             wear: Some(s.wear),
             roughness: Some(s.roughness),
+            discipline: Discipline::Mx,
         }
     }
 }
@@ -1647,6 +1997,7 @@ pub fn draw(seed: u64) -> Option<TrackProgram> {
 
 /// One lap, from one number and the bands to draw it from.
 pub fn draw_with(seed: u64, knobs: &LayoutKnobs) -> Option<TrackProgram> {
+    let rules = knobs.rules();
     let mut rng = Rng::new(seed);
     let width = rng.range(knobs.width.0, knobs.width.1);
     // A lap that strays from the length asked for is walked again: the walk only aims at its
@@ -1657,19 +2008,23 @@ pub fn draw_with(seed: u64, knobs: &LayoutKnobs) -> Option<TrackProgram> {
     let mut grown = None;
     for _ in 0..knobs.attempts {
         let want = rng.range(knobs.lap.0, knobs.lap.1);
-        grown = walk(&mut rng, PLOT_M, width, want, knobs).map(|(mut segs, start)| {
-            // No rng in here, so measuring after it moves nothing.
-            break_long_straights(&mut segs, (start.x, start.z, start.angle.to_radians()), width);
-            (segs, start)
-        });
+        grown = match &rules.stadium {
+            // Laid lane by lane, inside the floor and the rules: nothing to break up.
+            Some(st) => walk_stadium(&mut rng, rules, st, width, knobs.lap),
+            None => walk(&mut rng, rules.plot.0, width, want, knobs).map(|(mut segs, start)| {
+                // No rng in here, so measuring after it moves nothing.
+                break_long_straights(&mut segs, (start.x, start.z, start.angle.to_radians()), width);
+                (segs, start)
+            }),
+        };
         if grown.as_ref().is_some_and(|(segs, _)| fits(segs)) {
             break;
         }
     }
     let (mut segments, start) = grown.filter(|(segs, _)| fits(segs))?;
     let mut features = features(&mut rng, &segments, knobs);
-    side_singles(&mut features, &segments, seed);
-    fill_gaps(&mut features, &segments, seed);
+    side_singles(&mut features, &segments, seed, rules);
+    fill_gaps(&mut features, &segments, seed, rules);
     // Up and down: a climb on one long straight and a drop on another. Drawn after the jumps,
     // so the lap's shape and what is built on it stay where they were; the lap hands any net
     // rise back evenly.
@@ -1705,9 +2060,9 @@ pub fn draw_with(seed: u64, knobs: &LayoutKnobs) -> Option<TrackProgram> {
         width,
         blend: crate::trackprog::default_blend(),
         terrain: Terrain {
-            size_x: PLOT_M,
-            size_z: PLOT_M,
-            samples: 2049,
+            size_x: rules.plot.0,
+            size_z: rules.plot.1,
+            samples: rules.samples,
             scale: if rng.chance(0.5) { 63.0 } else { 70.0 },
             surface,
             wear: knobs.wear.unwrap_or_else(crate::trackprog::default_wear),
@@ -1730,7 +2085,130 @@ pub fn draw_with(seed: u64, knobs: &LayoutKnobs) -> Option<TrackProgram> {
         segments,
         features,
         elevation: Vec::new(),
+        discipline: knobs.discipline,
     })
+}
+
+/// How many floors a stadium lap is tried on before the seed gives up.
+const STADIUM_TRIES: usize = 40;
+
+/// A supercross lap: parallel lanes down a stadium floor joined by 180s at alternate ends, and
+/// one lane down the side that brings it back to the start straight.
+///
+/// It is the one shape the measured stadium tracks share (5–7 of their 7–9 corners are 180s),
+/// and it closes and cannot cross itself by construction: every lane has its own row, the
+/// return lane runs outside every 180, and each corner is filleted inside its own square.
+/// Returns the lap and its start pose: the first lane, which is the start straight.
+fn walk_stadium(
+    rng: &mut Rng,
+    rules: &Rules,
+    st: &Stadium,
+    width: f32,
+    lap: (f32, f32),
+) -> Option<(Vec<Segment>, Start)> {
+    for _ in 0..STADIUM_TRIES {
+        let n = st.lanes[rng.int(0, st.lanes.len() as i32 - 1) as usize];
+        let widest = (st.floor.1 - 2.0 * st.edge_m) / (n - 1) as f32;
+        let gap = rng.range(st.lane_gap_m.0, st.lane_gap_m.1.min(widest));
+        let long = rng.range(st.length_m.0, st.length_m.1.min(st.floor.0));
+        let across = (n - 1) as f32 * gap + 2.0 * st.edge_m;
+        if gap < st.lane_gap_m.0 || across > st.floor.1 {
+            continue;
+        }
+        // Which end the return lane runs down, and which side the start straight is on.
+        let flip = |rng: &mut Rng| if rng.chance(0.5) { 1.0f32 } else { -1.0 };
+        let (fx, fz) = (flip(rng), flip(rng));
+        // The floor's own frame: `u` along the lanes from the return end, `v` across from the
+        // start straight. The 180s at the return end stand a lane's width clear of it.
+        let ret = st.edge_m;
+        let inner = ret + width + 5.0;
+        let far = long - st.edge_m;
+        let v = |k: usize| st.edge_m + k as f32 * gap;
+        let mut corners: Vec<(f32, f32)> = vec![(ret, v(0))];
+        for k in 0..n - 1 {
+            let (lo, hi) = if k == 0 { st.holeshot_stagger_m } else { st.stagger_m };
+            let s = rng.range(lo, hi);
+            let end = if k % 2 == 0 { far - s } else { inner + s };
+            corners.push((end, v(k)));
+            corners.push((end, v(k + 1)));
+        }
+        corners.push((ret, v(n - 1)));
+        let (cx, cz) = (rules.plot.0 * 0.5, rules.plot.1 * 0.5);
+        let world: Vec<(f32, f32)> = corners
+            .iter()
+            .map(|&(u, w)| (cx + fx * (u - long * 0.5), cz + fz * (w - across * 0.5)))
+            .collect();
+        let Some((segs, start)) = fillet(rng, &world, rules.apex_m) else { continue };
+        let straights = segs.iter().filter_map(|s| match s {
+            Segment::Straight { length, .. } => Some(*length),
+            _ => None,
+        });
+        let longest = straights.fold(0.0f32, f32::max);
+        let opening = match segs.first() {
+            Some(Segment::Straight { length, .. }) => *length,
+            _ => 0.0,
+        };
+        // Long enough for the finish jump as well as the start: the measured laps all end on one.
+        let (lo, hi) = rules.start_straight_draw_m;
+        let lo = lo.max(crate::trackprog::finish_straight_m(rules));
+        if (lap.0..=lap.1).contains(&chain_length(&segs))
+            && (lo..=hi).contains(&opening)
+            && longest <= rules.run_max_m
+        {
+            return Some((segs, start));
+        }
+    }
+    None
+}
+
+/// A closed polygon of right angles as straights and arcs: each corner rounded on a radius
+/// drawn from `radius`, but never more than half the shorter leg beside it, so no two corners
+/// overlap. The lap starts where the first leg leaves its corner.
+fn fillet(
+    rng: &mut Rng,
+    corners: &[(f32, f32)],
+    radius: (f32, f32),
+) -> Option<(Vec<Segment>, Start)> {
+    let n = corners.len();
+    // Length and heading (the app's frame: 0 down +z, clockwise to +x) of the leg out of `i`.
+    let leg = |i: usize| {
+        let (a, b) = (corners[i], corners[(i + 1) % n]);
+        let (dx, dz) = (b.0 - a.0, b.1 - a.1);
+        (dx.hypot(dz), dx.atan2(dz))
+    };
+    let r: Vec<f32> = (0..n)
+        .map(|i| {
+            let most = leg((i + n - 1) % n).0.min(leg(i).0) * 0.5;
+            rng.range(radius.0, radius.1).min(most)
+        })
+        .collect();
+    let mut segs = Vec::with_capacity(n * 2);
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let (len, h) = leg(i);
+        let run = len - r[i] - r[j];
+        if run < -1e-3 {
+            return None;
+        }
+        if run > 0.05 {
+            segs.push(Segment::Straight { length: run, rise: 0.0 });
+        }
+        let turn = (leg(j).1 - h + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+            - std::f32::consts::PI;
+        segs.push(Segment::Arc {
+            radius: r[j] * turn.signum(),
+            angle: turn.abs().to_degrees(),
+            rise: 0.0,
+        });
+    }
+    let h = leg(0).1;
+    let (hx, hz) = crate::trackprog::heading_vector(h);
+    let start = Start {
+        x: corners[0].0 + hx * r[0],
+        z: corners[0].1 + hz * r[0],
+        angle: h.to_degrees().rem_euclid(360.0),
+    };
+    Some((segs, start))
 }
 
 /// What a lap came out measuring, once it was built.
@@ -1756,7 +2234,7 @@ pub fn ground_notes(prog: &TrackProgram) -> Vec<String> {
     // return leg: a tester found the gate row standing in the middle of the track. A drawn lap
     // like that is passed over rather than built.
     if let Some(line) = prog.start_line() {
-        let need = crate::trackprog::StartLine::room_needed(prog.width);
+        let need = crate::trackprog::StartLine::room_needed(prog.discipline.rules(), prog.width);
         if line.room < need {
             notes.push(format!(
                 "the start straight has {:.0} m beside the opening straight and needs {need:.0}: \
@@ -2097,6 +2575,7 @@ mod tests {
             tilt: 0.0,
             landforms: 0,
             elevation_changes: 0,
+            discipline: None,
         }
     }
 
@@ -2122,6 +2601,7 @@ mod tests {
             tilt: 25.0,
             landforms: 5,
             elevation_changes: 4,
+            discipline: None,
         }
     }
 
@@ -2305,6 +2785,145 @@ mod tests {
         assert_eq!(s.waves, 2);
     }
 
+    fn sx(seed: u64) -> Option<TrackProgram> {
+        draw_with(seed, &LayoutKnobs::for_discipline(Discipline::Sx))
+    }
+
+    /// The biggest floor a stadium lap may use, centred on its plot: x0, z0, x1, z1.
+    fn sx_floor() -> (f32, f32, f32, f32) {
+        let st = SX_RULES.stadium.expect("SX has a floor");
+        let (cx, cz) = (SX_RULES.plot.0 * 0.5, SX_RULES.plot.1 * 0.5);
+        (cx - st.floor.0 * 0.5, cz - st.floor.1 * 0.5, cx + st.floor.0 * 0.5, cz + st.floor.1 * 0.5)
+    }
+
+    /// Fifty stadium laps: on the floor, riding line and all, with the lap and the corner count
+    /// the measured SX tracks carry.
+    #[test]
+    fn sx_laps_fit_the_floor() {
+        let (x0, z0, x1, z1) = sx_floor();
+        let turns_band = SX_RULES.review.turns;
+        for seed in 0..50u64 {
+            let p = sx(seed).unwrap_or_else(|| panic!("seed {seed} drew no SX lap"));
+            assert_eq!(p.discipline, Discipline::Sx);
+            let half = p.width * 0.5;
+            for q in p.stations(2.0) {
+                assert!(
+                    q.x - half >= x0 && q.x + half <= x1 && q.z - half >= z0 && q.z + half <= z1,
+                    "seed {seed}: ({:.0}, {:.0}) is off the floor",
+                    q.x,
+                    q.z
+                );
+            }
+            let lap = p.lap_length();
+            assert!((SX_RULES.lap_m.0..=SX_RULES.lap_m.1).contains(&lap), "seed {seed}: {lap:.0} m");
+            let turns = crate::trackprog::turns(&p.segments).iter().filter(|t| t.0 >= 25.0).count();
+            assert!(
+                (turns_band.0..=turns_band.1).contains(&(turns as f32)),
+                "seed {seed}: {turns} corners"
+            );
+            let hairpins = crate::trackprog::turns(&p.segments)
+                .iter()
+                .filter(|t| t.0 > 170.0)
+                .count();
+            assert!(hairpins >= 5, "seed {seed}: only {hairpins} 180s");
+            assert!(p.closure_error() < 0.05, "seed {seed}: misses by {:.2} m", p.closure_error());
+        }
+    }
+
+    /// No two parts of a stadium lap share dirt: anything far apart round the lap stays more
+    /// than a riding line apart on the floor.
+    #[test]
+    fn sx_laps_never_cross() {
+        for seed in 0..50u64 {
+            let p = sx(seed).expect("an SX lap");
+            let st = p.stations(2.0);
+            let lap = p.lap_length();
+            for (i, a) in st.iter().enumerate() {
+                for b in &st[i + 1..] {
+                    let along = (b.s - a.s).abs();
+                    if along.min(lap - along) < 60.0 {
+                        continue;
+                    }
+                    let d = (a.x - b.x).hypot(a.z - b.z);
+                    assert!(
+                        d > p.width + 1.0,
+                        "seed {seed}: {:.0} m and {:.0} m round are {d:.1} m apart",
+                        a.s,
+                        b.s
+                    );
+                }
+            }
+        }
+    }
+
+    /// And review has nothing blocking to say about them once repaired.
+    #[test]
+    fn sx_random_passes_review() {
+        for seed in 0..8u64 {
+            let mut p = sx(seed).expect("an SX lap");
+            crate::trackllm::repair_for_tests(&mut p);
+            let r = crate::trackllm::review(&p);
+            println!("seed {seed}: {:.0} m, notes {:?}", p.lap_length(), r.notes);
+            assert!(r.fatal.is_empty(), "seed {seed}: {:?}", r.fatal);
+            assert!(r.problems.is_empty(), "seed {seed}: {:?}", r.problems);
+            assert_eq!(p.discipline, Discipline::Sx, "repair keeps the discipline");
+        }
+    }
+
+    /// SMX walks the outdoor lap on its own rules, and review holds it to them.
+    #[test]
+    fn smx_random_passes_review() {
+        let knobs = LayoutKnobs::for_discipline(Discipline::Smx);
+        let laps: Vec<TrackProgram> = (0..12u64).filter_map(|s| draw_with(s, &knobs)).take(4).collect();
+        assert!(laps.len() >= 4, "only {} SMX laps drew", laps.len());
+        for mut p in laps {
+            crate::trackllm::repair_for_tests(&mut p);
+            let r = crate::trackllm::review(&p);
+            println!("{:.0} m, notes {:?}", p.lap_length(), r.notes);
+            assert!(r.fatal.is_empty() && r.problems.is_empty(), "{:?} {:?}", r.fatal, r.problems);
+            assert_eq!(p.terrain.size_x, SMX_RULES.plot.0);
+        }
+    }
+
+    /// A discipline is written only when it isn't motocross, and read back as written; a
+    /// program or settings without one is motocross.
+    #[test]
+    fn the_discipline_round_trips() {
+        let p = sx(1).expect("an SX lap");
+        let v = serde_json::to_value(&p).unwrap();
+        assert_eq!(v["discipline"], "sx");
+        let back: TrackProgram = serde_json::from_value(v).unwrap();
+        assert_eq!(back.discipline, Discipline::Sx);
+
+        let mx = drawn(4242);
+        let v = serde_json::to_value(&mx).unwrap();
+        assert!(v.get("discipline").is_none(), "MX writes no discipline");
+        assert_eq!(serde_json::from_value::<TrackProgram>(v).unwrap().discipline, Discipline::Mx);
+
+        let s = TrackSettings { discipline: Some(Discipline::Smx), ..TrackSettings::default() };
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["discipline"], "smx");
+        assert_eq!(serde_json::from_value::<TrackSettings>(v).unwrap(), s);
+        let plain = serde_json::to_value(TrackSettings::default()).unwrap();
+        assert!(plain.get("discipline").is_none());
+    }
+
+    /// Settings for another discipline draw that discipline's lap, with the brief's character.
+    #[test]
+    fn sx_settings_draw_an_sx_lap() {
+        let s = TrackSettings {
+            name: "Stadium".into(),
+            surface: Surface::Sand,
+            discipline: Some(Discipline::Sx),
+            ..TrackSettings::default()
+        };
+        let knobs = LayoutKnobs::from_settings(&s);
+        let p = (0..8u64).find_map(|n| draw_with(n, &knobs)).expect("an SX lap from settings");
+        assert_eq!(p.discipline, Discipline::Sx);
+        assert_eq!((p.name.as_str(), p.terrain.surface), ("Stadium", Surface::Sand));
+        assert!((SX_RULES.lap_m.0..=SX_RULES.lap_m.1).contains(&p.lap_length()));
+    }
+
     /// The whole point: a seed range yields a lap that passes both halves.
     ///
     /// Slow — every candidate that passes review is synthesised and measured — so it runs on
@@ -2367,10 +2986,16 @@ mod corner_shape_tests {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(1);
+        // `LAYOUT_DISCIPLINE=sx` (or smx) for another discipline's laps.
+        let discipline: Discipline = std::env::var("LAYOUT_DISCIPLINE")
+            .ok()
+            .and_then(|d| serde_json::from_value(serde_json::Value::String(d)).ok())
+            .unwrap_or_default();
+        let knobs = LayoutKnobs::for_discipline(discipline);
         std::fs::create_dir_all(&dir).expect("create");
         let mut drew = 0;
         for seed in from..from + n {
-            let Some(p) = draw(seed) else {
+            let Some(p) = draw_with(seed, &knobs) else {
                 println!("seed {seed}: painted in");
                 continue;
             };

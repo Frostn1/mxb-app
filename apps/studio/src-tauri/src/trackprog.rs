@@ -74,6 +74,37 @@ pub struct TrackProgram {
     /// rather than as a run of instructions, which is the form you can take hold of.
     #[serde(default)]
     pub elevation: Vec<Knot>,
+    /// Motocross, supercross or SuperMotocross: which rules the lap is drawn and judged by.
+    /// Left out for motocross, so a project saved before this existed reads as one.
+    #[serde(default, skip_serializing_if = "Discipline::is_mx")]
+    pub discipline: Discipline,
+}
+
+/// Which kind of racing a track is for. See [`crate::tracklayout::Rules`].
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Discipline {
+    /// An outdoor national: a field, a long lap, a start spur beside it.
+    #[default]
+    Mx,
+    /// A stadium floor: a short flat lap of lanes, the gates on the start straight.
+    Sx,
+    /// The SuperMotocross hybrid: an outdoor-style lap, flatter and tighter.
+    Smx,
+}
+
+impl Discipline {
+    pub fn is_mx(&self) -> bool {
+        *self == Discipline::Mx
+    }
+
+    pub fn rules(self) -> &'static crate::tracklayout::Rules {
+        match self {
+            Discipline::Mx => &crate::tracklayout::MX_RULES,
+            Discipline::Sx => &crate::tracklayout::SX_RULES,
+            Discipline::Smx => &crate::tracklayout::SMX_RULES,
+        }
+    }
 }
 
 /// One point on the lap's height curve.
@@ -745,24 +776,8 @@ pub fn tabletop_faces(height: f32, length: f32, lip: f32) -> (f32, f32, f32) {
     (up, top, down)
 }
 
-/// How tall the finish jump is built, metres.
-///
-/// The jump the lap ends and begins on, and on a national it is one of the biggest on the
-/// track — a long tabletop on the main straight with the line painted past its landing. The
-/// range is the top of the published spread rather than the middle of it: this is the one
-/// jump a track is photographed on.
-// Full size: at three quarters it rode too small for the one jump a track is known by.
-pub const FINISH_JUMP_M: (f32, f32) = (2.4, 3.0);
-
-/// The longest deck a finish jump gets, metres. Published tabletop decks run six to twelve,
-/// and the finish one is at the long end because it is the one everybody lands on.
-// Past the published twelve: at 3 m, the regulated ceiling, the finish jump still rode small, and
-// a longer deck is the way to make it bigger without making it taller.
-pub const FINISH_DECK_MAX_M: f32 = 20.0;
-
-/// How far the finish jump's take-off runs, metres. Longer and gentler than the angle gives a
-/// 3 m face on its own (9 m, 37 degrees at the lip): at 13 it leaves at 26.
-pub const FINISH_FACE_M: f32 = 16.0;
+// The finish jump's height, deck and take-off are per discipline: see
+// `tracklayout::Rules::finish_jump_m`, `finish_deck_m` and `finish_face_m`.
 
 /// Bare ground off the last corner before the finish jump's face, metres. A takeoff at the
 /// corner exit is a takeoff nobody has any drive at.
@@ -776,45 +791,32 @@ pub const FINISH_RUNOUT_M: f32 = 10.0;
 /// rider comes down on, so it sits just off the end of the ramp rather than on it.
 pub const FINISH_LINE_PAST_M: f32 = 4.0;
 
-/// The whole footprint of a finish jump of this height with this deck, metres.
+/// The whole footprint of a finish jump of this height with this deck and take-off, metres.
 ///
 /// A tabletop's ramps are the longer of an angle and a fraction of the stated length, so the
 /// length and the faces define each other. Solved by iterating: the fraction is 0.44 at
 /// worst, so it converges geometrically and eight passes is far past the millimetre.
-pub fn finish_jump_length(height: f32, deck: f32) -> f32 {
+pub fn finish_jump_length(height: f32, deck: f32, face: f32) -> f32 {
     let deck = deck.max(TABLETOP_DECK_M);
     let mut len = height.abs() + deck;
     for _ in 0..8 {
-        let (up, _, down) = tabletop_faces(height, len, FINISH_FACE_M);
+        let (up, _, down) = tabletop_faces(height, len, face);
         len = up + deck + down;
     }
     len
 }
 
-/// The shortest straight a start will fit beside, metres.
-///
-/// A motocross start is a gate row and a sprint at the first turn, all of it in a line,
-/// because forty gates cannot be laid round a bend. The lap needs a straight this long for
-/// the start to run alongside.
-pub const START_STRAIGHT_M: f32 = 60.0;
+/// The main straight a finish jump needs under a discipline's rules: the corner exit, the
+/// smallest finish jump, and somewhere to land before the next corner.
+pub fn finish_straight_m(rules: &crate::tracklayout::Rules) -> f32 {
+    FINISH_RUNUP_M
+        + finish_jump_length(rules.finish_jump_m.0, rules.finish_deck_m.0, rules.finish_face_m)
+        + FINISH_RUNOUT_M
+}
 
-/// How far off the lap the gate row stands, metres.
-///
-/// Measured off six published tracks, whose start lines are carried in their own height
-/// files: Indiana 37.9, SandPoint 36.4, Briarcliff 41.0, I40 47.2, SFDR 48.9, Smokey Pines
-/// 34.0. The start is *not* part of the lap on any of them — it is a spur that runs beside it
-/// and merges in, so a rider on a flying lap never crosses the gates.
-pub const START_OFFSET_M: f32 = 40.0;
-
-/// How long the gate straight is before it starts turning in, metres.
-///
-/// Published start lines run 79–91 m of straight before their first corner, and 67–208 m all
-/// told. Shorter than the middle of that on purpose: ridden, 85 m of sprint and 90 m of
-/// turn-in is a long way to the first corner, and the whole point of a start straight is that
-/// it ends at one.
-// Ridden at 80 m as a long drag with nothing to do; shorter, so the pack arrives at turn one
-// still bunched and has to brake for it.
-pub const START_SPRINT_M: f32 = 55.0;
+// The shortest start straight, how far off the lap the gate row stands and how long its
+// sprint is are per discipline: `tracklayout::Rules::start_straight_m`, `start_offset_m` and
+// `start_sprint_m`.
 
 /// How far the start straight is angled towards the lap, degrees. Over the sprint it closes
 /// about a fifth of the offset, which leaves one corner to do the rest.
@@ -826,12 +828,8 @@ pub const START_CONVERGE_DEG: f32 = 3.0;
 /// corner rather than only its apex.
 pub const TURN_ONE_RADIUS_M: f32 = 60.0;
 
-/// Half the width of the start pad, metres: the gate row plus a margin.
-///
-/// Forty gates at 1.2 m is 48 m across, and the pad has to hold it. Stated here rather than
-/// in the synthesiser because the *layout* needs it — a start line whose centreline clears
-/// the lap by fifteen metres still lays its pad straight over it.
-pub const START_FAN_HALF_M: f32 = 27.0;
+// Half the start pad's width comes from the discipline's gate count:
+// `tracklayout::Rules::fan_half_m`.
 
 /// How much a start line is expected to turn on its way onto the lap. Published ones sweep
 /// 100–180°, and what that buys is a pack that arrives *in* the corner.
@@ -865,8 +863,8 @@ pub struct StartLine {
 impl StartLine {
     /// The room its gate row needs beside the opening straight: the offset out, the fan's half
     /// width, and the lap's own half width on the far side.
-    pub fn room_needed(width: f32) -> f32 {
-        START_OFFSET_M + crate::tracksynth::START_FAN_HALF_M + width * 0.5
+    pub fn room_needed(rules: &crate::tracklayout::Rules, width: f32) -> f32 {
+        rules.start_offset_m + rules.fan_half_m() + width * 0.5
     }
 
     pub fn length(&self) -> f32 {
@@ -1867,8 +1865,11 @@ impl TrackProgram {
     /// `None` when the lap has no straight to run beside — the gates would have nothing to
     /// line up against, and [`crate::trackllm::review`] says so.
     pub fn start_line(&self) -> Option<StartLine> {
+        let rules = self.discipline.rules();
+        let (offset, sprint, fan_half) =
+            (rules.start_offset_m, rules.start_sprint_m, rules.fan_half_m());
         let run = self.opening_straight();
-        if run < START_SPRINT_M * 0.5 || self.segments.is_empty() {
+        if run < sprint * 0.5 || self.segments.is_empty() {
             return None;
         }
         let st = self.stations(4.0);
@@ -1908,7 +1909,7 @@ impl TrackProgram {
             .map(|q| -q.curvature.signum())
             .unwrap_or(0.0);
         let side = if outside != 0.0
-            && (if outside > 0.0 { room_r } else { room_l }) > START_OFFSET_M * 1.15
+            && (if outside > 0.0 { room_r } else { room_l }) > offset * 1.15
         {
             outside
         } else if room_r >= room_l {
@@ -1925,8 +1926,8 @@ impl TrackProgram {
         // have: Indiana's straight runs 90 m and then turns *once*, through 170°, onto the
         // racing line.
         let start = Start {
-            x: self.start.x + rx * side * START_OFFSET_M,
-            z: self.start.z + rz * side * START_OFFSET_M,
+            x: self.start.x + rx * side * offset,
+            z: self.start.z + rz * side * offset,
             angle: self.start.angle - side * START_CONVERGE_DEG,
         };
         // Where turn one is: the first station past the opening straight that is properly
@@ -1956,7 +1957,7 @@ impl TrackProgram {
         // lap; failing that, land anywhere it can without crossing; failing that, take the
         // shortest merge there is. A track whose ground will not hold the ideal start still
         // gets one, and it is the same search each time.
-        let after = end_pose(start, &[Segment::Straight { length: START_SPRINT_M, rise: 0.0 }]);
+        let after = end_pose(start, &[Segment::Straight { length: sprint, rise: 0.0 }]);
         let search = |aim_at_the_corner: bool, keep_clear: bool| -> Option<(f32, Vec<Segment>, f32)> {
         let mut best: Option<(f32, Vec<Segment>, f32)> = None;
         for q in st.iter().filter(|q| q.s >= run * 0.5 && q.s <= corner_end + 120.0) {
@@ -2049,8 +2050,8 @@ impl TrackProgram {
                     // Against the *pad*, not the centreline: the start is 54 m across at the
                     // gates and still twenty by the middle of the merge, and a line that
                     // clears the lap by fifteen metres lays its pad straight over it.
-                    let taper = (a.s / (START_SPRINT_M * 0.9).max(1.0)).clamp(0.0, 1.0);
-                    let pad = START_FAN_HALF_M + (self.width * 0.5 - START_FAN_HALF_M) * taper;
+                    let taper = (a.s / (sprint * 0.9).max(1.0)).clamp(0.0, 1.0);
+                    let pad = fan_half + (self.width * 0.5 - fan_half) * taper;
                     // The riding line has to stay outside the pad — that is what "crossing"
                     // means here. Anything more generous is unsatisfiable on a lap that folds
                     // back on itself every eighty metres.
@@ -2086,7 +2087,7 @@ impl TrackProgram {
         let (_, merge, joins_at) = search(true, true)
             .or_else(|| search(false, true))
             .or_else(|| search(false, false))?;
-        let mut segments = vec![Segment::Straight { length: START_SPRINT_M, rise: 0.0 }];
+        let mut segments = vec![Segment::Straight { length: sprint, rise: 0.0 }];
         segments.extend(merge.into_iter().filter(|s| s.length() > 0.5));
         Some(StartLine { start, segments, joins_at, side, room })
     }
@@ -2099,6 +2100,7 @@ impl TrackProgram {
     /// front of them. Otherwise it ends at the shorter of the straight's own end and where
     /// the start spur merges back in, for the same reason.
     pub fn finish_window(&self) -> Option<(f32, f32)> {
+        let rules = self.discipline.rules();
         let run = self.opening_straight();
         let line = self.start_line()?;
         let mut to = run - FINISH_RUNOUT_M;
@@ -2106,7 +2108,9 @@ impl TrackProgram {
             to = line.joins_at - 5.0;
         }
         let from = FINISH_RUNUP_M;
-        (to - from >= finish_jump_length(FINISH_JUMP_M.0, TABLETOP_DECK_M)).then_some((from, to))
+        let least =
+            finish_jump_length(rules.finish_jump_m.0, rules.finish_deck_m.0, rules.finish_face_m);
+        (to - from >= least).then_some((from, to))
     }
 
     /// The finish jump: the one that was named, or failing that the tallest jump standing in
@@ -2129,7 +2133,7 @@ impl TrackProgram {
         self.features
             .iter()
             .filter(|f| matches!(f, Feature::Tabletop { .. } | Feature::Double { .. }))
-            .filter(|f| f.height() >= FINISH_JUMP_M.0 - 0.1)
+            .filter(|f| f.height() >= self.discipline.rules().finish_jump_m.0 - 0.1)
             .filter(|f| f.at() >= from - 1.0 && f.at() + f.length() <= to + 1.0)
             .max_by(|a, b| a.height().total_cmp(&b.height()))
     }
@@ -2372,6 +2376,7 @@ mod tests {
             features: Vec::new(),
             blend: default_blend(),
             elevation: Vec::new(),
+            discipline: Discipline::Mx,
         }
     }
 
@@ -2489,7 +2494,7 @@ mod tests {
     fn the_example_starts_on_a_straight_long_enough_for_a_start() {
         let p: TrackProgram = serde_json::from_str(EXAMPLE).unwrap();
         assert!(
-            p.opening_straight() >= START_STRAIGHT_M,
+            p.opening_straight() >= crate::tracklayout::MX_RULES.start_straight_m,
             "the example opens with {:.0} m of straight",
             p.opening_straight()
         );
@@ -2508,7 +2513,7 @@ mod tests {
         p.check().expect("and it validates");
         assert!(p.closes(), "and it meets itself");
         assert!(
-            p.opening_straight() >= START_STRAIGHT_M,
+            p.opening_straight() >= crate::tracklayout::MX_RULES.start_straight_m,
             "and it has room for a start: {:.0} m",
             p.opening_straight()
         );
