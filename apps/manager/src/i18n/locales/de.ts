@@ -1615,6 +1615,20 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0150.hero.title":
+    "Strecke eines Servers installieren und beitreten, mit einem Klick",
+  "showcase.v0150.hero.body":
+    "Läuft auf einem Server eine kostenlose Strecke, die du nicht hast, installiert ein Knopf die Strecke und tritt bei. Ist der Server voll, kommst du stattdessen in die Warteschlange.",
+  "showcase.v0150.pictures":
+    "Server-Kacheln zeigen das Bild der Strecke, auch wenn du sie nicht hast, mit einer Markierung, damit du es auf einen Blick siehst.",
+  "showcase.v0150.prices":
+    "Im Shop verkaufte Strecken zeigen ihren Preis auf der Kachel, und der Knopf öffnet ihre Shop-Seite.",
+  "showcase.v0150.feel":
+    "Fahrgefühl-Presets speichern jetzt, wie sich jede Steuerung anfühlt, etwa Totzone, Verstärkung und Glättung des Gases. Deine Tasten und Achsen bleiben, wie sie sind.",
+  "showcase.v0150.hub":
+    "MXB Hub lädt wieder, wenn der Shop eine Roboterprüfung verlangt: Die App beantwortet sie im Hintergrund oder öffnet den Shop, damit du sie selbst abschließt.",
+  "showcase.v0150.secured":
+    "Gesicherte Inhalte folgen dem Zugang, den du wirklich hast. Entfernt dich ein Ersteller als Käufer, öffnen sie sich nicht mehr, sobald die App das nächste Mal online ist, und die App sagt dir, warum.",
   "showcase.v0140.hero.title":
     "Frost's Mod Manager, und ein eigenes Studio",
   "showcase.v0140.hero.body":
