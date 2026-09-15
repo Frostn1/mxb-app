@@ -10,6 +10,7 @@
 mod analysis;
 mod bikecfg;
 mod coach;
+mod cues;
 mod fixes;
 mod ground;
 mod lines;
@@ -92,6 +93,7 @@ fn main() {
             coach::coach_ground,
             coach::coach_setup_plan,
             coach::coach_save_setup,
+            coach::coach_write_cues,
             check_coach_update,
             reveal_in_explorer,
             open_folder,

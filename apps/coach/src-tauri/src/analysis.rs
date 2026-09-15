@@ -1878,6 +1878,83 @@ pub fn ideal(sections: &[Section], laps: &[(i32, Trace)]) -> Option<Ideal> {
 }
 
 /// Also the stadium laps other modules' tests ride.
+/// Cue kinds, numbered as the recorder plugin numbers them (FrostMod `src/coachcue.h`).
+pub(crate) mod cue {
+    pub const BRAKE: u8 = 1;
+    pub const OFF_BRAKES: u8 = 2;
+    pub const THROTTLE: u8 = 3;
+    pub const UPSHIFT: u8 = 4;
+    pub const DOWNSHIFT: u8 = 5;
+    pub const WIDE: u8 = 6;
+    pub const INSIDE: u8 = 7;
+    pub const SCRUB: u8 = 8;
+    pub const STAND: u8 = 9;
+    pub const SIT: u8 = 10;
+}
+
+/// A place the fast lap does something a live cue calls, metres into the lap.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct CuePoint {
+    pub at: usize,
+    pub kind: u8,
+    pub section: usize,
+}
+
+/// Where the fast lap brakes, lets off, shifts, gets back on the gas, scrubs and stands, section
+/// by section, in lap order.
+pub(crate) fn cue_points(r: &Trace, secs: &[Section]) -> Vec<CuePoint> {
+    let mut out = Vec::new();
+    let last = r.len().saturating_sub(1);
+    for (si, s) in secs.iter().enumerate() {
+        let (start, end) = (s.start.min(last), s.end.min(last));
+        let (a, b) = (s.core.0.min(last), s.core.1.min(last));
+        let mut add = |at: usize, kind: u8| out.push(CuePoint { at, kind, section: si });
+        match s.kind {
+            Kind::Corner => {
+                let apex = r.slowest(a..b + 1);
+                if let Some(on) = r.first(start..apex + 1, |q| q.brake() > th::BRAKE_ON) {
+                    add(on, cue::BRAKE);
+                    if let Some(off) = r.first(on..apex + 1, |q| q.brake() <= th::BRAKE_ON) {
+                        if off > on + 3 {
+                            add(off, cue::OFF_BRAKES);
+                        }
+                    }
+                    // A gear lower by the apex: down on the brakes.
+                    if let Some(i) = (on..apex).find(|&i| r.pts[i + 1].gear < r.pts[i].gear && r.pts[i + 1].gear > 0) {
+                        add(i, cue::DOWNSHIFT);
+                    }
+                }
+                add(a, cue::SIT);
+                let held = |i: usize| (i..(i + th::THROTTLE_HOLD_M).min(end)).all(|j| r.pts[j].throttle > th::THROTTLE_ON);
+                if let Some(g) = (apex..end).find(|&i| held(i)) {
+                    add(g, cue::THROTTLE);
+                }
+                if let Some(i) = (apex..end).find(|&i| r.pts[i + 1].gear > r.pts[i].gear && r.pts[i].gear > 0) {
+                    add(i, cue::UPSHIFT);
+                }
+            }
+            Kind::Jump | Kind::Rhythm => {
+                if s.kind == Kind::Rhythm {
+                    add(start, cue::STAND);
+                }
+                if let Some(&(t, l)) = s.runs.first() {
+                    let third = (t + l.saturating_sub(t) / 3).max(t + 1).min(last);
+                    if r.max_by(t..third + 1, |q| q.roll.abs()) > th::SCRUB_ROLL_DEG {
+                        add(t, cue::SCRUB);
+                    }
+                }
+            }
+            Kind::Whoops => {
+                add(start, cue::STAND);
+                add(a, cue::THROTTLE);
+            }
+            Kind::Straight => {}
+        }
+    }
+    out.sort_by_key(|c| c.at);
+    out
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -2090,6 +2167,23 @@ pub(crate) mod tests {
         f.end();
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(std::path::Path::new(&dir).join("20260914-120000-000.mxbc"), &f.0).unwrap();
+    }
+
+    #[test]
+    fn the_fast_lap_says_where_to_brake_and_get_back_on_the_gas() {
+        let fast = lap(&FAST);
+        let secs = sections(&fast);
+        let pts = cue_points(&fast, &secs);
+        for (si, s) in secs.iter().enumerate().filter(|(_, s)| s.kind == Kind::Corner) {
+            let brake = pts.iter().find(|p| p.section == si && p.kind == cue::BRAKE).unwrap_or_else(|| panic!("{}: {pts:?}", s.name));
+            assert!(brake.at < s.core.0, "{}: brake {}", s.name, brake.at);
+            // The lap can end before the last corner's exit; the gas comes on in the next lap.
+            if s.end + 5 < fast.len() {
+                let gas = pts.iter().find(|p| p.section == si && p.kind == cue::THROTTLE).unwrap_or_else(|| panic!("{}: {pts:?}", s.name));
+                assert!(gas.at > brake.at, "{}: brake {} gas {}", s.name, brake.at, gas.at);
+            }
+        }
+        assert!(pts.windows(2).all(|w| w[0].at <= w[1].at));
     }
 
     fn skills_of(rv: &Review) -> Vec<&'static str> {

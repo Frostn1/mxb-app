@@ -86,6 +86,28 @@ from the lever inputs. The OEM MX tyres don't heat or wear in the game (heating 
 rate are 0), so pressure is judged against the tyre's optimum only. Sag is measured standing
 still when the recording has a second of it; riding sag is shown but not held to a target.
 
+## Live cues
+
+`cues.rs` turns a review into the few calls the recorder shows during a lap in practice.
+The fast lap says where each call goes (`analysis::cue_points`): the corner's braking point,
+brake release, a downshift on the brakes, turn-in (sit), back on the gas, an upshift on the
+exit, a scrub at a takeoff, standing into a rhythm or whoops. Each candidate is rated by the
+time its section loses, doubled when one of the section's tips is about the same thing, plus
+how basic the call is at the rider's level. Line cues (go wide, cut inside) come from the
+`line` tips.
+
+| Level | Calls | Section must lose |
+|---|---|---|
+| New | brake, gas, stand, sit | nothing: the basics everywhere |
+| Intermediate | + off the brakes, shift up, shift down | 0.05 s |
+| Sub-pro | + go wide, cut inside, scrub (no sit) | 0.1 s |
+| Pro | the same | 0.15 s |
+
+How much: a few (2 a lap, 5 s apart), normal (4, 3 s), lots (6, 2 s); cues closer than 30 m
+keep the more important one. The file is `<user folder>\mxbcoach\cues\<track>.<bike>.cue`,
+`MXCQ` version 1, read by FrostMod's `src/coachcue.h`; the plugin shows each cue 1.2 s before
+its spot at the bike's speed for 1.5 s, only in testing or a race event's practice session.
+
 ## Where MX Bikes differs from real life
 
 - **Scrubbing** is done seated in MX Bikes: lean the bike leaving the lip, lean the other way

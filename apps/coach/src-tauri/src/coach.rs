@@ -497,6 +497,46 @@ pub fn coach_save_setup(app: AppHandle, path: String, skills: Vec<String>) -> Re
     Err("There are already too many coach setups for this one.".into())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CuesOut {
+    /// The file the recorder reads, next to the sessions.
+    pub file: String,
+    pub cues: Vec<crate::cues::CueOut>,
+}
+
+/// Writes the live cues for this lap's track and bike: the few calls the recorder shows in
+/// practice, from where this lap loses time to the fastest one.
+#[tauri::command]
+pub fn coach_write_cues(
+    app: AppHandle,
+    path: String,
+    lap: i32,
+    level: crate::cues::Level,
+    amount: crate::cues::Amount,
+) -> Result<CuesOut, String> {
+    let out = coach_review(app.clone(), path.clone(), lap, None, None, None)?;
+    let rec = load(&path)?;
+    // The fast lap says where each call goes.
+    let r = &out.reference;
+    let ref_rec = if r.path == path { None } else { Some(load(&r.path)?) };
+    let fast = trace(ref_rec.as_ref().unwrap_or(&rec), r.lap)?;
+    let points = analysis::cue_points(&fast, &analysis::sections(&fast));
+    let cues = crate::cues::pick(&points, &out.review, level, amount);
+    let cfg = load_config(&app);
+    let dir = session_dirs(&cfg)
+        .into_iter()
+        .find_map(|d| d.parent().map(|p| p.join("cues")))
+        .ok_or("The game's user folder wasn't found.")?;
+    fs::create_dir_all(&dir).map_err(err)?;
+    let file = dir.join(crate::cues::file_name(&rec.event.track_id, &rec.event.bike_id));
+    // Written aside and moved in, so the recorder never reads half a file.
+    let tmp = dir.join(format!("{}.tmp", crate::cues::file_name(&rec.event.track_id, &rec.event.bike_id)));
+    fs::write(&tmp, crate::cues::write(rec.event.track_length, &cues, amount)).map_err(err)?;
+    fs::rename(&tmp, &file).map_err(err)?;
+    Ok(CuesOut { file: file.display().to_string(), cues })
+}
+
 /// How the session's lines and the track changed, against the fastest lap on the track; see
 /// `lines.rs`. None until there is a lap to compare with.
 #[tauri::command]

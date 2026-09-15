@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-15 — MXB Coach v0.1.8-beta.8
+
+### Added
+- Live cues: short calls on screen while you ride, like "Brake", "Gas", "Shift down" or
+  "Stand up", a moment before each spot, from where your lap loses time to your fastest.
+  Pick your level, from new to pro, and how much coaching you want, then send them to the game
+  from any lap review. They show only in practice sessions on that track and bike. Needs the
+  recorder from FrostMod 0.19 or newer: update it in Settings.
+
 ## 2026-09-15 — MXB Coach v0.1.7-beta.7
 
 ### Added

@@ -261,6 +261,28 @@ export const coachSetupPlan = (path: string, skills: string[]) =>
 /** Saves those changes as a new setup beside the rider's own. Resolves to its name. */
 export const coachSaveSetup = (path: string, skills: string[]) =>
   invoke<string>("coach_save_setup", { path, skills });
+export type CueLevel = "new" | "intermediate" | "subPro" | "pro";
+export type CueAmount = "few" | "normal" | "lots";
+
+/** One live cue: a short call the recorder shows a moment before its spot. */
+export interface CueOut {
+  /** Metres into the lap. */
+  at: number;
+  kind: number;
+  priority: number;
+  text: string;
+  section: string;
+}
+
+export interface CuesOut {
+  file: string;
+  cues: CueOut[];
+}
+
+/** Picks this lap's live cues for a rider's level and how much coaching they want, and writes
+ *  them where the recorder reads them. */
+export const coachWriteCues = (path: string, lap: number, level: CueLevel, amount: CueAmount) =>
+  invoke<CuesOut>("coach_write_cues", { path, lap, level, amount });
 /** Downloads the recorder, or copies it from `from`. Resolves to where it went. */
 export const installRecorder = (from?: string) =>
   invoke<string>("coach_install_plugin", { from: from ?? null });
