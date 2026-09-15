@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { open as openDialog, save as pickSavePath } from "@tauri-apps/plugin-dialog";
 import {
   Activity,
   ChevronsUp,
@@ -45,6 +45,7 @@ import { loadTrackOverview, loadTrackTerrain } from "@frost/shared/api/tracks";
 import type { TrackOverview, TrackTerrain } from "@frost/shared/types";
 import { useT } from "@/i18n";
 import { isRunning, useTrackBuild } from "../../../Context/TrackBuild";
+import { UnsavedRegistry } from "../../Shell/ContextBar";
 import { cn } from "@frost/shared/lib/utils";
 import {
   baseTrackProgram,
@@ -54,6 +55,9 @@ import {
   fitTrackBudget,
   checkTrack,
   exportTrackSource,
+  openTrackProject,
+  saveTrackProject,
+  TRACK_PROJECT_EXT,
   generateTrack,
   getTrackModel,
   type GenerateMode,
@@ -77,6 +81,7 @@ import {
   type TrackFeatureKind,
   type TrackPreview,
   type TrackProgram,
+  type TrackScale,
   type TrackSegment,
   type TrackToolsStatus,
 } from "../../../api/trackgen";
@@ -121,6 +126,9 @@ export default function TrackStudio() {
   // Whether anything has been changed since it was loaded, so a starting point can't be
   // dropped on top of an afternoon's work by accident.
   const [touched, setTouched] = useState(false);
+  // The project file this track was opened from or last saved to.
+  const [file, setFile] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const [confirming, setConfirming] = useState<{
     kind: "replace" | "problems";
     run: () => Promise<void>;
@@ -171,6 +179,13 @@ export default function TrackStudio() {
   // Rebuilding a two-thousand-square terrain on every drag is real work, so this is a choice
   // rather than the default. With it on, an edit settles and then the view catches up.
   const [live, setLive] = useState(false);
+  // The size a random track is drawn at.
+  const [scale, setScale] = useState<TrackScale>("normal");
+  const scales = (["easy", "normal", "arl"] as const).map((value) => ({
+    value,
+    label: t(`track.scale.${value}`),
+  }));
+  const randomAtScale = () => randomTrackProgram(undefined, scale);
   const rebuild = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tools, setTools] = useState<TrackToolsStatus | null>(null);
 
@@ -197,6 +212,8 @@ export default function TrackStudio() {
       current.current = next;
       setProgram(next);
       setPreview(null);
+      // Every edit lands here — renames and undo included — so this is what "unsaved" means.
+      if (!how.fresh) setTouched(true);
       try {
         let found = await checkTrack(next);
         // The height budget is arithmetic, not a decision. Work it out and carry on rather
@@ -338,6 +355,9 @@ export default function TrackStudio() {
     try {
       const { program: next, settings } = await generateTrack(brief.trim(), mode);
       await settle(next, { fresh: true });
+      // Minutes of generating is work worth asking about before it's dropped.
+      setTouched(true);
+      setFile(null);
       setAsking(false);
       toast.success(
         t("track.generated", { name: next.name }),
@@ -359,18 +379,19 @@ export default function TrackStudio() {
   }
 
   /** Load a starting point and put it on screen — a track you can't see isn't a start. */
-  async function onLoad(load: () => Promise<TrackProgram>) {
+  async function onLoad(load: () => Promise<TrackProgram>, from: string | null = null) {
     if (busy) return;
     // Replacing a track you have been working on is the one action here that throws work
     // away, so it asks first — and only when there is work to throw away.
     if (touched) {
-      setConfirming({ kind: "replace", run: () => reallyLoad(load) });
+      setConfirming({ kind: "replace", run: () => reallyLoad(load, from) });
       return;
     }
-    await reallyLoad(load);
+    await reallyLoad(load, from);
   }
 
-  async function reallyLoad(load: () => Promise<TrackProgram>) {
+  /** `from` is the project file being opened; null for every other start. */
+  async function reallyLoad(load: () => Promise<TrackProgram>, from: string | null) {
     if (busy) return;
     setWorking("generate");
     setPreview(null);
@@ -380,10 +401,11 @@ export default function TrackStudio() {
       const next = await load();
       const found = await settle(next, { fresh: true });
       setTouched(false);
+      setFile(from);
       toast.success(t("track.baseLoaded", { name: next.name }));
       if (found.length === 0) await showIn3d(next);
     } catch (e) {
-      toast.error(t("track.generateFailed"), { description: String(e) });
+      toast.error(t(from ? "track.openFailed" : "track.generateFailed"), { description: String(e) });
     } finally {
       setWorking(null);
     }
@@ -461,6 +483,65 @@ export default function TrackStudio() {
       setWorking(null);
     }
   }
+
+  /** Save to the file it came from, or ask where. False when nothing was written. */
+  async function saveProject(as = false): Promise<boolean> {
+    const prog = current.current;
+    if (!prog) return false;
+    let dest = as ? null : file;
+    if (!dest) {
+      dest = await pickSavePath({
+        defaultPath: `${prog.name.trim() || "track"}.${TRACK_PROJECT_EXT}`,
+        filters: [{ name: t("track.projectFile"), extensions: [TRACK_PROJECT_EXT] }],
+      });
+      if (!dest) return false;
+    }
+    try {
+      await saveTrackProject(prog, dest);
+      setFile(dest);
+      setTouched(false);
+      toast.success(t("track.saved", { name: prog.name }), { description: dest });
+      return true;
+    } catch (e) {
+      toast.error(t("track.saveFailed"), { description: String(e) });
+      return false;
+    }
+  }
+
+  async function onOpen() {
+    if (busy) return;
+    const path = await openDialog({
+      multiple: false,
+      filters: [{ name: t("track.projectFile"), extensions: [TRACK_PROJECT_EXT, "json"] }],
+    });
+    if (typeof path !== "string") return;
+    await onLoad(() => openTrackProject(path), path);
+  }
+
+  // Closing the window with an unsaved track asks first. Refs, because the registration is
+  // made once and must see the current track.
+  const { register } = useContext(UnsavedRegistry);
+  const saveRef = useRef(saveProject);
+  saveRef.current = saveProject;
+  const unsavedRef = useRef(false);
+  unsavedRef.current = touched && program !== null;
+  useEffect(
+    () => register({ dirty: () => unsavedRef.current, save: () => saveRef.current() }),
+    [register],
+  );
+
+  // Ctrl+S saves, Ctrl+Shift+S saves as.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "s") return;
+      // The pane stays mounted behind the other tabs; only the visible one saves.
+      if (!rootRef.current?.offsetParent || !current.current) return;
+      e.preventDefault();
+      void saveRef.current(e.shiftKey);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   function editFeature(index: number, patch: Partial<TrackFeature>) {
     if (!program) return;
@@ -745,7 +826,7 @@ export default function TrackStudio() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div ref={rootRef} className="flex h-full min-h-0 flex-col">
       {!program ? (
         /* Nothing loaded yet. One line describes a track and the schema does the rest, and
            two starting points sit beside it for when the model isn't the answer. */
@@ -789,10 +870,11 @@ export default function TrackStudio() {
                 ? t(mode === "settings" ? "track.generatingSettingsHint" : "track.generatingHint")
                 : t("track.empty")}
             </p>
-            <div className="mt-4 flex items-center gap-2">
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
               <Button
                 variant="outline"
-                onClick={() => void onLoad(randomTrackProgram)}
+                onClick={() => void onLoad(randomAtScale)}
                 disabled={busy !== null}
               >
                 {t("track.random")}
@@ -810,6 +892,9 @@ export default function TrackStudio() {
                 disabled={busy !== null}
               >
                 {t("track.blank")}
+              </Button>
+              <Button variant="ghost" onClick={() => void onOpen()} disabled={busy !== null}>
+                {t("track.open")}
               </Button>
             </div>
           </div>
@@ -1482,12 +1567,13 @@ export default function TrackStudio() {
                   </dl>
                 )}
 
-                <div className="mt-5 flex items-center gap-3 border-t border-border pt-3.5">
+                <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-border pt-3.5">
                   <span className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
                     {t("track.startOver")}
                   </span>
+                  <Segmented size="sm" options={scales} value={scale} onChange={setScale} />
                   <button
-                    onClick={() => void onLoad(randomTrackProgram)}
+                    onClick={() => void onLoad(randomAtScale)}
                     disabled={busy !== null}
                     className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
                   >
@@ -1506,6 +1592,13 @@ export default function TrackStudio() {
                     className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
                   >
                     {t("track.blank")}
+                  </button>
+                  <button
+                    onClick={() => void onOpen()}
+                    disabled={busy !== null}
+                    className="cursor-default font-cond text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                  >
+                    {t("track.open")}
                   </button>
                 </div>
               </div>
@@ -1638,6 +1731,10 @@ export default function TrackStudio() {
             <Switch checked={live} onCheckedChange={setLive} />
             {t("track.live")}
           </label>
+          {/* Not held back by the checks: a half-built lap is exactly what's worth keeping. */}
+          <Button variant="ghost" onClick={() => void saveProject()} title={file ?? undefined}>
+            {t("track.save")}
+          </Button>
           <Button
             variant="ghost"
             onClick={guarded(onExport)}

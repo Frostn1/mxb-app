@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — Frost's Studio
+
+### Added
+- Write tracks with your own AI model. Pick Groq, OpenRouter, OpenAI, Ollama or Anthropic in
+  Settings and paste a key. The key stays on your computer.
+- A Settings only mode for writing tracks: the model picks the kind of track and the Studio
+  draws the lap. It works with free models and usually takes under a minute.
+
+## 2026-09-15 — Frost's Studio v0.1.8 — Easy and ARL random tracks
+
+### Added
+- Random track comes in three sizes: Easy, Normal and ARL. Easy has smaller jumps and shallower
+  ruts, for learning. ARL has the bigger jumps and rougher ground of a raced pro track. Pick the
+  size next to the Random track button.
+
+## 2026-09-15 — Frost's Studio v0.1.7 — Save your tracks
+
+### Added
+- Save a track you're working on in Track Studio and open it later to carry on. Save is in the
+  bottom bar (Ctrl+S), and Open track… is on the start screen.
+- Closing Studio with an unsaved track asks first, the same as the Designer does.
+- New Frost's Studio versions are posted in the Discord, in #studio-releases.
+
+### Changed
+- Tabletops on generated tracks are wide, rounded mounds. The bigger the jump, the further its
+  dirt runs out either side, so its sides slope into the ground.
+
 ## 2026-09-15 — MXB Coach v0.1.6-beta.6
 
 ### Added
@@ -68,20 +95,6 @@
   the rider count, ping and a Join button. Switch between tiles and the list at the top; the app
   remembers which you picked. Track pictures load in one go and show straight away when you come
   back to the tab.
-
-## Unreleased — Frost's Studio
-
-### Added
-- New Frost's Studio versions are posted in the Discord, in #studio-releases.
-- mxbsecure admins can add and remove creators from the site, by Steam profile link.
-- Write tracks with your own AI model. Pick Groq, OpenRouter, OpenAI, Ollama or Anthropic in
-  Settings and paste a key. The key stays on your computer.
-- A Settings only mode for writing tracks: the model picks the kind of track and the Studio
-  draws the lap. It works with free models and usually takes under a minute.
-
-### Changed
-- Tabletops on generated tracks are wide, rounded mounds. The bigger the jump, the further its
-  dirt runs out either side, so its sides slope into the ground.
 
 ## 2026-09-15 — MXB Coach v0.1.4-beta.4
 

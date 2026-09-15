@@ -1205,6 +1205,101 @@ impl Feature {
     }
 }
 
+/// How big a random track is built: Easy for learning, ARL for a raced pro track.
+#[derive(serde::Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum TrackScale {
+    Easy,
+    #[default]
+    Normal,
+    Arl,
+}
+
+/// Easy: jumps at 70%, on fresher, smoother ground so the ruts come out shallower.
+const EASY_JUMP_SHARE: f32 = 0.7;
+const EASY_WEAR: f32 = 0.25;
+const EASY_ROUGHNESS: f32 = 0.6;
+/// ARL: the recipe the raced builds have always used (`FROST_ROUGH=2`).
+const ARL_ROUGHNESS: f32 = 2.0;
+const ARL_JUMP_GROWTH: f32 = 1.35;
+
+impl TrackProgram {
+    /// Set a freshly drawn track to a scale. Normal leaves it as drawn.
+    pub fn at_scale(&mut self, scale: TrackScale) {
+        match scale {
+            TrackScale::Normal => {}
+            TrackScale::Arl => {
+                self.terrain.roughness = ARL_ROUGHNESS;
+                self.name = format!("{} ARL", self.name);
+                self.bigger_jumps(ARL_JUMP_GROWTH);
+            }
+            TrackScale::Easy => {
+                self.terrain.wear = EASY_WEAR;
+                self.terrain.roughness = EASY_ROUGHNESS;
+                self.name = format!("{} Easy", self.name);
+                self.smaller_jumps(EASY_JUMP_SHARE);
+            }
+        }
+    }
+
+    /// Every jump `k` as tall, and a table's top or a double's gap `k` as long. Smaller only
+    /// frees ground, so unlike [`Self::bigger_jumps`] there is nothing to make room for.
+    pub fn smaller_jumps(&mut self, k: f32) {
+        for f in &mut self.features {
+            *f = match f.clone() {
+                Feature::Tabletop { at, length, height, lip, finish } => {
+                    Feature::Tabletop { at, length: length * k, height: height * k, lip, finish }
+                }
+                Feature::Double { at, height, gap, lip, finish } => {
+                    Feature::Double { at, height: height * k, gap: gap * k, lip, finish }
+                }
+                Feature::Custom { at, length, shape, side } => Feature::Custom {
+                    at,
+                    length,
+                    shape: shape.into_iter().map(|p| ShapePoint { u: p.u, h: p.h * k }).collect(),
+                    side,
+                },
+                other => other,
+            };
+        }
+    }
+}
+
+#[cfg(test)]
+mod scale_tests {
+    use super::*;
+
+    fn drawn() -> TrackProgram {
+        (0..24u64).find_map(|i| crate::tracklayout::draw(103 + i)).expect("a lap")
+    }
+
+    #[test]
+    fn normal_is_the_track_as_drawn() {
+        let mut p = drawn();
+        p.at_scale(TrackScale::Normal);
+        assert_eq!(serde_json::to_value(&p).unwrap(), serde_json::to_value(drawn()).unwrap());
+    }
+
+    #[test]
+    fn easy_has_smaller_jumps_and_smoother_ground() {
+        let base = drawn();
+        let mut p = base.clone();
+        p.at_scale(TrackScale::Easy);
+        assert!(p.terrain.wear < base.terrain.wear && p.terrain.roughness < base.terrain.roughness);
+        let tallest = |t: &TrackProgram| t.features.iter().map(|f| f.height()).fold(0.0, f32::max);
+        assert!(tallest(&p) <= tallest(&base) * EASY_JUMP_SHARE + 0.01);
+        assert!(p.name.ends_with(" Easy"));
+    }
+
+    #[test]
+    fn arl_is_the_raced_build() {
+        let mut p = drawn();
+        p.at_scale(TrackScale::Arl);
+        assert_eq!(p.terrain.roughness, ARL_ROUGHNESS);
+        assert!(p.name.ends_with(" ARL"));
+    }
+}
+
 /// A jump `k` times taller, capped at [`BIG_JUMP_MAX_H_M`], with its length or gap grown the same.
 /// Taller by `kh`, longer (a table's top, a double's gap, a single's run) by `kl`.
 fn grow(f: &Feature, kh: f32, kl: f32) -> Feature {
