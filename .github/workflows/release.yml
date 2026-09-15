@@ -75,10 +75,15 @@ jobs:
             patchelf \
             squashfs-tools
 
+      # Restores the dependency cache release-cache.yml keeps warm on main. A tag run can
+      # only read main's caches, never another tag's, so saving here was ~2 GB per release
+      # nobody could reuse — and it evicted main's.
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
+          shared-key: release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install frontend dependencies
         run: npm ci

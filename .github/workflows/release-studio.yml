@@ -68,10 +68,13 @@ jobs:
             patchelf \
             squashfs-tools
 
+      # Same shared cache as the manager's release, warmed on main by release-cache.yml.
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
+          shared-key: release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: npm ci
