@@ -157,6 +157,17 @@ export function exportTrackSource(program: TrackProgram, dir: string): Promise<s
   return invoke<string[]>("export_track_source", { program, dir });
 }
 
+/** A saved track project's extension. The file is JSON. */
+export const TRACK_PROJECT_EXT = "mxbtrack";
+
+export function saveTrackProject(program: TrackProgram, path: string): Promise<void> {
+  return invoke("save_track_project", { program, path });
+}
+
+export function openTrackProject(path: string): Promise<TrackProgram> {
+  return invoke<TrackProgram>("open_track_project", { path });
+}
+
 /**
  * The lap as a list you can read in order: a straight, a left turn, a double.
  *

@@ -154,6 +154,8 @@ fn main() {
             check_track,
             preview_track,
             export_track_source,
+            save_track_project,
+            open_track_project,
             track_tools_status,
             download_track_tools,
             build_track,
@@ -512,6 +514,33 @@ async fn export_track_source(
     })
     .await
     .map_err(|e| format!("export_track_source task failed: {e}"))?
+}
+
+/// What a saved track project says it is, so a future format change can tell old files apart.
+const TRACK_PROJECT_FORMAT: &str = "frost-track";
+
+/// Save the track being edited, to open and carry on with later.
+#[tauri::command]
+async fn save_track_project(program: serde_json::Value, path: String) -> Result<(), String> {
+    let prog = track_program(program)?;
+    let body = serde_json::json!({ "format": TRACK_PROJECT_FORMAT, "version": 1, "program": prog });
+    let text = serde_json::to_vec_pretty(&body).map_err(|e| e.to_string())?;
+    // Via a temp file, so a failed write can't leave half a project where the old one was.
+    let tmp = format!("{path}.tmp");
+    std::fs::write(&tmp, text).map_err(|e| format!("couldn't write {path}: {e}"))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("couldn't write {path}: {e}"))
+}
+
+/// Open a saved track project. A bare program file is taken too.
+#[tauri::command]
+async fn open_track_project(path: String) -> Result<trackprog::TrackProgram, String> {
+    let text = std::fs::read(&path).map_err(|e| format!("couldn't read {path}: {e}"))?;
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&text).map_err(|e| format!("that isn't a track project: {e}"))?;
+    if value.get("format").and_then(|f| f.as_str()) == Some(TRACK_PROJECT_FORMAT) {
+        value = value["program"].take();
+    }
+    track_program(value)
 }
 
 
@@ -1724,6 +1753,41 @@ const PSD_LIMIT: u64 = 512 * 1024 * 1024;
 /// How many paints are read for their names. A handful is plenty: paints for one model
 /// overwhelmingly supply the same names, and this runs every time the destination changes.
 const PAINT_SAMPLE: usize = 8;
+
+#[cfg(test)]
+mod track_project_tests {
+    use super::*;
+    use tauri::async_runtime::block_on;
+
+    fn temp(ext: &str) -> String {
+        let name = format!("frost-track-{}-{ext}.{ext}", std::process::id());
+        std::env::temp_dir().join(name).to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_saved_track_opens_as_the_same_track() {
+        let prog: trackprog::TrackProgram = serde_json::from_str(trackprog::EXAMPLE).unwrap();
+        let value = serde_json::to_value(&prog).unwrap();
+        let path = temp("mxbtrack");
+        block_on(save_track_project(value.clone(), path.clone())).unwrap();
+        let back = block_on(open_track_project(path.clone()));
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(serde_json::to_value(back.unwrap()).unwrap(), value);
+    }
+
+    #[test]
+    fn a_bare_program_file_opens_too() {
+        let path = temp("json");
+        std::fs::write(&path, trackprog::EXAMPLE).unwrap();
+        let back = block_on(open_track_project(path.clone()));
+        let _ = std::fs::remove_file(&path);
+        let want: trackprog::TrackProgram = serde_json::from_str(trackprog::EXAMPLE).unwrap();
+        assert_eq!(
+            serde_json::to_value(back.unwrap()).unwrap(),
+            serde_json::to_value(want).unwrap()
+        );
+    }
+}
 
 /// The viewer builds the model, but burying and raising a gear package is this app's
 /// business, so the round trip is tested here rather than in `mxb_core::viewer`.
