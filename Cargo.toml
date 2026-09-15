@@ -10,7 +10,12 @@
 # only ever exists in CI, so it can never be a member; excluding it is what tells Cargo that.
 [workspace]
 resolver = "2"
-members = ["crates/core", "apps/manager/src-tauri", "apps/studio/src-tauri"]
+members = [
+    "crates/core",
+    "apps/manager/src-tauri",
+    "apps/studio/src-tauri",
+    "apps/coach/src-tauri",
+]
 exclude = ["server-agent", ".sidecar-src"]
 
 # The profiles live here because Cargo IGNORES `[profile.*]` in a non-root workspace member —

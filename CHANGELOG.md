@@ -9,6 +9,14 @@
   game is already open, it tells you it's your turn so you can join from the game. Your place
   shows in the top bar on every tab. Only riders using MXB App are in the line.
 
+## 2026-09-14 — MXB Coach v0.1.0-beta.1
+
+### Added
+- MXB Coach, a new app that helps you find lap time. It records your laps in MX Bikes, compares
+  each one with your fastest, and tells you corner by corner what to change: brake later or
+  harder, carry more speed, lean more, pick a different line, get on the gas sooner, scrub a jump
+  or stop landing short. It also shows your ideal lap from your best sections.
+
 ## 2026-09-14 — v0.14.3 — Secured content restores itself
 
 ### Added
@@ -29,6 +37,7 @@
   Settings → General. Each report says which app sent it, so the two are counted apart.
 
 ### Changed
+- The Servers tab lists the live MX Bikes servers on Windows.
 - Release posts in Discord now come from mxbsecure, in the mxbsecure black.
 
 ## 2026-09-14 — Frost's Studio v0.1.6

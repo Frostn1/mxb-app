@@ -17,7 +17,11 @@ import { cn } from "@frost/shared/lib/utils";
 import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
 import { ThemeProvider, useTheme } from "@frost/shared/Context/Theme";
 import { I18nProvider, setAmbientVars, useT } from "@/i18n";
-import Rail, { RailButton, type RailEntry } from "./Components/Shell/Rail";
+import Rail, {
+  RailBrand,
+  RailButton,
+  type RailEntry,
+} from "@frost/shared/Components/Shell/Rail";
 import TitleBar from "./Components/Shell/TitleBar";
 import {
   ContextSlots,
@@ -159,32 +163,7 @@ function Shell() {
               entries={entries}
               active={view}
               onPick={setView}
-              header={
-                <div
-                  data-tauri-drag-region
-                  className="flex select-none items-center gap-2.5 px-2.5 pt-0.5"
-                >
-                  {/* The app's own mark, not a lettered plate — the same two-paint snowflake
-                      the icon and the installer carry. */}
-                  <img
-                    src="/logo.svg"
-                    alt=""
-                    draggable={false}
-                    className="size-[28px] flex-none [filter:drop-shadow(0_1px_3px_rgba(0,0,0,0.25))]"
-                  />
-                  {/* Two lines set as a logotype rather than as a stack: the possessive in
-                      the only face in the app that is not Barlow, and the name stepped in
-                      under it so the two overlap. Reads as one mark, not two labels. */}
-                  <span className="flex min-w-0 flex-col items-start">
-                    <span className="font-serif text-[15px] italic leading-none text-muted-foreground">
-                      Frost&apos;s
-                    </span>
-                    <span className="-mt-[5px] ml-[15px] font-serif text-[19px] font-bold italic leading-none tracking-[-0.01em] text-foreground">
-                      Studio
-                    </span>
-                  </span>
-                </div>
-              }
+              header={<RailBrand top="Frost's" name="Studio" />}
               footer={
                 <RailButton
                   label={t("nav.settings")}
