@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-09-14 — v0.14.3 — Secured content restores itself
 
 ### Added
 - Secured mods that won't unlock now tell you why. If you have one in your mods and aren't signed
