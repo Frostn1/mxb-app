@@ -1671,10 +1671,8 @@ async fn unlock_one(
     }
 
     let cfg = config::load_or_detect(app).unwrap_or_default();
-    let cp_token = cfg.cp_token.trim().to_string();
-    if cp_token.is_empty() {
-        return Err("Enroll with an invite code first — secured content is tied to your account.".into());
-    }
+    // No account yet: claim a self-serve one, as voice does. The grant keys on the Steam link.
+    let cp_token = voice::signal::account(app, &cfg).await?;
 
     // A one-off session id for the grant's audit log.
     let mut sid = [0u8; 16];
@@ -1842,8 +1840,8 @@ async fn mxbsecure_auto_unlock(app: tauri::AppHandle, force: Option<bool>) -> Re
     }
 }
 
-/// Why secured files on disk stayed locked, when the player can fix it from the app: `"enroll"`
-/// (no invite code yet) or `"steam"` (no Steam account linked). The UI says it once a run.
+/// Why secured files on disk stayed locked, when the player can fix it from the app: `"steam"`
+/// (no Steam account linked, or no account yet — sign-in claims one). The UI says it once a run.
 #[cfg(mxbsecure)]
 #[derive(Clone, serde::Serialize)]
 struct SecureBlocked {
@@ -1874,9 +1872,9 @@ pub(crate) async fn auto_unlock_now(app: &tauri::AppHandle, force: bool) -> usiz
         .collect();
     let cfg = config::load_or_detect(app).unwrap_or_default();
     if cfg.cp_token.trim().is_empty() {
-        // Nothing unlocks before enrolling, but a locked file on disk is worth saying so.
+        // No account means no Steam link yet; signing in with Steam claims the account too.
         if !locked.is_empty() {
-            let blocked = SecureBlocked { reason: "enroll", count: locked.len() };
+            let blocked = SecureBlocked { reason: "steam", count: locked.len() };
             let _ = app.emit("mxbsecure-blocked", blocked);
         }
         return 0;
@@ -2099,10 +2097,8 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
 #[tauri::command]
 async fn steam_link_start(app: tauri::AppHandle) -> Result<String, String> {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
-    let tok = cfg.cp_token.trim().to_string();
-    if tok.is_empty() {
-        return Err("Enroll with an invite code first — sign-in is tied to your account.".into());
-    }
+    // No account yet: claim a self-serve one. Steam is the identity; no invite needed.
+    let tok = voice::signal::account(&app, &cfg).await?;
     let resp = reqwest::Client::new()
         .post(format!("{}/v1/steam/login", crate::paintsync::control_plane()))
         .bearer_auth(&tok)
