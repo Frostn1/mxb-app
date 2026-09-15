@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-15 — Contributors
+
+### Added
+- Settings → Supporters now has a Contributors list for the people who helped make the app
+  better. Trystan34 is the first one on it, for ideas that shaped the app.
+
 ## 2026-09-15 — Every server tile shows its track
 
 ### Added

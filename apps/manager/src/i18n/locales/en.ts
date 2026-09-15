@@ -1981,6 +1981,9 @@ export const en = {
     "Couldn't reach the list just now — this is the last one we saw.",
   "supporters.optOut":
     "Names are shown with permission. Ask on Discord or Buy Me a Coffee and yours comes straight off.",
+  "supporters.contributors": "Contributors",
+  "supporters.contributorsDesc":
+    "People who made the app better with ideas, testing and feedback.",
   "reshade.needsGameFolder":
     "ReShade sits in your {{game}} folder — set that under Game folder, or point straight at it here.",
   "reshade.folder": "Looking in your {{game}} folder:",
