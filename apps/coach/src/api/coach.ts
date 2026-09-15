@@ -148,6 +148,20 @@ export interface ReviewOut {
   lap: LapRef;
   reference: LapRef;
   review: Review;
+  /** Other riders in the session worth comparing with. */
+  rivals: Rival[];
+}
+
+export interface Rival {
+  num: number;
+  name: string;
+  bike: string;
+  /** Just faster than you, the fastest, or ahead of you on track in a race. */
+  why: "closest" | "fastest" | "ahead";
+  lap: number;
+  timeMs: number;
+  /** Where they're quicker than this lap, most first. */
+  gains: { section: string; gain: number }[];
 }
 
 /** The ground under a session's laps, built from the laps. Heights row-major, row along z. */

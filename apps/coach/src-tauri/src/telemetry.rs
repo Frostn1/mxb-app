@@ -22,6 +22,52 @@ mod tag {
     /// change of sitting or standing (FrostMod's `src/stance.h`).
     pub const STANCE_BIND: u8 = 10;
     pub const STANCE: u8 = 11;
+    /// The other riders (FrostMod's `src/others.h`): who's in the event, where everyone is
+    /// about ten times a second, and each rider's laps and splits.
+    pub const ENTRY: u8 = 12;
+    pub const POSITIONS: u8 = 13;
+    pub const RACE_LAP: u8 = 14;
+}
+
+/// A rider in the event, as the game lists them.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Rider {
+    pub num: i32,
+    pub name: String,
+    pub bike: String,
+    pub riding: bool,
+}
+
+/// One bike in a POSITIONS record.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Place {
+    pub num: i32,
+    /// The recorder's guess that this is the rider recording: the bike nearest their own.
+    pub local: bool,
+    pub crashed: bool,
+    /// Along the centreline, 0..1.
+    pub pos: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+/// Every bike on track at one moment.
+#[derive(Clone, Debug, Default)]
+pub struct Frame {
+    pub t: f32,
+    pub bikes: Vec<Place>,
+}
+
+/// A lap the game timed for any rider, stamped with the track time it came in.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RaceLap {
+    pub t: f32,
+    pub num: i32,
+    pub lap: i32,
+    pub invalid: bool,
+    pub time_ms: i32,
 }
 
 /// Sitting or standing, as each sample carries it. Unknown in recordings from before the
@@ -161,6 +207,48 @@ pub struct Recording {
     /// How sure the recorder is of sitting and standing: 0 not read, 1 a guess (a toggle bind,
     /// or auto-sit it couldn't rule out), 2 sure.
     pub stance_confidence: u8,
+    /// The other riders, from recorders that write them: the latest listing of each.
+    pub riders: Vec<Rider>,
+    pub frames: Vec<Frame>,
+    pub race_laps: Vec<RaceLap>,
+}
+
+/// A NUL-padded string in a record.
+fn text(p: &[u8], at: usize, len: usize) -> String {
+    let b = p.get(at..(at + len).min(p.len())).unwrap_or(&[]);
+    String::from_utf8_lossy(&b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())]).trim().to_string()
+}
+
+fn rider(p: &[u8]) -> Rider {
+    let b = Bytes(p);
+    Rider { num: b.i(0), riding: p.get(4) == Some(&1), name: text(p, 8, 64), bike: text(p, 72, 40) }
+}
+
+/// `f32 t, u16 count, u16 stride`, then per bike `u16 num, u8 flags, u8, f32 pos, x, y, z`.
+fn frame(p: &[u8]) -> Frame {
+    let b = Bytes(p);
+    let u16_at = |i: usize| p.get(i..i + 2).map_or(0, |s| u16::from_le_bytes([s[0], s[1]]) as usize);
+    let (count, stride) = (u16_at(4), u16_at(6));
+    let mut bikes = Vec::with_capacity(count);
+    if stride >= 20 {
+        for k in 0..count {
+            let at = 8 + k * stride;
+            if at + 20 > p.len() {
+                break;
+            }
+            let flags = p[at + 2];
+            bikes.push(Place {
+                num: u16_at(at) as i32,
+                crashed: flags & 1 != 0,
+                local: flags & 2 != 0,
+                pos: b.f(at + 4),
+                x: b.f(at + 8),
+                y: b.f(at + 12),
+                z: b.f(at + 16),
+            });
+        }
+    }
+    Frame { t: b.f(0), bikes }
 }
 
 /// One lap's samples, with `pos` unwrapped to run 0..1 across it.
@@ -306,6 +394,22 @@ pub fn parse(bytes: &[u8]) -> Result<Recording> {
             tag::CENTRELINE => rec.centreline = centreline(p),
             tag::SAMPLE => rec.samples.push(Sample { stance: now, ..sample(p) }),
             tag::STANCE_BIND => rec.stance_confidence = p.get(4).copied().unwrap_or(0),
+            tag::ENTRY => {
+                let r = rider(p);
+                match rec.riders.iter_mut().find(|x| x.num == r.num) {
+                    Some(x) => *x = r,
+                    None => rec.riders.push(r),
+                }
+            }
+            tag::POSITIONS => rec.frames.push(frame(p)),
+            // `f32 t`, then `SPluginsRaceLap_t`: session, race number, lap, invalid, lap time.
+            tag::RACE_LAP => rec.race_laps.push(RaceLap {
+                t: b.f(0),
+                num: b.i(8),
+                lap: b.i(12),
+                invalid: b.i(16) != 0,
+                time_ms: b.i(20),
+            }),
             // The recorder writes 0 standing, 1 sitting, 2 unknown.
             tag::STANCE => {
                 now = match p.get(8) {
@@ -493,6 +597,44 @@ mod tests {
         assert!(!s.airborne());
         assert!(!rec.complete);
         assert_eq!((s.stance, rec.stance_confidence), (stance::UNKNOWN, 0));
+    }
+
+    #[test]
+    fn reads_the_other_riders() {
+        let mut f = File::new();
+        f.event("indiana", 1650.0);
+        let mut entry = vec![0u8; 152];
+        entry[..4].copy_from_slice(&7i32.to_le_bytes());
+        entry[4] = 1;
+        entry[8..16].copy_from_slice(b"Fast Guy");
+        entry[72..74].copy_from_slice(b"YZ");
+        f.record(tag::ENTRY, &entry);
+        // Two bikes: #7 crashed, #3 the rider recording.
+        let mut pos = Vec::new();
+        pos.extend_from_slice(&12.5f32.to_le_bytes());
+        pos.extend_from_slice(&2u16.to_le_bytes());
+        pos.extend_from_slice(&20u16.to_le_bytes());
+        for (num, flags, p) in [(7u16, 1u8, 0.5f32), (3, 2, 0.25)] {
+            pos.extend_from_slice(&num.to_le_bytes());
+            pos.extend_from_slice(&[flags, 0]);
+            for v in [p, 10.0, 2.0, -4.0] {
+                pos.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        f.record(tag::POSITIONS, &pos);
+        let mut lap = Vec::new();
+        for v in [13.0f32.to_bits() as i32, 2, 7, 3, 0, 61_234, 0, 0, 0] {
+            lap.extend_from_slice(&v.to_le_bytes());
+        }
+        f.record(tag::RACE_LAP, &lap);
+        let rec = parse(&f.0).unwrap();
+        assert_eq!((rec.riders[0].num, rec.riders[0].name.as_str(), rec.riders[0].bike.as_str()), (7, "Fast Guy", "YZ"));
+        let b = &rec.frames[0].bikes;
+        assert_eq!(rec.frames[0].t, 12.5);
+        assert_eq!((b[0].num, b[0].crashed, b[0].local, b[0].pos), (7, true, false, 0.5));
+        assert_eq!((b[1].num, b[1].local, b[1].x, b[1].z), (3, true, 10.0, -4.0));
+        let l = rec.race_laps[0];
+        assert_eq!((l.t, l.num, l.lap, l.invalid, l.time_ms), (13.0, 7, 3, false, 61_234));
     }
 
     #[test]

@@ -126,6 +126,16 @@ keep the more important one. The file is `<user folder>\mxbcoach\cues\<track>.<b
 `MXCQ` version 1, read by FrostMod's `src/coachcue.h`; the plugin shows each cue 1.2 s before
 its spot at the bike's speed for 1.5 s, only in testing or a race event's practice session.
 
+## Other riders
+
+Recorders from FrostMod 0.21 write ENTRY (tag 12, who's in the event), POSITIONS (tag 13, every
+bike's track position and x/y/z about ten times a second, the rider's own flagged as the bike
+nearest their telemetry) and RACE_LAP (tag 14, every rider's timed laps). `others.rs` cuts each
+other rider's valid laps from their positions, as metres against time, and times this lap's own
+sections on them. The review names up to three: the rider just faster than this lap, the fastest
+in the session and, in a race, the rider ahead on track when the lap ended, each with the
+sections where they gain more than 0.05 s (at most three).
+
 ## Where MX Bikes differs from real life
 
 - **Scrubbing** is done seated in MX Bikes: lean the bike leaving the lip, lean the other way
