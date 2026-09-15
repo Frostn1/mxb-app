@@ -588,16 +588,16 @@ export const es: Translation = {
   "settings.secRepairFail": "No se pudieron restaurar todas las claves",
   "settings.secRepairFailDesc_one": "{{count}} archivo necesita que estés en línea y con la sesión iniciada. Las claves se vuelven a emitir gratis, pero esa tiene que venir del servidor.",
   "settings.secRepairFailDesc_other": "{{count}} archivos necesitan que estés en línea y con la sesión iniciada. Las claves se vuelven a emitir gratis, pero esas tienen que venir del servidor.",
-  "settings.secRepairRevoked_one": "{{count}} archivo ya no se abre — su creador te retiró el acceso.",
-  "settings.secRepairRevoked_other": "{{count}} archivos ya no se abren — sus creadores te retiraron el acceso.",
+  "settings.secRepairRevoked_one": "{{count}} archivo no está disponible en este PC.",
+  "settings.secRepairRevoked_other": "{{count}} archivos no están disponibles en este PC.",
   "settings.secStatusTitle": "Contenido protegido encontrado",
   "settings.secStatusUnlocked": "Desbloqueado",
   "settings.secStatusUnlocking": "Desbloqueando…",
   "settings.secStatusReady": "Listo para desbloquear",
   "settings.secReasonReady": "Es tuyo: se desbloquea al abrir la Biblioteca o iniciar el juego.",
   "settings.secStatusNotOwned": "No está en tu biblioteca",
-  "settings.secStatusRevoked": "Acceso retirado",
-  "settings.secReasonRevoked": "El creador te retiró el acceso, así que esto ya no se abre en este PC.",
+  "settings.secStatusRevoked": "No disponible",
+  "settings.secReasonRevoked": "Esto no está disponible en este PC.",
   "settings.secStatusUnavailable": "No disponible",
   "settings.secStatusNeedsSteam": "Inicia sesión con Steam",
   "settings.secStatusUnreadable": "Archivo no reconocido",
@@ -611,9 +611,9 @@ export const es: Translation = {
   "secure.promptSteam": "Los mods protegidos están ligados a tu cuenta de Steam. Inicia sesión para desbloquear.",
   "secure.promptEnroll": "Primero regístrate con tu código de invitación. Está en Ajustes, en Sincronización de pinturas.",
   "secure.promptEnrollBtn": "Abrir Ajustes",
-  "secure.revokedTitle_one": "Ya no tienes acceso a un mod protegido",
-  "secure.revokedTitle_other": "Ya no tienes acceso a {{count}} mods protegidos",
-  "secure.revokedBody": "{{names}} — el creador te retiró el acceso, así que ya no se abre en este PC.",
+  "secure.revokedTitle_one": "Un mod protegido ya no está disponible",
+  "secure.revokedTitle_other": "{{count}} mods protegidos ya no están disponibles",
+  "secure.revokedBody": "{{names}} ya no está disponible en este PC.",
   "settings.unlockNotOwned": "Aún no posees este contenido en esta cuenta.",
   "secure.intro":
     "Elige un archivo, bloquéalo y luego verifica que se desbloquea. Verificar descifra el blob aquí mismo y lo compara con el original, byte a byte — la prueba de que va y vuelve en esta máquina.",
@@ -1615,8 +1615,6 @@ export const es: Translation = {
     "Los preajustes de Pilotaje guardan ahora cómo responde cada control, como la zona muerta, la ganancia y el suavizado del acelerador. Tus botones y ejes se quedan como están.",
   "showcase.v0150.hub":
     "MXB Hub vuelve a cargar cuando la tienda pide una comprobación anti-robot: la app la resuelve en segundo plano o abre la tienda para que la termines tú.",
-  "showcase.v0150.secured":
-    "El contenido protegido sigue el acceso que de verdad tienes. Si un creador te quita como comprador, deja de abrirse la próxima vez que la app esté en línea, y la app te dice por qué.",
   "showcase.v0140.hero.title":
     "Frost's Mod Manager, y un Studio propio",
   "showcase.v0140.hero.body":
