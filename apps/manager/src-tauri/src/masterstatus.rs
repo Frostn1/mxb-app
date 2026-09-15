@@ -78,28 +78,41 @@ impl Reason {
 
 /// Place a failure message in the closed list.
 ///
-/// Ordered by how specific each match is, not by how likely: "connection refused" contains
-/// neither "timed out" nor "dns", but a message can easily carry both a host name and the word
-/// "timeout", and the first arm that fits wins. `unsupported` is checked first because it is
-/// the one case that must never be reported as a failure of anything.
+/// The arms are ordered by how *diagnostic* each phrase is, not by how likely the failure is,
+/// because the real messages routinely satisfy two arms at once. `worldnet` says "the master
+/// didn't answer the login" for a receive timeout and "the master server refused the login" for
+/// a rejection: both name the login, only one is an auth failure, so the timeout wording is
+/// tested first. The same goes for "login send failed", which is a socket that couldn't put a
+/// packet on the wire and has nothing to do with logging in.
+///
+/// Nothing here is protocol knowledge — these are ordinary English phrases, and a message that
+/// fits none of them becomes `error`, which the control plane counts exactly as well. The
+/// reason is colour on the answer; the answer is the count.
 pub fn classify(message: &str) -> Reason {
     let m = message.to_ascii_lowercase();
     let has = |needles: &[&str]| needles.iter().any(|n| m.contains(n));
 
     if has(&["isn't included", "not included", "unsupported"]) {
+        // Must come first: this is a build without the browser, and it is never an outage.
         Reason::Unsupported
-    } else if has(&["steam", "ticket", "auth", "unauthor", "forbidden"]) {
-        Reason::Auth
     } else if has(&["dns", "resolve", "no such host", "name or service not known"]) {
         Reason::Dns
+    } else if has(&["couldn't open a socket", "send failed", "no network", "network is down"]) {
+        // A socket this machine couldn't open or couldn't send from. Local, and nothing to do
+        // with whoever was being sent to.
+        Reason::Offline
+    } else if has(&["sent no servers", "parse", "malformed", "unexpected", "protocol", "garbage"]) {
+        // Something answered and it wasn't what we asked for. Before the login arms, because
+        // "accepted the login but sent no servers" is a protocol failure that names the login.
+        Reason::Protocol
+    } else if has(&["timed out", "timeout", "timing out", "answer", "stopped talking"]) {
+        Reason::Timeout
+    } else if has(&["login", "steam", "ticket", "auth", "unauthor", "forbidden"]) {
+        Reason::Auth
     } else if has(&["refused", "reset", "unreachable"]) {
         Reason::Refused
-    } else if has(&["timed out", "timeout", "timing out"]) {
-        Reason::Timeout
-    } else if has(&["offline", "no network", "network is down"]) {
+    } else if has(&["offline"]) {
         Reason::Offline
-    } else if has(&["parse", "malformed", "unexpected", "protocol", "garbage"]) {
-        Reason::Protocol
     } else {
         Reason::Error
     }
@@ -430,6 +443,29 @@ mod tests {
         assert_eq!(classify("failed to lookup address: no such host"), Reason::Dns);
         assert_eq!(classify("couldn't get a Steam auth ticket"), Reason::Auth);
         assert_eq!(classify("unexpected reply from the master"), Reason::Protocol);
+    }
+
+    /// The messages `worldnet` actually produces. It is not in the public tree, so this is the
+    /// only place the two vocabularies are held against each other — and three of these fit
+    /// more than one arm, which is what the ordering is for.
+    #[test]
+    fn the_real_messages_land_where_they_should() {
+        assert_eq!(classify("couldn't resolve master.mx-bikes.com:54200: no such host"), Reason::Dns);
+        assert_eq!(classify("master.mx-bikes.com:54200 resolved to no address"), Reason::Dns);
+        assert_eq!(classify("couldn't open a socket: permission denied"), Reason::Offline);
+        // Names the login, and is a socket that couldn't send.
+        assert_eq!(classify("login send failed: network is unreachable"), Reason::Offline);
+        // Names the login, and is a receive timeout.
+        assert_eq!(classify("the master didn't answer the login"), Reason::Timeout);
+        assert_eq!(classify("None of the remembered servers answered."), Reason::Timeout);
+        // Names the login, and is an auth rejection — the arm the two above must not steal.
+        assert_eq!(classify("The master server refused the login: banned."), Reason::Auth);
+        assert_eq!(classify("The master server rejected the login."), Reason::Auth);
+        // Names the login, and is neither: something answered with nothing in it.
+        assert_eq!(
+            classify("The master server accepted the login but sent no servers."),
+            Reason::Protocol
+        );
     }
 
     #[test]
