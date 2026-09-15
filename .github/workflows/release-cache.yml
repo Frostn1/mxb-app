@@ -1,0 +1,110 @@
+name: Warm release cache
+
+# Keeps the release builds' Rust dependency cache warm on main, so a tag doesn't compile
+# every dependency from scratch. A tag run can read main's caches but not another tag's,
+# and before this nothing on main built the release profile.
+#
+# rust-cache keeps dependencies only, never the workspace crates, so this only needs to run
+# when dependencies change. The weekly run beats GitHub's 7-day eviction and picks up a new
+# stable rustc. Both apps build here: release.yml and release-studio.yml share one key.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - .github/workflows/release-cache.yml
+  # A PR that edits this file runs it once as a check; only main saves the cache.
+  pull_request:
+    paths:
+      - .github/workflows/release-cache.yml
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-cache
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - platform: ubuntu-22.04
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
+
+      # The manager's list, which covers the studio's.
+      - name: Install Linux system dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libasound2-dev \
+            patchelf \
+            squashfs-tools
+
+      # Must match the release workflows' step exactly, or the keys differ.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          shared-key: release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Fetch private sidecar module
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        uses: actions/checkout@v4
+        with:
+          repository: Frostn1/mxbapp-private
+          ssh-key: ${{ secrets.SIDECAR_DEPLOY_KEY }}
+          path: .sidecar-src
+
+      - name: Apply sidecar module
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        shell: bash
+        run: bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
+
+      # `tauri build` rather than bare cargo, so the feature set (custom-protocol) matches
+      # what a release compiles. No bundle, so nothing is signed or published.
+      - name: Build manager
+        working-directory: apps/manager
+        run: npm run tauri -- build --no-bundle ${{ matrix.args }}
+
+      - name: Build studio
+        working-directory: apps/studio
+        run: npm run tauri -- build --no-bundle ${{ matrix.args }}
