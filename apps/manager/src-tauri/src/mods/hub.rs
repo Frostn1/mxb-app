@@ -239,6 +239,23 @@ pub fn adopt_clearance(cookies: &[(String, String)]) -> anyhow::Result<()> {
     cookie_session::fill(jar(), &HUB_SITE, cookies)
 }
 
+/// How long a browsing request gets before it is given up on.
+///
+/// Deliberately *not* [`HUB_SITE`]'s own timeout. That one is thirty minutes because the
+/// signed-in client streams purchased tracks through it, and a track runs to hundreds of
+/// megabytes — a ceiling that has to cover a whole transfer. Nothing this client does is a
+/// transfer: it reads REST pages, thumbnails and the clearance probe, all of which are a page
+/// load at most.
+///
+/// Inheriting the download ceiling had a failure mode the store hits for real. A connection
+/// that is accepted and then goes quiet — SiteGround under load, a captive portal, a filtering
+/// middlebox — is not a connect error, so `connect_timeout` never fires and the read simply
+/// waits. With thirty minutes to wait in, the catalog sat on its eight loading skeletons with
+/// no count, no error and no Retry, which reads as a frozen tab rather than a store that is
+/// down. Half a minute is far longer than a healthy answer to any of these ever takes, and it
+/// fails in a way the UI can actually show.
+const BROWSE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// One client for the session — connection reuse matters most for the search box, where a fast
 /// typist would otherwise pay a TLS handshake per debounced keystroke.
 ///
@@ -250,6 +267,9 @@ pub fn client() -> anyhow::Result<&'static Client> {
     CLIENT
         .get_or_init(|| {
             cookie_session::client_builder(&HUB_SITE, jar().clone())
+                // After the builder, so it replaces the site's streaming ceiling rather than
+                // being replaced by it.
+                .timeout(BROWSE_TIMEOUT)
                 .build()
                 .map_err(|e| format!("{e:#}"))
         })
@@ -957,5 +977,27 @@ mod tests {
             );
             assert!(["asc", "desc"].contains(&order));
         }
+    }
+
+    /// Browsing must not inherit the signed-in client's streaming ceiling.
+    ///
+    /// [`HUB_SITE`] carries a thirty-minute timeout so `install::download` can stream a
+    /// purchased track through it. This client only ever reads REST pages and thumbnails, and
+    /// a store that accepts the connection then stops answering is not a connect error — so
+    /// the read timeout is the only thing that ends the wait. Left at the site's value, the
+    /// catalog showed loading skeletons for half an hour instead of an error with a Retry.
+    #[test]
+    fn browsing_gives_up_long_before_a_download_would() {
+        assert!(
+            BROWSE_TIMEOUT < HUB_SITE.timeout,
+            "browsing ({BROWSE_TIMEOUT:?}) must not wait as long as a file transfer ({:?})",
+            HUB_SITE.timeout
+        );
+        // A stalled store has to become a visible error while the user is still looking at the
+        // tab, not after they have given up on it.
+        assert!(
+            BROWSE_TIMEOUT <= Duration::from_secs(60),
+            "a browsing request that can hang for {BROWSE_TIMEOUT:?} reads as a frozen tab"
+        );
     }
 }

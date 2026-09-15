@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-15 — MXB Hub gets past the store's robot check
+
+### Fixed
+- MXB Hub's robot check can now be finished by hand. The app still answers it quietly in the
+  background, and when that doesn't work it opens the store in a window so you can complete the
+  check yourself. Before, the catalogue just never loaded.
+- Opening MXB Hub no longer runs that check four times over. One refusal used to cost four
+  goes, one after the other, and about two and a half minutes of waiting; now it's one.
+- MXB Hub no longer sits on a grid of empty tiles when shop.mxb-hub.com stops answering
+  altogether. It used to wait half an hour before giving up, with no message and no Retry.
+
 ## 2026-09-15 — MXB Coach v0.1.10-beta.10
 
 ### Added
