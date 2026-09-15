@@ -588,6 +588,11 @@ export const it: Translation = {
   "settings.secReasonLocked": "Nessuna chiave per questo contenuto sul tuo account.",
   "settings.secReasonUnreadable": "Non è un file mxbsecure valido.",
   "settings.unlockNeedsSteam": "Accedi prima con Steam — lo sblocco è legato al tuo account Steam.",
+  "secure.promptTitle_one": "Hai un mod protetto da sbloccare",
+  "secure.promptTitle_other": "Hai {{count}} mod protetti da sbloccare",
+  "secure.promptSteam": "I mod protetti sono legati al tuo account Steam. Accedi per sbloccarli.",
+  "secure.promptEnroll": "Registrati prima con il tuo codice d'invito. Lo trovi in Impostazioni, sotto Sincronizzazione livree.",
+  "secure.promptEnrollBtn": "Apri Impostazioni",
   "settings.unlockNotOwned": "Non possiedi ancora questo contenuto su questo account.",
   "secure.intro":
     "Scegli un file, bloccalo, poi verifica che si sblocchi. La verifica decifra il blob qui e lo confronta con l'originale, byte per byte — la prova che fa il giro su questa macchina.",

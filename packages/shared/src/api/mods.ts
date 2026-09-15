@@ -439,6 +439,20 @@ export function steamLinkStatus(): Promise<string | null> {
   return invoke<string | null>("steam_link_status");
 }
 
+/** Why secured files on disk stayed locked, when the player can fix it here: `enroll` (no
+ *  invite code yet) or `steam` (no Steam account linked). */
+export interface MxbsecureBlocked {
+  reason: "enroll" | "steam";
+  count: number;
+}
+
+/** Fires when an auto-unlock pass leaves secured files locked for one of those reasons. */
+export function onMxbsecureBlocked(
+  cb: (payload: MxbsecureBlocked) => void,
+): Promise<UnlistenFn> {
+  return listen<MxbsecureBlocked>("mxbsecure-blocked", (event) => cb(event.payload));
+}
+
 /** This player's own MX Bikes GUID, read out of the running game. `null` when the game
  *  isn't running or hasn't signed in to Steam yet — the ordinary case, not an error. */
 export function localGuid(): Promise<string | null> {

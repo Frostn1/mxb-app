@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-14
+
+### Added
+- Secured mods that won't unlock now tell you why. If you have one in your mods and aren't signed
+  in with Steam, the app says so and signs you in from the notice. If you haven't enrolled yet, it
+  takes you to Settings to do that first. The Unlock button in the Library offers Steam sign-in
+  too.
+
 ## 2026-09-14 — Frost's Studio v0.1.6
 
 ### Added

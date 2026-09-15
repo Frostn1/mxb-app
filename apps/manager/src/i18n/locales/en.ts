@@ -582,6 +582,11 @@ export const en = {
   "settings.secReasonLocked": "No key for this content on your account yet.",
   "settings.secReasonUnreadable": "This isn't a valid mxbsecure file.",
   "settings.unlockNeedsSteam": "Sign in with Steam first — unlocking is tied to your Steam account.",
+  "secure.promptTitle_one": "You have a secured mod to unlock",
+  "secure.promptTitle_other": "You have {{count}} secured mods to unlock",
+  "secure.promptSteam": "Secured mods are tied to your Steam account. Sign in to unlock.",
+  "secure.promptEnroll": "Enroll with your invite code first. It's in Settings under Paint sync.",
+  "secure.promptEnrollBtn": "Open Settings",
   "settings.unlockNotOwned": "You don't own this content on this account yet.",
   "secure.intro":
     "Pick a file, lock it, then verify it unlocks. Verifying decrypts the blob right here and checks it matches the original, byte for byte — the proof it round-trips on this machine.",

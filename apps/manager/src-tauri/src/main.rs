@@ -1753,7 +1753,8 @@ const AUTO_UNLOCK_THROTTLE: std::time::Duration = std::time::Duration::from_secs
 /// and the moment entitlement appears it unlocks). Returns how many were newly unlocked.
 ///
 /// `force` (a fresh sign-in) skips the throttle and the not-yet-elapsed guard, because the identity
-/// that decides entitlement just changed. Not enrolled leaves everything untouched.
+/// that decides entitlement just changed. Not enrolled unlocks nothing. Files left locked for a
+/// reason the player can fix are reported on `mxbsecure-blocked` (see [`SecureBlocked`]).
 #[tauri::command]
 async fn mxbsecure_auto_unlock(app: tauri::AppHandle, force: Option<bool>) -> Result<usize, String> {
     #[cfg(mxbsecure)]
@@ -1765,6 +1766,15 @@ async fn mxbsecure_auto_unlock(app: tauri::AppHandle, force: Option<bool>) -> Re
         let _ = (app, force);
         Ok(0)
     }
+}
+
+/// Why secured files on disk stayed locked, when the player can fix it from the app: `"enroll"`
+/// (no invite code yet) or `"steam"` (no Steam account linked). The UI says it once a run.
+#[cfg(mxbsecure)]
+#[derive(Clone, serde::Serialize)]
+struct SecureBlocked {
+    reason: &'static str,
+    count: usize,
 }
 
 /// The auto-unlock pass, callable from inside the app (the game-launch watcher) as well as the
@@ -1783,22 +1793,37 @@ pub(crate) async fn auto_unlock_now(app: &tauri::AppHandle, force: bool) -> usiz
         }
         *last = Some(std::time::Instant::now());
     }
+    let live = steamid::current_steam_id64();
+    let locked: Vec<String> = secure_launch::scan_blobs(app)
+        .into_iter()
+        .filter(|b| !live.as_deref().is_some_and(|id| has_valid_key(b, id)))
+        .collect();
     let cfg = config::load_or_detect(app).unwrap_or_default();
     if cfg.cp_token.trim().is_empty() {
+        // Nothing unlocks before enrolling, but a locked file on disk is worth saying so.
+        if !locked.is_empty() {
+            let blocked = SecureBlocked { reason: "enroll", count: locked.len() };
+            let _ = app.emit("mxbsecure-blocked", blocked);
+        }
         return 0;
     }
-    let live = steamid::current_steam_id64();
     let mut unlocked = 0usize;
-    for blob in secure_launch::scan_blobs(app) {
-        if let Some(id) = &live {
-            if has_valid_key(&blob, id) {
-                continue;
-            }
-        }
+    let mut needs_steam = 0usize;
+    for blob in locked {
         match unlock_one(app, &blob).await {
             Ok(_) => unlocked += 1,
-            Err(e) => log::info!("[secure] auto-unlock skipped {blob}: {e}"),
+            Err(e) => {
+                // The grant's refusal for an account with no Steam ID behind it.
+                if e.contains("no Steam account linked") {
+                    needs_steam += 1;
+                }
+                log::info!("[secure] auto-unlock skipped {blob}: {e}");
+            }
         }
+    }
+    if needs_steam > 0 {
+        let blocked = SecureBlocked { reason: "steam", count: needs_steam };
+        let _ = app.emit("mxbsecure-blocked", blocked);
     }
     if unlocked > 0 {
         secure_launch::refresh_running(app);
