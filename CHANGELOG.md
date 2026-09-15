@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-15 — MXB Hub tells you when the store isn't answering
+
+### Fixed
+- MXB Hub no longer sits on a grid of empty tiles when shop.mxb-hub.com stops answering.
+  It used to wait half an hour before giving up, with no message and no Retry, which looks
+  exactly like the app having frozen. It now says it couldn't load the catalogue after
+  thirty seconds and offers Retry.
+
 ## 2026-09-15 — MXB Coach v0.1.9-beta.9
 
 ### Added
