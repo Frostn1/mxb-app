@@ -13,9 +13,11 @@ mod coach;
 mod cues;
 mod fixes;
 mod ground;
+mod hud;
 mod hudsheet;
 mod lines;
 mod others;
+mod overlay;
 mod sag;
 mod soil;
 mod stp;
@@ -24,6 +26,7 @@ mod telemetry;
 mod tyres;
 
 use mxb_core::{config, game};
+use tauri::{Manager, WindowEvent};
 
 #[tauri::command]
 fn get_config(app: tauri::AppHandle) -> config::AppConfig {
@@ -97,12 +100,40 @@ fn register_secure_opener() {
 fn main() {
     #[cfg(mxbsecure)]
     register_secure_opener();
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // A second launch shows the window already running rather than starting another Coach
+    // (and another overlay key). Release only, so a dev run starts beside the installed one.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        overlay::show_main(app);
+    }));
+    builder
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // The overlay's hotkey has to fire while MX Bikes holds keyboard focus.
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .setup(|app| {
+            overlay::start(app.handle());
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() != overlay::LABEL {
+                return;
+            }
+            match event {
+                // Clicking back into the game puts the overlay away.
+                WindowEvent::Focused(false) => overlay::on_focus_lost(window.app_handle()),
+                // Closing it parks it, so the next press doesn't rebuild the webview.
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = mxb_core::overlay::hide(window.app_handle());
+                }
+                _ => {}
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             // What the shared shell calls: the platform, the config, the titles.
             mxb_core::viewer::app_platform,
@@ -137,7 +168,24 @@ fn main() {
             mxb_core::trackview::read_track_placements,
             coach::coach_install_plugin,
             coach::coach_uninstall_plugin,
+            hud::coach_hud,
+            hud::coach_set_hud,
+            hud::coach_voice,
+            hud::coach_set_voice,
+            overlay::overlay_toggle,
+            overlay::overlay_hide,
+            overlay::overlay_state,
+            overlay::set_overlay_enabled,
+            overlay::set_overlay_hotkey,
+            overlay::overlay_open_main,
+            overlay::overlay_handoff,
+            overlay::overlay_peer,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running MXB Coach");
+        .build(tauri::generate_context!())
+        .expect("error while running MXB Coach")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                overlay::stop(app);
+            }
+        });
 }

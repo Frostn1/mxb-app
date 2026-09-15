@@ -193,4 +193,21 @@ export const ptBR: Record<keyof typeof en, string> = {
   "trackViewer.whyDetails": "Por quê?",
   "trackViewer.copyDetails": "Copiar detalhes",
   "trackViewer.copied": "Copiado",
+
+  // ── Overlay frame and hotkey field ─────────────────────────────────────────
+  "overlay.pressKeys": "Aperte as teclas…",
+  "overlay.needModifier": "Adicione um modificador",
+  "overlay.needModifierDesc": "Segure Ctrl, Alt ou Shift para o atalho não disparar enquanto você digita.",
+  "overlay.toClose": "{{hotkey}} para fechar",
+  "overlay.closeTitle": "Fechar overlay (Esc)",
+  "overlay.openMain": "Abrir o app completo",
+  "overlay.openMainTitle": "Fecha o overlay e abre a janela principal do {{app}}",
+  "overlay.tab.presets": "Presets",
+  "overlay.tab.locker": "Armário",
+  "overlay.tab.browse": "Explorar",
+  "overlay.tab.manage": "Modo corrida",
+  "overlay.tab.tips": "Dicas",
+  "overlay.tab.setup": "Acerto",
+  "overlay.tab.cues": "Avisos ao vivo",
+  "overlay.tab.hud": "HUD",
 };

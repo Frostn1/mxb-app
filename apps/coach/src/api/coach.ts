@@ -308,3 +308,31 @@ export const coachWriteCues = (path: string, lap: number, level: CueLevel, amoun
 export const installRecorder = (from?: string) =>
   invoke<string>("coach_install_plugin", { from: from ?? null });
 export const removeRecorder = () => invoke<void>("coach_uninstall_plugin");
+
+/** One thing the recorder can draw over the game. Labels come from `hud.rs`. */
+export interface HudPart {
+  key: string;
+  label: string;
+  on: boolean;
+}
+
+/** `hud.ini` as the recorder will read it: missing keys are on. */
+export interface Hud {
+  enabled: boolean;
+  parts: HudPart[];
+  file: string;
+}
+
+export const coachHud = () => invoke<Hud>("coach_hud");
+/** Turn one part on or off, or the whole HUD with `enabled`. */
+export const coachSetHud = (key: string, on: boolean) => invoke<Hud>("coach_set_hud", { key, on });
+
+/** Whether the recorder speaks its cues (`cues/voice.ini`), and how loud, 0–100. */
+export interface Voice {
+  enabled: boolean;
+  volume: number;
+}
+
+export const coachVoice = () => invoke<Voice>("coach_voice");
+export const coachSetVoice = (enabled: boolean, volume: number) =>
+  invoke<Voice>("coach_set_voice", { enabled, volume: Math.round(volume) });

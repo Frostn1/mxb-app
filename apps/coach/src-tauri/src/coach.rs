@@ -27,7 +27,7 @@ fn err(e: impl std::fmt::Display) -> String {
 
 /// Where the recorder writes. More than one candidate: the user folder can be moved, and the
 /// configured profiles folder may know better than the default.
-fn session_dirs(cfg: &AppConfig) -> Vec<PathBuf> {
+pub(crate) fn session_dirs(cfg: &AppConfig) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     let users = [cfg.profiles_dir().parent().map(Path::to_path_buf), config::default_user_dir(cfg.game())];
     for user in users.into_iter().flatten() {
@@ -44,7 +44,7 @@ fn plugin_path(cfg: &AppConfig) -> Option<PathBuf> {
     (!dir.trim().is_empty()).then(|| Path::new(&dir).join("plugins").join(PLUGIN))
 }
 
-fn load_config(app: &AppHandle) -> AppConfig {
+pub(crate) fn load_config(app: &AppHandle) -> AppConfig {
     config::load(app).unwrap_or_default()
 }
 

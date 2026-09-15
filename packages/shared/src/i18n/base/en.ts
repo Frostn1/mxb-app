@@ -199,4 +199,21 @@ export const en = {
   "trackViewer.whyDetails": "Why?",
   "trackViewer.copyDetails": "Copy details",
   "trackViewer.copied": "Copied",
+
+  // ── Overlay frame and hotkey field ─────────────────────────────────────────
+  "overlay.pressKeys": "Press keys…",
+  "overlay.needModifier": "Add a modifier",
+  "overlay.needModifierDesc": "Hold Ctrl, Alt or Shift so the shortcut can't fire while you type.",
+  "overlay.toClose": "{{hotkey}} to close",
+  "overlay.closeTitle": "Close overlay (Esc)",
+  "overlay.openMain": "Open full app",
+  "overlay.openMainTitle": "Close the overlay and open the main {{app}} window",
+  "overlay.tab.presets": "Presets",
+  "overlay.tab.locker": "Locker",
+  "overlay.tab.browse": "Browse",
+  "overlay.tab.manage": "Race mode",
+  "overlay.tab.tips": "Tips",
+  "overlay.tab.setup": "Setup",
+  "overlay.tab.cues": "Live cues",
+  "overlay.tab.hud": "HUD",
 } as const;

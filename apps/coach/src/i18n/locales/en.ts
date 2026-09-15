@@ -243,4 +243,33 @@ export const en = {
   "coachSettings.plugin": "Recorder",
   "coachSettings.sessions": "Session files",
   "coachSettings.open": "Open",
+
+  "cues.voice": "Speak the cues",
+  "cues.voiceBody": "Needs the recorder from FrostMod 0.22 or newer. Update it in Settings.",
+  "cues.volume": "Volume",
+
+  "otips.none": "No laps to coach yet. Ride a whole lap with the recorder on.",
+  "otips.lap": "Lap {{lap}}",
+  "otips.against": "against your fastest, {{time}}",
+  "hud.title": "In-game HUD",
+  "hud.body": "What the recorder draws over the game. It reads these when a session starts.",
+  "hud.enabled": "Show the HUD",
+
+  "overlay.section": "In-game overlay",
+  "overlay.enable": "Enable the in-game overlay",
+  "overlay.enableDesc":
+    "Press a shortcut while {{game}} is running to see your last lap's tips, setup, live cues and the HUD over the game.",
+  "overlay.shortcut": "Overlay shortcut",
+  "overlay.shortcutDesc": "Works while the game has focus. Esc closes the overlay. MXB App uses the same shortcut.",
+  "overlay.showNow": "Show overlay now",
+  "overlay.showFailed": "Couldn't open the overlay",
+  "overlay.shortcutUpdated": "Overlay shortcut updated",
+  "overlay.shortcutRejected": "Couldn't use that shortcut",
+  "overlay.registerFailed": "The overlay shortcut couldn't be registered",
+  "overlay.hotkeyTaken": "Another app is using this shortcut",
+  "overlay.hotkeyTakenDesc": "Pick a different one above.",
+  "overlay.deferred.linked": "MXB App is running, so it holds this shortcut for both apps. Its tabs show in the overlay too.",
+  "overlay.deferred.oldManager": "An older MXB App is running and holds this shortcut. Update MXB App to share it with the coach.",
+  "overlay.deferred.updateManager": "Update MXB App to share this shortcut with the coach.",
+  "overlay.deferred.updateCoach": "Update MXB Coach to share this shortcut with MXB App.",
 };

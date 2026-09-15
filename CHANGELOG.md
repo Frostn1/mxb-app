@@ -6,6 +6,19 @@
 - In-game HUD: sending cues to the game now also sends what the recorder's HUD needs, your fast
   lap for the gap and the ghost on the map, and each section's name and tip. Needs the recorder
   from FrostMod 0.22 or newer.
+- An in-game overlay. Press Ctrl+Shift+X in the game to see your last lap's tips, setup fixes,
+  live cues and HUD settings without leaving it. Turn it on or pick another shortcut in Settings.
+- The overlay can switch the recorder's HUD parts on and off: the live cue, section and tip, gap
+  to your fast lap, sit or stand, the track map and the setup card.
+- Live cues can be spoken. Turn on Speak the cues and set the volume. It needs the recorder from
+  FrostMod 0.22 or newer.
+- With MXB App running too, the two share one shortcut, and each overlay shows the other's tabs.
+
+## Unreleased — MXB App
+
+### Added
+- With MXB Coach running, the overlay shows Coach's tabs next to yours and one shortcut opens
+  both.
 
 ## 2026-09-15 — v0.15.1 — Small fixes
 
