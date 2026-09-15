@@ -92,6 +92,14 @@ jobs:
         shell: bash
         run: bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
 
+      # Fail loudly rather than ship a coach that can't open locked tracks.
+      - name: Check the sidecar module is in place
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        shell: bash
+        run: |
+          test -f crates/core/src/sidecar.rs || { echo "::error::sidecar.rs missing after sync.sh"; exit 1; }
+          test -f crates/core/src/mxbsecure.rs || { echo "::error::mxbsecure.rs missing after sync.sh"; exit 1; }
+
       - name: Version without the coach- prefix
         id: tag
         shell: bash

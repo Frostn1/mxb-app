@@ -62,7 +62,7 @@ export default function SessionList({
         </div>
       ) : (
         <div className="border border-border">
-          <div className="grid grid-cols-[150px_1fr_1fr_60px_90px] gap-3 border-b border-border px-4 py-2 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
+          <div className="grid grid-cols-[150px_1fr_1fr_60px_90px] gap-3 border-b border-border px-4 py-2 eyebrow">
             <span>{t("sessions.when")}</span>
             <span>{t("sessions.track")}</span>
             <span>{t("sessions.bike")}</span>

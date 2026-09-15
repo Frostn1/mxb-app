@@ -20,7 +20,7 @@ function Row({ label, value, onOpen }: { label: string; value: string; onOpen?: 
   return (
     <div className="flex items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
       <div className="min-w-0">
-        <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">{label}</div>
+        <div className="eyebrow">{label}</div>
         <div className="mt-1 break-all font-mono text-[12px] text-muted-foreground">{value || "—"}</div>
       </div>
       {onOpen && value && (

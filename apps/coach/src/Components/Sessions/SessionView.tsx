@@ -141,7 +141,7 @@ export default function SessionView({
 function Stat({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
     <div className="border border-border bg-card px-4 py-3">
-      <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">{label}</div>
+      <div className="eyebrow">{label}</div>
       <div className="mt-1 font-mono text-[20px] tabular-nums">{value}</div>
       {note && <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">{note}</div>}
     </div>

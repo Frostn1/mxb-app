@@ -72,9 +72,9 @@ export function surfaceTerrain(surface: Surface): TrackTerrain {
 
 /** Three.js wants real colours, not CSS variables. */
 function loss(lost: number): string {
-  if (lost > 0.05) return "#ef8078";
-  if (lost < -0.05) return "#6fd99a";
-  return "#f2f3f5";
+  if (lost > 0.05) return "#ff6961";
+  if (lost < -0.05) return "#30d158";
+  return "#f5f5f7";
 }
 
 /**
@@ -137,7 +137,7 @@ export default function Track3D({
       }
     }
     if (!review.solo) out.push({ points: whole(paths.reference, paths.referenceY), colour: "#8a8a93", width: 1.5 });
-    out.push({ points: whole(paths.lap, paths.lapY), colour: "#9ccfec", width: 2.2 });
+    out.push({ points: whole(paths.lap, paths.lapY), colour: "#2997ff", width: 2.2 });
     if (sel) {
       const [a, b] = [Math.floor(sel.start / step), Math.min(paths.lap.length - 1, Math.ceil(sel.end / step))];
       const pts = paths.lap.slice(a, b + 1).map((_, k) => at(paths.lap, paths.lapY, a + k));

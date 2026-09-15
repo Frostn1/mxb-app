@@ -4,7 +4,7 @@ import { appPlatform, getConfig, listGames } from "@frost/shared/api/mods";
 import type { Config, GameInfo } from "@frost/shared/types";
 import { ConfigContext, MXB_FALLBACK } from "@frost/shared/Context/Config";
 import { ThemeProvider, useTheme } from "@frost/shared/Context/Theme";
-import Rail, { RailBrand, RailButton, type RailEntry } from "@frost/shared/Components/Shell/Rail";
+import Rail, { RailButton, type RailEntry } from "@frost/shared/Components/Shell/Rail";
 import TitleBar from "@frost/shared/Components/Shell/TitleBar";
 import { I18nProvider, setAmbientVars, useT } from "@/i18n";
 import Sessions from "./Components/Sessions/Sessions";
@@ -13,6 +13,20 @@ import UpdateBanner from "./Components/UpdateBanner";
 import { UpdateProvider } from "./Context/Update";
 
 type View = "sessions" | "settings";
+
+/** The mxbsecure wordmark over the product name, as the site sets them. Grabs the window. */
+function Brand() {
+  return (
+    <div data-tauri-drag-region className="select-none px-2.5 pt-0.5">
+      <div data-tauri-drag-region className="headline text-[12px] text-muted-foreground">
+        mxbsecure
+      </div>
+      <div data-tauri-drag-region className="headline mt-0.5 text-[22px]">
+        Coach
+      </div>
+    </div>
+  );
+}
 
 function Shell() {
   const t = useT();
@@ -58,7 +72,7 @@ function Shell() {
             entries={entries}
             active={view}
             onPick={setView}
-            header={<RailBrand top="MXB" name="Coach" />}
+            header={<Brand />}
             footer={
               <RailButton
                 label={t("nav.settings")}

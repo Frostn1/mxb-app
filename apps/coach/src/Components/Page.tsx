@@ -34,7 +34,7 @@ export default function Page({
         )}
         <div className="flex items-end justify-between gap-4">
           <div className="min-w-0">
-            <h2 className="truncate font-cond text-[20px] font-semibold tracking-[0.03em]">{title}</h2>
+            <h2 className="truncate headline text-[24px]">{title}</h2>
             {sub && <div className="mt-1 text-[12.5px] text-muted-foreground">{sub}</div>}
           </div>
           {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
@@ -45,10 +45,10 @@ export default function Page({
   );
 }
 
-/** A small uppercase heading over a block. */
+/** A small label over a block, as the site sets them. */
 export function Label({ children }: { children: ReactNode }) {
   return (
-    <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
+    <div className="mb-2 eyebrow">
       {children}
     </div>
   );

@@ -46,6 +46,8 @@
 - Open buttons in Settings for the game folder, the recorder and your session files.
 
 ### Changed
+- The coach has a new look to match mxbsecure.com: black, one blue, Geist Mono headings and
+  rounded controls.
 - The lap review shows the track, session and bike it's about, and has two separate switches:
   this lap or all laps, and 2D or 3D.
 - Each section now leads with the tip that matters most, with the rest under More details.
