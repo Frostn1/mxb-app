@@ -339,7 +339,7 @@ function r2Source(env: Env, key: string, size: number): PaintSource {
 }
 
 /**
- * `GET /admin/paints/thumb?sha=…` — the square, cut once and kept.
+ * `GET /v1/web/admin/paints/thumb?sha=…` — the square, cut once and kept.
  *
  * A paint that cannot be drawn answers with a labelled tile rather than a 404, because the
  * caller is an `<img>` in a table: a broken-image icon says the page is wrong, where the word
