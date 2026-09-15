@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
-import { Lock, Plug, Loader2, Signal, Users, Download, MapPin, CheckCircle2 } from "lucide-react";
+import {
+  Lock,
+  Plug,
+  Loader2,
+  Signal,
+  Users,
+  Download,
+  MapPin,
+  CheckCircle2,
+  Hourglass,
+} from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { Button } from "@frost/shared/Components/ui/button";
 import {
@@ -11,12 +21,15 @@ import {
 import { useT } from "@/i18n";
 import {
   probeServer,
+  queueCounts,
   serverRiders,
   guessServerTrack,
   type MasterServer,
+  type QueueState,
   type ServerRiders,
   type TrackGuess,
 } from "@frost/shared/api/mods";
+import { isFull } from "@/lib/useServerQueue";
 
 /**
  * Everything one server publishes about itself.
@@ -193,12 +206,16 @@ const ServerDetail = ({
   server,
   onOpenChange,
   onJoin,
+  onWait,
   joining,
+  queue,
 }: {
   server: MasterServer | null;
   onOpenChange: (open: boolean) => void;
   onJoin: (address: string) => void;
+  onWait: (server: MasterServer) => void;
   joining: string | null;
+  queue: QueueState | null;
 }) => {
   const t = useT();
   // What the row carried, replaced by the server's own answer once it arrives. Held here
@@ -209,6 +226,7 @@ const ServerDetail = ({
   const [ridersLoading, setRidersLoading] = useState(false);
   const [guess, setGuess] = useState<TrackGuess | null>(null);
   const [guessing, setGuessing] = useState(false);
+  const [waiting, setWaiting] = useState(0);
 
   const address = server?.address ?? "";
   const name = server?.name ?? "";
@@ -221,7 +239,12 @@ const ServerDetail = ({
     let cancelled = false;
     setLive(null);
     setRiders(null);
+    setWaiting(0);
     setRidersLoading(true);
+    // One key asked, so the one value back is this server's line.
+    queueCounts([address])
+      .then((c) => !cancelled && setWaiting(Object.values(c)[0] ?? 0))
+      .catch(() => {});
     probeServer(address)
       .then((s) => !cancelled && setLive(s))
       .catch(() => {});
@@ -340,19 +363,37 @@ const ServerDetail = ({
           {/* A server the game can't be pointed at says so, rather than offering a button
               that fails every time. */}
           <p className="text-[12px] text-faint">
-            {s.joinable ? "" : t("serverBrowser.notJoinable")}
+            {!s.joinable
+              ? t("serverBrowser.notJoinable")
+              : waiting > 0
+                ? t("serverBrowser.waitingCount", { count: waiting })
+                : isFull(s)
+                  ? t("serverBrowser.queueHint")
+                  : ""}
           </p>
-          <Button
-            onClick={() => onJoin(s.address)}
-            disabled={!s.joinable || joining !== null}
-          >
-            {joining === s.address ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Plug className="size-3.5" />
-            )}
-            {t("serverBrowser.join")}
-          </Button>
+          {queue?.address === s.address ? (
+            <Button variant="outline" disabled>
+              <Hourglass className="size-3.5" />
+              {t("serverBrowser.inLine", { position: queue.position })}
+            </Button>
+          ) : s.joinable && isFull(s) ? (
+            <Button variant="outline" onClick={() => onWait(s)}>
+              <Hourglass className="size-3.5" />
+              {t("serverBrowser.waitInLine")}
+            </Button>
+          ) : (
+            <Button
+              onClick={() => onJoin(s.address)}
+              disabled={!s.joinable || joining !== null}
+            >
+              {joining === s.address ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Plug className="size-3.5" />
+              )}
+              {t("serverBrowser.join")}
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

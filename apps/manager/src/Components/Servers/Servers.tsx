@@ -16,6 +16,7 @@ import {
   ChevronDown,
   Globe,
   UserCheck,
+  Hourglass,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@frost/shared/lib/utils";
@@ -32,11 +33,13 @@ import HelpHint from "@frost/shared/Components/ui/help-hint";
 import {
   listMasterServers,
   joinServer,
+  queueJoin,
   serversWithPaintSync,
   type MasterServer,
 } from "@frost/shared/api/mods";
 import { useT } from "@/i18n";
 import { useFavorites } from "@/lib/useFavorites";
+import { isFull, useServerQueue } from "@/lib/useServerQueue";
 import { REGION_LABEL_KEY, REGION_ORDER, canonicalRegion, type RegionKey } from "@/lib/serverRegion";
 import JoinServerDialog from "../Shell/JoinServerDialog";
 import ServerDetail from "./ServerDetail";
@@ -81,6 +84,7 @@ const Servers = () => {
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [joining, setJoining] = useState<string | null>(null);
+  const queue = useServerQueue();
   const [joinOpen, setJoinOpen] = useState(false);
   const [detail, setDetail] = useState<MasterServer | null>(null);
   // Spam and cheat-advertising servers are marked by the backend, not dropped, so this can
@@ -233,6 +237,18 @@ const Servers = () => {
     [joining, t],
   );
 
+  // A full server turns you away, so the button gets you in line instead of failing.
+  const wait = useCallback(
+    async (s: MasterServer) => {
+      try {
+        await queueJoin(s.address, s.name);
+      } catch (e) {
+        toast.error(typeof e === "string" ? e : t("queue.joinFailed"));
+      }
+    },
+    [t],
+  );
+
   const copy = useCallback(
     (address: string) => {
       navigator.clipboard
@@ -331,7 +347,9 @@ const Servers = () => {
         server={detail}
         onOpenChange={(open) => !open && setDetail(null)}
         onJoin={join}
+        onWait={wait}
         joining={joining}
+        queue={queue}
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
@@ -487,22 +505,42 @@ const Servers = () => {
                       </button>
                     </td>
                     <td className="px-3.5 py-2.5 text-right">
-                      <Button
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          join(s.address);
-                        }}
-                        disabled={joining !== null || !s.joinable}
-                        title={s.joinable ? undefined : t("serverBrowser.notJoinable")}
-                      >
-                        {joining === s.address ? (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        ) : (
-                          <Plug className="size-3.5" />
-                        )}
-                        {t("serverBrowser.join")}
-                      </Button>
+                      {queue?.address === s.address ? (
+                        <Button size="sm" variant="outline" disabled>
+                          <Hourglass className="size-3.5" />
+                          {t("serverBrowser.inLine", { position: queue.position })}
+                        </Button>
+                      ) : s.joinable && isFull(s) ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            wait(s);
+                          }}
+                          title={t("serverBrowser.queueHint")}
+                        >
+                          <Hourglass className="size-3.5" />
+                          {t("serverBrowser.waitInLine")}
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            join(s.address);
+                          }}
+                          disabled={joining !== null || !s.joinable}
+                          title={s.joinable ? undefined : t("serverBrowser.notJoinable")}
+                        >
+                          {joining === s.address ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <Plug className="size-3.5" />
+                          )}
+                          {t("serverBrowser.join")}
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 ))}

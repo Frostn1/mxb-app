@@ -134,6 +134,7 @@ mod ranked;
 mod reshade;
 mod serverbook;
 mod serverfilter;
+mod serverqueue;
 mod servers;
 mod sessionwatch;
 mod shop_catalog_session;
@@ -3119,6 +3120,36 @@ fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::Launc
         sync_paints_soon(&app, Some(address));
     }
     Ok(outcome)
+}
+
+/// Wait in line for a full server; the app launches into it when a slot is ours.
+/// See [`serverqueue`].
+#[tauri::command]
+async fn queue_join(
+    app: tauri::AppHandle,
+    address: String,
+    name: String,
+) -> Result<serverqueue::QueueState, String> {
+    serverqueue::join(app, address, name).await
+}
+
+#[tauri::command]
+async fn queue_leave(app: tauri::AppHandle) {
+    serverqueue::leave(app).await
+}
+
+#[tauri::command]
+fn queue_status() -> Option<serverqueue::QueueState> {
+    serverqueue::status()
+}
+
+/// How many are waiting for each server, keyed by normalized `host:port`.
+#[tauri::command]
+async fn queue_counts(
+    app: tauri::AppHandle,
+    addresses: Vec<String>,
+) -> Result<std::collections::HashMap<String, u32>, String> {
+    Ok(serverqueue::counts(&app, addresses).await?.into_iter().collect())
 }
 
 /// One live server as the Servers tab shows it. Filled by the local-only `worldnet` module
@@ -6372,6 +6403,10 @@ fn main() {
             frostmod_stop,
             launch_game,
             join_server,
+            queue_join,
+            queue_leave,
+            queue_status,
+            queue_counts,
             list_master_servers,
             probe_server,
             server_riders,
