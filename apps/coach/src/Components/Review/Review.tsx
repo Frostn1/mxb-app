@@ -405,7 +405,7 @@ function Setup({ findings }: { findings: Finding[] }) {
           if (mine.length === 0) return null;
           return (
             <div key={g.key}>
-              <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">{t(g.key)}</div>
+              <div className="mb-1.5 eyebrow">{t(g.key)}</div>
               <Notes findings={mine} />
             </div>
           );
@@ -424,10 +424,10 @@ function SectionPanel({ s, solo, onPrev, onNext }: { s: SectionReview; solo: boo
     <div className="border border-primary/40 bg-card">
       <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div>
-          <div className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
+          <div className="eyebrow">
             {t(`review.kind.${s.kind}` as TKey)}
           </div>
-          <div className="mt-0.5 font-cond text-[22px] font-semibold leading-tight">{s.name}</div>
+          <div className="mt-0.5 headline text-[24px]">{s.name}</div>
           <div className="mt-1 text-[12px] text-muted-foreground">
             {t("review.you")} {s.lapTime.toFixed(2)} s
             {!solo && ` · ${t("review.fastLap")} ${s.refTime.toFixed(2)} s`}
