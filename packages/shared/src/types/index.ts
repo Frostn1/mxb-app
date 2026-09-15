@@ -634,6 +634,19 @@ export interface TrackInfo {
   hasTerrain: boolean;
 }
 
+/** Where a track's files are, from the id the game reports. Mirrors `tracksource::TrackSource`. */
+export interface TrackSource {
+  /** The track's `.pkz`, folder or `.mxbsecure` — or the install's `tracks.pkz` when stock. */
+  path: string;
+  /** The track's folder inside `path` when the archive holds more than one track. */
+  prefix: string | null;
+  /** The installed file's name, or the name the game shows for a stock track. */
+  name: string;
+  stock: boolean;
+  /** Its contents can't be read here, so there is no terrain to draw. */
+  locked: boolean;
+}
+
 /** A track's terrain grid, unpacked from the binary IPC blob. */
 /**
  * A picture of a track's surfaces, laid over the terrain.

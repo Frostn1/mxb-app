@@ -149,6 +149,32 @@ fn top_folder(names: &[String]) -> Option<String> {
 
 /// Every entry name in a track, without inflating any of them.
 pub fn entry_names(path: &Path) -> Result<Vec<String>> {
+    entry_names_under(path, None)
+}
+
+/// A folder inside an archive, normalised the way entry names are compared: forward
+/// slashes, no slash at either end, lowercase. `None` for an empty prefix.
+fn norm_prefix(prefix: Option<&str>) -> Option<String> {
+    prefix
+        .map(|p| p.replace('\\', "/").trim_matches('/').to_ascii_lowercase())
+        .filter(|p| !p.is_empty())
+}
+
+/// [`entry_names`], narrowed to one folder inside the archive.
+///
+/// The game packs every stock track into one `tracks.pkz`, so the whole archive's names
+/// would hand the first stock `.trh` to whichever track asked. Names keep their full path,
+/// so [`read_entry`] reads them unchanged.
+pub fn entry_names_under(path: &Path, prefix: Option<&str>) -> Result<Vec<String>> {
+    let mut names = entry_names_all(path)?;
+    if let Some(p) = norm_prefix(prefix) {
+        let p = format!("{p}/");
+        names.retain(|n| n.to_ascii_lowercase().starts_with(&p));
+    }
+    Ok(names)
+}
+
+fn entry_names_all(path: &Path) -> Result<Vec<String>> {
     if is_dir(path) {
         let mut out = Vec::new();
         for entry in crate::linkwalk::walk_depth(path, 6)
@@ -165,6 +191,19 @@ pub fn entry_names(path: &Path) -> Result<Vec<String>> {
         return Ok(out);
     }
     crate::pkz::entry_names(path)
+}
+
+/// Whether a track's contents are out of reach here: a secured file with no key for this
+/// account, or a non-plain archive this build has no reader for. Its terrain can't be read,
+/// which is a state to show rather than an error.
+pub fn is_locked(path: &Path) -> bool {
+    if is_dir(path) {
+        return false;
+    }
+    if crate::securesource::is_secured(path) {
+        return !crate::securesource::is_unlocked(path);
+    }
+    !crate::pkz::is_plain_zip(path) && crate::pkz::entry_names(path).is_err()
 }
 
 /// Pull one named entry's bytes out of a track.
@@ -264,11 +303,15 @@ fn ini_text(path: &Path, names: &[String]) -> Option<String> {
 // The two things the app asks for
 // ---------------------------------------------------------------------------
 
-/// A track's metadata and contents, without inflating anything.
-pub fn read_info(app: &tauri::AppHandle, path: &str) -> Result<TrackInfo> {
+/// A track's metadata and contents, without inflating anything. `prefix` names one track's
+/// folder inside a shared archive — see [`entry_names_under`].
+pub fn read_info(app: &tauri::AppHandle, path: &str, prefix: Option<&str>) -> Result<TrackInfo> {
     let p = Path::new(path);
-    let meta = crate::pkz::read_meta_cached(app, path)?;
-    let names = entry_names(p).unwrap_or_default();
+    let meta = match norm_prefix(prefix) {
+        Some(pre) => crate::pkz::read_meta_and_preview_under(p, &pre)?.0,
+        None => crate::pkz::read_meta_cached(app, path)?,
+    };
+    let names = entry_names_under(p, prefix).unwrap_or_default();
     let has_terrain = !heightfield_entries(&names).is_empty();
 
     let mut files: Vec<TrackFile> = names
@@ -293,9 +336,9 @@ pub fn read_info(app: &tauri::AppHandle, path: &str) -> Result<TrackInfo> {
 
 /// Decode a track's terrain to the master grid, going to disk and to the archive only when
 /// nothing nearer has it.
-pub fn load_master(app: &tauri::AppHandle, path: &str) -> Result<Master> {
+pub fn load_master(app: &tauri::AppHandle, path: &str, prefix: Option<&str>) -> Result<Master> {
     let stamp = stamp(path)?;
-    let key = cache_key(path, stamp);
+    let key = cache_key(path, prefix, stamp);
 
     if let Some(hit) = memory_cache()
         .lock()
@@ -309,7 +352,7 @@ pub fn load_master(app: &tauri::AppHandle, path: &str) -> Result<Master> {
         return Ok(hit);
     }
 
-    let master = decode_master(Path::new(path))?;
+    let master = decode_master_under(Path::new(path), prefix)?;
     if let Some(f) = cache_file(app, &key) {
         write_cache(&f, &master);
         prune_cache(app);
@@ -320,7 +363,12 @@ pub fn load_master(app: &tauri::AppHandle, path: &str) -> Result<Master> {
 
 /// The expensive path: inflate a heightfield, work out its layout, reduce it.
 pub fn decode_master(path: &Path) -> Result<Master> {
-    let names = entry_names(path)?;
+    decode_master_under(path, None)
+}
+
+/// [`decode_master`] for one track's folder inside a shared archive.
+pub fn decode_master_under(path: &Path, prefix: Option<&str>) -> Result<Master> {
+    let names = entry_names_under(path, prefix)?;
     let candidates = heightfield_entries(&names);
     if candidates.is_empty() {
         bail!("no heightfield in {path:?}");
@@ -563,7 +611,12 @@ pub fn coverage_masks(block: &[u8]) -> Vec<Coverage> {
 ///
 /// Each cell takes the colour of whichever surface covers it most; cells nothing covers are
 /// left as bare dirt, which is exactly what the riding line is.
-pub fn overview_blob(app: &tauri::AppHandle, path: &Path, max_dim: u32) -> Option<Vec<u8>> {
+pub fn overview_blob(
+    app: &tauri::AppHandle,
+    path: &Path,
+    prefix: Option<&str>,
+    max_dim: u32,
+) -> Option<Vec<u8>> {
     // Cached beside the master, and for the same reason: building it is milliseconds, but
     // pulling the height file out of a several-hundred-megabyte archive to get at the masks
     // is most of a second, and that read has already happened once for the terrain.
@@ -573,7 +626,7 @@ pub fn overview_blob(app: &tauri::AppHandle, path: &Path, max_dim: u32) -> Optio
     let key = stamp(&path.to_string_lossy()).ok().map(|st| {
         format!(
             "{}:tex{max_dim}v{SURFACE_SCHEME}",
-            cache_key(&path.to_string_lossy(), st)
+            cache_key(&path.to_string_lossy(), prefix, st)
         )
     });
     if let Some(f) = key.as_deref().and_then(|k| cache_file(app, k)) {
@@ -584,7 +637,7 @@ pub fn overview_blob(app: &tauri::AppHandle, path: &Path, max_dim: u32) -> Optio
         }
     }
 
-    let built = build_surface_blob(path, max_dim)?;
+    let built = build_surface_blob(path, prefix, max_dim)?;
     if let Some(f) = key.as_deref().and_then(|k| cache_file(app, k)) {
         if let Some(parent) = f.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -594,8 +647,8 @@ pub fn overview_blob(app: &tauri::AppHandle, path: &Path, max_dim: u32) -> Optio
     Some(built)
 }
 
-fn build_surface_blob(path: &Path, max_dim: u32) -> Option<Vec<u8>> {
-    let names = entry_names(path).ok()?;
+fn build_surface_blob(path: &Path, prefix: Option<&str>, max_dim: u32) -> Option<Vec<u8>> {
+    let names = entry_names_under(path, prefix).ok()?;
     let entry = heightfield_entries(&names).into_iter().next()?;
     let bytes = read_entry(path, &entry).ok()?;
 
@@ -865,11 +918,16 @@ fn stamp(path: &str) -> Result<Stamp> {
     })
 }
 
-fn cache_key(path: &str, stamp: Stamp) -> String {
-    let name = Path::new(path)
+/// A prefix joins the file name, so each stock track in `tracks.pkz` caches apart. With no
+/// prefix the key is what it always was, so existing entries stay valid.
+fn cache_key(path: &str, prefix: Option<&str>, stamp: Stamp) -> String {
+    let mut name = Path::new(path)
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
+    if let Some(p) = norm_prefix(prefix) {
+        name = format!("{name}@{p}");
+    }
     format!("{name}:{}:{}", stamp.size, stamp.mtime_ns)
 }
 
@@ -1097,7 +1155,7 @@ mod tests {
             }
         }
 
-        match build_surface_blob(path, 1024) {
+        match build_surface_blob(path, None, 1024) {
             Some(b) => {
                 let w = u32::from_le_bytes(b[8..12].try_into().unwrap());
                 let h = u32::from_le_bytes(b[12..16].try_into().unwrap());
@@ -1108,7 +1166,7 @@ mod tests {
         }
         // `FROST_PNG=/tmp/surface.png` writes the picture out, which is the only way to see
         // whether a track really is one flat colour or is being read as one.
-        if let (Ok(out), Some(b)) = (std::env::var("FROST_PNG"), build_surface_blob(path, 1024)) {
+        if let (Ok(out), Some(b)) = (std::env::var("FROST_PNG"), build_surface_blob(path, None, 1024)) {
             let w = u32::from_le_bytes(b[8..12].try_into().unwrap()) as usize;
             let h = u32::from_le_bytes(b[12..16].try_into().unwrap()) as usize;
             let px = &b[TEXTURE_HEADER..];
@@ -1517,6 +1575,109 @@ mod tests {
             read_cache(&file).is_none(),
             "a short grid must be re-decoded, not read past",
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A `.trh` the probe reads directly, `dim` samples square, so a test can tell which
+    /// file a master came out of by its size.
+    fn synthetic_trh(dim: u32) -> Vec<u8> {
+        let mut b = b"TRH\0".to_vec();
+        b.extend_from_slice(&dim.to_le_bytes());
+        b.extend_from_slice(&dim.to_le_bytes());
+        for y in 0..dim {
+            for x in 0..dim {
+                let (fx, fy) = (x as f32 / dim as f32, y as f32 / dim as f32);
+                let v = (fx * 6.0).sin() * 0.4 + (fy * 4.5).cos() * 0.3;
+                b.extend_from_slice(&((v * 20000.0) as i16).to_le_bytes());
+            }
+        }
+        b.extend_from_slice(&[0u8; 64]);
+        b
+    }
+
+    /// A stored (uncompressed) zip at `path` holding `entries`.
+    fn write_zip(path: &Path, entries: &[(&str, Vec<u8>)]) {
+        use std::io::Write;
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        let opts: zip::write::FileOptions<()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        for (name, bytes) in entries {
+            zip.start_file(*name, opts).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("track-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The fault the prefix exists for: every stock track shares one `tracks.pkz`, and the
+    /// whole archive hands its first `.trh` to whichever track asked.
+    #[test]
+    fn a_prefix_reads_its_own_track_out_of_a_shared_archive() {
+        let dir = scratch("shared-archive");
+        let path = dir.join("tracks.pkz");
+        write_zip(
+            &path,
+            &[
+                ("tracks/motocross/club/club.ini", b"[info]\nname = Club\n".to_vec()),
+                ("tracks/motocross/club/club.trh", synthetic_trh(48)),
+                ("tracks/motocross/forest/forest.ini", b"[info]\nname = Forest\n".to_vec()),
+                ("tracks/motocross/forest/forest.trh", synthetic_trh(64)),
+                ("tracks/motocross/forest_mx/forest_mx.trh", synthetic_trh(80)),
+            ],
+        );
+
+        let whole = decode_master(&path).expect("the archive reads");
+        assert_eq!(whole.info.entry, "tracks/motocross/club/club.trh", "no prefix: first one");
+
+        let forest = decode_master_under(&path, Some("tracks/motocross/forest")).unwrap();
+        assert_eq!(forest.info.entry, "tracks/motocross/forest/forest.trh");
+        assert_eq!(forest.info.source_width, 64);
+
+        // Cased and slashed however the caller has it, and never a sibling that merely
+        // starts with the same letters.
+        let names = entry_names_under(&path, Some("Tracks\\Motocross\\Forest/")).unwrap();
+        assert_eq!(
+            names,
+            vec!["tracks/motocross/forest/forest.ini", "tracks/motocross/forest/forest.trh"],
+        );
+        assert!(decode_master_under(&path, Some("tracks/motocross/holjes")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn each_track_in_a_shared_archive_caches_apart() {
+        let st = Stamp { size: 1, mtime_ns: 2 };
+        let path = "C:/Games/MX Bikes/tracks.pkz";
+        assert_eq!(cache_key(path, None, st), "tracks.pkz:1:2", "an unprefixed key is unchanged");
+        let forest = cache_key(path, Some("tracks/motocross/forest"), st);
+        let club = cache_key(path, Some("tracks/motocross/club"), st);
+        assert_ne!(forest, club);
+        assert_ne!(forest, cache_key(path, None, st));
+        assert_eq!(forest, cache_key(path, Some("Tracks\\Motocross\\Forest/"), st));
+        assert_eq!(cache_key(path, Some(""), st), cache_key(path, None, st));
+    }
+
+    #[test]
+    fn a_track_this_build_cannot_open_reads_as_locked() {
+        let dir = scratch("locked");
+        let plain = dir.join("plain.pkz");
+        write_zip(&plain, &[("T/T.trh", synthetic_trh(48))]);
+        assert!(!is_locked(&plain));
+        assert!(!is_locked(&dir), "an unpacked track is always readable");
+
+        let opaque = dir.join("opaque.pkz");
+        std::fs::write(&opaque, b"not a zip, and no reader for it").unwrap();
+        assert!(is_locked(&opaque));
+
+        let secured = dir.join("track.mxbsecure");
+        std::fs::write(&secured, b"blob").unwrap();
+        assert!(is_locked(&secured), "no key for this account");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
