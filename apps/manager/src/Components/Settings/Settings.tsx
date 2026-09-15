@@ -542,14 +542,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
         cls: "bg-primary/15 text-primary",
         reason: t("settings.secReasonReady"),
       };
-    // Checked before "not in your library": both are `registered && !owned`, but this one can
-    // say what actually happened — you had it, the creator took it back, the key is gone.
-    if (it.revoked)
-      return {
-        label: t("settings.secStatusRevoked"),
-        cls: "bg-warning/15 text-warning",
-        reason: t("settings.secReasonRevoked"),
-      };
     if (it.registered && !it.owned)
       return {
         label: t("settings.secStatusNotOwned"),
@@ -884,21 +876,13 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     try {
       const r = await mxbsecureRepairKeys();
       const fixed = r.restored + r.reprovisioned;
-      // Said first and on its own, before any count of what was fixed: a player pressing
-      // Restore is looking for content that stopped appearing, and "its creator removed your
-      // access" is the answer — not something to bury under a success line.
-      if (r.revoked > 0) {
-        toast.info(t("settings.secRepairRevoked", { count: r.revoked }));
-      }
       if (fixed > 0) {
         toast.success(t("settings.secRepairOk", { count: fixed }));
       } else if (r.unresolved > 0) {
         toast.error(t("settings.secRepairFail"), {
           description: t("settings.secRepairFailDesc", { count: r.unresolved }),
         });
-      } else if (r.revoked === 0) {
-        // Only when the pass found nothing at all to say. "Every key is in place" beside a
-        // key we just deleted would be a flat contradiction.
+      } else {
         toast.info(t("settings.secRepairNone", { count: r.checked }));
       }
       mxbsecureStatus().then(setSecureItems).catch(() => {});
