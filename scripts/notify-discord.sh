@@ -157,7 +157,7 @@ avatar="https://raw.githubusercontent.com/$REPO/main/docs/brand/mxbsecure-m-512.
 
 # Amber down the side of a beta instead of the usual blue, and a footer that says so — the
 # two announcements sit in different channels, but plenty of people watch both.
-color=29155   # 0x0071E3, the mxbsecure blue
+color=723724   # 0x0B0B0C, the mxbsecure black
 footer="$APP_NAME • GitHub Releases"
 if [ "$IS_BETA" -eq 1 ]; then
   color=15246141   # 0xE8A33D
