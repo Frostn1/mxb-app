@@ -9,8 +9,8 @@ use serde::Serialize;
 
 use crate::analysis::{sections, Kind, Section, Trace};
 
-/// Points along the lap paths sent to the map: one every 2 m.
-const STEP: usize = 2;
+/// Points along the lap paths sent to the map: every metre, the grid's own spacing.
+const STEP: usize = 1;
 /// Laps' lines this far apart in a corner are two different lines.
 const SPLIT_M: f32 = 1.0;
 /// One line has to be at least this much quicker to be worth saying.
@@ -26,8 +26,10 @@ const MIN_LAPS_CUT: usize = 5;
 pub struct LapLine {
     pub lap: i32,
     pub time: f32,
-    /// World x/z every 2 m.
+    /// World x/z every metre.
     pub path: Vec<[f32; 2]>,
+    /// The bike's height at each point, for drawing the line in 3D.
+    pub heights: Vec<f32>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -120,7 +122,12 @@ pub fn lines(laps: &[(i32, Trace)], reference: &Trace) -> Lines {
     Lines {
         laps: laps
             .iter()
-            .map(|(n, t)| LapLine { lap: *n, time: t.time(), path: t.pts.iter().step_by(STEP).map(|q| [q.x, q.z]).collect() })
+            .map(|(n, t)| LapLine {
+                lap: *n,
+                time: t.time(),
+                path: t.pts.iter().step_by(STEP).map(|q| [q.x, q.z]).collect(),
+                heights: t.pts.iter().step_by(STEP).map(|q| q.y).collect(),
+            })
             .collect(),
         sections: secs,
         offsets,

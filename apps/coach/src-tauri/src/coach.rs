@@ -383,30 +383,41 @@ pub struct Ground {
     pub lift: f32,
 }
 
-/// None when the track isn't installed, is locked, or its terrain doesn't line up with the
-/// laps; the app then draws the ground built from the laps instead. Off the main thread: the
-/// first read of a big track is most of a second.
+/// The track's own terrain, or why the ground built from the laps is drawn instead.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroundAnswer {
+    pub ground: Option<Ground>,
+    pub why: Option<String>,
+}
+
+/// Off the main thread: the first read of a big track is most of a second.
 #[tauri::command]
-pub async fn coach_ground(app: AppHandle, path: String) -> Result<Option<Ground>, String> {
+pub async fn coach_ground(app: AppHandle, path: String) -> Result<GroundAnswer, String> {
     tauri::async_runtime::spawn_blocking(move || ground_for(&app, &path)).await.map_err(err)?
 }
 
-fn ground_for(app: &AppHandle, path: &str) -> Result<Option<Ground>, String> {
+fn ground_for(app: &AppHandle, path: &str) -> Result<GroundAnswer, String> {
+    let no = |why: &str| Ok(GroundAnswer { ground: None, why: Some(why.into()) });
     let rec = load(path)?;
     let Some(src) = mxb_core::tracksource::resolve(&load_config(app), &rec.event.track_id) else {
-        return Ok(None);
+        return no("the track isn't in your mods");
     };
+    // A GUID-locked track opens here the way it does in MXB App, through the private reader
+    // in a release build; only one that still can't be read counts as locked.
     if src.locked {
-        return Ok(None);
+        return no("the track is locked");
     }
     let Ok(master) = mxb_core::track::load_master(app, &src.path, src.prefix.as_deref()) else {
-        return Ok(None);
+        return no("its terrain couldn't be read");
     };
     let points: Vec<[f32; 3]> =
         rec.samples.iter().filter(|s| !s.airborne() && !s.crashed).step_by(5).map(|s| [s.x, s.y, s.z]).collect();
     let i = &master.info;
-    let lift = crate::ground::fit(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points);
-    Ok(lift.map(|lift| Ground { path: src.path, prefix: src.prefix, name: src.name, lift }))
+    match crate::ground::fit(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points) {
+        Some(lift) => Ok(GroundAnswer { ground: Some(Ground { path: src.path, prefix: src.prefix, name: src.name, lift }), why: None }),
+        None => no("its terrain doesn't line up with your laps"),
+    }
 }
 
 /// The ground under a session's laps, built from the laps; see `surface.rs`.

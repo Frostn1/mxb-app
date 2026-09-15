@@ -92,6 +92,14 @@ fn main() {
             // The track's own terrain, from core, for the map and the 3D view.
             mxb_core::trackview::load_track_terrain,
             mxb_core::trackview::load_track_overview,
+            // The rest of what the app's track viewer draws: scenery, its colours, sky, ground.
+            mxb_core::trackview::read_track_info,
+            mxb_core::trackview::load_track_scenery,
+            mxb_core::trackview::load_track_surfaces,
+            mxb_core::trackview::load_track_backdrop,
+            mxb_core::trackview::load_track_ground,
+            mxb_core::trackview::load_track_ground_layers,
+            mxb_core::trackview::read_track_placements,
             coach::coach_install_plugin,
             coach::coach_uninstall_plugin,
         ])

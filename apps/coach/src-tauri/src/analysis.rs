@@ -589,10 +589,22 @@ pub struct Channels {
     pub shock: Channel,
 }
 
+/// Both laps' world x/z every `step` metres, with the bike's height at each point.
 #[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Paths {
+    pub step: usize,
     pub lap: Vec<[f32; 2]>,
     pub reference: Vec<[f32; 2]>,
+    pub lap_y: Vec<f32>,
+    pub reference_y: Vec<f32>,
+}
+
+/// Every grid point: the grid is already a metre apart, and the lines are what the rider looks at.
+fn paths(p: &Trace, r: &Trace) -> Paths {
+    let xz = |t: &Trace| t.pts.iter().map(|q| [q.x, q.z]).collect();
+    let y = |t: &Trace| t.pts.iter().map(|q| q.y).collect();
+    Paths { step: 1, lap: xz(p), reference: xz(r), lap_y: y(p), reference_y: y(r) }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -767,10 +779,7 @@ pub fn review(lap: &Trace, reference: &Trace, bike: Bike) -> Review {
         setup,
         solo: false,
         channels: channels(p, r, 2),
-        paths: Paths {
-            lap: p.pts.iter().step_by(2).map(|q| [q.x, q.z]).collect(),
-            reference: r.pts.iter().step_by(2).map(|q| [q.x, q.z]).collect(),
-        },
+        paths: paths(p, r),
     }
 }
 
@@ -1324,7 +1333,6 @@ pub fn solo(lap: &Trace, bike: Bike) -> Review {
     let mut order: Vec<usize> = (0..out.len()).filter(|&i| !out[i].findings.is_empty()).collect();
     order.sort_by(|&a, &b| out[b].findings[0].weight.total_cmp(&out[a].findings[0].weight));
     order.truncate(th::FOCUS);
-    let path: Vec<[f32; 2]> = p.pts.iter().step_by(2).map(|q| [q.x, q.z]).collect();
     Review {
         lap_time: p.time(),
         ref_time: p.time(),
@@ -1334,7 +1342,7 @@ pub fn solo(lap: &Trace, bike: Bike) -> Review {
         setup,
         solo: true,
         channels: channels(p, p, 2),
-        paths: Paths { lap: path.clone(), reference: path },
+        paths: paths(p, p),
     }
 }
 

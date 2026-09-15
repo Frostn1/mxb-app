@@ -4,24 +4,28 @@ import type { TrackOverview, TrackTerrain } from "@frost/shared/types";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frost/shared/Components/ui/select";
 import { cn } from "@frost/shared/lib/utils";
 import { useT, type TKey } from "@/i18n";
 import {
   coachGround,
   coachLines,
   coachReview,
+  coachSessions,
   coachSurface,
   type Finding,
+  type Ground,
   type Lines,
   type ReviewOut,
   type SectionReview,
+  type SessionSummary,
   type Surface,
   type Theme,
 } from "@/api/coach";
 import { gap, lapTime, lossColor, started } from "@/lib/format";
 import Page, { Label } from "../Page";
 import TrackMap from "./TrackMap";
-import Track3D, { surfaceTerrain, type Ground3D } from "./Track3D";
+import Track3D from "./Track3D";
 import SectionStrip from "./SectionStrip";
 import Charts from "./Charts";
 
@@ -39,16 +43,23 @@ export default function Review({
   onBack: () => void;
 }) {
   const t = useT();
-  const [alone, setAlone] = useState(startAlone);
+  // What the lap is held against: the fastest on the track, nothing, or a lap picked by hand
+  // (`<session path>::<lap>`).
+  const [compare, setCompare] = useState<string>(startAlone ? "alone" : "best");
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [data, setData] = useState<ReviewOut | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [cursor, setCursor] = useState<number | null>(null);
   const [whole, setWhole] = useState(false);
   const [surface, setSurface] = useState<Surface | null>(null);
-  const [view, setView] = useState<"map" | "laps" | "3d">("map");
+  // Two separate choices: which lines are drawn, and whether it's drawn flat or in 3D.
+  const [laps, setLaps] = useState<"one" | "all">("one");
+  const [dim, setDim] = useState<"2d" | "3d">("2d");
   const [lines, setLines] = useState<Lines | null>(null);
   const [real, setReal] = useState<{ terrain: TrackTerrain; overview: TrackOverview | null; lift: number } | null>(null);
+  const [ground, setGround] = useState<Ground | null>(null);
+  const [why, setWhy] = useState<string | null>(null);
 
   // The ground and the other laps are extras: the review stands without them. The track's
   // own terrain wins over the ground built from the laps, when it's there and lines up.
@@ -56,10 +67,15 @@ export default function Review({
     setSurface(null);
     setLines(null);
     setReal(null);
+    setGround(null);
+    setWhy(null);
     coachSurface(path).then(setSurface).catch(() => {});
     coachLines(path).then(setLines).catch(() => {});
     coachGround(path)
-      .then(async (g) => {
+      .then(async (answer) => {
+        setGround(answer.ground);
+        setWhy(answer.why);
+        const g = answer.ground;
         if (!g) return;
         const [terrain, overview] = await Promise.all([
           loadTrackTerrain(g.path, 1024, g.prefix),
@@ -77,26 +93,24 @@ export default function Review({
         : surface,
     [real, surface],
   );
-  const ground3d = useMemo<Ground3D | null>(
-    () =>
-      real
-        ? { terrain: real.terrain, overview: real.overview, origin: [0, 0], lift: real.lift }
-        : surface
-          ? { terrain: surfaceTerrain(surface), overview: null, origin: [surface.x0, surface.z0], lift: 0 }
-          : null,
-    [real, surface],
-  );
 
   useEffect(() => {
     setData(null);
     setError(null);
-    coachReview(path, lap, undefined, undefined, alone)
+    const cut = compare.lastIndexOf("::");
+    const [refPath, refLap] = cut > 0 ? [compare.slice(0, cut), Number(compare.slice(cut + 2))] : [undefined, undefined];
+    coachReview(path, lap, refPath, refLap, compare === "alone")
       .then((r) => {
         setData(r);
         setSelected(r.review.focus[0] ?? null);
       })
       .catch((e) => setError(String(e)));
-  }, [path, lap, alone]);
+  }, [path, lap, compare]);
+
+  // Every session, for the laps on this track the rider can pick to compare with.
+  useEffect(() => {
+    coachSessions().then(setSessions).catch(() => {});
+  }, []);
 
   const count = data?.review.sections.length ?? 0;
   const pick = (i: number) => {
@@ -132,21 +146,43 @@ export default function Review({
     ...review.focus,
     ...review.sections.map((s, i) => (s.findings.length > 0 && !review.focus.includes(i) ? i : -1)).filter((i) => i >= 0),
   ];
-  const against = [lapTime(reference.timeMs), reference.bikeName, started(reference.started)].filter(Boolean).join(" · ");
+  const against = [
+    `${t("session.lap")} ${reference.lap + 1}`,
+    lapTime(reference.timeMs),
+    reference.path === path ? "" : started(reference.started),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const where = [data.trackName || data.trackId, started(data.lap.started), data.lap.bikeName].filter(Boolean).join(" · ");
+  // The fastest lap and nothing, then every other whole lap on this track, this session first.
+  const choices = [
+    { value: "best", label: t("review.fastest") },
+    { value: "alone", label: t("review.alone") },
+    ...[...sessions]
+      .filter((s) => s.trackId === data.trackId)
+      .sort((a, b) => (a.path === path ? -1 : b.path === path ? 1 : 0))
+      .flatMap((s) =>
+        s.laps
+          .filter((l) => l.whole && !l.invalid && !(s.path === path && l.num === lap))
+          .map((l) => ({
+            value: `${s.path}::${l.num}`,
+            label: [`${t("session.lap")} ${l.num + 1}`, lapTime(l.timeMs), s.path === path ? "" : started(s.started)]
+              .filter(Boolean)
+              .join(" · "),
+          })),
+      ),
+  ];
   // Every lap's line, fastest green to slowest red; this lap in blue on top.
   const others = (() => {
-    if (view !== "laps" || !lines) return undefined;
+    if (laps !== "all" || !lines) return undefined;
     const times = lines.laps.map((l) => l.time);
     const [lo, hi] = [Math.min(...times), Math.max(...times)];
     return lines.laps
       .filter((l) => l.lap !== lap)
       .map((l) => ({ path: l.path, colour: `hsl(${Math.round(120 * (1 - (l.time - lo) / Math.max(hi - lo, 0.01)))} 65% 55%)` }));
   })();
-  const views = [
-    { value: "map" as const, label: t("review.viewMap") },
-    ...(lines && lines.laps.length > 1 ? [{ value: "laps" as const, label: t("review.viewLaps") }] : []),
-    ...(ground3d ? [{ value: "3d" as const, label: t("review.view3d") }] : []),
-  ];
+  const canAll = lines != null && lines.laps.length > 1;
+  const can3d = ground != null || surface != null;
   const bySection = (name: string) => {
     const i = review.sections.findIndex((s) => s.name === name);
     if (i >= 0) pick(i);
@@ -157,29 +193,38 @@ export default function Review({
       wide
       title={`${t("session.lap")} ${lap + 1} · ${lapTime(data.lap.timeMs)}`}
       sub={
-        solo ? (
-          t("review.aloneSub")
-        ) : (
-          <>
-            <span style={{ color: lossColor(total) }} className="font-mono">
-              {gap(total)} s
-            </span>{" "}
-            {t("review.against")} {against}
-          </>
-        )
+        <>
+          <div className="text-foreground/80">{where}</div>
+          <div className="mt-0.5">
+            {solo ? (
+              t("review.aloneSub")
+            ) : (
+              <>
+                <span style={{ color: lossColor(total) }} className="font-mono">
+                  {gap(total)} s
+                </span>{" "}
+                {t("review.against")} {against}
+              </>
+            )}
+          </div>
+        </>
       }
       actions={
-        (!solo || alone) && (
-          <Segmented
-            size="sm"
-            value={alone ? "alone" : "compare"}
-            onChange={(v) => setAlone(v === "alone")}
-            options={[
-              { value: "compare", label: t("review.compare") },
-              { value: "alone", label: t("review.alone") },
-            ]}
-          />
-        )
+        <div className="flex items-center gap-2">
+          <span className="text-[11.5px] text-muted-foreground">{t("review.compareWith")}</span>
+          <Select value={compare} onValueChange={setCompare}>
+            <SelectTrigger className="h-8 w-[260px] text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {choices.map((c) => (
+                <SelectItem key={c.value} value={c.value}>
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       }
       onBack={onBack}
       backLabel={back}
@@ -187,17 +232,48 @@ export default function Review({
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
         <div className="min-w-0 space-y-3">
           <div className="relative h-[440px] border border-border bg-card">
-            {views.length > 1 && (
-              <Segmented size="sm" className="absolute right-3 top-3 z-10" value={view} onChange={setView} options={views} />
-            )}
-            {view === "3d" && ground3d ? (
-              <Track3D review={review} ground={ground3d} selected={selected} className="h-full w-full" />
+            <div className="absolute right-3 top-3 z-10 flex gap-2">
+              {canAll && (
+                <Segmented
+                  size="sm"
+                  value={laps}
+                  onChange={setLaps}
+                  options={[
+                    { value: "one", label: t("review.thisLap") },
+                    { value: "all", label: t("review.viewLaps") },
+                  ]}
+                />
+              )}
+              {can3d && (
+                <Segmented
+                  size="sm"
+                  value={dim}
+                  onChange={setDim}
+                  options={[
+                    { value: "2d", label: t("review.view2d") },
+                    { value: "3d", label: t("review.view3d") },
+                  ]}
+                />
+              )}
+            </div>
+            {dim === "3d" && can3d ? (
+              <Track3D
+                review={review}
+                ground={ground}
+                why={why}
+                surface={surface}
+                lines={lines}
+                allLaps={laps === "all"}
+                lap={lap}
+                selected={selected}
+                className="h-full w-full"
+              />
             ) : (
               <div className="h-full p-3">
                 <TrackMap review={review} surface={relief} others={others} selected={selected} cursor={cursor} onPick={pick} solo={solo} />
               </div>
             )}
-            {view === "laps" && (
+            {laps === "all" && dim === "2d" && (
               <p className="pointer-events-none absolute bottom-2 left-3 text-[11px] text-muted-foreground">{t("review.lapsLegend")}</p>
             )}
           </div>

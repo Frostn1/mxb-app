@@ -3,8 +3,6 @@ import type { Review } from "@/api/coach";
 import { gap, lossColor } from "@/lib/format";
 import { reliefImage, type Relief } from "@/lib/relief";
 
-/** Points along the drawn paths: `paths` holds one every 2 m. */
-const PATH_STEP = 2;
 
 export function shortName(name: string): string {
   const m = /^(Turn|Jump|Rhythm|Whoops) (\d+)$/.exec(name);
@@ -37,6 +35,7 @@ export default function TrackMap({
   onPick: (i: number) => void;
 }) {
   const { lap, reference } = review.paths;
+  const PATH_STEP = review.paths.step || 1;
   const [hover, setHover] = useState<number | null>(null);
 
   const view = useMemo(() => {

@@ -122,8 +122,8 @@ export interface Review {
   /** Reviewed on its own, with no faster lap to compare with. */
   solo: boolean;
   channels: Channels;
-  /** World x/z every 2 m. */
-  paths: { lap: [number, number][]; reference: [number, number][] };
+  /** Both laps' world x/z every `step` metres, with the bike's height at each point. */
+  paths: { step: number; lap: [number, number][]; reference: [number, number][]; lapY: number[]; referenceY: number[] };
 }
 
 /** One kind of mistake across the lap, with the time it cost. */
@@ -165,7 +165,8 @@ export interface LineNote {
 
 /** How the session's lines and the track changed; see `lines.rs`. */
 export interface Lines {
-  laps: { lap: number; time: number; path: [number, number][] }[];
+  /** Every whole lap's line, every metre, with the bike's height. */
+  laps: { lap: number; time: number; path: [number, number][]; heights: number[] }[];
   sections: Pick<SectionReview, "kind" | "name" | "start" | "end" | "core" | "dir">[];
   /** Per section, one row per lap: metres right of the fast line, and the section time. */
   offsets: { lap: number; offset: number; time: number }[][];
@@ -184,7 +185,12 @@ export interface Ground {
 export const coachStatus = () => invoke<CoachStatus>("coach_status");
 /** Opens a folder in the file manager, making it first if the recorder hasn't yet. */
 export const openFolder = (path: string) => invoke<void>("open_folder", { path });
-export const coachGround = (path: string) => invoke<Ground | null>("coach_ground", { path });
+/** The track's own terrain, or why the ground built from the laps is drawn instead. */
+export interface GroundAnswer {
+  ground: Ground | null;
+  why: string | null;
+}
+export const coachGround = (path: string) => invoke<GroundAnswer>("coach_ground", { path });
 export const coachLines = (path: string) => invoke<Lines | null>("coach_lines", { path });
 export const coachSurface = (path: string) => invoke<Surface | null>("coach_surface", { path });
 export const coachSessions = () => invoke<SessionSummary[]>("coach_sessions");
