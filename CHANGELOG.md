@@ -11,6 +11,15 @@
 - MXB Hub no longer sits on a grid of empty tiles when shop.mxb-hub.com stops answering
   altogether. It used to wait half an hour before giving up, with no message and no Retry.
 
+## 2026-09-15 — MXB Coach v0.1.10-beta.10
+
+### Added
+- Other riders: the lap review now shows the rider just faster than you, the fastest in the
+  session and, in a race, the rider ahead of you on track, with the sections where each one gains
+  on you. Needs the recorder from FrostMod 0.21 or newer: update it in Settings.
+- Where the track will wear: the lines view says where the other riders crowd through each
+  corner, since that's where it ruts first, and whether the fast line stays smoother.
+
 ## 2026-09-15 — Feel presets carry your controls
 
 ### Changed

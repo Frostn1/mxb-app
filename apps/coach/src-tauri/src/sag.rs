@@ -168,7 +168,7 @@ mod tests {
             samples,
             laps: Vec::new(),
             complete: true,
-            stance_confidence: 0,
+            ..Recording::default()
         }
     }
 

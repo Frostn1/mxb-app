@@ -26,6 +26,12 @@ const ALT_S: f32 = 0.25;
 /// Corners this close, metres from one's end to the next one's start, set each other up: the
 /// line out of the first is the line into the second, so they're judged together.
 const LINK_M: usize = 30;
+/// Other riders' positions through a corner needed to say where it'll wear.
+const BUSY_PASSES: usize = 30;
+/// The crowd this far from the fast line rides a line of its own.
+const BUSY_M: f32 = 1.0;
+/// A position this far from the fast line isn't on it at all: off track, or another part of it.
+const BESIDE_M: f32 = 8.0;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,7 +105,8 @@ fn mean(rows: &[Row], f: impl Fn(&Row) -> f32) -> f32 {
 }
 
 /// `laps` in the order they were ridden; `reference` decides the sections and the fast line.
-pub fn lines(laps: &[(i32, Trace)], reference: &Trace) -> Lines {
+/// `others` is every other rider's world x/z the recorder saw, for where the track will wear.
+pub fn lines(laps: &[(i32, Trace)], reference: &Trace, others: &[[f32; 2]]) -> Lines {
     let secs = sections(reference);
     let mut offsets = Vec::with_capacity(secs.len());
     let mut notes = Vec::new();
@@ -150,6 +157,11 @@ pub fn lines(laps: &[(i32, Trace)], reference: &Trace) -> Lines {
                 notes.push(note);
             }
         }
+        if s.kind == Kind::Corner {
+            if let Some(note) = busy(si, s, reference, others, &rows) {
+                notes.push(note);
+            }
+        }
     }
 
     Lines {
@@ -166,6 +178,62 @@ pub fn lines(laps: &[(i32, Trace)], reference: &Trace) -> Lines {
         offsets,
         notes,
     }
+}
+
+/// Where the other riders run through a corner. The game deforms the ground where it's
+/// ridden, so the line most of them share is the one that ruts first.
+fn busy(si: usize, s: &Section, r: &Trace, others: &[[f32; 2]], rows: &[Row]) -> Option<Note> {
+    let (a, b) = (s.core.0, s.core.1.min(r.len().checked_sub(1)?));
+    if b <= a + 1 {
+        return None;
+    }
+    let near = |i: usize, p: &[f32; 2]| (p[0] - r.pts[i].x).powi(2) + (p[1] - r.pts[i].z).powi(2);
+    let (lo_x, hi_x, lo_z, hi_z) = r.pts[a..=b].iter().fold((f32::MAX, f32::MIN, f32::MAX, f32::MIN), |m, q| {
+        (m.0.min(q.x), m.1.max(q.x), m.2.min(q.z), m.3.max(q.z))
+    });
+    // Each position beside the corner's core, as metres to the right of the fast line there.
+    let mut side: Vec<f32> = others
+        .iter()
+        .filter(|p| p[0] > lo_x - BESIDE_M && p[0] < hi_x + BESIDE_M && p[1] > lo_z - BESIDE_M && p[1] < hi_z + BESIDE_M)
+        .filter_map(|p| {
+            let i = (a..=b).min_by(|&i, &j| near(i, p).total_cmp(&near(j, p)))?;
+            // Past either end of the core it's before or after the corner, not beside it.
+            if i == a || i == b || near(i, p) > BESIDE_M * BESIDE_M {
+                return None;
+            }
+            let h = r.bearing(i);
+            Some((p[0] - r.pts[i].x) * h.cos() - (p[1] - r.pts[i].z) * h.sin())
+        })
+        .collect();
+    if side.len() < BUSY_PASSES {
+        return None;
+    }
+    side.sort_by(f32::total_cmp);
+    let crowd = side[side.len() / 2];
+    let name = &s.name;
+    let way = |x: f32| if x * s.dir as f32 > 0.0 { "tighter" } else { "wider" };
+    let (title, detail) = if crowd.abs() <= BUSY_M {
+        (
+            format!("Everyone rides the fast line in {name}"),
+            format!(
+                "Most of the other riders run within a metre of the fast line through {name}, so that's where it will \
+                 rut first. When it does, a line a metre or two wider stays smoother."
+            ),
+        )
+    } else {
+        let yours = !rows.is_empty() && (mean(rows, |x| x.offset) - crowd).abs() <= BUSY_M;
+        (
+            format!("The others ride {} in {name}", way(crowd)),
+            format!(
+                "Most of the other riders run about {:.1} m {} than the fast line through {name}, so that's where it will \
+                 rut first, and the fast line stays smoother.{}",
+                crowd.abs(),
+                way(crowd),
+                if yours { " You ride there too: move to the fast line." } else { "" }
+            ),
+        )
+    };
+    Some(Note { section: si, name: name.clone(), kind: "wear", title, detail })
 }
 
 /// The laps split into two lines through a corner, and one of them is clearly quicker.
@@ -349,7 +417,7 @@ mod tests {
     #[test]
     fn the_same_lap_over_and_over_says_nothing() {
         let laps: Vec<(i32, Trace)> = (0..6).map(|n| (n, lap(&FAST))).collect();
-        let out = lines(&laps, &lap(&FAST));
+        let out = lines(&laps, &lap(&FAST), &[]);
         assert!(out.notes.is_empty(), "{:?}", titles(&out));
         assert_eq!(out.laps.len(), 6);
         assert!(out.offsets.iter().flatten().all(|r| r.offset.abs() < 0.05));
@@ -359,7 +427,7 @@ mod tests {
     fn a_line_that_pays_is_named() {
         let wide = Style { wide: 2.5, corner_v: 11.0, ..FAST };
         let laps = vec![(0, lap(&FAST)), (1, lap(&FAST)), (2, lap(&wide)), (3, lap(&wide))];
-        let out = lines(&laps, &lap(&FAST));
+        let out = lines(&laps, &lap(&FAST), &[]);
         let t1 = out.notes.iter().find(|n| n.kind == "line" && n.name == "Turn 1").unwrap_or_else(|| panic!("{:?}", titles(&out)));
         assert!(t1.title.contains("wider"), "{}", t1.title);
         assert!(t1.detail.contains("laps 3, 4"), "{}", t1.detail);
@@ -374,13 +442,13 @@ mod tests {
     fn a_second_line_nearly_as_quick_is_kept_for_passing() {
         let wide = Style { wide: 2.5, corner_v: 10.2, ..FAST };
         let laps = vec![(0, lap(&FAST)), (1, lap(&FAST)), (2, lap(&wide)), (3, lap(&wide))];
-        let out = lines(&laps, &lap(&FAST));
+        let out = lines(&laps, &lap(&FAST), &[]);
         let t1 = out.notes.iter().find(|n| n.kind == "line" && n.name == "Turn 1").unwrap_or_else(|| panic!("{:?}", titles(&out)));
         assert!(t1.detail.contains("tighter line is only") && t1.detail.contains("for passing"), "{}", t1.detail);
         // A line that's much slower isn't offered as a second one.
         let far = Style { wide: 2.5, corner_v: 11.0, ..FAST };
         let laps = vec![(0, lap(&FAST)), (1, lap(&FAST)), (2, lap(&far)), (3, lap(&far))];
-        let out = lines(&laps, &lap(&FAST));
+        let out = lines(&laps, &lap(&FAST), &[]);
         assert!(!out.notes.iter().any(|n| n.detail.contains("for passing")), "{:?}", titles(&out));
     }
 
@@ -420,9 +488,28 @@ mod tests {
             .enumerate()
             .map(|(n, &sink)| (n as i32, lap(&Style { sink, ..FAST })))
             .collect();
-        let out = lines(&laps, &lap(&FAST));
+        let out = lines(&laps, &lap(&FAST), &[]);
         let cut = out.notes.iter().find(|n| n.kind == "cut").unwrap_or_else(|| panic!("{:?}", titles(&out)));
         assert_eq!(cut.name, "Turn 1");
         assert!(cut.detail.contains("about 11 cm"), "{}", cut.detail);
+    }
+
+    #[test]
+    fn where_the_other_riders_crowd_is_where_it_will_wear() {
+        let fast = lap(&FAST);
+        let secs = sections(&fast);
+        let (si, s) = secs.iter().enumerate().find(|(_, s)| s.kind == Kind::Corner && s.core.1 > s.core.0 + 4).unwrap();
+        // Forty passes 2 m to the right of the fast line through the corner's core.
+        let crowd: Vec<[f32; 2]> = (0..40)
+            .map(|k| {
+                let i = s.core.0 + 1 + k % (s.core.1 - s.core.0 - 1);
+                let h = fast.bearing(i);
+                [fast.pts[i].x + 2.0 * h.cos(), fast.pts[i].z - 2.0 * h.sin()]
+            })
+            .collect();
+        let out = lines(&[], &fast, &crowd);
+        let n = out.notes.iter().find(|n| n.kind == "wear" && n.section == si).expect("a wear note");
+        assert!(n.detail.contains("about 2.0 m"), "{}", n.detail);
+        assert!(lines(&[], &fast, &crowd[..10]).notes.iter().all(|n| n.kind != "wear"), "too few passes to say");
     }
 }
