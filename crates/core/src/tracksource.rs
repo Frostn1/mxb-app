@@ -37,25 +37,28 @@ pub fn resolve(cfg: &AppConfig, track_id: &str) -> Option<TrackSource> {
     stock_source(&cfg.install_dir(), id)
 }
 
-/// The installed track an id names. By file name first, folded, since that costs nothing;
-/// then by the folder inside each archive, which is what the game actually reports.
+/// What two spellings of one track share: its letters and digits, lowercased. A server's
+/// `Farm14` has to find the player's `Farm 14.pkz`, and a fold that keeps word breaks can't.
+pub fn key(raw: &str) -> String {
+    raw.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+/// The installed track an id names. By file name first, since that costs nothing; then by
+/// the folder inside each archive, which is what the game actually reports.
 pub fn find_installed(
     entries: Vec<library::LibraryEntry>,
     id: &str,
 ) -> Option<library::LibraryEntry> {
-    let want = trackstock::fold(id);
+    let want = key(id);
     if want.is_empty() {
         return None;
     }
-    if let Some(i) = entries
-        .iter()
-        .position(|e| trackstock::fold(&library::strip_ext(&e.name)) == want)
-    {
+    if let Some(i) = entries.iter().position(|e| key(&library::strip_ext(&e.name)) == want) {
         return entries.into_iter().nth(i);
     }
-    entries.into_iter().find(|e| {
-        track::folder_name(Path::new(&e.path)).is_some_and(|f| trackstock::fold(&f) == want)
-    })
+    entries
+        .into_iter()
+        .find(|e| track::folder_name(Path::new(&e.path)).is_some_and(|f| key(&f) == want))
 }
 
 fn installed_source(hit: library::LibraryEntry) -> TrackSource {
@@ -133,6 +136,17 @@ mod tests {
         assert_eq!(name("HANGTOWN").as_deref(), Some("Hangtown.pkz"));
         assert_eq!(name(""), None);
         assert_eq!(name("Farm14"), None);
+    }
+
+    /// Servers and downloads disagree about spaces: `Farm14` on the server, `Farm 14.pkz` on
+    /// disk.
+    #[test]
+    fn a_mod_is_found_whatever_its_spacing() {
+        let list = || vec![entry("Farm 14.pkz", Path::new("/x/Farm 14.pkz"))];
+        let name = |id: &str| find_installed(list(), id).map(|e| e.name);
+        assert_eq!(name("Farm14").as_deref(), Some("Farm 14.pkz"));
+        assert_eq!(name("farm_14").as_deref(), Some("Farm 14.pkz"));
+        assert_eq!(name("Farm 15"), None);
     }
 
     /// What the game reports is the folder inside the archive, which a download often

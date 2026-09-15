@@ -3506,7 +3506,8 @@ fn cached(map: &StampCache, key: Stamped, make: impl FnOnce() -> Option<String>)
     value
 }
 
-/// Card art for the server browser: each track id the player has, mapped to its preview.
+/// Card art for the server browser: each track id the player has, mapped to its preview, or
+/// to `""` when the track has no picture.
 ///
 /// One call for the whole list. Per card, [`guess_server_track`] would scan the library once
 /// a card and ask catalogues online. Ids the player doesn't have are left out. Everything is
@@ -3538,10 +3539,12 @@ fn track_previews(
     use std::collections::HashMap;
     let stamp = |e: &library::LibraryEntry| (e.path.clone(), e.size, e.modified);
 
-    // Folded id to the spellings asked for, since two spellings can name one track.
+    // Keyed id to the spellings asked for, since two spellings can name one track. The key
+    // is `find_installed`'s, so a tile and the detail panel agree about what is installed.
+    let key = mxb_core::tracksource::key;
     let mut want: HashMap<String, Vec<String>> = HashMap::new();
     for id in tracks {
-        let folded = fold_name(&id);
+        let folded = key(&id);
         if !folded.is_empty() {
             want.entry(folded).or_default().push(id);
         }
@@ -3550,7 +3553,7 @@ fn track_previews(
     // The order `guess_server_track` uses: file name, then the folder inside, then stock.
     let mut found: HashMap<String, ArtSource> = HashMap::new();
     for (i, e) in entries.iter().enumerate() {
-        let folded = fold_name(&library::strip_ext(&e.name));
+        let folded = key(&library::strip_ext(&e.name));
         if want.contains_key(&folded) {
             found.entry(folded).or_insert(ArtSource::Installed(i));
         }
@@ -3565,7 +3568,7 @@ fn track_previews(
             })
             .collect();
         for (i, folder) in folders.iter().enumerate() {
-            if let Some(folded) = folder.as_deref().map(fold_name) {
+            if let Some(folded) = folder.as_deref().map(key) {
                 if want.contains_key(&folded) {
                     found.entry(folded).or_insert(ArtSource::Installed(i));
                 }
@@ -3581,6 +3584,8 @@ fn track_previews(
     found
         .into_par_iter()
         .filter_map(|(folded, source)| {
+            // Empty when the player has the track but it carries no picture: still installed,
+            // so the tile mustn't offer to fetch it.
             let art = match source {
                 ArtSource::Installed(i) => {
                     let e = &entries[i];
@@ -3589,14 +3594,15 @@ fn track_previews(
                             .ok()
                             .flatten()
                     })
+                    .unwrap_or_default()
                 }
                 ArtSource::Stock(id) => {
                     cached(&CARD_ART, (format!("stock:{folded}"), 0, 0), || {
                         let hit = trackstock::find(install, &id)?;
-                        trackstock::preview(install, &hit)
-                    })
+                        Some(trackstock::preview(install, &hit).unwrap_or_default())
+                    })?
                 }
-            }?;
+            };
             Some((folded, art))
         })
         .collect::<Vec<_>>()
@@ -3632,17 +3638,91 @@ mod card_art_tests {
             locked: false,
         };
 
+        // Installed, spaced unlike the id the server sends, and with no picture.
+        let bare = root.join("Farm 14");
+        std::fs::create_dir_all(&bare).unwrap();
+        let bare_entry = library::LibraryEntry {
+            name: "Farm 14".into(),
+            path: bare.to_string_lossy().into_owned(),
+            ..entry.clone()
+        };
+
         let art = track_previews(
-            &[entry],
+            &[entry, bare_entry],
             "",
-            vec!["walnut".into(), "WALNUT".into(), "not_installed".into()],
+            vec![
+                "walnut".into(),
+                "WALNUT".into(),
+                "Farm14".into(),
+                "not_installed".into(),
+            ],
         );
         std::fs::remove_dir_all(&root).ok();
 
         assert!(art["walnut"].starts_with("data:image/jpeg;base64,"));
         assert_eq!(art["walnut"], art["WALNUT"]);
+        assert_eq!(art["Farm14"], "");
         assert!(!art.contains_key("not_installed"));
     }
+}
+
+/// A track the player doesn't have, as the control plane knows it: the catalogue product, our
+/// copy of its picture, and the price when it's sold.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogTrack {
+    /// `"mods"` (mxb-mods.com) or `"shop"`.
+    source: String,
+    exact: bool,
+    name: String,
+    url: String,
+    /// mxb-mods.com's post slug, which is what an install needs.
+    slug: Option<String>,
+    image: Option<String>,
+    price: Option<CatalogPrice>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogPrice {
+    currency: Option<String>,
+    base: Option<f64>,
+    sale: Option<f64>,
+    free: bool,
+}
+
+/// What the control plane knows about tracks the player doesn't have.
+///
+/// Asked of our server rather than the catalogue sites: one server looking tracks up on its
+/// own schedule, instead of every install asking mxb-mods.com the same questions. Ids it
+/// hasn't looked up yet are left out and it goes to find them, so asking later fills them in.
+#[tauri::command]
+async fn server_track_catalog(
+    tracks: Vec<String>,
+) -> Result<std::collections::HashMap<String, CatalogTrack>, String> {
+    #[derive(serde::Deserialize)]
+    struct Resp {
+        tracks: std::collections::HashMap<String, CatalogTrack>,
+    }
+    let ids: Vec<(&str, &str)> = tracks.iter().take(100).map(|t| ("id", t.as_str())).collect();
+    if ids.is_empty() {
+        return Ok(Default::default());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp: Resp = client
+        .get(format!("{}/v1/tracks", paintsync::control_plane()))
+        .query(&ids)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(resp.tracks)
 }
 
 fn shop_guess(mut guess: TrackGuess, hit: mods::shop_catalog::ShopMod, exact: bool) -> TrackGuess {
@@ -6572,6 +6652,7 @@ fn main() {
             servers_with_paint_sync,
             guess_server_track,
             server_track_previews,
+            server_track_catalog,
             ranked_identity,
             ranked_profile,
             set_ranked_guid,

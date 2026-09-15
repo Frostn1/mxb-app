@@ -3480,9 +3480,38 @@ export function guessServerTrack(track: string): Promise<TrackGuess> {
 }
 
 /** Card art for the server browser: track id to its preview, for every id the player has
- *  installed or got with the game. The rest are left out. One call for the whole list. */
+ *  installed or got with the game; `""` for one of those with no picture. The rest are left
+ *  out. One call for the whole list. */
 export function serverTrackPreviews(tracks: string[]): Promise<Record<string, string>> {
   return invoke<Record<string, string>>("server_track_previews", { tracks });
+}
+
+export interface CatalogPrice {
+  currency: string | null;
+  base: number | null;
+  /** The discounted price, when there is one. */
+  sale: number | null;
+  free: boolean;
+}
+
+/** A track the player doesn't have, as our server knows it. */
+export interface CatalogTrack {
+  source: "mods" | "shop";
+  /** False when the product only resembles the track. */
+  exact: boolean;
+  name: string;
+  url: string;
+  /** mxb-mods.com's post slug, which is what an install needs. */
+  slug: string | null;
+  /** Our copy of its picture. */
+  image: string | null;
+  price: CatalogPrice | null;
+}
+
+/** What our server knows about tracks the player doesn't have. Ids it hasn't looked up yet
+ *  are left out, and it goes to find them, so asking later fills them in. */
+export function serverTrackCatalog(tracks: string[]): Promise<Record<string, CatalogTrack>> {
+  return invoke<Record<string, CatalogTrack>>("server_track_catalog", { tracks });
 }
 
 export type ServerAction = "start" | "stop" | "restart";
