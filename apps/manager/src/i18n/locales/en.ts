@@ -1575,6 +1575,20 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0150.hero.title":
+    "Install a server's track and join, in one click",
+  "showcase.v0150.hero.body":
+    "On a server running a free track you don't have, one button installs the track and joins. If the server is full, you're put in line instead.",
+  "showcase.v0150.pictures":
+    "Server tiles show the track's picture even when you don't have it, with a mark so you can tell at a glance.",
+  "showcase.v0150.prices":
+    "Tracks sold in the shop show their price on the tile, and the button opens their shop page.",
+  "showcase.v0150.feel":
+    "Feel presets now carry how each control feels, like the throttle's dead zone, gain and smoothing. Your buttons and axes stay as they are.",
+  "showcase.v0150.hub":
+    "MXB Hub loads again when the store asks for a robot check: the app answers it quietly, or opens the store so you can finish it yourself.",
+  "showcase.v0150.secured":
+    "Secured content follows the access you actually have. If a creator removes you as a buyer, it stops opening the next time the app is online, and the app tells you why.",
   "showcase.v0140.hero.title":
     "Frost's Mod Manager, and a Studio of its own",
   "showcase.v0140.hero.body":

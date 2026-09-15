@@ -1603,6 +1603,20 @@ export const es: Translation = {
   "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.more": "+{{count}} más",
+  "showcase.v0150.hero.title":
+    "Instala el circuito de un servidor y únete, con un clic",
+  "showcase.v0150.hero.body":
+    "En un servidor con un circuito gratuito que no tienes, un botón instala el circuito y te une. Si el servidor está lleno, te pone en la cola.",
+  "showcase.v0150.pictures":
+    "Las fichas de servidor muestran la imagen del circuito aunque no lo tengas, con una marca para verlo de un vistazo.",
+  "showcase.v0150.prices":
+    "Los circuitos que se venden en la tienda muestran su precio en la ficha, y el botón abre su página en la tienda.",
+  "showcase.v0150.feel":
+    "Los preajustes de Pilotaje guardan ahora cómo responde cada control, como la zona muerta, la ganancia y el suavizado del acelerador. Tus botones y ejes se quedan como están.",
+  "showcase.v0150.hub":
+    "MXB Hub vuelve a cargar cuando la tienda pide una comprobación anti-robot: la app la resuelve en segundo plano o abre la tienda para que la termines tú.",
+  "showcase.v0150.secured":
+    "El contenido protegido sigue el acceso que de verdad tienes. Si un creador te quita como comprador, deja de abrirse la próxima vez que la app esté en línea, y la app te dice por qué.",
   "showcase.v0140.hero.title":
     "Frost's Mod Manager, y un Studio propio",
   "showcase.v0140.hero.body":
