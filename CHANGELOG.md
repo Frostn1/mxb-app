@@ -19,6 +19,9 @@
 - Frost's Studio sends the same anonymous usage counts as the MXB App, under the same switch in
   Settings → General. Each report says which app sent it, so the two are counted apart.
 
+### Changed
+- Release posts in Discord now come from mxbsecure, in the mxbsecure blue.
+
 ## 2026-09-14 — Frost's Studio v0.1.6
 
 ### Added
