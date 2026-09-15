@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- New Frost's Studio versions are posted in the Discord, in #studio-releases.
+
 ## 2026-09-14 — v0.14.3 — Secured content restores itself
 
 ### Added

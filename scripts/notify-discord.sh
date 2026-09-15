@@ -19,7 +19,10 @@
 #   GH_TOKEN                  passed through to `gh` (the workflow hands it GITHUB_TOKEN).
 #   REPO                      owner/name. Defaults to GITHUB_REPOSITORY, then Frostn1/mxb-app.
 #   APP_NAME                  the product this release is of. Defaults to the mod manager;
-#                             a second app's workflow passes its own.
+#                             a second app's workflow passes its own, and its changelog
+#                             sections are then read by that name (`Frost's Studio v0.1.6`).
+#   ICON_URL                  the embed thumbnail. Defaults to the manager's icon at $TAG.
+#   SLUG                      the product on mxbsecure.com and get.mxbsecure.com. Defaults to app.
 
 set -euo pipefail
 
@@ -79,7 +82,11 @@ published="$(jq -r '.publishedAt' <<<"$meta")"
 # --- title -------------------------------------------------------------------------
 # Release headings look like `## 2026-08-06 — v0.6.1 — Rider tab gear slots`; the trailing
 # segment is the human name for the release and makes a much better title than the tag.
-heading="$("$section" "$TAG" --heading || true)"
+# Another product's sections carry its name before the version; the MXB App's don't.
+app_arg=""
+[ "$APP_NAME" != "MXB App" ] && app_arg="--app=$APP_NAME"
+
+heading="$("$section" "$TAG" ${app_arg:+"$app_arg"} --heading || true)"
 subtitle="$(printf '%s' "$heading" | awk -F'—' '
   NF >= 3 {
     s = $3
@@ -118,10 +125,10 @@ if [ "$IS_BETA" -eq 1 ]; then
   limit=$(( limit - ${#lede} ))
 fi
 
-body="$("$section" "$TAG" --fold || true)"
+body="$("$section" "$TAG" ${app_arg:+"$app_arg"} --fold || true)"
 
 if [ -n "$body" ] && [ "${#body}" -gt "$limit" ]; then
-  short="$("$section" "$TAG" --summary || true)"
+  short="$("$section" "$TAG" ${app_arg:+"$app_arg"} --summary || true)"
   [ -n "$short" ] && body="$short$more"
 fi
 
@@ -142,6 +149,12 @@ fi
 
 body="$lede$body"
 
+# The product's page on mxbsecure.com goes under the notes; the 3500 cap leaves room for it.
+SLUG="${SLUG:-app}"
+body="$body
+
+[More about $APP_NAME →](https://mxbsecure.com/$SLUG)"
+
 # --- download links ------------------------------------------------------------------
 # Matched after the `finalize` job's rename, so these are the pretty `MXB-App-0.6.1-x64.exe`
 # names rather than Tauri's `MXB.App_0.6.1_x64-setup.exe`.
@@ -150,10 +163,20 @@ mac="$(jq -r '[.assets[] | select(.name | test("\\.dmg$"))] | first | .url // em
 # The AppImage is the portable one that works on any distro, so it's the Linux link
 # worth putting in a chat message; .deb/.rpm are a click away on the release page.
 lin="$(jq -r '[.assets[] | select(.name | test("\\.AppImage$"))] | first | .url // empty' <<<"$meta")"
+win_name="${win##*/}" mac_name="${mac##*/}" lin_name="${lin##*/}"
 
-icon="https://raw.githubusercontent.com/$REPO/$TAG/apps/manager/src-tauri/icons/icon.png"
+# A release links through get.mxbsecure.com, which serves the product's latest release, and
+# that is this one when the post goes out. A beta is never "latest" there, so it keeps GitHub's.
+if [ "$IS_BETA" -eq 0 ]; then
+  win="${win:+https://get.mxbsecure.com/$SLUG/windows}"
+  mac="${mac:+https://get.mxbsecure.com/$SLUG/mac}"
+  lin="${lin:+https://get.mxbsecure.com/$SLUG/linux}"
+fi
+
+icon="${ICON_URL:-https://raw.githubusercontent.com/$REPO/$TAG/apps/manager/src-tauri/icons/icon.png}"
 # Every product announces as mxbsecure, the brand that releases them; the thumbnail stays the product's.
-avatar="https://raw.githubusercontent.com/$REPO/main/docs/brand/mxbsecure-m-512.png"
+# Always from mxb-app: $REPO is frost-studio for a Studio release, which doesn't carry the image.
+avatar="https://raw.githubusercontent.com/Frostn1/mxb-app/main/docs/brand/mxbsecure-m-512.png"
 
 # Amber down the side of a beta instead of the usual black, and a footer that says so — the
 # two announcements sit in different channels, but plenty of people watch both.
@@ -174,6 +197,9 @@ payload="$(jq -n \
   --arg win "$win" \
   --arg mac "$mac" \
   --arg lin "$lin" \
+  --arg winname "$win_name" \
+  --arg macname "$mac_name" \
+  --arg linname "$lin_name" \
   --argjson color "$color" \
   --arg footer "$footer" \
   '{
@@ -191,19 +217,19 @@ payload="$(jq -n \
       fields: (
         (if $win != "" then [{
           name: "⬇ Windows — start here",
-          value: ("[" + ($win | split("/") | last) + "](" + $win + ")"),
+          value: ("[" + $winname + "](" + $win + ")"),
           inline: true
         }] else [] end)
         +
         (if $mac != "" then [{
           name: "⬇ macOS (Apple Silicon)",
-          value: ("[" + ($mac | split("/") | last) + "](" + $mac + ")"),
+          value: ("[" + $macname + "](" + $mac + ")"),
           inline: true
         }] else [] end)
         +
         (if $lin != "" then [{
           name: "⬇ Linux (AppImage)",
-          value: ("[" + ($lin | split("/") | last) + "](" + $lin + ")"),
+          value: ("[" + $linname + "](" + $lin + ")"),
           inline: true
         }] else [] end)
       )
