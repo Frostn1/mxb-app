@@ -22,8 +22,11 @@ export default function TrackMap({
   selected,
   cursor,
   onPick,
+  solo = false,
 }: {
   review: Review;
+  /** Reviewed on its own: no time against a fast lap to put on the label. */
+  solo?: boolean;
   /** The ground, drawn under the lines when there is one: the track's own or the ridden one. */
   surface?: Relief | null;
   /** Other laps' lines, drawn thin under this one. */
@@ -155,7 +158,7 @@ export default function TrackMap({
             return <circle key={k} cx={p[0]} cy={-p[1]} r={fs / 4} fill="var(--foreground)" stroke="var(--background)" strokeWidth={fs / 10} />;
           })}
           <Pill at={clamp(reference, (sel.core[0] + sel.core[1]) / 2)} centre={view.centre} fs={fs} color={lossColor(sel.lost)}>
-            {`${sel.name}  ${gap(sel.lost)} s`}
+            {solo ? sel.name : `${sel.name}  ${gap(sel.lost)} s`}
           </Pill>
         </g>
       )}

@@ -5,6 +5,25 @@
 ### Added
 - New Frost's Studio versions are posted in the Discord, in #studio-releases.
 
+## 2026-09-15 — MXB Coach v0.1.4-beta.4
+
+### Added
+- An overall summary at the top of every lap review: the kinds of mistakes that cost you most,
+  where they happened, and the one thing to change.
+- A bike setup card with advice on suspension, gearing, shifting and swingarm length: bottoming
+  out, the rev limiter, bogging out of corners, short-shifting and the front lifting on exits.
+- Review any lap on its own, without a faster lap to compare with. Useful for your first laps
+  on a track, or a lap that had a crash.
+
+### Changed
+- Each section now leads with the tip that matters most, with the rest under More details.
+- Laps that can't be compared say why, for example an out lap, and a crash no longer stops a
+  lap from being compared.
+
+### Fixed
+- Rhythm sections and double jumps no longer give tips that contradict each other or repeat.
+  If you take them in a different number of jumps than the fast lap, the coach says that instead.
+
 ## 2026-09-15 — MXB Coach v0.1.3-beta.3
 
 ### Added

@@ -79,6 +79,24 @@ mod th {
     pub const REAR_LOCK_SLIP: f32 = 0.7;
     pub const REAR_LOCK_S: f32 = 0.4;
     pub const AIR_GAS: f32 = 0.6;
+
+    // Setup, over a whole lap.
+    pub const LIMITER_LAP_S: f32 = 1.5;
+    /// Below this share of max revs at a corner's slowest point, the engine is bogging.
+    pub const BOG_SHARE: f32 = 0.45;
+    /// Upshifting below this share of the bike's shift point is short-shifting.
+    pub const SHORT_SHIFT: f32 = 0.85;
+    pub const WHEELIE_LAP_S: f32 = 1.0;
+
+    // A lap on its own: plain amounts, with nothing to hold them against.
+    pub const SOLO_COAST_S: f32 = 0.6;
+    pub const SOLO_SPIN_S: f32 = 0.5;
+    pub const SOLO_SKID_S: f32 = 0.6;
+    pub const SOLO_WHEELIE_S: f32 = 0.4;
+    pub const SOLO_LIMITER_S: f32 = 0.5;
+    pub const SOLO_PART_GAS: f32 = 0.75;
+    pub const SOLO_LONG_STRAIGHT_M: usize = 80;
+    pub const SOLO_OFF_GAS_SHARE: f32 = 0.35;
     pub const TAKEOFF_SPEED_RATIO: f32 = 0.97;
 
     pub const WHOOPS_SPEED_RATIO: f32 = 0.95;
@@ -571,10 +589,28 @@ pub struct Review {
     pub sections: Vec<SectionReview>,
     /// The sections to work on first: most time lost, at most three.
     pub focus: Vec<usize>,
-    /// Suspension advice for the whole lap.
+    /// The lap in a few lines: where the time went, by theme.
+    pub overall: Vec<Theme>,
+    /// Bike setup advice for the whole lap: suspension, gearing, shifting, chassis.
     pub setup: Vec<Finding>,
+    /// Reviewed on its own, with no faster lap to compare with.
+    pub solo: bool,
     pub channels: Channels,
     pub paths: Paths,
+}
+
+/// One kind of mistake across the lap, e.g. braking, with the time it cost.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Theme {
+    pub name: &'static str,
+    /// Seconds, over every section where it's the main cause; 0 on a lap reviewed alone.
+    pub lost: f32,
+    pub sections: Vec<String>,
+    /// The headline tip where it cost most.
+    pub tip: String,
+    #[serde(skip)]
+    most: f32,
 }
 
 /// The bike the lap was ridden on, as far as the review needs it.
@@ -582,8 +618,82 @@ pub struct Review {
 pub struct Bike {
     /// Rev limiter, 0 if unknown.
     pub limiter: f32,
+    pub max_rpm: f32,
+    /// Where the bike's maker says to change up, 0 if unknown.
+    pub shift_rpm: f32,
     /// Suspension travel in metres, front then rear; 0 if unknown.
     pub travel: [f32; 2],
+}
+
+fn theme(skill: &str) -> &'static str {
+    match skill {
+        "brake_early" | "brake_late" | "brake_harder" | "brake_unneeded" | "more_front" | "front_lock"
+        | "rear_lock" | "stoppie" | "clutch_braking" | "bottom_braking" => "Braking",
+        "carry_speed" | "lean_more" | "line" | "coasting" => "Corner speed",
+        "late_throttle" | "wheelspin" | "wheelie" | "exit_speed" | "gear_up" | "gear_down" => "Corner exits",
+        "jump_it" | "chop_face" | "scrub" | "land_short" | "overjump" | "land_throttle" | "land_crooked"
+        | "bottom_landing" | "air_throttle" | "rhythm_count" => "Jumps",
+        "whoops_speed" | "whoops_throttle" | "whoops_bucking" => "Whoops",
+        "shift_earlier" | "full_gas" => "Straights",
+        _ => "Other",
+    }
+}
+
+/// The lap by theme: each section counts towards the theme of its headline tip.
+fn overall(sections: &[SectionReview], solo: bool) -> Vec<Theme> {
+    let mut themes: Vec<Theme> = Vec::new();
+    for s in sections {
+        let Some(head) = s.findings.iter().find(|f| f.skill != "unclear") else { continue };
+        if !solo && s.lost <= th::WORTH_S && !head.safety {
+            continue;
+        }
+        let (name, lost) = (theme(head.skill), if solo { 0.0 } else { s.lost.max(0.0) });
+        match themes.iter_mut().find(|t| t.name == name) {
+            Some(t) => {
+                t.lost += lost;
+                t.sections.push(s.section.name.clone());
+                if lost > t.most {
+                    (t.most, t.tip) = (lost, head.title.clone());
+                }
+            }
+            None => themes.push(Theme { name, lost, sections: vec![s.section.name.clone()], tip: head.title.clone(), most: lost }),
+        }
+    }
+    themes.sort_by(|a, b| b.lost.total_cmp(&a.lost).then(b.sections.len().cmp(&a.sections.len())));
+    for t in &mut themes {
+        t.lost = (t.lost * 1000.0).round() / 1000.0;
+    }
+    themes
+}
+
+/// The same tip twice in one section is said once; on a jump section, with how many more
+/// jumps it applies to.
+fn dedupe(findings: Vec<Finding>, jumps: bool) -> Vec<Finding> {
+    let mut out: Vec<(Finding, usize)> = Vec::new();
+    for f in findings {
+        match out.iter_mut().find(|(o, _)| o.skill == f.skill && o.title == f.title) {
+            Some((_, n)) => *n += 1,
+            None => out.push((f, 0)),
+        }
+    }
+    out.into_iter()
+        .map(|(mut f, n)| {
+            if n > 0 && jumps {
+                f.detail.push_str(&format!(" The same goes for {n} more jump{} here.", if n == 1 { "" } else { "s" }));
+            }
+            f
+        })
+        .collect()
+}
+
+fn ordinal(n: usize) -> String {
+    match n {
+        1 => "first".into(),
+        2 => "second".into(),
+        3 => "third".into(),
+        4 => "fourth".into(),
+        _ => format!("{n}th"),
+    }
 }
 
 /// Compares `lap` with the faster `reference`, both ridden on `bike`.
@@ -593,7 +703,7 @@ pub fn review(lap: &Trace, reference: &Trace, bike: Bike) -> Review {
     let travel = p.fill_travel(bike.travel) && r.fill_travel(bike.travel);
     let (p, r) = (&p, &r);
     let secs = sections(r);
-    let setup = if travel { setup(p, &secs) } else { Vec::new() };
+    let setup = setup(p, Some(r), &secs, bike, travel);
     let mut out: Vec<SectionReview> = secs
         .into_iter()
         .map(|s| {
@@ -606,7 +716,7 @@ pub fn review(lap: &Trace, reference: &Trace, bike: Bike) -> Review {
                 Kind::Whoops => whoops(&mut c),
                 Kind::Straight => straight(&mut c),
             }
-            let mut findings = c.out;
+            let mut findings = dedupe(c.out, s.kind != Kind::Corner);
             if lost <= th::WORTH_S {
                 findings.retain(|f| f.safety);
             } else if findings.iter().all(|f| f.safety) {
@@ -637,9 +747,11 @@ pub fn review(lap: &Trace, reference: &Trace, bike: Bike) -> Review {
     Review {
         lap_time: p.time(),
         ref_time: r.time(),
+        overall: overall(&out, false),
         sections: out,
         focus: order,
         setup,
+        solo: false,
         channels: channels(p, r, 2),
         paths: Paths {
             lap: p.pts.iter().step_by(2).map(|q| [q.x, q.z]).collect(),
@@ -891,13 +1003,44 @@ fn jumps(c: &mut Ctx) {
     let (p, r, s) = (c.p, c.r, c.s);
     let name = s.name.clone();
     let mine = air_runs(p, s.start..s.end + 1);
-    for &(rt, rl) in &s.runs {
-        let Some(&(pt, pl)) = mine.iter().find(|&&(pt, _)| (pt as i64 - rt as i64).abs() <= th::MATCH_JUMP_M) else {
+    let theirs = s.runs.len();
+
+    // Taken in a different number of jumps, the jumps can't be paired one by one: that is
+    // what reads as landing short and overjumping in the same breath. Say the one thing.
+    if !mine.is_empty() && mine.len() != theirs {
+        let (pt0, rt0) = (mine[0].0, s.runs[0].0);
+        let quicker = (r.pts[rt0].v - p.pts[pt0].v) * KMH;
+        let speed = if quicker > 1.0 { format!(" Carry about {quicker:.0} km/h more to the first face.") } else { String::new() };
+        let jumps = |n: usize| if n == 1 { "1 jump".to_string() } else { format!("{n} jumps") };
+        if mine.len() > theirs {
+            c.add("rhythm_count", 1.0, pt0, "Link the jumps", format!(
+                "The fast lap takes {name} in {}, you take {}. Linking them is where the time is.{speed}",
+                jumps(theirs),
+                jumps(mine.len())
+            ));
+        } else {
+            c.add("rhythm_count", 1.0, pt0, "Take it the fast lap's way", format!(
+                "You take {name} in {}, the fast lap in {}, and its way is quicker here. Try it jump by jump.",
+                jumps(mine.len()),
+                jumps(theirs)
+            ));
+        }
+        return;
+    }
+
+    let mut used = vec![false; mine.len()];
+    for (k, &(rt, rl)) in s.runs.iter().enumerate() {
+        let near = |i: &usize| (mine[*i].0 as i64 - rt as i64).abs();
+        let pick = (0..mine.len()).filter(|&i| !used[i]).min_by_key(near).filter(|i| near(i) <= th::MATCH_JUMP_M);
+        let name = if theirs > 1 { format!("the {} jump of {name}", ordinal(k + 1)) } else { name.clone() };
+        let Some(i) = pick else {
             c.add("jump_it", 0.9, rt, "Jump it", format!(
-                "The fast lap jumps at {name} and you roll it. Carry more speed up the face and commit."
+                "The fast lap jumps {name} and you roll it. Carry more speed up the face and commit."
             ));
             continue;
         };
+        used[i] = true;
+        let (pt, pl) = mine[i];
         let face = |t: &Trace, take: usize| {
             let from = take.saturating_sub(th::CHOP_M);
             t.max_by(from..take + 1, |q| q.throttle) - t.pts[take].throttle
@@ -997,48 +1140,284 @@ fn bottom_runs(tr: &Trace, within: Range<usize>, k: usize) -> Vec<(usize, usize)
     out
 }
 
-/// Suspension advice for the whole lap: bottoming again and again, or travel left unused.
-fn setup(p: &Trace, secs: &[Section]) -> Vec<Finding> {
+fn upshifts(t: &Trace) -> Vec<usize> {
+    (1..t.len()).filter(|&i| t.pts[i].gear > t.pts[i - 1].gear && t.pts[i - 1].gear > 0).collect()
+}
+
+fn shifts(t: &Trace) -> usize {
+    (1..t.len()).filter(|&i| t.pts[i].gear != t.pts[i - 1].gear && t.pts[i].gear > 0 && t.pts[i - 1].gear > 0).count()
+}
+
+/// Setup advice for the whole lap: suspension that bottoms or never works, gearing that sits on
+/// the limiter or bogs, shifting habits, and a front that won't stay down. `r` is the fast lap,
+/// when there is one to compare with.
+fn setup(p: &Trace, r: Option<&Trace>, secs: &[Section], bike: Bike, travel: bool) -> Vec<Finding> {
     let mut out = Vec::new();
-    for (k, end) in ["fork", "shock"].iter().enumerate() {
-        let runs = bottom_runs(p, 0..p.len(), k);
-        if runs.len() >= th::BOTTOMS_PER_LAP {
-            let mut places: Vec<&str> = runs
-                .iter()
-                .filter_map(|&(a, _)| secs.iter().find(|s| s.start <= a && a <= s.end).map(|s| s.name.as_str()))
-                .collect();
-            places.dedup();
-            out.push(Finding {
-                skill: "setup_bottoming",
-                title: format!("The {end} bottoms {} times a lap", runs.len()),
-                detail: format!(
+    let mut tip = |skill: &'static str, weight: f32, at: usize, title: String, detail: String| {
+        out.push(Finding { skill, title, detail, at, weight, safety: false });
+    };
+
+    if travel {
+        for (k, end) in ["fork", "shock"].iter().enumerate() {
+            let runs = bottom_runs(p, 0..p.len(), k);
+            if runs.len() >= th::BOTTOMS_PER_LAP {
+                let mut places: Vec<&str> = runs
+                    .iter()
+                    .filter_map(|&(a, _)| secs.iter().find(|s| s.start <= a && a <= s.end).map(|s| s.name.as_str()))
+                    .collect();
+                places.dedup();
+                tip("setup_bottoming", 1.0, runs[0].0, format!("The {end} bottoms {} times a lap", runs.len()), format!(
                     "It runs out of travel at {}. If your landings are clean, stiffen the {end}: more compression \
                      damping or a stiffer spring, one step at a time.",
                     places.join(", ")
-                ),
-                at: runs[0].0,
-                weight: 1.0,
-                safety: false,
-            });
-        } else {
-            let most = p.pts.iter().map(|q| q.used[k]).fold(0.0, f32::max);
-            if most < th::LAZY_TRAVEL {
-                out.push(Finding {
-                    skill: "setup_stiff",
-                    title: format!("The {end} never uses its travel"),
-                    detail: format!(
+                ));
+            } else {
+                let most = p.pts.iter().map(|q| q.used[k]).fold(0.0, f32::max);
+                if most < th::LAZY_TRAVEL {
+                    tip("setup_stiff", 0.5, 0, format!("The {end} never uses its travel"), format!(
                         "It uses at most {:.0}% of its travel all lap. A softer spring or less compression would \
                          let it soak up the bumps.",
                         most * 100.0
-                    ),
-                    at: 0,
-                    weight: 0.5,
-                    safety: false,
-                });
+                    ));
+                }
             }
         }
     }
+
+    if bike.limiter > 0.0 {
+        let cap = bike.limiter * 0.98;
+        let on = p.time_where(0..p.len(), |q| q.rpm >= cap);
+        if on > th::LIMITER_LAP_S {
+            tip("setup_gearing_tall", 0.8, 0, "Try taller gearing".into(), format!(
+                "You're on the rev limiter for {on:.1} s a lap. Taller gearing, a bigger front sprocket or a \
+                 smaller rear one, lets the bike keep pulling. Shifting up sooner helps too."
+            ));
+        }
+    }
+    if bike.max_rpm > 0.0 {
+        let bogs: Vec<&str> = secs
+            .iter()
+            .filter(|s| s.kind == Kind::Corner)
+            .filter(|s| {
+                let apex = p.slowest(s.core.0..s.core.1 + 1);
+                p.pts[apex].rpm > 0.0 && p.pts[apex].rpm < bike.max_rpm * th::BOG_SHARE && p.pts[apex].gear > 1
+            })
+            .map(|s| s.name.as_str())
+            .collect();
+        if bogs.len() >= 2 {
+            tip("setup_gearing_short", 0.7, 0, "The engine bogs out of corners".into(), format!(
+                "Out of {} the engine is below {:.0}% of its revs at the slowest point. Take those corners a gear \
+                 lower, or try shorter gearing: a smaller front sprocket or a bigger rear one.",
+                bogs.join(", "),
+                th::BOG_SHARE * 100.0
+            ));
+        }
+    }
+
+    let ups = upshifts(p);
+    if ups.len() >= 4 {
+        let mut revs: Vec<f32> = ups.iter().map(|&i| p.pts[i.saturating_sub(2)].rpm).collect();
+        revs.sort_by(f32::total_cmp);
+        let typical = revs[revs.len() / 2];
+        if bike.limiter > 0.0 && typical >= bike.limiter * 0.98 {
+            let at = if bike.shift_rpm > 0.0 { format!(", at about {:.0} rpm", bike.shift_rpm) } else { String::new() };
+            tip("setup_shift_late", 0.6, ups[0], "You shift on the limiter".into(), format!(
+                "Most of your upshifts come after the engine has hit the limiter. Change up just before it{at}."
+            ));
+        } else if bike.shift_rpm > 0.0 && typical < bike.shift_rpm * th::SHORT_SHIFT {
+            tip("setup_shift_early", 0.5, ups[0], "You short-shift".into(), format!(
+                "You change up at about {typical:.0} rpm. This bike pulls hardest up to about {:.0}. Hold each gear \
+                 a little longer.",
+                bike.shift_rpm
+            ));
+        }
+    }
+    if let Some(r) = r {
+        let (np, nr) = (shifts(p), shifts(r));
+        if np >= nr + 4 && np as f32 > nr as f32 * 1.4 {
+            tip("setup_shift_count", 0.5, 0, "You change gear a lot".into(), format!(
+                "{np} gear changes a lap against the fast lap's {nr}. Pick one gear for each corner and stay in it."
+            ));
+        }
+    }
+
+    let wheelie = |t: &Trace| {
+        secs.iter()
+            .filter(|s| s.kind == Kind::Corner)
+            .map(|s| {
+                let apex = t.slowest(s.core.0..s.core.1 + 1);
+                t.time_where(apex..s.end.max(apex + 1), |q| q.off[0] && !q.off[1] && q.throttle > 0.5)
+            })
+            .sum::<f32>()
+    };
+    let (wp, wr) = (wheelie(p), r.map_or(0.0, wheelie));
+    if wp > th::WHEELIE_LAP_S && wp - wr > th::WHEELIE_LAP_S / 2.0 {
+        tip("setup_swingarm", 0.5, 0, "The front lifts out of corners".into(), format!(
+            "The front wheel is up for {wp:.1} s a lap coming out of corners. Smoother throttle first; then a \
+             longer swingarm (the rear wheel further back) or taller gearing keeps it down."
+        ));
+    }
     out
+}
+
+/// Reviews a lap on its own, with no faster lap to hold it against: only what costs time or
+/// risks a crash whatever the line, like coasting, wheelspin, the limiter or a hard landing.
+pub fn solo(lap: &Trace, bike: Bike) -> Review {
+    let mut p = lap.clone();
+    let travel = p.fill_travel(bike.travel);
+    let p = &p;
+    let secs = sections(p);
+    let setup = setup(p, None, &secs, bike, travel);
+    let out: Vec<SectionReview> = secs
+        .into_iter()
+        .map(|s| {
+            let t = p.span(s.start, s.end);
+            let mut c = Ctx { p, r: p, s: &s, bike, travel, out: Vec::new() };
+            alone(&mut c);
+            let mut findings = dedupe(c.out, s.kind != Kind::Corner);
+            findings.sort_by(|a, b| b.weight.total_cmp(&a.weight));
+            SectionReview { section: s, lap_time: t, ref_time: t, lost: 0.0, findings }
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..out.len()).filter(|&i| !out[i].findings.is_empty()).collect();
+    order.sort_by(|&a, &b| out[b].findings[0].weight.total_cmp(&out[a].findings[0].weight));
+    order.truncate(th::FOCUS);
+    let path: Vec<[f32; 2]> = p.pts.iter().step_by(2).map(|q| [q.x, q.z]).collect();
+    Review {
+        lap_time: p.time(),
+        ref_time: p.time(),
+        overall: overall(&out, true),
+        sections: out,
+        focus: order,
+        setup,
+        solo: true,
+        channels: channels(p, p, 2),
+        paths: Paths { lap: path.clone(), reference: path },
+    }
+}
+
+/// The rules that need no faster lap.
+fn alone(c: &mut Ctx) {
+    let (p, s) = (c.p, c.s);
+    let name = s.name.clone();
+    let (start, end) = (s.start, s.end.max(s.start + 1));
+    match s.kind {
+        Kind::Corner => {
+            let apex = p.slowest(s.core.0.max(start)..s.core.1.min(end) + 1);
+            let coast = p.time_where(start..end, |q| q.brake() < 0.05 && q.throttle < 0.15 && !q.air);
+            if coast > th::SOLO_COAST_S {
+                c.add("coasting", 0.8, apex, "Don't coast", format!(
+                    "You coast for {coast:.1} s in {name}, off the brakes and off the gas. Go straight from the \
+                     brakes to the throttle."
+                ));
+            }
+            let spin = p.time_where(apex..end, |q| q.slip_r > th::SPIN_SLIP && q.v > 5.0 && !q.air);
+            if spin > th::SOLO_SPIN_S {
+                c.add("wheelspin", 0.7, apex, "Smoother on the throttle", format!(
+                    "The rear wheel spins for {spin:.1} s out of {name}. Roll the throttle on more gradually."
+                ));
+            }
+            let skid = p.time_where(start..end, |q| q.rear > 0.3 && q.slip_r < th::REAR_LOCK_SLIP && q.v > 5.0 && !q.air);
+            if skid > th::SOLO_SKID_S {
+                c.add("rear_lock", 0.5, start, "Don't lock the rear", format!(
+                    "The rear wheel skids for {skid:.1} s into {name}. Ease the rear brake until it keeps rolling."
+                ));
+            }
+            let wheelie = p.time_where(apex..end, |q| q.off[0] && !q.off[1] && q.throttle > 0.5);
+            if wheelie > th::SOLO_WHEELIE_S {
+                c.add("wheelie", 0.6, apex, "Keep the front down on the exit", format!(
+                    "The front wheel comes up for {wheelie:.1} s out of {name}. Move your weight forward and roll \
+                     the throttle on more smoothly."
+                ));
+            }
+            let entry = start..apex.max(start + 1);
+            if p.time_where(entry.clone(), |q| q.off[1] && !q.off[0] && q.brake() > th::BRAKE_ON) > th::STOPPIE_S {
+                c.warn("stoppie", start, "Rear wheel lifts under braking", format!(
+                    "The rear comes off the ground while you brake into {name}. Ease the front brake a little and \
+                     keep your weight back."
+                ));
+            }
+            let lock = p.time_where(start..end, |q| q.front > 0.3 && q.slip_f < th::FRONT_LOCK_SLIP && q.v > 5.0 && !q.air);
+            if lock > th::FRONT_LOCK_S {
+                c.warn("front_lock", start, "Front wheel locking", format!(
+                    "The front wheel locks for {lock:.1} s into {name}. Ease the front brake and brake a little earlier."
+                ));
+            }
+            if p.time_where(entry.clone(), |q| q.clutch > 0.5 && q.brake() > th::BRAKE_ON) > th::CLUTCH_S {
+                c.add("clutch_braking", 0.3, start, "Keep the clutch out when braking", format!(
+                    "You pull the clutch while braking into {name}. Leave it out: engine braking slows you and keeps \
+                     the rear settled."
+                ));
+            }
+            if c.travel && !bottom_runs(p, entry, 0).is_empty() {
+                c.warn("bottom_braking", start, "The fork bottoms in the braking bumps", format!(
+                    "The fork runs out of travel braking into {name}. Brake a little earlier and lighter on the front, \
+                     and stay standing. If it keeps happening, add fork compression."
+                ));
+            }
+        }
+        Kind::Jump | Kind::Rhythm => {
+            let runs = air_runs(p, start..end + 1);
+            for (k, &(pt, pl)) in runs.iter().enumerate() {
+                let which = if runs.len() > 1 { format!("the {} jump of {name}", ordinal(k + 1)) } else { name.clone() };
+                let from = pt.saturating_sub(th::CHOP_M);
+                if p.max_by(from..pt + 1, |q| q.throttle) - p.pts[pt].throttle > th::CHOP {
+                    c.add("chop_face", 0.9, pt, "Stay on the gas up the face", format!(
+                        "You shut the throttle on the face of {which}, which drops the nose. Hold it steady to the lip."
+                    ));
+                }
+                if p.mean(pt..pl + 1, |q| q.throttle) > th::AIR_GAS {
+                    c.add("air_throttle", 0.4, pt, "Off the gas in the air", format!(
+                        "You hold the throttle open in the air over {which}. Close it so the bike stays level, then \
+                         open it as you touch down."
+                    ));
+                }
+                let lean = p.pts[(pl + 4).min(s.end)].roll.abs();
+                if lean > th::LAND_ROLL_DEG {
+                    c.warn("land_crooked", pl, "Straighten up before landing", format!(
+                        "The bike is still leaned {lean:.0}° after you land {which}. Bring it straight in the air, a \
+                         moment earlier."
+                    ));
+                }
+                if c.travel {
+                    for (e, end_name) in ["fork", "shock"].iter().enumerate() {
+                        if !bottom_runs(p, pl..(pl + 12).min(s.end + 1), e).is_empty() {
+                            c.warn("bottom_landing", pl, &format!("The {end_name} bottoms on the landing"), format!(
+                                "You run out of {end_name} travel landing {which}. Land on the downslope rather than \
+                                 flat. If it bottoms on a good landing too, add {end_name} compression."
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        Kind::Whoops => {
+            let (a, b) = (s.core.0, s.core.1 + 1);
+            if p.time_where(a..b, |q| q.throttle < th::WHOOPS_OFF_GAS) / p.span(a, b).max(0.01) > th::SOLO_OFF_GAS_SHARE {
+                c.add("whoops_throttle", 0.8, a, "Stay on the gas", format!(
+                    "You come off the throttle in {name}. Hold it on: the bike skims when it's driving."
+                ));
+            }
+        }
+        Kind::Straight => {
+            let range = start..end;
+            if c.bike.limiter > 0.0 {
+                let on = p.time_where(range.clone(), |q| q.rpm >= c.bike.limiter * 0.98);
+                if on > th::SOLO_LIMITER_S {
+                    c.add("shift_earlier", 0.7, start, "Shift up sooner", format!(
+                        "You sit on the rev limiter for {on:.1} s on this straight. Shift up before you hit it."
+                    ));
+                }
+            }
+            let gas = p.mean(range.clone(), |q| q.throttle);
+            if range.len() > th::SOLO_LONG_STRAIGHT_M && gas < th::SOLO_PART_GAS {
+                c.add("full_gas", 0.6, start, "Hold it wide open", format!(
+                    "You use {:.0}% throttle down this straight. Stay pinned until the braking point.",
+                    gas * 100.0
+                ));
+            }
+        }
+    }
 }
 
 fn whoops(c: &mut Ctx) {
@@ -1189,6 +1568,8 @@ pub(crate) mod tests {
         pub(crate) corner_v: f32,
         /// Ground under Turn 1 this much lower, metres, as a rut cut by earlier laps.
         pub(crate) sink: f32,
+        /// A second jump after the first, (takeoff, landing, peak); peak 0 for none.
+        pub(crate) hop: (f32, f32, f32),
     }
 
     pub(crate) const FAST: Style = Style {
@@ -1201,8 +1582,9 @@ pub(crate) mod tests {
         wide: 0.0,
         corner_v: 10.0,
         sink: 0.0,
+        hop: (0.0, 0.0, 0.0),
     };
-    const BIKE: Bike = Bike { limiter: 13000.0, travel: [0.3, 0.3] };
+    const BIKE: Bike = Bike { limiter: 13000.0, max_rpm: 14000.0, shift_rpm: 12500.0, travel: [0.3, 0.3] };
 
     /// Speed, throttle, brake and lean at `d`.
     fn ride(st: &Style, d: f32) -> (f32, f32, f32, f32) {
@@ -1226,7 +1608,7 @@ pub(crate) mod tests {
 
     pub(crate) fn lap(st: &Style) -> Trace {
         let (samples, t) = ride_lap(st);
-        let lap = Lap { num: 1, time_ms: (t * 1000.0) as i32, invalid: false, whole: true, samples };
+        let lap = Lap { num: 1, time_ms: (t * 1000.0) as i32, invalid: false, whole: true, issue: None, crashed: false, samples };
         Trace::new(&lap, len()).unwrap()
     }
 
@@ -1242,7 +1624,9 @@ pub(crate) mod tests {
             let turn1 = (200.0..200.0 + PI * R).contains(&d);
             let (x, z) = if turn1 { (x - bearing.cos() * st.wide, z + bearing.sin() * st.wide) } else { (x, z) };
             let (take, land, peak) = st.jump;
-            let air = d >= take && d <= land;
+            let (h0, h1, hp) = st.hop;
+            let in_hop = hp > 0.0 && d >= h0 && d <= h1;
+            let air = (d >= take && d <= land) || in_hop;
             let v = if air { v.min(st.air_v) } else { v };
             let roll = if st.whip > 0.0 && d >= take && d <= land + 2.0 {
                 st.whip * (PI * (d - take) / (land + 2.0 - take)).sin()
@@ -1263,7 +1647,9 @@ pub(crate) mod tests {
             s.pos = d / l;
             s.x = x;
             s.z = z;
-            s.y = if air {
+            s.y = if in_hop {
+                hp * (1.0 - ((d - (h0 + h1) / 2.0) / ((h1 - h0) / 2.0)).powi(2))
+            } else if air {
                 peak * (1.0 - ((d - mid) / half).powi(2))
             } else if turn1 {
                 -st.sink
@@ -1412,6 +1798,56 @@ pub(crate) mod tests {
         let rv = review(&hard, &lap(&FAST), Bike { travel: [0.0; 2], ..BIKE });
         assert!(!skills(section(&rv, "Jump 1")).contains(&"bottom_landing"));
         assert!(rv.setup.is_empty());
+    }
+
+    #[test]
+    fn a_jump_taken_in_two_hops_says_link_them_not_short_and_long() {
+        let hops = lap(&Style { jump: (330.0, 342.0, 1.5), hop: (346.0, 358.0, 1.5), air_v: 17.0, ..FAST });
+        let rv = review(&hops, &lap(&FAST), BIKE);
+        let found = skills(section(&rv, "Jump 1"));
+        assert!(found.contains(&"rhythm_count"), "{found:?}");
+        assert!(!found.contains(&"land_short") && !found.contains(&"overjump"), "{found:?}");
+    }
+
+    #[test]
+    fn the_same_tip_twice_in_a_section_is_said_once() {
+        let f = |skill: &'static str, title: &str| Finding {
+            skill,
+            title: title.into(),
+            detail: "Hold it.".into(),
+            at: 0,
+            weight: 1.0,
+            safety: false,
+        };
+        let out = dedupe(vec![f("chop_face", "Gas"), f("chop_face", "Gas"), f("scrub", "Scrub")], true);
+        assert_eq!(out.len(), 2);
+        assert!(out[0].detail.contains("1 more jump"), "{}", out[0].detail);
+    }
+
+    #[test]
+    fn the_overall_groups_the_lap_by_theme() {
+        let rv = review(&lap(&Style { decel: 2.5, brake: 0.5, ..FAST }), &lap(&FAST), BIKE);
+        let top = &rv.overall[0];
+        assert_eq!(top.name, "Braking");
+        assert_eq!(top.sections, vec!["Turn 1", "Turn 2"]);
+        assert!(top.lost > 0.3, "{}", top.lost);
+    }
+
+    #[test]
+    fn a_lap_on_its_own_gets_only_plain_tips() {
+        let rv = solo(&lap(&Style { bottom: 0.29, ..FAST }), BIKE);
+        assert!(rv.solo);
+        assert!(rv.sections.iter().all(|s| s.lost == 0.0));
+        assert!(skills(section(&rv, "Jump 1")).contains(&"bottom_landing"));
+        assert!(rv.sections.iter().flat_map(skills).all(|k| !k.starts_with("brake_")));
+    }
+
+    #[test]
+    fn a_lap_on_the_limiter_asks_for_taller_gearing() {
+        let rv = review(&lap(&FAST), &lap(&FAST), Bike { limiter: 7900.0, ..BIKE });
+        assert!(rv.setup.iter().any(|f| f.skill == "setup_gearing_tall"));
+        let rv = review(&lap(&FAST), &lap(&FAST), BIKE);
+        assert!(!rv.setup.iter().any(|f| f.skill.starts_with("setup_gearing")));
     }
 
     #[test]

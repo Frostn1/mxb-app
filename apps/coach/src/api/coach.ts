@@ -13,8 +13,11 @@ export interface LapSummary {
   num: number;
   timeMs: number;
   invalid: boolean;
-  /** Started and finished at the line, no crash: it can be compared. */
+  /** Started and finished at the line: it can be compared. */
   whole: boolean;
+  /** Why it can't be compared: `out lap`, `unfinished`, `untimed`, `gap in the recording`. */
+  issue: string | null;
+  crashed: boolean;
 }
 
 export interface SessionSummary {
@@ -110,11 +113,25 @@ export interface Review {
   refTime: number;
   sections: SectionReview[];
   focus: number[];
-  /** Suspension advice for the whole lap. */
+  /** The lap in a few lines: where the time went, by theme. */
+  overall: Theme[];
+  /** Bike setup advice for the whole lap: suspension, gearing, shifting, chassis. */
   setup: Finding[];
+  /** Reviewed on its own, with no faster lap to compare with. */
+  solo: boolean;
   channels: Channels;
   /** World x/z every 2 m. */
   paths: { lap: [number, number][]; reference: [number, number][] };
+}
+
+/** One kind of mistake across the lap, with the time it cost. */
+export interface Theme {
+  name: string;
+  /** Seconds; 0 on a lap reviewed on its own. */
+  lost: number;
+  sections: string[];
+  /** The headline tip where it cost most. */
+  tip: string;
 }
 
 export interface ReviewOut {
@@ -168,8 +185,9 @@ export const coachLines = (path: string) => invoke<Lines | null>("coach_lines", 
 export const coachSurface = (path: string) => invoke<Surface | null>("coach_surface", { path });
 export const coachSessions = () => invoke<SessionSummary[]>("coach_sessions");
 export const coachSession = (path: string) => invoke<SessionDetail>("coach_session", { path });
-export const coachReview = (path: string, lap: number, refPath?: string, refLap?: number) =>
-  invoke<ReviewOut>("coach_review", { path, lap, refPath: refPath ?? null, refLap: refLap ?? null });
+/** `solo` reviews the lap on its own; so does the backend when there's nothing to compare with. */
+export const coachReview = (path: string, lap: number, refPath?: string, refLap?: number, solo?: boolean) =>
+  invoke<ReviewOut>("coach_review", { path, lap, refPath: refPath ?? null, refLap: refLap ?? null, solo: solo ?? false });
 /** Downloads the recorder, or copies it from `from`. Resolves to where it went. */
 export const installRecorder = (from?: string) =>
   invoke<string>("coach_install_plugin", { from: from ?? null });
