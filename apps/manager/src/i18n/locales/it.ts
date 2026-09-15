@@ -587,16 +587,16 @@ export const it: Translation = {
   "settings.secRepairFail": "Non è stato possibile ripristinare tutte le chiavi",
   "settings.secRepairFailDesc_one": "{{count}} file richiede che tu sia online e connesso. Le chiavi vengono riemesse gratis, ma questa deve arrivare dal server.",
   "settings.secRepairFailDesc_other": "{{count}} file richiedono che tu sia online e connesso. Le chiavi vengono riemesse gratis, ma queste devono arrivare dal server.",
-  "settings.secRepairRevoked_one": "{{count}} file non si apre più — il suo creatore ti ha rimosso l'accesso.",
-  "settings.secRepairRevoked_other": "{{count}} file non si aprono più — i loro creatori ti hanno rimosso l'accesso.",
+  "settings.secRepairRevoked_one": "{{count}} file non è disponibile su questo PC.",
+  "settings.secRepairRevoked_other": "{{count}} file non sono disponibili su questo PC.",
   "settings.secStatusTitle": "Contenuti protetti trovati",
   "settings.secStatusUnlocked": "Sbloccato",
   "settings.secStatusUnlocking": "Sblocco…",
   "settings.secStatusReady": "Pronto per lo sblocco",
   "settings.secReasonReady": "È tuo — si sblocca quando apri la Libreria o avvii il gioco.",
   "settings.secStatusNotOwned": "Non nella tua libreria",
-  "settings.secStatusRevoked": "Accesso rimosso",
-  "settings.secReasonRevoked": "Il creatore ti ha rimosso l'accesso, quindi questo non si apre più su questo PC.",
+  "settings.secStatusRevoked": "Non disponibile",
+  "settings.secReasonRevoked": "Questo non è disponibile su questo PC.",
   "settings.secStatusUnavailable": "Non disponibile",
   "settings.secStatusNeedsSteam": "Accedi con Steam",
   "settings.secStatusUnreadable": "File non riconosciuto",
@@ -610,9 +610,9 @@ export const it: Translation = {
   "secure.promptSteam": "I mod protetti sono legati al tuo account Steam. Accedi per sbloccarli.",
   "secure.promptEnroll": "Registrati prima con il tuo codice d'invito. Lo trovi in Impostazioni, sotto Sincronizzazione livree.",
   "secure.promptEnrollBtn": "Apri Impostazioni",
-  "secure.revokedTitle_one": "Non hai più accesso a un mod protetto",
-  "secure.revokedTitle_other": "Non hai più accesso a {{count}} mod protetti",
-  "secure.revokedBody": "{{names}} — il creatore ti ha rimosso l'accesso, quindi non si apre più su questo PC.",
+  "secure.revokedTitle_one": "Un mod protetto non è più disponibile",
+  "secure.revokedTitle_other": "{{count}} mod protetti non sono più disponibili",
+  "secure.revokedBody": "{{names}} non è più disponibile su questo PC.",
   "settings.unlockNotOwned": "Non possiedi ancora questo contenuto su questo account.",
   "secure.intro":
     "Scegli un file, bloccalo, poi verifica che si sblocchi. La verifica decifra il blob qui e lo confronta con l'originale, byte per byte — la prova che fa il giro su questa macchina.",
@@ -1610,8 +1610,6 @@ export const it: Translation = {
     "I preset Feeling ora salvano come risponde ogni comando, come zona morta, guadagno e smussatura dell'acceleratore. I tuoi pulsanti e assi restano come sono.",
   "showcase.v0150.hub":
     "MXB Hub si carica di nuovo quando lo shop chiede una verifica anti-robot: l'app la risolve in background, oppure apre lo shop perché tu la completi.",
-  "showcase.v0150.secured":
-    "I contenuti protetti seguono l'accesso che hai davvero. Se un creatore ti rimuove dagli acquirenti, smettono di aprirsi la prossima volta che l'app è online, e l'app ti dice perché.",
   "showcase.v0140.hero.title":
     "Frost's Mod Manager, e uno Studio tutto suo",
   "showcase.v0140.hero.body":

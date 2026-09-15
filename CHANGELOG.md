@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-15 — v0.15.1 — Small fixes
+
+### Changed
+- Clearer wording in a few places, in all six languages.
+
 ## 2026-09-15 — Frost's Studio v0.1.10 — Track Studio asks you less
 
 ### Changed
@@ -23,7 +28,7 @@
 - Other riders: the coach now finds you among them by your rider name, the one the game shows
   everyone. Two riders with the same name are told apart by where each bike is.
 
-## 2026-09-15 — v0.15.0 — Secured content follows your access
+## 2026-09-15 — v0.15.0 — Install & join, and MXB Hub loads again
 
 ### Added
 - Server tiles show the track's picture even when you don't have it, with a mark over it so
@@ -42,12 +47,6 @@
   Farm14 and Farm 14.
 
 ### Fixed
-- Secured content now follows the access you actually have. If a creator removes you as a
-  buyer, the app picks that up the next time it's online — you launch the game, open the
-  Library, sign in, or press Restore keys — and that content stops opening on this PC. The
-  Secured content list marks it "Access removed" and the app says so when it happens, so
-  content no longer showing up in game doesn't look like the app breaking. Nothing changes
-  while you're offline, or if the check can't be made for any reason.
 - MXB Hub's robot check can now be finished by hand. The app still answers it quietly in the
   background, and when that doesn't work it opens the store in a window so you can complete the
   check yourself. Before, the catalogue just never loaded.

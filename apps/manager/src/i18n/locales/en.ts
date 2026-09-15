@@ -581,16 +581,16 @@ export const en = {
   "settings.secRepairFail": "Couldn't restore every key",
   "settings.secRepairFailDesc_one": "{{count}} file needs you online and signed in. Keys are re-issued free, but that one has to come from the server.",
   "settings.secRepairFailDesc_other": "{{count}} files need you online and signed in. Keys are re-issued free, but those have to come from the server.",
-  "settings.secRepairRevoked_one": "{{count}} file no longer opens — its creator removed your access.",
-  "settings.secRepairRevoked_other": "{{count}} files no longer open — their creators removed your access.",
+  "settings.secRepairRevoked_one": "{{count}} file isn't available on this PC.",
+  "settings.secRepairRevoked_other": "{{count}} files aren't available on this PC.",
   "settings.secStatusTitle": "Secured content found",
   "settings.secStatusUnlocked": "Unlocked",
   "settings.secStatusUnlocking": "Unlocking…",
   "settings.secStatusReady": "Ready to unlock",
   "settings.secReasonReady": "You own this — it unlocks when you open the Library or launch the game.",
   "settings.secStatusNotOwned": "Not in your library",
-  "settings.secStatusRevoked": "Access removed",
-  "settings.secReasonRevoked": "The creator removed your access, so this no longer opens on this PC.",
+  "settings.secStatusRevoked": "Not available",
+  "settings.secReasonRevoked": "This isn't available on this PC.",
   "settings.secStatusUnavailable": "Unavailable",
   "settings.secStatusNeedsSteam": "Sign in with Steam",
   "settings.secStatusUnreadable": "Unrecognized file",
@@ -604,9 +604,9 @@ export const en = {
   "secure.promptSteam": "Secured mods are tied to your Steam account. Sign in to unlock.",
   "secure.promptEnroll": "Enroll with your invite code first. It's in Settings under Paint sync.",
   "secure.promptEnrollBtn": "Open Settings",
-  "secure.revokedTitle_one": "You no longer have access to a secured mod",
-  "secure.revokedTitle_other": "You no longer have access to {{count}} secured mods",
-  "secure.revokedBody": "{{names}} — the creator removed your access, so it no longer opens on this PC.",
+  "secure.revokedTitle_one": "A secured mod isn't available any more",
+  "secure.revokedTitle_other": "{{count}} secured mods aren't available any more",
+  "secure.revokedBody": "{{names}} isn't available on this PC any more.",
   "settings.unlockNotOwned": "You don't own this content on this account yet.",
   "secure.intro":
     "Pick a file, lock it, then verify it unlocks. Verifying decrypts the blob right here and checks it matches the original, byte for byte — the proof it round-trips on this machine.",
@@ -1587,8 +1587,6 @@ export const en = {
     "Feel presets now carry how each control feels, like the throttle's dead zone, gain and smoothing. Your buttons and axes stay as they are.",
   "showcase.v0150.hub":
     "MXB Hub loads again when the store asks for a robot check: the app answers it quietly, or opens the store so you can finish it yourself.",
-  "showcase.v0150.secured":
-    "Secured content follows the access you actually have. If a creator removes you as a buyer, it stops opening the next time the app is online, and the app tells you why.",
   "showcase.v0140.hero.title":
     "Frost's Mod Manager, and a Studio of its own",
   "showcase.v0140.hero.body":
