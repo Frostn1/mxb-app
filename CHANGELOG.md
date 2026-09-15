@@ -9,6 +9,13 @@
 - Where the track will wear: the lines view says where the other riders crowd through each
   corner, since that's where it ruts first, and whether the fast line stays smoother.
 
+## 2026-09-15 — Feel presets carry your controls
+
+### Changed
+- Feel presets now save how each control feels, like the throttle's dead zone, gain and
+  smoothing, and put it back when you apply. Your buttons and axes stay as they are.
+- The feel editor names controls the way the game does, like Throttle, Front brake and Lean.
+
 ## 2026-09-15 — MXB Coach v0.1.9-beta.9
 
 ### Added
@@ -61,7 +68,7 @@
 ### Changed
 - Lean the bike more now says when the front isn't sliding, so you know the grip is there.
 
-## Unreleased — Frost's Studio
+## 2026-09-15 — Frost's Studio v0.1.9 — Your own AI model for tracks
 
 ### Added
 - Write tracks with your own AI model. Pick Groq, OpenRouter, OpenAI, Ollama or Anthropic in

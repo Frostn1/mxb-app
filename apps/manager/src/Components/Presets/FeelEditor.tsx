@@ -133,6 +133,35 @@ const LABELS: Record<string, string> = {
   drawdistance: "Draw distance",
 };
 
+/** `controls.txt` names the controls by the game's own ids (`CTRL_THROTTLE`). */
+const CONTROL_LABEL: Record<string, TKey> = {
+  CTRL_THROTTLE: "feel.control.throttle",
+  CTRL_BRAKE: "feel.control.brake",
+  CTRL_REARBRAKE: "feel.control.rearBrake",
+  CTRL_CLUTCH: "feel.control.clutch",
+  CTRL_SHIFTUP: "feel.control.shiftUp",
+  CTRL_SHIFTDOWN: "feel.control.shiftDown",
+  CTRL_SHIFTUPPL: "feel.control.shiftUpPreload",
+  CTRL_SHIFTDOWNPL: "feel.control.shiftDownPreload",
+  CTRL_LEAN: "feel.control.lean",
+  CTRL_FBLEAN: "feel.control.leanForwardBack",
+  CTRL_LRLEAN: "feel.control.leanLeftRight",
+  CTRL_SIT: "feel.control.sit",
+  CTRL_SITDirect: "feel.control.sitDirect",
+  CTRL_CHANGEVIEW: "feel.control.changeView",
+  CTRL_LOOKBACK: "feel.control.lookBack",
+  CTRL_HEADING: "feel.control.heading",
+  CTRL_TEAROFF: "feel.control.tearOff",
+};
+
+/** A control's name for the rider: `CTRL_THROTTLE` → `Throttle`, unknown ids tidied up. */
+export function controlLabel(t: ReturnType<typeof useT>, name: string): string {
+  const key = CONTROL_LABEL[name];
+  if (key) return t(key);
+  const bare = name.replace(/^CTRL_/, "").replace(/_/g, " ").toLowerCase();
+  return bare.charAt(0).toUpperCase() + bare.slice(1);
+}
+
 /** `leanhelp_scale` → `Lean help scale`, `smooth/press` → `Smooth press`. */
 function prettify(key: string): string {
   const known = LABELS[key];
@@ -295,7 +324,7 @@ export default function FeelEditor({ feel, taken, onClose, onSave }: Props) {
                   className="mb-3 flex-wrap"
                   value={controls.includes(control) ? control : controls[0]}
                   onChange={setControl}
-                  options={controls.map((c) => ({ value: c, label: c }))}
+                  options={controls.map((c) => ({ value: c, label: controlLabel(t, c) }))}
                 />
               )}
               {(filtering ? controls : [controls.includes(control) ? control : controls[0]]).map(
@@ -306,7 +335,7 @@ export default function FeelEditor({ feel, taken, onClose, onSave }: Props) {
                     <div key={c} className="mb-3 last:mb-0">
                       {filtering && (
                         <div className="mb-1.5 text-[11.5px] font-semibold text-foreground/85">
-                          {c}
+                          {controlLabel(t, c)}
                         </div>
                       )}
                       <Rows entries={rows} onChange={(k, v) => setTuning(c, k, v)} />
