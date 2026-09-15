@@ -73,7 +73,8 @@ jobs:
             libsoup-3.0-dev \
             libasound2-dev \
             patchelf \
-            squashfs-tools
+            squashfs-tools \
+            gcc-mingw-w64-x86-64
 
       # Restores the dependency cache release-cache.yml keeps warm on main. A tag run can
       # only read main's caches, never another tag's, so saving here was ~2 GB per release
@@ -99,32 +100,51 @@ jobs:
           ssh-key: ${{ secrets.SIDECAR_DEPLOY_KEY }}
           path: .sidecar-src
 
-      # Build the injected secure-content DLL from the private crate on the Windows leg only —
-      # injection is Windows-only, so the other platforms bundle nothing. sync.sh (next step)
-      # copies this into src/mxbsecure.dll, from where build.rs stages it into resources/ for
-      # the bundler. MSVC target to match the game's runtime.
-      - name: Build secure-content DLL
+      # Build the injected secure-content DLL from the private crate. On the Windows leg, MSVC to
+      # match the game's runtime; the app injects it in-process, so no injector exe is needed.
+      # sync.sh (below) copies it into src/mxbsecure.dll, from where build.rs stages it into
+      # resources/ for the bundler.
+      - name: Build secure-content DLL (Windows)
         if: ${{ github.repository == 'Frostn1/mxb-app' && startsWith(matrix.platform, 'windows') }}
         shell: bash
         run: cargo build --release --manifest-path .sidecar-src/secure/Cargo.toml --target x86_64-pc-windows-msvc
 
+      # On the Linux leg the buyer plays under Proton, so the DLL still has to be a Windows PE —
+      # cross-built with mingw (windows-gnu) — plus the attach injector (`inject.exe`) the app
+      # launches inside the Proton prefix. sync.sh copies both into src/ (mxbsecure.dll,
+      # mxbsecure-inject.exe), build.rs stages them into resources/.
+      - name: Build secure-content DLL + injector (Linux)
+        if: ${{ github.repository == 'Frostn1/mxb-app' && startsWith(matrix.platform, 'ubuntu') }}
+        shell: bash
+        run: |
+          rustup target add x86_64-pc-windows-gnu
+          cargo build --release --manifest-path .sidecar-src/secure/Cargo.toml --target x86_64-pc-windows-gnu
+
       - name: Apply sidecar module
         if: ${{ github.repository == 'Frostn1/mxb-app' }}
         shell: bash
-        run: bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
+        # worldnet.rs is the server browser. Without it the build still compiles, just with a
+        # Servers tab that says it isn't included, so fail here instead of shipping that.
+        run: |
+          bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
+          test -f apps/manager/src-tauri/src/worldnet.rs || { echo "::error::worldnet.rs missing after sync.sh"; exit 1; }
 
 
-      # Ask the bundler for the DLL only on the leg that has one. Tauri's `resources` glob
-      # is a hard error when it matches nothing, so keeping it in the committed config
-      # broke every build without the private module — CI on both platforms, and the
-      # macOS and Linux release legs. The file must be there by now: sync.sh put it in
-      # src/, build.rs copies it into resources/ before the bundler looks.
-      - name: Bundle the secure-content DLL
-        if: ${{ github.repository == 'Frostn1/mxb-app' && startsWith(matrix.platform, 'windows') }}
+      # Ask the bundler for the secure-content files only on the legs that have them. Tauri's
+      # `resources` glob is a hard error when it matches nothing, so keeping it in the committed
+      # config broke every build without the private module. By now sync.sh has put the files in
+      # src/ and build.rs has copied them into resources/. Windows ships just the DLL (injected
+      # in-process); Linux ships the DLL + `mxbsecure-inject.exe` (the Proton attach injector).
+      # The `resources/mxbsecure*` glob matches whichever files the leg produced.
+      - name: Bundle the secure-content files
+        if: ${{ github.repository == 'Frostn1/mxb-app' && (startsWith(matrix.platform, 'windows') || startsWith(matrix.platform, 'ubuntu')) }}
         shell: bash
         run: |
           test -f apps/manager/src-tauri/src/mxbsecure.dll || { echo "::error::mxbsecure.dll missing after sync.sh"; exit 1; }
-          jq '.bundle.resources = ["resources/*.dll"]' apps/manager/src-tauri/tauri.conf.json > tauri.conf.patched
+          if [[ "${{ matrix.platform }}" == ubuntu* ]]; then
+            test -f apps/manager/src-tauri/src/mxbsecure-inject.exe || { echo "::error::mxbsecure-inject.exe missing after sync.sh"; exit 1; }
+          fi
+          jq '.bundle.resources = ["resources/mxbsecure*"]' apps/manager/src-tauri/tauri.conf.json > tauri.conf.patched
           mv tauri.conf.patched apps/manager/src-tauri/tauri.conf.json
 
       # The release page should say what shipped, not only which file to download — so

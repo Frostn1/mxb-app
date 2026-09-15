@@ -3693,7 +3693,7 @@ dependencies = [
 
 [[package]]
 name = "mxb-app"
-version = "0.14.3"
+version = "0.14.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3755,8 +3755,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "mxb-coach"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs-next",
+ "log",
+ "mxb-core",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-log",
+ "tauri-plugin-process",
+ "tauri-plugin-shell",
+]
+
+[[package]]
 name = "mxb-core"
-version = "0.14.3"
+version = "0.14.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

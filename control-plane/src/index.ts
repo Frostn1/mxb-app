@@ -34,6 +34,7 @@ import { pruneReports, putReport } from "./diagnostics";
 import { stateRegions } from "./stateinvariants";
 import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
 import { deleteShare, publishShare, readShare, updateShare } from "./liveshare";
+import { leaveQueue, pruneQueue, putQueue, queueCounts } from "./serverqueue";
 import { generateTrack } from "./trackgen";
 import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
 import { bearer, hashToken, newToken, tokenMatches } from "./auth";
@@ -103,6 +104,7 @@ export default {
         pruneDeviceClaims(env),
         pruneUsage(env),
         pruneReports(env),
+        pruneQueue(env),
       ]).then(
         () => undefined,
       ),
@@ -291,6 +293,12 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/v1/roster") return roster(url, account, env);
   if (method === "GET" && path === "/v1/presence") return whoIsOn(url, env);
   if (method === "GET" && path === "/v1/presence/counts") return presenceCounts(env);
+
+  // The line for a full server. Open to every account, like presence: the riders who need it
+  // are the ones on community servers, not the invited few. See `serverqueue.ts`.
+  if (method === "PUT" && path === "/v1/queue") return putQueue(request, account.id, env);
+  if (method === "DELETE" && path === "/v1/queue") return leaveQueue(account.id, env);
+  if (method === "GET" && path === "/v1/queue/counts") return queueCounts(url, env);
 
   const openPaint = /^\/v1\/paints\/([0-9a-f]{64})$/.exec(path);
   if (openPaint) {
