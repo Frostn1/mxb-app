@@ -168,6 +168,69 @@ pub fn write_key_beside(blob_path: &str, sealed: &[u8]) -> Result<String, String
     Ok(out)
 }
 
+/// Delete every key file beside a blob — the `.mxbsecurekey` the app writes and the legacy
+/// `.mxbkey` sibling — returning whether one was actually there. Both names, because
+/// [`existing_key_path`] reads both and leaving the legacy one behind would leave the asset
+/// playing.
+///
+/// This is the revocation half of [`write_key_beside`], and it is only ever called after the
+/// control plane has said this account may no longer hold the key (see the app's revocation
+/// sweep). A missing file is success, not an error: the outcome asked for is "no key here".
+#[cfg_attr(not(mxbsecure), allow(dead_code))]
+pub fn remove_key_beside(blob_path: &str) -> bool {
+    let mut removed = false;
+    for path in [key_path_for(blob_path), format!("{blob_path}.mxbkey")] {
+        match std::fs::remove_file(&path) {
+            Ok(()) => removed = true,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => log::warn!("[secure] couldn't delete {path}: {e}"),
+        }
+    }
+    removed
+}
+
+/// Delete this account's vaulted copy of an asset's key, returning whether one was there.
+///
+/// Deleting the sibling alone would be undone by the next pass: the vault exists precisely to put
+/// a missing key back, offline, with no server call ([`ensure_key_present`]). So a revocation has
+/// to take both, and this is why a removal on the site can be made real at all — after this there
+/// is nothing left on the machine that opens the blob, and `/v1/keys/grant` will not issue another.
+#[cfg_attr(not(mxbsecure), allow(dead_code))]
+pub fn vault_remove(app: &AppHandle, steam_id: &str, asset_id: &str) -> bool {
+    let Some(path) = vault_key_path(app, steam_id, asset_id) else { return false };
+    match std::fs::remove_file(&path) {
+        Ok(()) => {
+            log::info!("[secure] removed the vaulted key for {asset_id}");
+            true
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => {
+            log::warn!("[secure] couldn't remove the vaulted key for {asset_id}: {e}");
+            false
+        }
+    }
+}
+
+/// Drop a blob from the provisioned-assets registry, so it is not re-listed by [`scan_secured`]
+/// from the registry after its key files are gone. Best-effort: [`scan_secured`] only folds in a
+/// registry entry, and an entry whose key no longer exists can't be armed anyway.
+#[cfg_attr(not(mxbsecure), allow(dead_code))]
+pub fn forget_asset(app: &AppHandle, blob_path: &str) {
+    let Some(path) = registry_path(app) else { return };
+    let mut assets = load_assets(app);
+    let before = assets.len();
+    assets.retain(|a| !a.blob_path.eq_ignore_ascii_case(blob_path));
+    if assets.len() == before {
+        return;
+    }
+    match serde_json::to_vec_pretty(&assets).map_err(|e| e.to_string()).and_then(|json| {
+        std::fs::write(&path, json).map_err(|e| e.to_string())
+    }) {
+        Ok(()) => {}
+        Err(e) => log::warn!("[secure] couldn't drop {blob_path} from the registry: {e}"),
+    }
+}
+
 /// The key beside `blob_path`, restoring it from the vault first if it has gone missing.
 ///
 /// This is the accidental-deletion path, and it is deliberately offline: the asset id comes from
@@ -726,6 +789,32 @@ mod tests {
         // Restoring over a key that no longer opens replaces it rather than failing.
         let again = write_key_beside(&blob, b"a-newer-sealed-key").unwrap();
         assert_eq!(std::fs::read(&again).unwrap(), b"a-newer-sealed-key");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn revoking_takes_the_legacy_key_too() {
+        // A blob can have either sibling name, and `existing_key_path` reads both — so a
+        // revocation that only deleted the new name would leave the asset playing off the old
+        // one. That is the whole failure this path exists to prevent, so it is asserted through
+        // `existing_key_path` rather than by checking the file names.
+        let dir = std::env::temp_dir().join(format!("frost-revoke-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let blob = dir.join("pinehill.mxbsecure").to_string_lossy().to_string();
+        std::fs::write(&blob, b"not a real blob").unwrap();
+
+        // Nothing to take back is success, not an error: the outcome asked for is "no key here".
+        assert!(!remove_key_beside(&blob), "nothing was there");
+
+        std::fs::write(key_path_for(&blob), b"sealed").unwrap();
+        std::fs::write(format!("{blob}.mxbkey"), b"older-sealed").unwrap();
+        assert!(existing_key_path(&blob).is_some());
+
+        assert!(remove_key_beside(&blob));
+        assert_eq!(existing_key_path(&blob), None, "both siblings are gone");
+        // And the blob itself is left alone — it is the buyer's file, and it is worthless
+        // without a key anyway.
+        assert!(std::path::Path::new(&blob).exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

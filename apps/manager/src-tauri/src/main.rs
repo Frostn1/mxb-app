@@ -1809,6 +1809,207 @@ fn register_secure_opener() {
     }));
 }
 
+/// What the control plane says about one secured asset, for this account.
+#[cfg(mxbsecure)]
+#[derive(serde::Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct AssetStatus {
+    #[allow(dead_code)]
+    asset_id: String,
+    title: Option<String>,
+    registered: bool,
+    owned: bool,
+    available: bool,
+    /// This account may no longer hold a key for this asset — the buyer was removed, or the
+    /// asset was withdrawn or taken down. `#[serde(default)]` on purpose: a control plane too
+    /// old to send the field reads as `false`, and `false` keeps the key. The answer that
+    /// deletes a file is never the one we infer from a missing field.
+    #[serde(default)]
+    revoked: bool,
+}
+
+/// The whole answer to one `/v1/assets/status` call: the Steam ID the control plane made the
+/// decisions for, and the assets by id.
+#[cfg(mxbsecure)]
+struct AssetStatusReply {
+    steam_id: Option<String>,
+    by_id: std::collections::HashMap<String, AssetStatus>,
+}
+
+/// Ask the control plane about a batch of assets. `None` for offline, a refusal, or a body we
+/// can't read — every one of which means "we don't know", and every caller treats not knowing as
+/// leave everything alone.
+#[cfg(mxbsecure)]
+async fn fetch_asset_status(cp_token: &str, asset_ids: &[&str]) -> Option<AssetStatusReply> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Reply {
+        steam_id: Option<String>,
+        assets: Vec<AssetStatus>,
+    }
+    let resp = reqwest::Client::new()
+        .post(format!("{}/v1/assets/status", crate::paintsync::control_plane()))
+        .bearer_auth(cp_token)
+        .json(&serde_json::json!({ "assetIds": asset_ids }))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: Reply = resp.json().await.ok()?;
+    Some(AssetStatusReply {
+        steam_id: body.steam_id,
+        by_id: body.assets.into_iter().map(|a| (a.asset_id.clone(), a)).collect(),
+    })
+}
+
+/// The asset this machine holds a key for at `blob_path`, or `None` if it holds none.
+///
+/// "Holds" is either copy: a `.mxbkey` beside the blob that opens for `steam_id`, or this
+/// account's vaulted copy — because either one alone is enough to keep playing, the vault being
+/// exactly what puts a deleted sibling back.
+#[cfg(mxbsecure)]
+fn held_asset_id(app: &tauri::AppHandle, blob_path: &str, steam_id: &str) -> Option<String> {
+    let asset_id = secure_launch::header_asset_id(std::path::Path::new(blob_path))?;
+    let beside = has_valid_key(blob_path, steam_id);
+    let vaulted =
+        secure_launch::vault_key_path(app, steam_id, &asset_id).is_some_and(|p| p.exists());
+    (beside || vaulted).then_some(asset_id)
+}
+
+/// What a revocation sweep took back, so the caller can skip those files and the UI can say so.
+#[cfg(mxbsecure)]
+#[derive(Default)]
+pub(crate) struct RevokeOutcome {
+    /// The blobs whose keys are now gone — not to be re-unlocked in the same pass.
+    pub blobs: std::collections::HashSet<String>,
+    /// What to call them, for the message the player sees.
+    pub names: Vec<String>,
+}
+
+/// What the UI is told when access to secured content is taken back.
+#[cfg(mxbsecure)]
+#[derive(Clone, serde::Serialize)]
+struct SecureRevoked {
+    names: Vec<String>,
+}
+
+/// Take back the keys for secured content this account may no longer open — the app half of
+/// removing a buyer on mxbsecure.com.
+///
+/// Removing a buyer revokes the entitlement, and `/v1/keys/grant` refuses from that moment. On a
+/// PC that had never unlocked the asset, that is the whole story. On one that had, it changed
+/// nothing: the `.mxbkey` beside the blob is sealed to that machine and opens **offline**, no
+/// server is ever asked again, and the key vault puts the file back if it is deleted. So the
+/// removal was real everywhere except on the machines it was about. This is the missing half:
+/// the app asks, on the same triggers that unlock, whether it may still hold what it holds, and
+/// deletes both copies of the key when the answer is no.
+///
+/// Every step is chosen so that not knowing leaves the key alone — deleting a paying buyer's
+/// access on a bad answer is far worse than an extra day of access on a stale one:
+///
+/// - Offline, a refused call, an unreadable body: nothing happens (`fetch_asset_status` → `None`).
+/// - An asset the control plane doesn't know, or an account with no Steam link: the server sends
+///   `revoked: false`, and a control plane too old to send the field at all reads the same way.
+/// - An answer about a different Steam ID than the keys are sealed to (the player signed the app
+///   in as one account and Steam is running as another) decides nothing, because `owned` there is
+///   about the wrong person.
+///
+/// The keys are gone from disk by the time this returns; a game that is already running keeps
+/// serving from the copy in its own memory until the DLL re-reads the manifest (~2 s) or the
+/// session ends, which is why the pass runs before arming rather than after.
+///
+/// `force` skips the throttle, for the two moments the answer can have just changed under us: a
+/// fresh sign-in or a game launch (both reach here through [`auto_unlock_now`]), and the explicit
+/// **Restore keys** repair, where the player is waiting on a fresh answer.
+#[cfg(mxbsecure)]
+pub(crate) async fn revoke_sweep(app: &tauri::AppHandle, force: bool) -> RevokeOutcome {
+    let mut out = RevokeOutcome::default();
+    {
+        // Throttled for the same reason the game-launch watcher latches: a pass walks the whole
+        // mods tree and reads a header per blob, and on a cloud-synced mods folder that is
+        // expensive enough to be felt. Opening Settings alone asks for the status list several
+        // times, so without this one click would sweep four times over.
+        let mut last = REVOKE_LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if !force {
+            if let Some(t) = *last {
+                if t.elapsed() < REVOKE_THROTTLE {
+                    return out;
+                }
+            }
+        }
+        *last = Some(std::time::Instant::now());
+    }
+    // No live Steam ID means no key on this machine opens anyway, and nothing to compare the
+    // server's answer against.
+    let Some(live) = steamid::current_steam_id64() else { return out };
+    let cfg = config::load_or_detect(app).unwrap_or_default();
+    let cp_token = cfg.cp_token.trim().to_string();
+    if cp_token.is_empty() {
+        return out; // not enrolled: nothing to ask with
+    }
+
+    // Only files this machine actually holds a key for are worth asking about. A blob with no
+    // key is already locked, and the grant decides that case on its own.
+    let held: Vec<(String, String)> = secure_launch::scan_blobs(app)
+        .into_iter()
+        .filter_map(|blob| held_asset_id(app, &blob, &live).map(|asset| (blob, asset)))
+        .collect();
+    if held.is_empty() {
+        return out;
+    }
+    let ids: Vec<&str> = {
+        let mut seen = std::collections::HashSet::new();
+        held.iter().map(|(_, a)| a.as_str()).filter(|a| seen.insert(*a)).collect()
+    };
+    let Some(reply) = fetch_asset_status(&cp_token, &ids).await else {
+        return out; // offline or refused — we don't know, so we keep everything
+    };
+    // The decisions are about the account the app is signed in as. If Steam is running as
+    // someone else, that answer says nothing about the keys on this disk.
+    if reply.steam_id.as_deref() != Some(live.as_str()) {
+        return out;
+    }
+
+    for (blob, asset_id) in held {
+        let Some(status) = reply.by_id.get(&asset_id) else { continue };
+        if !status.revoked {
+            continue;
+        }
+        // Both copies, or the next pass simply restores from the vault and nothing changed.
+        let beside = secure_launch::remove_key_beside(&blob);
+        let vaulted = secure_launch::vault_remove(app, &live, &asset_id);
+        secure_launch::forget_asset(app, &blob);
+        out.blobs.insert(blob.clone());
+        if beside || vaulted {
+            let name = status.title.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| {
+                let path = std::path::Path::new(&blob);
+                let file = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                secure_launch::game_name_of(path, &file)
+            });
+            log::info!("[secure] access to {asset_id} was revoked — key removed for {name}");
+            out.names.push(name);
+        }
+    }
+    if !out.names.is_empty() {
+        let _ = app.emit("mxbsecure-revoked", SecureRevoked { names: out.names.clone() });
+        // Rewrite the manifest without them, so a running game stops being served them.
+        secure_launch::refresh_running(app);
+    }
+    out
+}
+
+/// When a revocation sweep last ran, so the several status reads one screen makes collapse into
+/// one pass.
+#[cfg(mxbsecure)]
+static REVOKE_LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+/// The shortest gap between two unforced revocation sweeps. Longer than the unlock throttle: this
+/// is a "the next time their app is online" guarantee, not a live one, and the triggers that
+/// actually change the answer (a sign-in, a game launch, the repair button) all force it anyway.
+#[cfg(mxbsecure)]
+const REVOKE_THROTTLE: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// When auto-unlock last ran, so a burst of triggers (an unzip firing many install signals, the
 /// Library re-rendering, a status refresh) collapses to one pass instead of hammering the grant.
 #[cfg(mxbsecure)]
@@ -1865,9 +2066,16 @@ pub(crate) async fn auto_unlock_now(app: &tauri::AppHandle, force: bool) -> usiz
         }
         *last = Some(std::time::Instant::now());
     }
+    // Before unlocking anything, hand back what this account may no longer hold. Same triggers,
+    // same pass: a removal on the site lands the next time the app would have unlocked, which
+    // includes the moment the game starts — before `arm` writes the manifest.
+    let taken_back = revoke_sweep(app, force).await;
     let live = steamid::current_steam_id64();
     let locked: Vec<String> = secure_launch::scan_blobs(app)
         .into_iter()
+        // A key we just deleted leaves the blob "locked", and asking the grant for it again
+        // would only earn a 403 — it is revoked, that is the point.
+        .filter(|b| !taken_back.blobs.contains(b))
         .filter(|b| !live.as_deref().is_some_and(|id| has_valid_key(b, id)))
         .collect();
     let cfg = config::load_or_detect(app).unwrap_or_default();
@@ -1921,6 +2129,10 @@ struct SecureRepairOutcome {
     restored: usize,
     reprovisioned: usize,
     unresolved: usize,
+    /// Keys handed back because this account is no longer entitled. Repair is the one button a
+    /// player presses when content stopped appearing, so it is also where they should be told
+    /// that it stopped on purpose rather than left to read it as a broken repair.
+    revoked: usize,
 }
 
 /// Put back every secured key that has gone missing — the "I deleted something I shouldn't have"
@@ -1935,10 +2147,16 @@ struct SecureRepairOutcome {
 async fn mxbsecure_repair_keys(app: tauri::AppHandle) -> Result<SecureRepairOutcome, String> {
     #[cfg(mxbsecure)]
     {
+        // Take back revoked keys before putting any back: restoring from the vault would
+        // otherwise "repair" content the buyer is no longer entitled to.
+        let taken_back = revoke_sweep(&app, true).await;
         let live = steamid::current_steam_id64();
-        let mut out = SecureRepairOutcome::default();
+        let mut out = SecureRepairOutcome { revoked: taken_back.names.len(), ..Default::default() };
         for blob in secure_launch::scan_blobs(&app) {
             out.checked += 1;
+            if taken_back.blobs.contains(&blob) {
+                continue; // just revoked — not a key to put back
+            }
             if let Some(id) = &live {
                 let had_key = has_valid_key(&blob, id);
                 if restore_key_from_vault(&app, &blob, id) {
@@ -1984,6 +2202,10 @@ struct SecureStatusItem {
     registered: bool,
     owned: bool,
     available: bool,
+    /// Access was taken back: this account may no longer hold a key for it (the buyer was
+    /// removed, or the asset was withdrawn). The key has already been deleted by the time this
+    /// is reported, so `unlocked` is false beside it — this says *why*.
+    revoked: bool,
     unlocked: bool,
     /// The blob's header parsed — false for a truncated or non-mxbsecure file, which is still
     /// listed (with its filename) so a broken drop-in isn't a silent no-show.
@@ -2000,6 +2222,10 @@ struct SecureStatusItem {
 async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>, String> {
     #[cfg(mxbsecure)]
     {
+        // Opening the Secured-content view is one of the moments the answer can change, so it
+        // is a revocation check as well as a repair — otherwise the view would restore a key
+        // from the vault and report "Unlocked" for content the buyer no longer has.
+        revoke_sweep(&app, false).await;
         let live = steamid::current_steam_id64();
         let mut items: Vec<SecureStatusItem> = Vec::new();
         for blob_path in secure_launch::scan_blobs(&app) {
@@ -2032,6 +2258,7 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
                 registered: false,
                 owned: false,
                 available: false,
+                revoked: false,
                 unlocked,
                 readable,
                 has_key,
@@ -2046,38 +2273,14 @@ async fn mxbsecure_status(app: tauri::AppHandle) -> Result<Vec<SecureStatusItem>
         if !cp_token.is_empty() {
             let asset_ids: Vec<&str> =
                 items.iter().map(|i| i.asset_id.as_str()).filter(|a| !a.is_empty()).collect();
-            let sent = reqwest::Client::new()
-                .post(format!("{}/v1/assets/status", crate::paintsync::control_plane()))
-                .bearer_auth(&cp_token)
-                .json(&serde_json::json!({ "assetIds": asset_ids }))
-                .send()
-                .await;
-            if let Ok(resp) = sent {
-                if resp.status().is_success() {
-                    #[derive(serde::Deserialize)]
-                    struct StatusResp {
-                        assets: Vec<AssetStatus>,
-                    }
-                    #[derive(serde::Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct AssetStatus {
-                        asset_id: String,
-                        title: Option<String>,
-                        registered: bool,
-                        owned: bool,
-                        available: bool,
-                    }
-                    if let Ok(body) = resp.json::<StatusResp>().await {
-                        let map: std::collections::HashMap<String, AssetStatus> =
-                            body.assets.into_iter().map(|a| (a.asset_id.clone(), a)).collect();
-                        for item in &mut items {
-                            if let Some(a) = map.get(&item.asset_id) {
-                                item.title = a.title.clone();
-                                item.registered = a.registered;
-                                item.owned = a.owned;
-                                item.available = a.available;
-                            }
-                        }
+            if let Some(reply) = fetch_asset_status(&cp_token, &asset_ids).await {
+                for item in &mut items {
+                    if let Some(a) = reply.by_id.get(&item.asset_id) {
+                        item.title = a.title.clone();
+                        item.registered = a.registered;
+                        item.owned = a.owned;
+                        item.available = a.available;
+                        item.revoked = a.revoked;
                     }
                 }
             }
