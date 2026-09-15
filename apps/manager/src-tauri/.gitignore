@@ -13,4 +13,6 @@
 /src/mxbsecure.rs
 /src/worldnet.rs
 /src/mxbsecure.dll
+/src/mxbsecure-inject.exe
 /resources/*.dll
+/resources/mxbsecure-inject.exe
