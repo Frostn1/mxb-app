@@ -66,7 +66,7 @@ pub(crate) use mxb_core::mxbsecure;
 /// Local-only, like [`sidecar`] — the public tree neither has the file nor the feature.
 #[cfg(worldnet)]
 mod worldnet;
-mod steamid;
+use mxb_core::steamid;
 mod secure_launch;
 mod server_admin;
 

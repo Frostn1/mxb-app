@@ -596,6 +596,8 @@ function amount(c: SetupChange, t: ReturnType<typeof useT>): string {
   if (c.field === "forkOil") return t(c.steps > 0 ? "setup.moreOil" : "setup.lessOil");
   if (c.field === "frontSprocket" || c.field === "rearSprocket") return `${c.steps > 0 ? "+" : "−"}${n}T`;
   if (c.field === "swingarmLength" || c.field === "rodLength") return t(c.steps > 0 ? "setup.longer" : "setup.shorter");
+  if (c.field === "forkHeight") return t(c.steps > 0 ? "setup.frontHigher" : "setup.frontLower");
+  if (c.field === "forkOffset") return t(c.steps > 0 ? "setup.moreOffset" : "setup.lessOffset");
   const up = c.steps > 0;
   // Rebound reads as slower or faster, preload as more or less, the rest firmer or softer.
   const [one, many]: [TKey, TKey] =

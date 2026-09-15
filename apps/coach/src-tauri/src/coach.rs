@@ -382,6 +382,12 @@ fn rider_setup(app: &AppHandle, rec: &Recording) -> RiderSetup {
     let name = raw.trim_start_matches(':').to_string();
     let bike_cfg = crate::bikecfg::load_cfg(&cfg.mods_path, &e.bike_id);
     let mut opts = bike_cfg.as_ref().map(crate::bikecfg::options);
+    // The swingarm's lengths are in the bike's `.geom`, not its cfg.
+    if let (Some(bc), Some(o)) = (&bike_cfg, opts.as_mut()) {
+        if let Some(sw) = crate::bikecfg::load_geom(&cfg.mods_path, &e.bike_id, bc).as_ref().and_then(crate::bikecfg::swingarm) {
+            o.insert(crate::stp::Field::SwingarmLength, sw);
+        }
+    }
     let file = crate::stp::locate(&cfg.profiles_dir(), &raw, &e.track_id, &e.bike_id);
     let setup = file
         .as_ref()

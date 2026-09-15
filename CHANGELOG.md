@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-15 — MXB Coach v0.1.9-beta.9
+
+### Added
+- Secured tracks: a track locked to your Steam account now opens in the coach, for the 3D view
+  and the ground, the way it does in MXB App. Nobody else's does.
+- Geometry: the coach can now change fork height, linkage rod, fork offset and swingarm length in
+  your saved copy, reading which way each goes from the bike's own files. A front that sits low
+  or pushes, or a rear that sits low, gets a geometry step after the suspension ones.
+
 ## 2026-09-15 — MXB Coach v0.1.8-beta.8
 
 ### Added
