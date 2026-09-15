@@ -39,6 +39,10 @@
 - A Settings only mode for writing tracks: the model picks the kind of track and the Studio
   draws the lap. It works with free models and usually takes under a minute.
 
+### Changed
+- In Track Studio, press Esc, click the step again or use "← whole lap" to go back from a step
+  to the whole track's settings.
+
 ## 2026-09-15 — Frost's Studio v0.1.8 — Easy and ARL random tracks
 
 ### Added
