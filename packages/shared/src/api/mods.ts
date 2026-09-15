@@ -2551,6 +2551,11 @@ export function setAutoRunFrostmod(enabled: boolean): Promise<void> {
   return invoke<void>("set_auto_run_frostmod", { enabled });
 }
 
+/** Toggle closing an open game to launch into a queued server's slot. */
+export function setQueueRestartGame(enabled: boolean): Promise<void> {
+  return invoke<void>("set_queue_restart_game", { enabled });
+}
+
 /** Extra command-line flags handed to `frostmod.exe`, exactly as typed. */
 export function setFrostmodArgs(args: string): Promise<void> {
   return invoke<void>("set_frostmod_args", { args });

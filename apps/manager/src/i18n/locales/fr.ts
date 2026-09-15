@@ -546,6 +546,8 @@ export const fr: Translation = {
   "settings.colorwayRetro": "Rétro",
   "settings.language": "Langue",
   "settings.languageSystem": "Système",
+  "settings.queueRestartGame": "Fermer le jeu quand ton tour arrive dans la file",
+  "settings.queueRestartGameDesc": "Quand ton tour arrive dans la file d'un serveur et que le jeu est ouvert, il est fermé puis relancé directement sur le serveur.",
   "settings.preferServer": "Préférer les fichiers serveur dédié",
   "settings.preferServerDesc": "Prendre la version serveur dédié quand un mod en propose une. Pour une machine qui héberge un serveur plutôt que pour jouer.",
   "settings.preferredHost": "Hébergeur préféré",

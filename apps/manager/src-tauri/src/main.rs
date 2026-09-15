@@ -3826,6 +3826,13 @@ fn set_auto_run_frostmod(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+#[tauri::command]
+fn set_queue_restart_game(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.queue_restart_game = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 /// Extra flags for `frostmod.exe`, stored as typed. Not validated here: FrostMod ignores a
 /// flag it doesn't know, so an unknown one costs nothing, while checking against a list this
 /// app carries would reject flags a newer FrostMod does understand.
@@ -6360,6 +6367,7 @@ fn main() {
             track_event,
             set_launch_at_startup,
             set_auto_run_frostmod,
+            set_queue_restart_game,
             set_frostmod_args,
             set_instant_refresh,
             overlay_toggle,

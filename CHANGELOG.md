@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-14
+
+### Added
+- A setting to close the game when your turn in a server line comes, so the app can start it
+  straight into the server. It's off by default and lives in Settings, General.
+
 ## Unreleased — Frost's Studio
 
 ### Added

@@ -575,6 +575,10 @@ impl GameSession {
             .map(|d| format!("{:.1}s", d.as_secs_f64()))
             .unwrap_or_else(|| "unknown".into());
         let pid = self.pid;
+        if CLOSED_BY_APP.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            log::info!("[session] game closed by the app after {lived} (pid {pid})");
+            return None;
+        }
         match describe_exit(code) {
             None => log::info!("[session] game exited cleanly after {lived} (pid {pid})"),
             Some(what) => log::warn!(
@@ -1548,6 +1552,42 @@ pub fn is_game_running() -> bool {
 #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 pub fn is_game_running() -> bool {
     false
+}
+
+/// Set by [`close_game`] so the session log doesn't read our kill's exit code as a crash.
+#[cfg(windows)]
+static CLOSED_BY_APP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Close the running game and wait up to `timeout` for it to go. Reports whether it went.
+/// A hard kill: the game has no quit command we can send it.
+pub fn close_game(timeout: std::time::Duration) -> bool {
+    let exe = crate::game::active().exe;
+    log::info!("closing {exe}");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        CLOSED_BY_APP.store(true, std::sync::atomic::Ordering::Relaxed);
+        /// Don't flash a console window for the kill.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", exe])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+    #[cfg(target_os = "linux")]
+    crate::proton::kill_exe(exe);
+    #[cfg(target_os = "macos")]
+    crate::winehost::kill_exe(exe);
+
+    let deadline = std::time::Instant::now() + timeout;
+    while is_game_running() {
+        if std::time::Instant::now() >= deadline {
+            log::warn!("{exe} is still running {timeout:?} after being closed");
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    true
 }
 
 /// The game's mapped DLLs, read out of Proton's view of the process.

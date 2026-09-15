@@ -39,6 +39,7 @@ import {
   overlayToggle,
   presetsListProfiles,
   setAutoRunFrostmod,
+  setQueueRestartGame,
   setFrostmodArgs,
   setGamePath,
   setInstantRefresh,
@@ -497,6 +498,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const runInBackground = config.runInBackground ?? true;
   const launchAtStartup = config.launchAtStartup ?? false;
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
+  const queueRestartGame = config.queueRestartGame ?? false;
   // Typed flags are edited freely and saved on blur, so the field holds a draft until then —
   // saving per keystroke would write the config on every letter and fight the cursor.
   const [frostmodArgsDraft, setFrostmodArgsDraft] = useState<string | null>(null);
@@ -930,6 +932,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const toggleAutoRun = async (v: boolean) => {
     try {
       await setAutoRunFrostmod(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const toggleQueueRestartGame = async (v: boolean) => {
+    try {
+      await setQueueRestartGame(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
@@ -1430,6 +1441,13 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               desc={t("settings.paintSyncDesc")}
               checked={paintSyncEnabled}
               onChange={togglePaintSync}
+            />
+            <div className="h-px bg-border" />
+            <ToggleRow
+              label={t("settings.queueRestartGame")}
+              desc={t("settings.queueRestartGameDesc")}
+              checked={queueRestartGame}
+              onChange={toggleQueueRestartGame}
             />
             <div className="h-px bg-border" />
             {/* Which file to take when a mod ships the same thing twice. Both of these are

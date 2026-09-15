@@ -99,6 +99,8 @@ export interface Config {
   launchAtStartup?: boolean;
   /** Auto-run FrostMod when the app opens (default true). */
   autoRunFrostmod?: boolean;
+  /** Close an open game to launch into a queued server's slot (default false). */
+  queueRestartGame?: boolean;
   /** Extra command-line flags for `frostmod.exe`, exactly as typed. Empty by default. */
   frostmodArgs?: string;
   instantRefresh?: boolean;
