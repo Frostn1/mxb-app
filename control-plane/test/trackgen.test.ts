@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SYSTEM, generateTrack } from "../src/trackgen";
+import { PROTOCOLS, SYSTEM, generateTrack } from "../src/trackgen";
 
 /** A request the endpoint would accept, so each test can spoil one thing about it. */
 function post(body: unknown): Request {
@@ -58,14 +58,56 @@ describe("the no-key check comes first", () => {
   });
 });
 
-describe("the system prompt", () => {
-  it("is one string, not a tagged template", () => {
-    // It is a backtick literal, so a stray backtick in the prose ends it and turns the next
-    // line into a tag call — `a \`.trh\` carries` parses fine and throws `.trh is not a
-    // function` the moment the module is evaluated. It shipped that way once: `tsc` catches
-    // it, and `esbuild` and a bundle check both do not.
+describe("settings mode", () => {
+  it("answers 503 without a key too", async () => {
+    const res = await generateTrack(post({ brief: "a sandy national", mode: "settings" }), withoutKey);
+    expect(res.status).toBe(503);
+  });
+
+  it("refuses a mode it doesn't know", async () => {
+    const res = await generateTrack(post({ brief: "a sandy national", mode: "heightmap" }), withKey);
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("the prompts", () => {
+  it("load as text from packages/track-protocol", () => {
     expect(typeof SYSTEM).toBe("string");
     expect(SYSTEM.length).toBeGreaterThan(1000);
-    expect(SYSTEM).not.toContain("`");
+    expect(SYSTEM).toContain("THE LAP MUST CLOSE");
+    expect(PROTOCOLS.settings.system).toContain("settings");
+  });
+});
+
+/** Every object node in a schema, so each can be checked for strict mode. */
+function objects(node: unknown, out: Record<string, unknown>[] = []): Record<string, unknown>[] {
+  if (Array.isArray(node)) node.forEach((n) => objects(n, out));
+  else if (node && typeof node === "object") {
+    const o = node as Record<string, unknown>;
+    if (o.type === "object") out.push(o);
+    Object.values(o).forEach((n) => objects(n, out));
+  }
+  return out;
+}
+
+describe("the schemas", () => {
+  it("stay under the grammar ceiling", () => {
+    // Alternatives are what cost, and a nullable field is one. Measured 2026-09-06: the
+    // program fits with the segment union and nothing else. Raise this only after checking
+    // the live API still compiles it.
+    const unions = (s: unknown) => JSON.stringify(s).split('"anyOf"').length - 1;
+    expect(unions(PROTOCOLS.program.schema)).toBeLessThanOrEqual(1);
+    expect(unions(PROTOCOLS.settings.schema)).toBe(0);
+  });
+
+  it("are strict: every field required and nothing extra", () => {
+    // What Groq, OpenAI and Anthropic all need for constrained decoding.
+    for (const mode of ["program", "settings"] as const) {
+      for (const o of objects(PROTOCOLS[mode].schema)) {
+        const keys = Object.keys(o.properties as object).sort();
+        expect([...(o.required as string[])].sort(), `${mode}: ${keys}`).toEqual(keys);
+        expect(o.additionalProperties, `${mode}: ${keys}`).toBe(false);
+      }
+    }
   });
 });

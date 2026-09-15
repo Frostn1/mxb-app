@@ -9,6 +9,15 @@
  * A plain object rather than `defineConfig`, so this file itself imports nothing.
  */
 export default {
+  // Wrangler imports `.md` as text (the `rules` in wrangler.jsonc); this does the same here.
+  plugins: [
+    {
+      name: "text",
+      transform(code: string, id: string) {
+        return id.endsWith(".md") ? `export default ${JSON.stringify(code)};` : undefined;
+      },
+    },
+  ],
   test: {
     // The Worker's tests are plain unit tests over pure functions; nothing here needs the
     // workers pool.
