@@ -426,6 +426,24 @@ export function mxbsecureAutoUnlock(force = false): Promise<number> {
   return invoke<number>("mxbsecure_auto_unlock", { force });
 }
 
+/** What a key repair pass did. `restored` came back from the app's own key vault with no
+ *  network at all; `reprovisioned` needed a fresh `/v1/keys/grant`; `unresolved` could not be
+ *  fixed here (not enrolled, not entitled, no Steam, or offline with nothing vaulted). */
+export interface SecureRepairOutcome {
+  checked: number;
+  restored: number;
+  reprovisioned: number;
+  unresolved: number;
+}
+
+/** Put back every secured key that has gone missing — the fix for a `.mxbsecurekey` deleted by
+ *  accident, and the first thing to try when secured content stops showing up in game. Restores
+ *  the app's vaulted copy first (offline, instant); only a key that isn't vaulted is fetched
+ *  again from the control plane, which is free but needs to be online. */
+export function mxbsecureRepairKeys(): Promise<SecureRepairOutcome> {
+  return invoke<SecureRepairOutcome>("mxbsecure_repair_keys");
+}
+
 /** Start linking this account to Steam: returns a Steam OpenID URL to open in the browser.
  *  Completing it there sets your account's Steam ID (via /v1/steam/return), which is what
  *  grant checks before releasing a content key. */

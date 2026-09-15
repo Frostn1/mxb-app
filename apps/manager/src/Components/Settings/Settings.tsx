@@ -67,6 +67,7 @@ import {
   contentSecureAvailable,
   mxbsecureUnlock,
   mxbsecureAutoUnlock,
+  mxbsecureRepairKeys,
   steamLinkStatus,
   mxbsecureStatus,
   type SecureStatusItem,
@@ -515,6 +516,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const mxbsecureEnabled = config.mxbsecureEnabled ?? true;
   const [secureAvailable, setSecureAvailable] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
+  const [repairing, setRepairing] = useState(false);
   const [linkedSteam, setLinkedSteam] = useState<string | null>(null);
   const [secureItems, setSecureItems] = useState<SecureStatusItem[]>([]);
   const secureBadge = (
@@ -858,6 +860,32 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       }
     } finally {
       setUnlocking(false);
+    }
+  };
+
+  // Put back keys that went missing. Deleting the `.mxbsecurekey` beside a blob is the easiest
+  // mistake to make — it lives in the mods folder, where people tidy up and unzip over things —
+  // so the app keeps its own copy and this restores from it without touching the network.
+  // Anything not vaulted is re-granted instead, which is free but needs to be online.
+  const repairSecureKeys = async () => {
+    setRepairing(true);
+    try {
+      const r = await mxbsecureRepairKeys();
+      const fixed = r.restored + r.reprovisioned;
+      if (fixed > 0) {
+        toast.success(t("settings.secRepairOk", { count: fixed }));
+      } else if (r.unresolved > 0) {
+        toast.error(t("settings.secRepairFail"), {
+          description: t("settings.secRepairFailDesc", { count: r.unresolved }),
+        });
+      } else {
+        toast.info(t("settings.secRepairNone", { count: r.checked }));
+      }
+      mxbsecureStatus().then(setSecureItems).catch(() => {});
+    } catch (e) {
+      toast.error(t("settings.secRepairFail"), { description: String(e) });
+    } finally {
+      setRepairing(false);
     }
   };
 
@@ -1502,6 +1530,23 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                         onClick={() => void unlockSecured()}
                       >
                         {t("settings.mxbsecureUnlockBtn")}
+                      </Button>
+                    </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-medium">{t("settings.secRepair")}</p>
+                        <p className="mt-0.5 text-[12px] text-muted-foreground">
+                          {t("settings.secRepairDesc")}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-none"
+                        disabled={repairing}
+                        onClick={() => void repairSecureKeys()}
+                      >
+                        {repairing ? t("settings.secRepairBusy") : t("settings.secRepairBtn")}
                       </Button>
                     </div>
                     {secureItems.length > 0 && (

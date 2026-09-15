@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { adminAssets } from "../src/assets";
 import { landingSite, safeNext, webRoutes } from "../src/web";
+import { adminSteamIds } from "../src/webadmin";
 import {
   LEGACY_SESSION_COOKIE,
   LOGIN_COOKIE,
@@ -41,6 +42,8 @@ async function deployment(overrides: Record<string, string> = {}): Promise<Env> 
         return body === undefined ? null : { body };
       },
     },
+    // The paints bucket, as far as the paint views ask: a digest nobody uploaded is absent.
+    PAINTS: { async head() { return null; }, async get() { return null; } },
     MXB_WEB_SESSION_KEY: KEY,
     MXB_ASSET_MASTER_KEY: masterKey(),
     MXB_OWNER_ACCOUNT_ID: "acc_owner",
@@ -186,7 +189,7 @@ describe("Steam sign-in", () => {
     expect(me.status).toBe(200);
     expect(me.headers.get("Access-Control-Allow-Origin")).toBe(SITE);
     expect(me.headers.get("Access-Control-Allow-Credentials")).toBe("true");
-    expect(await me.json()).toEqual({ steamId: CREATOR, name: "Frost", creator: true, linked: true });
+    expect(await me.json()).toEqual({ steamId: CREATOR, name: "Frost", creator: true, linked: true, admin: false });
   });
 
   it("refuses a return that didn't start in this browser, before asking Steam", async () => {
@@ -527,5 +530,171 @@ describe("creator API keys", () => {
     expect((await assets(env, withKey(key, "GET", "/admin/assets"))).status).toBe(200);
     await env.DB.prepare("UPDATE accounts SET creator_at = NULL WHERE id = 'acc_frost'").run();
     expect((await assets(env, withKey(key, "GET", "/admin/assets"))).status).toBe(401);
+  });
+});
+
+describe("the dashboards on the site", () => {
+  const ADMINS = { MXB_ADMIN_STEAM_IDS: CREATOR };
+
+  it("is nobody's until the deployment names them", async () => {
+    const env = await deployment();
+    expect(adminSteamIds(env)).toEqual([]);
+    // Being a creator is not being an admin: one sells through the site, the other reads
+    // everybody's numbers.
+    expect((await web(env, req("GET", "/v1/web/admin/usage", { cookie: await cookieFor(CREATOR) }))).status).toBe(403);
+  });
+
+  it("drops anything in the list that isn't a SteamID64", async () => {
+    const env = await deployment({ MXB_ADMIN_STEAM_IDS: `nonsense, ${CREATOR} ${OTHER}, 12` });
+    expect(adminSteamIds(env)).toEqual([CREATOR, OTHER]);
+  });
+
+  it("asks for a sign-in, then for the right one", async () => {
+    const env = await deployment(ADMINS);
+    expect((await web(env, req("GET", "/v1/web/admin/usage"))).status).toBe(401);
+    expect((await web(env, req("GET", "/v1/web/admin/usage", { cookie: await cookieFor(OTHER) }))).status).toBe(403);
+    // Expired reads as signed out, not as refused: the fix is to sign in again.
+    const stale = await cookieFor(CREATOR, Date.now() - 1000);
+    expect((await web(env, req("GET", "/v1/web/admin/usage", { cookie: stale }))).status).toBe(401);
+  });
+
+  it("hands an admin the same numbers the rendered page draws", async () => {
+    const env = await deployment(ADMINS);
+    const res = await web(env, req("GET", "/v1/web/admin/usage?days=7", { cookie: await cookieFor(CREATOR) }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(SITE);
+    const stats = (await res.json()) as { days: number; daily: unknown[]; active: { day: number } };
+    expect(stats.days).toBe(7);
+    expect(stats.active.day).toBe(0);
+    expect(Array.isArray(stats.daily)).toBe(true);
+  });
+
+  it("serves the diagnostics views the rendered pages serve", async () => {
+    const env = await deployment(ADMINS);
+    const frost = await cookieFor(CREATOR);
+    const get = async (path: string) => {
+      const res = await web(env, req("GET", path, { cookie: frost }));
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
+
+    const overview = await get("/v1/web/admin/diagnostics?days=7");
+    expect(overview.status).toBe(200);
+    // The rules ride along with the overview rather than costing a second round trip.
+    expect(overview.body).toMatchObject({ days: 7, live: [], rules: [], reporting: 0 });
+    expect(overview.body.totals).toMatchObject({ accounts: 3 });
+
+    expect(await get("/v1/web/admin/diagnostics/riders?q=frost")).toMatchObject({
+      status: 200,
+      body: { rows: [{ riderName: "Frost" }], page: 1 },
+    });
+    expect((await get("/v1/web/admin/diagnostics/files")).body).toMatchObject({ rows: [], total: 0 });
+
+    // A name nobody has is a 404, not an empty detail page.
+    expect((await get("/v1/web/admin/diagnostics/rider?who=nobody")).status).toBe(404);
+    expect((await get("/v1/web/admin/diagnostics/rider")).status).toBe(404);
+    expect((await get("/v1/web/admin/diagnostics/file?name=nothing.dll")).status).toBe(404);
+  });
+
+  it("writes a rule only from the site, and only a usable one", async () => {
+    const env = await deployment(ADMINS);
+    const frost = await cookieFor(CREATOR);
+    const post = (body: unknown, opts: Record<string, unknown> = {}) =>
+      web(env, req("POST", "/v1/web/admin/diagnostics/rules", { cookie: frost, body, ...opts }));
+
+    // A form post from somewhere else is refused before the rule is read.
+    expect((await post({ kind: "deny", pattern: "x.dll" }, { origin: "https://evil.example" })).status).toBe(403);
+    expect((await post({ kind: "sideways", pattern: "x.dll" })).status).toBe(400);
+    // A name *and* a hash reads two different ways; `addRule` refuses it and so does this.
+    expect((await post({ kind: "deny", pattern: "x.dll", sha256: "a".repeat(64) })).status).toBe(400);
+
+    expect((await post({ kind: "deny", pattern: "cheat.dll", label: "Known cheat" })).status).toBe(200);
+    const after = await web(env, req("GET", "/v1/web/admin/diagnostics", { cookie: frost }));
+    const { rules } = (await after.json()) as { rules: { id: number; pattern: string }[] };
+    expect(rules).toMatchObject([{ pattern: "cheat.dll" }]);
+
+    expect((await post({ action: "delete", id: rules[0].id })).status).toBe(200);
+    expect((await post({ action: "delete", id: 0 })).status).toBe(400);
+  });
+
+  it("serves the paint views, and refuses a digest that isn't one", async () => {
+    const env = await deployment(ADMINS);
+    const frost = await cookieFor(CREATOR);
+    const get = async (path: string) => {
+      const res = await web(env, req("GET", path, { cookie: frost }));
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
+
+    const riders = await get("/v1/web/admin/paints/riders");
+    expect(riders.status).toBe(200);
+    expect(riders.body.totals).toMatchObject({ riders: 0, paints: 0 });
+    expect(riders.body.found).toMatchObject({ rows: [], page: 1 });
+    // The column asked for is looked up, never trusted: a hand-edited sort is the default.
+    expect((await get("/v1/web/admin/paints/riders?sort=nonsense")).body.order).toMatchObject({ sort: "published" });
+    expect((await get("/v1/web/admin/paints/files")).status).toBe(200);
+
+    expect((await get("/v1/web/admin/paints/rider?id=nobody")).status).toBe(404);
+    expect((await get("/v1/web/admin/paints/paint?sha=not-a-digest")).status).toBe(404);
+    expect((await get(`/v1/web/admin/paints/paint?sha=${"a".repeat(64)}`)).status).toBe(404);
+  });
+
+  it("mints, revokes and grants, and refuses what the data layer refuses", async () => {
+    const env = await deployment(ADMINS);
+    const frost = await cookieFor(CREATOR);
+    await env.DB.prepare("INSERT INTO plugins (id, name, created_at) VALUES ('voice', 'Voice', 1)").run();
+    const post = (body: unknown, opts: Record<string, unknown> = {}) =>
+      web(env, req("POST", "/v1/web/admin/plugins", { cookie: frost, body, ...opts }));
+    const read = async (path: string) =>
+      (await (await web(env, req("GET", path, { cookie: frost }))).json()) as Record<string, never>;
+
+    expect((await post({ action: "mint", plugin: "voice", months: 3, count: 2 }, { origin: "https://evil.example" })).status).toBe(403);
+    expect((await post({ action: "sideways" })).status).toBe(400);
+    // The ceilings are `mintKeys`'s, not this endpoint's: one place decides what is sane.
+    expect((await post({ action: "mint", plugin: "voice", months: 99, count: 2 })).status).toBe(400);
+    expect((await post({ action: "mint", plugin: "nope", months: 3, count: 2 })).status).toBe(400);
+
+    const minted = await post({ action: "mint", plugin: "voice", months: 3, count: 2, note: "testers" });
+    expect(minted.status).toBe(200);
+    const { at } = (await minted.json()) as { at: number };
+
+    const keys = await read(`/v1/web/admin/plugins/keys?minted=${at}`);
+    expect((keys.batch as unknown as string[]).length).toBe(2);
+    expect((keys.found as unknown as { rows: { code: string }[] }).rows).toHaveLength(2);
+    // The migrations ship a plugin of their own, so this is "contains", not "equals".
+    expect(keys.plugins as unknown as { id: string; keys: number }[]).toContainEqual(
+      expect.objectContaining({ id: "voice", keys: 2 }),
+    );
+
+    const code = (keys.batch as unknown as string[])[0];
+    expect((await post({ action: "key-revoke", code })).status).toBe(200);
+    const revoked = await read("/v1/web/admin/plugins/keys?state=revoked");
+    expect((revoked.found as unknown as { total: number }).total).toBe(1);
+    expect((await post({ action: "key-restore", code })).status).toBe(200);
+
+    expect((await post({ action: "grant", who: "nobody", plugin: "voice", months: 3 })).status).toBe(400);
+    expect((await post({ action: "grant", who: "Frost", plugin: "voice", months: 3 })).status).toBe(200);
+    expect((await read("/v1/web/admin/plugins/licenses")).found).toMatchObject({ total: 1 });
+    expect((await post({ action: "license-revoke", account: "acc_frost", plugin: "voice" })).status).toBe(200);
+    expect((await read("/v1/web/admin/plugins/licenses?state=live")).found).toMatchObject({ total: 0 });
+  });
+
+  it("clamps the window and refuses a path it doesn't serve", async () => {
+    const env = await deployment(ADMINS);
+    const frost = await cookieFor(CREATOR);
+    const res = await web(env, req("GET", "/v1/web/admin/usage?days=9000", { cookie: frost }));
+    expect(((await res.json()) as { days: number }).days).toBe(365);
+    expect((await web(env, req("GET", "/v1/web/admin/nothing", { cookie: frost }))).status).toBe(404);
+  });
+
+  it("tells the site whether to offer them at all", async () => {
+    const admin = await deployment(ADMINS);
+    const me = async (env: Env, steamId: string) =>
+      (await (await web(env, req("GET", "/v1/web/me", { cookie: await cookieFor(steamId) }))).json()) as {
+        admin: boolean;
+        creator: boolean;
+      };
+    expect(await me(admin, CREATOR)).toMatchObject({ admin: true, creator: true });
+    expect(await me(admin, OTHER)).toMatchObject({ admin: false, creator: true });
+    expect(await me(await deployment(), CREATOR)).toMatchObject({ admin: false });
   });
 });

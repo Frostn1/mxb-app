@@ -48,7 +48,7 @@ type Tab = "riders" | "paints";
 // Rows
 // ---------------------------------------------------------------------------
 
-interface RiderRow {
+export interface RiderRow {
   id: string;
   rider_name: string;
   guid: string | null;
@@ -77,7 +77,7 @@ export interface PaintRow {
   stored: number | null;
 }
 
-interface SlotRow {
+export interface SlotRow {
   bike_id: string;
   slot: string;
   file_name: string;
@@ -86,7 +86,7 @@ interface SlotRow {
   rel_dest: string;
 }
 
-interface Totals {
+export interface Totals {
   riders: number;
   paints: number;
   slots: number;
@@ -225,25 +225,45 @@ function html(body: string, status = 200): Response {
 }
 
 /** `GET /admin/paints` — who has published a look. */
+/**
+ * What each view reads, apart from how it is drawn.
+ *
+ * The site draws these too (`webadmin.ts`), and the two must not drift into asking slightly
+ * different questions: a gather function each is what keeps one query behind both doors.
+ */
+export interface RidersData {
+  totals: Totals;
+  found: Paged<RiderRow>;
+  q: string;
+  order: Order;
+}
+
+export async function ridersData(env: Env, url: URL): Promise<RidersData> {
+  const q = (url.searchParams.get("q") ?? "").slice(0, 96);
+  const order = parseOrder(url, RIDER_COLUMNS, "published");
+  const page = parsePage(url.searchParams.get("page"));
+  const [sums, found] = await Promise.all([totals(env), searchRiders(env, q, order, page)]);
+  return { totals: sums, found, q, order };
+}
+
 export async function paintRiders(request: Request, url: URL, env: Env): Promise<Response> {
   const denied = gate(request, url, env);
   if (denied) return denied;
 
   const c = ctx(url);
-  const q = (url.searchParams.get("q") ?? "").slice(0, 96);
-  const order = parseOrder(url, RIDER_COLUMNS, "published");
-  const page = parsePage(url.searchParams.get("page"));
-  const [sums, found] = await Promise.all([totals(env), searchRiders(env, q, order, page)]);
-  return html(view("Paint sync", "riders", ridersView(sums, found, q, order, c), c));
+  const d = await ridersData(env, url);
+  return html(view("Paint sync", "riders", ridersView(d.totals, d.found, d.q, d.order, c), c));
 }
 
-/** `GET /admin/paints/rider?id=…` — one rider's bikes, slot by slot. */
-export async function paintRider(request: Request, url: URL, env: Env): Promise<Response> {
-  const denied = gate(request, url, env);
-  if (denied) return denied;
+export interface OneRiderData {
+  account: { id: string; rider_name: string; guid: string | null; steam_id: string | null; kind: string; created_at: number };
+  slots: SlotRow[];
+  /** When each bike's loadout was last published. */
+  published: { bike_id: string; updated_at: number }[];
+  presence: { server_id: string; updated_at: number } | null;
+}
 
-  const c = ctx(url);
-  const id = url.searchParams.get("id") ?? "";
+export async function oneRiderData(env: Env, id: string): Promise<OneRiderData | null> {
   const account = await env.DB.prepare(
     "SELECT id, rider_name, guid, steam_id, kind, created_at FROM accounts WHERE id = ?",
   )
@@ -256,7 +276,7 @@ export async function paintRider(request: Request, url: URL, env: Env): Promise<
       kind: string;
       created_at: number;
     }>();
-  if (!account) return html(view("Paint sync", "riders", empty("No such account."), c), 404);
+  if (!account) return null;
 
   const [slots, published, presence] = await Promise.all([
     env.DB.prepare(
@@ -273,15 +293,34 @@ export async function paintRider(request: Request, url: URL, env: Env): Promise<
       .first<{ server_id: string; updated_at: number }>(),
   ]);
 
-  const when = new Map((published.results ?? []).map((r) => [r.bike_id, r.updated_at]));
-  return html(
-    view(
-      account.rider_name,
-      "riders",
-      riderView(account, slots.results ?? [], when, presence, c),
-      c,
-    ),
-  );
+  return { account, slots: slots.results ?? [], published: published.results ?? [], presence };
+}
+
+/** `GET /admin/paints/rider?id=…` — one rider's bikes, slot by slot. */
+export async function paintRider(request: Request, url: URL, env: Env): Promise<Response> {
+  const denied = gate(request, url, env);
+  if (denied) return denied;
+
+  const c = ctx(url);
+  const d = await oneRiderData(env, url.searchParams.get("id") ?? "");
+  if (!d) return html(view("Paint sync", "riders", empty("No such account."), c), 404);
+  const when = new Map(d.published.map((r) => [r.bike_id, r.updated_at]));
+  return html(view(d.account.rider_name, "riders", riderView(d.account, d.slots, when, d.presence, c), c));
+}
+
+export interface FilesData {
+  totals: Totals;
+  found: Paged<PaintRow>;
+  q: string;
+  order: Order;
+}
+
+export async function filesData(env: Env, url: URL): Promise<FilesData> {
+  const q = (url.searchParams.get("q") ?? "").slice(0, 96);
+  const order = parseOrder(url, PAINT_COLUMNS, "riders");
+  const page = parsePage(url.searchParams.get("page"));
+  const [sums, found] = await Promise.all([totals(env), searchPaints(env, q, order, page)]);
+  return { totals: sums, found, q, order };
 }
 
 /** `GET /admin/paints/files` — every paint we hold, once per digest. */
@@ -290,23 +329,31 @@ export async function paintFiles(request: Request, url: URL, env: Env): Promise<
   if (denied) return denied;
 
   const c = ctx(url);
-  const q = (url.searchParams.get("q") ?? "").slice(0, 96);
-  const order = parseOrder(url, PAINT_COLUMNS, "riders");
-  const page = parsePage(url.searchParams.get("page"));
-  const [sums, found] = await Promise.all([totals(env), searchPaints(env, q, order, page)]);
-  return html(view("Paints", "paints", paintsView(sums, found, q, order, c), c));
+  const d = await filesData(env, url);
+  return html(view("Paints", "paints", paintsView(d.totals, d.found, d.q, d.order, c), c));
 }
 
-/** `GET /admin/paints/paint?sha=…` — one paint: its sheets, and who is wearing it. */
-export async function paintOne(request: Request, url: URL, env: Env): Promise<Response> {
-  const denied = gate(request, url, env);
-  if (denied) return denied;
+export interface Wearer {
+  id: string;
+  rider_name: string;
+  guid: string | null;
+  bike_id: string;
+  slot: string;
+  file_name: string;
+  size: number;
+  rel_dest: string;
+}
 
-  const c = ctx(url);
-  const sha = (url.searchParams.get("sha") ?? "").toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(sha)) {
-    return html(view("Paints", "paints", empty("That is not a paint digest."), c), 400);
-  }
+export interface OnePaintData {
+  sha: string;
+  wearers: Wearer[];
+  /** What R2 holds under that digest, or null if the blob was never uploaded. */
+  stored: number | null;
+  sheets: { images: PntImage[]; chosen: number } | null;
+}
+
+export async function onePaintData(env: Env, sha: string): Promise<OnePaintData | null> {
+  if (!/^[0-9a-f]{64}$/.test(sha)) return null;
 
   const [wearers, stored, sheets] = await Promise.all([
     env.DB.prepare(
@@ -330,11 +377,24 @@ export async function paintOne(request: Request, url: URL, env: Env): Promise<Re
   ]);
 
   const rows = wearers.results ?? [];
-  if (rows.length === 0 && !stored) {
-    return html(view("Paints", "paints", empty("Nothing here has that digest."), c), 404);
+  if (rows.length === 0 && !stored) return null;
+  return { sha, wearers: rows, stored: stored?.size ?? null, sheets };
+}
+
+/** `GET /admin/paints/paint?sha=…` — one paint: its sheets, and who is wearing it. */
+export async function paintOne(request: Request, url: URL, env: Env): Promise<Response> {
+  const denied = gate(request, url, env);
+  if (denied) return denied;
+
+  const c = ctx(url);
+  const sha = (url.searchParams.get("sha") ?? "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(sha)) {
+    return html(view("Paints", "paints", empty("That is not a paint digest."), c), 400);
   }
-  const title = rows[0]?.file_name ?? sha.slice(0, 12);
-  return html(view(title, "paints", oneView(sha, rows, stored?.size ?? null, sheets, c), c));
+  const d = await onePaintData(env, sha);
+  if (!d) return html(view("Paints", "paints", empty("Nothing here has that digest."), c), 404);
+  const title = d.wearers[0]?.file_name ?? sha.slice(0, 12);
+  return html(view(title, "paints", oneView(sha, d.wearers, d.stored, d.sheets, c), c));
 }
 
 /** `GET /admin/paints/thumb?sha=…` — the picture itself. */

@@ -383,6 +383,13 @@ export function isGameId(value: unknown): value is string {
   return value === "mxb" || value === "gpb";
 }
 
+/** Which app a report came from. A closed list, like the platform and the title. */
+export const APPS = ["manager", "studio"] as const;
+
+export function isAppId(value: unknown): value is (typeof APPS)[number] {
+  return typeof value === "string" && (APPS as readonly string[]).includes(value);
+}
+
 /**
  * A usage event name — `area.thing`, up to four segments.
  *
