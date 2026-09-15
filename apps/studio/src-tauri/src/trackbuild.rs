@@ -741,7 +741,7 @@ mod build_one {
         // FROST_ROUGH=1.8 builds the same layout rougher, as its own track beside the first.
         if let Some(r) = std::env::var("FROST_ROUGH").ok().and_then(|v| v.parse::<f32>().ok()) {
             prog.terrain.roughness = r;
-            prog.name = format!("{} ARL", prog.name);
+            prog.name = format!("{} Pro", prog.name);
             // And bigger jumps: up to a third taller and longer on a raced build.
             prog.bigger_jumps(1.0 + 0.35 * (r - 1.0).clamp(0.0, 1.0));
         }

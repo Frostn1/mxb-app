@@ -1205,33 +1205,36 @@ impl Feature {
     }
 }
 
-/// How big a random track is built: Easy for learning, ARL for a raced pro track.
+/// How big a random track is built: Easy for learning, Pro for a raced pro track.
 #[derive(serde::Deserialize, Clone, Copy, Debug, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum TrackScale {
     Easy,
     #[default]
     Normal,
-    Arl,
+    /// `arl` is what this was called before it was named after what it is, and a project
+    /// saved then still asks for it by that name.
+    #[serde(alias = "arl")]
+    Pro,
 }
 
 /// Easy: jumps at 70%, on fresher, smoother ground so the ruts come out shallower.
 const EASY_JUMP_SHARE: f32 = 0.7;
 const EASY_WEAR: f32 = 0.25;
 const EASY_ROUGHNESS: f32 = 0.6;
-/// ARL: the recipe the raced builds have always used (`FROST_ROUGH=2`).
-const ARL_ROUGHNESS: f32 = 2.0;
-const ARL_JUMP_GROWTH: f32 = 1.35;
+/// Pro: the recipe the raced ARL builds have always used (`FROST_ROUGH=2`).
+const PRO_ROUGHNESS: f32 = 2.0;
+const PRO_JUMP_GROWTH: f32 = 1.35;
 
 impl TrackProgram {
     /// Set a freshly drawn track to a scale. Normal leaves it as drawn.
     pub fn at_scale(&mut self, scale: TrackScale) {
         match scale {
             TrackScale::Normal => {}
-            TrackScale::Arl => {
-                self.terrain.roughness = ARL_ROUGHNESS;
-                self.name = format!("{} ARL", self.name);
-                self.bigger_jumps(ARL_JUMP_GROWTH);
+            TrackScale::Pro => {
+                self.terrain.roughness = PRO_ROUGHNESS;
+                self.name = format!("{} Pro", self.name);
+                self.bigger_jumps(PRO_JUMP_GROWTH);
             }
             TrackScale::Easy => {
                 self.terrain.wear = EASY_WEAR;
@@ -1292,11 +1295,20 @@ mod scale_tests {
     }
 
     #[test]
-    fn arl_is_the_raced_build() {
+    fn pro_is_the_raced_build() {
         let mut p = drawn();
-        p.at_scale(TrackScale::Arl);
-        assert_eq!(p.terrain.roughness, ARL_ROUGHNESS);
-        assert!(p.name.ends_with(" ARL"));
+        p.at_scale(TrackScale::Pro);
+        assert_eq!(p.terrain.roughness, PRO_ROUGHNESS);
+        assert!(p.name.ends_with(" Pro"));
+    }
+
+    /// A project saved when this scale was called ARL still opens.
+    #[test]
+    fn arl_still_names_the_pro_scale() {
+        assert_eq!(
+            serde_json::from_str::<TrackScale>("\"arl\"").unwrap(),
+            TrackScale::Pro,
+        );
     }
 }
 

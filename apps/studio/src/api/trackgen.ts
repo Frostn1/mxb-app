@@ -87,6 +87,9 @@ export interface TrackPreview {
  * What a model is asked for. `program` is the whole lap, drawn by the model and measured by
  * the app, and only a strong model manages it. `settings` is the character only, and the
  * app's own walker draws the lap, so any model can do it, a free one included.
+ *
+ * Not a choice anyone is asked to make: which one works is a fact about the model that is
+ * configured, so `generate_track` picks it. Left here because the command still takes it.
  */
 export type GenerateMode = "program" | "settings";
 
@@ -124,9 +127,11 @@ export interface Generated {
  *
  * Slow on purpose — the model lays out a lap that has to close, and the app builds and
  * measures every answer before accepting it, retrying with the measurements when it doesn't
- * land. Minutes, not seconds. Settings mode is seconds.
+ * land. Minutes, not seconds, unless the model can only be asked for settings, which is.
+ *
+ * `mode` is left to the app unless something has a reason to force it.
  */
-export function generateTrack(brief: string, mode: GenerateMode): Promise<Generated> {
+export function generateTrack(brief: string, mode?: GenerateMode): Promise<Generated> {
   return invoke<Generated>("generate_track", { brief, mode });
 }
 
@@ -171,11 +176,6 @@ export function testTrackModel(
   return invoke<void>("test_track_model", { kind, baseUrl, model, key });
 }
 
-/** A track to start from, with no model involved. */
-export function baseTrackProgram(): Promise<TrackProgram> {
-  return invoke<TrackProgram>("base_track_program");
-}
-
 /** A lap with nothing on it, to start from scratch. */
 export function blankTrackProgram(): Promise<TrackProgram> {
   return invoke<TrackProgram>("blank_track_program");
@@ -194,8 +194,8 @@ export function randomTrackProgram(
   return invoke<TrackProgram>("random_track_program", { seed, scale });
 }
 
-/** Easy: smaller jumps, shallower ruts. ARL: the bigger, rougher raced build. */
-export type TrackScale = "easy" | "normal" | "arl";
+/** Easy: smaller jumps, shallower ruts. Pro: the bigger, rougher raced build. */
+export type TrackScale = "easy" | "normal" | "pro";
 
 /**
  * Give the track a height budget that fits it.
