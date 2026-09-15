@@ -3,14 +3,21 @@
 ## Unreleased — MXB App
 
 ### Fixed
-- Removing a buyer from secured content now actually takes it away. A PC that had already
-  unlocked kept playing forever, because the key there works offline and the app put it back
-  from its own copy whenever it went missing. The app now checks, whenever it would unlock
-  something — you launch the game, open the Library, sign in, or press Restore keys — whether
-  you may still open what you have, and deletes both copies of the key when the answer is no.
-  It says so when it happens, and the Secured content list marks it "Access removed", so
-  content vanishing from the game doesn't look like the app breaking. If you're offline, or
-  the check can't be made for any reason, nothing is deleted.
+- Secured content now follows the access you actually have. If a creator removes you as a
+  buyer, the app picks that up the next time it's online — you launch the game, open the
+  Library, sign in, or press Restore keys — and that content stops opening on this PC. The
+  Secured content list marks it "Access removed" and the app says so when it happens, so
+  content no longer showing up in game doesn't look like the app breaking. Nothing changes
+  while you're offline, or if the check can't be made for any reason.
+
+## 2026-09-15 — MXB Coach v0.1.10-beta.10
+
+### Added
+- Other riders: the lap review now shows the rider just faster than you, the fastest in the
+  session and, in a race, the rider ahead of you on track, with the sections where each one gains
+  on you. Needs the recorder from FrostMod 0.21 or newer: update it in Settings.
+- Where the track will wear: the lines view says where the other riders crowd through each
+  corner, since that's where it ruts first, and whether the fast line stays smoother.
 
 ## 2026-09-15 — Feel presets carry your controls
 
