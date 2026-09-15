@@ -745,6 +745,10 @@ mod build_one {
             // And bigger jumps: up to a third taller and longer on a raced build.
             prog.bigger_jumps(1.0 + 0.35 * (r - 1.0).clamp(0.0, 1.0));
         }
+        // FROST_NAME renames the build, so a variant installs beside the track it varies.
+        if let Ok(n) = std::env::var("FROST_NAME") {
+            prog.name = n;
+        }
         println!("  {} on {:?}", prog.name, prog.terrain.surface);
         let prog = crate::tracksynth::with_fitted_budget(&prog).expect("a height budget");
         let syn = crate::tracksynth::synthesise(&prog).expect("synthesise");
