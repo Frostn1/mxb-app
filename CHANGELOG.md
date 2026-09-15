@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-09-15 — Track Studio asks you less
+## 2026-09-15 — Frost's Studio v0.1.10 — Track Studio asks you less
 
 ### Changed
 - Random tracks come in Easy, Normal and Pro. Pro is what ARL was — the same big, rough, raced
