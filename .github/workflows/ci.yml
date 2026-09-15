@@ -117,22 +117,23 @@ jobs:
           # Wrangler 4 refuses to run on anything older, and `wrangler types` is what
           # generates the `Env` the typecheck needs.
           node-version: 22
-          cache: npm
-          cache-dependency-path: control-plane/package-lock.json
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       # `Env` comes from a generated `worker-configuration.d.ts` that is gitignored, so it
       # has to be regenerated before anything can typecheck.
       - name: Generate Worker types
-        run: npx wrangler types
+        run: bunx wrangler types
 
       - name: Typecheck
-        run: npx tsc --noEmit
+        run: bunx tsc --noEmit
 
       - name: Test
-        run: npx vitest run
+        run: bunx vitest run
 
   # The deploy the comment above used to describe as "by hand".
   #
@@ -140,12 +141,10 @@ jobs:
   # passed its tests, and restricted to `main`: a pull request builds and tests, it does not
   # ship. Every app in the field talks to this Worker, so the ordering is the safety.
   #
-  # Code only -- migrations stay manual, deliberately. `wrangler d1 migrations apply` decides
-  # what to run from the `d1_migrations` table, and that table is empty on the production
-  # database while all 28 migrations are in fact applied. An automatic apply would therefore
-  # start at 0001 and fail on `table accounts already exists`, on every deploy, until someone
-  # backfilled the bookkeeping. Adding a new table is also the one step that must happen
-  # *before* the code that reads it, which is an ordering a single job cannot express.
+  # Migrations first, then code: a new table or column has to exist before the Worker that
+  # reads it goes live. `d1_migrations` was backfilled on 2026-09-15 with every migration
+  # already in production, so `migrations apply` runs only the new files. A migration that
+  # fails is rolled back and stops the job before the deploy.
   deploy-control-plane:
     name: Control plane (deploy)
     needs: control-plane
@@ -172,11 +171,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: control-plane/package-lock.json
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       # Said plainly here rather than as whatever wrangler reports three minutes later: a
       # missing secret is the one failure of this job that is not about the code.
@@ -186,21 +186,29 @@ jobs:
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
             echo "::error::CLOUDFLARE_API_TOKEN is not set. Add it as a repository secret,"\
-                 "or under Settings -> Environments -> production. It needs the"\
-                 "'Edit Cloudflare Workers' template."
+                 "or under Settings -> Environments -> production. It needs Workers Scripts"\
+                 "Edit and D1 Edit on the account."
             exit 1
           fi
 
       # The account id is optional: a token scoped to one account tells wrangler which, and
       # this repository is public, so the id is not written into it. Set the secret only if
       # the token can reach more than one account.
+      - name: Apply migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$CF_ACCOUNT" ]; then export CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT"; fi
+          bunx wrangler d1 migrations apply mxb-control-plane --remote
+
       - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           if [ -n "$CF_ACCOUNT" ]; then export CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT"; fi
-          npx wrangler deploy
+          bunx wrangler deploy
 
   bootstrap-script:
     # The one part of this repo that runs somewhere nobody can watch.
@@ -224,15 +232,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: control-plane/package-lock.json
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
         working-directory: ./control-plane
 
       - name: Render the bootstrap scripts
-        run: npm run render:bootstrap -- "${{ runner.temp }}"
+        run: bun run render:bootstrap "${{ runner.temp }}"
         working-directory: ./control-plane
 
       - name: Parse them with PowerShell
