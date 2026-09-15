@@ -30,7 +30,7 @@ animations are all recognised — and anything can be installed by dropping it o
 the window, sorted by what the archive holds rather than by what its title says.
 
 [GP Bikes](https://gp-bikes.com/) is a second title in the same app, switched from
-the sidebar. Installing, the library, presets and paint building all work there.
+the sidebar. Installing, the library and presets all work there.
 What doesn't is per-title and gated on a capability rather than hidden: the 3D
 previews need part bindings GP Bikes hasn't got yet, and the stores and Race mode
 sell and manage MX Bikes content, so those rows don't appear. The UI speaks six
@@ -81,23 +81,13 @@ Each of these is a tab in the app.
 - **Locker** — swap each bike's model and engine sound between the sets you have
   installed, with the 3D preview beside it.
 - **Presets** — save a full rider look and load it onto a bike on command.
-- **Studio** — six tools over the same files:
-  - **Designer** draws the livery itself. Image and text layers, a brush,
-    gradient, fill and shapes, every stroke landing on the 2D sheet and on the 3D
-    model at the same time. A reference underlay shows the paint you started from
-    and the model's own UV islands, hovering the sheet names the piece of bodywork
-    under the cursor, and a layer can be fitted to a part and clipped to its
-    outline. Photoshop files open and export with their layers intact.
-  - **Paints** builds a `.pnt` from `.tga`/`.png` sheets, and unpacks an existing
-    paint back into editable sheets that keep the texture names the model binds.
-  - **Rider** and **Pose** preview the rider and stand them in a position.
-  - **Track** writes a lap from a description — corners, straights and the jumps
-    on them — measures it against real published tracks, previews it in 3D and
-    lets you edit any feature. Install writes the `.trh`, `.map`, `.ini`, `.amb`
-    and both UI images; the `.rdf` (start gate, pits, cameras) still needs
-    TerrainEd.
-  - **Protect** locks files you made to the GUIDs allowed to load them, a folder
-    per buyer. Official builds only — see [Optional modules](#optional-modules).
+- **Servers** — every MX Bikes server, live, with the track's picture even when you
+  don't have it. On a server running a free track you're missing, **Install & join**
+  installs it and joins, or puts you in line when the server is full.
+- **Studio** — opens [Frost's Studio](https://mxbsecure.com/studio), or gets it for
+  you. The Designer, the Paint, Track and Rider studios and content locking are all
+  there now, in their own app ([`apps/studio`](apps/studio/)). Both apps read the same
+  folders, so nothing moves.
 - **Race mode** — MX Bikes loads every mod in the folder at startup, so a preset
   names the track it races on and everything else steps aside into a holding
   folder until you bring it back.
@@ -217,10 +207,10 @@ server-bootstrap scripts.
 
 ### Optional modules
 
-Two features come from local-only modules that are not in the public tree:
-content locking (Studio → **Protect**) and secure content (the **Secure** tab).
-Their absence is the normal case — [`build.rs`](apps/manager/src-tauri/build.rs) sets a `cfg`
-when the file is present, and without it the app simply doesn't show those rows.
+Secure content (the **Secure** tab) comes from a local-only module that is not in
+the public tree; content locking lives in Frost's Studio now. Its absence is the
+normal case — [`build.rs`](apps/manager/src-tauri/build.rs) sets a `cfg` when the file
+is present, and without it the app simply doesn't show that row.
 A fork builds and runs with everything else intact.
 
 ### The shop catalog credential
@@ -308,14 +298,9 @@ skips the announcement. It's for testing that a build compiles, not for shipping
 
 Features coming next:
 
-- **A 3D preview for GP Bikes.** Building a `.pnt` is title-agnostic and already
-  works there; only the preview needs part bindings GP Bikes hasn't got yet, so
-  the Studio says so plainly rather than showing an empty stage.
-- **Your in-game track list, through FrostMod** (which already handles the live
-  reload) — to one-click-install the tracks you're missing.
-- **A server browser.** Joining by address works today; reading the game's own
-  list is what's missing, and an empty list behind a button is worse than no
-  button.
+- **A 3D preview for GP Bikes.** Locker's preview needs part bindings GP Bikes
+  hasn't got yet, so it says so plainly rather than showing an empty stage.
+  Frost's Studio has the same gap for its paint preview.
 - **Hosting a server from the app.** Built once and taken back out — creating and
   running a dedicated server needs an account on the control plane, and opening
   that up is the remaining work.
