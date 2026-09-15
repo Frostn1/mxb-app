@@ -343,7 +343,11 @@ const Servers = () => {
   const started = useRef(new Set<string>());
   const doneInstalling = useCallback((slug: string) => {
     started.current.delete(slug);
-    setInstalling(({ [slug]: _, ...rest }) => rest);
+    setInstalling((cur) => {
+      const rest = { ...cur };
+      delete rest[slug];
+      return rest;
+    });
   }, []);
 
   const installAndJoin = useCallback(

@@ -17,6 +17,11 @@
 - When the shock bottoms slowly, under braking or in turns, the fix now firms up its
   low-speed compression rather than the high-speed.
 - Rebound changes read as slower or faster, and preload as more or less.
+## 2026-09-15 — Contributors
+
+### Added
+- Settings → Supporters now has a Contributors list for the people who helped make the app
+  better. Trystan34 is the first one on it, for ideas that shaped the app.
 
 ## 2026-09-15 — Every server tile shows its track
 

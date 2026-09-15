@@ -2021,6 +2021,9 @@ export const de: Translation = {
     "Die Liste war gerade nicht erreichbar — das hier ist die zuletzt bekannte.",
   "supporters.optOut":
     "Namen erscheinen nur mit Einverständnis. Kurz auf Discord oder Buy Me a Coffee melden, dann ist deiner sofort weg.",
+  "supporters.contributors": "Mitwirkende",
+  "supporters.contributorsDesc":
+    "Leute, die die App mit Ideen, Tests und Feedback besser gemacht haben.",
   "reshade.needsGameFolder":
     "ReShade liegt in deinem {{game}}-Ordner — lege den unter Spielordner fest, oder zeige hier direkt darauf.",
   "reshade.folder": "Gesucht wird in deinem {{game}}-Ordner:",

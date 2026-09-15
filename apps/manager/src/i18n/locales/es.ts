@@ -2008,6 +2008,9 @@ export const es: Translation = {
     "No se pudo consultar la lista ahora mismo — esta es la última que vimos.",
   "supporters.optOut":
     "Los nombres se muestran con permiso. Escribe por Discord o por Buy Me a Coffee y el tuyo se quita al momento.",
+  "supporters.contributors": "Colaboradores",
+  "supporters.contributorsDesc":
+    "Gente que mejoró la app con ideas, pruebas y comentarios.",
   "reshade.needsGameFolder":
     "ReShade está en tu carpeta de {{game}} — configúrala en Carpeta del juego, o apunta directamente aquí.",
   "reshade.folder": "Buscando en tu carpeta de {{game}}:",
