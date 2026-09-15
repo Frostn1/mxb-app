@@ -1,3 +1,4 @@
+import { onOverlayFullscreenBlocked } from "@frost/shared/api/overlay";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import MiniRail from "./Components/Shell/MiniRail";
 import Dashboard from "./Components/Dashboard/Dashboard";
@@ -15,7 +16,6 @@ import {
   getConfig,
   isConfigured,
   listGames,
-  onOverlayFullscreenBlocked,
   setActiveGame,
   setIntroSeen,
 } from "@frost/shared/api/mods";

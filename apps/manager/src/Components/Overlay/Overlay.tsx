@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { Bike, ExternalLink, Home, Shirt, SlidersHorizontal, X } from "lucide-react";
-import { cn } from "@frost/shared/lib/utils";
+import { Bike, Home, Shirt, SlidersHorizontal } from "lucide-react";
 import { Toaster } from "@frost/shared/Components/ui/sonner";
 import { TooltipProvider } from "@frost/shared/Components/ui/tooltip";
+import OverlayFrame, { peerTabLabel } from "@frost/shared/Components/Overlay/OverlayFrame";
 import Browse from "../Browse/Browse";
 import Locker from "../Locker/Locker";
 import ModDetail from "../ModDetail/ModDetail";
@@ -17,15 +17,18 @@ import { InstallProvider } from "../../Context/Install";
 import { DownloadsProvider } from "../../Context/Downloads";
 import { DropReviewProvider } from "../../Context/DropReview";
 import { useModBrowsing } from "../../lib/useModBrowsing";
+import { bikePreviewAvailable, listGames, getConfig, isConfigured } from "@frost/shared/api/mods";
 import {
-  bikePreviewAvailable,
-  listGames,
-  getConfig,
+  getOverlayPeer,
   getOverlayState,
-  isConfigured,
+  initialOverlayTab,
+  onOverlayPeer,
+  onOverlayTab,
+  overlayHandoff,
   overlayHide,
   overlayOpenMain,
-} from "@frost/shared/api/mods";
+  type OverlayPeer,
+} from "@frost/shared/api/overlay";
 import type { Config, GameCaps, GameInfo } from "@frost/shared/types";
 
 /**
@@ -35,11 +38,8 @@ import type { Config, GameCaps, GameInfo } from "@frost/shared/types";
  * It reuses Presets, Locker, Browse and Manage unchanged rather than reimplementing them —
  * Presets and the Locker's model swaps are the two things that apply to a *running*
  * game via the loader re-run in `gameproc::refresh_look`, which is the whole reason
- * this window is worth having. Browse rides along so a mod can be queued mid-session, and
- * Manage so the next race can be lined up between sessions without leaving the game.
- *
- * Rider, Library and Settings stay in the main window: they're either GPU-hungry next
- * to a running game or not something you reach for from the pits.
+ * this window is worth having. When MXB Coach runs too, its tabs follow ours, and picking
+ * one hands the screen to Coach's own overlay.
  */
 
 type OverlayTab = "presets" | "locker" | "browse" | "manage";
@@ -59,16 +59,7 @@ const TABS: {
   { id: "manage", label: "nav.manage", icon: SlidersHorizontal, cap: "manage" },
 ];
 
-/** Human-readable form of a Tauri accelerator, for the header hint. */
-function prettyHotkey(accelerator: string) {
-  const isMac = navigator.userAgent.includes("Mac");
-  return accelerator
-    .split("+")
-    .map((part) =>
-      part === "CommandOrControl" ? (isMac ? "Cmd" : "Ctrl") : part,
-    )
-    .join(" + ");
-}
+const isTab = (id: string | null): id is OverlayTab => TABS.some((t) => t.id === id);
 
 export default function Overlay() {
   const { t } = useI18n();
@@ -77,7 +68,11 @@ export default function Overlay() {
   const [bikePreview, setBikePreview] = useState(false);
   const [games, setGames] = useState<GameInfo[]>([MXB_FALLBACK]);
   const [hotkey, setHotkey] = useState("");
-  const [tab, setTab] = useState<OverlayTab>("presets");
+  const [tab, setTab] = useState<OverlayTab>(() => {
+    const first = initialOverlayTab();
+    return isTab(first) ? first : "presets";
+  });
+  const [peer, setPeer] = useState<OverlayPeer | null>(null);
 
   const showBrowse = useCallback(() => setTab("browse"), []);
   const {
@@ -121,6 +116,19 @@ export default function Overlay() {
     if (!tabs.some((t) => t.id === tab)) setTab(tabs[0].id);
   }, [tabs, tab]);
 
+  // MXB Coach's tabs, while it's linked, and the tab it hands us.
+  useEffect(() => {
+    getOverlayPeer().then(setPeer).catch(() => {});
+    const offPeer = onOverlayPeer(setPeer);
+    const offTab = onOverlayTab((id) => {
+      if (isTab(id)) setTab(id);
+    });
+    return () => {
+      void offPeer.then((f) => f());
+      void offTab.then((f) => f());
+    };
+  }, []);
+
   const dismiss = useCallback(() => {
     void overlayHide().catch(() => {});
   }, []);
@@ -152,156 +160,85 @@ export default function Overlay() {
     })();
   }, [reloadConfig]);
 
-  // Transparent window: the page must not paint a background of its own.
-  useEffect(() => {
-    document.documentElement.classList.add("overlay-window");
-    return () => document.documentElement.classList.remove("overlay-window");
-  }, []);
-
-  // Esc is the way out — the same reflex that closes the game's own menus. Also
-  // blocks the webview's refresh/find shortcuts, as the main window does.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code === "Escape") {
-        e.preventDefault();
-        dismiss();
-        return;
-      }
-      if ((e.ctrlKey && (e.code === "KeyF" || e.code === "KeyR")) || e.code === "F5") {
-        e.preventDefault();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [dismiss]);
-
   return (
     <ThemeProvider>
       <FrostmodProvider>
         <TooltipProvider delayDuration={300}>
-          {/* The margin is what makes this read as an overlay: the game shows
-              through around a floating, rounded panel. */}
-          <div className="h-screen w-screen p-2">
-            <div className="flex h-full flex-col overflow-hidden rounded-xl border border-white/[0.09] bg-window/92 text-foreground shadow-2xl backdrop-blur-xl">
-              <header
-                data-tauri-drag-region
-                className="flex h-[42px] flex-none select-none items-center gap-3 border-b border-white/[0.06] pl-4 pr-1.5"
-              >
-                <span data-tauri-drag-region className="text-[13px] font-bold tracking-[0.2px]">
-                  {APP_NAME}
-                </span>
-
-                <nav className="flex items-center gap-0.5">
-                  {tabs.map(({ id, label, icon: Icon }) => (
-                    <button
-                      key={id}
-                      onClick={() => {
-                        setTab(id);
-                        closeMod();
-                      }}
-                      className={cn(
-                        "flex cursor-default items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12.5px] transition-colors",
-                        tab === id
-                          ? "bg-accent font-semibold text-accent-foreground"
-                          : "font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+          <OverlayFrame
+            appName={APP_NAME}
+            tabs={tabs.map(({ id, label, icon }) => ({ id, label: t(label), icon }))}
+            active={tab}
+            onTab={(id) => {
+              if (isTab(id)) setTab(id);
+              closeMod();
+            }}
+            peerName={peer?.app === "coach" ? "MXB Coach" : undefined}
+            peerTabs={peer?.tabs.map((id) => ({ id, label: peerTabLabel(t, id) }))}
+            onPeerTab={(id) => void overlayHandoff(id).catch(() => {})}
+            hotkey={hotkey}
+            onOpenMain={openFullApp}
+            onClose={dismiss}
+          >
+            {ready &&
+              (config ? (
+                <ConfigContext.Provider
+                  value={{
+                    config,
+                    reloadConfig,
+                    bikePreview,
+                    // The overlay has no game switcher — it shows one game's content,
+                    // the one the main window is on — so a single-entry list is right.
+                    games: [overlayGame],
+                    game: overlayGame,
+                    switchGame: async () => {},
+                  }}
+                >
+                  {/* No Downloads page in here, but installs made mid-session still
+                      belong in the history the main window shows. */}
+                  <DownloadsProvider>
+                  {/* Above the installer, as in the Dashboard: a download that turns
+                      out to be a pack is handed to this sheet, so `InstallProvider`
+                      has to be able to reach it here too. */}
+                  <DropReviewProvider onInstalled={onInstalled}>
+                  <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
+                    <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                      {tab === "presets" ? (
+                        <Presets onOpenLocker={() => setTab("locker")} />
+                      ) : tab === "locker" ? (
+                        <Locker />
+                      ) : tab === "manage" ? (
+                        <Manage />
+                      ) : selectedSlug ? (
+                        <ModDetail
+                          slug={selectedSlug}
+                          modType={modType}
+                          categoryId={selectedCategoryId ?? modType.categoryId}
+                          installed={installed}
+                          onBack={closeMod}
+                        />
+                      ) : (
+                        <Browse
+                          modType={modType}
+                          modTypes={modTypes}
+                          listing={listing}
+                          installed={installed}
+                          onOpenMod={openMod}
+                          onChangeType={changeType}
+                        />
                       )}
-                    >
-                      <Icon className="size-3.5" />
-                      <span>{t(label)}</span>
-                    </button>
-                  ))}
-                </nav>
-
-                <div data-tauri-drag-region className="ml-auto flex items-center gap-1">
-                  {hotkey && (
-                    <span
-                      data-tauri-drag-region
-                      className="hidden text-[11px] text-muted-foreground sm:inline"
-                    >
-                      {t("overlay.toClose", { hotkey: prettyHotkey(hotkey) })}
-                    </span>
-                  )}
-                  <button
-                    onClick={openFullApp}
-                    title={t("overlay.openMainTitle")}
-                    className="flex h-8 cursor-default items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
-                  >
-                    <ExternalLink className="size-3.5" />
-                    <span>{t("overlay.openMain")}</span>
-                  </button>
-                  <button
-                    onClick={dismiss}
-                    title={t("overlay.closeTitle")}
-                    className="grid size-8 cursor-default place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
-                  >
-                    <X className="size-4" />
-                  </button>
-                </div>
-              </header>
-
-              <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background/85">
-                {ready &&
-                  (config ? (
-                    <ConfigContext.Provider
-                      value={{
-                        config,
-                        reloadConfig,
-                        bikePreview,
-                        // The overlay has no game switcher — it shows one game's content,
-                        // the one the main window is on — so a single-entry list is right.
-                        games: [overlayGame],
-                        game: overlayGame,
-                        switchGame: async () => {},
-                      }}
-                    >
-                      {/* No Downloads page in here, but installs made mid-session still
-                          belong in the history the main window shows. */}
-                      <DownloadsProvider>
-                      {/* Above the installer, as in the Dashboard: a download that turns
-                          out to be a pack is handed to this sheet, so `InstallProvider`
-                          has to be able to reach it here too. */}
-                      <DropReviewProvider onInstalled={onInstalled}>
-                      <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
-                        <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                          {tab === "presets" ? (
-                            <Presets onOpenLocker={() => setTab("locker")} />
-                          ) : tab === "locker" ? (
-                            <Locker />
-                          ) : tab === "manage" ? (
-                            <Manage />
-                          ) : selectedSlug ? (
-                            <ModDetail
-                              slug={selectedSlug}
-                              modType={modType}
-                              categoryId={selectedCategoryId ?? modType.categoryId}
-                              installed={installed}
-                              onBack={closeMod}
-                            />
-                          ) : (
-                            <Browse
-                              modType={modType}
-                              modTypes={modTypes}
-                              listing={listing}
-                              installed={installed}
-                              onOpenMod={openMod}
-                              onChangeType={changeType}
-                            />
-                          )}
-                        </div>
-                      </InstallProvider>
-                      </DropReviewProvider>
-                      </DownloadsProvider>
-                    </ConfigContext.Provider>
-                  ) : (
-                    // No config means the player never finished first-run setup. That
-                    // wizard belongs in the main window, not over a running game.
-                    <div className="grid flex-1 place-items-center px-8 text-center text-[13px] text-muted-foreground">
-                      {t("overlay.needsSetup")}
                     </div>
-                  ))}
-              </main>
-            </div>
-          </div>
+                  </InstallProvider>
+                  </DropReviewProvider>
+                  </DownloadsProvider>
+                </ConfigContext.Provider>
+              ) : (
+                // No config means the player never finished first-run setup. That
+                // wizard belongs in the main window, not over a running game.
+                <div className="grid flex-1 place-items-center px-8 text-center text-[13px] text-muted-foreground">
+                  {t("overlay.needsSetup")}
+                </div>
+              ))}
+          </OverlayFrame>
           <Toaster />
         </TooltipProvider>
       </FrostmodProvider>

@@ -4296,7 +4296,7 @@ fn overlay_open_main(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn overlay_state(app: tauri::AppHandle) -> overlay::OverlayState {
-    overlay::state(&config::load(&app).unwrap_or_default())
+    overlay::state(&app, &config::load(&app).unwrap_or_default())
 }
 
 #[tauri::command]
@@ -6624,6 +6624,8 @@ fn main() {
             // Notice the game starting (Steam or Play button) to re-arm FrostMod for the
             // session and check the mods folder is really on disk.
             sessionwatch::start(handle);
+            // The link to MXB Coach: one overlay key for both apps.
+            overlay::start_link(handle);
             secure_launch::watch(handle);
             #[cfg(mxbsecure)]
             register_secure_opener();
@@ -6808,6 +6810,8 @@ fn main() {
             overlay_state,
             set_overlay_enabled,
             set_overlay_hotkey,
+            overlay::overlay_handoff,
+            overlay::overlay_peer,
             voice_devices,
             voice_status,
             voice_mute,
@@ -6962,8 +6966,14 @@ fn main() {
                 handler(invoke)
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // Coach reads our presence file to find us; a stale one is only ignored.
+            if let tauri::RunEvent::Exit = event {
+                overlay::stop_link(app);
+            }
+        });
 }
 
 #[cfg(test)]

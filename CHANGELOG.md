@@ -1,31 +1,51 @@
 # Changelog
 
-## Unreleased
-
-### Added
-- MXB Coach counts anonymous usage the way the app and the Studio already do — which pages get
-  opened, and how many sessions get reviewed. Same switch (Settings → General), same config, and
-  the same nothing-about-you payload: no rider name, no paths, no session files. Coach never
-  mints an identifier of its own, so a machine with only Coach on it counts nothing at all.
-
-### Changed
-- The apps report from a fixed list of names and nothing else. A plugin shares the app's window,
-  and so could count whatever it liked under any name it liked — including filling the buffer
-  with invented ones, which quietly stopped real counters being recorded until the next send.
-
 ## 2026-09-15 — MXB Coach v0.1.12-beta.12
 
 ### Added
 - In-game HUD: sending cues to the game now also sends what the recorder's HUD needs, your fast
   lap for the gap and the ghost on the map, and each section's name and tip. Needs the recorder
   from FrostMod 0.22 or newer.
+- An in-game overlay. Press Ctrl+Shift+X in the game to see your last lap's tips, setup fixes,
+  live cues and HUD settings without leaving it. Turn it on or pick another shortcut in Settings.
+- The overlay can switch the recorder's HUD parts on and off: the live cue, section and tip, gap
+  to your fast lap, sit or stand, the track map and the setup card.
+- Live cues can be spoken. Turn on Speak the cues and set the volume. It needs the recorder from
+  FrostMod 0.22 or newer.
+- With MXB App running too, the two share one shortcut, and each overlay shows the other's tabs.
+
+## Unreleased — MXB App
+
+### Added
+- With MXB Coach running, the overlay shows Coach's tabs next to yours and one shortcut opens
+  both.
+
+### Changed
+- The app reports anonymous usage from a fixed list of names and nothing else. A plugin shares
+  the app's window, and so could count whatever it liked under any name it liked — including
+  filling the buffer with invented ones, which quietly stopped real counters being recorded
+  until the next send.
+
+## Unreleased — Frost's Studio
+
+### Changed
+- The Studio reports anonymous usage from the same fixed list of names as the app, for the same
+  reason.
+
+## Unreleased — MXB Coach
+
+### Added
+- Coach counts anonymous usage the way the app and the Studio already do — which pages get
+  opened, and how many sessions get reviewed. Same switch (Settings → General), same config, and
+  the same nothing-about-you payload: no rider name, no paths, no session files. Coach never
+  mints an identifier of its own, so a machine with only Coach on it counts nothing at all.
 
 ## 2026-09-15 — v0.15.1 — Small fixes
 
 ### Changed
 - Clearer wording in a few places, in all six languages.
 
-## 2026-09-15 — Track Studio asks you less
+## 2026-09-15 — Frost's Studio v0.1.10 — Track Studio asks you less
 
 ### Changed
 - Random tracks come in Easy, Normal and Pro. Pro is what ARL was — the same big, rough, raced
