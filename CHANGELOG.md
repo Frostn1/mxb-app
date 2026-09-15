@@ -7,6 +7,9 @@
   unused for ten minutes, and never while MX Bikes is running. If the app was in the tray, it
   goes back there. Turn it off in Settings with "Install updates automatically".
 
+### Changed
+- You no longer need an invite code to sign in with Steam or unlock mxbsecure content you own.
+
 ## 2026-09-14 — v0.14.5 — Server tiles are back
 
 ### Added
