@@ -93,7 +93,6 @@ export const RELEASES: Release[] = [
       { icon: Store, text: "showcase.v0150.prices" },
       { icon: SlidersHorizontal, text: "showcase.v0150.feel" },
       { icon: RefreshCw, text: "showcase.v0150.hub" },
-      { icon: Shield, text: "showcase.v0150.secured" },
     ],
   },
   {

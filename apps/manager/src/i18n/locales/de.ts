@@ -595,16 +595,16 @@ export const de: Translation = {
   "settings.secRepairFail": "Nicht alle Schlüssel konnten wiederhergestellt werden",
   "settings.secRepairFailDesc_one": "Für {{count}} Datei musst du online und angemeldet sein. Die Neuausstellung ist kostenlos, der Schlüssel kommt aber vom Server.",
   "settings.secRepairFailDesc_other": "Für {{count}} Dateien musst du online und angemeldet sein. Die Neuausstellung ist kostenlos, die Schlüssel kommen aber vom Server.",
-  "settings.secRepairRevoked_one": "{{count}} Datei lässt sich nicht mehr öffnen — der Ersteller hat deinen Zugriff entfernt.",
-  "settings.secRepairRevoked_other": "{{count}} Dateien lassen sich nicht mehr öffnen — die Ersteller haben deinen Zugriff entfernt.",
+  "settings.secRepairRevoked_one": "{{count}} Datei ist auf diesem PC nicht verfügbar.",
+  "settings.secRepairRevoked_other": "{{count}} Dateien sind auf diesem PC nicht verfügbar.",
   "settings.secStatusTitle": "Geschützte Inhalte gefunden",
   "settings.secStatusUnlocked": "Freigeschaltet",
   "settings.secStatusUnlocking": "Wird freigeschaltet…",
   "settings.secStatusReady": "Bereit zum Freischalten",
   "settings.secReasonReady": "Gehört dir — wird beim Öffnen der Bibliothek oder beim Spielstart freigeschaltet.",
   "settings.secStatusNotOwned": "Nicht in deiner Bibliothek",
-  "settings.secStatusRevoked": "Zugriff entfernt",
-  "settings.secReasonRevoked": "Der Ersteller hat deinen Zugriff entfernt, daher lässt sich das auf diesem PC nicht mehr öffnen.",
+  "settings.secStatusRevoked": "Nicht verfügbar",
+  "settings.secReasonRevoked": "Das ist auf diesem PC nicht verfügbar.",
   "settings.secStatusUnavailable": "Nicht verfügbar",
   "settings.secStatusNeedsSteam": "Mit Steam anmelden",
   "settings.secStatusUnreadable": "Unbekannte Datei",
@@ -618,9 +618,9 @@ export const de: Translation = {
   "secure.promptSteam": "Gesicherte Mods sind an dein Steam-Konto gebunden. Melde dich zum Freischalten an.",
   "secure.promptEnroll": "Registriere dich zuerst mit deinem Einladungscode. Das geht in den Einstellungen unter Lackierungs-Sync.",
   "secure.promptEnrollBtn": "Einstellungen öffnen",
-  "secure.revokedTitle_one": "Du hast keinen Zugriff mehr auf einen gesicherten Mod",
-  "secure.revokedTitle_other": "Du hast keinen Zugriff mehr auf {{count}} gesicherte Mods",
-  "secure.revokedBody": "{{names}} — der Ersteller hat deinen Zugriff entfernt, daher lässt sich das auf diesem PC nicht mehr öffnen.",
+  "secure.revokedTitle_one": "Ein gesicherter Mod ist nicht mehr verfügbar",
+  "secure.revokedTitle_other": "{{count}} gesicherte Mods sind nicht mehr verfügbar",
+  "secure.revokedBody": "{{names}} ist auf diesem PC nicht mehr verfügbar.",
   "settings.unlockNotOwned": "Du besitzt diesen Inhalt auf diesem Konto noch nicht.",
   "secure.intro":
     "Datei wählen, sperren, dann das Entsperren prüfen. Beim Prüfen wird das Blob hier entschlüsselt und Byte für Byte mit dem Original verglichen — der Beleg, dass es auf diesem Rechner zurückkommt.",
@@ -1627,8 +1627,6 @@ export const de: Translation = {
     "Fahrgefühl-Presets speichern jetzt, wie sich jede Steuerung anfühlt, etwa Totzone, Verstärkung und Glättung des Gases. Deine Tasten und Achsen bleiben, wie sie sind.",
   "showcase.v0150.hub":
     "MXB Hub lädt wieder, wenn der Shop eine Roboterprüfung verlangt: Die App beantwortet sie im Hintergrund oder öffnet den Shop, damit du sie selbst abschließt.",
-  "showcase.v0150.secured":
-    "Gesicherte Inhalte folgen dem Zugang, den du wirklich hast. Entfernt dich ein Ersteller als Käufer, öffnen sie sich nicht mehr, sobald die App das nächste Mal online ist, und die App sagt dir, warum.",
   "showcase.v0140.hero.title":
     "Frost's Mod Manager, und ein eigenes Studio",
   "showcase.v0140.hero.body":

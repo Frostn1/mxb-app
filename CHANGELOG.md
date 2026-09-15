@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-15 — v0.15.1 — Small fixes
+
+### Changed
+- Clearer wording in a few places, in all six languages.
+
 ## 2026-09-15 — MXB Coach v0.1.11-beta.11
 
 ### Changed

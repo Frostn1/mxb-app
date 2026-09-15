@@ -592,16 +592,16 @@ export const fr: Translation = {
   "settings.secRepairFail": "Impossible de restaurer toutes les clés",
   "settings.secRepairFailDesc_one": "{{count}} fichier nécessite d'être en ligne et connecté. Les clés sont réémises gratuitement, mais celle-ci doit venir du serveur.",
   "settings.secRepairFailDesc_other": "{{count}} fichiers nécessitent d'être en ligne et connecté. Les clés sont réémises gratuitement, mais celles-ci doivent venir du serveur.",
-  "settings.secRepairRevoked_one": "{{count}} fichier ne s'ouvre plus — son créateur vous a retiré l'accès.",
-  "settings.secRepairRevoked_other": "{{count}} fichiers ne s'ouvrent plus — leurs créateurs vous ont retiré l'accès.",
+  "settings.secRepairRevoked_one": "{{count}} fichier n'est pas disponible sur ce PC.",
+  "settings.secRepairRevoked_other": "{{count}} fichiers ne sont pas disponibles sur ce PC.",
   "settings.secStatusTitle": "Contenu sécurisé trouvé",
   "settings.secStatusUnlocked": "Déverrouillé",
   "settings.secStatusUnlocking": "Déverrouillage…",
   "settings.secStatusReady": "Prêt à déverrouiller",
   "settings.secReasonReady": "Vous le possédez — il se déverrouille en ouvrant la Bibliothèque ou en lançant le jeu.",
   "settings.secStatusNotOwned": "Pas dans ta bibliothèque",
-  "settings.secStatusRevoked": "Accès retiré",
-  "settings.secReasonRevoked": "Le créateur vous a retiré l'accès, donc ceci ne s'ouvre plus sur ce PC.",
+  "settings.secStatusRevoked": "Non disponible",
+  "settings.secReasonRevoked": "Ceci n'est pas disponible sur ce PC.",
   "settings.secStatusUnavailable": "Indisponible",
   "settings.secStatusNeedsSteam": "Se connecter avec Steam",
   "settings.secStatusUnreadable": "Fichier non reconnu",
@@ -615,9 +615,9 @@ export const fr: Translation = {
   "secure.promptSteam": "Les mods sécurisés sont liés à votre compte Steam. Connectez-vous pour déverrouiller.",
   "secure.promptEnroll": "Inscrivez-vous d'abord avec votre code d'invitation, dans Réglages, section Synchro des peintures.",
   "secure.promptEnrollBtn": "Ouvrir les Réglages",
-  "secure.revokedTitle_one": "Vous n'avez plus accès à un mod sécurisé",
-  "secure.revokedTitle_other": "Vous n'avez plus accès à {{count}} mods sécurisés",
-  "secure.revokedBody": "{{names}} — le créateur vous a retiré l'accès, donc cela ne s'ouvre plus sur ce PC.",
+  "secure.revokedTitle_one": "Un mod sécurisé n'est plus disponible",
+  "secure.revokedTitle_other": "{{count}} mods sécurisés ne sont plus disponibles",
+  "secure.revokedBody": "{{names}} n'est plus disponible sur ce PC.",
   "settings.unlockNotOwned": "Vous ne possédez pas encore ce contenu sur ce compte.",
   "secure.intro":
     "Choisissez un fichier, verrouillez-le, puis vérifiez qu'il se déverrouille. La vérification déchiffre le blob ici même et le compare à l'original, octet par octet — la preuve qu'il fait l'aller-retour sur cette machine.",
@@ -1619,8 +1619,6 @@ export const fr: Translation = {
     "Les préréglages Feeling gardent maintenant la réponse de chaque commande, comme la zone morte, le gain et le lissage de l'accélérateur. Vos boutons et axes restent tels quels.",
   "showcase.v0150.hub":
     "MXB Hub se charge à nouveau quand la boutique demande une vérification anti-robot : l'app y répond en arrière-plan, ou ouvre la boutique pour que vous la terminiez vous-même.",
-  "showcase.v0150.secured":
-    "Le contenu sécurisé suit l'accès que vous avez vraiment. Si un créateur vous retire des acheteurs, il ne s'ouvre plus dès que l'app est de nouveau en ligne, et l'app vous dit pourquoi.",
   "showcase.v0140.hero.title":
     "Frost's Mod Manager, et un Studio à part",
   "showcase.v0140.hero.body":
