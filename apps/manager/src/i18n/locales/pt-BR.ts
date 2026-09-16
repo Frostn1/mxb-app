@@ -993,6 +993,14 @@ export const ptBR: Translation = {
   "connection.check.others": "Todo mundo",
   "connection.checkFootnote": "O UDP de saída mostra apenas que o datagrama pôde sair, não que algo respondeu.",
 
+  "registerServer.action": "Adicionar seu servidor",
+  "registerServer.title": "Adicione seu servidor à lista compartilhada",
+  "registerServer.blurb": "Para o app lembrar do seu servidor mesmo quando os servidores do MX Bikes não respondem.",
+  "registerServer.note": "Só é preciso para um servidor que não aparece na lista — um novo, ou um privado. Tudo que o jogo lista já é lembrado sozinho.",
+  "registerServer.submit": "Adicionar",
+  "registerServer.done": "{{address}} está na lista compartilhada",
+  "registerServer.failed": "Não foi possível adicionar esse servidor",
+
   "queue.banner": "#{{position}} na fila de {{name}}",
   "queue.turnBanner": "Sua vez: entre em {{name}}",
   "queue.launchingBanner": "Entrando em {{name}}",

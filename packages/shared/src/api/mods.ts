@@ -3418,6 +3418,23 @@ export function connectionSelfTest(): Promise<ConnectionSelfTest> {
   return invoke<ConnectionSelfTest>("connection_selftest");
 }
 
+/**
+ * Put a server on the shared address book deliberately, as its own operator.
+ *
+ * The app already contributes every address a master sweep turned up, and the control plane
+ * holds each one back until distinct networks have independently seen it — which is what makes
+ * an anonymous write safe to hand back to thousands of apps. This is the way round that for a
+ * server two strangers will never happen to report: a new one, or a private one that was never
+ * in the master's list to be seen in.
+ *
+ * Needs an enrolled account; rejects with the control plane's own wording when there isn't one.
+ * Resolves with the address as stored — normalised, default port filled in — which is worth
+ * showing back, since it is usually not quite what was typed.
+ */
+export function registerServerAddress(address: string): Promise<string> {
+  return invoke<string>("register_server_address", { address });
+}
+
 /** Where a rider stands in a server's line. */
 export type QueuePhase = "waiting" | "turn" | "launched" | "joined" | "ended";
 
