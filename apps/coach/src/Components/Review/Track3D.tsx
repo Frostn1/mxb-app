@@ -8,6 +8,10 @@ import type { TrackTerrain } from "@frost/shared/types";
 import { useT } from "@/i18n";
 import type { Ground, Lines, Review, Surface } from "@/api/coach";
 
+/** How tall a tip's post stands above the ground, and how far its flag reaches, in metres. */
+const POST = 3.2;
+const FLAG = 1.8;
+
 /**
  * The ridden ground as a terrain grid. Ground nobody rode takes the height of the nearest
  * ground somebody did, spreading out from the track, so it sits in a plain rather than on a
@@ -77,10 +81,23 @@ function loss(lost: number): string {
   return "#f5f5f7";
 }
 
+const YOU = "#2997ff";
+const REF = "#8a8a93";
+
+/** A swatch and a word, for the line colours over the track. */
+function Key({ colour, children }: { colour: string; children: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="inline-block h-[3px] w-4 rounded" style={{ background: colour }} />
+      {children}
+    </span>
+  );
+}
+
 /**
  * The track in 3D as MXB App shows it, when its files can be read: terrain, scenery and the
- * ground in game view, with this lap, the fast lap and the picked section drawn on it. When
- * they can't, the ground built from the laps, and why.
+ * ground in game view, with this lap, the fast lap, the picked section and a post at every tip
+ * drawn on it. When they can't, the ground built from the laps, and why.
  */
 export default function Track3D({
   review,
@@ -136,15 +153,36 @@ export default function Track3D({
         out.push({ points: whole(l.path, l.heights), colour: `hsl(${hue}, 65%, 55%)`, width: 1.2 });
       }
     }
-    if (!review.solo) out.push({ points: whole(paths.reference, paths.referenceY), colour: "#8a8a93", width: 1.5 });
-    out.push({ points: whole(paths.lap, paths.lapY), colour: "#2997ff", width: 2.2 });
+    if (!review.solo) out.push({ points: whole(paths.reference, paths.referenceY), colour: REF, width: 1.5 });
+    out.push({ points: whole(paths.lap, paths.lapY), colour: YOU, width: 2.2 });
     if (sel) {
       const [a, b] = [Math.floor(sel.start / step), Math.min(paths.lap.length - 1, Math.ceil(sel.end / step))];
       const pts = paths.lap.slice(a, b + 1).map((_, k) => at(paths.lap, paths.lapY, a + k));
       out.push({ points: pts, colour: loss(sel.lost), width: 5 });
     }
+    // A post where each tip happens, so "out of turn 2" is somewhere you can see. The sections
+    // worth working on always stand; the picked one stands taller, in its own colour.
+    const marked = new Set<number>(review.focus);
+    if (selected != null) marked.add(selected);
+    for (const i of marked) {
+      const s = review.sections[i];
+      if (!s) continue;
+      const colour = i === selected ? loss(s.lost) : "#f5f5f7";
+      const width = i === selected ? 3 : 2;
+      for (const f of s.findings) {
+        if (f.skill === "unclear") continue;
+        const k = Math.max(0, Math.min(paths.lap.length - 1, Math.round(f.at / step)));
+        const p = paths.lap[k];
+        if (!p) continue;
+        const [x, z] = [p[0] - ox, p[1] - oz];
+        const base = (paths.lapY[k] ?? 0) - lift + 0.3;
+        const top = base + POST;
+        out.push({ points: [[x, base, z], [x, top, z]], colour, width });
+        out.push({ points: [[x, top, z], [x + FLAG, top - 0.6, z], [x, top - 1.1, z]], colour, width });
+      }
+    }
     return out;
-  }, [paths, lines, allLaps, lap, review.solo, sel, step, ox, oz, lift]);
+  }, [paths, lines, allLaps, lap, review.solo, review.focus, review.sections, selected, sel, step, ox, oz, lift]);
 
   const focus = useMemo(() => {
     if (!sel) return null;
@@ -152,45 +190,56 @@ export default function Track3D({
     return { x: p[0] - ox, z: p[1] - oz };
   }, [sel, paths, step, ox, oz]);
 
-  return (
-    <div className={cn("relative", className)}>
-      <TrackViewer
-        terrain={terrain}
-        overview={real ? scene.overview : null}
-        scenery={real ? scene.scenery : null}
-        surfaces={real ? scene.surfaces : []}
-        backdrop={real ? scene.backdrop : null}
-        ground={real ? scene.ground : null}
-        groundLayers={real ? scene.groundLayers : []}
-        placements={real ? scene.placements : []}
-        showObjects={objects}
-        // The game's own look, the way MXB App shows a track.
-        gameView={real && scene.groundLayers.length > 0}
-        lines={drawn}
-        focus={focus}
-        className="h-full w-full"
-      />
-      {real && (scene.scenery || scene.placements.length > 0) && (
-        <Button
-          size="sm"
-          variant={objects ? "outline" : "ghost"}
-          className="absolute left-3 top-3 h-7 gap-1.5 px-2 text-[12px]"
-          aria-pressed={objects}
-          onClick={() => setObjects((v) => !v)}
-        >
-          <Boxes className="size-3.5" />
-          {t("review.objects")}
-        </Button>
-      )}
-      <p className="pointer-events-none absolute left-3 top-3 max-w-[70%] text-[11px] text-muted-foreground">
-        {ground && !scene.terrain
+  // What the ground under the lines actually is, said plainly when it isn't the track itself.
+  const note =
+    ground && !scene.terrain
+      ? t("review.loadingTrack")
+      : !real
+        ? `${t("review.groundFromLaps")}${why ? ` ${why}.` : ""}`
+        : scene.painting
           ? t("review.loadingTrack")
-          : !real
-            ? `${t("review.groundFromLaps")}${why ? ` ${why}.` : ""}`
-            : scene.painting
-              ? t("review.loadingTrack")
-              : ""}
-      </p>
+          : "";
+
+  return (
+    <div className={cn("flex flex-col", className)}>
+      {/* The viewer keeps its own corner for the drag and zoom hints, so the key sits under it
+          rather than on top of them. */}
+      <div className="relative min-h-0 flex-1">
+        <TrackViewer
+          terrain={terrain}
+          overview={real ? scene.overview : null}
+          scenery={real ? scene.scenery : null}
+          surfaces={real ? scene.surfaces : []}
+          backdrop={real ? scene.backdrop : null}
+          ground={real ? scene.ground : null}
+          groundLayers={real ? scene.groundLayers : []}
+          placements={real ? scene.placements : []}
+          showObjects={objects}
+          // The game's own look, the way MXB App shows a track.
+          gameView={real && scene.groundLayers.length > 0}
+          lines={drawn}
+          focus={focus}
+          className="h-full w-full"
+        />
+        {real && (scene.scenery || scene.placements.length > 0) && (
+          <Button
+            size="sm"
+            variant={objects ? "outline" : "ghost"}
+            className="absolute left-3 top-3 h-7 gap-1.5 px-2 text-[12px]"
+            aria-pressed={objects}
+            onClick={() => setObjects((v) => !v)}
+          >
+            <Boxes className="size-3.5" />
+            {t("review.objects")}
+          </Button>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border px-3 py-2 text-[11px] text-muted-foreground">
+        <Key colour={YOU}>{t("review.legendYou")}</Key>
+        {!review.solo && <Key colour={REF}>{t("review.legendRef")}</Key>}
+        <span>{t("review.tipsOnTrack")}</span>
+        {note && <span className="text-faint">{note}</span>}
+      </div>
     </div>
   );
 }

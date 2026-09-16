@@ -3,6 +3,9 @@
 ## Unreleased — MXB Coach
 
 ### Added
+- A numbered post stands on the 3D track where each tip happens, so a call like "the rear spins
+  out of turn 2" is somewhere you can see, with a key for your line and the fast lap.
+- The in-game HUD switches are on the review page too, under In game beside the live cues.
 - Saving a setup now sets it as the one practice loads on that track, so it's on the bike when
   you go out. Close MX Bikes first and it happens on save; otherwise there's a Select button
   for when the game is closed. Your other setups, and your race and qualifying picks, are left
@@ -22,6 +25,12 @@
   have a Refresh button too.
 
 ### Changed
+- The lap review is split into tabs — Lap, Sections, Setup, In game and Track — so each one is a
+  short read instead of one long scroll. It opens on the tab you used last.
+- "How does the bike feel?" is a bike now. Each thing you can say sits at the part it's about:
+  the fork and front wheel, the shock and rear, the chassis, and the engine and gearbox.
+- The setup card leads with the copy it would save and one line saying what that changes, then
+  lists every change the coach found from your laps, grouped, with the reason under each.
 - The live cues move on. Once you've sent them, the coach keeps them up to date as you ride: it
   drops what you've taken and calls what's costing you time now, instead of repeating the same
   lap's calls every lap.
