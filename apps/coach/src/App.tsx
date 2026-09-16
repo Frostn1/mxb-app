@@ -10,6 +10,7 @@ import { I18nProvider, setAmbientVars, useT } from "@/i18n";
 import Sessions from "./Components/Sessions/Sessions";
 import Settings from "./Components/Settings/Settings";
 import UpdateBanner from "./Components/UpdateBanner";
+import { track } from "@/lib/analytics";
 import { UpdateProvider } from "./Context/Update";
 
 type View = "sessions" | "settings";
@@ -33,6 +34,12 @@ function Shell() {
   const [config, setConfig] = useState<Config>({ modsPath: "" });
   const [games, setGames] = useState<GameInfo[]>([MXB_FALLBACK]);
   const [view, setView] = useState<View>("sessions");
+  // Which page is open. Derived and counted by an effect rather than inside the rail's handler,
+  // for the reason the manager does the same: plenty of things move the view without going
+  // through it. `view.settings` is deliberately the manager's name — it is the same page.
+  useEffect(() => {
+    track(`view.${view}`);
+  }, [view]);
 
   const reloadConfig = useCallback(async () => setConfig(await getConfig()), []);
 

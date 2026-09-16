@@ -14,6 +14,13 @@
   FrostMod 0.22 or newer.
 - With MXB App running too, the two share one shortcut, and each overlay shows the other's tabs.
 
+## Unreleased — Frost's Studio
+
+### Added
+- Track Studio draws random tracks as MX, SX or SMX. SX is a short, flat stadium lap of
+  parallel lanes and 180° turns with a 22-gate start, and SMX is a flatter, tighter outdoor lap.
+  Writing a track from a brief follows the same switch.
+
 ## Unreleased — MXB App
 
 ### Added
@@ -37,6 +44,26 @@
   didn't answer and the app rebuilt the list from its own address book, it reported the list
   rather than the master — so every install with a warm book voted "working" through an outage
   it was itself routing around.
+
+### Changed
+- The app reports anonymous usage from a fixed list of names and nothing else. A plugin shares
+  the app's window, and so could count whatever it liked under any name it liked — including
+  filling the buffer with invented ones, which quietly stopped real counters being recorded
+  until the next send.
+
+## Unreleased — Frost's Studio
+
+### Changed
+- The Studio reports anonymous usage from the same fixed list of names as the app, for the same
+  reason.
+
+## Unreleased — MXB Coach
+
+### Added
+- Coach counts anonymous usage the way the app and the Studio already do — which pages get
+  opened, and how many sessions get reviewed. Same switch (Settings → General), same config, and
+  the same nothing-about-you payload: no rider name, no paths, no session files. Coach never
+  mints an identifier of its own, so a machine with only Coach on it counts nothing at all.
 
 ## 2026-09-15 — v0.15.1 — Small fixes
 

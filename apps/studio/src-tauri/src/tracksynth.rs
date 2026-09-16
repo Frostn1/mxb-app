@@ -1049,7 +1049,7 @@ pub fn place_on_ground(prog: &TrackProgram) -> Option<Placement> {
     // The start needs more of it than the rest of the lap: the opening straight fans out to
     // hold a 48 m gate row, and a fan hanging off the edge of the plot is gates in the void.
     let run = prog.opening_straight();
-    let fan_margin = margin.max(START_FAN_HALF_M + SHOULDER_M);
+    let fan_margin = margin.max(prog.discipline.rules().fan_half_m() + SHOULDER_M);
 
     let score = |turn: f32, dx: f32, dz: f32| -> Option<(f32, f32, f32)> {
         let (c, s) = (turn.cos(), turn.sin());
@@ -2098,7 +2098,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // forty lines, deepest a few metres off the row and gone by the time the pack has
             // spread. The one piece of ground on a track whose ruts are laid out in a comb.
             let from_gate = s - spur.gate_at();
-            let row = GRID_STALLS as f32 * GRID_LANE_M * 0.5;
+            let row = spur.gates as f32 * GRID_LANE_M * 0.5;
             if from_gate > -1.0 && from_gate < GATE_RUT_M && t.abs() < row {
                 let along = smoothstep(1.0 - (from_gate.max(0.0) / GATE_RUT_M));
                 let lane = (t / GRID_LANE_M) * std::f32::consts::TAU;
@@ -4551,12 +4551,12 @@ fn line_id(s: Surface, preview: bool) -> u32 {
 ///
 /// Untested against the game — nothing here has been loaded by MX Bikes. The structure is
 /// right; whether every field means what it looks like is not something a macOS box can say.
-/// How many gates the row holds, and how wide a lane each one gets.
+/// How wide a lane each gate gets. How many gates the row holds is the discipline's
+/// (`tracklayout::Rules::gates`).
 ///
-/// Forty at 1.2 m, because that is what every modern track ships: Indiana, Millville,
-/// Washougal, Maryland and the GP tracks all say 40, and their lane widths run 1.1 to 1.3.
-const GRID_STALLS: usize = 40;
-const GRID_LANE_M: f32 = 1.2;
+/// 1.2 m, because that is what every modern track ships: Indiana, Millville, Washougal,
+/// Maryland and the GP tracks all run 1.1 to 1.3.
+pub(crate) const GRID_LANE_M: f32 = 1.2;
 
 /// Where the finish line sits, in metres round the lap.
 ///
@@ -4586,13 +4586,10 @@ pub(crate) fn finish_at(prog: &TrackProgram) -> f32 {
     (run * 0.4).clamp(10.0, 40.0)
 }
 
-/// How wide the start fans out, as a half-width in metres.
-///
-/// The gate row is 48 m across and it stands *on the track*, so the track has to be that wide
-/// where it stands. This is not the riding line being too wide: a start straight is a fan
-/// that funnels into turn one, and the published tracks measure 13 to 15 m at the finish line
-/// with a 45 to 53 m row of gates on the start.
-pub const START_FAN_HALF_M: f32 = GRID_STALLS as f32 * GRID_LANE_M * 0.5 + 3.0;
+// How wide the start fans out is `tracklayout::Rules::fan_half_m`: the gate row stands *on
+// the track*, so the track is that wide where it stands. A start straight is a fan that
+// funnels into turn one; published tracks measure 13 to 15 m at the finish line with a 45 to
+// 53 m row of gates on the start.
 
 /// How far back from the gate row the fan reaches, metres. The lap's last corner feeds onto
 /// the start straight, so the width has somewhere to come from.
@@ -4626,6 +4623,8 @@ pub struct StartSpur {
     /// How far the sprint runs before the fan has narrowed to the riding line.
     funnel: f32,
     len: f32,
+    /// Gates in the row.
+    pub gates: usize,
 }
 
 /// How far past the gate row its grooves run, and how deep they are at their deepest.
@@ -4646,8 +4645,8 @@ const MERGE_TAIL_M: f32 = 12.0;
 /// The whole gate row until its grooves run out, then narrowing to the track by the end of the
 /// sprint, so it meets turn one the width of the lap it joins. Held full width for the whole
 /// sprint, the pad's back half lay over the main straight and folded into a blob in the turn.
-fn pad_half(half: f32, line_half: f32, s: f32) -> f32 {
-    let (from, to) = (GATE_INSET_M + 15.0, crate::trackprog::START_SPRINT_M);
+fn pad_half(half: f32, line_half: f32, s: f32, sprint: f32) -> f32 {
+    let (from, to) = (GATE_INSET_M + 15.0, sprint);
     let u = ((s - from) / (to - from).max(1.0)).clamp(0.0, 1.0);
     half + (line_half - half) * smoothstep(u)
 }
@@ -4716,7 +4715,9 @@ impl StartSpur {
         // the plot is benched to ground that isn't there — and a lap with no room beside it
         // for a start is a lap that gets none, which `trackllm::review` says out loud rather
         // than quietly building something broken.
-        let margin = START_FAN_HALF_M + SHOULDER_M * START_BANK;
+        let rules = prog.discipline.rules();
+        let fan_half = rules.fan_half_m();
+        let margin = fan_half + SHOULDER_M * START_BANK;
         let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
         if stations.iter().any(|q| {
             q.x < margin || q.z < margin || q.x > sx - margin || q.z > sz - margin
@@ -4758,10 +4759,10 @@ impl StartSpur {
                 .sum::<f32>()
                 / n as f32
         };
-        let half = START_FAN_HALF_M.max(prog.width * 0.5);
+        let half = fan_half.max(prog.width * 0.5);
         // The same width the pad comes out — see `at`, which this has to agree with or the
         // level is taken across ground the start does not cover.
-        let wide_at = |s: f32| pad_half(half, prog.width * 0.5, s);
+        let wide_at = |s: f32| pad_half(half, prog.width * 0.5, s, rules.start_sprint_m);
         let mut deck: Vec<f32> = stations.iter().map(|q| across(q, wide_at(q.s))).collect();
         smooth_along(&mut deck, (BENCH_SMOOTH_M * 2.0 / STATION_STEP) as usize);
         // And where it comes near the lap, it takes the lap's height rather than the ground's.
@@ -4796,10 +4797,11 @@ impl StartSpur {
             line,
             stations,
             deck,
-            half: START_FAN_HALF_M.max(prog.width * 0.5),
+            half: fan_half.max(prog.width * 0.5),
             line_half: prog.width * 0.5,
-            funnel: crate::trackprog::START_SPRINT_M,
+            funnel: rules.start_sprint_m,
             len,
+            gates: rules.gates,
         })
     }
 
@@ -4827,7 +4829,7 @@ impl StartSpur {
     /// is why a start straight reads as a wide slab with a funnel on the end of it rather than
     /// as a wedge.
     pub fn at(&self, s: f32) -> f32 {
-        pad_half(self.half, self.line_half, s)
+        pad_half(self.half, self.line_half, s, self.funnel)
     }
 
     pub fn length(&self) -> f32 {
@@ -4983,7 +4985,7 @@ fn rdf(prog: &TrackProgram, syn: &Synth) -> String {
     //
     // `posx`/`posz` is one *end* of the row, not its middle, so the anchor sits half a
     // row-width across and the gates come out centred on the line they stand on.
-    let grid = GRID_STALLS;
+    let grid = prog.discipline.rules().gates;
     let lane = GRID_LANE_M;
     let span = grid as f32 * lane;
     let (gate, gate_at) = match spur {
@@ -5929,7 +5931,8 @@ fn start_rut(syn: &Synth, i: usize, seed: u32) -> Option<u8> {
     if !(-1.0..GATE_RUT_M).contains(&from_gate) {
         return Some(0);
     }
-    let row = GRID_STALLS as f32 * GRID_LANE_M * 0.5;
+    let gates = syn.spur.as_ref().map_or(0, |s| s.gates);
+    let row = gates as f32 * GRID_LANE_M * 0.5;
     if d > row {
         return Some(0);
     }
@@ -8376,7 +8379,7 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
 /// the code that made it. Bump it with every change to what a program builds into: minor for
 /// a new feature, patch for a fix. 0.x until the generator is finished. History in
 /// `apps/studio/FROST_ALGORITHM.md`.
-pub const FROST_ALGORITHM_VERSION: &str = "0.34.0";
+pub const FROST_ALGORITHM_VERSION: &str = "0.35.0";
 
 /// The stamp every built track carries in `<slug>/frost-algorithm.ini`.
 ///
@@ -9430,6 +9433,7 @@ mod tests {
             width: 12.0,
             blend: crate::trackprog::default_blend(),
             elevation: Vec::new(),
+            discipline: Default::default(),
             features: vec![
                 Feature::Tabletop { at: 30.0, length: 22.0, height: 2.4, lip: 0.0, finish: false },
                 Feature::Double { at: 70.0, height: 2.0, gap: 9.0, lip: 6.0, finish: false },
@@ -9504,7 +9508,7 @@ mod tests {
         let p = oval();
         let s = synthesise(&p).unwrap();
         let spur = s.spur.as_ref().expect("a lap with a straight has a start");
-        let span = GRID_STALLS as f32 * GRID_LANE_M;
+        let span = crate::tracklayout::MX_RULES.gates as f32 * GRID_LANE_M;
         let gate = spur.gate_at();
         // The widest cell on the row, measured off the start line the way the game measures a
         // stall's `lat`.
@@ -9570,7 +9574,7 @@ mod tests {
             let along = long - q.s;
             placed.push((q.x + fx * along + rx * lat, q.z + fz * along + rz * lat));
         }
-        assert_eq!(placed.len(), GRID_STALLS);
+        assert_eq!(placed.len(), crate::tracklayout::MX_RULES.gates);
 
         // Every gate on one straight line: fit the row's own direction from its ends and check
         // nothing wanders off it.
@@ -9631,7 +9635,7 @@ mod tests {
             let (rx, rz) = crate::trackprog::right_vector(q.heading);
             placed.push((q.x + rx * lat, q.z + rz * lat));
         }
-        assert_eq!(placed.len(), GRID_STALLS, "every gate is written");
+        assert_eq!(placed.len(), crate::tracklayout::MX_RULES.gates, "every gate is written");
 
         // Each one on the start straight, and none of them on the lap.
         let line = p.start_line().expect("a start line");
@@ -9667,7 +9671,7 @@ mod tests {
             .map(|q| ((q.x - gate.x).powi(2) + (q.z - gate.z).powi(2)).sqrt())
             .fold(f32::MAX, f32::min);
         assert!(
-            nearest > crate::trackprog::START_OFFSET_M * 0.5,
+            nearest > crate::tracklayout::MX_RULES.start_offset_m * 0.5,
             "the lap passes {nearest:.0} m from the gate row"
         );
     }
@@ -10391,7 +10395,7 @@ mod tests {
             "the start line is the whole lap again"
         );
         assert!(
-            (value("length") - crate::trackprog::START_SPRINT_M).abs() < 0.01,
+            (value("length") - crate::tracklayout::MX_RULES.start_sprint_m).abs() < 0.01,
             "the sprint is {} m",
             value("length")
         );
@@ -10929,7 +10933,7 @@ mod tests {
                     "{name}: start straight {:.0} m off the lap, {:.0} m long in {} segments, \
                      {:.0} m wide at the gates against a {:.0} m track; joins the lap at \
                      {:.0} m of {:.0}",
-                    crate::trackprog::START_OFFSET_M,
+                    crate::tracklayout::MX_RULES.start_offset_m,
                     spur.length(),
                     line.segments.len(),
                     spur.width_m(),
@@ -12679,7 +12683,7 @@ mod tests {
             lo_x.min(lo_z).min(p.terrain.size_x - hi_x).min(p.terrain.size_z - hi_z)
         );
         println!("  a spur needs {:.0} m of clear ground beside the opening straight",
-                 START_FAN_HALF_M + SHOULDER_M * START_BANK);
+                 crate::tracklayout::MX_RULES.fan_half_m() + SHOULDER_M * START_BANK);
     }
 }
 

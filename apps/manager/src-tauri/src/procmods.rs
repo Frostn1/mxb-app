@@ -142,7 +142,7 @@ const REGION_HEAD: usize = 4096;
 /// is what one of these is.
 ///
 /// It carries no verdict, in the same way [`Module`] carries none. `rwx`, `private`,
-/// `thread: true` and a PDB called `kaizo.pdb` are four observations; what they add up to is
+/// `thread: true` and a PDB called `trainer.pdb` are four observations; what they add up to is
 /// decided against rules the client does not hold.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -994,8 +994,8 @@ mod tests {
             protect: "rwx".into(),
             thread: true,
             image: true,
-            name: "kaizo.dll".into(),
-            pdb: "kaizo.pdb".into(),
+            name: "trainer.dll".into(),
+            pdb: "trainer.pdb".into(),
             timestamp: 0x6512_3456,
             sha256: "b".repeat(64),
         }
@@ -1186,7 +1186,7 @@ mod tests {
         .unwrap();
         assert!(json.contains(r#""kind":"private""#), "{json}");
         assert!(json.contains(r#""protect":"rwx""#), "{json}");
-        assert!(json.contains(r#""pdb":"kaizo.pdb""#), "{json}");
+        assert!(json.contains(r#""pdb":"trainer.pdb""#), "{json}");
         assert!(json.contains(r#""thread":true"#), "{json}");
         assert!(json.contains(r#""threads":{"total":44,"foreign":1,"breakpoints":2}"#), "{json}");
         assert!(json.contains(r#""loaded":true"#), "{json}");

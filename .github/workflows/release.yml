@@ -171,6 +171,13 @@ jobs:
           # Sign the updater artifacts so the app can verify self-updates.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Signs this build's anonymous usage reports, so the control plane can tell a report
+          # from one of our builds from a report from a script. Obfuscated into the binary by
+          # crates/core/build.rs — not secrecy, since anyone can download the build and read
+          # the pad, but it keeps the key off a `strings` dump. Unset expands to empty, which
+          # build.rs drops, so a fork builds an unsigned variant rather than failing; the
+          # endpoint takes unsigned reports until MXB_USAGE_REQUIRE_SIGNATURE is turned on.
+          MXB_USAGE_KEY: ${{ secrets.MXB_USAGE_KEY }}
           # Baked into the Rust binary by src-tauri/build.rs — the shop catalog can't be
           # reached without them, and the Shop tab hides itself when they're missing.
           # Unset secrets expand to empty and are filtered out, so forks build a

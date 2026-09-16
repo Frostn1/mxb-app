@@ -825,6 +825,72 @@ berm geometry, rut spacing and width, off-camber angle, per-lap elevation change
 
 For these, `trackllm::corpus` and `trackstats` are the authority and this document has nothing to add.
 
+### 12. Supercross and SuperMotocross: the discipline rules
+
+Track Studio draws a lap as MX, SX or SMX. Each discipline has one row of `tracklayout::Rules`
+(`MX_RULES`, `SX_RULES`, `SMX_RULES` in `apps/studio/src-tauri/src/tracklayout.rs`), and review
+holds the lap to that row's `review` bands. MX is every constant the walker had before, unchanged.
+Change an SX or SMX value in the code and in this table together.
+
+**Source.** 11 community tracks measured from their own `.trh`/`.rdf` (FSX Birmingham, Indianapolis,
+Seattle, Daytona, Charlotte SMX, Missouri SMX; Feulatracks Pittsburgh; 2020 San Diego, Tampa,
+Anaheim 2; Steezy Las Vegas SMX) plus 15 real rounds. The data and scripts are in the session
+scratchpad `sx-refs/`: `measured.json`, `measured_table.csv`, `summary.py`. Six of the eleven are by
+one team (FSX), so the medians lean towards that style; the bands are what to keep.
+
+Status: **M** measured, **P** published, **E** estimated.
+
+**SX** (7 stadium tracks, p10 / median / p90)
+
+| Rule | Value in code | Measured or source | Status |
+|---|---|---|---|
+| Floor | ≤ 140 x 120 m, drawn 125–140 along, laid on a 240 m square plot under any of the eight symmetries, so lanes run along the plot or across it | 117–150 along, 72–139 across: the FSX floors are 72–86, the 2020 rounds 124–139 | M |
+| Lap | 750–900 m | 770 / 779 / 880, target 780 | M |
+| Riding width | 8.5–10 m | 9.3–11.3, median 10; 6.1 m real minimum | M, P |
+| Lanes | 7 to 9, 12–14 m apart; a lane may skip a row, which makes a wide turn on two 90s rather than a 180 | 5–8 of the 7–10 corners are 180s; parallel lanes 55–110 m | M, E (gap) |
+| Corners | 7–10: one 180 a lane, less one for each step across, plus the return lane's two 90s | 7 / 9 / 9, of which 5 / 6 / 7 are 180s; 0–3 90s; no sweepers | M |
+| Corner radius | 5.5–8 m | apex 5.8 / 6.7 / 7.8 | M |
+| Runs | each lane 45–110 m, longest ≤ 130 | median run 64, longest 90–130; a lane may end anywhere, so runs vary within a lap | M |
+| Start straight | 75–110 m, on a long side and into the holeshot 180 | 35–110, target 75; gate to holeshot 34–108. The floor is 75 m because that is what a finish jump needs, so ours sit at the top of the measured range | M, E |
+| Gate off the line | 20 m | 9.6–29.9, median 16.8; 20 keeps the 26.4 m row off the next lane | M, E |
+| Gates | 22 | 22 riders | P |
+| Finish jump | 2.0–2.2 m tall, 20–25 m deck | usually a triple 22.6–25.3 m crest to crest, 30° lip, 0–5 m past the line | M; built as a tabletop (E) |
+| Finish take-off | 9 m | a 30° lip wants about 6 m; no face here is under 9 | E |
+| Take-off near a turn | allowed (tight radius 5 m) | take-offs come straight out of turns | E |
+| Relief | flat floor, no tilt, hills or banks | lap climb about 0 | M |
+| Features | 60 / 64 / 70 per km; 15 / 20 / 24 per lap over 1 m | height median 0.98, p90 1.95, max 2.2–3.6; lip median 21°, p90 30° | M |
+| Rhythm lanes | 4–7, 40–65 m, 5–6 hills at 9.5–10.5 m, 0.9–1.5 m tall | | M |
+| Whoops | 1 section (2nd optional), 9–10 at 5.2–5.6 m, 0.45–0.7 m, about 48 m | | M |
+| Triples / doubles / tables | 0–2 at 22.6–25.3 m / 0–1 at 17–18 m plus 1–3 rhythm at 10–13 m / 0–4, deck 6.5–11 m | | M |
+| Banking | median 2°, p90 8°; outside 0.4–0.5 m higher 4 m out | | M |
+
+Review bands (SX): lap 650–1000 m, width 6–12 m, 6–12 corners, median radius 4.5–10 m, total
+turning 900–2400° (M 1075–1618), 40–90 lips/km, relief amplitude 0–2 m, lap average 25–60 km/h (E).
+
+The rhythm lanes, whoops, triples, doubles, tables and banking are stated in `Rules::sections` for
+Phase 2, which places them. The measured lap order is start straight, first 180 (holeshot), then
+[rhythm lane, 180] four to six times; the whoops lane follows a 180 in the second half; one lane
+ends in a triple; then the final 180 and a triple or double over the finish. Transition odds:
+after a 180, rhythm 0.51, 180 0.16, whoops 0.14; after rhythm, 180 0.56, 90 0.16; after whoops,
+180 0.50.
+
+**SMX** (3 tracks). Phase 1 walks SMX as an outdoor lap on its own row; stadium blocks come later.
+
+| Rule | Value in code | Measured or source | Status |
+|---|---|---|---|
+| Plot | 400 x 400 m | up to 540 x 200 | E (square for the outdoor walk) |
+| Lap | 1300–1700 m (review 900–2100) | 1141–1925 | M |
+| Width | 10–13 m | 10.0–10.5 | M |
+| Corners | review 8–30 | 12–22, 7–10 of them 180s | M |
+| Corner radius | apex 7–11.5 m | 6.8–11.5 | M |
+| Longest straight | the outdoor walk's 125 m | one up to 350 m allowed | M, not modelled |
+| Features | review 25–60 per km | 37–45 per km, max 2.8–4.2 m | M |
+| Triples / doubles | 3–7 at about 27 m / 2–4 | | M |
+| Rhythm lanes | shorter, 3 hills; no SX whoops | | M |
+| Gate off the line | 30 m | 10.5 and 28.3 (the third 0.1) | M, E |
+| Gates | 22 | | P |
+| Relief | amplitude 1–2.5 m, tilt 0–3 m, 0–1 banks | flatter than MX | E |
+
 ---
 
 ## Source register

@@ -6,6 +6,7 @@ Minor for a new feature, patch for a fix, 0.x until the generator is finished. B
 
 | Version | Date | Commit | Change |
 |---|---|---|---|
+| 0.35.0 | 2026-09-15 | feature/track-discipline | MX, SX and SMX: a rules table per discipline (plot, lap, width, start, finish jump, gates, review bands); SX is a new stadium walker — lanes across a flat floor, each ending where its run puts it, so a lane either turns back (a 180) or steps across (two 90s), with a return lane and a 22-gate start; SMX walks the outdoor lap flatter and tighter; MX draws exactly what it drew before |
 | 0.34.0 | 2026-09-15 | feature/byo-llm-trackgen | the random lap takes settings — lap length, width, corners, jumps, surface, wear, ARL roughness, hills — so a model can pick them from a brief; with none given it draws exactly what it drew before |
 | 0.33.0 | 2026-09-15 | feature/random-track-scales | a random track picks a scale: Easy (jumps at 70% tall, tables and gaps 70% long; wear 0.25, roughness 0.6 for shallower ruts), Normal (as drawn), or ARL (the `FROST_ROUGH=2` raced build: roughness 2, jumps grown ×1.35) |
 | 0.32.0 | 2026-09-14 | feature/table-mounds | jumps spill wider the taller they are: sides round over the top, stand at most 28° a third of the way down and run out in a long skirt (a 3 m table stood at 38° within 6 m); rounded along the lap past the track and stopped 2 m short of another leg |

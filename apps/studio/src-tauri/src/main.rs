@@ -291,9 +291,14 @@ async fn generate_track(
     app: tauri::AppHandle,
     brief: String,
     mode: Option<String>,
+    discipline: Option<trackprog::Discipline>,
 ) -> Result<Generated, String> {
     let own = mxb_core::config::data_dir(&app).and_then(|d| trackmodel::load(&d));
+    let discipline = discipline.unwrap_or_default();
     let settings_only = match mode.as_deref() {
+        // A whole lap is written against the motocross corpus. Any other discipline is drawn
+        // by its own walker, so the model is asked only for the track's character.
+        _ if !discipline.is_mx() => true,
         Some("settings") => true,
         Some("program") => false,
         // Ours is Claude and writes the lap. One of the user's own is trusted with it only
@@ -302,7 +307,8 @@ async fn generate_track(
     };
     let out = match own {
         Some(model) => {
-            generate_with(&trackmodel::Direct { model }, brief.trim(), settings_only).await
+            generate_with(&trackmodel::Direct { model }, brief.trim(), settings_only, discipline)
+                .await
         }
         None => {
             let cfg = config::load_or_detect(&app).unwrap_or_default();
@@ -320,7 +326,7 @@ async fn generate_track(
                 );
             }
             let ask = trackllm::ControlPlane { base, token: cfg.cp_token.clone() };
-            generate_with(&ask, brief.trim(), settings_only).await
+            generate_with(&ask, brief.trim(), settings_only, discipline).await
         }
     }
     .map_err(|e| format!("{e:#}"))?;
@@ -332,6 +338,7 @@ async fn generate_with(
     ask: &impl trackllm::Ask,
     brief: &str,
     settings_only: bool,
+    discipline: trackprog::Discipline,
 ) -> anyhow::Result<Generated> {
     if !settings_only {
         // Four attempts: one to write it, one to fix the numbers, one for the thing the fix
@@ -341,7 +348,11 @@ async fn generate_with(
         let program = trackllm::generate(brief, ask, 4).await?;
         return Ok(Generated { program, settings: None });
     }
-    let settings = trackllm::ask_settings(brief, ask).await?;
+    let mut settings = trackllm::ask_settings(brief, ask).await?;
+    // Not the model's to pick: it is the switch on screen.
+    if !discipline.is_mx() {
+        settings.discipline = Some(discipline);
+    }
     let seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
@@ -444,6 +455,7 @@ async fn test_track_model(
 async fn random_track_program(
     seed: Option<u64>,
     scale: Option<trackprog::TrackScale>,
+    discipline: Option<trackprog::Discipline>,
 ) -> Result<serde_json::Value, String> {
     let from = seed.unwrap_or_else(|| {
         std::time::SystemTime::now()
@@ -451,8 +463,10 @@ async fn random_track_program(
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(1)
     });
+    let knobs = tracklayout::LayoutKnobs::for_discipline(discipline.unwrap_or_default());
     let prog = tauri::async_runtime::spawn_blocking(move || {
-        let mut prog = (0..24u64).find_map(|i| tracklayout::draw(from.wrapping_add(i)))?;
+        let mut prog =
+            (0..24u64).find_map(|i| tracklayout::draw_with(from.wrapping_add(i), &knobs))?;
         prog.at_scale(scale.unwrap_or_default());
         Some(prog)
     })

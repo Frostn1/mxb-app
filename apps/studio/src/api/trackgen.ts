@@ -41,7 +41,12 @@ export interface TrackProgram {
    * follows the ground it crosses.
    */
   elevation: { at: number; height: number }[];
+  /** Which rules the lap is drawn and judged by. Left out for motocross. */
+  discipline?: Discipline;
 }
+
+/** Motocross, supercross or SuperMotocross. Mirrors `Discipline` in `trackprog.rs`. */
+export type Discipline = "mx" | "sx" | "smx";
 
 export type TrackSegment =
   /** `rise` is metres climbed over the segment; negative drops, zero follows the ground. */
@@ -114,6 +119,8 @@ export interface TrackSettings {
   tilt: number;
   landforms: number;
   elevationChanges: number;
+  /** Set by the app from the discipline switch, never by the model. */
+  discipline?: Discipline;
 }
 
 /** A generated track, and the settings it was drawn from when that was the mode. */
@@ -131,8 +138,12 @@ export interface Generated {
  *
  * `mode` is left to the app unless something has a reason to force it.
  */
-export function generateTrack(brief: string, mode?: GenerateMode): Promise<Generated> {
-  return invoke<Generated>("generate_track", { brief, mode });
+export function generateTrack(
+  brief: string,
+  mode?: GenerateMode,
+  discipline: Discipline = "mx",
+): Promise<Generated> {
+  return invoke<Generated>("generate_track", { brief, mode, discipline });
 }
 
 /** Which API shape a model of the user's own speaks. */
@@ -190,8 +201,9 @@ export function blankTrackProgram(): Promise<TrackProgram> {
 export function randomTrackProgram(
   seed?: number,
   scale: TrackScale = "normal",
+  discipline: Discipline = "mx",
 ): Promise<TrackProgram> {
-  return invoke<TrackProgram>("random_track_program", { seed, scale });
+  return invoke<TrackProgram>("random_track_program", { seed, scale, discipline });
 }
 
 /** Easy: smaller jumps, shallower ruts. Pro: the bigger, rougher raced build. */
