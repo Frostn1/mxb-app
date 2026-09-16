@@ -2,7 +2,19 @@
 
 ## Unreleased — MXB Coach
 
+### Fixed
+- The live cue and the blue trail appear in the game. Coach was writing them to a different
+  folder from the one it writes the HUD settings to, so on any setup where those two folders
+  differ the recorder never found them: the HUD switches worked while the cue and the trail
+  showed nothing at all, with no message to say why.
+- Turning on the blue trail turns the track map on with it. The recorder draws the trail inside
+  the map, so with the map off the switch could never do anything — and the map starts off
+  wherever MXBMRP3 is installed.
+
 ### Changed
+- The cues send themselves. There is no "Send to the game" button any more: Coach writes them
+  when you open a lap, again whenever you change the level or how much coaching you want, and
+  it keeps them following you as you ride. Changes reach the game the next time you go out.
 - The lap notes name the line. "Take the fast line" said nothing you could act on; every note
   about a line now says inside or outside, at the corner — which one the other riders are on,
   which one paid on your own laps, and which one to move to when the busy one ruts.
