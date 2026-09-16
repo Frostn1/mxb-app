@@ -4114,6 +4114,21 @@ fn game_running() -> bool {
     gameproc::is_game_running()
 }
 
+/// Bring the running game's window to the front.
+///
+/// Exists because the app launches the game itself, which leaves it *behind* the app's own
+/// window — so "the game is already running" reads as a lie to a player looking at our UI
+/// with no MX Bikes in sight. Showing them the game they already have open is a better
+/// answer than telling them it exists.
+///
+/// Best-effort: Windows only grants foreground rights to the process that owns the last
+/// input, which we do here because the player just clicked our button. A refused activation
+/// returns `false` and leaves them one alt-tab away.
+#[tauri::command]
+fn focus_game() -> bool {
+    gameproc::focus_game()
+}
+
 /// Installed bikes with their class, for the garage bike-switch UI. The frontend
 /// filters this to the current race's class before offering a swap.
 #[tauri::command]
@@ -6879,6 +6894,7 @@ fn main() {
             sync_paints,
             cp_servers,
             game_running,
+            focus_game,
             shop_login,
             shop_status,
             shop_logout,
