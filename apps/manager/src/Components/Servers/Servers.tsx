@@ -15,6 +15,7 @@ import {
   ChevronUp,
   ChevronDown,
   Globe,
+  ServerCog,
   UserCheck,
   Hourglass,
   LayoutGrid,
@@ -55,6 +56,7 @@ import JoinServerDialog from "../Shell/JoinServerDialog";
 import ServerDetail from "./ServerDetail";
 import ServerCard from "./ServerCard";
 import ConnectionCheck from "./ConnectionCheck";
+import RegisterServerDialog from "./RegisterServerDialog";
 
 type ViewMode = "tiles" | "list";
 const VIEW_KEY = "mxb:serversView:v1";
@@ -113,6 +115,7 @@ const Servers = () => {
   const [joining, setJoining] = useState<string | null>(null);
   const queue = useServerQueue();
   const [joinOpen, setJoinOpen] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
   const [detail, setDetail] = useState<MasterServer | null>(null);
   // Spam and cheat-advertising servers are marked by the backend, not dropped, so this can
   // reveal them. Off by default: the whole point is not to have to read past them.
@@ -526,10 +529,24 @@ const Servers = () => {
           <Plug className="size-3.5" />
           {t("join.title")}
         </Button>
+        {/* Putting your own server on the shared address book. Almost nobody needs it — a
+            server the master lists gets there on its own, off everyone's sweeps — so it is a
+            quiet button rather than anything louder. It is for the two it can't reach: one
+            nobody has found yet, and one that was never in that list to be seen in. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setRegisterOpen(true)}
+          title={t("registerServer.blurb")}
+        >
+          <ServerCog className="size-3.5" />
+          {t("registerServer.action")}
+        </Button>
         <HelpHint title={t("servers.title")} description={t("serverBrowser.help")} />
       </ContextBarRight>
 
       <JoinServerDialog open={joinOpen} onOpenChange={setJoinOpen} onJoined={load} />
+      <RegisterServerDialog open={registerOpen} onOpenChange={setRegisterOpen} />
       <ServerDetail
         server={detail}
         onOpenChange={(open) => !open && setDetail(null)}

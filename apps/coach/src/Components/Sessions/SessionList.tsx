@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useT } from "@/i18n";
-import { coachSessions, coachStatus, type CoachStatus, type SessionSummary } from "@/api/coach";
+import { coachSessions, coachStatus, onSessionsChanged, type CoachStatus, type SessionSummary } from "@/api/coach";
 import { lapTime, started } from "@/lib/format";
 import Page from "../Page";
 
@@ -18,8 +19,10 @@ export default function SessionList({
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [status, setStatus] = useState<CoachStatus | null>(null);
 
-  const load = useCallback(() => {
-    setSessions(null);
+  // `quiet` keeps the list on screen while it re-reads. A live refresh that blanked it would
+  // flash "Loading…" every time the recorder wrote another second of the lap being ridden.
+  const load = useCallback((quiet = false) => {
+    if (!quiet) setSessions(null);
     coachSessions()
       .then(setSessions)
       .catch((e) => {
@@ -30,12 +33,26 @@ export default function SessionList({
   }, []);
   useEffect(() => load(), [load]);
 
+  // The recorder writes while the rider is out on track.
+  useEffect(() => {
+    let live = true;
+    let off: UnlistenFn | undefined;
+    onSessionsChanged(() => load(true)).then((stop) => {
+      if (live) off = stop;
+      else stop();
+    });
+    return () => {
+      live = false;
+      off?.();
+    };
+  }, [load]);
+
   return (
     <Page
       title={t("sessions.title")}
       sub={t("sessions.sub")}
       actions={
-        <Button variant="outline" size="sm" onClick={load}>
+        <Button variant="outline" size="sm" onClick={() => load()}>
           <RefreshCw className="size-3.5" />
           {t("common.refresh")}
         </Button>

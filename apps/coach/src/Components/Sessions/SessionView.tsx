@@ -1,8 +1,18 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { RefreshCw } from "lucide-react";
 import { Badge } from "@frost/shared/Components/ui/badge";
 import { Button } from "@frost/shared/Components/ui/button";
 import { useT } from "@/i18n";
-import { coachLines, coachSession, coachSessions, type Lines, type SessionDetail, type SessionSummary } from "@/api/coach";
+import {
+  coachLines,
+  coachSession,
+  coachSessions,
+  onSessionsChanged,
+  type Lines,
+  type SessionDetail,
+  type SessionSummary,
+} from "@/api/coach";
 import { gap, lapTime, started } from "@/lib/format";
 import Page, { Label } from "../Page";
 
@@ -24,11 +34,26 @@ export default function SessionView({
   const [lines, setLines] = useState<Lines | null>(null);
   const [all, setAll] = useState<SessionSummary[]>([]);
 
-  useEffect(() => {
+  // Re-read rather than replace: a lap finished while this page is open should just appear.
+  const load = useCallback(() => {
     coachSession(path).then(setDetail).catch((e) => setError(String(e)));
     coachLines(path).then(setLines).catch(() => {});
     coachSessions().then(setAll).catch(() => {});
   }, [path]);
+  useEffect(() => load(), [load]);
+
+  useEffect(() => {
+    let live = true;
+    let off: UnlistenFn | undefined;
+    onSessionsChanged(load).then((stop) => {
+      if (live) off = stop;
+      else stop();
+    });
+    return () => {
+      live = false;
+      off?.();
+    };
+  }, [load]);
 
   if (error || !detail) {
     return (
@@ -53,6 +78,12 @@ export default function SessionView({
         .join(" · ")}
       onBack={onBack}
       backLabel={t("sessions.title")}
+      actions={
+        <Button variant="outline" size="sm" onClick={load}>
+          <RefreshCw className="size-3.5" />
+          {t("common.refresh")}
+        </Button>
+      }
     >
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat label={t("session.best")} value={lapTime(best)} />

@@ -777,7 +777,10 @@ export const it: Translation = {
   "join.joining": "Connessione…",
   "join.launching": "Connessione a {{address}}…",
   "join.alreadyRunning":
-    "Chiudi prima {{game}} — un gioco già avviato non può essere collegato a un server.",
+    "{{game}} è già aperto — chiudilo, poi entra da qui.",
+  "join.gameOpen":
+    "{{game}} è già aperto. L'app lo ha avviato, quindi si trova dietro questa finestra. Chiudi il gioco, poi entra da qui.",
+  "join.showGame": "Mostra il gioco",
   "join.failed": "Impossibile entrare in quel server",
   "join.manual": "Entra in un server non elencato",
   "join.noServers": "Nessun server elencato per ora — digita un indirizzo che ti è stato dato.",
@@ -987,6 +990,14 @@ export const it: Translation = {
   "connection.check.master": "Elenco dei server",
   "connection.check.others": "Tutti gli altri",
   "connection.checkFootnote": "L'UDP in uscita dice solo che il datagramma è potuto uscire, non che qualcuno abbia risposto.",
+
+  "registerServer.action": "Aggiungi il tuo server",
+  "registerServer.title": "Aggiungi il tuo server all'elenco condiviso",
+  "registerServer.blurb": "Così l'app ricorda il tuo server anche quando i server di MX Bikes non rispondono.",
+  "registerServer.note": "Serve solo per un server che non compare nell'elenco: uno nuovo, o uno privato. Tutto ciò che il gioco elenca viene già ricordato da sé.",
+  "registerServer.submit": "Aggiungi",
+  "registerServer.done": "{{address}} è nell'elenco condiviso",
+  "registerServer.failed": "Impossibile aggiungere quel server",
 
   "queue.banner": "#{{position}} in coda per {{name}}",
   "queue.turnBanner": "Tocca a te: entra in {{name}}",

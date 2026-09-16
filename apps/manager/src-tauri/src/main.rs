@@ -4152,6 +4152,22 @@ async fn connection_selftest(app: tauri::AppHandle) -> masterstatus::SelfTest {
     masterstatus::self_test(app, &outcome, out.ok().map(|(list, _)| list.len())).await
 }
 
+/// Put a server on the shared address book deliberately, as its own operator.
+///
+/// The Servers tab already contributes every address a sweep turned up, and the control plane
+/// holds each one back until distinct networks have independently seen it — which is what makes
+/// an anonymous write safe to hand back to thousands of apps. This is the way round that for the
+/// server two strangers will never happen to report: one nobody has found yet, or a private one
+/// that was never in the master's list to be seen in. The account is what stands in for the
+/// corroboration, so unlike a sighting it is recorded against somebody.
+///
+/// Returns the address as it was actually stored — normalised, with the default port filled in —
+/// so the dialog can show what it registered rather than what was typed.
+#[tauri::command]
+async fn register_server_address(app: tauri::AppHandle, address: String) -> Result<String, String> {
+    roster::register_mine(&app, &address).await
+}
+
 /// Ask one server about itself, right now.
 ///
 /// The detail panel used to format whatever the list happened to hold, which on a busy evening
@@ -4174,6 +4190,21 @@ async fn probe_server(address: String) -> Result<WorldServer, String> {
 #[tauri::command]
 fn game_running() -> bool {
     gameproc::is_game_running()
+}
+
+/// Bring the running game's window to the front.
+///
+/// Exists because the app launches the game itself, which leaves it *behind* the app's own
+/// window — so "the game is already running" reads as a lie to a player looking at our UI
+/// with no MX Bikes in sight. Showing them the game they already have open is a better
+/// answer than telling them it exists.
+///
+/// Best-effort: Windows only grants foreground rights to the process that owns the last
+/// input, which we do here because the player just clicked our button. A refused activation
+/// returns `false` and leaves them one alt-tab away.
+#[tauri::command]
+fn focus_game() -> bool {
+    gameproc::focus_game()
 }
 
 /// Installed bikes with their class, for the garage bike-switch UI. The frontend
@@ -6933,6 +6964,7 @@ fn main() {
             list_master_servers,
             master_status,
             connection_selftest,
+            register_server_address,
             probe_server,
             server_riders,
             servers_with_paint_sync,
@@ -6958,6 +6990,7 @@ fn main() {
             sync_paints,
             cp_servers,
             game_running,
+            focus_game,
             shop_login,
             shop_status,
             shop_logout,

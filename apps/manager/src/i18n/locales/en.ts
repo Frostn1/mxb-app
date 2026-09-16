@@ -762,7 +762,10 @@ export const en = {
   "join.joining": "Joining…",
   "join.launching": "Joining {{address}}…",
   "join.alreadyRunning":
-    "Close {{game}} first — a running game can't be sent to a server.",
+    "{{game}} is already open — close it, then join from here.",
+  "join.gameOpen":
+    "{{game}} is already open. The app started it, so it's sitting behind this window. Close the game, then join from here.",
+  "join.showGame": "Show me the game",
   "join.failed": "Couldn't join that server",
   "join.manual": "Join a server that isn't listed",
   "join.noServers": "No servers listed yet — type an address you were given instead.",
@@ -973,6 +976,14 @@ export const en = {
   "connection.check.master": "Server list",
   "connection.check.others": "Everyone else",
   "connection.checkFootnote": "Outbound UDP only shows the datagram was allowed out, not that anything answered it.",
+
+  "registerServer.action": "Add your server",
+  "registerServer.title": "Add your server to the shared list",
+  "registerServer.blurb": "So the app remembers your server even when MX Bikes' own servers are down.",
+  "registerServer.note": "You only need this for a server that doesn't show up in the list — a new one, or a private one. Anything the game lists already gets remembered on its own.",
+  "registerServer.submit": "Add it",
+  "registerServer.done": "{{address}} is on the shared list",
+  "registerServer.failed": "Couldn't add that server",
 
   "queue.banner": "#{{position}} in line for {{name}}",
   "queue.turnBanner": "Your turn: join {{name}}",

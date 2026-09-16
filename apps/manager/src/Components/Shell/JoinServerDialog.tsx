@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { Loader2, Plug } from "lucide-react";
+import { ExternalLink, Loader2, Plug } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,7 +11,13 @@ import {
 } from "@frost/shared/Components/ui/dialog";
 import { Input } from "@frost/shared/Components/ui/input";
 import { Button } from "@frost/shared/Components/ui/button";
-import { cpServers, joinServer, type RegisteredServer } from "@frost/shared/api/mods";
+import {
+  cpServers,
+  focusGame,
+  isGameRunning,
+  joinServer,
+  type RegisteredServer,
+} from "@frost/shared/api/mods";
 import { useT } from "@/i18n";
 
 /** Remembers the last address, so rejoining a regular server is one keystroke. */
@@ -51,6 +57,11 @@ const JoinServerDialog = ({
   // enrolled — both land on the address field, which is the useful thing to show.
   const [servers, setServers] = useState<RegisteredServer[] | null>(null);
   const [manual, setManual] = useState(false);
+  // The game can only be steered into a server at startup, so a running copy makes every
+  // control here useless. Probed when the dialog opens rather than discovered by clicking:
+  // the app launches the game itself, which leaves it behind our own window, so a player who
+  // never alt-tabbed has no idea it is up and reads "close the game first" as nonsense.
+  const [gameRunning, setGameRunning] = useState(false);
 
   // Re-read each time it opens rather than once per mount: the registry is the one thing
   // here that changes without the player doing anything.
@@ -61,18 +72,26 @@ const JoinServerDialog = ({
     cpServers()
       .then((list) => !cancelled && setServers(list))
       .catch(() => !cancelled && setServers([]));
+    // A failed probe is treated as "not running": the join attempt reports it properly
+    // anyway, and a banner shown on a guess would be worse than one shown late.
+    isGameRunning()
+      .then((running) => !cancelled && setGameRunning(running))
+      .catch(() => !cancelled && setGameRunning(false));
     return () => {
       cancelled = true;
     };
   }, [open]);
 
   const join = async (target: string) => {
-    if (joining || !target.trim()) return;
+    if (joining || gameRunning || !target.trim()) return;
     setJoining(true);
     try {
       const outcome = await joinServer(target);
       if (outcome === "already_running") {
-        toast.info(t("join.alreadyRunning"));
+        // Reachable when the game started between the probe and the click. Catch up rather
+        // than just complaining, so the banner explains it from here on.
+        setGameRunning(true);
+        toast.info(t("join.alreadyRunning", { game: "MX Bikes" }));
       } else {
         localStorage.setItem(LAST_ADDRESS_KEY, target.trim());
         toast.success(t("join.launching", { address: target.trim() }));
@@ -100,6 +119,23 @@ const JoinServerDialog = ({
           <DialogDescription>{t("join.desc")}</DialogDescription>
         </DialogHeader>
 
+        {gameRunning && (
+          <div className="mt-4 rounded-lg border border-amber-500/25 bg-amber-500/[0.07] px-3 py-2.5">
+            <p className="text-[12.5px] leading-relaxed">
+              {t("join.gameOpen", { game: "MX Bikes" })}
+            </p>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="mt-2.5"
+              onClick={() => void focusGame()}
+            >
+              <ExternalLink className="size-3.5" />
+              {t("join.showGame")}
+            </Button>
+          </div>
+        )}
+
         {showList && (
           <div className="mt-4 space-y-1.5">
             {servers === null ? (
@@ -108,7 +144,7 @@ const JoinServerDialog = ({
               servers.map((s) => (
                 <button
                   key={s.id}
-                  disabled={joining}
+                  disabled={joining || gameRunning}
                   onClick={() => void join(s.address)}
                   className="flex w-full cursor-default items-center gap-3 rounded-lg border border-white/[0.07] px-3 py-2.5 text-left transition-colors hover:bg-white/[0.04] disabled:opacity-50"
                 >
@@ -147,7 +183,7 @@ const JoinServerDialog = ({
               <p className="mt-2 text-[11.5px] text-muted-foreground">{t("join.noServers")}</p>
             )}
             <DialogFooter className="mt-5">
-              <Button type="submit" disabled={joining || !address.trim()}>
+              <Button type="submit" disabled={joining || gameRunning || !address.trim()}>
                 {joining && <Loader2 className="size-4 animate-spin" />}
                 {joining ? t("join.joining") : t("join.action")}
               </Button>

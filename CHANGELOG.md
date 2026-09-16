@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — MXB Coach
+
+### Added
+- On the game's default setup the coach now writes you a setup of your own, named after the
+  track, instead of asking you to go and save one in the garage first. It starts from another
+  setup you have for that bike where there is one, and from the bike's own settings where there
+  isn't. Your own setups are never written over.
+- The session list and the laps in an open session keep up with the recorder while you ride, so
+  a lap you have just finished shows up without leaving the page and coming back. Both pages
+  have a Refresh button too.
+
+### Changed
+- Where two tips want one setting opposite ways — sand wants a tooth more on the rear, the rev
+  limiter a tooth less — the coach says so and leaves that setting to you, rather than listing
+  it as a change it will make. Saving a setup now names the settings it changed.
+
 ## 2026-09-15 — MXB Coach
 
 ### Added
@@ -54,6 +70,9 @@
 - Check my connection, on that screen: it tests your internet, whether the master server's
   address resolves, whether outbound UDP is being blocked, and the server list itself, then says
   whose problem it is. The same numbers are public at mxbsecure.com/status.
+- Add your server, on the Servers tab: puts a server on the shared book by hand, for one the
+  game's own list never carries — a brand-new box, or a private league one. Anything the game
+  does list is remembered on its own and needs none of this.
 - A shared server book. The Servers tab already rebuilt its list by asking each server directly
   when the master wouldn't answer, but only from addresses you had already seen — so on a fresh
   install it had nothing to work from, which is exactly who an outage catches out. The app now
