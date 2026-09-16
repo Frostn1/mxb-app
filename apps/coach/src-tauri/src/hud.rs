@@ -231,7 +231,14 @@ pub fn coach_set_hud(app: AppHandle, key: String, on: bool) -> Result<Hud, Strin
         .find(|k| *k == key)
         .ok_or_else(|| format!("\"{key}\" isn't a HUD part."))?;
     let path = hud_path(&app)?;
-    ini::write(&path, "hud", &[(key, if on { "1" } else { "0" }.to_string())])?;
+    let mut keys = vec![(key, if on { "1" } else { "0" }.to_string())];
+    // The recorder draws the trail inside the map, so a trail with the map off is a switch that
+    // can never do anything — and the map is off by default wherever MXBMRP3 is installed.
+    // Turning the trail on turns the map on with it rather than leaving the rider to find out.
+    if key == "trail" && on {
+        keys.push(("map", "1".to_string()));
+    }
+    ini::write(&path, "hud", &keys)?;
     let (dir, mxbmrp3, pre) = where_and_what(&app)?;
     Ok(hud_of(&dir.join("hud.ini"), mxbmrp3, pre))
 }
