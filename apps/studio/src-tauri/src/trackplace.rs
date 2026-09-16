@@ -1832,9 +1832,13 @@ pub async fn place_layers(app: AppHandle, slug: String) -> Result<PlaceLayers, S
         Some(i) => as_data_url(&dir.join(&i.path)).ok(),
         None => None,
     };
+    // Accept either spelling on the way in. A file this app wrote is snake_case; one a
+    // rider hand-edited, or another tool produced, may not be.
     let trace = std::fs::read(dir.join(format!("{slug}.lap.json")))
         .ok()
-        .and_then(|t| serde_json::from_slice::<LapTrace>(&t).ok());
+        .and_then(|t| serde_json::from_slice::<serde_json::Value>(&t).ok())
+        .map(camelise)
+        .and_then(|v| serde_json::from_value::<LapTrace>(v).ok());
 
     let mut attributions = Vec::new();
     if !place.dem.attribution.is_empty() {
@@ -1904,13 +1908,105 @@ pub async fn place_save_trace(
     };
     let path = dir.join(format!("{slug}.lap.json"));
     let tmp = path.with_extension("json.tmp");
-    let body = serde_json::to_vec_pretty(&trace).map_err(|e| e.to_string())?;
+    let body = serde_json::to_vec_pretty(&lap_file(&trace)).map_err(|e| e.to_string())?;
     std::fs::write(&tmp, body).map_err(|e| format!("couldn't save the lap: {e}"))?;
     std::fs::rename(&tmp, &path).map_err(|e| format!("couldn't save the lap: {e}"))?;
     Ok(path.display().to_string())
 }
 
 // ── Bringing your own ────────────────────────────────────────────────────────
+
+
+/// The lap file exactly as it goes to disk.
+///
+/// Written by hand rather than derived, because this file is a contract with a separate
+/// program and its field names are part of that contract. The structs in this module are
+/// named for Rust and serialised in camelCase for the webview; the file is snake_case,
+/// which is what the format was agreed in.
+///
+/// The temptation, when two spellings are both "accepted", is to write both and be safe.
+/// Do not: a JSON object with `default_width_m` and `defaultWidthM` side by side has two
+/// keys mapping to one field, and a strict reader rejects the whole file as a duplicate
+/// rather than picking one. Write each key once.
+fn lap_file(t: &LapTrace) -> serde_json::Value {
+    let dem = &t.dem;
+    let mut v = serde_json::json!({
+        "version": t.version,
+        "kind": t.kind,
+        "name": t.name,
+        "crs": t.crs,
+        "units": t.units,
+        "closed": t.closed,
+        "default_width_m": t.default_width_m,
+        "start_index": t.start_index,
+        "points": t.points,
+        "dem": {
+            "path": dem.path,
+            "crs": dem.crs,
+            "cell_m": dem.cell_m,
+            "origin_e": dem.origin_e,
+            "origin_n": dem.origin_n,
+            "width": dem.width,
+            "height": dem.height,
+            "vertical_datum": dem.vertical_datum,
+            "source": dem.source,
+            "source_url": dem.source_url,
+            "collected": dem.collected,
+            "licence": dem.licence,
+            "ground": if dem.ground == Ground::Terrain { "terrain" } else { "surface" },
+            "min_z": dem.min_z,
+            "max_z": dem.max_z,
+        },
+    });
+    if !dem.attribution.is_empty() {
+        v["dem"]["attribution"] = serde_json::Value::String(dem.attribution.clone());
+    }
+    if let Some(i) = &t.imagery {
+        let mut im = serde_json::json!({
+            "path": i.path, "source": i.source, "licence": i.licence, "captured": i.captured,
+        });
+        if !i.attribution.is_empty() {
+            im["attribution"] = serde_json::Value::String(i.attribution.clone());
+        }
+        v["imagery"] = im;
+    }
+    v
+}
+
+/// Rewrite a lap file's snake_case keys into the camelCase the structs here expect.
+///
+/// Recursive and total: every key in the document is converted, which is safe because the
+/// only keys this format has are single words or snake_case ones. A key already in
+/// camelCase passes through untouched, so a file written either way reads back.
+fn camelise(v: serde_json::Value) -> serde_json::Value {
+    match v {
+        serde_json::Value::Object(m) => serde_json::Value::Object(
+            m.into_iter()
+                .map(|(k, val)| (to_camel(&k), camelise(val)))
+                .collect(),
+        ),
+        serde_json::Value::Array(a) => {
+            serde_json::Value::Array(a.into_iter().map(camelise).collect())
+        }
+        other => other,
+    }
+}
+
+fn to_camel(k: &str) -> String {
+    let mut out = String::with_capacity(k.len());
+    let mut up = false;
+    for c in k.chars() {
+        if c == '_' {
+            up = true;
+        } else if up {
+            out.extend(c.to_uppercase());
+            up = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
 
 /// Take a GeoTIFF a rider downloaded themselves and make a place out of it.
 ///
@@ -2126,6 +2222,57 @@ mod tests {
         let (e, n) = ll_to_lambert93(46.5, 3.0);
         assert!((e - 700_000.0).abs() < 0.01, "easting was {e}");
         assert!((n - 6_600_000.0).abs() < 0.01, "northing was {n}");
+    }
+
+    /// The on-disk lap file is a contract with another program, so its exact key spelling is
+    /// worth a test. Writing a key twice, once in each spelling, looks generous and is not:
+    /// a strict reader rejects the whole document as a duplicate. Each key appears once.
+    #[test]
+    fn the_lap_file_writes_each_key_once_in_snake_case() {
+        let dem = DemNote {
+            path: "x.dem.tif".into(), crs: "EPSG:26916".into(), cell_m: 1.0,
+            origin_e: 1.5, origin_n: 2.5, width: 10, height: 10,
+            vertical_datum: "NAVD88".into(), source: "USGS".into(), source_url: "http://x".into(),
+            collected: "2017".into(), licence: "public domain".into(), attribution: String::new(),
+            ground: Ground::Terrain, min_z: 1.0, max_z: 2.0,
+        };
+        let trace = LapTrace {
+            version: 1, kind: "mxb-lap-trace".into(), name: "X".into(),
+            crs: "EPSG:26916".into(), units: "m".into(), closed: true,
+            default_width_m: 7.0, start_index: 3,
+            points: vec![vec![1.0, 2.0], vec![3.0, 4.0, 9.0]],
+            dem: dem.clone(), imagery: None,
+        };
+        let v = lap_file(&trace);
+        let text = serde_json::to_string(&v).unwrap();
+        for snake in ["default_width_m", "start_index", "cell_m", "origin_e", "origin_n",
+                      "vertical_datum", "source_url", "min_z", "max_z"] {
+            assert_eq!(text.matches(&format!("\"{snake}\"")).count(), 1, "{snake} once");
+        }
+        for camel in ["defaultWidthM", "startIndex", "cellM", "originE", "originN",
+                      "verticalDatum", "sourceUrl", "minZ", "maxZ"] {
+            assert!(!text.contains(camel), "{camel} must not be written");
+        }
+        // Per-point width survives, and the third element is not rounded away.
+        assert!(text.contains("9.0"), "a point's own width must survive");
+        // And it reads back through the same door a rider's hand-edited file comes in by.
+        let back: LapTrace = serde_json::from_value(camelise(v)).expect("reads back");
+        assert_eq!(back.start_index, 3);
+        assert_eq!(back.default_width_m, 7.0);
+        assert_eq!(back.points[1].len(), 3);
+        assert_eq!(back.dem.origin_e, 1.5);
+    }
+
+    /// A file written in either spelling has to read back, because files in both exist.
+    #[test]
+    fn either_spelling_reads_back() {
+        assert_eq!(to_camel("default_width_m"), "defaultWidthM");
+        assert_eq!(to_camel("startIndex"), "startIndex");
+        assert_eq!(to_camel("points"), "points");
+        let snake = serde_json::json!({ "dem": { "cell_m": 2.0 }, "start_index": 4 });
+        let c = camelise(snake);
+        assert_eq!(c["dem"]["cellM"], 2.0);
+        assert_eq!(c["startIndex"], 4);
     }
 
     #[test]

@@ -111,6 +111,58 @@ over a hill.
 The app refuses to pretend. If the finest thing available is coarser than 3 m it says so in
 as many words before you spend anything.
 
+### If you are asking the American service yourself
+
+Worth knowing if you go round the app and query USGS directly, because it will mislead you.
+The coverage endpoint is:
+
+```
+https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/identify
+  ?geometry={"x":<easting>,"y":<northing>,"spatialReference":{"wkid":<epsg>}}
+  &geometryType=esriGeometryPoint&returnCatalogItems=true&returnGeometry=false&f=json
+```
+
+It answers with a list, and **most of what comes back is not survey data**. The service keeps
+zoomed-out copies of itself for drawing maps quickly, and those copies are in the list too,
+reporting cell sizes like 75 m, 150 m, 300 m and upwards. Read the list naively and you will
+conclude your venue has nothing better than 75 m and give up, while 1 m LiDAR sits in the
+same response further down.
+
+The real entries are the ones that have a `DEM_Type` field. The zoomed-out copies do not.
+So: ignore everything without `DEM_Type`, then take the smallest `LowPS` of what is left.
+
+A real answer looks like this:
+
+```
+LowPS 1      Name "IN_Indiana_Statewide_LiDAR_2017_B17"   DEM_Type 1
+             StartDate 20170303   EndDate 20200411
+LowPS 10.31  Name "n41w087"                               DEM_Type 1
+             title "USGS 1/3 Arc Second n41w087"
+```
+
+Two real surveys, 1 m over 10.3 m, and the 1 m one is the answer. Anything with a `Name`
+that looks like `Ov_i02_L01_R0000005B_C0000001A.tif` is a drawing copy, not a survey.
+
+And sometimes `identify` returns **nothing but** drawing copies: 75 m, 150 m, 300 m and
+coarser, with no survey in the list at all, over ground that has 1 m LiDAR. It looks
+authoritative and it is not. When that happens, ask the catalogue directly instead:
+
+```
+https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/query
+  ?geometry=<envelope>&geometryType=esriGeometryEnvelope
+  &spatialRel=esriSpatialRelIntersects
+  &outFields=Name,LowPS,HighPS,ProductName&returnGeometry=false&f=json
+```
+
+At Ironman that returns the 1 m `IN_Indiana_Statewide_LiDAR_2017_B17` alongside the 10.3 m
+and 30.9 m fallbacks, which is the truth.
+
+**So: never conclude a place has no good survey from a single coarse answer.** Check the
+catalogue before you give up on a venue.
+
+The app does this filtering for you. This is only here so that if you go direct, you do not
+get the wrong answer and abandon a venue that is perfectly well covered.
+
 ### The other thing to check: terrain or surface
 
 Two kinds of elevation model exist and the difference matters enormously.
@@ -155,6 +207,14 @@ circuit. The same place at 1200 m holds 29.4 m of relief and the whole venue.
 
 **Rule of thumb: make the plot big enough that the whole lap fits with room to spare, and
 never smaller than you need.**
+
+### Plots are square
+
+The app always fetches a square, centred on your point. If you are cutting a plot by hand
+from a file you downloaded yourself, cut it square too: take the longer side of your lap's
+extent, add a margin on both ends, and use that for both axes. A rectangle that is 510 m
+wide and 373 m tall cannot have a 470 m square taken out of it, and you will find that out
+late.
 
 ---
 
@@ -232,15 +292,21 @@ The file is deliberately simple, and you can read or edit it in any text editor:
   "crs": "EPSG:26916",
   "units": "m",
   "closed": true,
-  "defaultWidthM": 6.0,
-  "startIndex": 0,
+  "default_width_m": 6.0,
+  "start_index": 0,
   "points": [[506051.3, 4428647.5], [506060.1, 4428646.2, 8.0]],
   "dem": { "...": "where the ground came from, when it was flown, and its licence" }
 }
 ```
 
 Points are in the elevation file's own coordinate system, easting first, in metres. A point
-can carry its own width as a third number; without one it uses `defaultWidthM`.
+can carry its own width as a third number; without one it uses `default_width_m`.
+
+If you hand-edit one of these, **write each key once**. It is tempting, when you are not sure
+whether a reader wants `default_width_m` or `defaultWidthM`, to put both in and be safe. That
+makes it worse: a JSON object with two keys pointing at the same field is rejected outright by
+a strict reader, so a file that tried to satisfy everyone satisfies no one. The app writes
+snake_case, and reads either.
 
 The `dem` block records what the ground is, when it was surveyed, and its licence, and that
 travels with the track. This matters more than it sounds: Ironman's survey was flown between

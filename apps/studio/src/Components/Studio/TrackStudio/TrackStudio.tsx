@@ -38,6 +38,7 @@ import { Input } from "@frost/shared/Components/ui/input";
 import { TrackViewer } from "@frost/shared/Components/Viewer/TrackViewer";
 import BuildCard from "./BuildCard";
 import LapPlan from "./LapPlan";
+import RealPlace from "./RealPlace";
 import ElevationCurve from "./ElevationCurve";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
@@ -106,6 +107,8 @@ import {
 export default function TrackStudio() {
   const t = useT();
   const [brief, setBrief] = useState("");
+  // Whether the real-place panel is open. Its own state, because it replaces the whole tab.
+  const [fromPlace, setFromPlace] = useState(false);
   const [working, setWorking] = useState<"generate" | "preview" | "export" | null>(null);
   // The build itself lives above this component — see `Context/TrackBuild` — so that leaving
   // the tab doesn't take the bar with it. To everything here that asks "is the studio busy?"
@@ -839,6 +842,10 @@ export default function TrackStudio() {
     setFocus(positionAt(program!, at));
   }
 
+  // The real-place panel takes the whole tab while it is open: tracing a lap wants every
+  // pixel, and there is nothing useful to look at behind it.
+  if (fromPlace) return <RealPlace onClose={() => setFromPlace(false)} />;
+
   return (
     <div ref={rootRef} className="flex h-full min-h-0 flex-col">
       {!program ? (
@@ -904,6 +911,13 @@ export default function TrackStudio() {
               </Button>
               <Button variant="ghost" onClick={() => void onOpen()} disabled={busy !== null}>
                 {t("track.open")}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setFromPlace(true)}
+                disabled={busy !== null}
+              >
+                {t("place.title")}
               </Button>
             </div>
           </div>
