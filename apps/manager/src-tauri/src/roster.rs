@@ -123,6 +123,59 @@ pub async fn seed(app: &AppHandle) -> usize {
     added
 }
 
+/// Put a server on the shared book deliberately, as its own operator.
+///
+/// The one path onto that list that needs no corroborating, because the account behind it is
+/// the corroboration — see `claimRoster` in `control-plane/src/roster.ts`. It exists for the
+/// server that two strangers will never happen to report: a new one nobody has found yet, or a
+/// private one that was never in the game's master list to be seen in.
+///
+/// The address goes through [`gameproc::parse_server_address`] first, which is the same
+/// normalisation the Join flow uses. That matters beyond tidiness: the shared book is keyed by
+/// the exact string, so registering `203.0.113.10` and joining `203.0.113.10:54210` must not
+/// end up as two different servers. It also fills in the default port, which is what most
+/// people will leave off.
+pub async fn register_mine(app: &AppHandle, address: &str) -> Result<String, String> {
+    let address = crate::gameproc::parse_server_address(address).map_err(|e| format!("{e:#}"))?;
+    let cfg = crate::config::load_or_detect(app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enroll with an invite code first — Settings, then Account.".into());
+    }
+
+    let client = client().map_err(|e| format!("Couldn't build an HTTP client: {e}"))?;
+    let resp = client
+        .post(format!("{}/v1/roster/mine", control_plane()))
+        .bearer_auth(cfg.cp_token.trim())
+        .json(&serde_json::json!({ "address": address }))
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+
+    if resp.status().is_success() {
+        log::info!("[roster] registered {address} on the shared book");
+        return Ok(address);
+    }
+    // The one refusal worth rewording. The endpoint is invite-gated on purpose — a self-serve
+    // account anyone can mint with one request would walk straight past the two-network bar
+    // that makes the anonymous path safe — but most people running the app have never claimed
+    // an invite, so "that needs an invite" is what the majority of clicks would get, and it
+    // tells them nothing they can act on. The useful half is the second sentence: almost
+    // everyone who lands here did not need this in the first place.
+    if resp.status() == reqwest::StatusCode::FORBIDDEN {
+        return Err("Adding a server by hand needs an invited account. You probably don't need \
+                    it: a server the game lists is remembered automatically, and this is only \
+                    for one that never appears there."
+            .into());
+    }
+    // Otherwise the control plane's own wording: it knows why it refused and this side would
+    // only be guessing.
+    let detail = resp.text().await.unwrap_or_default();
+    Err(serde_json::from_str::<serde_json::Value>(&detail)
+        .ok()
+        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+        .unwrap_or(detail))
+}
+
 /// Ask the control plane for the shared book. `None` for any failure at all.
 async fn fetch() -> Option<Vec<String>> {
     let client = client().ok()?;

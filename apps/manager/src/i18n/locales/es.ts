@@ -990,6 +990,14 @@ export const es: Translation = {
   "connection.check.others": "Todos los demás",
   "connection.checkFootnote": "El UDP saliente solo indica que el datagrama pudo salir, no que algo lo haya respondido.",
 
+  "registerServer.action": "Añade tu servidor",
+  "registerServer.title": "Añade tu servidor a la lista compartida",
+  "registerServer.blurb": "Así la app recuerda tu servidor incluso cuando los servidores de MX Bikes no responden.",
+  "registerServer.note": "Solo hace falta para un servidor que no aparece en la lista: uno nuevo, o uno privado. Todo lo que el juego lista ya se recuerda solo.",
+  "registerServer.submit": "Añadir",
+  "registerServer.done": "{{address}} está en la lista compartida",
+  "registerServer.failed": "No se pudo añadir ese servidor",
+
   "queue.banner": "#{{position}} en la cola de {{name}}",
   "queue.turnBanner": "Tu turno: entra en {{name}}",
   "queue.launchingBanner": "Entrando en {{name}}",

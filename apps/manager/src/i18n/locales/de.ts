@@ -996,6 +996,14 @@ export const de: Translation = {
   "connection.check.others": "Alle anderen",
   "connection.checkFootnote": "Ausgehendes UDP zeigt nur, dass das Datagramm raus durfte — nicht, dass etwas geantwortet hat.",
 
+  "registerServer.action": "Eigenen Server hinzufügen",
+  "registerServer.title": "Füge deinen Server zur gemeinsamen Liste hinzu",
+  "registerServer.blurb": "Damit die App deinen Server auch dann kennt, wenn die Server von MX Bikes nicht antworten.",
+  "registerServer.note": "Nötig nur für einen Server, der nicht in der Liste auftaucht — einen neuen oder einen privaten. Alles, was das Spiel auflistet, wird ohnehin von selbst gemerkt.",
+  "registerServer.submit": "Hinzufügen",
+  "registerServer.done": "{{address}} steht auf der gemeinsamen Liste",
+  "registerServer.failed": "Dieser Server konnte nicht hinzugefügt werden",
+
   "queue.banner": "#{{position}} in der Warteschlange für {{name}}",
   "queue.turnBanner": "Du bist dran: {{name}} beitreten",
   "queue.launchingBanner": "Verbinde mit {{name}}",

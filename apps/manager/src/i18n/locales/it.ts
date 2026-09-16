@@ -988,6 +988,14 @@ export const it: Translation = {
   "connection.check.others": "Tutti gli altri",
   "connection.checkFootnote": "L'UDP in uscita dice solo che il datagramma è potuto uscire, non che qualcuno abbia risposto.",
 
+  "registerServer.action": "Aggiungi il tuo server",
+  "registerServer.title": "Aggiungi il tuo server all'elenco condiviso",
+  "registerServer.blurb": "Così l'app ricorda il tuo server anche quando i server di MX Bikes non rispondono.",
+  "registerServer.note": "Serve solo per un server che non compare nell'elenco: uno nuovo, o uno privato. Tutto ciò che il gioco elenca viene già ricordato da sé.",
+  "registerServer.submit": "Aggiungi",
+  "registerServer.done": "{{address}} è nell'elenco condiviso",
+  "registerServer.failed": "Impossibile aggiungere quel server",
+
   "queue.banner": "#{{position}} in coda per {{name}}",
   "queue.turnBanner": "Tocca a te: entra in {{name}}",
   "queue.launchingBanner": "Entro in {{name}}",

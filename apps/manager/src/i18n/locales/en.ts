@@ -974,6 +974,14 @@ export const en = {
   "connection.check.others": "Everyone else",
   "connection.checkFootnote": "Outbound UDP only shows the datagram was allowed out, not that anything answered it.",
 
+  "registerServer.action": "Add your server",
+  "registerServer.title": "Add your server to the shared list",
+  "registerServer.blurb": "So the app remembers your server even when MX Bikes' own servers are down.",
+  "registerServer.note": "You only need this for a server that doesn't show up in the list — a new one, or a private one. Anything the game lists already gets remembered on its own.",
+  "registerServer.submit": "Add it",
+  "registerServer.done": "{{address}} is on the shared list",
+  "registerServer.failed": "Couldn't add that server",
+
   "queue.banner": "#{{position}} in line for {{name}}",
   "queue.turnBanner": "Your turn: join {{name}}",
   "queue.launchingBanner": "Joining {{name}}",

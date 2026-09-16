@@ -4152,6 +4152,22 @@ async fn connection_selftest(app: tauri::AppHandle) -> masterstatus::SelfTest {
     masterstatus::self_test(app, &outcome, out.ok().map(|(list, _)| list.len())).await
 }
 
+/// Put a server on the shared address book deliberately, as its own operator.
+///
+/// The Servers tab already contributes every address a sweep turned up, and the control plane
+/// holds each one back until distinct networks have independently seen it — which is what makes
+/// an anonymous write safe to hand back to thousands of apps. This is the way round that for the
+/// server two strangers will never happen to report: one nobody has found yet, or a private one
+/// that was never in the master's list to be seen in. The account is what stands in for the
+/// corroboration, so unlike a sighting it is recorded against somebody.
+///
+/// Returns the address as it was actually stored — normalised, with the default port filled in —
+/// so the dialog can show what it registered rather than what was typed.
+#[tauri::command]
+async fn register_server_address(app: tauri::AppHandle, address: String) -> Result<String, String> {
+    roster::register_mine(&app, &address).await
+}
+
 /// Ask one server about itself, right now.
 ///
 /// The detail panel used to format whatever the list happened to hold, which on a busy evening
@@ -6933,6 +6949,7 @@ fn main() {
             list_master_servers,
             master_status,
             connection_selftest,
+            register_server_address,
             probe_server,
             server_riders,
             servers_with_paint_sync,
