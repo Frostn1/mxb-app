@@ -10,6 +10,11 @@
 - Turning on the blue trail turns the track map on with it. The recorder draws the trail inside
   the map, so with the map off the switch could never do anything — and the map starts off
   wherever MXBMRP3 is installed.
+- The 3D view shows your actual track far more often. The check that decides whether a track's
+  own terrain belongs to your laps was strict enough to refuse the tracks you most want to
+  look at: the track file has none of the ruts cut into it over a session, and big jumps get
+  rounded off when its terrain is read, both of which make your laps sit unevenly above it. It
+  now allows for that, and still refuses a track that genuinely isn't the one you rode.
 
 ### Changed
 - The cues send themselves. There is no "Send to the game" button any more: Coach writes them
@@ -21,6 +26,10 @@
 - Where the other riders split into two lines through a corner, Coach says so: the two ruts,
   which side each is on, how far apart they are, how many riders are in each, and which one
   you are riding.
+- While the track loads, the 3D view says so over the picture instead of in small print under
+  it, and when it can't use the track at all it says that plainly, with the reason — how far
+  your laps sat off its terrain, or how little of them landed on it. The ground built from your
+  laps looks finished, so it was easy to take it for the real thing.
 
 ## 2026-09-15 — MXB Coach v0.1.13-beta.13
 
