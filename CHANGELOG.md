@@ -6,6 +6,16 @@
 - A numbered post stands on the 3D track where each tip happens, so a call like "the rear spins
   out of turn 2" is somewhere you can see, with a key for your line and the fast lap.
 - The in-game HUD switches are on the review page too, under In game beside the live cues.
+- Saving a setup now sets it as the one practice loads on that track, so it's on the bike when
+  you go out. Close MX Bikes first and it happens on save; otherwise there's a Select button
+  for when the game is closed. Your other setups, and your race and qualifying picks, are left
+  alone.
+- Move the live cue. Pick any of nine places on screen in the HUD panel, and the section line
+  follows it.
+- Choose who speaks the cues: a woman's voice or a man's.
+- Two new things the recorder can draw: suspension bars for each end, with a mark when it
+  bottoms, and a blue trail ahead of you on the map showing the line to take. Both start off.
+- The newest settings say when your recorder is older than the FrostMod 0.24 they need.
 - On the game's default setup the coach now writes you a setup of your own, named after the
   track, instead of asking you to go and save one in the garage first. It starts from another
   setup you have for that bike where there is one, and from the bike's own settings where there
@@ -21,6 +31,15 @@
   the fork and front wheel, the shock and rear, the chassis, and the engine and gearbox.
 - The setup card leads with the copy it would save and one line saying what that changes, then
   lists every change the coach found from your laps, grouped, with the reason under each.
+- The live cues move on. Once you've sent them, the coach keeps them up to date as you ride: it
+  drops what you've taken and calls what's costing you time now, instead of repeating the same
+  lap's calls every lap.
+- Cues say what to do and where: "Go inside here", "Stay wide", "Brake here". Line tips name the
+  inside or the outside line in those words.
+- A shift is only called where your gear is really costing you time on the exit, and it names
+  the gear to be in rather than telling you to change earlier.
+- The track map switch is a plain on/off that the game always obeys. With MXBMRP3 installed it
+  says so, since that draws a map of its own.
 - Where two tips want one setting opposite ways — sand wants a tooth more on the rear, the rev
   limiter a tooth less — the coach says so and leaves that setting to you, rather than listing
   it as a change it will make. Saving a setup now names the settings it changed.

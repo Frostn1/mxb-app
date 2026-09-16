@@ -4,8 +4,10 @@ import { Button } from "@frost/shared/Components/ui/button";
 import { useT, type TKey } from "@/i18n";
 import {
   coachSaveSetup,
+  coachSelectSetup,
   coachSetupPlan,
   type Finding,
+  type SavedSetup,
   type SetupChange,
   type SetupPlan,
 } from "@/api/coach";
@@ -140,6 +142,8 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
   const t = useT();
   const [plan, setPlan] = useState<SetupPlan | null>(null);
   const [saving, setSaving] = useState(false);
+  /** The setup this page wrote, so it can be pointed at the game once MX Bikes is closed. */
+  const [saved, setSaved] = useState<SavedSetup | null>(null);
   const [felt, setFelt] = useState<string[]>([]);
   // Kept apart from the plan so a refetch never flips a feel's check.
   const [used, setUsed] = useState<[number, number] | null>(null);
@@ -147,6 +151,7 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
     setPlan(null);
     setFelt([]);
     setUsed(null);
+    setSaved(null);
   }, [path]);
   const feels = useMemo(
     () => FEELS.filter((f) => felt.includes(f.skill)).map((f) => ({ f, ...feelCheck(f, findings, used) })),
@@ -193,12 +198,30 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
   const save = async () => {
     setSaving(true);
     try {
-      const saved = await coachSaveSetup(path, skills);
+      const out = await coachSaveSetup(path, skills);
+      setSaved(out);
       // Named, so the rider can check each one in the garage rather than take our word for it.
-      const list = saved.changed.map((f) => t(`setupField.${f}` as TKey)).join(", ");
-      toast.success(t("setup.saved", { name: saved.name }), {
+      const list = out.changed.map((f) => t(`setupField.${f}` as TKey)).join(", ");
+      // Saved either way; the game only picks it up when it isn't running.
+      toast.success(out.selected ? t("setup.selected", { name: out.name }) : t("setup.savedGameOpen", { name: out.name }), {
         description: list ? t("setup.savedChanged", { list }) : undefined,
       });
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /** Point the game at a setup already written, for when MX Bikes was open at the time. */
+  const selectIt = async () => {
+    if (!saved) return;
+    setSaving(true);
+    try {
+      const out = await coachSelectSetup(path, saved.name);
+      setSaved(out);
+      if (out.selected) toast.success(t("setup.selectDone", { name: out.name }));
+      else toast.error(t("setup.selectGameOpen"));
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -214,11 +237,22 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
         {plan && (writes || plan.why) && (
           <div className="border-b border-border pb-4">
             {writes ? (
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                <Button size="sm" onClick={save} disabled={saving}>
-                  {t("setup.save", { name: plan.saveAs ?? "" })}
-                </Button>
-                <span className="min-w-0 flex-1 text-[12px] text-muted-foreground">{summary || t("setup.saveHint")}</span>
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  <Button size="sm" onClick={save} disabled={saving}>
+                    {t("setup.save", { name: plan.saveAs ?? "" })}
+                  </Button>
+                  <span className="min-w-0 flex-1 text-[12px] text-muted-foreground">{summary || t("setup.saveHint")}</span>
+                </div>
+                {/* The game holds the file open while it runs, so offer the pick separately. */}
+                {saved && !saved.selected && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <Button size="sm" variant="outline" onClick={selectIt} disabled={saving}>
+                      {t("setup.select")}
+                    </Button>
+                    <span className="min-w-0 flex-1 text-[12px] text-muted-foreground">{t("setup.selectHint")}</span>
+                  </div>
+                )}
               </div>
             ) : (
               <p className="text-[12px] text-muted-foreground">{plan.why}</p>

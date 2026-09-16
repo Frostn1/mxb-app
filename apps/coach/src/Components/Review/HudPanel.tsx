@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Switch } from "@frost/shared/Components/ui/switch";
 import { useT } from "@/i18n";
 import { coachHud, coachSetHud, coachStatus, type CoachStatus, type Hud } from "@/api/coach";
+import CuePosition from "./CuePosition";
 import { Label } from "../Page";
 
 /** What the recorder draws over the game, part by part. Shared by the review page and the
@@ -41,12 +42,25 @@ export default function HudPanel() {
         </div>
         <div className="divide-y divide-border">
           {hud.parts.map((p) => (
-            <div key={p.key} className="flex items-center justify-between gap-4 py-2.5">
-              <span className="text-[12.5px]">{p.label}</span>
-              <Switch checked={p.on} disabled={!hud.enabled} onCheckedChange={(on) => void set(p.key, on)} />
+            <div key={p.key} className="py-2.5">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[12.5px]">{p.label}</span>
+                <Switch checked={p.on} disabled={!hud.enabled} onCheckedChange={(on) => void set(p.key, on)} />
+              </div>
+              {/* The map is a plain switch like the rest, so the reason two maps might show
+                  is said here rather than left for the rider to work out. */}
+              {p.key === "map" && hud.mxbmrp3 && (
+                <p className="mt-1 text-[11.5px] text-muted-foreground">{t("hud.mxbmrp3")}</p>
+              )}
+              {/* The newest parts draw nothing on an older recorder, so say so rather than
+                  leave a switch that looks broken. */}
+              {p.needs === "0.24" && hud.preExtras && (
+                <p className="mt-1 text-[11.5px] text-warning">{t("hud.needs024")}</p>
+              )}
             </div>
           ))}
         </div>
+        <CuePosition hud={hud} onChange={setHud} />
       </div>
     </div>
   );

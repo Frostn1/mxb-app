@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
 import { Slider } from "@frost/shared/Components/ui/slider";
@@ -10,10 +11,12 @@ import {
   coachStatus,
   coachVoice,
   coachWriteCues,
+  onSessionsChanged,
   type CoachStatus,
   type CueAmount,
   type CueLevel,
   type CuesOut,
+  type CueVoice,
   type Voice,
 } from "@/api/coach";
 import { Label } from "../Page";
@@ -40,6 +43,14 @@ function remember(key: string, v: string) {
 
 const LEVELS = ["new", "intermediate", "subPro", "pro"] as const;
 const AMOUNTS = ["few", "normal", "lots"] as const;
+/** The voices the recorder has clips for, as `hud.rs` writes them. */
+const VOICES = ["female", "male"] as const;
+
+/** The least time between two automatic re-picks. The sessions watcher fires whenever the
+ *  recording grows, which is every couple of seconds while the rider is out — not once a lap —
+ *  and a re-pick is a full review of the lap. A lap takes far longer than this, so the sheet
+ *  still follows the rider lap by lap without reviewing the same one over and over. */
+const AUTO_GAP_MS = 45_000;
 
 /** Live cues for this track and bike: short calls the recorder shows in practice, picked from
  *  where this lap loses time, for the rider's level and how much coaching they want. Shared by
@@ -50,18 +61,57 @@ export default function LiveCues({ path, lap }: { path: string; lap: number }) {
   const [amount, setAmount] = useState<CueAmount>(() => remembered(CUE_AMOUNT_KEY, AMOUNTS, "normal"));
   const [sent, setSent] = useState<CuesOut | null>(null);
   const [busy, setBusy] = useState(false);
-  const send = async () => {
+  /** A re-pick in progress, and when the last automatic one ran. */
+  const inFlight = useRef(false);
+  const lastAuto = useRef(0);
+  /** `latest` coaches the last lap ridden on this track rather than the one on screen: sent
+   *  mid-session, that is the one the rider wants calls about. `quiet` is for the automatic
+   *  re-picks below, which shouldn't put a toast up every time a lap lands. */
+  const send = async (latest = false, quiet = false) => {
+    // One at a time. Two overlapping re-picks would each read the same history and write it
+    // back, so one lap's worth of "the rider has heard this" would be lost.
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
-      const out = await coachWriteCues(path, lap, level, amount);
+      const out = await coachWriteCues(path, lap, level, amount, latest);
       setSent(out);
-      toast.success(out.cues.length ? t("cues.sent", { n: out.cues.length }) : t("cues.none"));
+      if (!quiet) toast.success(out.cues.length ? t("cues.sent", { n: out.cues.length }) : t("cues.none"));
     } catch (e) {
-      toast.error(String(e));
+      if (!quiet) toast.error(String(e));
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
+
+  // Once the rider has sent a sheet, keep it current: the recorder writes a lap, the watcher
+  // says so, and the calls are picked again from that lap. This is the whole point of them
+  // moving on — a sheet written three laps ago is about a lap already ridden past.
+  const sendRef = useRef(send);
+  useEffect(() => {
+    sendRef.current = send;
+  });
+  const following = sent != null;
+  useEffect(() => {
+    if (!following) return;
+    let alive = true;
+    let off: UnlistenFn | undefined;
+    const onLap = () => {
+      const now = Date.now();
+      if (now - lastAuto.current < AUTO_GAP_MS) return;
+      lastAuto.current = now;
+      void sendRef.current(true, true);
+    };
+    void onSessionsChanged(onLap).then((stop) => {
+      if (alive) off = stop;
+      else stop();
+    });
+    return () => {
+      alive = false;
+      off?.();
+    };
+  }, [following]);
   return (
     <div>
       <Label>{t("cues.title")}</Label>
@@ -93,12 +143,18 @@ export default function LiveCues({ path, lap }: { path: string; lap: number }) {
             options={AMOUNTS.map((v) => ({ value: v, label: t(`cues.amount.${v}` as TKey) }))}
           />
         </div>
-        <div className="flex flex-wrap items-center gap-3 pt-1">
-          <Button size="sm" onClick={send} disabled={busy}>
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {/* Called, not passed: the click event would arrive as `latest` and be truthy. */}
+          <Button size="sm" onClick={() => void send()} disabled={busy}>
             {t("cues.send")}
           </Button>
-          <span className="text-[12px] text-muted-foreground">{t("cues.where")}</span>
+          <Button size="sm" variant="outline" onClick={() => void send(true)} disabled={busy}>
+            {t("cues.fromLatest")}
+          </Button>
         </div>
+        <p className="text-[12px] text-muted-foreground">{t("cues.fromLatestHint")}</p>
+        <p className="text-[12px] text-muted-foreground">{t("cues.where")}</p>
+        <p className="text-[12px] text-muted-foreground">{t("cues.moveOn")}</p>
         {sent && sent.cues.length > 0 && (
           <ol className="space-y-1 border-t border-border pt-2">
             {sent.cues.map((c, i) => (
@@ -131,8 +187,8 @@ function SpokenCues() {
       .catch(() => {});
     coachStatus().then(setStatus).catch(() => {});
   }, []);
-  const save = (enabled: boolean, vol: number) => {
-    coachSetVoice(enabled, vol)
+  const save = (enabled: boolean, vol: number, who: CueVoice = voice?.voice ?? "female") => {
+    coachSetVoice(enabled, vol, who)
       .then(setVoice)
       .catch((e) => toast.error(String(e)));
   };
@@ -149,19 +205,31 @@ function SpokenCues() {
         <p className="text-[12px] text-warning">{t("recorder.tooOld", { version: status.recorderVersion ?? "" })}</p>
       )}
       {voice?.enabled && (
-        <div className="flex items-center gap-3">
-          <span className="w-16 text-[12px] text-muted-foreground">{t("cues.volume")}</span>
-          <Slider
-            className="flex-1"
-            min={0}
-            max={100}
-            step={5}
-            value={[volume]}
-            onValueChange={([v]) => setVolume(v)}
-            onValueCommit={([v]) => save(true, v)}
-          />
-          <span className="w-9 text-right font-mono text-[12px] text-muted-foreground">{volume}</span>
-        </div>
+        <>
+          <div className="flex items-center gap-3">
+            <span className="w-16 text-[12px] text-muted-foreground">{t("cues.volume")}</span>
+            <Slider
+              className="flex-1"
+              min={0}
+              max={100}
+              step={5}
+              value={[volume]}
+              onValueChange={([v]) => setVolume(v)}
+              onValueCommit={([v]) => save(true, v)}
+            />
+            <span className="w-9 text-right font-mono text-[12px] text-muted-foreground">{volume}</span>
+          </div>
+          <div className="space-y-1.5">
+            <div className="eyebrow">{t("cues.voiceWho")}</div>
+            <Segmented
+              size="sm"
+              value={voice.voice}
+              onChange={(v) => save(true, volume, v)}
+              options={VOICES.map((v) => ({ value: v, label: t(`cues.voice.${v}` as TKey) }))}
+            />
+            {voice.preExtras && <p className="text-[12px] text-warning">{t("hud.needs024")}</p>}
+          </div>
+        </>
       )}
     </div>
   );
