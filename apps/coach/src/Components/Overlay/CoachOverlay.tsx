@@ -17,6 +17,7 @@ import {
 import { I18nProvider, useT, type TKey } from "@/i18n";
 import { coachReview, type ReviewOut } from "@/api/coach";
 import { lastLap, type LastLap } from "@/lib/lastLap";
+import { BEST, refArgs, rememberedRef } from "@/lib/reference";
 import { gap, lapTime, lossColor } from "@/lib/format";
 import SetupFixes from "../Review/SetupFixes";
 import LiveCues from "../Review/LiveCues";
@@ -44,7 +45,21 @@ function useLastReview() {
     try {
       const l = await lastLap();
       setLast(l);
-      setData(l ? await coachReview(l.path, l.lap) : null);
+      if (!l) {
+        setData(null);
+        return;
+      }
+      // Held against whatever the rider picked for this track in the review, so the overlay and
+      // the page agree about what "the fast lap" is. A remembered lap can be gone — a recording
+      // deleted, an import removed — and then the overlay falls back to the fastest one rather
+      // than showing nothing over the game.
+      const ref = rememberedRef(l.session.trackId);
+      try {
+        setData(await coachReview(l.path, l.lap, refArgs(ref)));
+      } catch (e) {
+        if (ref === BEST) throw e;
+        setData(await coachReview(l.path, l.lap));
+      }
     } catch (e) {
       setError(String(e));
     }
@@ -210,7 +225,7 @@ function Panel() {
           ))}
         {tab === "cues" &&
           (path && last ? (
-            <LiveCues path={path} lap={last.lap} />
+            <LiveCues path={path} lap={last.lap} reference={rememberedRef(last.session.trackId)} />
           ) : (
             <p className="text-[12.5px] text-muted-foreground">{t("otips.none")}</p>
           ))}

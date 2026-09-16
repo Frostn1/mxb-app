@@ -25,8 +25,9 @@ export default function SessionView({
 }: {
   path: string;
   onBack: () => void;
-  /** The lap's own recording and number. `solo` reviews it with no faster lap to compare with. */
-  onReview: (path: string, lap: number, solo: boolean) => void;
+  /** The lap's own recording and number. `solo` reviews it with no faster lap to compare with;
+   *  the track comes along because the review remembers its reference per track. */
+  onReview: (path: string, lap: number, solo: boolean, trackId: string) => void;
 }) {
   const t = useT();
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -128,7 +129,7 @@ export default function SessionView({
                   {l.crashed && <Badge>{t("session.crashed")}</Badge>}
                 </span>
                 {/* A lap that can't be held against another is still worth a look on its own. */}
-                <Button size="sm" variant="outline" onClick={() => onReview(l.path, l.num, !comparable || !reference)}>
+                <Button size="sm" variant="outline" onClick={() => onReview(l.path, l.num, !comparable || !reference, s.trackId)}>
                   {t("session.review")}
                 </Button>
               </div>

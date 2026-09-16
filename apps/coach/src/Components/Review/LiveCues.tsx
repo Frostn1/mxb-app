@@ -19,7 +19,9 @@ import {
   type CueVoice,
   type Voice,
 } from "@/api/coach";
+import { BEST, refArgs, type Reference } from "@/lib/reference";
 import { Label } from "../Page";
+import { ReferenceLine } from "./RefPicker";
 
 const CUE_LEVEL_KEY = "coach-cue-level";
 const CUE_AMOUNT_KEY = "coach-cue-amount";
@@ -53,20 +55,34 @@ const VOICES = ["female", "male"] as const;
 const AUTO_GAP_MS = 45_000;
 
 /** Live cues for this track and bike: short calls the recorder shows in practice, picked from
- *  where this lap loses time, for the rider's level and how much coaching they want. Shared by
- *  the review page and the overlay. */
-export default function LiveCues({ path, lap }: { path: string; lap: number }) {
+ *  where this lap loses time to the lap it's held against, for the rider's level and how much
+ *  coaching they want. Shared by the review page and the overlay. */
+export default function LiveCues({
+  path,
+  lap,
+  reference = BEST,
+}: {
+  path: string;
+  lap: number;
+  /** What the cues are picked against — the review's own reference, so the calls, the gap on
+   *  the in-game HUD and the review all come from the lap the rider chose. */
+  reference?: Reference;
+}) {
   const t = useT();
   const [level, setLevel] = useState<CueLevel>(() => remembered(CUE_LEVEL_KEY, LEVELS, "intermediate"));
   const [amount, setAmount] = useState<CueAmount>(() => remembered(CUE_AMOUNT_KEY, AMOUNTS, "normal"));
   const [sent, setSent] = useState<CuesOut | null>(null);
   const [busy, setBusy] = useState(false);
+  // Picking another lap to be held against changes every call: what was sent isn't what these
+  // settings would send now.
+  useEffect(() => setSent(null), [reference]);
   /** A re-pick in progress, and when the last automatic one ran. */
   const inFlight = useRef(false);
   const lastAuto = useRef(0);
   /** `latest` coaches the last lap ridden on this track rather than the one on screen: sent
-   *  mid-session, that is the one the rider wants calls about. `quiet` is for the automatic
-   *  re-picks below, which shouldn't put a toast up every time a lap lands. */
+   *  mid-session, that is the one the rider wants calls about. The reference stands either way:
+   *  it is the lap they chose to be held against. `quiet` is for the automatic re-picks below,
+   *  which shouldn't put a toast up every time a lap lands. */
   const send = async (latest = false, quiet = false) => {
     // One at a time. Two overlapping re-picks would each read the same history and write it
     // back, so one lap's worth of "the rider has heard this" would be lost.
@@ -74,7 +90,7 @@ export default function LiveCues({ path, lap }: { path: string; lap: number }) {
     inFlight.current = true;
     setBusy(true);
     try {
-      const out = await coachWriteCues(path, lap, level, amount, latest);
+      const out = await coachWriteCues(path, lap, level, amount, refArgs(reference), latest);
       setSent(out);
       if (!quiet) toast.success(out.cues.length ? t("cues.sent", { n: out.cues.length }) : t("cues.none"));
     } catch (e) {
@@ -155,6 +171,11 @@ export default function LiveCues({ path, lap }: { path: string; lap: number }) {
         <p className="text-[12px] text-muted-foreground">{t("cues.fromLatestHint")}</p>
         <p className="text-[12px] text-muted-foreground">{t("cues.where")}</p>
         <p className="text-[12px] text-muted-foreground">{t("cues.moveOn")}</p>
+        {sent && (
+          <p className="text-[12px] text-muted-foreground">
+            {t("cues.ghost")} <ReferenceLine reference={sent.ghost} lapPath={path} />
+          </p>
+        )}
         {sent && sent.cues.length > 0 && (
           <ol className="space-y-1 border-t border-border pt-2">
             {sent.cues.map((c, i) => (

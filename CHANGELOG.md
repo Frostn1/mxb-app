@@ -3,6 +3,13 @@
 ## Unreleased — MXB Coach
 
 ### Added
+- Compare a lap with more than the session you're in. "Compare with" now offers your best ever
+  lap on the track — whenever you set it, and on whichever bike, which it tells you — and your
+  ideal lap, your own best sections across every session added up. You can also import another
+  rider's recording, a trainer lap, and ride against that: the coach shows whose lap it is and
+  which bike, and keeps imported laps apart from your own so they never count towards your bests.
+- The lap you compare with is remembered for each track, and the live cues and the in-game HUD
+  take it from there too, so the gap and the ghost are against the lap you picked.
 - A numbered post stands on the 3D track where each tip happens, so a call like "the rear spins
   out of turn 2" is somewhere you can see, with a key for your line and the fast lap.
 - The in-game HUD switches are on the review page too, under In game beside the live cues.
