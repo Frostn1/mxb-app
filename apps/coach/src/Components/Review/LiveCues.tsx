@@ -7,8 +7,10 @@ import { Switch } from "@frost/shared/Components/ui/switch";
 import { useT, type TKey } from "@/i18n";
 import {
   coachSetVoice,
+  coachStatus,
   coachVoice,
   coachWriteCues,
+  type CoachStatus,
   type CueAmount,
   type CueLevel,
   type CuesOut,
@@ -119,6 +121,7 @@ function SpokenCues() {
   const t = useT();
   const [voice, setVoice] = useState<Voice | null>(null);
   const [volume, setVolume] = useState(80);
+  const [status, setStatus] = useState<CoachStatus | null>(null);
   useEffect(() => {
     coachVoice()
       .then((v) => {
@@ -126,6 +129,7 @@ function SpokenCues() {
         setVolume(v.volume);
       })
       .catch(() => {});
+    coachStatus().then(setStatus).catch(() => {});
   }, []);
   const save = (enabled: boolean, vol: number) => {
     coachSetVoice(enabled, vol)
@@ -141,6 +145,9 @@ function SpokenCues() {
         </div>
         <Switch checked={voice?.enabled ?? false} disabled={!voice} onCheckedChange={(on) => save(on, volume)} />
       </div>
+      {status?.recorderOutdated && (
+        <p className="text-[12px] text-warning">{t("recorder.tooOld", { version: status.recorderVersion ?? "" })}</p>
+      )}
       {voice?.enabled && (
         <div className="flex items-center gap-3">
           <span className="w-16 text-[12px] text-muted-foreground">{t("cues.volume")}</span>

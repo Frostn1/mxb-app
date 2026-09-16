@@ -2491,6 +2491,17 @@ export function isGameRunning(): Promise<boolean> {
   return invoke<boolean>("game_running");
 }
 
+/**
+ * Bring the running game's window to the front.
+ *
+ * The app starts MX Bikes itself, so a running game sits behind the app window and a player
+ * who never alt-tabbed has no reason to believe it is open. Resolves `false` when the window
+ * could not be activated — they are still one alt-tab away.
+ */
+export function focusGame(): Promise<boolean> {
+  return invoke<boolean>("focus_game");
+}
+
 /** Install/version/running snapshot (hits GitHub for the latest tag). */
 export function frostmodStatus(): Promise<FrostmodStatus> {
   return invoke<FrostmodStatus>("frostmod_status");

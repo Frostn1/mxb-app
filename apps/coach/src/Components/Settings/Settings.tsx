@@ -170,7 +170,16 @@ export default function Settings() {
               {t("recorder.remove")}
             </Button>
           )}
+          {status?.recorderVersion && (
+            <span className="self-center font-mono text-[12px] text-muted-foreground">
+              {t("recorder.version", { version: status.recorderVersion })}
+            </span>
+          )}
         </div>
+        {status && !status.recorderVersion && (
+          <p className="mt-3 text-[12px] text-muted-foreground">{t("recorder.versionUnknown")}</p>
+        )}
+        {status?.recorderOutdated && <p className="mt-3 text-[12px] text-warning">{t("recorder.updateIt")}</p>}
         {status && !status.gameDir && <p className="mt-3 text-[12px] text-warning">{t("recorder.noGame")}</p>}
       </div>
 

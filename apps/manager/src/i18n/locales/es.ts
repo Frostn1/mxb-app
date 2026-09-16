@@ -779,7 +779,10 @@ export const es: Translation = {
   "join.joining": "Conectando…",
   "join.launching": "Conectando a {{address}}…",
   "join.alreadyRunning":
-    "Cierra {{game}} primero — un juego ya iniciado no se puede enviar a un servidor.",
+    "{{game}} ya está abierto — ciérralo y luego únete desde aquí.",
+  "join.gameOpen":
+    "{{game}} ya está abierto. La app lo inició, así que está detrás de esta ventana. Cierra el juego y luego únete desde aquí.",
+  "join.showGame": "Mostrar el juego",
   "join.failed": "No se pudo unir a ese servidor",
   "join.manual": "Unirse a un servidor que no está en la lista",
   "join.noServers": "Todavía no hay servidores en la lista — escribe una dirección que te hayan dado.",

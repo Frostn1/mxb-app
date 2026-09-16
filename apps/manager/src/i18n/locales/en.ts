@@ -762,7 +762,10 @@ export const en = {
   "join.joining": "Joining…",
   "join.launching": "Joining {{address}}…",
   "join.alreadyRunning":
-    "Close {{game}} first — a running game can't be sent to a server.",
+    "{{game}} is already open — close it, then join from here.",
+  "join.gameOpen":
+    "{{game}} is already open. The app started it, so it's sitting behind this window. Close the game, then join from here.",
+  "join.showGame": "Show me the game",
   "join.failed": "Couldn't join that server",
   "join.manual": "Join a server that isn't listed",
   "join.noServers": "No servers listed yet — type an address you were given instead.",
