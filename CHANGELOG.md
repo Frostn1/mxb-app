@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-16 — Code, testing, ideas
+
+### Changed
+- The Contributors list in Settings → Supporters now says what each person actually did. Code
+  contributions, testing and ideas each get their own heading and mark, so a pull request that
+  shipped reads as one and a suggestion that shipped reads as the other. Somebody who did two
+  of them is credited under both, and anyone not sorted yet stays in the list as before.
+
 ## 2026-09-16 — MXB Coach v0.1.14-beta.14
 
 ### Added

@@ -2044,6 +2044,13 @@ export const en = {
   "supporters.contributors": "Contributors",
   "supporters.contributorsDesc":
     "People who made the app better with ideas, testing and feedback.",
+  "supporters.kind.code": "Code contributions",
+  "supporters.kind.codeDesc": "Code they wrote, running in the build you're using.",
+  "supporters.kind.testing": "Testing",
+  "supporters.kind.testingDesc":
+    "Broke it on purpose, on builds nobody else had yet.",
+  "supporters.kind.ideas": "Ideas & feedback",
+  "supporters.kind.ideasDesc": "Suggested something that ended up shipping.",
   "reshade.needsGameFolder":
     "ReShade sits in your {{game}} folder — set that under Game folder, or point straight at it here.",
   "reshade.folder": "Looking in your {{game}} folder:",
