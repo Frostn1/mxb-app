@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Boxes } from "lucide-react";
+import { Boxes, Loader2 } from "lucide-react";
 import { TrackViewer, type ViewerLine } from "@frost/shared/Components/Viewer/TrackViewer";
 import { useTrackScene } from "@frost/shared/Components/Viewer/useTrackScene";
 import { Button } from "@frost/shared/Components/ui/button";
@@ -193,15 +193,14 @@ export default function Track3D({
     return { x: p[0] - ox, z: p[1] - oz };
   }, [sel, paths, step, ox, oz]);
 
-  // What the ground under the lines actually is, said plainly when it isn't the track itself.
-  const note =
-    ground && !scene.terrain
-      ? t("review.loadingTrack")
-      : !real
-        ? `${t("review.groundFromLaps")}${why ? ` ${why}.` : ""}`
-        : scene.painting
-          ? t("review.loadingTrack")
-          : "";
+  // The track is on its way: say so over the canvas rather than in 11px under it. The ground
+  // built from the laps is drawn meanwhile and looks finished, which is exactly how a rider
+  // ends up believing the blurred grid is their circuit.
+  const waiting = ground != null && !scene.terrain;
+  // Not the track at all, and it isn't coming. This is a banner, not a footnote, for the same
+  // reason: it is the difference between "your track" and "a guess from your laps".
+  const guessing = !waiting && !real;
+  const note = real && scene.painting ? t("review.loadingTrack") : "";
 
   return (
     <div className={cn("flex flex-col", className)}>
@@ -224,6 +223,22 @@ export default function Track3D({
           focus={focus}
           className="h-full w-full"
         />
+        {waiting && (
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/45">
+            <Loader2 className="size-6 animate-spin text-white/80" />
+            <span className="text-[13px] text-white/85">{t("review.loadingTrack")}</span>
+            <span className="max-w-xs text-center text-[11.5px] text-white/60">{t("review.loadingTrackHint")}</span>
+          </div>
+        )}
+        {guessing && (
+          <div className="pointer-events-none absolute inset-x-3 top-3 border border-warning/40 bg-black/70 px-3 py-2 backdrop-blur-sm">
+            <div className="text-[12.5px] font-semibold text-warning">{t("review.notYourTrack")}</div>
+            <div className="mt-0.5 text-[11.5px] text-white/70">
+              {t("review.groundFromLaps")}
+              {why ? ` ${why}.` : ""}
+            </div>
+          </div>
+        )}
         {real && (scene.scenery || scene.placements.length > 0) && (
           <Button
             size="sm"

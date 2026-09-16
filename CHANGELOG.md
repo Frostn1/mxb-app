@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — MXB Coach
+
+### Fixed
+- The 3D view shows your actual track far more often. The check that decides whether a track's
+  own terrain belongs to your laps was strict enough to refuse the tracks you most want to
+  look at: the track file has none of the ruts cut into it over a session, and big jumps get
+  rounded off when its terrain is read, both of which make your laps sit unevenly above it. It
+  now allows for that, and still refuses a track that genuinely isn't the one you rode.
+
+### Changed
+- While the track loads, the 3D view says so over the picture instead of in small print under
+  it, and when it can't use the track at all it says that plainly, with the reason — how far
+  your laps sat off its terrain, or how little of them landed on it. The ground built from your
+  laps looks finished, so it was easy to take it for the real thing.
+
 ## 2026-09-15 — MXB Coach v0.1.13-beta.13
 
 ### Added

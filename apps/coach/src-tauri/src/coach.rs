@@ -1112,9 +1112,19 @@ fn ground_for(app: &AppHandle, path: &str) -> Result<GroundAnswer, String> {
     let points: Vec<[f32; 3]> =
         rec.samples.iter().filter(|s| !s.airborne() && !s.crashed).step_by(5).map(|s| [s.x, s.y, s.z]).collect();
     let i = &master.info;
-    match crate::ground::fit(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points) {
+    let fit = crate::ground::measure(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points);
+    match fit.lift {
         Some(lift) => Ok(GroundAnswer { ground: Some(Ground { path: src.path, prefix: src.prefix, name: src.name, lift }), why: None }),
-        None => no("its terrain doesn't line up with your laps"),
+        // Say what was measured. "Doesn't line up" on its own left nothing to look into, and
+        // this is the branch a rider on a track they own actually hits.
+        None if fit.on_grid < points.len() / 2 => no(&format!(
+            "only {} of {} points on your laps land on its terrain, so it looks like a different track",
+            fit.on_grid, fit.offered
+        )),
+        None => no(&format!(
+            "the height of your laps above its terrain wanders by {:.1} m, too much to trust it as the same track",
+            fit.spread
+        )),
     }
 }
 
