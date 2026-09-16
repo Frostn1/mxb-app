@@ -165,10 +165,19 @@ pub struct Terrain {
     pub scale: f32,
     #[serde(default)]
     pub relief: Relief,
-    /// What the ground is. Decides the surfaces painted either side of the riding line, and
-    /// with them what the track looks like.
+    /// What the ground is made of: how deep it cuts, how wide the shoulder runs, what the
+    /// tyres are on. This is the *ride*.
     #[serde(default)]
     pub surface: Surface,
+    /// And what the ground looks like, which is a separate question.
+    ///
+    /// These two used to be one field. A track made of soil was painted with soil sheets and
+    /// dug a soil stack, and there was no way to say "this rides like a sand national but it
+    /// is the dark trucked-in dirt of a stadium floor" — which is most of what a supercross
+    /// track is. Left at its default the look follows [`Terrain::surface`] exactly as it
+    /// always did, so a project saved before this existed reads and builds the same.
+    #[serde(default, skip_serializing_if = "TextureSet::is_default")]
+    pub texture: TextureSet,
     /// How raced the ground arrives, 0 to 1.
     ///
     /// A generated track used to ship one state of ground: fully raced. The corner grooves,
@@ -212,6 +221,78 @@ pub enum Surface {
     Sand,
     /// Grass right up to the riding line — a grasstrack or an early-season circuit.
     Grass,
+}
+
+/// What a track's ground looks like: a look to start from, and the rider's own images over
+/// the top of it.
+///
+/// Deliberately not the same thing as [`Surface`]. The surface decides the material stack the
+/// game deforms and the shoulder the track is graded into; this decides only which sheets get
+/// painted, so the two can be picked apart.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TextureSet {
+    #[serde(default)]
+    pub preset: TexturePreset,
+    /// The rider's own ground, one image per slot. A slot named twice takes the last.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sheets: Vec<OwnSheet>,
+}
+
+impl TextureSet {
+    /// Whether this is the look the surface already implies, which is what gets left out of
+    /// the file.
+    pub fn is_default(&self) -> bool {
+        *self == TextureSet::default()
+    }
+}
+
+/// The look a texture set starts from.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TexturePreset {
+    /// Whatever the surface implies — the look and the ride move together, as they always
+    /// have.
+    #[default]
+    Ride,
+    /// Worked dirt with grass beyond it, whatever the track rides like.
+    Soil,
+    /// Pale sand.
+    Sand,
+    /// Turf to the edge of the line.
+    Grass,
+    /// A stadium floor: trucked-in dirt over the whole place and nothing green beyond it.
+    Stadium,
+}
+
+/// One of the rider's own images, standing in for a built-in ground sheet.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnSheet {
+    pub slot: SheetSlot,
+    /// The image's name in the Studio's own `track-textures` folder. Images are copied in
+    /// when they are imported and addressed by their contents, so a project still builds
+    /// after the file it was imported from has moved or gone.
+    pub id: String,
+}
+
+/// Which ground an image replaces.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum SheetSlot {
+    /// The riding surface: the dry worked dirt the track is ridden on.
+    Ground,
+    /// The darker soil the line is worn into, and the whole site under it.
+    Line,
+    /// The packed bottom of a rut.
+    Rut,
+    /// Whatever lies beyond the track.
+    Grass,
+}
+
+impl SheetSlot {
+    pub const ALL: [SheetSlot; 4] =
+        [SheetSlot::Ground, SheetSlot::Line, SheetSlot::Rut, SheetSlot::Grass];
 }
 
 fn default_samples() -> u32 {
@@ -2423,6 +2504,7 @@ mod tests {
                 scale: 20.0,
                 relief: Relief::default(),
                 surface: Surface::default(),
+                texture: Default::default(),
                 wear: default_wear(),
                 roughness: crate::trackprog::default_roughness(),
             },

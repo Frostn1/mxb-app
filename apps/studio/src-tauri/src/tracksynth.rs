@@ -4209,7 +4209,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     // What the 3D grass is coloured by. Terrain-wide, like the density map it sits beside in
     // the same block, rather than tiled like the blade sprite: the two `*map` keys are
     // siblings and read the ground the same way.
-    let turf = ground_looks(prog.terrain.surface).turf;
+    let turf = ground_looks_of(&prog.terrain).turf;
     let grass_color = mask_rect(syn, MASK_DIM, MASK_DIM, |_, _, x, z| {
         // One channel is enough to carry the variation; the tint itself is written below.
         (140.0 + 90.0 * fbm(x * 0.02, z * 0.02, seed ^ 0x4B12)).clamp(0.0, 255.0) as u8
@@ -5540,9 +5540,11 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
 ///
 /// Every published track ships one of these beside its `.map`, and the shape is the same on
 /// all of them — a ground colour, then a colour per surface the game can spray. Ours follows
-/// what the track is made of, so a sand national roosts sand rather than the default loam.
+/// what the track is *painted* with rather than what it is made of, because roost is dirt a
+/// rider can see: a sand national roosts sand, and a track re-skinned to look like a stadium
+/// floor roosts the dark stuff it now looks like.
 fn gfx_cfg(prog: &TrackProgram) -> String {
-    let (ground, line) = ground_palette(prog.terrain.surface);
+    let (ground, line) = ground_palette(&prog.terrain);
     let rgb = |c: [u8; 3]| {
         format!(
             "\t\tred = {:.2}\n\t\tgreen = {:.2}\n\t\tblue = {:.2}\n",
@@ -6554,11 +6556,11 @@ struct GroundLook {
     /// of it lands both — Indiana's dark soil measures a spread of 21 grey levels about a
     /// mean of 39, and its light soil only 28 about a mean of 142.
     contrast: f32,
-    /// The published sheet this band is painted with — see [`photo`].
+    /// The sheet this band is painted with — see [`photo`].
     ///
     /// Ground is a photograph. Everything above draws one instead, and only gets the chance
     /// when the asset will not decode.
-    photo: Option<&'static str>,
+    photo: Option<Sheet>,
     /// What to multiply that photograph by, so a sand track comes out sand.
     ///
     /// `[1.0; 3]` on soil, which is what the sheets were shot on.
@@ -6596,6 +6598,42 @@ fn ground_texture(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
 /// ruts wear down to, and its grass. [`ground_pixels`] draws ground instead of photographing
 /// it, and is the fallback behind these.
 ///
+/// Which photograph a band paints with: one of ours, or one the rider brought.
+///
+/// A rider's own image stands *in place of* a built-in one rather than beside it, and carries
+/// the name of the sheet it replaced, because the rest of the pipeline still has to know
+/// whether it is looking at soil or at grass — the normal map and the specular that go under
+/// a band are picked off that name, and there is no way to derive them from a photograph.
+#[derive(Clone)]
+enum Sheet {
+    /// One of the built-in ground photographs, by name — see [`photo`].
+    Named(&'static str),
+    /// The rider's own, already decoded. See `tracktex`.
+    Own {
+        /// The built-in it stands in for.
+        of: &'static str,
+        px: std::sync::Arc<(usize, Vec<u8>)>,
+    },
+}
+
+impl Sheet {
+    /// The built-in ground this band is, whether or not a rider's image is painting it.
+    fn name(&self) -> &'static str {
+        match self {
+            Sheet::Named(n) => n,
+            Sheet::Own { of, .. } => of,
+        }
+    }
+}
+
+/// A sheet's pixels, `(dim, rgba)`, whichever kind it is.
+fn sheet_pixels(s: &Sheet) -> Option<&(usize, Vec<u8>)> {
+    match s {
+        Sheet::Named(n) => photo(n),
+        Sheet::Own { px, .. } => Some(px.as_ref()),
+    }
+}
+
 /// Returns `(dim, rgba)`; the sheets are square.
 fn photo(name: &str) -> Option<&'static (usize, Vec<u8>)> {
     macro_rules! sheet_of {
@@ -6635,7 +6673,7 @@ fn photo(name: &str) -> Option<&'static (usize, Vec<u8>)> {
 /// Used rather than a normal derived from the sheet's luma, which came out far flatter than
 /// a published track's and rode as "texture too flat".
 fn photo_normal(look: &GroundLook, dim: usize) -> Option<Vec<u8>> {
-    let (name, spec) = match look.photo? {
+    let (name, spec) = match look.photo.as_ref()?.name() {
         "grass" => ("grass_normal", "grass_spec"),
         _ => ("soil_normal", "soil_spec"),
     };
@@ -6656,7 +6694,7 @@ fn photo_normal(look: &GroundLook, dim: usize) -> Option<Vec<u8>> {
 /// The one place a band's pixels come from — the exported `.tga`, the sheet baked into the
 /// `.map` and every picture drawn of the ground all come through here.
 fn band_pixels(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
-    let Some((sheet_dim, src)) = look.photo.and_then(photo) else {
+    let Some((sheet_dim, src)) = look.photo.as_ref().and_then(sheet_pixels) else {
         return ground_pixels(dim, look, seed);
     };
     let mut px = flatten_tile(resample_sheet(src, *sheet_dim, dim), dim);
@@ -7256,8 +7294,8 @@ fn ground_pixels(dim: usize, look: &GroundLook, seed: u32) -> Vec<u8> {
 /// the ground it came off, and a `GroundLook`'s base is what goes *into* the renderer —
 /// shading takes about a quarter of it back out, so quoting the base here would spray dirt
 /// visibly lighter than the dirt it came from. A small tile costs nothing and cannot drift.
-fn ground_palette(s: Surface) -> ([u8; 3], [u8; 3]) {
-    let g = ground_looks(s);
+fn ground_palette(t: &crate::trackprog::Terrain) -> ([u8; 3], [u8; 3]) {
+    let g = ground_looks_of(t);
     let (field, ridden) = (g.field, g.ridden);
     let mean = |look: &GroundLook| -> [u8; 3] {
         const DIM: usize = 256;
@@ -7289,6 +7327,8 @@ struct Grounds {
     loose: GroundLook,
     /// The turf over the top.
     turf: GroundLook,
+    /// Whether that turf grows 3D blades. False on a stadium floor, which has none.
+    turf_grows: bool,
 }
 
 /// The grounds, from what the track says it is made of.
@@ -7298,11 +7338,17 @@ struct Grounds {
 /// is not one band but three — the base, the packed line inside it and the loose stuff at its
 /// edges — and they are spread far enough apart in tone to tell apart at speed.
 fn ground_looks(surface: Surface) -> Grounds {
-    // Read off Indiana's own sheets rather than picked. `soil_light_c` averages (172, 134,
-    // 99) and `soil_dark_c` (50, 36, 24) — a bright tan field against a nearly black riding
-    // line, and the gap between them is far wider than any two colours anyone would guess.
-    // These are the numbers *before* shading, which lands around three quarters of them.
-    let (base, line): ([f32; 3], [f32; 3]) = match surface {
+    looks(surface_palette(surface))
+}
+
+/// The two colours a look is built out of: the field's and the riding line's.
+///
+/// Read off Indiana's own sheets rather than picked. `soil_light_c` averages (172, 134, 99)
+/// and `soil_dark_c` (50, 36, 24) — a bright tan field against a nearly black riding line,
+/// and the gap between them is far wider than any two colours anyone would guess. These are
+/// the numbers *before* shading, which lands around three quarters of them.
+fn surface_palette(surface: Surface) -> ([f32; 3], [f32; 3]) {
+    match surface {
         // The line is lighter than Indiana's own (50, 36, 24) on purpose. That figure is what
         // a sheet averages under a photographer's light; in the game, with the track's sky
         // over it and its own shadows on it, a line that dark stops reading as a line at all —
@@ -7313,7 +7359,16 @@ fn ground_looks(surface: Surface) -> Grounds {
         Surface::Sand => ([214.0, 193.0, 152.0], [176.0, 152.0, 114.0]),
         // Worn turf rather than soil, so a grasstrack's line is not a dirt one.
         Surface::Grass => ([174.0, 142.0, 100.0], [86.0, 80.0, 50.0]),
-    };
+    }
+}
+
+/// Every band of ground, built out of a field colour and a line colour.
+///
+/// The arithmetic below is the whole of what a look is, and it is the same arithmetic for
+/// every one of them — only the two colours going in change. Nothing here re-tones a sheet
+/// that a preset did not already re-tone: `tone` is a ratio against the soil the photographs
+/// were shot on, and for soil it is one.
+fn looks((base, line): ([f32; 3], [f32; 3])) -> Grounds {
     // The sheets were shot on Indiana, which is soil, so a soil track takes them as they are
     // and a sand or grass one pulls them to its own palette by the ratio of the two bases.
     let soil = |b: [f32; 3], of: [f32; 3]| -> [f32; 3] {
@@ -7324,7 +7379,7 @@ fn ground_looks(surface: Surface) -> Grounds {
     let line_tone = soil(line, soil_line);
     let field = GroundLook {
         base,
-        photo: Some("soil_light"),
+        photo: Some(Sheet::Named("soil_light")),
         // Knocked back: a whole plot of bright tan reads ugly from the seat.
         tone: [
             ground_tone[0] * FIELD_DARKEN,
@@ -7345,7 +7400,7 @@ fn ground_looks(surface: Surface) -> Grounds {
     };
     let ridden = GroundLook {
         base: line,
-        photo: Some("soil_dark"),
+        photo: Some(Sheet::Named("soil_dark")),
         tone: line_tone,
         // 22.5 measured, where Indiana's grittiest sheet is 18.2 and Southwick's 16.9 — and
         // it sits next to the rut, so the corridor jumped from heavy grit to smooth over a
@@ -7373,7 +7428,7 @@ fn ground_looks(surface: Surface) -> Grounds {
             base[1] * 1.04 + 5.0,
             base[2] * 1.02 + 4.0,
         ],
-        photo: Some("soil_light"),
+        photo: Some(Sheet::Named("soil_light")),
         tone: [
             ground_tone[0] * 0.80 * FIELD_DARKEN,
             ground_tone[1] * 0.79 * FIELD_DARKEN,
@@ -7393,7 +7448,7 @@ fn ground_looks(surface: Surface) -> Grounds {
     };
     let grass = GroundLook {
         base: [100.0, 114.0, 62.0],
-        photo: Some("grass"),
+        photo: Some(Sheet::Named("grass")),
         tone: [1.0; 3],
         grain_tint: (0.55, 1.32),
         fleck: [126.0, 132.0, 78.0],
@@ -7424,7 +7479,7 @@ fn ground_looks(surface: Surface) -> Grounds {
         // Indiana ships that as its own photograph. Toned down, because that photograph is
         // *lighter* than the dark soil of the line — 61 against 50 — and a groove painted
         // lighter than the line it is cut into is a groove nobody can find.
-        photo: Some("packed"),
+        photo: Some(Sheet::Named("packed")),
         tone: [
             line_tone[0] * RUT_FLOOR_DARKEN,
             line_tone[1] * RUT_FLOOR_DARKEN,
@@ -7461,7 +7516,7 @@ fn ground_looks(surface: Surface) -> Grounds {
         // soil put dark blotches over light ground in no pattern anybody could read. What is
         // thrown off a line and never driven on again dries out and goes lighter than what is
         // around it.
-        photo: Some("soil_light"),
+        photo: Some(Sheet::Named("soil_light")),
         tone: [
             ground_tone[0] * LOOSE_DRY,
             ground_tone[1] * LOOSE_DRY,
@@ -7482,7 +7537,7 @@ fn ground_looks(surface: Surface) -> Grounds {
     // The line is the corridor's own soil, worn down to what a published track paints its
     // riding line with. The corridor around it is lifted off that: a track from above is a
     // dark brown ribbon with a darker line down it, not a pale one with a black stripe.
-    let line_band = GroundLook { tone: line_tone, ..ridden };
+    let line_band = GroundLook { tone: line_tone, ..ridden.clone() };
     let ridden = GroundLook {
         tone: [
             line_tone[0] * CORRIDOR_LIFT,
@@ -7491,7 +7546,73 @@ fn ground_looks(surface: Surface) -> Grounds {
         ],
         ..ridden
     };
-    Grounds { field, ridden, line: line_band, shoulder, rut, loose, turf: grass }
+    Grounds { field, ridden, line: line_band, shoulder, rut, loose, turf: grass, turf_grows: true }
+}
+
+/// A stadium floor: trucked-in dirt over the whole place, and nothing green beyond it.
+///
+/// Composed out of the soil look rather than graded to a palette of its own. The ground
+/// photographs belong to a published track and are not ours to re-tone, so a stadium is made
+/// by putting the bands the generator already has in different places — the dark worked soil
+/// on the riding surface where the tan normally goes, and the tan on the floor outside the
+/// lanes where the grass normally goes — instead of by inventing a colour grade over someone
+/// else's art. New looks arrive with art of our own.
+fn stadium_looks() -> Grounds {
+    let g = ground_looks(Surface::Soil);
+    Grounds {
+        // The lanes: dark trucked-in dirt, not a dry outdoor national's tan.
+        field: g.ridden.clone(),
+        // And the floor beyond them is the same stuff, lighter where nobody rides.
+        turf: g.shoulder.clone(),
+        turf_grows: false,
+        ..g
+    }
+}
+
+/// The grounds a program actually paints with.
+///
+/// The one place the look is decided, and the only place that knows the look is a separate
+/// question from the ride. Left at its default this is exactly [`ground_looks`] of the
+/// surface, expression for expression, which is what keeps a motocross track that nobody
+/// re-skinned building the bytes it built before.
+fn ground_looks_of(t: &crate::trackprog::Terrain) -> Grounds {
+    use crate::trackprog::{SheetSlot, TexturePreset};
+    if t.texture.is_default() {
+        return ground_looks(t.surface);
+    }
+    let mut g = match t.texture.preset {
+        TexturePreset::Ride => ground_looks(t.surface),
+        TexturePreset::Soil => ground_looks(Surface::Soil),
+        TexturePreset::Sand => ground_looks(Surface::Sand),
+        TexturePreset::Grass => ground_looks(Surface::Grass),
+        TexturePreset::Stadium => stadium_looks(),
+    };
+    for own in &t.texture.sheets {
+        // An id nothing is stored under paints with the built-in it stands in for. A track
+        // carried to another machine looks ordinary; it does not fail to build.
+        let Some(px) = crate::tracktex::sheet(&own.id) else { continue };
+        let put = |look: &mut GroundLook| {
+            let of = look.photo.as_ref().map(Sheet::name).unwrap_or("soil_light");
+            look.photo = Some(Sheet::Own { of, px: px.clone() });
+        };
+        match own.slot {
+            // The riding surface, and the loose stuff thrown off it, which is the same dirt
+            // seen dry — they share a sheet in every look the generator has.
+            SheetSlot::Ground => {
+                put(&mut g.field);
+                put(&mut g.shoulder);
+                put(&mut g.loose);
+            }
+            // The dark soil: the whole site under the track, and the corridor over it.
+            SheetSlot::Line => {
+                put(&mut g.ridden);
+                put(&mut g.line);
+            }
+            SheetSlot::Rut => put(&mut g.rut),
+            SheetSlot::Grass => put(&mut g.turf),
+        }
+    }
+    g
 }
 
 /// The blade sprite the grass layer scatters. Alpha-cut, like every foliage sheet in the
@@ -8172,9 +8293,10 @@ struct Layer {
 /// line-and-field is a brown ribbon on a green sheet, and the shoulder — the worked ground
 /// either side of the ribbon — is most of what is actually in front of a rider.
 fn layers(prog: &TrackProgram) -> Vec<Layer> {
-    // Ground follows what the track is made of, so a sand national exports sand.
-    let Grounds { field, ridden, line, shoulder, rut, loose, turf } =
-        ground_looks(prog.terrain.surface);
+    // Ground follows the look the track was given, which is what the track is made of until
+    // somebody says otherwise — so a sand national still exports sand.
+    let Grounds { field, ridden, line, shoulder, rut, loose, turf, turf_grows } =
+        ground_looks_of(&prog.terrain);
     let (_, shoulder_scale) = ground(prog.terrain.surface);
     let mut bands = vec![
         // Dark soil over the whole site, and the riding line painted *light* on top of it.
@@ -8339,7 +8461,8 @@ fn layers(prog: &TrackProgram) -> Vec<Layer> {
             spec: 14,
             shininess: 8,
             wet: false,
-            grass: true,
+            // Blades, unless the look says there is nothing growing out there.
+            grass: turf_grows,
             gloss: 0,
         },
     ];
@@ -8625,7 +8748,7 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
 /// the code that made it. Bump it with every change to what a program builds into: minor for
 /// a new feature, patch for a fix. 0.x until the generator is finished. History in
 /// `apps/studio/FROST_ALGORITHM.md`.
-pub const FROST_ALGORITHM_VERSION: &str = "0.38.0";
+pub const FROST_ALGORITHM_VERSION: &str = "0.39.0";
 
 /// The stamp every built track carries in `<slug>/frost-algorithm.ini`.
 ///
@@ -9662,6 +9785,7 @@ mod tests {
                     landform_height: 12.0,
                                 },
                 surface: crate::trackprog::Surface::Soil,
+                texture: Default::default(),
                 wear: crate::trackprog::default_wear(),
                 roughness: crate::trackprog::default_roughness(),
             },
@@ -11531,7 +11655,8 @@ mod tests {
     fn every_band_is_painted_with_a_published_sheet() {
         let p: TrackProgram = serde_json::from_str(DEMO).unwrap();
         for l in layers(&p) {
-            let name = l.look.photo.unwrap_or_else(|| panic!("{} names no sheet", l.name));
+            let sheet = l.look.photo.unwrap_or_else(|| panic!("{} names no sheet", l.name));
+            let name = sheet.name();
             let (dim, px) = photo(name)
                 .unwrap_or_else(|| panic!("{}'s sheet {name} did not decode", l.name));
             assert_eq!(*dim, GROUND_TEXTURE_DIM, "{name} is {dim} and the bands go out at 1024");
@@ -13652,5 +13777,204 @@ mod game_light {
             image::RgbImage::from_raw((n * 2) as u32, n as u32, img).unwrap().save(&path).unwrap();
             println!("wrote {path}");
         }
+    }
+}
+
+/// A plain track, for a test in another module to hang a look on.
+#[cfg(test)]
+pub(crate) fn oval_for_test() -> TrackProgram {
+    tests::oval()
+}
+
+/// One band's pixels, for a test that has to look at the ground itself rather than at what
+/// the ground says it is. Returns nothing for a band this track doesn't carry.
+#[cfg(test)]
+pub(crate) fn band_for_test(prog: &TrackProgram, band: &str) -> Option<Vec<u8>> {
+    let l = layers(prog).into_iter().find(|l| l.name == band)?;
+    Some(band_pixels(64, &l.look, l.salt))
+}
+
+/// The look and the ride, which used to be the same field.
+#[cfg(test)]
+mod look_and_ride {
+    use super::tests::oval;
+    use super::*;
+    use crate::trackprog::{OwnSheet, SheetSlot, Surface, TexturePreset, TextureSet};
+
+    /// What every band is painted with: its name, the sheet under it, and the tone over that.
+    /// Two tracks with the same fingerprint are painted the same.
+    fn painted(p: &TrackProgram) -> Vec<(&'static str, &'static str, [f32; 3], bool)> {
+        layers(p)
+            .iter()
+            .map(|l| {
+                let sheet = l.look.photo.as_ref().map(Sheet::name).unwrap_or("drawn");
+                (l.name, sheet, l.look.tone, l.grass)
+            })
+            .collect()
+    }
+
+    /// Every thickness the surface stack declares, in order: how the track rides.
+    fn rides(p: &TrackProgram) -> Vec<String> {
+        let syn = synthesise(p).expect("synthesise");
+        tht(p, &syn)
+            .lines()
+            .filter(|l| {
+                let l = l.trim();
+                l.starts_with("material = ") || l.starts_with("thickness = ")
+            })
+            .map(|l| l.trim().to_string())
+            .collect()
+    }
+
+    fn with(surface: Surface, texture: TextureSet) -> TrackProgram {
+        let mut p = oval();
+        p.terrain.surface = surface;
+        p.terrain.texture = texture;
+        p
+    }
+
+    /// The whole point. A track can look like one thing and ride like another.
+    #[test]
+    fn a_look_can_be_picked_without_moving_the_ride() {
+        let sand = with(Surface::Sand, TextureSet::default());
+        let looks_like_soil = with(
+            Surface::Sand,
+            TextureSet { preset: TexturePreset::Soil, sheets: Vec::new() },
+        );
+        assert_eq!(rides(&sand), rides(&looks_like_soil), "the look moved the material stack");
+        assert_ne!(painted(&sand), painted(&looks_like_soil), "the look changed nothing");
+        // And it is soil's own paint, not a third thing.
+        let soil = with(Surface::Soil, TextureSet::default());
+        assert_eq!(painted(&soil), painted(&looks_like_soil));
+    }
+
+    /// And the other way round.
+    #[test]
+    fn a_ride_can_be_picked_without_moving_the_look() {
+        let soil = with(
+            Surface::Soil,
+            TextureSet { preset: TexturePreset::Soil, sheets: Vec::new() },
+        );
+        let rides_like_sand = with(
+            Surface::Sand,
+            TextureSet { preset: TexturePreset::Soil, sheets: Vec::new() },
+        );
+        assert_eq!(painted(&soil), painted(&rides_like_sand), "the ride moved the paint");
+        assert_ne!(rides(&soil), rides(&rides_like_sand), "the ride changed nothing");
+    }
+
+    /// A track nobody re-skinned is painted with exactly what its surface always painted it
+    /// with — which is the whole of why motocross output does not move.
+    #[test]
+    fn a_track_with_no_look_of_its_own_paints_what_it_always_did() {
+        for s in [Surface::Soil, Surface::Sand, Surface::Grass] {
+            let plain = with(s, TextureSet::default());
+            let ride = with(s, TextureSet { preset: TexturePreset::Ride, sheets: Vec::new() });
+            assert_eq!(painted(&plain), painted(&ride), "{s:?} moved");
+            let g = ground_looks(s);
+            let of = ground_looks_of(&plain.terrain);
+            assert_eq!(g.field.tone, of.field.tone, "{s:?}'s field moved");
+            assert_eq!(g.turf.base, of.turf.base, "{s:?}'s turf moved");
+            assert!(of.turf_grows);
+        }
+    }
+
+    /// A stadium floor is dirt to the wall, with nothing growing out of it.
+    #[test]
+    fn a_stadium_has_no_grass_on_it() {
+        let p = with(
+            Surface::Soil,
+            TextureSet { preset: TexturePreset::Stadium, sheets: Vec::new() },
+        );
+        let turf = painted(&p).into_iter().find(|b| b.0 == "hm_grass").expect("the outer band");
+        assert!(!turf.3, "a stadium grew grass");
+        assert_ne!(turf.1, "grass", "a stadium floor is painted with turf");
+        // And the riding surface is the dark trucked-in stuff, not an outdoor national's tan.
+        let soil = with(Surface::Soil, TextureSet::default());
+        assert_ne!(painted(&soil), painted(&p));
+        // The ride is untouched: a stadium is a look and nothing else.
+        assert_eq!(rides(&soil), rides(&p));
+    }
+
+    /// An image that isn't in the store — a project opened on another machine, or one whose
+    /// image has been deleted — paints with our own ground rather than failing to build.
+    #[test]
+    fn an_image_the_studio_never_stored_falls_back_to_our_own_ground() {
+        let missing = TextureSet {
+            preset: TexturePreset::Ride,
+            sheets: vec![OwnSheet {
+                slot: SheetSlot::Ground,
+                id: "00000000000000000000000000000000".into(),
+            }],
+        };
+        let p = with(Surface::Soil, missing);
+        let plain = with(Surface::Soil, TextureSet::default());
+        assert_eq!(painted(&plain), painted(&p));
+    }
+
+    /// The look travels in the file only when somebody picked one, so every project saved
+    /// before this existed opens and builds unchanged.
+    #[test]
+    fn a_look_nobody_picked_is_not_written_to_the_file() {
+        let plain = with(Surface::Soil, TextureSet::default());
+        let v = serde_json::to_value(&plain).unwrap();
+        assert!(v["terrain"].get("texture").is_none(), "{}", v["terrain"]);
+        let picked = with(
+            Surface::Soil,
+            TextureSet { preset: TexturePreset::Stadium, sheets: Vec::new() },
+        );
+        let v = serde_json::to_value(&picked).unwrap();
+        assert_eq!(v["terrain"]["texture"]["preset"], "stadium");
+        // And it reads back.
+        let back: TrackProgram = serde_json::from_value(v).unwrap();
+        assert_eq!(back.terrain.texture.preset, TexturePreset::Stadium);
+    }
+
+    /// A rider's own image reaches the band it was picked for, and only that band.
+    #[test]
+    fn an_imported_image_paints_the_slot_it_was_picked_for() {
+        // Straight into the look, so the test is about the wiring rather than about the
+        // store having a file in it.
+        let px = std::sync::Arc::new((4usize, vec![200u8; 4 * 4 * 4]));
+        let mut g = ground_looks(Surface::Soil);
+        let was = g.turf.photo.as_ref().map(Sheet::name).unwrap();
+        g.turf.photo = Some(Sheet::Own { of: was, px: px.clone() });
+        assert_eq!(g.turf.photo.as_ref().unwrap().name(), "grass", "it lost what it stands for");
+        let pixels = sheet_pixels(g.turf.photo.as_ref().unwrap()).unwrap();
+        assert_eq!(pixels.0, 4);
+        // And the soil bands beside it are untouched.
+        assert_eq!(g.field.photo.as_ref().unwrap().name(), "soil_light");
+    }
+}
+
+/// The motocross proof: Northgate, seed 103, written out as the collision terrain it compiles
+/// to, so a branch can be diffed against `main` cell by cell.
+///
+/// Motocross output is not allowed to move unless someone changed the look of the track, and
+/// "all the tests still pass" is not that proof — a change once moved 49,619 cells with the
+/// whole suite green. This writes the bytes; `cmp` reads them.
+///
+/// ```text
+/// FROST_OUT=/tmp/northgate.trh \
+///   cargo test -p frost-studio --bin frost-studio -- --ignored --nocapture northgate_trh
+/// ```
+#[cfg(test)]
+mod mx_proof {
+    #[test]
+    #[ignore = "writes a file — set FROST_OUT"]
+    fn northgate_trh() {
+        let p = match crate::tracklayout::search(103, 1) {
+            Ok(m) => m.program,
+            Err(v) => v[0].program.clone(),
+        };
+        let syn = super::synthesise(&p).expect("Northgate synthesises");
+        let out = std::path::PathBuf::from(std::env::var("FROST_OUT").expect("set FROST_OUT"));
+        std::fs::create_dir_all(&out).expect("made the output folder");
+        let bytes = super::trh(&p, &syn, true);
+        std::fs::write(out.join("northgate.trh"), &bytes).expect("wrote the .trh");
+        // And every source file the track compiles from, so a change to the *paint* shows up
+        // too: the collision terrain carries heights and surface ids and nothing about sheets.
+        let wrote = super::write_source(&p, &syn, &out).expect("wrote the source");
+        println!("{} bytes of .trh and {} source files", bytes.len(), wrote.len());
     }
 }
