@@ -189,7 +189,14 @@ describe("Steam sign-in", () => {
     expect(me.status).toBe(200);
     expect(me.headers.get("Access-Control-Allow-Origin")).toBe(SITE);
     expect(me.headers.get("Access-Control-Allow-Credentials")).toBe("true");
-    expect(await me.json()).toEqual({ steamId: CREATOR, name: "Frost", creator: true, linked: true, admin: false });
+    expect(await me.json()).toEqual({
+      steamId: CREATOR,
+      name: "Frost",
+      creator: true,
+      linked: true,
+      locks: { usedToday: 0, perDay: 10, remaining: 10 },
+      admin: false,
+    });
   });
 
   it("refuses a return that didn't start in this browser, before asking Steam", async () => {
@@ -331,7 +338,7 @@ describe("creators on /admin/assets", () => {
     expect((await assets(env, req("POST", grants, { cookie: frost, body, contentType: "application/json; charset=utf-8" }))).status).toBe(200);
   });
 
-  it("keeps new creators out by default, and lets existing ones in", async () => {
+  it("keeps a signed-in stranger out until they sign up, and lets existing creators in", async () => {
     const env = await deployment();
     const cookie = await cookieFor("76561198000000077");
     expect((await assets(env, req("GET", "/admin/assets", { cookie }))).status).toBe(403);
@@ -397,39 +404,97 @@ describe("creators on /admin/assets", () => {
     const profile = () =>
       env.DB.prepare("SELECT id FROM accounts WHERE steam_id = ?").bind(NEWCOMER).first<{ id: string }>();
 
-    // Signing in is proof of who they are, never of what they may sell.
+    // Signing in is proof of who they are, never of what they may sell. Signing up is one
+    // click, and it is still a click somebody has to make.
     expect((await assets(env, req("GET", "/admin/assets", { cookie }))).status).toBe(403);
     const made = await assets(env, req("POST", "/admin/assets", { cookie, body: { title: "First" } }));
     expect(made.status).toBe(403);
-    expect(((await made.json()) as { error: string }).error).toBe("mxbsecure is invite only, for affiliated creators");
+    expect(((await made.json()) as { error: string }).error).toBe("sign up as a creator on mxbsecure.com first");
     expect(await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()).toMatchObject({ creator: false });
     // No profile is conjured on the way past, so nothing accretes creator status later.
     expect(await profile()).toBeNull();
   });
 
-  it("hands the locker to a creator, and to nobody else", async () => {
+  it("signs a rider up as a creator on the spot, and remembers it was their own doing", async () => {
     const env = await deployment();
-    // Not signed in.
-    expect((await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js"))).status).toBe(401);
-    // Signed in, not a creator.
+    const NEWCOMER = "76561198000000077";
+    const cookie = await cookieFor(NEWCOMER);
+
+    const up = await web(env, req("POST", "/v1/web/creator", { cookie, body: {} }));
+    expect(up.status).toBe(201);
+    expect(await up.json()).toMatchObject({ creator: true, already: false });
+    expect(up.headers.get("cache-control")).toBe("no-store");
+
+    // A creator from that moment: the locking routes open with nothing else to do.
+    expect(await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()).toMatchObject({ creator: true });
+    expect((await assets(env, req("POST", "/admin/assets", { cookie, body: { title: "First" } }))).status).toBe(201);
+
+    const row = await env.DB.prepare("SELECT kind, creator_at, creator_source FROM accounts WHERE steam_id = ?")
+      .bind(NEWCOMER)
+      .first<{ kind: string; creator_at: number; creator_source: string }>();
+    expect(row).toMatchObject({ kind: "web", creator_source: "self" });
+
+    // Asking twice changes nothing, and never a second account.
+    const again = await web(env, req("POST", "/v1/web/creator", { cookie, body: {} }));
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ already: true });
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts WHERE steam_id = ?").bind(NEWCOMER).first<{ n: number }>())?.n).toBe(1);
+  });
+
+  it("signs nobody up who isn't signed in, or whose request didn't come from the site", async () => {
+    const env = await deployment();
+    expect((await web(env, req("POST", "/v1/web/creator", { body: {} }))).status).toBe(401);
+    const cookie = await cookieFor("76561198000000077");
+    // A form post from a sibling subdomain: the cookie rides along, the Origin cannot.
+    const forged = await web(env, req("POST", "/v1/web/creator", { cookie, origin: null, contentType: "text/plain" }));
+    expect(forged.status).toBe(403);
+    expect(await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()).toMatchObject({ creator: false });
+  });
+
+  it("says what is left of today's ceiling, and says the owner has none", async () => {
+    const env = await deployment();
+    const cookie = await cookieFor(CREATOR);
+    const mine = async () => ((await (await web(env, req("GET", "/v1/web/me", { cookie }))).json()) as { locks?: unknown }).locks;
+    expect(await mine()).toEqual({ usedToday: 0, perDay: 10, remaining: 10 });
+    for (let i = 0; i < 3; i++) await assets(env, req("POST", "/admin/assets", { cookie, body: { title: "T" } }));
+    expect(await mine()).toEqual({ usedToday: 3, perDay: 10, remaining: 7 });
+
+    // Somebody who hasn't signed up has no ceiling to report, because they cannot lock at all.
     const stranger = await cookieFor("76561198000000077");
-    expect((await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: stranger }))).status).toBe(403);
-    // A creator, but nothing uploaded: a configuration problem, not a missing page.
+    expect(await (await web(env, req("GET", "/v1/web/me", { cookie: stranger }))).json()).not.toHaveProperty("locks");
+
+    const owner = await deployment({ MXB_OWNER_ACCOUNT_ID: "acc_frost" });
+    const theirs = (await (await web(owner, req("GET", "/v1/web/me", { cookie }))).json()) as { locks: unknown };
+    expect(theirs.locks).toEqual({ usedToday: 0, perDay: null, remaining: null });
+  });
+
+  it("hands the locker to anyone signed in, and to nobody who isn't", async () => {
+    const env = await deployment();
+    // Not signed in: the GUID lock is open to every rider, not to every request.
+    expect((await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js"))).status).toBe(401);
+    // Signed in, nothing uploaded: a configuration problem, not a missing page.
     const frost = await cookieFor(CREATOR);
     expect((await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: frost }))).status).toBe(503);
     // A name that was never servable, whoever asks.
     expect((await web(env, req("GET", "/v1/web/lockweb/../secrets", { cookie: frost }))).status).toBe(404);
     expect((await web(env, req("GET", "/v1/web/lockweb/anything.txt", { cookie: frost }))).status).toBe(404);
 
-    // Uploaded: the creator gets it, served as a module and never at a shared cache.
+    // Uploaded: served as a module, and never at a shared cache.
     (env as unknown as { LOCKWEB: { objects: Map<string, string> } }).LOCKWEB.objects.set("mxb_lockweb.js", "export default 1");
     const got = await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: frost }));
     expect(got.status).toBe(200);
     expect(got.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
     expect(got.headers.get("cache-control")).toBe("private, max-age=3600");
     expect(await got.text()).toBe("export default 1");
-    // Still nobody else's, now that there is something to hand over.
-    expect((await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: stranger }))).status).toBe(403);
+
+    // Somebody who has never sold anything gets it too — that is the GUID lock working — and
+    // gets no closer to the assets for having it.
+    const rider = await cookieFor("76561198000000077");
+    expect((await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: rider }))).status).toBe(200);
+    expect((await assets(env, req("GET", "/admin/assets", { cookie: rider }))).status).toBe(403);
+    // An expired session is not a session.
+    const stale = await cookieFor(CREATOR, Date.now() - 1);
+    expect((await web(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: stale }))).status).toBe(401);
   });
 
   it("refuses an expired session", async () => {

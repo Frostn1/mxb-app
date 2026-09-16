@@ -548,15 +548,22 @@ async function steamReturn(request: Request, url: URL, env: Env): Promise<Respon
     if (!String(err).includes("UNIQUE")) throw err;
     // Held by a web-only profile made when this person locked something on mxbsecure.com. Steam
     // just confirmed it's them, so the app profile takes over the Steam link and their assets.
-    const held = await env.DB.prepare("SELECT id, kind, creator_at FROM accounts WHERE steam_id = ?")
+    const held = await env.DB.prepare("SELECT id, kind, creator_at, creator_source FROM accounts WHERE steam_id = ?")
       .bind(result.steamId)
-      .first<{ id: string; kind: string; creator_at: number | null }>();
+      .first<{ id: string; kind: string; creator_at: number | null; creator_source: string | null }>();
     if (held?.kind !== "web") return steamResult(site, "already-linked");
     await env.DB.batch([
       env.DB.prepare("UPDATE assets SET creator_id = ? WHERE creator_id = ?").bind(login.account_id, held.id),
       env.DB.prepare("UPDATE accounts SET steam_id = NULL WHERE id = ?").bind(held.id),
-      env.DB.prepare("UPDATE accounts SET steam_id = ?, creator_at = COALESCE(creator_at, ?) WHERE id = ?").bind(
+      // `creator_source` travels with the standing it describes: someone who signed themselves
+      // up on the site is still a signup after they link the app, not an invitation we made.
+      env.DB.prepare(
+        "UPDATE accounts SET steam_id = ?," +
+          " creator_source = CASE WHEN creator_at IS NULL THEN ? ELSE creator_source END," +
+          " creator_at = COALESCE(creator_at, ?) WHERE id = ?",
+      ).bind(
         result.steamId,
+        held.creator_source,
         held.creator_at ?? Date.now(),
         login.account_id,
       ),

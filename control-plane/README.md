@@ -47,6 +47,9 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/roster` | — | Addresses an app saw in the game's own master list. Held back until distinct networks agree — see below; without that this would be a reflection amplifier. |
 | GET | `/v1/roster` | — | The shared server book. Public and cacheable; the app seeds its own address book from it. |
 | POST | `/v1/roster/mine` | bearer (invited) | A server's own operator adding it, which needs no corroborating: the account is the corroboration. |
+| GET | `/v1/web/me` | Steam sign-in | Who is signed in on mxbsecure.com, whether they are a creator, and what is left of today's lock ceiling. Never cached. |
+| POST | `/v1/web/creator` | Steam sign-in | Signing up as a creator, which is what opens `/admin/assets*`. Anyone signed in may; `MXB_ASSETS_PER_DAY` is what bounds them afterwards. |
+| GET | `/v1/web/lockweb/*` | Steam sign-in | The WebAssembly locker. It cannot live on the static site, which serves everything it holds to everybody. Any signed-in rider gets it: the GUID lock is for all of them. |
 | GET/POST | `/v1/web/admin/*` | Steam sign-in + `MXB_ADMIN_STEAM_IDS` | The dashboards at mxbsecure.com/admin — usage, diagnostics, paint sync, plugin keys |
 | GET | `/v1/plugins` | — | The paid-plugin catalogue. Public: what is on offer is not a secret. |
 | GET | `/v1/me/plugins` | bearer | What this account holds, each with a freshly signed license |

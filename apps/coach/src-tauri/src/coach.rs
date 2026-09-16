@@ -39,6 +39,15 @@ pub(crate) fn session_dirs(cfg: &AppConfig) -> Vec<PathBuf> {
     out
 }
 
+/// Where the `.cue` and `.hud` sheets go: `cues/` under the same `mxbcoach` folder `hud.ini`
+/// is written to, which is the one the recorder actually uses. Taking the first candidate
+/// instead put the sheets somewhere the plugin never opens whenever the configured profiles
+/// folder wasn't the one the game writes to — and then the cue and the trail simply never
+/// appeared, with nothing on screen to say why.
+pub(crate) fn sheets_dir(cfg: &AppConfig) -> Option<PathBuf> {
+    crate::hud::coach_dir_of(&session_dirs(cfg)).map(|c| c.join("cues"))
+}
+
 fn plugin_path(cfg: &AppConfig) -> Option<PathBuf> {
     let dir = cfg.install_dir();
     (!dir.trim().is_empty()).then(|| Path::new(&dir).join("plugins").join(PLUGIN))
@@ -1022,10 +1031,7 @@ pub fn coach_write_cues(
     let picked = crate::cues::pick(&points, &out.review, level, amount, &seen);
     let (cues, next) = (picked.cues, picked.history);
     let cfg = load_config(&app);
-    let dir = session_dirs(&cfg)
-        .into_iter()
-        .find_map(|d| d.parent().map(|p| p.join("cues")))
-        .ok_or("The game's user folder wasn't found.")?;
+    let dir = sheets_dir(&cfg).ok_or("The game's user folder wasn't found.")?;
     fs::create_dir_all(&dir).map_err(err)?;
     let file = dir.join(crate::cues::file_name(&rec.event.track_id, &rec.event.bike_id));
     // Written aside and moved in, so the recorder never reads half a file.
@@ -1112,9 +1118,19 @@ fn ground_for(app: &AppHandle, path: &str) -> Result<GroundAnswer, String> {
     let points: Vec<[f32; 3]> =
         rec.samples.iter().filter(|s| !s.airborne() && !s.crashed).step_by(5).map(|s| [s.x, s.y, s.z]).collect();
     let i = &master.info;
-    match crate::ground::fit(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points) {
+    let fit = crate::ground::measure(i.width as usize, i.height as usize, i.metres_per_sample, &master.heights, &points);
+    match fit.lift {
         Some(lift) => Ok(GroundAnswer { ground: Some(Ground { path: src.path, prefix: src.prefix, name: src.name, lift }), why: None }),
-        None => no("its terrain doesn't line up with your laps"),
+        // Say what was measured. "Doesn't line up" on its own left nothing to look into, and
+        // this is the branch a rider on a track they own actually hits.
+        None if fit.on_grid < points.len() / 2 => no(&format!(
+            "only {} of {} points on your laps land on its terrain, so it looks like a different track",
+            fit.on_grid, fit.offered
+        )),
+        None => no(&format!(
+            "the height of your laps above its terrain wanders by {:.1} m, too much to trust it as the same track",
+            fit.spread
+        )),
     }
 }
 
@@ -1285,5 +1301,28 @@ mod tests {
         let r = best_reference(&all, "indiana", "crf250", None).unwrap();
         assert_eq!(r.path, "b", "no lap on this bike: the fastest on any");
         assert!(best_reference(&all, "nowhere", "kx450", None).is_none());
+    }
+
+    /// The `.cue` and `.hud` sheets and `hud.ini` must land under one `mxbcoach` folder. They
+    /// were chosen two different ways, and when the candidates disagreed the sheets went where
+    /// the plugin never looks: the HUD switches worked while the cue and the trail showed
+    /// nothing at all.
+    #[test]
+    fn the_sheets_go_where_hud_ini_goes() {
+        let dir = std::env::temp_dir().join(format!("coach-sheets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (moved, default) = (dir.join("moved"), dir.join("default"));
+        let dirs = [moved.join("mxbcoach").join("sessions"), default.join("mxbcoach").join("sessions")];
+        // The recorder writes to the second candidate, not the first.
+        std::fs::create_dir_all(&dirs[1]).unwrap();
+        let coach = crate::hud::coach_dir_of(&dirs).expect("a coach folder");
+        assert_eq!(coach, default.join("mxbcoach"), "the one the recorder uses");
+        assert_eq!(
+            coach.join("cues"),
+            crate::hud::coach_dir_of(&dirs).map(|c| c.join("cues")).unwrap(),
+            "the sheets sit beside hud.ini, never under the first candidate blindly"
+        );
+        assert_ne!(coach.join("cues"), moved.join("mxbcoach").join("cues"), "not the unused candidate");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
