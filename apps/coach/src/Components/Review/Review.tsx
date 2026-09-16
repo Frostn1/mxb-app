@@ -156,19 +156,26 @@ export default function Review({
     .filter(Boolean)
     .join(" · ");
   const where = [data.trackName || data.trackId, started(data.lap.started), data.lap.bikeName].filter(Boolean).join(" · ");
+  // A session is every stint of one event, and each lap carries the recording it's in.
+  const stintStart = (s: SessionSummary, file: string) => s.stints.find((x) => x.path === file)?.started ?? s.started;
+  const mine = (s: SessionSummary) => s.stints.some((x) => x.path === path);
   // The fastest lap and nothing, then every other whole lap on this track, this session first.
   const choices = [
     { value: "best", label: t("review.fastest") },
     { value: "alone", label: t("review.alone") },
     ...[...sessions]
       .filter((s) => s.trackId === data.trackId)
-      .sort((a, b) => (a.path === path ? -1 : b.path === path ? 1 : 0))
+      .sort((a, b) => (mine(a) ? -1 : mine(b) ? 1 : 0))
       .flatMap((s) =>
         s.laps
-          .filter((l) => l.whole && !l.invalid && !(s.path === path && l.num === lap))
+          .filter((l) => l.whole && !l.invalid && !(l.path === path && l.num === lap))
           .map((l) => ({
-            value: `${s.path}::${l.num}`,
-            label: [`${t("session.lap")} ${l.num + 1}`, lapTime(l.timeMs), s.path === path ? "" : started(s.started)]
+            value: `${l.path}::${l.num}`,
+            label: [
+              `${t("session.lap")} ${l.num + 1}`,
+              lapTime(l.timeMs),
+              l.path === path ? "" : started(stintStart(s, l.path)),
+            ]
               .filter(Boolean)
               .join(" · "),
           })),

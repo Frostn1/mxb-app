@@ -54,6 +54,7 @@ import { REGION_LABEL_KEY, REGION_ORDER, canonicalRegion, type RegionKey } from 
 import JoinServerDialog from "../Shell/JoinServerDialog";
 import ServerDetail from "./ServerDetail";
 import ServerCard from "./ServerCard";
+import ConnectionCheck from "./ConnectionCheck";
 
 type ViewMode = "tiles" | "list";
 const VIEW_KEY = "mxb:serversView:v1";
@@ -203,11 +204,15 @@ const Servers = () => {
     if (inFlight.current) return;
     inFlight.current = true;
     setLoading(true);
-    setError(null);
+    // The error is cleared when the next fetch *succeeds*, not when it starts. Clearing it here
+    // dropped the failure screen for as long as the retry took — which meant the connection
+    // check under it was unmounted, and its results thrown away, every time somebody pressed
+    // Try again. The spinner on the button already says a retry is happening.
     listMasterServers()
       .then((list) => {
         onScreen.current = list;
         setServers(list);
+        setError(null);
         // After the list, never with it: the browser has to draw whether or not the control
         // plane answers, and badges arriving a moment later is the right trade for that.
         serversWithPaintSync(
@@ -541,15 +546,12 @@ const Servers = () => {
             <p className="text-[13px] text-faint">{t("serverBrowser.loading")}</p>
           </Centered>
         ) : error && servers.length === 0 ? (
+          // Not the bare error this used to be. A failed list is nearly always the master
+          // server having gone quiet, which looks identical from one machine to a firewall
+          // problem — so the app asks how many other people are failing the same fetch and
+          // leads with that, rather than leaving somebody to debug a machine that is fine.
           <Centered>
-            <ServerOff className="size-6 text-faint" />
-            <p className="max-w-[420px] text-center text-[13px] text-muted-foreground">
-              {error}
-            </p>
-            <Button variant="outline" size="sm" onClick={load}>
-              <RefreshCw className="size-3.5" />
-              {t("serverBrowser.retry")}
-            </Button>
+            <ConnectionCheck error={error} onRetry={load} />
           </Centered>
         ) : shown.length === 0 ? (
           <Centered>

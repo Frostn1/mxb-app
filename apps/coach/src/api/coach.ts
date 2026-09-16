@@ -7,10 +7,18 @@ export interface CoachStatus {
   pluginPath: string | null;
   pluginInstalled: boolean;
   sessionDirs: string[];
+  /** The recorder's own version, as it wrote it the last time the game ran it. */
+  recorderVersion: string | null;
+  /** The recorder that ran is older than the HUD and the spoken cues need. */
+  recorderOutdated: boolean;
 }
 
 export interface LapSummary {
   num: number;
+  /** The recording this lap is in: a session is every stint of one event. */
+  path: string;
+  /** Which stint it was ridden in, from 0. Every stint counts its laps from the start. */
+  stint: number;
   timeMs: number;
   invalid: boolean;
   /** Started and finished at the line: it can be compared. */
@@ -22,9 +30,18 @@ export interface LapSummary {
   riddenMs: number;
 }
 
-export interface SessionSummary {
+/** One stint on track: one recording. A session is every stint of one event. */
+export interface Stint {
   path: string;
-  /** `yyyymmdd-hhmmss-mmm`, local time. */
+  started: string;
+  /** The setup it was ridden on, as the game names it. */
+  setup: string;
+}
+
+export interface SessionSummary {
+  /** The first stint's file. Every stint is in `stints`. */
+  path: string;
+  /** `yyyymmdd-hhmmss-mmm`, local time the first stint started. */
   started: string;
   rider: string;
   trackId: string;
@@ -32,13 +49,17 @@ export interface SessionSummary {
   bikeId: string;
   bikeName: string;
   category: string;
+  /** 1 = testing, 2 = race, 4 = straight rhythm. */
+  eventType: number;
   trackLength: number;
   limiter: number;
   complete: boolean;
   laps: LapSummary[];
   bestMs: number | null;
-  /** The setup it was ridden on, as the game names it. */
+  /** The setup the last stint was ridden on, as the game names it. */
   setup: string;
+  /** Every stint this session was ridden in, oldest first. */
+  stints: Stint[];
 }
 
 export interface LapRef {
@@ -215,6 +236,7 @@ export const coachGround = (path: string) => invoke<GroundAnswer>("coach_ground"
 export const coachLines = (path: string) => invoke<Lines | null>("coach_lines", { path });
 export const coachSurface = (path: string) => invoke<Surface | null>("coach_surface", { path });
 export const coachSessions = () => invoke<SessionSummary[]>("coach_sessions");
+/** The whole session the recording belongs to: every stint of that event, with all its laps. */
 export const coachSession = (path: string) => invoke<SessionDetail>("coach_session", { path });
 /** `solo` reviews the lap on its own; so does the backend when there's nothing to compare with. */
 export const coachReview = (path: string, lap: number, refPath?: string, refLap?: number, solo?: boolean) =>

@@ -424,3 +424,40 @@ export const MAX_REPORT_MINUTES = 1440;
 export function isCount(value: unknown, max: number): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= max;
 }
+
+/**
+ * Why an app's master-server fetch failed, from a closed list.
+ *
+ * Closed for the same reason event names are constrained: this is reported by every install
+ * and read back on a public page, so a free-text field is a field that eventually carries
+ * somebody's address, their game path or their rider name. Eight words cover everything a
+ * client can actually distinguish, and a client that learns to tell two failures apart that
+ * this list doesn't is a client that sends `error` until the list grows.
+ *
+ * `unsupported` is the odd one: it is a build with no server browser in it, which is not an
+ * outage and must never be counted as one — see `summarize`.
+ */
+export const PROBE_REASONS = [
+  /** No answer inside the client's own deadline. What a real master outage looks like. */
+  "timeout",
+  /** The host answered, and said no. */
+  "refused",
+  /** The master's hostname didn't resolve. */
+  "dns",
+  /** The Steam ticket the master wants was refused, or couldn't be minted. */
+  "auth",
+  /** Something answered, and it wasn't the master. Captive portals land here. */
+  "protocol",
+  /** This machine has no working network at all, which the client knows before it asks. */
+  "offline",
+  /** A build without the server browser. Not a failure of anything; excluded from the ratio. */
+  "unsupported",
+  /** Anything the client couldn't place. */
+  "error",
+] as const;
+
+export type ProbeReason = (typeof PROBE_REASONS)[number];
+
+export function isProbeReason(value: unknown): value is ProbeReason {
+  return typeof value === "string" && (PROBE_REASONS as readonly string[]).includes(value);
+}
