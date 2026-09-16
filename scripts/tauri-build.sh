@@ -23,9 +23,9 @@ root="$(dirname "$here")"
 # repo root — which is why the globs below are anchored on "$root", not on the cwd.
 cd "$root/apps/manager"
 
-# `npx tauri` is the `tauri` script in package.json without npm's round trip through a
+# `bunx tauri` is the `tauri` script in package.json without a round trip through a
 # shell — which matters below, where the bundle's path has a space in it.
-npx tauri "$@"
+bunx tauri "$@"
 
 # `tauri dev` and the rest produce no bundles to fix up.
 if [ "${1:-}" != "build" ]; then
@@ -50,6 +50,6 @@ for image in "${images[@]}"; do
   # have changed. Without this every Linux self-update fails signature verification.
   if [ -f "$image.sig" ]; then
     echo "$(basename "$image"): signing again over the rebuilt image"
-    npx tauri signer sign "$image"
+    bunx tauri signer sign "$image"
   fi
 done

@@ -108,7 +108,7 @@ for (const { app, reg } of perApp) {
   const assets = path.join(root, "apps", app, "dist", "assets");
   if (!fs.existsSync(assets)) {
     failed = true;
-    console.log(`${app}: no build in dist/ — run \`npm run build\` first`);
+    console.log(`${app}: no build in dist/ — run \`bun run build\` first`);
     continue;
   }
   const srcRoots = [path.join(root, "apps", app, "src"), path.join(root, "packages/shared/src")];

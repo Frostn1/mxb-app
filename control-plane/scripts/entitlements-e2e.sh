@@ -37,17 +37,17 @@ want() {
     FAIL=1
   fi
 }
-d1() { npx wrangler d1 execute mxb-control-plane --local --command "$1" >/dev/null; }
+d1() { bunx wrangler d1 execute mxb-control-plane --local --command "$1" >/dev/null; }
 
 say "clean local state"
 rm -rf .wrangler/state
 for m in migrations/*.sql; do
-  npx wrangler d1 execute mxb-control-plane --local --file "$m" >/dev/null 2>&1 ||
+  bunx wrangler d1 execute mxb-control-plane --local --file "$m" >/dev/null 2>&1 ||
     echo "   (${m##*/} already applied)"
 done
 
 say "start the control plane on :${PORT}"
-npx wrangler dev --port "$PORT" --local --var "MXB_ASSET_MASTER_KEY:${MASTER}" >"$LOG" 2>&1 &
+bunx wrangler dev --port "$PORT" --local --var "MXB_ASSET_MASTER_KEY:${MASTER}" >"$LOG" 2>&1 &
 trap 'kill %1 2>/dev/null || true' EXIT
 for _ in $(seq 1 60); do curl -fsS "${BASE}/v1/servers" >/dev/null 2>&1 && break; sleep 1; done
 curl -fsS "${BASE}/v1/servers" >/dev/null || { echo "worker never came up:"; cat "$LOG"; exit 1; }
@@ -55,7 +55,7 @@ curl -fsS "${BASE}/v1/servers" >/dev/null || { echo "worker never came up:"; cat
 say "a player, and a creator's asset"
 TOKEN=$(curl -fsS -X POST "${BASE}/v1/account" -H 'content-type: application/json' \
   -d '{"riderName":"Frost"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
-ACCOUNT=$(npx wrangler d1 execute mxb-control-plane --local --json \
+ACCOUNT=$(bunx wrangler d1 execute mxb-control-plane --local --json \
   --command "SELECT id FROM accounts LIMIT 1" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["results"][0]["id"])')
 d1 "INSERT INTO assets (id, creator_id, title, created_at) VALUES ('trk_pinehill', '${ACCOUNT}', 'Pine Hill', 1)"
 d1 "INSERT INTO assets (id, creator_id, title, created_at, withdrawn_at) VALUES ('trk_gone', '${ACCOUNT}', 'Withdrawn', 1, 2)"
@@ -94,9 +94,9 @@ d1 "UPDATE accounts SET steam_id = '76561198000000999' WHERE id = '${ACCOUNT}'"
 want "same account, different Steam identity"  "403" "$(check trk_pinehill)"
 
 say "the audit log"
-GRANTS=$(npx wrangler d1 execute mxb-control-plane --local --json \
+GRANTS=$(bunx wrangler d1 execute mxb-control-plane --local --json \
   --command "SELECT COUNT(*) AS n FROM entitlement_grants" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["results"][0]["n"])')
-DENIES=$(npx wrangler d1 execute mxb-control-plane --local --json \
+DENIES=$(bunx wrangler d1 execute mxb-control-plane --local --json \
   --command "SELECT COUNT(*) AS n FROM entitlement_grants WHERE decision = 'deny'" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["results"][0]["n"])')
 # Seven checks above: one allow and six refusals. Listing entitlements is not a decision
 # and deliberately writes nothing — the log is what was *asked and answered*, not what was

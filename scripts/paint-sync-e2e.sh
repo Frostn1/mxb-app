@@ -33,12 +33,12 @@ rm -rf .wrangler/state
 
 echo "==> applying migrations to local D1"
 for m in migrations/*.sql; do
-  npx wrangler d1 execute mxb-control-plane --local --file "$m" >/dev/null 2>&1 ||
+  bunx wrangler d1 execute mxb-control-plane --local --file "$m" >/dev/null 2>&1 ||
     echo "    (${m##*/} already applied)"
 done
 
 echo "==> starting the control plane on :${PORT}"
-npx wrangler dev --port "$PORT" --local >"$LOG" 2>&1 &
+bunx wrangler dev --port "$PORT" --local >"$LOG" 2>&1 &
 WORKER=$!
 trap 'kill $WORKER 2>/dev/null || true' EXIT
 
