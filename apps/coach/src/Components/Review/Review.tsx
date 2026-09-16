@@ -4,26 +4,25 @@ import type { TrackOverview, TrackTerrain } from "@frost/shared/types";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frost/shared/Components/ui/select";
 import { cn } from "@frost/shared/lib/utils";
 import { useT, type TKey } from "@/i18n";
 import {
   coachGround,
   coachLines,
   coachReview,
-  coachSessions,
   coachSurface,
   type Ground,
   type Lines,
   type ReviewOut,
   type Rival,
   type SectionReview,
-  type SessionSummary,
   type Surface,
   type Theme,
 } from "@/api/coach";
 import { gap, lapTime, lossColor, started } from "@/lib/format";
+import { ALONE, refArgs, rememberRef, rememberedRef, type Reference } from "@/lib/reference";
 import Page, { Label } from "../Page";
+import RefPicker, { ReferenceLine } from "./RefPicker";
 import TrackMap from "./TrackMap";
 import Track3D from "./Track3D";
 import SectionStrip from "./SectionStrip";
@@ -35,20 +34,26 @@ import LiveCues from "./LiveCues";
 export default function Review({
   path,
   lap,
+  trackId,
   solo: startAlone = false,
   onBack,
 }: {
   path: string;
   lap: number;
+  /** The track this lap is on. The reference is remembered per track. */
+  trackId: string;
   /** Start on its own rather than against the fast lap. */
   solo?: boolean;
   onBack: () => void;
 }) {
   const t = useT();
-  // What the lap is held against: the fastest on the track, nothing, or a lap picked by hand
-  // (`<session path>::<lap>`).
-  const [compare, setCompare] = useState<string>(startAlone ? "alone" : "best");
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  // What the lap is held against; see `lib/reference.ts`. Whatever the rider picked here last
+  // time on this track, so they don't pick it again every lap.
+  const [compare, setCompare] = useState<Reference>(() => (startAlone ? ALONE : rememberedRef(trackId)));
+  const pickRef = (v: Reference) => {
+    setCompare(v);
+    rememberRef(trackId, v);
+  };
   const [data, setData] = useState<ReviewOut | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
@@ -99,20 +104,13 @@ export default function Review({
   useEffect(() => {
     setData(null);
     setError(null);
-    const cut = compare.lastIndexOf("::");
-    const [refPath, refLap] = cut > 0 ? [compare.slice(0, cut), Number(compare.slice(cut + 2))] : [undefined, undefined];
-    coachReview(path, lap, refPath, refLap, compare === "alone")
+    coachReview(path, lap, refArgs(compare))
       .then((r) => {
         setData(r);
         setSelected(r.review.focus[0] ?? null);
       })
       .catch((e) => setError(String(e)));
   }, [path, lap, compare]);
-
-  // Every session, for the laps on this track the rider can pick to compare with.
-  useEffect(() => {
-    coachSessions().then(setSessions).catch(() => {});
-  }, []);
 
   const count = data?.review.sections.length ?? 0;
   const pick = (i: number) => {
@@ -133,7 +131,14 @@ export default function Review({
   const back = t("review.back");
   if (error || !data) {
     return (
-      <Page title={t("review.title")} onBack={onBack} backLabel={back}>
+      // The picker is here too: a reference that can't be loaded — a recording deleted, an
+      // import removed — would otherwise leave the rider on an error with no way to change it.
+      <Page
+        title={t("review.title")}
+        onBack={onBack}
+        backLabel={back}
+        actions={<RefPicker trackId={trackId} path={path} lap={lap} bikeId="" value={compare} onChange={pickRef} />}
+      >
         <p className="text-[13px] text-muted-foreground">{error ?? t("common.loading")}</p>
       </Page>
     );
@@ -141,6 +146,9 @@ export default function Review({
 
   const { review, reference } = data;
   const solo = review.solo;
+  // The ideal lap has real section times and no line: nothing to draw the traces or the ghost
+  // against, so those are drawn the way they are for a lap reviewed on its own.
+  const noTrace = solo || !review.traced;
   const total = (data.lap.timeMs - reference.timeMs) / 1000;
   const sel = selected != null ? review.sections[selected] : null;
   // Where the time went first, then anything flagged that cost nothing, like a hard landing.
@@ -148,39 +156,7 @@ export default function Review({
     ...review.focus,
     ...review.sections.map((s, i) => (s.findings.length > 0 && !review.focus.includes(i) ? i : -1)).filter((i) => i >= 0),
   ];
-  const against = [
-    `${t("session.lap")} ${reference.lap + 1}`,
-    lapTime(reference.timeMs),
-    reference.path === path ? "" : started(reference.started),
-  ]
-    .filter(Boolean)
-    .join(" · ");
   const where = [data.trackName || data.trackId, started(data.lap.started), data.lap.bikeName].filter(Boolean).join(" · ");
-  // A session is every stint of one event, and each lap carries the recording it's in.
-  const stintStart = (s: SessionSummary, file: string) => s.stints.find((x) => x.path === file)?.started ?? s.started;
-  const mine = (s: SessionSummary) => s.stints.some((x) => x.path === path);
-  // The fastest lap and nothing, then every other whole lap on this track, this session first.
-  const choices = [
-    { value: "best", label: t("review.fastest") },
-    { value: "alone", label: t("review.alone") },
-    ...[...sessions]
-      .filter((s) => s.trackId === data.trackId)
-      .sort((a, b) => (mine(a) ? -1 : mine(b) ? 1 : 0))
-      .flatMap((s) =>
-        s.laps
-          .filter((l) => l.whole && !l.invalid && !(l.path === path && l.num === lap))
-          .map((l) => ({
-            value: `${l.path}::${l.num}`,
-            label: [
-              `${t("session.lap")} ${l.num + 1}`,
-              lapTime(l.timeMs),
-              l.path === path ? "" : started(stintStart(s, l.path)),
-            ]
-              .filter(Boolean)
-              .join(" · "),
-          })),
-      ),
-  ];
   // Every lap's line, fastest green to slowest red; this lap in blue on top.
   const others = (() => {
     if (laps !== "all" || !lines) return undefined;
@@ -212,28 +188,16 @@ export default function Review({
                 <span style={{ color: lossColor(total) }} className="font-mono">
                   {gap(total)} s
                 </span>{" "}
-                {t("review.against")} {against}
+                {t("review.against")}{" "}
+                <ReferenceLine reference={reference} lapPath={path} lapBikeId={data.lap.bikeId} idealFrom={data.idealFrom} />
               </>
             )}
           </div>
+          {noTrace && !solo && <div className="mt-0.5 text-faint">{t("review.idealSub")}</div>}
         </>
       }
       actions={
-        <div className="flex items-center gap-2">
-          <span className="text-[11.5px] text-muted-foreground">{t("review.compareWith")}</span>
-          <Select value={compare} onValueChange={setCompare}>
-            <SelectTrigger className="h-8 w-[260px] text-[12px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {choices.map((c) => (
-                <SelectItem key={c.value} value={c.value}>
-                  {c.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <RefPicker trackId={trackId} path={path} lap={lap} bikeId={data.lap.bikeId} value={compare} onChange={pickRef} />
       }
       onBack={onBack}
       backLabel={back}
@@ -279,7 +243,7 @@ export default function Review({
               />
             ) : (
               <div className="h-full p-3">
-                <TrackMap review={review} surface={relief} others={others} selected={selected} cursor={cursor} onPick={pick} solo={solo} />
+                <TrackMap review={review} surface={relief} others={others} selected={selected} cursor={cursor} onPick={pick} solo={noTrace} />
               </div>
             )}
             {laps === "all" && dim === "2d" && (
@@ -307,7 +271,7 @@ export default function Review({
           )}
 
           <SetupFixes path={path} findings={review.setup} />
-          <LiveCues path={path} lap={lap} />
+          <LiveCues path={path} lap={lap} reference={compare} />
           <Rivals rivals={data?.rivals ?? []} />
 
           <div>

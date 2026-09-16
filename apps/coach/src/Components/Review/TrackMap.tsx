@@ -34,7 +34,12 @@ export default function TrackMap({
   cursor: number | null;
   onPick: (i: number) => void;
 }) {
-  const { lap, reference } = review.paths;
+  const { lap } = review.paths;
+  // The grey line under this one is the reference lap's. The ideal lap has none — it is a time
+  // for each section, not a lap anybody rode — so nothing is drawn under this one and the
+  // section labels sit on its own line instead.
+  const ghost = review.paths.reference;
+  const reference = ghost.length > 0 ? ghost : lap;
   const PATH_STEP = review.paths.step || 1;
   const [hover, setHover] = useState<number | null>(null);
 
@@ -74,16 +79,18 @@ export default function TrackMap({
           opacity={0.85}
         />
       )}
-      <polyline
-        points={line(reference)}
-        fill="none"
-        stroke="var(--faint)"
-        strokeWidth={10}
-        strokeOpacity={0.3}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        vectorEffect="non-scaling-stroke"
-      />
+      {ghost.length > 0 && (
+        <polyline
+          points={line(ghost)}
+          fill="none"
+          stroke="var(--faint)"
+          strokeWidth={10}
+          strokeOpacity={0.3}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
       {others?.map((o, i) => (
         <polyline
           key={`o${i}`}

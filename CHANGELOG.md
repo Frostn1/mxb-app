@@ -3,6 +3,13 @@
 ## Unreleased — MXB Coach
 
 ### Added
+- Compare a lap with more than the session you're in. "Compare with" now offers your best ever
+  lap on the track — whenever you set it, and on whichever bike, which it tells you — and your
+  ideal lap, your own best sections across every session added up. You can also import another
+  rider's recording, a trainer lap, and ride against that: the coach shows whose lap it is and
+  which bike, and keeps imported laps apart from your own so they never count towards your bests.
+- The lap you compare with is remembered for each track, and the live cues and the in-game HUD
+  take it from there too, so the gap and the ghost are against the lap you picked.
 - On the game's default setup the coach now writes you a setup of your own, named after the
   track, instead of asking you to go and save one in the garage first. It starts from another
   setup you have for that bike where there is one, and from the bike's own settings where there

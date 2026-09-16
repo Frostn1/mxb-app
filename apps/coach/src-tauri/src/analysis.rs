@@ -746,6 +746,9 @@ pub struct Review {
     pub setup: Vec<Finding>,
     /// Reviewed on its own, with no faster lap to compare with.
     pub solo: bool,
+    /// There is a reference lap to draw: its traces are in `channels` and its line in `paths`.
+    /// False against the ideal lap, which is a time per section and was never ridden whole.
+    pub traced: bool,
     pub channels: Channels,
     pub paths: Paths,
 }
@@ -943,6 +946,7 @@ pub fn review(lap: &Trace, reference: &Trace, bike: Bike) -> Review {
         focus: order,
         setup,
         solo: false,
+        traced: true,
         channels: channels(p, r, 2),
         paths: paths(p, r),
     }
@@ -1681,9 +1685,71 @@ pub fn solo(lap: &Trace, bike: Bike) -> Review {
         focus: order,
         setup,
         solo: true,
+        traced: false,
         channels: channels(p, p, 2),
         paths: paths(p, p),
     }
+}
+
+/// A lap against a target time for each section, rather than against another lap's trace.
+///
+/// This is how the ideal lap is ridden against: the rider's own best sections added up, a time
+/// that is real section by section but was never ridden whole. So the section times here are
+/// held against the targets, while the advice is the lap's own — the same rules [`solo`] uses,
+/// because there is no faster trace to say where the difference came from — and there is no
+/// reference line to draw.
+pub fn against_targets(lap: &Trace, secs: &[Section], targets: &[f32], bike: Bike) -> Review {
+    let mut p = lap.clone();
+    let travel = p.fill_travel(bike.travel);
+    let p = &p;
+    // A lap shorter than the grid the targets were measured on can't be timed over every
+    // section; it keeps the ones it reaches rather than reading off the end.
+    let last = p.len().saturating_sub(1);
+    let pairs: Vec<(Section, f32)> =
+        secs.iter().cloned().zip(targets.iter().copied()).filter(|(s, _)| s.end <= last).collect();
+    let secs: Vec<Section> = pairs.iter().map(|(s, _)| s.clone()).collect();
+    let setup = setup(p, None, &secs, bike, travel);
+    let out: Vec<SectionReview> = pairs
+        .into_iter()
+        .map(|(s, target)| {
+            let lap_time = p.span(s.start, s.end);
+            // No target for a section nobody has a clean time in: it can only be itself.
+            let ref_time = if target > 0.0 { target } else { lap_time };
+            let mut c = Ctx { p, r: p, s: &s, bike, travel, out: Vec::new() };
+            alone(&mut c);
+            let mut findings = dedupe(c.out, s.kind != Kind::Corner);
+            findings.sort_by(|a, b| b.weight.total_cmp(&a.weight));
+            let lost = ((lap_time - ref_time) * 1000.0).round() / 1000.0;
+            SectionReview { section: s, lap_time, ref_time, lost, findings, soil: None }
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..out.len()).filter(|&i| out[i].lost > th::WORTH_S).collect();
+    order.sort_by(|&a, &b| out[b].lost.total_cmp(&out[a].lost));
+    order.truncate(th::FOCUS);
+    Review {
+        lap_time: p.time(),
+        ref_time: out.iter().map(|s| s.ref_time).sum(),
+        overall: overall(&out, false),
+        sections: out,
+        focus: order,
+        setup,
+        solo: false,
+        traced: false,
+        channels: one_sided(p),
+        paths: Paths { reference: Vec::new(), reference_y: Vec::new(), ..paths(p, p) },
+    }
+}
+
+/// The lap's own traces with nothing beside them: there is no reference lap to draw.
+fn one_sided(p: &Trace) -> Channels {
+    let mut c = channels(p, p, 2);
+    c.delta.clear();
+    for ch in
+        [&mut c.speed, &mut c.throttle, &mut c.brake, &mut c.lean, &mut c.gear, &mut c.height, &mut c.fork, &mut c.shock]
+    {
+        ch.reference.clear();
+    }
+    c
 }
 
 /// The rules that need no faster lap.
@@ -2147,6 +2213,29 @@ pub(crate) mod tests {
         // Sitting like the fast lap, or no stance recorded: nothing to say.
         assert!(!called(&review(&with(&slow, stance::SIT), &with(&FAST, stance::SIT), BIKE)));
         assert!(!called(&review(&with(&slow, stance::UNKNOWN), &with(&FAST, stance::SIT), BIKE)));
+    }
+
+    /// The ideal lap is a target time per section and no lap at all, so the times are held
+    /// against it while the charts have nothing to draw beside this lap.
+    #[test]
+    fn a_lap_against_targets_is_timed_on_them_and_draws_no_reference() {
+        let slow = lap(&Style { corner_v: 9.0, ..FAST });
+        let fast = lap(&FAST);
+        let secs = sections(&fast);
+        let targets: Vec<f32> = secs.iter().map(|s| fast.span(s.start, s.end)).collect();
+        let rv = against_targets(&slow, &secs, &targets, BIKE);
+        assert_eq!(rv.sections.len(), secs.len());
+        assert!(!rv.solo, "the times are real, so it isn't a lap reviewed on its own");
+        assert!(!rv.traced, "but nobody rode the ideal lap, so there's no line to draw");
+        assert!(rv.paths.reference.is_empty() && rv.paths.reference_y.is_empty());
+        assert!(rv.channels.speed.reference.is_empty() && rv.channels.delta.is_empty());
+        assert!(!rv.paths.lap.is_empty(), "this lap is still drawn");
+        assert!((rv.ref_time - targets.iter().sum::<f32>()).abs() < 1e-3);
+        let lost: f32 = rv.sections.iter().map(|s| s.lost).sum();
+        assert!(lost > 0.0, "a slower lap loses time to the target: {lost}");
+        // A section nobody has a clean time in can only be itself.
+        let rv = against_targets(&slow, &secs, &vec![0.0; secs.len()], BIKE);
+        assert!(rv.sections.iter().all(|s| s.lost == 0.0));
     }
 
     #[test]

@@ -16,7 +16,9 @@ import {
   type CuesOut,
   type Voice,
 } from "@/api/coach";
+import { BEST, refArgs, type Reference } from "@/lib/reference";
 import { Label } from "../Page";
+import { ReferenceLine } from "./RefPicker";
 
 const CUE_LEVEL_KEY = "coach-cue-level";
 const CUE_AMOUNT_KEY = "coach-cue-amount";
@@ -42,18 +44,31 @@ const LEVELS = ["new", "intermediate", "subPro", "pro"] as const;
 const AMOUNTS = ["few", "normal", "lots"] as const;
 
 /** Live cues for this track and bike: short calls the recorder shows in practice, picked from
- *  where this lap loses time, for the rider's level and how much coaching they want. Shared by
- *  the review page and the overlay. */
-export default function LiveCues({ path, lap }: { path: string; lap: number }) {
+ *  where this lap loses time to the lap it's held against, for the rider's level and how much
+ *  coaching they want. Shared by the review page and the overlay. */
+export default function LiveCues({
+  path,
+  lap,
+  reference = BEST,
+}: {
+  path: string;
+  lap: number;
+  /** What the cues are picked against — the review's own reference, so the calls, the gap on
+   *  the in-game HUD and the review all come from the lap the rider chose. */
+  reference?: Reference;
+}) {
   const t = useT();
   const [level, setLevel] = useState<CueLevel>(() => remembered(CUE_LEVEL_KEY, LEVELS, "intermediate"));
   const [amount, setAmount] = useState<CueAmount>(() => remembered(CUE_AMOUNT_KEY, AMOUNTS, "normal"));
   const [sent, setSent] = useState<CuesOut | null>(null);
   const [busy, setBusy] = useState(false);
+  // Picking another lap to be held against changes every call: what was sent isn't what these
+  // settings would send now.
+  useEffect(() => setSent(null), [reference]);
   const send = async () => {
     setBusy(true);
     try {
-      const out = await coachWriteCues(path, lap, level, amount);
+      const out = await coachWriteCues(path, lap, level, amount, refArgs(reference));
       setSent(out);
       toast.success(out.cues.length ? t("cues.sent", { n: out.cues.length }) : t("cues.none"));
     } catch (e) {
@@ -99,6 +114,11 @@ export default function LiveCues({ path, lap }: { path: string; lap: number }) {
           </Button>
           <span className="text-[12px] text-muted-foreground">{t("cues.where")}</span>
         </div>
+        {sent && (
+          <p className="text-[12px] text-muted-foreground">
+            {t("cues.ghost")} <ReferenceLine reference={sent.ghost} lapPath={path} />
+          </p>
+        )}
         {sent && sent.cues.length > 0 && (
           <ol className="space-y-1 border-t border-border pt-2">
             {sent.cues.map((c, i) => (

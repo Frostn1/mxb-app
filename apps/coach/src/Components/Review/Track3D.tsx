@@ -136,7 +136,8 @@ export default function Track3D({
         out.push({ points: whole(l.path, l.heights), colour: `hsl(${hue}, 65%, 55%)`, width: 1.2 });
       }
     }
-    if (!review.solo) out.push({ points: whole(paths.reference, paths.referenceY), colour: "#8a8a93", width: 1.5 });
+    // The ideal lap has no line: it is a time for each section, not a lap anybody rode.
+    if (review.traced) out.push({ points: whole(paths.reference, paths.referenceY), colour: "#8a8a93", width: 1.5 });
     out.push({ points: whole(paths.lap, paths.lapY), colour: "#2997ff", width: 2.2 });
     if (sel) {
       const [a, b] = [Math.floor(sel.start / step), Math.min(paths.lap.length - 1, Math.ceil(sel.end / step))];
@@ -144,11 +145,13 @@ export default function Track3D({
       out.push({ points: pts, colour: loss(sel.lost), width: 5 });
     }
     return out;
-  }, [paths, lines, allLaps, lap, review.solo, sel, step, ox, oz, lift]);
+  }, [paths, lines, allLaps, lap, review.traced, sel, step, ox, oz, lift]);
 
   const focus = useMemo(() => {
     if (!sel) return null;
-    const p = paths.reference[Math.min(paths.reference.length - 1, Math.round((sel.core[0] + sel.core[1]) / 2 / step))];
+    // Where the camera looks: the reference lap's line, or this lap's when there is none.
+    const on = paths.reference.length > 0 ? paths.reference : paths.lap;
+    const p = on[Math.min(on.length - 1, Math.round((sel.core[0] + sel.core[1]) / 2 / step))];
     return { x: p[0] - ox, z: p[1] - oz };
   }, [sel, paths, step, ox, oz]);
 
