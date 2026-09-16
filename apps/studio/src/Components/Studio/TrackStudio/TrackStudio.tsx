@@ -74,6 +74,13 @@ import {
   roomiestGap,
   setTrackTools,
   trackToolsStatus,
+  SHEET_SLOTS,
+  importTrackTexture,
+  listTrackTextures,
+  type OwnTexture,
+  type SheetSlot,
+  type TexturePreset,
+  type TextureSet,
   type LapStep,
   type TrackFeature,
   type TrackFeatureKind,
@@ -1560,6 +1567,11 @@ export default function TrackStudio() {
                       ))}
                     </div>
                   </div>
+                  {/* And what it looks like, which the surface used to decide too. */}
+                  <GroundLook
+                    value={program.terrain.texture}
+                    onChange={(v) => settleTerrain({ texture: v })}
+                  />
                   {/* Only a supercross lane is lined with them, so nothing else is asked. */}
                   {(program.discipline === "sx" || program.discipline === "smx") && (
                     <div>
@@ -2084,6 +2096,140 @@ function Stat({ value, unit, label }: { value: string; unit?: string; label: str
       </div>
       <div className="mt-[5px] text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">
         {label}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What the ground looks like, which is not the same question as what it is made of.
+ *
+ * The surface buttons above decide the ride — how deep the ground cuts, how wide the shoulder
+ * runs. This decides only the paint, so a lap can ride like a sand national and look like a
+ * stadium floor. Left on "ride" the two move together, exactly as they always did.
+ *
+ * The images are the rider's own, off their own disk through the file picker. Nothing is
+ * downloaded and there is no list of ground to browse: the Studio only ever paints with what
+ * it ships and what somebody handed it.
+ */
+function GroundLook({
+  value,
+  onChange,
+}: {
+  value: TextureSet | undefined;
+  onChange: (v: TextureSet | undefined) => void;
+}) {
+  const t = useT();
+  const [own, setOwn] = useState<OwnTexture[]>([]);
+  const [busy, setBusy] = useState<SheetSlot | null>(null);
+  const preset = value?.preset ?? "ride";
+  const sheets = value?.sheets ?? [];
+
+  // What has already been imported, so a slot filled by a saved project shows its picture
+  // rather than a hash.
+  useEffect(() => {
+    void listTrackTextures().then(setOwn).catch(() => setOwn([]));
+  }, []);
+
+  /** Nothing picked at all is left out of the file, so an untouched track saves as before. */
+  function put(next: TextureSet) {
+    onChange(next.preset === "ride" && next.sheets?.length === 0 ? undefined : next);
+  }
+
+  function setPreset(p: TexturePreset) {
+    put({ preset: p, sheets });
+  }
+
+  async function pick(slot: SheetSlot) {
+    const path = await openDialog({
+      multiple: false,
+      filters: [{ name: t("track.look.images"), extensions: ["png", "jpg", "jpeg", "webp", "bmp", "tga"] }],
+    });
+    if (typeof path !== "string") return;
+    setBusy(slot);
+    try {
+      const added = await importTrackTexture(path);
+      setOwn((was) => [added, ...was.filter((o) => o.id !== added.id)]);
+      put({ preset, sheets: [...sheets.filter((s) => s.slot !== slot), { slot, id: added.id }] });
+    } catch (e) {
+      // Why, not "failed": every refusal from the store says what was wrong with the file.
+      toast.error(String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function clear(slot: SheetSlot) {
+    put({ preset, sheets: sheets.filter((s) => s.slot !== slot) });
+  }
+
+  const presets: TexturePreset[] = ["ride", "soil", "sand", "grass", "stadium"];
+  return (
+    <div>
+      <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+        {t("track.look")}
+      </div>
+      <div className="mt-2 grid grid-cols-5 border border-border">
+        {presets.map((p, i) => (
+          <button
+            key={p}
+            onClick={() => setPreset(p)}
+            className={cn(
+              "h-7 cursor-default truncate px-1 font-cond text-[10px] font-semibold uppercase transition-colors",
+              i > 0 && "border-l border-border",
+              preset === p
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t(`track.look.${p}` as "track.look.ride")}
+          </button>
+        ))}
+      </div>
+      <div className="mt-2.5 font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+        {t("track.look.own")}
+      </div>
+      <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+        {SHEET_SLOTS.map((slot) => {
+          const id = sheets.find((s) => s.slot === slot)?.id;
+          const img = own.find((o) => o.id === id);
+          return (
+            <div key={slot}>
+              <div className="relative">
+                <button
+                  onClick={() => void pick(slot)}
+                  disabled={busy !== null}
+                  title={img?.name ?? t("track.look.add")}
+                  className={cn(
+                    "flex aspect-square w-full cursor-default items-center justify-center border text-[16px] leading-none transition-colors",
+                    id
+                      ? "border-primary text-transparent"
+                      : "border-dashed border-border text-faint hover:text-foreground",
+                  )}
+                  style={
+                    img
+                      ? { backgroundImage: `url(${img.thumb})`, backgroundSize: "cover" }
+                      : undefined
+                  }
+                >
+                  {busy === slot ? "…" : id ? "" : "+"}
+                </button>
+                {id && (
+                  <button
+                    onClick={() => clear(slot)}
+                    title={t("track.look.clear")}
+                    className="absolute -right-1 -top-1 h-4 w-4 cursor-default border border-border bg-background text-[10px] leading-none text-muted-foreground hover:text-foreground"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <div className="mt-1 truncate text-center text-[10px] text-faint">
+                {t(`track.slot.${slot}` as "track.slot.ground")}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

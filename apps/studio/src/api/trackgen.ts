@@ -23,8 +23,15 @@ export interface TrackProgram {
     /** The whole height budget, metres — everything is quantised against it. */
     scale: number;
     relief: { amplitude: number; wavelength: number; seed: number; texture: number };
-    /** What the ground is, which decides the surfaces either side of the line. */
+    /**
+     * What the ground is made of: how deep it cuts, how wide the shoulder runs. The *ride*.
+     */
     surface: "soil" | "sand" | "grass";
+    /**
+     * And what it looks like, which is a separate question. Left out the look follows
+     * `surface`, exactly as it always did.
+     */
+    texture?: TextureSet;
   };
   /** Degrees: 0 looks down +z, increasing clockwise towards +x. */
   start: { x: number; z: number; angle: number };
@@ -49,6 +56,60 @@ export interface TrackProgram {
 
 /** Motocross, supercross or SuperMotocross. Mirrors `Discipline` in `trackprog.rs`. */
 export type Discipline = "mx" | "sx" | "smx";
+
+/**
+ * What a track's ground looks like: a look to start from, and the rider's own images over
+ * the top of it. Mirrors `TextureSet` in `trackprog.rs`.
+ */
+export interface TextureSet {
+  preset: TexturePreset;
+  sheets?: OwnSheet[];
+}
+
+/** `ride` follows the surface, which is what the look always did. */
+export type TexturePreset = "ride" | "soil" | "sand" | "grass" | "stadium";
+
+/** One of the rider's own images, standing in for a built-in ground sheet. */
+export interface OwnSheet {
+  slot: SheetSlot;
+  /** What the Studio stored it as — see `importTrackTexture`. */
+  id: string;
+}
+
+/** Which ground an image replaces. */
+export type SheetSlot = "ground" | "line" | "rut" | "grass";
+
+/** The four, in the order the picker shows them. */
+export const SHEET_SLOTS: SheetSlot[] = ["ground", "line", "rut", "grass"];
+
+/** An image the rider imported, as the picker shows it. Mirrors `OwnTexture`. */
+export interface OwnTexture {
+  id: string;
+  /** The file it came from, so it can be recognised. */
+  name: string;
+  /** A small PNG as a `data:` URL. */
+  thumb: string;
+}
+
+/**
+ * Take an image off the rider's own disk into the Studio's ground store.
+ *
+ * The path comes from the file picker. Nothing is ever fetched: the Studio has no list of
+ * ground to download and never asks anyone for one.
+ */
+export function importTrackTexture(path: string): Promise<OwnTexture> {
+  return invoke<OwnTexture>("import_track_texture", { path });
+}
+
+/** Everything already imported, so nobody has to find the same file twice. */
+export function listTrackTextures(): Promise<OwnTexture[]> {
+  return invoke<OwnTexture[]>("list_track_textures");
+}
+
+/** Drop one. A track still naming it paints with the ground it stood in for. */
+export function forgetTrackTexture(id: string): Promise<void> {
+  return invoke<void>("forget_track_texture", { id });
+}
 
 /**
  * The padded blocks along a supercross lane: soft ones a rider rides through, solid ones

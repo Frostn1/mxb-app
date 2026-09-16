@@ -28,6 +28,7 @@ mod trackshot;
 mod trackspeed;
 mod trackstats;
 mod tracksynth;
+mod tracktex;
 mod trackvenue;
 mod winefetch;
 
@@ -160,6 +161,9 @@ fn main() {
             export_track_source,
             save_track_project,
             open_track_project,
+            import_track_texture,
+            list_track_textures,
+            forget_track_texture,
             track_tools_status,
             download_track_tools,
             build_track,
@@ -213,6 +217,12 @@ fn main() {
             // a machine with only the studio on it reports nothing rather than inventing a
             // second identity for a computer the manager would also call one install.
             usage::start(app.handle(), usage::STUDIO);
+            // Where a rider's own ground images are kept. Set here rather than passed down,
+            // because a track is generated from a program and nothing else, and a program
+            // names its sheets rather than carrying them.
+            if let Ok(data) = tauri::Manager::path(app).app_data_dir() {
+                tracktex::set_dir(data.join("track-textures"));
+            }
             let _ = app;
             Ok(())
         })
@@ -654,6 +664,32 @@ async fn export_track_source(
     })
     .await
     .map_err(|e| format!("export_track_source task failed: {e}"))?
+}
+
+/// Take an image off the rider's own disk into the Studio's ground store.
+///
+/// The path comes from the file picker and nowhere else: no image is ever fetched, and the
+/// Studio has no list of ground to download. What it holds is what someone chose.
+#[tauri::command]
+async fn import_track_texture(path: String) -> Result<tracktex::OwnTexture, String> {
+    tauri::async_runtime::spawn_blocking(move || tracktex::import(std::path::Path::new(&path)))
+        .await
+        .map_err(|e| format!("importing that image failed: {e}"))?
+}
+
+/// Every image already imported, so the picker offers them again rather than making someone
+/// find the same file twice.
+#[tauri::command]
+async fn list_track_textures() -> Result<Vec<tracktex::OwnTexture>, String> {
+    tauri::async_runtime::spawn_blocking(tracktex::list)
+        .await
+        .map_err(|e| format!("reading your images failed: {e}"))
+}
+
+/// Drop one. A track still naming it falls back to the ground it stood in for.
+#[tauri::command]
+async fn forget_track_texture(id: String) -> Result<(), String> {
+    tracktex::forget(&id)
 }
 
 /// What a saved track project says it is, so a future format change can tell old files apart.
