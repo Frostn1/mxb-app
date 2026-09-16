@@ -23,7 +23,8 @@ use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// Samples each way in a stored ground square.
+/// Samples along the LONGER edge of a stored ground plot; the short edge gets whatever keeps the
+/// cells square.
 ///
 /// Deliberately *not* the 2049 the terrain is built at. The source is a 1 m lidar grid and the
 /// game's own grid is 0.2295 m across a 470 m plot — 4.36 times finer — so everything past
@@ -32,6 +33,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 /// 0.459 m a sample: still twice the source's own resolution, which is enough to resample from
 /// without stair-stepping, and honest about where the detail stops. The generator's own stamped
 /// features supply the rest, which is what they were always for.
+///
+/// On the long edge rather than on both, because a plot is the shape of the venue and a venue is
+/// rarely square — Ironman's circuit is 410 by 285 m. See [`Ground`].
 pub const GROUND_DIM: u32 = 1025;
 
 /// The biggest tile this will open, before it is decoded. A 10012² float tile is 315 MB on
@@ -546,19 +550,19 @@ const STRIPE_CLAMP_M: f32 = 0.015;
 ///
 /// `rows` run north-south and `cols` east-west, which is the flight direction for this tile;
 /// `flight_ns` is false for a tile flown the other way.
-pub fn destripe(z: &mut [f32], dim: usize, cell: f32, flight_ns: bool, strength: f32) -> f32 {
-    if strength <= 0.0 || dim < 8 {
+pub fn destripe(z: &mut [f32], w: usize, h: usize, cell: f32, flight_ns: bool, strength: f32) -> f32 {
+    if strength <= 0.0 || w < 8 || h < 8 {
         return 0.0;
     }
-    let detrended = high_pass(z, dim, cell, 6.0);
+    let detrended = high_pass(z, w, h, cell, 6.0);
     // Average along the flight line.
     let mut along = detrended.clone();
-    blur_axis(&mut along, dim, STRIPE_ALONG_M / 2.355 / cell, flight_ns);
+    blur_axis(&mut along, w, h, STRIPE_ALONG_M / 2.355 / cell, flight_ns);
     // Keep only the band the stripe lives in, across it.
     let mut lo = along.clone();
     let mut hi = along.clone();
-    blur_axis(&mut lo, dim, STRIPE_LO_M / 2.355 / cell, !flight_ns);
-    blur_axis(&mut hi, dim, STRIPE_HI_M / 2.355 / cell, !flight_ns);
+    blur_axis(&mut lo, w, h, STRIPE_LO_M / 2.355 / cell, !flight_ns);
+    blur_axis(&mut hi, w, h, STRIPE_HI_M / 2.355 / cell, !flight_ns);
 
     let mut moved = 0.0f64;
     for i in 0..z.len() {
@@ -570,11 +574,11 @@ pub fn destripe(z: &mut [f32], dim: usize, cell: f32, flight_ns: bool, strength:
 }
 
 /// `z` minus a Gaussian blur of itself: what is left at scales under `fwhm_m`.
-fn high_pass(z: &[f32], dim: usize, cell: f32, fwhm_m: f32) -> Vec<f32> {
+fn high_pass(z: &[f32], w: usize, h: usize, cell: f32, fwhm_m: f32) -> Vec<f32> {
     let mut low = z.to_vec();
     let sigma = fwhm_m / 2.355 / cell;
-    blur_axis(&mut low, dim, sigma, true);
-    blur_axis(&mut low, dim, sigma, false);
+    blur_axis(&mut low, w, h, sigma, true);
+    blur_axis(&mut low, w, h, sigma, false);
     z.iter().zip(&low).map(|(a, b)| a - b).collect()
 }
 
@@ -583,54 +587,70 @@ fn high_pass(z: &[f32], dim: usize, cell: f32, fwhm_m: f32) -> Vec<f32> {
 /// Three box passes, which is the standard cheap Gaussian and is within a percent of the real
 /// thing at these radii. Written out rather than pulled in because the only other blur in the
 /// tree works on `image` buffers.
-fn blur_axis(v: &mut [f32], dim: usize, sigma: f32, down_rows: bool) {
+fn blur_axis(v: &mut [f32], w: usize, h: usize, sigma: f32, down_rows: bool) {
     if !(sigma > 0.05) {
         return;
     }
     // The box width that matches a Gaussian of this sigma over three passes.
-    let w = ((12.0 * sigma * sigma / 3.0 + 1.0).sqrt().round() as usize).max(1) | 1;
-    let r = w / 2;
-    let mut line = vec![0.0f32; dim];
-    let mut tmp = vec![0.0f32; dim];
-    for outer in 0..dim {
-        for i in 0..dim {
-            line[i] = if down_rows { v[i * dim + outer] } else { v[outer * dim + i] };
+    let bw = ((12.0 * sigma * sigma / 3.0 + 1.0).sqrt().round() as usize).max(1) | 1;
+    let r = bw / 2;
+    // `n` is how long each line is, `outers` how many of them.
+    let (n, outers) = if down_rows { (h, w) } else { (w, h) };
+    if n < 2 {
+        return;
+    }
+    let mut line = vec![0.0f32; n];
+    let mut tmp = vec![0.0f32; n];
+    for outer in 0..outers {
+        for i in 0..n {
+            line[i] = if down_rows { v[i * w + outer] } else { v[outer * w + i] };
         }
         for _ in 0..3 {
             let mut acc: f32 = 0.0;
-            for i in 0..=r.min(dim - 1) {
+            for i in 0..=r.min(n - 1) {
                 acc += line[i];
             }
             // Edge cells see the edge value repeated, which is what `mode='nearest'` means.
             acc += line[0] * r as f32;
-            for i in 0..dim {
-                tmp[i] = acc / w as f32;
-                let add = line[(i + r + 1).min(dim - 1)];
+            for i in 0..n {
+                tmp[i] = acc / bw as f32;
+                let add = line[(i + r + 1).min(n - 1)];
                 let sub = line[i.saturating_sub(r)];
                 acc += add - sub;
             }
             line.copy_from_slice(&tmp);
         }
-        for i in 0..dim {
+        for i in 0..n {
             if down_rows {
-                v[i * dim + outer] = line[i];
+                v[i * w + outer] = line[i];
             } else {
-                v[outer * dim + i] = line[i];
+                v[outer * w + i] = line[i];
             }
         }
     }
 }
 
 // ---------------------------------------------------------------------------------------------
-// The stored square
+// The stored plot
 // ---------------------------------------------------------------------------------------------
 
-/// A square of real ground, ready to stand a track on.
+/// A piece of real ground, ready to stand a track on.
+///
+/// Rectangular, not square, because a venue is. Ironman's circuit is 410 by 285 m, and a square
+/// plot around it would have been a third woodland — and worse, the delivered scan of it is 528
+/// by 404 m, out of which no 490 m square can be cut at all. [`crate::trackprog::Terrain`] has
+/// always had `size_x` and `size_z` as separate fields and `grid_dims` has always put the 2049
+/// samples on the long edge, so this is the shape the format was already built for.
+///
+/// Cells are square even when the plot is not: [`GROUND_DIM`] samples go on the long edge and
+/// the short edge takes whatever number keeps a cell the same size both ways.
 #[derive(Clone, Debug)]
 pub struct Ground {
-    pub dim: usize,
-    /// Metres the plot is across, both ways.
-    pub size_m: f32,
+    pub dim_x: usize,
+    pub dim_z: usize,
+    /// Metres the plot is across, east-west and north-south.
+    pub size_x: f32,
+    pub size_z: f32,
     /// Heights in metres above [`Ground::base_m`], row 0 at world z = 0.
     pub z: Vec<f32>,
     /// What was subtracted to bring the plot's lowest point to zero — the real elevation of the
@@ -639,16 +659,21 @@ pub struct Ground {
 }
 
 impl Ground {
+    /// Metres a sample, the same both ways.
+    pub fn cell(&self) -> f32 {
+        self.size_x / (self.dim_x - 1).max(1) as f32
+    }
+
     /// Height at a point on the plot, in the generator's own world coordinates, bilinear.
     pub fn at(&self, x: f32, z: f32) -> f32 {
-        let per = self.size_m / (self.dim - 1) as f32;
-        let fx = (x / per).clamp(0.0, (self.dim - 1) as f32);
-        let fy = (z / per).clamp(0.0, (self.dim - 1) as f32);
+        let per = self.cell();
+        let fx = (x / per).clamp(0.0, (self.dim_x - 1) as f32);
+        let fy = (z / per).clamp(0.0, (self.dim_z - 1) as f32);
         let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
-        let x1 = (x0 + 1).min(self.dim - 1);
-        let y1 = (y0 + 1).min(self.dim - 1);
+        let x1 = (x0 + 1).min(self.dim_x - 1);
+        let y1 = (y0 + 1).min(self.dim_z - 1);
         let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
-        let g = |x: usize, y: usize| self.z[y * self.dim + x];
+        let g = |x: usize, y: usize| self.z[y * self.dim_x + x];
         let top = g(x0, y0) + (g(x1, y0) - g(x0, y0)) * tx;
         let bot = g(x0, y1) + (g(x1, y1) - g(x0, y1)) * tx;
         top + (bot - top) * ty
@@ -667,11 +692,13 @@ impl Ground {
 
     fn encode(&self) -> Vec<u8> {
         let span = self.relief().max(1e-3);
-        let mut out = Vec::with_capacity(16 + self.z.len() * 2);
+        let mut out = Vec::with_capacity(32 + self.z.len() * 2);
         out.extend_from_slice(b"FGND");
         out.extend_from_slice(&1u32.to_le_bytes());
-        out.extend_from_slice(&(self.dim as u32).to_le_bytes());
-        out.extend_from_slice(&self.size_m.to_le_bytes());
+        out.extend_from_slice(&(self.dim_x as u32).to_le_bytes());
+        out.extend_from_slice(&(self.dim_z as u32).to_le_bytes());
+        out.extend_from_slice(&self.size_x.to_le_bytes());
+        out.extend_from_slice(&self.size_z.to_le_bytes());
         out.extend_from_slice(&self.base_m.to_le_bytes());
         out.extend_from_slice(&span.to_le_bytes());
         for &v in &self.z {
@@ -682,32 +709,34 @@ impl Ground {
     }
 
     fn decode(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() < 24 || &bytes[..4] != b"FGND" {
-            bail!("not a stored ground square");
+        if bytes.len() < 32 || &bytes[..4] != b"FGND" {
+            bail!("not a stored ground plot");
         }
         let u32_at = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         let f32_at = |o: usize| f32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         if u32_at(4) != 1 {
             bail!("stored ground is version {}, which this build doesn't read", u32_at(4));
         }
-        let dim = u32_at(8) as usize;
-        let size_m = f32_at(12);
-        let base_m = f32_at(16);
-        let span = f32_at(20);
-        if dim < 2 || bytes.len() < 24 + dim * dim * 2 {
+        let dim_x = u32_at(8) as usize;
+        let dim_z = u32_at(12) as usize;
+        let size_x = f32_at(16);
+        let size_z = f32_at(20);
+        let base_m = f32_at(24);
+        let span = f32_at(28);
+        if dim_x < 2 || dim_z < 2 || bytes.len() < 32 + dim_x * dim_z * 2 {
             bail!("stored ground is truncated");
         }
-        let mut z = Vec::with_capacity(dim * dim);
-        for i in 0..dim * dim {
-            let o = 24 + i * 2;
+        let mut z = Vec::with_capacity(dim_x * dim_z);
+        for i in 0..dim_x * dim_z {
+            let o = 32 + i * 2;
             let q = u16::from_le_bytes([bytes[o], bytes[o + 1]]);
             z.push(q as f32 / 65535.0 * span);
         }
-        Ok(Ground { dim, size_m, z, base_m })
+        Ok(Ground { dim_x, dim_z, size_x, size_z, z, base_m })
     }
 }
 
-/// Fetch a stored ground square by id, decoding it once per process.
+/// Fetch a stored ground plot by id, decoding it once per process.
 pub fn load(id: &str) -> Option<Arc<Ground>> {
     if id.is_empty() {
         return None;
@@ -741,8 +770,9 @@ pub struct Imported {
     /// south from its north edge, which is the generator's `+x` and `+z`.
     pub lap: Vec<(f32, f32, f32)>,
     pub closed: bool,
-    /// Metres the plot is across.
-    pub size_m: f32,
+    /// Metres the plot is across, east-west and north-south.
+    pub size_x: f32,
+    pub size_z: f32,
     /// How much the destripe pass moved the ground, rms metres — reported rather than assumed.
     pub destripe_rms: f32,
     pub place: String,
@@ -769,11 +799,15 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
     let pts = trace.resolved()?;
     let (e0, n0, e1, n1) = trace.bounds()?;
 
-    let span = (e1 - e0).max(n1 - n0) as f32 + PLOT_MARGIN_M * 2.0;
-    // To the nearest ten metres, so a trace nudged by a metre does not move the whole plot.
-    let size_m = (span / 10.0).ceil() * 10.0;
+    // The plot is the shape of the venue, rounded to ten metres so a trace nudged by a metre
+    // does not move the whole plot. Cells stay square: whichever edge is longer gets
+    // [`GROUND_DIM`] samples and the other gets the count that keeps a cell the same size.
+    let want_x = ((e1 - e0) as f32 + PLOT_MARGIN_M * 2.0 / 1.0).max(60.0);
+    let want_z = ((n1 - n0) as f32 + PLOT_MARGIN_M * 2.0).max(60.0);
+    let size_x = (want_x / 10.0).ceil() * 10.0;
+    let size_z = (want_z / 10.0).ceil() * 10.0;
     let (cx, cy) = ((e0 + e1) * 0.5, (n0 + n1) * 0.5);
-    let (west, north) = (cx - size_m as f64 * 0.5, cy + size_m as f64 * 0.5);
+    let (west, north) = (cx - size_x as f64 * 0.5, cy + size_z as f64 * 0.5);
 
     // Padded, so the slide below has somewhere to slide to. A tile cropped exactly to the lap
     // gives back its whole self and the plot moves inside it; a big staged tile gives back a
@@ -784,8 +818,8 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
         tif,
         Some((
             west - pad,
-            north - size_m as f64 - pad,
-            west + size_m as f64 + pad,
+            north - size_z as f64 - pad,
+            west + size_x as f64 + pad,
             north + pad,
         )),
     )?;
@@ -794,69 +828,51 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
     // bounding box wants a margin the crop may not have. Sliding the plot to sit inside the
     // ground that exists beats failing, and beats filling the overhang with invented height:
     // the lap still fits — it is smaller than the plot by the margin — it just sits off-centre
-    // in it. Only if the tile is genuinely too small for the plot does this give up.
+    // in it. Only if the tile is genuinely too small does this give up.
     let (dem_w, dem_e) = (dem.origin_e - dem.cell * 0.5, dem.origin_e + (dem.w as f64 - 0.5) * dem.cell);
     let (dem_n, dem_s) = (dem.origin_n + dem.cell * 0.5, dem.origin_n - (dem.h as f64 - 0.5) * dem.cell);
-    let (west, north) = if dem_e - dem_w < size_m as f64 || dem_n - dem_s < size_m as f64 {
+    if dem_e - dem_w < size_x as f64 || dem_n - dem_s < size_z as f64 {
         bail!(
-            "the lap wants a {size_m:.0} m plot and the tile only covers {:.0} by {:.0} m around \
-             it. Fetch a wider tile, or trace a shorter lap.",
+            "the lap wants a {size_x:.0} by {size_z:.0} m plot and the tile only covers {:.0} by \
+             {:.0} m around it. Fetch a wider tile, or trace a shorter lap.",
             dem_e - dem_w,
             dem_n - dem_s
         );
-    } else {
-        (
-            west.clamp(dem_w, dem_e - size_m as f64),
-            north.clamp(dem_s + size_m as f64, dem_n),
-        )
-    };
-
-    if !trace.crs.is_empty() && dem.epsg != 0 {
-        let want = trace
-            .crs
-            .rsplit(':')
-            .next()
-            .and_then(|s| s.trim().parse::<u32>().ok())
-            .unwrap_or(0);
-        if want != 0 && want != dem.epsg {
-            bail!(
-                "the trace says it is in {} and the tile says it is in EPSG:{}. One of them is \
-                 wrong, and guessing which would put the track in the wrong field.",
-                trace.crs,
-                dem.epsg
-            );
-        }
     }
+    let west = west.clamp(dem_w, dem_e - size_x as f64);
+    let north = north.clamp(dem_s + size_z as f64, dem_n);
 
     // Resample onto the plot. Row 0 is the NORTH edge, so world z runs south — the same sense
     // the generator's grid already uses.
-    let dim = GROUND_DIM as usize;
-    let per = size_m as f64 / (dim - 1) as f64;
-    let mut z = vec![0.0f32; dim * dim];
+    let long = size_x.max(size_z);
+    let per = long as f64 / (GROUND_DIM - 1) as f64;
+    let dim_x = ((size_x as f64 / per).round() as usize + 1).max(2);
+    let dim_z = ((size_z as f64 / per).round() as usize + 1).max(2);
+    let mut z = vec![0.0f32; dim_x * dim_z];
     let mut holes = 0usize;
-    for y in 0..dim {
-        for x in 0..dim {
+    for y in 0..dim_z {
+        for x in 0..dim_x {
             let v = dem.at(west + x as f64 * per, north - y as f64 * per);
             if v.is_finite() {
-                z[y * dim + x] = v;
+                z[y * dim_x + x] = v;
             } else {
-                z[y * dim + x] = f32::NAN;
+                z[y * dim_x + x] = f32::NAN;
                 holes += 1;
             }
         }
     }
-    if holes * 20 > dim * dim {
+    if holes * 20 > dim_x * dim_z {
         bail!(
             "{:.1}% of the plot has no height in the tile. Either the lap is off the edge of it \
              or the tile is mostly void.",
-            holes as f32 * 100.0 / (dim * dim) as f32
+            holes as f32 * 100.0 / (dim_x * dim_z) as f32
         );
     }
     if holes > 0 {
-        fill_holes(&mut z, dim);
+        fill_holes(&mut z, dim_x, dim_z);
     }
 
-    let destripe_rms = destripe(&mut z, dim, per as f32, true, strength);
+    let destripe_rms = destripe(&mut z, dim_x, dim_z, per as f32, true, strength);
 
     // Bring the lowest point to zero: the generator's height budget is a range, not an
     // elevation, and Ironman sits 215 m above the sea.
@@ -865,7 +881,7 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
         *v -= base;
     }
 
-    let ground = Ground { dim, size_m, z, base_m: base };
+    let ground = Ground { dim_x, dim_z, size_x, size_z, z, base_m: base };
 
     let id = {
         use sha2::Digest;
@@ -892,7 +908,8 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
         ground,
         lap: lap_xz,
         closed: trace.closed,
-        size_m,
+        size_x,
+        size_z,
         destripe_rms,
         place: trace.name.clone(),
         source: d.source,
@@ -910,13 +927,13 @@ pub fn import(tif: &Path, lap: &Path, strength: f32) -> Result<Imported> {
 
 /// Fill the odd nodata cell from its neighbours, so a puddle in the lidar is not a hole in the
 /// track. Anything bigger than a puddle has already been refused above.
-fn fill_holes(z: &mut [f32], dim: usize) {
+fn fill_holes(z: &mut [f32], w: usize, h: usize) {
     for _ in 0..24 {
         let src = z.to_vec();
         let mut left = 0usize;
-        for y in 0..dim {
-            for x in 0..dim {
-                let i = y * dim + x;
+        for y in 0..h {
+            for x in 0..w {
+                let i = y * w + x;
                 if src[i].is_finite() {
                     continue;
                 }
@@ -924,10 +941,10 @@ fn fill_holes(z: &mut [f32], dim: usize) {
                 let mut n = 0u32;
                 for (dx, dy) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)] {
                     let (nx, ny) = (x as i64 + dx, y as i64 + dy);
-                    if nx < 0 || ny < 0 || nx >= dim as i64 || ny >= dim as i64 {
+                    if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
                         continue;
                     }
-                    let v = src[ny as usize * dim + nx as usize];
+                    let v = src[ny as usize * w + nx as usize];
                     if v.is_finite() {
                         sum += v;
                         n += 1;
@@ -1008,8 +1025,8 @@ pub fn program_for(imp: &Imported, jumps: crate::trackprog::ScanJumps) -> Result
         author: String::new(),
         location: place_note(imp),
         terrain: Terrain {
-            size_x: imp.size_m,
-            size_z: imp.size_m,
+            size_x: imp.size_x,
+            size_z: imp.size_z,
             samples,
             scale,
             relief: Relief {
@@ -1077,6 +1094,62 @@ pub fn place_note(imp: &Imported) -> String {
     bits.join("; ")
 }
 
+/// Everything known and not known about where this track came from, as lines of text for the
+/// built track's README.
+///
+/// The per-segment confidence the tracer recorded is the part worth keeping: "points 44 to 51,
+/// low, several graded ribbons and the imagery did not settle it" tells a rider exactly which
+/// corner to distrust, which is far more use than a blanket "provisional" on the whole lap.
+/// Dropping it because the track format has nowhere structured to put it would be losing the
+/// most specific thing anyone knows about the track.
+pub fn provenance_lines(imp: &Imported) -> Vec<String> {
+    let mut out = Vec::new();
+    out.push(format!("Place: {}", if imp.place.is_empty() { "unnamed" } else { &imp.place }));
+    if !imp.source.is_empty() {
+        out.push(format!("Ground: {}", imp.source));
+    }
+    if !imp.collected.is_empty() {
+        out.push(format!("Flown: {}", imp.collected));
+    }
+    if !imp.licence.is_empty() {
+        out.push(format!("Licence: {}", imp.licence));
+    }
+    out.push(format!(
+        "Plot: {:.0} x {:.0} m at EPSG:{}, north-west corner {:.1} {:.1}",
+        imp.size_x, imp.size_z, imp.epsg, imp.origin_e, imp.origin_n
+    ));
+    out.push(format!(
+        "Destriping moved the ground by {:.2} cm rms.",
+        imp.destripe_rms * 100.0
+    ));
+    if imp.provisional {
+        out.push("The traced lap is PROVISIONAL: it is where someone judged the racing line to \
+                  be from an aerial photograph, not a survey."
+            .into());
+    }
+    if !imp.direction_verified {
+        out.push("The direction of travel is INFERRED, not verified. The lap may run the wrong \
+                  way round."
+            .into());
+    }
+    if !imp.note.is_empty() {
+        out.push(format!("Tracer's note: {}", imp.note));
+    }
+    if !imp.confidence.is_empty() {
+        out.push("How much of the lap is trusted, by traced point:".into());
+        for c in &imp.confidence {
+            out.push(format!(
+                "  points {}-{}, {}: {}",
+                c.from,
+                c.to,
+                if c.confidence.is_empty() { "unrated" } else { &c.confidence },
+                c.what
+            ));
+        }
+    }
+    out
+}
+
 /// What a fit cost, in words, for whoever is about to look at the track.
 pub fn fit_report(fit: &crate::trackprog::Fitted) -> String {
     let (lo, hi) = fit.width_range_m;
@@ -1131,9 +1204,14 @@ mod scan_build {
         let imp = super::import(std::path::Path::new(&dem), std::path::Path::new(&lap), 1.0)
             .expect("the place imports");
         println!(
-            "imported {}: plot {:.0} m, relief {:.2} m, datum {:.2} m, EPSG:{}, destripe {:.3} cm rms",
+            "imported {}: plot {:.0} x {:.0} m at {:.3} m/cell ({} x {}), relief {:.2} m, \
+             datum {:.2} m, EPSG:{}, destripe {:.3} cm rms",
             imp.place,
-            imp.size_m,
+            imp.size_x,
+            imp.size_z,
+            imp.ground.cell(),
+            imp.ground.dim_x,
+            imp.ground.dim_z,
             imp.ground.relief(),
             imp.ground.base_m,
             imp.epsg,
@@ -1168,6 +1246,11 @@ mod scan_build {
             serde_json::to_vec_pretty(&prog).expect("the program serialises"),
         )
         .expect("wrote the program");
+        std::fs::write(out.join("PLACE.txt"), super::provenance_lines(&imp).join("\n") + "\n")
+            .expect("wrote the provenance");
+        for l in super::provenance_lines(&imp) {
+            println!("  {l}");
+        }
         let wrote = crate::tracksynth::write_source(&prog, &syn, &out).expect("wrote the source");
         println!("{} source files in {}", wrote.len(), out.display());
     }
@@ -1177,24 +1260,29 @@ mod scan_build {
 mod tests {
     use super::*;
 
-    fn bump(dim: usize) -> Vec<f32> {
-        let mut z = vec![0.0f32; dim * dim];
-        for y in 0..dim {
-            for x in 0..dim {
-                let (fx, fy) = (x as f32 / dim as f32, y as f32 / dim as f32);
-                z[y * dim + x] = 4.0 * (fx * 6.0).sin() * (fy * 5.0).cos() + 10.0 * fy;
+    fn bump2(w: usize, h: usize) -> Vec<f32> {
+        let mut z = vec![0.0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+                z[y * w + x] = 4.0 * (fx * 6.0).sin() * (fy * 5.0).cos() + 10.0 * fy;
             }
         }
         z
     }
 
+    fn bump(dim: usize) -> Vec<f32> {
+        bump2(dim, dim)
+    }
+
     #[test]
     fn a_stored_square_survives_the_round_trip() {
-        let dim = 65;
-        let g = Ground { dim, size_m: 470.0, z: bump(dim), base_m: 214.9 };
+        // Rectangular on purpose: a square would not catch the two dimensions being swapped.
+        let (w, h) = (65usize, 41usize);
+        let g = Ground { dim_x: w, dim_z: h, size_x: 470.0, size_z: 290.0, z: bump2(w, h), base_m: 214.9 };
         let back = Ground::decode(&g.encode()).expect("decodes");
-        assert_eq!(back.dim, dim);
-        assert_eq!(back.size_m, 470.0);
+        assert_eq!((back.dim_x, back.dim_z), (w, h));
+        assert_eq!((back.size_x, back.size_z), (470.0, 290.0));
         assert_eq!(back.base_m, 214.9);
         // Quantised against its own range, so the step is the range over 65535.
         let step = g.relief() / 65535.0;
@@ -1207,7 +1295,7 @@ mod tests {
     fn a_short_or_wrong_file_is_refused_rather_than_guessed() {
         assert!(Ground::decode(b"").is_err());
         assert!(Ground::decode(b"NOPE1234567890123456789012").is_err());
-        let g = Ground { dim: 9, size_m: 100.0, z: vec![0.0; 81], base_m: 0.0 };
+        let g = Ground { dim_x: 9, dim_z: 9, size_x: 100.0, size_z: 100.0, z: vec![0.0; 81], base_m: 0.0 };
         let mut b = g.encode();
         b.truncate(b.len() - 4);
         assert!(Ground::decode(&b).is_err());
@@ -1215,13 +1303,20 @@ mod tests {
 
     #[test]
     fn sampling_a_square_hits_its_own_cells_exactly() {
-        let dim = 33;
-        let g = Ground { dim, size_m: 320.0, z: bump(dim), base_m: 0.0 };
-        let per = g.size_m / (dim - 1) as f32;
-        for y in [0usize, 7, 16, 32] {
+        let (w, h) = (33usize, 21usize);
+        let per = 10.0f32;
+        let g = Ground {
+            dim_x: w,
+            dim_z: h,
+            size_x: per * (w - 1) as f32,
+            size_z: per * (h - 1) as f32,
+            z: bump2(w, h),
+            base_m: 0.0,
+        };
+        for y in [0usize, 7, 16, 20] {
             for x in [0usize, 1, 20, 32] {
                 let got = g.at(x as f32 * per, y as f32 * per);
-                let want = g.z[y * dim + x];
+                let want = g.z[y * w + x];
                 assert!((got - want).abs() < 1e-3, "at cell ({x},{y}): {got} vs {want}");
             }
         }
@@ -1232,26 +1327,26 @@ mod tests {
 
     #[test]
     fn destriping_takes_out_a_stripe_and_leaves_the_land() {
-        let dim = 257;
-        let cell = 470.0 / (dim - 1) as f32;
-        let land = bump(dim);
+        let (w, h) = (257usize, 161usize);
+        let cell = 470.0 / (w - 1) as f32;
+        let land = bump2(w, h);
         // A 12 m east-west wave, coherent all the way down the flight line, 1 cm tall — which
         // is the amplitude measured on the Ironman tile's flat ground.
         let mut striped = land.clone();
-        for y in 0..dim {
-            for x in 0..dim {
-                striped[y * dim + x] += 0.010 * (x as f32 * cell / 12.0 * std::f32::consts::TAU).sin();
+        for y in 0..h {
+            for x in 0..w {
+                striped[y * w + x] += 0.010 * (x as f32 * cell / 12.0 * std::f32::consts::TAU).sin();
             }
         }
         let before = rms_diff(&striped, &land);
         let mut fixed = striped.clone();
-        destripe(&mut fixed, dim, cell, true, 1.0);
+        destripe(&mut fixed, w, h, cell, true, 1.0);
         let after = rms_diff(&fixed, &land);
         assert!(after < before * 0.75, "stripe rms {before} -> {after}, not enough taken out");
 
         // And on ground with no stripe in it, it barely moves anything.
         let mut clean = land.clone();
-        let moved = destripe(&mut clean, dim, cell, true, 1.0);
+        let moved = destripe(&mut clean, w, h, cell, true, 1.0);
         assert!(moved < 0.004, "moved clean ground by {moved} m rms");
     }
 
@@ -1308,14 +1403,14 @@ mod tests {
 
     #[test]
     fn holes_get_filled_from_what_is_around_them() {
-        let dim = 17;
-        let mut z = bump(dim);
-        let want = z[8 * dim + 8];
-        z[8 * dim + 8] = f32::NAN;
-        z[3 * dim + 4] = f32::NAN;
-        fill_holes(&mut z, dim);
+        let (w, h) = (17usize, 11usize);
+        let mut z = bump2(w, h);
+        let want = z[5 * w + 8];
+        z[5 * w + 8] = f32::NAN;
+        z[3 * w + 4] = f32::NAN;
+        fill_holes(&mut z, w, h);
         assert!(z.iter().all(|v| v.is_finite()), "a NaN survived");
         // The fill is the neighbours' mean, so it lands near what was there.
-        assert!((z[8 * dim + 8] - want).abs() < 0.5, "{} vs {want}", z[8 * dim + 8]);
+        assert!((z[5 * w + 8] - want).abs() < 0.5, "{} vs {want}", z[5 * w + 8]);
     }
 }

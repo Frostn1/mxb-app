@@ -1941,6 +1941,14 @@ pub const FIT_TOLERANCE_M: f32 = 1.5;
 /// likely to be two traced points that happened to fall close together than a real hairpin.
 pub const FIT_MIN_RADIUS_M: f32 = 8.0;
 
+/// The longest a single fitted segment may be, metres.
+///
+/// A sanity bound, not a design limit: no plot is 5 km across, so a segment this long means the
+/// walk has diverged rather than that the track is long. Without it a diverged pose produces a
+/// straight of astronomical length and [`walk`] tries to sample it every half metre, which is
+/// how this first showed itself — 3.7 GB of resident memory and the process killed.
+const MAX_SEGMENT_M: f32 = 5000.0;
+
 /// The straightest an arc may be before it is simply a straight, metres of radius.
 ///
 /// A 3000 m arc across a 60 m segment departs from its own chord by 15 cm, which is under the
@@ -2013,6 +2021,16 @@ pub fn fit_lap(points: &[(f32, f32, f32)], closed: bool) -> Option<Fitted> {
     let guard = pts.len() + 8;
     while i + 1 < pts.len() && segments.len() < guard {
         let (seg, next) = longest_from(pose, &pts, i)?;
+        if !seg.length().is_finite() || seg.length() > MAX_SEGMENT_M {
+            eprintln!("fit_lap: runaway segment at i={i} next={next} pose={pose:?} seg={seg:?}");
+            return None;
+        }
+        if std::env::var_os("FROST_FIT_TRACE").is_some() && segments.len() % 25 == 0 {
+            eprintln!(
+                "fit_lap: seg {} i={i} next={next} len={:.1} pose=({:.1},{:.1},{:.1})",
+                segments.len(), seg.length(), pose.x, pose.z, pose.angle
+            );
+        }
         segments.push(seg);
         pose = end_pose(pose, &segments[segments.len() - 1..]);
         if next <= i {
@@ -2128,6 +2146,9 @@ fn longest_from(pose: Start, pts: &[(f32, f32, f32)], i: usize) -> Option<(Segme
     let last = pts.len() - 1;
     let fits = |j: usize| -> Option<Segment> {
         let seg = primitive(pose, pts[j])?;
+        if !plausible(&seg, j - i) {
+            return None;
+        }
         let (worst, _) = fit_error(pose, std::slice::from_ref(&seg), &pts[i..=j]);
         (worst <= FIT_TOLERANCE_M).then_some(seg)
     };
@@ -2146,9 +2167,13 @@ fn longest_from(pose: Start, pts: &[(f32, f32, f32)], i: usize) -> Option<(Segme
         // of the right length, which is wrong by at most the tolerance over two metres and is
         // corrected by the next segment starting from where this one really ended.
         let j = (i + 1).min(last);
-        let step = ((pts[j].0 - pose.x).powi(2) + (pts[j].1 - pose.z).powi(2)).sqrt();
         let seg = primitive(pose, pts[j])
-            .unwrap_or(Segment::Straight { length: step.max(0.25), rise: 0.0 });
+            .filter(|s| plausible(s, j - i))
+            // A metre of trace is a metre of track. When the pose has drifted far enough that
+            // no primitive reaches the next point plausibly, stepping one metre straight ahead
+            // is the least wrong thing available: it keeps the walk moving, it cannot run away,
+            // and the error it costs is measured and reported like any other.
+            .unwrap_or(Segment::Straight { length: 1.0, rise: 0.0 });
         return Some((seg, j));
     };
     let mut hi = lo;
@@ -2180,6 +2205,28 @@ fn longest_from(pose: Start, pts: &[(f32, f32, f32)], i: usize) -> Option<(Segme
         }
     }
     Some((best, lo))
+}
+
+/// Whether a primitive is the right size for the piece of trace it claims to cover.
+///
+/// This is the guard that stops the walk running away, and it took a 1606 m lap to expose the
+/// need for it. The trace is resampled to one metre a point, so a segment covering `span` points
+/// must be about `span` metres long — a chord is never much shorter than its arc at these
+/// curvatures, and neither can be much longer than the ground they cross.
+///
+/// Without it the fit had a positive feedback loop. A primitive that reaches the next point with
+/// a badly wrong heading leaves the pose slightly off the line; from there the next primitive is
+/// wronger, and once the pose is far enough out, `primitive` starts returning straights whose
+/// length is the distance from a drifted pose rather than a distance along the track. Measured,
+/// the pose reached 1e175 metres and the fit asked to sample a straight of that length every half
+/// metre: 3.7 GB resident and killed by the OS. The symptom looked like a memory bug and was a
+/// geometry bug.
+///
+/// Half again plus five metres is loose enough never to reject an honest fit and tight enough
+/// that the loop cannot start.
+fn plausible(seg: &Segment, span: usize) -> bool {
+    let len = seg.length();
+    len.is_finite() && len <= span as f32 * 1.5 + 5.0 && len <= MAX_SEGMENT_M
 }
 
 /// The one straight or arc that leaves `pose` and arrives at `q`.
@@ -2270,7 +2317,12 @@ fn walk(from: Start, segs: &[Segment], step: f32) -> Vec<(f32, f32)> {
     let mut pose = from;
     for seg in segs {
         let len = seg.length();
-        let n = ((len / step.max(0.05)).ceil() as usize).max(1);
+        if !len.is_finite() {
+            break;
+        }
+        // Capped as well as bounded above, because `f32 as usize` saturates rather than wrapping
+        // and one bad length would otherwise ask for a Vec of usize::MAX points.
+        let n = ((len / step.max(0.05)).ceil() as usize).clamp(1, 1 << 17);
         for k in 1..=n {
             let part = len * k as f32 / n as f32;
             let piece = match *seg {
