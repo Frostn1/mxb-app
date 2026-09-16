@@ -240,7 +240,7 @@ fn merge_stint(into: &mut SessionSummary, s: SessionSummary) {
 
 /// One session per event: stints of the same event, ridden back to back, become one session
 /// with all their laps. Oldest first.
-fn group_sessions(mut stints: Vec<SessionSummary>) -> Vec<SessionSummary> {
+pub(crate) fn group_sessions(mut stints: Vec<SessionSummary>) -> Vec<SessionSummary> {
     stints.sort_by(|a, b| a.started.cmp(&b.started));
     // Each group with the time its last stint came off track.
     let mut out: Vec<(SessionSummary, i64)> = Vec::new();
@@ -274,11 +274,12 @@ fn index_path(app: &AppHandle) -> Option<PathBuf> {
     Some(config::data_dir(app)?.join("coach").join("index-v4.json"))
 }
 
-/// Every session on disk, newest first: the stints of one event as one session. A file that
-/// won't parse is skipped, not fatal.
-fn all_sessions(app: &AppHandle) -> Vec<SessionSummary> {
-    let cfg = load_config(app);
-    let index_file = index_path(app);
+/// Every recording in `dirs`, summarised one stint at a time, with `index_file` as a cache
+/// keyed by path, size and modified time. A file that won't parse is skipped, not fatal.
+///
+/// The imported trainer laps are read the same way out of their own folder, with their own
+/// index: they are recordings like any other, they just aren't the rider's.
+pub(crate) fn summaries(dirs: &[PathBuf], index_file: Option<PathBuf>) -> Vec<SessionSummary> {
     let mut index: HashMap<String, Indexed> = index_file
         .as_ref()
         .and_then(|p| fs::read(p).ok())
@@ -287,8 +288,8 @@ fn all_sessions(app: &AppHandle) -> Vec<SessionSummary> {
     let mut changed = false;
     let mut seen = HashSet::new();
     let mut out = Vec::new();
-    for dir in session_dirs(&cfg) {
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+    for dir in dirs {
+        let Ok(entries) = fs::read_dir(dir) else { continue };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("mxbc") {
@@ -329,7 +330,13 @@ fn all_sessions(app: &AppHandle) -> Vec<SessionSummary> {
             let _ = fs::write(file, json);
         }
     }
-    let mut out = group_sessions(out);
+    out
+}
+
+/// Every session on disk, newest first: the stints of one event as one session.
+fn all_sessions(app: &AppHandle) -> Vec<SessionSummary> {
+    let dirs = session_dirs(&load_config(app));
+    let mut out = group_sessions(summaries(&dirs, index_path(app)));
     out.sort_by(|a, b| b.started.cmp(&a.started));
     out
 }
@@ -382,7 +389,20 @@ fn trace(rec: &Recording, num: i32) -> Result<Trace, String> {
     Trace::new(&lap, rec.event.track_length).ok_or_else(|| format!("Lap {num} is too short to review."))
 }
 
-/// A lap somewhere on disk.
+/// Where a reference lap came from. The rider is told, because it changes what the comparison
+/// means: another rider's lap isn't theirs to ride back, and the ideal lap was never ridden.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RefKind {
+    /// A lap the rider rode themselves.
+    Own,
+    /// A lap from another rider, imported into the coach.
+    Imported,
+    /// The rider's own best sections added up: a time that was never ridden whole.
+    Ideal,
+}
+
+/// A lap somewhere on disk — or the ideal lap, which is nowhere.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LapRef {
@@ -391,10 +411,34 @@ pub struct LapRef {
     pub time_ms: i32,
     pub started: String,
     pub bike_name: String,
+    /// The bike it was ridden on. A 250 and a 450 don't take a corner the same way, so the
+    /// review says so when it isn't the same one.
+    pub bike_id: String,
+    /// Whose lap it is, as the recorder saved it.
+    pub rider: String,
+    pub kind: RefKind,
 }
 
-/// The fastest comparable lap on this track, other than `exclude`. The same bike wins over a
-/// faster lap on a different one: a 250 and a 450 don't take a corner the same way.
+impl LapRef {
+    /// Lap `l` of session `s`, as something to be reviewed against.
+    fn of(s: &SessionSummary, l: &LapSummary, kind: RefKind) -> LapRef {
+        LapRef {
+            // The lap's own file and the stint it was ridden in: a session spans several.
+            path: l.path.clone(),
+            lap: l.num,
+            time_ms: l.time_ms,
+            started: s.stints.get(l.stint.max(0) as usize).map_or(&s.started, |x| &x.started).clone(),
+            bike_name: s.bike_name.clone(),
+            bike_id: s.bike_id.clone(),
+            rider: s.rider.clone(),
+            kind,
+        }
+    }
+}
+
+/// The fastest comparable lap on this track, other than `exclude`, across every session the
+/// rider has ridden here. The same bike wins over a faster lap on a different one: a 250 and a
+/// 450 don't take a corner the same way.
 fn best_reference(sessions: &[SessionSummary], track_id: &str, bike_id: &str, exclude: Option<(&str, i32)>) -> Option<LapRef> {
     sessions
         .iter()
@@ -402,14 +446,7 @@ fn best_reference(sessions: &[SessionSummary], track_id: &str, bike_id: &str, ex
         .flat_map(|s| s.laps.iter().filter(|l| l.comparable()).map(move |l| (s, l)))
         .filter(|(_, l)| exclude != Some((l.path.as_str(), l.num)))
         .min_by_key(|(s, l)| (s.bike_id != bike_id, l.time_ms))
-        .map(|(s, l)| LapRef {
-            // The lap's own file and the stint it was ridden in: a session spans several.
-            path: l.path.clone(),
-            lap: l.num,
-            time_ms: l.time_ms,
-            started: s.stints.get(l.stint.max(0) as usize).map_or(&s.started, |x| &x.started).clone(),
-            bike_name: s.bike_name.clone(),
-        })
+        .map(|(s, l)| LapRef::of(s, l, RefKind::Own))
 }
 
 #[derive(Serialize)]
@@ -462,13 +499,59 @@ pub struct ReviewOut {
     pub lap: LapRef,
     pub reference: LapRef,
     pub review: Review,
+    /// How many of the rider's own laps the ideal lap was stitched from, when that is what
+    /// this lap is held against. None otherwise.
+    pub ideal_from: Option<i32>,
     /// Other riders in the session worth comparing with, where the recorder saw them.
     pub rivals: Vec<crate::others::Rival>,
 }
 
-/// Reviews lap `lap` of `path` against `ref_path`/`ref_lap`, or against the fastest other lap
-/// on the track when none is given. `solo`, or no other lap to compare with, reviews it on its
-/// own instead.
+/// How far two centrelines can differ and still be the same track. A rebuilt layout is a
+/// different length, and the two laps then sit on different grids.
+const TRACK_LENGTH_SLACK_M: f32 = 1.0;
+
+/// The rider's own best time for each section of this track, across every session they have
+/// ridden here: the ideal lap. The sections come from the fastest lap on the track, which is
+/// the grid every lap is timed on; the times come from every whole lap ridden here, on the bike
+/// this lap is on where there are any — a 250 and a 450 don't take a corner the same way.
+///
+/// Gives back the sections, a target for each, how many laps went into it, and the bike they
+/// were ridden on.
+fn ideal_targets(
+    app: &AppHandle,
+    summary: &SessionSummary,
+) -> Result<(Vec<analysis::Section>, Vec<f32>, i32, String), String> {
+    let sessions = all_sessions(app);
+    let grid = best_reference(&sessions, &summary.track_id, &summary.bike_id, None)
+        .ok_or("Ride one whole lap on this track first: the ideal lap is built out of your own laps.")?;
+    let sections = analysis::sections(&trace(&load(&grid.path)?, grid.lap)?);
+    let on_this_bike = sessions
+        .iter()
+        .any(|s| s.track_id == summary.track_id && s.bike_id == summary.bike_id && s.laps.iter().any(|l| l.comparable()));
+    let mut laps: Vec<(i32, Trace)> = Vec::new();
+    for s in sessions.iter().filter(|s| s.track_id == summary.track_id) {
+        if on_this_bike && s.bike_id != summary.bike_id {
+            continue;
+        }
+        for st in &s.stints {
+            let Ok(rec) = load(&st.path) else { continue };
+            for l in rec.laps().iter().filter(|l| l.whole && !l.invalid) {
+                if let Some(t) = Trace::new(l, rec.event.track_length) {
+                    laps.push((laps.len() as i32, t));
+                }
+            }
+        }
+    }
+    let ideal = analysis::ideal(&sections, &laps)
+        .ok_or("There aren't enough whole laps of yours on this track to build an ideal lap.")?;
+    let bike = if on_this_bike { summary.bike_name.clone() } else { grid.bike_name.clone() };
+    Ok((sections, ideal.sections.iter().map(|b| b.best).collect(), laps.len() as i32, bike))
+}
+
+/// Reviews lap `lap` of `path` against `ref_path`/`ref_lap` — which can be an imported lap of
+/// another rider's — against the rider's ideal lap on this track when `ideal`, or against the
+/// fastest other lap on the track when none is given. `solo`, or no other lap to compare with,
+/// reviews it on its own instead.
 #[tauri::command]
 pub fn coach_review(
     app: AppHandle,
@@ -477,17 +560,21 @@ pub fn coach_review(
     ref_path: Option<String>,
     ref_lap: Option<i32>,
     solo: Option<bool>,
+    ideal: Option<bool>,
 ) -> Result<ReviewOut, String> {
     let rec = load(&path)?;
     let summary = summarize(Path::new(&path), &rec);
-    let reference = if solo.unwrap_or(false) {
+    let alone = solo.unwrap_or(false);
+    let want_ideal = ideal.unwrap_or(false) && !alone;
+    let reference = if alone || want_ideal {
         None
     } else {
         match (ref_path, ref_lap) {
             (Some(p), Some(n)) => {
                 let s = if p == path { summary.clone() } else { summarize(Path::new(&p), &load(&p)?) };
                 let l = s.laps.iter().find(|l| l.num == n).ok_or_else(|| format!("Lap {n} isn't in that session."))?;
-                Some(LapRef { path: p, lap: n, time_ms: l.time_ms, started: s.started, bike_name: s.bike_name })
+                let kind = if crate::imports::is_import(&app, &p) { RefKind::Imported } else { RefKind::Own };
+                Some(LapRef::of(&s, l, kind))
             }
             _ => best_reference(&all_sessions(&app), &summary.track_id, &summary.bike_id, Some((&path, lap))),
         }
@@ -506,17 +593,55 @@ pub fn coach_review(
     };
     let mine = trace(&rec, lap)?;
     let time_ms = summary.laps.iter().find(|l| l.num == lap).map_or(0, |l| l.time_ms);
-    let this = LapRef { path, lap, time_ms, started: summary.started.clone(), bike_name: summary.bike_name.clone() };
-    let (review, reference) = match reference {
-        Some(reference) => {
-            let ref_rec = if reference.path == this.path { None } else { Some(load(&reference.path)?) };
-            let ref_rec = ref_rec.as_ref().unwrap_or(&rec);
-            if ref_rec.event.track_id != rec.event.track_id {
-                return Err("The reference lap is on a different track.".into());
+    let this = LapRef {
+        path,
+        lap,
+        time_ms,
+        started: summary.started.clone(),
+        bike_name: summary.bike_name.clone(),
+        bike_id: summary.bike_id.clone(),
+        rider: summary.rider.clone(),
+        kind: RefKind::Own,
+    };
+    let mut ideal_from = None;
+    let (review, reference) = if want_ideal {
+        let (secs, targets, from, bike_name) = ideal_targets(&app, &summary)?;
+        ideal_from = Some(from);
+        // The ideal lap is nowhere on disk: it is a time for each section, so it has no file,
+        // no lap number and no day it was ridden.
+        let r = LapRef {
+            path: String::new(),
+            lap: -1,
+            time_ms: (targets.iter().sum::<f32>() * 1000.0).round() as i32,
+            started: String::new(),
+            bike_name,
+            bike_id: summary.bike_id.clone(),
+            rider: summary.rider.clone(),
+            kind: RefKind::Ideal,
+        };
+        (analysis::against_targets(&mine, &secs, &targets, bike), r)
+    } else {
+        match reference {
+            Some(reference) => {
+                let ref_rec = if reference.path == this.path { None } else { Some(load(&reference.path)?) };
+                let ref_rec = ref_rec.as_ref().unwrap_or(&rec);
+                if ref_rec.event.track_id != rec.event.track_id {
+                    return Err("That lap is on a different track.".into());
+                }
+                // A recording from another rider can carry the right track id and still be a
+                // different build of it. A changed layout is a different centreline, so the two
+                // laps sit on different grids and every section would be measured elsewhere.
+                if (ref_rec.event.track_length - rec.event.track_length).abs() > TRACK_LENGTH_SLACK_M {
+                    return Err(format!(
+                        "That lap is on a different version of this track: its centreline is {:.0} m against your {:.0} m, \
+                         so the two can't be lined up.",
+                        ref_rec.event.track_length, rec.event.track_length
+                    ));
+                }
+                (analysis::review(&mine, &trace(ref_rec, reference.lap)?, bike), reference)
             }
-            (analysis::review(&mine, &trace(ref_rec, reference.lap)?, bike), reference)
+            None => (analysis::solo(&mine, bike), this.clone()),
         }
-        None => (analysis::solo(&mine, bike), this.clone()),
     };
     // The ground under each section and the lap, from the rear wheel: the review can't know
     // the weather, and wet soil is mud.
@@ -541,7 +666,7 @@ pub fn coach_review(
         .collect();
     let ended = rec.laps().into_iter().find(|l| l.num == this.lap).and_then(|l| l.samples.last().map(|s| s.t)).unwrap_or(0.0);
     let rivals = crate::others::rivals(&rec, &parts, this.time_ms, ended, rec.event.event_type == 2);
-    Ok(ReviewOut { track_id: summary.track_id, track_name: summary.track_name, lap: this, reference, review, rivals })
+    Ok(ReviewOut { track_id: summary.track_id, track_name: summary.track_name, lap: this, reference, review, ideal_from, rivals })
 }
 
 /// Where a setup the coach saves goes, and what it is called. It never writes over a file.
@@ -806,6 +931,10 @@ pub struct CuesOut {
     /// The file the recorder reads, next to the sessions.
     pub file: String,
     pub cues: Vec<crate::cues::CueOut>,
+    /// The lap the HUD's gap and ghost run against, which the rider is shown. It is the
+    /// reference they picked wherever that is a lap somebody rode; the ideal lap never was,
+    /// so there the HUD races the fastest lap on the track instead.
+    pub ghost: LapRef,
 }
 
 /// What the rider has already been called on this track and bike, beside the session index.
@@ -845,11 +974,14 @@ fn newest_lap(app: &AppHandle, track: &str, bike: &str) -> Option<(String, i32)>
 }
 
 /// Writes the live cues for this lap's track and bike: the few calls the recorder shows in
-/// practice, from where this lap loses time to the fastest one.
+/// practice, from where this lap loses time to the lap it is held against. The reference is the
+/// one the rider picked in the review, so the cue sheet and the HUD sheet beside it are both
+/// against the lap they chose.
 ///
 /// `latest` writes them for the newest lap on this track and bike instead of the one named,
 /// which is what the review page asks for while the rider is still out: a sheet is only worth
-/// anything if it is about the laps they are riding now.
+/// anything if it is about the laps they are riding now. The reference stands either way: it is
+/// the lap they chose to be held against, not the lap being reviewed.
 #[tauri::command]
 pub fn coach_write_cues(
     app: AppHandle,
@@ -857,8 +989,13 @@ pub fn coach_write_cues(
     lap: i32,
     level: crate::cues::Level,
     amount: crate::cues::Amount,
+    ref_path: Option<String>,
+    ref_lap: Option<i32>,
+    ideal: Option<bool>,
     latest: Option<bool>,
 ) -> Result<CuesOut, String> {
+    // Which lap is coached is settled before the review, so the reference the rider picked is
+    // applied to the lap the calls actually come from.
     let (path, lap) = match latest.unwrap_or(false) {
         true => {
             let head = summarize(Path::new(&path), &load(&path)?);
@@ -866,10 +1003,17 @@ pub fn coach_write_cues(
         }
         false => (path, lap),
     };
-    let out = coach_review(app.clone(), path.clone(), lap, None, None, None)?;
+    let out = coach_review(app.clone(), path.clone(), lap, ref_path, ref_lap, None, ideal)?;
     let rec = load(&path)?;
-    // The fast lap says where each call goes.
-    let r = &out.reference;
+    // The lap the calls are placed on, and the one the HUD races. The ideal lap can't be
+    // either: there is no line to draw a ghost from and no ghost to run a gap against, so the
+    // fastest lap on the track stands in and the rider is told which lap that is.
+    let ghost = match out.reference.kind {
+        RefKind::Ideal => best_reference(&all_sessions(&app), &out.track_id, &rec.event.bike_id, None)
+            .ok_or("There's no whole lap on this track for the in-game HUD to race against.")?,
+        _ => out.reference.clone(),
+    };
+    let r = &ghost;
     let ref_rec = if r.path == path { None } else { Some(load(&r.path)?) };
     let fast = trace(ref_rec.as_ref().unwrap_or(&rec), r.lap)?;
     let points = analysis::cue_points(&fast, &analysis::sections(&fast));
@@ -899,7 +1043,7 @@ pub fn coach_write_cues(
     // Only once the sheet is really on disk: a write that failed is a sheet the rider never
     // heard, and it would be wrong to count it against them.
     write_history(&app, &rec.event.track_id, &rec.event.bike_id, &next);
-    Ok(CuesOut { file: file.display().to_string(), cues })
+    Ok(CuesOut { file: file.display().to_string(), cues, ghost })
 }
 
 /// How the session's lines and the track changed, against the fastest lap on the track; see

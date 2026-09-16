@@ -1,8 +1,18 @@
 # Changelog
 
-## Unreleased — MXB Coach
+## 2026-09-15 — MXB Coach v0.1.13-beta.13
 
 ### Added
+- Compare a lap with more than the session you're in. "Compare with" now offers your best ever
+  lap on the track — whenever you set it, and on whichever bike, which it tells you — and your
+  ideal lap, your own best sections across every session added up. You can also import another
+  rider's recording, a trainer lap, and ride against that: the coach shows whose lap it is and
+  which bike, and keeps imported laps apart from your own so they never count towards your bests.
+- The lap you compare with is remembered for each track, and the live cues and the in-game HUD
+  take it from there too, so the gap and the ghost are against the lap you picked.
+- A numbered post stands on the 3D track where each tip happens, so a call like "the rear spins
+  out of turn 2" is somewhere you can see, with a key for your line and the fast lap.
+- The in-game HUD switches are on the review page too, under In game beside the live cues.
 - Saving a setup now sets it as the one practice loads on that track, so it's on the bike when
   you go out. Close MX Bikes first and it happens on save; otherwise there's a Select button
   for when the game is closed. Your other setups, and your race and qualifying picks, are left
@@ -20,8 +30,17 @@
 - The session list and the laps in an open session keep up with the recorder while you ride, so
   a lap you have just finished shows up without leaving the page and coming back. Both pages
   have a Refresh button too.
+- Settings shows which recorder the game actually ran. It appears after you've started MX Bikes
+  once with the recorder installed.
+- Speak the cues and the in-game HUD say which recorder they need when yours is older than that.
 
 ### Changed
+- The lap review is split into tabs — Lap, Sections, Setup, In game and Track — so each one is a
+  short read instead of one long scroll. It opens on the tab you used last.
+- "How does the bike feel?" is a bike now. Each thing you can say sits at the part it's about:
+  the fork and front wheel, the shock and rear, the chassis, and the engine and gearbox.
+- The setup card leads with the copy it would save and one line saying what that changes, then
+  lists every change the coach found from your laps, grouped, with the reason under each.
 - The live cues move on. Once you've sent them, the coach keeps them up to date as you ride: it
   drops what you've taken and calls what's costing you time now, instead of repeating the same
   lap's calls every lap.
@@ -34,15 +53,6 @@
 - Where two tips want one setting opposite ways — sand wants a tooth more on the rear, the rev
   limiter a tooth less — the coach says so and leaves that setting to you, rather than listing
   it as a change it will make. Saving a setup now names the settings it changed.
-
-## 2026-09-15 — MXB Coach
-
-### Added
-- Settings shows which recorder the game actually ran. It appears after you've started MX Bikes
-  once with the recorder installed.
-- Speak the cues and the in-game HUD say which recorder they need when yours is older than that.
-
-### Changed
 - One session per event. Go out, come in and go out again, and it's all one session with every
   lap you rode: your best lap and your ideal lap count all of them, and each lap says which
   stint it came from.

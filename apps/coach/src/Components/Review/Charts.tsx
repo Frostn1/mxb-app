@@ -109,7 +109,9 @@ export default function Charts({
   const t = useT();
   const plot = useRef<HTMLDivElement>(null);
   // On its own there's no fast lap: its line, lane and the time against it all drop out.
-  const solo = review.solo;
+  // Nothing to draw beside this lap: reviewed on its own, or against the ideal lap, which is a
+  // time for each section and has no trace of its own.
+  const solo = review.solo || !review.traced;
   const ch = review.channels;
   const step = ch.step;
   const n = ch.delta.length;

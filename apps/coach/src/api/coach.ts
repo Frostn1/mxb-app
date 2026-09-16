@@ -63,12 +63,22 @@ export interface SessionSummary {
   stints: Stint[];
 }
 
+/** Where a reference lap came from: one of your own, one you imported from another rider, or
+ *  your ideal lap, which is a time per section and was never ridden whole. */
+export type RefKind = "own" | "imported" | "ideal";
+
+/** A lap somewhere on disk — or the ideal lap, which is nowhere: no file, no lap number. */
 export interface LapRef {
   path: string;
   lap: number;
   timeMs: number;
   started: string;
   bikeName: string;
+  /** The bike it was ridden on: a 250 and a 450 don't take a corner the same way. */
+  bikeId: string;
+  /** Whose lap it is, as the recorder saved it. */
+  rider: string;
+  kind: RefKind;
 }
 
 export interface SectionBest {
@@ -149,6 +159,9 @@ export interface Review {
   setup: Finding[];
   /** Reviewed on its own, with no faster lap to compare with. */
   solo: boolean;
+  /** There is a reference lap to draw: its traces are in `channels`, its line in `paths`.
+   *  False against the ideal lap, which nobody ever rode whole. */
+  traced: boolean;
   channels: Channels;
   /** Both laps' world x/z every `step` metres, with the bike's height at each point. */
   paths: { step: number; lap: [number, number][]; reference: [number, number][]; lapY: number[]; referenceY: number[] };
@@ -170,6 +183,8 @@ export interface ReviewOut {
   lap: LapRef;
   reference: LapRef;
   review: Review;
+  /** How many of your own laps the ideal lap was stitched from, when that's the reference. */
+  idealFrom: number | null;
   /** Other riders in the session worth comparing with. */
   rivals: Rival[];
 }
@@ -243,9 +258,28 @@ export const onSessionsChanged = (run: () => void): Promise<UnlistenFn> =>
 
 /** The whole session the recording belongs to: every stint of that event, with all its laps. */
 export const coachSession = (path: string) => invoke<SessionDetail>("coach_session", { path });
-/** `solo` reviews the lap on its own; so does the backend when there's nothing to compare with. */
-export const coachReview = (path: string, lap: number, refPath?: string, refLap?: number, solo?: boolean) =>
-  invoke<ReviewOut>("coach_review", { path, lap, refPath: refPath ?? null, refLap: refLap ?? null, solo: solo ?? false });
+/** What a lap is held against. Nothing given means the fastest lap on the track. */
+export interface RefArgs {
+  /** One particular lap: the recording it's in, and its number. An imported lap is one of these. */
+  refPath?: string;
+  refLap?: number;
+  /** Review it on its own, with nothing to compare with. */
+  solo?: boolean;
+  /** Your own best sections on this track, added up: the ideal lap. */
+  ideal?: boolean;
+}
+
+/** Reviews a lap against the reference asked for; the backend reviews it on its own when
+ *  there's nothing to compare with. */
+export const coachReview = (path: string, lap: number, ref: RefArgs = {}) =>
+  invoke<ReviewOut>("coach_review", {
+    path,
+    lap,
+    refPath: ref.refPath ?? null,
+    refLap: ref.refLap ?? null,
+    solo: ref.solo ?? false,
+    ideal: ref.ideal ?? false,
+  });
 export type SetupField =
   | "forkOffset"
   | "swingarmLength"
@@ -343,17 +377,59 @@ export interface CueOut {
 export interface CuesOut {
   file: string;
   cues: CueOut[];
+  /** The lap the in-game HUD's gap and ghost run against. It's the reference you picked
+   *  wherever somebody rode that lap; the ideal lap nobody did, so there the HUD races your
+   *  fastest lap on the track instead. */
+  ghost: LapRef;
 }
 
 /** Picks this lap's live cues for a rider's level and how much coaching they want, and writes
- *  them where the recorder reads them.
+ *  them — and the HUD sheet beside them — where the recorder reads them. The cues come from the
+ *  same reference the review is against.
  *
  *  The calls move on each time: what the last sheets said is remembered, so a cue the rider
  *  has been hearing for a few laps rests and whatever is costing time now takes its place.
  *  `latest` picks from the newest lap on this track and bike rather than the one on screen,
- *  which is what to ask for while the rider is still out. */
-export const coachWriteCues = (path: string, lap: number, level: CueLevel, amount: CueAmount, latest?: boolean) =>
-  invoke<CuesOut>("coach_write_cues", { path, lap, level, amount, latest: latest ?? false });
+ *  which is what to ask for while the rider is still out. The reference still applies: it is
+ *  the lap they chose to be held against, not the lap being reviewed. */
+export const coachWriteCues = (
+  path: string,
+  lap: number,
+  level: CueLevel,
+  amount: CueAmount,
+  ref: RefArgs = {},
+  latest?: boolean,
+) =>
+  invoke<CuesOut>("coach_write_cues", {
+    path,
+    lap,
+    level,
+    amount,
+    refPath: ref.refPath ?? null,
+    refLap: ref.refLap ?? null,
+    ideal: ref.ideal ?? false,
+    latest: latest ?? false,
+  });
+
+/** A recording that couldn't be imported, and why. */
+export interface Skipped {
+  file: string;
+  why: string;
+}
+
+export interface Imported {
+  /** How many recordings went in. */
+  added: number;
+  skipped: Skipped[];
+}
+
+/** Laps imported from other riders. They're kept apart from your own sessions, so they never
+ *  count towards your bests. */
+export const coachImports = () => invoke<SessionSummary[]>("coach_imports");
+/** Copies recordings in: the files picked, or every recording in a folder picked. */
+export const coachImportLaps = (paths: string[]) => invoke<Imported>("coach_import_laps", { paths });
+export const coachRemoveImport = (path: string) => invoke<void>("coach_remove_import", { path });
+
 /** Downloads the recorder, or copies it from `from`. Resolves to where it went. */
 export const installRecorder = (from?: string) =>
   invoke<string>("coach_install_plugin", { from: from ?? null });

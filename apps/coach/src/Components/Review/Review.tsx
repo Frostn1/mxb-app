@@ -4,64 +4,95 @@ import type { TrackOverview, TrackTerrain } from "@frost/shared/types";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@frost/shared/Components/ui/button";
 import { Segmented } from "@frost/shared/Components/ui/segmented";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@frost/shared/Components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@frost/shared/Components/ui/tabs";
 import { cn } from "@frost/shared/lib/utils";
 import { useT, type TKey } from "@/i18n";
 import {
   coachGround,
   coachLines,
   coachReview,
-  coachSessions,
   coachSurface,
   type Ground,
   type Lines,
   type ReviewOut,
   type Rival,
   type SectionReview,
-  type SessionSummary,
   type Surface,
   type Theme,
 } from "@/api/coach";
 import { gap, lapTime, lossColor, started } from "@/lib/format";
+import { ALONE, refArgs, rememberRef, rememberedRef, type Reference } from "@/lib/reference";
 import Page, { Label } from "../Page";
+import RefPicker, { ReferenceLine } from "./RefPicker";
 import TrackMap from "./TrackMap";
 import Track3D from "./Track3D";
 import SectionStrip from "./SectionStrip";
 import Charts from "./Charts";
 import SetupFixes, { Notes, Num } from "./SetupFixes";
 import LiveCues from "./LiveCues";
+import HudPanel from "./HudPanel";
+
+/** The page is a lot to take in at once, so it's split: the lap, the sections, the bike, what
+ *  the game shows, and the track itself. */
+const TABS = ["lap", "sections", "setup", "ingame", "track"] as const;
+type Tab = (typeof TABS)[number];
+const TAB_KEY = "coach-review-tab";
+
+function firstTab(): Tab {
+  try {
+    const v = localStorage.getItem(TAB_KEY);
+    return TABS.includes(v as Tab) ? (v as Tab) : "lap";
+  } catch {
+    return "lap";
+  }
+}
 
 /** One lap against the reference, or on its own: where the time went, and what to change. */
 export default function Review({
   path,
   lap,
+  trackId,
   solo: startAlone = false,
   onBack,
 }: {
   path: string;
   lap: number;
+  /** The track this lap is on. The reference is remembered per track. */
+  trackId: string;
   /** Start on its own rather than against the fast lap. */
   solo?: boolean;
   onBack: () => void;
 }) {
   const t = useT();
-  // What the lap is held against: the fastest on the track, nothing, or a lap picked by hand
-  // (`<session path>::<lap>`).
-  const [compare, setCompare] = useState<string>(startAlone ? "alone" : "best");
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  // What the lap is held against; see `lib/reference.ts`. Whatever the rider picked here last
+  // time on this track, so they don't pick it again every lap.
+  const [compare, setCompare] = useState<Reference>(() => (startAlone ? ALONE : rememberedRef(trackId)));
+  const pickRef = (v: Reference) => {
+    setCompare(v);
+    rememberRef(trackId, v);
+  };
   const [data, setData] = useState<ReviewOut | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [cursor, setCursor] = useState<number | null>(null);
   const [whole, setWhole] = useState(false);
   const [surface, setSurface] = useState<Surface | null>(null);
-  // Two separate choices: which lines are drawn, and whether it's drawn flat or in 3D.
+  const [tab, setTab] = useState<Tab>(firstTab);
+  // Which lines are drawn: this lap alone, or every lap in the session.
   const [laps, setLaps] = useState<"one" | "all">("one");
-  const [dim, setDim] = useState<"2d" | "3d">("2d");
   const [lines, setLines] = useState<Lines | null>(null);
   const [real, setReal] = useState<{ terrain: TrackTerrain; overview: TrackOverview | null; lift: number } | null>(null);
   const [ground, setGround] = useState<Ground | null>(null);
   const [why, setWhy] = useState<string | null>(null);
+
+  // The tab lasts the session, so flipping between laps doesn't send the rider back to the top.
+  useEffect(() => {
+    try {
+      localStorage.setItem(TAB_KEY, tab);
+    } catch {
+      /* no storage: the choice lasts this page */
+    }
+  }, [tab]);
 
   // The ground and the other laps are extras: the review stands without them. The track's
   // own terrain wins over the ground built from the laps, when it's there and lines up.
@@ -99,9 +130,7 @@ export default function Review({
   useEffect(() => {
     setData(null);
     setError(null);
-    const cut = compare.lastIndexOf("::");
-    const [refPath, refLap] = cut > 0 ? [compare.slice(0, cut), Number(compare.slice(cut + 2))] : [undefined, undefined];
-    coachReview(path, lap, refPath, refLap, compare === "alone")
+    coachReview(path, lap, refArgs(compare))
       .then((r) => {
         setData(r);
         setSelected(r.review.focus[0] ?? null);
@@ -109,17 +138,16 @@ export default function Review({
       .catch((e) => setError(String(e)));
   }, [path, lap, compare]);
 
-  // Every session, for the laps on this track the rider can pick to compare with.
-  useEffect(() => {
-    coachSessions().then(setSessions).catch(() => {});
-  }, []);
-
   const count = data?.review.sections.length ?? 0;
+  // Picking a section anywhere goes to the tab that shows it.
   const pick = (i: number) => {
     setSelected(i);
     setWhole(false);
+    setTab("sections");
   };
+  // The arrow keys walk the sections, but only where a section is on screen.
   useEffect(() => {
+    if (tab !== "sections" && tab !== "lap") return;
     const key = (e: KeyboardEvent) => {
       if (!count || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
       const d = e.key === "ArrowLeft" ? -1 : 1;
@@ -128,12 +156,19 @@ export default function Review({
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [count]);
+  }, [count, tab]);
 
   const back = t("review.back");
   if (error || !data) {
     return (
-      <Page title={t("review.title")} onBack={onBack} backLabel={back}>
+      // The picker is here too: a reference that can't be loaded — a recording deleted, an
+      // import removed — would otherwise leave the rider on an error with no way to change it.
+      <Page
+        title={t("review.title")}
+        onBack={onBack}
+        backLabel={back}
+        actions={<RefPicker trackId={trackId} path={path} lap={lap} bikeId="" value={compare} onChange={pickRef} />}
+      >
         <p className="text-[13px] text-muted-foreground">{error ?? t("common.loading")}</p>
       </Page>
     );
@@ -141,6 +176,9 @@ export default function Review({
 
   const { review, reference } = data;
   const solo = review.solo;
+  // The ideal lap has real section times and no line: nothing to draw the traces or the ghost
+  // against, so those are drawn the way they are for a lap reviewed on its own.
+  const noTrace = solo || !review.traced;
   const total = (data.lap.timeMs - reference.timeMs) / 1000;
   const sel = selected != null ? review.sections[selected] : null;
   // Where the time went first, then anything flagged that cost nothing, like a hard landing.
@@ -148,39 +186,7 @@ export default function Review({
     ...review.focus,
     ...review.sections.map((s, i) => (s.findings.length > 0 && !review.focus.includes(i) ? i : -1)).filter((i) => i >= 0),
   ];
-  const against = [
-    `${t("session.lap")} ${reference.lap + 1}`,
-    lapTime(reference.timeMs),
-    reference.path === path ? "" : started(reference.started),
-  ]
-    .filter(Boolean)
-    .join(" · ");
   const where = [data.trackName || data.trackId, started(data.lap.started), data.lap.bikeName].filter(Boolean).join(" · ");
-  // A session is every stint of one event, and each lap carries the recording it's in.
-  const stintStart = (s: SessionSummary, file: string) => s.stints.find((x) => x.path === file)?.started ?? s.started;
-  const mine = (s: SessionSummary) => s.stints.some((x) => x.path === path);
-  // The fastest lap and nothing, then every other whole lap on this track, this session first.
-  const choices = [
-    { value: "best", label: t("review.fastest") },
-    { value: "alone", label: t("review.alone") },
-    ...[...sessions]
-      .filter((s) => s.trackId === data.trackId)
-      .sort((a, b) => (mine(a) ? -1 : mine(b) ? 1 : 0))
-      .flatMap((s) =>
-        s.laps
-          .filter((l) => l.whole && !l.invalid && !(l.path === path && l.num === lap))
-          .map((l) => ({
-            value: `${l.path}::${l.num}`,
-            label: [
-              `${t("session.lap")} ${l.num + 1}`,
-              lapTime(l.timeMs),
-              l.path === path ? "" : started(stintStart(s, l.path)),
-            ]
-              .filter(Boolean)
-              .join(" · "),
-          })),
-      ),
-  ];
   // Every lap's line, fastest green to slowest red; this lap in blue on top.
   const others = (() => {
     if (laps !== "all" || !lines) return undefined;
@@ -196,6 +202,17 @@ export default function Review({
     const i = review.sections.findIndex((s) => s.name === name);
     if (i >= 0) pick(i);
   };
+  const allLaps = canAll && (
+    <Segmented
+      size="sm"
+      value={laps}
+      onChange={setLaps}
+      options={[
+        { value: "one", label: t("review.thisLap") },
+        { value: "all", label: t("review.viewLaps") },
+      ]}
+    />
+  );
 
   return (
     <Page
@@ -212,60 +229,85 @@ export default function Review({
                 <span style={{ color: lossColor(total) }} className="font-mono">
                   {gap(total)} s
                 </span>{" "}
-                {t("review.against")} {against}
+                {t("review.against")}{" "}
+                <ReferenceLine reference={reference} lapPath={path} lapBikeId={data.lap.bikeId} idealFrom={data.idealFrom} />
               </>
             )}
           </div>
+          {noTrace && !solo && <div className="mt-0.5 text-faint">{t("review.idealSub")}</div>}
         </>
       }
-      actions={
-        <div className="flex items-center gap-2">
-          <span className="text-[11.5px] text-muted-foreground">{t("review.compareWith")}</span>
-          <Select value={compare} onValueChange={setCompare}>
-            <SelectTrigger className="h-8 w-[260px] text-[12px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {choices.map((c) => (
-                <SelectItem key={c.value} value={c.value}>
-                  {c.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      }
+      actions={<RefPicker trackId={trackId} path={path} lap={lap} bikeId={data.lap.bikeId} value={compare} onChange={pickRef} />}
       onBack={onBack}
       backLabel={back}
     >
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
-        <div className="min-w-0 space-y-3">
-          <div className="relative h-[440px] border border-border bg-card">
-            <div className="absolute right-3 top-3 z-10 flex gap-2">
-              {canAll && (
-                <Segmented
-                  size="sm"
-                  value={laps}
-                  onChange={setLaps}
-                  options={[
-                    { value: "one", label: t("review.thisLap") },
-                    { value: "all", label: t("review.viewLaps") },
-                  ]}
-                />
-              )}
-              {can3d && (
-                <Segmented
-                  size="sm"
-                  value={dim}
-                  onChange={setDim}
-                  options={[
-                    { value: "2d", label: t("review.view2d") },
-                    { value: "3d", label: t("review.view3d") },
-                  ]}
-                />
+      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+        <TabsList className="mb-4">
+          {TABS.map((id) => (
+            <TabsTrigger key={id} value={id} className="px-3.5 py-1.5">
+              {t(`review.tab.${id}` as TKey)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        {/* The lap end to end: where the time went, and the charts behind it. */}
+        <TabsContent value="lap" className="space-y-4">
+          <div>
+            <SectionStrip review={review} selected={selected} onPick={pick} />
+            <p className="mt-2 text-[11.5px] text-faint">{t("review.strip")}</p>
+          </div>
+          <div className="border border-border bg-card">
+            <Charts review={review} selected={selected} whole={whole} onWhole={setWhole} cursor={cursor} onCursor={setCursor} />
+          </div>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Overall themes={review.overall} solo={solo} onPick={bySection} />
+            <Focus review={review} worth={worth} selected={selected} solo={solo} onPick={pick} />
+          </div>
+        </TabsContent>
+
+        {/* One section at a time, with the map to find it on. */}
+        <TabsContent value="sections" className="space-y-4">
+          <SectionStrip review={review} selected={selected} onPick={pick} />
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+            <div className="relative h-[460px] border border-border bg-card">
+              {allLaps && <div className="absolute right-3 top-3 z-10">{allLaps}</div>}
+              <div className="h-full p-3">
+                <TrackMap review={review} surface={relief} others={others} selected={selected} cursor={cursor} onPick={pick} solo={noTrace} />
+              </div>
+              {laps === "all" && (
+                <p className="pointer-events-none absolute bottom-2 left-3 text-[11px] text-muted-foreground">{t("review.lapsLegend")}</p>
               )}
             </div>
-            {dim === "3d" && can3d ? (
+            {sel && selected != null && (
+              <SectionPanel
+                key={sel.name}
+                s={sel}
+                solo={solo}
+                onPrev={() => pick((selected - 1 + count) % count)}
+                onNext={() => pick((selected + 1) % count)}
+              />
+            )}
+          </div>
+        </TabsContent>
+
+        {/* The bike: what it would change, and how it feels. */}
+        <TabsContent value="setup">
+          <SetupFixes path={path} findings={review.setup} />
+        </TabsContent>
+
+        {/* What the rider gets while riding. */}
+        <TabsContent value="ingame">
+          <div className="grid gap-6 lg:grid-cols-2">
+            <LiveCues path={path} lap={lap} reference={compare} />
+            <HudPanel />
+          </div>
+        </TabsContent>
+
+        {/* The track itself, with the lap on it. */}
+        <TabsContent value="track" className="space-y-4">
+          {can3d ? (
+            <div className="relative h-[520px] border border-border bg-card">
+              {allLaps && <div className="absolute right-3 top-3 z-10">{allLaps}</div>}
               <Track3D
                 review={review}
                 ground={ground}
@@ -277,94 +319,88 @@ export default function Review({
                 selected={selected}
                 className="h-full w-full"
               />
-            ) : (
-              <div className="h-full p-3">
-                <TrackMap review={review} surface={relief} others={others} selected={selected} cursor={cursor} onPick={pick} solo={solo} />
-              </div>
-            )}
-            {laps === "all" && dim === "2d" && (
-              <p className="pointer-events-none absolute bottom-2 left-3 text-[11px] text-muted-foreground">{t("review.lapsLegend")}</p>
-            )}
-          </div>
-          <SectionStrip review={review} selected={selected} onPick={pick} />
-          <p className="text-[11.5px] text-faint">{t("review.strip")}</p>
-          <div className="mt-3 border border-border bg-card">
-            <Charts review={review} selected={selected} whole={whole} onWhole={setWhole} cursor={cursor} onCursor={setCursor} />
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <Overall themes={review.overall} solo={solo} onPick={bySection} />
-
-          {sel && selected != null && (
-            <SectionPanel
-              key={sel.name}
-              s={sel}
-              solo={solo}
-              onPrev={() => pick((selected - 1 + count) % count)}
-              onNext={() => pick((selected + 1) % count)}
-            />
+            </div>
+          ) : (
+            <p className="border border-border bg-card px-4 py-3 text-[12.5px] text-muted-foreground">
+              {`${t("review.groundFromLaps")}${why ? ` ${why}.` : ""}`}
+            </p>
           )}
-
-          <SetupFixes path={path} findings={review.setup} />
-          <LiveCues path={path} lap={lap} />
-          <Rivals rivals={data?.rivals ?? []} />
-
-          <div>
-            <Label>{t("review.focus")}</Label>
-            {worth.length === 0 ? (
-              <p className="border border-border px-4 py-3 text-[12.5px] text-muted-foreground">{t("review.nothing")}</p>
-            ) : (
-              <div className="space-y-1">
-                {worth.map((i, k) => {
-                  const s = review.sections[i];
-                  return (
+          <div className="grid gap-6 lg:grid-cols-2">
+            {lines && lines.notes.length > 0 && (
+              <div>
+                <Label>{t("review.linesTitle")}</Label>
+                <div className="space-y-1">
+                  {lines.notes.map((n, k) => (
                     <button
-                      key={i}
-                      onClick={() => pick(i)}
+                      key={k}
+                      onClick={() => bySection(n.name)}
                       className={cn(
-                        "flex w-full items-center gap-3 border bg-card px-3 py-2 text-left",
-                        selected === i ? "border-primary/60" : "border-border hover:border-foreground/30",
+                        "w-full border bg-card px-4 py-3 text-left",
+                        sel?.name === n.name ? "border-primary/60" : "border-border hover:border-foreground/30",
                       )}
                     >
-                      <span className="font-mono text-[11px] text-faint">{k + 1}</span>
-                      <span className="w-20 shrink-0 text-[12.5px] font-semibold">{s.name}</span>
-                      <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">{s.findings[0]?.title}</span>
-                      {!solo && (
-                        <span className="font-mono text-[12px] tabular-nums" style={{ color: lossColor(s.lost) }}>
-                          {gap(s.lost)}
-                        </span>
-                      )}
+                      <div className="text-[13px] font-semibold">{n.title}</div>
+                      <div className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{n.detail}</div>
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
             )}
+            <Rivals rivals={data.rivals ?? []} />
           </div>
-
-          {lines && lines.notes.length > 0 && (
-            <div>
-              <Label>{t("review.linesTitle")}</Label>
-              <div className="space-y-1">
-                {lines.notes.map((n, k) => (
-                  <button
-                    key={k}
-                    onClick={() => bySection(n.name)}
-                    className={cn(
-                      "w-full border bg-card px-4 py-3 text-left",
-                      sel?.name === n.name ? "border-primary/60" : "border-border hover:border-foreground/30",
-                    )}
-                  >
-                    <div className="text-[13px] font-semibold">{n.title}</div>
-                    <div className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{n.detail}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+        </TabsContent>
+      </Tabs>
     </Page>
+  );
+}
+
+/** Where the time went first, then anything flagged that cost nothing. */
+function Focus({
+  review,
+  worth,
+  selected,
+  solo,
+  onPick,
+}: {
+  review: ReviewOut["review"];
+  worth: number[];
+  selected: number | null;
+  solo: boolean;
+  onPick: (i: number) => void;
+}) {
+  const t = useT();
+  return (
+    <div>
+      <Label>{t("review.focus")}</Label>
+      {worth.length === 0 ? (
+        <p className="border border-border px-4 py-3 text-[12.5px] text-muted-foreground">{t("review.nothing")}</p>
+      ) : (
+        <div className="space-y-1">
+          {worth.map((i, k) => {
+            const s = review.sections[i];
+            return (
+              <button
+                key={i}
+                onClick={() => onPick(i)}
+                className={cn(
+                  "flex w-full items-center gap-3 border bg-card px-3 py-2 text-left",
+                  selected === i ? "border-primary/60" : "border-border hover:border-foreground/30",
+                )}
+              >
+                <span className="font-mono text-[11px] text-faint">{k + 1}</span>
+                <span className="w-20 shrink-0 text-[12.5px] font-semibold">{s.name}</span>
+                <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">{s.findings[0]?.title}</span>
+                {!solo && (
+                  <span className="font-mono text-[12px] tabular-nums" style={{ color: lossColor(s.lost) }}>
+                    {gap(s.lost)}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
