@@ -50,6 +50,7 @@ import { cn } from "@frost/shared/lib/utils";
 import {
   blankTrackProgram,
   randomTrackProgram,
+  DENSITY_RANGE,
   closeTrackLap,
   fitTrackBudget,
   checkTrack,
@@ -185,6 +186,9 @@ export default function TrackStudio() {
   }));
   // Motocross, supercross or SuperMotocross: which walker draws the lap, and what it is held to.
   const [discipline, setDiscipline] = useState<Discipline>("mx");
+  // How packed the next random lap is. Starts where a real round sits, so the rider has to
+  // ask for something other than the real thing rather than ask for the real thing.
+  const [density, setDensity] = useState<number>(DENSITY_RANGE.reference);
   const disciplines = (["mx", "sx", "smx"] as const).map((value) => ({
     value,
     label: t(`track.discipline.${value}`),
@@ -195,7 +199,7 @@ export default function TrackStudio() {
     value,
     label: t(`track.tuff.${value}`),
   }));
-  const randomAtScale = () => randomTrackProgram(undefined, scale, discipline);
+  const randomAtScale = () => randomTrackProgram(undefined, scale, discipline, density);
   const rebuild = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tools, setTools] = useState<TrackToolsStatus | null>(null);
 
@@ -870,6 +874,9 @@ export default function TrackStudio() {
                   value={discipline}
                   onChange={setDiscipline}
                 />
+                {discipline !== "mx" && (
+                  <DensitySlider value={density} onChange={setDensity} />
+                )}
               </div>
               <span aria-hidden className="text-faint">
                 ·
@@ -1606,6 +1613,9 @@ export default function TrackStudio() {
                       value={discipline}
                       onChange={setDiscipline}
                     />
+                    {discipline !== "mx" && (
+                      <DensitySlider value={density} onChange={setDensity} />
+                    )}
                   </div>
                   <button
                     onClick={() => void onLoad(blankTrackProgram)}
@@ -2076,6 +2086,38 @@ function Stat({ value, unit, label }: { value: string; unit?: string; label: str
         {label}
       </div>
     </div>
+  );
+}
+
+/**
+ * How packed the lap is, for the disciplines that are built lane by lane.
+ *
+ * A stadium lap is drawn section by section, so this says how much of each lane carries jumps
+ * — the middle of the slider is what a real round measures. A national spaces its jumps by a
+ * different rule and never reads it, so it only appears where it does something.
+ */
+function DensitySlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const t = useT();
+  const span = DENSITY_RANGE.max - DENSITY_RANGE.min;
+  const word = value < 0.9 ? "sparse" : value > 1.1 ? "packed" : "real";
+  return (
+    <label className="flex items-center gap-2">
+      <span className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+        {t("track.density")}
+      </span>
+      <input
+        type="range"
+        min={DENSITY_RANGE.min}
+        max={DENSITY_RANGE.max}
+        step={DENSITY_RANGE.step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ ["--fill" as string]: `${((value - DENSITY_RANGE.min) / span) * 100}%` }}
+        className="w-[104px]"
+        aria-label={t("track.density")}
+      />
+      <span className="w-[52px] text-[11px] text-faint">{t(`track.density.${word}`)}</span>
+    </label>
   );
 }
 

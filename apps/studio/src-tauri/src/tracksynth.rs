@@ -3333,6 +3333,18 @@ fn resample(st: &[Station], vals: &[f32], lap: f32) -> Profile {
 /// Height added by everything built on the line, along the lap.
 fn feature_profile(features: &[Feature], lap: f32, blend: f32, restore_drawn: bool) -> Profile {
     let mut out = Profile::blank(lap);
+    // A drawn run of hills: built as one shape with the ground coming back to grade between
+    // its hills, so it is neither dug a hollow nor rounded off the way a single jump is.
+    //
+    // Gated on `restore_drawn` for the same reason the restore below is: motocross draws its
+    // wave sections as one `Custom` of five to seven humps, which clears the four-lip bar.
+    // Ungated, this stopped digging a national's waves a hollow and moved Northgate's ground
+    // in 49,619 cells — measured, not guessed at.
+    let drawn_run = |f: &Feature| match f {
+        Feature::Whoops { .. } => true,
+        Feature::Custom { .. } => restore_drawn && f.lips() >= 4,
+        _ => false,
+    };
     for f in features {
         if matches!(f, Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Sand { .. }) {
             continue;
@@ -3365,12 +3377,12 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32, restore_drawn: bo
                 | Feature::Berm { .. }
                 | Feature::Rut { .. }
                 | Feature::Sand { .. }
-                // A whoop set is not a jump dug out of the ground. Measured on all seven
-                // rounds a real set's troughs sit at grade and its crests stand 0.55 m over
-                // the floor beside them; given a hollow at each end the whole section stands
-                // on a pad and its crests read 0.87 m, half again what a supercross whoop is.
-                | Feature::Whoops { .. }
-        ) {
+        ) || drawn_run(f)
+        {
+            // A run of hills is not a jump dug out of the ground. Measured on all seven rounds
+            // a real one's troughs sit at grade, 0.01–0.03 m off the floor beside them; given a
+            // hollow at each end the whole run stands proud of that floor, its troughs never
+            // come back down, and neighbouring hills merge into one stretch of raised ground.
             continue;
         }
         let h = f.height().abs();
@@ -3409,7 +3421,7 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32, restore_drawn: bo
     // the same pad. Eased back in rather than cut off, so the ground still meets the hollow
     // either side of the set without a step at the entry.
     for f in features {
-        if !matches!(f, Feature::Whoops { .. }) {
+        if !drawn_run(f) {
             continue;
         }
         let (at, len) = (f.at(), f.length());
@@ -3475,17 +3487,7 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32, restore_drawn: bo
         // of five or six at a ten-metre pitch loses a tenth of its height to the same filter,
         // and the hills are the whole of what a rhythm lane is. Three crests is a triple,
         // whose dips *should* be rounded, so the bar sits above it.
-        let drawn = match f {
-            // A whoop set is a whoop set whoever drew it: the blend takes a third off every
-            // crest, and that is the whole reason this restore exists.
-            Feature::Whoops { .. } => true,
-            // A drawn run of hills, but only where lanes abut. Motocross draws its wave
-            // sections as one `Custom` of five to seven humps, which clears the four-lip bar,
-            // and restoring those would stand every national's waves taller than the laps the
-            // rider has already signed off were built with.
-            Feature::Custom { .. } => restore_drawn && f.lips() >= 4,
-            _ => false,
-        };
+        let drawn = drawn_run(f);
         if !drawn {
             continue;
         }
@@ -8623,7 +8625,7 @@ fn start_tcl(prog: &TrackProgram) -> Option<String> {
 /// the code that made it. Bump it with every change to what a program builds into: minor for
 /// a new feature, patch for a fix. 0.x until the generator is finished. History in
 /// `apps/studio/FROST_ALGORITHM.md`.
-pub const FROST_ALGORITHM_VERSION: &str = "0.36.0";
+pub const FROST_ALGORITHM_VERSION: &str = "0.38.0";
 
 /// The stamp every built track carries in `<slug>/frost-algorithm.ini`.
 ///

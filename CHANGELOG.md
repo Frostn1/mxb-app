@@ -90,6 +90,15 @@
   behind it.
 - Tuff blocks line the lane borders. Choose soft ones you ride through or solid ones you don't,
   per track, in Track Studio.
+- SX and SMX laps carry as much as a real round does. A lane used to get one set of jumps and
+  then a long run of flat ground to the next corner. Now the rest of the lane gets jumps too,
+  so there is something to ride the whole way down it.
+- How packed the lap is, in Track Studio: a slider from sparse to packed, sitting by default
+  where a real round sits. It shows for SX and SMX, which are the ones it changes.
+- The ground comes back down between jumps. A row of hills used to sit on a shelf, so the dips
+  never reached the ground either side and it rode as one long wave instead of a row of lips you
+  pick a line through. Now each hill lands back at grade, and the hills stand as tall as the ones
+  on a real round.
 
 ### Changed
 - The Studio reports anonymous usage from the same fixed list of names as the app, for the same
