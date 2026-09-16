@@ -2018,6 +2018,21 @@ fn section_features(
     let (mut rhythms, mut doubles) = (count_in(rng, sec.rhythm_lanes), count_in(rng, sec.doubles));
     let (mut tables, mut sands) = (count_in(rng, sec.tables), count_in(rng, sec.sand_sections));
 
+    // What the brief asked for, over what the seed rolled. Both are the settings path only —
+    // a random lap arrives with `waves` at its ceiling and `surface` at the discipline's own
+    // ground, so neither of these moves it.
+    //
+    // The roll stays the roll either way: a cap and a floor, not a count. A brief that says
+    // nothing about whoops leaves `waves` at 2, which is already the top of the measured
+    // band, and the seed draws what it always drew.
+    whoops = whoops.min(knobs.waves as i32);
+    // And sand asked for is sand built. The corpus rolls it — Racer X puts sand in about half
+    // the rounds, which is what `sand_sections` (0, 1) says — but "a sandy supercross" is not
+    // a brief the coin should get to refuse.
+    if knobs.surface == Some(Surface::Sand) {
+        sands = sands.max(1);
+    }
+
     // What the lap should carry, in lips. `density` is the slider: 1.0 is the corpus.
     //
     // This steers which section a lane gets rather than how a section is shaped. A lane is
@@ -2600,9 +2615,14 @@ pub struct TrackSettings {
     pub landforms: u32,
     /// 0–4 long straights that climb or drop.
     pub elevation_changes: u32,
-    /// Set by the app from the discipline switch, never by the model. `None` is motocross.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub discipline: Option<Discipline>,
+    /// Motocross, supercross or SuperMotocross.
+    ///
+    /// The model's to pick, from what the brief asks for — "a supercross round" is a thing
+    /// somebody writes and it used to come back as a national. The switch on screen still
+    /// wins when it is set to something: an explicit choice is not a brief's to overrule.
+    /// Missing reads as motocross, so an older answer still parses.
+    #[serde(default)]
+    pub discipline: Discipline,
 }
 
 impl Default for TrackSettings {
@@ -2628,7 +2648,7 @@ impl Default for TrackSettings {
             tilt: 11.0,
             landforms: 3,
             elevation_changes: 2,
-            discipline: None,
+            discipline: Discipline::Mx,
         }
     }
 }
@@ -2782,7 +2802,7 @@ impl LayoutKnobs {
         let some = |t: &str| (!t.is_empty()).then(|| t.to_string());
         // Another discipline keeps its own lap, width and ground, which the settings' ranges
         // are motocross's for. The brief still sets what is built on it and the name.
-        if let Some(d) = s.discipline.filter(|d| !d.is_mx()) {
+        if !s.discipline.is_mx() {
             return LayoutKnobs {
                 picks,
                 jump_scale: s.jump_scale,
@@ -2794,7 +2814,7 @@ impl LayoutKnobs {
                 wear: Some(s.wear),
                 roughness: Some(s.roughness),
                 density: density_of(s.jump_density),
-                ..LayoutKnobs::for_discipline(d)
+                ..LayoutKnobs::for_discipline(s.discipline)
             };
         }
         LayoutKnobs {
@@ -3523,7 +3543,7 @@ mod tests {
             tilt: 0.0,
             landforms: 0,
             elevation_changes: 0,
-            discipline: None,
+            discipline: Discipline::Mx,
         }
     }
 
@@ -3549,7 +3569,7 @@ mod tests {
             tilt: 25.0,
             landforms: 5,
             elevation_changes: 4,
-            discipline: None,
+            discipline: Discipline::Mx,
         }
     }
 
@@ -3912,8 +3932,9 @@ mod tests {
         assert!((10..=40).contains(&along_x), "{along_x} of 50 laps run along x");
     }
 
-    /// A discipline is written only when it isn't motocross, and read back as written; a
-    /// program or settings without one is motocross.
+    /// A *program's* discipline is written only when it isn't motocross, and read back as
+    /// written; a program without one is motocross. Settings always write theirs, because
+    /// the model is asked for it and a field the model must fill has to be in the schema.
     #[test]
     fn the_discipline_round_trips() {
         let p = sx(1).expect("an SX lap");
@@ -3927,12 +3948,17 @@ mod tests {
         assert!(v.get("discipline").is_none(), "MX writes no discipline");
         assert_eq!(serde_json::from_value::<TrackProgram>(v).unwrap().discipline, Discipline::Mx);
 
-        let s = TrackSettings { discipline: Some(Discipline::Smx), ..TrackSettings::default() };
+        let s = TrackSettings { discipline: Discipline::Smx, ..TrackSettings::default() };
         let v = serde_json::to_value(&s).unwrap();
         assert_eq!(v["discipline"], "smx");
         assert_eq!(serde_json::from_value::<TrackSettings>(v).unwrap(), s);
         let plain = serde_json::to_value(TrackSettings::default()).unwrap();
-        assert!(plain.get("discipline").is_none());
+        assert_eq!(plain["discipline"], "mx");
+        // And an answer from before the field existed still parses, as motocross.
+        let mut older = plain.as_object().unwrap().clone();
+        older.remove("discipline");
+        let read: TrackSettings = serde_json::from_value(older.into()).unwrap();
+        assert_eq!(read.discipline, Discipline::Mx);
     }
 
     /// Settings for another discipline draw that discipline's lap, with the brief's character.
@@ -3941,7 +3967,7 @@ mod tests {
         let s = TrackSettings {
             name: "Stadium".into(),
             surface: Surface::Sand,
-            discipline: Some(Discipline::Sx),
+            discipline: Discipline::Sx,
             ..TrackSettings::default()
         };
         let knobs = LayoutKnobs::from_settings(&s);

@@ -880,6 +880,39 @@ pub async fn ask_settings(brief: &str, ask: &impl Ask) -> Result<TrackSettings> 
     bail!("the model's settings didn't parse twice; last time: {last}")
 }
 
+/// Whether a brief asks for a stadium discipline, near enough to route on.
+///
+/// Which protocol to ask is decided before anything is asked, and it cannot be the model's
+/// call because the model has not been asked yet. It is also not a *judgement*: a supercross
+/// lap is laid out by `tracklayout`'s own stadium walker, and a model writing segments one at
+/// a time has no way to build one. So a brief that names a stadium discipline is asked for
+/// settings, whatever model is configured, and the model still says which discipline it
+/// really is.
+///
+/// Deliberately only the discipline's own names — nothing about jumps, rhythm or whoops,
+/// which an outdoor national has too. It is allowed to be wrong in one direction: a brief
+/// that says "supercross-style outdoor track" routes here, comes back `mx`, and is drawn by
+/// the walker rather than written by the model. That is the path most models take anyway and
+/// it measures against the same corpus. Wrong the other way — a supercross brief reaching the
+/// program path — cannot produce a supercross at all, which is the fault this exists to stop.
+pub fn brief_names_a_stadium(brief: &str) -> bool {
+    let lower = brief.to_lowercase();
+    // Spelt-out names, which can sit inside a longer word ("supercross-style").
+    const SPELT: [&str; 6] = [
+        "supercross", "super cross", "supermotocross", "super motocross", "arenacross",
+        "arena cross",
+    ];
+    if SPELT.iter().any(|w| lower.contains(w)) {
+        return true;
+    }
+    // And the short ones, which have to be words of their own: "sx" is inside "ASX" and
+    // "sxs", and "indoor" is not a word anybody uses about a field.
+    const WORDS: [&str; 5] = ["sx", "smx", "stadium", "indoor", "indoors"];
+    lower
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|w| WORDS.contains(&w))
+}
+
 /// Draw a lap from settings, with the walker rather than the model.
 ///
 /// Settings at their extremes draw less often, so a lap that won't come on any of 24 seeds is
@@ -1546,18 +1579,40 @@ mod tests {
         assert_eq!(written, props(feature));
     }
 
-    /// The model's schema has no discipline: it is the switch on screen, not the model's to
-    /// write. So a motocross program is the schema exactly, and any other adds that one key.
+    /// The discipline is in one of the two schemas and not the other, on purpose.
+    ///
+    /// It used to be in neither: it was the switch on screen, so a brief could not ask for a
+    /// supercross round at all. It is a *settings* field now — the model reads the brief and
+    /// says which kind of racing it is, and `tracklayout` draws that discipline's lap.
+    ///
+    /// It is still not a **program** field, and that is not an oversight either. A program is
+    /// the lap itself, segment by segment, and a stadium lap is laid out by `walk_stadium`
+    /// from a measured floor: a model writing segments cannot build one, and a program tagged
+    /// `sx` would then be measured against supercross's review bands it never aimed at. So a
+    /// motocross program is the program schema exactly, and a walked SX lap adds that one key
+    /// on the way out.
     #[test]
-    fn a_discipline_is_the_one_key_past_the_schema() {
-        let schema = Protocol::Program.schema();
+    fn a_discipline_is_the_settings_schemas_and_not_the_programs() {
+        let program = Protocol::Program.schema();
+        assert!(program["properties"].get("discipline").is_none(), "the model does not draw a stadium");
         let knobs = LayoutKnobs::for_discipline(crate::trackprog::Discipline::Sx);
         let sx = (0..8u64).find_map(|n| draw_with(n, &knobs)).expect("an SX lap");
-        let mut want = props(&schema);
+        let mut want = props(&program);
         want.insert("discipline".into());
         assert_eq!(keys(&serde_json::to_value(&sx).unwrap()), want);
         let mx: TrackProgram = serde_json::from_str(EXAMPLE).unwrap();
-        assert_eq!(keys(&serde_json::to_value(&mx).unwrap()), props(&schema));
+        assert_eq!(keys(&serde_json::to_value(&mx).unwrap()), props(&program));
+
+        // And the settings schema names every one of them, spelt the way serde reads them.
+        let settings = Protocol::Settings.schema();
+        let values = settings["properties"]["discipline"]["enum"].as_array().unwrap();
+        let read: Vec<crate::trackprog::Discipline> = values
+            .iter()
+            .map(|d| serde_json::from_value(d.clone()).expect("a discipline the app knows"))
+            .collect();
+        use crate::trackprog::Discipline::{Mx, Smx, Sx};
+        assert_eq!(read, vec![Mx, Sx, Smx]);
+        assert!(settings["required"].as_array().unwrap().iter().any(|r| r == "discipline"));
     }
 
     #[test]
@@ -1565,8 +1620,118 @@ mod tests {
         let schema = Protocol::Settings.schema();
         let v = serde_json::to_value(TrackSettings::default()).unwrap();
         assert_eq!(keys(&v), props(&schema));
+        // Every required name is one serde writes, and every name serde writes is required:
+        // an optional field is an alternative in the compiled grammar, and this schema has
+        // never had one. See `control-plane/src/trackgen.ts`.
+        let required: std::collections::BTreeSet<String> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(required, keys(&v));
         for surface in schema["properties"]["surface"]["enum"].as_array().unwrap() {
             serde_json::from_value::<crate::trackprog::Surface>(surface.clone()).unwrap();
+        }
+    }
+
+    /// The settings schema is small enough that its enums cost nothing: what the grammar
+    /// charges for is alternatives, and this one has no optional field and no union in it.
+    /// Two `enum`s of three values apiece is the whole of it.
+    #[test]
+    fn the_settings_schema_has_no_unions_in_it() {
+        let text = serde_json::to_string(&Protocol::Settings.schema()).unwrap();
+        for costly in ["anyOf", "oneOf", "allOf", "null"] {
+            assert!(!text.contains(costly), "the settings schema grew a {costly}");
+        }
+    }
+
+    /// A brief that names a stadium discipline is asked for settings; one that merely sounds
+    /// jumpy is not. See `brief_names_a_stadium` for why the line is drawn there.
+    #[test]
+    fn a_stadium_brief_is_read_off_the_words_it_uses() {
+        for yes in [
+            "a supercross round in a stadium",
+            "Supercross, Anaheim 1",
+            "an SX track",
+            "SMX playoff round",
+            "a SuperMotocross lap",
+            "arenacross, tight and indoors",
+            "an indoor track",
+            "supercross-style, built as a real SX round",
+        ] {
+            assert!(brief_names_a_stadium(yes), "{yes:?} names a stadium");
+        }
+        for no in [
+            "a sandy national",
+            "a jumpy rhythm track with whoops",
+            "a hillside track like Millville",
+            "a fast flowing grasstrack",
+            // Not a word of its own, so it is not the discipline.
+            "the ASX circuit at Essex",
+        ] {
+            assert!(!brief_names_a_stadium(no), "{no:?} is not a stadium");
+        }
+    }
+
+    /// The brief's own discipline draws that discipline's lap, without the switch on screen.
+    #[test]
+    fn a_brief_can_ask_for_a_supercross() {
+        use crate::trackprog::Discipline;
+        let picked = TrackSettings { discipline: Discipline::Sx, ..TrackSettings::default() };
+        let answer = serde_json::to_string(&picked).unwrap();
+        // The model's whole answer, through the loop the app runs.
+        let got = block_on(ask_settings("a supercross round", &Canned::new(&[&answer]))).unwrap();
+        assert_eq!(got.discipline, Discipline::Sx);
+        let prog = draw_from_settings(&got, 7).unwrap();
+        assert_eq!(prog.discipline, Discipline::Sx);
+        let r = review(&prog);
+        assert!(r.fatal.is_empty() && r.problems.is_empty(), "{:?} {:?}", r.fatal, r.problems);
+        // And it is a stadium lap, not a national drawn short.
+        let sx = crate::tracklayout::SX_RULES;
+        assert!((sx.lap_m.0..=sx.lap_m.1).contains(&prog.lap_length()), "{}", prog.lap_length());
+    }
+
+    /// The stadium words a brief uses reach the lap: whoops asked for or left out, and sand
+    /// laid rather than rolled for.
+    #[test]
+    fn the_stadium_vocabulary_moves_the_lap() {
+        use crate::trackprog::{Discipline, Feature, Surface};
+        let sx = |f: fn(&mut TrackSettings)| {
+            let mut s = TrackSettings { discipline: Discipline::Sx, ..TrackSettings::default() };
+            f(&mut s);
+            let knobs = LayoutKnobs::from_settings(&s);
+            (0..24u64)
+                .filter_map(|n| draw_with(n, &knobs))
+                .take(8)
+                .collect::<Vec<_>>()
+        };
+
+        // "No whoops in it": the set the seed rolled is not built.
+        let none = sx(|s| s.waves = 0);
+        assert!(!none.is_empty(), "no SX laps drew");
+        for p in &none {
+            assert!(
+                !p.features.iter().any(|f| matches!(f, Feature::Whoops { .. })),
+                "{} kept a whoops set with waves 0",
+                p.name
+            );
+        }
+        // And left alone it still builds them — otherwise the check above proves nothing.
+        let some = sx(|_| {});
+        assert!(
+            some.iter().any(|p| p.features.iter().any(|f| matches!(f, Feature::Whoops { .. }))),
+            "no supercross lap built whoops at all"
+        );
+
+        // "A sandy supercross": sand every time, not the corpus's coin flip.
+        let sandy = sx(|s| s.surface = Surface::Sand);
+        for p in &sandy {
+            assert!(
+                p.features.iter().any(|f| matches!(f, Feature::Sand { .. })),
+                "{} was asked for sand and has none",
+                p.name
+            );
         }
     }
 

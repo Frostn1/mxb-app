@@ -301,6 +301,10 @@ async fn generate_track(
         _ if !discipline.is_mx() => true,
         Some("settings") => true,
         Some("program") => false,
+        // And the switch left where it starts does not mean the brief wants a national: a
+        // brief that asks for a stadium round is asked for settings too, because only the
+        // walker builds one. See `trackllm::brief_names_a_stadium`.
+        _ if trackllm::brief_names_a_stadium(brief.trim()) => true,
         // Ours is Claude and writes the lap. One of the user's own is trusted with it only
         // when it is an Anthropic model too; everything else is asked for the character.
         _ => own.as_ref().is_some_and(|m| m.kind != trackmodel::Kind::Anthropic),
@@ -349,9 +353,11 @@ async fn generate_with(
         return Ok(Generated { program, settings: None });
     }
     let mut settings = trackllm::ask_settings(brief, ask).await?;
-    // Not the model's to pick: it is the switch on screen.
+    // The switch on screen is an explicit choice and wins. Left where it starts — motocross,
+    // which is also what somebody who never touched it has — the brief gets to ask, and a
+    // brief that says "a supercross round" comes back `sx`.
     if !discipline.is_mx() {
-        settings.discipline = Some(discipline);
+        settings.discipline = discipline;
     }
     let seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
