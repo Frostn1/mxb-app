@@ -491,6 +491,34 @@ track, so it is on you.
 The simplest way to honour all of this is a line in your track's readme naming the source of
 the elevation and the imagery. Copy the strings out of `place.json`; they are exact.
 
+### If you go and fetch data yourself, read the licence rather than the licence field
+
+Three things worth knowing, all found the hard way while checking these sources.
+
+**A machine-readable licence field can be wrong.** Switzerland's catalogue reports its
+elevation and imagery as `"license": "proprietary"`. That is not the position: swisstopo's
+own terms allow use, redistribution, modification and commercial use, asking only for a
+source credit of `©swisstopo`. If you write anything that checks a licence field
+automatically, it will refuse Switzerland incorrectly.
+
+**"Free" does not always mean "do what you like".** Poland's imagery service says its use is
+unrestricted *with the exception of automated downloading and collecting of images*. A single
+fetch when somebody presses a button is fine. A crawler, or anything that pre-fetches tiles
+in the background, is expressly excluded. Their elevation service carries no such wording.
+This is a good example of why the rule in this app is that nothing is ever fetched except on
+a click.
+
+**Some obligations are more specific than "credit the source".** Mecklenburg-Vorpommern
+requires its notice to be *deutlich sichtbar*, clearly visible, and to carry the year.
+Brandenburg publishes the exact string to use and asks you to mark the data as modified.
+Navarra requires one specific Spanish sentence. Where a source gives you the wording, use
+their wording rather than your own translation of it.
+
+And two where nobody could find a first-party statement at all: **Czechia** and **Norway**
+both appear to be openly licensed from catalogue entries and general terms pages, but neither
+publishes a licence on the service itself. Both are almost certainly fine. Neither is
+verified. If you are about to release something built on either, check first.
+
 Two things that are never acceptable, regardless of how the question is phrased:
 
 - **Google, Apple and Bing imagery or elevation.** Not for tracing, not for reference, not
