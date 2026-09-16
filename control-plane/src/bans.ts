@@ -106,8 +106,24 @@ export const BANNED = "this install is banned from mxbsecure";
 export const APP_BLOCK_MESSAGE =
   "This copy couldn't be verified. It may be out of date or damaged — reinstall the latest version from mxbsecure.com.";
 
-/** The gate verdict the desktop apps read: `ok` runs, `unsupported` refuses (a benign word). */
-export type AppGate = { status: "ok" } | { status: "unsupported"; message: string };
+/**
+ * What the app is told when a deployment requires a Steam sign-in and this install has none.
+ *
+ * Honest, unlike the ban message: this is a requirement to meet, not a refusal to hide. The app
+ * shows it above a "Sign in with Steam" button and unlocks the moment Valve confirms the account.
+ */
+export const APP_SIGNIN_MESSAGE = "Sign in with Steam to use MXB App.";
+
+/**
+ * The gate verdict the desktop apps read:
+ *  - `ok` — run;
+ *  - `signin` — a Steam sign-in is required first (honest; the app prompts and retries);
+ *  - `unsupported` — refuse (the disguised ban).
+ */
+export type AppGate =
+  | { status: "ok" }
+  | { status: "signin"; message: string }
+  | { status: "unsupported"; message: string };
 
 /** How a GUID is written down: trimmed and upper-cased, or null if it isn't one. */
 export function normalizeGuid(raw: unknown): string | null {

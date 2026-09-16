@@ -32,7 +32,7 @@
 
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 /// The fallback shown if the server sent an empty message, or a stale marker holds none. Kept
@@ -46,11 +46,24 @@ const FALLBACK: &str =
 enum Verdict {
     /// This install may run.
     Ok,
+    /// A Steam sign-in is required before it may. Honest — the app shows the wall and unlocks
+    /// once Valve confirms the account. Not a ban and not a lie.
+    Signin {
+        #[serde(default)]
+        message: String,
+    },
     /// It may not. `message` is what to show — a mundane untruth, never the word "ban".
     Unsupported {
         #[serde(default)]
         message: String,
     },
+}
+
+/// What the frontend is told about the sign-in wall — put up (`required: true`) or taken down.
+#[derive(Clone, serde::Serialize)]
+struct SigninRequired {
+    required: bool,
+    message: String,
 }
 
 /// Where the "stay blocked, even offline" marker lives. `None` only if there is no data dir to
@@ -153,7 +166,22 @@ pub async fn check(app: AppHandle) {
     };
 
     match verdict {
-        Verdict::Ok => unmark(&app),
+        // A clean run: clear any stale block, and tell the UI the sign-in wall (if it was up)
+        // can come down.
+        Verdict::Ok => {
+            unmark(&app);
+            let _ = app.emit("mxb-signin-required", SigninRequired { required: false, message: String::new() });
+        }
+        // A Steam sign-in is required. Never fatal, and never marked: the person can complete it
+        // and carry on. The frontend shows the wall on this event and drives the existing
+        // `steam_link_start` / `steam_link_status` commands; nothing else in the app should
+        // proceed until it flips back. Left to the UI rather than a native dialog because the
+        // OpenID round trip lives in the webview, not a message box.
+        Verdict::Signin { message } => {
+            let message = if message.trim().is_empty() { "Sign in with Steam to use MXB App.".to_string() } else { message };
+            log::info!("[gate] a Steam sign-in is required before this install may run");
+            let _ = app.emit("mxb-signin-required", SigninRequired { required: true, message });
+        }
         Verdict::Unsupported { message } => {
             let message = if message.trim().is_empty() { FALLBACK.to_string() } else { message };
             mark(&app, &message);

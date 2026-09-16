@@ -2351,6 +2351,16 @@ async fn steam_link_status(app: tauri::AppHandle) -> Result<Option<String>, Stri
     Ok(ent.steam_id)
 }
 
+/// Re-ask the estate gate now, rather than at the next launch.
+///
+/// The frontend calls this after the Steam sign-in wall has been satisfied, so a freshly linked
+/// account takes the wall down at once instead of on restart. It routes through the same
+/// [`gate::check`] as startup, so the verdict — and any block — is decided in exactly one place.
+#[tauri::command]
+async fn recheck_gate(app: tauri::AppHandle) {
+    gate::check(app).await;
+}
+
 #[tauri::command]
 fn set_run_in_background(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
@@ -6877,6 +6887,7 @@ fn main() {
             mxbsecure_status,
             steam_link_start,
             steam_link_status,
+            recheck_gate,
             mxb_core::viewer::load_bike_model,
             preview_model_swap,
             mxb_core::viewer::load_rider_model,

@@ -29,7 +29,7 @@ consequences fall out of that, and they're baked into the schema:
 | GET | `/v1/servers` | — | Server registry. Public: it is the app's join picker, and the people who most need it are the ones with no account yet. `agent_url` is not returned. |
 | POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
 | GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it. Looks ordinary to a banned install on purpose — see below. |
-| GET | `/v1/app/gate` | bearer | The desktop apps' startup gate. `{status:"ok"}` to run, `{status:"unsupported", message}` to refuse — a banned install is told a mundane untruth here, never that it is banned. |
+| GET | `/v1/app/gate` | bearer | The desktop apps' startup gate. `{status:"ok"}` to run; `{status:"signin"}` when `MXB_REQUIRE_STEAM` is on and the account has no confirmed Steam link (the app shows a sign-in wall); `{status:"unsupported"}` for a banned install (a mundane untruth, never the word "ban"). |
 | PUT | `/v1/me/guid` | bearer | Claim a GUID. Derived from the linked Steam identity and pinned (the client's value is ignored) for a Steam account; first-come for a non-Steam one; refused if banned. |
 | PUT | `/v1/loadout` | bearer | Replace **one bike's** loadout. Kept for clients older than per-bike storage. |
 | PUT | `/v1/loadouts` | bearer | Replace the whole look, every bike at once. Returns `missing` — the blobs still to upload. |
@@ -299,6 +299,21 @@ dedicated-server log the way it used to. Auto-found, and the same value the serv
 A non-Steam (Piboso) copy has no SteamID64 to derive from, so its GUID stays opaque and
 first-come, corroborated by the sightings other installs report. That is the one identity a ban
 still leans on the claim log for; a Steam identity is nailed down by Valve.
+
+#### Requiring a Steam sign-in for the whole estate
+
+`MXB_REQUIRE_STEAM` (a var in `wrangler.jsonc`, `"1"` to enable, off by default) turns the
+startup gate into a hard wall: an account with no Valve-confirmed Steam link gets `signin`
+instead of `ok`, and the app shows "Sign in with Steam" and will not run until the OpenID round
+trip lands (`steam_link_start` → the browser → `/v1/steam/return`), which sets `steam_id` and
+pins the derived GUID. A ban still wins over the requirement.
+
+Turned on, every install becomes a proven identity — which is what makes the GUID and the ban
+unspoofable for the whole estate rather than only for the accounts that happened to link. It is a
+switch and not a build for one reason: it locks out anyone without a **Steam** copy of the game.
+A Piboso owner has no Steam identity to confirm and cannot pass the wall, so enabling this is a
+deliberate "Steam players only" decision the deployment makes and can reverse — not something
+baked into a release.
 
 ### Banning a rider
 

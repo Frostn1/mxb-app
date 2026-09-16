@@ -27,7 +27,7 @@ import {
   terminateInstance,
 } from "./aws";
 import { adminAssets, isAssetsPath } from "./assets";
-import { APP_BLOCK_MESSAGE, appGate, banFor, rememberGuid } from "./bans";
+import { APP_BLOCK_MESSAGE, APP_SIGNIN_MESSAGE, appGate, banFor, rememberGuid } from "./bans";
 import { isWebPath, landingSite, webRoutes } from "./web";
 import { steamResult, redirectPage } from "./page";
 import { pinGuidFromSteam, rememberLink, steamIdFor } from "./steamlink";
@@ -322,8 +322,20 @@ async function route(request: Request, env: Env): Promise<Response> {
   // The desktop apps' startup gate. In `bannedMayUse`, so a banned install can reach it and be
   // told to stand down — with a reason that is not the truth. This is what makes MXB App,
   // Studio, Coach and FrostMod refuse to run at all, not only lose their online features.
+  //
+  // Three verdicts, in order of precedence:
+  //  1. a ban wins over everything — the disguised `unsupported`;
+  //  2. then, if this deployment requires a Steam sign-in and the account has no Valve-confirmed
+  //     one, `signin`: the app prompts for Steam and retries, and every install becomes a proven
+  //     identity — which is what makes the GUID and the ban unspoofable for the whole estate;
+  //  3. otherwise `ok`.
   if (method === "GET" && path === "/v1/app/gate") {
-    return json(200, await appGate(env, { accountId: account.id, steamId: account.steam_id, guid: account.guid }));
+    const banned = await appGate(env, { accountId: account.id, steamId: account.steam_id, guid: account.guid });
+    if (banned.status !== "ok") return json(200, banned);
+    if (requireSteam(env) && !(await steamIdFor(env, account))) {
+      return json(200, { status: "signin", message: APP_SIGNIN_MESSAGE });
+    }
+    return json(200, { status: "ok" });
   }
 
   // Open to every account, self-serve ones included: who you are, where you are, and the
@@ -1002,6 +1014,17 @@ function b64(bytes: Uint8Array): string {
  * install keep using something, so it should be as hard to do by accident as this is to read —
  * the reasoning for each entry is at the gate itself.
  */
+/**
+ * Does this deployment require a Valve-confirmed Steam sign-in to run the apps?
+ *
+ * Off unless `MXB_REQUIRE_STEAM` is exactly `"1"`. A switch rather than a build, because turning
+ * it on locks out anyone without a Steam copy of the game (a Piboso owner has no Steam identity
+ * to confirm) — a decision the deployment makes and can reverse, not one baked into a release.
+ */
+function requireSteam(env: Env): boolean {
+  return (env.MXB_REQUIRE_STEAM ?? "").trim() === "1";
+}
+
 function bannedMayUse(method: string, path: string): boolean {
   if (method === "GET" && path === "/v1/app/gate") return true;
   if (method === "GET" && path === "/v1/me") return true;

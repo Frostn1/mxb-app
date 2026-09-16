@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { APP_BLOCK_MESSAGE, addBan, appGate, banFor, liftBan, listBans, normalizeGuid, rememberGuid } from "../src/bans";
+import { APP_BLOCK_MESSAGE, APP_SIGNIN_MESSAGE, addBan, appGate, banFor, liftBan, listBans, normalizeGuid, rememberGuid } from "../src/bans";
 import { guidFromSteamId } from "../src/steam";
 import { hashToken } from "../src/auth";
 import { mintKeys } from "../src/plugins";
@@ -65,6 +65,7 @@ async function deployment(overrides: Record<string, string> = {}): Promise<Env> 
     PAINTS: { async get(key: string) { return key ? { body: "BUNDLE" } : null; } },
     // Enough R2 for the locker route: one file, present.
     LOCKWEB: { async get(name: string) { return name ? { body: "wasm" } : null; } },
+    ...overrides,
   } as unknown as Env;
 }
 
@@ -504,6 +505,50 @@ describe("what a ban actually refuses", () => {
     expect(me.banned).toBeUndefined();
     expect((await call(env, req("GET", "/v1/web/lockweb/mxb_lockweb.js", { cookie: who }))).status).toBe(200);
     expect((await call(env, req("GET", "/admin/assets", { cookie: who }))).status).toBe(200);
+  });
+});
+
+describe("locking the apps down to a Steam sign-in", () => {
+  const gate = (env: Env, token: string) =>
+    call(env, req("GET", "/v1/app/gate", { key: token, origin: null }));
+
+  it("does nothing until the deployment turns it on", async () => {
+    const env = await deployment(); // MXB_REQUIRE_STEAM unset
+    await account(env, "acc_nosteam", "t", null, null);
+    expect(await (await gate(env, "t")).json()).toEqual({ status: "ok" });
+  });
+
+  it("asks an unlinked install to sign in when it is on, honestly", async () => {
+    const env = await deployment({ MXB_REQUIRE_STEAM: "1" });
+    await account(env, "acc_nosteam", "t", null, null);
+    const verdict = await (await gate(env, "t")).json();
+    expect(verdict).toEqual({ status: "signin", message: APP_SIGNIN_MESSAGE });
+    // Honest: this one is a requirement, not the disguised ban.
+    expect(APP_SIGNIN_MESSAGE.toLowerCase()).toContain("steam");
+  });
+
+  it("lets a Valve-confirmed install straight through", async () => {
+    const env = await deployment({ MXB_REQUIRE_STEAM: "1" });
+    await account(env, "acc_steam", "t", BUYER, null);
+    expect(await (await gate(env, "t")).json()).toEqual({ status: "ok" });
+  });
+
+  it("restores a lost Steam link from the log rather than nagging a linked account", async () => {
+    const env = await deployment({ MXB_REQUIRE_STEAM: "1" });
+    await account(env, "acc_lost", "t", null, null);
+    // The column was dropped, but Valve confirmed it before — the log proves it, so no sign-in.
+    await env.DB.prepare("INSERT INTO steam_links (account_id, steam_id, linked_at) VALUES (?, ?, ?)")
+      .bind("acc_lost", BUYER, Date.now())
+      .run();
+    expect(await (await gate(env, "t")).json()).toEqual({ status: "ok" });
+  });
+
+  it("a ban still wins over the sign-in requirement", async () => {
+    const env = await deployment({ MXB_REQUIRE_STEAM: "1" });
+    await account(env, "acc_banned", "t", null, GUID);
+    await ban(env, GUID);
+    const verdict = await (await gate(env, "t")).json();
+    expect(verdict).toEqual({ status: "unsupported", message: APP_BLOCK_MESSAGE });
   });
 });
 

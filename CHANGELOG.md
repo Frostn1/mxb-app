@@ -2,6 +2,13 @@
 
 ## Unreleased — MXB App and MXB Coach
 
+### Added
+- MXB App can be locked to a Steam sign-in. When turned on for the deployment, the app shows a
+  "Sign in with Steam" wall at startup and won't run until you've signed in once — one click,
+  through Steam, and it remembers. It makes every account a confirmed identity, which is what
+  keeps a ban from being walked around and a GUID from being anyone else's. Off unless the
+  service turns it on, and it needs a Steam copy of the game.
+
 ### Changed
 - Your MX Bikes GUID is found automatically from your signed-in Steam account, the instant the
   app starts — no more waiting to be seen on a server for it to fill in. It's the same value the
