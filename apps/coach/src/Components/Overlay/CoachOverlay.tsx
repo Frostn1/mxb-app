@@ -44,7 +44,7 @@ function useLastReview() {
     try {
       const l = await lastLap();
       setLast(l);
-      setData(l ? await coachReview(l.session.path, l.lap) : null);
+      setData(l ? await coachReview(l.path, l.lap) : null);
     } catch (e) {
       setError(String(e));
     }
@@ -170,7 +170,7 @@ function Panel() {
   }, []);
 
   const close = useCallback(() => void overlayHide().catch(() => {}), []);
-  const path = last?.session.path;
+  const path = last?.path;
 
   return (
     <OverlayFrame

@@ -195,6 +195,9 @@ pub struct Change {
     pub to_value: Option<String>,
     /// The coach can make this change in a copy of the setup.
     pub writes: bool,
+    /// Another tip wants this setting the other way, so the coach leaves it to the rider.
+    #[serde(default)]
+    pub conflict: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -256,6 +259,7 @@ fn make(field: Field, firmer: i32, why: String, setup: Option<&Setup>, opts: Opt
         from_value: from.zip(o).and_then(|(i, o)| value(field, o, i)),
         to_value: to.zip(o).and_then(|(i, o)| value(field, o, i)),
         writes: WRITES.contains(&field) && in_list && to.is_some() && to != from,
+        conflict: false,
     }
 }
 
@@ -358,17 +362,17 @@ pub fn pressure_finding(setup: &Setup, opts: &BikeOptions, optimal: [Option<f32>
     })
 }
 
-/// The setup with every change the coach can make. Changes to one setting add up, and a
-/// setting the fixes pull both ways is left alone. Returns the copy and how many settings moved.
-pub fn apply(setup: &Setup, fixes: &[Fix], opts: &BikeOptions) -> (Setup, usize) {
+/// Every setting a save would really move, and where to. Changes to one setting add up; a
+/// setting two tips pull opposite ways stays where it is, because the coach has no way to
+/// pick between them.
+fn net(setup: &Setup, fixes: &[Fix], opts: &BikeOptions) -> HashMap<Field, u32> {
     let mut by: HashMap<Field, Vec<i64>> = HashMap::new();
     for c in fixes.iter().flat_map(|f| &f.changes).filter(|c| c.writes) {
         if let (Some(from), Some(to)) = (c.from, c.to) {
             by.entry(c.field).or_default().push(to as i64 - from as i64);
         }
     }
-    let mut out = setup.clone();
-    let mut moved = 0;
+    let mut out = HashMap::new();
     for (field, deltas) in by {
         if deltas.iter().any(|&d| d > 0) && deltas.iter().any(|&d| d < 0) {
             continue;
@@ -377,10 +381,41 @@ pub fn apply(setup: &Setup, fixes: &[Fix], opts: &BikeOptions) -> (Setup, usize)
         let from = setup.get(field);
         let to = target(from, deltas.iter().sum(), o);
         if to != from {
-            out.set(field, to);
-            moved += 1;
+            out.insert(field, to);
         }
     }
+    out
+}
+
+/// Takes back the claim on every change the save won't actually make.
+///
+/// Without this the plan and the save disagreed. Two tips can want one setting both ways —
+/// sand wants a tooth more on the rear, the rev limiter a tooth less — and the save quietly
+/// left it alone while the plan had already told the rider it would be changed, and the toast
+/// still said the setup was saved. The rider then found their gearing untouched in the garage.
+/// Deciding it once, here, is what keeps what they read and what gets written the same thing.
+pub fn settle(fixes: &mut [Fix], setup: Option<&Setup>, opts: Option<&BikeOptions>) {
+    let (Some(setup), Some(opts)) = (setup, opts) else { return };
+    let moving = net(setup, fixes, opts);
+    for c in fixes.iter_mut().flat_map(|f| &mut f.changes) {
+        if c.writes && !moving.contains_key(&c.field) {
+            c.writes = false;
+            c.conflict = true;
+        }
+    }
+}
+
+/// The setup with every change the coach can make, and the settings that moved.
+pub fn apply(setup: &Setup, fixes: &[Fix], opts: &BikeOptions) -> (Setup, Vec<Field>) {
+    let moving = net(setup, fixes, opts);
+    let mut out = setup.clone();
+    let mut moved: Vec<Field> = Vec::new();
+    for (&field, &to) in &moving {
+        out.set(field, to);
+        moved.push(field);
+    }
+    // A stable order, so the rider is told what changed the same way twice running.
+    moved.sort_by_key(|f| WRITES.iter().position(|w| w == f).unwrap_or(usize::MAX));
     (out, moved)
 }
 
@@ -513,7 +548,49 @@ mod tests {
         assert_eq!(out.get(Field::ForkCompression), 5);
         assert_eq!(out.get(Field::ForkSpring), 4);
         assert_eq!(out.get(Field::ShockSpring), 2);
-        assert_eq!(moved, 3);
+        assert_eq!(moved.len(), 3);
+        assert!(!moved.contains(&Field::ShockLowCompression));
         assert_eq!(out.bike_id(), "2027_K85M");
+    }
+
+    /// The fault a rider reported: the coach listed a gearing change, said it had saved it,
+    /// and the garage showed the old sprocket. A sandy lap wants a tooth more on the rear and
+    /// the rev limiter wants one less, so the save left the gearing alone — while the plan the
+    /// rider read still claimed it.
+    #[test]
+    fn a_setting_two_tips_pull_both_ways_is_never_claimed_as_changed() {
+        let (s, o) = sand();
+        let mut f = plan(&skills(&["setup_sand", "setup_gearing_tall"]), Some(&s), Some(&o));
+        let rear = |f: &[Fix]| -> Vec<(bool, bool)> {
+            f.iter().flat_map(|x| &x.changes).filter(|c| c.field == Field::RearSprocket).map(|c| (c.writes, c.conflict)).collect()
+        };
+        // Each tip on its own is a change the coach can make, which is why it used to claim both.
+        assert_eq!(rear(&f), [(true, false), (true, false)]);
+        settle(&mut f, Some(&s), Some(&o));
+        assert_eq!(rear(&f), [(false, true), (false, true)], "both are handed back to the rider");
+        let (out, moved) = apply(&s, &f, &o);
+        assert_eq!(out.get(Field::RearSprocket), s.get(Field::RearSprocket), "the gearing really doesn't move");
+        assert!(!moved.contains(&Field::RearSprocket));
+        // The rest of the sand fix still lands, so the save is still worth making.
+        assert!(moved.contains(&Field::ForkCompression) && moved.contains(&Field::ShockLowCompression));
+    }
+
+    #[test]
+    fn gearing_the_laps_agree_on_is_still_written() {
+        let (s, o) = sand();
+        // Sand and bogging both want a tooth more: one setting, two tips, one direction.
+        let mut f = plan(&skills(&["setup_sand", "setup_gearing_short"]), Some(&s), Some(&o));
+        settle(&mut f, Some(&s), Some(&o));
+        let (out, moved) = apply(&s, &f, &o);
+        assert_eq!(out.get(Field::RearSprocket), s.get(Field::RearSprocket) + 2, "the two steps add up");
+        assert!(moved.contains(&Field::RearSprocket));
+        assert!(f.iter().flat_map(|x| &x.changes).all(|c| !c.conflict));
+    }
+
+    #[test]
+    fn settling_without_a_setup_leaves_the_advice_alone() {
+        let mut f = plan(&skills(&["setup_gearing_tall"]), None, None);
+        settle(&mut f, None, None);
+        assert!(f.iter().flat_map(|x| &x.changes).all(|c| !c.conflict));
     }
 }

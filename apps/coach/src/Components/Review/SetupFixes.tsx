@@ -78,7 +78,9 @@ function Change({ c }: { c: SetupChange }) {
       <span className="whitespace-nowrap font-mono text-[12px] text-accent-foreground">{amount(c, t)}</span>
       <span className="col-span-2 text-[12px] leading-snug text-muted-foreground">
         {c.why}
-        {!c.writes && c.from !== c.to && <span className="ml-1.5 text-[11px] text-faint">{t("setup.byHand")}</span>}
+        {!c.writes && c.from !== c.to && (
+          <span className="ml-1.5 text-[11px] text-faint">{c.conflict ? t("setup.conflict") : t("setup.byHand")}</span>
+        )}
       </span>
     </li>
   );
@@ -191,7 +193,12 @@ export default function SetupFixes({ path, findings }: { path: string; findings:
   const save = async () => {
     setSaving(true);
     try {
-      toast.success(t("setup.saved", { name: await coachSaveSetup(path, skills) }));
+      const saved = await coachSaveSetup(path, skills);
+      // Named, so the rider can check each one in the garage rather than take our word for it.
+      const list = saved.changed.map((f) => t(`setupField.${f}` as TKey)).join(", ");
+      toast.success(t("setup.saved", { name: saved.name }), {
+        description: list ? t("setup.savedChanged", { list }) : undefined,
+      });
     } catch (e) {
       toast.error(String(e));
     } finally {

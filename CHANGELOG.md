@@ -6,6 +6,13 @@
 - A numbered post stands on the 3D track where each tip happens, so a call like "the rear spins
   out of turn 2" is somewhere you can see, with a key for your line and the fast lap.
 - The in-game HUD switches are on the review page too, under In game beside the live cues.
+- On the game's default setup the coach now writes you a setup of your own, named after the
+  track, instead of asking you to go and save one in the garage first. It starts from another
+  setup you have for that bike where there is one, and from the bike's own settings where there
+  isn't. Your own setups are never written over.
+- The session list and the laps in an open session keep up with the recorder while you ride, so
+  a lap you have just finished shows up without leaving the page and coming back. Both pages
+  have a Refresh button too.
 
 ### Changed
 - The lap review is split into tabs — Lap, Sections, Setup, In game and Track — so each one is a
@@ -14,6 +21,23 @@
   the fork and front wheel, the shock and rear, the chassis, and the engine and gearbox.
 - The setup card leads with the copy it would save and one line saying what that changes, then
   lists every change the coach found from your laps, grouped, with the reason under each.
+- Where two tips want one setting opposite ways — sand wants a tooth more on the rear, the rev
+  limiter a tooth less — the coach says so and leaves that setting to you, rather than listing
+  it as a change it will make. Saving a setup now names the settings it changed.
+
+## 2026-09-15 — MXB Coach
+
+### Added
+- Settings shows which recorder the game actually ran. It appears after you've started MX Bikes
+  once with the recorder installed.
+- Speak the cues and the in-game HUD say which recorder they need when yours is older than that.
+
+### Changed
+- One session per event. Go out, come in and go out again, and it's all one session with every
+  lap you rode: your best lap and your ideal lap count all of them, and each lap says which
+  stint it came from.
+- The HUD and the spoken cues are written where the recorder reads them, wherever your MX Bikes
+  user folder is.
 
 ## 2026-09-15 — MXB Coach v0.1.12-beta.12
 
@@ -39,8 +63,32 @@
 ## Unreleased — MXB App
 
 ### Added
+- The 3D track view now shows the game's own tracks in full, with their ground, their markings,
+  their scenery and their sky, the same as a track you downloaded. This covers the 3D view in
+  MXB Coach too.
 - With MXB Coach running, the overlay shows Coach's tabs next to yours and one shortcut opens
   both.
+- When the server list won't load, the Servers tab now says whether it's MX Bikes' own servers
+  or something at your end. The game answers a dead master server with "connection timeout" and
+  nothing else — the same thing it says for a firewall or a router problem — so the app asks
+  how many other apps failed the same fetch in the last ten minutes and leads with that.
+- Check my connection, on that screen: it tests your internet, whether the master server's
+  address resolves, whether outbound UDP is being blocked, and the server list itself, then says
+  whose problem it is. The same numbers are public at mxbsecure.com/status.
+- Add your server, on the Servers tab: puts a server on the shared book by hand, for one the
+  game's own list never carries — a brand-new box, or a private league one. Anything the game
+  does list is remembered on its own and needs none of this.
+- A shared server book. The Servers tab already rebuilt its list by asking each server directly
+  when the master wouldn't answer, but only from addresses you had already seen — so on a fresh
+  install it had nothing to work from, which is exactly who an outage catches out. The app now
+  seeds that book from a pooled one and adds what it sees, so the fallback is ready before the
+  outage instead of after it.
+
+### Fixed
+- "Is MX Bikes down" could say the servers were fine while they were down. When the master
+  didn't answer and the app rebuilt the list from its own address book, it reported the list
+  rather than the master — so every install with a warm book voted "working" through an outage
+  it was itself routing around.
 
 ### Changed
 - The app reports anonymous usage from a fixed list of names and nothing else. A plugin shares

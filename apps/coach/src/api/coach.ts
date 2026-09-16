@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /** Mirrors `coach.rs` and `analysis.rs`. */
 
@@ -7,10 +8,18 @@ export interface CoachStatus {
   pluginPath: string | null;
   pluginInstalled: boolean;
   sessionDirs: string[];
+  /** The recorder's own version, as it wrote it the last time the game ran it. */
+  recorderVersion: string | null;
+  /** The recorder that ran is older than the HUD and the spoken cues need. */
+  recorderOutdated: boolean;
 }
 
 export interface LapSummary {
   num: number;
+  /** The recording this lap is in: a session is every stint of one event. */
+  path: string;
+  /** Which stint it was ridden in, from 0. Every stint counts its laps from the start. */
+  stint: number;
   timeMs: number;
   invalid: boolean;
   /** Started and finished at the line: it can be compared. */
@@ -22,9 +31,18 @@ export interface LapSummary {
   riddenMs: number;
 }
 
-export interface SessionSummary {
+/** One stint on track: one recording. A session is every stint of one event. */
+export interface Stint {
   path: string;
-  /** `yyyymmdd-hhmmss-mmm`, local time. */
+  started: string;
+  /** The setup it was ridden on, as the game names it. */
+  setup: string;
+}
+
+export interface SessionSummary {
+  /** The first stint's file. Every stint is in `stints`. */
+  path: string;
+  /** `yyyymmdd-hhmmss-mmm`, local time the first stint started. */
   started: string;
   rider: string;
   trackId: string;
@@ -32,13 +50,17 @@ export interface SessionSummary {
   bikeId: string;
   bikeName: string;
   category: string;
+  /** 1 = testing, 2 = race, 4 = straight rhythm. */
+  eventType: number;
   trackLength: number;
   limiter: number;
   complete: boolean;
   laps: LapSummary[];
   bestMs: number | null;
-  /** The setup it was ridden on, as the game names it. */
+  /** The setup the last stint was ridden on, as the game names it. */
   setup: string;
+  /** Every stint this session was ridden in, oldest first. */
+  stints: Stint[];
 }
 
 export interface LapRef {
@@ -215,6 +237,11 @@ export const coachGround = (path: string) => invoke<GroundAnswer>("coach_ground"
 export const coachLines = (path: string) => invoke<Lines | null>("coach_lines", { path });
 export const coachSurface = (path: string) => invoke<Surface | null>("coach_surface", { path });
 export const coachSessions = () => invoke<SessionSummary[]>("coach_sessions");
+/** Fires when the recorder writes a session or adds to the one being ridden now. */
+export const onSessionsChanged = (run: () => void): Promise<UnlistenFn> =>
+  listen("coach-sessions-changed", () => run());
+
+/** The whole session the recording belongs to: every stint of that event, with all its laps. */
 export const coachSession = (path: string) => invoke<SessionDetail>("coach_session", { path });
 /** `solo` reviews the lap on its own; so does the backend when there's nothing to compare with. */
 export const coachReview = (path: string, lap: number, refPath?: string, refLap?: number, solo?: boolean) =>
@@ -254,6 +281,8 @@ export interface SetupChange {
   toValue: string | null;
   /** The coach can make this change in a copy of the setup. */
   writes: boolean;
+  /** Another tip wants this setting the other way, so the coach leaves it to the rider. */
+  conflict: boolean;
 }
 
 export interface SetupFix {
@@ -279,9 +308,16 @@ export interface SetupPlan {
 /** The changes behind a lap's setup tips, against the setup the rider had on. */
 export const coachSetupPlan = (path: string, skills: string[]) =>
   invoke<SetupPlan>("coach_setup_plan", { path, skills });
-/** Saves those changes as a new setup beside the rider's own. Resolves to its name. */
+/** A setup the coach wrote: its name, and the settings it really changed. */
+export interface SavedSetup {
+  name: string;
+  changed: SetupField[];
+}
+
+/** Saves those changes as a new setup: beside the rider's own, or as one of their own when
+ *  they rode the game's default. */
 export const coachSaveSetup = (path: string, skills: string[]) =>
-  invoke<string>("coach_save_setup", { path, skills });
+  invoke<SavedSetup>("coach_save_setup", { path, skills });
 export type CueLevel = "new" | "intermediate" | "subPro" | "pro";
 export type CueAmount = "few" | "normal" | "lots";
 

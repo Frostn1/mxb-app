@@ -93,6 +93,89 @@ fn find<'a>(n: &'a CfgNode, name: &str) -> Option<&'a CfgNode> {
     n.block(name).or_else(|| n.blocks.values().find_map(|b| find(b, name)))
 }
 
+fn block_at<'a>(root: &'a CfgNode, path: &[&str]) -> Option<&'a CfgNode> {
+    path.iter().try_fold(root, |n, k| n.block(k))
+}
+
+/// A whole-number setting, from the first field of the value.
+fn num(n: &CfgNode, key: &str) -> Option<u32> {
+    let v: f64 = n.get(key)?.split(',').next()?.trim().parse().ok()?;
+    (v >= 0.0).then_some(v.round() as u32)
+}
+
+/// A setting by name, wherever the bike keeps it — for the few whose name is its own address
+/// (`FSprocketSetting`, `CapacitySetting`). Anything with a name a bike uses twice, like
+/// `BumpSetting`, is read by path instead.
+fn find_num(n: &CfgNode, key: &str) -> Option<u32> {
+    num(n, key).or_else(|| n.blocks.values().find_map(|b| find_num(b, key)))
+}
+
+/// What the bike itself sets each setting to. This is the setup a rider is on before they
+/// save one of their own, and what a setup built from nothing has to start from.
+pub fn defaults(root: &CfgNode) -> HashMap<Field, u32> {
+    let mut out = HashMap::new();
+    let at = |path: &[&str], key: &str| block_at(root, path).and_then(|n| num(n, key));
+    let mut put = |f: Field, v: Option<u32>| {
+        if let Some(v) = v {
+            out.insert(f, v);
+        }
+    };
+    put(Field::ForkSpring, at(&["front_suspension", "spring"], "setting"));
+    put(Field::ForkOil, at(&["front_suspension", "oil"], "setting"));
+    put(Field::ForkPreload, at(&["front_suspension", "preload"], "setting"));
+    put(Field::ForkHeight, at(&["front_suspension", "rideheight"], "setting"));
+    put(Field::ForkCompression, at(&["front_suspension", "damper"], "bumpsetting"));
+    put(Field::ForkRebound, at(&["front_suspension", "damper"], "reboundsetting"));
+    put(Field::ForkOffset, at(&["steer", "forkoffset"], "setting"));
+    put(Field::ShockSpring, at(&["rear_suspension", "spring"], "setting"));
+    put(Field::ShockPreload, at(&["rear_suspension", "preload"], "setting"));
+    put(Field::ShockLowCompression, at(&["rear_suspension", "damper"], "bumpsetting"));
+    put(Field::ShockHighCompression, at(&["rear_suspension", "damper"], "fastbumpsetting"));
+    put(Field::ShockRebound, at(&["rear_suspension", "damper"], "reboundsetting"));
+    put(Field::RodLength, at(&["rear_suspension"], "rodlengthsetting"));
+    put(Field::SwingarmLength, at(&["rear_suspension"], "lengthsetting"));
+    put(Field::FrontSprocket, find_num(root, "fsprocketsetting"));
+    put(Field::RearSprocket, find_num(root, "rsprocketsetting"));
+    put(Field::FrontTyre, block_at(root, &["wheel0"]).and_then(|n| num(n, "tyresetting")));
+    put(Field::RearTyre, block_at(root, &["wheel1"]).and_then(|n| num(n, "tyresetting")));
+    put(Field::FrontPressure, block_at(root, &["wheel0"]).and_then(|n| num(n, "pressuresetting")));
+    put(Field::RearPressure, block_at(root, &["wheel1"]).and_then(|n| num(n, "pressuresetting")));
+    out
+}
+
+/// Every setting of a setup file, as the bike's own defaults, for a rider who has never saved
+/// one. `None` when the bike doesn't say enough to build one.
+///
+/// Three slots have no garage label and are filled anyway, because leaving them at zero is a
+/// change rather than a default: each gear's ratio (all six the same gear otherwise), the
+/// steer offset, and the fuel load — which at zero is very nearly an empty tank.
+/// Slots the bike says nothing about stay at zero, which is the first option in their list.
+pub fn default_slots(root: &CfgNode, gears: usize) -> Option<Vec<u32>> {
+    if gears == 0 || gears > crate::stp::MAX_GEARS {
+        return None;
+    }
+    let gearbox = root.block("gearbox")?;
+    let mut slots = vec![0u32; crate::stp::SLOTS + gears];
+    let mut put = |at: usize, v: u32| {
+        if let Some(s) = slots.get_mut(at / 4) {
+            *s = v;
+        }
+    };
+    for (f, v) in defaults(root) {
+        put(f.at(gears), v);
+    }
+    if let Some(v) = block_at(root, &["steer", "offset"]).and_then(|n| num(n, "setting")) {
+        put(4, v);
+    }
+    for i in 0..gears {
+        put(crate::stp::GEARS_FROM + 4 * i, num(gearbox, &format!("gear{i}")).unwrap_or(i as u32));
+    }
+    if let Some(v) = find_num(root, "capacitysetting") {
+        put(crate::stp::GEARS_FROM + 4 * gears + 0x20, v);
+    }
+    Some(slots)
+}
+
 /// An option list: `range = first, step, last`, or numbered `setting0`, `gear0` … entries.
 pub(crate) fn list(n: &CfgNode) -> Option<Options> {
     if let Some(r) = n.get("range") {
@@ -231,6 +314,40 @@ rear_suspension
 
     fn close(a: &[f64], b: &[f64]) -> bool {
         a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6)
+    }
+
+    /// A rider on the game's default setup has no file to copy, so the bike's own cfg has to
+    /// supply every slot. The ones with no garage label matter most: all six gears at ratio 0
+    /// is a bike with one gear, and the fuel load at 0 is the smallest tank the bike offers.
+    #[test]
+    fn a_bike_says_what_its_own_default_setup_is() {
+        let cfg = format!(
+            "{CFG_85}\nfueltank\n{{\n\tCapacityRange = 1, 0.5, 7.5\n\tCapacitySetting = 13\n}}\n\
+             steer\n{{\n\toffset\n\t{{\n\t\trange = -0.005, 0.001, 0.005\n\t\tsetting = 5\n\t}}\n}}\n"
+        );
+        let root = cfg::parse(cfg.as_bytes());
+        let d = defaults(&root);
+        assert_eq!(d[&Field::FrontSprocket], 2);
+        assert_eq!(d[&Field::ForkSpring], 5);
+        assert_eq!(d[&Field::ForkCompression], 3);
+        assert_eq!(d[&Field::ShockPreload], 12);
+        // The bike lists no fork ride height, so the coach claims no default for it.
+        assert!(!d.contains_key(&Field::ForkHeight));
+
+        let slots = default_slots(&root, 6).expect("a six-speed's defaults");
+        assert_eq!(slots.len(), crate::stp::SLOTS + 6);
+        let s = crate::stp::Setup::build("2027_K85M", 6, &slots).expect("a setup file");
+        assert_eq!(s.get(Field::FrontSprocket), 2);
+        assert_eq!(s.get(Field::ForkSpring), 5);
+        assert_eq!(s.get(Field::ShockPreload), 12);
+        // Each gear on its own ratio, the steer offset and the fuel, none of them zero.
+        let gears: Vec<u32> = (0..6).map(|i| slots[(crate::stp::GEARS_FROM + 4 * i) / 4]).collect();
+        assert_eq!(gears, [0, 1, 2, 3, 4, 5]);
+        assert_eq!(slots[1], 5, "the steer offset");
+        assert_eq!(slots[(crate::stp::GEARS_FROM + 4 * 6 + 0x20) / 4], 13, "the fuel load");
+        // A gear count the bike can't have builds nothing rather than a short file.
+        assert!(default_slots(&root, 0).is_none());
+        assert!(default_slots(&cfg::parse(b"front_suspension\n{\n}\n"), 5).is_none());
     }
 
     #[test]

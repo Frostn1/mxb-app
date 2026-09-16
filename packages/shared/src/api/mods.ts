@@ -2491,6 +2491,17 @@ export function isGameRunning(): Promise<boolean> {
   return invoke<boolean>("game_running");
 }
 
+/**
+ * Bring the running game's window to the front.
+ *
+ * The app starts MX Bikes itself, so a running game sits behind the app window and a player
+ * who never alt-tabbed has no reason to believe it is open. Resolves `false` when the window
+ * could not be activated — they are still one alt-tab away.
+ */
+export function focusGame(): Promise<boolean> {
+  return invoke<boolean>("focus_game");
+}
+
 /** Install/version/running snapshot (hits GitHub for the latest tag). */
 export function frostmodStatus(): Promise<FrostmodStatus> {
   return invoke<FrostmodStatus>("frostmod_status");
@@ -3343,6 +3354,85 @@ export function listMasterServers(): Promise<MasterServer[]> {
  */
 export function probeServer(address: string): Promise<MasterServer> {
   return invoke<MasterServer>("probe_server", { address });
+}
+
+/** `up`, `degraded`, `down`, or `unknown` when too few apps have checked to say. */
+export type MasterState = "up" | "degraded" | "down" | "unknown";
+
+/**
+ * What every other app is seeing of MX Bikes' master server.
+ *
+ * Nobody can answer "is the master down or is it me" from one machine, which is exactly why
+ * the game's own `connection timeout` sends people off to reinstall something that works.
+ * This is the same failure, counted across everyone who tried recently.
+ */
+export interface MasterStatus {
+  state: MasterState;
+  /** The sentence, already written and carrying the numbers. English; see {@link masterStatus}. */
+  summary: string;
+  master: {
+    /** Distinct installs that tried at all in the window. */
+    installs: number;
+    /** How many of them are failing right now. */
+    failing: number;
+    /** Minutes it has been failing, when the state is `down` and it can be said at all. */
+    failingForMinutes: number | null;
+  };
+  windowMinutes: number;
+}
+
+/**
+ * Ask what everyone else is seeing. `null` when the control plane couldn't be reached.
+ *
+ * `summary` arrives in English, from the control plane, because it is composed in one place
+ * and the status page, this app and a Discord bot all show the same wording. The app pairs it
+ * with a translated heading rather than rendering it alone.
+ */
+export function masterStatus(): Promise<MasterStatus | null> {
+  return invoke<MasterStatus | null>("master_status");
+}
+
+/** One line of {@link connectionSelfTest}. `state` is `ok`, `fail`, or `skip`. */
+export interface ConnectionCheck {
+  id: "internet" | "dns" | "udp" | "master" | "others";
+  state: "ok" | "fail" | "skip";
+  /** The technical half — a host, an error, a count. Untranslated, for pasting into Discord. */
+  detail: string;
+}
+
+export interface ConnectionSelfTest {
+  /** `upstream` (the master, not you), `local` (this machine), `fine`, or `unknown`. */
+  verdict: "upstream" | "local" | "fine" | "unknown";
+  checks: ConnectionCheck[];
+  summary: string | null;
+}
+
+/**
+ * Walk this machine's side of the connection and say whose problem it is.
+ *
+ * Runs outwards from the machine — internet, the master's name, outbound UDP, our own fetch —
+ * and finishes with what everyone else is seeing, which is the only check that can overturn
+ * the rest: when the master is down, every machine in the world looks broken from the inside.
+ */
+export function connectionSelfTest(): Promise<ConnectionSelfTest> {
+  return invoke<ConnectionSelfTest>("connection_selftest");
+}
+
+/**
+ * Put a server on the shared address book deliberately, as its own operator.
+ *
+ * The app already contributes every address a master sweep turned up, and the control plane
+ * holds each one back until distinct networks have independently seen it — which is what makes
+ * an anonymous write safe to hand back to thousands of apps. This is the way round that for a
+ * server two strangers will never happen to report: a new one, or a private one that was never
+ * in the master's list to be seen in.
+ *
+ * Needs an enrolled account; rejects with the control plane's own wording when there isn't one.
+ * Resolves with the address as stored — normalised, default port filled in — which is worth
+ * showing back, since it is usually not quite what was typed.
+ */
+export function registerServerAddress(address: string): Promise<string> {
+  return invoke<string>("register_server_address", { address });
 }
 
 /** Where a rider stands in a server's line. */

@@ -33,6 +33,7 @@ pub(crate) use mxb_core::library;
 mod liveshare;
 pub(crate) use mxb_core::linkwalk;
 mod logs;
+mod masterstatus;
 mod memwatch;
 pub(crate) use mxb_core::modelswap;
 mod mods;
@@ -50,6 +51,7 @@ pub(crate) use mxb_core::pkz;
 mod plugins;
 /// What the running game has loaded, reported for diagnostics.
 mod procmods;
+mod roster;
 /// What the running game's own memory says about itself — digests of named regions, compared
 /// against a per-build baseline the control plane holds. The client half of state invariants.
 mod stateinvariants;
@@ -4079,6 +4081,38 @@ fn set_ranked_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
 /// opaquely.
 #[tauri::command]
 async fn list_master_servers(app: tauri::AppHandle) -> Result<Vec<WorldServer>, String> {
+    let mut out = master_list(app.clone()).await;
+
+    // A fresh install has an empty address book, so the fallback the rest of this depends on
+    // has nothing to fall back to — which makes it useless to precisely the people an outage
+    // hits hardest, the ones who never got to open this tab on a good day. Fill it from the
+    // shared book and ask again. Only ever on an empty book, so this is once in an install's
+    // life and nobody pays the second attempt twice.
+    if out.is_err() && serverbook::load(&app).is_empty() && roster::seed(&app).await > 0 {
+        out = master_list(app.clone()).await;
+    }
+
+    match &out {
+        // The outcome, never the list: a list rebuilt from the book is what a *failed* master
+        // looks like from here, and reporting it as an answer would have every install with a
+        // warm book calling an outage `ok`. See `masterstatus::MasterOutcome`.
+        Ok((list, outcome)) => {
+            masterstatus::report(&app, outcome);
+            // Only a real sweep is worth contributing. A list rebuilt from our own book would
+            // corroborate the shared book using the copies it handed out — see `roster`.
+            if *outcome == masterstatus::MasterOutcome::Answered {
+                roster::contribute(list);
+            }
+        }
+        Err(e) => masterstatus::report(&app, &masterstatus::MasterOutcome::Failed(e.clone())),
+    }
+
+    out.map(|(list, _)| list)
+}
+
+async fn master_list(
+    app: tauri::AppHandle,
+) -> Result<(Vec<WorldServer>, masterstatus::MasterOutcome), String> {
     #[cfg(worldnet)]
     {
         worldnet::list_servers(app).await
@@ -4088,6 +4122,50 @@ async fn list_master_servers(app: tauri::AppHandle) -> Result<Vec<WorldServer>, 
         let _ = app;
         Err("The server browser isn't included in this build.".into())
     }
+}
+
+/// What every other app is seeing of the master server, right now.
+///
+/// The Servers tab asks after a failed fetch, and only then. One machine failing knows nothing
+/// — that is the whole reason `connection timeout` sends people to reinstall a working game —
+/// and one machine failing while twenty others are fine, or alongside twenty others, knows
+/// exactly what to tell the player. `None` when the control plane couldn't be asked, which the
+/// banner renders as the plain failure it was already going to show.
+#[tauri::command]
+async fn master_status() -> Option<masterstatus::MasterStatus> {
+    masterstatus::fetch(std::time::Duration::from_secs(8)).await
+}
+
+/// Check this machine's side of the connection, end to end, and say whose problem it is.
+///
+/// The button under a failed server list. It walks outwards from the machine — internet, the
+/// master's name, outbound UDP, our own fetch — and finishes with what everyone else is
+/// seeing, because that last one is the only check that can overturn the others.
+#[tauri::command]
+async fn connection_selftest(app: tauri::AppHandle) -> masterstatus::SelfTest {
+    let out = master_list(app.clone()).await;
+    let outcome = match &out {
+        Ok((_, outcome)) => outcome.clone(),
+        Err(e) => masterstatus::MasterOutcome::Failed(e.clone()),
+    };
+    masterstatus::report(&app, &outcome);
+    masterstatus::self_test(app, &outcome, out.ok().map(|(list, _)| list.len())).await
+}
+
+/// Put a server on the shared address book deliberately, as its own operator.
+///
+/// The Servers tab already contributes every address a sweep turned up, and the control plane
+/// holds each one back until distinct networks have independently seen it — which is what makes
+/// an anonymous write safe to hand back to thousands of apps. This is the way round that for the
+/// server two strangers will never happen to report: one nobody has found yet, or a private one
+/// that was never in the master's list to be seen in. The account is what stands in for the
+/// corroboration, so unlike a sighting it is recorded against somebody.
+///
+/// Returns the address as it was actually stored — normalised, with the default port filled in —
+/// so the dialog can show what it registered rather than what was typed.
+#[tauri::command]
+async fn register_server_address(app: tauri::AppHandle, address: String) -> Result<String, String> {
+    roster::register_mine(&app, &address).await
 }
 
 /// Ask one server about itself, right now.
@@ -4112,6 +4190,21 @@ async fn probe_server(address: String) -> Result<WorldServer, String> {
 #[tauri::command]
 fn game_running() -> bool {
     gameproc::is_game_running()
+}
+
+/// Bring the running game's window to the front.
+///
+/// Exists because the app launches the game itself, which leaves it *behind* the app's own
+/// window — so "the game is already running" reads as a lie to a player looking at our UI
+/// with no MX Bikes in sight. Showing them the game they already have open is a better
+/// answer than telling them it exists.
+///
+/// Best-effort: Windows only grants foreground rights to the process that owns the last
+/// input, which we do here because the player just clicked our button. A refused activation
+/// returns `false` and leaves them one alt-tab away.
+#[tauri::command]
+fn focus_game() -> bool {
+    gameproc::focus_game()
 }
 
 /// Installed bikes with their class, for the garage bike-switch UI. The frontend
@@ -6641,6 +6734,21 @@ fn main() {
             // Anonymous counters. Started last of the startup tasks and after the config
             // work above, because the install id it mints is saved into that same config.
             usage::start(handle, usage::MANAGER);
+            // Warm an empty address book from the shared one, once, before anybody needs it.
+            // The Servers tab already rebuilds its whole list with `GETINFO` when the master
+            // won't answer — but only from addresses this install has been told about, so on a
+            // fresh install that fallback has nothing to fall back to. Doing it here rather
+            // than waiting for the first failure means the book is ready before the outage
+            // instead of during it, when the control plane is exactly what a player's flaky
+            // afternoon may also be failing to reach.
+            {
+                let handle = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    if serverbook::load(&handle).is_empty() {
+                        roster::seed(&handle).await;
+                    }
+                });
+            }
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);
@@ -6854,6 +6962,9 @@ fn main() {
             queue_status,
             queue_counts,
             list_master_servers,
+            master_status,
+            connection_selftest,
+            register_server_address,
             probe_server,
             server_riders,
             servers_with_paint_sync,
@@ -6879,6 +6990,7 @@ fn main() {
             sync_paints,
             cp_servers,
             game_running,
+            focus_game,
             shop_login,
             shop_status,
             shop_logout,
