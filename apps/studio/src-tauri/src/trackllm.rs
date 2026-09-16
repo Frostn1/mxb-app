@@ -663,15 +663,24 @@ fn repair(prog: &mut TrackProgram) -> Vec<String> {
                 .join(", ");
             prog.features
                 .retain(|f| f.at() + f.length() <= at || f.at() >= at + length);
-            prog.features.push(Feature::Tabletop {
-                at,
-                length,
-                height,
-                lip: rules.finish_face_m,
-                // Left untagged on purpose. This is the automatic placement, and it should
-                // keep being found by measurement — tagging is what a person does to overrule
-                // it, and a tag nobody asked for is one they would have to find and undo.
-                finish: false,
+            // A stadium round finishes over a triple, not a table — 22.6–25.3 m crest to crest
+            // at a 30° lip on all seven of the measured laps. Built at the span the run-up
+            // carries, which `deck` already is: see `tracklayout::triple_span` for why that
+            // and the measured median are not the same number.
+            prog.features.push(if rules.finish_triple {
+                crate::tracklayout::finish_triple(at, height, deck)
+            } else {
+                Feature::Tabletop {
+                    at,
+                    length,
+                    height,
+                    lip: rules.finish_face_m,
+                    // Left untagged on purpose. This is the automatic placement, and it should
+                    // keep being found by measurement — tagging is what a person does to
+                    // overrule it, and a tag nobody asked for is one they would have to find
+                    // and undo.
+                    finish: false,
+                }
             });
             prog.features.sort_by(|a, b| a.at().total_cmp(&b.at()));
             done.push(format!(
@@ -1187,8 +1196,12 @@ pub fn review(prog: &TrackProgram) -> Review {
                 ));
             }
         }
+        // A sand section stands nothing up — it is what the ground is made of over a stretch,
+        // like a rut — so the jump-height band has nothing to say about it.
         let h = f.height().abs();
-        if h < corpus::FEATURE_HEIGHT_M.0 || h > corpus::FEATURE_HEIGHT_M.1 {
+        if !matches!(f, Feature::Sand { .. })
+            && (h < corpus::FEATURE_HEIGHT_M.0 || h > corpus::FEATURE_HEIGHT_M.1)
+        {
             out.push(format!(
                 "a feature at {:.0} m stands {h:.1} m; jumps run {:.1}–{:.1} m",
                 f.at(),

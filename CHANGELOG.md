@@ -20,6 +20,13 @@
 - Track Studio draws random tracks as MX, SX or SMX. SX is a short, flat stadium lap of
   parallel lanes and 180° turns with a 22-gate start, and SMX is a flatter, tighter outdoor lap.
   Writing a track from a brief follows the same switch.
+- SX and SMX laps are built out of real sections now, lane by lane: rhythm lanes, a set of
+  whoops, triples, doubles, tabletops, and a stretch of sand you can both see and feel. The lap
+  finishes over a triple.
+- A supercross track is built in a stadium, with a wall round the floor and tiered stands
+  behind it.
+- Tuff blocks line the lane borders. Choose soft ones you ride through or solid ones you don't,
+  per track, in Track Studio.
 
 ## Unreleased — MXB App
 

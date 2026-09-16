@@ -189,6 +189,12 @@ export default function TrackStudio() {
     value,
     label: t(`track.discipline.${value}`),
   }));
+  // Not a switch for Random like the two above: this one is the loaded track's own, so it
+  // is read off the program and settled back into it.
+  const tuffs = (["soft", "solid"] as const).map((value) => ({
+    value,
+    label: t(`track.tuff.${value}`),
+  }));
   const randomAtScale = () => randomTrackProgram(undefined, scale, discipline);
   const rebuild = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tools, setTools] = useState<TrackToolsStatus | null>(null);
@@ -1547,6 +1553,22 @@ export default function TrackStudio() {
                       ))}
                     </div>
                   </div>
+                  {/* Only a supercross lane is lined with them, so nothing else is asked. */}
+                  {(program.discipline === "sx" || program.discipline === "smx") && (
+                    <div>
+                      <div className="font-cond text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">
+                        {t("track.tuff")}
+                      </div>
+                      <div className="mt-2">
+                        <Segmented
+                          size="sm"
+                          options={tuffs}
+                          value={program.tuff ?? "soft"}
+                          onChange={(v) => void settle({ ...program, tuff: v })}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Measured, not claimed — the same figures taken of published tracks. */}
