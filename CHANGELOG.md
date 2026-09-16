@@ -91,6 +91,10 @@
   so there is something to ride the whole way down it.
 - How packed the lap is, in Track Studio: a slider from sparse to packed, sitting by default
   where a real round sits. It shows for SX and SMX, which are the ones it changes.
+- The ground comes back down between jumps. A row of hills used to sit on a shelf, so the dips
+  never reached the ground either side and it rode as one long wave instead of a row of lips you
+  pick a line through. Now each hill lands back at grade, and the hills stand as tall as the ones
+  on a real round.
 
 ## Unreleased — MXB App
 

@@ -357,7 +357,10 @@ pub const SX_RULES: Rules = Rules {
         rhythm_m: (40.0, 65.0),
         rhythm_hills: (5, 6),
         rhythm_pitch_m: (9.5, 10.5),
-        rhythm_h_m: (0.9, 1.5),
+        // M: hills stand 1.30-1.55 over the floor beside them, median 1.44. Drawn lower than
+        // that and then measured off a floor the hollow had dug, ours read in band at 1.42
+        // while a rider only ever felt 0.96 crest to trough.
+        rhythm_h_m: (1.25, 1.60),
         whoop_sections: (1, 2),
         whoops: (9, 10),
         whoop_pitch_m: (5.2, 5.6),
@@ -459,7 +462,10 @@ pub const SMX_RULES: Rules = Rules {
         rhythm_m: (25.0, 40.0),
         rhythm_hills: (3, 3),
         rhythm_pitch_m: (9.5, 10.5),
-        rhythm_h_m: (0.9, 1.5),
+        // M: hills stand 1.30-1.55 over the floor beside them, median 1.44. Drawn lower than
+        // that and then measured off a floor the hollow had dug, ours read in band at 1.42
+        // while a rider only ever felt 0.96 crest to trough.
+        rhythm_h_m: (1.25, 1.60),
         // None. Whoops belong to the stadium, and none of the three measured laps carries a set.
         whoop_sections: (0, 0),
         whoops: (0, 0),
@@ -1863,7 +1869,14 @@ fn rhythm_lane(rng: &mut Rng, at: f32, room: f32, sec: &Sections) -> Option<Feat
         let h = rng.range(sec.rhythm_h_m.0, sec.rhythm_h_m.1);
         marks.push((x + pitch * 0.34, h));
         marks.push((x + pitch * 0.50, h));
-        marks.push((x + pitch * 0.92, h * 0.07));
+        // All the way back to grade, not a fourteenth of the way up it.
+        //
+        // Measured against the corpus: a real round's ground comes back to within 0.01–0.03 m
+        // between hills on every one of the seven, and ours stopped 0.08 m short of its own
+        // baseline. That reads as a wave rather than a row of lips — the rider's own rule —
+        // and it is what left 44% of our troughs never clearing the floor a jump is counted
+        // off, so neighbouring hills merged into one long stretch of raised ground.
+        marks.push((x + pitch * 0.92, 0.0));
         x += pitch;
     }
     marks.push((span, 0.0));
