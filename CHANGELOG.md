@@ -14,6 +14,13 @@
   FrostMod 0.22 or newer.
 - With MXB App running too, the two share one shortcut, and each overlay shows the other's tabs.
 
+## Unreleased — Frost's Studio
+
+### Added
+- Track Studio draws random tracks as MX, SX or SMX. SX is a short, flat stadium lap of
+  parallel lanes and 180° turns with a 22-gate start, and SMX is a flatter, tighter outdoor lap.
+  Writing a track from a brief follows the same switch.
+
 ## Unreleased — MXB App
 
 ### Added
