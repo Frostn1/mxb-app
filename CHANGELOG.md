@@ -23,6 +23,10 @@
 - Two new things the recorder can draw: suspension bars for each end, with a mark when it
   bottoms, and a blue trail ahead of you on the map showing the line to take. Both start off.
 - The newest settings say when your recorder is older than the FrostMod 0.24 they need.
+- Coach counts anonymous usage the way the app and the Studio already do — which pages get
+  opened, and how many sessions get reviewed. Same switch (Settings → General), same config, and
+  the same nothing-about-you payload: no rider name, no paths, no session files. Coach never
+  mints an identifier of its own, so a machine with only Coach on it counts nothing at all.
 - On the game's default setup the coach now writes you a setup of your own, named after the
   track, instead of asking you to go and save one in the garage first. It starts from another
   setup you have for that bike where there is one, and from the bike's own settings where there
@@ -87,6 +91,10 @@
 - Tuff blocks line the lane borders. Choose soft ones you ride through or solid ones you don't,
   per track, in Track Studio.
 
+### Changed
+- The Studio reports anonymous usage from the same fixed list of names as the app, for the same
+  reason.
+
 ## Unreleased — MXB App
 
 ### Added
@@ -122,20 +130,6 @@
   the app's window, and so could count whatever it liked under any name it liked — including
   filling the buffer with invented ones, which quietly stopped real counters being recorded
   until the next send.
-
-## Unreleased — Frost's Studio
-
-### Changed
-- The Studio reports anonymous usage from the same fixed list of names as the app, for the same
-  reason.
-
-## Unreleased — MXB Coach
-
-### Added
-- Coach counts anonymous usage the way the app and the Studio already do — which pages get
-  opened, and how many sessions get reviewed. Same switch (Settings → General), same config, and
-  the same nothing-about-you payload: no rider name, no paths, no session files. Coach never
-  mints an identifier of its own, so a machine with only Coach on it counts nothing at all.
 
 ## 2026-09-15 — v0.15.1 — Small fixes
 
