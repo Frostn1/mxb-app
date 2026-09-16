@@ -16,7 +16,7 @@ import {
   type OverlayPeer,
 } from "@frost/shared/api/overlay";
 import { I18nProvider, useT, type TKey } from "@/i18n";
-import { coachHud, coachReview, coachSetHud, type Hud, type ReviewOut } from "@/api/coach";
+import { coachHud, coachReview, coachSetHud, coachStatus, type CoachStatus, type Hud, type ReviewOut } from "@/api/coach";
 import { lastLap, type LastLap } from "@/lib/lastLap";
 import { gap, lapTime, lossColor } from "@/lib/format";
 import SetupFixes from "../Review/SetupFixes";
@@ -44,7 +44,7 @@ function useLastReview() {
     try {
       const l = await lastLap();
       setLast(l);
-      setData(l ? await coachReview(l.session.path, l.lap) : null);
+      setData(l ? await coachReview(l.path, l.lap) : null);
     } catch (e) {
       setError(String(e));
     }
@@ -144,8 +144,10 @@ function HudTab() {
   const t = useT();
   const [hud, setHud] = useState<Hud | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<CoachStatus | null>(null);
   useEffect(() => {
     coachHud().then(setHud).catch((e) => setError(String(e)));
+    coachStatus().then(setStatus).catch(() => {});
   }, []);
   const set = (key: string, on: boolean) =>
     coachSetHud(key, on)
@@ -158,6 +160,11 @@ function HudTab() {
       <Label>{t("hud.title")}</Label>
       <div className="border border-border bg-card px-4 py-3">
         <p className="text-[12.5px] text-muted-foreground">{t("hud.body")}</p>
+        {status?.recorderOutdated && (
+          <p className="mt-2 text-[12px] text-warning">
+            {t("recorder.tooOld", { version: status.recorderVersion ?? "" })}
+          </p>
+        )}
         <div className="mt-3 flex items-center justify-between gap-4 border-b border-border pb-3">
           <span className="text-[13px] font-semibold">{t("hud.enabled")}</span>
           <Switch checked={hud.enabled} onCheckedChange={(on) => void set("enabled", on)} />
@@ -206,7 +213,7 @@ function Panel() {
   }, []);
 
   const close = useCallback(() => void overlayHide().catch(() => {}), []);
-  const path = last?.session.path;
+  const path = last?.path;
 
   return (
     <OverlayFrame
