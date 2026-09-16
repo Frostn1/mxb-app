@@ -3,11 +3,26 @@
 ## 2026-09-15 — MXB Coach
 
 ### Added
+- Saving a setup now sets it as the one practice loads on that track, so it's on the bike when
+  you go out. Close MX Bikes first and it happens on save; otherwise there's a Select button
+  for when the game is closed. Your other setups, and your race and qualifying picks, are left
+  alone.
+- Move the live cue. Pick any of nine places on screen in the HUD panel, for the recorder from
+  FrostMod 0.24 onwards.
+- Send the cues from your newest lap without leaving the review you're reading.
 - Settings shows which recorder the game actually ran. It appears after you've started MX Bikes
   once with the recorder installed.
 - Speak the cues and the in-game HUD say which recorder they need when yours is older than that.
 
 ### Changed
+- The live cues move on. Send them again after a few laps and the coach drops what you've taken
+  and calls what's costing you time now, instead of repeating the same lap's calls.
+- Cues say what to do and where: "Go inside here", "Stay wide", "Brake here". Line tips name the
+  inside or the outside line in those words.
+- A shift is only called where your gear is really costing you time on the exit, and it names
+  the gear to be in rather than telling you to change earlier.
+- The track map switch is a plain on/off that the game always obeys. With MXBMRP3 installed it
+  says so, since that draws a map of its own.
 - One session per event. Go out, come in and go out again, and it's all one session with every
   lap you rode: your best lap and your ideal lap count all of them, and each lap says which
   stint it came from.

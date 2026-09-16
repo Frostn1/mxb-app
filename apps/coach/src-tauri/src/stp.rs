@@ -158,6 +158,40 @@ pub fn coach_names(base: &str) -> impl Iterator<Item = String> + '_ {
     (1..100).map(move |n| if n == 1 { format!("{base} (coach)") } else { format!("{base} (coach {n})") })
 }
 
+/// The game's own record of which setup a bike loads, in the same folder as the setups it
+/// names: `[setup]` with one key per session type.
+///
+/// From the exe, which reads and writes it through its ini helper at two call sites
+/// (0x14006b503 and 0x14009c4f3): the path is `profiles\<p>\setups\<track>\<bike>\default.ini`,
+/// the section is `setup`, and the keys are `testing`, `wet_testing`, `qualify` and `race`.
+/// The same helper reads `profile.ini`'s `[riding_style]` with the bike id as the key
+/// (0x140092910), which is what settles which argument is the section and which the key.
+pub const DEFAULT_INI: &str = "default.ini";
+const SETUP_SECTION: &str = "setup";
+/// The session a practice lap is ridden in, and the wet version of it.
+const DRY_KEY: &str = "testing";
+const WET_KEY: &str = "wet_testing";
+
+/// Point the game at `name` for practice in `dir`, keeping every other key.
+///
+/// Only the practice keys are touched. `qualify` and `race` are the rider's own choices about
+/// a race weekend, and a coach setup written from a practice lap has no business changing
+/// what they line up on.
+pub fn select_default(dir: &Path, name: &str, wet: bool) -> Result<(), String> {
+    let mut keys: Vec<(&str, String)> = vec![(DRY_KEY, name.to_string())];
+    if wet {
+        keys.push((WET_KEY, name.to_string()));
+    }
+    crate::ini::write(&dir.join(DEFAULT_INI), SETUP_SECTION, &keys)
+}
+
+/// Which setup `dir` currently loads for practice, if it says.
+pub fn selected_default(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join(DEFAULT_INI)).ok()?;
+    let v = crate::ini::get(&crate::ini::read_section(&text, SETUP_SECTION), DRY_KEY)?.trim().to_string();
+    (!v.is_empty()).then_some(v)
+}
+
 /// Where a recorded setup lives. The plugin reports the name only: a leading ':' means a
 /// setup for every track (`setups\common`), else it's saved under the track. `*` names a
 /// `.stt` file, which isn't a setup the coach reads.

@@ -301,9 +301,22 @@ export interface SetupPlan {
 /** The changes behind a lap's setup tips, against the setup the rider had on. */
 export const coachSetupPlan = (path: string, skills: string[]) =>
   invoke<SetupPlan>("coach_setup_plan", { path, skills });
-/** Saves those changes as a new setup beside the rider's own. Resolves to its name. */
+
+/** A setup the coach wrote, and whether the game will load it. */
+export interface SavedSetup {
+  name: string;
+  /** The game is pointed at it for practice on this track. */
+  selected: boolean;
+  /** It isn't, because MX Bikes is open: the file is the game's, and it rewrites it on exit. */
+  gameOpen: boolean;
+}
+
+/** Saves those changes as a new setup beside the rider's own, and selects it in the game. */
 export const coachSaveSetup = (path: string, skills: string[]) =>
-  invoke<string>("coach_save_setup", { path, skills });
+  invoke<SavedSetup>("coach_save_setup", { path, skills });
+/** Points the game at a setup the coach already saved. Only works with MX Bikes closed. */
+export const coachSelectSetup = (path: string, name: string) =>
+  invoke<SavedSetup>("coach_select_setup", { path, name });
 export type CueLevel = "new" | "intermediate" | "subPro" | "pro";
 export type CueAmount = "few" | "normal" | "lots";
 
@@ -323,9 +336,14 @@ export interface CuesOut {
 }
 
 /** Picks this lap's live cues for a rider's level and how much coaching they want, and writes
- *  them where the recorder reads them. */
-export const coachWriteCues = (path: string, lap: number, level: CueLevel, amount: CueAmount) =>
-  invoke<CuesOut>("coach_write_cues", { path, lap, level, amount });
+ *  them where the recorder reads them.
+ *
+ *  The calls move on each time: what the last sheets said is remembered, so a cue the rider
+ *  has been hearing for a few laps rests and whatever is costing time now takes its place.
+ *  `latest` picks from the newest lap on this track and bike rather than the one on screen,
+ *  which is what to ask for while the rider is still out. */
+export const coachWriteCues = (path: string, lap: number, level: CueLevel, amount: CueAmount, latest?: boolean) =>
+  invoke<CuesOut>("coach_write_cues", { path, lap, level, amount, latest: latest ?? false });
 /** Downloads the recorder, or copies it from `from`. Resolves to where it went. */
 export const installRecorder = (from?: string) =>
   invoke<string>("coach_install_plugin", { from: from ?? null });
@@ -338,16 +356,24 @@ export interface HudPart {
   on: boolean;
 }
 
-/** `hud.ini` as the recorder will read it: missing keys are on. */
+/** `hud.ini` as the recorder will read it: missing keys are on, except the map when MXBMRP3
+ *  is installed — `parts` already says what the recorder will really do. */
 export interface Hud {
   enabled: boolean;
   parts: HudPart[];
   file: string;
+  /** MXBMRP3 sits beside the recorder and draws a track map of its own. */
+  mxbmrp3: boolean;
+  /** Where the live cue sits: fractions of the width and height, (0,0) top left. */
+  cuePos: [number, number];
 }
 
 export const coachHud = () => invoke<Hud>("coach_hud");
-/** Turn one part on or off, or the whole HUD with `enabled`. */
+/** Turn one part on or off, or the whole HUD with `enabled`. Always written out, so the
+ *  recorder does what the switch says even when another plugin would decide for it. */
 export const coachSetHud = (key: string, on: boolean) => invoke<Hud>("coach_set_hud", { key, on });
+/** Move the live cue. FrostMod 0.24 reads it; older recorders leave the cue where it was. */
+export const coachSetCuePos = (x: number, y: number) => invoke<Hud>("coach_set_cue_pos", { x, y });
 
 /** Whether the recorder speaks its cues (`cues/voice.ini`), and how loud, 0–100. */
 export interface Voice {

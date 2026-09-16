@@ -50,10 +50,12 @@ export default function LiveCues({ path, lap }: { path: string; lap: number }) {
   const [amount, setAmount] = useState<CueAmount>(() => remembered(CUE_AMOUNT_KEY, AMOUNTS, "normal"));
   const [sent, setSent] = useState<CuesOut | null>(null);
   const [busy, setBusy] = useState(false);
-  const send = async () => {
+  /** `latest` coaches the last lap ridden on this track rather than the one on screen: sent
+   *  mid-session, that is the one the rider wants calls about. */
+  const send = async (latest = false) => {
     setBusy(true);
     try {
-      const out = await coachWriteCues(path, lap, level, amount);
+      const out = await coachWriteCues(path, lap, level, amount, latest);
       setSent(out);
       toast.success(out.cues.length ? t("cues.sent", { n: out.cues.length }) : t("cues.none"));
     } catch (e) {
@@ -93,12 +95,18 @@ export default function LiveCues({ path, lap }: { path: string; lap: number }) {
             options={AMOUNTS.map((v) => ({ value: v, label: t(`cues.amount.${v}` as TKey) }))}
           />
         </div>
-        <div className="flex flex-wrap items-center gap-3 pt-1">
-          <Button size="sm" onClick={send} disabled={busy}>
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {/* Called, not passed: the click event would arrive as `latest` and be truthy. */}
+          <Button size="sm" onClick={() => void send()} disabled={busy}>
             {t("cues.send")}
           </Button>
-          <span className="text-[12px] text-muted-foreground">{t("cues.where")}</span>
+          <Button size="sm" variant="outline" onClick={() => void send(true)} disabled={busy}>
+            {t("cues.fromLatest")}
+          </Button>
         </div>
+        <p className="text-[12px] text-muted-foreground">{t("cues.fromLatestHint")}</p>
+        <p className="text-[12px] text-muted-foreground">{t("cues.where")}</p>
+        <p className="text-[12px] text-muted-foreground">{t("cues.moveOn")}</p>
         {sent && sent.cues.length > 0 && (
           <ol className="space-y-1 border-t border-border pt-2">
             {sent.cues.map((c, i) => (
