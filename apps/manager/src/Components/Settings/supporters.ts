@@ -106,9 +106,7 @@ export const BUNDLED_SUPPORTERS: SupportersManifest = {
     { name: "Bøddi" },
     { name: "Kelso" },
   ],
-  contributors: [
-    { name: "Trystan34", kind: "ideas", note: "Ideas that made the app better" },
-  ],
+  contributors: [{ name: "Trystan34", kind: "code" }],
 };
 
 const CACHE_KEY = "mxb:supporters:v1";
