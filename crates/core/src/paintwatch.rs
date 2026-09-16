@@ -369,6 +369,61 @@ pub fn stop(set: &WatchSet) {
     }
 }
 
+/// Whether this set holds a live watch. A caller whose folder only appears once something has
+/// written to it asks this to know whether to try again.
+pub fn is_watching(set: &WatchSet) -> bool {
+    set.0.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+}
+
+/// Watch whole folders and report the files that change inside them.
+///
+/// The third shape, beside named files ([`start_with`]) and one mod ([`watch_source`]): here
+/// the folder *is* the question — whatever lands in it counts — and the caller sets its own
+/// debounce, because a file being appended to all through a session wants a slower answer
+/// than a paint someone just saved. Returns whether anything is being watched: a folder that
+/// isn't there yet can't be, and the caller is expected to ask again later.
+pub fn watch_folders<F>(set: &WatchSet, label: &'static str, dirs: &[String], debounce: Duration, on_change: F) -> bool
+where
+    F: Fn(Vec<String>) + Send + 'static,
+{
+    stop(set);
+    let live = Arc::new(AtomicBool::new(true));
+    let alive = live.clone();
+    let mut debouncer = match new_debouncer(debounce, move |res: DebounceEventResult| {
+        if !alive.load(Ordering::SeqCst) {
+            return;
+        }
+        let Ok(events) = res else { return };
+        // `None`: nothing is named here, so everything but litter and the folder itself counts.
+        let paths = source_changes(None, events.into_iter().map(|e| e.path));
+        if paths.is_empty() {
+            return;
+        }
+        on_change(paths);
+    }) {
+        Ok(d) => d,
+        Err(e) => {
+            log::warn!("{label}: couldn't start: {e}");
+            return false;
+        }
+    };
+    let mut any = false;
+    for dir in dirs.iter().take(MAX_WATCHED) {
+        match debouncer.watcher().watch(Path::new(dir), RecursiveMode::NonRecursive) {
+            Ok(()) => {
+                any = true;
+                log::info!("{label}: watching {dir}");
+            }
+            Err(e) => log::warn!("{label}: couldn't watch {dir}: {e}"),
+        }
+    }
+    if !any {
+        return false;
+    }
+    *set.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(Running { _debouncers: vec![debouncer], live });
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -562,6 +617,47 @@ mod tests {
             payloads.iter().all(|p| p.contains(&*source.replace('\\', "\\\\"))),
             "every event names the source the viewer asked about: {payloads:?}",
         );
+    }
+
+    /// A folder watch answers for whatever lands in the folder, including a file that didn't
+    /// exist when the watch started — which is every recording a session writes.
+    #[test]
+    fn a_file_written_into_a_watched_folder_is_reported() {
+        let dir = std::env::temp_dir().join(format!("frost-folderwatch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("make the folder");
+        let set = WatchSet::default();
+        let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+        let heard = Arc::clone(&seen);
+        let started = watch_folders(
+            &set,
+            "folder watcher",
+            &owned(&[dir.to_string_lossy().as_ref()]),
+            Duration::from_millis(100),
+            move |paths| heard.lock().unwrap().extend(paths),
+        );
+        assert!(started && is_watching(&set));
+        // A folder that isn't there is not watched, and says so rather than pretending.
+        let missing = WatchSet::default();
+        assert!(!watch_folders(&missing, "folder watcher", &owned(&["/no/such/folder/here"]), Duration::from_millis(100), |_| {}));
+        assert!(!is_watching(&missing));
+
+        std::thread::sleep(Duration::from_millis(300));
+        std::fs::write(dir.join("20260915-120000-000.mxbc"), b"first").expect("write a recording");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let hit = loop {
+            if seen.lock().unwrap().iter().any(|p| p.contains(".mxbc")) {
+                break true;
+            }
+            if std::time::Instant::now() >= deadline {
+                break false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        stop(&set);
+        let payloads = seen.lock().unwrap().clone();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(hit, "a recording written into the folder must be reported; saw {payloads:?}");
+        assert!(!is_watching(&set), "stopping really stops");
     }
 
     fn mock_app() -> tauri::App<tauri::test::MockRuntime> {

@@ -154,6 +154,8 @@ export const en = {
   "setup.lessOffset": "less offset",
   "setup.atLimit": "already as far as it goes",
   "setup.byHand": "in the garage",
+  "setup.conflict": "two tips disagree, so this one is yours",
+  "setup.savedChanged": "Changed: {{list}}.",
   "setupField.forkSpring": "Fork spring",
   "setupField.forkCompression": "Fork compression",
   "setupField.forkRebound": "Fork rebound",

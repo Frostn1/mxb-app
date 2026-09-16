@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — MXB Coach
+
+### Added
+- On the game's default setup the coach now writes you a setup of your own, named after the
+  track, instead of asking you to go and save one in the garage first. It starts from another
+  setup you have for that bike where there is one, and from the bike's own settings where there
+  isn't. Your own setups are never written over.
+- The session list and the laps in an open session keep up with the recorder while you ride, so
+  a lap you have just finished shows up without leaving the page and coming back. Both pages
+  have a Refresh button too.
+
+### Changed
+- Where two tips want one setting opposite ways — sand wants a tooth more on the rear, the rev
+  limiter a tooth less — the coach says so and leaves that setting to you, rather than listing
+  it as a change it will make. Saving a setup now names the settings it changed.
+
 ## 2026-09-15 — MXB Coach v0.1.12-beta.12
 
 ### Added

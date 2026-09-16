@@ -578,6 +578,43 @@ mod tests {
     use super::testfile::File;
     use super::*;
 
+    /// The recorder writes all the way through a stint, so the coach re-reads a file that is
+    /// still growing. A record cut in half at the end is where the writer had got to, not a
+    /// broken file, and the laps already in it have to come back either way — the session list
+    /// and the open session's laps refresh off exactly this.
+    #[test]
+    fn a_recording_still_being_written_reads_up_to_where_it_stopped() {
+        let mut f = File::new();
+        f.event("indiana", 1650.0);
+        f.sample(0.0, 0.0, |_| {}).sample(30.0, 0.5, |_| {}).lap(0, 60_000);
+        f.sample(60.0, 0.0, |_| {}).sample(90.0, 0.5, |_| {});
+        let mid_stint = f.0.clone();
+        let finished = {
+            let mut g = File(mid_stint.clone());
+            g.end();
+            g.0
+        };
+
+        let done = parse(&finished).unwrap();
+        assert!(done.complete);
+        assert_eq!((done.laps.len(), done.samples.len()), (1, 4));
+
+        // Still out on track: no end record yet, and the lap already timed is there.
+        let mid = parse(&mid_stint).unwrap();
+        assert!(!mid.complete, "the stint is still running");
+        assert_eq!((mid.laps.len(), mid.samples.len()), (1, 4));
+
+        // Cut anywhere inside the last record — a half-written header, a half-written payload
+        // — and it still reads up to the last whole record rather than failing.
+        for cut in [1, 5, 9, 40, 100, 203] {
+            let short = &mid_stint[..mid_stint.len() - cut];
+            let rec = parse(short).expect("a half-written tail is not a broken file");
+            assert_eq!(rec.laps.len(), 1, "the finished lap survives a cut of {cut}");
+            assert_eq!(rec.samples.len(), 3, "and the sample being written is simply not there yet");
+            assert!(!rec.complete);
+        }
+    }
+
     #[test]
     fn reads_the_fields_at_the_published_offsets() {
         let mut f = File::new();
