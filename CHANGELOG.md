@@ -61,6 +61,9 @@
 ## Unreleased — MXB App
 
 ### Added
+- The 3D track view now shows the game's own tracks in full, with their ground, their markings,
+  their scenery and their sky, the same as a track you downloaded. This covers the 3D view in
+  MXB Coach too.
 - With MXB Coach running, the overlay shows Coach's tabs next to yours and one shortcut opens
   both.
 - When the server list won't load, the Servers tab now says whether it's MX Bikes' own servers
