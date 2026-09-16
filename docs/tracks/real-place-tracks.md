@@ -247,9 +247,20 @@ of last year's corner stays in the ground. Ironman shows at least three overlapp
 generations of track. Nothing in the elevation tells you which one is this season's, because
 as far as the laser is concerned they are all just dirt.
 
-The aerial photo solves it instantly. The lane in use is the one worn down to bare dirt, with
-tyre lines in it. The old ones have grass growing back. A human sees this in about two
-seconds. So you trace it, on the photo, and the app keeps your points.
+The aerial photo narrows it down: the lane in use is usually the one worn to bare dirt, and
+the abandoned ones have grass growing back. So you trace it on the photo, and the app keeps
+your points.
+
+**But the photo is not enough on its own, and this is worth taking seriously.** We tried it.
+Tracing Ironman from the imagery, carefully, twice, by someone who has never ridden there,
+produced two confident and completely wrong laps. A venue like that carries its motocross
+lap, a GNCC course, service roads and a decade of old layouts, and every one of them is worn
+dirt from the air.
+
+**So trace a track you know, or get someone who knows it to trace it.** That is the whole
+reason this step is a panel you click in rather than something the app attempts by itself.
+Somebody who has ridden the place draws the right lap in two minutes. Somebody who has not
+can spend an hour and be confidently wrong.
 
 ### How to trace well
 
@@ -460,19 +471,53 @@ does.
 
 ---
 
-## The worked example
+## The worked example, and how it went wrong
 
 `Ironman Raceway`, Crawfordsville, Indiana. 40.008 N, 86.9291 W.
 
 - Survey: USGS 3DEP 1 m, `IN_Indiana_Statewide_LiDAR_2017_B17`, flown March 2017 to April
   2020, public domain.
-- 470 m plot: 1,049,883 bytes, 1.5 seconds, 23.5 m of relief, holds part of the circuit.
-- 1200 m plot: 6,555,579 bytes, 29.4 m of relief, holds the whole venue.
+- 528 m square plot: 1,639,779 bytes, 278,784 cells, no holes, 24.4 m of relief.
 - Imagery: USGS NAIPPlus, public domain.
 
-**The trace shipped with this example is provisional.** It was placed by eye off the aerial
-photo and it has known gaps: the south straight and the east hairpin are certain, the
-west and north-west sections are a best guess between several parallel graded lanes, and the
-direction of travel is unverified. Those segments are labelled in the file itself rather than
-only mentioned here. Treat it as a demonstration that the pipeline works end to end, not as
-an accurate reproduction of Ironman Raceway.
+**The ground is good. The lap traced on it was wrong, twice, and that is the most useful
+thing in this document.**
+
+It was traced from the aerial photo by someone who has never ridden Ironman. The first
+attempt followed the obvious worn ribbons and produced a 1175 m loop. The second overlaid
+that lap back onto the photo, found where it had drifted off the worn dirt, corrected it, and
+produced a confident 1606 m lap with per-segment confidence ratings. A rider who knows the
+venue looked at it and said flatly that it is not the lap.
+
+Both attempts were plausible. Both were wrong. And the confidence ratings did not catch it,
+because the sections rated *most* confident can be on the wrong ribbon just as easily as the
+uncertain ones. Confidence in how clearly you can see a ribbon is not confidence that it is
+the right ribbon.
+
+The reason is specific to places like this. Ironman hosts more than motocross, and the site
+carries, all at once and all clearly visible from the air:
+
+- this season's motocross lap
+- the GNCC course, which is a different sport on the same land
+- access roads and service tracks
+- a decade of superimposed older motocross layouts, because the venue is rebuilt every year
+
+Every one of those is worn dirt. "It follows a tan ribbon" tells you nothing about which of
+those four you are on.
+
+### What this means for you
+
+**If you do not know the venue, you cannot trace it. Ask someone who does.**
+
+That is not a limitation of this tool that will be fixed later; it is a property of the
+problem. The photograph does not contain the answer, and neither does the elevation. The
+answer is in the head of someone who has ridden there. The tracing panel exists precisely so
+that person can sit down and draw it in a couple of minutes, which is much faster and far
+more reliable than any amount of careful squinting by somebody who has not.
+
+So: trace your own local track, or the one you ride. If you want to build a famous circuit
+you have never been to, find someone who has and get them to mark the lap for you.
+
+The Ironman files that ship with this work are kept as a demonstration of the **workflow**,
+not as a reproduction of Ironman. The lap file says so in its own `note`, and is marked
+`"correct": false`. Do not build a track from it and call it Ironman.
