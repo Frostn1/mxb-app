@@ -348,6 +348,7 @@ export const en = {
   "overlay.registerFailed": "The overlay shortcut couldn't be registered",
   "overlay.hotkeyTaken": "Another app is using this shortcut",
   "overlay.hotkeyTakenDesc": "Pick a different one above.",
+  "overlay.linkDown": "MXB Coach couldn't open its link to MXB App, so the two can't share one shortcut or show each other's tabs. Coach is holding its own shortcut. A firewall or antivirus blocking local connections is the usual cause.",
   "overlay.deferred.linked": "MXB App is running, so it holds this shortcut for both apps. Its tabs show in the overlay too.",
   "overlay.deferred.oldManager": "An older MXB App is running and holds this shortcut. Update MXB App to share it with the coach.",
   "overlay.deferred.updateManager": "Update MXB App to share this shortcut with the coach.",
